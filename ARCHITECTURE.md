@@ -426,6 +426,7 @@ yeokcham-repository/
     ab/cd/<index-id>
   manifests/
     blobs/
+    objects/
     generations/
   journals/
     refs/<device-id>/<sequence>

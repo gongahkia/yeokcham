@@ -219,6 +219,7 @@ impl LocalRepository {
         for relative_path in LAYOUT_DIRECTORIES {
             validate_directory(&root.join(relative_path), false)?;
         }
+        validate_optional_directory(&root.join(METADATA_OBJECT_MANIFEST_DIRECTORY))?;
 
         let (id, format) = read_bootstrap(root)?;
         Ok(Self {
@@ -1469,6 +1470,17 @@ fn validate_directory(path: &Path, root: bool) -> Result<()> {
     Ok(())
 }
 
+fn validate_optional_directory(path: &Path) -> Result<()> {
+    match fs::symlink_metadata(path) {
+        Ok(_) => validate_directory(path, false),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(io_error(
+            error,
+            "repository optional layout could not be inspected",
+        )),
+    }
+}
+
 fn create_root_error(error: io::Error) -> Error {
     if error.kind() == io::ErrorKind::AlreadyExists {
         Error::with_source(ErrorKind::Conflict, "repository path already exists", error)
@@ -1997,6 +2009,25 @@ mod tests {
             error.public_message(),
             "object metadata database is not a regular file"
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_symlinked_metadata_object_manifest_directory_at_open() {
+        use std::os::unix::fs::symlink;
+
+        let temporary = TestDirectory::new();
+        let root = temporary.path().join("repository");
+        LocalRepository::create(&root).expect("create repository");
+        let replacement = temporary.path().join("replacement");
+        fs::create_dir(&replacement).expect("create replacement");
+        symlink(&replacement, root.join(METADATA_OBJECT_MANIFEST_DIRECTORY))
+            .expect("link manifest directory");
+
+        let error = LocalRepository::open(&root)
+            .err()
+            .expect("symlink must fail");
+        assert_eq!(error.kind(), ErrorKind::CorruptData);
     }
 
     #[test]

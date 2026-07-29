@@ -69,26 +69,26 @@ Each entry content ID is SHA-256 of its raw blob body. The aggregate content ID 
 
 ## Segment record version 1
 
-The `YKSG` segment container holds one or more already-verified `YKWB` or `YKTA` payloads. Its fields are:
+The `YKSG` segment container holds one or more already-verified `YKWB`, `YKTA`, or `YKMO` payloads. Its fields are:
 
 1. Magic `YKSG`.
 2. Schema version `1`.
-3. Required feature bits `0`.
+3. Required feature bits. Bit `0` permits metadata-object records with type `3`; segments without that bit contain only the original blob record families.
 4. Optional feature bits `0`.
 5. Raw 16-byte repository UUIDv4.
 6. Raw 16-byte segment UUIDv4.
 7. Unsigned `u32` record count.
-8. That many records, in writer insertion order: one-byte record type (`1` whole blob, `2` tiny-blob aggregation), one-byte content-hash tag, raw 32-byte content digest, one-byte compression method (`0`, none), `u64` plaintext length, `u64` stored length, then the exact stored payload bytes.
+8. That many records, in writer insertion order: one-byte record type (`1` whole blob, `2` tiny-blob aggregation, `3` metadata object), one-byte content-hash tag, raw 32-byte content digest, one-byte compression method (`0`, none), `u64` plaintext length, `u64` stored length, then the exact stored payload bytes.
 9. Footer magic `YKSF`.
 10. `u64` aggregate plaintext length.
 11. `u64` aggregate stored length.
 12. Raw 32-byte SHA-256 checksum of every preceding segment byte, including the footer fields through aggregate stored length.
 
-Version 1 writes uncompressed payloads, so each record's plaintext and stored lengths match, and both footer totals match. The checksum detects corruption but is not authentication; later encryption/authentication requires a new format version or required feature. Writers stage a complete file, synchronize it, then create the final path without replacement. `SegmentReader` validates header identities, counts, types, tags, lengths, totals, nested records, checksum, and trailing bytes under caller limits before returning typed records. Indexes and manifests are defined separately.
+Version 1 writes uncompressed payloads, so each record's plaintext and stored lengths match, and both footer totals match. The checksum detects corruption but is not authentication; later encryption/authentication requires a new format version or required feature. Writers stage a complete file, synchronize it, then create the final path without replacement. `SegmentReader` validates header identities, feature-to-record consistency, counts, types, tags, lengths, totals, nested records, checksum, and trailing bytes under caller limits before returning typed records. Indexes and manifests are defined separately.
 
 ## Segment index version 1
 
-The `YKIX` index is rebuildable metadata for one verified `YKSG` segment. It contains magic, version, zero feature bits, raw repository and segment UUIDv4 values, the raw 32-byte bound segment checksum, and a `u32` entry count. Entries sort strictly by tagged content identity and contain its tag/digest, record type, compression method, payload offset, plaintext length, and stored length. The `YKIF` footer stores aggregate plaintext/stored lengths followed by a SHA-256 checksum over every preceding index byte. Readers validate the bound identities, limits, strict order, totals, checksum, and trailing bytes before lookup. An index never replaces segment verification.
+The `YKIX` index is rebuildable metadata for one verified `YKSG` segment. It contains magic, version, matching required feature bits, raw repository and segment UUIDv4 values, the raw 32-byte bound segment checksum, and a `u32` entry count. Entries sort strictly by tagged content identity and contain its tag/digest, record type, compression method, payload offset, plaintext length, and stored length. Required bit `0` permits type-`3` metadata-object entries and must match the associated segment. The `YKIF` footer stores aggregate plaintext/stored lengths followed by a SHA-256 checksum over every preceding index byte. Readers validate the bound identities, feature-to-entry consistency, limits, strict order, totals, checksum, and trailing bytes before lookup. An index never replaces segment verification.
 
 ## Blob manifest version 1
 
@@ -120,3 +120,43 @@ Version-1 local segments use `segments/<lowercase-segment-uuid>`. A manifest rec
 `LocalRepository::reconstruct_blob_bytes` resolves that verified record and copies only the selected raw Git blob body. Whole-blob manifests copy their one body; tiny-aggregation manifests copy the entry named by the manifest Git ID. It returns raw bytes rather than a `GitObject`; final Git-object construction and verification remain an explicit following boundary. Existing segment and record bounds cover the decoded and returned body allocation.
 
 `LocalRepository::reconstruct_blob` applies that final boundary: it creates a blob `GitObject` with the manifest Git ID and exact reconstructed body, recomputes canonical `blob <decimal-size>\0<body>` SHA-1 bytes, and returns the object only when the ID matches. This recheck remains required even though version-1 record decoders also validate their local identities; later representations can change their internal reconstruction without weakening the export/recovery boundary.
+
+## Metadata-object record version 1
+
+The `YKMO` record stores one exact verified Git tree, commit, or annotated-tag body. Its fields are:
+
+1. Magic `YKMO`.
+2. Schema version `1`.
+3. Required feature bits `0`.
+4. Optional feature bits `0`.
+5. Record type `3`.
+6. Git object kind: `2` tree, `3` commit, or `4` tag.
+7. Compression method `0` for no compression.
+8. One-byte plaintext-content-hash algorithm tag `3` for SHA-256.
+9. Raw 20-byte SHA-1 Git object ID.
+10. Raw 32-byte plaintext content digest.
+11. `u64` body byte length followed by exact body bytes.
+
+The plaintext digest is SHA-256 over the domain `yeokcham/metadata-object/v1\0`, the one-byte object-kind tag, the `u64` body length, and exact body bytes. This keeps non-blob content identities distinct from raw blob-body SHA-256 identities. Decoders reject blobs, feature bits, compression, unsupported hashes, ID mismatches, content mismatches, malformed lengths, and trailing bytes. Caller bounds for nested whole-blob bodies also bound these version-1 metadata-object bodies.
+
+## Metadata-object manifest version 1
+
+The `YKOM` manifest is immutable metadata for one tree, commit, or annotated tag. Its fields are:
+
+1. Magic `YKOM`.
+2. Schema version `1`.
+3. Required feature bits `0`.
+4. Optional feature bits `0`.
+5. Raw 16-byte repository UUIDv4.
+6. Raw 20-byte SHA-1 Git object ID.
+7. One-byte Git kind: `2` tree, `3` commit, or `4` tag.
+8. One-byte content-hash tag `3` and raw 32-byte metadata-object content digest.
+9. `u64` exact object-body length.
+10. Raw 16-byte sealed segment UUIDv4.
+11. Raw 32-byte SHA-256 checksum of that exact segment.
+12. Footer magic `YKOF`.
+13. Raw 32-byte SHA-256 checksum over every preceding manifest byte.
+
+Published local metadata-object manifests use `manifests/objects/<lowercase-git-sha1>.ykom`. The objects directory is optional for existing version-1 repositories and is created only on first publication. The filename must equal the embedded Git ID. Publication writes and synchronizes a same-directory temporary file, creates the final path by hard link without replacement, synchronizes the directory, and removes the temporary name. Repeating identical manifest bytes is idempotent; different bytes for the same Git ID conflict.
+
+Metadata-object resolution reads that direct manifest under caller limits, verifies the named segment fully, binds repository ID, segment ID, and segment checksum, then selects the one type-3 record with the manifest content identity. It verifies Git ID, kind, content identity, and length before reconstructing a `GitObject` and recomputing its final canonical Git SHA-1 identity. SQLite is not a metadata-object resolver or recovery dependency.
