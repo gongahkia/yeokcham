@@ -119,6 +119,14 @@ module Scratch_event : sig
 end
 
 module Checkpoint : sig
+  val create :
+    parent:Paengi_id.Checkpoint_id.t option ->
+    snapshot:Snapshot.t ->
+    event:Paengi_id.Operation_id.t option ->
+    created_at:int64 ->
+    retention:retention_reason list ->
+    checkpoint
+
   val initial :
     snapshot:Snapshot.t ->
     created_at:int64 ->

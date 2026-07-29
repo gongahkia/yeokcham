@@ -245,8 +245,18 @@ let replace_file files target replacement =
 let remove_file files target =
   List.filter (fun file -> not (Path.equal file.path target)) files
 
-let scenario values =
-  let directories = [ source; archive; nested ] in
+let generated_directories values =
+  let count = 1 + (List.hd values mod 4) in
+  List.init count (fun index ->
+      let root = require_path [ Printf.sprintf "tree-%d" index ] in
+      let nested =
+        require_path [ Printf.sprintf "tree-%d" index; "nested" ]
+      in
+      [ root; nested ])
+  |> List.concat
+
+let scenario_with_directories values =
+  let directories = generated_directories values in
   let initial =
     List.map (fun path -> Model.Directory_path path) directories
     |> require_snapshot
@@ -262,7 +272,7 @@ let scenario values =
         (initial, List.rev operations, require_snapshot expected_entries)
     | value :: rest -> (
         let create () =
-          let parent = if value land 1 = 0 then source else nested in
+          let parent = nth directories (value + index) in
           let path =
             Path.to_components parent @ [ Printf.sprintf "created-%d" index ]
             |> require_path
@@ -323,7 +333,9 @@ let scenario values =
                 (operation :: operations) rest
           | _ ->
               let destination =
-                require_path [ "archive"; Printf.sprintf "moved-%d" index ]
+                Path.to_components (nth directories (value + index))
+                @ [ Printf.sprintf "moved-%d" index ]
+                |> require_path
               in
               let operation =
                 Model.Move_path
@@ -338,7 +350,12 @@ let scenario values =
                 (replace_file files selected.path moved)
                 (operation :: operations) rest)
   in
-  build 0 [] [] values
+  let initial, operations, expected = build 0 [] [] values in
+  (directories, initial, operations, expected)
+
+let scenario values =
+  let _, initial, operations, expected = scenario_with_directories values in
+  (initial, operations, expected)
 
 let valid_operation_sequences =
   QCheck2.Gen.list_size
@@ -425,12 +442,13 @@ let parent_chains_are_coherent_property =
 let invalid_operations_return_errors_property =
   QCheck2.Test.make ~count:500 ~name:"invalid scratch events return errors"
     valid_operation_sequences (fun values ->
-      let initial, _, _ = scenario values in
+      let directories, initial, _, _ = scenario_with_directories values in
       let parent = initial_checkpoint initial in
       let parent_snapshot_id = Snapshot.id (Checkpoint.snapshot parent) in
       let missing =
-        require_path
-          [ "archive"; Printf.sprintf "missing-%d" (List.length values) ]
+        Path.to_components (List.hd directories)
+        @ [ Printf.sprintf "missing-%d" (List.length values) ]
+        |> require_path
       in
       let event =
         Scratch_event.create ~parent:(Checkpoint.id parent)

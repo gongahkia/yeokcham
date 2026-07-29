@@ -641,8 +641,11 @@ module Scratch_event = struct
 end
 
 module Checkpoint = struct
+  let create ~parent ~snapshot ~event ~created_at ~retention =
+    make_checkpoint ~parent ~snapshot ~event ~created_at ~retention
+
   let initial ~snapshot ~created_at ~retention =
-    make_checkpoint ~parent:None ~snapshot ~event:None ~created_at ~retention
+    create ~parent:None ~snapshot ~event:None ~created_at ~retention
 
   let id checkpoint = checkpoint.checkpoint_id
   let parent checkpoint = checkpoint.checkpoint_parent
@@ -942,8 +945,8 @@ module Repository = struct
     match find_checkpoint repository ancestor with
     | None -> Error (Missing_checkpoint ancestor)
     | Some ancestor_checkpoint -> (
-        let rec event_path checkpoint_id events =
-          if Id.Checkpoint_id.equal checkpoint_id ancestor then Ok events
+        let rec event_path checkpoint_id links =
+          if Id.Checkpoint_id.equal checkpoint_id ancestor then Ok links
           else
             match find_checkpoint repository checkpoint_id with
             | None -> Error (Missing_checkpoint checkpoint_id)
@@ -951,7 +954,8 @@ module Repository = struct
                 match
                   (Checkpoint.parent checkpoint, Checkpoint.event checkpoint)
                 with
-                | Some parent, Some event -> event_path parent (event :: events)
+                | Some parent, Some event ->
+                    event_path parent ((event, checkpoint) :: links)
                 | None, None ->
                     Error (Target_not_descended_from { ancestor; target })
                 | None, Some _ | Some _, None ->
@@ -962,7 +966,7 @@ module Repository = struct
         | Ok events ->
             let rec apply snapshot = function
               | [] -> Ok snapshot
-              | event_id :: rest -> (
+              | (event_id, expected_checkpoint) :: rest -> (
                   match find_event repository event_id with
                   | None -> Error (Missing_event event_id)
                   | Some event -> (
@@ -971,7 +975,15 @@ module Repository = struct
                           (Scratch_event.operations event)
                       with
                       | Error error -> Error (Replay_operation_rejected error)
-                      | Ok snapshot -> apply snapshot rest))
+                      | Ok snapshot ->
+                          if
+                            Snapshot.equal snapshot
+                              (Checkpoint.snapshot expected_checkpoint)
+                          then apply snapshot rest
+                          else
+                            Error
+                              (Incoherent_checkpoint
+                                 (Checkpoint.id expected_checkpoint))))
             in
             apply (Checkpoint.snapshot ancestor_checkpoint) events)
 end
