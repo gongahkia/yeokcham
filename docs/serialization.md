@@ -89,3 +89,25 @@ Version 1 writes uncompressed payloads, so each record's plaintext and stored le
 ## Segment index version 1
 
 The `YKIX` index is rebuildable metadata for one verified `YKSG` segment. It contains magic, version, zero feature bits, raw repository and segment UUIDv4 values, the raw 32-byte bound segment checksum, and a `u32` entry count. Entries sort strictly by tagged content identity and contain its tag/digest, record type, compression method, payload offset, plaintext length, and stored length. The `YKIF` footer stores aggregate plaintext/stored lengths followed by a SHA-256 checksum over every preceding index byte. Readers validate the bound identities, limits, strict order, totals, checksum, and trailing bytes before lookup. An index never replaces segment verification.
+
+## Blob manifest version 1
+
+The `YKMF` manifest is immutable metadata for exactly one Git SHA-1 blob representation. Its fields are:
+
+1. Magic `YKMF`.
+2. Schema version `1`.
+3. Required feature bits `0`.
+4. Optional feature bits `0`.
+5. Raw 16-byte repository UUIDv4.
+6. Raw 16-byte manifest UUIDv4.
+7. Raw 20-byte Git SHA-1 blob ID.
+8. One-byte full-blob content-hash tag (`3`, SHA-256) and raw 32-byte digest.
+9. `u64` exact blob-body length.
+10. One-byte representation: `1` whole blob or `2` tiny-blob aggregation.
+11. Raw 16-byte sealed segment UUIDv4.
+12. Raw 32-byte SHA-256 checksum of that exact segment.
+13. One-byte outer-record content-hash tag (`3`, SHA-256) and raw 32-byte digest. For whole blobs this equals the full-blob content ID; for tiny aggregations it identifies the enclosing aggregation.
+14. Footer magic `YKBF`.
+15. Raw 32-byte SHA-256 checksum over every preceding manifest byte.
+
+The manifest itself contains no blob body or payload offset. Resolution first verifies a segment with the stated repository ID, segment ID, and checksum; it then locates the stated outer record and verifies the selected Git blob, content ID, and length. Version 1 has exactly one record reference and supports only the current whole-blob and tiny-aggregation records. Chunk lists, other record families, compression, encryption, and multiple records require a new version or required feature.
