@@ -59,4 +59,4 @@ The count limit bounds result allocation. Ref storage remains untrusted until la
 
 ## Verification
 
-Tests use C Git to create packed and loose refs, a symbolic regular ref, and a raw non-UTF-8 loose ref. They verify byte-sorted output, pseudo-ref exclusion, and rejection of malformed `packed-refs` input. CI runs these tests on macOS and Linux.
+Tests use C Git to create packed and loose refs and a symbolic regular ref; the Linux fixture also writes a raw non-UTF-8 loose ref. They verify byte-sorted output, pseudo-ref exclusion, and rejection of malformed `packed-refs` input. CI runs these tests on macOS and Linux.
