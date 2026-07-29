@@ -207,6 +207,11 @@ impl ReadSegment {
         &self.records
     }
 
+    /// Consumes this verified segment and returns records in insertion order.
+    pub fn into_records(self) -> Vec<ReadSegmentRecord> {
+        self.records
+    }
+
     /// Returns verified record locations in the same order as [`records`](Self::records).
     pub fn locations(&self) -> &[SegmentRecordLocation] {
         &self.locations

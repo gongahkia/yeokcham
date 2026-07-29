@@ -11,8 +11,9 @@ use rusqlite::{
 };
 
 use crate::{
-    BlobManifest, CanonicalDecoder, CanonicalEncoder, Error, ErrorKind, GitObject, GitObjectId,
-    GitObjectKind, ManifestId, RepositoryFormat, RepositoryId, Result,
+    BlobManifest, BlobManifestRepresentation, CanonicalDecoder, CanonicalEncoder, Error,
+    ErrorKind, GitObject, GitObjectId, GitObjectKind, ManifestId, ReadSegmentRecord,
+    RepositoryFormat, RepositoryId, Result, SegmentId, SegmentReadLimits, SegmentReader,
 };
 
 const BOOTSTRAP_MAGIC: [u8; 4] = *b"YKRB";
@@ -211,6 +212,14 @@ impl LocalRepository {
     /// Returns the validated persistent format declaration.
     pub const fn format(&self) -> RepositoryFormat {
         self.format
+    }
+
+    /// Returns the canonical final path for one sealed local segment.
+    ///
+    /// Callers pass this absent path to [`SegmentWriter`](crate::SegmentWriter)
+    /// before publishing a manifest that references the segment.
+    pub fn segment_path(&self, id: SegmentId) -> PathBuf {
+        self.root.join("segments").join(id.to_string())
     }
 
     /// Records verified metadata for `object` in the local SQLite database.
@@ -426,6 +435,65 @@ impl LocalRepository {
         Ok(resolved)
     }
 
+    /// Resolves and verifies the typed segment record named by one manifest.
+    ///
+    /// The manifest must belong to this repository. The segment's repository
+    /// ID, segment ID, checksum, outer record identity, and selected blob
+    /// metadata must all match before the verified record is returned.
+    pub fn resolve_manifest_record(
+        &self,
+        manifest: &BlobManifest,
+        maximum_segment_bytes: u64,
+        limits: SegmentReadLimits,
+    ) -> Result<ReadSegmentRecord> {
+        if manifest.repository_id() != self.id {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "blob manifest belongs to a different repository",
+            ));
+        }
+        if maximum_segment_bytes == 0 {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "segment byte limit must not be zero",
+            ));
+        }
+        let directory = self.root.join("segments");
+        validate_directory(&directory, false)?;
+        let bytes = read_bounded_segment_file(
+            &self.segment_path(manifest.segment_id()),
+            maximum_segment_bytes,
+        )?;
+        let segment = SegmentReader::decode(&bytes, limits)?;
+        if segment.repository_id() != self.id
+            || segment.segment_id() != manifest.segment_id()
+            || segment.checksum() != manifest.segment_checksum()
+        {
+            return Err(Error::new(
+                ErrorKind::CorruptData,
+                "segment does not match the blob manifest",
+            ));
+        }
+        let mut matching = segment.into_records().into_iter().filter(|record| {
+            record.content_id() == manifest.record_content_id()
+                && manifest_representation_matches(manifest.representation(), record)
+        });
+        let record = matching.next().ok_or_else(|| {
+            Error::new(
+                ErrorKind::CorruptData,
+                "segment does not contain the manifest record",
+            )
+        })?;
+        if matching.next().is_some() {
+            return Err(Error::new(
+                ErrorKind::CorruptData,
+                "segment contains duplicate manifest records",
+            ));
+        }
+        verify_manifest_record(manifest, &record)?;
+        Ok(record)
+    }
+
     fn verify_existing_blob_manifest(
         &self,
         path: &Path,
@@ -573,6 +641,67 @@ fn create_blob_manifest_staging(parent: &Path) -> Result<(File, PathBuf)> {
     ))
 }
 
+fn manifest_representation_matches(
+    representation: BlobManifestRepresentation,
+    record: &ReadSegmentRecord,
+) -> bool {
+    match representation {
+        BlobManifestRepresentation::WholeBlob => record.as_whole_blob().is_some(),
+        BlobManifestRepresentation::TinyBlobAggregation => {
+            record.as_tiny_blob_aggregation().is_some()
+        }
+    }
+}
+
+fn verify_manifest_record(manifest: &BlobManifest, record: &ReadSegmentRecord) -> Result<()> {
+    match manifest.representation() {
+        BlobManifestRepresentation::WholeBlob => {
+            let whole = record.as_whole_blob().ok_or_else(|| {
+                Error::new(
+                    ErrorKind::CorruptData,
+                    "segment record type does not match the blob manifest",
+                )
+            })?;
+            if whole.git_object_id() != manifest.git_object_id()
+                || whole.content_id() != manifest.content_id()
+                || u64::try_from(whole.data().len()).ok() != Some(manifest.plaintext_bytes())
+            {
+                return Err(Error::new(
+                    ErrorKind::CorruptData,
+                    "whole-blob record does not match the blob manifest",
+                ));
+            }
+        }
+        BlobManifestRepresentation::TinyBlobAggregation => {
+            let aggregation = record.as_tiny_blob_aggregation().ok_or_else(|| {
+                Error::new(
+                    ErrorKind::CorruptData,
+                    "segment record type does not match the blob manifest",
+                )
+            })?;
+            let entry = aggregation
+                .entries()
+                .iter()
+                .find(|entry| entry.git_object_id() == manifest.git_object_id())
+                .ok_or_else(|| {
+                    Error::new(
+                        ErrorKind::CorruptData,
+                        "tiny-blob aggregation does not contain the manifest blob",
+                    )
+                })?;
+            if entry.content_id() != manifest.content_id()
+                || u64::try_from(entry.data().len()).ok() != Some(manifest.plaintext_bytes())
+            {
+                return Err(Error::new(
+                    ErrorKind::CorruptData,
+                    "tiny-blob entry does not match the blob manifest",
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 fn read_bounded_regular_file(path: &Path, maximum_bytes: u64) -> Result<Vec<u8>> {
     let metadata = fs::symlink_metadata(path).map_err(|error| {
         if error.kind() == io::ErrorKind::NotFound {
@@ -619,6 +748,56 @@ fn read_bounded_regular_file(path: &Path, maximum_bytes: u64) -> Result<Vec<u8>>
             ));
         }
         Err(error) => return Err(io_error(error, "blob manifest file could not be read")),
+    }
+    Ok(bytes)
+}
+
+fn read_bounded_segment_file(path: &Path, maximum_bytes: u64) -> Result<Vec<u8>> {
+    let metadata = fs::symlink_metadata(path).map_err(|error| {
+        if error.kind() == io::ErrorKind::NotFound {
+            Error::new(ErrorKind::NotFound, "manifest segment is missing")
+        } else {
+            io_error(error, "manifest segment could not be inspected")
+        }
+    })?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(Error::new(
+            ErrorKind::CorruptData,
+            "manifest segment is not a regular file",
+        ));
+    }
+    if metadata.len() > maximum_bytes {
+        return Err(Error::new(
+            ErrorKind::Unsupported,
+            "manifest segment exceeds the byte limit",
+        ));
+    }
+    let length = usize::try_from(metadata.len()).map_err(|_| {
+        Error::new(
+            ErrorKind::Unsupported,
+            "manifest segment exceeds the byte limit",
+        )
+    })?;
+    let mut file = File::open(path)
+        .map_err(|error| io_error(error, "manifest segment could not be opened"))?;
+    let mut bytes = vec![0; length];
+    file.read_exact(&mut bytes).map_err(|error| {
+        if error.kind() == io::ErrorKind::UnexpectedEof {
+            Error::new(ErrorKind::CorruptData, "manifest segment is truncated")
+        } else {
+            io_error(error, "manifest segment could not be read")
+        }
+    })?;
+    let mut extra = [0; 1];
+    match file.read(&mut extra) {
+        Ok(0) => {}
+        Ok(_) => {
+            return Err(Error::new(
+                ErrorKind::CorruptData,
+                "manifest segment changed while being read",
+            ));
+        }
+        Err(error) => return Err(io_error(error, "manifest segment could not be read")),
     }
     Ok(bytes)
 }
@@ -862,12 +1041,13 @@ mod tests {
         path::{Path, PathBuf},
     };
 
+    use sha2::{Digest, Sha256};
     use uuid::Uuid;
 
     use super::*;
     use crate::{
-        SegmentId, SegmentReadLimits, SegmentReader, SegmentRecord, SegmentWriteLimits,
-        SegmentWriter, WholeBlobRecord,
+        SegmentReadLimits, SegmentReader, SegmentRecord, SegmentWriteLimits, SegmentWriter,
+        TinyBlobAggregation, WholeBlobRecord,
     };
 
     const TEST_ID: &str = "550e8400-e29b-41d4-a716-446655440000";
@@ -932,6 +1112,10 @@ mod tests {
         BlobManifestReadLimits::new(8, 4_096, 4_096).expect("manifest limits")
     }
 
+    fn segment_limits() -> SegmentReadLimits {
+        SegmentReadLimits::new(4, 4_096, 4_096, 4_096, 4_096, 4_096).expect("segment limits")
+    }
+
     fn whole_blob_manifest(
         repository: &LocalRepository,
         manifest_id: ManifestId,
@@ -941,10 +1125,7 @@ mod tests {
         let object = verified_object(GitObjectKind::Blob, data);
         let record = WholeBlobRecord::from_verified_blob(&object).expect("whole record");
         let segment_record = SegmentRecord::from_whole_blob(&record).expect("segment record");
-        let path = repository
-            .path()
-            .join("segments")
-            .join(segment_id.to_string());
+        let path = repository.segment_path(segment_id);
         let mut writer = SegmentWriter::new(
             repository.id(),
             segment_id,
@@ -959,6 +1140,44 @@ mod tests {
         )
         .expect("read segment");
         BlobManifest::from_whole_blob(manifest_id, &segment, &record).expect("manifest")
+    }
+
+    fn tiny_blob_manifest(
+        repository: &LocalRepository,
+        manifest_id: ManifestId,
+        segment_id: SegmentId,
+    ) -> (BlobManifest, GitObjectId) {
+        let first = verified_object(GitObjectKind::Blob, b"first");
+        let selected = verified_object(GitObjectKind::Blob, b"\0selected\xff");
+        let selected_id = selected.id();
+        let aggregation =
+            TinyBlobAggregation::from_verified_blobs(&[first, selected]).expect("aggregation");
+        let segment_record =
+            SegmentRecord::from_tiny_blob_aggregation(&aggregation).expect("segment record");
+        let path = repository.segment_path(segment_id);
+        let mut writer = SegmentWriter::new(
+            repository.id(),
+            segment_id,
+            SegmentWriteLimits::new(1, segment_record.stored_len()).expect("write limits"),
+        );
+        writer.add(segment_record).expect("add record");
+        writer.seal_to(&path).expect("seal segment");
+        let bytes = fs::read(path).expect("read segment");
+        let segment = SegmentReader::decode(
+            &bytes,
+            SegmentReadLimits::new(1, 4_096, 4_096, 4_096, 4_096, 4_096).expect("read limits"),
+        )
+        .expect("read segment");
+        (
+            BlobManifest::from_tiny_blob_aggregation(
+                manifest_id,
+                &segment,
+                &aggregation,
+                selected_id,
+            )
+            .expect("manifest"),
+            selected_id,
+        )
     }
 
     #[test]
