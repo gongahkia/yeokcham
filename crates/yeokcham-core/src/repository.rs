@@ -1,4 +1,5 @@
 use std::{
+    collections::{BTreeMap, BTreeSet},
     fs::{self, File, OpenOptions},
     io::{self, Read, Write},
     path::{Path, PathBuf},
@@ -13,8 +14,8 @@ use rusqlite::{
 use crate::{
     BlobManifest, BlobManifestRepresentation, CanonicalDecoder, CanonicalEncoder, Error, ErrorKind,
     GitObject, GitObjectId, GitObjectKind, ManifestId, MetadataObjectManifest,
-    MetadataObjectRecord, ReadSegmentRecord, RepositoryFormat, RepositoryId, Result, SegmentId,
-    SegmentReadLimits, SegmentReader,
+    MetadataObjectRecord, ReadSegment, ReadSegmentRecord, RepositoryFormat, RepositoryId, Result,
+    SegmentId, SegmentIndex, SegmentReadLimits, SegmentReader,
 };
 
 const BOOTSTRAP_MAGIC: [u8; 4] = *b"YKRB";
@@ -31,6 +32,8 @@ const METADATA_OBJECT_MANIFEST_DIRECTORY: &str = "manifests/objects";
 const METADATA_OBJECT_MANIFEST_EXTENSION: &str = ".ykom";
 const METADATA_OBJECT_MANIFEST_STAGING_SUFFIX: &str = ".partial";
 const PUBLISHED_METADATA_OBJECT_MANIFEST_MAX_BYTES: u64 = 4096;
+const SEGMENT_INDEX_EXTENSION: &str = ".ykix";
+const SEGMENT_INDEX_STAGING_SUFFIX: &str = ".partial";
 const LAYOUT_DIRECTORIES: &[&str] = &[
     "format",
     "segments",
@@ -135,6 +138,145 @@ impl MetadataObjectManifestReadLimits {
     /// Returns the maximum object-body length accepted from one manifest.
     pub const fn maximum_plaintext_bytes(self) -> u64 {
         self.maximum_plaintext_bytes
+    }
+}
+
+/// Caller-selected bounds for complete immutable local-storage verification.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct RepositoryVerificationLimits {
+    maximum_segment_entries: usize,
+    maximum_segment_bytes: u64,
+    segment_read_limits: SegmentReadLimits,
+    maximum_index_entries: usize,
+    maximum_index_bytes: u64,
+    maximum_index_records: usize,
+    maximum_index_stored_bytes: u64,
+    blob_manifest_limits: BlobManifestReadLimits,
+    maximum_metadata_object_manifest_entries: usize,
+    metadata_object_manifest_limits: MetadataObjectManifestReadLimits,
+}
+
+impl RepositoryVerificationLimits {
+    /// Validates bounds for one full local immutable-storage scan.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        maximum_segment_entries: usize,
+        maximum_segment_bytes: u64,
+        segment_read_limits: SegmentReadLimits,
+        maximum_index_entries: usize,
+        maximum_index_bytes: u64,
+        maximum_index_records: usize,
+        maximum_index_stored_bytes: u64,
+        blob_manifest_limits: BlobManifestReadLimits,
+        maximum_metadata_object_manifest_entries: usize,
+        metadata_object_manifest_limits: MetadataObjectManifestReadLimits,
+    ) -> Result<Self> {
+        if maximum_segment_entries == 0
+            || maximum_segment_bytes == 0
+            || maximum_index_entries == 0
+            || maximum_index_bytes == 0
+            || maximum_index_records == 0
+            || maximum_index_stored_bytes == 0
+            || maximum_metadata_object_manifest_entries == 0
+        {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "repository verification limit must not be zero",
+            ));
+        }
+        Ok(Self {
+            maximum_segment_entries,
+            maximum_segment_bytes,
+            segment_read_limits,
+            maximum_index_entries,
+            maximum_index_bytes,
+            maximum_index_records,
+            maximum_index_stored_bytes,
+            blob_manifest_limits,
+            maximum_metadata_object_manifest_entries,
+            metadata_object_manifest_limits,
+        })
+    }
+
+    /// Returns the maximum entries inspected in `segments/`.
+    pub const fn maximum_segment_entries(self) -> usize {
+        self.maximum_segment_entries
+    }
+
+    /// Returns the maximum accepted bytes for one `YKSG` file.
+    pub const fn maximum_segment_bytes(self) -> u64 {
+        self.maximum_segment_bytes
+    }
+
+    /// Returns nested `YKSG` decoding bounds.
+    pub const fn segment_read_limits(self) -> SegmentReadLimits {
+        self.segment_read_limits
+    }
+
+    /// Returns the maximum entries inspected in `indexes/`.
+    pub const fn maximum_index_entries(self) -> usize {
+        self.maximum_index_entries
+    }
+
+    /// Returns the maximum accepted bytes for one `YKIX` file.
+    pub const fn maximum_index_bytes(self) -> u64 {
+        self.maximum_index_bytes
+    }
+
+    /// Returns the maximum records decoded from one `YKIX` file.
+    pub const fn maximum_index_records(self) -> usize {
+        self.maximum_index_records
+    }
+
+    /// Returns the maximum aggregate stored bytes declared by one `YKIX` file.
+    pub const fn maximum_index_stored_bytes(self) -> u64 {
+        self.maximum_index_stored_bytes
+    }
+
+    /// Returns `YKMF` directory and body bounds.
+    pub const fn blob_manifest_limits(self) -> BlobManifestReadLimits {
+        self.blob_manifest_limits
+    }
+
+    /// Returns the maximum entries inspected in `manifests/objects/`.
+    pub const fn maximum_metadata_object_manifest_entries(self) -> usize {
+        self.maximum_metadata_object_manifest_entries
+    }
+
+    /// Returns `YKOM` file and body bounds.
+    pub const fn metadata_object_manifest_limits(self) -> MetadataObjectManifestReadLimits {
+        self.metadata_object_manifest_limits
+    }
+}
+
+/// Counts returned only after complete immutable-storage verification succeeds.
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+pub struct RepositoryVerificationReport {
+    segment_count: usize,
+    index_count: usize,
+    blob_manifest_count: usize,
+    metadata_object_manifest_count: usize,
+}
+
+impl RepositoryVerificationReport {
+    /// Returns verified sealed `YKSG` file count.
+    pub const fn segment_count(self) -> usize {
+        self.segment_count
+    }
+
+    /// Returns verified published `YKIX` file count.
+    pub const fn index_count(self) -> usize {
+        self.index_count
+    }
+
+    /// Returns verified published `YKMF` file count.
+    pub const fn blob_manifest_count(self) -> usize {
+        self.blob_manifest_count
+    }
+
+    /// Returns verified published `YKOM` file count.
+    pub const fn metadata_object_manifest_count(self) -> usize {
+        self.metadata_object_manifest_count
     }
 }
 
