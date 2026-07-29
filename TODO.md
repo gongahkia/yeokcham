@@ -10,7 +10,7 @@ Robustness tasks operate only on Paengi's pure functions and generated local fix
 - Modules/files: `lib/paengi_model/paengi_model.{mli,ml}`, `test/model_property_test.ml`, and `TODO.md`; no persistent write, CLI, or `test/dune` change.
 - Types: immutable repository maps for snapshots, scratch events, and checkpoints; explicit scratch head; typed repository error; and deterministic retained-ancestor replay.
 - Invariants: inserted IDs match canonical values; equal duplicates are idempotent and conflicting duplicates are rejected; events reference stored parents; checkpoints reference stored snapshots/events/parents and replay exactly; a failed insertion returns no partial repository; snapshot IDs exclude observational metadata.
-- Tests: eight unit tests and twelve 500-case bounded deterministic properties cover checkpoint behavior, generated directory trees, lookup, replay, insertion-order independence, duplicate handling, missing/incoherent references, and all five scratch operations. `make test` passes.
+- Tests: eight unit tests and twelve 500-case bounded deterministic properties cover checkpoint behavior, generated directory trees, lookup, replay, insertion-order independence, duplicate handling, missing/incoherent references, and all five scratch operations. `make check` and `make property-test PROPERTY_TEST_SEED=17` pass.
 - External libraries: existing Alcotest, QCheck, SHA-256, and Profile 1 encoder only.
 - ADR changes: no new ADR; the slice defines no persistent object format.
 
