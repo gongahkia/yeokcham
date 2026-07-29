@@ -1,6 +1,6 @@
 use std::{collections::BTreeSet, error::Error as StdError, io, path::Path};
 
-use crate::{Error, ErrorKind, GitObjectId, RefName, Result};
+use crate::{Error, ErrorKind, GitObject, GitObjectId, GitObjectKind, RefName, Result};
 
 const MAX_REFERENCE_COUNT: usize = 1_000_000;
 const MAX_REACHABLE_OBJECT_COUNT: usize = 1_000_000;
@@ -181,6 +181,50 @@ impl GitRepository {
 
         Ok(reachable.into_iter().collect())
     }
+
+    /// Reads one SHA-1 Git object's exact decompressed body within `maximum_bytes`.
+    ///
+    /// The returned [`GitObject`] carries its Git type and requested ID, but this
+    /// method does not recompute or verify that ID. The caller must supply a
+    /// bound appropriate for its memory budget; an object exceeding it is not
+    /// decompressed. Pseudo-refs and object traversal are not involved.
+    pub fn read_object(&self, id: GitObjectId, maximum_bytes: usize) -> Result<GitObject> {
+        let repository = self.inner.to_thread_local();
+        if repository.object_hash() != gix::hash::Kind::Sha1 {
+            return Err(Error::new(
+                ErrorKind::Unsupported,
+                "Git repository uses an unsupported object hash",
+            ));
+        }
+        let object_id = gix::hash::ObjectId::from(id.into_bytes());
+        let header = repository
+            .try_find_header(object_id)
+            .map_err(|source| reference_corrupt_error("Git object could not be inspected", source))?
+            .ok_or_else(|| Error::new(ErrorKind::NotFound, "Git object does not exist"))?;
+        if header.size() > maximum_bytes as u64 {
+            return Err(Error::new(
+                ErrorKind::Unsupported,
+                "Git object exceeds the read limit",
+            ));
+        }
+        let object = repository
+            .try_find_object(object_id)
+            .map_err(|source| reference_corrupt_error("Git object could not be read", source))?
+            .ok_or_else(|| Error::new(ErrorKind::NotFound, "Git object does not exist"))?;
+        let actual_kind = object.kind;
+        let data = object.detach().data;
+        if actual_kind != header.kind() || data.len() as u64 != header.size() {
+            return Err(Error::new(
+                ErrorKind::CorruptData,
+                "Git object changed while being read",
+            ));
+        }
+        Ok(GitObject::new(
+            id,
+            GitObjectKind::from_gix(actual_kind),
+            data,
+        ))
+    }
 }
 
 fn open_error(error: gix::open::Error) -> Error {
@@ -345,6 +389,21 @@ mod tests {
             .expect("Git output must be UTF-8")
             .trim()
             .to_owned()
+    }
+
+    fn git_bytes(directory: &Path, arguments: &[&str]) -> Vec<u8> {
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(directory)
+            .args(arguments)
+            .output()
+            .expect("run Git");
+        assert!(
+            output.status.success(),
+            "Git failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        output.stdout
     }
 
     fn git_object_ids(directory: &Path, arguments: &[&str]) -> Vec<GitObjectId> {
@@ -582,5 +641,87 @@ mod tests {
 
         assert_eq!(error.kind(), ErrorKind::CorruptData);
         assert!(!error.to_string().contains(unavailable_id));
+    }
+
+    #[test]
+    fn reads_exact_object_bodies_and_types_from_packed_storage() {
+        let temporary = TestDirectory::new();
+        let worktree = initialize_committed_worktree(&temporary);
+        fs::write(worktree.join("body.bin"), b"\0body\xff\n").expect("write blob body");
+        run_git_in(&worktree, &["add", "body.bin"]);
+        commit(&worktree, "add binary body");
+        run_git_in(
+            &worktree,
+            &[
+                "-c",
+                "user.name=Yeokcham Test",
+                "-c",
+                "user.email=test@example.invalid",
+                "tag",
+                "--annotate",
+                "v1.0",
+                "--message=version one",
+            ],
+        );
+        run_git_in(&worktree, &["gc", "--prune=now"]);
+
+        let cases = [
+            (
+                git_stdout(&worktree, &["rev-parse", "HEAD:body.bin"]),
+                "blob",
+                GitObjectKind::Blob,
+            ),
+            (
+                git_stdout(&worktree, &["rev-parse", "HEAD^{tree}"]),
+                "tree",
+                GitObjectKind::Tree,
+            ),
+            (
+                git_stdout(&worktree, &["rev-parse", "HEAD"]),
+                "commit",
+                GitObjectKind::Commit,
+            ),
+            (
+                git_stdout(&worktree, &["rev-parse", "refs/tags/v1.0^{tag}"]),
+                "tag",
+                GitObjectKind::Tag,
+            ),
+        ];
+        let repository = GitRepository::open(&worktree).expect("open repository");
+
+        for (id_text, kind_text, expected_kind) in cases {
+            let id: GitObjectId = id_text.parse().expect("object ID");
+            let expected = git_bytes(&worktree, &["cat-file", kind_text, &id_text]);
+            let object = repository
+                .read_object(id, expected.len())
+                .expect("read packed object");
+
+            assert_eq!(object.id(), id);
+            assert_eq!(object.kind(), expected_kind);
+            assert_eq!(object.data(), expected);
+        }
+    }
+
+    #[test]
+    fn rejects_read_limits_and_missing_objects_without_disclosing_ids() {
+        let temporary = TestDirectory::new();
+        let worktree = initialize_committed_worktree(&temporary);
+        fs::write(worktree.join("body.bin"), b"bounded body").expect("write blob body");
+        let id_text = git_stdout(&worktree, &["hash-object", "-w", "body.bin"]);
+        let id: GitObjectId = id_text.parse().expect("object ID");
+        let repository = GitRepository::open(&worktree).expect("open repository");
+
+        let limit_error = repository
+            .read_object(id, 1)
+            .expect_err("limit must reject object");
+        let missing_id = "1111111111111111111111111111111111111111";
+        let missing_error = repository
+            .read_object(missing_id.parse().expect("object ID"), 1024)
+            .expect_err("missing object must fail");
+
+        assert_eq!(limit_error.kind(), ErrorKind::Unsupported);
+        assert_eq!(missing_error.kind(), ErrorKind::NotFound);
+        assert!(!limit_error.to_string().contains(&id_text));
+        assert!(!missing_error.to_string().contains(missing_id));
     }
 }

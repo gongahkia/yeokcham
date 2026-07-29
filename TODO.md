@@ -43,7 +43,7 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 - [x] Open an existing Git repository.
 - [x] Enumerate refs.
 - [x] Traverse reachable commits, trees, blobs, and tags.
-- [ ] Read object bytes.
+- [x] Read object bytes.
 - [ ] Recompute and verify Git object IDs.
 - [ ] Record object metadata in SQLite.
 - [ ] Reject unsupported repository hash formats clearly.

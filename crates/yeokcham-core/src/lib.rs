@@ -5,6 +5,7 @@
 mod canonical;
 mod device_id;
 mod error;
+mod git_object;
 mod git_object_id;
 mod git_repository;
 mod manifest_id;
@@ -19,6 +20,7 @@ mod yeokcham_content_id;
 pub use canonical::{CanonicalDecoder, CanonicalEncoder};
 pub use device_id::DeviceId;
 pub use error::{Error, ErrorKind, Result};
+pub use git_object::{GitObject, GitObjectKind};
 pub use git_object_id::GitObjectId;
 pub use git_repository::GitRepository;
 pub use manifest_id::ManifestId;
