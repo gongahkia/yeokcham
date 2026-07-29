@@ -43,3 +43,4 @@ Valid statuses are `Proposed`, `Accepted`, `Rejected`, `Deprecated`, and `Supers
 | [ADR-0035](0035-versioned-whole-blob-record.md) | Accepted | Store verified small-slice blobs as canonical whole-blob records |
 | [ADR-0036](0036-bounded-tiny-blob-aggregation.md) | Accepted | Aggregate bounded distinct tiny blobs in one canonical record |
 | [ADR-0037](0037-fastcdc-v2016-chunk-boundaries.md) | Accepted | Use bounded FastCDC v2016 chunk boundaries |
+| [ADR-0038](0038-bounded-uncompressed-codec-abstraction.md) | Accepted | Use a bounded uncompressed codec abstraction first |

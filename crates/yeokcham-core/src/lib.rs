@@ -3,6 +3,7 @@
 #![deny(missing_docs)]
 
 mod canonical;
+mod compression;
 mod content_defined_chunking;
 mod device_id;
 mod error;
@@ -21,6 +22,7 @@ mod whole_blob_record;
 mod yeokcham_content_id;
 
 pub use canonical::{CanonicalDecoder, CanonicalEncoder};
+pub use compression::{CompressionAlgorithm, CompressionCodec};
 pub use content_defined_chunking::{
     ContentDefinedChunk, ContentDefinedChunker, ContentDefinedChunkingParameters,
 };
