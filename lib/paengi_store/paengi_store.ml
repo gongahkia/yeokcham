@@ -21,6 +21,9 @@ module Stored_object_id = struct
     | 'a' .. 'f' as character -> Some (10 + Char.code character - Char.code 'a')
     | _ -> None
 
+  let of_raw_bytes bytes = if String.length bytes = 32 then Some bytes else None
+  let to_raw_bytes identity = identity
+
   let of_hex hex =
     if String.length hex <> 64 then Error (Invalid_length (String.length hex))
     else
@@ -149,6 +152,12 @@ let rec ensure_directory path =
 let close_noerr descriptor =
   try Unix.close descriptor with Unix.Unix_error _ -> ()
 
+let close_file descriptor path =
+  try
+    Unix.close descriptor;
+    Ok ()
+  with Unix.Unix_error (error, _, _) -> Error (io_error "close" path error)
+
 let write_all descriptor path bytes =
   let length = Bytes.length bytes in
   let rec write offset =
@@ -276,7 +285,10 @@ let create_temporary directory final_name bytes =
           | Error error -> Error error
           | Ok () -> fsync_file descriptor path
         in
-        close_noerr descriptor;
+        let close_result = close_file descriptor path in
+        let result =
+          match result with Error error -> Error error | Ok () -> close_result
+        in
         (match result with
         | Ok () -> Ok path
         | Error error ->

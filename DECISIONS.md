@@ -131,3 +131,4 @@ The ADR lifecycle, numbering rules, and template are defined in [`docs/adr/READM
 - [ADR-018 — Fixed object envelope](docs/adr/018-fixed-object-envelope.md) — Accepted.
 - [ADR-019 — Object format versions and mandatory features](docs/adr/019-object-format-versions-and-mandatory-features.md) — Accepted.
 - [ADR-020 — Stored-object identity and immutable publication](docs/adr/020-stored-object-identity-and-publication.md) — Accepted.
+- [ADR-021 — Persisted snapshot object schemas](docs/adr/021-persisted-snapshot-object-schemas.md) — Accepted.

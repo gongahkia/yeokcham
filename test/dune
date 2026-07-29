@@ -62,6 +62,11 @@
   (source_tree golden)))
 
 (test
+ (name test_store)
+ (modules test_store)
+ (libraries alcotest paengi_encoding paengi_envelope paengi_store unix))
+
+(test
  (name encoding_property_test)
  (modules encoding_property_test)
  (libraries
@@ -78,13 +83,27 @@
  (modules model_property_test)
  (libraries alcotest qcheck-core qcheck-alcotest paengi_id paengi_model))
 
+(test
+ (name store_property_test)
+ (modules store_property_test)
+ (libraries
+  alcotest
+  qcheck-core
+  qcheck-alcotest
+  paengi_encoding
+  paengi_envelope
+  paengi_store
+  unix))
+
 (rule
  (alias property-test)
  (deps
   (:encoding_property_test encoding_property_test.exe)
   (:model_property_test model_property_test.exe)
+  (:store_property_test store_property_test.exe)
   (source_tree fixtures/encoding))
  (action
   (progn
    (run %{encoding_property_test})
-   (run %{model_property_test}))))
+   (run %{model_property_test})
+   (run %{store_property_test}))))

@@ -6,6 +6,8 @@ module Stored_object_id : sig
     | Invalid_hex_character of int * char
 
   val parse_error_to_string : parse_error -> string
+  val of_raw_bytes : string -> t option
+  val to_raw_bytes : t -> string
   val of_hex : string -> (t, parse_error) result
   val to_hex : t -> string
   val equal : t -> t -> bool
