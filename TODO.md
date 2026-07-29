@@ -46,7 +46,7 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 - [x] Read object bytes.
 - [x] Recompute and verify Git object IDs.
 - [x] Record object metadata in SQLite.
-- [ ] Reject unsupported repository hash formats clearly.
+- [x] Reject unsupported repository hash formats clearly.
 
 ### Storage representations
 
