@@ -54,7 +54,7 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 - [x] Implement tiny-blob aggregation.
 - [x] Implement content-defined chunking.
 - [x] Select an initial chunking algorithm through an ADR.
-- [ ] Implement compression abstraction.
+- [x] Implement compression abstraction.
 - [ ] Implement immutable segment writer.
 - [ ] Implement segment reader.
 - [ ] Implement segment index.

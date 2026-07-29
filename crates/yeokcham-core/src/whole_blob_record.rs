@@ -2,14 +2,14 @@ use std::fmt;
 
 use crate::yeokcham_content_id::sha256_content_id;
 use crate::{
-    CanonicalDecoder, CanonicalEncoder, ContentHashAlgorithm, Error, ErrorKind, GitObject,
-    GitObjectId, GitObjectKind, Result, YeokchamContentId,
+    CanonicalDecoder, CanonicalEncoder, CompressionAlgorithm, CompressionCodec,
+    ContentHashAlgorithm, Error, ErrorKind, GitObject, GitObjectId, GitObjectKind, Result,
+    YeokchamContentId,
 };
 
 const MAGIC: [u8; 4] = *b"YKWB";
 const VERSION: u16 = 1;
 const RECORD_TYPE: u8 = 1;
-const COMPRESSION_NONE: u8 = 0;
 
 /// A canonical uncompressed record containing one verified Git blob body.
 ///
@@ -74,7 +74,8 @@ impl WholeBlobRecord {
                 "whole-blob record has an invalid type",
             ));
         }
-        if decoder.read_u8()? != COMPRESSION_NONE {
+        let compression = CompressionAlgorithm::from_binary_tag(decoder.read_u8()?)?;
+        if compression != CompressionAlgorithm::None {
             return Err(Error::new(
                 ErrorKind::Unsupported,
                 "whole-blob record compression is unsupported",
@@ -95,18 +96,13 @@ impl WholeBlobRecord {
         }
         let git_object_id = GitObjectId::from_bytes(decoder.read_fixed()?);
         let content_id = YeokchamContentId::from_digest(algorithm, decoder.read_fixed()?);
-        let data = decoder.read_byte_string()?;
-        if data.len() > maximum_body_bytes {
-            return Err(Error::new(
-                ErrorKind::Unsupported,
-                "whole-blob record exceeds the decode limit",
-            ));
-        }
+        let data = CompressionCodec::new(compression)
+            .decompress(decoder.read_byte_string()?, maximum_body_bytes)?;
         decoder.finish()?;
         let record = Self {
             git_object_id,
             content_id,
-            data: data.to_vec(),
+            data,
         };
         record.verify()?;
         Ok(record)
@@ -135,7 +131,7 @@ impl WholeBlobRecord {
         encoder.write_u64(0);
         encoder.write_u64(0);
         encoder.write_u8(RECORD_TYPE);
-        encoder.write_u8(COMPRESSION_NONE);
+        encoder.write_u8(CompressionAlgorithm::None.binary_tag());
         encoder.write_u8(self.content_id.algorithm().binary_tag());
         encoder.write_fixed(self.git_object_id.as_bytes());
         encoder.write_fixed(self.content_id.digest());

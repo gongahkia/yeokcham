@@ -85,11 +85,17 @@ mod tests {
     #[test]
     fn none_uses_a_stable_binary_tag() {
         assert_eq!(CompressionAlgorithm::None.binary_tag(), 0);
-        assert_eq!(CompressionAlgorithm::from_binary_tag(0).expect("none tag"), CompressionAlgorithm::None);
+        assert_eq!(
+            CompressionAlgorithm::from_binary_tag(0).expect("none tag"),
+            CompressionAlgorithm::None
+        );
 
         let error = CompressionAlgorithm::from_binary_tag(1).expect_err("unknown tag");
         assert_eq!(error.kind(), ErrorKind::Unsupported);
-        assert_eq!(error.public_message(), "compression algorithm is unsupported");
+        assert_eq!(
+            error.public_message(),
+            "compression algorithm is unsupported"
+        );
     }
 
     #[test]

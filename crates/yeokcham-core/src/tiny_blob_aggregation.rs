@@ -4,14 +4,14 @@ use sha2::{Digest, Sha256};
 
 use crate::yeokcham_content_id::sha256_content_id;
 use crate::{
-    CanonicalDecoder, CanonicalEncoder, ContentHashAlgorithm, Error, ErrorKind, GitObject,
-    GitObjectId, GitObjectKind, Result, YeokchamContentId,
+    CanonicalDecoder, CanonicalEncoder, CompressionAlgorithm, CompressionCodec,
+    ContentHashAlgorithm, Error, ErrorKind, GitObject, GitObjectId, GitObjectKind, Result,
+    YeokchamContentId,
 };
 
 const MAGIC: [u8; 4] = *b"YKTA";
 const VERSION: u16 = 1;
 const RECORD_TYPE: u8 = 2;
-const COMPRESSION_NONE: u8 = 0;
 const CONTENT_DOMAIN: &[u8] = b"yeokcham/tiny-blob-aggregation/v1\0";
 
 /// Largest number of distinct blobs permitted in one aggregation record.
@@ -170,7 +170,8 @@ impl TinyBlobAggregation {
                 "tiny-blob aggregation has an invalid type",
             ));
         }
-        if decoder.read_u8()? != COMPRESSION_NONE {
+        let compression = CompressionAlgorithm::from_binary_tag(decoder.read_u8()?)?;
+        if compression != CompressionAlgorithm::None {
             return Err(Error::new(
                 ErrorKind::Unsupported,
                 "tiny-blob aggregation compression is unsupported",
@@ -205,23 +206,26 @@ impl TinyBlobAggregation {
             ensure_sha256_algorithm(decoder.read_u8()?)?;
             let entry_content_id =
                 YeokchamContentId::from_digest(ContentHashAlgorithm::Sha256, decoder.read_fixed()?);
-            let data = decoder.read_byte_string()?;
+            let remaining_body_bytes = maximum_total_body_bytes
+                .checked_sub(total_body_bytes)
+                .ok_or_else(|| {
+                    Error::new(
+                        ErrorKind::CorruptData,
+                        "tiny-blob aggregation body length is invalid",
+                    )
+                })?;
+            let data = CompressionCodec::new(compression)
+                .decompress(decoder.read_byte_string()?, remaining_body_bytes)?;
             total_body_bytes = total_body_bytes.checked_add(data.len()).ok_or_else(|| {
                 Error::new(
                     ErrorKind::CorruptData,
                     "tiny-blob aggregation body length is invalid",
                 )
             })?;
-            if total_body_bytes > maximum_total_body_bytes {
-                return Err(Error::new(
-                    ErrorKind::Unsupported,
-                    "tiny-blob aggregation exceeds the decode limit",
-                ));
-            }
             entries.push(TinyBlobEntry {
                 git_object_id,
                 content_id: entry_content_id,
-                data: data.to_vec(),
+                data,
             });
         }
         decoder.finish()?;
@@ -251,7 +255,7 @@ impl TinyBlobAggregation {
         encoder.write_u64(0);
         encoder.write_u64(0);
         encoder.write_u8(RECORD_TYPE);
-        encoder.write_u8(COMPRESSION_NONE);
+        encoder.write_u8(CompressionAlgorithm::None.binary_tag());
         encoder.write_u8(self.content_id.algorithm().binary_tag());
         encoder.write_fixed(self.content_id.digest());
         encoder.write_u32(self.entries.len() as u32);
