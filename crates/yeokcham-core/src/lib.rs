@@ -15,6 +15,7 @@ mod repository_format;
 mod repository_id;
 mod segment_id;
 mod telemetry;
+mod tiny_blob_aggregation;
 mod whole_blob_record;
 mod yeokcham_content_id;
 
@@ -31,5 +32,8 @@ pub use repository_format::{RepositoryFeatureFlags, RepositoryFormat, Repository
 pub use repository_id::RepositoryId;
 pub use segment_id::SegmentId;
 pub use telemetry::{Redacted, redact};
+pub use tiny_blob_aggregation::{
+    MAX_TINY_BLOB_AGGREGATION_ENTRIES, TinyBlobAggregation, TinyBlobEntry,
+};
 pub use whole_blob_record::WholeBlobRecord;
 pub use yeokcham_content_id::{ContentHashAlgorithm, YeokchamContentId};

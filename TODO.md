@@ -51,7 +51,7 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 ### Storage representations
 
 - [x] Implement whole-blob record.
-- [ ] Implement tiny-blob aggregation.
+- [x] Implement tiny-blob aggregation.
 - [ ] Implement content-defined chunking.
 - [ ] Select an initial chunking algorithm through an ADR.
 - [ ] Implement compression abstraction.

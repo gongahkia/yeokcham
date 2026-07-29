@@ -1,5 +1,7 @@
 use std::{fmt, str::FromStr};
 
+use sha2::{Digest, Sha256};
+
 use crate::{Error, ErrorKind, Result};
 
 /// Algorithm attached to a Yeokcham plaintext content identity.
@@ -168,6 +170,10 @@ impl fmt::Debug for YeokchamContentId {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str("YeokchamContentId(<redacted>)")
     }
+}
+
+pub(crate) fn sha256_content_id(data: &[u8]) -> YeokchamContentId {
+    YeokchamContentId::from_digest(ContentHashAlgorithm::Sha256, Sha256::digest(data).into())
 }
 
 #[cfg(test)]

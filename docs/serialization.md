@@ -49,3 +49,20 @@ The `YKWB` record stores one exact, verified Git blob body before segment framin
 10. `u64` body byte length followed by the exact body bytes.
 
 Content-hash tags are `1` HMAC-SHA-256, `2` keyed BLAKE3, `3` SHA-256, and `4` BLAKE3. Version 1 writes and verifies only tag `3`; it rejects the other reserved tags until their key/configuration and implementation contracts exist. Callers bound the encoded record and supply a maximum decoded body length before the parser allocates. The decoder rejects nonzero feature bits, foreign record types, compression modes, malformed tags, length mismatch/truncation, trailing bytes, and mismatched Git or content IDs.
+
+## Tiny-blob aggregation record version 1
+
+The `YKTA` record groups at least one and at most 4,096 distinct verified Git blobs. Its fields are:
+
+1. Magic `YKTA`.
+2. Schema version `1`.
+3. Required feature bits `0`.
+4. Optional feature bits `0`.
+5. Record type `2` for tiny-blob aggregation.
+6. Compression method `0` for no compression.
+7. One-byte aggregate content-hash algorithm tag (`3`, SHA-256).
+8. Raw 32-byte aggregate content digest.
+9. Unsigned `u32` entry count.
+10. Entries, strictly ascending by raw 20-byte Git blob ID: Git ID, one-byte content-hash tag (`3`), raw 32-byte entry digest, `u64` body length, and exact body bytes.
+
+Each entry content ID is SHA-256 of its raw blob body. The aggregate content ID is SHA-256 over the domain separator `yeokcham/tiny-blob-aggregation/v1\0`, entry count, and each canonical entry field in order. The fixed maximum controls record metadata growth but does not choose a tiny-blob byte threshold; storage policy does that later. Decoders receive caller bounds for entry count and cumulative body bytes and verify every entry, strict order, and aggregate ID before trust.

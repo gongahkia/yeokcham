@@ -1,7 +1,6 @@
 use std::fmt;
 
-use sha2::{Digest, Sha256};
-
+use crate::yeokcham_content_id::sha256_content_id;
 use crate::{
     CanonicalDecoder, CanonicalEncoder, ContentHashAlgorithm, Error, ErrorKind, GitObject,
     GitObjectId, GitObjectKind, Result, YeokchamContentId,
@@ -40,7 +39,7 @@ impl WholeBlobRecord {
         object.verify_id()?;
         Ok(Self {
             git_object_id: object.id(),
-            content_id: content_id_for(object.data()),
+            content_id: sha256_content_id(object.data()),
             data: object.data().to_vec(),
         })
     }
@@ -151,7 +150,7 @@ impl WholeBlobRecord {
                 "whole-blob record Git object ID does not match its bytes",
             ));
         }
-        if self.content_id != content_id_for(&self.data) {
+        if self.content_id != sha256_content_id(&self.data) {
             return Err(Error::new(
                 ErrorKind::CorruptData,
                 "whole-blob record content ID does not match its bytes",
@@ -159,10 +158,6 @@ impl WholeBlobRecord {
         }
         Ok(())
     }
-}
-
-fn content_id_for(data: &[u8]) -> YeokchamContentId {
-    YeokchamContentId::from_digest(ContentHashAlgorithm::Sha256, Sha256::digest(data).into())
 }
 
 impl fmt::Debug for WholeBlobRecord {

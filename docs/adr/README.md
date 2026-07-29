@@ -41,3 +41,4 @@ Valid statuses are `Proposed`, `Accepted`, `Rejected`, `Deprecated`, and `Supers
 | [ADR-0033](0033-local-sqlite-object-metadata.md) | Accepted | Store verified Git object metadata in a local versioned SQLite database |
 | [ADR-0034](0034-reject-unsupported-git-object-hashes-at-open.md) | Accepted | Reject unsupported Git object hash formats during repository opening |
 | [ADR-0035](0035-versioned-whole-blob-record.md) | Accepted | Store verified small-slice blobs as canonical whole-blob records |
+| [ADR-0036](0036-bounded-tiny-blob-aggregation.md) | Accepted | Aggregate bounded distinct tiny blobs in one canonical record |
