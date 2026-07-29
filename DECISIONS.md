@@ -1,6 +1,6 @@
 # Architecture Decision Records
 
-This file contains initial decisions. They may change only through an explicit ADR update with rationale and migration implications.
+This file contains the initial ADR-001 through ADR-015. New decisions follow the [`docs/adr/` process](docs/adr/README.md) and continue at ADR-0016. Accepted decisions change only through a superseding ADR with rationale and migration implications.
 
 ## ADR-001 — Preserve Git object identities
 
