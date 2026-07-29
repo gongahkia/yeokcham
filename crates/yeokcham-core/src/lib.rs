@@ -1,5 +1,7 @@
 //! Core types and repository logic for Yeokcham.
 
+#![deny(missing_docs)]
+
 mod canonical;
 mod device_id;
 mod error;
