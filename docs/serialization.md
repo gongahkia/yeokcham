@@ -85,3 +85,7 @@ The `YKSG` segment container holds one or more already-verified `YKWB` or `YKTA`
 12. Raw 32-byte SHA-256 checksum of every preceding segment byte, including the footer fields through aggregate stored length.
 
 Version 1 writes uncompressed payloads, so each record's plaintext and stored lengths match, and both footer totals match. The checksum detects corruption but is not authentication; later encryption/authentication requires a new format version or required feature. Writers stage a complete file, synchronize it, then create the final path without replacement. `SegmentReader` validates header identities, counts, types, tags, lengths, totals, nested records, checksum, and trailing bytes under caller limits before returning typed records. Indexes and manifests are defined separately.
+
+## Segment index version 1
+
+The `YKIX` index is rebuildable metadata for one verified `YKSG` segment. It contains magic, version, zero feature bits, raw repository and segment UUIDv4 values, the raw 32-byte bound segment checksum, and a `u32` entry count. Entries sort strictly by tagged content identity and contain its tag/digest, record type, compression method, payload offset, plaintext length, and stored length. The `YKIF` footer stores aggregate plaintext/stored lengths followed by a SHA-256 checksum over every preceding index byte. Readers validate the bound identities, limits, strict order, totals, checksum, and trailing bytes before lookup. An index never replaces segment verification.

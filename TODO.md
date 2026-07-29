@@ -57,7 +57,7 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 - [x] Implement compression abstraction.
 - [x] Implement immutable segment writer.
 - [x] Implement segment reader.
-- [ ] Implement segment index.
+- [x] Implement segment index.
 - [ ] Implement blob manifest.
 - [ ] Record storage-policy decisions per blob.
 
