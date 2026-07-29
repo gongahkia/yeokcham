@@ -6,11 +6,11 @@ Robustness tasks operate only on Paengi's pure functions and generated local fix
 ## Active vertical slice
 
 - Milestone: 0 — Project and model foundation.
-- Task: define an in-memory byte-exact directory snapshot and replay valid scratch operations (complete).
-- Modules/files: new `lib/paengi_model/` and `test/model_property_test.ml`; update `test/dune`; no persistent write or CLI.
-- Types: validated path, file mode and entry, directory tree, immutable snapshot, and create/modify/delete/move/mode-change scratch operations.
-- Invariants: paths are relative, non-empty, component-safe, and canonical; tree entries are unique and ordered; snapshot IDs derive only from canonical tree bytes; operations validate preconditions and replay atomically without mutation.
-- Tests: five unit tests cover operation bytes/modes, directory moves, preconditions, unsafe paths, and canonical identity; 500 bounded deterministic generated valid directory-operation sequences are checked against an independent reference model. `make test`, `make check`, and `make property-test PROPERTY_TEST_SEED=17` pass.
+- Task: define in-memory scratch events and immutable checkpoint transitions (complete).
+- Modules/files: `lib/paengi_model/paengi_model.{mli,ml}`, `test/model_property_test.ml`, and `TODO.md`; no persistent write, CLI, or `test/dune` change.
+- Types: existing create/modify/delete/move/mode-change operations; observation source; scratch event; retention reason; checkpoint; and typed event-transition error.
+- Invariants: an event names its exact parent checkpoint; a successful transition records that parent, event ID, resulting snapshot, timestamp, and normalised retention reasons; a failed transition returns a structured error without a partial checkpoint; snapshot IDs derive only from snapshot bytes.
+- Tests: eight unit tests cover snapshot operations plus parent mismatch, retention normalisation, and checkpoint metadata; 500 bounded deterministic generated cases each cover event replay, determinism, parent-chain coherence, invalid-operation errors, and metadata-independent snapshot IDs. `make check` and `make property-test PROPERTY_TEST_SEED=17` pass.
 - External libraries: existing Alcotest, QCheck, SHA-256, and Profile 1 encoder only.
 - ADR changes: no new ADR; the slice defines no persistent object format.
 
@@ -44,9 +44,9 @@ Robustness tasks operate only on Paengi's pure functions and generated local fix
 ### In-memory reference model
 
 - [x] Define file, tree, and snapshot types.
-- [ ] Define scratch event and checkpoint.
-- [ ] Define retention reason.
-- [ ] Define pure event application.
+- [x] Define scratch event and checkpoint.
+- [x] Define retention reason.
+- [x] Define pure event application.
 - [ ] Define simple in-memory repository.
 - [ ] Add generated directory-tree tests.
 

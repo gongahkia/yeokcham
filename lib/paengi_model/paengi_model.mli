@@ -64,6 +64,19 @@ type replay_error = { operation_index : int; cause : transition_error }
 
 val replay_error_to_string : replay_error -> string
 
+type observation_source = Explicit | Scan
+
+type retention_reason =
+  | User_pinned
+  | Capsule_boundary of Paengi_id.Capsule_id.t
+  | Release_boundary of Paengi_id.Release_id.t
+  | Validation_passed of Paengi_id.Validation_id.t
+  | Periodic_retention
+  | Recent_window
+  | Conflict_reference of Paengi_id.Conflict_id.t
+
+val retention_reason_to_string : retention_reason -> string
+
 module Snapshot : sig
   type t
 
@@ -76,4 +89,55 @@ module Snapshot : sig
   val id : t -> Paengi_id.Snapshot_id.t
   val apply_operation : t -> scratch_operation -> (t, transition_error) result
   val apply_operations : t -> scratch_operation list -> (t, replay_error) result
+end
+
+type scratch_event
+type checkpoint
+
+type event_transition_error =
+  | Event_parent_mismatch of {
+      expected_parent : Paengi_id.Checkpoint_id.t;
+      actual_parent : Paengi_id.Checkpoint_id.t;
+    }
+  | Event_operation_rejected of replay_error
+
+val event_transition_error_to_string : event_transition_error -> string
+
+module Scratch_event : sig
+  val create :
+    parent:Paengi_id.Checkpoint_id.t ->
+    operations:scratch_operation list ->
+    observed_at:int64 ->
+    source:observation_source ->
+    scratch_event
+
+  val id : scratch_event -> Paengi_id.Operation_id.t
+  val parent : scratch_event -> Paengi_id.Checkpoint_id.t
+  val operations : scratch_event -> scratch_operation list
+  val observed_at : scratch_event -> int64
+  val source : scratch_event -> observation_source
+end
+
+module Checkpoint : sig
+  val initial :
+    snapshot:Snapshot.t ->
+    created_at:int64 ->
+    retention:retention_reason list ->
+    checkpoint
+
+  val id : checkpoint -> Paengi_id.Checkpoint_id.t
+  val parent : checkpoint -> Paengi_id.Checkpoint_id.t option
+  val snapshot : checkpoint -> Snapshot.t
+  val event : checkpoint -> Paengi_id.Operation_id.t option
+  val created_at : checkpoint -> int64
+  val retention : checkpoint -> retention_reason list
+end
+
+module Scratch : sig
+  val apply_event :
+    parent:checkpoint ->
+    created_at:int64 ->
+    retention:retention_reason list ->
+    scratch_event ->
+    (checkpoint, event_transition_error) result
 end

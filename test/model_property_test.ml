@@ -1,4 +1,5 @@
 module Model = Paengi_model
+module Id = Paengi_id
 open Model
 
 let default_seed = 20_260_729
@@ -344,16 +345,214 @@ let valid_operation_sequences =
     (QCheck2.Gen.int_range 1 40)
     (QCheck2.Gen.int_range 0 1_000_000)
 
-let replay_property =
-  QCheck2.Test.make ~count:500 ~name:"valid scratch operations replay exactly"
+let initial_checkpoint snapshot =
+  Checkpoint.initial ~snapshot ~created_at:0L ~retention:[]
+
+let run_event_sequence initial operations =
+  let rec apply index checkpoint applied = function
+    | [] -> Ok (checkpoint, List.rev applied)
+    | operation :: rest -> (
+        let event =
+          Scratch_event.create ~parent:(Checkpoint.id checkpoint)
+            ~operations:[ operation ]
+            ~observed_at:(Int64.of_int (index + 1))
+            ~source:(if index land 1 = 0 then Explicit else Scan)
+        in
+        let retention =
+          if index land 1 = 0 then [ Recent_window ] else [ Periodic_retention ]
+        in
+        match
+          Scratch.apply_event ~parent:checkpoint
+            ~created_at:(Int64.of_int (index + 101))
+            ~retention event
+        with
+        | Error error -> Error error
+        | Ok child -> apply (index + 1) child ((event, child) :: applied) rest)
+  in
+  apply 0 initial [] operations
+
+let event_replay_property =
+  QCheck2.Test.make ~count:500 ~name:"valid scratch events replay exactly"
     valid_operation_sequences (fun values ->
       let initial, operations, expected = scenario values in
-      match Snapshot.apply_operations initial operations with
+      match run_event_sequence (initial_checkpoint initial) operations with
       | Error _ -> false
-      | Ok replayed ->
-          Snapshot.equal replayed expected
-          && Paengi_id.Snapshot_id.equal (Snapshot.id replayed)
+      | Ok (checkpoint, _) ->
+          Snapshot.equal (Checkpoint.snapshot checkpoint) expected
+          && Paengi_id.Snapshot_id.equal
+               (Snapshot.id (Checkpoint.snapshot checkpoint))
                (Snapshot.id expected))
+
+let deterministic_replay_property =
+  QCheck2.Test.make ~count:500 ~name:"scratch event replay is deterministic"
+    valid_operation_sequences (fun values ->
+      let initial, operations, _ = scenario values in
+      let parent = initial_checkpoint initial in
+      match
+        ( run_event_sequence parent operations,
+          run_event_sequence parent operations )
+      with
+      | Ok (left, _), Ok (right, _) ->
+          Id.Checkpoint_id.equal (Checkpoint.id left) (Checkpoint.id right)
+          && Snapshot.equal (Checkpoint.snapshot left)
+               (Checkpoint.snapshot right)
+      | Error _, _ | _, Error _ -> false)
+
+let parent_chains_are_coherent_property =
+  QCheck2.Test.make ~count:500 ~name:"checkpoint parent chains are coherent"
+    valid_operation_sequences (fun values ->
+      let initial, operations, _ = scenario values in
+      let parent = initial_checkpoint initial in
+      match run_event_sequence parent operations with
+      | Error _ -> false
+      | Ok (_, applied) ->
+          let rec coherent previous = function
+            | [] -> true
+            | (event, checkpoint) :: rest ->
+                Option.equal Id.Checkpoint_id.equal
+                  (Checkpoint.parent checkpoint)
+                  (Some (Checkpoint.id previous))
+                && Option.equal Id.Operation_id.equal
+                     (Checkpoint.event checkpoint)
+                     (Some (Scratch_event.id event))
+                && Id.Checkpoint_id.equal
+                     (Scratch_event.parent event)
+                     (Checkpoint.id previous)
+                && coherent checkpoint rest
+          in
+          coherent parent applied)
+
+let invalid_operations_return_errors_property =
+  QCheck2.Test.make ~count:500 ~name:"invalid scratch events return errors"
+    valid_operation_sequences (fun values ->
+      let initial, _, _ = scenario values in
+      let parent = initial_checkpoint initial in
+      let parent_snapshot_id = Snapshot.id (Checkpoint.snapshot parent) in
+      let missing =
+        require_path
+          [ "archive"; Printf.sprintf "missing-%d" (List.length values) ]
+      in
+      let event =
+        Scratch_event.create ~parent:(Checkpoint.id parent)
+          ~operations:
+            [
+              Modify_file
+                {
+                  path = missing;
+                  expected_content = "before";
+                  replacement_content = "after";
+                };
+            ]
+          ~observed_at:1L ~source:Explicit
+      in
+      match Scratch.apply_event ~parent ~created_at:2L ~retention:[] event with
+      | Error (Event_operation_rejected error) ->
+          error.operation_index = 0
+          && Id.Snapshot_id.equal parent_snapshot_id
+               (Snapshot.id (Checkpoint.snapshot parent))
+      | Error (Event_parent_mismatch _) | Ok _ -> false)
+
+let metadata_does_not_change_snapshot_id_property =
+  QCheck2.Test.make ~count:500
+    ~name:"timestamps and retention do not change snapshot IDs"
+    valid_operation_sequences (fun values ->
+      let initial, operations, expected = scenario values in
+      let parent = initial_checkpoint initial in
+      let early =
+        Scratch_event.create ~parent:(Checkpoint.id parent) ~operations
+          ~observed_at:1L ~source:Explicit
+      in
+      let late =
+        Scratch_event.create ~parent:(Checkpoint.id parent) ~operations
+          ~observed_at:9_999L ~source:Scan
+      in
+      match
+        ( Scratch.apply_event ~parent ~created_at:2L
+            ~retention:[ Recent_window ] early,
+          Scratch.apply_event ~parent ~created_at:8_888L
+            ~retention:[ User_pinned; Periodic_retention; User_pinned ]
+            late )
+      with
+      | Ok early_checkpoint, Ok late_checkpoint ->
+          Paengi_id.Snapshot_id.equal
+            (Snapshot.id (Checkpoint.snapshot early_checkpoint))
+            (Snapshot.id (Checkpoint.snapshot late_checkpoint))
+          && Paengi_id.Snapshot_id.equal
+               (Snapshot.id (Checkpoint.snapshot early_checkpoint))
+               (Snapshot.id expected)
+      | Error _, _ | _, Error _ -> false)
+
+let event_parent_mismatch_is_explicit () =
+  let event_parent = initial_checkpoint (initial_snapshot ()) in
+  let event =
+    Scratch_event.create
+      ~parent:(Checkpoint.id event_parent)
+      ~operations:[] ~observed_at:1L ~source:Explicit
+  in
+  let other_parent =
+    Checkpoint.initial ~snapshot:Snapshot.empty ~created_at:0L ~retention:[]
+  in
+  match
+    Scratch.apply_event ~parent:other_parent ~created_at:2L ~retention:[] event
+  with
+  | Error (Event_parent_mismatch { expected_parent; actual_parent }) ->
+      Alcotest.(check bool)
+        "applying parent retained" true
+        (Id.Checkpoint_id.equal expected_parent (Checkpoint.id other_parent));
+      Alcotest.(check bool)
+        "event parent retained" true
+        (Id.Checkpoint_id.equal actual_parent (Checkpoint.id event_parent))
+  | Error (Event_operation_rejected error) ->
+      Alcotest.fail
+        (event_transition_error_to_string (Event_operation_rejected error))
+  | Ok _ -> Alcotest.fail "mismatched parent accepted"
+
+let retention_is_normalised () =
+  let checkpoint =
+    Checkpoint.initial ~snapshot:(initial_snapshot ()) ~created_at:0L
+      ~retention:[ Recent_window; User_pinned; Recent_window ]
+  in
+  Alcotest.(check (list string))
+    "retention reasons are sorted and deduplicated"
+    [ "user pinned"; "recent window" ]
+    (List.map retention_reason_to_string (Checkpoint.retention checkpoint))
+
+let checkpoint_records_event_metadata () =
+  let parent = initial_checkpoint (initial_snapshot ()) in
+  let event =
+    Scratch_event.create ~parent:(Checkpoint.id parent) ~operations:[]
+      ~observed_at:41L ~source:Scan
+  in
+  match
+    Scratch.apply_event ~parent ~created_at:42L
+      ~retention:[ Recent_window; User_pinned ]
+      event
+  with
+  | Error error -> Alcotest.fail (event_transition_error_to_string error)
+  | Ok checkpoint ->
+      Alcotest.(check int64)
+        "checkpoint timestamp" 42L
+        (Checkpoint.created_at checkpoint);
+      Alcotest.(check int64)
+        "event timestamp" 41L
+        (Scratch_event.observed_at event);
+      Alcotest.(check bool)
+        "event source" true
+        (Scratch_event.source event = Scan);
+      Alcotest.(check bool)
+        "parent reference" true
+        (Option.equal Id.Checkpoint_id.equal
+           (Checkpoint.parent checkpoint)
+           (Some (Checkpoint.id parent)));
+      Alcotest.(check bool)
+        "event reference" true
+        (Option.equal Id.Operation_id.equal
+           (Checkpoint.event checkpoint)
+           (Some (Scratch_event.id event)));
+      Alcotest.(check string)
+        "snapshot identity"
+        (Id.Snapshot_id.to_hex (Snapshot.id (Checkpoint.snapshot parent)))
+        (Id.Snapshot_id.to_hex (Snapshot.id (Checkpoint.snapshot checkpoint)))
 
 let property_case name test =
   QCheck_alcotest.to_alcotest ~speed_level:`Quick ~rand:(state_for name) test
@@ -373,6 +572,22 @@ let () =
             paths_reject_unsafe_components;
           Alcotest.test_case "snapshot identity is canonical" `Quick
             snapshot_identity_is_canonical;
+          Alcotest.test_case "event parent mismatch is explicit" `Quick
+            event_parent_mismatch_is_explicit;
+          Alcotest.test_case "retention is normalised" `Quick
+            retention_is_normalised;
+          Alcotest.test_case "checkpoint records event metadata" `Quick
+            checkpoint_records_event_metadata;
         ] );
-      ("property", [ property_case "scratch-replay" replay_property ]);
+      ( "property",
+        [
+          property_case "event-replay" event_replay_property;
+          property_case "event-determinism" deterministic_replay_property;
+          property_case "checkpoint-parent-chain"
+            parent_chains_are_coherent_property;
+          property_case "invalid-event"
+            invalid_operations_return_errors_property;
+          property_case "snapshot-metadata"
+            metadata_does_not_change_snapshot_id_property;
+        ] );
     ]
