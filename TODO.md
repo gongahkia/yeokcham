@@ -5,13 +5,13 @@ The roadmap is ordered. The local byte-correct model must exist before semantic 
 ## Active vertical slice
 
 - Milestone: 0 — Project and model foundation.
-- Task: add retained golden encoding fixtures (complete).
-- Modules/files: `Paengi_testkit`, `test/golden/`, Profile 1 and envelope tests, `test/dune`, this active slice, and existing ADR verification evidence; no persistent write or CLI.
-- Types: a test-only strict lowercase-hex fixture reader; one composite Profile 1 value and one Envelope-1 `Snapshot` value.
-- Invariants: a fixture is one nonempty, even-length lowercase-hex line terminated by exactly one LF; its decoded bytes are canonical and must re-encode byte-identically; test data is declared to Dune so sandboxed and CI runs read the same source-controlled bytes.
-- Tests: fixture-text and file-shape parser boundaries; decoding and re-encoding of each retained fixture; exact semantic values; envelope checksum verification; Dune test-data dependency; and `make ci` after implementation.
+- Task: reject unknown mandatory features (complete).
+- Modules/files: `test/golden/`, `Paengi_envelope` tests, this active slice, and ADR-019 verification evidence; no persistent write or CLI.
+- Types: checksum-valid Envelope-1 `Snapshot` fixtures carrying mandatory bit `0` and unsigned bit `63`; typed `Unknown_mandatory_features` decode errors.
+- Invariants: current Envelope 1 accepts only mask `0`; any nonzero mask is rejected at header offset `8` after checksum validation and before the payload decoder runs; signed OCaml representation does not change the wire interpretation of bit `63`.
+- Tests: retained source-controlled fixtures for low and high bits; typed error kind and offset; no payload-callback invocation; 500 generated nonzero masks; independent OpenSSL and `shasum` checksum matches; and `make ci` pass on 2026-07-29.
 - External libraries: no new dependency.
-- ADR changes: no new ADR; [ADR-017](docs/adr/017-restricted-deterministic-cbor.md) and [ADR-018](docs/adr/018-fixed-object-envelope.md) record retained-fixture evidence on 2026-07-29.
+- ADR changes: no new ADR; [ADR-019](docs/adr/019-object-format-versions-and-mandatory-features.md) records retained rejection evidence on 2026-07-29.
 
 ## Milestone 0 — Project and model foundation
 
@@ -36,7 +36,7 @@ The roadmap is ordered. The local byte-correct model must exist before semantic 
 - [x] Define object envelope.
 - [x] Define format version and feature flags.
 - [x] Add golden encoding fixtures.
-- [ ] Reject unknown mandatory features.
+- [x] Reject unknown mandatory features.
 - [ ] Add coverage-guided encoding decoder fuzzing before object persistence.
 - [ ] Benchmark encoding and decoding on representative object fixtures.
 

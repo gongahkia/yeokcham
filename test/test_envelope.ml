@@ -141,6 +141,30 @@ let golden_envelope () =
     (Encoding.equal payload (Envelope.payload decoded));
   Alcotest.(check string) "re-encode" expected (Envelope.encode decoded)
 
+let retained_unknown_mandatory_feature_fixtures () =
+  List.iter
+    (fun (name, features) ->
+      let invoked = ref false in
+      let result =
+        Envelope.decode_with (require_golden name) ~payload_decoder:(fun _ ->
+            invoked := true;
+            Ok ())
+      in
+      match result with
+      | Error error ->
+          Alcotest.(check int)
+            "unknown mandatory feature offset" 8 error.Envelope.offset;
+          Alcotest.(check bool)
+            "unknown mandatory feature kind" true
+            (error.Envelope.kind = Envelope.Unknown_mandatory_features features);
+          Alcotest.(check bool)
+            "unknown mandatory feature stops before payload" false !invoked
+      | Ok _ -> Alcotest.fail "unknown mandatory feature fixture accepted")
+    [
+      ("envelope-v1-snapshot-feature-bit-0.peng.hex", 1L);
+      ("envelope-v1-snapshot-feature-bit-63.peng.hex", Int64.min_int);
+    ]
+
 let construction_boundaries () =
   List.iter
     (fun version ->
@@ -452,6 +476,8 @@ let () =
         ] );
       ( "rejection",
         [
+          Alcotest.test_case "retained unknown mandatory-feature fixtures"
+            `Quick retained_unknown_mandatory_feature_fixtures;
           Alcotest.test_case "header and payload corruption" `Quick
             rejection_cases;
           Alcotest.test_case "truncation and callback ordering" `Quick

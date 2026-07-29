@@ -97,6 +97,7 @@ A future reader that adds a `(type, version)` schema must retain version-1 fixtu
 
 - 2026-07-29: the public registry exposes only object-format version `1` and mandatory-feature mask `0`; the writer rejects versions `-1`, `0`, `2`, `65535`, and `65536`, plus low, high non-sign, and high-sign feature bits.
 - 2026-07-29: checksum-valid version `2`, bit `0`, and bit `63` envelopes return typed incompatibility errors without invoking an instrumented payload callback.
+- 2026-07-29: retained checksum-valid bit-`0` and bit-`63` Envelope-1 fixtures reject at header offset `8` before payload decoding; their prescribed checksum preimages independently match `openssl dgst -sha256` and `shasum -a 256`.
 - 2026-07-29: checksum-valid combined failures prove deterministic precedence: object type is checked before object format, and object format before mandatory features.
 - 2026-07-29: all 12 registered object types round-trip at version `1` and mask `0`; the retained Envelope-1 golden vector remains byte-identical.
 - 2026-07-29: 500 valid-envelope round trips, 500 checksum-valid unsupported-version cases, 500 checksum-valid nonzero-mask cases, 500 single-byte corruptions, and 2,000 arbitrary-byte cases pass.

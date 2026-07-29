@@ -15,4 +15,6 @@ Each fixture is exactly one nonempty line of lowercase ASCII hexadecimal digits 
 
 `envelope-v1-snapshot.peng.hex` is Fixed Object Envelope 1 for object type `Snapshot`, object-format version `1`, mandatory-feature mask `0`, and Profile 1 payload `{1: true}`. Its checksum is SHA-256 over the prescribed header prefix and payload.
 
+`envelope-v1-snapshot-feature-bit-0.peng.hex` and `envelope-v1-snapshot-feature-bit-63.peng.hex` have the same valid Envelope-1 header and payload, except for mandatory feature bit `0` or bit `63` respectively. Their checksums are valid. Current readers must reject both at header offset `8` before payload decoding.
+
 Changing any fixture bytes requires a format decision and retained compatibility evidence; adding a new schema requires a new named fixture.
