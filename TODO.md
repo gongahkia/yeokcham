@@ -34,7 +34,7 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 - [ ] CI passes on macOS and Linux.
 - [x] Empty repository format can be created, reopened, and migrated.
 - [x] Public types have invariants documented.
-- [ ] No implementation code depends directly on a cloud backend.
+- [x] No implementation code depends directly on a cloud backend.
 
 ## Milestone 1 — Local storage proof
 
