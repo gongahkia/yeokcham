@@ -7,7 +7,7 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 ### Project setup
 
 - [x] Create Rust workspace.
-- [ ] Add formatting, linting, unit-test, and documentation CI.
+- [x] Add formatting, linting, unit-test, and documentation CI.
 - [ ] Define supported Rust version.
 - [ ] Add licence and contribution guide.
 - [ ] Add `docs/adr/` process.
