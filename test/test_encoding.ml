@@ -215,15 +215,12 @@ let truncation_cases () =
   done
 
 let ascii_generator =
-  QCheck2.Gen.(
-    map
-      (fun raw ->
-        String.map
-          (fun character -> Char.chr (Char.code character land 0x7f))
-          raw)
-      (string_size (0 -- 32)))
+  QCheck2.Gen.map
+    (fun raw ->
+      String.map (fun character -> Char.chr (Char.code character land 0x7f)) raw)
+    (QCheck2.Gen.string_size (QCheck2.Gen.int_range 0 32))
 
-let raw_generator = QCheck2.Gen.(string_size (0 -- 128))
+let raw_generator = QCheck2.Gen.string_size (QCheck2.Gen.int_range 0 128)
 
 let rec value_generator depth =
   let scalar =
@@ -242,7 +239,7 @@ let rec value_generator depth =
     let arrays =
       QCheck2.Gen.map
         (fun values -> array values)
-        QCheck2.Gen.(list_size (0 -- 4) child)
+        (QCheck2.Gen.list_size (QCheck2.Gen.int_range 0 4) child)
     in
     let maps =
       QCheck2.Gen.map
@@ -252,7 +249,7 @@ let rec value_generator depth =
             List.mapi (fun index value -> (List.nth keys index, value)) values
           in
           map entries)
-        QCheck2.Gen.(list_size (0 -- 4) child)
+        (QCheck2.Gen.list_size (QCheck2.Gen.int_range 0 4) child)
     in
     QCheck2.Gen.oneof_weighted [ (6, scalar); (2, arrays); (2, maps) ]
 
@@ -268,7 +265,7 @@ let round_trip_property =
 
 let map_permutation_property =
   QCheck2.Test.make ~count:300 ~name:"map permutations encode identically"
-    (QCheck2.Gen.list_size QCheck2.Gen.(0 -- 4) (value_generator 3))
+    (QCheck2.Gen.list_size (QCheck2.Gen.int_range 0 4) (value_generator 3))
     (fun values ->
       let keys = [ 0L; 24L; 256L; 65_536L ] in
       let entries =
