@@ -1,0 +1,330 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:yeokcham:schema:benchmark-result:1",
+  "title": "Yeokcham benchmark result v1",
+  "description": "A completed, reproducible Yeokcham benchmark result. Numeric units are encoded in field names.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "result_kind",
+    "contains_sensitive_data",
+    "benchmark_id",
+    "recorded_at",
+    "provenance",
+    "environment",
+    "fixture",
+    "configuration",
+    "network_conditions",
+    "run",
+    "metrics"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "result_kind": {
+      "enum": ["measured", "synthetic_validation"]
+    },
+    "contains_sensitive_data": {
+      "const": false
+    },
+    "benchmark_id": {
+      "$ref": "#/$defs/nonEmptyString"
+    },
+    "recorded_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "provenance": {
+      "$ref": "#/$defs/provenance"
+    },
+    "environment": {
+      "$ref": "#/$defs/environment"
+    },
+    "fixture": {
+      "$ref": "#/$defs/fixture"
+    },
+    "configuration": {
+      "$ref": "#/$defs/configuration"
+    },
+    "network_conditions": {
+      "$ref": "#/$defs/networkConditions"
+    },
+    "run": {
+      "$ref": "#/$defs/run"
+    },
+    "metrics": {
+      "$ref": "#/$defs/metrics"
+    }
+  },
+  "$defs": {
+    "nonEmptyString": {
+      "type": "string",
+      "minLength": 1
+    },
+    "nonNegativeInteger": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "positiveInteger": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "gitOid": {
+      "oneOf": [
+        {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      ]
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "yeokcham_version",
+        "yeokcham_commit",
+        "worktree_dirty",
+        "git_version",
+        "rust_version",
+        "harness_version"
+      ],
+      "properties": {
+        "yeokcham_version": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "yeokcham_commit": {
+          "$ref": "#/$defs/gitOid"
+        },
+        "worktree_dirty": {
+          "type": "boolean"
+        },
+        "git_version": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "rust_version": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "harness_version": {
+          "$ref": "#/$defs/nonEmptyString"
+        }
+      }
+    },
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "os_name",
+        "os_version",
+        "kernel_version",
+        "architecture",
+        "cpu_model",
+        "logical_cpu_count",
+        "memory_bytes",
+        "storage_device",
+        "filesystem",
+        "available_disk_bytes"
+      ],
+      "properties": {
+        "os_name": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "os_version": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "kernel_version": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "architecture": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "cpu_model": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "logical_cpu_count": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "memory_bytes": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "storage_device": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "filesystem": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "available_disk_bytes": {
+          "$ref": "#/$defs/nonNegativeInteger"
+        }
+      }
+    },
+    "fixture": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "version", "workload", "checksum_algorithm", "checksum", "parameters"],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "version": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "workload": {
+          "enum": [
+            "w1_tiny_files",
+            "w2_long_source_history",
+            "w3_large_changing_binary",
+            "w4_already_compressed_assets",
+            "w5_monorepo_sparse_workspace",
+            "w6_drive_backend",
+            "w7_github_mirror",
+            "custom"
+          ]
+        },
+        "checksum_algorithm": {
+          "const": "sha256"
+        },
+        "checksum": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "parameters": {
+          "type": "object"
+        }
+      }
+    },
+    "configuration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cache_state", "backend_kind", "parameters"],
+      "properties": {
+        "cache_state": {
+          "enum": ["cold", "warm", "mixed", "not_applicable"]
+        },
+        "backend_kind": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "parameters": {
+          "type": "object"
+        }
+      }
+    },
+    "networkConditions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode",
+        "description",
+        "round_trip_latency_ms",
+        "packet_loss_percent",
+        "bandwidth_limit_bytes_per_second"
+      ],
+      "properties": {
+        "mode": {
+          "enum": ["local", "simulated", "live"]
+        },
+        "description": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "round_trip_latency_ms": {
+          "type": "number",
+          "minimum": 0
+        },
+        "packet_loss_percent": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "bandwidth_limit_bytes_per_second": {
+          "type": ["integer", "null"],
+          "minimum": 1
+        }
+      }
+    },
+    "run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["started_at", "ended_at", "repetitions", "warmup_repetitions", "command"],
+      "properties": {
+        "started_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "ended_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "repetitions": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "warmup_repetitions": {
+          "$ref": "#/$defs/nonNegativeInteger"
+        },
+        "command": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/nonEmptyString"
+          }
+        }
+      }
+    },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "median_wall_time_ns",
+        "p95_wall_time_ns",
+        "p99_wall_time_ns",
+        "median_cpu_time_ns",
+        "peak_rss_bytes",
+        "io_bytes_read",
+        "io_bytes_written",
+        "network_request_count",
+        "network_bytes_sent",
+        "network_bytes_received",
+        "final_storage_bytes"
+      ],
+      "properties": {
+        "median_wall_time_ns": {
+          "$ref": "#/$defs/nonNegativeInteger"
+        },
+        "p95_wall_time_ns": {
+          "$ref": "#/$defs/nonNegativeInteger"
+        },
+        "p99_wall_time_ns": {
+          "$ref": "#/$defs/nonNegativeInteger"
+        },
+        "median_cpu_time_ns": {
+          "$ref": "#/$defs/nonNegativeInteger"
+        },
+        "peak_rss_bytes": {
+          "$ref": "#/$defs/nonNegativeInteger"
+        },
+        "io_bytes_read": {
+          "$ref": "#/$defs/nonNegativeInteger"
+        },
+        "io_bytes_written": {
+          "$ref": "#/$defs/nonNegativeInteger"
+        },
+        "network_request_count": {
+          "$ref": "#/$defs/nonNegativeInteger"
+        },
+        "network_bytes_sent": {
+          "$ref": "#/$defs/nonNegativeInteger"
+        },
+        "network_bytes_received": {
+          "$ref": "#/$defs/nonNegativeInteger"
+        },
+        "final_storage_bytes": {
+          "$ref": "#/$defs/nonNegativeInteger"
+        }
+      }
+    }
+  }
+}
