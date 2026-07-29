@@ -20,7 +20,7 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 ### Core types
 
 - [x] Define `RepositoryId`.
-- [ ] Define `GitObjectId`.
+- [x] Define `GitObjectId`.
 - [ ] Define `yeokchamContentId`.
 - [ ] Define `SegmentId`.
 - [ ] Define `ManifestId`.
