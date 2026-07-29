@@ -66,3 +66,22 @@ The `YKTA` record groups at least one and at most 4,096 distinct verified Git bl
 10. Entries, strictly ascending by raw 20-byte Git blob ID: Git ID, one-byte content-hash tag (`3`), raw 32-byte entry digest, `u64` body length, and exact body bytes.
 
 Each entry content ID is SHA-256 of its raw blob body. The aggregate content ID is SHA-256 over the domain separator `yeokcham/tiny-blob-aggregation/v1\0`, entry count, and each canonical entry field in order. The fixed maximum controls record metadata growth but does not choose a tiny-blob byte threshold; storage policy does that later. Decoders receive caller bounds for entry count and cumulative body bytes and verify every entry, strict order, and aggregate ID before trust.
+
+## Segment record version 1
+
+The `YKSG` segment container holds one or more already-verified `YKWB` or `YKTA` payloads. Its fields are:
+
+1. Magic `YKSG`.
+2. Schema version `1`.
+3. Required feature bits `0`.
+4. Optional feature bits `0`.
+5. Raw 16-byte repository UUIDv4.
+6. Raw 16-byte segment UUIDv4.
+7. Unsigned `u32` record count.
+8. That many records, in writer insertion order: one-byte record type (`1` whole blob, `2` tiny-blob aggregation), one-byte content-hash tag, raw 32-byte content digest, one-byte compression method (`0`, none), `u64` plaintext length, `u64` stored length, then the exact stored payload bytes.
+9. Footer magic `YKSF`.
+10. `u64` aggregate plaintext length.
+11. `u64` aggregate stored length.
+12. Raw 32-byte SHA-256 checksum of every preceding segment byte, including the footer fields through aggregate stored length.
+
+Version 1 writes uncompressed payloads, so each record's plaintext and stored lengths match, and both footer totals match. The checksum detects corruption but is not authentication; later encryption/authentication requires a new format version or required feature. Writers stage a complete file, synchronize it, then create the final path without replacement. Readers, indexes, and manifests are defined separately; they must validate header identities, counts, types, tags, lengths, totals, nested records, checksum, and trailing bytes before returning data.

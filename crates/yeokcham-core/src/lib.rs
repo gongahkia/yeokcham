@@ -16,6 +16,7 @@ mod repository;
 mod repository_format;
 mod repository_id;
 mod segment_id;
+mod segment_writer;
 mod telemetry;
 mod tiny_blob_aggregation;
 mod whole_blob_record;
@@ -37,6 +38,9 @@ pub use repository::{GitObjectMetadata, LocalRepository};
 pub use repository_format::{RepositoryFeatureFlags, RepositoryFormat, RepositoryFormatVersion};
 pub use repository_id::RepositoryId;
 pub use segment_id::SegmentId;
+pub use segment_writer::{
+    SealedSegment, SegmentRecord, SegmentRecordKind, SegmentWriteLimits, SegmentWriter,
+};
 pub use telemetry::{Redacted, redact};
 pub use tiny_blob_aggregation::{
     MAX_TINY_BLOB_AGGREGATION_ENTRIES, TinyBlobAggregation, TinyBlobEntry,

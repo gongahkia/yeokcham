@@ -55,7 +55,7 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 - [x] Implement content-defined chunking.
 - [x] Select an initial chunking algorithm through an ADR.
 - [x] Implement compression abstraction.
-- [ ] Implement immutable segment writer.
+- [x] Implement immutable segment writer.
 - [ ] Implement segment reader.
 - [ ] Implement segment index.
 - [ ] Implement blob manifest.
