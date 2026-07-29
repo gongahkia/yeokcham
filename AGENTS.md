@@ -2,7 +2,7 @@
 
 ## Mission
 
-Implement Relay incrementally as a correctness-first Git-compatible storage and remote system.
+Implement Yeokcham incrementally as a correctness-first Git-compatible storage and remote system.
 
 Do not reinterpret the project as:
 
@@ -57,7 +57,7 @@ Important invariants include:
 - Refs never point to unavailable acknowledged data.
 - Immutable remote objects never change in place.
 - Cache contents are disposable.
-- Recovery does not depend on a hosted Relay service.
+- Recovery does not depend on a hosted Yeokcham service.
 - No silent force-push or last-writer-wins loss.
 
 ### 4. Prefer simple formats first
@@ -78,7 +78,7 @@ unless a benchmark or correctness need is recorded.
 
 Every performance claim must link to a benchmark fixture and result.
 
-It is acceptable to report that Relay is slower.
+It is acceptable to report that Yeokcham is slower.
 
 ### 6. Security discipline
 
@@ -93,7 +93,7 @@ It is acceptable to report that Relay is slower.
 
 Use mature Git libraries when possible.
 
-Wrap external libraries behind Relay interfaces so that:
+Wrap external libraries behind Yeokcham interfaces so that:
 
 - Tests can inject failures.
 - Dependency behaviour is isolated.
@@ -113,12 +113,12 @@ Avoid mixing refactors, format changes, and new features in one commit.
 ## Suggested initial command set
 
 ```bash
-relay init --from-git <path>
-relay verify <relay-repo>
-relay export-git <relay-repo> <destination>
-relay inspect object <git-object-id>
-relay inspect storage
-git clone relay::<relay-repo-path>
+yeokcham init --from-git <path>
+yeokcham verify <yeokcham-repo>
+yeokcham export-git <yeokcham-repo> <destination>
+yeokcham inspect object <git-object-id>
+yeokcham inspect storage
+git clone yeokcham::<yeokcham-repo-path>
 ```
 
 ## Definition of done for a task
@@ -139,7 +139,7 @@ Implement:
 
 1. Import one loose or packed Git blob.
 2. Verify its Git object ID.
-3. Store it as one Relay record.
+3. Store it as one Yeokcham record.
 4. Reconstruct it.
 5. Export it as a valid Git object.
 6. Add corruption and round-trip tests.
