@@ -3456,6 +3456,20 @@ mod tests {
             .to_owned()
     }
 
+    fn git_fsck(git_dir: &Path) {
+        let output = Command::new("git")
+            .arg("--git-dir")
+            .arg(git_dir)
+            .args(["fsck", "--full"])
+            .output()
+            .expect("run Git fsck");
+        assert!(
+            output.status.success(),
+            "Git fsck must succeed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
     fn verified_segment(repository: &LocalRepository, id: SegmentId) -> ReadSegment {
         let bytes = fs::read(repository.segment_path(id)).expect("read segment");
         SegmentReader::decode(&bytes, segment_limits()).expect("decode segment")
@@ -3848,6 +3862,7 @@ mod tests {
                 .expect("read export ref state"),
             *snapshot.state()
         );
+        git_fsck(&destination);
 
         let detached_root = temporary.path().join("detached-repository");
         let detached_repository =
