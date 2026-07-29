@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/gongahkia/paengi/blob/main/bench/schema/canonical-codec-benchmark-result.schema.json",
+  "title": "Paengi canonical codec benchmark result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "benchmark_id",
+    "recorded_at_utc",
+    "purpose",
+    "fixture",
+    "codec",
+    "iterations",
+    "operation_count",
+    "encoded_size_bytes",
+    "elapsed_ns",
+    "metadata"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "benchmark_id": { "const": "canonical-codec-v1" },
+    "recorded_at_utc": { "type": "string", "format": "date-time" },
+    "purpose": { "const": "baseline_not_performance_claim" },
+    "fixture": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [ "name", "sha256" ],
+      "properties": {
+        "name": { "const": "nested-snapshot-v1" },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "codec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [ "profile_version", "envelope_version", "object_format_version" ],
+      "properties": {
+        "profile_version": { "const": 1 },
+        "envelope_version": { "const": 1 },
+        "object_format_version": { "const": 1 }
+      }
+    },
+    "iterations": { "const": 10000 },
+    "operation_count": { "const": 20000 },
+    "encoded_size_bytes": { "type": "integer", "minimum": 1 },
+    "elapsed_ns": { "type": "integer", "minimum": 0 },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [ "ocaml_version", "dune_profile", "paengi_revision", "working_tree_state" ],
+      "properties": {
+        "ocaml_version": { "type": "string", "minLength": 1 },
+        "dune_profile": { "type": "string", "minLength": 1 },
+        "paengi_revision": { "type": "string", "minLength": 1 },
+        "working_tree_state": { "enum": [ "clean", "dirty", "unavailable" ] }
+      }
+    }
+  }
+}

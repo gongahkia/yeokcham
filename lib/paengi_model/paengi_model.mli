@@ -64,6 +64,20 @@ type replay_error = { operation_index : int; cause : transition_error }
 
 val replay_error_to_string : replay_error -> string
 
+type canonical_decode_error =
+  | Canonical_payload_error of Paengi_encoding.decode_error
+  | Unsupported_canonical_version of int64
+  | Invalid_canonical_shape of string
+  | Invalid_canonical_path of Path.error
+  | Invalid_canonical_mode of int64
+  | Invalid_canonical_identity_length of int
+  | Invalid_canonical_identity of Paengi_id.parse_error
+  | Invalid_canonical_snapshot of construction_error
+  | Canonical_snapshot_reference_mismatch
+  | Noncanonical_canonical_bytes
+
+val canonical_decode_error_to_string : canonical_decode_error -> string
+
 type observation_source = Explicit | Scan
 
 type retention_reason =
@@ -86,6 +100,7 @@ module Snapshot : sig
   val find : t -> Path.t -> tree_entry option
   val equal : t -> t -> bool
   val canonical_bytes : t -> string
+  val decode_canonical_bytes : string -> (t, canonical_decode_error) result
   val id : t -> Paengi_id.Snapshot_id.t
   val apply_operation : t -> scratch_operation -> (t, transition_error) result
   val apply_operations : t -> scratch_operation list -> (t, replay_error) result
@@ -116,6 +131,10 @@ module Scratch_event : sig
   val operations : scratch_event -> scratch_operation list
   val observed_at : scratch_event -> int64
   val source : scratch_event -> observation_source
+  val canonical_bytes : scratch_event -> string
+
+  val decode_canonical_bytes :
+    string -> (scratch_event, canonical_decode_error) result
 end
 
 module Checkpoint : sig
@@ -139,6 +158,10 @@ module Checkpoint : sig
   val event : checkpoint -> Paengi_id.Operation_id.t option
   val created_at : checkpoint -> int64
   val retention : checkpoint -> retention_reason list
+  val canonical_bytes : checkpoint -> string
+
+  val decode_canonical_bytes :
+    snapshot:Snapshot.t -> string -> (checkpoint, canonical_decode_error) result
 end
 
 module Scratch : sig

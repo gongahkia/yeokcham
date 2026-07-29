@@ -17,4 +17,6 @@ Each fixture is exactly one nonempty line of lowercase ASCII hexadecimal digits 
 
 `envelope-v1-snapshot-feature-bit-0.peng.hex` and `envelope-v1-snapshot-feature-bit-63.peng.hex` have the same valid Envelope-1 header and payload, except for mandatory feature bit `0` or bit `63` respectively. Their checksums are valid. Current readers must reject both at header offset `8` before payload decoding.
 
+`model-v1-snapshot-empty.peng.hex`, `model-v1-snapshot-nested.peng.hex`, `model-v1-scratch-event.peng.hex`, and `model-v1-checkpoint.peng.hex` are Envelope-1 bytes containing the existing model canonical payload schemas. They cover empty and nested trees, canonical ordering, all file modes, all five scratch operations, checkpoint metadata, and retention reasons.
+
 Changing any fixture bytes requires a format decision and retained compatibility evidence; adding a new schema requires a new named fixture.

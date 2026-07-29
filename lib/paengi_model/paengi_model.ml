@@ -126,6 +126,107 @@ let replay_error_to_string { operation_index; cause } =
   Printf.sprintf "operation %d: %s" operation_index
     (transition_error_to_string cause)
 
+type canonical_decode_error =
+  | Canonical_payload_error of Encoding.decode_error
+  | Unsupported_canonical_version of int64
+  | Invalid_canonical_shape of string
+  | Invalid_canonical_path of Path.error
+  | Invalid_canonical_mode of int64
+  | Invalid_canonical_identity_length of int
+  | Invalid_canonical_identity of Id.parse_error
+  | Invalid_canonical_snapshot of construction_error
+  | Canonical_snapshot_reference_mismatch
+  | Noncanonical_canonical_bytes
+
+let canonical_decode_error_to_string = function
+  | Canonical_payload_error error -> Encoding.decode_error_to_string error
+  | Unsupported_canonical_version version ->
+      Printf.sprintf "unsupported canonical model version: %Ld" version
+  | Invalid_canonical_shape message ->
+      Printf.sprintf "invalid canonical model shape: %s" message
+  | Invalid_canonical_path error ->
+      Printf.sprintf "invalid canonical model path: %s"
+        (Path.error_to_string error)
+  | Invalid_canonical_mode mode ->
+      Printf.sprintf "invalid canonical file mode: %Ld" mode
+  | Invalid_canonical_identity_length length ->
+      Printf.sprintf "invalid canonical identity length: %d" length
+  | Invalid_canonical_identity error ->
+      Printf.sprintf "invalid canonical identity: %s"
+        (Id.parse_error_to_string error)
+  | Invalid_canonical_snapshot error ->
+      Printf.sprintf "invalid canonical snapshot: %s"
+        (construction_error_to_string error)
+  | Canonical_snapshot_reference_mismatch ->
+      "canonical checkpoint snapshot reference does not match supplied snapshot"
+  | Noncanonical_canonical_bytes -> "canonical model bytes are not normalized"
+
+let canonical_value bytes =
+  match Encoding.decode bytes with
+  | Ok value -> Ok value
+  | Error error -> Error (Canonical_payload_error error)
+
+let canonical_array name = function
+  | Encoding.Array values -> Ok values
+  | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _ | Encoding.Map _
+  | Encoding.Bool _ | Encoding.Null ->
+      Error (Invalid_canonical_shape (name ^ " must be an array"))
+
+let canonical_exact_array name length value =
+  match canonical_array name value with
+  | Error error -> Error error
+  | Ok values ->
+      if List.length values = length then Ok values
+      else
+        Error
+          (Invalid_canonical_shape
+             (Printf.sprintf "%s must contain %d values" name length))
+
+let canonical_integer name = function
+  | Encoding.Integer value -> Ok value
+  | Encoding.Bytes _ | Encoding.Text _ | Encoding.Array _ | Encoding.Map _
+  | Encoding.Bool _ | Encoding.Null ->
+      Error (Invalid_canonical_shape (name ^ " must be an integer"))
+
+let canonical_bytes_value name = function
+  | Encoding.Bytes value -> Ok value
+  | Encoding.Integer _ | Encoding.Text _ | Encoding.Array _ | Encoding.Map _
+  | Encoding.Bool _ | Encoding.Null ->
+      Error (Invalid_canonical_shape (name ^ " must be bytes"))
+
+let canonical_path value =
+  match canonical_array "path" value with
+  | Error error -> Error error
+  | Ok values ->
+      let rec components reversed = function
+        | [] ->
+            Path.of_components (List.rev reversed)
+            |> Result.map_error (fun error -> Invalid_canonical_path error)
+        | value :: rest -> (
+            match canonical_bytes_value "path component" value with
+            | Error error -> Error error
+            | Ok component -> components (component :: reversed) rest)
+      in
+      components [] values
+
+let canonical_mode value =
+  match canonical_integer "file mode" value with
+  | Error error -> Error error
+  | Ok 0L -> Ok Regular
+  | Ok 1L -> Ok Executable
+  | Ok 2L -> Ok Symlink
+  | Ok mode -> Error (Invalid_canonical_mode mode)
+
+let canonical_identity value of_bytes =
+  match canonical_bytes_value "identity" value with
+  | Error error -> Error error
+  | Ok bytes ->
+      if String.length bytes <> 32 then
+        Error (Invalid_canonical_identity_length (String.length bytes))
+      else
+        of_bytes bytes
+        |> Result.map_error (fun error -> Invalid_canonical_identity error)
+
 type observation_source = Explicit | Scan
 
 type retention_reason =
@@ -334,6 +435,78 @@ module Snapshot = struct
     let entry_values = entries snapshot |> List.map initial_entry_value in
     value_array [ Encoding.integer 1L; value_array entry_values ]
     |> Encoding.encode
+
+  let decode_entry value =
+    match canonical_array "snapshot entry" value with
+    | Error error -> Error error
+    | Ok (tag :: fields) -> (
+        match canonical_integer "snapshot entry tag" tag with
+        | Error error -> Error error
+        | Ok 0L -> (
+            match fields with
+            | [ path ] ->
+                canonical_path path
+                |> Result.map (fun path -> Directory_path path)
+            | _ ->
+                Error
+                  (Invalid_canonical_shape
+                     "directory snapshot entry must contain two values"))
+        | Ok 1L -> (
+            match fields with
+            | [ path; mode; content ] -> (
+                match
+                  ( canonical_path path,
+                    canonical_mode mode,
+                    canonical_bytes_value "file content" content )
+                with
+                | Ok path, Ok mode, Ok content ->
+                    Ok (File_path (path, { mode; content }))
+                | Error error, _, _ | _, Error error, _ | _, _, Error error ->
+                    Error error)
+            | _ ->
+                Error
+                  (Invalid_canonical_shape
+                     "file snapshot entry must contain four values"))
+        | Ok tag ->
+            Error
+              (Invalid_canonical_shape
+                 (Printf.sprintf "unknown snapshot entry tag: %Ld" tag)))
+    | Ok [] -> Error (Invalid_canonical_shape "snapshot entry is empty")
+
+  let decode_entries_value value =
+    match canonical_array "snapshot entries" value with
+    | Error error -> Error error
+    | Ok values ->
+        let rec decode reversed = function
+          | [] ->
+              of_entries (List.rev reversed)
+              |> Result.map_error (fun error ->
+                  Invalid_canonical_snapshot error)
+          | value :: rest -> (
+              match decode_entry value with
+              | Error error -> Error error
+              | Ok entry -> decode (entry :: reversed) rest)
+        in
+        decode [] values
+
+  let decode_canonical_bytes bytes =
+    match canonical_value bytes with
+    | Error error -> Error error
+    | Ok value -> (
+        match canonical_exact_array "snapshot" 2 value with
+        | Error error -> Error error
+        | Ok [ version; entries ] -> (
+            match canonical_integer "snapshot version" version with
+            | Error error -> Error error
+            | Ok 1L -> (
+                match decode_entries_value entries with
+                | Error error -> Error error
+                | Ok snapshot ->
+                    if String.equal bytes (canonical_bytes snapshot) then
+                      Ok snapshot
+                    else Error Noncanonical_canonical_bytes)
+            | Ok version -> Error (Unsupported_canonical_version version))
+        | Ok _ -> assert false)
 
   let id snapshot =
     let digest =
@@ -625,6 +798,151 @@ let make_checkpoint ~parent ~snapshot ~event ~created_at ~retention =
     checkpoint_retention = retention;
   }
 
+let canonical_prior_entry value =
+  match canonical_array "prior entry" value with
+  | Error error -> Error error
+  | Ok (tag :: fields) -> (
+      match canonical_integer "prior entry tag" tag with
+      | Error error -> Error error
+      | Ok 0L -> (
+          match fields with
+          | [ mode; content ] -> (
+              match
+                ( canonical_mode mode,
+                  canonical_bytes_value "prior file content" content )
+              with
+              | Ok mode, Ok content -> Ok (File { mode; content })
+              | Error error, _ | _, Error error -> Error error)
+          | _ ->
+              Error
+                (Invalid_canonical_shape
+                   "file prior entry must contain three values"))
+      | Ok 1L -> (
+          match fields with
+          | [ records ] ->
+              Snapshot.decode_entries_value records
+              |> Result.map (fun tree -> Directory tree)
+          | _ ->
+              Error
+                (Invalid_canonical_shape
+                   "directory prior entry must contain two values"))
+      | Ok tag ->
+          Error
+            (Invalid_canonical_shape
+               (Printf.sprintf "unknown prior entry tag: %Ld" tag)))
+  | Ok [] -> Error (Invalid_canonical_shape "prior entry is empty")
+
+let canonical_operation value =
+  match canonical_array "scratch operation" value with
+  | Error error -> Error error
+  | Ok (tag :: fields) -> (
+      match canonical_integer "scratch operation tag" tag with
+      | Error error -> Error error
+      | Ok 0L -> (
+          match fields with
+          | [ path; content; mode ] -> (
+              match
+                ( canonical_path path,
+                  canonical_bytes_value "created file content" content,
+                  canonical_mode mode )
+              with
+              | Ok path, Ok content, Ok mode ->
+                  Ok (Create_file { path; content; mode })
+              | Error error, _, _ | _, Error error, _ | _, _, Error error ->
+                  Error error)
+          | _ ->
+              Error
+                (Invalid_canonical_shape
+                   "create operation must contain four values"))
+      | Ok 1L -> (
+          match fields with
+          | [ path; expected_content; replacement_content ] -> (
+              match
+                ( canonical_path path,
+                  canonical_bytes_value "expected file content" expected_content,
+                  canonical_bytes_value "replacement file content"
+                    replacement_content )
+              with
+              | Ok path, Ok expected_content, Ok replacement_content ->
+                  Ok
+                    (Modify_file { path; expected_content; replacement_content })
+              | Error error, _, _ | _, Error error, _ | _, _, Error error ->
+                  Error error)
+          | _ ->
+              Error
+                (Invalid_canonical_shape
+                   "modify operation must contain four values"))
+      | Ok 2L -> (
+          match fields with
+          | [ path; prior ] -> (
+              match (canonical_path path, canonical_prior_entry prior) with
+              | Ok path, Ok prior -> Ok (Delete_path { path; prior })
+              | Error error, _ | _, Error error -> Error error)
+          | _ ->
+              Error
+                (Invalid_canonical_shape
+                   "delete operation must contain three values"))
+      | Ok 3L -> (
+          match fields with
+          | [ source; destination; prior ] -> (
+              match
+                ( canonical_path source,
+                  canonical_path destination,
+                  canonical_prior_entry prior )
+              with
+              | Ok source, Ok destination, Ok prior ->
+                  Ok (Move_path { source; destination; prior })
+              | Error error, _, _ | _, Error error, _ | _, _, Error error ->
+                  Error error)
+          | _ ->
+              Error
+                (Invalid_canonical_shape
+                   "move operation must contain four values"))
+      | Ok 4L -> (
+          match fields with
+          | [ path; expected_mode; replacement_mode ] -> (
+              match
+                ( canonical_path path,
+                  canonical_mode expected_mode,
+                  canonical_mode replacement_mode )
+              with
+              | Ok path, Ok expected_mode, Ok replacement_mode ->
+                  Ok (Change_mode { path; expected_mode; replacement_mode })
+              | Error error, _, _ | _, Error error, _ | _, _, Error error ->
+                  Error error)
+          | _ ->
+              Error
+                (Invalid_canonical_shape
+                   "mode operation must contain four values"))
+      | Ok tag ->
+          Error
+            (Invalid_canonical_shape
+               (Printf.sprintf "unknown scratch operation tag: %Ld" tag)))
+  | Ok [] -> Error (Invalid_canonical_shape "scratch operation is empty")
+
+let canonical_operations value =
+  match canonical_array "scratch operations" value with
+  | Error error -> Error error
+  | Ok values ->
+      let rec decode reversed = function
+        | [] -> Ok (List.rev reversed)
+        | value :: rest -> (
+            match canonical_operation value with
+            | Error error -> Error error
+            | Ok operation -> decode (operation :: reversed) rest)
+      in
+      decode [] values
+
+let canonical_source value =
+  match canonical_integer "scratch event source" value with
+  | Error error -> Error error
+  | Ok 0L -> Ok Explicit
+  | Ok 1L -> Ok Scan
+  | Ok source ->
+      Error
+        (Invalid_canonical_shape
+           (Printf.sprintf "unknown scratch event source: %Ld" source))
+
 module Scratch_event = struct
   let create ~parent ~operations ~observed_at ~source =
     let id =
@@ -638,7 +956,122 @@ module Scratch_event = struct
   let operations (event : scratch_event) = event.operations
   let observed_at (event : scratch_event) = event.observed_at
   let source (event : scratch_event) = event.source
+
+  let canonical_bytes event =
+    event_canonical_bytes ~parent:event.event_parent
+      ~operations:event.operations ~observed_at:event.observed_at
+      ~source:event.source
+
+  let decode_canonical_bytes bytes =
+    let ( let* ) = Result.bind in
+    let* value = canonical_value bytes in
+    let* fields = canonical_exact_array "scratch event" 5 value in
+    match fields with
+    | [ version; parent; operations; observed_at; source ] ->
+        let* version = canonical_integer "scratch event version" version in
+        if not (Int64.equal version 1L) then
+          Error (Unsupported_canonical_version version)
+        else
+          let* parent = canonical_identity parent Id.Checkpoint_id.of_bytes in
+          let* operations = canonical_operations operations in
+          let* observed_at =
+            canonical_integer "scratch event timestamp" observed_at
+          in
+          let* source = canonical_source source in
+          let event = create ~parent ~operations ~observed_at ~source in
+          if String.equal bytes (canonical_bytes event) then Ok event
+          else Error Noncanonical_canonical_bytes
+    | _ -> assert false
 end
+
+let canonical_retention_reason value =
+  match canonical_array "retention reason" value with
+  | Error error -> Error error
+  | Ok (tag :: fields) -> (
+      match canonical_integer "retention reason tag" tag with
+      | Error error -> Error error
+      | Ok 0L -> (
+          match fields with
+          | [] -> Ok User_pinned
+          | _ ->
+              Error
+                (Invalid_canonical_shape
+                   "user-pinned retention reason must contain one value"))
+      | Ok 1L -> (
+          match fields with
+          | [ identity ] ->
+              canonical_identity identity Id.Capsule_id.of_bytes
+              |> Result.map (fun identity -> Capsule_boundary identity)
+          | _ ->
+              Error
+                (Invalid_canonical_shape
+                   "capsule retention reason must contain two values"))
+      | Ok 2L -> (
+          match fields with
+          | [ identity ] ->
+              canonical_identity identity Id.Release_id.of_bytes
+              |> Result.map (fun identity -> Release_boundary identity)
+          | _ ->
+              Error
+                (Invalid_canonical_shape
+                   "release retention reason must contain two values"))
+      | Ok 3L -> (
+          match fields with
+          | [ identity ] ->
+              canonical_identity identity Id.Validation_id.of_bytes
+              |> Result.map (fun identity -> Validation_passed identity)
+          | _ ->
+              Error
+                (Invalid_canonical_shape
+                   "validation retention reason must contain two values"))
+      | Ok 4L -> (
+          match fields with
+          | [] -> Ok Periodic_retention
+          | _ ->
+              Error
+                (Invalid_canonical_shape
+                   "periodic retention reason must contain one value"))
+      | Ok 5L -> (
+          match fields with
+          | [] -> Ok Recent_window
+          | _ ->
+              Error
+                (Invalid_canonical_shape
+                   "recent retention reason must contain one value"))
+      | Ok 6L -> (
+          match fields with
+          | [ identity ] ->
+              canonical_identity identity Id.Conflict_id.of_bytes
+              |> Result.map (fun identity -> Conflict_reference identity)
+          | _ ->
+              Error
+                (Invalid_canonical_shape
+                   "conflict retention reason must contain two values"))
+      | Ok tag ->
+          Error
+            (Invalid_canonical_shape
+               (Printf.sprintf "unknown retention reason tag: %Ld" tag)))
+  | Ok [] -> Error (Invalid_canonical_shape "retention reason is empty")
+
+let canonical_retention value =
+  match canonical_array "checkpoint retention" value with
+  | Error error -> Error error
+  | Ok values ->
+      let rec decode reversed = function
+        | [] -> Ok (List.rev reversed)
+        | value :: rest -> (
+            match canonical_retention_reason value with
+            | Error error -> Error error
+            | Ok reason -> decode (reason :: reversed) rest)
+      in
+      decode [] values
+
+let canonical_optional_identity value of_bytes =
+  match value with
+  | Encoding.Null -> Ok None
+  | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _ | Encoding.Array _
+  | Encoding.Map _ | Encoding.Bool _ ->
+      canonical_identity value of_bytes |> Result.map Option.some
 
 module Checkpoint = struct
   let create ~parent ~snapshot ~event ~created_at ~retention =
@@ -653,6 +1086,46 @@ module Checkpoint = struct
   let event checkpoint = checkpoint.applied_event
   let created_at checkpoint = checkpoint.checkpoint_created_at
   let retention checkpoint = checkpoint.checkpoint_retention
+
+  let canonical_bytes checkpoint =
+    checkpoint_canonical_bytes ~parent:checkpoint.checkpoint_parent
+      ~snapshot:checkpoint.checkpoint_snapshot ~event:checkpoint.applied_event
+      ~created_at:checkpoint.checkpoint_created_at
+      ~retention:checkpoint.checkpoint_retention
+
+  let decode_canonical_bytes ~snapshot bytes =
+    let ( let* ) = Result.bind in
+    let* value = canonical_value bytes in
+    let* fields = canonical_exact_array "checkpoint" 6 value in
+    match fields with
+    | [ version; parent; snapshot_id; event; created_at; retention ] ->
+        let* version = canonical_integer "checkpoint version" version in
+        if not (Int64.equal version 1L) then
+          Error (Unsupported_canonical_version version)
+        else
+          let* parent =
+            canonical_optional_identity parent Id.Checkpoint_id.of_bytes
+          in
+          let* snapshot_id =
+            canonical_identity snapshot_id Id.Snapshot_id.of_bytes
+          in
+          let* event =
+            canonical_optional_identity event Id.Operation_id.of_bytes
+          in
+          let* created_at =
+            canonical_integer "checkpoint timestamp" created_at
+          in
+          let* retention = canonical_retention retention in
+          if not (Id.Snapshot_id.equal snapshot_id (Snapshot.id snapshot)) then
+            Error Canonical_snapshot_reference_mismatch
+          else
+            let checkpoint =
+              create ~parent ~snapshot ~event ~created_at ~retention
+            in
+            if String.equal bytes (canonical_bytes checkpoint) then
+              Ok checkpoint
+            else Error Noncanonical_canonical_bytes
+    | _ -> assert false
 end
 
 module Scratch = struct

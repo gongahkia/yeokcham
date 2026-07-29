@@ -21,3 +21,7 @@ python3 -m jsonschema \
   --instance bench/examples/benchmark-result-v1.json \
   bench/schema/benchmark-result.schema.json
 ```
+
+## Canonical codec baseline
+
+Run `make benchmark-encoding` to create `results/canonical-codec-v1.json`. The benchmark uses a fixed nested Snapshot fixture and exactly 10,000 encode/decode iterations; its compact output schema is `schema/canonical-codec-benchmark-result.schema.json`. The checked-in result is a host-specific baseline, not a performance claim.

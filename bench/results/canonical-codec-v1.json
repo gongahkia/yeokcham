@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "benchmark_id": "canonical-codec-v1",
+  "recorded_at_utc": "2026-07-29T16:27:49Z",
+  "purpose": "baseline_not_performance_claim",
+  "fixture": {
+    "name": "nested-snapshot-v1",
+    "sha256": "e123f08f0110338f1ec664f35b5397ae1ca7eed097312a181a885d0331d522d6"
+  },
+  "codec": {
+    "profile_version": 1,
+    "envelope_version": 1,
+    "object_format_version": 1
+  },
+  "iterations": 10000,
+  "operation_count": 20000,
+  "encoded_size_bytes": 191,
+  "elapsed_ns": 191118955,
+  "metadata": {
+    "ocaml_version": "5.5.0",
+    "dune_profile": "release",
+    "paengi_revision": "6009cf534ebf006087afd60b87e6d36b11e97074"
+  }
+}
