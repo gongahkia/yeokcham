@@ -5,10 +5,10 @@ The roadmap is ordered. The local byte-correct model must exist before semantic 
 ## Active vertical slice
 
 - Milestone: 0 — Project and model foundation.
-- Task: select the supported OCaml version (complete).
+- Task: configure formatting and linting (complete).
 - Types: none; model types begin after project tooling is established.
-- Invariants: package resolution accepts OCaml 5.5.0 and the project builds with that compiler.
-- Tests: package resolution selects OCaml 5.5.0; `dune build @all` passes with OCaml 5.5.0.
+- Invariants: OCamlFormat 0.29.0 defines source layout; all enabled compiler warnings fail development builds.
+- Tests: `dune build @fmt @lint @all` passes; development flags contain `-warn-error +a -w @a`.
 - ADR changes: none; no architectural choice changes.
 
 ## Milestone 0 — Project and model foundation
@@ -17,7 +17,7 @@ The roadmap is ordered. The local byte-correct model must exist before semantic 
 
 - [x] Create Dune project.
 - [x] Select supported OCaml version.
-- [ ] Configure formatting and linting.
+- [x] Configure formatting and linting.
 - [ ] Configure unit and property-test CI.
 - [ ] Add licence and contribution guide.
 - [ ] Add ADR process.

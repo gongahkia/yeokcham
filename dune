@@ -1,0 +1,8 @@
+(env
+ (dev
+  (flags :standard -w @a)))
+
+(alias
+ (name lint)
+ (deps
+  (alias_rec check)))
