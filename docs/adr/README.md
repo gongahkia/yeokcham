@@ -52,3 +52,4 @@ Valid statuses are `Proposed`, `Accepted`, `Rejected`, `Deprecated`, and `Supers
 | [ADR-0044](0044-immutable-local-blob-manifest-publication.md) | Accepted | Publish and scan immutable local blob manifests |
 | [ADR-0045](0045-verify-local-manifest-record-resolution.md) | Accepted | Resolve manifest records through verified local segments |
 | [ADR-0046](0046-reconstruct-exact-blob-body-bytes.md) | Accepted | Reconstruct exact blob bytes from a verified manifest record |
+| [ADR-0047](0047-verify-final-reconstructed-git-blob-id.md) | Accepted | Verify final Git blob identity after reconstruction |

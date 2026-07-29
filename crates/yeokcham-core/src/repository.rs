@@ -533,6 +533,22 @@ impl LocalRepository {
         }
     }
 
+    /// Reconstructs and verifies one Git blob named by a manifest.
+    ///
+    /// The returned object has the manifest's Git ID only after its canonical
+    /// Git header and exact reconstructed body verify that identity.
+    pub fn reconstruct_blob(
+        &self,
+        manifest: &BlobManifest,
+        maximum_segment_bytes: u64,
+        limits: SegmentReadLimits,
+    ) -> Result<GitObject> {
+        verified_reconstructed_blob(
+            manifest.git_object_id(),
+            self.reconstruct_blob_bytes(manifest, maximum_segment_bytes, limits)?,
+        )
+    }
+
     fn verify_existing_blob_manifest(
         &self,
         path: &Path,
@@ -739,6 +755,12 @@ fn verify_manifest_record(manifest: &BlobManifest, record: &ReadSegmentRecord) -
         }
     }
     Ok(())
+}
+
+fn verified_reconstructed_blob(id: GitObjectId, data: Vec<u8>) -> Result<GitObject> {
+    let object = GitObject::new(id, GitObjectKind::Blob, data);
+    object.verify_id()?;
+    Ok(object)
 }
 
 fn read_bounded_regular_file(path: &Path, maximum_bytes: u64) -> Result<Vec<u8>> {
@@ -1791,6 +1813,37 @@ mod tests {
                 .expect("reconstruct tiny blob"),
             b"\0selected\xff"
         );
+    }
+
+    #[test]
+    fn reconstructs_and_verifies_final_git_blob_ids() {
+        let temporary = TestDirectory::new();
+        let root = temporary.path().join("repository");
+        let repository = LocalRepository::create(&root).expect("create repository");
+        let manifest = whole_blob_manifest(
+            &repository,
+            MANIFEST_ID_A.parse().expect("manifest ID"),
+            SEGMENT_ID_A.parse().expect("segment ID"),
+            b"\0verified\xff",
+        );
+
+        let object = repository
+            .reconstruct_blob(&manifest, 4_096, segment_limits())
+            .expect("reconstruct verified blob");
+        assert_eq!(object.id(), manifest.git_object_id());
+        assert_eq!(object.kind(), GitObjectKind::Blob);
+        assert_eq!(object.data(), b"\0verified\xff");
+        object.verify_id().expect("verify final blob ID");
+    }
+
+    #[test]
+    fn rejects_reconstructed_bytes_that_do_not_match_the_final_git_blob_id() {
+        let expected = verified_object(GitObjectKind::Blob, b"expected");
+        let error = verified_reconstructed_blob(expected.id(), b"altered private body".to_vec())
+            .expect_err("mismatched final Git ID");
+
+        assert_eq!(error.kind(), ErrorKind::CorruptData);
+        assert!(!error.to_string().contains("altered private body"));
     }
 
     #[test]
