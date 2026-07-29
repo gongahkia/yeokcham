@@ -25,7 +25,7 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 - [x] Define `SegmentId`.
 - [x] Define `ManifestId`.
 - [x] Define `DeviceId`.
-- [ ] Define `RefName` with validation.
+- [x] Define `RefName` with validation.
 - [ ] Define repository format version and feature flags.
 - [ ] Define serialisation policy and canonical encoding rules.
 
