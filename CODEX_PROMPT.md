@@ -1,6 +1,6 @@
 # Bootstrap Prompt for a Local Codex Agent
 
-You are implementing Relay, a Git-compatible, local-first, encrypted repository accelerator and sovereign remote written in Rust.
+You are implementing Yeokcham, a Git-compatible, local-first, encrypted repository accelerator and sovereign remote written in Rust.
 
 Read every root document in this order:
 
@@ -21,7 +21,7 @@ Start at Milestone 0 and then the smallest vertical slice of Milestone 1:
 - Initialise the Rust workspace.
 - Define the core object identifiers and repository format version.
 - Import and verify one Git blob.
-- Store it in a simple immutable Relay record.
+- Store it in a simple immutable Yeokcham record.
 - Reconstruct the exact bytes.
 - Recompute and verify the original Git object ID.
 - Export it as a valid Git object.

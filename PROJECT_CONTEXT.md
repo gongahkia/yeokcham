@@ -1,6 +1,6 @@
 # Project Context
 
-## Why Relay exists
+## Why Yeokcham exists
 
 Git remains the compatibility standard for source control, but its default repository and hosting workflows create several practical concerns:
 
@@ -11,7 +11,7 @@ Git remains the compatibility standard for source control, but its default repos
 - Git has accumulated partial clone, sparse checkout, commit graphs, multi-pack indexes, filesystem monitoring, maintenance tasks, and Git LFS, but these capabilities are fragmented and not presented as one simple sovereign-storage product.
 - Putting a live `.git` directory inside a generic cloud-sync folder is unsafe because such services do not provide Git-aware transactions.
 
-Relay should let developers treat GitHub as a disposable publication and collaboration surface while keeping the canonical repository under their own control.
+Yeokcham should let developers treat GitHub as a disposable publication and collaboration surface while keeping the canonical repository under their own control.
 
 ## Core problem statement
 
@@ -26,15 +26,15 @@ Ordinary developers need a repository system that:
 
 ## Product thesis
 
-Relay is not "Git on Google Drive" and not "Git rewritten in Rust."
+Yeokcham is not "Git on Google Drive" and not "Git rewritten in Rust."
 
-Relay is:
+Yeokcham is:
 
 > A Git object gateway that preserves Git identities and protocol compatibility while storing content in an encrypted, chunk-addressed, backend-independent representation.
 
 ## Competitive context
 
-Relay should explicitly learn from, and avoid duplicating without differentiation, the following classes of tools:
+Yeokcham should explicitly learn from, and avoid duplicating without differentiation, the following classes of tools:
 
 - Git and gitoxide: Git object and protocol implementations.
 - Git LFS: external storage for selected large files.
@@ -45,7 +45,7 @@ Relay should explicitly learn from, and avoid duplicating without differentiatio
 - Fossil and Gitea-class tools: self-hosted repository browsing and collaboration.
 - Encrypted Git remote tools: client-side encrypted repository transport.
 
-Relay's differentiated combination is:
+Yeokcham's differentiated combination is:
 
 - No mandatory pointer-file migration.
 - Existing Git histories remain valid.
@@ -70,7 +70,7 @@ An ordinary software developer who:
 
 ## Initial target workloads
 
-Relay should be designed for, and benchmarked against:
+Yeokcham should be designed for, and benchmarked against:
 
 1. Hundreds of thousands to millions of small source files.
 2. Hundreds of thousands of commits.
@@ -84,11 +84,11 @@ Relay should be designed for, and benchmarked against:
 
 ### Compatibility is a boundary contract
 
-Relay may use a different internal representation, but imported and exported Git histories must remain verifiable.
+Yeokcham may use a different internal representation, but imported and exported Git histories must remain verifiable.
 
 ### The backend is untrusted and dumb
 
-A backend stores and retrieves opaque immutable objects. It should not be required to understand refs, commits, locks, Git, or Relay internals.
+A backend stores and retrieves opaque immutable objects. It should not be required to understand refs, commits, locks, Git, or Yeokcham internals.
 
 ### Immutable data, explicit mutable state
 
@@ -96,11 +96,11 @@ Large data segments should be immutable. Mutable refs should be represented by s
 
 ### Recovery is a first-class feature
 
-A user must be able to inspect, verify, repair, and export a repository without relying on a Relay-hosted service.
+A user must be able to inspect, verify, repair, and export a repository without relying on a Yeokcham-hosted service.
 
 ### Benchmarks must include modern Git
 
-Relay must not compare itself only with naive Git defaults. Baselines should include partial clone, sparse checkout, maintenance, Git LFS, and other relevant configurations.
+Yeokcham must not compare itself only with naive Git defaults. Baselines should include partial clone, sparse checkout, maintenance, Git LFS, and other relevant configurations.
 
 ### Correctness outranks speed
 
@@ -108,6 +108,6 @@ A faster remote that can corrupt repositories is not useful.
 
 ## Product split
 
-Relay is the adoption-oriented project.
+Yeokcham is the adoption-oriented project.
 
-A separate project, Loom, explores a new VCS model and deliberately does not inherit Relay's compatibility constraints. Do not merge the two codebases or product narratives early. Shared research is acceptable; shared production code should occur only after stable interfaces exist.
+A separate project, Loom, explores a new VCS model and deliberately does not inherit Yeokcham's compatibility constraints. Do not merge the two codebases or product narratives early. Shared research is acceptable; shared production code should occur only after stable interfaces exist.

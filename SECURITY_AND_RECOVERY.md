@@ -2,7 +2,7 @@
 
 ## 1. Security objectives
 
-Relay should protect:
+Yeokcham should protect:
 
 - Source and binary content.
 - Commit messages.
@@ -13,7 +13,7 @@ Relay should protect:
 - Ref integrity.
 - Recovery material.
 
-Relay should not claim to hide:
+Yeokcham should not claim to hide:
 
 - That a user communicates with Google Drive or GitHub.
 - Approximate upload timing and total encrypted object size.
@@ -89,12 +89,12 @@ A device should have:
 Commands should include:
 
 ```bash
-relay keys export --repository <repo> --output recovery.relay-key
-relay keys verify recovery.relay-key
-relay keys import recovery.relay-key
-relay keys rotate
-relay device list
-relay device revoke <device-id>
+yeokcham keys export --repository <repo> --output recovery.yeokcham-key
+yeokcham keys verify recovery.yeokcham-key
+yeokcham keys import recovery.yeokcham-key
+yeokcham keys rotate
+yeokcham device list
+yeokcham device revoke <device-id>
 ```
 
 Key exports should be:
@@ -105,7 +105,7 @@ Key exports should be:
 - Integrity-checked.
 - Test-restored during release validation.
 
-Relay must not promise that lost keys can be recovered from the backend.
+Yeokcham must not promise that lost keys can be recovered from the backend.
 
 ## 6. Metadata privacy
 
@@ -187,7 +187,7 @@ Expected behaviour:
 Expected behaviour:
 
 - Verification identifies affected objects and refs.
-- Relay checks alternate mirrors or local caches.
+- Yeokcham checks alternate mirrors or local caches.
 - Repository remains read-only for affected operations.
 - No reconstructed object is returned without complete verification.
 
@@ -196,7 +196,7 @@ Expected behaviour:
 Expected behaviour:
 
 - Both device journal branches remain.
-- Relay reports divergence.
+- Yeokcham reports divergence.
 - User selects, merges, or publishes a resolution event.
 - No last-writer-wins data loss.
 
@@ -204,23 +204,23 @@ Expected behaviour:
 
 Expected behaviour:
 
-- User installs Relay elsewhere.
+- User installs Yeokcham elsewhere.
 - Imports recovery key.
 - Authenticates to backend.
 - Rebuilds local metadata.
 - Exports or clones repository.
 
-### Scenario F — Relay project discontinued
+### Scenario F — Yeokcham project discontinued
 
 Expected behaviour:
 
 - Published storage-format specification and open-source implementation remain sufficient.
 - User can build the recovery binary.
-- `relay recover --export-git` reconstructs a conventional Git repository.
+- `yeokcham recover --export-git` reconstructs a conventional Git repository.
 
 ## 11. Backup policy
 
-Relay remote storage is not automatically a backup if:
+Yeokcham remote storage is not automatically a backup if:
 
 - The same credentials can delete every generation.
 - Encryption keys exist only on one device.
@@ -231,7 +231,7 @@ Recommended production guidance:
 
 - At least two independent backends or one backend plus offline recovery bundle.
 - Separate key backup.
-- Periodic `relay verify --full`.
+- Periodic `yeokcham verify --full`.
 - Periodic conventional Git export.
 - Retention window before remote garbage collection.
 - Optional immutable or versioned backend storage.

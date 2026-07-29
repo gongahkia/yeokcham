@@ -2,11 +2,11 @@
 
 ## 1. Testing philosophy
 
-Relay must prove three things separately:
+Yeokcham must prove three things separately:
 
 1. **Git correctness** — exported and served repositories are valid Git.
 2. **Storage correctness** — manifests, chunks, segments, indexes, and refs survive failure.
-3. **Performance value** — Relay improves defined workloads without hiding regressions.
+3. **Performance value** — Yeokcham improves defined workloads without hiding regressions.
 
 ## 2. Test layers
 
@@ -52,7 +52,7 @@ Important properties:
 
 ### Differential tests
 
-Compare Relay with C Git:
+Compare Yeokcham with C Git:
 
 - Reachable object IDs.
 - Commit and tree traversal.
@@ -67,7 +67,7 @@ Compare Relay with C Git:
 
 Test:
 
-- `git clone relay://...`
+- `git clone yeokcham://...`
 - `git fetch`
 - `git push`
 - Branch creation and deletion.
@@ -137,7 +137,7 @@ Maintain fixtures for:
 
 Every run records:
 
-- Relay commit.
+- Yeokcham commit.
 - Git version.
 - Rust version.
 - OS and kernel.
@@ -189,7 +189,7 @@ Measure:
 
 - Import.
 - Clone.
-- Status where Relay daemon exists.
+- Status where Yeokcham daemon exists.
 - Checkout.
 - Index size.
 - Storage overhead.
@@ -237,7 +237,7 @@ Measure:
 - MP4.
 - Compressed model artefacts.
 
-Measure whether Relay correctly avoids wasteful recompression and pathological chunk overhead.
+Measure whether Yeokcham correctly avoids wasteful recompression and pathological chunk overhead.
 
 ### W5 — Monorepo sparse workspace
 
@@ -307,7 +307,7 @@ Pack synthesis may be slower than serving precomputed Git packs unless packs are
 
 ### H6
 
-Relay may lose to modern Git on small, source-only repositories; this should be reported rather than hidden.
+Yeokcham may lose to modern Git on small, source-only repositories; this should be reported rather than hidden.
 
 ## 7. Release gates
 

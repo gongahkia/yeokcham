@@ -1,19 +1,19 @@
-# Relay
+# Yeokcham
 
-Relay is a **Git-compatible, local-first, encrypted repository accelerator and sovereign remote**.
+Yeokcham is a **Git-compatible, local-first, encrypted repository accelerator and sovereign remote**.
 
 Its design principle is:
 
 > Git-compatible at the boundary, chunk-addressed internally.
 
-Relay is intended for ordinary software developers who want to keep using Git tooling while gaining:
+Yeokcham is intended for ordinary software developers who want to keep using Git tooling while gaining:
 
 - Better storage efficiency for long histories and frequently changing large binaries.
 - Faster metadata-first clones and working-set hydration.
 - A canonical repository that can live on local disk, a self-hosted server, Google Drive, or another dumb object store.
 - Optional GitHub mirroring rather than mandatory GitHub dependence.
 - End-to-end encryption before objects leave the user's machine.
-- Recovery and export paths that do not depend on a Relay-hosted cloud service.
+- Recovery and export paths that do not depend on a Yeokcham-hosted cloud service.
 
 ## Status
 
@@ -23,11 +23,11 @@ Design and implementation handoff package. No production implementation should b
 
 Rust, using the stable toolchain.
 
-The implementation may use gitoxide and other mature crates for low-level Git primitives. Relay's differentiation is not reimplementing SHA parsing or packfile decoding from scratch. The important work is the storage model, chunking, encryption, crash consistency, remote protocol, caching, mirroring, and operational simplicity.
+The implementation may use gitoxide and other mature crates for low-level Git primitives. Yeokcham's differentiation is not reimplementing SHA parsing or packfile decoding from scratch. The important work is the storage model, chunking, encryption, crash consistency, remote protocol, caching, mirroring, and operational simplicity.
 
 ## Repository goals
 
-Relay should eventually support:
+Yeokcham should eventually support:
 
 1. Importing any ordinary Git repository.
 2. Serving it through a Git-compatible remote.
@@ -67,6 +67,6 @@ Relay should eventually support:
 
 The first end-to-end milestone is deliberately narrow:
 
-> Import a Git repository into a local Relay store, serve it through `git-remote-relay`, clone it into a new directory, and prove byte-for-byte and object-ID equivalence with the original repository.
+> Import a Git repository into a local Yeokcham store, serve it through `git-remote-yeokcham`, clone it into a new directory, and prove byte-for-byte and object-ID equivalence with the original repository.
 
 Do not start with Google Drive, GitHub synchronisation, a daemon, a web UI, or performance claims.

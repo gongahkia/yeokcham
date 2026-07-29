@@ -2,7 +2,7 @@
 
 ## 1. System overview
 
-Relay is organised around a compatibility boundary and an internal storage engine.
+yeokcham is organised around a compatibility boundary and an internal storage engine.
 
 ```text
 Git CLI / IDE / CI
@@ -19,7 +19,7 @@ Repository Service
   +--------------------> Object Resolver
                               |
                               v
-                    Relay Object Database
+                    yeokcham Object Database
                      |       |        |
                      |       |        +--> Local Cache
                      |       +----------> Chunk/Segment Store
@@ -34,26 +34,26 @@ Repository Service
 ## 2. Proposed Rust workspace
 
 ```text
-relay/
+yeokcham/
   Cargo.toml
   crates/
-    relay-cli/
-    relay-remote-helper/
-    relay-core/
-    relay-git/
-    relay-store/
-    relay-chunking/
-    relay-segments/
-    relay-refs/
-    relay-crypto/
-    relay-backend/
-    relay-backend-local/
-    relay-backend-drive/
-    relay-cache/
-    relay-mirror/
-    relay-server/
-    relay-testkit/
-    relay-bench/
+    yeokcham-cli/
+    yeokcham-remote-helper/
+    yeokcham-core/
+    yeokcham-git/
+    yeokcham-store/
+    yeokcham-chunking/
+    yeokcham-segments/
+    yeokcham-refs/
+    yeokcham-crypto/
+    yeokcham-backend/
+    yeokcham-backend-local/
+    yeokcham-backend-drive/
+    yeokcham-cache/
+    yeokcham-mirror/
+    yeokcham-server/
+    yeokcham-testkit/
+    yeokcham-bench/
   docs/
   fixtures/
   scripts/
@@ -147,7 +147,7 @@ Suggested initial implementation: SQLite.
 Responsibilities:
 
 - Repository configuration.
-- Git object ID to Relay representation mapping.
+- Git object ID to yeokcham representation mapping.
 - Blob manifests.
 - Segment inventory.
 - Chunk location index.
@@ -417,7 +417,7 @@ Other device
 Top-level conceptual structure:
 
 ```text
-relay-repository/
+yeokcham-repository/
   format/
     repository.json
   segments/
@@ -463,7 +463,7 @@ GC phases:
 
 1. Discover accepted ref heads.
 2. Traverse reachable Git object identities.
-3. Resolve Relay manifests and records.
+3. Resolve yeokcham manifests and records.
 4. Mark reachable segments and records.
 5. Retain recent unreferenced objects during a safety window.
 6. Compact sparsely live segments by copying live records.

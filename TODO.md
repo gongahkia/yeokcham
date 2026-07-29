@@ -21,7 +21,7 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 
 - [ ] Define `RepositoryId`.
 - [ ] Define `GitObjectId`.
-- [ ] Define `RelayContentId`.
+- [ ] Define `yeokchamContentId`.
 - [ ] Define `SegmentId`.
 - [ ] Define `ManifestId`.
 - [ ] Define `DeviceId`.
@@ -98,18 +98,18 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 
 ### Remote-helper protocol
 
-- [ ] Create `git-remote-relay`.
+- [ ] Create `git-remote-yeokcham`.
 - [ ] Parse helper command stream.
 - [ ] Advertise minimal capabilities.
 - [ ] Implement ref listing.
-- [ ] Implement fetch for a local Relay store.
+- [ ] Implement fetch for a local yeokcham store.
 - [ ] Stream or generate a valid pack.
 - [ ] Add useful protocol error messages.
 - [ ] Add debug tracing mode that does not expose source bytes.
 
 ### Clone and fetch
 
-- [ ] `git clone relay::/absolute/path`.
+- [ ] `git clone yeokcham::/absolute/path`.
 - [ ] Fetch updated branches.
 - [ ] Fetch tags.
 - [ ] Handle deleted refs.
@@ -119,7 +119,7 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 
 ### Exit criteria
 
-- [ ] Ordinary Git can clone a Relay local store.
+- [ ] Ordinary Git can clone a yeokcham local store.
 - [ ] Ordinary Git can fetch updates.
 - [ ] Checkout and reachable object IDs match the original.
 - [ ] Integration suite runs against at least two maintained Git versions.
@@ -157,7 +157,7 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 
 ### Exit criteria
 
-- [ ] Git push works for local Relay stores.
+- [ ] Git push works for local yeokcham stores.
 - [ ] No injected crash creates an acknowledged but unrecoverable ref state.
 - [ ] Divergent device-style events are preserved rather than overwritten.
 
@@ -204,7 +204,7 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 
 ### Storage behaviour
 
-- [ ] Map opaque Relay keys to Drive files.
+- [ ] Map opaque yeokcham keys to Drive files.
 - [ ] Implement put-if-absent semantics.
 - [ ] Implement resumable upload.
 - [ ] Implement metadata cache.
@@ -330,7 +330,7 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 
 ## Milestone 9 — Self-hosted HTTP service
 
-- [ ] Add smart HTTP or documented Relay-native transport.
+- [ ] Add smart HTTP or documented yeokcham-native transport.
 - [ ] Bind to loopback by default.
 - [ ] Add single-user authentication.
 - [ ] Add repository browser.
@@ -368,7 +368,7 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 
 ### Production-quality definition
 
-Relay is not production-quality until:
+yeokcham is not production-quality until:
 
 - Conventional export is reliable.
 - Recovery is documented and tested.
@@ -378,4 +378,4 @@ Relay is not production-quality until:
 - Push is crash-safe.
 - Benchmarks are reproducible.
 - Security-sensitive parsers are fuzzed.
-- Users can leave Relay without losing history.
+- Users can leave yeokcham without losing history.

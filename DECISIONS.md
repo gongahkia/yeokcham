@@ -4,15 +4,15 @@ This file contains initial decisions. They may change only through an explicit A
 
 ## ADR-001 — Preserve Git object identities
 
-**Decision:** Relay preserves Git object IDs at the compatibility boundary.
+**Decision:** Yeokcham preserves Git object IDs at the compatibility boundary.
 
 **Reason:** Existing Git history, GitHub interoperability, verification, and conventional export depend on stable identities.
 
-**Consequence:** Relay may chunk blob content internally, but must reconstruct exact Git object bytes.
+**Consequence:** Yeokcham may chunk blob content internally, but must reconstruct exact Git object bytes.
 
 ## ADR-002 — Rust implementation
 
-**Decision:** Use stable Rust for Relay.
+**Decision:** Use stable Rust for Yeokcham.
 
 **Reason:** The project requires binary parsing, cryptography, concurrency, filesystem work, streaming, fuzzing, and cross-platform static binaries.
 
@@ -22,13 +22,13 @@ This file contains initial decisions. They may change only through an explicit A
 
 **Decision:** Use gitoxide or another mature implementation for low-level Git functionality where appropriate.
 
-**Reason:** Reimplementing the full Git object and pack ecosystem is not Relay's differentiation.
+**Reason:** Reimplementing the full Git object and pack ecosystem is not Yeokcham's differentiation.
 
-**Consequence:** Wrap dependencies behind Relay-owned interfaces to preserve testability and future replacement.
+**Consequence:** Wrap dependencies behind Yeokcham-owned interfaces to preserve testability and future replacement.
 
 ## ADR-004 — Remote helper first
 
-**Decision:** Implement `git-remote-relay` before smart HTTP or SSH.
+**Decision:** Implement `git-remote-yeokcham` before smart HTTP or SSH.
 
 **Reason:** It provides a narrow integration surface and allows local end-to-end validation.
 
@@ -72,7 +72,7 @@ This file contains initial decisions. They may change only through an explicit A
 
 **Reason:** Git ref and object updates require semantics generic file sync does not guarantee.
 
-**Consequence:** Relay uploads immutable opaque files and manages transactions itself.
+**Consequence:** Yeokcham uploads immutable opaque files and manages transactions itself.
 
 ## ADR-010 — Explicit GitHub publication
 
@@ -116,8 +116,8 @@ This file contains initial decisions. They may change only through an explicit A
 
 ## ADR-015 — No universal performance claim
 
-**Decision:** Relay publishes workload-specific benchmark results and regressions.
+**Decision:** Yeokcham publishes workload-specific benchmark results and regressions.
 
 **Reason:** Storage and retrieval strategies have unavoidable trade-offs.
 
-**Consequence:** Marketing and documentation must say where Relay loses.
+**Consequence:** Marketing and documentation must say where Yeokcham loses.
