@@ -70,3 +70,7 @@ The first end-to-end milestone is deliberately narrow:
 > Import a Git repository into a local Yeokcham store, serve it through `git-remote-yeokcham`, clone it into a new directory, and prove byte-for-byte and object-ID equivalence with the original repository.
 
 Do not start with Google Drive, GitHub synchronisation, a daemon, a web UI, or performance claims.
+
+## Rust support
+
+Yeokcham's minimum supported Rust version (MSRV) is 1.85. The repository toolchain is pinned to 1.85.0, and CI also tests the latest stable Rust release. Raising the MSRV requires an explicit documented change.

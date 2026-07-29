@@ -9,19 +9,19 @@ permissions:
 
 jobs:
   rust:
-    name: Rust (${{ matrix.os }})
+    name: Rust ${{ matrix.toolchain }} (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
+    env:
+      RUSTUP_TOOLCHAIN: ${{ matrix.toolchain }}
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest]
+        toolchain: ["1.85.0", stable]
     steps:
       - uses: actions/checkout@v6
       - name: Install Rust
-        run: |
-          rustup update stable --no-self-update
-          rustup default stable
-          rustup component add clippy rustfmt
+        run: rustup toolchain install "${{ matrix.toolchain }}" --profile minimal --component clippy --component rustfmt --no-self-update
       - name: Check formatting
         run: cargo fmt --all -- --check
       - name: Lint
