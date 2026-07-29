@@ -73,3 +73,17 @@ No persistent objects exist yet, so no format version or migration changes. The 
 ## CLI and user impact
 
 No CLI behavior exists yet. Future diagnostic output may report `sha256`; stored algorithm identifiers remain a separate format decision.
+
+## Verification evidence
+
+- 2026-07-29: CAVP empty, one-byte, and multiblock vectors plus the million-`a` regression vector pass.
+- 2026-07-29: 300 generated one-shot/byte/variable-chunk equivalence cases pass.
+- 2026-07-29: 31-byte and 33-byte raw digests are rejected; 32-byte digests round-trip.
+- 2026-07-29: a fresh OCaml 5.5.0 switch resolved Digestif 1.3.1, selected `digestif.ocaml`, built, and passed `make ci`.
+
+## References
+
+- [Digestif 1.3.1 package metadata](https://opam.ocaml.org/packages/digestif/)
+- [Digestif streaming interface](https://github.com/mirage/digestif/blob/main/src/digestif.mli)
+- [Digestif pure-OCaml backend declaration](https://github.com/mirage/digestif/blob/main/src-ocaml/dune)
+- [NIST SHA byte-oriented test vectors](https://csrc.nist.gov/projects/cryptographic-algorithm-validation-program/secure-hashing)

@@ -5,12 +5,12 @@ The roadmap is ordered. The local byte-correct model must exist before semantic 
 ## Active vertical slice
 
 - Milestone: 0 — Project and model foundation.
-- Task: select the initial hash implementation.
+- Task: select the initial hash implementation (complete).
 - Modules/files: `Paengi_hash.Sha256` Digestif adapter, dependency metadata, ADR-016, and unit/property tests; no persistence or CLI.
 - Types: no new model types; concrete SHA-256 digest and context remain abstract behind `Paengi_hash.S`.
 - Invariants: digest size is exactly 32 bytes; published vectors match; one-shot and arbitrary chunking agree; raw digest parsing rejects non-32-byte input; Digestif types do not escape the adapter.
-- Tests: published empty/short/multiblock/million-byte vectors, raw conversion, generated chunk-boundary equivalence, fresh dependency bootstrap, and existing gates.
-- External libraries: proposed Digestif 1.3.1 with explicit pure-OCaml backend.
+- Tests: published empty/short/multiblock/million-byte vectors, raw conversion failures, 300 generated chunk-boundary cases, fresh dependency bootstrap, and `make ci` pass on 2026-07-29.
+- External libraries: Digestif 1.3.1 with explicit pure-OCaml backend.
 - ADR changes: [ADR-016](docs/adr/016-initial-sha256-implementation.md) accepted by the maintainer on 2026-07-29.
 
 ## Milestone 0 — Project and model foundation
@@ -31,7 +31,7 @@ The roadmap is ordered. The local byte-correct model must exist before semantic 
 
 - [x] Define typed IDs.
 - [x] Define hash abstraction.
-- [ ] Select initial hash implementation.
+- [x] Select initial hash implementation.
 - [ ] Select portable canonical encoding through ADR.
 - [ ] Define object envelope.
 - [ ] Define format version and feature flags.
