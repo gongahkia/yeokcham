@@ -4088,6 +4088,19 @@ mod tests {
             .expect("read exported reachable object IDs");
         assert_eq!(exported_ids, source_ids);
         git_fsck(&destination);
+        let checkout = temporary.path().join("checkout");
+        run_git_in(
+            temporary.path(),
+            &[
+                "clone",
+                destination.to_str().expect("UTF-8 test path"),
+                checkout.to_str().expect("UTF-8 test path"),
+            ],
+        );
+        assert_eq!(
+            fs::read(checkout.join("body.bin")).expect("read checked-out body"),
+            fs::read(source_path.join("body.bin")).expect("read source body")
+        );
     }
 
     #[test]

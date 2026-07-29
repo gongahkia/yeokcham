@@ -76,7 +76,7 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 - [x] Restore refs.
 - [x] Run `git fsck --full`.
 - [x] Compare reachable object sets with source repository.
-- [ ] Compare checkout bytes.
+- [x] Compare checkout bytes.
 
 ### Tests
 
