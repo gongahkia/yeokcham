@@ -42,3 +42,4 @@ Valid statuses are `Proposed`, `Accepted`, `Rejected`, `Deprecated`, and `Supers
 | [ADR-0034](0034-reject-unsupported-git-object-hashes-at-open.md) | Accepted | Reject unsupported Git object hash formats during repository opening |
 | [ADR-0035](0035-versioned-whole-blob-record.md) | Accepted | Store verified small-slice blobs as canonical whole-blob records |
 | [ADR-0036](0036-bounded-tiny-blob-aggregation.md) | Accepted | Aggregate bounded distinct tiny blobs in one canonical record |
+| [ADR-0037](0037-fastcdc-v2016-chunk-boundaries.md) | Accepted | Use bounded FastCDC v2016 chunk boundaries |

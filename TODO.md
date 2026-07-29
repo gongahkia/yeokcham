@@ -52,8 +52,8 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 
 - [x] Implement whole-blob record.
 - [x] Implement tiny-blob aggregation.
-- [ ] Implement content-defined chunking.
-- [ ] Select an initial chunking algorithm through an ADR.
+- [x] Implement content-defined chunking.
+- [x] Select an initial chunking algorithm through an ADR.
 - [ ] Implement compression abstraction.
 - [ ] Implement immutable segment writer.
 - [ ] Implement segment reader.
