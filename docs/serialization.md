@@ -96,7 +96,7 @@ The `YKMF` manifest is immutable metadata for exactly one Git SHA-1 blob represe
 
 1. Magic `YKMF`.
 2. Schema version `1`.
-3. Required feature bits `0`.
+3. Required feature bits. Bit `0` records an explicit storage-policy selection; new writers set it, while pre-policy version-1 manifests retain `0`.
 4. Optional feature bits `0`.
 5. Raw 16-byte repository UUIDv4.
 6. Raw 16-byte manifest UUIDv4.
@@ -104,10 +104,11 @@ The `YKMF` manifest is immutable metadata for exactly one Git SHA-1 blob represe
 8. One-byte full-blob content-hash tag (`3`, SHA-256) and raw 32-byte digest.
 9. `u64` exact blob-body length.
 10. One-byte representation: `1` whole blob or `2` tiny-blob aggregation.
-11. Raw 16-byte sealed segment UUIDv4.
-12. Raw 32-byte SHA-256 checksum of that exact segment.
-13. One-byte outer-record content-hash tag (`3`, SHA-256) and raw 32-byte digest. For whole blobs this equals the full-blob content ID; for tiny aggregations it identifies the enclosing aggregation.
-14. Footer magic `YKBF`.
-15. Raw 32-byte SHA-256 checksum over every preceding manifest byte.
+11. When required feature bit `0` is set, one-byte storage policy: `1` whole blob or `2` tiny-blob aggregation. It must match the representation.
+12. Raw 16-byte sealed segment UUIDv4.
+13. Raw 32-byte SHA-256 checksum of that exact segment.
+14. One-byte outer-record content-hash tag (`3`, SHA-256) and raw 32-byte digest. For whole blobs this equals the full-blob content ID; for tiny aggregations it identifies the enclosing aggregation.
+15. Footer magic `YKBF`.
+16. Raw 32-byte SHA-256 checksum over every preceding manifest byte.
 
-The manifest itself contains no blob body or payload offset. Resolution first verifies a segment with the stated repository ID, segment ID, and checksum; it then locates the stated outer record and verifies the selected Git blob, content ID, and length. Version 1 has exactly one record reference and supports only the current whole-blob and tiny-aggregation records. Chunk lists, other record families, compression, encryption, and multiple records require a new version or required feature.
+The manifest itself contains no blob body or payload offset. Resolution first verifies a segment with the stated repository ID, segment ID, and checksum; it then locates the stated outer record and verifies the selected Git blob, content ID, and length. Version 1 has exactly one record reference and supports only the current whole-blob and tiny-aggregation records. The policy feature records the selected current representation but no unmeasured threshold; content-defined chunk parameters and other policy inputs require their own later feature or version. Chunk lists, other record families, compression, encryption, and multiple records require a new version or required feature.

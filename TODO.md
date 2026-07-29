@@ -59,7 +59,7 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 - [x] Implement segment reader.
 - [x] Implement segment index.
 - [x] Implement blob manifest.
-- [ ] Record storage-policy decisions per blob.
+- [x] Record storage-policy decisions per blob.
 
 ### Reconstruction
 

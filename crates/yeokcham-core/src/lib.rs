@@ -25,7 +25,7 @@ mod tiny_blob_aggregation;
 mod whole_blob_record;
 mod yeokcham_content_id;
 
-pub use blob_manifest::{BlobManifest, BlobManifestRepresentation};
+pub use blob_manifest::{BlobManifest, BlobManifestRepresentation, BlobStoragePolicyDecision};
 pub use canonical::{CanonicalDecoder, CanonicalEncoder};
 pub use compression::{CompressionAlgorithm, CompressionCodec};
 pub use content_defined_chunking::{

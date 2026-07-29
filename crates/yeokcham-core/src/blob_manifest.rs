@@ -11,6 +11,7 @@ use crate::{
 const MAGIC: [u8; 4] = *b"YKMF";
 const FOOTER_MAGIC: [u8; 4] = *b"YKBF";
 const VERSION: u16 = 1;
+const STORAGE_POLICY_FEATURE: u64 = 1;
 
 /// The verified record family referenced by a [`BlobManifest`].
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -39,6 +40,40 @@ impl BlobManifestRepresentation {
     }
 }
 
+/// The explicit storage-policy selection recorded for one blob manifest.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[non_exhaustive]
+pub enum BlobStoragePolicyDecision {
+    /// Store the blob as one whole-blob record.
+    WholeBlob,
+    /// Store the blob as one entry in a tiny-blob aggregation.
+    TinyBlobAggregation,
+}
+
+impl BlobStoragePolicyDecision {
+    const fn binary_tag(self) -> u8 {
+        match self {
+            Self::WholeBlob => 1,
+            Self::TinyBlobAggregation => 2,
+        }
+    }
+
+    const fn from_binary_tag(tag: u8) -> Option<Self> {
+        match tag {
+            1 => Some(Self::WholeBlob),
+            2 => Some(Self::TinyBlobAggregation),
+            _ => None,
+        }
+    }
+
+    const fn representation(self) -> BlobManifestRepresentation {
+        match self {
+            Self::WholeBlob => BlobManifestRepresentation::WholeBlob,
+            Self::TinyBlobAggregation => BlobManifestRepresentation::TinyBlobAggregation,
+        }
+    }
+}
+
 /// An immutable, checksum-protected reference to one exact Git blob body.
 ///
 /// Version 1 references one verified record in one sealed segment. A whole
@@ -52,6 +87,7 @@ pub struct BlobManifest {
     content_id: YeokchamContentId,
     plaintext_bytes: u64,
     representation: BlobManifestRepresentation,
+    storage_policy: Option<BlobStoragePolicyDecision>,
     segment_id: SegmentId,
     segment_checksum: [u8; 32],
     record_content_id: YeokchamContentId,
@@ -73,6 +109,7 @@ impl BlobManifest {
             content_id: record.content_id(),
             plaintext_bytes: checked_plaintext_bytes(record.data().len())?,
             representation,
+            storage_policy: Some(BlobStoragePolicyDecision::WholeBlob),
             segment_id: segment.segment_id(),
             segment_checksum: segment.checksum(),
             record_content_id: record.content_id(),
@@ -105,6 +142,7 @@ impl BlobManifest {
             content_id: entry.content_id(),
             plaintext_bytes: checked_plaintext_bytes(entry.data().len())?,
             representation,
+            storage_policy: Some(BlobStoragePolicyDecision::TinyBlobAggregation),
             segment_id: segment.segment_id(),
             segment_checksum: segment.checksum(),
             record_content_id: aggregation.content_id(),
@@ -126,7 +164,8 @@ impl BlobManifest {
                 "blob manifest version is unsupported",
             ));
         }
-        if d.read_u64()? != 0 || d.read_u64()? != 0 {
+        let required_features = d.read_u64()?;
+        if required_features & !STORAGE_POLICY_FEATURE != 0 || d.read_u64()? != 0 {
             return Err(Error::new(
                 ErrorKind::Unsupported,
                 "blob manifest uses unsupported features",
@@ -160,6 +199,24 @@ impl BlobManifest {
                     "blob manifest has an invalid representation",
                 )
             })?;
+        let storage_policy = if required_features & STORAGE_POLICY_FEATURE != 0 {
+            let policy =
+                BlobStoragePolicyDecision::from_binary_tag(d.read_u8()?).ok_or_else(|| {
+                    Error::new(
+                        ErrorKind::CorruptData,
+                        "blob manifest has an invalid storage policy",
+                    )
+                })?;
+            if policy.representation() != representation {
+                return Err(Error::new(
+                    ErrorKind::CorruptData,
+                    "blob manifest storage policy does not match its representation",
+                ));
+            }
+            Some(policy)
+        } else {
+            None
+        };
         let segment_id = SegmentId::from_bytes(d.read_fixed()?).map_err(|_| {
             Error::new(
                 ErrorKind::CorruptData,
@@ -204,6 +261,7 @@ impl BlobManifest {
             content_id,
             plaintext_bytes,
             representation,
+            storage_policy,
             segment_id,
             segment_checksum,
             record_content_id,
@@ -240,6 +298,14 @@ impl BlobManifest {
         self.representation
     }
 
+    /// Returns the explicit policy selection, if this manifest records one.
+    ///
+    /// Zero-feature version-1 manifests created before the storage-policy
+    /// feature was introduced remain readable and return `None`.
+    pub const fn storage_policy(&self) -> Option<BlobStoragePolicyDecision> {
+        self.storage_policy
+    }
+
     /// Returns the sealed segment identity containing the referenced record.
     pub const fn segment_id(&self) -> SegmentId {
         self.segment_id
@@ -260,7 +326,11 @@ impl BlobManifest {
         let mut e = CanonicalEncoder::new();
         e.write_fixed(&MAGIC);
         e.write_u16(VERSION);
-        e.write_u64(0);
+        e.write_u64(if self.storage_policy.is_some() {
+            STORAGE_POLICY_FEATURE
+        } else {
+            0
+        });
         e.write_u64(0);
         e.write_fixed(self.repository_id.as_bytes());
         e.write_fixed(self.manifest_id.as_bytes());
@@ -268,6 +338,9 @@ impl BlobManifest {
         write_content_id(&mut e, self.content_id);
         e.write_u64(self.plaintext_bytes);
         e.write_u8(self.representation.binary_tag());
+        if let Some(policy) = self.storage_policy {
+            e.write_u8(policy.binary_tag());
+        }
         e.write_fixed(self.segment_id.as_bytes());
         e.write_fixed(&self.segment_checksum);
         write_content_id(&mut e, self.record_content_id);
@@ -350,6 +423,7 @@ impl fmt::Debug for BlobManifest {
             .field("content_id", &self.content_id)
             .field("plaintext_bytes", &self.plaintext_bytes)
             .field("representation", &self.representation)
+            .field("storage_policy", &self.storage_policy)
             .field("segment_id", &self.segment_id)
             .field("segment_checksum", &"<redacted>")
             .field("record_content_id", &self.record_content_id)
@@ -361,6 +435,7 @@ impl fmt::Debug for BlobManifest {
 mod tests {
     use std::{fs, path::PathBuf};
 
+    use sha2::{Digest, Sha256};
     use uuid::Uuid;
 
     use super::*;
@@ -372,7 +447,8 @@ mod tests {
     const REPOSITORY_ID: &str = "550e8400-e29b-41d4-a716-446655440000";
     const SEGMENT_ID: &str = "6ba7b814-9dad-41d1-80b4-00c04fd430c8";
     const MANIFEST_ID: &str = "0f8fad5b-d9cb-469f-a165-70867728950e";
-    const HEADER_BYTES: usize = 197;
+    const HEADER_BYTES: usize = 198;
+    const POLICY_OFFSET: usize = 116;
 
     struct TestDirectory(PathBuf);
 
@@ -456,6 +532,10 @@ mod tests {
             decoded.representation(),
             BlobManifestRepresentation::WholeBlob
         );
+        assert_eq!(
+            decoded.storage_policy(),
+            Some(BlobStoragePolicyDecision::WholeBlob)
+        );
         assert_eq!(decoded.record_content_id(), decoded.content_id());
         assert_eq!(decoded.segment_id().to_string(), SEGMENT_ID);
         assert_eq!(decoded.repository_id().to_string(), REPOSITORY_ID);
@@ -486,6 +566,10 @@ mod tests {
         );
         assert_eq!(manifest.git_object_id(), selected_id);
         assert_eq!(manifest.plaintext_bytes(), selected_length);
+        assert_eq!(
+            manifest.storage_policy(),
+            Some(BlobStoragePolicyDecision::TinyBlobAggregation)
+        );
         assert_eq!(manifest.record_content_id(), aggregation.content_id());
         assert_eq!(
             BlobManifest::decode(&manifest.encode(), 4_096).expect("decode"),
@@ -540,12 +624,16 @@ mod tests {
         exceeded_limit[107..115].copy_from_slice(&u64::MAX.to_be_bytes());
         let mut invalid_representation = encoded.clone();
         invalid_representation[115] = 0;
+        let mut invalid_policy = encoded.clone();
+        invalid_policy[POLICY_OFFSET] = 0;
+        let mut mismatched_policy = encoded.clone();
+        mismatched_policy[POLICY_OFFSET] = 2;
         let mut unsupported_content_hash = encoded.clone();
         unsupported_content_hash[74] = 1;
         let mut mismatched_whole_record = encoded.clone();
-        mismatched_whole_record[165] ^= 1;
+        mismatched_whole_record[166] ^= 1;
         let mut invalid_footer = encoded.clone();
-        invalid_footer[197] ^= 1;
+        invalid_footer[HEADER_BYTES] ^= 1;
         let mut invalid_checksum = encoded.clone();
         let final_byte = invalid_checksum.len() - 1;
         invalid_checksum[final_byte] ^= 1;
@@ -560,6 +648,9 @@ mod tests {
         let exceeded_limit = BlobManifest::decode(&exceeded_limit, 4_096).expect_err("limit");
         let invalid_representation =
             BlobManifest::decode(&invalid_representation, 4_096).expect_err("representation");
+        let invalid_policy = BlobManifest::decode(&invalid_policy, 4_096).expect_err("policy");
+        let mismatched_policy =
+            BlobManifest::decode(&mismatched_policy, 4_096).expect_err("mismatched policy");
         let unsupported_content_hash =
             BlobManifest::decode(&unsupported_content_hash, 4_096).expect_err("content hash");
         let mismatched_whole_record =
@@ -574,11 +665,28 @@ mod tests {
         assert_eq!(unsupported_features.kind(), ErrorKind::Unsupported);
         assert_eq!(exceeded_limit.kind(), ErrorKind::Unsupported);
         assert_eq!(invalid_representation.kind(), ErrorKind::CorruptData);
+        assert_eq!(invalid_policy.kind(), ErrorKind::CorruptData);
+        assert_eq!(mismatched_policy.kind(), ErrorKind::CorruptData);
         assert_eq!(unsupported_content_hash.kind(), ErrorKind::Unsupported);
         assert_eq!(mismatched_whole_record.kind(), ErrorKind::CorruptData);
         assert_eq!(invalid_footer.kind(), ErrorKind::CorruptData);
         assert_eq!(invalid_checksum.kind(), ErrorKind::CorruptData);
         assert_eq!(trailing.kind(), ErrorKind::CorruptData);
+    }
+
+    #[test]
+    fn preserves_legacy_zero_feature_manifests_without_a_policy() {
+        let mut encoded = whole_manifest().encode();
+        encoded[6..14].copy_from_slice(&0u64.to_be_bytes());
+        encoded.remove(POLICY_OFFSET);
+        let checksum_offset = encoded.len() - 32;
+        let checksum: [u8; 32] = Sha256::digest(&encoded[..checksum_offset]).into();
+        encoded[checksum_offset..].copy_from_slice(&checksum);
+
+        let decoded = BlobManifest::decode(&encoded, 4_096).expect("legacy manifest");
+
+        assert_eq!(decoded.storage_policy(), None);
+        assert_eq!(decoded.encode(), encoded);
     }
 
     #[test]
@@ -593,5 +701,6 @@ mod tests {
         fn assert_send_sync<T: Send + Sync>() {}
         assert_send_sync::<BlobManifest>();
         assert_send_sync::<BlobManifestRepresentation>();
+        assert_send_sync::<BlobStoragePolicyDecision>();
     }
 }

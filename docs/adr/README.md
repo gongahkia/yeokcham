@@ -48,3 +48,4 @@ Valid statuses are `Proposed`, `Accepted`, `Rejected`, `Deprecated`, and `Supers
 | [ADR-0040](0040-bounded-segment-v1-reader.md) | Accepted | Read and verify bounded `YKSG` version-1 segments |
 | [ADR-0041](0041-rebuildable-per-segment-index.md) | Accepted | Use a rebuildable canonical index per immutable segment |
 | [ADR-0042](0042-immutable-single-record-blob-manifest.md) | Accepted | Reference one verified segment record per blob manifest |
+| [ADR-0043](0043-record-explicit-blob-storage-policy.md) | Accepted | Record explicit storage policy in new blob manifests |
