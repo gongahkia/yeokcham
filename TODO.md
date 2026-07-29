@@ -9,7 +9,7 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 - [x] Create Rust workspace.
 - [x] Add formatting, linting, unit-test, and documentation CI.
 - [x] Define supported Rust version.
-- [ ] Add licence and contribution guide.
+- [x] Add licence and contribution guide.
 - [ ] Add `docs/adr/` process.
 - [ ] Add structured error type strategy.
 - [ ] Add tracing with source-content redaction rules.
