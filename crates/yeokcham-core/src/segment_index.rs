@@ -2,6 +2,7 @@ use std::fmt;
 
 use sha2::{Digest, Sha256};
 
+use crate::segment_writer::REQUIRED_FEATURE_METADATA_OBJECT;
 use crate::{
     CanonicalDecoder, CanonicalEncoder, CompressionAlgorithm, ContentHashAlgorithm, Error,
     ErrorKind, ReadSegment, RepositoryId, Result, SegmentId, SegmentRecordKind, YeokchamContentId,
@@ -138,7 +139,14 @@ impl SegmentIndex {
                 "segment index version is unsupported",
             ));
         }
-        if d.read_u64()? != 0 || d.read_u64()? != 0 {
+        let required_features = d.read_u64()?;
+        if required_features & !REQUIRED_FEATURE_METADATA_OBJECT != 0 {
+            return Err(Error::new(
+                ErrorKind::Unsupported,
+                "segment index uses unsupported features",
+            ));
+        }
+        if d.read_u64()? != 0 {
             return Err(Error::new(
                 ErrorKind::Unsupported,
                 "segment index uses unsupported features",
@@ -178,6 +186,7 @@ impl SegmentIndex {
         let mut entries = Vec::new();
         let mut total_plaintext_bytes = 0u64;
         let mut total_stored_bytes = 0u64;
+        let mut has_metadata_object_entry = false;
         for _ in 0..count {
             let algorithm =
                 ContentHashAlgorithm::from_binary_tag(d.read_u8()?).ok_or_else(|| {
@@ -209,6 +218,15 @@ impl SegmentIndex {
                     "segment index uncompressed lengths do not match",
                 ));
             }
+            if kind == SegmentRecordKind::MetadataObject {
+                if required_features & REQUIRED_FEATURE_METADATA_OBJECT == 0 {
+                    return Err(Error::new(
+                        ErrorKind::CorruptData,
+                        "segment index metadata-object entry lacks its required feature",
+                    ));
+                }
+                has_metadata_object_entry = true;
+            }
             total_plaintext_bytes = total_plaintext_bytes
                 .checked_add(plaintext_bytes)
                 .ok_or_else(|| {
@@ -239,6 +257,12 @@ impl SegmentIndex {
                 plaintext_bytes,
                 stored_bytes,
             });
+        }
+        if required_features & REQUIRED_FEATURE_METADATA_OBJECT != 0 && !has_metadata_object_entry {
+            return Err(Error::new(
+                ErrorKind::CorruptData,
+                "segment index metadata-object feature has no matching entry",
+            ));
         }
         if d.read_fixed::<4>()? != FOOTER_MAGIC {
             return Err(Error::new(
@@ -318,7 +342,7 @@ impl SegmentIndex {
         let mut e = CanonicalEncoder::new();
         e.write_fixed(&MAGIC);
         e.write_u16(VERSION);
-        e.write_u64(0);
+        e.write_u64(required_features_for_entries(&self.entries));
         e.write_u64(0);
         e.write_fixed(self.repository_id.as_bytes());
         e.write_fixed(self.segment_id.as_bytes());
@@ -342,6 +366,17 @@ impl SegmentIndex {
     }
 }
 
+fn required_features_for_entries(entries: &[SegmentIndexEntry]) -> u64 {
+    if entries
+        .iter()
+        .any(|entry| entry.kind == SegmentRecordKind::MetadataObject)
+    {
+        REQUIRED_FEATURE_METADATA_OBJECT
+    } else {
+        0
+    }
+}
+
 impl fmt::Debug for SegmentIndex {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("SegmentIndex")
@@ -358,12 +393,13 @@ impl fmt::Debug for SegmentIndex {
 mod tests {
     use std::fs;
 
+    use sha2::{Digest, Sha256};
     use uuid::Uuid;
 
     use super::*;
     use crate::{
         GitObject, GitObjectId, GitObjectKind, SegmentReadLimits, SegmentReader, SegmentRecord,
-        SegmentWriteLimits, SegmentWriter, WholeBlobRecord,
+        SegmentWriteLimits, SegmentWriter, MetadataObjectRecord, WholeBlobRecord,
     };
 
     const HEADER_BYTES: usize = 90;
@@ -382,6 +418,23 @@ mod tests {
         );
         SegmentRecord::from_whole_blob(
             &WholeBlobRecord::from_verified_blob(&object).expect("whole blob"),
+        )
+        .expect("segment record")
+    }
+
+    fn metadata_object(data: &[u8]) -> SegmentRecord {
+        let provisional = GitObject::new(
+            GitObjectId::from_bytes([0; GitObjectId::BYTE_LENGTH]),
+            GitObjectKind::Commit,
+            data.to_vec(),
+        );
+        let object = GitObject::new(
+            provisional.recompute_id(),
+            GitObjectKind::Commit,
+            data.to_vec(),
+        );
+        SegmentRecord::from_metadata_object(
+            &MetadataObjectRecord::from_verified_object(&object).expect("metadata object"),
         )
         .expect("segment record")
     }
@@ -492,6 +545,27 @@ mod tests {
         assert_eq!(&encoded[54..86], segment_checksum);
         assert!(diagnostic.contains("<redacted>"));
         assert!(!diagnostic.contains("e69de29bb2d1d6434b8b29ae775ad8c2e48c5391"));
+    }
+
+    #[test]
+    fn metadata_object_entries_require_the_segment_feature() {
+        let (index, _) = index(vec![metadata_object(b"tree \0commit")]);
+        let encoded = index.encode();
+        assert_eq!(
+            u64::from_be_bytes(encoded[6..14].try_into().expect("required features")),
+            REQUIRED_FEATURE_METADATA_OBJECT
+        );
+        let decoded = SegmentIndex::decode(&encoded, 1, 1024).expect("decode index");
+        assert_eq!(decoded.entries()[0].kind(), SegmentRecordKind::MetadataObject);
+
+        let mut missing_feature = encoded;
+        missing_feature[6..14].copy_from_slice(&0u64.to_be_bytes());
+        let checksum_offset = missing_feature.len() - 32;
+        let checksum: [u8; 32] = Sha256::digest(&missing_feature[..checksum_offset]).into();
+        missing_feature[checksum_offset..].copy_from_slice(&checksum);
+        let error =
+            SegmentIndex::decode(&missing_feature, 1, 1024).expect_err("missing required feature");
+        assert_eq!(error.kind(), ErrorKind::CorruptData);
     }
 
     #[test]

@@ -12,8 +12,9 @@ use rusqlite::{
 
 use crate::{
     BlobManifest, BlobManifestRepresentation, CanonicalDecoder, CanonicalEncoder, Error, ErrorKind,
-    GitObject, GitObjectId, GitObjectKind, ManifestId, ReadSegmentRecord, RepositoryFormat,
-    RepositoryId, Result, SegmentId, SegmentReadLimits, SegmentReader,
+    GitObject, GitObjectId, GitObjectKind, ManifestId, MetadataObjectManifest,
+    MetadataObjectRecord, ReadSegmentRecord, RepositoryFormat, RepositoryId, Result, SegmentId,
+    SegmentReadLimits, SegmentReader,
 };
 
 const BOOTSTRAP_MAGIC: [u8; 4] = *b"YKRB";
@@ -26,6 +27,10 @@ const BLOB_MANIFEST_DIRECTORY: &str = "manifests/blobs";
 const BLOB_MANIFEST_EXTENSION: &str = ".ykmf";
 const BLOB_MANIFEST_STAGING_SUFFIX: &str = ".partial";
 const PUBLISHED_BLOB_MANIFEST_MAX_BYTES: u64 = 4096;
+const METADATA_OBJECT_MANIFEST_DIRECTORY: &str = "manifests/objects";
+const METADATA_OBJECT_MANIFEST_EXTENSION: &str = ".ykom";
+const METADATA_OBJECT_MANIFEST_STAGING_SUFFIX: &str = ".partial";
+const PUBLISHED_METADATA_OBJECT_MANIFEST_MAX_BYTES: u64 = 4096;
 const LAYOUT_DIRECTORIES: &[&str] = &[
     "format",
     "segments",
@@ -95,6 +100,39 @@ impl BlobManifestReadLimits {
     }
 
     /// Returns the maximum blob body length accepted from one manifest.
+    pub const fn maximum_plaintext_bytes(self) -> u64 {
+        self.maximum_plaintext_bytes
+    }
+}
+
+/// Caller-selected bounds for resolving one immutable metadata-object manifest.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct MetadataObjectManifestReadLimits {
+    maximum_manifest_bytes: u64,
+    maximum_plaintext_bytes: u64,
+}
+
+impl MetadataObjectManifestReadLimits {
+    /// Validates bounds for one direct metadata-object manifest lookup.
+    pub fn new(maximum_manifest_bytes: u64, maximum_plaintext_bytes: u64) -> Result<Self> {
+        if maximum_manifest_bytes == 0 {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "metadata-object manifest byte limit must not be zero",
+            ));
+        }
+        Ok(Self {
+            maximum_manifest_bytes,
+            maximum_plaintext_bytes,
+        })
+    }
+
+    /// Returns the maximum bytes accepted from one metadata-object manifest file.
+    pub const fn maximum_manifest_bytes(self) -> u64 {
+        self.maximum_manifest_bytes
+    }
+
+    /// Returns the maximum object-body length accepted from one manifest.
     pub const fn maximum_plaintext_bytes(self) -> u64 {
         self.maximum_plaintext_bytes
     }
@@ -549,6 +587,183 @@ impl LocalRepository {
         )
     }
 
+    /// Publishes one immutable non-blob object manifest without using SQLite.
+    ///
+    /// The manifest must belong to this repository. Repeating identical bytes
+    /// is idempotent; a distinct manifest at the same Git object ID conflicts.
+    pub fn publish_metadata_object_manifest(
+        &self,
+        manifest: &MetadataObjectManifest,
+    ) -> Result<()> {
+        if manifest.repository_id() != self.id {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "metadata-object manifest belongs to a different repository",
+            ));
+        }
+        let directory = self.ensure_metadata_object_manifest_directory()?;
+        let destination =
+            directory.join(metadata_object_manifest_filename(manifest.git_object_id()));
+        let bytes = manifest.encode();
+        if let Ok(metadata) = fs::symlink_metadata(&destination) {
+            if metadata.file_type().is_symlink() || !metadata.is_file() {
+                return Err(Error::new(
+                    ErrorKind::CorruptData,
+                    "metadata-object manifest destination is not a regular file",
+                ));
+            }
+        }
+
+        let (mut staging, staging_path) = create_metadata_object_manifest_staging(&directory)?;
+        if let Err(error) = staging.write_all(&bytes) {
+            drop(staging);
+            let _ = fs::remove_file(&staging_path);
+            return Err(io_error(
+                error,
+                "metadata-object manifest staging file could not be written",
+            ));
+        }
+        if let Err(error) = staging.sync_all() {
+            drop(staging);
+            let _ = fs::remove_file(&staging_path);
+            return Err(io_error(
+                error,
+                "metadata-object manifest staging file could not be synchronized",
+            ));
+        }
+        drop(staging);
+        match fs::hard_link(&staging_path, &destination) {
+            Ok(()) => {
+                sync_directory(&directory)?;
+                let _ = fs::remove_file(&staging_path);
+                let _ = sync_directory(&directory);
+                Ok(())
+            }
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                let _ = fs::remove_file(&staging_path);
+                self.verify_existing_metadata_object_manifest(&destination, manifest, &bytes)
+            }
+            Err(error) => {
+                let _ = fs::remove_file(&staging_path);
+                Err(io_error(
+                    error,
+                    "metadata-object manifest could not be published",
+                ))
+            }
+        }
+    }
+
+    /// Resolves one Git tree, commit, or tag ID to its published manifest.
+    pub fn resolve_metadata_object_manifest(
+        &self,
+        git_object_id: GitObjectId,
+        limits: MetadataObjectManifestReadLimits,
+    ) -> Result<Option<MetadataObjectManifest>> {
+        let directory = self.root.join(METADATA_OBJECT_MANIFEST_DIRECTORY);
+        match fs::symlink_metadata(&directory) {
+            Ok(_) => validate_directory(&directory, false)?,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => {
+                return Err(io_error(
+                    error,
+                    "metadata-object manifest directory could not be inspected",
+                ));
+            }
+        }
+        let path = directory.join(metadata_object_manifest_filename(git_object_id));
+        match fs::symlink_metadata(&path) {
+            Ok(_) => self
+                .read_metadata_object_manifest(
+                    &path,
+                    git_object_id,
+                    limits.maximum_manifest_bytes,
+                    limits.maximum_plaintext_bytes,
+                )
+                .map(Some),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+            Err(error) => Err(io_error(
+                error,
+                "metadata-object manifest file could not be inspected",
+            )),
+        }
+    }
+
+    /// Resolves and verifies the metadata-object segment record named by a manifest.
+    pub fn resolve_metadata_object_record(
+        &self,
+        manifest: &MetadataObjectManifest,
+        maximum_segment_bytes: u64,
+        limits: SegmentReadLimits,
+    ) -> Result<MetadataObjectRecord> {
+        if manifest.repository_id() != self.id {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "metadata-object manifest belongs to a different repository",
+            ));
+        }
+        if maximum_segment_bytes == 0 {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "segment byte limit must not be zero",
+            ));
+        }
+        let directory = self.root.join("segments");
+        validate_directory(&directory, false)?;
+        let bytes = read_bounded_segment_file(
+            &self.segment_path(manifest.segment_id()),
+            maximum_segment_bytes,
+        )?;
+        let segment = SegmentReader::decode(&bytes, limits)?;
+        if segment.repository_id() != self.id
+            || segment.segment_id() != manifest.segment_id()
+            || segment.checksum() != manifest.segment_checksum()
+        {
+            return Err(Error::new(
+                ErrorKind::CorruptData,
+                "segment does not match the metadata-object manifest",
+            ));
+        }
+        let mut matching = segment.into_records().into_iter().filter_map(|record| {
+            record
+                .as_metadata_object()
+                .is_some_and(|stored| stored.content_id() == manifest.content_id())
+                .then(|| match record {
+                    ReadSegmentRecord::MetadataObject(record) => record,
+                    _ => unreachable!("metadata-object accessor and enum variant disagree"),
+                })
+        });
+        let record = matching.next().ok_or_else(|| {
+            Error::new(
+                ErrorKind::CorruptData,
+                "segment does not contain the metadata-object manifest record",
+            )
+        })?;
+        if matching.next().is_some() {
+            return Err(Error::new(
+                ErrorKind::CorruptData,
+                "segment contains duplicate metadata-object manifest records",
+            ));
+        }
+        verify_metadata_object_manifest_record(manifest, &record)?;
+        Ok(record)
+    }
+
+    /// Reconstructs and verifies one Git tree, commit, or annotated tag.
+    pub fn reconstruct_metadata_object(
+        &self,
+        manifest: &MetadataObjectManifest,
+        maximum_segment_bytes: u64,
+        limits: SegmentReadLimits,
+    ) -> Result<GitObject> {
+        let record =
+            self.resolve_metadata_object_record(manifest, maximum_segment_bytes, limits)?;
+        verified_reconstructed_metadata_object(
+            manifest.git_object_id(),
+            manifest.kind(),
+            record.data().to_vec(),
+        )
+    }
+
     fn verify_existing_blob_manifest(
         &self,
         path: &Path,
@@ -590,6 +805,70 @@ impl LocalRepository {
             return Err(Error::new(
                 ErrorKind::CorruptData,
                 "blob manifest filename does not match its identity",
+            ));
+        }
+        Ok(manifest)
+    }
+
+    fn ensure_metadata_object_manifest_directory(&self) -> Result<PathBuf> {
+        let directory = self.root.join(METADATA_OBJECT_MANIFEST_DIRECTORY);
+        match fs::create_dir(&directory) {
+            Ok(()) => {
+                sync_directory(&self.root.join("manifests"))?;
+                Ok(directory)
+            }
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                validate_directory(&directory, false)?;
+                Ok(directory)
+            }
+            Err(error) => Err(io_error(
+                error,
+                "metadata-object manifest directory could not be created",
+            )),
+        }
+    }
+
+    fn verify_existing_metadata_object_manifest(
+        &self,
+        path: &Path,
+        manifest: &MetadataObjectManifest,
+        bytes: &[u8],
+    ) -> Result<()> {
+        let existing = self.read_metadata_object_manifest(
+            path,
+            manifest.git_object_id(),
+            PUBLISHED_METADATA_OBJECT_MANIFEST_MAX_BYTES,
+            u64::MAX,
+        )?;
+        if existing.encode() == bytes {
+            Ok(())
+        } else {
+            Err(Error::new(
+                ErrorKind::Conflict,
+                "metadata-object manifest conflicts with an existing Git object ID",
+            ))
+        }
+    }
+
+    fn read_metadata_object_manifest(
+        &self,
+        path: &Path,
+        expected_id: GitObjectId,
+        maximum_manifest_bytes: u64,
+        maximum_plaintext_bytes: u64,
+    ) -> Result<MetadataObjectManifest> {
+        let bytes = read_bounded_metadata_object_manifest_file(path, maximum_manifest_bytes)?;
+        let manifest = MetadataObjectManifest::decode(&bytes, maximum_plaintext_bytes)?;
+        if manifest.repository_id() != self.id {
+            return Err(Error::new(
+                ErrorKind::CorruptData,
+                "metadata-object manifest belongs to a different repository",
+            ));
+        }
+        if manifest.git_object_id() != expected_id {
+            return Err(Error::new(
+                ErrorKind::CorruptData,
+                "metadata-object manifest filename does not match its identity",
             ));
         }
         Ok(manifest)
@@ -645,6 +924,10 @@ fn blob_manifest_filename(id: ManifestId) -> String {
     format!("{id}{BLOB_MANIFEST_EXTENSION}")
 }
 
+fn metadata_object_manifest_filename(id: GitObjectId) -> String {
+    format!("{id}{METADATA_OBJECT_MANIFEST_EXTENSION}")
+}
+
 fn parse_blob_manifest_filename(name: &str) -> Result<ManifestId> {
     let id = name.strip_suffix(BLOB_MANIFEST_EXTENSION).ok_or_else(|| {
         Error::new(
@@ -693,6 +976,30 @@ fn create_blob_manifest_staging(parent: &Path) -> Result<(File, PathBuf)> {
     Err(Error::new(
         ErrorKind::Conflict,
         "blob manifest staging path could not be allocated",
+    ))
+}
+
+fn create_metadata_object_manifest_staging(parent: &Path) -> Result<(File, PathBuf)> {
+    for _ in 0..16 {
+        let path = parent.join(format!(
+            ".{}{}",
+            SegmentId::generate(),
+            METADATA_OBJECT_MANIFEST_STAGING_SUFFIX
+        ));
+        match OpenOptions::new().create_new(true).write(true).open(&path) {
+            Ok(file) => return Ok((file, path)),
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(error) => {
+                return Err(io_error(
+                    error,
+                    "metadata-object manifest staging file could not be created",
+                ));
+            }
+        }
+    }
+    Err(Error::new(
+        ErrorKind::Conflict,
+        "metadata-object manifest staging path could not be allocated",
     ))
 }
 
@@ -763,6 +1070,39 @@ fn verified_reconstructed_blob(id: GitObjectId, data: Vec<u8>) -> Result<GitObje
     Ok(object)
 }
 
+fn verify_metadata_object_manifest_record(
+    manifest: &MetadataObjectManifest,
+    record: &MetadataObjectRecord,
+) -> Result<()> {
+    if record.git_object_id() != manifest.git_object_id()
+        || record.kind() != manifest.kind()
+        || record.content_id() != manifest.content_id()
+        || u64::try_from(record.data().len()).ok() != Some(manifest.plaintext_bytes())
+    {
+        return Err(Error::new(
+            ErrorKind::CorruptData,
+            "metadata-object record does not match its manifest",
+        ));
+    }
+    Ok(())
+}
+
+fn verified_reconstructed_metadata_object(
+    id: GitObjectId,
+    kind: GitObjectKind,
+    data: Vec<u8>,
+) -> Result<GitObject> {
+    if kind == GitObjectKind::Blob {
+        return Err(Error::new(
+            ErrorKind::CorruptData,
+            "metadata-object manifest has an invalid Git object kind",
+        ));
+    }
+    let object = GitObject::new(id, kind, data);
+    object.verify_id()?;
+    Ok(object)
+}
+
 fn read_bounded_regular_file(path: &Path, maximum_bytes: u64) -> Result<Vec<u8>> {
     let metadata = fs::symlink_metadata(path).map_err(|error| {
         if error.kind() == io::ErrorKind::NotFound {
@@ -811,6 +1151,65 @@ fn read_bounded_regular_file(path: &Path, maximum_bytes: u64) -> Result<Vec<u8>>
         Err(error) => return Err(io_error(error, "blob manifest file could not be read")),
     }
     Ok(bytes)
+}
+
+fn read_bounded_metadata_object_manifest_file(path: &Path, maximum_bytes: u64) -> Result<Vec<u8>> {
+    let metadata = fs::symlink_metadata(path).map_err(|error| {
+        if error.kind() == io::ErrorKind::NotFound {
+            Error::new(
+                ErrorKind::CorruptData,
+                "metadata-object manifest file is missing",
+            )
+        } else {
+            io_error(
+                error,
+                "metadata-object manifest file could not be inspected",
+            )
+        }
+    })?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(Error::new(
+            ErrorKind::CorruptData,
+            "metadata-object manifest file is not a regular file",
+        ));
+    }
+    if metadata.len() > maximum_bytes {
+        return Err(Error::new(
+            ErrorKind::Unsupported,
+            "metadata-object manifest file exceeds the byte limit",
+        ));
+    }
+    let length = usize::try_from(metadata.len()).map_err(|_| {
+        Error::new(
+            ErrorKind::Unsupported,
+            "metadata-object manifest file exceeds the byte limit",
+        )
+    })?;
+    let mut file = File::open(path)
+        .map_err(|error| io_error(error, "metadata-object manifest file could not be opened"))?;
+    let mut bytes = vec![0; length];
+    file.read_exact(&mut bytes).map_err(|error| {
+        if error.kind() == io::ErrorKind::UnexpectedEof {
+            Error::new(
+                ErrorKind::CorruptData,
+                "metadata-object manifest file is truncated",
+            )
+        } else {
+            io_error(error, "metadata-object manifest file could not be read")
+        }
+    })?;
+    let mut extra = [0; 1];
+    match file.read(&mut extra) {
+        Ok(0) => Ok(bytes),
+        Ok(_) => Err(Error::new(
+            ErrorKind::CorruptData,
+            "metadata-object manifest file changed while being read",
+        )),
+        Err(error) => Err(io_error(
+            error,
+            "metadata-object manifest file could not be read",
+        )),
+    }
 }
 
 fn read_bounded_segment_file(path: &Path, maximum_bytes: u64) -> Result<Vec<u8>> {
@@ -1116,6 +1515,7 @@ mod tests {
     const MANIFEST_ID_B: &str = "7d444840-9dc0-41d1-b245-5ffdce74fad2";
     const SEGMENT_ID_A: &str = "6ba7b814-9dad-41d1-80b4-00c04fd430c8";
     const SEGMENT_ID_B: &str = "123e4567-e89b-42d3-a456-426614174000";
+    const SEGMENT_ID_C: &str = "67e55044-10b1-426f-9247-bb680e5fe0c8";
 
     struct TestDirectory(PathBuf);
 
@@ -1169,8 +1569,17 @@ mod tests {
             .join(blob_manifest_filename(id))
     }
 
+    fn metadata_object_manifest_path(root: &Path, id: GitObjectId) -> PathBuf {
+        root.join(METADATA_OBJECT_MANIFEST_DIRECTORY)
+            .join(metadata_object_manifest_filename(id))
+    }
+
     fn manifest_limits() -> BlobManifestReadLimits {
         BlobManifestReadLimits::new(8, 4_096, 4_096).expect("manifest limits")
+    }
+
+    fn metadata_object_manifest_limits() -> MetadataObjectManifestReadLimits {
+        MetadataObjectManifestReadLimits::new(4_096, 4_096).expect("metadata manifest limits")
     }
 
     fn segment_limits() -> SegmentReadLimits {
@@ -1239,6 +1648,33 @@ mod tests {
             .expect("manifest"),
             selected_id,
         )
+    }
+
+    fn metadata_object_manifest(
+        repository: &LocalRepository,
+        segment_id: SegmentId,
+        kind: GitObjectKind,
+        data: &[u8],
+    ) -> MetadataObjectManifest {
+        let object = verified_object(kind, data);
+        let record =
+            MetadataObjectRecord::from_verified_object(&object).expect("metadata object record");
+        let segment_record = SegmentRecord::from_metadata_object(&record).expect("segment record");
+        let path = repository.segment_path(segment_id);
+        let mut writer = SegmentWriter::new(
+            repository.id(),
+            segment_id,
+            SegmentWriteLimits::new(1, segment_record.stored_len()).expect("write limits"),
+        );
+        writer.add(segment_record).expect("add record");
+        writer.seal_to(&path).expect("seal segment");
+        let bytes = fs::read(path).expect("read segment");
+        let segment = SegmentReader::decode(
+            &bytes,
+            SegmentReadLimits::new(1, 4_096, 4_096, 4_096, 1, 1).expect("read limits"),
+        )
+        .expect("read segment");
+        MetadataObjectManifest::from_metadata_object(&segment, &record).expect("manifest")
     }
 
     #[test]
@@ -1610,6 +2046,148 @@ mod tests {
     }
 
     #[test]
+    fn publishes_resolves_and_reconstructs_commit_tree_and_tag_objects() {
+        let temporary = TestDirectory::new();
+        let root = temporary.path().join("repository");
+        let repository = LocalRepository::create(&root).expect("create repository");
+
+        for (kind, body, segment_id) in [
+            (
+                GitObjectKind::Tree,
+                b"100644 file\0\x01\xff".as_slice(),
+                SEGMENT_ID_A,
+            ),
+            (
+                GitObjectKind::Commit,
+                b"tree \0commit\xff\n".as_slice(),
+                SEGMENT_ID_B,
+            ),
+            (
+                GitObjectKind::Tag,
+                b"object \xff\0tag".as_slice(),
+                SEGMENT_ID_C,
+            ),
+        ] {
+            let manifest = metadata_object_manifest(
+                &repository,
+                segment_id.parse().expect("segment ID"),
+                kind,
+                body,
+            );
+            assert_eq!(
+                repository
+                    .resolve_metadata_object_manifest(
+                        manifest.git_object_id(),
+                        metadata_object_manifest_limits(),
+                    )
+                    .expect("resolve absent"),
+                None
+            );
+            repository
+                .publish_metadata_object_manifest(&manifest)
+                .expect("publish manifest");
+            repository
+                .publish_metadata_object_manifest(&manifest)
+                .expect("repeat manifest");
+            assert!(metadata_object_manifest_path(&root, manifest.git_object_id()).is_file());
+            assert_eq!(
+                repository
+                    .resolve_metadata_object_manifest(
+                        manifest.git_object_id(),
+                        metadata_object_manifest_limits(),
+                    )
+                    .expect("resolve manifest")
+                    .as_ref(),
+                Some(&manifest)
+            );
+            let record = repository
+                .resolve_metadata_object_record(&manifest, 4_096, segment_limits())
+                .expect("resolve metadata record");
+            assert_eq!(record.kind(), kind);
+            assert_eq!(record.git_object_id(), manifest.git_object_id());
+            assert_eq!(record.data(), body);
+            let object = repository
+                .reconstruct_metadata_object(&manifest, 4_096, segment_limits())
+                .expect("reconstruct object");
+            assert_eq!(object.id(), manifest.git_object_id());
+            assert_eq!(object.kind(), kind);
+            assert_eq!(object.data(), body);
+            object.verify_id().expect("verify reconstructed object");
+        }
+        assert!(!metadata_path(&root).exists());
+
+        let reopened = LocalRepository::open(&root).expect("reopen repository");
+        assert!(
+            reopened
+                .resolve_metadata_object_manifest(
+                    verified_object(GitObjectKind::Commit, b"tree \0commit\xff\n").id(),
+                    metadata_object_manifest_limits(),
+                )
+                .expect("resolve after reopen")
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn rejects_conflicting_limited_and_tampered_metadata_object_storage() {
+        let temporary = TestDirectory::new();
+        let root = temporary.path().join("repository");
+        let repository = LocalRepository::create(&root).expect("create repository");
+        let first = metadata_object_manifest(
+            &repository,
+            SEGMENT_ID_A.parse().expect("segment ID"),
+            GitObjectKind::Commit,
+            b"private metadata body",
+        );
+        let conflict = metadata_object_manifest(
+            &repository,
+            SEGMENT_ID_B.parse().expect("segment ID"),
+            GitObjectKind::Commit,
+            b"private metadata body",
+        );
+        repository
+            .publish_metadata_object_manifest(&first)
+            .expect("publish manifest");
+        let conflict = repository
+            .publish_metadata_object_manifest(&conflict)
+            .expect_err("conflicting manifest");
+        assert_eq!(conflict.kind(), ErrorKind::Conflict);
+
+        let limited = repository
+            .resolve_metadata_object_manifest(
+                first.git_object_id(),
+                MetadataObjectManifestReadLimits::new(1, 4_096).expect("limits"),
+            )
+            .expect_err("manifest limit");
+        assert_eq!(limited.kind(), ErrorKind::Unsupported);
+
+        let path = repository.segment_path(first.segment_id());
+        let mut tampered = fs::read(&path).expect("read segment");
+        let final_byte = tampered.len() - 1;
+        tampered[final_byte] ^= 1;
+        fs::write(&path, tampered).expect("tamper segment");
+        let tampered = repository
+            .resolve_metadata_object_record(&first, 4_096, segment_limits())
+            .expect_err("tampered segment");
+        assert_eq!(tampered.kind(), ErrorKind::CorruptData);
+        assert!(!tampered.to_string().contains("private metadata body"));
+    }
+
+    #[test]
+    fn rejects_reconstructed_metadata_bytes_that_do_not_match_the_final_git_id() {
+        let expected = verified_object(GitObjectKind::Tree, b"expected tree");
+        let error = verified_reconstructed_metadata_object(
+            expected.id(),
+            GitObjectKind::Tree,
+            b"altered private metadata body".to_vec(),
+        )
+        .expect_err("mismatched final Git ID");
+
+        assert_eq!(error.kind(), ErrorKind::CorruptData);
+        assert!(!error.to_string().contains("altered private metadata body"));
+    }
+
+    #[test]
     fn rejects_manifest_conflicts_and_ambiguous_blob_resolution() {
         let temporary = TestDirectory::new();
         let root = temporary.path().join("repository");
@@ -1959,7 +2537,14 @@ mod tests {
                 .kind(),
             ErrorKind::InvalidInput
         );
+        assert_eq!(
+            MetadataObjectManifestReadLimits::new(0, 1)
+                .expect_err("zero byte limit")
+                .kind(),
+            ErrorKind::InvalidInput
+        );
         assert_send_sync::<LocalRepository>();
         assert_send_sync::<BlobManifestReadLimits>();
+        assert_send_sync::<MetadataObjectManifestReadLimits>();
     }
 }

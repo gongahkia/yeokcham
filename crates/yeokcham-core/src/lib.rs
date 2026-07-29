@@ -12,6 +12,8 @@ mod git_object;
 mod git_object_id;
 mod git_repository;
 mod manifest_id;
+mod metadata_object_manifest;
+mod metadata_object_record;
 mod ref_name;
 mod repository;
 mod repository_format;
@@ -37,8 +39,12 @@ pub use git_object::{GitObject, GitObjectKind};
 pub use git_object_id::GitObjectId;
 pub use git_repository::GitRepository;
 pub use manifest_id::ManifestId;
+pub use metadata_object_manifest::MetadataObjectManifest;
+pub use metadata_object_record::MetadataObjectRecord;
 pub use ref_name::RefName;
-pub use repository::{BlobManifestReadLimits, GitObjectMetadata, LocalRepository};
+pub use repository::{
+    BlobManifestReadLimits, GitObjectMetadata, LocalRepository, MetadataObjectManifestReadLimits,
+};
 pub use repository_format::{RepositoryFeatureFlags, RepositoryFormat, RepositoryFormatVersion};
 pub use repository_id::RepositoryId;
 pub use segment_id::SegmentId;

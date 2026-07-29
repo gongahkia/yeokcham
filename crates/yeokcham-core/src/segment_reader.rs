@@ -2,10 +2,11 @@ use std::fmt;
 
 use sha2::{Digest, Sha256};
 
-use crate::segment_writer::{FOOTER_MAGIC, MAGIC, VERSION};
+use crate::segment_writer::{FOOTER_MAGIC, MAGIC, REQUIRED_FEATURE_METADATA_OBJECT, VERSION};
 use crate::{
-    CanonicalDecoder, CompressionAlgorithm, ContentHashAlgorithm, Error, ErrorKind, RepositoryId,
-    Result, SegmentId, SegmentRecordKind, TinyBlobAggregation, WholeBlobRecord, YeokchamContentId,
+    CanonicalDecoder, CompressionAlgorithm, ContentHashAlgorithm, Error, ErrorKind,
+    MetadataObjectRecord, RepositoryId, Result, SegmentId, SegmentRecordKind, TinyBlobAggregation,
+    WholeBlobRecord, YeokchamContentId,
 };
 
 /// Caller-selected bounds for decoding one immutable segment.
@@ -132,6 +133,8 @@ pub enum ReadSegmentRecord {
     WholeBlob(WholeBlobRecord),
     /// A verified tiny-blob aggregation.
     TinyBlobAggregation(TinyBlobAggregation),
+    /// A verified non-blob Git object record.
+    MetadataObject(MetadataObjectRecord),
 }
 
 impl ReadSegmentRecord {
@@ -140,6 +143,7 @@ impl ReadSegmentRecord {
         match self {
             Self::WholeBlob(_) => SegmentRecordKind::WholeBlob,
             Self::TinyBlobAggregation(_) => SegmentRecordKind::TinyBlobAggregation,
+            Self::MetadataObject(_) => SegmentRecordKind::MetadataObject,
         }
     }
 
@@ -148,6 +152,7 @@ impl ReadSegmentRecord {
         match self {
             Self::WholeBlob(record) => record.content_id(),
             Self::TinyBlobAggregation(record) => record.content_id(),
+            Self::MetadataObject(record) => record.content_id(),
         }
     }
 
@@ -155,7 +160,7 @@ impl ReadSegmentRecord {
     pub const fn as_whole_blob(&self) -> Option<&WholeBlobRecord> {
         match self {
             Self::WholeBlob(record) => Some(record),
-            Self::TinyBlobAggregation(_) => None,
+            Self::TinyBlobAggregation(_) | Self::MetadataObject(_) => None,
         }
     }
 
@@ -164,6 +169,15 @@ impl ReadSegmentRecord {
         match self {
             Self::WholeBlob(_) => None,
             Self::TinyBlobAggregation(record) => Some(record),
+            Self::MetadataObject(_) => None,
+        }
+    }
+
+    /// Returns the non-blob Git object record when this is that payload family.
+    pub const fn as_metadata_object(&self) -> Option<&MetadataObjectRecord> {
+        match self {
+            Self::MetadataObject(record) => Some(record),
+            Self::WholeBlob(_) | Self::TinyBlobAggregation(_) => None,
         }
     }
 }
@@ -268,7 +282,14 @@ impl SegmentReader {
                 "segment version is unsupported",
             ));
         }
-        if decoder.read_u64()? != 0 || decoder.read_u64()? != 0 {
+        let required_features = decoder.read_u64()?;
+        if required_features & !REQUIRED_FEATURE_METADATA_OBJECT != 0 {
+            return Err(Error::new(
+                ErrorKind::Unsupported,
+                "segment uses unsupported features",
+            ));
+        }
+        if decoder.read_u64()? != 0 {
             return Err(Error::new(
                 ErrorKind::Unsupported,
                 "segment uses unsupported features",
@@ -298,6 +319,7 @@ impl SegmentReader {
         let mut locations = Vec::new();
         let mut total_plaintext_bytes = 0u64;
         let mut total_stored_bytes = 0usize;
+        let mut has_metadata_object_record = false;
         for _ in 0..record_count {
             let kind = SegmentRecordKind::from_binary_tag(decoder.read_u8()?).ok_or_else(|| {
                 Error::new(ErrorKind::CorruptData, "segment has an invalid record type")
@@ -355,6 +377,15 @@ impl SegmentReader {
             })?;
             let payload = decoder.read_raw_bytes(stored_bytes_usize)?;
             let record = decode_record(kind, payload, limits)?;
+            if kind == SegmentRecordKind::MetadataObject {
+                if required_features & REQUIRED_FEATURE_METADATA_OBJECT == 0 {
+                    return Err(Error::new(
+                        ErrorKind::CorruptData,
+                        "segment metadata-object record lacks its required feature",
+                    ));
+                }
+                has_metadata_object_record = true;
+            }
             if record.content_id() != content_id {
                 return Err(Error::new(
                     ErrorKind::CorruptData,
@@ -370,6 +401,13 @@ impl SegmentReader {
                 stored_bytes,
             });
             records.push(record);
+        }
+        if required_features & REQUIRED_FEATURE_METADATA_OBJECT != 0 && !has_metadata_object_record
+        {
+            return Err(Error::new(
+                ErrorKind::CorruptData,
+                "segment metadata-object feature has no matching record",
+            ));
         }
 
         if decoder.read_fixed::<4>()? != FOOTER_MAGIC {
@@ -435,6 +473,9 @@ fn decode_record(
                 limits.maximum_tiny_blob_body_bytes,
             )?,
         )),
+        SegmentRecordKind::MetadataObject => Ok(ReadSegmentRecord::MetadataObject(
+            MetadataObjectRecord::decode(payload, limits.maximum_whole_blob_body_bytes)?,
+        )),
     }
 }
 
@@ -442,11 +483,13 @@ fn decode_record(
 mod tests {
     use std::{fs, path::PathBuf};
 
+    use sha2::{Digest, Sha256};
     use uuid::Uuid;
 
     use super::*;
     use crate::{
-        GitObject, GitObjectId, GitObjectKind, SegmentRecord, SegmentWriteLimits, SegmentWriter,
+        GitObject, GitObjectId, GitObjectKind, MetadataObjectRecord, SegmentRecord,
+        SegmentWriteLimits, SegmentWriter,
     };
 
     const REPOSITORY_ID: &str = "550e8400-e29b-41d4-a716-446655440000";
@@ -594,6 +637,43 @@ mod tests {
         assert_eq!(record, &aggregation);
         assert_eq!(record.entries().len(), 2);
         assert_eq!(record.content_id(), aggregation.content_id());
+    }
+
+    #[test]
+    fn reads_metadata_object_records_only_with_the_required_feature() {
+        let provisional = GitObject::new(
+            GitObjectId::from_bytes([0; GitObjectId::BYTE_LENGTH]),
+            GitObjectKind::Commit,
+            b"tree \0commit\xff".to_vec(),
+        );
+        let object = GitObject::new(
+            provisional.recompute_id(),
+            GitObjectKind::Commit,
+            provisional.data().to_vec(),
+        );
+        let metadata =
+            MetadataObjectRecord::from_verified_object(&object).expect("metadata record");
+        let (bytes, _) = writer_bytes_for(
+            SegmentRecord::from_metadata_object(&metadata).expect("segment record"),
+        );
+        assert_eq!(
+            u64::from_be_bytes(bytes[6..14].try_into().expect("required features")),
+            REQUIRED_FEATURE_METADATA_OBJECT
+        );
+        let segment = SegmentReader::decode(&bytes, limits()).expect("read metadata segment");
+        let record = segment.records()[0]
+            .as_metadata_object()
+            .expect("metadata record type");
+        assert_eq!(record, &metadata);
+
+        let mut missing_feature = bytes;
+        missing_feature[6..14].copy_from_slice(&0u64.to_be_bytes());
+        let checksum_offset = missing_feature.len() - 32;
+        let checksum: [u8; 32] = Sha256::digest(&missing_feature[..checksum_offset]).into();
+        missing_feature[checksum_offset..].copy_from_slice(&checksum);
+        let error = SegmentReader::decode(&missing_feature, limits())
+            .expect_err("missing required feature");
+        assert_eq!(error.kind(), ErrorKind::CorruptData);
     }
 
     #[test]

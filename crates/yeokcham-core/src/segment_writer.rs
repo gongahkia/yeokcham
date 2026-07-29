@@ -8,13 +8,14 @@ use std::{
 use sha2::{Digest, Sha256};
 
 use crate::{
-    CompressionAlgorithm, Error, ErrorKind, RepositoryId, Result, SegmentId, TinyBlobAggregation,
-    WholeBlobRecord, YeokchamContentId,
+    CompressionAlgorithm, Error, ErrorKind, MetadataObjectRecord, RepositoryId, Result, SegmentId,
+    TinyBlobAggregation, WholeBlobRecord, YeokchamContentId,
 };
 
 pub(crate) const MAGIC: [u8; 4] = *b"YKSG";
 pub(crate) const FOOTER_MAGIC: [u8; 4] = *b"YKSF";
 pub(crate) const VERSION: u16 = 1;
+pub(crate) const REQUIRED_FEATURE_METADATA_OBJECT: u64 = 1;
 
 /// Typed payload family accepted by segment version 1.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -24,6 +25,8 @@ pub enum SegmentRecordKind {
     WholeBlob,
     /// One [`TinyBlobAggregation`] encoding.
     TinyBlobAggregation,
+    /// One [`MetadataObjectRecord`] encoding.
+    MetadataObject,
 }
 
 impl SegmentRecordKind {
@@ -31,6 +34,7 @@ impl SegmentRecordKind {
         match self {
             Self::WholeBlob => 1,
             Self::TinyBlobAggregation => 2,
+            Self::MetadataObject => 3,
         }
     }
 
@@ -38,6 +42,7 @@ impl SegmentRecordKind {
         match tag {
             1 => Some(Self::WholeBlob),
             2 => Some(Self::TinyBlobAggregation),
+            3 => Some(Self::MetadataObject),
             _ => None,
         }
     }
@@ -70,6 +75,15 @@ impl SegmentRecord {
     pub fn from_tiny_blob_aggregation(record: &TinyBlobAggregation) -> Result<Self> {
         Self::new(
             SegmentRecordKind::TinyBlobAggregation,
+            record.content_id(),
+            record.encode(),
+        )
+    }
+
+    /// Wraps a verified non-blob Git object record for segment storage.
+    pub fn from_metadata_object(record: &MetadataObjectRecord) -> Result<Self> {
+        Self::new(
+            SegmentRecordKind::MetadataObject,
             record.content_id(),
             record.encode(),
         )
@@ -360,7 +374,7 @@ impl SegmentWriter {
         let mut checksum = Sha256::new();
         write_and_hash(file, &mut checksum, &MAGIC)?;
         write_and_hash(file, &mut checksum, &VERSION.to_be_bytes())?;
-        write_and_hash(file, &mut checksum, &0u64.to_be_bytes())?;
+        write_and_hash(file, &mut checksum, &self.required_features().to_be_bytes())?;
         write_and_hash(file, &mut checksum, &0u64.to_be_bytes())?;
         write_and_hash(file, &mut checksum, self.repository_id.as_bytes())?;
         write_and_hash(file, &mut checksum, self.segment_id.as_bytes())?;
@@ -395,6 +409,18 @@ impl SegmentWriter {
         file.write_all(&checksum)
             .map_err(|error| io_error(error, "segment staging file could not be written"))?;
         Ok(checksum)
+    }
+
+    fn required_features(&self) -> u64 {
+        if self
+            .records
+            .iter()
+            .any(|record| record.kind == SegmentRecordKind::MetadataObject)
+        {
+            REQUIRED_FEATURE_METADATA_OBJECT
+        } else {
+            0
+        }
     }
 }
 
