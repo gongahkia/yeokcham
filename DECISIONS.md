@@ -1,0 +1,121 @@
+# Architecture Decision Records
+
+## ADR-001 — Three distinct histories
+
+**Decision:** Paengi models scratch, intent, and release histories separately.
+
+**Reason:** Recovery, collaboration, and release auditing have different retention and usability requirements.
+
+**Consequence:** The CLI and storage model must expose all three rather than disguising them as one commit graph.
+
+## ADR-002 — OCaml implementation
+
+**Decision:** Implement Paengi in OCaml.
+
+**Reason:** The core project is an algebraic model of immutable state transitions, composition, conflicts, and compaction.
+
+**Consequence:** Persistent formats must remain portable and must not use OCaml `Marshal`.
+
+## ADR-003 — Exact bytes are canonical
+
+**Decision:** File bytes and filesystem structure are authoritative.
+
+**Reason:** A general VCS must preserve comments, formatting, invalid source, generated files, binaries, and unsupported languages.
+
+**Consequence:** AST or semantic data is always a sidecar with textual or exact fallback.
+
+## ADR-004 — Automatic scratch history is bounded
+
+**Decision:** Scratch checkpoints are subject to explicit retention and compaction.
+
+**Reason:** Saving everything forever recreates the historical growth problem.
+
+**Consequence:** Pinning and compaction invariants are core features, not later maintenance work.
+
+## ADR-005 — Stable capsule ID, immutable revisions
+
+**Decision:** Logical capsule identity remains stable while each revision is immutable.
+
+**Reason:** Humans think of a feature or fix as one continuing unit even while implementation changes.
+
+**Consequence:** References must distinguish capsule ID from revision ID.
+
+## ADR-006 — Conflicts are persistent values
+
+**Decision:** Conflicts are stored repository objects.
+
+**Reason:** A conflict may require deferred resolution and should not globally block unrelated work.
+
+**Consequence:** Commands must operate in repositories containing unresolved conflicts.
+
+## ADR-007 — Composition is explicit and deterministic
+
+**Decision:** Workspace materialisation depends on a declared base, revision set, dependency graph, order, and policies.
+
+**Reason:** Hidden or environment-dependent ordering makes capsules unpredictable.
+
+**Consequence:** Paengi must explain composition order.
+
+## ADR-008 — Semantic replay exposes uncertainty
+
+**Decision:** Semantic operations carry confidence and may yield uncertainty conflicts.
+
+**Reason:** A clean-looking automatic application can still be incorrect.
+
+**Consequence:** The system must not silently convert uncertain matches into exact success.
+
+## ADR-009 — Git is an interchange layer
+
+**Decision:** Git import/export does not define Paengi's internal model.
+
+**Reason:** Recreating Git concepts would undermine the experimental purpose.
+
+**Consequence:** Imported Git history may be represented opaquely, and export policies must be explicit.
+
+## ADR-010 — Local model before distributed sync
+
+**Decision:** Do not implement remote synchronisation until scratch, capsule, workspace, conflict, and release invariants are stable.
+
+**Reason:** Distribution multiplies ambiguity and failure states.
+
+**Consequence:** The first useful product is entirely local.
+
+## ADR-011 — Polling scan before filesystem watcher
+
+**Decision:** Begin with deterministic explicit or debounced scans.
+
+**Reason:** Platform-specific watcher semantics add complexity before the history model is validated.
+
+**Consequence:** Early prototypes may use more I/O.
+
+## ADR-012 — Portable canonical encoding
+
+**Decision:** Persistent objects use a versioned portable encoding such as canonical CBOR, selected after library validation.
+
+**Reason:** Repository longevity must not depend on OCaml runtime representation.
+
+**Consequence:** Encoding is part of the tested specification.
+
+## ADR-013 — Hash abstraction
+
+**Decision:** Internal IDs use a hash abstraction; SHA-256 is acceptable initially.
+
+**Reason:** Hash choice should not permeate the model, and implementation availability matters.
+
+**Consequence:** Encodings record the algorithm.
+
+## ADR-014 — No semantic compaction initially
+
+**Decision:** Scratch compaction uses only provable byte- or graph-level transformations in the initial prototype.
+
+**Reason:** Inferring that two semantic edit sequences are equivalent is unsafe.
+
+**Consequence:** Semantic research focuses on capsule replay, not deleting recovery history.
+
+## ADR-015 — TypeScript first semantic adapter
+
+**Decision:** Prototype semantic sidecars for TypeScript before Rust.
+
+**Reason:** TypeScript provides common source structures and a broad demonstration audience; Rust follows to test a stricter and macro-heavy language.
+
+**Consequence:** The byte model must remain language-neutral.
