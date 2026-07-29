@@ -494,6 +494,45 @@ impl LocalRepository {
         Ok(record)
     }
 
+    /// Reconstructs the exact blob body selected by one verified manifest.
+    ///
+    /// This returns only raw Git blob body bytes. Callers that need a Git
+    /// object identity must perform final object verification separately.
+    pub fn reconstruct_blob_bytes(
+        &self,
+        manifest: &BlobManifest,
+        maximum_segment_bytes: u64,
+        limits: SegmentReadLimits,
+    ) -> Result<Vec<u8>> {
+        let record = self.resolve_manifest_record(manifest, maximum_segment_bytes, limits)?;
+        match manifest.representation() {
+            BlobManifestRepresentation::WholeBlob => record
+                .as_whole_blob()
+                .map(|record| record.data().to_vec())
+                .ok_or_else(|| {
+                    Error::new(
+                        ErrorKind::CorruptData,
+                        "segment record type does not match the blob manifest",
+                    )
+                }),
+            BlobManifestRepresentation::TinyBlobAggregation => record
+                .as_tiny_blob_aggregation()
+                .and_then(|aggregation| {
+                    aggregation
+                        .entries()
+                        .iter()
+                        .find(|entry| entry.git_object_id() == manifest.git_object_id())
+                })
+                .map(|entry| entry.data().to_vec())
+                .ok_or_else(|| {
+                    Error::new(
+                        ErrorKind::CorruptData,
+                        "tiny-blob aggregation does not contain the manifest blob",
+                    )
+                }),
+        }
+    }
+
     fn verify_existing_blob_manifest(
         &self,
         path: &Path,
@@ -1721,6 +1760,57 @@ mod tests {
             .expect("selected entry");
         assert_eq!(entry.content_id(), tiny.content_id());
         assert_eq!(entry.data(), b"\0selected\xff");
+    }
+
+    #[test]
+    fn reconstructs_exact_whole_and_tiny_blob_bytes() {
+        let temporary = TestDirectory::new();
+        let root = temporary.path().join("repository");
+        let repository = LocalRepository::create(&root).expect("create repository");
+        let whole = whole_blob_manifest(
+            &repository,
+            MANIFEST_ID_A.parse().expect("manifest ID"),
+            SEGMENT_ID_A.parse().expect("segment ID"),
+            b"\0whole\xff\n",
+        );
+        assert_eq!(
+            repository
+                .reconstruct_blob_bytes(&whole, 4_096, segment_limits())
+                .expect("reconstruct whole blob"),
+            b"\0whole\xff\n"
+        );
+
+        let (tiny, _) = tiny_blob_manifest(
+            &repository,
+            MANIFEST_ID_B.parse().expect("manifest ID"),
+            SEGMENT_ID_B.parse().expect("segment ID"),
+        );
+        assert_eq!(
+            repository
+                .reconstruct_blob_bytes(&tiny, 4_096, segment_limits())
+                .expect("reconstruct tiny blob"),
+            b"\0selected\xff"
+        );
+    }
+
+    #[test]
+    fn reconstruction_returns_segment_resolution_errors_without_body_disclosure() {
+        let temporary = TestDirectory::new();
+        let root = temporary.path().join("repository");
+        let repository = LocalRepository::create(&root).expect("create repository");
+        let manifest = whole_blob_manifest(
+            &repository,
+            MANIFEST_ID_A.parse().expect("manifest ID"),
+            SEGMENT_ID_A.parse().expect("segment ID"),
+            b"private reconstruction body",
+        );
+        fs::remove_file(repository.segment_path(manifest.segment_id())).expect("remove segment");
+
+        let error = repository
+            .reconstruct_blob_bytes(&manifest, 4_096, segment_limits())
+            .expect_err("missing segment");
+        assert_eq!(error.kind(), ErrorKind::NotFound);
+        assert!(!error.to_string().contains("private reconstruction body"));
     }
 
     #[test]

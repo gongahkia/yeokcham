@@ -51,3 +51,4 @@ Valid statuses are `Proposed`, `Accepted`, `Rejected`, `Deprecated`, and `Supers
 | [ADR-0043](0043-record-explicit-blob-storage-policy.md) | Accepted | Record explicit storage policy in new blob manifests |
 | [ADR-0044](0044-immutable-local-blob-manifest-publication.md) | Accepted | Publish and scan immutable local blob manifests |
 | [ADR-0045](0045-verify-local-manifest-record-resolution.md) | Accepted | Resolve manifest records through verified local segments |
+| [ADR-0046](0046-reconstruct-exact-blob-body-bytes.md) | Accepted | Reconstruct exact blob bytes from a verified manifest record |
