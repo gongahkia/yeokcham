@@ -6,6 +6,8 @@ paengi's strongest portfolio value comes from making its model falsifiable.
 
 Each core claim should map to an invariant, generated test, benchmark, or comparative experiment.
 
+Paengi is a local VCS and persistent-data-model project. Testing is limited to repository correctness and checked-in local fixtures; external security analysis is outside scope. Bounds checks, corruption detection, atomic writes, and malformed-input handling remain required storage-system behavior.
+
 ## 2. Test layers
 
 ### Unit tests
@@ -28,6 +30,8 @@ Cover:
 ### Property tests
 
 Use QCheck or an equivalent maintained OCaml property-testing library.
+
+Property tests use bounded counts and a printed, reproducible seed. Independent per-property random states must be derived from that base seed so test order cannot alter generated inputs. Codec tests must include deterministically sampled zero, boundary, near-limit, and malformed byte lengths.
 
 Generate:
 
@@ -341,7 +345,7 @@ The comparison should acknowledge features those tools already provide.
 - Dune.
 - Alcotest.
 - QCheck.
-- An instrumented generated-input runner where suitable.
+- Bounded deterministic generated-input properties for pure codecs.
 - SQLite bindings for indexes.
 - Process-level benchmark scripts.
 - `hyperfine` where appropriate.

@@ -116,7 +116,7 @@ No persistent objects exist, so v1 introduces no migration. Existing object file
 - 2026-07-29: an instrumented payload callback is not invoked for a checksum-invalid envelope and is invoked only after checksum verification on a checksum-valid malformed payload.
 - 2026-07-29: 500 generated envelope round trips, 500 generated one-byte corruptions, and 2,000 arbitrary-byte cases pass.
 - 2026-07-29: `make ci` passes.
-- Instrumented generated-input exploration and header-verification benchmarks are not yet run; no verification-completeness or performance claim follows from these tests.
+- Header-verification benchmarks are not yet run; no performance claim follows from these tests. Bounded deterministic properties and checked-in malformed fixtures provide repository-correctness evidence only; they are not external security analysis.
 
 ## CLI and user impact
 

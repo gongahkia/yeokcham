@@ -58,7 +58,11 @@ make setup
 make ci
 ```
 
-`make build`, `make test`, `make lint`, and `make format` expose the individual steps. `make check` runs build, format verification, lint, package validation, and tests without the GitHub Actions linter.
+`make build`, `make test`, `make property-test`, `make lint`, and `make format` expose the individual steps. `make check` runs build, format verification, lint, package validation, and tests without the GitHub Actions linter.
+
+## Testing scope
+
+Paengi is a local VCS and persistent-data-model project. Its tests cover repository correctness, deterministic generated inputs, and checked-in local fixtures. External security analysis is outside scope. Bounds checks, corruption detection, atomic writes, and malformed-input handling remain required storage-system behavior.
 
 ## Non-goals for the initial prototype
 

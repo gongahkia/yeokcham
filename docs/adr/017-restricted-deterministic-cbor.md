@@ -34,7 +34,7 @@ The available OCaml packages do not implement the required profile as a strict b
 
 - Uses a published standard and official vectors while exposing only Paengi's required subset.
 - Can reject unsupported forms before allocating from input-declared lengths.
-- Adds strict parser code that requires malformed-input, instrumented generated-input exploration, and independent interoperability evidence.
+- Adds strict parser code that requires malformed-input fixtures, bounded deterministic generated-input properties, and independent interoperability evidence.
 
 ### `cbor` 0.5 behind a strict adapter
 
@@ -112,7 +112,7 @@ Future changes that alter accepted values or canonical bytes require a new profi
 - Generated encode/decode round trips, re-encoding stability, map permutation invariance, integer boundaries, arbitrary bytes, and valid UTF-8.
 - Failure tests for every unsupported major or simple type, non-minimal head, indefinite form, invalid UTF-8, duplicate or unsorted map key, truncation point, trailing byte, overflow, impossible length, exhausted work budget, and depth 65.
 - Differential fixture checks with an independent RFC 8949 implementation, recording its name and version.
-- Instrumented generated-input exploration of the decoder before persistent input is treated as trustworthy.
+- Bounded deterministic generated-input properties of the decoder, including totality and canonical-byte checks, before persistent input is treated as trustworthy.
 - Encoder and decoder throughput and allocation baselines on representative tree and snapshot fixtures; no throughput claim is made by this ADR.
 - I/O failure injection is not applicable to the pure codec. Envelope and object-store writes require separate failure tests.
 
@@ -124,7 +124,7 @@ Future changes that alter accepted values or canonical bytes require a new profi
 - 2026-07-29: `cbor2` 6.1.3 independently produced the same canonical bytes for 16 Profile 1 vectors.
 - 2026-07-29: source-controlled `test/golden/profile1-v1-composite.cbor.hex` covers binary bytes, valid Unicode text, signed 64-bit boundaries, arrays, ordered numeric-key maps, booleans, and null; it decodes and re-encodes byte-identically in Dune's sandboxed test run.
 - 2026-07-29: `make ci` passes.
-- Instrumented generated-input exploration and encoder/decoder benchmarks are not yet run; both remain explicit TODO work before object persistence or performance claims.
+- Encoder/decoder benchmarks are not yet run; they remain explicit TODO work before performance claims. Bounded deterministic properties and checked-in malformed fixtures provide repository-correctness evidence only; they are not external security analysis.
 
 ## CLI and user impact
 
