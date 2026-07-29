@@ -1,13 +1,16 @@
-use std::{io, path::Path};
+use std::{error::Error as StdError, io, path::Path};
 
-use crate::{Error, ErrorKind, Result};
+use crate::{Error, ErrorKind, RefName, Result};
+
+const MAX_REFERENCE_COUNT: usize = 1_000_000;
 
 /// An opened, ownership-checked Git repository behind Yeokcham's Git adapter.
 ///
 /// The adapter uses isolated, strict `gix` opening: it reads only repository
 /// configuration, does not use Git environment overrides, and rejects an
 /// untrusted Git directory. It supports bare repositories and worktrees but
-/// does not yet enumerate refs or return objects.
+/// enumerates regular ref names but does not yet resolve ref targets or return
+/// objects.
 pub struct GitRepository {
     inner: gix::ThreadSafeRepository,
 }
@@ -47,6 +50,59 @@ impl GitRepository {
     pub fn is_bare(&self) -> bool {
         self.work_dir().is_none()
     }
+
+    /// Returns regular Git reference names sorted by their exact bytes.
+    ///
+    /// Pseudo-refs such as `HEAD` are excluded. Names are validated through
+    /// [`RefName`] without UTF-8 conversion or normalization. The result is a
+    /// point-in-time enumeration only; it is not a ref transaction snapshot.
+    ///
+    /// Enumeration rejects malformed references and repositories with more
+    /// than 1,000,000 regular refs to bound allocation.
+    pub fn ref_names(&self) -> Result<Vec<RefName>> {
+        let repository = self.inner.to_thread_local();
+        let references = repository.references().map_err(reference_store_error)?;
+        let iterator = references.all().map_err(|source| {
+            reference_corrupt_error("Git references could not be enumerated", source)
+        })?;
+        let mut names = Vec::new();
+
+        for reference in iterator {
+            let reference = reference.map_err(|source| {
+                Error::with_boxed_source(
+                    ErrorKind::CorruptData,
+                    "Git reference could not be enumerated",
+                    source,
+                )
+            })?;
+            let bytes: &[u8] = reference.name().as_bstr().as_ref();
+            if !bytes.starts_with(b"refs/") {
+                continue;
+            }
+            if names.len() == MAX_REFERENCE_COUNT {
+                return Err(Error::new(
+                    ErrorKind::Unsupported,
+                    "Git repository has too many references",
+                ));
+            }
+            names.push(RefName::from_bytes(bytes).map_err(|source| {
+                Error::with_source(
+                    ErrorKind::CorruptData,
+                    "Git reference name is invalid",
+                    source,
+                )
+            })?);
+        }
+
+        names.sort();
+        if names.windows(2).any(|pair| pair[0] == pair[1]) {
+            return Err(Error::new(
+                ErrorKind::CorruptData,
+                "Git reference enumeration contains duplicate names",
+            ));
+        }
+        Ok(names)
+    }
 }
 
 fn open_error(error: gix::open::Error) -> Error {
@@ -72,6 +128,22 @@ fn open_error(error: gix::open::Error) -> Error {
     }
 }
 
+fn reference_store_error(error: gix::refs::packed::buffer::open::Error) -> Error {
+    match error {
+        gix::refs::packed::buffer::open::Error::Io(source) => {
+            Error::with_source(ErrorKind::Io, "Git references could not be read", source)
+        }
+        source => reference_corrupt_error("Git packed references are malformed", source),
+    }
+}
+
+fn reference_corrupt_error<E>(message: &'static str, source: E) -> Error
+where
+    E: StdError + Send + Sync + 'static,
+{
+    Error::with_source(ErrorKind::CorruptData, message, source)
+}
+
 #[cfg(test)]
 mod tests {
     use std::{
@@ -79,6 +151,9 @@ mod tests {
         path::{Path, PathBuf},
         process::Command,
     };
+
+    #[cfg(target_os = "linux")]
+    use std::{ffi::OsString, os::unix::ffi::OsStringExt};
 
     use uuid::Uuid;
 
@@ -114,6 +189,57 @@ mod tests {
             "Git failed: {}",
             String::from_utf8_lossy(&output.stderr)
         );
+    }
+
+    fn run_git_in(directory: &Path, arguments: &[&str]) {
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(directory)
+            .args(arguments)
+            .output()
+            .expect("run Git");
+        assert!(
+            output.status.success(),
+            "Git failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    fn git_stdout(directory: &Path, arguments: &[&str]) -> String {
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(directory)
+            .args(arguments)
+            .output()
+            .expect("run Git");
+        assert!(
+            output.status.success(),
+            "Git failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout)
+            .expect("Git output must be UTF-8")
+            .trim()
+            .to_owned()
+    }
+
+    fn initialize_committed_worktree(temporary: &TestDirectory) -> PathBuf {
+        let worktree = temporary.path().join("worktree");
+        let worktree_text = worktree.to_str().expect("UTF-8 test path");
+        run_git(&["init", "--initial-branch=main", worktree_text]);
+        run_git_in(
+            &worktree,
+            &[
+                "-c",
+                "user.name=Yeokcham Test",
+                "-c",
+                "user.email=test@example.invalid",
+                "commit",
+                "--allow-empty",
+                "--message=initial",
+            ],
+        );
+        worktree
     }
 
     #[test]
@@ -154,5 +280,78 @@ mod tests {
         assert_eq!(missing_error.kind(), ErrorKind::NotFound);
         assert_eq!(invalid_error.kind(), ErrorKind::InvalidInput);
         assert!(!format!("{invalid_error:?}").contains("not-a-repository"));
+    }
+
+    #[test]
+    fn enumerates_sorted_regular_ref_names_from_packed_and_loose_storage() {
+        let temporary = TestDirectory::new();
+        let worktree = initialize_committed_worktree(&temporary);
+        let object_id = git_stdout(&worktree, &["rev-parse", "HEAD"]);
+        run_git_in(&worktree, &["update-ref", "refs/heads/alpha", &object_id]);
+        run_git_in(&worktree, &["update-ref", "refs/tags/v1.0", &object_id]);
+        run_git_in(&worktree, &["pack-refs", "--all", "--prune"]);
+        run_git_in(&worktree, &["update-ref", "refs/heads/z-last", &object_id]);
+        run_git_in(
+            &worktree,
+            &[
+                "symbolic-ref",
+                "refs/remotes/origin/HEAD",
+                "refs/remotes/origin/main",
+            ],
+        );
+
+        let names = GitRepository::open(&worktree)
+            .expect("open repository")
+            .ref_names()
+            .expect("enumerate references");
+        let bytes: Vec<Vec<u8>> = names.iter().map(|name| name.as_bytes().to_vec()).collect();
+
+        assert_eq!(
+            bytes,
+            vec![
+                b"refs/heads/alpha".to_vec(),
+                b"refs/heads/main".to_vec(),
+                b"refs/heads/z-last".to_vec(),
+                b"refs/remotes/origin/HEAD".to_vec(),
+                b"refs/tags/v1.0".to_vec(),
+            ]
+        );
+        assert!(bytes.iter().all(|name| name.starts_with(b"refs/")));
+        assert!(!bytes.iter().any(|name| name == b"HEAD"));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn preserves_non_utf8_regular_ref_names() {
+        let temporary = TestDirectory::new();
+        let worktree = initialize_committed_worktree(&temporary);
+        let object_id = git_stdout(&worktree, &["rev-parse", "HEAD"]);
+        let raw_component = OsString::from_vec(vec![0xff]);
+        let raw_path = worktree.join(".git/refs/heads").join(raw_component);
+        fs::write(raw_path, format!("{object_id}\n")).expect("write raw-byte ref");
+
+        let names = GitRepository::open(&worktree)
+            .expect("open repository")
+            .ref_names()
+            .expect("enumerate references");
+        let bytes: Vec<Vec<u8>> = names.iter().map(|name| name.as_bytes().to_vec()).collect();
+
+        assert!(bytes.contains(&b"refs/heads/\xff".to_vec()));
+    }
+
+    #[test]
+    fn rejects_malformed_packed_references_without_disclosing_them() {
+        let temporary = TestDirectory::new();
+        let worktree = initialize_committed_worktree(&temporary);
+        fs::write(worktree.join(".git/packed-refs"), b"not-a-reference\n")
+            .expect("write malformed packed refs");
+
+        let error = GitRepository::open(&worktree)
+            .expect("open repository")
+            .ref_names()
+            .expect_err("malformed packed refs must fail");
+
+        assert_eq!(error.kind(), ErrorKind::CorruptData);
+        assert!(!error.to_string().contains("not-a-reference"));
     }
 }
