@@ -67,6 +67,20 @@
  (libraries alcotest paengi_encoding paengi_envelope paengi_store unix))
 
 (test
+ (name test_persisted_snapshot)
+ (modules test_persisted_snapshot)
+ (libraries
+  alcotest
+  paengi_encoding
+  paengi_envelope
+  paengi_snapshot
+  paengi_store
+  paengi_testkit
+  unix)
+ (deps
+  (source_tree golden)))
+
+(test
  (name encoding_property_test)
  (modules encoding_property_test)
  (libraries
@@ -95,15 +109,28 @@
   paengi_store
   unix))
 
+(test
+ (name snapshot_property_test)
+ (modules snapshot_property_test)
+ (libraries
+  alcotest
+  qcheck-core
+  qcheck-alcotest
+  paengi_snapshot
+  paengi_store
+  unix))
+
 (rule
  (alias property-test)
  (deps
   (:encoding_property_test encoding_property_test.exe)
   (:model_property_test model_property_test.exe)
   (:store_property_test store_property_test.exe)
+  (:snapshot_property_test snapshot_property_test.exe)
   (source_tree fixtures/encoding))
  (action
   (progn
    (run %{encoding_property_test})
    (run %{model_property_test})
-   (run %{store_property_test}))))
+   (run %{store_property_test})
+   (run %{snapshot_property_test}))))

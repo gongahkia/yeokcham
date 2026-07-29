@@ -64,6 +64,34 @@ module Snapshot : sig
   val load : Paengi_store.repository -> id -> (t, error) result
 end
 
+module Materialize : sig
+  type action =
+    | Create_directory of string list
+    | Write_file of {
+        path : string list;
+        content : Content.id;
+        mode : file_mode;
+      }
+    | Create_symlink of { path : string list; target : Content.id }
+
+  type error =
+    | Snapshot_error of error
+    | Destination_not_directory of string
+    | Destination_not_empty of string
+    | Unsafe_destination_path of string list
+    | Invalid_symlink_target of string list
+    | Io_error of { path : string; operation : string; message : string }
+
+  val error_to_string : error -> string
+  val plan : Paengi_store.repository -> Snapshot.t -> (action list, error) result
+
+  val write :
+    destination:string ->
+    Paengi_store.repository ->
+    Snapshot.t ->
+    (unit, error) result
+end
+
 val scan :
   root:string ->
   store:Paengi_store.repository ->

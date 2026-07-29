@@ -19,4 +19,6 @@ Each fixture is exactly one nonempty line of lowercase ASCII hexadecimal digits 
 
 `model-v1-snapshot-empty.peng.hex`, `model-v1-snapshot-nested.peng.hex`, `model-v1-scratch-event.peng.hex`, and `model-v1-checkpoint.peng.hex` are Envelope-1 bytes containing the existing model canonical payload schemas. They cover empty and nested trees, canonical ordering, all file modes, all five scratch operations, checkpoint metadata, and retention reasons.
 
+`store-v1-content.peng.hex`, `store-v1-tree.peng.hex`, and `store-v1-snapshot.peng.hex` are Envelope-1 bytes for ADR-021's persisted Content, Tree, and Snapshot schemas. They cover exact binary content, executable mode, a typed content reference, and a typed root-tree reference.
+
 Changing any fixture bytes requires a format decision and retained compatibility evidence; adding a new schema requires a new named fixture.

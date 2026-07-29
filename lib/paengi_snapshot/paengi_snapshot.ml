@@ -297,7 +297,29 @@ module Tree = struct
       Error
         (Unexpected_object_type
            { expected = Envelope.Tree; actual = Envelope.object_type object_ })
-    else decode (Envelope.payload object_)
+    else
+      let* tree = decode (Envelope.payload object_) in
+      let rec validate_references = function
+        | [] -> Ok ()
+        | (_, File { content; _ }) :: rest ->
+            let* _ = Content.load repository content in
+            validate_references rest
+        | (_, Directory child) :: rest ->
+            let* child_object =
+              Store.get repository child
+              |> Result.map_error (fun error -> Store_error error)
+            in
+            if Envelope.object_type child_object <> Envelope.Tree then
+              Error
+                (Unexpected_object_type
+                   {
+                     expected = Envelope.Tree;
+                     actual = Envelope.object_type child_object;
+                   })
+            else validate_references rest
+      in
+      let* () = validate_references tree in
+      Ok tree
 end
 
 module Snapshot = struct
@@ -345,7 +367,176 @@ module Snapshot = struct
       Error
         (Unexpected_object_type
            { expected = Envelope.Snapshot; actual = Envelope.object_type object_ })
-    else decode (Envelope.payload object_)
+    else
+      let* snapshot = decode (Envelope.payload object_) in
+      let* _ = Tree.load repository snapshot.root in
+      Ok snapshot
+end
+
+let snapshot_error_to_string = error_to_string
+type snapshot_model_error = error
+
+module Materialize = struct
+  type action =
+    | Create_directory of string list
+    | Write_file of {
+        path : string list;
+        content : Content.id;
+        mode : file_mode;
+      }
+    | Create_symlink of { path : string list; target : Content.id }
+
+  type error =
+    | Snapshot_error of snapshot_model_error
+    | Destination_not_directory of string
+    | Destination_not_empty of string
+    | Unsafe_destination_path of string list
+    | Invalid_symlink_target of string list
+    | Io_error of { path : string; operation : string; message : string }
+
+  let error_to_string = function
+    | Snapshot_error error -> snapshot_error_to_string error
+    | Destination_not_directory path ->
+        Printf.sprintf "materialisation destination is not a directory: %s" path
+    | Destination_not_empty path ->
+        Printf.sprintf "materialisation destination is not empty: %s" path
+    | Unsafe_destination_path components ->
+        Printf.sprintf "unsafe materialisation path: %s" (String.concat "/" components)
+    | Invalid_symlink_target components ->
+        Printf.sprintf "symlink target contains NUL bytes: %s" (String.concat "/" components)
+    | Io_error { path; operation; message } ->
+        Printf.sprintf "%s failed for %s: %s" operation path message
+
+  let io_error operation path error =
+    Io_error { path; operation; message = Unix.error_message error }
+
+  let safe_output_path destination components =
+    if List.for_all valid_name components then
+      Ok (List.fold_left Filename.concat destination components)
+    else Error (Unsafe_destination_path components)
+
+  let plan repository snapshot =
+    let rec plan_tree prefix identity =
+      let* tree =
+        Tree.load repository identity |> Result.map_error (fun error -> Snapshot_error error)
+      in
+      let rec plan_entries reversed = function
+        | [] -> Ok (List.rev reversed)
+        | (name, entry) :: rest ->
+            let path = prefix @ [ name ] in
+            let* actions =
+              match entry with
+              | Tree.File { mode = Symlink; content } ->
+                  Ok [ Create_symlink { path; target = content } ]
+              | Tree.File { mode = (Regular | Executable as mode); content } ->
+                  Ok [ Write_file { path; content; mode } ]
+              | Tree.Directory child ->
+                  let* descendants = plan_tree path child in
+                  Ok (Create_directory path :: descendants)
+            in
+            plan_entries (List.rev_append actions reversed) rest
+      in
+      plan_entries [] (Tree.entries tree)
+    in
+    plan_tree [] (Snapshot.root snapshot)
+
+  let validate_destination destination =
+    try
+      let stat = Unix.lstat destination in
+      if stat.Unix.st_kind <> Unix.S_DIR then Error (Destination_not_directory destination)
+      else
+        try
+          if Array.length (Sys.readdir destination) = 0 then Ok ()
+          else Error (Destination_not_empty destination)
+        with Sys_error message ->
+          Error (Io_error { path = destination; operation = "readdir"; message })
+    with Unix.Unix_error (error, _, _) -> Error (io_error "lstat" destination error)
+
+  let write_all descriptor path bytes =
+    let length = Bytes.length bytes in
+    let rec write offset =
+      if offset = length then Ok ()
+      else
+        try
+          match Unix.write descriptor bytes offset (length - offset) with
+          | 0 ->
+              Error
+                (Io_error
+                   {
+                     path;
+                     operation = "write";
+                     message = "write returned zero before completion";
+                   })
+          | count -> write (offset + count)
+        with Unix.Unix_error (error, _, _) -> Error (io_error "write" path error)
+    in
+    write 0
+
+  let close descriptor path =
+    try
+      Unix.close descriptor;
+      Ok ()
+    with Unix.Unix_error (error, _, _) -> Error (io_error "close" path error)
+
+  let write_file path contents mode =
+    try
+      let descriptor =
+        Unix.openfile path [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_EXCL ] 0o600
+      in
+      let write_result = write_all descriptor path (Bytes.of_string contents) in
+      let close_result = close descriptor path in
+      let* () = write_result in
+      let* () = close_result in
+      let permissions = if mode = Executable then 0o755 else 0o644 in
+      (try
+         Unix.chmod path permissions;
+         Ok ()
+       with Unix.Unix_error (error, _, _) -> Error (io_error "chmod" path error))
+    with Unix.Unix_error (error, _, _) -> Error (io_error "create" path error)
+
+  let create_directory path =
+    try
+      Unix.mkdir path 0o700;
+      Ok ()
+    with Unix.Unix_error (error, _, _) -> Error (io_error "mkdir" path error)
+
+  let create_symlink path target components =
+    if String.contains target '\000' then Error (Invalid_symlink_target components)
+    else
+      try
+        Unix.symlink target path;
+        Ok ()
+      with Unix.Unix_error (error, _, _) -> Error (io_error "symlink" path error)
+
+  let write ~destination repository snapshot =
+    let* () = validate_destination destination in
+    let* actions = plan repository snapshot in
+    let rec apply = function
+      | [] -> Ok ()
+      | action :: rest ->
+          let* () =
+            match action with
+            | Create_directory components ->
+                let* path = safe_output_path destination components in
+                create_directory path
+            | Write_file { path = components; content; mode } ->
+                let* path = safe_output_path destination components in
+                let* contents =
+                  Content.load repository content
+                  |> Result.map_error (fun error -> Snapshot_error error)
+                in
+                write_file path contents mode
+            | Create_symlink { path = components; target } ->
+                let* path = safe_output_path destination components in
+                let* target =
+                  Content.load repository target
+                  |> Result.map_error (fun error -> Snapshot_error error)
+                in
+                create_symlink path target components
+          in
+          apply rest
+    in
+    apply actions
 end
 
 let inline_file_limit = Store.max_object_bytes - 128
