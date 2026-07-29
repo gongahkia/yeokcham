@@ -1,0 +1,19 @@
+(executable
+ (name fuzz_encoding)
+ (modes native)
+ (libraries afl-persistent paengi_encoding unix))
+
+(rule
+ (alias fuzz-smoke)
+ (deps
+  (:exe fuzz_encoding.exe)
+  corpus/valid-empty-bytes.cbor
+  corpus/valid-negative-integer.cbor
+  corpus/invalid-truncated.cbor
+  corpus/invalid-reserved.cbor)
+ (action
+  (progn
+   (run %{exe:fuzz_encoding.exe} %{dep:corpus/valid-empty-bytes.cbor})
+   (run %{exe:fuzz_encoding.exe} %{dep:corpus/valid-negative-integer.cbor})
+   (run %{exe:fuzz_encoding.exe} %{dep:corpus/invalid-truncated.cbor})
+   (run %{exe:fuzz_encoding.exe} %{dep:corpus/invalid-reserved.cbor}))))

@@ -5,13 +5,13 @@ The roadmap is ordered. The local byte-correct model must exist before semantic 
 ## Active vertical slice
 
 - Milestone: 0 — Project and model foundation.
-- Task: reject unknown mandatory features (complete).
-- Modules/files: `test/golden/`, `Paengi_envelope` tests, this active slice, and ADR-019 verification evidence; no persistent write or CLI.
-- Types: checksum-valid Envelope-1 `Snapshot` fixtures carrying mandatory bit `0` and unsigned bit `63`; typed `Unknown_mandatory_features` decode errors.
-- Invariants: current Envelope 1 accepts only mask `0`; any nonzero mask is rejected at header offset `8` after checksum validation and before the payload decoder runs; signed OCaml representation does not change the wire interpretation of bit `63`.
-- Tests: retained source-controlled fixtures for low and high bits; typed error kind and offset; no payload-callback invocation; 500 generated nonzero masks; independent OpenSSL and `shasum` checksum matches; and `make ci` pass on 2026-07-29.
-- External libraries: no new dependency.
-- ADR changes: no new ADR; [ADR-019](docs/adr/019-object-format-versions-and-mandatory-features.md) records retained rejection evidence on 2026-07-29.
+- Task: add coverage-guided encoding decoder fuzzing (in progress).
+- Modules/files: `fuzz/`, `Makefile`, package test dependencies, this active slice, and ADR-017 verification evidence; no persistent write or CLI.
+- Types: no model or persistent-format type changes; the native harness receives arbitrary byte strings from AFL++.
+- Invariants: decoding arbitrary input must either return a typed result or fail the harness; every accepted input must re-encode byte-identically; only an OCaml compiler built with AFL instrumentation may be used for a coverage-guided run.
+- Tests: deterministic corpus smoke test, existing arbitrary-byte canonicality property, and a bounded AFL++ run using the isolated native harness.
+- External libraries: `afl-persistent` 1.4 as a test-only dependency.
+- ADR changes: no new ADR; ADR-017 will record harness and run evidence after verification.
 
 ## Milestone 0 — Project and model foundation
 
