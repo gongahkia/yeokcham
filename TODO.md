@@ -6,13 +6,13 @@ Robustness tasks operate only on Paengi's pure functions and generated local fix
 ## Active vertical slice
 
 - Milestone: 0 — Project and model foundation.
-- Task: replace the encoding harness with bounded deterministic property tests (complete).
-- Modules/files: `test/encoding_property_test.ml`, `test/fixtures/encoding/`, `Makefile`, package test dependencies, and ADR-017/018 verification evidence; no persistent write or CLI.
-- Types: no model or persistent-format type changes; Profile 1 and Envelope 1 decoders retain their existing result types.
-- Invariants: `decode (encode value) = Ok value`; accepted input re-encodes byte-identically because recognised non-canonical encodings are rejected; every supplied byte stream returns a typed result or structured error without an uncaught exception.
-- Tests: checked-in valid and malformed fixtures; 500 valid-value and 2,000 arbitrary-byte QCheck cases per codec; explicit zero, boundary, near-limit, and malformed lengths; independent reproducible per-property seeds. `make check` and `make property-test` pass with the default seed; `make property-test PROPERTY_TEST_SEED=17` also passes.
-- External libraries: Alcotest and QCheck only.
-- ADR changes: no new ADR; update ADR-017/018 verification evidence and scope.
+- Task: define an in-memory byte-exact directory snapshot and replay valid scratch operations.
+- Modules/files: new `lib/paengi_model/` and `test/model_property_test.ml`; update `test/dune`; no persistent write or CLI.
+- Types: validated path, file mode and entry, directory tree, immutable snapshot, and create/modify/delete/move/mode-change scratch operations.
+- Invariants: paths are relative, non-empty, component-safe, and canonical; tree entries are unique and ordered; snapshot IDs derive only from canonical tree bytes; operations validate preconditions and replay atomically without mutation.
+- Tests: unit coverage for each operation, paths, and preconditions; 500 bounded deterministic generated valid directory-operation sequences checked against an independent reference model; independent reproducible property seed.
+- External libraries: existing Alcotest, QCheck, SHA-256, and Profile 1 encoder only.
+- ADR changes: no new ADR; the slice defines no persistent object format.
 
 ## Milestone 0 — Project and model foundation
 
