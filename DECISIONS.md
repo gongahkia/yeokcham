@@ -127,3 +127,4 @@ The ADR lifecycle, numbering rules, and template are defined in [`docs/adr/READM
 ## File-backed ADRs
 
 - [ADR-016 — Initial SHA-256 implementation](docs/adr/016-initial-sha256-implementation.md) — Accepted.
+- [ADR-017 — Restricted deterministic CBOR encoding](docs/adr/017-restricted-deterministic-cbor.md) — Accepted.

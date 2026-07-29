@@ -5,13 +5,13 @@ The roadmap is ordered. The local byte-correct model must exist before semantic 
 ## Active vertical slice
 
 - Milestone: 0 — Project and model foundation.
-- Task: select the initial hash implementation (complete).
-- Modules/files: `Paengi_hash.Sha256` Digestif adapter, dependency metadata, ADR-016, and unit/property tests; no persistence or CLI.
-- Types: no new model types; concrete SHA-256 digest and context remain abstract behind `Paengi_hash.S`.
-- Invariants: digest size is exactly 32 bytes; published vectors match; one-shot and arbitrary chunking agree; raw digest parsing rejects non-32-byte input; Digestif types do not escape the adapter.
-- Tests: published empty/short/multiblock/million-byte vectors, raw conversion failures, 300 generated chunk-boundary cases, fresh dependency bootstrap, and `make ci` pass on 2026-07-29.
-- External libraries: Digestif 1.3.1 with explicit pure-OCaml backend.
-- ADR changes: [ADR-016](docs/adr/016-initial-sha256-implementation.md) accepted by the maintainer on 2026-07-29.
+- Task: select and implement the portable canonical encoding; ADR accepted and implementation in progress.
+- Modules/files: ADR-017, `Paengi_encoding`, unit/property tests, `DECISIONS.md`, and this active slice; no persistent object or CLI.
+- Types: proposed restricted encoding values are signed 64-bit integers, exact byte strings, validated UTF-8 text, arrays, numeric-key maps, booleans, and null.
+- Invariants: one model value has one deterministic byte encoding; lengths and integers are minimal; collections are definite-length; map keys are unique and bytewise ordered; unsupported CBOR forms and non-deterministic input are rejected.
+- Tests: RFC vectors, generated round trips and determinism checks, malformed-input failures, independent cross-checks, random-byte decoding, and bounded-decoder tests.
+- External libraries: evaluated `cbor` 0.5, `cborl` 0.1.0, and `data-encoding` 1.0.1; proposal adds no runtime codec dependency.
+- ADR changes: [ADR-017](docs/adr/017-restricted-deterministic-cbor.md) accepted by the maintainer on 2026-07-29.
 
 ## Milestone 0 — Project and model foundation
 
