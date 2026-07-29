@@ -85,7 +85,7 @@ The local profile removes reliance on a permissive generic decoder and keeps the
 
 ## Model and invariant impact
 
-The encoding layer will define a pure restricted value algebra with integer, bytes, validated text, array, numeric-key map, boolean, and null cases. Map construction must reject duplicate keys and make input order semantically irrelevant.
+The encoding layer defines a pure restricted value algebra with integer, bytes, validated text, array, numeric-key map, boolean, and null cases. Map construction rejects duplicate keys and makes input order semantically irrelevant.
 
 Required invariants are:
 
@@ -107,7 +107,7 @@ Future changes that alter accepted values or canonical bytes require a new profi
 
 ## Verification
 
-- Unit tests from RFC 8949 Appendix A for every supported head width and value type.
+- Unit tests from RFC 8949 Appendix A for supported value types and reachable head-width boundaries.
 - Golden fixtures for each Paengi record schema, retained after later format versions are added.
 - Generated encode/decode round trips, re-encoding stability, map permutation invariance, integer boundaries, arbitrary bytes, and valid UTF-8.
 - Failure tests for every unsupported major or simple type, non-minimal head, indefinite form, invalid UTF-8, duplicate or unsorted map key, truncation point, trailing byte, overflow, impossible length, exhausted work budget, and depth 65.
@@ -115,6 +115,15 @@ Future changes that alter accepted values or canonical bytes require a new profi
 - Coverage-guided fuzzing of the decoder before persistent input is treated as trustworthy.
 - Encoder and decoder throughput and allocation baselines on representative tree and snapshot fixtures; no throughput claim is made by this ADR.
 - I/O failure injection is not applicable to the pure codec. Envelope and object-store writes require separate failure tests.
+
+## Verification evidence
+
+- 2026-07-29: RFC 8949 integer, byte string, text, array, map, boolean, and null vectors pass, including signed 64-bit boundaries.
+- 2026-07-29: constructors reject invalid UTF-8, negative or duplicate map keys, and nesting 65; decoder rejects non-minimal, indefinite, unsupported, unordered, truncated, overflowing, impossible-length, trailing, and work-limited inputs.
+- 2026-07-29: 500 generated value round trips, 300 map-permutation cases, and 2,000 arbitrary-byte decoder cases pass.
+- 2026-07-29: `cbor2` 6.1.3 independently produced the same canonical bytes for 16 Profile 1 vectors.
+- 2026-07-29: `make ci` passes.
+- Coverage-guided fuzzing and encoder/decoder benchmarks are not yet run; both remain explicit TODO work before object persistence or performance claims.
 
 ## CLI and user impact
 

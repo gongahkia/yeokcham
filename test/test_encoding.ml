@@ -129,6 +129,45 @@ let constructor_invariants () =
     (raw_of_hex "a3010118180219010003")
     (Encoding.encode first)
 
+let utf8_boundaries () =
+  let cases =
+    [
+      "\x7f";
+      "\xc2\x80";
+      "\xdf\xbf";
+      "\xe0\xa0\x80";
+      "\xed\x9f\xbf";
+      "\xee\x80\x80";
+      "\xef\xbf\xbf";
+      "\xf0\x90\x80\x80";
+      "\xf4\x8f\xbf\xbf";
+    ]
+  in
+  List.iter
+    (fun input ->
+      let value = text input in
+      Alcotest.(check bool)
+        "UTF-8 boundary round trip" true
+        (match Encoding.decode (Encoding.encode value) with
+        | Ok decoded -> Encoding.equal value decoded
+        | Error _ -> false))
+    cases
+
+let limit_invariants () =
+  let invalid_depth =
+    Encoding.make_limits ~max_depth:(Encoding.max_nesting + 1) ()
+    |> Result.map (fun _ -> false)
+  in
+  Alcotest.(check bool)
+    "depth limit cannot exceed profile" true
+    (invalid_depth = Error (Encoding.Invalid_max_depth 65));
+  let invalid_items =
+    Encoding.make_limits ~max_items:(-1) () |> Result.map (fun _ -> false)
+  in
+  Alcotest.(check bool)
+    "negative item limit rejected" true
+    (invalid_items = Error (Encoding.Invalid_max_items (-1)))
+
 let nesting_invariants () =
   let rec nest count value =
     if count = 0 then value else nest (count - 1) (array [ value ])
@@ -188,9 +227,9 @@ let rejection_cases () =
   expect_kind "negative integer outside profile" Encoding.Argument_out_of_range
     (raw_of_hex "3b8000000000000000");
   expect_kind "impossible byte string length"
-    (Encoding.Declared_length_exceeds_input 1L) (raw_of_hex "5a00000001");
+    (Encoding.Declared_length_exceeds_input 65_536L) (raw_of_hex "5a00010000");
   expect_kind "impossible array count" (Encoding.Declared_items_exceed_input 1L)
-    (raw_of_hex "9801");
+    (raw_of_hex "81");
   expect_kind "impossible map count" (Encoding.Declared_items_exceed_input 1L)
     (raw_of_hex "a1");
   let over_depth = String.make 65 (Char.chr 0x81) ^ "\xf6" in
@@ -295,6 +334,8 @@ let () =
         [
           Alcotest.test_case "enforce profile invariants" `Quick
             constructor_invariants;
+          Alcotest.test_case "accept UTF-8 boundaries" `Quick utf8_boundaries;
+          Alcotest.test_case "validate decoder limits" `Quick limit_invariants;
           Alcotest.test_case "enforce nesting bound" `Quick nesting_invariants;
         ] );
       ( "decoder rejections",

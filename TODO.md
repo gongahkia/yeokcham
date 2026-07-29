@@ -5,13 +5,13 @@ The roadmap is ordered. The local byte-correct model must exist before semantic 
 ## Active vertical slice
 
 - Milestone: 0 — Project and model foundation.
-- Task: select and implement the portable canonical encoding; ADR accepted and implementation in progress.
-- Modules/files: ADR-017, `Paengi_encoding`, unit/property tests, `DECISIONS.md`, and this active slice; no persistent object or CLI.
-- Types: proposed restricted encoding values are signed 64-bit integers, exact byte strings, validated UTF-8 text, arrays, numeric-key maps, booleans, and null.
+- Task: select and implement the portable canonical encoding (complete).
+- Modules/files: `Paengi_encoding`, ADR-017, unit/property tests, `DECISIONS.md`, and this active slice; no persistent object or CLI.
+- Types: restricted values are signed 64-bit integers, exact byte strings, validated UTF-8 text, arrays, numeric-key maps, booleans, and null.
 - Invariants: one model value has one deterministic byte encoding; lengths and integers are minimal; collections are definite-length; map keys are unique and bytewise ordered; unsupported CBOR forms and non-deterministic input are rejected.
-- Tests: RFC vectors, generated round trips and determinism checks, malformed-input failures, independent cross-checks, random-byte decoding, and bounded-decoder tests.
-- External libraries: evaluated `cbor` 0.5, `cborl` 0.1.0, and `data-encoding` 1.0.1; proposal adds no runtime codec dependency.
-- ADR changes: [ADR-017](docs/adr/017-restricted-deterministic-cbor.md) accepted by the maintainer on 2026-07-29.
+- Tests: RFC vectors, 500 generated round trips, 300 generated map permutations, 2,000 arbitrary-byte decoder cases, malformed-input failures, bounds checks, `cbor2` 6.1.3 differential vectors, and `make ci` pass on 2026-07-29.
+- External libraries: evaluated `cbor` 0.5, `cborl` 0.1.0, and `data-encoding` 1.0.1; Profile 1 adds no runtime codec dependency.
+- ADR changes: [ADR-017](docs/adr/017-restricted-deterministic-cbor.md) accepted and verified on 2026-07-29.
 
 ## Milestone 0 — Project and model foundation
 
@@ -32,11 +32,13 @@ The roadmap is ordered. The local byte-correct model must exist before semantic 
 - [x] Define typed IDs.
 - [x] Define hash abstraction.
 - [x] Select initial hash implementation.
-- [ ] Select portable canonical encoding through ADR.
+- [x] Select portable canonical encoding through ADR.
 - [ ] Define object envelope.
 - [ ] Define format version and feature flags.
 - [ ] Add golden encoding fixtures.
 - [ ] Reject unknown mandatory features.
+- [ ] Add coverage-guided encoding decoder fuzzing before object persistence.
+- [ ] Benchmark encoding and decoding on representative object fixtures.
 
 ### In-memory reference model
 

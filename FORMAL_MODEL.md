@@ -30,6 +30,12 @@ All persistent identities must have:
 
 ## 2. Canonical content model
 
+### Encoding profile
+
+Paengi CBOR Profile 1, defined by [ADR-017](docs/adr/017-restricted-deterministic-cbor.md), is the canonical payload encoding. It represents signed 64-bit integers, byte strings, valid UTF-8 text, arrays, non-negative integer-key maps, booleans, and null. It rejects all other CBOR forms, non-minimal heads, indefinite lengths, duplicate or unordered map keys, invalid UTF-8 text, and trailing bytes. Filesystem bytes and path components are byte strings.
+
+The profile is a pure payload rule. Object type, format version, feature flags, payload length, and integrity fields remain outer-envelope concerns.
+
 ### File content
 
 ```ocaml

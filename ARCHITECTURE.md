@@ -142,11 +142,11 @@ Persistent encodings must be:
 
 Recommended prototype approach:
 
-- Canonical CBOR or another deterministic portable encoding for records.
+- Paengi CBOR Profile 1: restricted deterministic CBOR for records, defined by [ADR-017](docs/adr/017-restricted-deterministic-cbor.md).
 - Fixed outer envelope with object type, format version, payload length, and checksum.
 - No `Marshal` for persistent repository data.
 
-The exact encoding choice requires an ADR after confirming maintained library support.
+The object envelope, feature flags, and checksum remain separate format decisions.
 
 ### 4.3 Content IDs
 
