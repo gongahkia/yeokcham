@@ -1,6 +1,5 @@
 module Model = Paengi_model
-module Path = Model.Path
-module Snapshot = Model.Snapshot
+open Model
 
 let default_seed = 20_260_729
 
@@ -42,7 +41,7 @@ let require_snapshot entries =
   | Ok snapshot -> snapshot
   | Error error -> failwith (Model.construction_error_to_string error)
 
-let file ?(mode = Model.Regular) content = { Model.mode; content }
+let file ?(mode = Model.Regular) content = { mode; content }
 
 let find_entry snapshot path =
   match Snapshot.find snapshot path with
@@ -87,19 +86,20 @@ let operations_apply_exact_bytes_and_modes () =
         {
           source = draft;
           destination = moved;
-          prior = file ~mode:Model.Executable replacement;
+          prior = Model.File (file ~mode:Model.Executable replacement);
         };
       Model.Delete_path
         {
           path = moved;
-          prior = file ~mode:Model.Executable replacement;
+          prior = Model.File (file ~mode:Model.Executable replacement);
         };
     ]
   in
   match Snapshot.apply_operations original operations with
   | Error error -> Alcotest.fail (Model.replay_error_to_string error)
   | Ok restored ->
-      Alcotest.(check bool) "operations return to the original snapshot" true
+      Alcotest.(check bool)
+        "operations return to the original snapshot" true
         (Snapshot.equal original restored)
 
 let directory_moves_preserve_descendants () =
@@ -121,10 +121,14 @@ let directory_moves_preserve_descendants () =
   with
   | Error error -> Alcotest.fail (Model.transition_error_to_string error)
   | Ok moved ->
-      let expected_file = require_path [ "archive"; "source"; "nested"; "value" ] in
-      Alcotest.(check bool) "source no longer exists" true
+      let expected_file =
+        require_path [ "archive"; "source"; "nested"; "value" ]
+      in
+      Alcotest.(check bool)
+        "source no longer exists" true
         (Option.is_none (Snapshot.find moved source));
-      Alcotest.(check bool) "descendant bytes preserved" true
+      Alcotest.(check bool)
+        "descendant bytes preserved" true
         (match Snapshot.find moved expected_file with
         | Some (Model.File entry) -> String.equal entry.content "value"
         | Some (Model.Directory _) | None -> false)
@@ -143,7 +147,11 @@ let preconditions_fail_without_mutating_snapshot () =
   let operations =
     [
       Model.Create_file
-        { path = require_path [ "source"; "new" ]; content = "new"; mode = Model.Regular };
+        {
+          path = require_path [ "source"; "new" ];
+          content = "new";
+          mode = Model.Regular;
+        };
       Model.Modify_file
         {
           path;
@@ -153,14 +161,17 @@ let preconditions_fail_without_mutating_snapshot () =
     ]
   in
   (match Snapshot.apply_operations original operations with
-  | Error { operation_index = 1; cause = Model.Expected_content_mismatch failed } ->
-      Alcotest.(check string) "failure path" (Path.to_string path)
-        (Path.to_string failed)
-  | Error error -> Alcotest.fail (Model.replay_error_to_string error)
+  | Error error ->
+      Alcotest.(check string)
+        "precondition failure"
+        "operation 1: content precondition failed: source/value"
+        (Model.replay_error_to_string error)
   | Ok _ -> Alcotest.fail "invalid operation sequence applied");
-  Alcotest.(check bool) "original remains unchanged" true
+  Alcotest.(check bool)
+    "original remains unchanged" true
     (Option.is_none (Snapshot.find original (require_path [ "source"; "new" ])));
-  Alcotest.(check bool) "original bytes remain unchanged" true
+  Alcotest.(check bool)
+    "original bytes remain unchanged" true
     (match Snapshot.find original path with
     | Some (Model.File entry) -> String.equal entry.content "actual"
     | Some (Model.Directory _) | None -> false)
@@ -180,7 +191,8 @@ let paths_reject_unsafe_components () =
     (fun (components, expected) ->
       match Path.of_components components with
       | Ok _ -> Alcotest.fail "unsafe path accepted"
-      | Error actual -> Alcotest.(check bool) "path rejection" true (actual = expected))
+      | Error actual ->
+          Alcotest.(check bool) "path rejection" true (actual = expected))
     cases
 
 let snapshot_identity_is_canonical () =
@@ -198,11 +210,16 @@ let snapshot_identity_is_canonical () =
   let reordered = List.rev entries in
   let left = require_snapshot entries in
   let right = require_snapshot reordered in
-  Alcotest.(check bool) "insertion order does not change the tree" true
+  Alcotest.(check bool)
+    "insertion order does not change the tree" true
     (Snapshot.equal left right);
-  Alcotest.(check string) "canonical bytes" (Snapshot.canonical_bytes left)
+  Alcotest.(check string)
+    "canonical bytes"
+    (Snapshot.canonical_bytes left)
     (Snapshot.canonical_bytes right);
-  Alcotest.(check string) "snapshot identity" (Paengi_id.Snapshot_id.to_hex (Snapshot.id left))
+  Alcotest.(check string)
+    "snapshot identity"
+    (Paengi_id.Snapshot_id.to_hex (Snapshot.id left))
     (Paengi_id.Snapshot_id.to_hex (Snapshot.id right))
 
 type reference_file = { path : Path.t; entry : Model.file_entry }
@@ -242,16 +259,19 @@ let scenario values =
               files
         in
         (initial, List.rev operations, require_snapshot expected_entries)
-    | value :: rest ->
+    | value :: rest -> (
         let create () =
           let parent = if value land 1 = 0 then source else nested in
           let path =
             Path.to_components parent @ [ Printf.sprintf "created-%d" index ]
             |> require_path
           in
-          let entry = file ~mode:(mode_from value) (generated_content index value) in
+          let entry =
+            file ~mode:(mode_from value) (generated_content index value)
+          in
           let operation =
-            Model.Create_file { path; content = entry.content; mode = entry.mode }
+            Model.Create_file
+              { path; content = entry.content; mode = entry.mode }
           in
           build (index + 1) ({ path; entry } :: files) (operation :: operations)
             rest
@@ -261,7 +281,9 @@ let scenario values =
           let selected = nth files value in
           match value mod 5 with
           | 1 ->
-              let replacement = file ~mode:selected.entry.mode (generated_content index value) in
+              let replacement =
+                file ~mode:selected.entry.mode (generated_content index value)
+              in
               let operation =
                 Model.Modify_file
                   {
@@ -271,10 +293,13 @@ let scenario values =
                   }
               in
               build (index + 1)
-                (replace_file files selected.path { selected with entry = replacement })
+                (replace_file files selected.path
+                   { selected with entry = replacement })
                 (operation :: operations) rest
           | 2 ->
-              let replacement = { selected.entry with mode = mode_from value } in
+              let replacement =
+                { selected.entry with mode = mode_from value }
+              in
               let operation =
                 Model.Change_mode
                   {
@@ -284,13 +309,16 @@ let scenario values =
                   }
               in
               build (index + 1)
-                (replace_file files selected.path { selected with entry = replacement })
+                (replace_file files selected.path
+                   { selected with entry = replacement })
                 (operation :: operations) rest
           | 3 ->
               let operation =
-                Model.Delete_path { path = selected.path; prior = Model.File selected.entry }
+                Model.Delete_path
+                  { path = selected.path; prior = Model.File selected.entry }
               in
-              build (index + 1) (remove_file files selected.path)
+              build (index + 1)
+                (remove_file files selected.path)
                 (operation :: operations) rest
           | _ ->
               let destination =
@@ -307,12 +335,13 @@ let scenario values =
               let moved = { selected with path = destination } in
               build (index + 1)
                 (replace_file files selected.path moved)
-                (operation :: operations) rest
+                (operation :: operations) rest)
   in
   build 0 [] [] values
 
 let valid_operation_sequences =
-  QCheck2.Gen.list_size (QCheck2.Gen.int_range 1 40)
+  QCheck2.Gen.list_size
+    (QCheck2.Gen.int_range 1 40)
     (QCheck2.Gen.int_range 0 1_000_000)
 
 let replay_property =

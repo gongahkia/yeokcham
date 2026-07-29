@@ -18,9 +18,7 @@ module Path : sig
 end
 
 type file_mode = Regular | Executable | Symlink
-
 type file_entry = { mode : file_mode; content : string }
-
 type tree
 type tree_entry = File of file_entry | Directory of tree
 

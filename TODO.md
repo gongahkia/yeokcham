@@ -6,11 +6,11 @@ Robustness tasks operate only on Paengi's pure functions and generated local fix
 ## Active vertical slice
 
 - Milestone: 0 — Project and model foundation.
-- Task: define an in-memory byte-exact directory snapshot and replay valid scratch operations.
+- Task: define an in-memory byte-exact directory snapshot and replay valid scratch operations (complete).
 - Modules/files: new `lib/paengi_model/` and `test/model_property_test.ml`; update `test/dune`; no persistent write or CLI.
 - Types: validated path, file mode and entry, directory tree, immutable snapshot, and create/modify/delete/move/mode-change scratch operations.
 - Invariants: paths are relative, non-empty, component-safe, and canonical; tree entries are unique and ordered; snapshot IDs derive only from canonical tree bytes; operations validate preconditions and replay atomically without mutation.
-- Tests: unit coverage for each operation, paths, and preconditions; 500 bounded deterministic generated valid directory-operation sequences checked against an independent reference model; independent reproducible property seed.
+- Tests: five unit tests cover operation bytes/modes, directory moves, preconditions, unsafe paths, and canonical identity; 500 bounded deterministic generated valid directory-operation sequences are checked against an independent reference model. `make test`, `make check`, and `make property-test PROPERTY_TEST_SEED=17` pass.
 - External libraries: existing Alcotest, QCheck, SHA-256, and Profile 1 encoder only.
 - ADR changes: no new ADR; the slice defines no persistent object format.
 
@@ -43,7 +43,7 @@ Robustness tasks operate only on Paengi's pure functions and generated local fix
 
 ### In-memory reference model
 
-- [ ] Define file, tree, and snapshot types.
+- [x] Define file, tree, and snapshot types.
 - [ ] Define scratch event and checkpoint.
 - [ ] Define retention reason.
 - [ ] Define pure event application.
@@ -53,8 +53,8 @@ Robustness tasks operate only on Paengi's pure functions and generated local fix
 ### Exit criteria
 
 - [ ] Canonical object bytes are stable in golden tests.
-- [ ] Snapshot identity is independent of timestamps.
-- [ ] In-memory model passes generated operation sequences.
+- [x] Snapshot identity is independent of timestamps.
+- [x] In-memory model passes generated operation sequences.
 - [ ] Persistent code does not use OCaml `Marshal`.
 
 ## Milestone 1 — Canonical object store and snapshots

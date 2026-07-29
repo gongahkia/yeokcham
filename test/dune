@@ -75,4 +75,4 @@
  (action
   (progn
    (run %{encoding_property_test})
-   (run %{model_property_test})))
+   (run %{model_property_test}))))

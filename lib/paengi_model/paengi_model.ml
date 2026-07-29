@@ -27,7 +27,8 @@ module Path = struct
     if String.is_empty component then Error (Empty_component index)
     else if String.equal component "." then Error (Dot_component index)
     else if String.equal component ".." then Error (Dot_dot_component index)
-    else if String.contains component '/' then Error (Separator_in_component index)
+    else if String.contains component '/' then
+      Error (Separator_in_component index)
     else if String.contains component '\000' then Error (Nul_in_component index)
     else Ok component
 
@@ -51,7 +52,6 @@ module Path = struct
 end
 
 type file_mode = Regular | Executable | Symlink
-
 type file_entry = { mode : file_mode; content : string }
 
 module Component_map = Map.Make (String)
@@ -102,7 +102,8 @@ type transition_error =
   | Move_into_descendant of { source : Path.t; destination : Path.t }
 
 let transition_error_to_string = function
-  | Path_not_found path -> Printf.sprintf "path not found: %s" (Path.to_string path)
+  | Path_not_found path ->
+      Printf.sprintf "path not found: %s" (Path.to_string path)
   | Path_already_exists path ->
       Printf.sprintf "path already exists: %s" (Path.to_string path)
   | Parent_not_found path ->
@@ -125,12 +126,13 @@ let replay_error_to_string { operation_index; cause } =
   Printf.sprintf "operation %d: %s" operation_index
     (transition_error_to_string cause)
 
-let entry_equal left right =
+let rec entry_equal left right =
   match (left, right) with
   | File left, File right ->
       left.mode = right.mode && String.equal left.content right.content
-  | Directory left, Directory right -> Component_map.equal entry_equal left right
-  | _ -> false
+  | Directory left, Directory right ->
+      Component_map.equal entry_equal left right
+  | File _, Directory _ | Directory _, File _ -> false
 
 let initial_entry_path = function
   | Directory_path path -> path
@@ -142,7 +144,9 @@ let path_parent path =
   | _ :: reversed_parent -> List.rev reversed_parent
 
 let path_from_components components =
-  match Path.of_components components with Ok path -> path | Error _ -> assert false
+  match Path.of_components components with
+  | Ok path -> path
+  | Error _ -> assert false
 
 let path_parent_value path = path_from_components (path_parent path)
 
@@ -168,13 +172,14 @@ let rec insert_entry tree components entry path =
       | Some (Directory child) -> (
           match insert_entry child rest entry path with
           | Error error -> Error error
-          | Ok child -> Ok (Component_map.add name (Directory child) tree)) )
+          | Ok child -> Ok (Component_map.add name (Directory child) tree)))
 
 let rec replace_entry tree components replacement path =
   match components with
   | [] -> assert false
   | [ name ] ->
-      if Component_map.mem name tree then Ok (Component_map.add name replacement tree)
+      if Component_map.mem name tree then
+        Ok (Component_map.add name replacement tree)
       else Error (Path_not_found path)
   | name :: rest -> (
       match Component_map.find_opt name tree with
@@ -183,7 +188,7 @@ let rec replace_entry tree components replacement path =
       | Some (Directory child) -> (
           match replace_entry child rest replacement path with
           | Error error -> Error error
-          | Ok child -> Ok (Component_map.add name (Directory child) tree)) )
+          | Ok child -> Ok (Component_map.add name (Directory child) tree)))
 
 let rec remove_entry tree components path =
   match components with
@@ -197,7 +202,7 @@ let rec remove_entry tree components path =
       | Some (Directory child) -> (
           match remove_entry child rest path with
           | Error error -> Error error
-          | Ok child -> Ok (Component_map.add name (Directory child) tree)) )
+          | Ok child -> Ok (Component_map.add name (Directory child) tree)))
 
 let rec path_is_prefix prefix path =
   match (prefix, path) with
@@ -223,11 +228,9 @@ module Snapshot = struct
     if by_depth <> 0 then by_depth else Path.compare left_path right_path
 
   let ensure_unique_paths entries =
-    let paths =
-      List.map initial_entry_path entries |> List.sort Path.compare
-    in
+    let paths = List.map initial_entry_path entries |> List.sort Path.compare in
     let rec find_duplicate = function
-      | left :: ((right :: _) as rest) when Path.equal left right -> Some left
+      | left :: right :: _ when Path.equal left right -> Some left
       | _ :: rest -> find_duplicate rest
       | [] -> None
     in
@@ -239,12 +242,14 @@ module Snapshot = struct
     | Parent_not_found path -> Missing_initial_parent path
     | Parent_is_file path -> Initial_parent_is_file path
     | Path_already_exists path -> Duplicate_initial_path path
-    | _ -> assert false
+    | Path_not_found _ | Expected_entry_mismatch _ | Expected_content_mismatch _
+    | Expected_mode_mismatch _ | Move_into_descendant _ ->
+        assert false
 
   let add_initial tree = function
     | Directory_path path ->
-        insert_entry tree (Path.to_components path) (Directory Component_map.empty)
-          path
+        insert_entry tree (Path.to_components path)
+          (Directory Component_map.empty) path
     | File_path (path, file) ->
         insert_entry tree (Path.to_components path) (File file) path
 
@@ -264,27 +269,25 @@ module Snapshot = struct
   let rec collect_entries prefix tree =
     Component_map.bindings tree
     |> List.concat_map (fun (name, entry) ->
-           let path = path_from_components (prefix @ [ name ]) in
-           match entry with
-           | File file -> [ File_path (path, file) ]
-           | Directory child ->
-               Directory_path path :: collect_entries (prefix @ [ name ]) child)
+        let path = path_from_components (prefix @ [ name ]) in
+        match entry with
+        | File file -> [ File_path (path, file) ]
+        | Directory child ->
+            Directory_path path :: collect_entries (prefix @ [ name ]) child)
 
   let entries snapshot =
     collect_entries [] snapshot
     |> List.sort (fun left right ->
-           Path.compare (initial_entry_path left) (initial_entry_path right))
+        Path.compare (initial_entry_path left) (initial_entry_path right))
 
   let find snapshot path = find_entry snapshot (Path.to_components path)
   let equal left right = Component_map.equal entry_equal left right
-
-  let mode_code = function
-    | Regular -> 0L
-    | Executable -> 1L
-    | Symlink -> 2L
+  let mode_code = function Regular -> 0L | Executable -> 1L | Symlink -> 2L
 
   let value_array values =
-    match Encoding.array values with Ok value -> value | Error _ -> assert false
+    match Encoding.array values with
+    | Ok value -> value
+    | Error _ -> assert false
 
   let path_value path =
     Path.to_components path |> List.map Encoding.bytes |> value_array
@@ -303,19 +306,23 @@ module Snapshot = struct
 
   let canonical_bytes snapshot =
     let entry_values = entries snapshot |> List.map initial_entry_value in
-    value_array [ Encoding.integer 1L; value_array entry_values ] |> Encoding.encode
+    value_array [ Encoding.integer 1L; value_array entry_values ]
+    |> Encoding.encode
 
   let id snapshot =
     let digest =
-      Hash.feed_string Hash.empty "paengi:snapshot:v1\000"
-      |> fun context -> Hash.feed_string context (canonical_bytes snapshot)
+      Hash.feed_string Hash.empty "paengi:snapshot:v1\000" |> fun context ->
+      Hash.feed_string context (canonical_bytes snapshot)
       |> Hash.get |> Hash.to_raw_string
     in
-    match Id.Snapshot_id.of_bytes digest with Ok identity -> identity | Error _ -> assert false
+    match Id.Snapshot_id.of_bytes digest with
+    | Ok identity -> identity
+    | Error _ -> assert false
 
   let apply_operation snapshot = function
     | Create_file { path; content; mode } ->
-        insert_entry snapshot (Path.to_components path) (File { mode; content })
+        insert_entry snapshot (Path.to_components path)
+          (File { mode; content })
           path
     | Modify_file { path; expected_content; replacement_content } -> (
         match find snapshot path with
@@ -326,37 +333,47 @@ module Snapshot = struct
               Error (Expected_content_mismatch path)
             else
               replace_entry snapshot (Path.to_components path)
-                (File { file with content = replacement_content }) path)
+                (File { file with content = replacement_content })
+                path)
     | Delete_path { path; prior } -> (
         match find snapshot path with
         | None -> Error (Path_not_found path)
         | Some entry ->
-            if not (entry_equal entry prior) then Error (Expected_entry_mismatch path)
+            if not (entry_equal entry prior) then
+              Error (Expected_entry_mismatch path)
             else remove_entry snapshot (Path.to_components path) path)
-    | Move_path { source; destination; prior } ->
-        if path_is_prefix (Path.to_components source) (Path.to_components destination)
+    | Move_path { source; destination; prior } -> (
+        if
+          path_is_prefix
+            (Path.to_components source)
+            (Path.to_components destination)
         then Error (Move_into_descendant { source; destination })
-        else (
+        else
           match find snapshot source with
           | None -> Error (Path_not_found source)
-          | Some entry ->
+          | Some entry -> (
               if not (entry_equal entry prior) then
                 Error (Expected_entry_mismatch source)
-              else (
-                match remove_entry snapshot (Path.to_components source) source with
+              else
+                match
+                  remove_entry snapshot (Path.to_components source) source
+                with
                 | Error error -> Error error
                 | Ok without_source ->
-                    insert_entry without_source (Path.to_components destination)
+                    insert_entry without_source
+                      (Path.to_components destination)
                       entry destination))
     | Change_mode { path; expected_mode; replacement_mode } -> (
         match find snapshot path with
         | None -> Error (Path_not_found path)
         | Some (Directory _) -> Error (Expected_mode_mismatch path)
         | Some (File file) ->
-            if file.mode <> expected_mode then Error (Expected_mode_mismatch path)
+            if file.mode <> expected_mode then
+              Error (Expected_mode_mismatch path)
             else
               replace_entry snapshot (Path.to_components path)
-                (File { file with mode = replacement_mode }) path)
+                (File { file with mode = replacement_mode })
+                path)
 
   let apply_operations snapshot operations =
     let rec apply index snapshot = function
