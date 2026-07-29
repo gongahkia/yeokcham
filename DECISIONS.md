@@ -1,5 +1,9 @@
 # Architecture Decision Records
 
+## Process
+
+The ADR lifecycle, numbering rules, and template are defined in [`docs/adr/README.md`](docs/adr/README.md). ADR-001 through ADR-015 are accepted legacy records. New records start at ADR-016 and live in `docs/adr/`.
+
 ## ADR-001 — Three distinct histories
 
 **Decision:** Paengi models scratch, intent, and release histories separately.
