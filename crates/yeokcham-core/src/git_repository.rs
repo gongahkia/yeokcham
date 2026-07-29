@@ -225,6 +225,17 @@ impl GitRepository {
             data,
         ))
     }
+
+    /// Reads and verifies one SHA-1 Git object within `maximum_bytes`.
+    ///
+    /// This is equivalent to [`read_object`](Self::read_object) followed by
+    /// [`GitObject::verify_id`]. The returned object is safe to use as a
+    /// verified source object, subject to later graph and persistence checks.
+    pub fn read_verified_object(&self, id: GitObjectId, maximum_bytes: usize) -> Result<GitObject> {
+        let object = self.read_object(id, maximum_bytes)?;
+        object.verify_id()?;
+        Ok(object)
+    }
 }
 
 fn open_error(error: gix::open::Error) -> Error {
@@ -693,8 +704,8 @@ mod tests {
             let id: GitObjectId = id_text.parse().expect("object ID");
             let expected = git_bytes(&worktree, &["cat-file", kind_text, &id_text]);
             let object = repository
-                .read_object(id, expected.len())
-                .expect("read packed object");
+                .read_verified_object(id, expected.len())
+                .expect("read and verify packed object");
 
             assert_eq!(object.id(), id);
             assert_eq!(object.kind(), expected_kind);
@@ -723,5 +734,34 @@ mod tests {
         assert_eq!(missing_error.kind(), ErrorKind::NotFound);
         assert!(!limit_error.to_string().contains(&id_text));
         assert!(!missing_error.to_string().contains(missing_id));
+    }
+
+    #[test]
+    fn rejects_loose_objects_whose_bytes_do_not_match_the_requested_id() {
+        let temporary = TestDirectory::new();
+        let worktree = initialize_committed_worktree(&temporary);
+        fs::write(worktree.join("expected.bin"), b"expected bytes").expect("write expected body");
+        fs::write(worktree.join("altered.bin"), b"altered bytes").expect("write altered body");
+        let expected_id = git_stdout(&worktree, &["hash-object", "-w", "expected.bin"]);
+        let altered_id = git_stdout(&worktree, &["hash-object", "-w", "altered.bin"]);
+        let expected_path = worktree
+            .join(".git/objects")
+            .join(&expected_id[..2])
+            .join(&expected_id[2..]);
+        let altered_path = worktree
+            .join(".git/objects")
+            .join(&altered_id[..2])
+            .join(&altered_id[2..]);
+        fs::remove_file(&expected_path).expect("remove expected loose object");
+        fs::copy(altered_path, expected_path).expect("overwrite loose object");
+
+        let error = GitRepository::open(&worktree)
+            .expect("open repository")
+            .read_verified_object(expected_id.parse().expect("object ID"), 1024)
+            .expect_err("mismatched loose object must fail");
+
+        assert_eq!(error.kind(), ErrorKind::CorruptData);
+        assert!(!error.to_string().contains(&expected_id));
+        assert!(!error.to_string().contains("altered bytes"));
     }
 }

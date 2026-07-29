@@ -2110,6 +2110,7 @@ dependencies = [
  "hex",
  "jsonschema",
  "serde_json",
+ "sha1",
  "thiserror",
  "uuid",
 ]

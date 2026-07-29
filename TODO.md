@@ -44,7 +44,7 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 - [x] Enumerate refs.
 - [x] Traverse reachable commits, trees, blobs, and tags.
 - [x] Read object bytes.
-- [ ] Recompute and verify Git object IDs.
+- [x] Recompute and verify Git object IDs.
 - [ ] Record object metadata in SQLite.
 - [ ] Reject unsupported repository hash formats clearly.
 

@@ -1,6 +1,8 @@
 use std::fmt;
 
-use crate::GitObjectId;
+use sha1::{Digest, Sha1};
+
+use crate::{Error, ErrorKind, GitObjectId, Result};
 
 /// The Git object type associated with an exact object body.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -23,6 +25,15 @@ impl GitObjectKind {
             gix::objs::Kind::Tree => Self::Tree,
             gix::objs::Kind::Commit => Self::Commit,
             gix::objs::Kind::Tag => Self::Tag,
+        }
+    }
+
+    const fn canonical_name(self) -> &'static [u8] {
+        match self {
+            Self::Blob => b"blob",
+            Self::Tree => b"tree",
+            Self::Commit => b"commit",
+            Self::Tag => b"tag",
         }
     }
 }
@@ -59,6 +70,28 @@ impl GitObject {
         self.data
     }
 
+    /// Recomputes the SHA-1 ID from the canonical Git header and body.
+    pub fn recompute_id(&self) -> GitObjectId {
+        let mut hasher = Sha1::new();
+        hasher.update(self.kind.canonical_name());
+        hasher.update(b" ");
+        hasher.update(self.data.len().to_string().as_bytes());
+        hasher.update([0]);
+        hasher.update(&self.data);
+        GitObjectId::from_bytes(hasher.finalize().into())
+    }
+
+    /// Verifies that the requested ID equals the canonical SHA-1 ID of this object.
+    pub fn verify_id(&self) -> Result<()> {
+        if self.id != self.recompute_id() {
+            return Err(Error::new(
+                ErrorKind::CorruptData,
+                "Git object ID does not match its bytes",
+            ));
+        }
+        Ok(())
+    }
+
     /// Constructs an object from an adapter-read body.
     pub(crate) fn new(id: GitObjectId, kind: GitObjectKind, data: Vec<u8>) -> Self {
         Self { id, kind, data }
@@ -93,6 +126,22 @@ mod tests {
             "GitObject { id: GitObjectId(<redacted>), kind: Blob, data: \"<redacted>\" }"
         );
         assert_eq!(object.into_data(), b"private body");
+    }
+
+    #[test]
+    fn recomputes_and_verifies_canonical_git_object_ids() {
+        let empty_blob_id: GitObjectId = "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391"
+            .parse()
+            .expect("empty blob ID");
+        let valid = GitObject::new(empty_blob_id, GitObjectKind::Blob, Vec::new());
+        let altered = GitObject::new(empty_blob_id, GitObjectKind::Blob, b"altered body".to_vec());
+
+        assert_eq!(valid.recompute_id(), empty_blob_id);
+        valid.verify_id().expect("valid object ID");
+        let error = altered.verify_id().expect_err("altered object must fail");
+        assert_eq!(error.kind(), ErrorKind::CorruptData);
+        assert!(!error.to_string().contains("altered body"));
+        assert!(!error.to_string().contains(&empty_blob_id.to_string()));
     }
 
     #[test]
