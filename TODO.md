@@ -22,7 +22,7 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 - [x] Define `RepositoryId`.
 - [x] Define `GitObjectId`.
 - [x] Define `yeokchamContentId`.
-- [ ] Define `SegmentId`.
+- [x] Define `SegmentId`.
 - [ ] Define `ManifestId`.
 - [ ] Define `DeviceId`.
 - [ ] Define `RefName` with validation.

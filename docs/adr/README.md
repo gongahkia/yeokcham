@@ -26,3 +26,4 @@ Valid statuses are `Proposed`, `Accepted`, `Rejected`, `Deprecated`, and `Supers
 | [ADR-0018](0018-versioned-benchmark-result-schema.md) | Accepted | Use a versioned JSON Schema for benchmark results |
 | [ADR-0019](0019-repository-id-as-uuid-v4.md) | Accepted | Represent repository IDs as UUIDv4 bytes |
 | [ADR-0020](0020-tagged-content-identities.md) | Accepted | Use tagged, configurable content identities |
+| [ADR-0021](0021-segment-id-as-uuid-v4.md) | Accepted | Represent segment IDs as UUIDv4 bytes |
