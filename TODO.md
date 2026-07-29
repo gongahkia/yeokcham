@@ -80,7 +80,7 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 
 ### Tests
 
-- [ ] Unit tests for segment format.
+- [x] Unit tests for segment format.
 - [ ] Property tests for chunking and reconstruction.
 - [ ] Corruption tests.
 - [ ] Round-trip tests on generated repositories.
