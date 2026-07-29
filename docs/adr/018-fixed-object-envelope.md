@@ -115,6 +115,7 @@ No persistent objects exist, so v1 introduces no migration. Existing object file
 - 2026-07-29: tests reject every truncated prefix, invalid magic/version/algorithm/type/features, high-bit length, length mismatch, trailing bytes, covered-header corruption, checksum corruption, and payload corruption.
 - 2026-07-29: an instrumented payload callback is not invoked for a checksum-invalid envelope and is invoked only after checksum verification on a checksum-valid malformed payload.
 - 2026-07-29: 500 generated envelope round trips, 500 generated one-byte corruptions, and 2,000 arbitrary-byte cases pass.
+- 2026-07-29: `encoding_property_test.exe` runs 500 Envelope 1 value round trips and 2,000 bounded arbitrary-byte totality/canonical-byte cases from independent stable per-property states derived from printed seed `20260729`; it verifies named valid and malformed local fixtures and explicit zero, boundary, near-limit, and malformed lengths.
 - 2026-07-29: `make ci` passes.
 - Header-verification benchmarks are not yet run; no performance claim follows from these tests. Bounded deterministic properties and checked-in malformed fixtures provide repository-correctness evidence only; they are not external security analysis.
 

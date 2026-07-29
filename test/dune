@@ -48,3 +48,23 @@
   paengi_testkit)
  (deps
   (source_tree golden)))
+
+(test
+ (name encoding_property_test)
+ (modules encoding_property_test)
+ (libraries
+  alcotest
+  qcheck-core
+  qcheck-alcotest
+  paengi_encoding
+  paengi_envelope)
+ (deps
+  (source_tree fixtures/encoding)))
+
+(rule
+ (alias property-test)
+ (deps
+  (:exe encoding_property_test.exe)
+  (source_tree fixtures/encoding))
+ (action
+  (run %{exe:encoding_property_test.exe})))

@@ -293,75 +293,6 @@ let truncation_cases () =
     | Ok _ -> Alcotest.failf "truncated prefix accepted at length %d" length
   done
 
-let ascii_generator =
-  QCheck2.Gen.map
-    (fun raw ->
-      String.map (fun character -> Char.chr (Char.code character land 0x7f)) raw)
-    (QCheck2.Gen.string_size (QCheck2.Gen.int_range 0 32))
-
-let raw_generator = QCheck2.Gen.string_size (QCheck2.Gen.int_range 0 128)
-
-let rec value_generator depth =
-  let scalar =
-    QCheck2.Gen.oneof
-      [
-        QCheck2.Gen.map Encoding.integer QCheck2.Gen.int64;
-        QCheck2.Gen.map Encoding.bytes raw_generator;
-        QCheck2.Gen.map (fun value -> text value) ascii_generator;
-        QCheck2.Gen.map Encoding.bool QCheck2.Gen.bool;
-        QCheck2.Gen.return Encoding.null;
-      ]
-  in
-  if depth = 0 then scalar
-  else
-    let child = value_generator (depth - 1) in
-    let arrays =
-      QCheck2.Gen.map
-        (fun values -> array values)
-        (QCheck2.Gen.list_size (QCheck2.Gen.int_range 0 4) child)
-    in
-    let maps =
-      QCheck2.Gen.map
-        (fun values ->
-          let keys = [ 0L; 24L; 256L; 65_536L ] in
-          let entries =
-            List.mapi (fun index value -> (List.nth keys index, value)) values
-          in
-          map entries)
-        (QCheck2.Gen.list_size (QCheck2.Gen.int_range 0 4) child)
-    in
-    QCheck2.Gen.oneof_weighted [ (6, scalar); (2, arrays); (2, maps) ]
-
-let round_trip_property =
-  QCheck2.Test.make ~count:500 ~name:"Profile 1 values round-trip and re-encode"
-    (value_generator 4) (fun value ->
-      let encoded = Encoding.encode value in
-      match Encoding.decode encoded with
-      | Error _ -> false
-      | Ok decoded ->
-          Encoding.equal value decoded
-          && String.equal encoded (Encoding.encode decoded))
-
-let map_permutation_property =
-  QCheck2.Test.make ~count:300 ~name:"map permutations encode identically"
-    (QCheck2.Gen.list_size (QCheck2.Gen.int_range 0 4) (value_generator 3))
-    (fun values ->
-      let keys = [ 0L; 24L; 256L; 65_536L ] in
-      let entries =
-        List.mapi (fun index value -> (List.nth keys index, value)) values
-      in
-      let forward = map entries in
-      let reverse = map (List.rev entries) in
-      String.equal (Encoding.encode forward) (Encoding.encode reverse))
-
-let random_bytes_property =
-  QCheck2.Test.make ~count:2_000
-    ~name:"arbitrary bytes either reject or are already canonical" raw_generator
-    (fun input ->
-      match Encoding.decode input with
-      | Error _ -> true
-      | Ok value -> String.equal input (Encoding.encode value))
-
 let () =
   Alcotest.run "deterministic CBOR"
     [
@@ -386,12 +317,5 @@ let () =
             rejection_cases;
           Alcotest.test_case "reject every truncated prefix" `Quick
             truncation_cases;
-        ] );
-      ( "properties",
-        [
-          QCheck_alcotest.to_alcotest ~speed_level:`Quick round_trip_property;
-          QCheck_alcotest.to_alcotest ~speed_level:`Quick
-            map_permutation_property;
-          QCheck_alcotest.to_alcotest ~speed_level:`Quick random_bytes_property;
         ] );
     ]
