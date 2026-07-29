@@ -143,7 +143,7 @@ Persistent encodings must be:
 Recommended prototype approach:
 
 - Paengi CBOR Profile 1: restricted deterministic CBOR for records, defined by [ADR-017](docs/adr/017-restricted-deterministic-cbor.md).
-- Fixed outer envelope with object type, format version, payload length, and checksum.
+- Fixed Object Envelope 1 with object type, format version, payload length, and checksum, defined by [ADR-018](docs/adr/018-fixed-object-envelope.md).
 - No `Marshal` for persistent repository data.
 
 The object envelope, feature flags, and checksum remain separate format decisions.

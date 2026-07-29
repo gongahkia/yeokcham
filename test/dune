@@ -27,3 +27,14 @@
  (name test_encoding)
  (modules test_encoding)
  (libraries alcotest qcheck-core qcheck-alcotest paengi_encoding))
+
+(test
+ (name test_envelope)
+ (modules test_envelope)
+ (libraries
+  alcotest
+  qcheck-core
+  qcheck-alcotest
+  paengi_encoding
+  paengi_envelope
+  paengi_hash))

@@ -5,13 +5,13 @@ The roadmap is ordered. The local byte-correct model must exist before semantic 
 ## Active vertical slice
 
 - Milestone: 0 — Project and model foundation.
-- Task: select and implement the portable canonical encoding (complete).
-- Modules/files: `Paengi_encoding`, ADR-017, unit/property tests, `DECISIONS.md`, and this active slice; no persistent object or CLI.
-- Types: restricted values are signed 64-bit integers, exact byte strings, validated UTF-8 text, arrays, numeric-key maps, booleans, and null.
-- Invariants: one model value has one deterministic byte encoding; lengths and integers are minimal; collections are definite-length; map keys are unique and bytewise ordered; unsupported CBOR forms and non-deterministic input are rejected.
-- Tests: RFC vectors, 500 generated round trips, 300 generated map permutations, 2,000 arbitrary-byte decoder cases, malformed-input failures, bounds checks, `cbor2` 6.1.3 differential vectors, and `make ci` pass on 2026-07-29.
-- External libraries: evaluated `cbor` 0.5, `cborl` 0.1.0, and `data-encoding` 1.0.1; Profile 1 adds no runtime codec dependency.
-- ADR changes: [ADR-017](docs/adr/017-restricted-deterministic-cbor.md) accepted and verified on 2026-07-29.
+- Task: define and implement the object envelope (complete).
+- Modules/files: `Paengi_envelope`, ADR-018, unit/property tests, `DECISIONS.md`, and this active slice; no persistent write or CLI.
+- Types: envelope fields are object kind, object-format version, mandatory-feature mask, SHA-256 algorithm, payload length, checksum, and exact Profile 1 payload.
+- Invariants: one 57-byte header layout; fixed big-endian widths; the input is exactly header plus declared payload; checksum covers every header byte except its own field and the payload; the checksum verifies before Profile 1 payload decoding.
+- Tests: a hard-coded golden header/checksum vector cross-checked by `shasum` and OpenSSL; all truncations; header/payload/checksum corruption; version/type/algorithm/features/length failures; callback ordering; 500 generated round trips; 500 generated single-byte corruptions; 2,000 arbitrary-byte cases; and `make ci` pass on 2026-07-29.
+- External libraries: no new dependency; checksum uses the existing SHA-256 abstraction.
+- ADR changes: [ADR-018](docs/adr/018-fixed-object-envelope.md) accepted and verified on 2026-07-29.
 
 ## Milestone 0 — Project and model foundation
 
@@ -33,7 +33,7 @@ The roadmap is ordered. The local byte-correct model must exist before semantic 
 - [x] Define hash abstraction.
 - [x] Select initial hash implementation.
 - [x] Select portable canonical encoding through ADR.
-- [ ] Define object envelope.
+- [x] Define object envelope.
 - [ ] Define format version and feature flags.
 - [ ] Add golden encoding fixtures.
 - [ ] Reject unknown mandatory features.
