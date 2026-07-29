@@ -39,3 +39,4 @@ Valid statuses are `Proposed`, `Accepted`, `Rejected`, `Deprecated`, and `Supers
 | [ADR-0031](0031-bounded-git-object-body-reads.md) | Accepted | Read bounded Git object bodies before trust |
 | [ADR-0032](0032-canonical-sha1-git-object-verification.md) | Accepted | Verify SHA-1 Git objects from canonical header and body bytes |
 | [ADR-0033](0033-local-sqlite-object-metadata.md) | Accepted | Store verified Git object metadata in a local versioned SQLite database |
+| [ADR-0034](0034-reject-unsupported-git-object-hashes-at-open.md) | Accepted | Reject unsupported Git object hash formats during repository opening |

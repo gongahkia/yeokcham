@@ -505,7 +505,8 @@ mod tests {
 
         for repository in [&bare, &worktree] {
             let error = GitRepository::open(repository)
-                .expect_err("SHA-256 repository must fail at open");
+                .err()
+                .expect("SHA-256 repository must fail at open");
 
             assert_eq!(error.kind(), ErrorKind::Unsupported);
             assert_eq!(
