@@ -6,6 +6,7 @@ use std::{
     time::Duration,
 };
 
+use flate2::{Compression, write::ZlibEncoder};
 use rusqlite::{
     Connection, Error as SqliteError, ErrorCode as SqliteErrorCode, OpenFlags, OptionalExtension,
     TransactionBehavior, params,
@@ -138,6 +139,90 @@ impl MetadataObjectManifestReadLimits {
     /// Returns the maximum object-body length accepted from one manifest.
     pub const fn maximum_plaintext_bytes(self) -> u64 {
         self.maximum_plaintext_bytes
+    }
+}
+
+/// Caller-selected bounds for export into a new loose-object Git repository.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct LooseObjectExportLimits {
+    maximum_segment_bytes: u64,
+    segment_read_limits: SegmentReadLimits,
+    blob_manifest_limits: BlobManifestReadLimits,
+    maximum_metadata_object_manifest_entries: usize,
+    metadata_object_manifest_limits: MetadataObjectManifestReadLimits,
+}
+
+impl LooseObjectExportLimits {
+    /// Validates bounds for one complete loose-object export.
+    pub fn new(
+        maximum_segment_bytes: u64,
+        segment_read_limits: SegmentReadLimits,
+        blob_manifest_limits: BlobManifestReadLimits,
+        maximum_metadata_object_manifest_entries: usize,
+        metadata_object_manifest_limits: MetadataObjectManifestReadLimits,
+    ) -> Result<Self> {
+        if maximum_segment_bytes == 0 || maximum_metadata_object_manifest_entries == 0 {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "loose-object export limit must not be zero",
+            ));
+        }
+        Ok(Self {
+            maximum_segment_bytes,
+            segment_read_limits,
+            blob_manifest_limits,
+            maximum_metadata_object_manifest_entries,
+            metadata_object_manifest_limits,
+        })
+    }
+
+    /// Returns the maximum accepted bytes for one referenced `YKSG` file.
+    pub const fn maximum_segment_bytes(self) -> u64 {
+        self.maximum_segment_bytes
+    }
+
+    /// Returns nested `YKSG` decoding bounds.
+    pub const fn segment_read_limits(self) -> SegmentReadLimits {
+        self.segment_read_limits
+    }
+
+    /// Returns `YKMF` directory and body bounds.
+    pub const fn blob_manifest_limits(self) -> BlobManifestReadLimits {
+        self.blob_manifest_limits
+    }
+
+    /// Returns the maximum entries inspected in `manifests/objects/`.
+    pub const fn maximum_metadata_object_manifest_entries(self) -> usize {
+        self.maximum_metadata_object_manifest_entries
+    }
+
+    /// Returns `YKOM` file and body bounds.
+    pub const fn metadata_object_manifest_limits(self) -> MetadataObjectManifestReadLimits {
+        self.metadata_object_manifest_limits
+    }
+}
+
+/// Counts returned only after all loose Git objects were durably exported.
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+pub struct LooseObjectExportReport {
+    blob_count: usize,
+    metadata_object_count: usize,
+}
+
+impl LooseObjectExportReport {
+    /// Returns exported Git blob count.
+    pub const fn blob_count(self) -> usize {
+        self.blob_count
+    }
+
+    /// Returns exported Git tree, commit, and tag count.
+    pub const fn metadata_object_count(self) -> usize {
+        self.metadata_object_count
+    }
+
+    /// Returns total exported Git object count.
+    pub const fn object_count(self) -> usize {
+        self.blob_count + self.metadata_object_count
     }
 }
 
@@ -497,6 +582,55 @@ impl LocalRepository {
             index_count,
             blob_manifest_count,
             metadata_object_manifest_count,
+        })
+    }
+
+    /// Exports every published object as a loose object in a new bare Git repository.
+    ///
+    /// `destination` must not exist. This creates a bare SHA-1 Git repository
+    /// with no restored refs; a failed export may leave an incomplete directory
+    /// that callers must discard before retrying.
+    pub fn export_loose_objects(
+        &self,
+        destination: impl AsRef<Path>,
+        limits: LooseObjectExportLimits,
+    ) -> Result<LooseObjectExportReport> {
+        self.verify_layout_and_bootstrap()?;
+        let destination = destination.as_ref();
+        validate_export_destination_parent(destination)?;
+        match fs::create_dir(destination) {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                return Err(Error::new(
+                    ErrorKind::Conflict,
+                    "Git export destination already exists",
+                ));
+            }
+            Err(error) => {
+                return Err(io_error(
+                    error,
+                    "Git export destination could not be created",
+                ));
+            }
+        }
+        gix::init_bare(destination).map_err(|source| {
+            Error::with_source(
+                ErrorKind::Io,
+                "bare Git export repository could not be initialized",
+                source,
+            )
+        })?;
+        let objects_directory = destination.join("objects");
+        validate_directory(&objects_directory, false)?;
+        let mut exported_ids = BTreeSet::new();
+        let blob_count =
+            self.export_blob_manifests(&objects_directory, limits, &mut exported_ids)?;
+        let metadata_object_count =
+            self.export_metadata_object_manifests(&objects_directory, limits, &mut exported_ids)?;
+        sync_export_repository(destination, &objects_directory)?;
+        Ok(LooseObjectExportReport {
+            blob_count,
+            metadata_object_count,
         })
     }
 
@@ -1114,6 +1248,140 @@ impl LocalRepository {
         Ok(manifest)
     }
 
+    fn export_blob_manifests(
+        &self,
+        objects_directory: &Path,
+        limits: LooseObjectExportLimits,
+        exported_ids: &mut BTreeSet<GitObjectId>,
+    ) -> Result<usize> {
+        let directory = self.root.join(BLOB_MANIFEST_DIRECTORY);
+        validate_directory(&directory, false)?;
+        let entries = fs::read_dir(&directory)
+            .map_err(|error| io_error(error, "blob manifest directory could not be read"))?;
+        let mut inspected_entries = 0usize;
+        let mut manifest_object_ids = BTreeSet::new();
+        let mut blob_count = 0usize;
+        for entry in entries {
+            let entry = entry
+                .map_err(|error| io_error(error, "blob manifest directory could not be read"))?;
+            inspected_entries = increment_directory_entries(
+                inspected_entries,
+                limits.blob_manifest_limits.maximum_entries,
+                "blob manifest directory exceeds the entry limit",
+            )?;
+            let name = entry.file_name();
+            let name = name.to_str().ok_or_else(|| {
+                Error::new(
+                    ErrorKind::CorruptData,
+                    "blob manifest directory has an invalid entry name",
+                )
+            })?;
+            if is_blob_manifest_staging_filename(name) {
+                continue;
+            }
+            let manifest_id = parse_blob_manifest_filename(name)?;
+            let manifest = self.read_blob_manifest(
+                &entry.path(),
+                manifest_id,
+                limits.blob_manifest_limits.maximum_manifest_bytes,
+                limits.blob_manifest_limits.maximum_plaintext_bytes,
+            )?;
+            if !manifest_object_ids.insert(manifest.git_object_id()) {
+                return Err(Error::new(
+                    ErrorKind::Conflict,
+                    "multiple blob manifests match the Git object ID",
+                ));
+            }
+            let object = self.reconstruct_blob(
+                &manifest,
+                limits.maximum_segment_bytes,
+                limits.segment_read_limits,
+            )?;
+            export_loose_git_object(objects_directory, &object, exported_ids)?;
+            blob_count = blob_count.checked_add(1).ok_or_else(|| {
+                Error::new(
+                    ErrorKind::Unsupported,
+                    "blob manifest directory exceeds the entry limit",
+                )
+            })?;
+        }
+        Ok(blob_count)
+    }
+
+    fn export_metadata_object_manifests(
+        &self,
+        objects_directory: &Path,
+        limits: LooseObjectExportLimits,
+        exported_ids: &mut BTreeSet<GitObjectId>,
+    ) -> Result<usize> {
+        let directory = self.root.join(METADATA_OBJECT_MANIFEST_DIRECTORY);
+        match fs::symlink_metadata(&directory) {
+            Ok(_) => validate_directory(&directory, false)?,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(0),
+            Err(error) => {
+                return Err(io_error(
+                    error,
+                    "metadata-object manifest directory could not be inspected",
+                ));
+            }
+        }
+        let entries = fs::read_dir(&directory).map_err(|error| {
+            io_error(
+                error,
+                "metadata-object manifest directory could not be read",
+            )
+        })?;
+        let mut inspected_entries = 0usize;
+        let mut object_count = 0usize;
+        for entry in entries {
+            let entry = entry.map_err(|error| {
+                io_error(
+                    error,
+                    "metadata-object manifest directory could not be read",
+                )
+            })?;
+            inspected_entries = increment_directory_entries(
+                inspected_entries,
+                limits.maximum_metadata_object_manifest_entries,
+                "metadata-object manifest directory exceeds the entry limit",
+            )?;
+            let name = entry.file_name();
+            let name = name.to_str().ok_or_else(|| {
+                Error::new(
+                    ErrorKind::CorruptData,
+                    "metadata-object manifest directory has an invalid entry name",
+                )
+            })?;
+            if is_metadata_object_manifest_staging_filename(name) {
+                continue;
+            }
+            let git_object_id = parse_metadata_object_manifest_filename(name)?;
+            let manifest = self.read_metadata_object_manifest(
+                &entry.path(),
+                git_object_id,
+                limits
+                    .metadata_object_manifest_limits
+                    .maximum_manifest_bytes,
+                limits
+                    .metadata_object_manifest_limits
+                    .maximum_plaintext_bytes,
+            )?;
+            let object = self.reconstruct_metadata_object(
+                &manifest,
+                limits.maximum_segment_bytes,
+                limits.segment_read_limits,
+            )?;
+            export_loose_git_object(objects_directory, &object, exported_ids)?;
+            object_count = object_count.checked_add(1).ok_or_else(|| {
+                Error::new(
+                    ErrorKind::Unsupported,
+                    "metadata-object manifest directory exceeds the entry limit",
+                )
+            })?;
+        }
+        Ok(object_count)
+    }
+
     fn verify_segments(
         &self,
         limits: RepositoryVerificationLimits,
@@ -1628,6 +1896,172 @@ fn create_metadata_object_manifest_staging(parent: &Path) -> Result<(File, PathB
         ErrorKind::Conflict,
         "metadata-object manifest staging path could not be allocated",
     ))
+}
+
+fn export_loose_git_object(
+    objects_directory: &Path,
+    object: &GitObject,
+    exported_ids: &mut BTreeSet<GitObjectId>,
+) -> Result<()> {
+    object.verify_id()?;
+    if !exported_ids.insert(object.id()) {
+        return Err(Error::new(
+            ErrorKind::Conflict,
+            "multiple exported objects use the same Git object ID",
+        ));
+    }
+    let object_id = object.id().to_string();
+    let (directory_name, file_name) = object_id.split_at(2);
+    let directory = objects_directory.join(directory_name);
+    match fs::create_dir(&directory) {
+        Ok(()) => sync_directory(objects_directory)?,
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+            validate_directory(&directory, false)?;
+        }
+        Err(error) => {
+            return Err(io_error(
+                error,
+                "loose-object directory could not be created",
+            ));
+        }
+    }
+    let destination = directory.join(file_name);
+    match fs::symlink_metadata(&destination) {
+        Ok(_) => {
+            return Err(Error::new(
+                ErrorKind::Conflict,
+                "loose Git object already exists in the export destination",
+            ));
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(io_error(
+                error,
+                "loose Git object destination could not be inspected",
+            ));
+        }
+    }
+
+    let (staging, staging_path) = create_loose_object_staging(&directory)?;
+    let write_result = (|| -> io::Result<()> {
+        let mut encoder = ZlibEncoder::new(staging, Compression::default());
+        encoder.write_all(&object.loose_header())?;
+        encoder.write_all(object.data())?;
+        let file = encoder.finish()?;
+        file.sync_all()
+    })();
+    if let Err(error) = write_result {
+        let _ = fs::remove_file(&staging_path);
+        return Err(io_error(
+            error,
+            "loose Git object staging file could not be written",
+        ));
+    }
+    match fs::hard_link(&staging_path, &destination) {
+        Ok(()) => {
+            sync_directory(&directory)?;
+            let _ = fs::remove_file(&staging_path);
+            let _ = sync_directory(&directory);
+            Ok(())
+        }
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+            let _ = fs::remove_file(&staging_path);
+            Err(Error::new(
+                ErrorKind::Conflict,
+                "loose Git object already exists in the export destination",
+            ))
+        }
+        Err(error) => {
+            let _ = fs::remove_file(&staging_path);
+            Err(io_error(error, "loose Git object could not be published"))
+        }
+    }
+}
+
+fn create_loose_object_staging(parent: &Path) -> Result<(File, PathBuf)> {
+    for _ in 0..16 {
+        let path = parent.join(format!(
+            ".yeokcham-export-{}.partial",
+            SegmentId::generate()
+        ));
+        match OpenOptions::new().create_new(true).write(true).open(&path) {
+            Ok(file) => return Ok((file, path)),
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(error) => {
+                return Err(io_error(
+                    error,
+                    "loose Git object staging file could not be created",
+                ));
+            }
+        }
+    }
+    Err(Error::new(
+        ErrorKind::Conflict,
+        "loose Git object staging path could not be allocated",
+    ))
+}
+
+fn validate_export_destination_parent(destination: &Path) -> Result<()> {
+    let parent = destination
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let metadata = fs::symlink_metadata(parent).map_err(|error| {
+        if error.kind() == io::ErrorKind::NotFound {
+            Error::new(
+                ErrorKind::NotFound,
+                "Git export destination parent is missing",
+            )
+        } else {
+            io_error(
+                error,
+                "Git export destination parent could not be inspected",
+            )
+        }
+    })?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(Error::new(
+            ErrorKind::InvalidInput,
+            "Git export destination parent is not a directory",
+        ));
+    }
+    Ok(())
+}
+
+fn sync_export_repository(destination: &Path, objects_directory: &Path) -> Result<()> {
+    for directory in [
+        destination.join("info"),
+        destination.join("hooks"),
+        objects_directory.join("info"),
+        objects_directory.join("pack"),
+        destination.join("refs/heads"),
+        destination.join("refs/tags"),
+        destination.join("refs"),
+        objects_directory.to_path_buf(),
+        destination.to_path_buf(),
+    ] {
+        validate_directory(&directory, false)?;
+        sync_directory(&directory)?;
+    }
+    for file in ["HEAD", "config", "description"] {
+        sync_export_regular_file(&destination.join(file))?;
+    }
+    sync_directory(destination)
+}
+
+fn sync_export_regular_file(path: &Path) -> Result<()> {
+    let metadata = fs::symlink_metadata(path)
+        .map_err(|error| io_error(error, "Git export file could not be inspected"))?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(Error::new(
+            ErrorKind::CorruptData,
+            "Git export file is not a regular file",
+        ));
+    }
+    File::open(path)
+        .map_err(|error| io_error(error, "Git export file could not be opened"))?
+        .sync_all()
+        .map_err(|error| io_error(error, "Git export file could not be synchronized"))
 }
 
 fn manifest_representation_matches(
@@ -2184,6 +2618,7 @@ mod tests {
     use std::{
         fs,
         path::{Path, PathBuf},
+        process::Command,
     };
 
     use sha2::{Digest, Sha256};
@@ -2191,8 +2626,8 @@ mod tests {
 
     use super::*;
     use crate::{
-        SegmentReadLimits, SegmentReader, SegmentRecord, SegmentWriteLimits, SegmentWriter,
-        TinyBlobAggregation, WholeBlobRecord,
+        GitRepository, SegmentReadLimits, SegmentReader, SegmentRecord, SegmentWriteLimits,
+        SegmentWriter, TinyBlobAggregation, WholeBlobRecord,
     };
 
     const TEST_ID: &str = "550e8400-e29b-41d4-a716-446655440000";
@@ -2285,6 +2720,42 @@ mod tests {
             metadata_object_manifest_limits(),
         )
         .expect("verification limits")
+    }
+
+    fn export_limits() -> LooseObjectExportLimits {
+        LooseObjectExportLimits::new(
+            4_096,
+            segment_limits(),
+            manifest_limits(),
+            8,
+            metadata_object_manifest_limits(),
+        )
+        .expect("export limits")
+    }
+
+    fn git_object_bytes(git_dir: &Path, kind: &str, id: GitObjectId) -> Vec<u8> {
+        let output = Command::new("git")
+            .arg("--git-dir")
+            .arg(git_dir)
+            .args(["cat-file", kind, &id.to_string()])
+            .output()
+            .expect("run Git cat-file");
+        assert!(output.status.success(), "Git cat-file must succeed");
+        output.stdout
+    }
+
+    fn git_object_type(git_dir: &Path, id: GitObjectId) -> String {
+        let output = Command::new("git")
+            .arg("--git-dir")
+            .arg(git_dir)
+            .args(["cat-file", "-t", &id.to_string()])
+            .output()
+            .expect("run Git cat-file");
+        assert!(output.status.success(), "Git cat-file must succeed");
+        String::from_utf8(output.stdout)
+            .expect("Git object type must be UTF-8")
+            .trim()
+            .to_owned()
     }
 
     fn verified_segment(repository: &LocalRepository, id: SegmentId) -> ReadSegment {
@@ -2417,6 +2888,17 @@ mod tests {
         (blob, metadata)
     }
 
+    fn assert_exported_git_object(git_dir: &Path, object: &GitObject) {
+        let kind = match object.kind() {
+            GitObjectKind::Blob => "blob",
+            GitObjectKind::Tree => "tree",
+            GitObjectKind::Commit => "commit",
+            GitObjectKind::Tag => "tag",
+        };
+        assert_eq!(git_object_type(git_dir, object.id()), kind);
+        assert_eq!(git_object_bytes(git_dir, kind, object.id()), object.data());
+    }
+
     #[test]
     fn bootstrap_encoding_is_canonical() {
         let id: RepositoryId = TEST_ID.parse().expect("valid test ID");
@@ -2495,6 +2977,136 @@ mod tests {
             .publish_segment_index(&segment, &other_index)
             .expect_err("mismatched index must fail");
         assert_eq!(mismatch.kind(), ErrorKind::InvalidInput);
+    }
+
+    #[test]
+    fn exports_all_published_objects_as_git_readable_loose_objects() {
+        let temporary = TestDirectory::new();
+        let root = temporary.path().join("repository");
+        let repository = LocalRepository::create(&root).expect("create repository");
+        let blob = verified_object(GitObjectKind::Blob, b"\0exported blob\xff");
+        let blob_manifest = whole_blob_manifest(
+            &repository,
+            MANIFEST_ID_A.parse().expect("manifest ID"),
+            SEGMENT_ID_A.parse().expect("segment ID"),
+            blob.data(),
+        );
+        let (tiny_manifest, tiny_id) = tiny_blob_manifest(
+            &repository,
+            MANIFEST_ID_B.parse().expect("manifest ID"),
+            SegmentId::generate(),
+        );
+        let tiny_blob = verified_object(GitObjectKind::Blob, b"\0selected\xff");
+        assert_eq!(tiny_blob.id(), tiny_id);
+        let tree = verified_object(GitObjectKind::Tree, b"");
+        let tree_manifest = metadata_object_manifest(
+            &repository,
+            SEGMENT_ID_B.parse().expect("segment ID"),
+            GitObjectKind::Tree,
+            tree.data(),
+        );
+        let commit_body = format!(
+            "tree {}\nauthor Yeokcham Test <test@example.invalid> 0 +0000\ncommitter Yeokcham Test <test@example.invalid> 0 +0000\n\ninitial\n",
+            tree.id()
+        );
+        let commit = verified_object(GitObjectKind::Commit, commit_body.as_bytes());
+        let commit_manifest = metadata_object_manifest(
+            &repository,
+            SEGMENT_ID_C.parse().expect("segment ID"),
+            GitObjectKind::Commit,
+            commit.data(),
+        );
+        let tag_body = format!(
+            "object {}\ntype commit\ntag v1\ntagger Yeokcham Test <test@example.invalid> 0 +0000\n\nversion one\n",
+            commit.id()
+        );
+        let tag = verified_object(GitObjectKind::Tag, tag_body.as_bytes());
+        let tag_manifest = metadata_object_manifest(
+            &repository,
+            SegmentId::generate(),
+            GitObjectKind::Tag,
+            tag.data(),
+        );
+        repository
+            .publish_blob_manifest(&blob_manifest)
+            .expect("publish blob manifest");
+        repository
+            .publish_blob_manifest(&tiny_manifest)
+            .expect("publish tiny-blob manifest");
+        for manifest in [&tree_manifest, &commit_manifest, &tag_manifest] {
+            repository
+                .publish_metadata_object_manifest(manifest)
+                .expect("publish metadata manifest");
+        }
+
+        let destination = temporary.path().join("export.git");
+        let report = repository
+            .export_loose_objects(&destination, export_limits())
+            .expect("export loose objects");
+
+        assert_eq!(report.blob_count(), 2);
+        assert_eq!(report.metadata_object_count(), 3);
+        assert_eq!(report.object_count(), 5);
+        for object in [&blob, &tiny_blob, &tree, &commit, &tag] {
+            assert_exported_git_object(&destination, object);
+        }
+        assert!(
+            GitRepository::open(&destination)
+                .expect("open exported repository")
+                .is_bare()
+        );
+        assert!(
+            !destination
+                .join("refs/heads")
+                .read_dir()
+                .expect("read refs")
+                .any(|entry| entry.is_ok())
+        );
+    }
+
+    #[test]
+    fn export_rejects_existing_destinations_and_source_limit_failures() {
+        let temporary = TestDirectory::new();
+        let root = temporary.path().join("repository");
+        let repository = LocalRepository::create(&root).expect("create repository");
+        let manifest = whole_blob_manifest(
+            &repository,
+            MANIFEST_ID_A.parse().expect("manifest ID"),
+            SEGMENT_ID_A.parse().expect("segment ID"),
+            b"limited export",
+        );
+        repository
+            .publish_blob_manifest(&manifest)
+            .expect("publish blob manifest");
+
+        let existing = temporary.path().join("existing.git");
+        fs::create_dir(&existing).expect("create destination");
+        let conflict = repository
+            .export_loose_objects(&existing, export_limits())
+            .expect_err("existing destination must fail");
+        assert_eq!(conflict.kind(), ErrorKind::Conflict);
+        assert!(
+            existing
+                .read_dir()
+                .expect("read destination")
+                .next()
+                .is_none()
+        );
+
+        let limited = temporary.path().join("limited.git");
+        let limits = LooseObjectExportLimits::new(
+            1,
+            segment_limits(),
+            manifest_limits(),
+            8,
+            metadata_object_manifest_limits(),
+        )
+        .expect("limited export limits");
+        let limit = repository
+            .export_loose_objects(&limited, limits)
+            .expect_err("segment limit must fail");
+        assert_eq!(limit.kind(), ErrorKind::Unsupported);
+        assert!(limited.is_dir());
     }
 
     #[test]
@@ -3555,8 +4167,22 @@ mod tests {
             .kind(),
             ErrorKind::InvalidInput
         );
+        assert_eq!(
+            LooseObjectExportLimits::new(
+                0,
+                segment_limits(),
+                manifest_limits(),
+                1,
+                metadata_object_manifest_limits(),
+            )
+            .expect_err("zero export limit")
+            .kind(),
+            ErrorKind::InvalidInput
+        );
         assert_send_sync::<LocalRepository>();
         assert_send_sync::<BlobManifestReadLimits>();
+        assert_send_sync::<LooseObjectExportLimits>();
+        assert_send_sync::<LooseObjectExportReport>();
         assert_send_sync::<MetadataObjectManifestReadLimits>();
         assert_send_sync::<RepositoryVerificationLimits>();
         assert_send_sync::<RepositoryVerificationReport>();

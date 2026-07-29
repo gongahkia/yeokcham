@@ -55,3 +55,4 @@ Valid statuses are `Proposed`, `Accepted`, `Rejected`, `Deprecated`, and `Supers
 | [ADR-0047](0047-verify-final-reconstructed-git-blob-id.md) | Accepted | Verify final Git blob identity after reconstruction |
 | [ADR-0048](0048-store-nonblob-git-objects-in-segments.md) | Accepted | Store and resolve non-blob Git objects through segments and direct manifests |
 | [ADR-0049](0049-verify-published-immutable-local-storage.md) | Accepted | Publish and fully verify immutable local storage |
+| [ADR-0050](0050-export-published-objects-as-loose-git-objects.md) | Accepted | Export published objects as standard loose Git objects |

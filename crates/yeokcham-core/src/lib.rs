@@ -43,8 +43,9 @@ pub use metadata_object_manifest::MetadataObjectManifest;
 pub use metadata_object_record::MetadataObjectRecord;
 pub use ref_name::RefName;
 pub use repository::{
-    BlobManifestReadLimits, GitObjectMetadata, LocalRepository, MetadataObjectManifestReadLimits,
-    RepositoryVerificationLimits, RepositoryVerificationReport,
+    BlobManifestReadLimits, GitObjectMetadata, LocalRepository, LooseObjectExportLimits,
+    LooseObjectExportReport, MetadataObjectManifestReadLimits, RepositoryVerificationLimits,
+    RepositoryVerificationReport,
 };
 pub use repository_format::{RepositoryFeatureFlags, RepositoryFormat, RepositoryFormatVersion};
 pub use repository_id::RepositoryId;

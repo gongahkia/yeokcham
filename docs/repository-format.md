@@ -39,3 +39,7 @@ The V1 record is exactly 38 bytes. Existing V1 readers reject malformed, truncat
 V1 is the first persisted repository format, so `LocalRepository::migrate` validates and returns the repository without writing. A future migration must use a new supported version or required feature bit, write a copy-on-write generation, verify it, retain the old readable bootstrap until finalization, and document recovery from interruption.
 
 SQLite metadata is disposable local coordination state, not a recovery source. Ref journals, encryption, and remote backends are deferred to later milestones. Current immutable record layouts and publication paths are specified in [`docs/serialization.md`](serialization.md).
+
+## Loose-object export
+
+`LocalRepository::export_loose_objects` creates a new bare SHA-1 Git repository and writes every published blob and metadata-object manifest as a standard zlib-compressed loose object. The destination must not already exist. It has no restored refs, so it is an object export only; ref restoration is a later operation. The export verifies each reconstructed object ID before writing, creates each loose file without replacement, synchronizes its object and repository metadata, and returns counts only after completion. A failed export can leave an incomplete destination that must be discarded before retrying.

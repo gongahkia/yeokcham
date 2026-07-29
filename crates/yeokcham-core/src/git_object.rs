@@ -86,6 +86,16 @@ impl GitObject {
         GitObjectId::from_bytes(hasher.finalize().into())
     }
 
+    /// Returns the canonical loose-object header for the exact object body.
+    pub(crate) fn loose_header(&self) -> Vec<u8> {
+        let mut header = Vec::with_capacity(self.kind.canonical_name().len() + 22);
+        header.extend_from_slice(self.kind.canonical_name());
+        header.push(b' ');
+        header.extend_from_slice(self.data.len().to_string().as_bytes());
+        header.push(0);
+        header
+    }
+
     /// Verifies that the requested ID equals the canonical SHA-1 ID of this object.
     pub fn verify_id(&self) -> Result<()> {
         if self.id != self.recompute_id() {
@@ -147,6 +157,17 @@ mod tests {
         assert_eq!(error.kind(), ErrorKind::CorruptData);
         assert!(!error.to_string().contains("altered body"));
         assert!(!error.to_string().contains(&empty_blob_id.to_string()));
+    }
+
+    #[test]
+    fn emits_the_canonical_loose_object_header() {
+        let object = GitObject::new(
+            GitObjectId::from_bytes([0; GitObjectId::BYTE_LENGTH]),
+            GitObjectKind::Tag,
+            b"\0body\xff".to_vec(),
+        );
+
+        assert_eq!(object.loose_header(), b"tag 6\0");
     }
 
     #[test]
