@@ -24,7 +24,7 @@ The available OCaml packages do not implement the required profile as a strict b
 - Preserve arbitrary bytes without Unicode or JSON conversion.
 - Keep schemas implementable and inspectable outside OCaml.
 - Reject non-deterministic, ambiguous, unsupported, truncated, or trailing input.
-- Bound decoder depth, arithmetic, allocation, and collection work on hostile input.
+- Bound decoder depth, arithmetic, allocation, and collection work on malformed input.
 - Avoid a runtime dependency that still requires a second strict parser or substantial validation layer.
 - Keep the first format small enough to validate exhaustively before persistent objects exist.
 
@@ -33,8 +33,8 @@ The available OCaml packages do not implement the required profile as a strict b
 ### Local restricted RFC 8949 deterministic profile
 
 - Uses a published standard and official vectors while exposing only Paengi's required subset.
-- Can reject unsupported forms before allocating from attacker-controlled lengths.
-- Adds security-sensitive parser code that requires malformed-input, fuzz, and independent interoperability evidence.
+- Can reject unsupported forms before allocating from input-declared lengths.
+- Adds strict parser code that requires malformed-input, instrumented generated-input exploration, and independent interoperability evidence.
 
 ### `cbor` 0.5 behind a strict adapter
 
@@ -76,12 +76,12 @@ Implement the profile inside Paengi rather than depending on a generic CBOR runt
 - Canonical payload bytes follow a public standard and can be inspected by generic CBOR tools that support the subset.
 - Numeric field keys keep records compact and leave explicit key space for compatible extensions.
 - The accepted data model cannot represent floats, arbitrary CBOR tags, integers outside `int64`, or invalid UTF-8 as text; exact byte strings remain available.
-- Paengi owns a small parser and its security maintenance.
+- Paengi owns a small parser and its correctness maintenance.
 - A generic CBOR library may be adopted later only if a new ADR demonstrates byte-for-byte Profile 1 compatibility and equivalent strict-decoder behavior.
 
 ## Trade-off summary
 
-The local profile removes reliance on a permissive generic decoder and keeps the accepted wire surface small, but transfers parser correctness, denial-of-service resistance, interoperability testing, and future security maintenance to Paengi. Restricting values and map keys makes exhaustive boundary testing practical, but unsupported CBOR values require a future profile and migration rather than an in-place extension. The implementation must therefore remain isolated, pure, bounded, and independently testable; adoption of Profile 1 does not establish that the parser is vulnerability-free.
+The local profile removes reliance on a permissive generic decoder and keeps the accepted wire surface small, but transfers parser correctness, resource-bound enforcement, interoperability testing, and future parser maintenance to Paengi. Restricting values and map keys makes exhaustive boundary testing practical, but unsupported CBOR values require a future profile and migration rather than an in-place extension. The implementation must therefore remain isolated, pure, bounded, and independently testable; adoption of Profile 1 does not establish the absence of decoder defects.
 
 ## Model and invariant impact
 
@@ -112,7 +112,7 @@ Future changes that alter accepted values or canonical bytes require a new profi
 - Generated encode/decode round trips, re-encoding stability, map permutation invariance, integer boundaries, arbitrary bytes, and valid UTF-8.
 - Failure tests for every unsupported major or simple type, non-minimal head, indefinite form, invalid UTF-8, duplicate or unsorted map key, truncation point, trailing byte, overflow, impossible length, exhausted work budget, and depth 65.
 - Differential fixture checks with an independent RFC 8949 implementation, recording its name and version.
-- Coverage-guided fuzzing of the decoder before persistent input is treated as trustworthy.
+- Instrumented generated-input exploration of the decoder before persistent input is treated as trustworthy.
 - Encoder and decoder throughput and allocation baselines on representative tree and snapshot fixtures; no throughput claim is made by this ADR.
 - I/O failure injection is not applicable to the pure codec. Envelope and object-store writes require separate failure tests.
 
@@ -124,7 +124,7 @@ Future changes that alter accepted values or canonical bytes require a new profi
 - 2026-07-29: `cbor2` 6.1.3 independently produced the same canonical bytes for 16 Profile 1 vectors.
 - 2026-07-29: source-controlled `test/golden/profile1-v1-composite.cbor.hex` covers binary bytes, valid Unicode text, signed 64-bit boundaries, arrays, ordered numeric-key maps, booleans, and null; it decodes and re-encodes byte-identically in Dune's sandboxed test run.
 - 2026-07-29: `make ci` passes.
-- Coverage-guided fuzzing and encoder/decoder benchmarks are not yet run; both remain explicit TODO work before object persistence or performance claims.
+- Instrumented generated-input exploration and encoder/decoder benchmarks are not yet run; both remain explicit TODO work before object persistence or performance claims.
 
 ## CLI and user impact
 

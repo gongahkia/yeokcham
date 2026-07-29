@@ -8,7 +8,7 @@
 
 ## Context and problem statement
 
-ADR-017 defines canonical payload bytes but deliberately leaves object kind, format evolution, payload boundaries, and integrity outside the payload. Architecture requires a fixed outer envelope with object type, format version, payload length, and checksum. The envelope must let a reader reject malformed or corrupt data before passing untrusted bytes to the CBOR payload decoder.
+ADR-017 defines canonical payload bytes but deliberately leaves object kind, format evolution, payload boundaries, and integrity outside the payload. Architecture requires a fixed outer envelope with object type, format version, payload length, and checksum. The envelope must let a reader reject malformed or corrupt data before passing unverified bytes to the CBOR payload decoder.
 
 ADR-013 and ADR-016 establish SHA-256 behind an abstraction. The persistent algorithm code and exact checksum preimage remain undefined until this decision.
 
@@ -76,7 +76,7 @@ Git's object model independently demonstrates hashing typed, length-delimited ob
 - Envelope evolution is explicit: a new header interpretation requires a new envelope version, not an ambiguous optional field.
 - The header has no free-form extension area. New header fields require a version transition; payload compatibility uses the mandatory-feature mask and object-format version.
 - The project maintains a small fixed-width parser, writer, and golden fixtures in addition to the Profile 1 codec.
-- The checksum provides integrity detection, not authentication, signing, encryption, or protection against a malicious writer that can replace both payload and checksum.
+- The checksum provides integrity detection, not authentication, signing, encryption, or protection when a writer can replace both payload and checksum.
 
 ## Model and invariant impact
 
@@ -116,7 +116,7 @@ No persistent objects exist, so v1 introduces no migration. Existing object file
 - 2026-07-29: an instrumented payload callback is not invoked for a checksum-invalid envelope and is invoked only after checksum verification on a checksum-valid malformed payload.
 - 2026-07-29: 500 generated envelope round trips, 500 generated one-byte corruptions, and 2,000 arbitrary-byte cases pass.
 - 2026-07-29: `make ci` passes.
-- Coverage-guided fuzzing and header-verification benchmarks are not yet run; no security-completeness or performance claim follows from these tests.
+- Instrumented generated-input exploration and header-verification benchmarks are not yet run; no verification-completeness or performance claim follows from these tests.
 
 ## CLI and user impact
 

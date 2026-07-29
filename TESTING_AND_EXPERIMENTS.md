@@ -317,7 +317,7 @@ The comparison should acknowledge features those tools already provide.
 
 - Snapshot and restore property tests pass.
 - Compaction preserves retained states.
-- Crash during compaction preserves a valid generation.
+- Process interruption during compaction preserves a valid generation.
 - Storage statistics distinguish history classes.
 
 ### Local alpha gate
@@ -341,7 +341,7 @@ The comparison should acknowledge features those tools already provide.
 - Dune.
 - Alcotest.
 - QCheck.
-- Crowbar or another fuzzing option if suitable.
+- An instrumented generated-input runner where suitable.
 - SQLite bindings for indexes.
 - Process-level benchmark scripts.
 - `hyperfine` where appropriate.

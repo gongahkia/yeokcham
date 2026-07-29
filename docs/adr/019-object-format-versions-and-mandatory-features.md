@@ -30,7 +30,7 @@ The compatibility boundary must be narrow. A payload schema change for one objec
 ### Accept any 16-bit version and let payload decoders decide
 
 - Defers per-schema validation to future code.
-- Lets an old reader reach untrusted bytes under an unknown schema and makes compatibility accidental.
+- Lets an old reader reach unverified bytes under an unknown schema and makes compatibility accidental.
 
 ### Scoped version with a fail-closed mandatory-feature mask
 

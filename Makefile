@@ -49,4 +49,5 @@ FUZZ_BINARY = _build/default/fuzz/fuzz_encoding.exe
 fuzz:
 	@test ! -e "$(FUZZ_OUTPUT)" || { echo "refusing existing fuzz output: $(FUZZ_OUTPUT)" >&2; exit 2; }
 	$(FUZZ_DUNE) build fuzz/fuzz_encoding.exe
-	AFL_SKIP_CPUFREQ=1 afl-fuzz -V $(FUZZ_SECONDS) -i $(FUZZ_INPUT) -o $(FUZZ_OUTPUT) -- ./$(FUZZ_BINARY) @@
+	@mkdir -p "$(dir $(FUZZ_OUTPUT))"
+	AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES=1 AFL_SKIP_CPUFREQ=1 afl-fuzz -V $(FUZZ_SECONDS) -i $(FUZZ_INPUT) -o $(FUZZ_OUTPUT) -- ./$(FUZZ_BINARY) @@
