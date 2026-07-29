@@ -1,3 +1,9 @@
 (test
  (name test_foundation)
+ (modules test_foundation)
  (libraries alcotest qcheck-core qcheck-alcotest))
+
+(test
+ (name test_fixture)
+ (modules test_fixture)
+ (libraries alcotest qcheck-core qcheck-alcotest paengi_testkit unix))
