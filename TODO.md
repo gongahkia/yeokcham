@@ -15,7 +15,7 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 - [x] Add tracing with source-content redaction rules.
 - [x] Add fixture-generation scripts.
 - [x] Add benchmark-result schema.
-- [ ] Add reproducible development commands through `just`, `make`, or `cargo xtask`.
+- [x] Add reproducible development commands through `just`, `make`, or `cargo xtask`.
 
 ### Core types
 

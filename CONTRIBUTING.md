@@ -10,14 +10,13 @@ Install [rustup](https://rustup.rs/), then clone the repository. The checked-in 
 
 Keep changes narrow and fail fast. Preserve the invariants in `AGENTS.md`, avoid unrelated refactors, and add normal and failure-path tests for changed behaviour. Persistent format changes require a version, migration implications, and an ADR.
 
-Run the CI-equivalent checks before submitting:
+Run the complete CI-equivalent gate before submitting:
 
 ```bash
-cargo fmt --all -- --check
-cargo clippy --workspace --all-targets --all-features -- -D warnings
-cargo test --workspace --all-features
-RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps
+make ci
 ```
+
+Run `make help` for individual build, format, lint, test, documentation, and fixture targets.
 
 ## Pull requests
 

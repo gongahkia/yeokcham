@@ -75,6 +75,10 @@ Do not start with Google Drive, GitHub synchronisation, a daemon, a web UI, or p
 
 Yeokcham's minimum supported Rust version (MSRV) is 1.85. The repository toolchain is pinned to 1.85.0, and CI also tests the latest stable Rust release. Raising the MSRV requires an explicit documented change.
 
+## Development
+
+Run `make help` to list development targets and `make ci` for the complete locked local CI gate.
+
 ## Contributing and licence
 
 See [`CONTRIBUTING.md`](CONTRIBUTING.md). Yeokcham is licensed under the [`MIT License`](LICENSE).
