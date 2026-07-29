@@ -436,6 +436,8 @@ yeokcham-repository/
 
 Remote keys should be opaque when metadata confidentiality is enabled.
 
+The current local V1 implementation uses flat `segments/<segment-uuid>` paths and `indexes/<segment-uuid>.ykix` paths before future sharding or opaque remote keys. `YKIX` remains rebuildable acceleration metadata and is never trusted instead of the matching sealed segment.
+
 `repository.bin` contains only the minimum bootstrap information and follows the canonical binary policy in [`docs/serialization.md`](docs/serialization.md). It should itself be encrypted if practical.
 
 ## 6. Crash consistency

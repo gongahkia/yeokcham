@@ -68,7 +68,7 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 - [x] Reconstruct exact bytes.
 - [x] Verify final Git blob ID.
 - [x] Reconstruct commit, tree, and tag objects.
-- [ ] Implement full repository verification.
+- [x] Implement full repository verification.
 
 ### Export
 

@@ -1,6 +1,6 @@
 # Local repository format
 
-This specifies the first local, empty Yeokcham repository. It contains no Git objects, indexes, encryption keys, cache, or remote-backend state.
+This specifies the first local Yeokcham repository. Creation is empty; later Milestone-1 publication may add immutable segments, segment indexes, and blob or metadata-object manifests.
 
 ## Layout
 
@@ -10,6 +10,7 @@ This specifies the first local, empty Yeokcham repository. It contains no Git ob
   segments/
   indexes/
   manifests/blobs/
+  manifests/objects/ # created on first metadata-object publication
   manifests/generations/
   journals/refs/
   summaries/current/
@@ -17,7 +18,7 @@ This specifies the first local, empty Yeokcham repository. It contains no Git ob
 
 `LocalRepository::create` requires a nonexistent repository root and an existing parent directory. It creates each directory, writes the bootstrap last with exclusive creation, syncs it, then validates the resulting repository. An interrupted initialization with no valid bootstrap is not an opened repository and contains no acknowledged Git data.
 
-`LocalRepository::open` requires every listed path to be a directory and `format/repository.bin` to be a regular file. It rejects symlinks at these owned paths. The bootstrap file is bounded to 4096 bytes before reading.
+`LocalRepository::open` requires every listed path to be a directory and `format/repository.bin` to be a regular file. `manifests/objects/` is optional for repositories without metadata-object manifests. It rejects symlinks at these owned paths. The bootstrap file is bounded to 4096 bytes before reading.
 
 ## Bootstrap record
 
@@ -37,4 +38,4 @@ The V1 record is exactly 38 bytes. Existing V1 readers reject malformed, truncat
 
 V1 is the first persisted repository format, so `LocalRepository::migrate` validates and returns the repository without writing. A future migration must use a new supported version or required feature bit, write a copy-on-write generation, verify it, retain the old readable bootstrap until finalization, and document recovery from interruption.
 
-SQLite metadata, immutable object records, ref journals, encryption, and remote backends are deferred to later milestones.
+SQLite metadata is disposable local coordination state, not a recovery source. Ref journals, encryption, and remote backends are deferred to later milestones. Current immutable record layouts and publication paths are specified in [`docs/serialization.md`](serialization.md).

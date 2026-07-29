@@ -90,6 +90,8 @@ Version 1 writes uncompressed payloads, so each record's plaintext and stored le
 
 The `YKIX` index is rebuildable metadata for one verified `YKSG` segment. It contains magic, version, matching required feature bits, raw repository and segment UUIDv4 values, the raw 32-byte bound segment checksum, and a `u32` entry count. Entries sort strictly by tagged content identity and contain its tag/digest, record type, compression method, payload offset, plaintext length, and stored length. Required bit `0` permits type-`3` metadata-object entries and must match the associated segment. The `YKIF` footer stores aggregate plaintext/stored lengths followed by a SHA-256 checksum over every preceding index byte. Readers validate the bound identities, feature-to-entry consistency, limits, strict order, totals, checksum, and trailing bytes before lookup. An index never replaces segment verification.
 
+Published local indexes use `indexes/<lowercase-segment-uuid>.ykix`. A writer accepts only the canonical index rebuilt from a verified matching segment, writes and synchronizes a same-directory `.<segment-uuid>.partial`, creates the final file by hard link without replacement, synchronizes the directory, and removes staging. Repeating identical bytes is idempotent; other bytes for the same segment ID conflict. Verification ignores only recognized staging names, checks each index under caller file, entry, record, and stored-byte limits, then rebuilds it from the independently decoded sealed segment before accepting it.
+
 ## Blob manifest version 1
 
 The `YKMF` manifest is immutable metadata for exactly one Git SHA-1 blob representation. Its fields are:

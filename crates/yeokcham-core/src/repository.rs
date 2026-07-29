@@ -403,6 +403,103 @@ impl LocalRepository {
         self.root.join("segments").join(id.to_string())
     }
 
+    /// Returns the canonical final path for one rebuildable segment index.
+    pub fn segment_index_path(&self, id: SegmentId) -> PathBuf {
+        self.root.join("indexes").join(segment_index_filename(id))
+    }
+
+    /// Publishes one index built from a verified segment without replacement.
+    ///
+    /// The index remains disposable acceleration metadata. Publication proves
+    /// it is the exact canonical index for `segment`; recovery still verifies
+    /// the referenced segment independently.
+    pub fn publish_segment_index(&self, segment: &ReadSegment, index: &SegmentIndex) -> Result<()> {
+        if segment.repository_id() != self.id || index.repository_id() != self.id {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "segment index belongs to a different repository",
+            ));
+        }
+        if segment.segment_id() != index.segment_id()
+            || segment.checksum() != index.segment_checksum()
+            || SegmentIndex::from_segment(segment)? != *index
+        {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "segment index does not match its verified segment",
+            ));
+        }
+        let directory = self.root.join("indexes");
+        validate_directory(&directory, false)?;
+        let destination = self.segment_index_path(segment.segment_id());
+        let bytes = index.encode();
+        if let Ok(metadata) = fs::symlink_metadata(&destination) {
+            if metadata.file_type().is_symlink() || !metadata.is_file() {
+                return Err(Error::new(
+                    ErrorKind::CorruptData,
+                    "segment index destination is not a regular file",
+                ));
+            }
+        }
+
+        let (mut staging, staging_path) = create_segment_index_staging(&directory)?;
+        if let Err(error) = staging.write_all(&bytes) {
+            drop(staging);
+            let _ = fs::remove_file(&staging_path);
+            return Err(io_error(
+                error,
+                "segment index staging file could not be written",
+            ));
+        }
+        if let Err(error) = staging.sync_all() {
+            drop(staging);
+            let _ = fs::remove_file(&staging_path);
+            return Err(io_error(
+                error,
+                "segment index staging file could not be synchronized",
+            ));
+        }
+        drop(staging);
+        match fs::hard_link(&staging_path, &destination) {
+            Ok(()) => {
+                sync_directory(&directory)?;
+                let _ = fs::remove_file(&staging_path);
+                let _ = sync_directory(&directory);
+                Ok(())
+            }
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                let _ = fs::remove_file(&staging_path);
+                self.verify_existing_segment_index(&destination, &bytes)
+            }
+            Err(error) => {
+                let _ = fs::remove_file(&staging_path);
+                Err(io_error(error, "segment index could not be published"))
+            }
+        }
+    }
+
+    /// Fully verifies every currently published immutable local record.
+    ///
+    /// SQLite is intentionally excluded because it is disposable local
+    /// coordination state. Recognized interrupted staging files are ignored;
+    /// every other directory entry is rejected.
+    pub fn verify(
+        &self,
+        limits: RepositoryVerificationLimits,
+    ) -> Result<RepositoryVerificationReport> {
+        self.verify_layout_and_bootstrap()?;
+        let segments = self.verify_segments(limits)?;
+        let index_count = self.verify_segment_indexes(&segments, limits)?;
+        let blob_manifest_count = self.verify_blob_manifests(limits)?;
+        let metadata_object_manifest_count = self.verify_metadata_object_manifests(limits)?;
+        Ok(RepositoryVerificationReport {
+            segment_count: segments.len(),
+            index_count,
+            blob_manifest_count,
+            metadata_object_manifest_count,
+        })
+    }
+
     /// Records verified metadata for `object` in the local SQLite database.
     ///
     /// This verifies the object's canonical Git ID before any database is
@@ -1017,6 +1114,280 @@ impl LocalRepository {
         Ok(manifest)
     }
 
+    fn verify_segments(
+        &self,
+        limits: RepositoryVerificationLimits,
+    ) -> Result<BTreeMap<SegmentId, [u8; 32]>> {
+        let directory = self.root.join("segments");
+        validate_directory(&directory, false)?;
+        let entries = fs::read_dir(&directory)
+            .map_err(|error| io_error(error, "segment directory could not be read"))?;
+        let mut inspected_entries = 0usize;
+        let mut segments = BTreeMap::new();
+        for entry in entries {
+            let entry =
+                entry.map_err(|error| io_error(error, "segment directory could not be read"))?;
+            inspected_entries = increment_directory_entries(
+                inspected_entries,
+                limits.maximum_segment_entries,
+                "segment directory exceeds the entry limit",
+            )?;
+            let name = entry.file_name();
+            let name = name.to_str().ok_or_else(|| {
+                Error::new(
+                    ErrorKind::CorruptData,
+                    "segment directory has an invalid entry name",
+                )
+            })?;
+            if is_segment_staging_filename(name) {
+                continue;
+            }
+            let id = parse_segment_filename(name)?;
+            let bytes = read_bounded_segment_file(&entry.path(), limits.maximum_segment_bytes)?;
+            let segment = SegmentReader::decode(&bytes, limits.segment_read_limits)?;
+            if segment.repository_id() != self.id || segment.segment_id() != id {
+                return Err(Error::new(
+                    ErrorKind::CorruptData,
+                    "segment filename does not match its bound identity",
+                ));
+            }
+            if segments.insert(id, segment.checksum()).is_some() {
+                return Err(Error::new(
+                    ErrorKind::CorruptData,
+                    "segment directory contains duplicate identities",
+                ));
+            }
+        }
+        Ok(segments)
+    }
+
+    fn verify_layout_and_bootstrap(&self) -> Result<()> {
+        validate_directory(&self.root, true)?;
+        for relative_path in LAYOUT_DIRECTORIES {
+            validate_directory(&self.root.join(relative_path), false)?;
+        }
+        validate_optional_directory(&self.root.join(METADATA_OBJECT_MANIFEST_DIRECTORY))?;
+        let (id, format) = read_bootstrap(&self.root)?;
+        if id != self.id || format != self.format {
+            return Err(Error::new(
+                ErrorKind::CorruptData,
+                "repository bootstrap changed after open",
+            ));
+        }
+        Ok(())
+    }
+
+    fn verify_segment_indexes(
+        &self,
+        segments: &BTreeMap<SegmentId, [u8; 32]>,
+        limits: RepositoryVerificationLimits,
+    ) -> Result<usize> {
+        let directory = self.root.join("indexes");
+        validate_directory(&directory, false)?;
+        let entries = fs::read_dir(&directory)
+            .map_err(|error| io_error(error, "segment index directory could not be read"))?;
+        let mut inspected_entries = 0usize;
+        let mut index_count = 0usize;
+        for entry in entries {
+            let entry = entry
+                .map_err(|error| io_error(error, "segment index directory could not be read"))?;
+            inspected_entries = increment_directory_entries(
+                inspected_entries,
+                limits.maximum_index_entries,
+                "segment index directory exceeds the entry limit",
+            )?;
+            let name = entry.file_name();
+            let name = name.to_str().ok_or_else(|| {
+                Error::new(
+                    ErrorKind::CorruptData,
+                    "segment index directory has an invalid entry name",
+                )
+            })?;
+            if is_segment_index_staging_filename(name) {
+                continue;
+            }
+            let id = parse_segment_index_filename(name)?;
+            let bytes = read_bounded_segment_index_file(&entry.path(), limits.maximum_index_bytes)?;
+            let index = SegmentIndex::decode(
+                &bytes,
+                limits.maximum_index_records,
+                limits.maximum_index_stored_bytes,
+            )?;
+            let checksum = segments.get(&id).ok_or_else(|| {
+                Error::new(
+                    ErrorKind::CorruptData,
+                    "segment index references an unavailable segment",
+                )
+            })?;
+            let segment_bytes =
+                read_bounded_segment_file(&self.segment_path(id), limits.maximum_segment_bytes)?;
+            let segment = SegmentReader::decode(&segment_bytes, limits.segment_read_limits)?;
+            if index.repository_id() != self.id
+                || index.segment_id() != id
+                || index.segment_checksum() != *checksum
+                || segment.repository_id() != self.id
+                || segment.segment_id() != id
+                || segment.checksum() != *checksum
+                || SegmentIndex::from_segment(&segment)? != index
+            {
+                return Err(Error::new(
+                    ErrorKind::CorruptData,
+                    "segment index does not match its sealed segment",
+                ));
+            }
+            index_count = index_count.checked_add(1).ok_or_else(|| {
+                Error::new(
+                    ErrorKind::Unsupported,
+                    "segment index directory exceeds the entry limit",
+                )
+            })?;
+        }
+        Ok(index_count)
+    }
+
+    fn verify_blob_manifests(&self, limits: RepositoryVerificationLimits) -> Result<usize> {
+        let directory = self.root.join(BLOB_MANIFEST_DIRECTORY);
+        validate_directory(&directory, false)?;
+        let entries = fs::read_dir(&directory)
+            .map_err(|error| io_error(error, "blob manifest directory could not be read"))?;
+        let mut inspected_entries = 0usize;
+        let mut git_object_ids = BTreeSet::new();
+        let mut manifest_count = 0usize;
+        for entry in entries {
+            let entry = entry
+                .map_err(|error| io_error(error, "blob manifest directory could not be read"))?;
+            inspected_entries = increment_directory_entries(
+                inspected_entries,
+                limits.blob_manifest_limits.maximum_entries,
+                "blob manifest directory exceeds the entry limit",
+            )?;
+            let name = entry.file_name();
+            let name = name.to_str().ok_or_else(|| {
+                Error::new(
+                    ErrorKind::CorruptData,
+                    "blob manifest directory has an invalid entry name",
+                )
+            })?;
+            if is_blob_manifest_staging_filename(name) {
+                continue;
+            }
+            let manifest_id = parse_blob_manifest_filename(name)?;
+            let manifest = self.read_blob_manifest(
+                &entry.path(),
+                manifest_id,
+                limits.blob_manifest_limits.maximum_manifest_bytes,
+                limits.blob_manifest_limits.maximum_plaintext_bytes,
+            )?;
+            if !git_object_ids.insert(manifest.git_object_id()) {
+                return Err(Error::new(
+                    ErrorKind::Conflict,
+                    "multiple blob manifests match the Git object ID",
+                ));
+            }
+            self.reconstruct_blob(
+                &manifest,
+                limits.maximum_segment_bytes,
+                limits.segment_read_limits,
+            )?;
+            manifest_count = manifest_count.checked_add(1).ok_or_else(|| {
+                Error::new(
+                    ErrorKind::Unsupported,
+                    "blob manifest directory exceeds the entry limit",
+                )
+            })?;
+        }
+        Ok(manifest_count)
+    }
+
+    fn verify_metadata_object_manifests(
+        &self,
+        limits: RepositoryVerificationLimits,
+    ) -> Result<usize> {
+        let directory = self.root.join(METADATA_OBJECT_MANIFEST_DIRECTORY);
+        match fs::symlink_metadata(&directory) {
+            Ok(_) => validate_directory(&directory, false)?,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(0),
+            Err(error) => {
+                return Err(io_error(
+                    error,
+                    "metadata-object manifest directory could not be inspected",
+                ));
+            }
+        }
+        let entries = fs::read_dir(&directory).map_err(|error| {
+            io_error(
+                error,
+                "metadata-object manifest directory could not be read",
+            )
+        })?;
+        let mut inspected_entries = 0usize;
+        let mut manifest_count = 0usize;
+        for entry in entries {
+            let entry = entry.map_err(|error| {
+                io_error(
+                    error,
+                    "metadata-object manifest directory could not be read",
+                )
+            })?;
+            inspected_entries = increment_directory_entries(
+                inspected_entries,
+                limits.maximum_metadata_object_manifest_entries,
+                "metadata-object manifest directory exceeds the entry limit",
+            )?;
+            let name = entry.file_name();
+            let name = name.to_str().ok_or_else(|| {
+                Error::new(
+                    ErrorKind::CorruptData,
+                    "metadata-object manifest directory has an invalid entry name",
+                )
+            })?;
+            if is_metadata_object_manifest_staging_filename(name) {
+                continue;
+            }
+            let git_object_id = parse_metadata_object_manifest_filename(name)?;
+            let manifest = self.read_metadata_object_manifest(
+                &entry.path(),
+                git_object_id,
+                limits
+                    .metadata_object_manifest_limits
+                    .maximum_manifest_bytes,
+                limits
+                    .metadata_object_manifest_limits
+                    .maximum_plaintext_bytes,
+            )?;
+            self.reconstruct_metadata_object(
+                &manifest,
+                limits.maximum_segment_bytes,
+                limits.segment_read_limits,
+            )?;
+            manifest_count = manifest_count.checked_add(1).ok_or_else(|| {
+                Error::new(
+                    ErrorKind::Unsupported,
+                    "metadata-object manifest directory exceeds the entry limit",
+                )
+            })?;
+        }
+        Ok(manifest_count)
+    }
+
+    fn verify_existing_segment_index(&self, path: &Path, bytes: &[u8]) -> Result<()> {
+        let maximum_bytes = u64::try_from(bytes.len()).map_err(|_| {
+            Error::new(
+                ErrorKind::Unsupported,
+                "segment index is too large to publish",
+            )
+        })?;
+        let existing = read_bounded_segment_index_file(path, maximum_bytes)?;
+        if existing == bytes {
+            Ok(())
+        } else {
+            Err(Error::new(
+                ErrorKind::Conflict,
+                "segment index conflicts with an existing segment ID",
+            ))
+        }
+    }
+
     fn open_metadata_database(&self) -> Result<Connection> {
         let root = fs::canonicalize(&self.root)
             .map_err(|error| io_error(error, "repository directory could not be resolved"))?;
@@ -1071,6 +1442,40 @@ fn metadata_object_manifest_filename(id: GitObjectId) -> String {
     format!("{id}{METADATA_OBJECT_MANIFEST_EXTENSION}")
 }
 
+fn segment_index_filename(id: SegmentId) -> String {
+    format!("{id}{SEGMENT_INDEX_EXTENSION}")
+}
+
+fn parse_segment_filename(name: &str) -> Result<SegmentId> {
+    name.parse().map_err(|_| {
+        Error::new(
+            ErrorKind::CorruptData,
+            "segment directory has an invalid entry name",
+        )
+    })
+}
+
+fn parse_segment_index_filename(name: &str) -> Result<SegmentId> {
+    let id = name.strip_suffix(SEGMENT_INDEX_EXTENSION).ok_or_else(|| {
+        Error::new(
+            ErrorKind::CorruptData,
+            "segment index directory has an invalid entry name",
+        )
+    })?;
+    if id.is_empty() {
+        return Err(Error::new(
+            ErrorKind::CorruptData,
+            "segment index directory has an invalid entry name",
+        ));
+    }
+    id.parse().map_err(|_| {
+        Error::new(
+            ErrorKind::CorruptData,
+            "segment index directory has an invalid entry name",
+        )
+    })
+}
+
 fn parse_blob_manifest_filename(name: &str) -> Result<ManifestId> {
     let id = name.strip_suffix(BLOB_MANIFEST_EXTENSION).ok_or_else(|| {
         Error::new(
@@ -1092,10 +1497,89 @@ fn parse_blob_manifest_filename(name: &str) -> Result<ManifestId> {
     })
 }
 
+fn parse_metadata_object_manifest_filename(name: &str) -> Result<GitObjectId> {
+    let id = name
+        .strip_suffix(METADATA_OBJECT_MANIFEST_EXTENSION)
+        .ok_or_else(|| {
+            Error::new(
+                ErrorKind::CorruptData,
+                "metadata-object manifest directory has an invalid entry name",
+            )
+        })?;
+    if id.is_empty() {
+        return Err(Error::new(
+            ErrorKind::CorruptData,
+            "metadata-object manifest directory has an invalid entry name",
+        ));
+    }
+    id.parse().map_err(|_| {
+        Error::new(
+            ErrorKind::CorruptData,
+            "metadata-object manifest directory has an invalid entry name",
+        )
+    })
+}
+
+fn increment_directory_entries(
+    current: usize,
+    maximum: usize,
+    message: &'static str,
+) -> Result<usize> {
+    let inspected = current
+        .checked_add(1)
+        .ok_or_else(|| Error::new(ErrorKind::Unsupported, message))?;
+    if inspected > maximum {
+        return Err(Error::new(ErrorKind::Unsupported, message));
+    }
+    Ok(inspected)
+}
+
+fn is_segment_staging_filename(name: &str) -> bool {
+    name.strip_prefix(".yeokcham-")
+        .and_then(|name| name.strip_suffix(SEGMENT_INDEX_STAGING_SUFFIX))
+        .is_some_and(|id| id.parse::<SegmentId>().is_ok())
+}
+
+fn is_segment_index_staging_filename(name: &str) -> bool {
+    name.strip_prefix('.')
+        .and_then(|name| name.strip_suffix(SEGMENT_INDEX_STAGING_SUFFIX))
+        .is_some_and(|id| id.parse::<SegmentId>().is_ok())
+}
+
 fn is_blob_manifest_staging_filename(name: &str) -> bool {
     name.strip_prefix('.')
         .and_then(|name| name.strip_suffix(BLOB_MANIFEST_STAGING_SUFFIX))
         .is_some_and(|id| id.parse::<ManifestId>().is_ok())
+}
+
+fn is_metadata_object_manifest_staging_filename(name: &str) -> bool {
+    name.strip_prefix('.')
+        .and_then(|name| name.strip_suffix(METADATA_OBJECT_MANIFEST_STAGING_SUFFIX))
+        .is_some_and(|id| id.parse::<SegmentId>().is_ok())
+}
+
+fn create_segment_index_staging(parent: &Path) -> Result<(File, PathBuf)> {
+    for _ in 0..16 {
+        let path = parent.join(format!(
+            ".{}{}",
+            SegmentId::generate(),
+            SEGMENT_INDEX_STAGING_SUFFIX
+        ));
+        match OpenOptions::new().create_new(true).write(true).open(&path) {
+            Ok(file) => return Ok((file, path)),
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(error) => {
+                return Err(io_error(
+                    error,
+                    "segment index staging file could not be created",
+                ));
+            }
+        }
+    }
+    Err(Error::new(
+        ErrorKind::Conflict,
+        "segment index staging path could not be allocated",
+    ))
 }
 
 fn create_blob_manifest_staging(parent: &Path) -> Result<(File, PathBuf)> {
@@ -1352,6 +1836,53 @@ fn read_bounded_metadata_object_manifest_file(path: &Path, maximum_bytes: u64) -
             error,
             "metadata-object manifest file could not be read",
         )),
+    }
+}
+
+fn read_bounded_segment_index_file(path: &Path, maximum_bytes: u64) -> Result<Vec<u8>> {
+    let metadata = fs::symlink_metadata(path).map_err(|error| {
+        if error.kind() == io::ErrorKind::NotFound {
+            Error::new(ErrorKind::CorruptData, "segment index file is missing")
+        } else {
+            io_error(error, "segment index file could not be inspected")
+        }
+    })?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(Error::new(
+            ErrorKind::CorruptData,
+            "segment index file is not a regular file",
+        ));
+    }
+    if metadata.len() > maximum_bytes {
+        return Err(Error::new(
+            ErrorKind::Unsupported,
+            "segment index file exceeds the byte limit",
+        ));
+    }
+    let length = usize::try_from(metadata.len()).map_err(|_| {
+        Error::new(
+            ErrorKind::Unsupported,
+            "segment index file exceeds the byte limit",
+        )
+    })?;
+    let mut file = File::open(path)
+        .map_err(|error| io_error(error, "segment index file could not be opened"))?;
+    let mut bytes = vec![0; length];
+    file.read_exact(&mut bytes).map_err(|error| {
+        if error.kind() == io::ErrorKind::UnexpectedEof {
+            Error::new(ErrorKind::CorruptData, "segment index file is truncated")
+        } else {
+            io_error(error, "segment index file could not be read")
+        }
+    })?;
+    let mut extra = [0; 1];
+    match file.read(&mut extra) {
+        Ok(0) => Ok(bytes),
+        Ok(_) => Err(Error::new(
+            ErrorKind::CorruptData,
+            "segment index file changed while being read",
+        )),
+        Err(error) => Err(io_error(error, "segment index file could not be read")),
     }
 }
 
@@ -1740,6 +2271,35 @@ mod tests {
         SegmentReadLimits::new(4, 4_096, 4_096, 4_096, 4_096, 4_096).expect("segment limits")
     }
 
+    fn verification_limits() -> RepositoryVerificationLimits {
+        RepositoryVerificationLimits::new(
+            8,
+            4_096,
+            segment_limits(),
+            8,
+            4_096,
+            4,
+            4_096,
+            manifest_limits(),
+            8,
+            metadata_object_manifest_limits(),
+        )
+        .expect("verification limits")
+    }
+
+    fn verified_segment(repository: &LocalRepository, id: SegmentId) -> ReadSegment {
+        let bytes = fs::read(repository.segment_path(id)).expect("read segment");
+        SegmentReader::decode(&bytes, segment_limits()).expect("decode segment")
+    }
+
+    fn publish_segment_index(repository: &LocalRepository, id: SegmentId) {
+        let segment = verified_segment(repository, id);
+        let index = SegmentIndex::from_segment(&segment).expect("build index");
+        repository
+            .publish_segment_index(&segment, &index)
+            .expect("publish index");
+    }
+
     fn whole_blob_manifest(
         repository: &LocalRepository,
         manifest_id: ManifestId,
@@ -1831,6 +2391,32 @@ mod tests {
         MetadataObjectManifest::from_metadata_object(&segment, &record).expect("manifest")
     }
 
+    fn verification_fixture(
+        repository: &LocalRepository,
+    ) -> (BlobManifest, MetadataObjectManifest) {
+        let blob = whole_blob_manifest(
+            repository,
+            MANIFEST_ID_A.parse().expect("manifest ID"),
+            SEGMENT_ID_A.parse().expect("segment ID"),
+            b"full verification blob",
+        );
+        let metadata = metadata_object_manifest(
+            repository,
+            SEGMENT_ID_B.parse().expect("segment ID"),
+            GitObjectKind::Commit,
+            b"tree \0full verification commit\n",
+        );
+        repository
+            .publish_blob_manifest(&blob)
+            .expect("publish blob manifest");
+        repository
+            .publish_metadata_object_manifest(&metadata)
+            .expect("publish metadata manifest");
+        publish_segment_index(repository, blob.segment_id());
+        publish_segment_index(repository, metadata.segment_id());
+        (blob, metadata)
+    }
+
     #[test]
     fn bootstrap_encoding_is_canonical() {
         let id: RepositoryId = TEST_ID.parse().expect("valid test ID");
@@ -1866,6 +2452,242 @@ mod tests {
             before_migration,
             fs::read(bootstrap_path(&root)).expect("read bootstrap")
         );
+    }
+
+    #[test]
+    fn fully_verifies_empty_and_populated_immutable_storage() {
+        let temporary = TestDirectory::new();
+        let root = temporary.path().join("repository");
+        let repository = LocalRepository::create(&root).expect("create repository");
+
+        assert_eq!(
+            repository
+                .verify(verification_limits())
+                .expect("verify empty"),
+            RepositoryVerificationReport::default()
+        );
+
+        let (blob, metadata) = verification_fixture(&repository);
+        let report = repository
+            .verify(verification_limits())
+            .expect("verify immutable storage");
+
+        assert_eq!(report.segment_count(), 2);
+        assert_eq!(report.index_count(), 2);
+        assert_eq!(report.blob_manifest_count(), 1);
+        assert_eq!(report.metadata_object_manifest_count(), 1);
+        assert!(repository.segment_index_path(blob.segment_id()).is_file());
+        assert!(
+            repository
+                .segment_index_path(metadata.segment_id())
+                .is_file()
+        );
+
+        let segment = verified_segment(&repository, blob.segment_id());
+        let index = SegmentIndex::from_segment(&segment).expect("build index");
+        repository
+            .publish_segment_index(&segment, &index)
+            .expect("repeat index publication");
+
+        let other_segment = verified_segment(&repository, metadata.segment_id());
+        let other_index = SegmentIndex::from_segment(&other_segment).expect("build other index");
+        let mismatch = repository
+            .publish_segment_index(&segment, &other_index)
+            .expect_err("mismatched index must fail");
+        assert_eq!(mismatch.kind(), ErrorKind::InvalidInput);
+    }
+
+    #[test]
+    fn verification_rejects_altered_or_missing_immutable_records() {
+        #[derive(Clone, Copy)]
+        enum Target {
+            Bootstrap,
+            Segment,
+            Index,
+            MismatchedIndex,
+            BlobManifest,
+            MetadataObjectManifest,
+            MissingSegment,
+        }
+
+        for target in [
+            Target::Bootstrap,
+            Target::Segment,
+            Target::Index,
+            Target::MismatchedIndex,
+            Target::BlobManifest,
+            Target::MetadataObjectManifest,
+            Target::MissingSegment,
+        ] {
+            let temporary = TestDirectory::new();
+            let root = temporary.path().join("repository");
+            let repository = LocalRepository::create(&root).expect("create repository");
+            let (blob, metadata) = verification_fixture(&repository);
+            match target {
+                Target::Bootstrap => {
+                    let path = bootstrap_path(&root);
+                    let mut bytes = fs::read(&path).expect("read bootstrap");
+                    bytes[0] ^= 1;
+                    fs::write(path, bytes).expect("alter bootstrap");
+                }
+                Target::Segment => {
+                    let path = repository.segment_path(blob.segment_id());
+                    let mut bytes = fs::read(&path).expect("read segment");
+                    *bytes.last_mut().expect("segment checksum") ^= 1;
+                    fs::write(path, bytes).expect("alter segment");
+                }
+                Target::Index => {
+                    let path = repository.segment_index_path(blob.segment_id());
+                    let mut bytes = fs::read(&path).expect("read index");
+                    *bytes.last_mut().expect("index checksum") ^= 1;
+                    fs::write(path, bytes).expect("alter index");
+                }
+                Target::MismatchedIndex => {
+                    let path = repository.segment_index_path(blob.segment_id());
+                    let mut bytes = fs::read(&path).expect("read index");
+                    bytes[38..54].copy_from_slice(
+                        &SEGMENT_ID_C
+                            .parse::<SegmentId>()
+                            .expect("segment ID")
+                            .into_bytes(),
+                    );
+                    let checksum_offset = bytes.len() - 32;
+                    let checksum: [u8; 32] = Sha256::digest(&bytes[..checksum_offset]).into();
+                    bytes[checksum_offset..].copy_from_slice(&checksum);
+                    fs::write(path, bytes).expect("mismatch index segment ID");
+                }
+                Target::BlobManifest => {
+                    let path = manifest_path(&root, blob.manifest_id());
+                    let mut bytes = fs::read(&path).expect("read manifest");
+                    *bytes.last_mut().expect("manifest checksum") ^= 1;
+                    fs::write(path, bytes).expect("alter manifest");
+                }
+                Target::MetadataObjectManifest => {
+                    let path = metadata_object_manifest_path(&root, metadata.git_object_id());
+                    let mut bytes = fs::read(&path).expect("read metadata manifest");
+                    *bytes.last_mut().expect("manifest checksum") ^= 1;
+                    fs::write(path, bytes).expect("alter metadata manifest");
+                }
+                Target::MissingSegment => {
+                    fs::remove_file(repository.segment_path(blob.segment_id()))
+                        .expect("remove segment");
+                }
+            }
+            let error = repository
+                .verify(verification_limits())
+                .expect_err("altered immutable storage must fail verification");
+            assert_eq!(error.kind(), ErrorKind::CorruptData);
+        }
+    }
+
+    #[test]
+    fn verification_ignores_only_recognized_staging_files_and_rejects_unexpected_entries() {
+        #[derive(Clone, Copy)]
+        enum Directory {
+            Segments,
+            Indexes,
+            BlobManifests,
+            MetadataObjectManifests,
+        }
+
+        let temporary = TestDirectory::new();
+        let root = temporary.path().join("repository");
+        let repository = LocalRepository::create(&root).expect("create repository");
+        verification_fixture(&repository);
+        let staging_id = SEGMENT_ID_C.parse::<SegmentId>().expect("segment ID");
+        fs::write(
+            root.join("segments")
+                .join(format!(".yeokcham-{staging_id}.partial")),
+            b"partial",
+        )
+        .expect("write segment staging");
+        fs::write(
+            root.join("indexes").join(format!(".{staging_id}.partial")),
+            b"partial",
+        )
+        .expect("write index staging");
+        fs::write(
+            root.join(BLOB_MANIFEST_DIRECTORY)
+                .join(format!(".{MANIFEST_ID_B}.partial")),
+            b"partial",
+        )
+        .expect("write blob staging");
+        fs::write(
+            root.join(METADATA_OBJECT_MANIFEST_DIRECTORY)
+                .join(format!(".{staging_id}.partial")),
+            b"partial",
+        )
+        .expect("write metadata staging");
+        repository
+            .verify(verification_limits())
+            .expect("recognized staging is ignored");
+
+        for directory in [
+            Directory::Segments,
+            Directory::Indexes,
+            Directory::BlobManifests,
+            Directory::MetadataObjectManifests,
+        ] {
+            let temporary = TestDirectory::new();
+            let root = temporary.path().join("repository");
+            let repository = LocalRepository::create(&root).expect("create repository");
+            verification_fixture(&repository);
+            let directory = match directory {
+                Directory::Segments => root.join("segments"),
+                Directory::Indexes => root.join("indexes"),
+                Directory::BlobManifests => root.join(BLOB_MANIFEST_DIRECTORY),
+                Directory::MetadataObjectManifests => root.join(METADATA_OBJECT_MANIFEST_DIRECTORY),
+            };
+            fs::write(directory.join("unexpected"), b"invalid").expect("write unexpected entry");
+            let error = repository
+                .verify(verification_limits())
+                .expect_err("unexpected entry must fail verification");
+            assert_eq!(error.kind(), ErrorKind::CorruptData);
+        }
+    }
+
+    #[test]
+    fn verification_enforces_directory_and_file_bounds() {
+        let temporary = TestDirectory::new();
+        let root = temporary.path().join("repository");
+        let repository = LocalRepository::create(&root).expect("create repository");
+        verification_fixture(&repository);
+
+        let entry_limited = RepositoryVerificationLimits::new(
+            1,
+            4_096,
+            segment_limits(),
+            8,
+            4_096,
+            4,
+            4_096,
+            manifest_limits(),
+            8,
+            metadata_object_manifest_limits(),
+        )
+        .expect("entry-limited verification");
+        let entry_error = repository
+            .verify(entry_limited)
+            .expect_err("segment entry limit");
+        assert_eq!(entry_error.kind(), ErrorKind::Unsupported);
+
+        let file_limited = RepositoryVerificationLimits::new(
+            8,
+            1,
+            segment_limits(),
+            8,
+            4_096,
+            4,
+            4_096,
+            manifest_limits(),
+            8,
+            metadata_object_manifest_limits(),
+        )
+        .expect("file-limited verification");
+        let file_error = repository
+            .verify(file_limited)
+            .expect_err("segment byte limit");
+        assert_eq!(file_error.kind(), ErrorKind::Unsupported);
     }
 
     #[test]
@@ -2716,8 +3538,27 @@ mod tests {
                 .kind(),
             ErrorKind::InvalidInput
         );
+        assert_eq!(
+            RepositoryVerificationLimits::new(
+                0,
+                1,
+                segment_limits(),
+                1,
+                1,
+                1,
+                1,
+                manifest_limits(),
+                1,
+                metadata_object_manifest_limits(),
+            )
+            .expect_err("zero verification limit")
+            .kind(),
+            ErrorKind::InvalidInput
+        );
         assert_send_sync::<LocalRepository>();
         assert_send_sync::<BlobManifestReadLimits>();
         assert_send_sync::<MetadataObjectManifestReadLimits>();
+        assert_send_sync::<RepositoryVerificationLimits>();
+        assert_send_sync::<RepositoryVerificationReport>();
     }
 }

@@ -1,10 +1,10 @@
 # ADR-0041: Use a rebuildable canonical index per immutable segment
 
-- Status: Accepted
+- Status: Superseded by ADR-0049
 - Date: 2026-07-29
 - Deciders: Yeokcham maintainers
 - Supersedes: None
-- Superseded by: None
+- Superseded by: ADR-0049
 
 ## Context
 
