@@ -5,10 +5,10 @@ The roadmap is ordered. The local byte-correct model must exist before semantic 
 ## Active vertical slice
 
 - Milestone: 0 — Project and model foundation.
-- Task: add the ADR process (complete).
+- Task: add reproducible development commands (complete).
 - Types: none; model types begin after project tooling is established.
-- Invariants: architectural decisions have unique IDs, explicit status, rationale, consequences, and supersession links.
-- Tests: ADR numbering/template checks and all existing quality gates pass.
+- Invariants: setup pins OCaml and OCamlFormat; standard targets run the same build, format, lint, and test gates locally.
+- Tests: `make setup`, `make check`, and `make ci` pass in a fresh temporary copy.
 - ADR changes: none; no architectural choice changes.
 
 ## Milestone 0 — Project and model foundation
@@ -21,7 +21,7 @@ The roadmap is ordered. The local byte-correct model must exist before semantic 
 - [x] Configure unit and property-test CI.
 - [x] Add licence and contribution guide.
 - [x] Add ADR process.
-- [ ] Add reproducible development commands.
+- [x] Add reproducible development commands.
 - [ ] Add benchmark-result schema.
 - [ ] Add fixture generator.
 

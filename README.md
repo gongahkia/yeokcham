@@ -48,6 +48,18 @@ Design and implementation handoff package. paengi is a portfolio and research pr
 
 See `CONTRIBUTING.md` for development rules. Paengi is licensed under the MIT License.
 
+## Development
+
+Install the host tools on macOS, create the repository-local OCaml 5.5.0 switch, and run every gate:
+
+```bash
+brew install opam actionlint
+make setup
+make ci
+```
+
+`make build`, `make test`, `make lint`, and `make format` expose the individual steps. `make check` runs build, format verification, lint, package validation, and tests without the GitHub Actions linter.
+
 ## Non-goals for the initial prototype
 
 - Full Git command compatibility.

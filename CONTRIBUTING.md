@@ -27,12 +27,11 @@ Exact bytes remain canonical. Semantic data is optional sidecar metadata. Ambigu
 Use OCaml 5.5.0 and Dune 3.23 or newer.
 
 ```bash
-opam install . --deps-only --with-test
-opam exec -- dune build @opam @fmt @lint @all
-opam exec -- dune runtest
+make setup
+make check
 ```
 
-Generated `paengi.opam` changes must be produced from `dune-project` and applied with `dune promote`.
+Use `make format` to apply formatting. Generated `paengi.opam` changes must be produced from `dune-project` and applied with `dune promote`.
 
 ## Pull requests
 
