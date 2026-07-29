@@ -3,6 +3,11 @@ opam-version: "2.0"
 synopsis: "Experimental model-first local-first version control"
 description:
   "A local-first VCS separating scratch, intent, and release history."
+maintainer: ["Gabriel Ong Zhe Mian <angryapplegravy@gmail.com>"]
+authors: ["Gabriel Ong Zhe Mian"]
+license: "MIT"
+homepage: "https://github.com/gongahkia/paengi"
+bug-reports: "https://github.com/gongahkia/paengi/issues"
 depends: [
   "ocaml" {= "5.5.0"}
   "dune" {>= "3.23"}
@@ -25,4 +30,5 @@ build: [
     "@doc" {with-doc}
   ]
 ]
+dev-repo: "git+https://github.com/gongahkia/paengi.git"
 x-maintenance-intent: ["(latest)"]

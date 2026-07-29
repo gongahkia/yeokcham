@@ -46,6 +46,8 @@ The supported compiler is OCaml 5.5.0. The exact constraint is recorded in `dune
 
 Design and implementation handoff package. paengi is a portfolio and research prototype first, not a production Git replacement.
 
+See `CONTRIBUTING.md` for development rules. Paengi is licensed under the MIT License.
+
 ## Non-goals for the initial prototype
 
 - Full Git command compatibility.

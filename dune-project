@@ -1,6 +1,10 @@
 (lang dune 3.23)
 (name paengi)
 (generate_opam_files true)
+(source (github gongahkia/paengi))
+(authors "Gabriel Ong Zhe Mian")
+(maintainers "Gabriel Ong Zhe Mian <angryapplegravy@gmail.com>")
+(license MIT)
 
 (package
  (name paengi)

@@ -5,10 +5,10 @@ The roadmap is ordered. The local byte-correct model must exist before semantic 
 ## Active vertical slice
 
 - Milestone: 0 — Project and model foundation.
-- Task: configure unit and property-test CI (complete).
+- Task: add the MIT licence and contribution guide (complete).
 - Types: none; model types begin after project tooling is established.
-- Invariants: CI uses OCaml 5.5.0 and executes both unit and generated property tests.
-- Tests: local unit/property smoke suite passes; `actionlint` accepts the workflow.
+- Invariants: package metadata and repository licence agree; contribution gates preserve the model and test standard.
+- Tests: `opam lint`, Dune quality gates, tests, and `actionlint` pass.
 - ADR changes: none; no architectural choice changes.
 
 ## Milestone 0 — Project and model foundation
@@ -19,7 +19,7 @@ The roadmap is ordered. The local byte-correct model must exist before semantic 
 - [x] Select supported OCaml version.
 - [x] Configure formatting and linting.
 - [x] Configure unit and property-test CI.
-- [ ] Add licence and contribution guide.
+- [x] Add licence and contribution guide.
 - [ ] Add ADR process.
 - [ ] Add reproducible development commands.
 - [ ] Add benchmark-result schema.
