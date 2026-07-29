@@ -398,8 +398,8 @@ mod tests {
 
     use super::*;
     use crate::{
-        GitObject, GitObjectId, GitObjectKind, SegmentReadLimits, SegmentReader, SegmentRecord,
-        SegmentWriteLimits, SegmentWriter, MetadataObjectRecord, WholeBlobRecord,
+        GitObject, GitObjectId, GitObjectKind, MetadataObjectRecord, SegmentReadLimits,
+        SegmentReader, SegmentRecord, SegmentWriteLimits, SegmentWriter, WholeBlobRecord,
     };
 
     const HEADER_BYTES: usize = 90;
@@ -556,7 +556,10 @@ mod tests {
             REQUIRED_FEATURE_METADATA_OBJECT
         );
         let decoded = SegmentIndex::decode(&encoded, 1, 1024).expect("decode index");
-        assert_eq!(decoded.entries()[0].kind(), SegmentRecordKind::MetadataObject);
+        assert_eq!(
+            decoded.entries()[0].kind(),
+            SegmentRecordKind::MetadataObject
+        );
 
         let mut missing_feature = encoded;
         missing_feature[6..14].copy_from_slice(&0u64.to_be_bytes());
