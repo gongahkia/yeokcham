@@ -40,7 +40,8 @@ All records below are Paengi CBOR Profile 1 arrays inside an Envelope 1 with obj
 
 ```text
 content-v1  = [1, bytes]
-tree-v1     = [1, *tree-entry-v1]
+tree-v1     = [1, tree-entries-v1]
+tree-entries-v1 = [*tree-entry-v1]
 tree-entry-v1 = file-entry-v1 / directory-entry-v1
 file-entry-v1 = [0, name-bytes, mode, content-object-id]
 directory-entry-v1 = [1, name-bytes, tree-object-id]

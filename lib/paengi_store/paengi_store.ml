@@ -415,19 +415,30 @@ let existing_matches repository id expected =
 
 let put repository envelope =
   let bytes = Envelope.encode envelope in
-  let id = stored_object_id_of_bytes bytes in
-  let* () = ensure_object_shard repository id in
-  let directory = object_directory repository id in
-  let final = object_path repository id in
-  let* temporary = create_temporary directory (Filename.basename final) (Bytes.of_string bytes) in
-  let link_result = link_without_replace ~temporary ~final in
-  match link_result with
-  | Error error -> Error error
-  | Ok Published ->
-      let* () = fsync_directory directory in
-      let* () = finish_temporary ~directory temporary in
-      Ok id
-  | Ok Already_exists ->
-      let* () = finish_temporary ~directory temporary in
-      let* () = existing_matches repository id bytes in
-      Ok id
+  if String.length bytes > max_object_bytes then
+    Error
+      (Object_too_large
+         {
+           path = "canonical Envelope-1 object";
+           size = String.length bytes;
+           limit = max_object_bytes;
+         })
+  else
+    let id = stored_object_id_of_bytes bytes in
+    let* () = ensure_object_shard repository id in
+    let directory = object_directory repository id in
+    let final = object_path repository id in
+    let* temporary =
+      create_temporary directory (Filename.basename final) (Bytes.of_string bytes)
+    in
+    let link_result = link_without_replace ~temporary ~final in
+    match link_result with
+    | Error error -> Error error
+    | Ok Published ->
+        let* () = fsync_directory directory in
+        let* () = finish_temporary ~directory temporary in
+        Ok id
+    | Ok Already_exists ->
+        let* () = finish_temporary ~directory temporary in
+        let* () = existing_matches repository id bytes in
+        Ok id

@@ -26,6 +26,7 @@ val error_to_string : error -> string
 module Content : sig
   type id
 
+  val of_stored_object_id : Paengi_store.Stored_object_id.t -> id
   val stored_object_id : id -> Paengi_store.Stored_object_id.t
   val equal_id : id -> id -> bool
   val store : Paengi_store.repository -> string -> (id, error) result
@@ -41,6 +42,7 @@ module Tree : sig
 
   type t
 
+  val of_stored_object_id : Paengi_store.Stored_object_id.t -> id
   val stored_object_id : id -> Paengi_store.Stored_object_id.t
   val equal_id : id -> id -> bool
   val create : (string * entry) list -> (t, error) result
@@ -53,6 +55,7 @@ module Snapshot : sig
   type id
   type t
 
+  val of_stored_object_id : Paengi_store.Stored_object_id.t -> id
   val stored_object_id : id -> Paengi_store.Stored_object_id.t
   val equal_id : id -> id -> bool
   val create : root:Tree.id -> t
