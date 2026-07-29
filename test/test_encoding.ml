@@ -1,4 +1,5 @@
 module Encoding = Paengi_encoding
+module Golden = Paengi_testkit.Golden_fixture
 
 let raw_of_hex encoded =
   let nibble = function
@@ -30,6 +31,11 @@ let require_error input =
   match Encoding.decode input with
   | Error error -> error
   | Ok _ -> Alcotest.fail "decoder unexpectedly accepted input"
+
+let require_golden name =
+  match Golden.read_lower_hex_file (Filename.concat "golden" name) with
+  | Ok bytes -> bytes
+  | Error message -> Alcotest.fail message
 
 let construction_result result =
   result
@@ -93,6 +99,40 @@ let published_vectors () =
         (name ^ " decode") true
         (Encoding.equal value decoded))
     rfc_vectors
+
+let retained_composite_fixture () =
+  let expected = require_golden "profile1-v1-composite.cbor.hex" in
+  let value =
+    map
+      [
+        ( 256L,
+          map
+            [
+              (24L, array []);
+              (1L, Encoding.bytes "");
+              (0L, Encoding.integer (-25L));
+            ] );
+        ( 24L,
+          array
+            [
+              Encoding.integer Int64.min_int;
+              Encoding.integer Int64.max_int;
+              Encoding.bool false;
+              Encoding.bool true;
+              Encoding.null;
+            ] );
+        (1L, text (raw_of_hex "5061656e676920e29c93"));
+        (0L, Encoding.bytes (raw_of_hex "00ff80414243"));
+      ]
+  in
+  Alcotest.(check string)
+    "composite fixture encodes exactly" expected (Encoding.encode value);
+  let decoded = require_decode expected in
+  Alcotest.(check bool)
+    "composite fixture decodes exactly" true
+    (Encoding.equal value decoded);
+  Alcotest.(check string)
+    "composite fixture re-encodes exactly" expected (Encoding.encode decoded)
 
 let constructor_invariants () =
   Alcotest.(check (result unit string))
@@ -329,6 +369,8 @@ let () =
         [
           Alcotest.test_case "RFC 8949 supported values" `Quick
             published_vectors;
+          Alcotest.test_case "retained composite Profile 1 fixture" `Quick
+            retained_composite_fixture;
         ] );
       ( "constructors",
         [

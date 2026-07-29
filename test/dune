@@ -26,7 +26,14 @@
 (test
  (name test_encoding)
  (modules test_encoding)
- (libraries alcotest qcheck-core qcheck-alcotest paengi_encoding))
+ (libraries
+  alcotest
+  qcheck-core
+  qcheck-alcotest
+  paengi_encoding
+  paengi_testkit)
+ (deps
+  (source_tree golden)))
 
 (test
  (name test_envelope)
@@ -37,4 +44,7 @@
   qcheck-alcotest
   paengi_encoding
   paengi_envelope
-  paengi_hash))
+  paengi_hash
+  paengi_testkit)
+ (deps
+  (source_tree golden)))

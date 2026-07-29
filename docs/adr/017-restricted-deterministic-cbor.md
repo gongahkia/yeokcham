@@ -122,6 +122,7 @@ Future changes that alter accepted values or canonical bytes require a new profi
 - 2026-07-29: constructors reject invalid UTF-8, negative or duplicate map keys, and nesting 65; decoder rejects non-minimal, indefinite, unsupported, unordered, truncated, overflowing, impossible-length, trailing, and work-limited inputs.
 - 2026-07-29: 500 generated value round trips, 300 map-permutation cases, and 2,000 arbitrary-byte decoder cases pass.
 - 2026-07-29: `cbor2` 6.1.3 independently produced the same canonical bytes for 16 Profile 1 vectors.
+- 2026-07-29: source-controlled `test/golden/profile1-v1-composite.cbor.hex` covers binary bytes, valid Unicode text, signed 64-bit boundaries, arrays, ordered numeric-key maps, booleans, and null; it decodes and re-encodes byte-identically in Dune's sandboxed test run.
 - 2026-07-29: `make ci` passes.
 - Coverage-guided fuzzing and encoder/decoder benchmarks are not yet run; both remain explicit TODO work before object persistence or performance claims.
 

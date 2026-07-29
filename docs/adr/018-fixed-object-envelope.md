@@ -110,6 +110,7 @@ No persistent objects exist, so v1 introduces no migration. Existing object file
 ## Verification evidence
 
 - 2026-07-29: the 57-byte golden `Snapshot` envelope, including its SHA-256 checksum, passes; its checksum was independently matched by `shasum -a 256` and `openssl dgst -sha256` over the defined preimage.
+- 2026-07-29: the retained `test/golden/envelope-v1-snapshot.peng.hex` fixture is loaded as source-controlled data, verifies, decodes, and re-encodes byte-identically in Dune's sandboxed test run.
 - 2026-07-29: all registered object-type codes round-trip; code `0` and unassigned code `13` reject.
 - 2026-07-29: tests reject every truncated prefix, invalid magic/version/algorithm/type/features, high-bit length, length mismatch, trailing bytes, covered-header corruption, checksum corruption, and payload corruption.
 - 2026-07-29: an instrumented payload callback is not invoked for a checksum-invalid envelope and is invoked only after checksum verification on a checksum-valid malformed payload.

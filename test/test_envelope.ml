@@ -1,19 +1,7 @@
 module Encoding = Paengi_encoding
 module Envelope = Paengi_envelope
 module Hash = Paengi_hash.Sha256
-
-let raw_of_hex encoded =
-  let nibble = function
-    | '0' .. '9' as character -> Char.code character - Char.code '0'
-    | 'a' .. 'f' as character -> Char.code character - Char.code 'a' + 10
-    | 'A' .. 'F' as character -> Char.code character - Char.code 'A' + 10
-    | _ -> invalid_arg "non-hex test vector"
-  in
-  let length = String.length encoded in
-  if length mod 2 <> 0 then invalid_arg "odd test vector";
-  String.init (length / 2) (fun index ->
-      let offset = index * 2 in
-      Char.chr ((nibble encoded.[offset] lsl 4) lor nibble encoded.[offset + 1]))
+module Golden = Paengi_testkit.Golden_fixture
 
 let require_encoding = function
   | Ok value -> value
@@ -32,6 +20,11 @@ let require_error input =
   match Envelope.decode input with
   | Error error -> error
   | Ok _ -> Alcotest.fail "envelope decoder unexpectedly accepted input"
+
+let require_golden name =
+  match Golden.read_lower_hex_file (Filename.concat "golden" name) with
+  | Ok bytes -> bytes
+  | Error message -> Alcotest.fail message
 
 let payload = require_encoding (Encoding.map [ (1L, Encoding.bool true) ])
 
@@ -125,10 +118,7 @@ let object_type_codes () =
     (Option.is_none (Envelope.object_type_of_code 13))
 
 let golden_envelope () =
-  let expected =
-    raw_of_hex
-      "50454e4701030001000000000000000001000000000000000399ea8b710e1438755cd7ea29deb16a182a74224f71da67867be1e5007df043a8a101f5"
-  in
+  let expected = require_golden "envelope-v1-snapshot.peng.hex" in
   Alcotest.(check int) "header size" 57 Envelope.header_size;
   Alcotest.(check int) "envelope version" 1 Envelope.envelope_version;
   Alcotest.(check int)

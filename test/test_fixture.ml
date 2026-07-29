@@ -1,5 +1,6 @@
 module Spec = Paengi_testkit.Fixture_spec
 module Materializer = Paengi_testkit.Fixture_materializer
+module Golden = Paengi_testkit.Golden_fixture
 open! Spec
 
 let is_executable = function Regular -> false | Executable -> true
@@ -13,6 +14,56 @@ let expect_invalid fixture =
   match Spec.validate fixture with
   | Ok () -> Alcotest.fail "fixture unexpectedly valid"
   | Error _ -> ()
+
+let golden_hex_parser () =
+  Alcotest.(check (result string string))
+    "lowercase hex decodes" (Ok "\000\255")
+    (Golden.decode_lower_hex "00ff");
+  Alcotest.(check (result string string))
+    "empty hex rejects" (Error "fixture hex is empty")
+    (Golden.decode_lower_hex "");
+  Alcotest.(check (result string string))
+    "odd hex rejects" (Error "fixture hex has odd length: 1")
+    (Golden.decode_lower_hex "0");
+  Alcotest.(check (result string string))
+    "uppercase hex rejects"
+    (Error
+       "fixture hex has invalid character 'F'; use lowercase hex at offset 0")
+    (Golden.decode_lower_hex "F0");
+  Alcotest.(check (result string string))
+    "non-hex rejects"
+    (Error
+       "fixture hex has invalid character 'g'; use lowercase hex at offset 0")
+    (Golden.decode_lower_hex "g0");
+  Alcotest.(check (result string string))
+    "low nibble offset is exact"
+    (Error
+       "fixture hex has invalid character 'F'; use lowercase hex at offset 1")
+    (Golden.decode_lower_hex "0F")
+
+let with_temporary_file contents check =
+  let path = Filename.temp_file "paengi-golden-" ".hex" in
+  Fun.protect
+    ~finally:(fun () -> try Sys.remove path with Sys_error _ -> ())
+    (fun () ->
+      let channel = open_out_bin path in
+      Fun.protect
+        ~finally:(fun () -> close_out channel)
+        (fun () -> output_string channel contents);
+      check path)
+
+let golden_file_shape () =
+  with_temporary_file "00ff\n" (fun path ->
+      Alcotest.(check (result string string))
+        "one newline-terminated line reads" (Ok "\000\255")
+        (Golden.read_lower_hex_file path));
+  List.iter
+    (fun contents ->
+      with_temporary_file contents (fun path ->
+          Alcotest.(check bool)
+            "invalid fixture file rejects" true
+            (Result.is_error (Golden.read_lower_hex_file path))))
+    [ ""; "00ff"; "00ff\n\n"; "00FF\n" ]
 
 let generated_edges () =
   let fixture = Spec.generate ~seed:7 in
@@ -137,6 +188,9 @@ let () =
           Alcotest.test_case "contains edge cases" `Quick generated_edges;
           Alcotest.test_case "rejects unsafe or noncanonical paths" `Quick
             invalid_paths;
+          Alcotest.test_case "parses strict golden hex" `Quick golden_hex_parser;
+          Alcotest.test_case "enforces golden file shape" `Quick
+            golden_file_shape;
           QCheck_alcotest.to_alcotest ~speed_level:`Quick deterministic_property;
         ] );
       ( "materializer",
