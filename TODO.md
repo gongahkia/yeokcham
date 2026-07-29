@@ -5,11 +5,13 @@ The roadmap is ordered. The local byte-correct model must exist before semantic 
 ## Active vertical slice
 
 - Milestone: 0 — Project and model foundation.
-- Task: add the deterministic fixture generator (complete).
-- Types: fixture path, mode, file entry, symlink entry, and fixture specification; these are testkit-only, not canonical snapshot types.
-- Invariants: paths are relative, traversal-free, unique, and canonically ordered; equal seeds produce equal byte fixtures; generation never overwrites a destination.
-- Tests: unit edge cases, 200-seed determinism/validity property, exact materialisation, overwrite failure, CLI smoke, and `make ci` pass on 2026-07-29.
-- ADR changes: none; no architectural choice changes.
+- Task: define typed IDs (complete).
+- Modules/files: `paengi_id` library plus unit/property tests; no persistent adapter or CLI.
+- Types: repository, content, snapshot, checkpoint, capsule, capsule-revision, release, conflict, operation, device, validation, and resolution IDs; shared parse error.
+- Invariants: ID kinds are compile-time distinct and abstract; bytes are non-empty and round-trip exactly; full text is canonical lowercase hex; comparison is lexicographic by bytes; short text is a prefix of full text.
+- Tests: every kind covers byte/hex round trips and comparison; 500 generated non-empty arbitrary byte cases; invalid empty/hex inputs; `make ci` pass on 2026-07-29.
+- External libraries: none.
+- ADR changes: none; this implements existing model distinctions without selecting hashing or persistent encoding.
 
 ## Milestone 0 — Project and model foundation
 
@@ -27,7 +29,7 @@ The roadmap is ordered. The local byte-correct model must exist before semantic 
 
 ### Core identities and encoding
 
-- [ ] Define typed IDs.
+- [x] Define typed IDs.
 - [ ] Define hash abstraction.
 - [ ] Select initial hash implementation.
 - [ ] Select portable canonical encoding through ADR.

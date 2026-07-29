@@ -17,6 +17,8 @@ type release_id
 type conflict_id
 type operation_id
 type device_id
+type validation_id
+type resolution_id
 ```
 
 All persistent identities must have:

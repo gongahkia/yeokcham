@@ -7,3 +7,8 @@
  (name test_fixture)
  (modules test_fixture)
  (libraries alcotest qcheck-core qcheck-alcotest paengi_testkit unix))
+
+(test
+ (name test_id)
+ (modules test_id)
+ (libraries alcotest qcheck-core qcheck-alcotest paengi_id))
