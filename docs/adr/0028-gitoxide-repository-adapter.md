@@ -36,7 +36,7 @@ This is mature but adds a C library boundary and platform build/distribution sur
 
 Use `gix = 0.85.0` with default features disabled and only `sha1` and `sha256` enabled. The exact version pin protects the declared MSRV; upgrades require explicit compatibility review. `GitRepository` owns `gix::ThreadSafeRepository` privately.
 
-`GitRepository::open` requires an explicit existing path and uses isolated, strict configuration with `bail_if_untrusted(true)`. It does not search parent directories or honor `GIT_DIR`. It exposes Git-directory and optional worktree paths, followed by a Yeokcham-owned regular-ref enumeration API; ref targets and object operations remain later work.
+`GitRepository::open` requires an explicit existing path and uses isolated, strict configuration with `bail_if_untrusted(true)`. It does not search parent directories or honor `GIT_DIR`. It exposes Git-directory and optional worktree paths, followed by Yeokcham-owned regular-ref enumeration and reachable-object traversal APIs; raw object access remains later work.
 
 ## Consequences
 

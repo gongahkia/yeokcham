@@ -1,8 +1,9 @@
-use std::{error::Error as StdError, io, path::Path};
+use std::{collections::BTreeSet, error::Error as StdError, io, path::Path};
 
-use crate::{Error, ErrorKind, RefName, Result};
+use crate::{Error, ErrorKind, GitObjectId, RefName, Result};
 
 const MAX_REFERENCE_COUNT: usize = 1_000_000;
+const MAX_REACHABLE_OBJECT_COUNT: usize = 1_000_000;
 
 /// An opened, ownership-checked Git repository behind Yeokcham's Git adapter.
 ///
@@ -76,22 +77,16 @@ impl GitRepository {
                 )
             })?;
             let bytes: &[u8] = reference.name().as_bstr().as_ref();
-            if !bytes.starts_with(b"refs/") {
+            let Some(name) = regular_ref_name(bytes)? else {
                 continue;
-            }
+            };
             if names.len() == MAX_REFERENCE_COUNT {
                 return Err(Error::new(
                     ErrorKind::Unsupported,
                     "Git repository has too many references",
                 ));
             }
-            names.push(RefName::from_bytes(bytes).map_err(|source| {
-                Error::with_source(
-                    ErrorKind::CorruptData,
-                    "Git reference name is invalid",
-                    source,
-                )
-            })?);
+            names.push(name);
         }
 
         names.sort();
@@ -102,6 +97,89 @@ impl GitRepository {
             ));
         }
         Ok(names)
+    }
+
+    /// Returns all SHA-1 objects reachable from regular Git refs, sorted by ID.
+    ///
+    /// Symbolic refs are followed to their first object without peeling
+    /// annotated tags. The walk includes commit parents and trees, tree entries,
+    /// and annotated-tag targets. Pseudo-refs such as `HEAD` are excluded.
+    ///
+    /// The result is a point-in-time traversal only; it is not a ref transaction
+    /// snapshot. Malformed or unavailable reachable objects fail closed. The
+    /// traversal rejects repositories requiring an unsupported object hash and
+    /// repositories with more than 1,000,000 reachable objects.
+    pub fn reachable_object_ids(&self) -> Result<Vec<GitObjectId>> {
+        let repository = self.inner.to_thread_local();
+        let references = repository.references().map_err(reference_store_error)?;
+        let iterator = references.all().map_err(|source| {
+            reference_corrupt_error("Git references could not be enumerated", source)
+        })?;
+        let mut pending = Vec::new();
+        let mut reachable = BTreeSet::new();
+
+        for reference in iterator {
+            let mut reference = reference.map_err(|source| {
+                Error::with_boxed_source(
+                    ErrorKind::CorruptData,
+                    "Git reference could not be enumerated",
+                    source,
+                )
+            })?;
+            let bytes: &[u8] = reference.name().as_bstr().as_ref();
+            if regular_ref_name(bytes)?.is_none() {
+                continue;
+            }
+            let object_id = reference.follow_to_object().map_err(|source| {
+                reference_corrupt_error("Git reference target is unavailable or malformed", source)
+            })?;
+            schedule_reachable_object(object_id.detach(), &mut pending, &mut reachable)?;
+        }
+
+        while let Some(object_id) = pending.pop() {
+            let object = repository.find_object(object_id).map_err(|source| {
+                reference_corrupt_error("reachable Git object is unavailable or malformed", source)
+            })?;
+            match object.kind {
+                gix::objs::Kind::Blob => {}
+                gix::objs::Kind::Commit => {
+                    let commit = object.into_commit();
+                    let tree_id = commit.tree_id().map_err(|source| {
+                        reference_corrupt_error("reachable Git commit is malformed", source)
+                    })?;
+                    schedule_reachable_object(tree_id.detach(), &mut pending, &mut reachable)?;
+                    for parent_id in commit.parent_ids() {
+                        schedule_reachable_object(
+                            parent_id.detach(),
+                            &mut pending,
+                            &mut reachable,
+                        )?;
+                    }
+                }
+                gix::objs::Kind::Tree => {
+                    let tree = object.into_tree();
+                    for entry in tree.iter() {
+                        let entry = entry.map_err(|source| {
+                            reference_corrupt_error("reachable Git tree is malformed", source)
+                        })?;
+                        schedule_reachable_object(
+                            entry.id().detach(),
+                            &mut pending,
+                            &mut reachable,
+                        )?;
+                    }
+                }
+                gix::objs::Kind::Tag => {
+                    let tag = object.into_tag();
+                    let target_id = tag.target_id().map_err(|source| {
+                        reference_corrupt_error("reachable Git tag is malformed", source)
+                    })?;
+                    schedule_reachable_object(target_id.detach(), &mut pending, &mut reachable)?;
+                }
+            }
+        }
+
+        Ok(reachable.into_iter().collect())
     }
 }
 
@@ -142,6 +220,52 @@ where
     E: StdError + Send + Sync + 'static,
 {
     Error::with_source(ErrorKind::CorruptData, message, source)
+}
+
+fn regular_ref_name(bytes: &[u8]) -> Result<Option<RefName>> {
+    if !bytes.starts_with(b"refs/") {
+        return Ok(None);
+    }
+    RefName::from_bytes(bytes).map(Some).map_err(|source| {
+        Error::with_source(
+            ErrorKind::CorruptData,
+            "Git reference name is invalid",
+            source,
+        )
+    })
+}
+
+fn schedule_reachable_object(
+    object_id: gix::hash::ObjectId,
+    pending: &mut Vec<gix::hash::ObjectId>,
+    reachable: &mut BTreeSet<GitObjectId>,
+) -> Result<()> {
+    let git_object_id = git_object_id_from_gix(&object_id)?;
+    if reachable.contains(&git_object_id) {
+        return Ok(());
+    }
+    if reachable.len() == MAX_REACHABLE_OBJECT_COUNT {
+        return Err(Error::new(
+            ErrorKind::Unsupported,
+            "Git repository has too many reachable objects",
+        ));
+    }
+    reachable.insert(git_object_id);
+    pending.push(object_id);
+    Ok(())
+}
+
+fn git_object_id_from_gix(object_id: &gix::hash::ObjectId) -> Result<GitObjectId> {
+    let bytes = object_id.as_slice();
+    if bytes.len() != GitObjectId::BYTE_LENGTH {
+        return Err(Error::new(
+            ErrorKind::Unsupported,
+            "Git repository uses an unsupported object hash",
+        ));
+    }
+    let mut digest = [0; GitObjectId::BYTE_LENGTH];
+    digest.copy_from_slice(bytes);
+    Ok(GitObjectId::from_bytes(digest))
 }
 
 #[cfg(test)]
@@ -221,6 +345,31 @@ mod tests {
             .expect("Git output must be UTF-8")
             .trim()
             .to_owned()
+    }
+
+    fn git_object_ids(directory: &Path, arguments: &[&str]) -> Vec<GitObjectId> {
+        let mut ids: Vec<GitObjectId> = git_stdout(directory, arguments)
+            .lines()
+            .map(|line| line.parse().expect("Git object ID"))
+            .collect();
+        ids.sort();
+        ids.dedup();
+        ids
+    }
+
+    fn commit(directory: &Path, message: &str) {
+        run_git_in(
+            directory,
+            &[
+                "-c",
+                "user.name=Yeokcham Test",
+                "-c",
+                "user.email=test@example.invalid",
+                "commit",
+                "--message",
+                message,
+            ],
+        );
     }
 
     fn initialize_committed_worktree(temporary: &TestDirectory) -> PathBuf {
@@ -353,5 +502,85 @@ mod tests {
 
         assert_eq!(error.kind(), ErrorKind::CorruptData);
         assert!(!error.to_string().contains("not-a-reference"));
+    }
+
+    #[test]
+    fn traverses_reachable_commits_trees_blobs_and_tags() {
+        let temporary = TestDirectory::new();
+        let worktree = initialize_committed_worktree(&temporary);
+        fs::create_dir(worktree.join("nested")).expect("create nested directory");
+        fs::write(worktree.join("root.txt"), b"first version\n").expect("write root file");
+        fs::write(worktree.join("nested/file.txt"), b"nested version\n")
+            .expect("write nested file");
+        run_git_in(&worktree, &["add", "root.txt", "nested/file.txt"]);
+        commit(&worktree, "first contents");
+        fs::write(worktree.join("root.txt"), b"second version\n").expect("update root file");
+        run_git_in(&worktree, &["add", "root.txt"]);
+        commit(&worktree, "second contents");
+        run_git_in(
+            &worktree,
+            &[
+                "-c",
+                "user.name=Yeokcham Test",
+                "-c",
+                "user.email=test@example.invalid",
+                "tag",
+                "--annotate",
+                "v1.0",
+                "--message=version one",
+            ],
+        );
+
+        let tree_id = git_stdout(&worktree, &["rev-parse", "HEAD^{tree}"]);
+        let blob_id = git_stdout(&worktree, &["rev-parse", "HEAD:root.txt"]);
+        let tag_id = git_stdout(&worktree, &["rev-parse", "refs/tags/v1.0^{tag}"]);
+        run_git_in(&worktree, &["update-ref", "refs/custom/tree", &tree_id]);
+        run_git_in(&worktree, &["update-ref", "refs/custom/blob", &blob_id]);
+        run_git_in(
+            &worktree,
+            &[
+                "symbolic-ref",
+                "refs/remotes/origin/HEAD",
+                "refs/heads/main",
+            ],
+        );
+        fs::write(worktree.join("unreachable.txt"), b"not reachable\n")
+            .expect("write unreachable file");
+        let unreachable_id = git_stdout(&worktree, &["hash-object", "-w", "unreachable.txt"]);
+
+        let actual = GitRepository::open(&worktree)
+            .expect("open repository")
+            .reachable_object_ids()
+            .expect("traverse reachable objects");
+        let expected = git_object_ids(
+            &worktree,
+            &["rev-list", "--objects", "--no-object-names", "--all"],
+        );
+
+        assert_eq!(actual, expected);
+        assert!(actual.contains(&tag_id.parse().expect("tag object ID")));
+        assert!(actual.contains(&tree_id.parse().expect("tree object ID")));
+        assert!(actual.contains(&blob_id.parse().expect("blob object ID")));
+        assert!(!actual.contains(&unreachable_id.parse().expect("unreachable object ID")));
+    }
+
+    #[test]
+    fn rejects_refs_to_unavailable_reachable_objects_without_disclosing_ids() {
+        let temporary = TestDirectory::new();
+        let worktree = initialize_committed_worktree(&temporary);
+        let unavailable_id = "1111111111111111111111111111111111111111";
+        fs::write(
+            worktree.join(".git/refs/heads/unavailable"),
+            format!("{unavailable_id}\n"),
+        )
+        .expect("write dangling ref");
+
+        let error = GitRepository::open(&worktree)
+            .expect("open repository")
+            .reachable_object_ids()
+            .expect_err("unavailable ref target must fail");
+
+        assert_eq!(error.kind(), ErrorKind::CorruptData);
+        assert!(!error.to_string().contains(unavailable_id));
     }
 }
