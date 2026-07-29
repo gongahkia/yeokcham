@@ -24,3 +24,4 @@ Valid statuses are `Proposed`, `Accepted`, `Rejected`, `Deprecated`, and `Supers
 | [ADR-0016](0016-structured-error-contract.md) | Accepted | Use an opaque structured core error contract |
 | [ADR-0017](0017-allowlisted-structured-tracing.md) | Accepted | Use allowlisted structured tracing |
 | [ADR-0018](0018-versioned-benchmark-result-schema.md) | Accepted | Use a versioned JSON Schema for benchmark results |
+| [ADR-0019](0019-repository-id-as-uuid-v4.md) | Accepted | Represent repository IDs as UUIDv4 bytes |
