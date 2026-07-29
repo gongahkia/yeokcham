@@ -5,10 +5,10 @@ The roadmap is ordered. The local byte-correct model must exist before semantic 
 ## Active vertical slice
 
 - Milestone: 0 — Project and model foundation.
-- Task: create the Dune project root (complete).
+- Task: select the supported OCaml version (complete).
 - Types: none; model types begin after project tooling is established.
-- Invariants: Dune accepts the project metadata and a clean build succeeds.
-- Tests: `dune build @all` passes with OCaml 5.5.0 and Dune 3.24.1.
+- Invariants: package resolution accepts OCaml 5.5.0 and the project builds with that compiler.
+- Tests: package resolution selects OCaml 5.5.0; `dune build @all` passes with OCaml 5.5.0.
 - ADR changes: none; no architectural choice changes.
 
 ## Milestone 0 — Project and model foundation
@@ -16,7 +16,7 @@ The roadmap is ordered. The local byte-correct model must exist before semantic 
 ### Project setup
 
 - [x] Create Dune project.
-- [ ] Select supported OCaml version.
+- [x] Select supported OCaml version.
 - [ ] Configure formatting and linting.
 - [ ] Configure unit and property-test CI.
 - [ ] Add licence and contribution guide.

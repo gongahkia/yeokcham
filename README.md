@@ -40,6 +40,8 @@ OCaml.
 
 OCaml is selected because paengi's core is an algebraic model of immutable state, operations, conflicts, composition, and compaction. The project should make extensive use of algebraic data types, pure transition functions, property testing, and explicit state-machine modelling.
 
+The supported compiler is OCaml 5.5.0. The exact constraint is recorded in `dune-project`.
+
 ## Status
 
 Design and implementation handoff package. paengi is a portfolio and research prototype first, not a production Git replacement.
