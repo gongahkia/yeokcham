@@ -11,7 +11,7 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 - [x] Define supported Rust version.
 - [x] Add licence and contribution guide.
 - [x] Add `docs/adr/` process.
-- [ ] Add structured error type strategy.
+- [x] Add structured error type strategy.
 - [ ] Add tracing with source-content redaction rules.
 - [ ] Add fixture-generation scripts.
 - [ ] Add benchmark-result schema.

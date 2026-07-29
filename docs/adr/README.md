@@ -21,3 +21,4 @@ Valid statuses are `Proposed`, `Accepted`, `Rejected`, `Deprecated`, and `Supers
 | ADR | Status | Decision |
 | --- | --- | --- |
 | [ADR-001–ADR-015](../../DECISIONS.md) | Accepted | Initial architecture decisions |
+| [ADR-0016](0016-structured-error-contract.md) | Accepted | Use an opaque structured core error contract |
