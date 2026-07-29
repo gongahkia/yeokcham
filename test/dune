@@ -12,3 +12,8 @@
  (name test_id)
  (modules test_id)
  (libraries alcotest qcheck-core qcheck-alcotest paengi_id))
+
+(test
+ (name test_hash)
+ (modules test_hash)
+ (libraries alcotest qcheck-core qcheck-alcotest paengi_hash))

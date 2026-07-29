@@ -5,13 +5,13 @@ The roadmap is ordered. The local byte-correct model must exist before semantic 
 ## Active vertical slice
 
 - Milestone: 0 — Project and model foundation.
-- Task: define typed IDs (complete).
-- Modules/files: `paengi_id` library plus unit/property tests; no persistent adapter or CLI.
-- Types: repository, content, snapshot, checkpoint, capsule, capsule-revision, release, conflict, operation, device, validation, and resolution IDs; shared parse error.
-- Invariants: ID kinds are compile-time distinct and abstract; bytes are non-empty and round-trip exactly; full text is canonical lowercase hex; comparison is lexicographic by bytes; short text is a prefix of full text.
-- Tests: every kind covers byte/hex round trips and comparison; 500 generated non-empty arbitrary byte cases; invalid empty/hex inputs; `make ci` pass on 2026-07-29.
-- External libraries: none.
-- ADR changes: none; this implements existing model distinctions without selecting hashing or persistent encoding.
+- Task: define the hash abstraction (complete).
+- Modules/files: `paengi_hash` interface library plus an injected fake implementation and conformance tests; no production algorithm, persistence, or CLI.
+- Types: abstract digest and streaming context under an algorithm module signature.
+- Invariants: algorithm name is non-empty; digest byte length is fixed; one-shot bytes/string and any ordered chunking produce equal digests; contexts are persistent values; raw digest bytes round-trip through the abstraction.
+- Tests: interface injection, metadata, one-shot equivalence, offset/length handling, and 500 generated chunk-boundary equivalence cases over arbitrary bytes; `make ci` pass on 2026-07-29.
+- External libraries: none; production adapter selection is the next task.
+- ADR changes: none; this implements ADR-013 without selecting an algorithm or persistent representation.
 
 ## Milestone 0 — Project and model foundation
 
@@ -30,7 +30,7 @@ The roadmap is ordered. The local byte-correct model must exist before semantic 
 ### Core identities and encoding
 
 - [x] Define typed IDs.
-- [ ] Define hash abstraction.
+- [x] Define hash abstraction.
 - [ ] Select initial hash implementation.
 - [ ] Select portable canonical encoding through ADR.
 - [ ] Define object envelope.
