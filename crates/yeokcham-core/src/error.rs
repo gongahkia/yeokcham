@@ -71,10 +71,15 @@ impl Error {
     where
         E: StdError + Send + Sync + 'static,
     {
+        Self::with_boxed_source(kind, message, Box::new(source))
+    }
+
+    /// Creates an error from an already boxed underlying source.
+    pub fn with_boxed_source(kind: ErrorKind, message: &'static str, source: BoxError) -> Self {
         Self {
             kind,
             message,
-            source: Some(Box::new(source)),
+            source: Some(source),
         }
     }
 
@@ -152,6 +157,17 @@ mod tests {
 
         assert_eq!(error.to_string(), "storage operation failed");
         assert!(!format!("{error:?}").contains("secret source detail"));
+        assert_eq!(
+            error.source().map(ToString::to_string),
+            Some("secret source detail".to_owned())
+        );
+    }
+
+    #[test]
+    fn retains_already_boxed_source() {
+        let source: BoxError = Box::new(SensitiveSource);
+        let error = Error::with_boxed_source(ErrorKind::Internal, "operation failed", source);
+
         assert_eq!(
             error.source().map(ToString::to_string),
             Some("secret source detail".to_owned())

@@ -12,7 +12,7 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 - [x] Add licence and contribution guide.
 - [x] Add `docs/adr/` process.
 - [x] Add structured error type strategy.
-- [ ] Add tracing with source-content redaction rules.
+- [x] Add tracing with source-content redaction rules.
 - [ ] Add fixture-generation scripts.
 - [ ] Add benchmark-result schema.
 - [ ] Add reproducible development commands through `just`, `make`, or `cargo xtask`.
