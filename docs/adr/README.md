@@ -45,3 +45,4 @@ Valid statuses are `Proposed`, `Accepted`, `Rejected`, `Deprecated`, and `Supers
 | [ADR-0037](0037-fastcdc-v2016-chunk-boundaries.md) | Accepted | Use bounded FastCDC v2016 chunk boundaries |
 | [ADR-0038](0038-bounded-uncompressed-codec-abstraction.md) | Accepted | Use a bounded uncompressed codec abstraction first |
 | [ADR-0039](0039-append-only-segment-v1-writer.md) | Accepted | Write sealed append-only segments with create-new publication |
+| [ADR-0040](0040-bounded-segment-v1-reader.md) | Accepted | Read and verify bounded `YKSG` version-1 segments |

@@ -12,9 +12,9 @@ use crate::{
     WholeBlobRecord, YeokchamContentId,
 };
 
-const MAGIC: [u8; 4] = *b"YKSG";
-const FOOTER_MAGIC: [u8; 4] = *b"YKSF";
-const VERSION: u16 = 1;
+pub(crate) const MAGIC: [u8; 4] = *b"YKSG";
+pub(crate) const FOOTER_MAGIC: [u8; 4] = *b"YKSF";
+pub(crate) const VERSION: u16 = 1;
 
 /// Typed payload family accepted by segment version 1.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -27,10 +27,18 @@ pub enum SegmentRecordKind {
 }
 
 impl SegmentRecordKind {
-    const fn binary_tag(self) -> u8 {
+    pub(crate) const fn binary_tag(self) -> u8 {
         match self {
             Self::WholeBlob => 1,
             Self::TinyBlobAggregation => 2,
+        }
+    }
+
+    pub(crate) const fn from_binary_tag(tag: u8) -> Option<Self> {
+        match tag {
+            1 => Some(Self::WholeBlob),
+            2 => Some(Self::TinyBlobAggregation),
+            _ => None,
         }
     }
 }

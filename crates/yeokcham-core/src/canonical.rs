@@ -102,6 +102,11 @@ impl<'a> CanonicalDecoder<'a> {
         Ok(output)
     }
 
+    /// Reads an exact caller-specified number of bytes without a length prefix.
+    pub fn read_raw_bytes(&mut self, length: usize) -> Result<&'a [u8]> {
+        self.take(length)
+    }
+
     /// Reads a length-delimited byte string without allocating.
     pub fn read_byte_string(&mut self) -> Result<&'a [u8]> {
         let length = usize::try_from(self.read_u64()?).map_err(|_| {
@@ -173,6 +178,7 @@ mod tests {
         assert_eq!(decoder.read_u32().expect("u32"), 3);
         assert_eq!(decoder.read_u64().expect("u64"), 4);
         assert_eq!(decoder.read_fixed::<2>().expect("fixed"), [5, 6]);
+        assert_eq!(decoder.read_raw_bytes(0).expect("raw bytes"), b"");
         assert_eq!(decoder.read_byte_string().expect("bytes"), b"\xffref");
         decoder.finish().expect("no trailing bytes");
     }
