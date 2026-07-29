@@ -11,8 +11,8 @@ use rusqlite::{
 };
 
 use crate::{
-    CanonicalDecoder, CanonicalEncoder, Error, ErrorKind, GitObject, GitObjectId, GitObjectKind,
-    RepositoryFormat, RepositoryId, Result,
+    BlobManifest, CanonicalDecoder, CanonicalEncoder, Error, ErrorKind, GitObject, GitObjectId,
+    GitObjectKind, ManifestId, RepositoryFormat, RepositoryId, Result,
 };
 
 const BOOTSTRAP_MAGIC: [u8; 4] = *b"YKRB";
@@ -21,6 +21,10 @@ const BOOTSTRAP_PATH: &str = "format/repository.bin";
 const METADATA_PATH: &str = "metadata.sqlite3";
 const METADATA_APPLICATION_ID: i32 = 0x594b_4d44; // YKMD
 const METADATA_SCHEMA_VERSION: i32 = 1;
+const BLOB_MANIFEST_DIRECTORY: &str = "manifests/blobs";
+const BLOB_MANIFEST_EXTENSION: &str = ".ykmf";
+const BLOB_MANIFEST_STAGING_SUFFIX: &str = ".partial";
+const PUBLISHED_BLOB_MANIFEST_MAX_BYTES: u64 = 4096;
 const LAYOUT_DIRECTORIES: &[&str] = &[
     "format",
     "segments",
@@ -43,6 +47,56 @@ pub struct GitObjectMetadata {
     id: GitObjectId,
     kind: GitObjectKind,
     size: u64,
+}
+
+/// Caller-selected bounds for scanning local immutable blob manifests.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct BlobManifestReadLimits {
+    maximum_entries: usize,
+    maximum_manifest_bytes: u64,
+    maximum_plaintext_bytes: u64,
+}
+
+impl BlobManifestReadLimits {
+    /// Validates bounds for one manifest-directory resolution scan.
+    pub fn new(
+        maximum_entries: usize,
+        maximum_manifest_bytes: u64,
+        maximum_plaintext_bytes: u64,
+    ) -> Result<Self> {
+        if maximum_entries == 0 {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "blob manifest entry limit must not be zero",
+            ));
+        }
+        if maximum_manifest_bytes == 0 {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "blob manifest byte limit must not be zero",
+            ));
+        }
+        Ok(Self {
+            maximum_entries,
+            maximum_manifest_bytes,
+            maximum_plaintext_bytes,
+        })
+    }
+
+    /// Returns the maximum directory entries inspected during one scan.
+    pub const fn maximum_entries(self) -> usize {
+        self.maximum_entries
+    }
+
+    /// Returns the maximum bytes accepted from one manifest file.
+    pub const fn maximum_manifest_bytes(self) -> u64 {
+        self.maximum_manifest_bytes
+    }
+
+    /// Returns the maximum blob body length accepted from one manifest.
+    pub const fn maximum_plaintext_bytes(self) -> u64 {
+        self.maximum_plaintext_bytes
+    }
 }
 
 impl GitObjectMetadata {
@@ -236,6 +290,188 @@ impl LocalRepository {
         }))
     }
 
+    /// Publishes one immutable blob manifest without replacing an existing ID.
+    ///
+    /// The manifest must belong to this repository. Repeating byte-identical
+    /// publication is idempotent; a different value under the same manifest ID
+    /// fails as a conflict. This portable file is the recovery source; SQLite
+    /// is intentionally not involved.
+    pub fn publish_blob_manifest(&self, manifest: &BlobManifest) -> Result<()> {
+        if manifest.repository_id() != self.id {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "blob manifest belongs to a different repository",
+            ));
+        }
+        let bytes = manifest.encode();
+        let bytes_len = u64::try_from(bytes.len()).map_err(|_| {
+            Error::new(
+                ErrorKind::Unsupported,
+                "blob manifest is too large to publish",
+            )
+        })?;
+        if bytes_len > PUBLISHED_BLOB_MANIFEST_MAX_BYTES {
+            return Err(Error::new(
+                ErrorKind::Unsupported,
+                "blob manifest is too large to publish",
+            ));
+        }
+        let directory = self.root.join(BLOB_MANIFEST_DIRECTORY);
+        validate_directory(&directory, false)?;
+        let destination = directory.join(blob_manifest_filename(manifest.manifest_id()));
+        match fs::symlink_metadata(&destination) {
+            Ok(_) => return self.verify_existing_blob_manifest(&destination, manifest, &bytes),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(io_error(
+                    error,
+                    "blob manifest destination could not be inspected",
+                ));
+            }
+        }
+
+        let (mut staging, staging_path) = create_blob_manifest_staging(&directory)?;
+        if let Err(error) = staging.write_all(&bytes) {
+            drop(staging);
+            let _ = fs::remove_file(&staging_path);
+            return Err(io_error(
+                error,
+                "blob manifest staging file could not be written",
+            ));
+        }
+        if let Err(error) = staging.sync_all() {
+            drop(staging);
+            let _ = fs::remove_file(&staging_path);
+            return Err(io_error(
+                error,
+                "blob manifest staging file could not be synchronized",
+            ));
+        }
+        drop(staging);
+        match fs::hard_link(&staging_path, &destination) {
+            Ok(()) => {
+                sync_directory(&directory)?;
+                let _ = fs::remove_file(&staging_path);
+                let _ = sync_directory(&directory);
+                Ok(())
+            }
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                let _ = fs::remove_file(&staging_path);
+                self.verify_existing_blob_manifest(&destination, manifest, &bytes)
+            }
+            Err(error) => {
+                let _ = fs::remove_file(&staging_path);
+                Err(io_error(error, "blob manifest could not be published"))
+            }
+        }
+    }
+
+    /// Resolves one Git blob ID to its only published manifest, if present.
+    ///
+    /// A blob may validly acquire multiple immutable representations. This
+    /// method rejects that ambiguity instead of selecting one implicitly.
+    pub fn resolve_blob_manifest(
+        &self,
+        git_object_id: GitObjectId,
+        limits: BlobManifestReadLimits,
+    ) -> Result<Option<BlobManifest>> {
+        let directory = self.root.join(BLOB_MANIFEST_DIRECTORY);
+        validate_directory(&directory, false)?;
+        let entries = fs::read_dir(&directory)
+            .map_err(|error| io_error(error, "blob manifest directory could not be read"))?;
+        let mut inspected_entries = 0usize;
+        let mut resolved = None;
+        for entry in entries {
+            let entry = entry
+                .map_err(|error| io_error(error, "blob manifest directory could not be read"))?;
+            inspected_entries = inspected_entries.checked_add(1).ok_or_else(|| {
+                Error::new(
+                    ErrorKind::Unsupported,
+                    "blob manifest directory exceeds the entry limit",
+                )
+            })?;
+            if inspected_entries > limits.maximum_entries {
+                return Err(Error::new(
+                    ErrorKind::Unsupported,
+                    "blob manifest directory exceeds the entry limit",
+                ));
+            }
+            let name = entry.file_name();
+            let name = name.to_str().ok_or_else(|| {
+                Error::new(
+                    ErrorKind::CorruptData,
+                    "blob manifest directory has an invalid entry name",
+                )
+            })?;
+            if is_blob_manifest_staging_filename(name) {
+                continue;
+            }
+            let manifest_id = parse_blob_manifest_filename(name)?;
+            let manifest = self.read_blob_manifest(
+                &entry.path(),
+                manifest_id,
+                limits.maximum_manifest_bytes,
+                limits.maximum_plaintext_bytes,
+            )?;
+            if manifest.git_object_id() != git_object_id {
+                continue;
+            }
+            if resolved.replace(manifest).is_some() {
+                return Err(Error::new(
+                    ErrorKind::Conflict,
+                    "multiple blob manifests match the Git object ID",
+                ));
+            }
+        }
+        Ok(resolved)
+    }
+
+    fn verify_existing_blob_manifest(
+        &self,
+        path: &Path,
+        manifest: &BlobManifest,
+        bytes: &[u8],
+    ) -> Result<()> {
+        let existing = self.read_blob_manifest(
+            path,
+            manifest.manifest_id(),
+            PUBLISHED_BLOB_MANIFEST_MAX_BYTES,
+            u64::MAX,
+        )?;
+        if existing.encode() == bytes {
+            Ok(())
+        } else {
+            Err(Error::new(
+                ErrorKind::Conflict,
+                "blob manifest conflicts with an existing manifest ID",
+            ))
+        }
+    }
+
+    fn read_blob_manifest(
+        &self,
+        path: &Path,
+        expected_id: ManifestId,
+        maximum_manifest_bytes: u64,
+        maximum_plaintext_bytes: u64,
+    ) -> Result<BlobManifest> {
+        let bytes = read_bounded_regular_file(path, maximum_manifest_bytes)?;
+        let manifest = BlobManifest::decode(&bytes, maximum_plaintext_bytes)?;
+        if manifest.repository_id() != self.id {
+            return Err(Error::new(
+                ErrorKind::CorruptData,
+                "blob manifest belongs to a different repository",
+            ));
+        }
+        if manifest.manifest_id() != expected_id {
+            return Err(Error::new(
+                ErrorKind::CorruptData,
+                "blob manifest filename does not match its identity",
+            ));
+        }
+        Ok(manifest)
+    }
+
     fn open_metadata_database(&self) -> Result<Connection> {
         let root = fs::canonicalize(&self.root)
             .map_err(|error| io_error(error, "repository directory could not be resolved"))?;
@@ -280,6 +516,111 @@ fn object_kind_from_code(code: i64) -> Result<GitObjectKind> {
             "object metadata contains an invalid kind",
         )),
     }
+}
+
+fn blob_manifest_filename(id: ManifestId) -> String {
+    format!("{id}{BLOB_MANIFEST_EXTENSION}")
+}
+
+fn parse_blob_manifest_filename(name: &str) -> Result<ManifestId> {
+    let id = name.strip_suffix(BLOB_MANIFEST_EXTENSION).ok_or_else(|| {
+        Error::new(
+            ErrorKind::CorruptData,
+            "blob manifest directory has an invalid entry name",
+        )
+    })?;
+    if id.is_empty() {
+        return Err(Error::new(
+            ErrorKind::CorruptData,
+            "blob manifest directory has an invalid entry name",
+        ));
+    }
+    id.parse().map_err(|_| {
+        Error::new(
+            ErrorKind::CorruptData,
+            "blob manifest directory has an invalid entry name",
+        )
+    })
+}
+
+fn is_blob_manifest_staging_filename(name: &str) -> bool {
+    name.strip_prefix('.')
+        .and_then(|name| name.strip_suffix(BLOB_MANIFEST_STAGING_SUFFIX))
+        .is_some_and(|id| id.parse::<ManifestId>().is_ok())
+}
+
+fn create_blob_manifest_staging(parent: &Path) -> Result<(File, PathBuf)> {
+    for _ in 0..16 {
+        let path = parent.join(format!(
+            ".{}{}",
+            ManifestId::generate(),
+            BLOB_MANIFEST_STAGING_SUFFIX
+        ));
+        match OpenOptions::new().create_new(true).write(true).open(&path) {
+            Ok(file) => return Ok((file, path)),
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(error) => {
+                return Err(io_error(
+                    error,
+                    "blob manifest staging file could not be created",
+                ));
+            }
+        }
+    }
+    Err(Error::new(
+        ErrorKind::Conflict,
+        "blob manifest staging path could not be allocated",
+    ))
+}
+
+fn read_bounded_regular_file(path: &Path, maximum_bytes: u64) -> Result<Vec<u8>> {
+    let metadata = fs::symlink_metadata(path).map_err(|error| {
+        if error.kind() == io::ErrorKind::NotFound {
+            Error::new(ErrorKind::CorruptData, "blob manifest file is missing")
+        } else {
+            io_error(error, "blob manifest file could not be inspected")
+        }
+    })?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(Error::new(
+            ErrorKind::CorruptData,
+            "blob manifest file is not a regular file",
+        ));
+    }
+    if metadata.len() > maximum_bytes {
+        return Err(Error::new(
+            ErrorKind::Unsupported,
+            "blob manifest file exceeds the byte limit",
+        ));
+    }
+    let length = usize::try_from(metadata.len()).map_err(|_| {
+        Error::new(
+            ErrorKind::Unsupported,
+            "blob manifest file exceeds the byte limit",
+        )
+    })?;
+    let mut file = File::open(path)
+        .map_err(|error| io_error(error, "blob manifest file could not be opened"))?;
+    let mut bytes = vec![0; length];
+    file.read_exact(&mut bytes).map_err(|error| {
+        if error.kind() == io::ErrorKind::UnexpectedEof {
+            Error::new(ErrorKind::CorruptData, "blob manifest file is truncated")
+        } else {
+            io_error(error, "blob manifest file could not be read")
+        }
+    })?;
+    let mut extra = [0; 1];
+    match file.read(&mut extra) {
+        Ok(0) => {}
+        Ok(_) => {
+            return Err(Error::new(
+                ErrorKind::CorruptData,
+                "blob manifest file changed while being read",
+            ));
+        }
+        Err(error) => return Err(io_error(error, "blob manifest file could not be read")),
+    }
+    Ok(bytes)
 }
 
 fn validate_metadata_file(path: &Path) -> Result<()> {
@@ -524,8 +865,16 @@ mod tests {
     use uuid::Uuid;
 
     use super::*;
+    use crate::{
+        SegmentId, SegmentReadLimits, SegmentReader, SegmentRecord, SegmentWriteLimits,
+        SegmentWriter, WholeBlobRecord,
+    };
 
     const TEST_ID: &str = "550e8400-e29b-41d4-a716-446655440000";
+    const MANIFEST_ID_A: &str = "0f8fad5b-d9cb-469f-a165-70867728950e";
+    const MANIFEST_ID_B: &str = "7d444840-9dc0-41d1-b245-5ffdce74fad2";
+    const SEGMENT_ID_A: &str = "6ba7b814-9dad-41d1-80b4-00c04fd430c8";
+    const SEGMENT_ID_B: &str = "123e4567-e89b-42d3-a456-426614174000";
 
     struct TestDirectory(PathBuf);
 
@@ -572,6 +921,44 @@ mod tests {
 
     fn metadata_path(root: &Path) -> PathBuf {
         root.join(METADATA_PATH)
+    }
+
+    fn manifest_path(root: &Path, id: ManifestId) -> PathBuf {
+        root.join(BLOB_MANIFEST_DIRECTORY)
+            .join(blob_manifest_filename(id))
+    }
+
+    fn manifest_limits() -> BlobManifestReadLimits {
+        BlobManifestReadLimits::new(8, 4_096, 4_096).expect("manifest limits")
+    }
+
+    fn whole_blob_manifest(
+        repository: &LocalRepository,
+        manifest_id: ManifestId,
+        segment_id: SegmentId,
+        data: &[u8],
+    ) -> BlobManifest {
+        let object = verified_object(GitObjectKind::Blob, data);
+        let record = WholeBlobRecord::from_verified_blob(&object).expect("whole record");
+        let segment_record = SegmentRecord::from_whole_blob(&record).expect("segment record");
+        let path = repository
+            .path()
+            .join("segments")
+            .join(segment_id.to_string());
+        let mut writer = SegmentWriter::new(
+            repository.id(),
+            segment_id,
+            SegmentWriteLimits::new(1, segment_record.stored_len()).expect("write limits"),
+        );
+        writer.add(segment_record).expect("add record");
+        writer.seal_to(&path).expect("seal segment");
+        let bytes = fs::read(path).expect("read segment");
+        let segment = SegmentReader::decode(
+            &bytes,
+            SegmentReadLimits::new(1, 4_096, 4_096, 4_096, 4_096, 4_096).expect("read limits"),
+        )
+        .expect("read segment");
+        BlobManifest::from_whole_blob(manifest_id, &segment, &record).expect("manifest")
     }
 
     #[test]
@@ -897,9 +1284,229 @@ mod tests {
     }
 
     #[test]
+    fn publishes_and_resolves_one_blob_manifest_without_sqlite() {
+        let temporary = TestDirectory::new();
+        let root = temporary.path().join("repository");
+        let repository = LocalRepository::create(&root).expect("create repository");
+        let manifest = whole_blob_manifest(
+            &repository,
+            MANIFEST_ID_A.parse().expect("manifest ID"),
+            SEGMENT_ID_A.parse().expect("segment ID"),
+            b"\0private body\xff",
+        );
+        let git_object_id = manifest.git_object_id();
+
+        assert_eq!(
+            repository
+                .resolve_blob_manifest(git_object_id, manifest_limits())
+                .expect("resolve absent"),
+            None
+        );
+        assert!(!metadata_path(&root).exists());
+        repository
+            .publish_blob_manifest(&manifest)
+            .expect("publish manifest");
+        repository
+            .publish_blob_manifest(&manifest)
+            .expect("repeat manifest");
+        assert!(manifest_path(&root, manifest.manifest_id()).is_file());
+        assert_eq!(
+            repository
+                .resolve_blob_manifest(git_object_id, manifest_limits())
+                .expect("resolve manifest")
+                .as_ref(),
+            Some(&manifest)
+        );
+
+        let reopened = LocalRepository::open(&root).expect("reopen repository");
+        assert_eq!(
+            reopened
+                .resolve_blob_manifest(git_object_id, manifest_limits())
+                .expect("resolve after reopen")
+                .as_ref(),
+            Some(&manifest)
+        );
+        assert!(!metadata_path(&root).exists());
+    }
+
+    #[test]
+    fn rejects_manifest_conflicts_and_ambiguous_blob_resolution() {
+        let temporary = TestDirectory::new();
+        let root = temporary.path().join("repository");
+        let repository = LocalRepository::create(&root).expect("create repository");
+        let first = whole_blob_manifest(
+            &repository,
+            MANIFEST_ID_A.parse().expect("manifest ID"),
+            SEGMENT_ID_A.parse().expect("segment ID"),
+            b"same blob",
+        );
+        let first_git_object_id = first.git_object_id();
+        let conflicting_id = whole_blob_manifest(
+            &repository,
+            MANIFEST_ID_A.parse().expect("manifest ID"),
+            SEGMENT_ID_B.parse().expect("segment ID"),
+            b"different blob",
+        );
+        repository
+            .publish_blob_manifest(&first)
+            .expect("publish first manifest");
+        let conflict = repository
+            .publish_blob_manifest(&conflicting_id)
+            .expect_err("conflicting manifest ID");
+        assert_eq!(conflict.kind(), ErrorKind::Conflict);
+        assert_eq!(
+            repository
+                .resolve_blob_manifest(first_git_object_id, manifest_limits())
+                .expect("resolve first manifest")
+                .as_ref(),
+            Some(&first)
+        );
+
+        let duplicate_representation = whole_blob_manifest(
+            &repository,
+            MANIFEST_ID_B.parse().expect("manifest ID"),
+            "67e55044-10b1-426f-9247-bb680e5fe0c8"
+                .parse()
+                .expect("segment ID"),
+            b"same blob",
+        );
+        repository
+            .publish_blob_manifest(&duplicate_representation)
+            .expect("publish second manifest");
+        let ambiguous = repository
+            .resolve_blob_manifest(first_git_object_id, manifest_limits())
+            .expect_err("ambiguous manifests");
+        assert_eq!(ambiguous.kind(), ErrorKind::Conflict);
+    }
+
+    #[test]
+    fn rejects_corrupt_foreign_and_out_of_bound_blob_manifests() {
+        let temporary = TestDirectory::new();
+        let root = temporary.path().join("repository");
+        let repository = LocalRepository::create(&root).expect("create repository");
+        let manifest = whole_blob_manifest(
+            &repository,
+            MANIFEST_ID_A.parse().expect("manifest ID"),
+            SEGMENT_ID_A.parse().expect("segment ID"),
+            b"private body",
+        );
+        repository
+            .publish_blob_manifest(&manifest)
+            .expect("publish manifest");
+
+        let too_small = BlobManifestReadLimits::new(8, 1, 4_096).expect("limits");
+        let limit = repository
+            .resolve_blob_manifest(manifest.git_object_id(), too_small)
+            .expect_err("manifest byte limit");
+        assert_eq!(limit.kind(), ErrorKind::Unsupported);
+
+        fs::write(manifest_path(&root, manifest.manifest_id()), b"corrupt")
+            .expect("corrupt manifest");
+        let corrupt = repository
+            .resolve_blob_manifest(manifest.git_object_id(), manifest_limits())
+            .expect_err("corrupt manifest");
+        assert_eq!(corrupt.kind(), ErrorKind::CorruptData);
+
+        let foreign_root = temporary.path().join("foreign-repository");
+        let foreign = LocalRepository::create(&foreign_root).expect("create foreign repository");
+        let foreign_manifest = whole_blob_manifest(
+            &foreign,
+            MANIFEST_ID_B.parse().expect("manifest ID"),
+            SEGMENT_ID_A.parse().expect("segment ID"),
+            b"foreign",
+        );
+        let foreign_error = repository
+            .publish_blob_manifest(&foreign_manifest)
+            .expect_err("foreign manifest");
+        assert_eq!(foreign_error.kind(), ErrorKind::InvalidInput);
+    }
+
+    #[test]
+    fn ignores_staging_files_and_rejects_invalid_manifest_directory_entries() {
+        let temporary = TestDirectory::new();
+        let root = temporary.path().join("repository");
+        let repository = LocalRepository::create(&root).expect("create repository");
+        let manifest = whole_blob_manifest(
+            &repository,
+            MANIFEST_ID_A.parse().expect("manifest ID"),
+            SEGMENT_ID_A.parse().expect("segment ID"),
+            b"body",
+        );
+        let git_object_id = manifest.git_object_id();
+        repository
+            .publish_blob_manifest(&manifest)
+            .expect("publish manifest");
+        fs::write(
+            root.join(BLOB_MANIFEST_DIRECTORY)
+                .join(".123e4567-e89b-42d3-a456-426614174000.partial"),
+            b"partial",
+        )
+        .expect("write staging");
+        let entry_limit = BlobManifestReadLimits::new(1, 4_096, 4_096).expect("entry limit");
+        let entry_limit = repository
+            .resolve_blob_manifest(git_object_id, entry_limit)
+            .expect_err("entry limit");
+        assert_eq!(entry_limit.kind(), ErrorKind::Unsupported);
+        assert_eq!(
+            repository
+                .resolve_blob_manifest(git_object_id, manifest_limits())
+                .expect("ignore staging")
+                .as_ref(),
+            Some(&manifest)
+        );
+
+        fs::write(
+            root.join(BLOB_MANIFEST_DIRECTORY).join("unexpected"),
+            b"invalid",
+        )
+        .expect("write invalid entry");
+        let invalid = repository
+            .resolve_blob_manifest(git_object_id, manifest_limits())
+            .expect_err("invalid entry");
+        assert_eq!(invalid.kind(), ErrorKind::CorruptData);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_symlinked_blob_manifests() {
+        use std::os::unix::fs::symlink;
+
+        let temporary = TestDirectory::new();
+        let root = temporary.path().join("repository");
+        let repository = LocalRepository::create(&root).expect("create repository");
+        let manifest = whole_blob_manifest(
+            &repository,
+            MANIFEST_ID_A.parse().expect("manifest ID"),
+            SEGMENT_ID_A.parse().expect("segment ID"),
+            b"body",
+        );
+        let replacement = temporary.path().join("replacement");
+        fs::write(&replacement, manifest.encode()).expect("write replacement");
+        symlink(&replacement, manifest_path(&root, manifest.manifest_id())).expect("link manifest");
+
+        let error = repository
+            .resolve_blob_manifest(manifest.git_object_id(), manifest_limits())
+            .expect_err("symlink manifest");
+        assert_eq!(error.kind(), ErrorKind::CorruptData);
+    }
+
+    #[test]
     fn local_repository_is_send_and_sync() {
         fn assert_send_sync<T: Send + Sync>() {}
 
+        assert_eq!(
+            BlobManifestReadLimits::new(0, 1, 1)
+                .expect_err("zero entry limit")
+                .kind(),
+            ErrorKind::InvalidInput
+        );
+        assert_eq!(
+            BlobManifestReadLimits::new(1, 0, 1)
+                .expect_err("zero byte limit")
+                .kind(),
+            ErrorKind::InvalidInput
+        );
         assert_send_sync::<LocalRepository>();
+        assert_send_sync::<BlobManifestReadLimits>();
     }
 }

@@ -63,7 +63,7 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 
 ### Reconstruction
 
-- [ ] Resolve a Git blob ID to a manifest.
+- [x] Resolve a Git blob ID to a manifest.
 - [ ] Resolve manifest records from segments.
 - [ ] Reconstruct exact bytes.
 - [ ] Verify final Git blob ID.
