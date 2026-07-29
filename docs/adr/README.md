@@ -33,3 +33,4 @@ Valid statuses are `Proposed`, `Accepted`, `Rejected`, `Deprecated`, and `Supers
 | [ADR-0025](0025-repository-format-compatibility.md) | Accepted | Version repository formats with required and optional flags |
 | [ADR-0026](0026-canonical-binary-serialization.md) | Accepted | Use fixed-width canonical binary serialization |
 | [ADR-0027](0027-local-repository-bootstrap.md) | Accepted | Store the V1 repository bootstrap as canonical binary |
+| [ADR-0028](0028-gitoxide-repository-adapter.md) | Accepted | Open Git repositories through a minimal gitoxide adapter |
