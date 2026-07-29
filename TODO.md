@@ -6,11 +6,11 @@ Robustness tasks operate only on Paengi's pure functions and generated local fix
 ## Active vertical slice
 
 - Milestone: 0 — Project and model foundation.
-- Task: define an in-memory typed-ID repository and generated directory-tree histories.
+- Task: define an in-memory typed-ID repository and generated directory-tree histories (complete).
 - Modules/files: `lib/paengi_model/paengi_model.{mli,ml}`, `test/model_property_test.ml`, and `TODO.md`; no persistent write, CLI, or `test/dune` change.
 - Types: immutable repository maps for snapshots, scratch events, and checkpoints; explicit scratch head; typed repository error; and deterministic retained-ancestor replay.
 - Invariants: inserted IDs match canonical values; equal duplicates are idempotent and conflicting duplicates are rejected; events reference stored parents; checkpoints reference stored snapshots/events/parents and replay exactly; a failed insertion returns no partial repository; snapshot IDs exclude observational metadata.
-- Tests: bounded deterministic generated directory trees and valid histories cover lookup, replay, insertion-order independence, duplicate handling, missing/incoherent references, and all five scratch operations.
+- Tests: eight unit tests and twelve 500-case bounded deterministic properties cover checkpoint behavior, generated directory trees, lookup, replay, insertion-order independence, duplicate handling, missing/incoherent references, and all five scratch operations. `make test` passes.
 - External libraries: existing Alcotest, QCheck, SHA-256, and Profile 1 encoder only.
 - ADR changes: no new ADR; the slice defines no persistent object format.
 
@@ -47,8 +47,8 @@ Robustness tasks operate only on Paengi's pure functions and generated local fix
 - [x] Define scratch event and checkpoint.
 - [x] Define retention reason.
 - [x] Define pure event application.
-- [ ] Define simple in-memory repository.
-- [ ] Add generated directory-tree tests.
+- [x] Define simple in-memory repository.
+- [x] Add generated directory-tree tests.
 
 ### Exit criteria
 

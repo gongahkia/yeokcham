@@ -249,9 +249,7 @@ let generated_directories values =
   let count = 1 + (List.hd values mod 4) in
   List.init count (fun index ->
       let root = require_path [ Printf.sprintf "tree-%d" index ] in
-      let nested =
-        require_path [ Printf.sprintf "tree-%d" index; "nested" ]
-      in
+      let nested = require_path [ Printf.sprintf "tree-%d" index; "nested" ] in
       [ root; nested ])
   |> List.concat
 
@@ -572,6 +570,368 @@ let checkpoint_records_event_metadata () =
         (Id.Snapshot_id.to_hex (Snapshot.id (Checkpoint.snapshot parent)))
         (Id.Snapshot_id.to_hex (Snapshot.id (Checkpoint.snapshot checkpoint)))
 
+type history_error =
+  | History_event_error of event_transition_error
+  | History_repository_error of repository_error
+
+let root_repository snapshot =
+  let checkpoint = initial_checkpoint snapshot in
+  match Repository.add_snapshot Repository.empty snapshot with
+  | Error error -> Error (History_repository_error error)
+  | Ok repository -> (
+      match Repository.add_checkpoint repository checkpoint with
+      | Error error -> Error (History_repository_error error)
+      | Ok repository -> Ok (repository, checkpoint))
+
+let add_transition ~event_first repository event checkpoint =
+  let add_snapshot repository =
+    Repository.add_snapshot repository (Checkpoint.snapshot checkpoint)
+  in
+  let add_event repository = Repository.add_event repository event in
+  let add_checkpoint repository =
+    Repository.add_checkpoint repository checkpoint
+  in
+  if event_first then
+    match add_event repository with
+    | Error error -> Error error
+    | Ok repository -> (
+        match add_snapshot repository with
+        | Error error -> Error error
+        | Ok repository -> add_checkpoint repository)
+  else
+    match add_snapshot repository with
+    | Error error -> Error error
+    | Ok repository -> (
+        match add_event repository with
+        | Error error -> Error error
+        | Ok repository -> add_checkpoint repository)
+
+let repository_history ?(event_first = false) initial operations =
+  match root_repository initial with
+  | Error error -> Error error
+  | Ok (repository, root) ->
+      let rec add index repository parent applied = function
+        | [] -> Ok (repository, root, parent, List.rev applied)
+        | operation :: rest -> (
+            let event =
+              Scratch_event.create ~parent:(Checkpoint.id parent)
+                ~operations:[ operation ]
+                ~observed_at:(Int64.of_int (index + 1))
+                ~source:(if index land 1 = 0 then Explicit else Scan)
+            in
+            let retention =
+              if index land 1 = 0 then [ Recent_window ]
+              else [ Periodic_retention ]
+            in
+            match
+              Scratch.apply_event ~parent
+                ~created_at:(Int64.of_int (index + 101))
+                ~retention event
+            with
+            | Error error -> Error (History_event_error error)
+            | Ok checkpoint -> (
+                match
+                  add_transition ~event_first repository event checkpoint
+                with
+                | Error error -> Error (History_repository_error error)
+                | Ok repository ->
+                    add (index + 1) repository checkpoint
+                      ((event, checkpoint) :: applied)
+                      rest))
+      in
+      add 0 repository root [] operations
+
+let has_repository_error expected = function
+  | Error error -> String.equal (repository_error_to_string error) expected
+  | Ok _ -> false
+
+let repository_lookup_property =
+  QCheck2.Test.make ~count:500
+    ~name:"repository insertion and lookup preserve immutable values"
+    valid_operation_sequences (fun values ->
+      let initial, operations, expected = scenario values in
+      match repository_history initial operations with
+      | Error _ -> false
+      | Ok (repository, root, target, (event, _) :: _) -> (
+          match
+            ( Repository.find_snapshot repository (Snapshot.id initial),
+              Repository.find_snapshot repository (Snapshot.id expected),
+              Repository.find_event repository (Scratch_event.id event),
+              Repository.find_checkpoint repository (Checkpoint.id target) )
+          with
+          | ( Some stored_initial,
+              Some stored_expected,
+              Some stored_event,
+              Some stored_checkpoint ) ->
+              Snapshot.equal stored_initial initial
+              && Snapshot.equal stored_expected expected
+              && Id.Operation_id.equal
+                   (Scratch_event.id stored_event)
+                   (Scratch_event.id event)
+              && Id.Checkpoint_id.equal
+                   (Checkpoint.id stored_checkpoint)
+                   (Checkpoint.id target)
+              && Snapshot.equal
+                   (Checkpoint.snapshot stored_checkpoint)
+                   (Checkpoint.snapshot target)
+              && Id.Checkpoint_id.equal (Checkpoint.id root)
+                   (Scratch_event.parent stored_event)
+          | None, _, _, _ | _, None, _, _ | _, _, None, _ | _, _, _, None ->
+              false)
+      | Ok (_, _, _, []) -> false)
+
+let repository_replay_property =
+  QCheck2.Test.make ~count:500
+    ~name:"repository replay reaches the target snapshot"
+    valid_operation_sequences (fun values ->
+      let initial, operations, expected = scenario values in
+      match repository_history initial operations with
+      | Error _ -> false
+      | Ok (repository, root, target, _) -> (
+          match
+            Repository.replay repository ~ancestor:(Checkpoint.id root)
+              ~target:(Checkpoint.id target)
+          with
+          | Ok replayed -> Snapshot.equal replayed expected
+          | Error _ -> false))
+
+let repository_insertion_order_property =
+  QCheck2.Test.make ~count:500
+    ~name:"repository insertion order preserves identities and replay"
+    valid_operation_sequences (fun values ->
+      let initial, operations, expected = scenario values in
+      match
+        ( repository_history ~event_first:false initial operations,
+          repository_history ~event_first:true initial operations )
+      with
+      | ( Ok (left_repository, left_root, left_target, _),
+          Ok (right_repository, right_root, right_target, _) ) -> (
+          match
+            ( Repository.replay left_repository
+                ~ancestor:(Checkpoint.id left_root)
+                ~target:(Checkpoint.id left_target),
+              Repository.replay right_repository
+                ~ancestor:(Checkpoint.id right_root)
+                ~target:(Checkpoint.id right_target) )
+          with
+          | Ok left, Ok right ->
+              Id.Checkpoint_id.equal
+                (Checkpoint.id left_target)
+                (Checkpoint.id right_target)
+              && Option.equal Id.Checkpoint_id.equal
+                   (Repository.scratch_head left_repository)
+                   (Repository.scratch_head right_repository)
+              && Snapshot.equal left right
+              && Snapshot.equal left expected
+          | Error _, _ | _, Error _ -> false)
+      | Error _, _ | _, Error _ -> false)
+
+let repository_duplicate_property =
+  QCheck2.Test.make ~count:500
+    ~name:"identical repository insertion is idempotent"
+    valid_operation_sequences (fun values ->
+      let initial, operations, expected = scenario values in
+      match repository_history initial operations with
+      | Error _ -> false
+      | Ok (repository, root, target, (event, _) :: _) -> (
+          match
+            ( Repository.add_snapshot repository initial,
+              Repository.add_event repository event,
+              Repository.add_checkpoint repository target )
+          with
+          | Ok after_snapshot, Ok after_event, Ok after_checkpoint -> (
+              match
+                Repository.replay after_checkpoint
+                  ~ancestor:(Checkpoint.id root) ~target:(Checkpoint.id target)
+              with
+              | Ok replayed ->
+                  Option.equal Id.Checkpoint_id.equal
+                    (Repository.scratch_head repository)
+                    (Repository.scratch_head after_snapshot)
+                  && Option.equal Id.Checkpoint_id.equal
+                       (Repository.scratch_head repository)
+                       (Repository.scratch_head after_event)
+                  && Option.equal Id.Checkpoint_id.equal
+                       (Repository.scratch_head repository)
+                       (Repository.scratch_head after_checkpoint)
+                  && Snapshot.equal replayed expected
+              | Error _ -> false)
+          | Error _, _, _ | _, Error _, _ | _, _, Error _ -> false)
+      | Ok (_, _, _, []) -> false)
+
+let repository_conflicting_duplicate_property =
+  QCheck2.Test.make ~count:500
+    ~name:"conflicting duplicate repository IDs are rejected"
+    valid_operation_sequences (fun values ->
+      let initial, operations, _ = scenario values in
+      match repository_history initial operations with
+      | Error _ -> false
+      | Ok (repository, _, target, (event, _) :: _) ->
+          let conflicting_event =
+            Scratch_event.create
+              ~parent:(Scratch_event.parent event)
+              ~operations:[] ~observed_at:999L ~source:Scan
+          in
+          let conflicting_checkpoint =
+            Checkpoint.initial ~snapshot:Snapshot.empty ~created_at:999L
+              ~retention:[]
+          in
+          let snapshot_conflict =
+            Repository.insert_snapshot repository ~id:(Snapshot.id initial)
+              Snapshot.empty
+            |> has_repository_error
+                 (Printf.sprintf "conflicting snapshot: %s"
+                    (Id.Snapshot_id.short_hex (Snapshot.id initial)))
+          in
+          let event_conflict =
+            Repository.insert_event repository ~id:(Scratch_event.id event)
+              conflicting_event
+            |> has_repository_error
+                 (Printf.sprintf "conflicting event: %s"
+                    (Id.Operation_id.short_hex (Scratch_event.id event)))
+          in
+          let checkpoint_conflict =
+            Repository.insert_checkpoint repository ~id:(Checkpoint.id target)
+              conflicting_checkpoint
+            |> has_repository_error
+                 (Printf.sprintf "conflicting checkpoint: %s"
+                    (Id.Checkpoint_id.short_hex (Checkpoint.id target)))
+          in
+          snapshot_conflict && event_conflict && checkpoint_conflict
+      | Ok (_, _, _, []) -> false)
+
+let repository_rejection_property =
+  QCheck2.Test.make ~count:500
+    ~name:"missing and incoherent references reject without mutation"
+    valid_operation_sequences (fun values ->
+      let _, initial, operations, _ = scenario_with_directories values in
+      match (root_repository initial, operations) with
+      | Ok (repository, root), operation :: _ ->
+          let valid_event =
+            Scratch_event.create ~parent:(Checkpoint.id root)
+              ~operations:[ operation ] ~observed_at:1L ~source:Explicit
+          in
+          let child =
+            match
+              Scratch.apply_event ~parent:root ~created_at:2L ~retention:[]
+                valid_event
+            with
+            | Ok checkpoint -> checkpoint
+            | Error _ -> assert false
+          in
+          let missing_parent =
+            Checkpoint.initial ~snapshot:Snapshot.empty ~created_at:3L
+              ~retention:[]
+          in
+          let missing_parent_event =
+            Scratch_event.create
+              ~parent:(Checkpoint.id missing_parent)
+              ~operations:[] ~observed_at:4L ~source:Scan
+          in
+          let missing_event =
+            match
+              Repository.add_snapshot repository (Checkpoint.snapshot child)
+            with
+            | Error _ -> false
+            | Ok repository_with_snapshot ->
+                Repository.add_checkpoint repository_with_snapshot child
+                |> fun result ->
+                has_repository_error
+                  (Printf.sprintf "missing event: %s"
+                     (Id.Operation_id.short_hex (Scratch_event.id valid_event)))
+                  result
+                && Option.equal Id.Checkpoint_id.equal
+                     (Repository.scratch_head repository_with_snapshot)
+                     (Some (Checkpoint.id root))
+          in
+          let incoherent_checkpoint =
+            Checkpoint.create
+              ~parent:(Some (Checkpoint.id root))
+              ~snapshot:(Checkpoint.snapshot root)
+              ~event:(Some (Scratch_event.id valid_event))
+              ~created_at:5L ~retention:[]
+          in
+          let missing_parent_rejected =
+            Repository.add_event repository missing_parent_event
+            |> has_repository_error
+                 (Printf.sprintf "event parent missing: %s"
+                    (Id.Checkpoint_id.short_hex (Checkpoint.id missing_parent)))
+          in
+          let incoherent_rejected =
+            match Repository.add_event repository valid_event with
+            | Error _ -> false
+            | Ok repository_with_event ->
+                Repository.add_checkpoint repository_with_event
+                  incoherent_checkpoint
+                |> fun result ->
+                has_repository_error
+                  (Printf.sprintf "incoherent checkpoint: %s"
+                     (Id.Checkpoint_id.short_hex
+                        (Checkpoint.id incoherent_checkpoint)))
+                  result
+                && Option.equal Id.Checkpoint_id.equal
+                     (Repository.scratch_head repository_with_event)
+                     (Some (Checkpoint.id root))
+          in
+          missing_event && missing_parent_rejected && incoherent_rejected
+      | Error _, _ | _, [] -> false)
+
+let complete_history_property =
+  QCheck2.Test.make ~count:500
+    ~name:"generated directory histories preserve all scratch operation states"
+    valid_operation_sequences (fun values ->
+      let directories = generated_directories values in
+      let initial =
+        List.map (fun path -> Directory_path path) directories
+        |> require_snapshot
+      in
+      let source = List.hd directories in
+      let destination_parent = List.hd (List.rev directories) in
+      let draft =
+        Path.to_components source @ [ "all-operations" ] |> require_path
+      in
+      let moved =
+        Path.to_components destination_parent @ [ "all-operations-moved" ]
+        |> require_path
+      in
+      let operations =
+        [
+          Create_file { path = draft; content = "one"; mode = Regular };
+          Modify_file
+            {
+              path = draft;
+              expected_content = "one";
+              replacement_content = "two";
+            };
+          Change_mode
+            {
+              path = draft;
+              expected_mode = Regular;
+              replacement_mode = Executable;
+            };
+          Move_path
+            {
+              source = draft;
+              destination = moved;
+              prior = File { mode = Executable; content = "two" };
+            };
+          Delete_path
+            {
+              path = moved;
+              prior = File { mode = Executable; content = "two" };
+            };
+        ]
+      in
+      match repository_history initial operations with
+      | Error _ -> false
+      | Ok (repository, root, target, _) -> (
+          match
+            Repository.replay repository ~ancestor:(Checkpoint.id root)
+              ~target:(Checkpoint.id target)
+          with
+          | Ok replayed -> Snapshot.equal replayed initial
+          | Error _ -> false))
+
 let property_case name test =
   QCheck_alcotest.to_alcotest ~speed_level:`Quick ~rand:(state_for name) test
 
@@ -607,5 +967,14 @@ let () =
             invalid_operations_return_errors_property;
           property_case "snapshot-metadata"
             metadata_does_not_change_snapshot_id_property;
+          property_case "repository-lookup" repository_lookup_property;
+          property_case "repository-replay" repository_replay_property;
+          property_case "repository-insertion-order"
+            repository_insertion_order_property;
+          property_case "repository-duplicate" repository_duplicate_property;
+          property_case "repository-conflict"
+            repository_conflicting_duplicate_property;
+          property_case "repository-rejection" repository_rejection_property;
+          property_case "complete-history" complete_history_property;
         ] );
     ]
