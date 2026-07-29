@@ -63,6 +63,35 @@ let scan_determinism =
                   | Ok (second, _) -> Snapshot_store.Snapshot.equal_id first second
                   | Error _ -> false))))
 
+let materialise_round_trip =
+  QCheck2.Test.make ~count:80 ~name:"scan then materialise preserves snapshot identity"
+    QCheck2.Gen.(triple bytes_generator bytes_generator bool)
+    (fun (left, right, executable) ->
+      with_directory (fun source ->
+          with_directory (fun store_root ->
+              with_directory (fun destination ->
+                  Unix.mkdir (Filename.concat source "nested") 0o700;
+                  write_file (Filename.concat source "left") left;
+                  write_file (Filename.concat source "right") right;
+                  write_file (Filename.concat (Filename.concat source "nested") "again") left;
+                  if executable then Unix.chmod (Filename.concat source "right") 0o755;
+                  Unix.symlink "left" (Filename.concat source "link");
+                  match Store.init ~root:store_root with
+                  | Error _ -> false
+                  | Ok store -> (
+                      match Snapshot_store.scan ~root:source ~store with
+                      | Error _ -> false
+                      | Ok (source_id, snapshot) -> (
+                          match
+                            Snapshot_store.Materialize.write ~destination store snapshot
+                          with
+                          | Error _ -> false
+                          | Ok () -> (
+                              match Snapshot_store.scan ~root:destination ~store with
+                              | Ok (destination_id, _) ->
+                                  Snapshot_store.Snapshot.equal_id source_id destination_id
+                              | Error _ -> false)))))))
+
 let () =
   Alcotest.run "persisted snapshot properties"
     [
@@ -70,5 +99,7 @@ let () =
         [
           QCheck_alcotest.to_alcotest ~speed_level:`Quick
             ~rand:(state_for "scan-determinism") scan_determinism;
+          QCheck_alcotest.to_alcotest ~speed_level:`Quick
+            ~rand:(state_for "materialise-round-trip") materialise_round_trip;
         ] );
     ]

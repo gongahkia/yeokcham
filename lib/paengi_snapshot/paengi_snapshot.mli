@@ -23,6 +23,8 @@ type error =
 
 val error_to_string : error -> string
 
+type snapshot_model_error = error
+
 module Content : sig
   type id
 
@@ -75,7 +77,7 @@ module Materialize : sig
     | Create_symlink of { path : string list; target : Content.id }
 
   type error =
-    | Snapshot_error of error
+    | Snapshot_error of snapshot_model_error
     | Destination_not_directory of string
     | Destination_not_empty of string
     | Unsafe_destination_path of string list

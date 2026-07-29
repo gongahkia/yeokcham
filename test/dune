@@ -81,6 +81,17 @@
   (source_tree golden)))
 
 (test
+ (name test_materialize)
+ (modules test_materialize)
+ (libraries
+  alcotest
+  paengi_encoding
+  paengi_envelope
+  paengi_snapshot
+  paengi_store
+  unix))
+
+(test
  (name encoding_property_test)
  (modules encoding_property_test)
  (libraries
