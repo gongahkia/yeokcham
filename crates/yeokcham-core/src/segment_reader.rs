@@ -19,6 +19,49 @@ pub struct SegmentReadLimits {
     maximum_tiny_blob_body_bytes: usize,
 }
 
+/// Verified byte location and metadata for one record inside a segment.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct SegmentRecordLocation {
+    kind: SegmentRecordKind,
+    content_id: YeokchamContentId,
+    compression: CompressionAlgorithm,
+    payload_offset: u64,
+    plaintext_bytes: u64,
+    stored_bytes: u64,
+}
+
+impl SegmentRecordLocation {
+    /// Returns the payload family at this location.
+    pub const fn kind(self) -> SegmentRecordKind {
+        self.kind
+    }
+
+    /// Returns the verified plaintext content identity at this location.
+    pub const fn content_id(self) -> YeokchamContentId {
+        self.content_id
+    }
+
+    /// Returns the compression method declared for this payload.
+    pub const fn compression(self) -> CompressionAlgorithm {
+        self.compression
+    }
+
+    /// Returns the zero-based segment byte offset of the stored payload.
+    pub const fn payload_offset(self) -> u64 {
+        self.payload_offset
+    }
+
+    /// Returns the uncompressed payload length.
+    pub const fn plaintext_bytes(self) -> u64 {
+        self.plaintext_bytes
+    }
+
+    /// Returns the stored payload length.
+    pub const fn stored_bytes(self) -> u64 {
+        self.stored_bytes
+    }
+}
+
 impl SegmentReadLimits {
     /// Validates bounds for one segment and its nested records.
     pub fn new(
@@ -142,6 +185,7 @@ pub struct ReadSegment {
     repository_id: RepositoryId,
     segment_id: SegmentId,
     records: Vec<ReadSegmentRecord>,
+    locations: Vec<SegmentRecordLocation>,
     total_plaintext_bytes: u64,
     total_stored_bytes: u64,
     checksum: [u8; 32],
@@ -161,6 +205,11 @@ impl ReadSegment {
     /// Returns verified records in their immutable insertion order.
     pub fn records(&self) -> &[ReadSegmentRecord] {
         &self.records
+    }
+
+    /// Returns verified record locations in the same order as [`records`](Self::records).
+    pub fn locations(&self) -> &[SegmentRecordLocation] {
+        &self.locations
     }
 
     /// Returns the verified aggregate plaintext payload length.
@@ -241,6 +290,7 @@ impl SegmentReader {
         }
 
         let mut records = Vec::new();
+        let mut locations = Vec::new();
         let mut total_plaintext_bytes = 0u64;
         let mut total_stored_bytes = 0usize;
         for _ in 0..record_count {
@@ -295,6 +345,9 @@ impl SegmentReader {
                     "segment exceeds the stored-byte limit",
                 ));
             }
+            let payload_offset = u64::try_from(decoder.consumed_len()).map_err(|_| {
+                Error::new(ErrorKind::CorruptData, "segment payload offset is invalid")
+            })?;
             let payload = decoder.read_raw_bytes(stored_bytes_usize)?;
             let record = decode_record(kind, payload, limits)?;
             if record.content_id() != content_id {
@@ -303,6 +356,14 @@ impl SegmentReader {
                     "segment record content ID does not match its payload",
                 ));
             }
+            locations.push(SegmentRecordLocation {
+                kind,
+                content_id,
+                compression,
+                payload_offset,
+                plaintext_bytes,
+                stored_bytes,
+            });
             records.push(record);
         }
 
@@ -342,6 +403,7 @@ impl SegmentReader {
             repository_id,
             segment_id,
             records,
+            locations,
             total_plaintext_bytes,
             total_stored_bytes: u64::try_from(total_stored_bytes).map_err(|_| {
                 Error::new(ErrorKind::CorruptData, "segment stored total is invalid")
@@ -458,6 +520,7 @@ mod tests {
         assert_eq!(segment.repository_id().to_string(), REPOSITORY_ID);
         assert_eq!(segment.segment_id().to_string(), SEGMENT_ID);
         assert_eq!(segment.records().len(), 1);
+        assert_eq!(segment.locations().len(), 1);
         assert_eq!(segment.records()[0].kind(), SegmentRecordKind::WholeBlob);
         assert_eq!(
             segment.records()[0].content_id(),
@@ -474,6 +537,9 @@ mod tests {
         assert_eq!(segment.total_plaintext_bytes(), 85);
         assert_eq!(segment.total_stored_bytes(), 85);
         assert_eq!(segment.checksum(), checksum);
+        assert_eq!(segment.locations()[0].payload_offset(), 109);
+        assert_eq!(segment.locations()[0].plaintext_bytes(), 85);
+        assert_eq!(segment.locations()[0].stored_bytes(), 85);
     }
 
     #[test]

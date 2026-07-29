@@ -16,6 +16,7 @@ mod repository;
 mod repository_format;
 mod repository_id;
 mod segment_id;
+mod segment_index;
 mod segment_reader;
 mod segment_writer;
 mod telemetry;
@@ -39,7 +40,10 @@ pub use repository::{GitObjectMetadata, LocalRepository};
 pub use repository_format::{RepositoryFeatureFlags, RepositoryFormat, RepositoryFormatVersion};
 pub use repository_id::RepositoryId;
 pub use segment_id::SegmentId;
-pub use segment_reader::{ReadSegment, ReadSegmentRecord, SegmentReadLimits, SegmentReader};
+pub use segment_index::{SegmentIndex, SegmentIndexEntry};
+pub use segment_reader::{
+    ReadSegment, ReadSegmentRecord, SegmentReadLimits, SegmentReader, SegmentRecordLocation,
+};
 pub use segment_writer::{
     SealedSegment, SegmentRecord, SegmentRecordKind, SegmentWriteLimits, SegmentWriter,
 };

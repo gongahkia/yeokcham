@@ -74,6 +74,11 @@ impl<'a> CanonicalDecoder<'a> {
         self.bytes.len() - self.offset
     }
 
+    /// Returns the number of bytes consumed from the record.
+    pub const fn consumed_len(&self) -> usize {
+        self.offset
+    }
+
     /// Reads one byte.
     pub fn read_u8(&mut self) -> Result<u8> {
         Ok(self.take(1)?[0])
@@ -178,6 +183,7 @@ mod tests {
         assert_eq!(decoder.read_u32().expect("u32"), 3);
         assert_eq!(decoder.read_u64().expect("u64"), 4);
         assert_eq!(decoder.read_fixed::<2>().expect("fixed"), [5, 6]);
+        assert_eq!(decoder.consumed_len(), 17);
         assert_eq!(decoder.read_raw_bytes(0).expect("raw bytes"), b"");
         assert_eq!(decoder.read_byte_string().expect("bytes"), b"\xffref");
         decoder.finish().expect("no trailing bytes");
