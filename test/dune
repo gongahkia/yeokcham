@@ -61,10 +61,18 @@
  (deps
   (source_tree fixtures/encoding)))
 
+(test
+ (name model_property_test)
+ (modules model_property_test)
+ (libraries alcotest qcheck-core qcheck-alcotest paengi_id paengi_model))
+
 (rule
  (alias property-test)
  (deps
-  (:exe encoding_property_test.exe)
+  (:encoding_property_test encoding_property_test.exe)
+  (:model_property_test model_property_test.exe)
   (source_tree fixtures/encoding))
  (action
-  (run %{exe:encoding_property_test.exe})))
+  (progn
+   (run %{encoding_property_test})
+   (run %{model_property_test})))
