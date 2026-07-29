@@ -5,13 +5,13 @@ The roadmap is ordered. The local byte-correct model must exist before semantic 
 ## Active vertical slice
 
 - Milestone: 0 — Project and model foundation.
-- Task: define and implement the object envelope (complete).
-- Modules/files: `Paengi_envelope`, ADR-018, unit/property tests, `DECISIONS.md`, and this active slice; no persistent write or CLI.
+- Task: define object-format version and mandatory-feature rules (complete).
+- Modules/files: ADR-019, `Paengi_envelope`, unit/property tests, `DECISIONS.md`, and this active slice; no persistent write or CLI.
 - Types: envelope fields are object kind, object-format version, mandatory-feature mask, SHA-256 algorithm, payload length, checksum, and exact Profile 1 payload.
-- Invariants: one 57-byte header layout; fixed big-endian widths; the input is exactly header plus declared payload; checksum covers every header byte except its own field and the payload; the checksum verifies before Profile 1 payload decoding.
-- Tests: a hard-coded golden header/checksum vector cross-checked by `shasum` and OpenSSL; all truncations; header/payload/checksum corruption; version/type/algorithm/features/length failures; callback ordering; 500 generated round trips; 500 generated single-byte corruptions; 2,000 arbitrary-byte cases; and `make ci` pass on 2026-07-29.
+- Invariants: Envelope 1 accepts and writes payload schema version 1 only; its mandatory-feature mask is zero until a later ADR assigns a bit; unsupported versions or required bits reject after checksum validation and before payload decoding.
+- Tests: writer boundaries for versions `-1`, `0`, `2`, `65535`, and `65536` plus low/high feature bits; checksum-valid typed rejection before payload callback; deterministic metadata-error precedence; all 12 object-type round trips; 500 generated valid round trips; 500 generated unsupported versions; 500 generated nonzero feature masks; 500 one-byte corruptions; 2,000 arbitrary bytes; retained golden header/checksum vector; and `make ci` pass on 2026-07-29.
 - External libraries: no new dependency; checksum uses the existing SHA-256 abstraction.
-- ADR changes: [ADR-018](docs/adr/018-fixed-object-envelope.md) accepted and verified on 2026-07-29.
+- ADR changes: [ADR-018](docs/adr/018-fixed-object-envelope.md) accepted and verified on 2026-07-29; [ADR-019](docs/adr/019-object-format-versions-and-mandatory-features.md) accepted and verified on 2026-07-29.
 
 ## Milestone 0 — Project and model foundation
 
@@ -34,7 +34,7 @@ The roadmap is ordered. The local byte-correct model must exist before semantic 
 - [x] Select initial hash implementation.
 - [x] Select portable canonical encoding through ADR.
 - [x] Define object envelope.
-- [ ] Define format version and feature flags.
+- [x] Define format version and feature flags.
 - [ ] Add golden encoding fixtures.
 - [ ] Reject unknown mandatory features.
 - [ ] Add coverage-guided encoding decoder fuzzing before object persistence.

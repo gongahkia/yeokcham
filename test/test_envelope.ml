@@ -37,12 +37,28 @@ let payload = require_encoding (Encoding.map [ (1L, Encoding.bool true) ])
 
 let sample =
   require_envelope
-    (Envelope.create ~object_type:Envelope.Snapshot ~object_format_version:1
-       ~mandatory_features:0L ~payload ())
+    (Envelope.create ~object_type:Envelope.Snapshot
+       ~object_format_version:Envelope.current_object_format_version
+       ~mandatory_features:Envelope.supported_mandatory_features ~payload ())
 
 let mutate input offset character =
   let output = Bytes.of_string input in
   Bytes.set output offset character;
+  Bytes.unsafe_to_string output
+
+let with_uint16 input offset value =
+  let output = Bytes.of_string input in
+  Bytes.set output offset (Char.chr (value lsr 8));
+  Bytes.set output (offset + 1) (Char.chr (value land 0xff));
+  Bytes.unsafe_to_string output
+
+let with_uint64 input offset value =
+  let output = Bytes.of_string input in
+  for index = 0 to 7 do
+    let shift = (7 - index) * 8 in
+    let byte = Int64.(to_int (logand (shift_right_logical value shift) 255L)) in
+    Bytes.set output (offset + index) (Char.chr byte)
+  done;
   Bytes.unsafe_to_string output
 
 let recalculate_checksum input =
@@ -60,6 +76,20 @@ let recalculate_checksum input =
 let expect_kind name expected input =
   let actual = (require_error input).Envelope.kind in
   Alcotest.(check bool) name true (actual = expected)
+
+let expect_rejection_before_payload name expected input =
+  let invoked = ref false in
+  let result =
+    Envelope.decode_with input ~payload_decoder:(fun _ ->
+        invoked := true;
+        Ok ())
+  in
+  (match result with
+  | Error error ->
+      Alcotest.(check bool) name true (error.Envelope.kind = expected)
+  | Ok _ ->
+      Alcotest.failf "%s: envelope decoder unexpectedly accepted input" name);
+  Alcotest.(check bool) (name ^ " before payload") false !invoked
 
 let object_type_codes () =
   let expected =
@@ -102,6 +132,10 @@ let golden_envelope () =
   Alcotest.(check int) "header size" 57 Envelope.header_size;
   Alcotest.(check int) "envelope version" 1 Envelope.envelope_version;
   Alcotest.(check int)
+    "current object format version" 1 Envelope.current_object_format_version;
+  Alcotest.(check int64)
+    "supported mandatory features" 0L Envelope.supported_mandatory_features;
+  Alcotest.(check int)
     "checksum algorithm code" 1 Envelope.checksum_algorithm_code;
   Alcotest.(check string) "golden bytes" expected (Envelope.encode sample);
   let decoded = require_decoded expected in
@@ -117,47 +151,59 @@ let golden_envelope () =
     (Encoding.equal payload (Envelope.payload decoded));
   Alcotest.(check string) "re-encode" expected (Envelope.encode decoded)
 
-let construction_and_features () =
-  let invalid_low =
-    Envelope.create ~object_type:Envelope.Content ~object_format_version:(-1)
-      ~mandatory_features:0L ~payload ()
-    |> Result.map (fun _ -> false)
-  in
-  Alcotest.(check bool)
-    "negative version rejected" true
-    (invalid_low = Error (Envelope.Invalid_object_format_version (-1)));
-  let invalid_high =
-    Envelope.create ~object_type:Envelope.Content ~object_format_version:65_536
-      ~mandatory_features:0L ~payload ()
-    |> Result.map (fun _ -> false)
-  in
-  Alcotest.(check bool)
-    "large version rejected" true
-    (invalid_high = Error (Envelope.Invalid_object_format_version 65_536));
-  let unsupported =
-    Envelope.create ~object_type:Envelope.Content ~object_format_version:0
-      ~mandatory_features:1L ~payload ()
-    |> Result.map (fun _ -> false)
-  in
-  Alcotest.(check bool)
-    "unknown feature cannot be written" true
-    (unsupported = Error (Envelope.Unsupported_mandatory_features 1L));
-  let with_feature =
-    require_envelope
-      (Envelope.create ~supported_features:1L ~object_type:Envelope.Content
-         ~object_format_version:65_535 ~mandatory_features:1L ~payload ())
-  in
-  let encoded = Envelope.encode with_feature in
-  Alcotest.(check int) "version high byte" 255 (Char.code encoded.[6]);
-  Alcotest.(check int) "version low byte" 255 (Char.code encoded.[7]);
-  expect_kind "unknown feature rejected by default"
-    (Envelope.Unknown_mandatory_features 1L) encoded;
-  match Envelope.decode ~supported_features:1L encoded with
-  | Error error -> Alcotest.fail (Envelope.decode_error_to_string error)
-  | Ok decoded ->
-      Alcotest.(check int64)
-        "known feature preserved" 1L
-        (Envelope.mandatory_features decoded)
+let construction_boundaries () =
+  List.iter
+    (fun version ->
+      let result =
+        Envelope.create ~object_type:Envelope.Content
+          ~object_format_version:version ~mandatory_features:0L ~payload ()
+        |> Result.map (fun _ -> false)
+      in
+      Alcotest.(check bool)
+        "unsupported version cannot be written" true
+        (result = Error (Envelope.Invalid_object_format_version version)))
+    [ -1; 0; 2; 65_535; 65_536 ];
+  List.iter
+    (fun features ->
+      let result =
+        Envelope.create ~object_type:Envelope.Content
+          ~object_format_version:Envelope.current_object_format_version
+          ~mandatory_features:features ~payload ()
+        |> Result.map (fun _ -> false)
+      in
+      Alcotest.(check bool)
+        "mandatory features cannot be written before assignment" true
+        (result = Error (Envelope.Unsupported_mandatory_features features)))
+    [ 1L; Int64.shift_left 1L 62; Int64.min_int ]
+
+let registered_types_round_trip () =
+  List.iter
+    (fun object_type ->
+      let envelope =
+        require_envelope
+          (Envelope.create ~object_type
+             ~object_format_version:Envelope.current_object_format_version
+             ~mandatory_features:Envelope.supported_mandatory_features ~payload
+             ())
+      in
+      let decoded = require_decoded (Envelope.encode envelope) in
+      Alcotest.(check bool)
+        "registered type round-trips" true
+        (Envelope.object_type decoded = object_type))
+    [
+      Envelope.Content;
+      Envelope.Tree;
+      Envelope.Snapshot;
+      Envelope.Scratch_event;
+      Envelope.Checkpoint;
+      Envelope.Capsule;
+      Envelope.Capsule_revision;
+      Envelope.Release;
+      Envelope.Conflict;
+      Envelope.Validation;
+      Envelope.Resolution;
+      Envelope.Repository_config;
+    ]
 
 let rejection_cases () =
   let encoded = Envelope.encode sample in
@@ -185,11 +231,29 @@ let rejection_cases () =
   let unknown_type = mutate encoded 5 (Char.chr 127) |> recalculate_checksum in
   expect_kind "unknown type after checksum" (Envelope.Unknown_object_type 127)
     unknown_type;
-  let unknown_features =
-    mutate encoded 15 (Char.chr 1) |> recalculate_checksum
+  let unsupported_version = with_uint16 encoded 6 2 |> recalculate_checksum in
+  expect_rejection_before_payload "unsupported version after checksum"
+    (Envelope.Unsupported_object_format_version 2) unsupported_version;
+  let low_feature = with_uint64 encoded 8 1L |> recalculate_checksum in
+  expect_rejection_before_payload "low mandatory feature after checksum"
+    (Envelope.Unknown_mandatory_features 1L) low_feature;
+  let high_feature =
+    with_uint64 encoded 8 Int64.min_int |> recalculate_checksum
   in
-  expect_kind "unknown features after checksum"
-    (Envelope.Unknown_mandatory_features 1L) unknown_features
+  expect_rejection_before_payload "high mandatory feature after checksum"
+    (Envelope.Unknown_mandatory_features Int64.min_int) high_feature;
+  let unknown_type_before_version =
+    let with_type = mutate encoded 5 (Char.chr 127) in
+    with_uint16 with_type 6 2 |> recalculate_checksum
+  in
+  expect_kind "object type precedes object format"
+    (Envelope.Unknown_object_type 127) unknown_type_before_version;
+  let version_before_feature =
+    let with_feature = with_uint64 encoded 8 1L in
+    with_uint16 with_feature 6 2 |> recalculate_checksum
+  in
+  expect_kind "object format precedes mandatory features"
+    (Envelope.Unsupported_object_format_version 2) version_before_feature
 
 let truncation_and_callback_order () =
   let encoded = Envelope.encode sample in
@@ -294,12 +358,12 @@ let object_type_generator =
 
 let round_trip_property =
   QCheck2.Test.make ~count:500 ~name:"envelopes round-trip with exact bytes"
-    QCheck2.Gen.(
-      pair object_type_generator (pair (int_range 0 65_535) (value_generator 4)))
-    (fun (object_type, (object_format_version, payload)) ->
+    QCheck2.Gen.(pair object_type_generator (value_generator 4))
+    (fun (object_type, payload) ->
       match
-        Envelope.create ~object_type ~object_format_version
-          ~mandatory_features:0L ~payload ()
+        Envelope.create ~object_type
+          ~object_format_version:Envelope.current_object_format_version
+          ~mandatory_features:Envelope.supported_mandatory_features ~payload ()
       with
       | Error _ -> false
       | Ok envelope -> (
@@ -308,18 +372,65 @@ let round_trip_property =
           | Error _ -> false
           | Ok decoded ->
               Envelope.object_type decoded = object_type
-              && Envelope.object_format_version decoded = object_format_version
-              && Int64.equal (Envelope.mandatory_features decoded) 0L
+              && Envelope.object_format_version decoded
+                 = Envelope.current_object_format_version
+              && Int64.equal
+                   (Envelope.mandatory_features decoded)
+                   Envelope.supported_mandatory_features
               && Encoding.equal (Envelope.payload decoded) payload
               && String.equal (Envelope.encode decoded) encoded))
+
+let unsupported_version_property =
+  QCheck2.Test.make ~count:500
+    ~name:"checksum-valid unsupported versions reject before payload"
+    QCheck2.Gen.(oneof [ return 0; int_range 2 65_535 ])
+    (fun version ->
+      let input =
+        with_uint16 (Envelope.encode sample) 6 version |> recalculate_checksum
+      in
+      let invoked = ref false in
+      match
+        Envelope.decode_with input ~payload_decoder:(fun _ ->
+            invoked := true;
+            Ok ())
+      with
+      | Error error ->
+          error.Envelope.kind
+          = Envelope.Unsupported_object_format_version version
+          && not !invoked
+      | Ok _ -> false)
+
+let nonzero_feature_generator =
+  QCheck2.Gen.map
+    (fun features -> if Int64.equal features 0L then 1L else features)
+    QCheck2.Gen.int64
+
+let unknown_feature_property =
+  QCheck2.Test.make ~count:500
+    ~name:"checksum-valid mandatory features reject before payload"
+    nonzero_feature_generator (fun features ->
+      let input =
+        with_uint64 (Envelope.encode sample) 8 features |> recalculate_checksum
+      in
+      let invoked = ref false in
+      match
+        Envelope.decode_with input ~payload_decoder:(fun _ ->
+            invoked := true;
+            Ok ())
+      with
+      | Error error ->
+          error.Envelope.kind = Envelope.Unknown_mandatory_features features
+          && not !invoked
+      | Ok _ -> false)
 
 let corruption_property =
   QCheck2.Test.make ~count:500 ~name:"every single-byte mutation is rejected"
     QCheck2.Gen.(pair (value_generator 3) nat)
     (fun (payload, candidate) ->
       match
-        Envelope.create ~object_type:Envelope.Content ~object_format_version:1
-          ~mandatory_features:0L ~payload ()
+        Envelope.create ~object_type:Envelope.Content
+          ~object_format_version:Envelope.current_object_format_version
+          ~mandatory_features:Envelope.supported_mandatory_features ~payload ()
       with
       | Error _ -> false
       | Ok envelope ->
@@ -344,8 +455,10 @@ let () =
         [
           Alcotest.test_case "object type registry" `Quick object_type_codes;
           Alcotest.test_case "golden envelope" `Quick golden_envelope;
-          Alcotest.test_case "construction and features" `Quick
-            construction_and_features;
+          Alcotest.test_case "construction boundaries" `Quick
+            construction_boundaries;
+          Alcotest.test_case "registered types round-trip" `Quick
+            registered_types_round_trip;
         ] );
       ( "rejection",
         [
@@ -357,6 +470,10 @@ let () =
       ( "properties",
         [
           QCheck_alcotest.to_alcotest ~speed_level:`Quick round_trip_property;
+          QCheck_alcotest.to_alcotest ~speed_level:`Quick
+            unsupported_version_property;
+          QCheck_alcotest.to_alcotest ~speed_level:`Quick
+            unknown_feature_property;
           QCheck_alcotest.to_alcotest ~speed_level:`Quick corruption_property;
           QCheck_alcotest.to_alcotest ~speed_level:`Quick random_bytes_property;
         ] );

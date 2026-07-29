@@ -5,6 +5,8 @@ let envelope_version = 1
 let header_size = 57
 let prefix_size = 25
 let checksum_algorithm_code = 1
+let current_object_format_version = 1
+let supported_mandatory_features = 0L
 let magic = "PENG"
 
 type object_type =
@@ -56,7 +58,7 @@ type creation_error =
 
 let creation_error_to_string = function
   | Invalid_object_format_version version ->
-      Printf.sprintf "invalid object format version: %d" version
+      Printf.sprintf "unsupported object format version: %d" version
   | Unsupported_mandatory_features features ->
       Printf.sprintf "unsupported mandatory features: 0x%Lx" features
 
@@ -76,8 +78,8 @@ let mandatory_features envelope = envelope.mandatory_features
 let checksum envelope = envelope.checksum
 let payload envelope = envelope.payload
 
-let unknown_features ~supported features =
-  Int64.logand features (Int64.lognot supported)
+let unknown_mandatory_features features =
+  Int64.logand features (Int64.lognot supported_mandatory_features)
 
 let set_byte bytes offset value = Bytes.set bytes offset (Char.chr value)
 
@@ -108,16 +110,11 @@ let calculate_checksum prefix payload =
   Hash.feed_string Hash.empty prefix |> fun context ->
   Hash.feed_string context payload |> Hash.get |> Hash.to_raw_string
 
-let valid_format_version version = version >= 0 && version <= 0xffff
-
-let create ?(supported_features = 0L) ~object_type ~object_format_version
-    ~mandatory_features ~payload () =
-  if not (valid_format_version object_format_version) then
+let create ~object_type ~object_format_version ~mandatory_features ~payload () =
+  if object_format_version <> current_object_format_version then
     Error (Invalid_object_format_version object_format_version)
   else
-    let unsupported =
-      unknown_features ~supported:supported_features mandatory_features
-    in
+    let unsupported = unknown_mandatory_features mandatory_features in
     if not (Int64.equal unsupported 0L) then
       Error (Unsupported_mandatory_features unsupported)
     else
@@ -145,6 +142,7 @@ type decode_error_kind =
   | Length_mismatch of { declared : int64; actual : int }
   | Checksum_mismatch
   | Unknown_object_type of int
+  | Unsupported_object_format_version of int
   | Unknown_mandatory_features of int64
   | Invalid_payload of string
 
@@ -166,6 +164,8 @@ let decode_error_to_string { offset; kind } =
           declared actual
     | Checksum_mismatch -> "checksum mismatch"
     | Unknown_object_type code -> Printf.sprintf "unknown object type: %d" code
+    | Unsupported_object_format_version version ->
+        Printf.sprintf "unsupported object format version: %d" version
     | Unknown_mandatory_features features ->
         Printf.sprintf "unknown mandatory features: 0x%Lx" features
     | Invalid_payload message -> Printf.sprintf "invalid payload: %s" message
@@ -202,7 +202,7 @@ let encode envelope =
   in
   prefix ^ envelope.checksum ^ encoded_payload
 
-let verify ?(supported_features = 0L) input =
+let verify input =
   let length = String.length input in
   if length < header_size then error 0 (Truncated_header length)
   else if not (String.equal (String.sub input 0 4) magic) then
@@ -247,26 +247,32 @@ let verify ?(supported_features = 0L) input =
                     match object_type_of_code object_type_code with
                     | None -> error 5 (Unknown_object_type object_type_code)
                     | Some object_type ->
-                        let mandatory_features = read_uint64 input 8 in
-                        let unknown =
-                          unknown_features ~supported:supported_features
-                            mandatory_features
-                        in
-                        if not (Int64.equal unknown 0L) then
-                          error 8 (Unknown_mandatory_features unknown)
+                        let object_format_version = read_uint16 input 6 in
+                        if
+                          object_format_version <> current_object_format_version
+                        then
+                          error 6
+                            (Unsupported_object_format_version
+                               object_format_version)
                         else
-                          let object_format_version = read_uint16 input 6 in
-                          Ok
-                            {
-                              object_type;
-                              object_format_version;
-                              mandatory_features;
-                              checksum = stored_checksum;
-                              payload = raw_payload;
-                            }))
+                          let mandatory_features = read_uint64 input 8 in
+                          let unknown =
+                            unknown_mandatory_features mandatory_features
+                          in
+                          if not (Int64.equal unknown 0L) then
+                            error 8 (Unknown_mandatory_features unknown)
+                          else
+                            Ok
+                              {
+                                object_type;
+                                object_format_version;
+                                mandatory_features;
+                                checksum = stored_checksum;
+                                payload = raw_payload;
+                              }))
 
-let decode_with ?(supported_features = 0L) ~payload_decoder input =
-  let* verified = verify ~supported_features input in
+let decode_with ~payload_decoder input =
+  let* verified = verify input in
   match payload_decoder verified.payload with
   | Ok payload ->
       Ok
@@ -279,8 +285,8 @@ let decode_with ?(supported_features = 0L) ~payload_decoder input =
         }
   | Error message -> error header_size (Invalid_payload message)
 
-let decode ?(supported_features = 0L) input =
-  decode_with ~supported_features
+let decode input =
+  decode_with
     ~payload_decoder:(fun raw ->
       match Encoding.decode raw with
       | Ok value -> Ok value

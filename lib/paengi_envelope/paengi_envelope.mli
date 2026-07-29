@@ -1,6 +1,8 @@
 val envelope_version : int
 val header_size : int
 val checksum_algorithm_code : int
+val current_object_format_version : int
+val supported_mandatory_features : int64
 
 type object_type =
   | Content
@@ -42,7 +44,6 @@ val checksum : 'payload envelope -> string
 val payload : 'payload envelope -> 'payload
 
 val create :
-  ?supported_features:int64 ->
   object_type:object_type ->
   object_format_version:int ->
   mandatory_features:int64 ->
@@ -59,6 +60,7 @@ type decode_error_kind =
   | Length_mismatch of { declared : int64; actual : int }
   | Checksum_mismatch
   | Unknown_object_type of int
+  | Unsupported_object_format_version of int
   | Unknown_mandatory_features of int64
   | Invalid_payload of string
 
@@ -66,14 +68,11 @@ type decode_error = { offset : int; kind : decode_error_kind }
 
 val decode_error_to_string : decode_error -> string
 val encode : t -> string
-
-val verify :
-  ?supported_features:int64 -> string -> (string envelope, decode_error) result
+val verify : string -> (string envelope, decode_error) result
 
 val decode_with :
-  ?supported_features:int64 ->
   payload_decoder:(string -> ('payload, string) result) ->
   string ->
   ('payload envelope, decode_error) result
 
-val decode : ?supported_features:int64 -> string -> (t, decode_error) result
+val decode : string -> (t, decode_error) result
