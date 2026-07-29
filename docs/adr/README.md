@@ -31,3 +31,4 @@ Valid statuses are `Proposed`, `Accepted`, `Rejected`, `Deprecated`, and `Supers
 | [ADR-0023](0023-device-id-as-uuid-v4.md) | Accepted | Represent device IDs as UUIDv4 bytes |
 | [ADR-0024](0024-byte-preserving-git-refnames.md) | Accepted | Preserve validated Git refname bytes |
 | [ADR-0025](0025-repository-format-compatibility.md) | Accepted | Version repository formats with required and optional flags |
+| [ADR-0026](0026-canonical-binary-serialization.md) | Accepted | Use fixed-width canonical binary serialization |

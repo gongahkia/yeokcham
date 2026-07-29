@@ -27,7 +27,7 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 - [x] Define `DeviceId`.
 - [x] Define `RefName` with validation.
 - [x] Define repository format version and feature flags.
-- [ ] Define serialisation policy and canonical encoding rules.
+- [x] Define serialisation policy and canonical encoding rules.
 
 ### Exit criteria
 
