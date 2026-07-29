@@ -25,7 +25,7 @@ pub use git_object_id::GitObjectId;
 pub use git_repository::GitRepository;
 pub use manifest_id::ManifestId;
 pub use ref_name::RefName;
-pub use repository::LocalRepository;
+pub use repository::{GitObjectMetadata, LocalRepository};
 pub use repository_format::{RepositoryFeatureFlags, RepositoryFormat, RepositoryFormatVersion};
 pub use repository_id::RepositoryId;
 pub use segment_id::SegmentId;

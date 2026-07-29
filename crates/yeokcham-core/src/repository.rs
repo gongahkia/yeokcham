@@ -2,15 +2,25 @@ use std::{
     fs::{self, File, OpenOptions},
     io::{self, Read, Write},
     path::{Path, PathBuf},
+    time::Duration,
+};
+
+use rusqlite::{
+    Connection, Error as SqliteError, ErrorCode as SqliteErrorCode, OpenFlags, OptionalExtension,
+    TransactionBehavior, params,
 };
 
 use crate::{
-    CanonicalDecoder, CanonicalEncoder, Error, ErrorKind, RepositoryFormat, RepositoryId, Result,
+    CanonicalDecoder, CanonicalEncoder, Error, ErrorKind, GitObject, GitObjectId, GitObjectKind,
+    RepositoryFormat, RepositoryId, Result,
 };
 
 const BOOTSTRAP_MAGIC: [u8; 4] = *b"YKRB";
 const BOOTSTRAP_MAX_BYTES: u64 = 4096;
 const BOOTSTRAP_PATH: &str = "format/repository.bin";
+const METADATA_PATH: &str = "metadata.sqlite3";
+const METADATA_APPLICATION_ID: i32 = 0x594b_4d44; // YKMD
+const METADATA_SCHEMA_VERSION: i32 = 1;
 const LAYOUT_DIRECTORIES: &[&str] = &[
     "format",
     "segments",
@@ -23,6 +33,34 @@ const LAYOUT_DIRECTORIES: &[&str] = &[
     "summaries",
     "summaries/current",
 ];
+
+/// Verified local metadata for one Git object.
+///
+/// This is rebuildable local coordination state. It contains no object body,
+/// storage mapping, or canonical recovery data.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct GitObjectMetadata {
+    id: GitObjectId,
+    kind: GitObjectKind,
+    size: u64,
+}
+
+impl GitObjectMetadata {
+    /// Returns the verified Git object ID.
+    pub const fn id(&self) -> GitObjectId {
+        self.id
+    }
+
+    /// Returns the Git object type.
+    pub const fn kind(&self) -> GitObjectKind {
+        self.kind
+    }
+
+    /// Returns the exact decompressed object-body size.
+    pub const fn size(&self) -> u64 {
+        self.size
+    }
+}
 
 /// An opened V1 repository rooted on the local filesystem.
 ///
@@ -120,6 +158,223 @@ impl LocalRepository {
     pub const fn format(&self) -> RepositoryFormat {
         self.format
     }
+
+    /// Records verified metadata for `object` in the local SQLite database.
+    ///
+    /// This verifies the object's canonical Git ID before any database is
+    /// opened. Repeating an identical record is idempotent; a conflicting
+    /// existing record fails without replacement. The database is local
+    /// coordination state and is not a recovery source.
+    pub fn record_object_metadata(&self, object: &GitObject) -> Result<()> {
+        object.verify_id()?;
+        let size = i64::try_from(object.data().len()).map_err(|_| {
+            Error::new(
+                ErrorKind::Unsupported,
+                "Git object metadata size is too large",
+            )
+        })?;
+        let mut connection = self.open_metadata_database()?;
+        let transaction = connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(metadata_error)?;
+        let changed = transaction
+            .execute(
+                "INSERT INTO object_metadata (git_object_id, kind, size) \
+                 VALUES (?1, ?2, ?3) ON CONFLICT(git_object_id) DO NOTHING",
+                params![
+                    object.id().as_bytes().as_slice(),
+                    object_kind_code(object.kind()),
+                    size
+                ],
+            )
+            .map_err(metadata_error)?;
+        if changed == 0 {
+            let (kind, existing_size): (i64, i64) = transaction
+                .query_row(
+                    "SELECT kind, size FROM object_metadata WHERE git_object_id = ?1",
+                    params![object.id().as_bytes().as_slice()],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .map_err(metadata_error)?;
+            if object_kind_from_code(kind)? != object.kind() || existing_size != size {
+                return Err(Error::new(
+                    ErrorKind::Conflict,
+                    "Git object metadata conflicts with an existing record",
+                ));
+            }
+        }
+        transaction.commit().map_err(metadata_error)
+    }
+
+    /// Returns local metadata for `id`, or `None` when no record exists.
+    ///
+    /// Returned data is local acceleration state only and must never be used
+    /// as evidence that the object bytes are available or recoverable.
+    pub fn object_metadata(&self, id: GitObjectId) -> Result<Option<GitObjectMetadata>> {
+        let connection = self.open_metadata_database()?;
+        let row: Option<(i64, i64)> = connection
+            .query_row(
+                "SELECT kind, size FROM object_metadata WHERE git_object_id = ?1",
+                params![id.as_bytes().as_slice()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()
+            .map_err(metadata_error)?;
+        let Some((kind, size)) = row else {
+            return Ok(None);
+        };
+        let size = u64::try_from(size).map_err(|_| {
+            Error::new(
+                ErrorKind::CorruptData,
+                "object metadata contains an invalid size",
+            )
+        })?;
+        Ok(Some(GitObjectMetadata {
+            id,
+            kind: object_kind_from_code(kind)?,
+            size,
+        }))
+    }
+
+    fn open_metadata_database(&self) -> Result<Connection> {
+        let root = fs::canonicalize(&self.root)
+            .map_err(|error| io_error(error, "repository directory could not be resolved"))?;
+        let path = root.join(METADATA_PATH);
+        validate_metadata_file(&path)?;
+        let mut connection = Connection::open_with_flags(
+            path,
+            OpenFlags::SQLITE_OPEN_READ_WRITE
+                | OpenFlags::SQLITE_OPEN_CREATE
+                | OpenFlags::SQLITE_OPEN_NO_MUTEX
+                | OpenFlags::SQLITE_OPEN_NOFOLLOW,
+        )
+        .map_err(metadata_error)?;
+        connection
+            .busy_timeout(Duration::ZERO)
+            .map_err(metadata_error)?;
+        connection
+            .pragma_update(None, "trusted_schema", false)
+            .map_err(metadata_error)?;
+        initialize_metadata_schema(&mut connection)?;
+        Ok(connection)
+    }
+}
+
+fn object_kind_code(kind: GitObjectKind) -> i64 {
+    match kind {
+        GitObjectKind::Blob => 1,
+        GitObjectKind::Tree => 2,
+        GitObjectKind::Commit => 3,
+        GitObjectKind::Tag => 4,
+    }
+}
+
+fn object_kind_from_code(code: i64) -> Result<GitObjectKind> {
+    match code {
+        1 => Ok(GitObjectKind::Blob),
+        2 => Ok(GitObjectKind::Tree),
+        3 => Ok(GitObjectKind::Commit),
+        4 => Ok(GitObjectKind::Tag),
+        _ => Err(Error::new(
+            ErrorKind::CorruptData,
+            "object metadata contains an invalid kind",
+        )),
+    }
+}
+
+fn validate_metadata_file(path: &Path) -> Result<()> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
+            Err(Error::new(
+                ErrorKind::CorruptData,
+                "object metadata database is not a regular file",
+            ))
+        }
+        Ok(_) => Ok(()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(io_error(
+            error,
+            "object metadata database could not be inspected",
+        )),
+    }
+}
+
+fn initialize_metadata_schema(connection: &mut Connection) -> Result<()> {
+    let transaction = connection
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(metadata_error)?;
+    let application_id: i32 = transaction
+        .pragma_query_value(None, "application_id", |row| row.get(0))
+        .map_err(metadata_error)?;
+    let version: i32 = transaction
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .map_err(metadata_error)?;
+    match (application_id, version) {
+        (0, 0) => {
+            transaction
+                .execute_batch(
+                    "CREATE TABLE object_metadata (
+                        git_object_id BLOB PRIMARY KEY NOT NULL CHECK (length(git_object_id) = 20),
+                        kind INTEGER NOT NULL CHECK (kind BETWEEN 1 AND 4),
+                        size INTEGER NOT NULL CHECK (size >= 0)
+                    ) WITHOUT ROWID;",
+                )
+                .map_err(metadata_error)?;
+            transaction
+                .pragma_update(None, "application_id", METADATA_APPLICATION_ID)
+                .map_err(metadata_error)?;
+            transaction
+                .pragma_update(None, "user_version", METADATA_SCHEMA_VERSION)
+                .map_err(metadata_error)?;
+        }
+        (METADATA_APPLICATION_ID, METADATA_SCHEMA_VERSION) => {}
+        (METADATA_APPLICATION_ID, _) => {
+            return Err(Error::new(
+                ErrorKind::Unsupported,
+                "object metadata database schema version is unsupported",
+            ));
+        }
+        _ => {
+            return Err(Error::new(
+                ErrorKind::CorruptData,
+                "object metadata database has an invalid identity",
+            ));
+        }
+    }
+    transaction.commit().map_err(metadata_error)
+}
+
+fn metadata_error(error: SqliteError) -> Error {
+    let (kind, message) = match &error {
+        SqliteError::SqliteFailure(error, _) => match error.code {
+            SqliteErrorCode::DatabaseBusy | SqliteErrorCode::DatabaseLocked => {
+                (ErrorKind::Conflict, "object metadata database is busy")
+            }
+            SqliteErrorCode::DatabaseCorrupt
+            | SqliteErrorCode::NotADatabase
+            | SqliteErrorCode::SchemaChanged
+            | SqliteErrorCode::ConstraintViolation
+            | SqliteErrorCode::TypeMismatch => (
+                ErrorKind::CorruptData,
+                "object metadata database is corrupt",
+            ),
+            _ => (
+                ErrorKind::Io,
+                "object metadata database could not be accessed",
+            ),
+        },
+        SqliteError::FromSqlConversionFailure(..)
+        | SqliteError::IntegralValueOutOfRange(..)
+        | SqliteError::InvalidColumnType(..) => (
+            ErrorKind::CorruptData,
+            "object metadata database is corrupt",
+        ),
+        _ => (
+            ErrorKind::Io,
+            "object metadata database could not be accessed",
+        ),
+    };
+    Error::with_source(kind, message, error)
 }
 
 fn encode_bootstrap(id: RepositoryId, format: RepositoryFormat) -> Vec<u8> {
@@ -306,6 +561,19 @@ mod tests {
         encoder.into_bytes()
     }
 
+    fn verified_object(kind: GitObjectKind, data: &[u8]) -> GitObject {
+        let provisional = GitObject::new(
+            GitObjectId::from_bytes([0; GitObjectId::BYTE_LENGTH]),
+            kind,
+            data.to_vec(),
+        );
+        GitObject::new(provisional.recompute_id(), kind, data.to_vec())
+    }
+
+    fn metadata_path(root: &Path) -> PathBuf {
+        root.join(METADATA_PATH)
+    }
+
     #[test]
     fn bootstrap_encoding_is_canonical() {
         let id: RepositoryId = TEST_ID.parse().expect("valid test ID");
@@ -433,6 +701,154 @@ mod tests {
         );
     }
 
+    #[test]
+    fn records_verified_object_metadata_and_reopens_it() {
+        let temporary = TestDirectory::new();
+        let root = temporary.path().join("repository");
+        let repository = LocalRepository::create(&root).expect("create repository");
+        let objects = [
+            verified_object(GitObjectKind::Blob, b"blob body"),
+            verified_object(GitObjectKind::Tree, b"tree body"),
+            verified_object(GitObjectKind::Commit, b"commit body"),
+            verified_object(GitObjectKind::Tag, b"tag body"),
+        ];
+
+        assert!(!metadata_path(&root).exists());
+        for object in &objects {
+            repository
+                .record_object_metadata(object)
+                .expect("record metadata");
+            repository
+                .record_object_metadata(object)
+                .expect("repeat metadata record");
+            assert_eq!(
+                repository
+                    .object_metadata(object.id())
+                    .expect("read metadata"),
+                Some(GitObjectMetadata {
+                    id: object.id(),
+                    kind: object.kind(),
+                    size: object.data().len() as u64,
+                })
+            );
+        }
+        assert!(metadata_path(&root).is_file());
+
+        let reopened = LocalRepository::open(&root).expect("reopen repository");
+        for object in &objects {
+            assert_eq!(
+                reopened
+                    .object_metadata(object.id())
+                    .expect("read persisted metadata"),
+                Some(GitObjectMetadata {
+                    id: object.id(),
+                    kind: object.kind(),
+                    size: object.data().len() as u64,
+                })
+            );
+        }
+        assert_eq!(
+            reopened
+                .object_metadata(GitObjectId::from_bytes([9; GitObjectId::BYTE_LENGTH]))
+                .expect("read absent metadata"),
+            None
+        );
+    }
+
+    #[test]
+    fn rejects_unverified_object_metadata_without_creating_a_database() {
+        let temporary = TestDirectory::new();
+        let root = temporary.path().join("repository");
+        let repository = LocalRepository::create(&root).expect("create repository");
+        let object = GitObject::new(
+            "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391"
+                .parse()
+                .expect("empty blob ID"),
+            GitObjectKind::Blob,
+            b"altered body".to_vec(),
+        );
+
+        let error = repository
+            .record_object_metadata(&object)
+            .expect_err("unverified object must fail");
+
+        assert_eq!(error.kind(), ErrorKind::CorruptData);
+        assert_eq!(
+            error.public_message(),
+            "Git object ID does not match its bytes"
+        );
+        assert!(!metadata_path(&root).exists());
+    }
+
+    #[test]
+    fn rejects_corrupt_and_conflicting_object_metadata() {
+        let temporary = TestDirectory::new();
+        let root = temporary.path().join("repository");
+        let repository = LocalRepository::create(&root).expect("create repository");
+        let object = verified_object(GitObjectKind::Blob, b"body");
+        repository
+            .record_object_metadata(&object)
+            .expect("record metadata");
+
+        let connection = Connection::open(metadata_path(&root)).expect("open metadata database");
+        connection
+            .execute(
+                "UPDATE object_metadata SET kind = ?1 WHERE git_object_id = ?2",
+                params![
+                    object_kind_code(GitObjectKind::Tree),
+                    object.id().as_bytes().as_slice()
+                ],
+            )
+            .expect("change metadata kind");
+        drop(connection);
+        let conflict = repository
+            .record_object_metadata(&object)
+            .expect_err("conflicting metadata must fail");
+        assert_eq!(conflict.kind(), ErrorKind::Conflict);
+
+        let connection = Connection::open(metadata_path(&root)).expect("reopen metadata database");
+        connection
+            .execute_batch(
+                "PRAGMA ignore_check_constraints = ON; UPDATE object_metadata SET kind = 99;",
+            )
+            .expect("corrupt metadata kind");
+        drop(connection);
+        let corrupt = repository
+            .object_metadata(object.id())
+            .expect_err("invalid metadata kind must fail");
+        assert_eq!(corrupt.kind(), ErrorKind::CorruptData);
+        assert_eq!(
+            corrupt.public_message(),
+            "object metadata contains an invalid kind"
+        );
+    }
+
+    #[test]
+    fn rejects_unsupported_object_metadata_schema() {
+        let temporary = TestDirectory::new();
+        let root = temporary.path().join("repository");
+        let repository = LocalRepository::create(&root).expect("create repository");
+        let object = verified_object(GitObjectKind::Blob, b"body");
+        repository
+            .record_object_metadata(&object)
+            .expect("record metadata");
+
+        let connection = Connection::open(metadata_path(&root)).expect("open metadata database");
+        connection
+            .pragma_update(None, "user_version", METADATA_SCHEMA_VERSION + 1)
+            .expect("set future schema version");
+        drop(connection);
+        let error = repository
+            .object_metadata(object.id())
+            .expect_err("future schema must fail");
+
+        assert_eq!(error.kind(), ErrorKind::Unsupported);
+        assert_eq!(
+            error.public_message(),
+            "object metadata database schema version is unsupported"
+        );
+    }
+
     #[cfg(unix)]
     #[test]
     fn rejects_symlinked_bootstrap() {
@@ -454,6 +870,29 @@ mod tests {
         assert_eq!(
             error.public_message(),
             "repository bootstrap is not a regular file"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_symlinked_object_metadata_database() {
+        use std::os::unix::fs::symlink;
+
+        let temporary = TestDirectory::new();
+        let root = temporary.path().join("repository");
+        let repository = LocalRepository::create(&root).expect("create repository");
+        let replacement = temporary.path().join("replacement");
+        fs::write(&replacement, b"not metadata").expect("write replacement");
+        symlink(&replacement, metadata_path(&root)).expect("link metadata database");
+
+        let error = repository
+            .record_object_metadata(&verified_object(GitObjectKind::Blob, b"body"))
+            .expect_err("symlink must fail");
+
+        assert_eq!(error.kind(), ErrorKind::CorruptData);
+        assert_eq!(
+            error.public_message(),
+            "object metadata database is not a regular file"
         );
     }
 

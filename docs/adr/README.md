@@ -34,3 +34,8 @@ Valid statuses are `Proposed`, `Accepted`, `Rejected`, `Deprecated`, and `Supers
 | [ADR-0026](0026-canonical-binary-serialization.md) | Accepted | Use fixed-width canonical binary serialization |
 | [ADR-0027](0027-local-repository-bootstrap.md) | Accepted | Store the V1 repository bootstrap as canonical binary |
 | [ADR-0028](0028-gitoxide-repository-adapter.md) | Accepted | Open Git repositories through a minimal gitoxide adapter |
+| [ADR-0029](0029-bounded-regular-ref-enumeration.md) | Accepted | Enumerate bounded regular Git refs by raw bytes |
+| [ADR-0030](0030-bounded-reachable-git-object-traversal.md) | Accepted | Traverse bounded reachable SHA-1 Git objects |
+| [ADR-0031](0031-bounded-git-object-body-reads.md) | Accepted | Read bounded Git object bodies before trust |
+| [ADR-0032](0032-canonical-sha1-git-object-verification.md) | Accepted | Verify SHA-1 Git objects from canonical header and body bytes |
+| [ADR-0033](0033-local-sqlite-object-metadata.md) | Accepted | Store verified Git object metadata in a local versioned SQLite database |
