@@ -1,0 +1,79 @@
+{
+  "schema_version": 1,
+  "benchmark_id": "example-initial-scan",
+  "benchmark_kind": "initial_scan",
+  "recorded_at": "2026-07-29T00:00:00Z",
+  "paengi": {
+    "commit": "0000000000000000000000000000000000000000",
+    "dirty": false,
+    "version": "dev"
+  },
+  "toolchain": {
+    "ocaml_version": "5.5.0",
+    "compiler_mode": {
+      "backend": "native",
+      "dune_profile": "release",
+      "flambda": false
+    },
+    "dune_version": "3.24.1"
+  },
+  "host": {
+    "os": "macos",
+    "os_version": "example",
+    "architecture": "arm64",
+    "cpu_model": "example",
+    "logical_cpu_count": 1,
+    "memory_bytes": 1,
+    "filesystem": {
+      "type": "apfs",
+      "mount_options": []
+    }
+  },
+  "fixture": {
+    "name": "example-empty-tree",
+    "checksum": {
+      "algorithm": "sha256",
+      "value": "0000000000000000000000000000000000000000000000000000000000000000"
+    }
+  },
+  "cache": {
+    "state": "warm",
+    "warmup_runs": 1,
+    "preparation_commands": []
+  },
+  "execution": {
+    "runner": "example",
+    "runner_version": "1",
+    "command": [
+      "paengi",
+      "scan"
+    ],
+    "environment": {},
+    "repetitions": 3,
+    "completed_repetitions": 3,
+    "concurrency": 1
+  },
+  "outcome": {
+    "status": "ok",
+    "exit_code": 0
+  },
+  "metrics": {
+    "timing": {
+      "samples_ns": [
+        100,
+        110,
+        120
+      ],
+      "min_ns": 100,
+      "median_ns": 110,
+      "p95_ns": 120,
+      "p99_ns": 120,
+      "max_ns": 120
+    },
+    "peak_rss_bytes": 1,
+    "stored_bytes": 0,
+    "objects_written": 0,
+    "replay_depth": 0
+  },
+  "notes": "Illustrative schema fixture; not an empirical result."
+}

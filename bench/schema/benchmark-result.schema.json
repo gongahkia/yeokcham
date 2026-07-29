@@ -1,0 +1,476 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/gongahkia/paengi/blob/main/bench/schema/benchmark-result.schema.json",
+  "title": "Paengi benchmark result",
+  "description": "Versioned result envelope for Paengi performance experiments.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "benchmark_id",
+    "benchmark_kind",
+    "recorded_at",
+    "paengi",
+    "toolchain",
+    "host",
+    "fixture",
+    "cache",
+    "execution",
+    "outcome",
+    "metrics"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "benchmark_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+    },
+    "benchmark_kind": {
+      "enum": [
+        "initial_scan",
+        "incremental_scan",
+        "checkpoint_creation",
+        "restore",
+        "timeline_query",
+        "compaction",
+        "capsule_application",
+        "workspace_rematerialisation",
+        "semantic_retargeting",
+        "release_creation",
+        "git_import",
+        "git_export"
+      ]
+    },
+    "recorded_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "paengi": {
+      "$ref": "#/$defs/paengi"
+    },
+    "toolchain": {
+      "$ref": "#/$defs/toolchain"
+    },
+    "host": {
+      "$ref": "#/$defs/host"
+    },
+    "fixture": {
+      "$ref": "#/$defs/fixture"
+    },
+    "cache": {
+      "$ref": "#/$defs/cache"
+    },
+    "execution": {
+      "$ref": "#/$defs/execution"
+    },
+    "outcome": {
+      "$ref": "#/$defs/outcome"
+    },
+    "metrics": {
+      "$ref": "#/$defs/metrics"
+    },
+    "notes": {
+      "type": "string"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "outcome": {
+            "properties": {
+              "status": {
+                "const": "ok"
+              }
+            },
+            "required": [
+              "status"
+            ]
+          }
+        },
+        "required": [
+          "outcome"
+        ]
+      },
+      "then": {
+        "properties": {
+          "metrics": {
+            "properties": {
+              "timing": {
+                "properties": {
+                  "samples_ns": {
+                    "minItems": 1
+                  },
+                  "min_ns": {
+                    "type": "integer"
+                  },
+                  "median_ns": {
+                    "type": "integer"
+                  },
+                  "p95_ns": {
+                    "type": "integer"
+                  },
+                  "p99_ns": {
+                    "type": "integer"
+                  },
+                  "max_ns": {
+                    "type": "integer"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "non_empty_string": {
+      "type": "string",
+      "minLength": 1
+    },
+    "nullable_count": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "paengi": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "commit",
+        "dirty",
+        "version"
+      ],
+      "properties": {
+        "commit": {
+          "type": "string",
+          "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$"
+        },
+        "dirty": {
+          "type": "boolean"
+        },
+        "version": {
+          "$ref": "#/$defs/non_empty_string"
+        }
+      }
+    },
+    "toolchain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ocaml_version",
+        "compiler_mode",
+        "dune_version"
+      ],
+      "properties": {
+        "ocaml_version": {
+          "$ref": "#/$defs/non_empty_string"
+        },
+        "compiler_mode": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "backend",
+            "dune_profile",
+            "flambda"
+          ],
+          "properties": {
+            "backend": {
+              "enum": [
+                "bytecode",
+                "native"
+              ]
+            },
+            "dune_profile": {
+              "$ref": "#/$defs/non_empty_string"
+            },
+            "flambda": {
+              "type": "boolean"
+            }
+          }
+        },
+        "dune_version": {
+          "$ref": "#/$defs/non_empty_string"
+        }
+      }
+    },
+    "host": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "os",
+        "os_version",
+        "architecture",
+        "cpu_model",
+        "logical_cpu_count",
+        "memory_bytes",
+        "filesystem"
+      ],
+      "properties": {
+        "os": {
+          "$ref": "#/$defs/non_empty_string"
+        },
+        "os_version": {
+          "$ref": "#/$defs/non_empty_string"
+        },
+        "architecture": {
+          "$ref": "#/$defs/non_empty_string"
+        },
+        "cpu_model": {
+          "$ref": "#/$defs/non_empty_string"
+        },
+        "logical_cpu_count": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "memory_bytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "filesystem": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "mount_options"
+          ],
+          "properties": {
+            "type": {
+              "$ref": "#/$defs/non_empty_string"
+            },
+            "mount_options": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/non_empty_string"
+              },
+              "uniqueItems": true
+            }
+          }
+        }
+      }
+    },
+    "fixture": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "checksum"
+      ],
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/non_empty_string"
+        },
+        "checksum": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "algorithm",
+            "value"
+          ],
+          "properties": {
+            "algorithm": {
+              "enum": [
+                "sha256",
+                "blake3"
+              ]
+            },
+            "value": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          }
+        }
+      }
+    },
+    "cache": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "state",
+        "warmup_runs",
+        "preparation_commands"
+      ],
+      "properties": {
+        "state": {
+          "enum": [
+            "cold",
+            "warm",
+            "mixed"
+          ]
+        },
+        "warmup_runs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "preparation_commands": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/argv"
+          }
+        }
+      }
+    },
+    "argv": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string"
+      }
+    },
+    "execution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "runner",
+        "runner_version",
+        "command",
+        "environment",
+        "repetitions",
+        "completed_repetitions",
+        "concurrency"
+      ],
+      "properties": {
+        "runner": {
+          "$ref": "#/$defs/non_empty_string"
+        },
+        "runner_version": {
+          "$ref": "#/$defs/non_empty_string"
+        },
+        "command": {
+          "$ref": "#/$defs/argv"
+        },
+        "environment": {
+          "type": "object",
+          "propertyNames": {
+            "pattern": "^[A-Z_][A-Z0-9_]*$"
+          },
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "repetitions": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "completed_repetitions": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "concurrency": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "outcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "exit_code"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "ok",
+            "failed",
+            "timed_out"
+          ]
+        },
+        "exit_code": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "ok"
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "properties": {
+              "exit_code": {
+                "const": 0
+              }
+            }
+          }
+        }
+      ]
+    },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "timing",
+        "peak_rss_bytes",
+        "stored_bytes",
+        "objects_written",
+        "replay_depth"
+      ],
+      "properties": {
+        "timing": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "samples_ns",
+            "min_ns",
+            "median_ns",
+            "p95_ns",
+            "p99_ns",
+            "max_ns"
+          ],
+          "properties": {
+            "samples_ns": {
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "min_ns": {
+              "$ref": "#/$defs/nullable_count"
+            },
+            "median_ns": {
+              "$ref": "#/$defs/nullable_count"
+            },
+            "p95_ns": {
+              "$ref": "#/$defs/nullable_count"
+            },
+            "p99_ns": {
+              "$ref": "#/$defs/nullable_count"
+            },
+            "max_ns": {
+              "$ref": "#/$defs/nullable_count"
+            }
+          }
+        },
+        "peak_rss_bytes": {
+          "$ref": "#/$defs/nullable_count"
+        },
+        "stored_bytes": {
+          "$ref": "#/$defs/nullable_count"
+        },
+        "objects_written": {
+          "$ref": "#/$defs/nullable_count"
+        },
+        "replay_depth": {
+          "$ref": "#/$defs/nullable_count"
+        }
+      }
+    }
+  }
+}

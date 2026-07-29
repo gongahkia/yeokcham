@@ -5,10 +5,10 @@ The roadmap is ordered. The local byte-correct model must exist before semantic 
 ## Active vertical slice
 
 - Milestone: 0 — Project and model foundation.
-- Task: add reproducible development commands (complete).
+- Task: add the benchmark-result schema (complete).
 - Types: none; model types begin after project tooling is established.
-- Invariants: setup pins OCaml and OCamlFormat; standard targets run the same build, format, lint, and test gates locally.
-- Tests: `make setup`, `make check`, and `make ci` pass in a fresh temporary copy.
+- Invariants: every result records schema version, provenance, exact units, repetitions, median/tail latency, resources, storage, and replay depth.
+- Tests: Draft 2020-12 meta-validation accepts the schema; valid/safe-failure examples pass, malformed results fail, and existing gates pass.
 - ADR changes: none; no architectural choice changes.
 
 ## Milestone 0 — Project and model foundation
@@ -22,7 +22,7 @@ The roadmap is ordered. The local byte-correct model must exist before semantic 
 - [x] Add licence and contribution guide.
 - [x] Add ADR process.
 - [x] Add reproducible development commands.
-- [ ] Add benchmark-result schema.
+- [x] Add benchmark-result schema.
 - [ ] Add fixture generator.
 
 ### Core identities and encoding
