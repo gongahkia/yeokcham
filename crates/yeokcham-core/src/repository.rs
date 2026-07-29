@@ -3298,6 +3298,7 @@ mod tests {
         process::Command,
     };
 
+    use proptest::prelude::*;
     use sha2::{Digest, Sha256};
     use uuid::Uuid;
 
@@ -5061,6 +5062,30 @@ mod tests {
         assert_eq!(object.kind(), GitObjectKind::Blob);
         assert_eq!(object.data(), b"\0verified\xff");
         object.verify_id().expect("verify final blob ID");
+    }
+
+    proptest! {
+        #[test]
+        fn reconstructs_generated_whole_blob_bodies(data in prop::collection::vec(any::<u8>(), 0..1_025)) {
+            let temporary = TestDirectory::new();
+            let root = temporary.path().join("repository");
+            let repository = LocalRepository::create(&root).expect("create repository");
+            let manifest = whole_blob_manifest(
+                &repository,
+                ManifestId::generate(),
+                SegmentId::generate(),
+                &data,
+            );
+            repository
+                .publish_blob_manifest(&manifest)
+                .expect("publish manifest");
+            let reconstructed = repository
+                .reconstruct_blob(&manifest, 4_096, segment_limits())
+                .expect("reconstruct generated blob");
+
+            prop_assert_eq!(reconstructed.data(), data.as_slice());
+            prop_assert_eq!(reconstructed.id(), verified_object(GitObjectKind::Blob, &data).id());
+        }
     }
 
     #[test]

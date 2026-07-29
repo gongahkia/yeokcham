@@ -216,6 +216,8 @@ impl ContentDefinedChunker {
 
 #[cfg(test)]
 mod tests {
+    use proptest::prelude::*;
+
     use super::*;
     use crate::ContentHashAlgorithm;
 
@@ -297,6 +299,34 @@ mod tests {
             chunks.last().map(|chunk| chunk.end_offset()),
             Some(source.len() as u64)
         );
+    }
+
+    proptest! {
+        #[test]
+        fn generated_chunks_cover_reassemble_and_verify_each_range(
+            source in prop::collection::vec(any::<u8>(), 0..16_385),
+        ) {
+            let chunker = ContentDefinedChunker::new(parameters(512));
+            let chunks = chunker.chunk(&source).expect("chunk generated input");
+            let mut reassembled = Vec::with_capacity(source.len());
+            let mut expected_offset = 0usize;
+
+            for chunk in chunks {
+                let offset = usize::try_from(chunk.offset()).expect("platform offset");
+                let end = offset.checked_add(chunk.length()).expect("chunk end");
+                prop_assert_eq!(offset, expected_offset);
+                prop_assert!(end <= source.len());
+                prop_assert_eq!(
+                    chunk.content_id(),
+                    sha256_content_id(&source[offset..end]),
+                );
+                reassembled.extend_from_slice(&source[offset..end]);
+                expected_offset = end;
+            }
+
+            prop_assert_eq!(expected_offset, source.len());
+            prop_assert_eq!(reassembled, source);
+        }
     }
 
     #[test]
