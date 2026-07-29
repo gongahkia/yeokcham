@@ -3990,7 +3990,7 @@ mod tests {
     }
 
     #[test]
-    fn preserves_reachable_object_sets_from_a_real_git_source() {
+    fn round_trips_a_generated_git_repository() {
         let temporary = TestDirectory::new();
         let source_path = temporary.path().join("source");
         run_git_in(

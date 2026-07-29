@@ -83,7 +83,7 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 - [x] Unit tests for segment format.
 - [x] Property tests for chunking and reconstruction.
 - [x] Corruption tests.
-- [ ] Round-trip tests on generated repositories.
+- [x] Round-trip tests on generated repositories.
 - [ ] Round-trip tests on selected real repositories.
 - [ ] Benchmark whole-blob versus chunked storage.
 
