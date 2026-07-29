@@ -14,9 +14,10 @@ use rusqlite::{
 
 use crate::{
     BlobManifest, BlobManifestRepresentation, CanonicalDecoder, CanonicalEncoder, Error, ErrorKind,
-    GitObject, GitObjectId, GitObjectKind, ManifestId, MetadataObjectManifest,
-    MetadataObjectRecord, ReadSegment, ReadSegmentRecord, RepositoryFormat, RepositoryId, Result,
-    SegmentId, SegmentIndex, SegmentReadLimits, SegmentReader,
+    GitObject, GitObjectId, GitObjectKind, HeadState, ManifestId, MetadataObjectManifest,
+    MetadataObjectRecord, ReadSegment, ReadSegmentRecord, RefSnapshot, RefSnapshotReadLimits,
+    RepositoryFormat, RepositoryId, Result, SegmentId, SegmentIndex, SegmentReadLimits,
+    SegmentReader,
 };
 
 const BOOTSTRAP_MAGIC: [u8; 4] = *b"YKRB";
@@ -33,6 +34,12 @@ const METADATA_OBJECT_MANIFEST_DIRECTORY: &str = "manifests/objects";
 const METADATA_OBJECT_MANIFEST_EXTENSION: &str = ".ykom";
 const METADATA_OBJECT_MANIFEST_STAGING_SUFFIX: &str = ".partial";
 const PUBLISHED_METADATA_OBJECT_MANIFEST_MAX_BYTES: u64 = 4096;
+const REF_SNAPSHOT_DIRECTORY: &str = "manifests/refs";
+const REF_SNAPSHOT_EXTENSION: &str = ".ykrf";
+const REF_SNAPSHOT_STAGING_SUFFIX: &str = ".partial";
+const PUBLISHED_REF_SNAPSHOT_MAX_DIRECTORY_ENTRIES: usize = 1_000_000;
+const PUBLISHED_REF_SNAPSHOT_MAX_BYTES: u64 = 128 * 1024 * 1024;
+const PUBLISHED_REF_SNAPSHOT_MAX_REFERENCE_ENTRIES: usize = 1_000_000;
 const SEGMENT_INDEX_EXTENSION: &str = ".ykix";
 const SEGMENT_INDEX_STAGING_SUFFIX: &str = ".partial";
 const LAYOUT_DIRECTORIES: &[&str] = &[
@@ -142,6 +149,58 @@ impl MetadataObjectManifestReadLimits {
     }
 }
 
+/// Caller-selected bounds for checking ref-snapshot targets before publication.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct RefSnapshotPublicationLimits {
+    maximum_segment_bytes: u64,
+    segment_read_limits: SegmentReadLimits,
+    blob_manifest_limits: BlobManifestReadLimits,
+    metadata_object_manifest_limits: MetadataObjectManifestReadLimits,
+}
+
+impl RefSnapshotPublicationLimits {
+    /// Validates target-resolution bounds for one snapshot publication.
+    pub fn new(
+        maximum_segment_bytes: u64,
+        segment_read_limits: SegmentReadLimits,
+        blob_manifest_limits: BlobManifestReadLimits,
+        metadata_object_manifest_limits: MetadataObjectManifestReadLimits,
+    ) -> Result<Self> {
+        if maximum_segment_bytes == 0 {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "ref snapshot publication limit must not be zero",
+            ));
+        }
+        Ok(Self {
+            maximum_segment_bytes,
+            segment_read_limits,
+            blob_manifest_limits,
+            metadata_object_manifest_limits,
+        })
+    }
+
+    /// Returns the maximum accepted bytes for one referenced `YKSG` file.
+    pub const fn maximum_segment_bytes(self) -> u64 {
+        self.maximum_segment_bytes
+    }
+
+    /// Returns nested `YKSG` decoding bounds.
+    pub const fn segment_read_limits(self) -> SegmentReadLimits {
+        self.segment_read_limits
+    }
+
+    /// Returns `YKMF` directory and body bounds.
+    pub const fn blob_manifest_limits(self) -> BlobManifestReadLimits {
+        self.blob_manifest_limits
+    }
+
+    /// Returns `YKOM` file and body bounds.
+    pub const fn metadata_object_manifest_limits(self) -> MetadataObjectManifestReadLimits {
+        self.metadata_object_manifest_limits
+    }
+}
+
 /// Caller-selected bounds for export into a new loose-object Git repository.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct LooseObjectExportLimits {
@@ -150,6 +209,7 @@ pub struct LooseObjectExportLimits {
     blob_manifest_limits: BlobManifestReadLimits,
     maximum_metadata_object_manifest_entries: usize,
     metadata_object_manifest_limits: MetadataObjectManifestReadLimits,
+    ref_snapshot_limits: RefSnapshotReadLimits,
 }
 
 impl LooseObjectExportLimits {
@@ -160,6 +220,7 @@ impl LooseObjectExportLimits {
         blob_manifest_limits: BlobManifestReadLimits,
         maximum_metadata_object_manifest_entries: usize,
         metadata_object_manifest_limits: MetadataObjectManifestReadLimits,
+        ref_snapshot_limits: RefSnapshotReadLimits,
     ) -> Result<Self> {
         if maximum_segment_bytes == 0 || maximum_metadata_object_manifest_entries == 0 {
             return Err(Error::new(
@@ -173,6 +234,7 @@ impl LooseObjectExportLimits {
             blob_manifest_limits,
             maximum_metadata_object_manifest_entries,
             metadata_object_manifest_limits,
+            ref_snapshot_limits,
         })
     }
 
@@ -200,6 +262,11 @@ impl LooseObjectExportLimits {
     pub const fn metadata_object_manifest_limits(self) -> MetadataObjectManifestReadLimits {
         self.metadata_object_manifest_limits
     }
+
+    /// Returns `YKRF` directory, file, and reference bounds.
+    pub const fn ref_snapshot_limits(self) -> RefSnapshotReadLimits {
+        self.ref_snapshot_limits
+    }
 }
 
 /// Counts returned only after all loose Git objects were durably exported.
@@ -207,6 +274,7 @@ impl LooseObjectExportLimits {
 pub struct LooseObjectExportReport {
     blob_count: usize,
     metadata_object_count: usize,
+    ref_count: usize,
 }
 
 impl LooseObjectExportReport {
@@ -218,6 +286,11 @@ impl LooseObjectExportReport {
     /// Returns exported Git tree, commit, and tag count.
     pub const fn metadata_object_count(self) -> usize {
         self.metadata_object_count
+    }
+
+    /// Returns restored regular Git ref count.
+    pub const fn ref_count(self) -> usize {
+        self.ref_count
     }
 
     /// Returns total exported Git object count.
@@ -239,6 +312,7 @@ pub struct RepositoryVerificationLimits {
     blob_manifest_limits: BlobManifestReadLimits,
     maximum_metadata_object_manifest_entries: usize,
     metadata_object_manifest_limits: MetadataObjectManifestReadLimits,
+    ref_snapshot_limits: RefSnapshotReadLimits,
 }
 
 impl RepositoryVerificationLimits {
@@ -255,6 +329,7 @@ impl RepositoryVerificationLimits {
         blob_manifest_limits: BlobManifestReadLimits,
         maximum_metadata_object_manifest_entries: usize,
         metadata_object_manifest_limits: MetadataObjectManifestReadLimits,
+        ref_snapshot_limits: RefSnapshotReadLimits,
     ) -> Result<Self> {
         if maximum_segment_entries == 0
             || maximum_segment_bytes == 0
@@ -280,6 +355,7 @@ impl RepositoryVerificationLimits {
             blob_manifest_limits,
             maximum_metadata_object_manifest_entries,
             metadata_object_manifest_limits,
+            ref_snapshot_limits,
         })
     }
 
@@ -332,6 +408,11 @@ impl RepositoryVerificationLimits {
     pub const fn metadata_object_manifest_limits(self) -> MetadataObjectManifestReadLimits {
         self.metadata_object_manifest_limits
     }
+
+    /// Returns `YKRF` directory, file, and reference bounds.
+    pub const fn ref_snapshot_limits(self) -> RefSnapshotReadLimits {
+        self.ref_snapshot_limits
+    }
 }
 
 /// Counts returned only after complete immutable-storage verification succeeds.
@@ -341,6 +422,7 @@ pub struct RepositoryVerificationReport {
     index_count: usize,
     blob_manifest_count: usize,
     metadata_object_manifest_count: usize,
+    ref_snapshot_count: usize,
 }
 
 impl RepositoryVerificationReport {
@@ -362,6 +444,11 @@ impl RepositoryVerificationReport {
     /// Returns verified published `YKOM` file count.
     pub const fn metadata_object_manifest_count(self) -> usize {
         self.metadata_object_manifest_count
+    }
+
+    /// Returns verified immutable `YKRF` snapshot count.
+    pub const fn ref_snapshot_count(self) -> usize {
+        self.ref_snapshot_count
     }
 }
 
@@ -447,6 +534,7 @@ impl LocalRepository {
             validate_directory(&root.join(relative_path), false)?;
         }
         validate_optional_directory(&root.join(METADATA_OBJECT_MANIFEST_DIRECTORY))?;
+        validate_optional_directory(&root.join(REF_SNAPSHOT_DIRECTORY))?;
 
         let (id, format) = read_bootstrap(root)?;
         Ok(Self {
@@ -577,19 +665,21 @@ impl LocalRepository {
         let index_count = self.verify_segment_indexes(&segments, limits)?;
         let blob_manifest_count = self.verify_blob_manifests(limits)?;
         let metadata_object_manifest_count = self.verify_metadata_object_manifests(limits)?;
+        let ref_snapshot_count = self.verify_ref_snapshots(limits)?;
         Ok(RepositoryVerificationReport {
             segment_count: segments.len(),
             index_count,
             blob_manifest_count,
             metadata_object_manifest_count,
+            ref_snapshot_count,
         })
     }
 
     /// Exports every published object as a loose object in a new bare Git repository.
     ///
     /// `destination` must not exist. This creates a bare SHA-1 Git repository
-    /// with no restored refs; a failed export may leave an incomplete directory
-    /// that callers must discard before retrying.
+    /// and restores the one published ref snapshot when present. A failed export
+    /// may leave an incomplete directory that callers must discard before retrying.
     pub fn export_loose_objects(
         &self,
         destination: impl AsRef<Path>,
@@ -627,10 +717,12 @@ impl LocalRepository {
             self.export_blob_manifests(&objects_directory, limits, &mut exported_ids)?;
         let metadata_object_count =
             self.export_metadata_object_manifests(&objects_directory, limits, &mut exported_ids)?;
+        let ref_count = self.export_ref_snapshot(destination, limits, &exported_ids)?;
         sync_export_repository(destination, &objects_directory)?;
         Ok(LooseObjectExportReport {
             blob_count,
             metadata_object_count,
+            ref_count,
         })
     }
 
@@ -1138,6 +1230,249 @@ impl LocalRepository {
         )
     }
 
+    /// Publishes the only immutable ref snapshot after checking every direct target.
+    ///
+    /// A symbolic `HEAD` may be unborn. Regular refs and a detached `HEAD`
+    /// must already resolve to reconstructed, verified Git objects. Repeating
+    /// identical publication is idempotent; another snapshot conflicts rather
+    /// than silently selecting an order-dependent ref state.
+    pub fn publish_ref_snapshot(
+        &self,
+        snapshot: &RefSnapshot,
+        limits: RefSnapshotPublicationLimits,
+    ) -> Result<()> {
+        if snapshot.repository_id() != self.id {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "ref snapshot belongs to a different repository",
+            ));
+        }
+        self.verify_ref_snapshot_targets_for_publication(snapshot, limits)?;
+        let bytes = snapshot.encode();
+        let bytes_len = u64::try_from(bytes.len()).map_err(|_| {
+            Error::new(
+                ErrorKind::Unsupported,
+                "ref snapshot is too large to publish",
+            )
+        })?;
+        if bytes_len > PUBLISHED_REF_SNAPSHOT_MAX_BYTES {
+            return Err(Error::new(
+                ErrorKind::Unsupported,
+                "ref snapshot is too large to publish",
+            ));
+        }
+        let directory = self.ensure_ref_snapshot_directory()?;
+        let read_limits = published_ref_snapshot_read_limits()?;
+        if let Some(existing) = self.resolve_ref_snapshot(read_limits)? {
+            return if existing == *snapshot {
+                Ok(())
+            } else {
+                Err(Error::new(
+                    ErrorKind::Conflict,
+                    "ref snapshot conflicts with an existing snapshot",
+                ))
+            };
+        }
+        let destination = directory.join(ref_snapshot_filename(snapshot.manifest_id()));
+        let (mut staging, staging_path) = create_ref_snapshot_staging(&directory)?;
+        if let Err(error) = staging.write_all(&bytes) {
+            drop(staging);
+            let _ = fs::remove_file(&staging_path);
+            return Err(io_error(
+                error,
+                "ref snapshot staging file could not be written",
+            ));
+        }
+        if let Err(error) = staging.sync_all() {
+            drop(staging);
+            let _ = fs::remove_file(&staging_path);
+            return Err(io_error(
+                error,
+                "ref snapshot staging file could not be synchronized",
+            ));
+        }
+        drop(staging);
+        match fs::hard_link(&staging_path, &destination) {
+            Ok(()) => {
+                sync_directory(&directory)?;
+                let _ = fs::remove_file(&staging_path);
+                let _ = sync_directory(&directory);
+            }
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                let _ = fs::remove_file(&staging_path);
+            }
+            Err(error) => {
+                let _ = fs::remove_file(&staging_path);
+                return Err(io_error(error, "ref snapshot could not be published"));
+            }
+        }
+        match self.resolve_ref_snapshot(read_limits)? {
+            Some(existing) if existing == *snapshot => Ok(()),
+            Some(_) => Err(Error::new(
+                ErrorKind::Conflict,
+                "ref snapshot conflicts with an existing snapshot",
+            )),
+            None => Err(Error::new(
+                ErrorKind::CorruptData,
+                "published ref snapshot is unavailable",
+            )),
+        }
+    }
+
+    /// Resolves the one published immutable ref snapshot, if no snapshot exists.
+    ///
+    /// Multiple valid snapshots are a conflict. Only recognized interrupted
+    /// staging files are ignored; every other directory entry is rejected.
+    pub fn resolve_ref_snapshot(
+        &self,
+        limits: RefSnapshotReadLimits,
+    ) -> Result<Option<RefSnapshot>> {
+        let directory = self.root.join(REF_SNAPSHOT_DIRECTORY);
+        match fs::symlink_metadata(&directory) {
+            Ok(_) => validate_directory(&directory, false)?,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => {
+                return Err(io_error(
+                    error,
+                    "ref snapshot directory could not be inspected",
+                ));
+            }
+        }
+        let entries = fs::read_dir(&directory)
+            .map_err(|error| io_error(error, "ref snapshot directory could not be read"))?;
+        let mut inspected_entries = 0usize;
+        let mut resolved = None;
+        for entry in entries {
+            let entry = entry
+                .map_err(|error| io_error(error, "ref snapshot directory could not be read"))?;
+            inspected_entries = increment_directory_entries(
+                inspected_entries,
+                limits.maximum_directory_entries(),
+                "ref snapshot directory exceeds the entry limit",
+            )?;
+            let name = entry.file_name();
+            let name = name.to_str().ok_or_else(|| {
+                Error::new(
+                    ErrorKind::CorruptData,
+                    "ref snapshot directory has an invalid entry name",
+                )
+            })?;
+            if is_ref_snapshot_staging_filename(name) {
+                continue;
+            }
+            let manifest_id = parse_ref_snapshot_filename(name)?;
+            let snapshot = self.read_ref_snapshot(&entry.path(), manifest_id, limits)?;
+            if resolved.replace(snapshot).is_some() {
+                return Err(Error::new(
+                    ErrorKind::Conflict,
+                    "multiple ref snapshots are published",
+                ));
+            }
+        }
+        Ok(resolved)
+    }
+
+    fn verify_ref_snapshot_targets_for_publication(
+        &self,
+        snapshot: &RefSnapshot,
+        limits: RefSnapshotPublicationLimits,
+    ) -> Result<()> {
+        self.verify_ref_snapshot_targets(
+            snapshot,
+            limits.maximum_segment_bytes,
+            limits.segment_read_limits,
+            limits.blob_manifest_limits,
+            limits.metadata_object_manifest_limits,
+        )
+    }
+
+    fn verify_ref_snapshot_targets(
+        &self,
+        snapshot: &RefSnapshot,
+        maximum_segment_bytes: u64,
+        segment_read_limits: SegmentReadLimits,
+        blob_manifest_limits: BlobManifestReadLimits,
+        metadata_object_manifest_limits: MetadataObjectManifestReadLimits,
+    ) -> Result<()> {
+        for target in ref_snapshot_target_ids(snapshot) {
+            self.reconstruct_published_git_object(
+                target,
+                maximum_segment_bytes,
+                segment_read_limits,
+                blob_manifest_limits,
+                metadata_object_manifest_limits,
+            )?;
+        }
+        Ok(())
+    }
+
+    fn reconstruct_published_git_object(
+        &self,
+        id: GitObjectId,
+        maximum_segment_bytes: u64,
+        segment_read_limits: SegmentReadLimits,
+        blob_manifest_limits: BlobManifestReadLimits,
+        metadata_object_manifest_limits: MetadataObjectManifestReadLimits,
+    ) -> Result<GitObject> {
+        if let Some(manifest) = self.resolve_blob_manifest(id, blob_manifest_limits)? {
+            return self.reconstruct_blob(&manifest, maximum_segment_bytes, segment_read_limits);
+        }
+        if let Some(manifest) =
+            self.resolve_metadata_object_manifest(id, metadata_object_manifest_limits)?
+        {
+            return self.reconstruct_metadata_object(
+                &manifest,
+                maximum_segment_bytes,
+                segment_read_limits,
+            );
+        }
+        Err(Error::new(
+            ErrorKind::NotFound,
+            "ref snapshot target is unavailable",
+        ))
+    }
+
+    fn ensure_ref_snapshot_directory(&self) -> Result<PathBuf> {
+        let directory = self.root.join(REF_SNAPSHOT_DIRECTORY);
+        match fs::create_dir(&directory) {
+            Ok(()) => {
+                sync_directory(&self.root.join("manifests"))?;
+                Ok(directory)
+            }
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                validate_directory(&directory, false)?;
+                Ok(directory)
+            }
+            Err(error) => Err(io_error(
+                error,
+                "ref snapshot directory could not be created",
+            )),
+        }
+    }
+
+    fn read_ref_snapshot(
+        &self,
+        path: &Path,
+        expected_id: ManifestId,
+        limits: RefSnapshotReadLimits,
+    ) -> Result<RefSnapshot> {
+        let bytes = read_bounded_ref_snapshot_file(path, limits.maximum_snapshot_bytes())?;
+        let snapshot = RefSnapshot::decode(&bytes, limits)?;
+        if snapshot.repository_id() != self.id {
+            return Err(Error::new(
+                ErrorKind::CorruptData,
+                "ref snapshot belongs to a different repository",
+            ));
+        }
+        if snapshot.manifest_id() != expected_id {
+            return Err(Error::new(
+                ErrorKind::CorruptData,
+                "ref snapshot filename does not match its identity",
+            ));
+        }
+        Ok(snapshot)
+    }
+
     fn verify_existing_blob_manifest(
         &self,
         path: &Path,
@@ -1382,6 +1717,27 @@ impl LocalRepository {
         Ok(object_count)
     }
 
+    fn export_ref_snapshot(
+        &self,
+        destination: &Path,
+        limits: LooseObjectExportLimits,
+        exported_ids: &BTreeSet<GitObjectId>,
+    ) -> Result<usize> {
+        let Some(snapshot) = self.resolve_ref_snapshot(limits.ref_snapshot_limits)? else {
+            return Ok(0);
+        };
+        for target in ref_snapshot_target_ids(&snapshot) {
+            if !exported_ids.contains(&target) {
+                return Err(Error::new(
+                    ErrorKind::NotFound,
+                    "ref snapshot target was not exported",
+                ));
+            }
+        }
+        restore_exported_ref_snapshot(destination, &snapshot)?;
+        Ok(snapshot.state().regular_refs().len())
+    }
+
     fn verify_segments(
         &self,
         limits: RepositoryVerificationLimits,
@@ -1435,6 +1791,7 @@ impl LocalRepository {
             validate_directory(&self.root.join(relative_path), false)?;
         }
         validate_optional_directory(&self.root.join(METADATA_OBJECT_MANIFEST_DIRECTORY))?;
+        validate_optional_directory(&self.root.join(REF_SNAPSHOT_DIRECTORY))?;
         let (id, format) = read_bootstrap(&self.root)?;
         if id != self.id || format != self.format {
             return Err(Error::new(
@@ -1638,6 +1995,20 @@ impl LocalRepository {
         Ok(manifest_count)
     }
 
+    fn verify_ref_snapshots(&self, limits: RepositoryVerificationLimits) -> Result<usize> {
+        let Some(snapshot) = self.resolve_ref_snapshot(limits.ref_snapshot_limits)? else {
+            return Ok(0);
+        };
+        self.verify_ref_snapshot_targets(
+            &snapshot,
+            limits.maximum_segment_bytes,
+            limits.segment_read_limits,
+            limits.blob_manifest_limits,
+            limits.metadata_object_manifest_limits,
+        )?;
+        Ok(1)
+    }
+
     fn verify_existing_segment_index(&self, path: &Path, bytes: &[u8]) -> Result<()> {
         let maximum_bytes = u64::try_from(bytes.len()).map_err(|_| {
             Error::new(
@@ -1708,6 +2079,10 @@ fn blob_manifest_filename(id: ManifestId) -> String {
 
 fn metadata_object_manifest_filename(id: GitObjectId) -> String {
     format!("{id}{METADATA_OBJECT_MANIFEST_EXTENSION}")
+}
+
+fn ref_snapshot_filename(id: ManifestId) -> String {
+    format!("{id}{REF_SNAPSHOT_EXTENSION}")
 }
 
 fn segment_index_filename(id: SegmentId) -> String {
@@ -1788,6 +2163,35 @@ fn parse_metadata_object_manifest_filename(name: &str) -> Result<GitObjectId> {
     })
 }
 
+fn parse_ref_snapshot_filename(name: &str) -> Result<ManifestId> {
+    let id = name.strip_suffix(REF_SNAPSHOT_EXTENSION).ok_or_else(|| {
+        Error::new(
+            ErrorKind::CorruptData,
+            "ref snapshot directory has an invalid entry name",
+        )
+    })?;
+    if id.is_empty() {
+        return Err(Error::new(
+            ErrorKind::CorruptData,
+            "ref snapshot directory has an invalid entry name",
+        ));
+    }
+    id.parse().map_err(|_| {
+        Error::new(
+            ErrorKind::CorruptData,
+            "ref snapshot directory has an invalid entry name",
+        )
+    })
+}
+
+fn published_ref_snapshot_read_limits() -> Result<RefSnapshotReadLimits> {
+    RefSnapshotReadLimits::new(
+        PUBLISHED_REF_SNAPSHOT_MAX_DIRECTORY_ENTRIES,
+        PUBLISHED_REF_SNAPSHOT_MAX_BYTES,
+        PUBLISHED_REF_SNAPSHOT_MAX_REFERENCE_ENTRIES,
+    )
+}
+
 fn increment_directory_entries(
     current: usize,
     maximum: usize,
@@ -1824,6 +2228,12 @@ fn is_metadata_object_manifest_staging_filename(name: &str) -> bool {
     name.strip_prefix('.')
         .and_then(|name| name.strip_suffix(METADATA_OBJECT_MANIFEST_STAGING_SUFFIX))
         .is_some_and(|id| id.parse::<SegmentId>().is_ok())
+}
+
+fn is_ref_snapshot_staging_filename(name: &str) -> bool {
+    name.strip_prefix('.')
+        .and_then(|name| name.strip_suffix(REF_SNAPSHOT_STAGING_SUFFIX))
+        .is_some_and(|id| id.parse::<ManifestId>().is_ok())
 }
 
 fn create_segment_index_staging(parent: &Path) -> Result<(File, PathBuf)> {
@@ -1895,6 +2305,226 @@ fn create_metadata_object_manifest_staging(parent: &Path) -> Result<(File, PathB
     Err(Error::new(
         ErrorKind::Conflict,
         "metadata-object manifest staging path could not be allocated",
+    ))
+}
+
+fn create_ref_snapshot_staging(parent: &Path) -> Result<(File, PathBuf)> {
+    for _ in 0..16 {
+        let path = parent.join(format!(
+            ".{}{}",
+            ManifestId::generate(),
+            REF_SNAPSHOT_STAGING_SUFFIX
+        ));
+        match OpenOptions::new().create_new(true).write(true).open(&path) {
+            Ok(file) => return Ok((file, path)),
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(error) => {
+                return Err(io_error(
+                    error,
+                    "ref snapshot staging file could not be created",
+                ));
+            }
+        }
+    }
+    Err(Error::new(
+        ErrorKind::Conflict,
+        "ref snapshot staging path could not be allocated",
+    ))
+}
+
+fn ref_snapshot_target_ids(snapshot: &RefSnapshot) -> BTreeSet<GitObjectId> {
+    let mut targets: BTreeSet<GitObjectId> =
+        snapshot.state().regular_refs().values().copied().collect();
+    if let HeadState::Detached(target) = snapshot.state().head() {
+        targets.insert(*target);
+    }
+    targets
+}
+
+fn restore_exported_ref_snapshot(destination: &Path, snapshot: &RefSnapshot) -> Result<()> {
+    for (name, target) in snapshot.state().regular_refs() {
+        write_export_ref(destination, name.as_bytes(), *target)?;
+    }
+    let mut head = Vec::new();
+    match snapshot.state().head() {
+        HeadState::Symbolic(name) => {
+            head.extend_from_slice(b"ref: ");
+            head.extend_from_slice(name.as_bytes());
+        }
+        HeadState::Detached(target) => head.extend_from_slice(target.to_string().as_bytes()),
+    }
+    head.push(b'\n');
+    replace_export_head(destination, &head)
+}
+
+#[cfg(unix)]
+fn write_export_ref(destination: &Path, name: &[u8], target: GitObjectId) -> Result<()> {
+    use std::{ffi::OsString, os::unix::ffi::OsStringExt};
+
+    let components: Vec<&[u8]> = name.split(|byte| *byte == b'/').collect();
+    let (file_name, parents) = components.split_last().ok_or_else(|| {
+        Error::new(
+            ErrorKind::CorruptData,
+            "ref snapshot contains an invalid regular ref",
+        )
+    })?;
+    let mut parent = destination.to_path_buf();
+    for component in parents {
+        parent.push(OsString::from_vec(component.to_vec()));
+        match fs::create_dir(&parent) {
+            Ok(()) => {
+                let ancestor = parent.parent().ok_or_else(|| {
+                    Error::new(
+                        ErrorKind::CorruptData,
+                        "Git export ref directory has no parent",
+                    )
+                })?;
+                sync_directory(ancestor)?;
+            }
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                validate_directory(&parent, false)?;
+            }
+            Err(error) => {
+                return Err(io_error(
+                    error,
+                    "Git export ref directory could not be created",
+                ));
+            }
+        }
+    }
+    let destination = parent.join(OsString::from_vec(file_name.to_vec()));
+    match fs::symlink_metadata(&destination) {
+        Ok(_) => {
+            return Err(Error::new(
+                ErrorKind::Conflict,
+                "Git export ref already exists",
+            ));
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(io_error(
+                error,
+                "Git export ref destination could not be inspected",
+            ));
+        }
+    }
+    let (mut staging, staging_path) = create_export_ref_staging(&parent)?;
+    if let Err(error) = writeln!(staging, "{target}") {
+        drop(staging);
+        let _ = fs::remove_file(&staging_path);
+        return Err(io_error(
+            error,
+            "Git export ref staging file could not be written",
+        ));
+    }
+    if let Err(error) = staging.sync_all() {
+        drop(staging);
+        let _ = fs::remove_file(&staging_path);
+        return Err(io_error(
+            error,
+            "Git export ref staging file could not be synchronized",
+        ));
+    }
+    drop(staging);
+    match fs::hard_link(&staging_path, &destination) {
+        Ok(()) => {
+            sync_directory(&parent)?;
+            let _ = fs::remove_file(&staging_path);
+            let _ = sync_directory(&parent);
+            Ok(())
+        }
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+            let _ = fs::remove_file(&staging_path);
+            Err(Error::new(
+                ErrorKind::Conflict,
+                "Git export ref already exists",
+            ))
+        }
+        Err(error) => {
+            let _ = fs::remove_file(&staging_path);
+            Err(io_error(error, "Git export ref could not be published"))
+        }
+    }
+}
+
+#[cfg(not(unix))]
+fn write_export_ref(_: &Path, _: &[u8], _: GitObjectId) -> Result<()> {
+    Err(Error::new(
+        ErrorKind::Unsupported,
+        "Git ref restoration is unsupported on this platform",
+    ))
+}
+
+fn create_export_ref_staging(parent: &Path) -> Result<(File, PathBuf)> {
+    for _ in 0..16 {
+        let path = parent.join(format!(".yeokcham-ref-{}.partial", SegmentId::generate()));
+        match OpenOptions::new().create_new(true).write(true).open(&path) {
+            Ok(file) => return Ok((file, path)),
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(error) => {
+                return Err(io_error(
+                    error,
+                    "Git export ref staging file could not be created",
+                ));
+            }
+        }
+    }
+    Err(Error::new(
+        ErrorKind::Conflict,
+        "Git export ref staging path could not be allocated",
+    ))
+}
+
+fn replace_export_head(destination: &Path, bytes: &[u8]) -> Result<()> {
+    let head = destination.join("HEAD");
+    let metadata = fs::symlink_metadata(&head)
+        .map_err(|error| io_error(error, "Git export HEAD could not be inspected"))?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(Error::new(
+            ErrorKind::CorruptData,
+            "Git export HEAD is not a regular file",
+        ));
+    }
+    let (mut staging, staging_path) = create_export_head_staging(destination)?;
+    if let Err(error) = staging.write_all(bytes) {
+        drop(staging);
+        let _ = fs::remove_file(&staging_path);
+        return Err(io_error(
+            error,
+            "Git export HEAD staging file could not be written",
+        ));
+    }
+    if let Err(error) = staging.sync_all() {
+        drop(staging);
+        let _ = fs::remove_file(&staging_path);
+        return Err(io_error(
+            error,
+            "Git export HEAD staging file could not be synchronized",
+        ));
+    }
+    drop(staging);
+    fs::rename(&staging_path, &head)
+        .map_err(|error| io_error(error, "Git export HEAD could not be restored"))?;
+    sync_directory(destination)
+}
+
+fn create_export_head_staging(parent: &Path) -> Result<(File, PathBuf)> {
+    for _ in 0..16 {
+        let path = parent.join(format!(".yeokcham-head-{}.partial", SegmentId::generate()));
+        match OpenOptions::new().create_new(true).write(true).open(&path) {
+            Ok(file) => return Ok((file, path)),
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(error) => {
+                return Err(io_error(
+                    error,
+                    "Git export HEAD staging file could not be created",
+                ));
+            }
+        }
+    }
+    Err(Error::new(
+        ErrorKind::Conflict,
+        "Git export HEAD staging path could not be allocated",
     ))
 }
 
@@ -2273,6 +2903,53 @@ fn read_bounded_metadata_object_manifest_file(path: &Path, maximum_bytes: u64) -
     }
 }
 
+fn read_bounded_ref_snapshot_file(path: &Path, maximum_bytes: u64) -> Result<Vec<u8>> {
+    let metadata = fs::symlink_metadata(path).map_err(|error| {
+        if error.kind() == io::ErrorKind::NotFound {
+            Error::new(ErrorKind::CorruptData, "ref snapshot file is missing")
+        } else {
+            io_error(error, "ref snapshot file could not be inspected")
+        }
+    })?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(Error::new(
+            ErrorKind::CorruptData,
+            "ref snapshot file is not a regular file",
+        ));
+    }
+    if metadata.len() > maximum_bytes {
+        return Err(Error::new(
+            ErrorKind::Unsupported,
+            "ref snapshot file exceeds the byte limit",
+        ));
+    }
+    let length = usize::try_from(metadata.len()).map_err(|_| {
+        Error::new(
+            ErrorKind::Unsupported,
+            "ref snapshot file exceeds the byte limit",
+        )
+    })?;
+    let mut file = File::open(path)
+        .map_err(|error| io_error(error, "ref snapshot file could not be opened"))?;
+    let mut bytes = vec![0; length];
+    file.read_exact(&mut bytes).map_err(|error| {
+        if error.kind() == io::ErrorKind::UnexpectedEof {
+            Error::new(ErrorKind::CorruptData, "ref snapshot file is truncated")
+        } else {
+            io_error(error, "ref snapshot file could not be read")
+        }
+    })?;
+    let mut extra = [0; 1];
+    match file.read(&mut extra) {
+        Ok(0) => Ok(bytes),
+        Ok(_) => Err(Error::new(
+            ErrorKind::CorruptData,
+            "ref snapshot file changed while being read",
+        )),
+        Err(error) => Err(io_error(error, "ref snapshot file could not be read")),
+    }
+}
+
 fn read_bounded_segment_index_file(path: &Path, maximum_bytes: u64) -> Result<Vec<u8>> {
     let metadata = fs::symlink_metadata(path).map_err(|error| {
         if error.kind() == io::ErrorKind::NotFound {
@@ -2626,8 +3303,8 @@ mod tests {
 
     use super::*;
     use crate::{
-        GitRepository, SegmentReadLimits, SegmentReader, SegmentRecord, SegmentWriteLimits,
-        SegmentWriter, TinyBlobAggregation, WholeBlobRecord,
+        GitRefState, GitRepository, SegmentReadLimits, SegmentReader, SegmentRecord,
+        SegmentWriteLimits, SegmentWriter, TinyBlobAggregation, WholeBlobRecord,
     };
 
     const TEST_ID: &str = "550e8400-e29b-41d4-a716-446655440000";
@@ -2694,12 +3371,31 @@ mod tests {
             .join(metadata_object_manifest_filename(id))
     }
 
+    fn ref_snapshot_path(root: &Path, id: ManifestId) -> PathBuf {
+        root.join(REF_SNAPSHOT_DIRECTORY)
+            .join(ref_snapshot_filename(id))
+    }
+
     fn manifest_limits() -> BlobManifestReadLimits {
         BlobManifestReadLimits::new(8, 4_096, 4_096).expect("manifest limits")
     }
 
     fn metadata_object_manifest_limits() -> MetadataObjectManifestReadLimits {
         MetadataObjectManifestReadLimits::new(4_096, 4_096).expect("metadata manifest limits")
+    }
+
+    fn ref_snapshot_limits() -> RefSnapshotReadLimits {
+        RefSnapshotReadLimits::new(8, 4_096, 8).expect("ref snapshot limits")
+    }
+
+    fn ref_snapshot_publication_limits() -> RefSnapshotPublicationLimits {
+        RefSnapshotPublicationLimits::new(
+            4_096,
+            segment_limits(),
+            manifest_limits(),
+            metadata_object_manifest_limits(),
+        )
+        .expect("ref snapshot publication limits")
     }
 
     fn segment_limits() -> SegmentReadLimits {
@@ -2718,6 +3414,7 @@ mod tests {
             manifest_limits(),
             8,
             metadata_object_manifest_limits(),
+            ref_snapshot_limits(),
         )
         .expect("verification limits")
     }
@@ -2729,6 +3426,7 @@ mod tests {
             manifest_limits(),
             8,
             metadata_object_manifest_limits(),
+            ref_snapshot_limits(),
         )
         .expect("export limits")
     }
@@ -3100,6 +3798,7 @@ mod tests {
             manifest_limits(),
             8,
             metadata_object_manifest_limits(),
+            ref_snapshot_limits(),
         )
         .expect("limited export limits");
         let limit = repository
@@ -3276,6 +3975,7 @@ mod tests {
             manifest_limits(),
             8,
             metadata_object_manifest_limits(),
+            ref_snapshot_limits(),
         )
         .expect("entry-limited verification");
         let entry_error = repository
@@ -3294,6 +3994,7 @@ mod tests {
             manifest_limits(),
             8,
             metadata_object_manifest_limits(),
+            ref_snapshot_limits(),
         )
         .expect("file-limited verification");
         let file_error = repository
@@ -4162,6 +4863,7 @@ mod tests {
                 manifest_limits(),
                 1,
                 metadata_object_manifest_limits(),
+                ref_snapshot_limits(),
             )
             .expect_err("zero verification limit")
             .kind(),
@@ -4174,6 +4876,7 @@ mod tests {
                 manifest_limits(),
                 1,
                 metadata_object_manifest_limits(),
+                ref_snapshot_limits(),
             )
             .expect_err("zero export limit")
             .kind(),

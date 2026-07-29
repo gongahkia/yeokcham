@@ -15,6 +15,7 @@ mod manifest_id;
 mod metadata_object_manifest;
 mod metadata_object_record;
 mod ref_name;
+mod ref_snapshot;
 mod repository;
 mod repository_format;
 mod repository_id;
@@ -42,10 +43,11 @@ pub use manifest_id::ManifestId;
 pub use metadata_object_manifest::MetadataObjectManifest;
 pub use metadata_object_record::MetadataObjectRecord;
 pub use ref_name::RefName;
+pub use ref_snapshot::{GitRefState, HeadState, RefSnapshot, RefSnapshotReadLimits};
 pub use repository::{
     BlobManifestReadLimits, GitObjectMetadata, LocalRepository, LooseObjectExportLimits,
-    LooseObjectExportReport, MetadataObjectManifestReadLimits, RepositoryVerificationLimits,
-    RepositoryVerificationReport,
+    LooseObjectExportReport, MetadataObjectManifestReadLimits, RefSnapshotPublicationLimits,
+    RepositoryVerificationLimits, RepositoryVerificationReport,
 };
 pub use repository_format::{RepositoryFeatureFlags, RepositoryFormat, RepositoryFormatVersion};
 pub use repository_id::RepositoryId;

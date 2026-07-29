@@ -1,6 +1,14 @@
-use std::{collections::BTreeSet, error::Error as StdError, io, path::Path};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    error::Error as StdError,
+    io,
+    path::Path,
+};
 
-use crate::{Error, ErrorKind, GitObject, GitObjectId, GitObjectKind, RefName, Result};
+use crate::{
+    Error, ErrorKind, GitObject, GitObjectId, GitObjectKind, GitRefState, HeadState, RefName,
+    Result,
+};
 
 const MAX_REFERENCE_COUNT: usize = 1_000_000;
 const MAX_REACHABLE_OBJECT_COUNT: usize = 1_000_000;
@@ -10,8 +18,7 @@ const MAX_REACHABLE_OBJECT_COUNT: usize = 1_000_000;
 /// The adapter uses isolated, strict `gix` opening: it reads only repository
 /// configuration, does not use Git environment overrides, and rejects an
 /// untrusted Git directory. It supports bare repositories and worktrees but
-/// enumerates regular ref names but does not yet resolve ref targets or return
-/// objects.
+/// enumerates refs, resolves their direct targets, and reads verified objects.
 pub struct GitRepository {
     inner: gix::ThreadSafeRepository,
 }
@@ -103,6 +110,82 @@ impl GitRepository {
             ));
         }
         Ok(names)
+    }
+
+    /// Returns a checked point-in-time state of regular refs and `HEAD`.
+    ///
+    /// Every regular symbolic ref is followed to its first direct SHA-1 object
+    /// target. `HEAD` remains symbolic, including for an unborn branch, or
+    /// remains detached. The state is not a transaction snapshot: concurrent
+    /// Git mutation can cause an error or a later consistency check to fail.
+    pub fn ref_state(&self) -> Result<GitRefState> {
+        let repository = self.inner.to_thread_local();
+        let references = repository.references().map_err(reference_store_error)?;
+        let iterator = references.all().map_err(|source| {
+            reference_corrupt_error("Git references could not be enumerated", source)
+        })?;
+        let mut regular_refs = BTreeMap::new();
+
+        for reference in iterator {
+            let mut reference = reference.map_err(|source| {
+                Error::with_boxed_source(
+                    ErrorKind::CorruptData,
+                    "Git reference could not be enumerated",
+                    source,
+                )
+            })?;
+            let bytes: &[u8] = reference.name().as_bstr().as_ref();
+            let Some(name) = regular_ref_name(bytes)? else {
+                continue;
+            };
+            if regular_refs.len() == MAX_REFERENCE_COUNT {
+                return Err(Error::new(
+                    ErrorKind::Unsupported,
+                    "Git repository has too many references",
+                ));
+            }
+            let target = reference.follow_to_object().map_err(|source| {
+                reference_corrupt_error("Git reference target is unavailable or malformed", source)
+            })?;
+            let target = git_object_id_from_gix(&target.detach())?;
+            if regular_refs.insert(name, target).is_some() {
+                return Err(Error::new(
+                    ErrorKind::CorruptData,
+                    "Git reference enumeration contains duplicate names",
+                ));
+            }
+        }
+
+        let head = repository.head().map_err(|source| {
+            reference_corrupt_error("Git HEAD is unavailable or malformed", source)
+        })?;
+        let head = match head.referent_name() {
+            Some(name) => {
+                let bytes: &[u8] = name.as_bstr().as_ref();
+                let name = regular_ref_name(bytes)?.ok_or_else(|| {
+                    Error::new(
+                        ErrorKind::CorruptData,
+                        "Git HEAD has an invalid symbolic target",
+                    )
+                })?;
+                HeadState::Symbolic(name)
+            }
+            None => {
+                let head = repository.find_reference("HEAD").map_err(|source| {
+                    reference_corrupt_error("Git HEAD is unavailable or malformed", source)
+                })?;
+                let target = head.try_id().ok_or_else(|| {
+                    Error::new(
+                        ErrorKind::CorruptData,
+                        "Git HEAD has an invalid detached target",
+                    )
+                })?;
+                HeadState::Detached(git_object_id_from_gix(&target.detach())?)
+            }
+        };
+        GitRefState::new(regular_refs, head).map_err(|source| {
+            Error::with_source(ErrorKind::CorruptData, "Git ref state is invalid", source)
+        })
     }
 
     /// Returns all SHA-1 objects reachable from regular Git refs, sorted by ID.
@@ -572,6 +655,50 @@ mod tests {
         );
         assert!(bytes.iter().all(|name| name.starts_with(b"refs/")));
         assert!(!bytes.iter().any(|name| name == b"HEAD"));
+    }
+
+    #[test]
+    fn reads_direct_regular_ref_targets_and_symbolic_or_detached_head() {
+        let temporary = TestDirectory::new();
+        let worktree = initialize_committed_worktree(&temporary);
+        let object_id = git_stdout(&worktree, &["rev-parse", "HEAD"]);
+        run_git_in(&worktree, &["update-ref", "refs/heads/alpha", &object_id]);
+        run_git_in(&worktree, &["update-ref", "refs/tags/v1.0", &object_id]);
+        run_git_in(
+            &worktree,
+            &[
+                "symbolic-ref",
+                "refs/remotes/origin/HEAD",
+                "refs/heads/main",
+            ],
+        );
+
+        let repository = GitRepository::open(&worktree).expect("open repository");
+        let state = repository.ref_state().expect("read ref state");
+        let id: GitObjectId = object_id.parse().expect("object ID");
+        assert_eq!(
+            state.regular_refs().get(
+                &RefName::from_bytes(b"refs/heads/alpha").expect("ref name")
+            ),
+            Some(&id)
+        );
+        assert_eq!(
+            state.regular_refs().get(
+                &RefName::from_bytes(b"refs/remotes/origin/HEAD").expect("ref name")
+            ),
+            Some(&id)
+        );
+        assert_eq!(
+            state.head(),
+            &HeadState::Symbolic(RefName::from_bytes(b"refs/heads/main").expect("ref name"))
+        );
+
+        run_git_in(&worktree, &["checkout", "--detach"]);
+        let detached = GitRepository::open(&worktree)
+            .expect("open detached repository")
+            .ref_state()
+            .expect("read detached state");
+        assert_eq!(detached.head(), &HeadState::Detached(id));
     }
 
     #[cfg(target_os = "linux")]
