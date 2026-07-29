@@ -28,3 +28,4 @@ Valid statuses are `Proposed`, `Accepted`, `Rejected`, `Deprecated`, and `Supers
 | [ADR-0020](0020-tagged-content-identities.md) | Accepted | Use tagged, configurable content identities |
 | [ADR-0021](0021-segment-id-as-uuid-v4.md) | Accepted | Represent segment IDs as UUIDv4 bytes |
 | [ADR-0022](0022-manifest-id-as-uuid-v4.md) | Accepted | Represent manifest IDs as UUIDv4 bytes |
+| [ADR-0023](0023-device-id-as-uuid-v4.md) | Accepted | Represent device IDs as UUIDv4 bytes |

@@ -1,5 +1,6 @@
 //! Core types and repository logic for Yeokcham.
 
+mod device_id;
 mod error;
 mod git_object_id;
 mod manifest_id;
@@ -8,6 +9,7 @@ mod segment_id;
 mod telemetry;
 mod yeokcham_content_id;
 
+pub use device_id::DeviceId;
 pub use error::{Error, ErrorKind, Result};
 pub use git_object_id::GitObjectId;
 pub use manifest_id::ManifestId;

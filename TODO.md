@@ -24,7 +24,7 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 - [x] Define `yeokchamContentId`.
 - [x] Define `SegmentId`.
 - [x] Define `ManifestId`.
-- [ ] Define `DeviceId`.
+- [x] Define `DeviceId`.
 - [ ] Define `RefName` with validation.
 - [ ] Define repository format version and feature flags.
 - [ ] Define serialisation policy and canonical encoding rules.
