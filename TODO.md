@@ -31,7 +31,7 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 
 ### Exit criteria
 
-- [ ] CI passes on macOS and Linux.
+- [x] CI passes on macOS and Linux.
 - [x] Empty repository format can be created, reopened, and migrated.
 - [x] Public types have invariants documented.
 - [x] No implementation code depends directly on a cloud backend.
