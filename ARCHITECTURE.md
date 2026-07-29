@@ -419,7 +419,7 @@ Top-level conceptual structure:
 ```text
 yeokcham-repository/
   format/
-    repository.json
+    repository.bin
   segments/
     ab/cd/<segment-id>
   indexes/
@@ -435,7 +435,7 @@ yeokcham-repository/
 
 Remote keys should be opaque when metadata confidentiality is enabled.
 
-`repository.json` must contain only the minimum bootstrap information and should itself be encrypted if practical.
+`repository.bin` contains only the minimum bootstrap information and follows the canonical binary policy in [`docs/serialization.md`](docs/serialization.md). It should itself be encrypted if practical.
 
 ## 6. Crash consistency
 
