@@ -11,9 +11,9 @@ use rusqlite::{
 };
 
 use crate::{
-    BlobManifest, BlobManifestRepresentation, CanonicalDecoder, CanonicalEncoder, Error,
-    ErrorKind, GitObject, GitObjectId, GitObjectKind, ManifestId, ReadSegmentRecord,
-    RepositoryFormat, RepositoryId, Result, SegmentId, SegmentReadLimits, SegmentReader,
+    BlobManifest, BlobManifestRepresentation, CanonicalDecoder, CanonicalEncoder, Error, ErrorKind,
+    GitObject, GitObjectId, GitObjectKind, ManifestId, ReadSegmentRecord, RepositoryFormat,
+    RepositoryId, Result, SegmentId, SegmentReadLimits, SegmentReader,
 };
 
 const BOOTSTRAP_MAGIC: [u8; 4] = *b"YKRB";
@@ -1683,6 +1683,97 @@ mod tests {
             .resolve_blob_manifest(git_object_id, manifest_limits())
             .expect_err("invalid entry");
         assert_eq!(invalid.kind(), ErrorKind::CorruptData);
+    }
+
+    #[test]
+    fn resolves_verified_whole_and_tiny_manifest_records_from_segments() {
+        let temporary = TestDirectory::new();
+        let root = temporary.path().join("repository");
+        let repository = LocalRepository::create(&root).expect("create repository");
+        let whole = whole_blob_manifest(
+            &repository,
+            MANIFEST_ID_A.parse().expect("manifest ID"),
+            SEGMENT_ID_A.parse().expect("segment ID"),
+            b"\0whole\xff",
+        );
+        let whole_record = repository
+            .resolve_manifest_record(&whole, 4_096, segment_limits())
+            .expect("resolve whole record");
+        let whole_record = whole_record.as_whole_blob().expect("whole record type");
+        assert_eq!(whole_record.git_object_id(), whole.git_object_id());
+        assert_eq!(whole_record.content_id(), whole.content_id());
+        assert_eq!(whole_record.data(), b"\0whole\xff");
+
+        let (tiny, selected_id) = tiny_blob_manifest(
+            &repository,
+            MANIFEST_ID_B.parse().expect("manifest ID"),
+            SEGMENT_ID_B.parse().expect("segment ID"),
+        );
+        let tiny_record = repository
+            .resolve_manifest_record(&tiny, 4_096, segment_limits())
+            .expect("resolve tiny record");
+        let entry = tiny_record
+            .as_tiny_blob_aggregation()
+            .expect("tiny aggregation type")
+            .entries()
+            .iter()
+            .find(|entry| entry.git_object_id() == selected_id)
+            .expect("selected entry");
+        assert_eq!(entry.content_id(), tiny.content_id());
+        assert_eq!(entry.data(), b"\0selected\xff");
+    }
+
+    #[test]
+    fn rejects_missing_limited_tampered_and_mismatched_manifest_segments() {
+        let temporary = TestDirectory::new();
+        let root = temporary.path().join("repository");
+        let repository = LocalRepository::create(&root).expect("create repository");
+        let manifest = whole_blob_manifest(
+            &repository,
+            MANIFEST_ID_A.parse().expect("manifest ID"),
+            SEGMENT_ID_A.parse().expect("segment ID"),
+            b"body",
+        );
+        let zero_limit = repository
+            .resolve_manifest_record(&manifest, 0, segment_limits())
+            .expect_err("zero segment limit");
+        let byte_limit = repository
+            .resolve_manifest_record(&manifest, 1, segment_limits())
+            .expect_err("segment byte limit");
+        assert_eq!(zero_limit.kind(), ErrorKind::InvalidInput);
+        assert_eq!(byte_limit.kind(), ErrorKind::Unsupported);
+
+        let path = repository.segment_path(manifest.segment_id());
+        let mut tampered = fs::read(&path).expect("read segment");
+        let final_byte = tampered.len() - 1;
+        tampered[final_byte] ^= 1;
+        fs::write(&path, &tampered).expect("tamper segment");
+        let tampered = repository
+            .resolve_manifest_record(&manifest, 4_096, segment_limits())
+            .expect_err("tampered segment");
+        assert_eq!(tampered.kind(), ErrorKind::CorruptData);
+
+        let mut mismatched = fs::read(&path).expect("read tampered segment");
+        mismatched[38..54].copy_from_slice(
+            &SEGMENT_ID_B
+                .parse::<SegmentId>()
+                .expect("segment ID")
+                .into_bytes(),
+        );
+        let checksum_offset = mismatched.len() - 32;
+        let checksum: [u8; 32] = Sha256::digest(&mismatched[..checksum_offset]).into();
+        mismatched[checksum_offset..].copy_from_slice(&checksum);
+        fs::write(&path, mismatched).expect("rewrite mismatched segment");
+        let mismatched = repository
+            .resolve_manifest_record(&manifest, 4_096, segment_limits())
+            .expect_err("mismatched segment ID");
+        assert_eq!(mismatched.kind(), ErrorKind::CorruptData);
+
+        fs::remove_file(path).expect("remove segment");
+        let missing = repository
+            .resolve_manifest_record(&manifest, 4_096, segment_limits())
+            .expect_err("missing segment");
+        assert_eq!(missing.kind(), ErrorKind::NotFound);
     }
 
     #[cfg(unix)]
