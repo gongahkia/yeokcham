@@ -6,11 +6,11 @@ Robustness tasks operate only on Paengi's pure functions and generated local fix
 ## Active vertical slice
 
 - Milestone: 0 — Project and model foundation.
-- Task: replace the AFL encoding harness with bounded deterministic property tests (complete).
+- Task: replace the encoding harness with bounded deterministic property tests (complete).
 - Modules/files: `test/encoding_property_test.ml`, `test/fixtures/encoding/`, `Makefile`, package test dependencies, and ADR-017/018 verification evidence; no persistent write or CLI.
 - Types: no model or persistent-format type changes; Profile 1 and Envelope 1 decoders retain their existing result types.
 - Invariants: `decode (encode value) = Ok value`; accepted input re-encodes byte-identically because recognised non-canonical encodings are rejected; every supplied byte stream returns a typed result or structured error without an uncaught exception.
-- Tests: checked-in valid and malformed fixtures; 500 valid-value and 2,000 arbitrary-byte QCheck cases per codec; explicit zero, boundary, near-limit, and malformed lengths; independent reproducible per-property seeds. `make test` and `make property-test` pass with the default seed; `make property-test PROPERTY_TEST_SEED=17` also passes.
+- Tests: checked-in valid and malformed fixtures; 500 valid-value and 2,000 arbitrary-byte QCheck cases per codec; explicit zero, boundary, near-limit, and malformed lengths; independent reproducible per-property seeds. `make check` and `make property-test` pass with the default seed; `make property-test PROPERTY_TEST_SEED=17` also passes.
 - External libraries: Alcotest and QCheck only.
 - ADR changes: no new ADR; update ADR-017/018 verification evidence and scope.
 
