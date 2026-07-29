@@ -1,3 +1,7 @@
+(env
+ (afl
+  (ocamlopt_flags (:standard -afl-instrument))))
+
 (executable
  (name fuzz_encoding)
  (modes native)
