@@ -734,6 +734,29 @@ mod tests {
     }
 
     #[test]
+    fn rejects_payload_tampering_after_recomputing_the_segment_checksum() {
+        let record = WholeBlobRecord::from_verified_blob(&verified_blob(b"private payload"))
+            .expect("whole blob");
+        let (mut encoded, _) =
+            writer_bytes_for(SegmentRecord::from_whole_blob(&record).expect("segment record"));
+        let segment = SegmentReader::decode(&encoded, limits()).expect("read segment");
+        let location = segment.locations()[0];
+        let payload_start = usize::try_from(location.payload_offset()).expect("payload offset");
+        let payload_len = usize::try_from(location.stored_bytes()).expect("payload length");
+        encoded[payload_start + payload_len - 1] ^= 1;
+        let checksum_offset = encoded.len() - 32;
+        let checksum: [u8; 32] = Sha256::digest(&encoded[..checksum_offset]).into();
+        encoded[checksum_offset..].copy_from_slice(&checksum);
+
+        assert_eq!(
+            SegmentReader::decode(&encoded, limits())
+                .expect_err("rechecks nested blob identity")
+                .kind(),
+            ErrorKind::CorruptData
+        );
+    }
+
+    #[test]
     fn debug_output_redacts_payloads_and_identifiers() {
         let whole_blob =
             WholeBlobRecord::from_verified_blob(&verified_blob(b"private reader body"))
