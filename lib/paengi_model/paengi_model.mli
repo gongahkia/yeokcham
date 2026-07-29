@@ -141,3 +141,74 @@ module Scratch : sig
     scratch_event ->
     (checkpoint, event_transition_error) result
 end
+
+type repository
+
+type repository_error =
+  | Snapshot_identity_mismatch of {
+      supplied : Paengi_id.Snapshot_id.t;
+      computed : Paengi_id.Snapshot_id.t;
+    }
+  | Event_identity_mismatch of {
+      supplied : Paengi_id.Operation_id.t;
+      computed : Paengi_id.Operation_id.t;
+    }
+  | Checkpoint_identity_mismatch of {
+      supplied : Paengi_id.Checkpoint_id.t;
+      computed : Paengi_id.Checkpoint_id.t;
+    }
+  | Conflicting_snapshot of Paengi_id.Snapshot_id.t
+  | Conflicting_event of Paengi_id.Operation_id.t
+  | Conflicting_checkpoint of Paengi_id.Checkpoint_id.t
+  | Missing_snapshot of Paengi_id.Snapshot_id.t
+  | Missing_event of Paengi_id.Operation_id.t
+  | Missing_checkpoint of Paengi_id.Checkpoint_id.t
+  | Event_parent_missing of Paengi_id.Checkpoint_id.t
+  | Incoherent_checkpoint of Paengi_id.Checkpoint_id.t
+  | Replay_operation_rejected of replay_error
+  | Target_not_descended_from of {
+      ancestor : Paengi_id.Checkpoint_id.t;
+      target : Paengi_id.Checkpoint_id.t;
+    }
+
+val repository_error_to_string : repository_error -> string
+
+module Repository : sig
+  type t = repository
+
+  val empty : t
+  val scratch_head : t -> Paengi_id.Checkpoint_id.t option
+  val find_snapshot : t -> Paengi_id.Snapshot_id.t -> Snapshot.t option
+  val find_event : t -> Paengi_id.Operation_id.t -> scratch_event option
+  val find_checkpoint : t -> Paengi_id.Checkpoint_id.t -> checkpoint option
+
+  val insert_snapshot :
+    t ->
+    id:Paengi_id.Snapshot_id.t ->
+    Snapshot.t ->
+    (t, repository_error) result
+
+  val add_snapshot : t -> Snapshot.t -> (t, repository_error) result
+
+  val insert_event :
+    t ->
+    id:Paengi_id.Operation_id.t ->
+    scratch_event ->
+    (t, repository_error) result
+
+  val add_event : t -> scratch_event -> (t, repository_error) result
+
+  val insert_checkpoint :
+    t ->
+    id:Paengi_id.Checkpoint_id.t ->
+    checkpoint ->
+    (t, repository_error) result
+
+  val add_checkpoint : t -> checkpoint -> (t, repository_error) result
+
+  val replay :
+    t ->
+    ancestor:Paengi_id.Checkpoint_id.t ->
+    target:Paengi_id.Checkpoint_id.t ->
+    (Snapshot.t, repository_error) result
+end

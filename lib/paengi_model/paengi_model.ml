@@ -671,3 +671,307 @@ module Scratch = struct
                ~event:(Some (Scratch_event.id event))
                ~created_at ~retention)
 end
+
+module Snapshot_map = Map.Make (struct
+  type t = Id.Snapshot_id.t
+
+  let compare = Id.Snapshot_id.compare
+end)
+
+module Event_map = Map.Make (struct
+  type t = Id.Operation_id.t
+
+  let compare = Id.Operation_id.compare
+end)
+
+module Checkpoint_map = Map.Make (struct
+  type t = Id.Checkpoint_id.t
+
+  let compare = Id.Checkpoint_id.compare
+end)
+
+type repository = {
+  snapshots : Snapshot.t Snapshot_map.t;
+  events : scratch_event Event_map.t;
+  checkpoints : checkpoint Checkpoint_map.t;
+  scratch_head : Id.Checkpoint_id.t option;
+}
+
+type repository_error =
+  | Snapshot_identity_mismatch of {
+      supplied : Id.Snapshot_id.t;
+      computed : Id.Snapshot_id.t;
+    }
+  | Event_identity_mismatch of {
+      supplied : Id.Operation_id.t;
+      computed : Id.Operation_id.t;
+    }
+  | Checkpoint_identity_mismatch of {
+      supplied : Id.Checkpoint_id.t;
+      computed : Id.Checkpoint_id.t;
+    }
+  | Conflicting_snapshot of Id.Snapshot_id.t
+  | Conflicting_event of Id.Operation_id.t
+  | Conflicting_checkpoint of Id.Checkpoint_id.t
+  | Missing_snapshot of Id.Snapshot_id.t
+  | Missing_event of Id.Operation_id.t
+  | Missing_checkpoint of Id.Checkpoint_id.t
+  | Event_parent_missing of Id.Checkpoint_id.t
+  | Incoherent_checkpoint of Id.Checkpoint_id.t
+  | Replay_operation_rejected of replay_error
+  | Target_not_descended_from of {
+      ancestor : Id.Checkpoint_id.t;
+      target : Id.Checkpoint_id.t;
+    }
+
+let repository_error_to_string = function
+  | Snapshot_identity_mismatch { supplied; computed } ->
+      Printf.sprintf "snapshot identity mismatch: supplied %s, computed %s"
+        (Id.Snapshot_id.short_hex supplied)
+        (Id.Snapshot_id.short_hex computed)
+  | Event_identity_mismatch { supplied; computed } ->
+      Printf.sprintf "event identity mismatch: supplied %s, computed %s"
+        (Id.Operation_id.short_hex supplied)
+        (Id.Operation_id.short_hex computed)
+  | Checkpoint_identity_mismatch { supplied; computed } ->
+      Printf.sprintf "checkpoint identity mismatch: supplied %s, computed %s"
+        (Id.Checkpoint_id.short_hex supplied)
+        (Id.Checkpoint_id.short_hex computed)
+  | Conflicting_snapshot identity ->
+      Printf.sprintf "conflicting snapshot: %s"
+        (Id.Snapshot_id.short_hex identity)
+  | Conflicting_event identity ->
+      Printf.sprintf "conflicting event: %s"
+        (Id.Operation_id.short_hex identity)
+  | Conflicting_checkpoint identity ->
+      Printf.sprintf "conflicting checkpoint: %s"
+        (Id.Checkpoint_id.short_hex identity)
+  | Missing_snapshot identity ->
+      Printf.sprintf "missing snapshot: %s" (Id.Snapshot_id.short_hex identity)
+  | Missing_event identity ->
+      Printf.sprintf "missing event: %s" (Id.Operation_id.short_hex identity)
+  | Missing_checkpoint identity ->
+      Printf.sprintf "missing checkpoint: %s"
+        (Id.Checkpoint_id.short_hex identity)
+  | Event_parent_missing identity ->
+      Printf.sprintf "event parent missing: %s"
+        (Id.Checkpoint_id.short_hex identity)
+  | Incoherent_checkpoint identity ->
+      Printf.sprintf "incoherent checkpoint: %s"
+        (Id.Checkpoint_id.short_hex identity)
+  | Replay_operation_rejected error ->
+      Printf.sprintf "replay operation rejected: %s"
+        (replay_error_to_string error)
+  | Target_not_descended_from { ancestor; target } ->
+      Printf.sprintf "checkpoint %s does not descend from %s"
+        (Id.Checkpoint_id.short_hex target)
+        (Id.Checkpoint_id.short_hex ancestor)
+
+let scratch_operation_equal left right =
+  match (left, right) with
+  | Create_file left, Create_file right ->
+      Path.equal left.path right.path
+      && String.equal left.content right.content
+      && left.mode = right.mode
+  | Modify_file left, Modify_file right ->
+      Path.equal left.path right.path
+      && String.equal left.expected_content right.expected_content
+      && String.equal left.replacement_content right.replacement_content
+  | Delete_path left, Delete_path right ->
+      Path.equal left.path right.path && entry_equal left.prior right.prior
+  | Move_path left, Move_path right ->
+      Path.equal left.source right.source
+      && Path.equal left.destination right.destination
+      && entry_equal left.prior right.prior
+  | Change_mode left, Change_mode right ->
+      Path.equal left.path right.path
+      && left.expected_mode = right.expected_mode
+      && left.replacement_mode = right.replacement_mode
+  | ( ( Create_file _ | Modify_file _ | Delete_path _ | Move_path _
+      | Change_mode _ ),
+      _ ) ->
+      false
+
+let scratch_event_equal left right =
+  Id.Operation_id.equal left.event_id right.event_id
+  && Id.Checkpoint_id.equal left.event_parent right.event_parent
+  && List.equal scratch_operation_equal left.operations right.operations
+  && Int64.equal left.observed_at right.observed_at
+  && left.source = right.source
+
+let retention_equal left right =
+  List.equal
+    (fun left right -> compare_retention_reason left right = 0)
+    left right
+
+let checkpoint_equal left right =
+  Id.Checkpoint_id.equal left.checkpoint_id right.checkpoint_id
+  && Option.equal Id.Checkpoint_id.equal left.checkpoint_parent
+       right.checkpoint_parent
+  && Snapshot.equal left.checkpoint_snapshot right.checkpoint_snapshot
+  && Option.equal Id.Operation_id.equal left.applied_event right.applied_event
+  && Int64.equal left.checkpoint_created_at right.checkpoint_created_at
+  && retention_equal left.checkpoint_retention right.checkpoint_retention
+
+module Repository = struct
+  type t = repository
+
+  let empty =
+    {
+      snapshots = Snapshot_map.empty;
+      events = Event_map.empty;
+      checkpoints = Checkpoint_map.empty;
+      scratch_head = None;
+    }
+
+  let scratch_head repository = repository.scratch_head
+
+  let find_snapshot repository identity =
+    Snapshot_map.find_opt identity repository.snapshots
+
+  let find_event repository identity =
+    Event_map.find_opt identity repository.events
+
+  let find_checkpoint repository identity =
+    Checkpoint_map.find_opt identity repository.checkpoints
+
+  let insert_snapshot repository ~id snapshot =
+    match find_snapshot repository id with
+    | Some existing ->
+        if Snapshot.equal existing snapshot then Ok repository
+        else Error (Conflicting_snapshot id)
+    | None ->
+        let computed = Snapshot.id snapshot in
+        if not (Id.Snapshot_id.equal id computed) then
+          Error (Snapshot_identity_mismatch { supplied = id; computed })
+        else
+          Ok
+            {
+              repository with
+              snapshots = Snapshot_map.add id snapshot repository.snapshots;
+            }
+
+  let add_snapshot repository snapshot =
+    insert_snapshot repository ~id:(Snapshot.id snapshot) snapshot
+
+  let insert_event repository ~id event =
+    match find_event repository id with
+    | Some existing ->
+        if scratch_event_equal existing event then Ok repository
+        else Error (Conflicting_event id)
+    | None ->
+        let computed = Scratch_event.id event in
+        if not (Id.Operation_id.equal id computed) then
+          Error (Event_identity_mismatch { supplied = id; computed })
+        else
+          let parent = Scratch_event.parent event in
+          if Option.is_none (find_checkpoint repository parent) then
+            Error (Event_parent_missing parent)
+          else
+            Ok
+              {
+                repository with
+                events = Event_map.add id event repository.events;
+              }
+
+  let add_event repository event =
+    insert_event repository ~id:(Scratch_event.id event) event
+
+  let checkpoint_replays repository checkpoint =
+    match (Checkpoint.parent checkpoint, Checkpoint.event checkpoint) with
+    | None, None -> Ok ()
+    | Some parent_id, Some event_id -> (
+        match find_checkpoint repository parent_id with
+        | None -> Error (Missing_checkpoint parent_id)
+        | Some parent -> (
+            match find_event repository event_id with
+            | None -> Error (Missing_event event_id)
+            | Some event -> (
+                if
+                  not
+                    (Id.Checkpoint_id.equal
+                       (Scratch_event.parent event)
+                       parent_id)
+                then Error (Incoherent_checkpoint (Checkpoint.id checkpoint))
+                else
+                  match
+                    Snapshot.apply_operations
+                      (Checkpoint.snapshot parent)
+                      (Scratch_event.operations event)
+                  with
+                  | Error error -> Error (Replay_operation_rejected error)
+                  | Ok replayed ->
+                      if
+                        Snapshot.equal replayed (Checkpoint.snapshot checkpoint)
+                      then Ok ()
+                      else
+                        Error (Incoherent_checkpoint (Checkpoint.id checkpoint))
+                )))
+    | None, Some _ | Some _, None ->
+        Error (Incoherent_checkpoint (Checkpoint.id checkpoint))
+
+  let insert_checkpoint repository ~id checkpoint =
+    match find_checkpoint repository id with
+    | Some existing ->
+        if checkpoint_equal existing checkpoint then Ok repository
+        else Error (Conflicting_checkpoint id)
+    | None -> (
+        let computed = Checkpoint.id checkpoint in
+        if not (Id.Checkpoint_id.equal id computed) then
+          Error (Checkpoint_identity_mismatch { supplied = id; computed })
+        else
+          let snapshot_id = Snapshot.id (Checkpoint.snapshot checkpoint) in
+          if Option.is_none (find_snapshot repository snapshot_id) then
+            Error (Missing_snapshot snapshot_id)
+          else
+            match checkpoint_replays repository checkpoint with
+            | Error error -> Error error
+            | Ok () ->
+                Ok
+                  {
+                    repository with
+                    checkpoints =
+                      Checkpoint_map.add id checkpoint repository.checkpoints;
+                    scratch_head = Some id;
+                  })
+
+  let add_checkpoint repository checkpoint =
+    insert_checkpoint repository ~id:(Checkpoint.id checkpoint) checkpoint
+
+  let replay repository ~ancestor ~target =
+    match find_checkpoint repository ancestor with
+    | None -> Error (Missing_checkpoint ancestor)
+    | Some ancestor_checkpoint -> (
+        let rec event_path checkpoint_id events =
+          if Id.Checkpoint_id.equal checkpoint_id ancestor then Ok events
+          else
+            match find_checkpoint repository checkpoint_id with
+            | None -> Error (Missing_checkpoint checkpoint_id)
+            | Some checkpoint -> (
+                match
+                  (Checkpoint.parent checkpoint, Checkpoint.event checkpoint)
+                with
+                | Some parent, Some event -> event_path parent (event :: events)
+                | None, None ->
+                    Error (Target_not_descended_from { ancestor; target })
+                | None, Some _ | Some _, None ->
+                    Error (Incoherent_checkpoint checkpoint_id))
+        in
+        match event_path target [] with
+        | Error error -> Error error
+        | Ok events ->
+            let rec apply snapshot = function
+              | [] -> Ok snapshot
+              | event_id :: rest -> (
+                  match find_event repository event_id with
+                  | None -> Error (Missing_event event_id)
+                  | Some event -> (
+                      match
+                        Snapshot.apply_operations snapshot
+                          (Scratch_event.operations event)
+                      with
+                      | Error error -> Error (Replay_operation_rejected error)
+                      | Ok snapshot -> apply snapshot rest))
+            in
+            apply (Checkpoint.snapshot ancestor_checkpoint) events)
+end
