@@ -1319,7 +1319,7 @@ impl LocalRepository {
         }
     }
 
-    /// Resolves the one published immutable ref snapshot, if no snapshot exists.
+    /// Resolves the one published immutable ref snapshot, if present.
     ///
     /// Multiple valid snapshots are a conflict. Only recognized interrupted
     /// staging files are ignored; every other directory entry is rejected.
@@ -3303,7 +3303,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        GitRefState, GitRepository, SegmentReadLimits, SegmentReader, SegmentRecord,
+        GitRefState, GitRepository, RefName, SegmentReadLimits, SegmentReader, SegmentRecord,
         SegmentWriteLimits, SegmentWriter, TinyBlobAggregation, WholeBlobRecord,
     };
 
@@ -3759,6 +3759,203 @@ mod tests {
                 .read_dir()
                 .expect("read refs")
                 .any(|entry| entry.is_ok())
+        );
+    }
+
+    #[test]
+    fn publishes_verifies_and_restores_symbolic_and_detached_ref_snapshots() {
+        let temporary = TestDirectory::new();
+        let root = temporary.path().join("repository");
+        let repository = LocalRepository::create(&root).expect("create repository");
+        let tree = verified_object(GitObjectKind::Tree, b"");
+        let tree_manifest = metadata_object_manifest(
+            &repository,
+            SEGMENT_ID_A.parse().expect("segment ID"),
+            GitObjectKind::Tree,
+            tree.data(),
+        );
+        let commit_body = format!(
+            "tree {}\nauthor Yeokcham Test <test@example.invalid> 0 +0000\ncommitter Yeokcham Test <test@example.invalid> 0 +0000\n\ninitial\n",
+            tree.id()
+        );
+        let commit = verified_object(GitObjectKind::Commit, commit_body.as_bytes());
+        let commit_manifest = metadata_object_manifest(
+            &repository,
+            SEGMENT_ID_B.parse().expect("segment ID"),
+            GitObjectKind::Commit,
+            commit.data(),
+        );
+        for manifest in [&tree_manifest, &commit_manifest] {
+            repository
+                .publish_metadata_object_manifest(manifest)
+                .expect("publish metadata manifest");
+        }
+        let mut refs = BTreeMap::new();
+        refs.insert(
+            RefName::from_bytes(b"refs/heads/main").expect("ref name"),
+            commit.id(),
+        );
+        refs.insert(
+            RefName::from_bytes(b"refs/tags/v1.0").expect("ref name"),
+            commit.id(),
+        );
+        let snapshot = RefSnapshot::new(
+            repository.id(),
+            MANIFEST_ID_A.parse().expect("manifest ID"),
+            GitRefState::new(
+                refs,
+                HeadState::Symbolic(RefName::from_bytes(b"refs/heads/main").expect("ref name")),
+            )
+            .expect("ref state"),
+        )
+        .expect("ref snapshot");
+        repository
+            .publish_ref_snapshot(&snapshot, ref_snapshot_publication_limits())
+            .expect("publish ref snapshot");
+        assert!(ref_snapshot_path(&root, snapshot.manifest_id()).is_file());
+        assert_eq!(
+            repository
+                .resolve_ref_snapshot(ref_snapshot_limits())
+                .expect("resolve ref snapshot")
+                .as_ref(),
+            Some(&snapshot)
+        );
+        assert_eq!(
+            repository
+                .verify(verification_limits())
+                .expect("verify repository")
+                .ref_snapshot_count(),
+            1
+        );
+
+        let destination = temporary.path().join("export.git");
+        let report = repository
+            .export_loose_objects(&destination, export_limits())
+            .expect("export with refs");
+        assert_eq!(report.ref_count(), 2);
+        assert_eq!(
+            fs::read(destination.join("refs/heads/main")).expect("read branch ref"),
+            format!("{}\n", commit.id()).as_bytes()
+        );
+        assert_eq!(
+            fs::read(destination.join("HEAD")).expect("read HEAD"),
+            b"ref: refs/heads/main\n"
+        );
+        assert_eq!(
+            GitRepository::open(&destination)
+                .expect("open export")
+                .ref_state()
+                .expect("read export ref state"),
+            *snapshot.state()
+        );
+
+        let detached_root = temporary.path().join("detached-repository");
+        let detached_repository =
+            LocalRepository::create(&detached_root).expect("create repository");
+        let blob_manifest = whole_blob_manifest(
+            &detached_repository,
+            MANIFEST_ID_B.parse().expect("manifest ID"),
+            SEGMENT_ID_C.parse().expect("segment ID"),
+            b"detached ref target",
+        );
+        detached_repository
+            .publish_blob_manifest(&blob_manifest)
+            .expect("publish blob manifest");
+        let detached_snapshot = RefSnapshot::new(
+            detached_repository.id(),
+            MANIFEST_ID_A.parse().expect("manifest ID"),
+            GitRefState::new(
+                BTreeMap::new(),
+                HeadState::Detached(blob_manifest.git_object_id()),
+            )
+            .expect("detached state"),
+        )
+        .expect("detached snapshot");
+        detached_repository
+            .publish_ref_snapshot(&detached_snapshot, ref_snapshot_publication_limits())
+            .expect("publish detached snapshot");
+        let detached_destination = temporary.path().join("detached-export.git");
+        detached_repository
+            .export_loose_objects(&detached_destination, export_limits())
+            .expect("export detached HEAD");
+        assert_eq!(
+            fs::read(detached_destination.join("HEAD")).expect("read detached HEAD"),
+            format!("{}\n", blob_manifest.git_object_id()).as_bytes()
+        );
+    }
+
+    #[test]
+    fn rejects_unavailable_conflicting_and_tampered_ref_snapshots() {
+        let temporary = TestDirectory::new();
+        let root = temporary.path().join("repository");
+        let repository = LocalRepository::create(&root).expect("create repository");
+        let unavailable = RefSnapshot::new(
+            repository.id(),
+            MANIFEST_ID_A.parse().expect("manifest ID"),
+            GitRefState::new(
+                BTreeMap::from([(
+                    RefName::from_bytes(b"refs/heads/main").expect("ref name"),
+                    GitObjectId::from_bytes([7; GitObjectId::BYTE_LENGTH]),
+                )]),
+                HeadState::Symbolic(RefName::from_bytes(b"refs/heads/main").expect("ref name")),
+            )
+            .expect("state"),
+        )
+        .expect("snapshot");
+        assert_eq!(
+            repository
+                .publish_ref_snapshot(&unavailable, ref_snapshot_publication_limits())
+                .expect_err("unavailable target")
+                .kind(),
+            ErrorKind::NotFound
+        );
+        assert!(!root.join(REF_SNAPSHOT_DIRECTORY).exists());
+
+        let manifest = whole_blob_manifest(
+            &repository,
+            MANIFEST_ID_B.parse().expect("manifest ID"),
+            SEGMENT_ID_A.parse().expect("segment ID"),
+            b"available ref target",
+        );
+        repository
+            .publish_blob_manifest(&manifest)
+            .expect("publish blob manifest");
+        let state = GitRefState::new(
+            BTreeMap::from([(
+                RefName::from_bytes(b"refs/heads/main").expect("ref name"),
+                manifest.git_object_id(),
+            )]),
+            HeadState::Symbolic(RefName::from_bytes(b"refs/heads/main").expect("ref name")),
+        )
+        .expect("state");
+        let first = RefSnapshot::new(
+            repository.id(),
+            MANIFEST_ID_A.parse().expect("manifest ID"),
+            state.clone(),
+        )
+        .expect("snapshot");
+        repository
+            .publish_ref_snapshot(&first, ref_snapshot_publication_limits())
+            .expect("publish snapshot");
+        let conflict = RefSnapshot::new(repository.id(), ManifestId::generate(), state)
+            .expect("conflicting snapshot");
+        assert_eq!(
+            repository
+                .publish_ref_snapshot(&conflict, ref_snapshot_publication_limits())
+                .expect_err("conflict")
+                .kind(),
+            ErrorKind::Conflict
+        );
+        let path = ref_snapshot_path(&root, first.manifest_id());
+        let mut bytes = fs::read(&path).expect("read snapshot");
+        *bytes.last_mut().expect("checksum") ^= 1;
+        fs::write(path, bytes).expect("tamper snapshot");
+        assert_eq!(
+            repository
+                .verify(verification_limits())
+                .expect_err("tampered snapshot")
+                .kind(),
+            ErrorKind::CorruptData
         );
     }
 
@@ -4852,6 +5049,23 @@ mod tests {
             ErrorKind::InvalidInput
         );
         assert_eq!(
+            RefSnapshotReadLimits::new(1, 0, 1)
+                .expect_err("zero ref snapshot byte limit")
+                .kind(),
+            ErrorKind::InvalidInput
+        );
+        assert_eq!(
+            RefSnapshotPublicationLimits::new(
+                0,
+                segment_limits(),
+                manifest_limits(),
+                metadata_object_manifest_limits(),
+            )
+            .expect_err("zero ref snapshot publication limit")
+            .kind(),
+            ErrorKind::InvalidInput
+        );
+        assert_eq!(
             RepositoryVerificationLimits::new(
                 0,
                 1,
@@ -4887,6 +5101,7 @@ mod tests {
         assert_send_sync::<LooseObjectExportLimits>();
         assert_send_sync::<LooseObjectExportReport>();
         assert_send_sync::<MetadataObjectManifestReadLimits>();
+        assert_send_sync::<RefSnapshotPublicationLimits>();
         assert_send_sync::<RepositoryVerificationLimits>();
         assert_send_sync::<RepositoryVerificationReport>();
     }

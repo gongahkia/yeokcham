@@ -56,3 +56,4 @@ Valid statuses are `Proposed`, `Accepted`, `Rejected`, `Deprecated`, and `Supers
 | [ADR-0048](0048-store-nonblob-git-objects-in-segments.md) | Accepted | Store and resolve non-blob Git objects through segments and direct manifests |
 | [ADR-0049](0049-verify-published-immutable-local-storage.md) | Accepted | Publish and fully verify immutable local storage |
 | [ADR-0050](0050-export-published-objects-as-loose-git-objects.md) | Accepted | Export published objects as standard loose Git objects |
+| [ADR-0051](0051-immutable-local-ref-snapshot.md) | Accepted | Publish one immutable local ref snapshot before journals |

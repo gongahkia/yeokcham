@@ -52,7 +52,7 @@ impl GitRefState {
     }
 }
 
-/// Caller-selected bounds for decoding one immutable `YKRF` snapshot.
+/// Caller-selected bounds for resolving one immutable `YKRF` snapshot.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct RefSnapshotReadLimits {
     maximum_directory_entries: usize,
@@ -61,7 +61,7 @@ pub struct RefSnapshotReadLimits {
 }
 
 impl RefSnapshotReadLimits {
-    /// Validates decoding bounds for one snapshot file.
+    /// Validates directory, file, and reference bounds for one snapshot scan.
     pub fn new(
         maximum_directory_entries: usize,
         maximum_snapshot_bytes: u64,

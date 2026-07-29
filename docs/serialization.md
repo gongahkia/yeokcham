@@ -162,3 +162,23 @@ The `YKOM` manifest is immutable metadata for one tree, commit, or annotated tag
 Published local metadata-object manifests use `manifests/objects/<lowercase-git-sha1>.ykom`. The objects directory is optional for existing version-1 repositories and is created only on first publication. The filename must equal the embedded Git ID. Publication writes and synchronizes a same-directory temporary file, creates the final path by hard link without replacement, synchronizes the directory, and removes the temporary name. Repeating identical manifest bytes is idempotent; different bytes for the same Git ID conflict.
 
 Metadata-object resolution reads that direct manifest under caller limits, verifies the named segment fully, binds repository ID, segment ID, and segment checksum, then selects the one type-3 record with the manifest content identity. It verifies Git ID, kind, content identity, and length before reconstructing a `GitObject` and recomputing its final canonical Git SHA-1 identity. SQLite is not a metadata-object resolver or recovery dependency.
+
+## Ref snapshot version 1
+
+The `YKRF` record is an immutable point-in-time recovery bridge for regular Git refs before append-only journal events exist. Its fields are:
+
+1. Magic `YKRF`.
+2. Schema version `1`.
+3. Required feature bits `0`.
+4. Optional feature bits `0`.
+5. Raw 16-byte repository UUIDv4.
+6. Raw 16-byte snapshot UUIDv4.
+7. One-byte `HEAD` state: `1` symbolic followed by a length-prefixed regular `refs/*` name, or `2` detached followed by a raw 20-byte Git SHA-1 ID.
+8. `u64` regular-ref count.
+9. That many entries, strictly ascending by raw refname bytes: length-prefixed regular `refs/*` name followed by its raw 20-byte Git SHA-1 target.
+10. Footer magic `YKRH`.
+11. Raw 32-byte SHA-256 checksum over every preceding snapshot byte.
+
+Published local snapshots use `manifests/refs/<lowercase-snapshot-uuid>.ykrf`; the filename must equal the embedded snapshot ID. The directory is created on first publication. Publication first reconstructs and verifies every regular target and detached `HEAD` target under caller bounds; a symbolic `HEAD` may name an unborn branch. It stages, synchronizes, and hard-links the final file without replacement. Repeating identical publication is idempotent. The current V1 layout accepts exactly one final snapshot: malformed, foreign, duplicate, unexpected, or nonregular entries fail recovery rather than selecting an order-dependent state. Recognized `.<uuid>.partial` staging files are ignored.
+
+Export scans the snapshot under caller directory, file-byte, and reference-entry limits. It writes direct regular-ref files with create-new semantics, then replaces the initialized bare repository's `HEAD` with the preserved symbolic or detached form. All direct targets must already have been exported; no ref is silently dropped or retargeted. This bridge is superseded by the append-only, signed journal design in Milestone 3; it does not represent ref updates or reconciliation.

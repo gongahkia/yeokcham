@@ -677,15 +677,15 @@ mod tests {
         let state = repository.ref_state().expect("read ref state");
         let id: GitObjectId = object_id.parse().expect("object ID");
         assert_eq!(
-            state.regular_refs().get(
-                &RefName::from_bytes(b"refs/heads/alpha").expect("ref name")
-            ),
+            state
+                .regular_refs()
+                .get(&RefName::from_bytes(b"refs/heads/alpha").expect("ref name")),
             Some(&id)
         );
         assert_eq!(
-            state.regular_refs().get(
-                &RefName::from_bytes(b"refs/remotes/origin/HEAD").expect("ref name")
-            ),
+            state
+                .regular_refs()
+                .get(&RefName::from_bytes(b"refs/remotes/origin/HEAD").expect("ref name")),
             Some(&id)
         );
         assert_eq!(
