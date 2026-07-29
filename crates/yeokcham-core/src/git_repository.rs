@@ -34,6 +34,12 @@ impl GitRepository {
             .strict_config(true)
             .bail_if_untrusted(true);
         let inner = options.open(path).map_err(open_error)?;
+        if inner.to_thread_local().object_hash() != gix::hash::Kind::Sha1 {
+            return Err(Error::new(
+                ErrorKind::Unsupported,
+                "Git repository uses an unsupported object hash",
+            ));
+        }
         Ok(Self { inner })
     }
 
@@ -107,7 +113,7 @@ impl GitRepository {
     ///
     /// The result is a point-in-time traversal only; it is not a ref transaction
     /// snapshot. Malformed or unavailable reachable objects fail closed. The
-    /// traversal rejects repositories requiring an unsupported object hash and
+    /// repository hash was accepted as SHA-1 at open time; traversal rejects
     /// repositories with more than 1,000,000 reachable objects.
     pub fn reachable_object_ids(&self) -> Result<Vec<GitObjectId>> {
         let repository = self.inner.to_thread_local();
@@ -480,6 +486,34 @@ mod tests {
         assert!(!worktree_repository.is_bare());
         assert_eq!(worktree_repository.work_dir(), Some(worktree.as_path()));
         assert_eq!(worktree_repository.git_dir(), worktree.join(".git"));
+    }
+
+    #[test]
+    fn rejects_sha256_bare_and_worktree_repositories_at_open() {
+        let temporary = TestDirectory::new();
+        let bare = temporary.path().join("bare.git");
+        let worktree = temporary.path().join("worktree");
+        let bare_text = bare.to_str().expect("UTF-8 test path");
+        let worktree_text = worktree.to_str().expect("UTF-8 test path");
+        run_git(&["init", "--bare", "--object-format=sha256", bare_text]);
+        run_git(&[
+            "init",
+            "--initial-branch=main",
+            "--object-format=sha256",
+            worktree_text,
+        ]);
+
+        for repository in [&bare, &worktree] {
+            let error = GitRepository::open(repository)
+                .expect_err("SHA-256 repository must fail at open");
+
+            assert_eq!(error.kind(), ErrorKind::Unsupported);
+            assert_eq!(
+                error.public_message(),
+                "Git repository uses an unsupported object hash"
+            );
+            assert!(!format!("{error:?}").contains(&repository.display().to_string()));
+        }
     }
 
     #[test]
