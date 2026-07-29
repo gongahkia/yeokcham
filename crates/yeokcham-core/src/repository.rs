@@ -3470,6 +3470,20 @@ mod tests {
         );
     }
 
+    fn run_git_in(directory: &Path, arguments: &[&str]) {
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(directory)
+            .args(arguments)
+            .output()
+            .expect("run Git");
+        assert!(
+            output.status.success(),
+            "Git command must succeed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
     fn verified_segment(repository: &LocalRepository, id: SegmentId) -> ReadSegment {
         let bytes = fs::read(repository.segment_path(id)).expect("read segment");
         SegmentReader::decode(&bytes, segment_limits()).expect("decode segment")
@@ -3972,6 +3986,108 @@ mod tests {
                 .kind(),
             ErrorKind::CorruptData
         );
+    }
+
+    #[test]
+    fn preserves_reachable_object_sets_from_a_real_git_source() {
+        let temporary = TestDirectory::new();
+        let source_path = temporary.path().join("source");
+        run_git_in(
+            temporary.path(),
+            &[
+                "init",
+                "--initial-branch=main",
+                source_path.to_str().expect("UTF-8 test path"),
+            ],
+        );
+        fs::write(source_path.join("body.bin"), b"\0first source body\xff")
+            .expect("write first source body");
+        run_git_in(&source_path, &["add", "body.bin"]);
+        run_git_in(
+            &source_path,
+            &[
+                "-c",
+                "user.name=Yeokcham Test",
+                "-c",
+                "user.email=test@example.invalid",
+                "commit",
+                "--message=first",
+            ],
+        );
+        fs::write(source_path.join("body.bin"), b"\0second source body\xff")
+            .expect("write second source body");
+        run_git_in(&source_path, &["add", "body.bin"]);
+        run_git_in(
+            &source_path,
+            &[
+                "-c",
+                "user.name=Yeokcham Test",
+                "-c",
+                "user.email=test@example.invalid",
+                "commit",
+                "--message=second",
+            ],
+        );
+        run_git_in(
+            &source_path,
+            &[
+                "-c",
+                "user.name=Yeokcham Test",
+                "-c",
+                "user.email=test@example.invalid",
+                "tag",
+                "--annotate",
+                "v1.0",
+                "--message=version one",
+            ],
+        );
+
+        let source = GitRepository::open(&source_path).expect("open source repository");
+        let source_ids = source
+            .reachable_object_ids()
+            .expect("read source reachable object IDs");
+        let source_state = source.ref_state().expect("read source ref state");
+        let repository_root = temporary.path().join("repository");
+        let repository = LocalRepository::create(&repository_root).expect("create repository");
+        for id in source_ids.iter().copied() {
+            let object = source
+                .read_verified_object(id, 4_096)
+                .expect("read verified source object");
+            match object.kind() {
+                GitObjectKind::Blob => repository
+                    .publish_blob_manifest(&whole_blob_manifest(
+                        &repository,
+                        ManifestId::generate(),
+                        SegmentId::generate(),
+                        object.data(),
+                    ))
+                    .expect("publish source blob manifest"),
+                GitObjectKind::Tree | GitObjectKind::Commit | GitObjectKind::Tag => repository
+                    .publish_metadata_object_manifest(&metadata_object_manifest(
+                        &repository,
+                        SegmentId::generate(),
+                        object.kind(),
+                        object.data(),
+                    ))
+                    .expect("publish source metadata manifest"),
+            }
+        }
+        let snapshot = RefSnapshot::new(repository.id(), ManifestId::generate(), source_state)
+            .expect("create source ref snapshot");
+        repository
+            .publish_ref_snapshot(&snapshot, ref_snapshot_publication_limits())
+            .expect("publish source ref snapshot");
+
+        let destination = temporary.path().join("export.git");
+        repository
+            .export_loose_objects(&destination, export_limits())
+            .expect("export source repository");
+        let exported_ids = GitRepository::open(&destination)
+            .expect("open export repository")
+            .reachable_object_ids()
+            .expect("read exported reachable object IDs");
+        assert_eq!(exported_ids, source_ids);
+        git_fsck(&destination);
     }
 
     #[test]

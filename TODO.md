@@ -75,7 +75,7 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 - [x] Export loose Git objects or a pack.
 - [x] Restore refs.
 - [x] Run `git fsck --full`.
-- [ ] Compare reachable object sets with source repository.
+- [x] Compare reachable object sets with source repository.
 - [ ] Compare checkout bytes.
 
 ### Tests
