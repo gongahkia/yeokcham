@@ -34,6 +34,25 @@ impl ContentHashAlgorithm {
     pub const fn requires_key(self) -> bool {
         matches!(self, Self::HmacSha256 | Self::Blake3Keyed)
     }
+
+    pub(crate) const fn binary_tag(self) -> u8 {
+        match self {
+            Self::HmacSha256 => 1,
+            Self::Blake3Keyed => 2,
+            Self::Sha256 => 3,
+            Self::Blake3 => 4,
+        }
+    }
+
+    pub(crate) const fn from_binary_tag(tag: u8) -> Option<Self> {
+        match tag {
+            1 => Some(Self::HmacSha256),
+            2 => Some(Self::Blake3Keyed),
+            3 => Some(Self::Sha256),
+            4 => Some(Self::Blake3),
+            _ => None,
+        }
+    }
 }
 
 impl FromStr for ContentHashAlgorithm {
@@ -182,6 +201,23 @@ mod tests {
         assert!(ContentHashAlgorithm::Blake3Keyed.requires_key());
         assert!(!ContentHashAlgorithm::Sha256.requires_key());
         assert!(!ContentHashAlgorithm::Blake3.requires_key());
+    }
+
+    #[test]
+    fn binary_tags_are_stable_and_bijective() {
+        let cases = [
+            (ContentHashAlgorithm::HmacSha256, 1),
+            (ContentHashAlgorithm::Blake3Keyed, 2),
+            (ContentHashAlgorithm::Sha256, 3),
+            (ContentHashAlgorithm::Blake3, 4),
+        ];
+
+        for (algorithm, tag) in cases {
+            assert_eq!(algorithm.binary_tag(), tag);
+            assert_eq!(ContentHashAlgorithm::from_binary_tag(tag), Some(algorithm));
+        }
+        assert_eq!(ContentHashAlgorithm::from_binary_tag(0), None);
+        assert_eq!(ContentHashAlgorithm::from_binary_tag(5), None);
     }
 
     #[test]

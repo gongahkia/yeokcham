@@ -32,3 +32,20 @@ Record schemas may use a fixed ordered sequence of fields or an ordered repeated
 ## Evolution
 
 Each new record family documents its magic, schema version, field order, limits, and feature effects before implementation. Incompatible changes require a new schema version or required feature bit and a copy-on-write migration. Existing records retain their original encoding forever.
+
+## Whole-blob record version 1
+
+The `YKWB` record stores one exact, verified Git blob body before segment framing exists. Its fields are:
+
+1. Magic `YKWB`.
+2. Schema version `1`.
+3. Required feature bits `0`.
+4. Optional feature bits `0`.
+5. Record type `1` for whole blob.
+6. Compression method `0` for no compression.
+7. One-byte plaintext-content-hash algorithm tag.
+8. Raw 20-byte SHA-1 Git blob ID.
+9. Raw 32-byte plaintext content digest.
+10. `u64` body byte length followed by the exact body bytes.
+
+Content-hash tags are `1` HMAC-SHA-256, `2` keyed BLAKE3, `3` SHA-256, and `4` BLAKE3. Version 1 writes and verifies only tag `3`; it rejects the other reserved tags until their key/configuration and implementation contracts exist. Callers bound the encoded record and supply a maximum decoded body length before the parser allocates. The decoder rejects nonzero feature bits, foreign record types, compression modes, malformed tags, length mismatch/truncation, trailing bytes, and mismatched Git or content IDs.

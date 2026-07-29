@@ -40,3 +40,4 @@ Valid statuses are `Proposed`, `Accepted`, `Rejected`, `Deprecated`, and `Supers
 | [ADR-0032](0032-canonical-sha1-git-object-verification.md) | Accepted | Verify SHA-1 Git objects from canonical header and body bytes |
 | [ADR-0033](0033-local-sqlite-object-metadata.md) | Accepted | Store verified Git object metadata in a local versioned SQLite database |
 | [ADR-0034](0034-reject-unsupported-git-object-hashes-at-open.md) | Accepted | Reject unsupported Git object hash formats during repository opening |
+| [ADR-0035](0035-versioned-whole-blob-record.md) | Accepted | Store verified small-slice blobs as canonical whole-blob records |

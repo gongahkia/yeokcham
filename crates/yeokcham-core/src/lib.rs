@@ -15,6 +15,7 @@ mod repository_format;
 mod repository_id;
 mod segment_id;
 mod telemetry;
+mod whole_blob_record;
 mod yeokcham_content_id;
 
 pub use canonical::{CanonicalDecoder, CanonicalEncoder};
@@ -30,4 +31,5 @@ pub use repository_format::{RepositoryFeatureFlags, RepositoryFormat, Repository
 pub use repository_id::RepositoryId;
 pub use segment_id::SegmentId;
 pub use telemetry::{Redacted, redact};
+pub use whole_blob_record::WholeBlobRecord;
 pub use yeokcham_content_id::{ContentHashAlgorithm, YeokchamContentId};

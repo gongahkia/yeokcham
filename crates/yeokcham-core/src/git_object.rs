@@ -72,12 +72,17 @@ impl GitObject {
 
     /// Recomputes the SHA-1 ID from the canonical Git header and body.
     pub fn recompute_id(&self) -> GitObjectId {
+        Self::recompute_id_for(self.kind, &self.data)
+    }
+
+    /// Recomputes a SHA-1 ID from one Git type and exact object body.
+    pub(crate) fn recompute_id_for(kind: GitObjectKind, data: &[u8]) -> GitObjectId {
         let mut hasher = Sha1::new();
-        hasher.update(self.kind.canonical_name());
+        hasher.update(kind.canonical_name());
         hasher.update(b" ");
-        hasher.update(self.data.len().to_string().as_bytes());
+        hasher.update(data.len().to_string().as_bytes());
         hasher.update([0]);
-        hasher.update(&self.data);
+        hasher.update(data);
         GitObjectId::from_bytes(hasher.finalize().into())
     }
 
