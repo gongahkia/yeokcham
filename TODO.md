@@ -5,10 +5,10 @@ The roadmap is ordered. The local byte-correct model must exist before semantic 
 ## Active vertical slice
 
 - Milestone: 0 — Project and model foundation.
-- Task: configure formatting and linting (complete).
+- Task: configure unit and property-test CI (complete).
 - Types: none; model types begin after project tooling is established.
-- Invariants: OCamlFormat 0.29.0 defines source layout; all enabled compiler warnings fail development builds.
-- Tests: `dune build @fmt @lint @all` passes; development flags contain `-warn-error +a -w @a`.
+- Invariants: CI uses OCaml 5.5.0 and executes both unit and generated property tests.
+- Tests: local unit/property smoke suite passes; `actionlint` accepts the workflow.
 - ADR changes: none; no architectural choice changes.
 
 ## Milestone 0 — Project and model foundation
@@ -18,7 +18,7 @@ The roadmap is ordered. The local byte-correct model must exist before semantic 
 - [x] Create Dune project.
 - [x] Select supported OCaml version.
 - [x] Configure formatting and linting.
-- [ ] Configure unit and property-test CI.
+- [x] Configure unit and property-test CI.
 - [ ] Add licence and contribution guide.
 - [ ] Add ADR process.
 - [ ] Add reproducible development commands.

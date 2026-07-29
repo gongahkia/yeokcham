@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: "5.5.0"
+          dune-cache: true
+      - run: opam install . --deps-only --with-test
+      - run: opam exec -- dune build @lint @all
+      - run: opam exec -- dune runtest
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: "5.5.0"
+      - uses: ocaml/setup-ocaml/lint-fmt@v3

@@ -1,9 +1,15 @@
 (lang dune 3.23)
 (name paengi)
+(generate_opam_files true)
 
 (package
  (name paengi)
+ (synopsis "Experimental model-first local-first version control")
+ (description "A local-first VCS separating scratch, intent, and release history.")
  (allow_empty)
  (depends
   (ocaml (= 5.5.0))
-  (dune (>= 3.23))))
+  (dune (>= 3.23))
+  (alcotest (and (= 1.9.1) :with-test))
+  (qcheck-core (and (= 0.91) :with-test))
+  (qcheck-alcotest (and (= 0.91) :with-test))))
