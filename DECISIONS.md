@@ -123,3 +123,7 @@ The ADR lifecycle, numbering rules, and template are defined in [`docs/adr/READM
 **Reason:** TypeScript provides common source structures and a broad demonstration audience; Rust follows to test a stricter and macro-heavy language.
 
 **Consequence:** The byte model must remain language-neutral.
+
+## File-backed ADRs
+
+- [ADR-016 — Initial SHA-256 implementation](docs/adr/016-initial-sha256-implementation.md) — Accepted.

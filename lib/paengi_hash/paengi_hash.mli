@@ -16,3 +16,5 @@ module type S = sig
   val equal : digest -> digest -> bool
   val compare : digest -> digest -> int
 end
+
+module Sha256 : S

@@ -5,13 +5,13 @@ The roadmap is ordered. The local byte-correct model must exist before semantic 
 ## Active vertical slice
 
 - Milestone: 0 — Project and model foundation.
-- Task: define the hash abstraction (complete).
-- Modules/files: `paengi_hash` interface library plus an injected fake implementation and conformance tests; no production algorithm, persistence, or CLI.
-- Types: abstract digest and streaming context under an algorithm module signature.
-- Invariants: algorithm name is non-empty; digest byte length is fixed; one-shot bytes/string and any ordered chunking produce equal digests; contexts are persistent values; raw digest bytes round-trip through the abstraction.
-- Tests: interface injection, metadata, one-shot equivalence, offset/length handling, and 500 generated chunk-boundary equivalence cases over arbitrary bytes; `make ci` pass on 2026-07-29.
-- External libraries: none; production adapter selection is the next task.
-- ADR changes: none; this implements ADR-013 without selecting an algorithm or persistent representation.
+- Task: select the initial hash implementation.
+- Modules/files: `Paengi_hash.Sha256` Digestif adapter, dependency metadata, ADR-016, and unit/property tests; no persistence or CLI.
+- Types: no new model types; concrete SHA-256 digest and context remain abstract behind `Paengi_hash.S`.
+- Invariants: digest size is exactly 32 bytes; published vectors match; one-shot and arbitrary chunking agree; raw digest parsing rejects non-32-byte input; Digestif types do not escape the adapter.
+- Tests: published empty/short/multiblock/million-byte vectors, raw conversion, generated chunk-boundary equivalence, fresh dependency bootstrap, and existing gates.
+- External libraries: proposed Digestif 1.3.1 with explicit pure-OCaml backend.
+- ADR changes: [ADR-016](docs/adr/016-initial-sha256-implementation.md) accepted by the maintainer on 2026-07-29.
 
 ## Milestone 0 — Project and model foundation
 

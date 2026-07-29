@@ -14,6 +14,7 @@
  (depends
   (ocaml (= 5.5.0))
   (dune (>= 3.23))
+  (digestif (= 1.3.1))
   (alcotest (and (= 1.9.1) :with-test))
   (qcheck-core (and (= 0.91) :with-test))
   (qcheck-alcotest (and (= 0.91) :with-test))))
