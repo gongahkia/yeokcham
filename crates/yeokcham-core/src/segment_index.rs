@@ -366,20 +366,31 @@ mod tests {
         SegmentWriteLimits, SegmentWriter, WholeBlobRecord,
     };
 
-    fn index() -> SegmentIndex {
-        let directory = std::env::temp_dir().join(format!("yeokcham-index-{}", Uuid::new_v4()));
-        fs::create_dir(&directory).expect("directory");
-        let object = GitObject::new(
-            "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391"
-                .parse::<GitObjectId>()
-                .expect("blob ID"),
+    const HEADER_BYTES: usize = 90;
+    const ENTRY_BYTES: usize = 59;
+
+    fn whole_blob(data: &[u8]) -> SegmentRecord {
+        let provisional = GitObject::new(
+            GitObjectId::from_bytes([0; GitObjectId::BYTE_LENGTH]),
             GitObjectKind::Blob,
-            Vec::new(),
+            data.to_vec(),
         );
-        let record = SegmentRecord::from_whole_blob(
+        let object = GitObject::new(
+            provisional.recompute_id(),
+            GitObjectKind::Blob,
+            data.to_vec(),
+        );
+        SegmentRecord::from_whole_blob(
             &WholeBlobRecord::from_verified_blob(&object).expect("whole blob"),
         )
-        .expect("segment record");
+        .expect("segment record")
+    }
+
+    fn index(records: Vec<SegmentRecord>) -> (SegmentIndex, [u8; 32]) {
+        let maximum_stored_bytes = records.iter().map(SegmentRecord::stored_len).sum();
+        let record_count = records.len();
+        let directory = std::env::temp_dir().join(format!("yeokcham-index-{}", Uuid::new_v4()));
+        fs::create_dir(&directory).expect("directory");
         let mut writer = SegmentWriter::new(
             "550e8400-e29b-41d4-a716-446655440000"
                 .parse()
@@ -387,24 +398,38 @@ mod tests {
             "6ba7b814-9dad-41d1-80b4-00c04fd430c8"
                 .parse()
                 .expect("segment ID"),
-            SegmentWriteLimits::new(1, record.stored_len()).expect("limits"),
+            SegmentWriteLimits::new(record_count, maximum_stored_bytes).expect("limits"),
         );
-        writer.add(record).expect("add");
+        for record in records {
+            writer.add(record).expect("add");
+        }
         let path = directory.join("segment");
         writer.seal_to(&path).expect("seal");
         let bytes = fs::read(path).expect("segment bytes");
         let segment = SegmentReader::decode(
             &bytes,
-            SegmentReadLimits::new(1, 1024, 1024, 1024, 1024, 1024).expect("limits"),
+            SegmentReadLimits::new(
+                record_count,
+                maximum_stored_bytes,
+                usize::try_from(maximum_stored_bytes).expect("stored bytes"),
+                1024,
+                1024,
+                1024,
+            )
+            .expect("limits"),
         )
         .expect("segment");
+        let checksum = segment.checksum();
         let _ = fs::remove_dir_all(&directory);
-        SegmentIndex::from_segment(&segment).expect("index")
+        (
+            SegmentIndex::from_segment(&segment).expect("index"),
+            checksum,
+        )
     }
 
     #[test]
     fn round_trips_canonical_lookup_index() {
-        let index = index();
+        let (index, _) = index(vec![whole_blob(&[])]);
         let encoded = index.encode();
         let decoded = SegmentIndex::decode(&encoded, 1, 85).expect("decode");
 
@@ -420,8 +445,12 @@ mod tests {
 
     #[test]
     fn rejects_index_limits_and_corruption() {
-        let encoded = index().encode();
+        let encoded = index(vec![whole_blob(&[])]).0.encode();
         let limited = SegmentIndex::decode(&encoded, 0, 85).expect_err("entry limit");
+        let mut footer_totals = encoded.clone();
+        let footer_total_offset = footer_totals.len() - 48;
+        footer_totals[footer_total_offset] ^= 1;
+        let footer_totals = SegmentIndex::decode(&footer_totals, 1, 85).expect_err("footer totals");
         let mut corrupt = encoded.clone();
         let final_byte = corrupt.len() - 1;
         corrupt[final_byte] ^= 1;
@@ -431,7 +460,45 @@ mod tests {
         let trailing = SegmentIndex::decode(&trailing, 1, 85).expect_err("trailing");
 
         assert_eq!(limited.kind(), ErrorKind::Unsupported);
+        assert_eq!(footer_totals.kind(), ErrorKind::CorruptData);
         assert_eq!(corrupt.kind(), ErrorKind::CorruptData);
         assert_eq!(trailing.kind(), ErrorKind::CorruptData);
+    }
+
+    #[test]
+    fn rejects_duplicate_or_out_of_order_content_id_entries() {
+        let (index, _) = index(vec![whole_blob(&[]), whole_blob(b"x")]);
+        let mut encoded = index.encode();
+        let first_content_id = encoded[HEADER_BYTES..HEADER_BYTES + 33].to_vec();
+        encoded[HEADER_BYTES + ENTRY_BYTES..HEADER_BYTES + ENTRY_BYTES + 33]
+            .copy_from_slice(&first_content_id);
+
+        let error = SegmentIndex::decode(&encoded, 2, 171).expect_err("duplicate entries");
+
+        assert_eq!(error.kind(), ErrorKind::CorruptData);
+        assert_eq!(
+            error.public_message(),
+            "segment index entries are not strictly sorted"
+        );
+    }
+
+    #[test]
+    fn binds_verified_segment_checksum_and_redacts_diagnostics() {
+        let (index, segment_checksum) = index(vec![whole_blob(&[])]);
+        let encoded = index.encode();
+        let diagnostic = format!("{index:?}");
+
+        assert_eq!(index.segment_checksum(), segment_checksum);
+        assert_eq!(&encoded[54..86], segment_checksum);
+        assert!(diagnostic.contains("<redacted>"));
+        assert!(!diagnostic.contains("e69de29bb2d1d6434b8b29ae775ad8c2e48c5391"));
+    }
+
+    #[test]
+    fn index_types_are_send_and_sync() {
+        fn assert_send_sync<T: Send + Sync>() {}
+
+        assert_send_sync::<SegmentIndex>();
+        assert_send_sync::<SegmentIndexEntry>();
     }
 }
