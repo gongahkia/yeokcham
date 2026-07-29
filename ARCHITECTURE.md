@@ -148,6 +148,8 @@ Recommended prototype approach:
 
 Object-store identity and storage-publication rules remain separate decisions.
 
+ADR-020 resolves the initial store rule: a `Stored_object_id` is SHA-256 of the `paengi:object:v1\000` domain prefix followed by the exact Envelope-1 bytes. It is rendered as 64 lowercase hexadecimal characters at `.paengi/objects/<hex[0:2]>/<hex[2:4]>/<hex[4:64]>`. Writers use same-shard temporary files, file fsync, hard-link no-replace publication, and directory fsync; an existing final path is verified byte-identically or reported as collision/corruption. No overwriting rename fallback is permitted. Directory fsync unsupported by a filesystem weakens crash-durability guarantees and is documented rather than hidden.
+
 ### 4.3 Content IDs
 
 Use a hash abstraction.
@@ -194,6 +196,8 @@ The snapshot engine:
 - Stores file manifests and trees.
 - Produces a snapshot ID.
 - Reuses unchanged object identities.
+
+The initial scanner implements exact-path `.paengiignore` entries, excludes the root `.paengi`, stores content/tree/snapshot schemas from ADR-021, and supports regular files, executable mode, and symlinks without following them. Chunk manifests and unsupported node kinds remain later work with explicit errors in this slice.
 
 Initial implementation should use full or metadata-assisted scans. Filesystem watching is a later optimisation.
 
@@ -289,6 +293,8 @@ Working-directory update should be transactional where possible:
 5. Atomically replace files where supported.
 6. Record pre-operation safety checkpoint.
 7. Update workspace ref only after successful materialisation.
+
+Milestone 1 materialisation is intentionally narrower: it emits an inspectable dry-run plan and writes only to an existing empty destination with exclusive file creation. It preserves regular bytes, executable mode, directories, and symlink target bytes; unsafe decoded names and nonempty destinations reject. Workspace transactional replacement and safety checkpoints remain scratch/workspace work.
 
 ## 10. Semantic sidecar architecture
 

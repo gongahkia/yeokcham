@@ -8,6 +8,7 @@ Notation is descriptive rather than a complete mechanised proof.
 
 ```ocaml
 type repository_id
+type stored_object_id
 type content_id
 type snapshot_id
 type checkpoint_id
@@ -27,6 +28,8 @@ All persistent identities must have:
 - Explicit versioning where applicable.
 - Equality independent of in-memory representation.
 - Human-readable shortened form for CLI use.
+
+`stored_object_id` is a format-specific storage identity, not a semantic snapshot, checkpoint, capsule, revision, release, or conflict identity. ADR-020 defines its Envelope-1 preimage and path layout.
 
 ## 2. Canonical content model
 
@@ -82,6 +85,30 @@ type snapshot = {
 ```
 
 The snapshot ID must be derivable from canonical content, not timestamps.
+
+### Persisted snapshot subset
+
+Milestone 1 stores content, trees, and snapshots as separate Envelope-1 objects under ADR-021. The retained Milestone 0 in-memory snapshot payload remains a distinct model fixture and is not reinterpreted as this store schema.
+
+```text
+content-v1 = [1, bytes]
+tree-v1 = [1, [* tree-entry-v1]]
+file-entry-v1 = [0, name-bytes, mode, content-stored-object-id]
+directory-entry-v1 = [1, name-bytes, tree-stored-object-id]
+snapshot-v1 = [1, root-tree-stored-object-id]
+```
+
+Every stored-object reference is exactly 32 raw bytes. Tree names are nonempty safe path components and are strictly bytewise ascending. Mode codes are regular `0`, executable `1`, and symlink `2`. A scanner stores a symlink target as authoritative content bytes without following it; `.paengi` is excluded and `.paengiignore` uses exact safe relative paths only.
+
+### Materialisation invariant
+
+For a valid persisted snapshot `s` and an empty real destination directory `d`:
+
+```text
+scan(materialise(s, d)) = s
+```
+
+for regular-file bytes, executable mode, directory structure, and symlink target bytes supported by the host filesystem. Materialisation accepts only decoded safe tree names, creates output files exclusively, and returns an explicit error rather than overwriting a nonempty destination.
 
 ## 3. Scratch history
 

@@ -5,14 +5,14 @@ Robustness tasks operate only on Paengi's pure functions and generated local fix
 
 ## Active vertical slice
 
-- Milestone: 0 — Project and model foundation.
-- Task: close Milestone 0 canonical model-fixture, portable-format audit, and codec-baseline work (complete).
-- Modules/files: canonical model decode functions and envelope fixtures; `tools/check_persistent_format.sh`; `bench/encoding_benchmark.ml`; compact benchmark schema/result; `Makefile`; and related tests/docs.
-- Types: structured canonical-model decode errors; inverse decoders for existing snapshot, scratch-event, and checkpoint payload schemas; no new object schema or persistent repository adapter.
-- Invariants: golden Envelope 1 bytes decode and re-encode identically; model decoders reject malformed, non-normalized, or mismatched references; all production `lib/` sources are free of OCaml runtime serialization; benchmark inputs and operation count are fixed.
-- Tests: four model-object golden cases cover empty/nested trees, ordering, file modes, all five scratch operations, checkpoint metadata, and retention. `make check` and `make property-test PROPERTY_TEST_SEED=17` pass; `make benchmark-encoding` writes the host-specific baseline.
+- Milestone: 1 — Canonical object store and snapshots.
+- Task: immutable Envelope-1 store/init, persisted content/tree/snapshot scanner, and safe empty-destination materialisation (complete).
+- Modules/files: `paengi_store`; `paengi_snapshot`; store, snapshot, and materialisation tests/properties; three persisted-object golden fixtures; ADR-020 and ADR-021; model and architecture documentation.
+- Types: abstract `Stored_object_id`, distinct persisted content/tree/snapshot ID wrappers, typed tree entries, scanner errors, and materialisation plans/errors; existing semantic model IDs and M0 payload schemas are unchanged.
+- Invariants: stored ID is the ADR-020 domain-separated hash of exact Envelope-1 bytes; final objects are hard-link published without overwrite; tree names/order and references are canonical; scan excludes `.paengi`; materialisation only writes safe plans to empty destinations.
+- Tests: focused Alcotest corruption/restart/schema/scan/materialisation tests; golden Content/Tree/Snapshot Envelope-1 bytes; bounded deterministic store, scan, and scan/materialise properties with printed seeds. Full `make check` and `make property-test PROPERTY_TEST_SEED=17` remain required after the slice.
 - External libraries: existing Alcotest, QCheck, SHA-256, Profile 1 encoder, and Unix only.
-- ADR changes: no new ADR; existing Profile 1, Envelope 1, and model payload schemas are retained.
+- ADR changes: ADR-020 specifies stored-object identity/publication; ADR-021 specifies Content/Tree/Snapshot schemas.
 
 ## Milestone 0 — Project and model foundation
 
@@ -61,26 +61,26 @@ Robustness tasks operate only on Paengi's pure functions and generated local fix
 
 ### Object store
 
-- [ ] Implement immutable object write.
-- [ ] Implement object read and verification.
-- [ ] Implement atomic temporary-write-and-rename.
-- [ ] Implement object-type envelope.
-- [ ] Implement content-addressed path layout.
-- [ ] Implement corruption detection.
+- [x] Implement immutable object write.
+- [x] Implement object read and verification.
+- [x] Implement atomic temporary-write-and-no-replace publication.
+- [x] Implement object-type envelope.
+- [x] Implement content-addressed path layout.
+- [x] Implement corruption detection.
 - [ ] Implement rebuildable SQLite index if needed.
 
 ### Filesystem scanning
 
-- [ ] Initialise `.paengi`.
-- [ ] Exclude `.paengi`.
-- [ ] Add ignore-file support.
-- [ ] Scan regular files.
-- [ ] Preserve executable mode.
-- [ ] Preserve symlinks safely.
-- [ ] Hash file content.
-- [ ] Store trees canonically.
-- [ ] Produce root snapshot.
-- [ ] Reuse unchanged content.
+- [x] Initialise `.paengi`.
+- [x] Exclude `.paengi`.
+- [x] Add ignore-file support.
+- [x] Scan regular files.
+- [x] Preserve executable mode.
+- [x] Preserve symlinks safely.
+- [x] Hash file content.
+- [x] Store trees canonically.
+- [x] Produce root snapshot.
+- [x] Reuse unchanged content.
 
 ### Large content
 
@@ -92,16 +92,16 @@ Robustness tasks operate only on Paengi's pure functions and generated local fix
 
 ### Materialisation
 
-- [ ] Materialise snapshot to empty directory.
-- [ ] Compare exact bytes and modes.
-- [ ] Reject path traversal.
-- [ ] Handle safe symlink creation.
-- [ ] Add dry-run materialisation plan.
+- [x] Materialise snapshot to empty directory.
+- [x] Compare exact bytes and modes.
+- [x] Reject path traversal.
+- [x] Handle safe symlink creation.
+- [x] Add dry-run materialisation plan.
 
 ### Exit criteria
 
-- [ ] Snapshot round trip is exact.
-- [ ] Corruption is detected.
+- [x] Snapshot round trip is exact.
+- [x] Corruption is detected.
 - [ ] Generated filesystem fixtures pass.
 - [ ] Unknown file types remain byte-correct.
 
