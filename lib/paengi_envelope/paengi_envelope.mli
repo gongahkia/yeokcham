@@ -17,6 +17,8 @@ type object_type =
   | Validation
   | Resolution
   | Repository_config
+  | Chunk
+  | File_manifest
 
 val object_type_code : object_type -> int
 val object_type_of_code : int -> object_type option

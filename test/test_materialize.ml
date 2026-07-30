@@ -31,6 +31,16 @@ let write_file path bytes =
 
 let read_file path = In_channel.with_open_bin path In_channel.input_all
 
+let deterministic_bytes length =
+  let state = ref 0x13198a2e03707344L in
+  let bytes = Bytes.create length in
+  for index = 0 to length - 1 do
+    state := Int64.add (Int64.mul !state 2862933555777941757L) 3037000493L;
+    Bytes.set bytes index
+      (Char.chr Int64.(to_int (logand (shift_right_logical !state 32) 255L)))
+  done;
+  Bytes.unsafe_to_string bytes
+
 let scanned_fixture run =
   with_directory "paengi-materialize-source-" (fun source ->
       with_directory "paengi-materialize-store-" (fun store_root ->
@@ -155,6 +165,33 @@ let unsafe_tree_name_cannot_materialise () =
                 (Array.length (Sys.readdir destination))
           | Ok () -> Alcotest.fail "unsafe tree name was materialised"))
 
+let manifest_backed_file_materialises_exactly () =
+  with_directory "paengi-large-materialize-source-" (fun source ->
+      with_directory "paengi-large-materialize-store-" (fun store_root ->
+          with_directory "paengi-large-materialize-destination-"
+            (fun destination ->
+              let contents = deterministic_bytes (3 * 131_072 + 17) in
+              write_file (Filename.concat source "large.bin") contents;
+              let store =
+                Store.init ~root:store_root |> require_ok Store.error_to_string
+              in
+              let source_id, snapshot =
+                Snapshot_store.scan ~root:source ~store
+                |> require_ok Snapshot_store.error_to_string
+              in
+              Snapshot_store.Materialize.write ~destination store snapshot
+              |> require_ok Snapshot_store.Materialize.error_to_string;
+              Alcotest.(check string)
+                "manifest-backed regular bytes" contents
+                (read_file (Filename.concat destination "large.bin"));
+              let destination_id, _ =
+                Snapshot_store.scan ~root:destination ~store
+                |> require_ok Snapshot_store.error_to_string
+              in
+              Alcotest.(check bool)
+                "manifest-backed round-trip identity" true
+                (Snapshot_store.Snapshot.equal_id source_id destination_id))))
+
 let () =
   Alcotest.run "snapshot materialisation"
     [
@@ -166,5 +203,7 @@ let () =
             nonempty_destination_is_unchanged;
           Alcotest.test_case "unsafe tree paths are rejected" `Quick
             unsafe_tree_name_cannot_materialise;
+          Alcotest.test_case "manifest-backed file materialises exactly" `Quick
+            manifest_backed_file_materialises_exactly;
         ] );
     ]

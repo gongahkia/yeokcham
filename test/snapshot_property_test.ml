@@ -44,7 +44,16 @@ let write_file path bytes =
   Out_channel.with_open_bin path (fun channel ->
       Out_channel.output_string channel bytes)
 
-let bytes_generator = QCheck2.Gen.string_size (QCheck2.Gen.int_range 0 512)
+let small_bytes_generator = QCheck2.Gen.string_size (QCheck2.Gen.int_range 0 512)
+
+let manifest_bytes_generator =
+  QCheck2.Gen.string_size
+    (QCheck2.Gen.int_range
+       (Snapshot_store.inline_file_limit + 1)
+       (Snapshot_store.inline_file_limit + (128 * 1024)))
+
+let bytes_generator =
+  QCheck2.Gen.oneof [ small_bytes_generator; manifest_bytes_generator ]
 
 let scan_determinism =
   QCheck2.Test.make ~count:100

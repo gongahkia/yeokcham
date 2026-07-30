@@ -1,6 +1,7 @@
 module Encoding = Paengi_encoding
 module Envelope = Paengi_envelope
 module Store = Paengi_store
+module Hash = Paengi_hash.Sha256
 
 type file_mode = Regular | Executable | Symlink
 
@@ -19,7 +20,15 @@ type error =
   | Unordered_name of { previous : string; current : string }
   | Invalid_mode of int64
   | Invalid_object_id_length of int
+  | Invalid_content_id_length of int
   | Noncanonical_schema_bytes
+  | Noncanonical_content_representation of { length : int; limit : int }
+  | Unsupported_chunking_algorithm of int64
+  | Unsupported_chunking_parameters of string
+  | Invalid_chunk_length of int64
+  | Manifest_length_mismatch of { declared : int; actual : int }
+  | Manifest_content_identity_mismatch
+  | Noncanonical_chunk_boundaries
   | File_too_large of { path : string; size : int; limit : int }
   | Scan_error of { path : string; operation : string; message : string }
   | Unsupported_file_type of { path : string; kind : string }
@@ -49,8 +58,27 @@ let error_to_string = function
   | Invalid_mode mode -> Printf.sprintf "invalid persisted file mode: %Ld" mode
   | Invalid_object_id_length length ->
       Printf.sprintf "stored object ID must be 32 bytes, got %d" length
+  | Invalid_content_id_length length ->
+      Printf.sprintf "content identity must be 32 bytes, got %d" length
   | Noncanonical_schema_bytes ->
       "persisted snapshot schema bytes are noncanonical"
+  | Noncanonical_content_representation { length; limit } ->
+      Printf.sprintf
+        "file manifest is noncanonical for %d bytes; inline limit is %d" length
+        limit
+  | Unsupported_chunking_algorithm algorithm ->
+      Printf.sprintf "unsupported manifest chunking algorithm: %Ld" algorithm
+  | Unsupported_chunking_parameters parameters ->
+      Printf.sprintf "unsupported manifest chunking parameters: %s" parameters
+  | Invalid_chunk_length length ->
+      Printf.sprintf "invalid manifest chunk length: %Ld" length
+  | Manifest_length_mismatch { declared; actual } ->
+      Printf.sprintf "manifest length mismatch: declared %d bytes, got %d" declared
+        actual
+  | Manifest_content_identity_mismatch ->
+      "manifest full-content identity does not match reconstructed bytes"
+  | Noncanonical_chunk_boundaries ->
+      "manifest chunks do not match the declared canonical boundaries"
   | File_too_large { path; size; limit } ->
       Printf.sprintf "file exceeds inline storage limit (%d > %d bytes): %s"
         size limit path
@@ -99,11 +127,24 @@ let raw_object_id value =
   | Some identity -> Ok identity
   | None -> Error (Invalid_object_id_length (String.length raw))
 
+let raw_content_id value =
+  let* raw = bytes "content identity" value in
+  if String.length raw = 32 then Ok raw
+  else Error (Invalid_content_id_length (String.length raw))
+
 let envelope object_type payload =
   Envelope.create ~object_type
     ~object_format_version:Envelope.current_object_format_version
     ~mandatory_features:Envelope.supported_mandatory_features ~payload ()
   |> Result.map_error (fun error -> Envelope_creation_error error)
+
+let inline_file_limit = 64 * 1024
+let content_domain = "paengi:content:v1\000"
+
+let content_identity bytes =
+  Hash.feed_string Hash.empty content_domain
+  |> fun context -> Hash.feed_string context bytes
+  |> Hash.get |> Hash.to_raw_string
 
 let canonical_payload_matches expected payload =
   if String.equal expected (Encoding.encode payload) then Ok ()
@@ -124,7 +165,7 @@ let mode_of_code = function
   | 2L -> Ok Symlink
   | value -> Error (Invalid_mode value)
 
-module Content = struct
+module Chunk = struct
   type id = Store.Stored_object_id.t
 
   let of_stored_object_id identity = identity
@@ -136,9 +177,291 @@ module Content = struct
 
   let store repository value =
     let* payload = payload value in
-    let* object_ = envelope Envelope.Content payload in
+    let* object_ = envelope Envelope.Chunk payload in
     Store.put repository object_
     |> Result.map_error (fun error -> Store_error error)
+
+  let decode payload_value =
+    let* fields = exact_array "chunk" 2 payload_value in
+    match fields with
+    | [ version; value ] ->
+        let* version = integer "chunk version" version in
+        if not (Int64.equal version 1L) then
+          Error (Unsupported_schema_version version)
+        else
+          let* value = bytes "chunk value" value in
+          let* canonical = payload value in
+          let* () =
+            canonical_payload_matches (Encoding.encode canonical) payload_value
+          in
+          Ok value
+    | _ -> Error (Invalid_schema "chunk must contain two values")
+
+  let load repository identity =
+    let* object_ =
+      Store.get repository (stored_object_id identity)
+      |> Result.map_error (fun error -> Store_error error)
+    in
+    if Envelope.object_type object_ <> Envelope.Chunk then
+      Error
+        (Unexpected_object_type
+           { expected = Envelope.Chunk; actual = Envelope.object_type object_ })
+    else decode (Envelope.payload object_)
+end
+
+module Manifest = struct
+  type id = Store.Stored_object_id.t
+
+  type t = {
+    total_length : int;
+    full_content_id : string;
+    chunks : (Chunk.id * int) list;
+  }
+
+  let schema_version = 1L
+  let algorithm = 1L
+  let window_size = 64L
+  let min_size = 16_384L
+  let average_size = 65_536L
+  let max_size = 131_072L
+
+  let of_stored_object_id identity = identity
+  let stored_object_id identity = identity
+  let equal_id = Store.Stored_object_id.equal
+  let total_length manifest = manifest.total_length
+  let chunks manifest = manifest.chunks
+
+  let chunk_ref_value (chunk, length) =
+    encoding_array
+      [
+        Encoding.bytes (Store.Stored_object_id.to_raw_bytes chunk);
+        Encoding.integer (Int64.of_int length);
+      ]
+
+  let payload manifest =
+    let rec encode reversed = function
+      | [] -> Ok (List.rev reversed)
+      | reference :: rest ->
+          let* encoded = chunk_ref_value reference in
+          encode (encoded :: reversed) rest
+    in
+    let* references = encode [] manifest.chunks in
+    let* references = encoding_array references in
+    encoding_array
+      [
+        Encoding.integer schema_version;
+        Encoding.integer (Int64.of_int manifest.total_length);
+        Encoding.integer algorithm;
+        Encoding.integer window_size;
+        Encoding.integer min_size;
+        Encoding.integer average_size;
+        Encoding.integer max_size;
+        Encoding.bytes manifest.full_content_id;
+        references;
+      ]
+
+  let check_representation manifest =
+    if manifest.total_length <= inline_file_limit then
+      Error
+        (Noncanonical_content_representation
+           { length = manifest.total_length; limit = inline_file_limit })
+    else if String.length manifest.full_content_id <> 32 then
+      Error (Invalid_content_id_length (String.length manifest.full_content_id))
+    else
+      let total =
+        List.fold_left
+          (fun total (_, length) ->
+            if length <= 0 then Error (Invalid_chunk_length (Int64.of_int length))
+            else
+              match total with
+              | Error _ as error -> error
+              | Ok total ->
+                  if total > max_int - length then
+                    Error (Invalid_chunk_length (Int64.of_int length))
+                  else Ok (total + length))
+          (Ok 0) manifest.chunks
+      in
+      let* total = total in
+      if manifest.chunks = [] then Error (Invalid_schema "manifest has no chunks")
+      else if total <> manifest.total_length then
+        Error
+          (Manifest_length_mismatch
+             { declared = manifest.total_length; actual = total })
+      else Ok ()
+
+  let store_manifest repository manifest =
+    let* () = check_representation manifest in
+    let* payload = payload manifest in
+    let* object_ = envelope Envelope.File_manifest payload in
+    Store.put repository object_
+    |> Result.map_error (fun error -> Store_error error)
+
+  let store_chunks repository ~total_length ~full_content_id chunks =
+    store_manifest repository { total_length; full_content_id; chunks }
+
+  let store_bytes repository value =
+    if String.length value <= inline_file_limit then
+      Error
+        (Noncanonical_content_representation
+           { length = String.length value; limit = inline_file_limit })
+    else
+      let* chunks =
+        Paengi_chunking.split Paengi_chunking.default value
+        |> Result.map_error (fun error ->
+               Unsupported_chunking_parameters
+                 (Paengi_chunking.error_to_string error))
+      in
+      let rec store_chunk_objects reversed = function
+        | [] -> Ok (List.rev reversed)
+        | chunk :: rest ->
+            let* identity = Chunk.store repository chunk in
+            store_chunk_objects ((identity, String.length chunk) :: reversed)
+              rest
+      in
+      let* chunks = store_chunk_objects [] chunks in
+      store_chunks repository ~total_length:(String.length value)
+        ~full_content_id:(content_identity value) chunks
+
+  let decode_chunk_ref value =
+    let* fields = exact_array "manifest chunk reference" 2 value in
+    match fields with
+    | [ identity; length ] ->
+        let* identity = raw_object_id identity in
+        let* length = integer "manifest chunk length" length in
+        if Int64.compare length 0L <= 0 || Int64.compare length (Int64.of_int max_int) > 0
+        then Error (Invalid_chunk_length length)
+        else Ok (Chunk.of_stored_object_id identity, Int64.to_int length)
+    | _ -> Error (Invalid_schema "manifest chunk reference must contain two values")
+
+  let exact_parameters values =
+    match values with
+    | [ algorithm_value; window_value; minimum; average; maximum ] ->
+        let* algorithm_value = integer "manifest algorithm" algorithm_value in
+        if not (Int64.equal algorithm_value algorithm) then
+          Error (Unsupported_chunking_algorithm algorithm_value)
+        else
+          let* window_value = integer "manifest window size" window_value in
+          let* minimum = integer "manifest minimum chunk size" minimum in
+          let* average = integer "manifest average chunk size" average in
+          let* maximum = integer "manifest maximum chunk size" maximum in
+          if
+            Int64.equal window_value window_size && Int64.equal minimum min_size
+            && Int64.equal average average_size && Int64.equal maximum max_size
+          then Ok ()
+          else
+            Error
+              (Unsupported_chunking_parameters
+                 (Printf.sprintf "window=%Ld min=%Ld average=%Ld max=%Ld"
+                    window_value minimum average maximum))
+    | _ -> Error (Invalid_schema "manifest parameters are missing")
+
+  let decode payload_value =
+    let* fields = exact_array "file manifest" 9 payload_value in
+    match fields with
+    | [ version; total; algorithm_value; window_value; minimum; average; maximum; full_id; references ] ->
+        let* version = integer "file manifest version" version in
+        if not (Int64.equal version schema_version) then
+          Error (Unsupported_schema_version version)
+        else
+          let* total = integer "manifest total length" total in
+          if Int64.compare total 0L <= 0 || Int64.compare total (Int64.of_int max_int) > 0
+          then Error (Invalid_chunk_length total)
+          else
+            let* () =
+              exact_parameters
+                [ algorithm_value; window_value; minimum; average; maximum ]
+            in
+            let* full_content_id = raw_content_id full_id in
+            let* references = array_values "manifest chunk references" references in
+            let rec decode_references reversed = function
+              | [] -> Ok (List.rev reversed)
+              | reference :: rest ->
+                  let* reference = decode_chunk_ref reference in
+                  decode_references (reference :: reversed) rest
+            in
+            let* chunks = decode_references [] references in
+            let manifest =
+              {
+                total_length = Int64.to_int total;
+                full_content_id;
+                chunks;
+              }
+            in
+            let* () = check_representation manifest in
+            let* canonical = payload manifest in
+            let* () =
+              canonical_payload_matches (Encoding.encode canonical) payload_value
+            in
+            Ok manifest
+    | _ -> Error (Invalid_schema "file manifest must contain nine values")
+
+  let contents repository manifest =
+    let rec load_chunks reversed actual_length = function
+      | [] -> Ok (List.rev reversed, actual_length)
+      | (identity, declared_length) :: rest ->
+          let* chunk = Chunk.load repository identity in
+          let actual_chunk_length = String.length chunk in
+          if actual_chunk_length <> declared_length then
+            Error
+              (Manifest_length_mismatch
+                 { declared = declared_length; actual = actual_chunk_length })
+          else if actual_length > max_int - actual_chunk_length then
+            Error (Invalid_chunk_length (Int64.of_int actual_chunk_length))
+          else
+            load_chunks (chunk :: reversed) (actual_length + actual_chunk_length)
+              rest
+    in
+    let* (chunks, actual_length) = load_chunks [] 0 manifest.chunks in
+    if actual_length <> manifest.total_length then
+      Error
+        (Manifest_length_mismatch
+           { declared = manifest.total_length; actual = actual_length })
+    else if not (Paengi_chunking.chunks_are_canonical Paengi_chunking.default chunks)
+    then Error Noncanonical_chunk_boundaries
+    else
+      let contents = String.concat "" chunks in
+      if not (String.equal (content_identity contents) manifest.full_content_id)
+      then Error Manifest_content_identity_mismatch
+      else Ok contents
+
+  let load repository identity =
+    let* object_ =
+      Store.get repository (stored_object_id identity)
+      |> Result.map_error (fun error -> Store_error error)
+    in
+    if Envelope.object_type object_ <> Envelope.File_manifest then
+      Error
+        (Unexpected_object_type
+           {
+             expected = Envelope.File_manifest;
+             actual = Envelope.object_type object_;
+           })
+    else
+      let* manifest = decode (Envelope.payload object_) in
+      let* _ = contents repository manifest in
+      Ok manifest
+end
+
+module Content = struct
+  type id = Store.Stored_object_id.t
+  type identity = string
+
+  let of_stored_object_id identity = identity
+  let stored_object_id identity = identity
+  let equal_id = Store.Stored_object_id.equal
+  let identity_of_bytes = content_identity
+  let identity_to_raw_bytes identity = identity
+
+  let payload value =
+    encoding_array [ Encoding.integer 1L; Encoding.bytes value ]
+
+  let store repository value =
+    if String.length value <= inline_file_limit then
+      let* payload = payload value in
+      let* object_ = envelope Envelope.Content payload in
+      Store.put repository object_
+      |> Result.map_error (fun error -> Store_error error)
+    else Manifest.store_bytes repository value
 
   let decode payload_value =
     let* fields = exact_array "content" 2 payload_value in
@@ -161,14 +484,13 @@ module Content = struct
       Store.get repository (stored_object_id identity)
       |> Result.map_error (fun error -> Store_error error)
     in
-    if Envelope.object_type object_ <> Envelope.Content then
-      Error
-        (Unexpected_object_type
-           {
-             expected = Envelope.Content;
-             actual = Envelope.object_type object_;
-           })
-    else decode (Envelope.payload object_)
+    let actual = Envelope.object_type object_ in
+    if actual = Envelope.Content then decode (Envelope.payload object_)
+    else if actual = Envelope.File_manifest then
+        let manifest = Manifest.of_stored_object_id identity in
+        let* manifest = Manifest.load repository manifest in
+        Manifest.contents repository manifest
+    else Error (Unexpected_object_type { expected = Envelope.Content; actual })
 end
 
 module Tree = struct
@@ -581,8 +903,6 @@ module Materialize = struct
     apply actions
 end
 
-let inline_file_limit = Store.max_object_bytes - 128
-
 let scan_error operation path error =
   Scan_error { path; operation; message = Unix.error_message error }
 
@@ -593,41 +913,127 @@ let read_file path size =
       ~finally:(fun () ->
         try Unix.close descriptor with Unix.Unix_error _ -> ())
       (fun () ->
-        let bytes = Bytes.create size in
-        let rec read offset =
-          if offset = size then Ok ()
-          else
-            try
-              match Unix.read descriptor bytes offset (size - offset) with
-              | 0 ->
-                  Error
-                    (Scan_error
-                       {
-                         path;
-                         operation = "read";
-                         message = "file ended before its recorded size";
-                       })
-              | count -> read (offset + count)
+        let stat = Unix.fstat descriptor in
+        if stat.Unix.st_kind <> Unix.S_REG then
+          Error (Unsupported_file_type { path; kind = "non-regular file" })
+        else
+          let bytes = Bytes.create size in
+          let rec read offset =
+            if offset = size then Ok ()
+            else
+              try
+                match Unix.read descriptor bytes offset (size - offset) with
+                | 0 ->
+                    Error
+                      (Scan_error
+                         {
+                           path;
+                           operation = "read";
+                           message = "file ended before its recorded size";
+                         })
+                | count -> read (offset + count)
+              with Unix.Unix_error (error, _, _) ->
+                Error (scan_error "read" path error)
+          in
+          let* () = read 0 in
+          let probe = Bytes.create 1 in
+          let* extra =
+            try Ok (Unix.read descriptor probe 0 1)
             with Unix.Unix_error (error, _, _) ->
               Error (scan_error "read" path error)
-        in
-        let* () = read 0 in
-        let probe = Bytes.create 1 in
-        let* extra =
-          try Ok (Unix.read descriptor probe 0 1)
-          with Unix.Unix_error (error, _, _) ->
-            Error (scan_error "read" path error)
-        in
-        if extra = 0 then Ok (Bytes.unsafe_to_string bytes)
-        else
-          Error
-            (Scan_error
-               {
-                 path;
-                 operation = "read";
-                 message = "file grew while it was scanned";
-               }))
+          in
+          if extra = 0 then Ok (Bytes.unsafe_to_string bytes)
+          else
+            Error
+              (Scan_error
+                 {
+                   path;
+                   operation = "read";
+                   message = "file grew while it was scanned";
+                 }))
   with Unix.Unix_error (error, _, _) -> Error (scan_error "open" path error)
+
+let store_large_file repository path expected_size =
+  try
+    let descriptor = Unix.openfile path [ Unix.O_RDONLY ] 0 in
+    Fun.protect
+      ~finally:(fun () ->
+        try Unix.close descriptor with Unix.Unix_error _ -> ())
+      (fun () ->
+        let stat = Unix.fstat descriptor in
+        if stat.Unix.st_kind <> Unix.S_REG then
+          Error (Unsupported_file_type { path; kind = "non-regular file" })
+        else
+          let* splitter =
+            Paengi_chunking.create_splitter Paengi_chunking.default
+            |> Result.map_error (fun error ->
+                   Unsupported_chunking_parameters
+                     (Paengi_chunking.error_to_string error))
+          in
+          let buffer = Bytes.create (32 * 1024) in
+          let full_content_hash = ref (Hash.feed_string Hash.empty content_domain) in
+          let total = ref 0 in
+          let chunk_references = ref [] in
+          let store_chunks chunks =
+            let rec persist reversed = function
+              | [] -> Ok (List.rev reversed)
+              | chunk :: rest ->
+                  let* identity = Chunk.store repository chunk in
+                  persist ((identity, String.length chunk) :: reversed) rest
+            in
+            let* stored = persist [] chunks in
+            chunk_references := List.rev_append stored !chunk_references;
+            Ok ()
+          in
+          let rec read () =
+            let* count =
+              try Ok (Unix.read descriptor buffer 0 (Bytes.length buffer))
+              with Unix.Unix_error (error, _, _) -> Error (scan_error "read" path error)
+            in
+            if count = 0 then Ok ()
+            else
+              let bytes = Bytes.sub_string buffer 0 count in
+              full_content_hash := Hash.feed_string !full_content_hash bytes;
+              total := !total + count;
+              let* () = store_chunks (Paengi_chunking.feed splitter bytes) in
+              read ()
+          in
+          let* () = read () in
+          let* () = store_chunks (Paengi_chunking.finish splitter) in
+          let final_stat = Unix.fstat descriptor in
+          if !total <> expected_size || final_stat.Unix.st_size <> expected_size then
+            Error
+              (Scan_error
+                 {
+                   path;
+                   operation = "read";
+                   message = "file size changed while it was scanned";
+                 })
+          else
+            let full_content_id = Hash.get !full_content_hash |> Hash.to_raw_string in
+            let* manifest =
+              Manifest.store_chunks repository ~total_length:!total ~full_content_id
+                (List.rev !chunk_references)
+            in
+            Ok
+              (Content.of_stored_object_id
+                 (Manifest.stored_object_id manifest)))
+  with Unix.Unix_error (error, _, _) -> Error (scan_error "open" path error)
+
+let store_regular_file repository path stat =
+  if stat.Unix.st_size <= inline_file_limit then
+    let* contents = read_file path stat.Unix.st_size in
+    Content.store repository contents
+  else store_large_file repository path stat.Unix.st_size
+
+let unsupported_node_kind = function
+  | Unix.S_SOCK -> "socket"
+  | Unix.S_FIFO -> "fifo"
+  | Unix.S_CHR -> "character-device"
+  | Unix.S_BLK -> "block-device"
+  | Unix.S_DIR -> "directory"
+  | Unix.S_REG -> "regular-file"
+  | Unix.S_LNK -> "symlink"
 
 let safe_ignore_components path =
   if String.is_empty path || String.starts_with ~prefix:"/" path then None
@@ -718,22 +1124,12 @@ let scan ~root ~store =
                   let* child = scan_directory child_relative child_path in
                   Ok (Tree.Directory child)
                 else if stat.Unix.st_kind = Unix.S_REG then
-                  if stat.Unix.st_size > inline_file_limit then
-                    Error
-                      (File_too_large
-                         {
-                           path = child_path;
-                           size = stat.Unix.st_size;
-                           limit = inline_file_limit;
-                         })
-                  else
-                    let* contents = read_file child_path stat.Unix.st_size in
-                    let* content = Content.store store contents in
-                    let mode =
-                      if stat.Unix.st_perm land 0o111 = 0 then Regular
-                      else Executable
-                    in
-                    Ok (Tree.File { mode; content })
+                  let* content = store_regular_file store child_path stat in
+                  let mode =
+                    if stat.Unix.st_perm land 0o111 = 0 then Regular
+                    else Executable
+                  in
+                  Ok (Tree.File { mode; content })
                 else if stat.Unix.st_kind = Unix.S_LNK then
                   let* target =
                     try Ok (Unix.readlink child_path)
@@ -747,7 +1143,7 @@ let scan ~root ~store =
                     (Unsupported_file_type
                        {
                          path = child_path;
-                         kind = "non-regular filesystem node";
+                         kind = unsupported_node_kind stat.Unix.st_kind;
                        })
               in
               scan_entries ((name, entry) :: reversed) rest

@@ -51,17 +51,22 @@ let content_payload bytes =
   |> require Encoding.construction_error_to_string
 
 let manifest_parameters = function
-  | Chunking.Fixed { chunk_size } -> (0L, chunk_size, chunk_size, chunk_size)
-  | Chunking.Gear_v1 { min_size; average_size; max_size } ->
-      (1L, min_size, average_size, max_size)
+  | Chunking.Fixed { chunk_size } -> (0L, 0, chunk_size, chunk_size, chunk_size)
+  | Chunking.Buzhash_v1 { window_size; min_size; average_size; max_size } ->
+      (1L, window_size, min_size, average_size, max_size)
 
 let chunk_object bytes =
+  let plaintext_length = String.length bytes in
+  let bytes = envelope Envelope.Chunk (content_payload bytes) in
+  { id = stored_id bytes; bytes; plaintext_length }
+
+let inline_object bytes =
   let plaintext_length = String.length bytes in
   let bytes = envelope Envelope.Content (content_payload bytes) in
   { id = stored_id bytes; bytes; plaintext_length }
 
 let manifest_object chunking bytes chunks =
-  let algorithm, minimum, average, maximum = manifest_parameters chunking in
+  let algorithm, window, minimum, average, maximum = manifest_parameters chunking in
   let refs =
     List.map
       (fun chunk ->
@@ -77,6 +82,7 @@ let manifest_object chunking bytes chunks =
         Encoding.integer 1L;
         Encoding.integer (Int64.of_int (String.length bytes));
         Encoding.integer algorithm;
+        Encoding.integer (Int64.of_int window);
         Encoding.integer (Int64.of_int minimum);
         Encoding.integer (Int64.of_int average);
         Encoding.integer (Int64.of_int maximum);
@@ -85,12 +91,12 @@ let manifest_object chunking bytes chunks =
       ]
     |> require Encoding.construction_error_to_string
   in
-  let bytes = envelope Envelope.Repository_config payload in
+  let bytes = envelope Envelope.File_manifest payload in
   { id = stored_id bytes; bytes; plaintext_length = 0 }
 
 let encode_file configuration bytes =
   if String.length bytes <= configuration.inline_threshold then
-    let object_ = chunk_object bytes in
+    let object_ = inline_object bytes in
     { objects = [ object_ ]; root = object_.id; inline = true }
   else
     let chunks =
@@ -123,6 +129,7 @@ let decode_file encoded =
         [
           Encoding.Integer 1L;
           Encoding.Integer length;
+          Encoding.Integer _;
           Encoding.Integer _;
           Encoding.Integer _;
           Encoding.Integer _;
@@ -238,19 +245,28 @@ let replace_at bytes offset replacement =
 let insert_at_start prefix bytes = prefix ^ bytes
 
 let fixtures () =
-  let threshold = 64 * 1024 in
   let medium = deterministic_bytes 17 (512 * 1024) in
   let large = repeated "paengi-large-content\000" (2 * 1024 * 1024) in
   let high_entropy = deterministic_bytes 29 (2 * 1024 * 1024) in
   let gzip_like = "\031\139\008\000\000\000\000\000\000\003" ^ deterministic_bytes 43 ((2 * 1024 * 1024) - 10) in
   let local_base = deterministic_bytes 71 (1024 * 1024) in
-  let insertion_base = repeated "0123456789abcdef" (1024 * 1024) in
-  [
-    ("empty", "");
-    ("tiny", "paengi\000tiny\255");
-    ("threshold-minus-1", deterministic_bytes 3 (threshold - 1));
-    ("threshold", deterministic_bytes 5 threshold);
-    ("threshold-plus-1", deterministic_bytes 7 (threshold + 1));
+  let insertion_base = deterministic_bytes 113 (1024 * 1024) in
+  let boundary_fixtures =
+    List.concat_map
+      (fun threshold ->
+        [
+          ( Printf.sprintf "threshold-%d-minus-1" threshold,
+            deterministic_bytes (threshold + 3) (threshold - 1) );
+          ( Printf.sprintf "threshold-%d" threshold,
+            deterministic_bytes (threshold + 5) threshold );
+          ( Printf.sprintf "threshold-%d-plus-1" threshold,
+            deterministic_bytes (threshold + 7) (threshold + 1) );
+        ])
+      inline_candidates
+  in
+  [ ("empty", ""); ("tiny", "paengi\000tiny\255") ]
+  @ boundary_fixtures
+  @ [
     ("medium", medium);
     ("large-low-entropy", large);
     ("large-high-entropy", high_entropy);
@@ -280,8 +296,9 @@ let json value =
 
 let strategy_name = function
   | Chunking.Fixed { chunk_size } -> Printf.sprintf "fixed-%d" chunk_size
-  | Chunking.Gear_v1 { min_size; average_size; max_size } ->
-      Printf.sprintf "gear-v1-%d-%d-%d" min_size average_size max_size
+  | Chunking.Buzhash_v1 { window_size; min_size; average_size; max_size } ->
+      Printf.sprintf "buzhash-v1-%d-%d-%d-%d" window_size min_size average_size
+        max_size
 
 let output_path () =
   match Array.to_list Sys.argv with
@@ -321,16 +338,16 @@ let () =
   let output_path = output_path () in
   let configurations =
     [
-      { name = "inline-8192-gear"; inline_threshold = List.nth inline_candidates 0; chunking = Chunking.default };
+      { name = "inline-8192-buzhash"; inline_threshold = List.nth inline_candidates 0; chunking = Chunking.default };
       { name = "inline-65536-fixed"; inline_threshold = List.nth inline_candidates 1; chunking = Chunking.fixed_64k };
-      { name = "inline-65536-gear"; inline_threshold = List.nth inline_candidates 1; chunking = Chunking.default };
-      { name = "inline-262144-gear"; inline_threshold = List.nth inline_candidates 2; chunking = Chunking.default };
+      { name = "inline-65536-buzhash"; inline_threshold = List.nth inline_candidates 1; chunking = Chunking.default };
+      { name = "inline-262144-buzhash"; inline_threshold = List.nth inline_candidates 2; chunking = Chunking.default };
     ]
   in
   let fixtures = fixtures () in
   Out_channel.with_open_bin output_path (fun output ->
       Printf.fprintf output
-        "{\n  \"schema_version\":1,\n  \"benchmark_id\":\"large-content-v1\",\n  \"purpose\":\"host_specific_format_decision_evidence_not_performance_claim\",\n  \"fixed_seed\":20260730,\n  \"repetitions\":%d,\n  \"candidate_inline_thresholds_bytes\":[8192,65536,262144],\n  \"candidate_chunking\":[\"fixed-65536\",\"gear-v1-16384-65536-131072\"],\n  \"allocation_metric\":\"approximate_working_set_bytes_not_peak_rss\",\n  \"fixtures\":[\n"
+        "{\n  \"schema_version\":1,\n  \"benchmark_id\":\"large-content-v1\",\n  \"purpose\":\"host_specific_format_decision_evidence_not_performance_claim\",\n  \"fixed_seed\":20260730,\n  \"repetitions\":%d,\n  \"candidate_inline_thresholds_bytes\":[8192,65536,262144],\n  \"candidate_chunking\":[\"fixed-65536\",\"buzhash-v1-64-16384-65536-131072\"],\n  \"allocation_metric\":\"approximate_working_set_bytes_not_peak_rss\",\n  \"fixtures\":[\n"
         repetitions;
       let first = ref true in
       List.iter

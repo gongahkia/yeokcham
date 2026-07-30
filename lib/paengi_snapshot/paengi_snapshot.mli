@@ -15,7 +15,15 @@ type error =
   | Unordered_name of { previous : string; current : string }
   | Invalid_mode of int64
   | Invalid_object_id_length of int
+  | Invalid_content_id_length of int
   | Noncanonical_schema_bytes
+  | Noncanonical_content_representation of { length : int; limit : int }
+  | Unsupported_chunking_algorithm of int64
+  | Unsupported_chunking_parameters of string
+  | Invalid_chunk_length of int64
+  | Manifest_length_mismatch of { declared : int; actual : int }
+  | Manifest_content_identity_mismatch
+  | Noncanonical_chunk_boundaries
   | File_too_large of { path : string; size : int; limit : int }
   | Scan_error of { path : string; operation : string; message : string }
   | Unsupported_file_type of { path : string; kind : string }
@@ -27,12 +35,47 @@ type snapshot_model_error = error
 
 module Content : sig
   type id
+  type identity
+
+  val of_stored_object_id : Paengi_store.Stored_object_id.t -> id
+  val stored_object_id : id -> Paengi_store.Stored_object_id.t
+  val equal_id : id -> id -> bool
+  val identity_of_bytes : string -> identity
+  val identity_to_raw_bytes : identity -> string
+  val store : Paengi_store.repository -> string -> (id, error) result
+  val load : Paengi_store.repository -> id -> (string, error) result
+end
+
+module Chunk : sig
+  type id
 
   val of_stored_object_id : Paengi_store.Stored_object_id.t -> id
   val stored_object_id : id -> Paengi_store.Stored_object_id.t
   val equal_id : id -> id -> bool
   val store : Paengi_store.repository -> string -> (id, error) result
   val load : Paengi_store.repository -> id -> (string, error) result
+end
+
+module Manifest : sig
+  type id
+  type t
+
+  val of_stored_object_id : Paengi_store.Stored_object_id.t -> id
+  val stored_object_id : id -> Paengi_store.Stored_object_id.t
+  val equal_id : id -> id -> bool
+  val total_length : t -> int
+  val chunks : t -> (Chunk.id * int) list
+
+  val store_chunks :
+    Paengi_store.repository ->
+    total_length:int ->
+    full_content_id:string ->
+    (Chunk.id * int) list ->
+    (id, error) result
+
+  val store_bytes : Paengi_store.repository -> string -> (id, error) result
+
+  val load : Paengi_store.repository -> id -> (t, error) result
 end
 
 module Tree : sig
@@ -100,3 +143,5 @@ val scan :
   root:string ->
   store:Paengi_store.repository ->
   (Snapshot.id * Snapshot.t, error) result
+
+val inline_file_limit : int

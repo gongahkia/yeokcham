@@ -91,6 +91,8 @@ let object_type_generator =
       Envelope.Validation;
       Envelope.Resolution;
       Envelope.Repository_config;
+      Envelope.Chunk;
+      Envelope.File_manifest;
     ]
 
 let boundary_lengths =

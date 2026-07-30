@@ -73,6 +73,7 @@
   alcotest
   paengi_encoding
   paengi_envelope
+  paengi_chunking
   paengi_snapshot
   paengi_store
   paengi_testkit

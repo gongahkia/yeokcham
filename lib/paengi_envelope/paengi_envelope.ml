@@ -22,6 +22,8 @@ type object_type =
   | Validation
   | Resolution
   | Repository_config
+  | Chunk
+  | File_manifest
 
 let object_type_code = function
   | Content -> 1
@@ -36,6 +38,8 @@ let object_type_code = function
   | Validation -> 10
   | Resolution -> 11
   | Repository_config -> 12
+  | Chunk -> 13
+  | File_manifest -> 14
 
 let object_type_of_code = function
   | 1 -> Some Content
@@ -50,6 +54,8 @@ let object_type_of_code = function
   | 10 -> Some Validation
   | 11 -> Some Resolution
   | 12 -> Some Repository_config
+  | 13 -> Some Chunk
+  | 14 -> Some File_manifest
   | _ -> None
 
 type creation_error =
