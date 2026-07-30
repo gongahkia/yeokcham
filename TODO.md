@@ -5,14 +5,15 @@ Robustness tasks operate only on Paengi's pure functions and generated local fix
 
 ## Active vertical slice
 
-- Milestone: 1 — Canonical object store and snapshots.
-- Task: large-content benchmark/decision, Chunk/File_manifest storage, generated filesystem histories, and Milestone 1 closeout (complete).
-- Modules/files: `paengi_store`; `paengi_chunking`; `paengi_snapshot`; large-content benchmark/result; store, snapshot, materialisation, golden, and generated-history tests; ADR-020 through ADR-022; model, architecture, testing, and benchmark documentation.
-- Types: abstract stored, semantic content, chunk, manifest, tree, and snapshot IDs; typed tree entries; structured scanner/schema/materialisation errors; existing semantic model IDs and M0 payload schemas remain unchanged.
-- Invariants: stored ID is the ADR-020 domain-separated hash of exact Envelope-1 bytes; final objects are hard-link published without overwrite; inline Content v1 is canonical through 64 KiB; larger bytes use verified Buzhash Chunk/File_manifest v1; tree names/order and references are canonical; scan excludes `.paengi`; materialisation only writes safe plans to empty destinations.
-- Tests: focused corruption/restart/schema/scan/materialisation tests; goldens for Content/Chunk/File_manifest/Tree/Snapshot Envelope-1 bytes; bounded deterministic generated store/scan/history/scan-materialise properties with printed seeds; host-specific benchmark results. Full `make check` and `make property-test PROPERTY_TEST_SEED=17` remain required after the slice.
+- Milestone: 2 — Scratch history and restore.
+- Task: completed three approved slices: (1) immutable event/checkpoint records, CAS refs, timeline, and retention; (2) guarded exact restore; (3) narrow CLI/watch plus state-machine/recovery closeout.  Do not begin Milestone 3 without a new selection.
+- Modules/files: `paengi_store`; new `paengi_scratch`; `paengi_snapshot`; new CLI executable; scratch, restore, CLI, golden, restart, and state-machine tests; ADR-023; model, architecture, testing, and TODO documentation.
+- Types: typed event, checkpoint, retention-change, snapshot, and mutable-ref handles; exact scratch operations and state; structured record/ref/timeline/restore errors; M0 model payloads remain unchanged.
+- Formats: Scratch_event v1, Scratch_checkpoint v1, Retention_change v1, and mutable-ref v1 from ADR-023.  Timeline/path indexes, if any, are rebuildable caches only.
+- Invariants: immutable records use ADR-020 IDs; checkpoint/event/base/result/replay agreement is verified; CAS refs have no silent last-writer-wins update; pinning never changes checkpoint identity; timeline is bounded ancestry order; restore validates a safety checkpoint, plan preconditions, exact result, and target-head publication order.
+- Tests: focused schema/CAS/timeline/pin/restore tests; deterministic QCheck replay and state-machine properties with printed seeds; corruption, restart, external-mutation, and failed-publication cases; v1 golden bytes. Verified with `make check` and `make property-test PROPERTY_TEST_SEED=17`.
 - External libraries: existing Alcotest, QCheck, SHA-256, Profile 1 encoder, and Unix only.
-- ADR changes: ADR-020 specifies stored-object identity/publication; ADR-021 specifies Content/Tree/Snapshot schemas; ADR-022 specifies Chunk/File_manifest schemas and Buzhash parameters.
+- ADR changes: ADR-023 accepted for scratch records, retention changes, mutable refs, index rebuildability, and restore durability limits.
 
 ## Milestone 0 — Project and model foundation
 
@@ -109,38 +110,38 @@ Robustness tasks operate only on Paengi's pure functions and generated local fix
 
 ### Checkpoint creation
 
-- [ ] Create initial checkpoint.
-- [ ] Compute change set between snapshots.
-- [ ] Record scratch event.
-- [ ] Record resulting checkpoint.
-- [ ] Add explicit `paengi checkpoint`.
-- [ ] Add debounced polling mode.
-- [ ] Create safety checkpoint before destructive operations.
-- [ ] Add timeline query.
+- [x] Create initial checkpoint.
+- [x] Compute change set between snapshots.
+- [x] Record scratch event.
+- [x] Record resulting checkpoint.
+- [x] Add explicit `paengi checkpoint`.
+- [x] Add debounced polling mode.
+- [x] Create safety checkpoint before destructive operations.
+- [x] Add timeline query.
 
 ### Restore
 
-- [ ] Restore retained checkpoint.
-- [ ] Add dry-run.
-- [ ] Preserve current work in a safety checkpoint.
-- [ ] Handle untracked paths explicitly.
-- [ ] Handle conflicts with external filesystem changes.
-- [ ] Add restore verification.
+- [x] Restore retained checkpoint.
+- [x] Add dry-run.
+- [x] Preserve current work in a safety checkpoint.
+- [x] Handle untracked paths explicitly.
+- [x] Handle conflicts with external filesystem changes.
+- [x] Add restore verification.
 
 ### Pinning and tags
 
-- [ ] User pin.
-- [ ] User unpin.
-- [ ] Automatic recent-window retention.
-- [ ] Capsule-boundary retention placeholder.
-- [ ] Validation-boundary retention placeholder.
-- [ ] Timeline displays retention reason.
+- [x] User pin.
+- [x] User unpin.
+- [x] Automatic recent-window retention.
+- [x] Capsule-boundary retention placeholder.
+- [x] Validation-boundary retention placeholder.
+- [x] Timeline displays retention reason.
 
 ### Exit criteria
 
-- [ ] A directory can be edited, checkpointed, and restored exactly.
-- [ ] State-machine tests cover edit/checkpoint/restore sequences.
-- [ ] Restart does not lose accepted checkpoints.
+- [x] A directory can be edited, checkpointed, and restored exactly.
+- [x] State-machine tests cover edit/checkpoint/restore sequences.
+- [x] Restart does not lose accepted checkpoints.
 
 ## Milestone 3 — Scratch compaction
 

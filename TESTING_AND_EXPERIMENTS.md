@@ -60,6 +60,15 @@ Applying scratch events from a retained boundary yields the expected checkpoint 
 
 Restoring a checkpoint reproduces exact bytes and supported metadata.
 
+Milestone 2 additionally checks immutable event/checkpoint replay, CAS head
+publication, pin identity preservation, deterministic bounded ancestry
+traversal, reopen recovery, failed-publication head preservation, disposable
+index recovery, unsupported-record rejection, polling debounce/no-duplicate
+behaviour, and restore-plan external-mutation rejection. A failed
+populated-directory restore is tested for an available safety checkpoint and no
+target-head advancement; it is not represented as crash-atomic unless an
+operation journal is implemented.
+
 #### P4 — Compaction preservation
 
 Before and after compaction, every retained checkpoint resolves to the same snapshot.

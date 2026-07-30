@@ -101,6 +101,7 @@ let object_type_codes () =
       (Envelope.Repository_config, 12);
       (Envelope.Chunk, 13);
       (Envelope.File_manifest, 14);
+      (Envelope.Retention_change, 15);
     ]
   in
   List.iter
@@ -117,7 +118,7 @@ let object_type_codes () =
     (Option.is_none (Envelope.object_type_of_code 0));
   Alcotest.(check bool)
     "unassigned type is rejected" true
-    (Option.is_none (Envelope.object_type_of_code 15))
+    (Option.is_none (Envelope.object_type_of_code 16))
 
 let golden_envelope () =
   let expected = require_golden "envelope-v1-snapshot.peng.hex" in
@@ -221,6 +222,7 @@ let registered_types_round_trip () =
       Envelope.Repository_config;
       Envelope.Chunk;
       Envelope.File_manifest;
+      Envelope.Retention_change;
     ]
 
 let rejection_cases () =

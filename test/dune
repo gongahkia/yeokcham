@@ -93,6 +93,38 @@
   unix))
 
 (test
+ (name test_scratch)
+ (modules test_scratch)
+ (libraries
+  alcotest
+  paengi_encoding
+  paengi_envelope
+  paengi_scratch
+  paengi_snapshot
+  paengi_store
+  paengi_testkit
+  unix)
+ (deps
+  (source_tree golden)))
+
+(test
+ (name test_restore)
+ (modules test_restore)
+ (libraries alcotest paengi_scratch paengi_snapshot paengi_store unix))
+
+(test
+ (name scratch_property_test)
+ (modules scratch_property_test)
+ (libraries
+  alcotest
+  qcheck-core
+  qcheck-alcotest
+  paengi_scratch
+  paengi_snapshot
+  paengi_store
+  unix))
+
+(test
  (name encoding_property_test)
  (modules encoding_property_test)
  (libraries
@@ -139,10 +171,12 @@
   (:model_property_test model_property_test.exe)
   (:store_property_test store_property_test.exe)
   (:snapshot_property_test snapshot_property_test.exe)
+  (:scratch_property_test scratch_property_test.exe)
   (source_tree fixtures/encoding))
  (action
   (progn
    (run %{encoding_property_test})
    (run %{model_property_test})
    (run %{store_property_test})
-   (run %{snapshot_property_test}))))
+   (run %{snapshot_property_test})
+   (run %{scratch_property_test}))))

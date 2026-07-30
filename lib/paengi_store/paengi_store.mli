@@ -14,6 +14,14 @@ module Stored_object_id : sig
   val compare : t -> t -> int
 end
 
+module Mutable_ref : sig
+  type t
+
+  val generation : t -> int64
+  val target : t -> Stored_object_id.t option
+  val equal : t -> t -> bool
+end
+
 type repository
 
 type error =
@@ -32,6 +40,15 @@ type error =
   | Collision_or_corruption of { id : Stored_object_id.t; detail : string }
   | Unsupported_publication of { path : string; detail : string }
   | Temporary_name_exhausted of string
+  | Invalid_ref_name of string
+  | Corrupt_ref of { name : string; detail : string }
+  | Concurrent_ref_update of {
+      name : string;
+      expected : Mutable_ref.t option;
+      actual : Mutable_ref.t option;
+    }
+  | Ref_lock_held of string
+  | Ref_generation_exhausted of string
 
 val error_to_string : error -> string
 val repository_format : string
@@ -39,5 +56,14 @@ val max_object_bytes : int
 val init : root:string -> (repository, error) result
 val open_repository : root:string -> (repository, error) result
 val object_path : repository -> Stored_object_id.t -> string
+val id_of_envelope : Paengi_envelope.t -> Stored_object_id.t
 val put : repository -> Paengi_envelope.t -> (Stored_object_id.t, error) result
 val get : repository -> Stored_object_id.t -> (Paengi_envelope.t, error) result
+val read_ref : repository -> name:string -> (Mutable_ref.t option, error) result
+
+val compare_and_swap_ref :
+  repository ->
+  name:string ->
+  expected:Mutable_ref.t option ->
+  target:Stored_object_id.t option ->
+  (Mutable_ref.t, error) result

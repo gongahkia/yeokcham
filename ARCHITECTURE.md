@@ -181,6 +181,13 @@ Conceptual local layout:
   tmp/
 ```
 
+Milestone 2 uses immutable Envelope-1 objects for scratch events, checkpoints,
+and retention changes.  `refs/scratch-head` and `refs/retention-head` are the
+only mutable scratch records; they use canonical, checksummed ref bytes and
+same-directory temporary-write, lock, compare-and-swap, rename-over, and
+directory-fsync publication from ADR-023.  Timeline and path indexes remain
+rebuildable cache data and cannot be required to recover history.
+
 SQLite may be used for rebuildable indexes and queries. Canonical objects must remain independently readable.
 
 ## 5. Snapshot engine
@@ -221,6 +228,11 @@ A checkpoint may be created by:
 - Before workspace rematerialisation.
 - After configured validation passes.
 - Periodic safety policy.
+
+An event/checkpoint pair is persisted before scratch-head publication.  The
+timeline walks checkpoint parents from that head in ancestry order and verifies
+event/base/result/replay agreement.  User pinning appends a Retention_change
+object and moves retention-head; it never rewrites a checkpoint.
 
 ## 7. Compaction engine
 
@@ -295,6 +307,13 @@ Working-directory update should be transactional where possible:
 7. Update workspace ref only after successful materialisation.
 
 Milestone 1 materialisation is intentionally narrower: it emits an inspectable dry-run plan and writes only to an existing empty destination with exclusive file creation. It preserves regular bytes, executable mode, directories, and symlink target bytes; unsafe decoded names and nonempty destinations reject. Workspace transactional replacement and safety checkpoints remain scratch/workspace work.
+
+Milestone 2 restore is a guarded, but not crash-atomic, populated-directory
+operation.  It scans and durably checkpoints differing current work, binds a
+dry-run plan to that scan, rescans before applying, validates each safe path,
+then rescans the result before target-head publication.  On an I/O failure the
+safety checkpoint provides recovery; Paengi reports rather than conceals any
+possible partial filesystem application.
 
 ## 10. Semantic sidecar architecture
 

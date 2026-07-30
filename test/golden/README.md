@@ -23,4 +23,11 @@ Each fixture is exactly one nonempty line of lowercase ASCII hexadecimal digits 
 
 `store-v1-chunk.peng.hex` and `store-v1-file-manifest.peng.hex` are Envelope-1 bytes for ADR-022's Chunk and File_manifest schemas. They cover raw chunk bytes and a canonical manifest reference for a file one byte over the 64 KiB inline limit.
 
+`scratch-v1-event.peng.hex`, `scratch-v1-checkpoint.peng.hex`, and
+`scratch-v1-retention-change.peng.hex` are Envelope-1 bytes for ADR-023's
+Scratch_event, Checkpoint, and Retention_change v1 schemas. They cover replay
+links, timestamps, intrinsic retention, and immutable pin changes.
+`scratch-v1-head.ref.hex` is the exact checksummed mutable-ref v1 byte record;
+it is deliberately not an Envelope-1 object.
+
 Changing any fixture bytes requires a format decision and retained compatibility evidence; adding a new schema requires a new named fixture.

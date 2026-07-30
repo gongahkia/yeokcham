@@ -24,6 +24,7 @@ type object_type =
   | Repository_config
   | Chunk
   | File_manifest
+  | Retention_change
 
 let object_type_code = function
   | Content -> 1
@@ -40,6 +41,7 @@ let object_type_code = function
   | Repository_config -> 12
   | Chunk -> 13
   | File_manifest -> 14
+  | Retention_change -> 15
 
 let object_type_of_code = function
   | 1 -> Some Content
@@ -56,6 +58,7 @@ let object_type_of_code = function
   | 12 -> Some Repository_config
   | 13 -> Some Chunk
   | 14 -> Some File_manifest
+  | 15 -> Some Retention_change
   | _ -> None
 
 type creation_error =

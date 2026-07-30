@@ -126,6 +126,24 @@ for regular-file bytes, executable mode, directory structure, and symlink target
 
 ## 3. Scratch history
 
+### Persisted scratch subset
+
+Milestone 2 stores Scratch_event v1 and Scratch_checkpoint v1 as immutable
+Envelope-1 objects.  Their stored IDs are typed separately at the API boundary;
+they use the ADR-020 stored-object identity and do not introduce semantic ID
+hashing.  ADR-023 defines their canonical payloads and the mutable, non-object
+scratch-head ref.  An event names its parent checkpoint, base snapshot, result
+snapshot, ordered operations, source, and observation time.  A checkpoint names
+its optional parent/event pair, result snapshot, creation time, and intrinsic
+retention.  Initial checkpoints have neither parent nor event; all other
+checkpoints have both.  Event/checkpoint linkage and exact replay are verified
+when traversed.
+
+Later retention edits are immutable Retention_change v1 objects chained from a
+separate atomic retention-head ref.  Pinning therefore never replaces a
+checkpoint.  The canonical timeline is the bounded parent chain from the
+verified scratch-head; any timeline index is rebuildable cache data only.
+
 ### Scratch event
 
 A scratch event describes an observed transition.
@@ -178,6 +196,15 @@ materialise(c.snapshot) = exact recorded filesystem state for c
 ```
 
 Compaction may remove intermediate events or checkpoints only if this remains true for every retained checkpoint.
+
+For a non-initial checkpoint `c` and its event `e`:
+
+```text
+e.parent = c.parent
+e.base_snapshot = snapshot(c.parent)
+e.resulting_snapshot = c.snapshot
+replay(snapshot(c.parent), e.operations) = c.snapshot
+```
 
 ## 4. Compaction model
 

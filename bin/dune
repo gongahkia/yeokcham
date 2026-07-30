@@ -1,0 +1,3 @@
+(executable
+ (name paengi)
+ (libraries paengi_scratch paengi_snapshot paengi_store unix))

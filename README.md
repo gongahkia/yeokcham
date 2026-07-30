@@ -44,7 +44,9 @@ The supported compiler is OCaml 5.5.0. The exact constraint is recorded in `dune
 
 ## Status
 
-Design and implementation handoff package. paengi is a portfolio and research prototype first, not a production Git replacement.
+Milestone 2 implements local scratch checkpoints, exact guarded restore, immutable
+retention changes, and an explicit polling command. paengi remains a portfolio
+and research prototype, not a production Git replacement.
 
 See `CONTRIBUTING.md` for development rules. Paengi is licensed under the MIT License.
 
@@ -59,6 +61,24 @@ make ci
 ```
 
 `make build`, `make test`, `make property-test`, `make lint`, and `make format` expose the individual steps. `make check` runs build, format verification, lint, package validation, and tests without the GitHub Actions linter.
+
+## Current local CLI
+
+```bash
+dune exec bin/paengi.exe -- init
+dune exec bin/paengi.exe -- checkpoint
+dune exec bin/paengi.exe -- timeline --limit 32
+dune exec bin/paengi.exe -- restore --dry-run <checkpoint>
+dune exec bin/paengi.exe -- restore <checkpoint>
+dune exec bin/paengi.exe -- pin <checkpoint>
+dune exec bin/paengi.exe -- unpin <checkpoint>
+dune exec bin/paengi.exe -- watch --interval-ms 500 --debounce-ms 500
+```
+
+`restore` creates a durable safety checkpoint for divergent work, validates its
+plan immediately before applying, and moves `scratch-head` only after exact
+result verification. It is not crash-atomic for a populated working directory;
+on a reported partial failure, restore the reported safety checkpoint.
 
 ## Testing scope
 

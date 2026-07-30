@@ -133,3 +133,4 @@ The ADR lifecycle, numbering rules, and template are defined in [`docs/adr/READM
 - [ADR-020 — Stored-object identity and immutable publication](docs/adr/020-stored-object-identity-and-publication.md) — Accepted.
 - [ADR-021 — Persisted snapshot object schemas](docs/adr/021-persisted-snapshot-object-schemas.md) — Accepted.
 - [ADR-022 — Large-content chunks and file manifests](docs/adr/022-large-content-chunks-and-file-manifests.md) — Accepted.
+- [ADR-023 — Scratch records, retention, and mutable refs](docs/adr/023-scratch-records-retention-and-mutable-refs.md) — Accepted.
