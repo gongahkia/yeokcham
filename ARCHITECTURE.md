@@ -507,7 +507,7 @@ Remote deletion should be optional in early releases. A leak is safer than data 
 
 ## 8. Partial retrieval
 
-The local helper relies on C Git-compatible filtering rather than inventing a Yeokcham filter protocol. Its verified complete snapshot lets C Git serve `blob:none` and `blob:limit=<bytes>` with normal promisor configuration and lazy hydration. A C Git cone-mode sparse checkout configured before `checkout` hydrates only selected current paths through the same helper and retains excluded blobs as promisor objects. The complete cache remains an implementation boundary, so this does not yet reduce Yeokcham-side reconstruction or remote-backend reads. Shallow clone and native remote-backend sparse prefetch remain unsupported.
+The local helper relies on C Git-compatible filtering rather than inventing a Yeokcham filter protocol. Its verified complete snapshot lets C Git serve `blob:none` and `blob:limit=<bytes>` with normal promisor configuration and lazy hydration. A C Git cone-mode sparse checkout configured before `checkout` hydrates only selected current paths through the same helper and retains excluded blobs as promisor objects. The complete cache remains an implementation boundary, so this does not yet reduce Yeokcham-side reconstruction or remote-backend reads. Shallow clone and native remote-backend sparse prefetch remain unsupported; non-cone and sparse-index combinations are not covered.
 
 Possible progression:
 

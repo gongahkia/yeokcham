@@ -521,8 +521,10 @@ fn remote_helper_serves_blob_none_and_size_filtered_promisor_clones() {
         "sparse clone must succeed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-    run_git(&sparse_checkout, &["sparse-checkout", "init", "--cone"]);
-    run_git(&sparse_checkout, &["sparse-checkout", "set", "app"]);
+    run_git(
+        &sparse_checkout,
+        &["sparse-checkout", "set", "--cone", "app"],
+    );
     let output = Command::new("git")
         .arg("-C")
         .arg(&sparse_checkout)
