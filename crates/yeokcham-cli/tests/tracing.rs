@@ -1,10 +1,15 @@
 use std::{
+    env,
+    ffi::OsString,
     fs,
+    io::Write,
     path::{Path, PathBuf},
-    process::Command,
+    process::{Command, Stdio},
     sync::atomic::{AtomicUsize, Ordering},
     time::{SystemTime, UNIX_EPOCH},
 };
+
+use yeokcham_core::GitRepository;
 
 static TEST_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
@@ -49,6 +54,18 @@ fn run_git(directory: &Path, arguments: &[&str]) -> Vec<u8> {
         String::from_utf8_lossy(&output.stderr)
     );
     output.stdout
+}
+
+fn remote_helper_path() -> OsString {
+    let helper = Path::new(env!("CARGO_BIN_EXE_git-remote-yeokcham"));
+    let helper_directory = helper.parent().expect("helper parent directory");
+    let path = env::var_os("PATH").expect("PATH");
+    let paths = std::iter::once(helper_directory.to_path_buf()).chain(env::split_paths(&path));
+    env::join_paths(paths).expect("valid PATH")
+}
+
+fn remote_uri(repository: &Path) -> String {
+    format!("yeokcham::{}", repository.display())
 }
 
 #[test]
@@ -182,4 +199,120 @@ fn cli_import_verify_inspect_and_export_round_trip() {
         fs::read(source.join("chunked.bin")).expect("read source"),
         fs::read(checkout.join("chunked.bin")).expect("read checkout")
     );
+}
+
+#[test]
+fn remote_helper_clones_lists_refs_and_repeats_fetch_without_source_disclosure() {
+    let directory = TestDirectory::new();
+    let source = directory.path().join("source");
+    let repository = directory.path().join("repository");
+    let checkout = directory.path().join("checkout");
+    fs::create_dir(&source).expect("create source repository");
+    run_git(&source, &["init", "-b", "main"]);
+    run_git(&source, &["config", "user.name", "Yeokcham Test"]);
+    run_git(
+        &source,
+        &["config", "user.email", "yeokcham-test@example.invalid"],
+    );
+    fs::write(source.join("README.md"), b"remote helper fixture\n").expect("write fixture");
+    fs::write(source.join("tiny.txt"), b"tiny\n").expect("write tiny blob");
+    run_git(&source, &["add", "."]);
+    run_git(&source, &["commit", "-m", "fixture"]);
+    run_git(&source, &["branch", "topic"]);
+    run_git(&source, &["tag", "-a", "v1", "-m", "version one"]);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_yeokcham"))
+        .args(["init", "--from-git"])
+        .arg(&source)
+        .arg(&repository)
+        .output()
+        .expect("import source repository");
+    assert!(
+        output.status.success(),
+        "import must succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let helper_path = remote_helper_path();
+    let remote = remote_uri(&repository);
+    let output = Command::new("git")
+        .args(["ls-remote", "--heads", "--tags", &remote])
+        .env("PATH", &helper_path)
+        .output()
+        .expect("list remote refs");
+    assert!(
+        output.status.success(),
+        "ls-remote must succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let refs = String::from_utf8(output.stdout).expect("ref listing is UTF-8");
+    assert!(refs.contains("refs/heads/main"));
+    assert!(refs.contains("refs/heads/topic"));
+    assert!(refs.contains("refs/tags/v1"));
+
+    let output = Command::new("git")
+        .args(["clone", "--quiet", &remote])
+        .arg(&checkout)
+        .env("PATH", &helper_path)
+        .output()
+        .expect("clone remote helper");
+    assert!(
+        output.status.success(),
+        "clone must succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        fs::read(source.join("README.md")).expect("read source"),
+        fs::read(checkout.join("README.md")).expect("read checkout")
+    );
+    assert_eq!(
+        run_git(&source, &["rev-parse", "refs/tags/v1"]),
+        run_git(&checkout, &["rev-parse", "refs/tags/v1"])
+    );
+    assert_eq!(
+        GitRepository::open(&source)
+            .expect("open source")
+            .reachable_object_ids()
+            .expect("source object IDs"),
+        GitRepository::open(&checkout)
+            .expect("open checkout")
+            .reachable_object_ids()
+            .expect("checkout object IDs")
+    );
+    run_git(&checkout, &["fsck", "--full", "--strict"]);
+
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(&checkout)
+        .args(["fetch", "--quiet", "origin"])
+        .env("PATH", &helper_path)
+        .output()
+        .expect("repeat fetch");
+    assert!(
+        output.status.success(),
+        "repeat fetch must succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(run_git(&checkout, &["status", "--porcelain"]).is_empty());
+
+    let mut helper = Command::new(env!("CARGO_BIN_EXE_git-remote-yeokcham"))
+        .arg("secret-source-location")
+        .env("YEOKCHAM_LOG", "debug")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("start helper");
+    helper
+        .stdin
+        .take()
+        .expect("helper stdin")
+        .write_all(b"capabilities\n\n")
+        .expect("write helper protocol");
+    let output = helper.wait_with_output().expect("wait helper");
+    assert!(output.status.success());
+    assert_eq!(output.stdout, b"connect\n\n");
+    let stderr = String::from_utf8(output.stderr).expect("stderr is UTF-8");
+    assert!(stderr.contains("remote_helper_command"));
+    assert!(!stderr.contains("secret-source-location"));
 }

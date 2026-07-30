@@ -89,30 +89,30 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 
 ### Remote-helper protocol
 
-- [ ] Create `git-remote-yeokcham`.
-- [ ] Parse helper command stream.
-- [ ] Advertise minimal capabilities.
-- [ ] Implement ref listing.
-- [ ] Implement fetch for a local yeokcham store.
-- [ ] Stream or generate a valid pack.
-- [ ] Add useful protocol error messages.
-- [ ] Add debug tracing mode that does not expose source bytes.
+- [x] Create `git-remote-yeokcham`.
+- [x] Parse helper command stream.
+- [x] Advertise minimal capabilities.
+- [x] Implement ref listing.
+- [x] Implement fetch for a local yeokcham store.
+- [x] Stream or generate a valid pack.
+- [x] Add useful protocol error messages.
+- [x] Add debug tracing mode that does not expose source bytes.
 
 ### Clone and fetch
 
-- [ ] `git clone yeokcham::/absolute/path`.
+- [x] `git clone yeokcham::/absolute/path`.
 - [ ] Fetch updated branches.
-- [ ] Fetch tags.
+- [x] Fetch tags.
 - [ ] Handle deleted refs.
-- [ ] Verify checkout equivalence.
-- [ ] Test repeated fetch with no changes.
+- [x] Verify checkout equivalence.
+- [x] Test repeated fetch with no changes.
 - [ ] Cache synthesised packs where safe.
 
 ### Exit criteria
 
-- [ ] Ordinary Git can clone a yeokcham local store.
+- [x] Ordinary Git can clone a yeokcham local store.
 - [ ] Ordinary Git can fetch updates.
-- [ ] Checkout and reachable object IDs match the original.
+- [x] Checkout and reachable object IDs match the original.
 - [ ] Integration suite runs against at least two maintained Git versions.
 
 ## Milestone 3 — Push and crash-safe refs

@@ -82,6 +82,8 @@ Test:
 - Submodules, initially as unsupported or opaque depending on implementation.
 - Interrupted remote operations.
 
+The current local remote-helper integration test builds a repository containing a branch and annotated tag, imports it, runs `git ls-remote`, clones through `yeokcham::<absolute-path>`, compares checkout bytes and reachable object IDs, runs `git fsck --full --strict`, and repeats an unchanged `git fetch`. It also verifies debug telemetry does not emit the requested source location. Mutable fetch updates and multi-Git-version coverage remain pending.
+
 ### Crash-injection tests
 
 Inject failure after every durable mutation boundary:
@@ -119,7 +121,7 @@ Targets:
 - Remote-helper command parser.
 - HTTP endpoints when added.
 
-The current `fuzz/` cargo-fuzz package covers canonical decoding, `YKSG` segment reading, `YKIX` index decoding, blob/metadata/chunk manifests, and ref names/snapshots. Run `make fuzz-smoke` for 1,000 bounded executions per target, or `scripts/fuzz-smoke.sh <runs>` for a longer local campaign; it requires the Rust nightly toolchain. Fuzzer corpora and crash artifacts are local-only; minimized reproductions must become deterministic regression tests before committing.
+The current `fuzz/` cargo-fuzz package covers canonical decoding, `YKSG` segment reading, `YKIX` index decoding, blob/metadata/chunk manifests, ref names/snapshots, and remote-helper command parsing. Run `make fuzz-smoke` for 1,000 bounded executions per target, or `scripts/fuzz-smoke.sh <runs>` for a longer local campaign; it requires the Rust nightly toolchain. Fuzzer corpora and crash artifacts are local-only; minimized reproductions must become deterministic regression tests before committing.
 
 ### Compatibility fixtures
 

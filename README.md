@@ -17,7 +17,7 @@ Yeokcham is intended for ordinary software developers who want to keep using Git
 
 ## Status
 
-Milestone 1 local import, verification, inspection, and loose-Git export are implemented. Remote-helper, push, encryption, and remote backends remain unfinished.
+Milestone 1 is implemented. The local `git-remote-yeokcham` compatibility bridge supports ref discovery, clone, and unchanged fetch through C Git's `upload-pack`; push, mutable fetch updates, encryption, and remote backends remain unfinished.
 
 ## Recommended implementation language
 
@@ -91,6 +91,19 @@ git --git-dir=<destination-git-repo> fsck --full --strict
 ```
 
 `init` requires a destination path that does not exist. A failed import can leave unreachable immutable records in that fresh path; remove the failed destination before retrying. The initial CDC threshold is 4 KiB; `--chunked-blob-minimum <bytes>` is available for controlled storage-policy comparison, not as a benchmark-backed default recommendation.
+
+## Local remote helper
+
+Build the binaries, place the build directory on `PATH`, then use Git's explicit remote-helper syntax:
+
+```bash
+cargo build -p yeokcham-cli
+export PATH="$PWD/target/debug:$PATH"
+git ls-remote yeokcham::/absolute/path/to/yeokcham-repository
+git clone yeokcham::/absolute/path/to/yeokcham-repository
+```
+
+For each `connect git-upload-pack` request, the helper verifies and exports the immutable Yeokcham repository into a private temporary bare repository, then delegates the smart protocol and pack stream to C Git. This is a correctness bridge, not a measured performance path. It supports clone and unchanged fetch only; push, shallow operations, and ref updates are deferred.
 
 ## Contributing and licence
 

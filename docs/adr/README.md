@@ -60,3 +60,4 @@ Valid statuses are `Proposed`, `Accepted`, `Rejected`, `Deprecated`, and `Supers
 | [ADR-0052](0052-chunked-blob-descriptor-and-manifest-v2.md) | Accepted | Store chunked blobs through immutable descriptors and `YKMF` version 2 |
 | [ADR-0053](0053-bounded-git-import-and-local-cli-workflows.md) | Accepted | Import Git repositories through bounded local CLI workflows |
 | [ADR-0054](0054-compact-tiny-blob-group-manifests.md) | Accepted | Publish compact mappings for tiny-blob aggregations |
+| [ADR-0055](0055-local-remote-helper-upload-pack-bridge.md) | Accepted | Serve local clone and unchanged fetch through an upload-pack bridge |
