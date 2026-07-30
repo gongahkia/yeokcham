@@ -117,6 +117,22 @@ The manifest itself contains no blob body or payload offset. Resolution first ve
 
 Published local blob manifests use the canonical path `manifests/blobs/<lowercase-manifest-uuid>.ykmf`. The path identity must equal the manifest's embedded UUIDv4 identity. Publication writes and synchronizes a same-directory temporary `.<uuid>.partial`, creates the final path by hard link without replacement, synchronizes the directory, and removes the temporary name. A recovery scan ignores only such staging names, treats every other unexpected entry as corrupt, and validates each final file under caller-provided entry, file-byte, and plaintext-byte limits. SQLite is not a manifest resolver or recovery dependency.
 
+## Tiny-blob group manifest version 1
+
+New tiny-blob imports publish one `YKTG` mapping for each bounded `YKTA` aggregation instead of one `YKMF` file per blob. A `YKTG` mapping contains:
+
+1. Magic `YKTG`.
+2. Schema version `1`.
+3. Required and optional feature bits, both `0`.
+4. Raw repository UUIDv4 and raw group-manifest UUIDv4.
+5. Raw sealed segment UUIDv4 and its SHA-256 checksum.
+6. One-byte aggregate content-hash tag (`3`, SHA-256) and the raw 32-byte `YKTA` content digest.
+7. A nonzero `u32` entry count, at most 4,096.
+8. Entries strictly ascending by raw 20-byte Git blob ID: Git ID, one-byte content-hash tag (`3`), raw 32-byte body digest, and `u64` body length.
+9. Footer magic `YKTF` and a raw SHA-256 checksum over every preceding mapping byte.
+
+Published mappings use `manifests/tiny-groups/<lowercase-manifest-uuid>.yktg`, with a same-directory `.<uuid>.partial` staging name. Readers bound the file and each body length before allocation, reject malformed IDs, unsorted or duplicate entries, unsupported hashes/features, checksum failures, and trailing data, then verify the entire mapping against its one sealed `YKTA` record before accepting any entry. Lookup synthesizes the existing tiny `YKMF` representation only in memory so reconstruction and export retain their verification boundary; no synthetic file is persisted. Legacy per-blob tiny `YKMF` files remain readable. A Git object ID appearing in a legacy manifest and any group mapping, or in two mappings, is a conflict.
+
 Version-1 local segments use `segments/<lowercase-segment-uuid>`. A manifest record resolver reads that bounded regular file, performs the complete `YKSG` parse and checksum verification, then requires its repository ID, segment ID, and checksum to equal the manifest. It locates the one typed outer record named by the manifest content ID and verifies the whole blob or selected tiny-aggregation entry against the manifest Git ID, content ID, and length. Indexes are not used to bypass segment verification.
 
 `LocalRepository::reconstruct_blob_bytes` resolves that verified record and copies only the selected raw Git blob body. Whole-blob manifests copy their one body; tiny-aggregation manifests copy the entry named by the manifest Git ID. It returns raw bytes rather than a `GitObject`; final Git-object construction and verification remain an explicit following boundary. Existing segment and record bounds cover the decoded and returned body allocation.

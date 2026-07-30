@@ -19,7 +19,8 @@ use crate::{
     MetadataObjectManifest, MetadataObjectRecord, ReadSegment, ReadSegmentRecord, RefSnapshot,
     RefSnapshotReadLimits, RepositoryFormat, RepositoryId, Result, SegmentId, SegmentIndex,
     SegmentReadLimits, SegmentReader, SegmentRecord, SegmentWriteLimits, SegmentWriter,
-    TinyBlobAggregation, WholeBlobRecord, YeokchamContentId,
+    TinyBlobAggregation, TinyBlobGroupManifest, TinyBlobGroupManifestEntry, WholeBlobRecord,
+    YeokchamContentId,
 };
 
 const BOOTSTRAP_MAGIC: [u8; 4] = *b"YKRB";
@@ -32,6 +33,10 @@ const BLOB_MANIFEST_DIRECTORY: &str = "manifests/blobs";
 const BLOB_MANIFEST_EXTENSION: &str = ".ykmf";
 const BLOB_MANIFEST_STAGING_SUFFIX: &str = ".partial";
 const PUBLISHED_BLOB_MANIFEST_MAX_BYTES: u64 = 4096;
+const TINY_BLOB_GROUP_MANIFEST_DIRECTORY: &str = "manifests/tiny-groups";
+const TINY_BLOB_GROUP_MANIFEST_EXTENSION: &str = ".yktg";
+const TINY_BLOB_GROUP_MANIFEST_STAGING_SUFFIX: &str = ".partial";
+const PUBLISHED_TINY_BLOB_GROUP_MANIFEST_MAX_BYTES: u64 = 1024 * 1024;
 const METADATA_OBJECT_MANIFEST_DIRECTORY: &str = "manifests/objects";
 const METADATA_OBJECT_MANIFEST_EXTENSION: &str = ".ykom";
 const METADATA_OBJECT_MANIFEST_STAGING_SUFFIX: &str = ".partial";
@@ -146,7 +151,7 @@ impl GitImportLimits {
             chunked_blob_storage_limits,
             BlobManifestReadLimits::new(
                 INITIAL_IMPORT_MAXIMUM_OBJECTS,
-                PUBLISHED_BLOB_MANIFEST_MAX_BYTES,
+                PUBLISHED_TINY_BLOB_GROUP_MANIFEST_MAX_BYTES,
                 INITIAL_IMPORT_MAXIMUM_OBJECT_BYTES as u64,
             )?,
             MetadataObjectManifestReadLimits::new(
@@ -435,7 +440,7 @@ impl ChunkedBlobStorageLimits {
     }
 }
 
-/// Caller-selected bounds for scanning local immutable blob manifests.
+/// Caller-selected bounds for scanning local immutable `YKMF` and `YKTG` manifests.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct BlobManifestReadLimits {
     maximum_entries: usize,
@@ -444,7 +449,7 @@ pub struct BlobManifestReadLimits {
 }
 
 impl BlobManifestReadLimits {
-    /// Validates bounds for one manifest-directory resolution scan.
+    /// Validates bounds for one blob-manifest directory resolution scan.
     pub fn new(
         maximum_entries: usize,
         maximum_manifest_bytes: u64,
@@ -559,7 +564,7 @@ impl RefSnapshotPublicationLimits {
         self.segment_read_limits
     }
 
-    /// Returns `YKMF` directory and body bounds.
+    /// Returns `YKMF` and `YKTG` directory and body bounds.
     pub const fn blob_manifest_limits(self) -> BlobManifestReadLimits {
         self.blob_manifest_limits
     }
@@ -617,7 +622,7 @@ impl LooseObjectExportLimits {
         self.segment_read_limits
     }
 
-    /// Returns `YKMF` directory and body bounds.
+    /// Returns `YKMF` and `YKTG` directory and body bounds.
     pub const fn blob_manifest_limits(self) -> BlobManifestReadLimits {
         self.blob_manifest_limits
     }
@@ -763,7 +768,7 @@ impl RepositoryVerificationLimits {
         self.maximum_index_stored_bytes
     }
 
-    /// Returns `YKMF` directory and body bounds.
+    /// Returns `YKMF` and `YKTG` directory and body bounds.
     pub const fn blob_manifest_limits(self) -> BlobManifestReadLimits {
         self.blob_manifest_limits
     }
@@ -790,6 +795,7 @@ pub struct RepositoryVerificationReport {
     segment_count: usize,
     index_count: usize,
     blob_manifest_count: usize,
+    tiny_blob_group_manifest_count: usize,
     metadata_object_manifest_count: usize,
     ref_snapshot_count: usize,
 }
@@ -808,6 +814,11 @@ impl RepositoryVerificationReport {
     /// Returns verified published `YKMF` file count.
     pub const fn blob_manifest_count(self) -> usize {
         self.blob_manifest_count
+    }
+
+    /// Returns verified compact `YKTG` mapping file count.
+    pub const fn tiny_blob_group_manifest_count(self) -> usize {
+        self.tiny_blob_group_manifest_count
     }
 
     /// Returns verified published `YKOM` file count.
@@ -904,6 +915,7 @@ impl LocalRepository {
         }
         validate_optional_directory(&root.join(METADATA_OBJECT_MANIFEST_DIRECTORY))?;
         validate_optional_directory(&root.join(REF_SNAPSHOT_DIRECTORY))?;
+        validate_optional_directory(&root.join(TINY_BLOB_GROUP_MANIFEST_DIRECTORY))?;
 
         let (id, format) = read_bootstrap(root)?;
         Ok(Self {
@@ -1032,13 +1044,17 @@ impl LocalRepository {
         self.verify_layout_and_bootstrap()?;
         let segments = self.verify_segments(limits)?;
         let index_count = self.verify_segment_indexes(&segments, limits)?;
-        let blob_manifest_count = self.verify_blob_manifests(limits)?;
+        let mut blob_git_object_ids = BTreeSet::new();
+        let blob_manifest_count = self.verify_blob_manifests(limits, &mut blob_git_object_ids)?;
+        let tiny_blob_group_manifest_count =
+            self.verify_tiny_blob_group_manifests(limits, &mut blob_git_object_ids)?;
         let metadata_object_manifest_count = self.verify_metadata_object_manifests(limits)?;
         let ref_snapshot_count = self.verify_ref_snapshots(limits)?;
         Ok(RepositoryVerificationReport {
             segment_count: segments.len(),
             index_count,
             blob_manifest_count,
+            tiny_blob_group_manifest_count,
             metadata_object_manifest_count,
             ref_snapshot_count,
         })
@@ -1280,15 +1296,12 @@ impl LocalRepository {
                 limits.chunked_blob_storage_limits().maximum_segment_bytes(),
                 limits.chunked_blob_storage_limits().segment_read_limits(),
             )?;
-            for entry in aggregation.entries() {
-                let manifest = BlobManifest::from_tiny_blob_aggregation(
-                    ManifestId::generate(),
-                    &segment,
-                    &aggregation,
-                    entry.git_object_id(),
-                )?;
-                self.publish_blob_manifest(&manifest)?;
-            }
+            let manifest = TinyBlobGroupManifest::from_tiny_blob_aggregation(
+                ManifestId::generate(),
+                &segment,
+                &aggregation,
+            )?;
+            self.publish_tiny_blob_group_manifest(&manifest)?;
         }
         Ok(())
     }
@@ -1440,6 +1453,83 @@ impl LocalRepository {
         }
     }
 
+    fn publish_tiny_blob_group_manifest(&self, manifest: &TinyBlobGroupManifest) -> Result<()> {
+        if manifest.repository_id() != self.id {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "tiny-blob group manifest belongs to a different repository",
+            ));
+        }
+        let bytes = manifest.encode();
+        let bytes_len = u64::try_from(bytes.len()).map_err(|_| {
+            Error::new(
+                ErrorKind::Unsupported,
+                "tiny-blob group manifest is too large to publish",
+            )
+        })?;
+        if bytes_len > PUBLISHED_TINY_BLOB_GROUP_MANIFEST_MAX_BYTES {
+            return Err(Error::new(
+                ErrorKind::Unsupported,
+                "tiny-blob group manifest is too large to publish",
+            ));
+        }
+        let directory = self.ensure_tiny_blob_group_manifest_directory()?;
+        let destination = directory.join(tiny_blob_group_manifest_filename(manifest.manifest_id()));
+        match fs::symlink_metadata(&destination) {
+            Ok(_) => {
+                return self.verify_existing_tiny_blob_group_manifest(
+                    &destination,
+                    manifest,
+                    &bytes,
+                );
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(io_error(
+                    error,
+                    "tiny-blob group manifest destination could not be inspected",
+                ));
+            }
+        }
+        let (mut staging, staging_path) = create_tiny_blob_group_manifest_staging(&directory)?;
+        if let Err(error) = staging.write_all(&bytes) {
+            drop(staging);
+            let _ = fs::remove_file(&staging_path);
+            return Err(io_error(
+                error,
+                "tiny-blob group manifest staging file could not be written",
+            ));
+        }
+        if let Err(error) = staging.sync_all() {
+            drop(staging);
+            let _ = fs::remove_file(&staging_path);
+            return Err(io_error(
+                error,
+                "tiny-blob group manifest staging file could not be synchronized",
+            ));
+        }
+        drop(staging);
+        match fs::hard_link(&staging_path, &destination) {
+            Ok(()) => {
+                sync_directory(&directory)?;
+                let _ = fs::remove_file(&staging_path);
+                let _ = sync_directory(&directory);
+                Ok(())
+            }
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                let _ = fs::remove_file(&staging_path);
+                self.verify_existing_tiny_blob_group_manifest(&destination, manifest, &bytes)
+            }
+            Err(error) => {
+                let _ = fs::remove_file(&staging_path);
+                Err(io_error(
+                    error,
+                    "tiny-blob group manifest could not be published",
+                ))
+            }
+        }
+    }
+
     /// Resolves one Git blob ID to its only published manifest, if present.
     ///
     /// A blob may validly acquire multiple immutable representations. This
@@ -1490,6 +1580,64 @@ impl LocalRepository {
             if manifest.git_object_id() != git_object_id {
                 continue;
             }
+            if resolved.replace(manifest).is_some() {
+                return Err(Error::new(
+                    ErrorKind::Conflict,
+                    "multiple blob manifests match the Git object ID",
+                ));
+            }
+        }
+        let group_directory = self.root.join(TINY_BLOB_GROUP_MANIFEST_DIRECTORY);
+        match fs::symlink_metadata(&group_directory) {
+            Ok(_) => validate_directory(&group_directory, false)?,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(resolved),
+            Err(error) => {
+                return Err(io_error(
+                    error,
+                    "tiny-blob group manifest directory could not be inspected",
+                ));
+            }
+        }
+        let entries = fs::read_dir(&group_directory).map_err(|error| {
+            io_error(
+                error,
+                "tiny-blob group manifest directory could not be read",
+            )
+        })?;
+        let mut inspected_entries = 0usize;
+        for entry in entries {
+            let entry = entry.map_err(|error| {
+                io_error(
+                    error,
+                    "tiny-blob group manifest directory could not be read",
+                )
+            })?;
+            inspected_entries = increment_directory_entries(
+                inspected_entries,
+                limits.maximum_entries,
+                "tiny-blob group manifest directory exceeds the entry limit",
+            )?;
+            let name = entry.file_name();
+            let name = name.to_str().ok_or_else(|| {
+                Error::new(
+                    ErrorKind::CorruptData,
+                    "tiny-blob group manifest directory has an invalid entry name",
+                )
+            })?;
+            if is_tiny_blob_group_manifest_staging_filename(name) {
+                continue;
+            }
+            let manifest_id = parse_tiny_blob_group_manifest_filename(name)?;
+            let group = self.read_tiny_blob_group_manifest(
+                &entry.path(),
+                manifest_id,
+                limits.maximum_manifest_bytes,
+                limits.maximum_plaintext_bytes,
+            )?;
+            let Some(entry) = group.entry(git_object_id) else {
+                continue;
+            };
+            let manifest = blob_manifest_from_tiny_blob_group_entry(&group, entry);
             if resolved.replace(manifest).is_some() {
                 return Err(Error::new(
                     ErrorKind::Conflict,
@@ -1641,6 +1789,52 @@ impl LocalRepository {
             manifest.git_object_id(),
             self.reconstruct_blob_bytes(manifest, maximum_segment_bytes, limits)?,
         )
+    }
+
+    fn reconstruct_tiny_blob_group(
+        &self,
+        group: &TinyBlobGroupManifest,
+        maximum_segment_bytes: u64,
+        limits: SegmentReadLimits,
+    ) -> Result<Vec<GitObject>> {
+        let first = group.entries().first().copied().ok_or_else(|| {
+            Error::new(
+                ErrorKind::CorruptData,
+                "tiny-blob group manifest has no entries",
+            )
+        })?;
+        let manifest = blob_manifest_from_tiny_blob_group_entry(group, first);
+        let record = self.resolve_manifest_record(&manifest, maximum_segment_bytes, limits)?;
+        let aggregation = record.as_tiny_blob_aggregation().ok_or_else(|| {
+            Error::new(
+                ErrorKind::CorruptData,
+                "segment record type does not match the tiny-blob group manifest",
+            )
+        })?;
+        if aggregation.entries().len() != group.entries().len() {
+            return Err(Error::new(
+                ErrorKind::CorruptData,
+                "tiny-blob aggregation does not match compact group mapping",
+            ));
+        }
+        let mut objects = Vec::with_capacity(group.entries().len());
+        for (group_entry, aggregation_entry) in group.entries().iter().zip(aggregation.entries()) {
+            if group_entry.git_object_id() != aggregation_entry.git_object_id()
+                || group_entry.content_id() != aggregation_entry.content_id()
+                || u64::try_from(aggregation_entry.data().len()).ok()
+                    != Some(group_entry.plaintext_bytes())
+            {
+                return Err(Error::new(
+                    ErrorKind::CorruptData,
+                    "tiny-blob aggregation does not match compact group mapping",
+                ));
+            }
+            objects.push(verified_reconstructed_blob(
+                group_entry.git_object_id(),
+                aggregation_entry.data().to_vec(),
+            )?);
+        }
+        Ok(objects)
     }
 
     fn find_or_publish_chunk(
@@ -2314,6 +2508,52 @@ impl LocalRepository {
         Ok(manifest)
     }
 
+    fn read_tiny_blob_group_manifest(
+        &self,
+        path: &Path,
+        expected_id: ManifestId,
+        maximum_manifest_bytes: u64,
+        maximum_plaintext_bytes: u64,
+    ) -> Result<TinyBlobGroupManifest> {
+        let bytes = read_bounded_regular_file(path, maximum_manifest_bytes)?;
+        let manifest = TinyBlobGroupManifest::decode(&bytes, maximum_plaintext_bytes)?;
+        if manifest.repository_id() != self.id {
+            return Err(Error::new(
+                ErrorKind::CorruptData,
+                "tiny-blob group manifest belongs to a different repository",
+            ));
+        }
+        if manifest.manifest_id() != expected_id {
+            return Err(Error::new(
+                ErrorKind::CorruptData,
+                "tiny-blob group manifest filename does not match its identity",
+            ));
+        }
+        Ok(manifest)
+    }
+
+    fn verify_existing_tiny_blob_group_manifest(
+        &self,
+        path: &Path,
+        manifest: &TinyBlobGroupManifest,
+        bytes: &[u8],
+    ) -> Result<()> {
+        let existing = self.read_tiny_blob_group_manifest(
+            path,
+            manifest.manifest_id(),
+            PUBLISHED_TINY_BLOB_GROUP_MANIFEST_MAX_BYTES,
+            u64::MAX,
+        )?;
+        if existing.encode() == bytes {
+            Ok(())
+        } else {
+            Err(Error::new(
+                ErrorKind::Conflict,
+                "tiny-blob group manifest conflicts with an existing manifest ID",
+            ))
+        }
+    }
+
     fn ensure_metadata_object_manifest_directory(&self) -> Result<PathBuf> {
         let directory = self.root.join(METADATA_OBJECT_MANIFEST_DIRECTORY);
         match fs::create_dir(&directory) {
@@ -2328,6 +2568,24 @@ impl LocalRepository {
             Err(error) => Err(io_error(
                 error,
                 "metadata-object manifest directory could not be created",
+            )),
+        }
+    }
+
+    fn ensure_tiny_blob_group_manifest_directory(&self) -> Result<PathBuf> {
+        let directory = self.root.join(TINY_BLOB_GROUP_MANIFEST_DIRECTORY);
+        match fs::create_dir(&directory) {
+            Ok(()) => {
+                sync_directory(&self.root.join("manifests"))?;
+                Ok(directory)
+            }
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                validate_directory(&directory, false)?;
+                Ok(directory)
+            }
+            Err(error) => Err(io_error(
+                error,
+                "tiny-blob group manifest directory could not be created",
             )),
         }
     }
@@ -2434,6 +2692,73 @@ impl LocalRepository {
                     "blob manifest directory exceeds the entry limit",
                 )
             })?;
+        }
+        let group_directory = self.root.join(TINY_BLOB_GROUP_MANIFEST_DIRECTORY);
+        match fs::symlink_metadata(&group_directory) {
+            Ok(_) => validate_directory(&group_directory, false)?,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(blob_count),
+            Err(error) => {
+                return Err(io_error(
+                    error,
+                    "tiny-blob group manifest directory could not be inspected",
+                ));
+            }
+        }
+        let entries = fs::read_dir(&group_directory).map_err(|error| {
+            io_error(
+                error,
+                "tiny-blob group manifest directory could not be read",
+            )
+        })?;
+        let mut inspected_entries = 0usize;
+        for entry in entries {
+            let entry = entry.map_err(|error| {
+                io_error(
+                    error,
+                    "tiny-blob group manifest directory could not be read",
+                )
+            })?;
+            inspected_entries = increment_directory_entries(
+                inspected_entries,
+                limits.blob_manifest_limits.maximum_entries,
+                "tiny-blob group manifest directory exceeds the entry limit",
+            )?;
+            let name = entry.file_name();
+            let name = name.to_str().ok_or_else(|| {
+                Error::new(
+                    ErrorKind::CorruptData,
+                    "tiny-blob group manifest directory has an invalid entry name",
+                )
+            })?;
+            if is_tiny_blob_group_manifest_staging_filename(name) {
+                continue;
+            }
+            let manifest_id = parse_tiny_blob_group_manifest_filename(name)?;
+            let group = self.read_tiny_blob_group_manifest(
+                &entry.path(),
+                manifest_id,
+                limits.blob_manifest_limits.maximum_manifest_bytes,
+                limits.blob_manifest_limits.maximum_plaintext_bytes,
+            )?;
+            for object in self.reconstruct_tiny_blob_group(
+                &group,
+                limits.maximum_segment_bytes,
+                limits.segment_read_limits,
+            )? {
+                if !manifest_object_ids.insert(object.id()) {
+                    return Err(Error::new(
+                        ErrorKind::Conflict,
+                        "multiple blob manifests match the Git object ID",
+                    ));
+                }
+                export_loose_git_object(objects_directory, &object, exported_ids)?;
+                blob_count = blob_count.checked_add(1).ok_or_else(|| {
+                    Error::new(
+                        ErrorKind::Unsupported,
+                        "blob manifest directory exceeds the entry limit",
+                    )
+                })?;
+            }
         }
         Ok(blob_count)
     }
@@ -2587,6 +2912,7 @@ impl LocalRepository {
         }
         validate_optional_directory(&self.root.join(METADATA_OBJECT_MANIFEST_DIRECTORY))?;
         validate_optional_directory(&self.root.join(REF_SNAPSHOT_DIRECTORY))?;
+        validate_optional_directory(&self.root.join(TINY_BLOB_GROUP_MANIFEST_DIRECTORY))?;
         let (id, format) = read_bootstrap(&self.root)?;
         if id != self.id || format != self.format {
             return Err(Error::new(
@@ -2665,13 +2991,16 @@ impl LocalRepository {
         Ok(index_count)
     }
 
-    fn verify_blob_manifests(&self, limits: RepositoryVerificationLimits) -> Result<usize> {
+    fn verify_blob_manifests(
+        &self,
+        limits: RepositoryVerificationLimits,
+        git_object_ids: &mut BTreeSet<GitObjectId>,
+    ) -> Result<usize> {
         let directory = self.root.join(BLOB_MANIFEST_DIRECTORY);
         validate_directory(&directory, false)?;
         let entries = fs::read_dir(&directory)
             .map_err(|error| io_error(error, "blob manifest directory could not be read"))?;
         let mut inspected_entries = 0usize;
-        let mut git_object_ids = BTreeSet::new();
         let mut manifest_count = 0usize;
         for entry in entries {
             let entry = entry
@@ -2713,6 +3042,81 @@ impl LocalRepository {
                 Error::new(
                     ErrorKind::Unsupported,
                     "blob manifest directory exceeds the entry limit",
+                )
+            })?;
+        }
+        Ok(manifest_count)
+    }
+
+    fn verify_tiny_blob_group_manifests(
+        &self,
+        limits: RepositoryVerificationLimits,
+        git_object_ids: &mut BTreeSet<GitObjectId>,
+    ) -> Result<usize> {
+        let directory = self.root.join(TINY_BLOB_GROUP_MANIFEST_DIRECTORY);
+        match fs::symlink_metadata(&directory) {
+            Ok(_) => validate_directory(&directory, false)?,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(0),
+            Err(error) => {
+                return Err(io_error(
+                    error,
+                    "tiny-blob group manifest directory could not be inspected",
+                ));
+            }
+        }
+        let entries = fs::read_dir(&directory).map_err(|error| {
+            io_error(
+                error,
+                "tiny-blob group manifest directory could not be read",
+            )
+        })?;
+        let mut inspected_entries = 0usize;
+        let mut manifest_count = 0usize;
+        for entry in entries {
+            let entry = entry.map_err(|error| {
+                io_error(
+                    error,
+                    "tiny-blob group manifest directory could not be read",
+                )
+            })?;
+            inspected_entries = increment_directory_entries(
+                inspected_entries,
+                limits.blob_manifest_limits.maximum_entries,
+                "tiny-blob group manifest directory exceeds the entry limit",
+            )?;
+            let name = entry.file_name();
+            let name = name.to_str().ok_or_else(|| {
+                Error::new(
+                    ErrorKind::CorruptData,
+                    "tiny-blob group manifest directory has an invalid entry name",
+                )
+            })?;
+            if is_tiny_blob_group_manifest_staging_filename(name) {
+                continue;
+            }
+            let manifest_id = parse_tiny_blob_group_manifest_filename(name)?;
+            let group = self.read_tiny_blob_group_manifest(
+                &entry.path(),
+                manifest_id,
+                limits.blob_manifest_limits.maximum_manifest_bytes,
+                limits.blob_manifest_limits.maximum_plaintext_bytes,
+            )?;
+            for object in self.reconstruct_tiny_blob_group(
+                &group,
+                limits.maximum_segment_bytes,
+                limits.segment_read_limits,
+            )? {
+                if !git_object_ids.insert(object.id()) {
+                    return Err(Error::new(
+                        ErrorKind::Conflict,
+                        "multiple blob manifests match the Git object ID",
+                    ));
+                }
+            }
+            manifest_count = manifest_count.checked_add(1).ok_or_else(|| {
+                Error::new(
+                    ErrorKind::Unsupported,
+                    "tiny-blob group manifest directory exceeds the entry limit",
                 )
             })?;
         }
@@ -2868,8 +3272,19 @@ fn object_kind_from_code(code: i64) -> Result<GitObjectKind> {
     }
 }
 
+fn blob_manifest_from_tiny_blob_group_entry(
+    group: &TinyBlobGroupManifest,
+    entry: TinyBlobGroupManifestEntry,
+) -> BlobManifest {
+    BlobManifest::from_tiny_blob_group_entry(group, entry)
+}
+
 fn blob_manifest_filename(id: ManifestId) -> String {
     format!("{id}{BLOB_MANIFEST_EXTENSION}")
+}
+
+fn tiny_blob_group_manifest_filename(id: ManifestId) -> String {
+    format!("{id}{TINY_BLOB_GROUP_MANIFEST_EXTENSION}")
 }
 
 fn metadata_object_manifest_filename(id: GitObjectId) -> String {
@@ -2931,6 +3346,29 @@ fn parse_blob_manifest_filename(name: &str) -> Result<ManifestId> {
         Error::new(
             ErrorKind::CorruptData,
             "blob manifest directory has an invalid entry name",
+        )
+    })
+}
+
+fn parse_tiny_blob_group_manifest_filename(name: &str) -> Result<ManifestId> {
+    let id = name
+        .strip_suffix(TINY_BLOB_GROUP_MANIFEST_EXTENSION)
+        .ok_or_else(|| {
+            Error::new(
+                ErrorKind::CorruptData,
+                "tiny-blob group manifest directory has an invalid entry name",
+            )
+        })?;
+    if id.is_empty() {
+        return Err(Error::new(
+            ErrorKind::CorruptData,
+            "tiny-blob group manifest directory has an invalid entry name",
+        ));
+    }
+    id.parse().map_err(|_| {
+        Error::new(
+            ErrorKind::CorruptData,
+            "tiny-blob group manifest directory has an invalid entry name",
         )
     })
 }
@@ -3019,6 +3457,12 @@ fn is_blob_manifest_staging_filename(name: &str) -> bool {
         .is_some_and(|id| id.parse::<ManifestId>().is_ok())
 }
 
+fn is_tiny_blob_group_manifest_staging_filename(name: &str) -> bool {
+    name.strip_prefix('.')
+        .and_then(|name| name.strip_suffix(TINY_BLOB_GROUP_MANIFEST_STAGING_SUFFIX))
+        .is_some_and(|id| id.parse::<ManifestId>().is_ok())
+}
+
 fn is_metadata_object_manifest_staging_filename(name: &str) -> bool {
     name.strip_prefix('.')
         .and_then(|name| name.strip_suffix(METADATA_OBJECT_MANIFEST_STAGING_SUFFIX))
@@ -3076,6 +3520,30 @@ fn create_blob_manifest_staging(parent: &Path) -> Result<(File, PathBuf)> {
     Err(Error::new(
         ErrorKind::Conflict,
         "blob manifest staging path could not be allocated",
+    ))
+}
+
+fn create_tiny_blob_group_manifest_staging(parent: &Path) -> Result<(File, PathBuf)> {
+    for _ in 0..16 {
+        let path = parent.join(format!(
+            ".{}{}",
+            ManifestId::generate(),
+            TINY_BLOB_GROUP_MANIFEST_STAGING_SUFFIX
+        ));
+        match OpenOptions::new().create_new(true).write(true).open(&path) {
+            Ok(file) => return Ok((file, path)),
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(error) => {
+                return Err(io_error(
+                    error,
+                    "tiny-blob group manifest staging file could not be created",
+                ));
+            }
+        }
+    }
+    Err(Error::new(
+        ErrorKind::Conflict,
+        "tiny-blob group manifest staging path could not be allocated",
     ))
 }
 
@@ -4350,6 +4818,10 @@ mod tests {
         assert_eq!(report.chunked_blob_count(), 1);
         assert!(report.metadata_object_count() >= 2);
         assert_eq!(report.ref_count(), source_refs.regular_refs().len());
+        let verification = repository
+            .verify(limits.verification_limits().expect("verification limits"))
+            .expect("verify imported repository");
+        assert_eq!(verification.tiny_blob_group_manifest_count(), 1);
         repository
             .export_loose_objects(
                 &exported_path,
@@ -4366,6 +4838,108 @@ mod tests {
         assert_eq!(
             git_output_in(&source_path, &["rev-parse", "HEAD^{tree}"]),
             git_output_in(&exported_path, &["rev-parse", "HEAD^{tree}"])
+        );
+    }
+
+    #[test]
+    fn imports_many_tiny_blobs_with_one_mapping_per_aggregation() {
+        let directory = TestDirectory::new();
+        let source_path = directory.path().join("source");
+        let destination_path = directory.path().join("destination");
+        let exported_path = directory.path().join("exported.git");
+        fs::create_dir(&source_path).expect("create source path");
+        run_git_in(&source_path, &["init", "-b", "main"]);
+        run_git_in(&source_path, &["config", "user.name", "Yeokcham Test"]);
+        run_git_in(
+            &source_path,
+            &["config", "user.email", "yeokcham-test@example.invalid"],
+        );
+        let blobs = source_path.join("blobs");
+        fs::create_dir(&blobs).expect("create blobs directory");
+        for index in 0..513 {
+            fs::write(
+                blobs.join(format!("{index:04}.txt")),
+                format!("tiny-{index:04}\n"),
+            )
+            .expect("write tiny blob");
+        }
+        run_git_in(&source_path, &["add", "."]);
+        run_git_in(&source_path, &["commit", "-m", "tiny fixture"]);
+
+        let source = GitRepository::open(&source_path).expect("open source");
+        let source_ids = source.reachable_object_ids().expect("source IDs");
+        let repository = LocalRepository::create(&destination_path).expect("create destination");
+        let limits = GitImportLimits::initial().expect("initial import limits");
+        let report = repository
+            .import_git_repository(&source, limits)
+            .expect("import tiny fixture");
+
+        assert_eq!(report.tiny_blob_count(), 513);
+        assert_eq!(
+            fs::read_dir(destination_path.join(BLOB_MANIFEST_DIRECTORY))
+                .expect("read blob manifests")
+                .count(),
+            0
+        );
+        assert_eq!(
+            fs::read_dir(destination_path.join(TINY_BLOB_GROUP_MANIFEST_DIRECTORY))
+                .expect("read compact mappings")
+                .count(),
+            2
+        );
+        let verification = repository
+            .verify(limits.verification_limits().expect("verification limits"))
+            .expect("verify tiny fixture");
+        assert_eq!(verification.blob_manifest_count(), 0);
+        assert_eq!(verification.tiny_blob_group_manifest_count(), 2);
+
+        let first_blob = source_ids
+            .iter()
+            .copied()
+            .find(|id| {
+                source
+                    .read_verified_object(*id, 64 * 1024)
+                    .expect("read source object")
+                    .kind()
+                    == GitObjectKind::Blob
+            })
+            .expect("source blob");
+        let manifest = repository
+            .resolve_blob_manifest(first_blob, limits.blob_manifest_limits())
+            .expect("resolve compact mapping")
+            .expect("mapped tiny blob");
+        assert_eq!(manifest.git_object_id(), first_blob);
+        assert_eq!(
+            manifest.representation(),
+            BlobManifestRepresentation::TinyBlobAggregation
+        );
+        repository
+            .export_loose_objects(
+                &exported_path,
+                limits.export_limits().expect("export limits"),
+            )
+            .expect("export tiny fixture");
+        let exported = GitRepository::open(&exported_path).expect("open exported repository");
+        assert_eq!(
+            exported.reachable_object_ids().expect("exported IDs"),
+            source_ids
+        );
+        git_fsck(&exported_path);
+        let group_path = fs::read_dir(destination_path.join(TINY_BLOB_GROUP_MANIFEST_DIRECTORY))
+            .expect("read compact mappings")
+            .next()
+            .expect("compact mapping")
+            .expect("mapping entry")
+            .path();
+        let mut bytes = fs::read(&group_path).expect("read compact mapping");
+        *bytes.last_mut().expect("mapping checksum") ^= 1;
+        fs::write(group_path, bytes).expect("tamper compact mapping");
+        assert_eq!(
+            repository
+                .verify(limits.verification_limits().expect("verification limits"))
+                .expect_err("tampered compact mapping")
+                .kind(),
+            ErrorKind::CorruptData
         );
     }
 

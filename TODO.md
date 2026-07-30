@@ -85,10 +85,6 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 - [x] Corruption tests.
 - [x] Round-trip tests on generated repositories.
 
-### Exit criteria
-
-- [ ] Tiny-file fixture does not suffer unbounded metadata expansion.
-
 ## Milestone 2 — Git remote helper
 
 ### Remote-helper protocol

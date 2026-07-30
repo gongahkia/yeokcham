@@ -133,7 +133,9 @@ fn cli_import_verify_inspect_and_export_round_trip() {
         .output()
         .expect("verify with CLI");
     assert!(output.status.success());
-    assert!(String::from_utf8_lossy(&output.stdout).contains("ref_snapshots=1"));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("tiny_blob_group_manifests=1"));
+    assert!(stdout.contains("ref_snapshots=1"));
 
     let object_id = String::from_utf8(run_git(&source, &["rev-parse", "HEAD:chunked.bin"]))
         .expect("object ID is UTF-8");

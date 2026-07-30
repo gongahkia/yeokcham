@@ -5,7 +5,7 @@ use sha2::{Digest, Sha256};
 use crate::{
     CanonicalDecoder, CanonicalEncoder, ChunkedBlobRecord, ContentHashAlgorithm, Error, ErrorKind,
     GitObjectId, ManifestId, ReadSegment, RepositoryId, Result, SegmentId, TinyBlobAggregation,
-    WholeBlobRecord, YeokchamContentId,
+    TinyBlobGroupManifest, TinyBlobGroupManifestEntry, WholeBlobRecord, YeokchamContentId,
 };
 
 const MAGIC: [u8; 4] = *b"YKMF";
@@ -158,6 +158,24 @@ impl BlobManifest {
             segment_checksum: segment.checksum(),
             record_content_id: aggregation.content_id(),
         })
+    }
+
+    pub(crate) fn from_tiny_blob_group_entry(
+        group: &TinyBlobGroupManifest,
+        entry: TinyBlobGroupManifestEntry,
+    ) -> Self {
+        Self {
+            repository_id: group.repository_id(),
+            manifest_id: group.manifest_id(),
+            git_object_id: entry.git_object_id(),
+            content_id: entry.content_id(),
+            plaintext_bytes: entry.plaintext_bytes(),
+            representation: BlobManifestRepresentation::TinyBlobAggregation,
+            storage_policy: Some(BlobStoragePolicyDecision::TinyBlobAggregation),
+            segment_id: group.segment_id(),
+            segment_checksum: group.segment_checksum(),
+            record_content_id: group.record_content_id(),
+        }
     }
 
     /// Creates a manifest for a chunked-blob descriptor found in a verified segment.

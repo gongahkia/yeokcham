@@ -27,6 +27,7 @@ mod segment_reader;
 mod segment_writer;
 mod telemetry;
 mod tiny_blob_aggregation;
+mod tiny_blob_group_manifest;
 mod whole_blob_record;
 mod yeokcham_content_id;
 
@@ -68,5 +69,6 @@ pub use telemetry::{Redacted, redact};
 pub use tiny_blob_aggregation::{
     MAX_TINY_BLOB_AGGREGATION_ENTRIES, TinyBlobAggregation, TinyBlobEntry,
 };
+pub use tiny_blob_group_manifest::{TinyBlobGroupManifest, TinyBlobGroupManifestEntry};
 pub use whole_blob_record::WholeBlobRecord;
 pub use yeokcham_content_id::{ContentHashAlgorithm, YeokchamContentId};

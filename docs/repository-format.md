@@ -10,6 +10,7 @@ This specifies the first local Yeokcham repository. Creation is empty; later Mil
   segments/
   indexes/
   manifests/blobs/
+  manifests/tiny-groups/ # created on first tiny-blob aggregation publication
   manifests/objects/ # created on first metadata-object publication
   manifests/refs/ # created on first ref-snapshot publication
   manifests/generations/
@@ -19,7 +20,7 @@ This specifies the first local Yeokcham repository. Creation is empty; later Mil
 
 `LocalRepository::create` requires a nonexistent repository root and an existing parent directory. It creates each directory, writes the bootstrap last with exclusive creation, syncs it, then validates the resulting repository. An interrupted initialization with no valid bootstrap is not an opened repository and contains no acknowledged Git data.
 
-`LocalRepository::open` requires every listed path to be a directory and `format/repository.bin` to be a regular file. `manifests/objects/` and `manifests/refs/` are optional for repositories without their corresponding immutable records. It rejects symlinks at these owned paths. The bootstrap file is bounded to 4096 bytes before reading.
+`LocalRepository::open` requires every fixed path to be a directory and `format/repository.bin` to be a regular file. `manifests/tiny-groups/`, `manifests/objects/`, and `manifests/refs/` are optional until their corresponding immutable records exist. It rejects symlinks at these owned paths. The bootstrap file is bounded to 4096 bytes before reading.
 
 ## Bootstrap record
 
@@ -43,4 +44,4 @@ SQLite metadata is disposable local coordination state, not a recovery source. T
 
 ## Loose-object export
 
-`LocalRepository::export_loose_objects` creates a new bare SHA-1 Git repository and writes every published blob and metadata-object manifest as a standard zlib-compressed loose object. The destination must not already exist. When exactly one published `YKRF` ref snapshot is present, it restores its regular refs and symbolic or detached `HEAD` only after every target object has been exported; an absent snapshot leaves an object-only bare repository. The export verifies each reconstructed object ID before writing, creates each loose file without replacement, synchronizes its object and repository metadata, and returns counts only after completion. A failed export can leave an incomplete destination that must be discarded before retrying.
+`LocalRepository::export_loose_objects` creates a new bare SHA-1 Git repository and writes every published blob (`YKMF` or `YKTG`) and metadata-object manifest as a standard zlib-compressed loose object. The destination must not already exist. When exactly one published `YKRF` ref snapshot is present, it restores its regular refs and symbolic or detached `HEAD` only after every target object has been exported; an absent snapshot leaves an object-only bare repository. The export verifies each reconstructed object ID before writing, creates each loose file without replacement, synchronizes its object and repository metadata, and returns counts only after completion. A failed export can leave an incomplete destination that must be discarded before retrying.

@@ -155,10 +155,11 @@ fn verify(repository: PathBuf) -> Result<()> {
     let limits = GitImportLimits::initial()?;
     let report = LocalRepository::open(repository)?.verify(limits.verification_limits()?)?;
     println!(
-        "verified segments={} indexes={} blob_manifests={} metadata_manifests={} ref_snapshots={}",
+        "verified segments={} indexes={} blob_manifests={} tiny_blob_group_manifests={} metadata_manifests={} ref_snapshots={}",
         report.segment_count(),
         report.index_count(),
         report.blob_manifest_count(),
+        report.tiny_blob_group_manifest_count(),
         report.metadata_object_manifest_count(),
         report.ref_snapshot_count(),
     );
