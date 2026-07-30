@@ -21,6 +21,7 @@ use remote_helper_protocol::{RemoteHelperCommand, parse_command, read_command_li
 
 const PACK_CACHE_DIRECTORY: &str = "cache/packs";
 const PACK_CACHE_STAGING_SUFFIX: &str = ".partial";
+const PACK_CACHE_ACCESS_FILE: &str = ".yeokcham-last-used";
 const MAXIMUM_RECEIVE_PACK_RESPONSE_BYTES: u64 = 128 * 1024 * 1024;
 
 fn main() -> ExitCode {
@@ -206,6 +207,7 @@ impl PackCache {
         ensure_pack_cache_directory(&self.directory)?;
         for _ in 0..2 {
             if self.is_valid(&self.entry)? {
+                self.record_access(&self.entry);
                 tracing::debug!(event = "remote_helper_pack_cache", outcome = "hit");
                 return Ok(self.entry.clone());
             }
@@ -235,6 +237,7 @@ impl PackCache {
             })();
             match result {
                 Ok(true) => {
+                    self.record_access(&self.entry);
                     tracing::debug!(event = "remote_helper_pack_cache", outcome = "miss");
                     return Ok(self.entry.clone());
                 }
@@ -312,6 +315,16 @@ impl PackCache {
             ErrorKind::Conflict,
             "pack cache staging path could not be allocated",
         ))
+    }
+
+    fn record_access(&self, entry: &Path) {
+        if let Err(error) = record_cache_access(entry) {
+            tracing::warn!(
+                event = "remote_helper_pack_cache_access",
+                error_code = error.code(),
+                "pack cache access time could not be recorded"
+            );
+        }
     }
 }
 
@@ -412,6 +425,57 @@ fn verify_packed_repository(repository: &Path) -> Result<bool> {
             )
         })?;
     Ok(status.success())
+}
+
+fn record_cache_access(entry: &Path) -> Result<()> {
+    let access = entry.join(PACK_CACHE_ACCESS_FILE);
+    match fs::symlink_metadata(&access) {
+        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
+            return Err(Error::new(
+                ErrorKind::CorruptData,
+                "pack cache access record is invalid",
+            ));
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(Error::with_source(
+                ErrorKind::Io,
+                "pack cache access record could not be inspected",
+                error,
+            ));
+        }
+    }
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|_| Error::new(ErrorKind::Internal, "system clock is before Unix epoch"))?;
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(&access)
+        .map_err(|error| {
+            Error::with_source(
+                ErrorKind::Io,
+                "pack cache access record could not be written",
+                error,
+            )
+        })?;
+    writeln!(file, "{} {}", now.as_secs(), now.subsec_nanos()).map_err(|error| {
+        Error::with_source(
+            ErrorKind::Io,
+            "pack cache access record could not be written",
+            error,
+        )
+    })?;
+    file.sync_all().map_err(|error| {
+        Error::with_source(
+            ErrorKind::Io,
+            "pack cache access record could not be synchronized",
+            error,
+        )
+    })?;
+    sync_directory(entry)
 }
 
 fn git_repository_command(repository: &Path) -> ProcessCommand {

@@ -8,7 +8,7 @@ use std::{
     process::{Command as ProcessCommand, ExitCode, Stdio},
     sync::Arc,
     task::{Context, Poll, Wake, Waker},
-    time::Duration,
+    time::{Duration, SystemTime},
 };
 
 use yeokcham_core::{
@@ -73,6 +73,10 @@ enum Command {
     },
     CacheVerify {
         repository: PathBuf,
+    },
+    CacheTrim {
+        repository: PathBuf,
+        maximum_bytes: u64,
     },
     DriveAuth {
         client_id: String,
@@ -155,6 +159,10 @@ fn main() -> ExitCode {
         Command::CacheClear { repository } => cache_clear(repository),
         Command::CacheInspect { repository } => cache_inspect(repository),
         Command::CacheVerify { repository } => cache_verify(repository),
+        Command::CacheTrim {
+            repository,
+            maximum_bytes,
+        } => cache_trim(repository, maximum_bytes),
         Command::DriveAuth {
             client_id,
             redirect_port,
@@ -266,6 +274,21 @@ fn parse_command(arguments: Vec<OsString>) -> Result<Command> {
         "cache" if arguments.len() == 3 && arguments[1].as_os_str() == OsStr::new("verify") => {
             Ok(Command::CacheVerify {
                 repository: PathBuf::from(&arguments[2]),
+            })
+        }
+        "cache"
+            if arguments.len() == 5
+                && arguments[1].as_os_str() == OsStr::new("trim")
+                && arguments[2].as_os_str() == OsStr::new("--max-bytes") =>
+        {
+            let maximum_bytes = arguments[3]
+                .to_str()
+                .ok_or_else(usage_error)?
+                .parse()
+                .map_err(|_| Error::new(ErrorKind::InvalidInput, "cache byte limit is invalid"))?;
+            Ok(Command::CacheTrim {
+                repository: PathBuf::from(&arguments[4]),
+                maximum_bytes,
             })
         }
         _ => Err(usage_error()),
@@ -704,6 +727,65 @@ fn cache_verify(repository: PathBuf) -> Result<()> {
     Ok(())
 }
 
+struct PackCacheTrimCandidate {
+    path: PathBuf,
+    byte_count: u64,
+    access_time: SystemTime,
+}
+
+fn cache_trim(repository: PathBuf, maximum_bytes: u64) -> Result<()> {
+    let repository = LocalRepository::open(repository)?;
+    let entries = pack_cache_entries(&repository)?;
+    let mut total_bytes = 0_u64;
+    let mut candidates = Vec::with_capacity(entries.len());
+    for entry in &entries {
+        let usage = pack_cache_entry_statistics(entry)?;
+        total_bytes = total_bytes
+            .checked_add(usage.byte_count)
+            .ok_or_else(|| Error::new(ErrorKind::Unsupported, "pack cache byte count overflows"))?;
+        candidates.push(PackCacheTrimCandidate {
+            path: entry.path.clone(),
+            byte_count: usage.byte_count,
+            access_time: pack_cache_access_time(entry)?,
+        });
+    }
+    candidates.sort_by(|left, right| {
+        left.access_time
+            .cmp(&right.access_time)
+            .then_with(|| left.path.cmp(&right.path))
+    });
+    let mut removed_entries = 0_usize;
+    for candidate in candidates {
+        if total_bytes <= maximum_bytes {
+            break;
+        }
+        remove_pack_cache_entry(&candidate.path)?;
+        total_bytes = total_bytes
+            .checked_sub(candidate.byte_count)
+            .ok_or_else(|| Error::new(ErrorKind::Internal, "pack cache byte count underflows"))?;
+        removed_entries = removed_entries.checked_add(1).ok_or_else(|| {
+            Error::new(ErrorKind::Unsupported, "pack cache removal count overflows")
+        })?;
+    }
+    if removed_entries != 0 {
+        let packs = repository.path().join("cache/packs");
+        File::open(packs)
+            .and_then(|directory| directory.sync_all())
+            .map_err(|error| {
+                Error::with_source(
+                    ErrorKind::Io,
+                    "pack cache trimming could not be synchronized",
+                    error,
+                )
+            })?;
+    }
+    println!(
+        "trimmed_pack_cache_entries={} pack_cache_bytes={total_bytes}",
+        removed_entries,
+    );
+    Ok(())
+}
+
 fn pack_cache_entries(repository: &LocalRepository) -> Result<Vec<PackCacheEntry>> {
     let cache = repository.path().join("cache");
     if !existing_cache_directory(&cache)? {
@@ -772,9 +854,13 @@ fn existing_cache_directory(path: &Path) -> Result<bool> {
 fn pack_cache_statistics(entries: &[PackCacheEntry]) -> Result<PackCacheStatistics> {
     let mut statistics = PackCacheStatistics::default();
     for entry in entries {
-        statistics.entry_count = statistics.entry_count.checked_add(1).ok_or_else(|| {
-            Error::new(ErrorKind::Unsupported, "pack cache entry count overflows")
-        })?;
+        let entry_statistics = pack_cache_entry_statistics(entry)?;
+        statistics.entry_count = statistics
+            .entry_count
+            .checked_add(entry_statistics.entry_count)
+            .ok_or_else(|| {
+                Error::new(ErrorKind::Unsupported, "pack cache entry count overflows")
+            })?;
         if entry.name.to_string_lossy().ends_with(".partial") {
             statistics.partial_entry_count = statistics
                 .partial_entry_count
@@ -786,9 +872,91 @@ fn pack_cache_statistics(entries: &[PackCacheEntry]) -> Result<PackCacheStatisti
                     )
                 })?;
         }
-        collect_pack_cache_usage(&entry.path, &mut statistics, 0)?;
+        statistics.file_count = statistics
+            .file_count
+            .checked_add(entry_statistics.file_count)
+            .ok_or_else(|| Error::new(ErrorKind::Unsupported, "pack cache file count overflows"))?;
+        statistics.byte_count = statistics
+            .byte_count
+            .checked_add(entry_statistics.byte_count)
+            .ok_or_else(|| Error::new(ErrorKind::Unsupported, "pack cache byte count overflows"))?;
+        statistics.scanned_path_count = statistics
+            .scanned_path_count
+            .checked_add(entry_statistics.scanned_path_count)
+            .ok_or_else(|| Error::new(ErrorKind::Unsupported, "pack cache path count overflows"))?;
+        if statistics.scanned_path_count > MAXIMUM_CACHE_PATHS {
+            return Err(Error::new(
+                ErrorKind::Unsupported,
+                "pack cache contains too many paths",
+            ));
+        }
     }
     Ok(statistics)
+}
+
+fn pack_cache_entry_statistics(entry: &PackCacheEntry) -> Result<PackCacheStatistics> {
+    let mut statistics = PackCacheStatistics {
+        entry_count: 1,
+        ..PackCacheStatistics::default()
+    };
+    collect_pack_cache_usage(&entry.path, &mut statistics, 0)?;
+    Ok(statistics)
+}
+
+fn pack_cache_access_time(entry: &PackCacheEntry) -> Result<SystemTime> {
+    let access = entry.path.join(".yeokcham-last-used");
+    match fs::symlink_metadata(&access) {
+        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
+            Err(Error::new(
+                ErrorKind::CorruptData,
+                "pack cache access record is invalid",
+            ))
+        }
+        Ok(metadata) => metadata.modified().map_err(|error| {
+            Error::with_source(
+                ErrorKind::Io,
+                "pack cache access record could not be inspected",
+                error,
+            )
+        }),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => fs::symlink_metadata(&entry.path)
+            .and_then(|metadata| metadata.modified())
+            .map_err(|error| {
+                Error::with_source(
+                    ErrorKind::Io,
+                    "pack cache entry could not be inspected",
+                    error,
+                )
+            }),
+        Err(error) => Err(Error::with_source(
+            ErrorKind::Io,
+            "pack cache access record could not be inspected",
+            error,
+        )),
+    }
+}
+
+fn remove_pack_cache_entry(path: &Path) -> Result<()> {
+    let metadata = fs::symlink_metadata(path).map_err(|error| {
+        Error::with_source(
+            ErrorKind::Io,
+            "pack cache entry could not be inspected",
+            error,
+        )
+    })?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(Error::new(
+            ErrorKind::CorruptData,
+            "pack cache entry is not a directory",
+        ));
+    }
+    fs::remove_dir_all(path).map_err(|error| {
+        Error::with_source(
+            ErrorKind::Io,
+            "pack cache entry could not be removed",
+            error,
+        )
+    })
 }
 
 fn collect_pack_cache_usage(
@@ -1299,7 +1467,7 @@ fn usage_error() -> Error {
 
 fn print_usage() {
     println!(
-        "usage:\n  yeokcham init --from-git <source-git-repo> <yeokcham-repo> [--chunked-blob-minimum <bytes>]\n  yeokcham sync --from-git <source-git-repo> <yeokcham-repo> --device <device-id>\n  yeokcham verify <yeokcham-repo>\n  yeokcham export-git <yeokcham-repo> <destination-git-repo>\n  yeokcham inspect object <yeokcham-repo> <git-object-id>\n  yeokcham inspect storage <yeokcham-repo>\n  yeokcham inspect refs <yeokcham-repo>\n  yeokcham cache inspect|verify|clear <yeokcham-repo>\n  yeokcham key create-export --passphrase-stdin <yeokcham-repo> <recovery-key-export>\n  yeokcham drive auth --client-id <google-desktop-client-id> [--redirect-port <port>]\n  yeokcham drive init --client-id <google-desktop-client-id>\n  yeokcham drive backup|push --client-id <google-desktop-client-id> --folder-id <drive-folder-id> --key-export <recovery-key-export> --passphrase-stdin <yeokcham-repo>\n  yeokcham drive restore|clone --client-id <google-desktop-client-id> --folder-id <drive-folder-id> --key-export <recovery-key-export> --passphrase-stdin <destination>\n  yeokcham drive verify --client-id <google-desktop-client-id> --folder-id <drive-folder-id> --key-export <recovery-key-export> --passphrase-stdin\n  yeokcham drive journal inspect --client-id <google-desktop-client-id> --folder-id <drive-folder-id> --key-export <recovery-key-export> --root-key <root-ed25519-public-key-hex> --passphrase-stdin <yeokcham-repo>"
+        "usage:\n  yeokcham init --from-git <source-git-repo> <yeokcham-repo> [--chunked-blob-minimum <bytes>]\n  yeokcham sync --from-git <source-git-repo> <yeokcham-repo> --device <device-id>\n  yeokcham verify <yeokcham-repo>\n  yeokcham export-git <yeokcham-repo> <destination-git-repo>\n  yeokcham inspect object <yeokcham-repo> <git-object-id>\n  yeokcham inspect storage <yeokcham-repo>\n  yeokcham inspect refs <yeokcham-repo>\n  yeokcham cache inspect|verify|clear <yeokcham-repo>\n  yeokcham cache trim --max-bytes <bytes> <yeokcham-repo>\n  yeokcham key create-export --passphrase-stdin <yeokcham-repo> <recovery-key-export>\n  yeokcham drive auth --client-id <google-desktop-client-id> [--redirect-port <port>]\n  yeokcham drive init --client-id <google-desktop-client-id>\n  yeokcham drive backup|push --client-id <google-desktop-client-id> --folder-id <drive-folder-id> --key-export <recovery-key-export> --passphrase-stdin <yeokcham-repo>\n  yeokcham drive restore|clone --client-id <google-desktop-client-id> --folder-id <drive-folder-id> --key-export <recovery-key-export> --passphrase-stdin <destination>\n  yeokcham drive verify --client-id <google-desktop-client-id> --folder-id <drive-folder-id> --key-export <recovery-key-export> --passphrase-stdin\n  yeokcham drive journal inspect --client-id <google-desktop-client-id> --folder-id <drive-folder-id> --key-export <recovery-key-export> --root-key <root-ed25519-public-key-hex> --passphrase-stdin <yeokcham-repo>"
     );
 }
 
@@ -1338,6 +1506,19 @@ mod tests {
         assert!(matches!(
             verify,
             Command::CacheVerify { repository } if repository == PathBuf::from("repository")
+        ));
+        let trim = parse_command(
+            ["cache", "trim", "--max-bytes", "4096", "repository"]
+                .map(OsString::from)
+                .to_vec(),
+        )
+        .expect("cache trim");
+        assert!(matches!(
+            trim,
+            Command::CacheTrim {
+                repository,
+                maximum_bytes: 4096,
+            } if repository == PathBuf::from("repository")
         ));
     }
 

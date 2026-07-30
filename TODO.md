@@ -238,8 +238,8 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 - [ ] Cache encrypted segments.
 - [ ] Cache decrypted chunks with safe local policy.
 - [ ] Cache reconstructed Git objects.
-- [ ] Implement capacity limits.
-- [ ] Implement LRU or benchmarked replacement policy.
+- [x] Implement capacity limits.
+- [x] Implement LRU or benchmarked replacement policy.
 - [x] Add cache verification.
 - [x] Add cache statistics.
 - [x] Add cache clearing without repository damage.

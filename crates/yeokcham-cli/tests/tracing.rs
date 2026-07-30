@@ -83,6 +83,25 @@ fn pack_cache_entry(repository: &Path) -> PathBuf {
     entries.into_iter().next().expect("cached entry")
 }
 
+fn directory_byte_count(path: &Path) -> u64 {
+    fs::read_dir(path)
+        .expect("read cache directory")
+        .map(|entry| entry.expect("read cache entry").path())
+        .map(|entry| {
+            let metadata = fs::symlink_metadata(&entry).expect("inspect cache entry");
+            assert!(
+                !metadata.file_type().is_symlink(),
+                "cache must not contain symlinks"
+            );
+            if metadata.is_dir() {
+                directory_byte_count(&entry)
+            } else {
+                metadata.len()
+            }
+        })
+        .sum()
+}
+
 fn run_git_bare(repository: &Path, arguments: &[&str]) -> Vec<u8> {
     let output = Command::new("git")
         .arg("--git-dir")
@@ -692,6 +711,24 @@ fn remote_helper_clones_lists_refs_and_repeats_fetch_without_source_disclosure()
         .find(|entry| *entry != &cached_repository)
         .expect("updated cache entry");
     run_git_bare(updated_cache, &["fsck", "--full", "--strict"]);
+    let maximum_bytes = directory_byte_count(updated_cache);
+    let output = Command::new(env!("CARGO_BIN_EXE_yeokcham"))
+        .args(["cache", "trim", "--max-bytes"])
+        .arg(maximum_bytes.to_string())
+        .arg(&repository)
+        .output()
+        .expect("trim pack cache");
+    assert!(
+        output.status.success(),
+        "cache trimming must succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(String::from_utf8_lossy(&output.stdout).contains("trimmed_pack_cache_entries=1"));
+    assert!(
+        !cached_repository.exists(),
+        "least-recently-used cache must be removed"
+    );
+    assert!(updated_cache.exists(), "most-recent cache must remain");
     assert_eq!(
         run_git(&source, &["rev-parse", "refs/heads/main"]),
         run_git(&checkout, &["rev-parse", "refs/remotes/origin/main"])
