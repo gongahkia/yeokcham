@@ -261,11 +261,11 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 
 ### Configuration
 
-- [ ] Add GitHub remote configuration.
-- [ ] Add publication ref rules.
-- [ ] Add mirror direction policy.
-- [ ] Add force-update policy.
-- [ ] Store mirror checkpoints.
+- [x] Add GitHub remote configuration.
+- [x] Add publication ref rules.
+- [x] Add mirror direction policy.
+- [x] Add force-update policy.
+- [x] Store mirror checkpoints.
 
 ### Publication
 

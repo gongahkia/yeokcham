@@ -19,12 +19,12 @@ use crate::{
     BlobManifest, BlobManifestRepresentation, CanonicalDecoder, CanonicalEncoder, ChunkRecord,
     ChunkReference, ChunkedBlobRecord, ContentDefinedChunker, ContentDefinedChunkingParameters,
     DeviceId, EncryptedBackend, Error, ErrorKind, GitObject, GitObjectId, GitObjectKind,
-    GitRefState, GitRepository, HeadState, ManifestId, MetadataObjectManifest,
-    MetadataObjectRecord, ReadSegment, ReadSegmentRecord, RefEvent, RefEventReadLimits,
-    RefEventSigningKey, RefSnapshot, RefSnapshotReadLimits, RepositoryFormat, RepositoryId, Result,
-    SegmentId, SegmentIndex, SegmentReadLimits, SegmentReader, SegmentRecord, SegmentWriteLimits,
-    SegmentWriter, TinyBlobAggregation, TinyBlobGroupManifest, TinyBlobGroupManifestEntry,
-    WholeBlobRecord, YeokchamContentId,
+    GitRefState, GitRepository, GithubMirrorCheckpoint, GithubMirrorConfiguration, HeadState,
+    ManifestId, MetadataObjectManifest, MetadataObjectRecord, ReadSegment, ReadSegmentRecord,
+    RefEvent, RefEventReadLimits, RefEventSigningKey, RefName, RefSnapshot, RefSnapshotReadLimits,
+    RepositoryFormat, RepositoryId, Result, SegmentId, SegmentIndex, SegmentReadLimits,
+    SegmentReader, SegmentRecord, SegmentWriteLimits, SegmentWriter, TinyBlobAggregation,
+    TinyBlobGroupManifest, TinyBlobGroupManifestEntry, WholeBlobRecord, YeokchamContentId,
 };
 
 const BOOTSTRAP_MAGIC: [u8; 4] = *b"YKRB";
@@ -58,6 +58,11 @@ const PUBLISHED_REF_EVENT_MAX_DIRECTORY_ENTRIES: usize = 1_000_000;
 const PUBLISHED_REF_EVENT_MAX_BYTES: u64 = 128 * 1024 * 1024;
 const SEGMENT_INDEX_EXTENSION: &str = ".ykix";
 const SEGMENT_INDEX_STAGING_SUFFIX: &str = ".partial";
+const GITHUB_MIRROR_DIRECTORY: &str = "mirrors";
+const GITHUB_MIRROR_CONFIGURATION_PATH: &str = "mirrors/github.ykgm";
+const GITHUB_MIRROR_CONFIGURATION_STAGING_SUFFIX: &str = ".partial";
+const GITHUB_MIRROR_CONFIGURATION_MAXIMUM_BYTES: u64 = 1024 * 1024;
+const GITHUB_MIRROR_DIRECTORY_MAXIMUM_ENTRIES: usize = 17;
 const RECOVERY_MANIFEST_MAGIC: [u8; 4] = *b"YKRM";
 const RECOVERY_MANIFEST_VERSION: u16 = 1;
 const RECOVERY_PREFIX: &str = "recovery";
@@ -1359,6 +1364,7 @@ impl LocalRepository {
         validate_optional_directory(&root.join(METADATA_OBJECT_MANIFEST_DIRECTORY))?;
         validate_optional_directory(&root.join(REF_SNAPSHOT_DIRECTORY))?;
         validate_optional_directory(&root.join(TINY_BLOB_GROUP_MANIFEST_DIRECTORY))?;
+        validate_optional_directory(&root.join(GITHUB_MIRROR_DIRECTORY))?;
 
         let (id, format) = read_bootstrap(root)?;
         Ok(Self {
@@ -1458,6 +1464,164 @@ impl LocalRepository {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .insert_object(object.id(), object.kind(), manifest, object.data().to_vec());
+    }
+
+    /// Atomically replaces this repository's token-free GitHub mirror policy.
+    ///
+    /// The policy is bound to this repository ID and remains a portable
+    /// canonical record. GitHub credentials are deliberately not accepted or
+    /// stored by this API.
+    pub fn configure_github_mirror(&self, configuration: &GithubMirrorConfiguration) -> Result<()> {
+        if configuration.repository_id() != self.id {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "GitHub mirror configuration belongs to a different repository",
+            ));
+        }
+        let directory = self.ensure_github_mirror_directory()?;
+        let destination = self.root.join(GITHUB_MIRROR_CONFIGURATION_PATH);
+        match fs::symlink_metadata(&destination) {
+            Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
+                return Err(Error::new(
+                    ErrorKind::CorruptData,
+                    "GitHub mirror configuration is not a regular file",
+                ));
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(io_error(
+                    error,
+                    "GitHub mirror configuration could not be inspected",
+                ));
+            }
+        }
+        let bytes = configuration.encode();
+        let bytes_len = u64::try_from(bytes.len()).map_err(|_| {
+            Error::new(
+                ErrorKind::Unsupported,
+                "GitHub mirror configuration exceeds the byte limit",
+            )
+        })?;
+        if bytes_len > GITHUB_MIRROR_CONFIGURATION_MAXIMUM_BYTES {
+            return Err(Error::new(
+                ErrorKind::Unsupported,
+                "GitHub mirror configuration exceeds the byte limit",
+            ));
+        }
+        let (mut staging, staging_path) = create_github_mirror_configuration_staging(&directory)?;
+        if let Err(error) = staging.write_all(&bytes) {
+            drop(staging);
+            let _ = fs::remove_file(&staging_path);
+            return Err(io_error(
+                error,
+                "GitHub mirror configuration staging file could not be written",
+            ));
+        }
+        if let Err(error) = staging.sync_all() {
+            drop(staging);
+            let _ = fs::remove_file(&staging_path);
+            return Err(io_error(
+                error,
+                "GitHub mirror configuration staging file could not be synchronized",
+            ));
+        }
+        drop(staging);
+        if let Err(error) = fs::rename(&staging_path, &destination) {
+            let _ = fs::remove_file(&staging_path);
+            return Err(io_error(
+                error,
+                "GitHub mirror configuration could not be published",
+            ));
+        }
+        sync_directory(&directory)
+    }
+
+    /// Resolves this repository's checked GitHub mirror policy when configured.
+    pub fn github_mirror_configuration(&self) -> Result<Option<GithubMirrorConfiguration>> {
+        let directory = self.root.join(GITHUB_MIRROR_DIRECTORY);
+        match fs::symlink_metadata(&directory) {
+            Ok(_) => validate_github_mirror_directory(&directory)?,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => {
+                return Err(io_error(
+                    error,
+                    "GitHub mirror directory could not be inspected",
+                ));
+            }
+        }
+        let path = self.root.join(GITHUB_MIRROR_CONFIGURATION_PATH);
+        let bytes = match read_bounded_github_mirror_configuration_file(&path) {
+            Ok(bytes) => bytes,
+            Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error),
+        };
+        let configuration = GithubMirrorConfiguration::decode(&bytes)?;
+        if configuration.repository_id() != self.id {
+            return Err(Error::new(
+                ErrorKind::CorruptData,
+                "GitHub mirror configuration belongs to a different repository",
+            ));
+        }
+        Ok(Some(configuration))
+    }
+
+    /// Records one selected-ref checkpoint only when its local target is current.
+    ///
+    /// A future transport must supply a GitHub-confirmed remote object ID and
+    /// observation timestamp. This method rejects stale local targets rather
+    /// than silently replacing a checkpoint for a changed ref.
+    pub fn record_github_mirror_checkpoint(
+        &self,
+        reference: RefName,
+        checkpoint: GithubMirrorCheckpoint,
+        ref_snapshot_limits: RefSnapshotReadLimits,
+    ) -> Result<()> {
+        let mut configuration = self
+            .github_mirror_configuration()?
+            .ok_or_else(|| Error::new(ErrorKind::NotFound, "GitHub mirror is not configured"))?;
+        let state = self
+            .resolve_ref_state(ref_snapshot_limits)?
+            .ok_or_else(|| {
+                Error::new(
+                    ErrorKind::NotFound,
+                    "repository has no acknowledged ref state",
+                )
+            })?;
+        let local_object_id = state.regular_refs().get(&reference).ok_or_else(|| {
+            Error::new(
+                ErrorKind::NotFound,
+                "GitHub mirror checkpoint ref is unavailable",
+            )
+        })?;
+        if *local_object_id != checkpoint.local_object_id() {
+            return Err(Error::new(
+                ErrorKind::Conflict,
+                "GitHub mirror checkpoint local object is stale",
+            ));
+        }
+        configuration.record_checkpoint(reference, checkpoint)?;
+        self.configure_github_mirror(&configuration)
+    }
+
+    fn ensure_github_mirror_directory(&self) -> Result<PathBuf> {
+        let directory = self.root.join(GITHUB_MIRROR_DIRECTORY);
+        match fs::symlink_metadata(&directory) {
+            Ok(_) => validate_github_mirror_directory(&directory)?,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                fs::create_dir(&directory).map_err(|error| {
+                    io_error(error, "GitHub mirror directory could not be created")
+                })?;
+                sync_directory(&self.root)?;
+            }
+            Err(error) => {
+                return Err(io_error(
+                    error,
+                    "GitHub mirror directory could not be inspected",
+                ));
+            }
+        }
+        Ok(directory)
     }
 
     /// Publishes a bounded encrypted copy of this repository's canonical files.
@@ -4174,6 +4338,7 @@ impl LocalRepository {
         validate_optional_directory(&self.root.join(METADATA_OBJECT_MANIFEST_DIRECTORY))?;
         validate_optional_directory(&self.root.join(REF_SNAPSHOT_DIRECTORY))?;
         validate_optional_directory(&self.root.join(TINY_BLOB_GROUP_MANIFEST_DIRECTORY))?;
+        validate_optional_directory(&self.root.join(GITHUB_MIRROR_DIRECTORY))?;
         let (id, format) = read_bootstrap(&self.root)?;
         if id != self.id || format != self.format() {
             return Err(Error::new(
@@ -4181,6 +4346,7 @@ impl LocalRepository {
                 "repository bootstrap changed after open",
             ));
         }
+        let _ = self.github_mirror_configuration()?;
         Ok(())
     }
 
@@ -4973,6 +5139,30 @@ fn create_ref_event_staging<F: LocalRepositoryFilesystem>(
     ))
 }
 
+fn create_github_mirror_configuration_staging(parent: &Path) -> Result<(File, PathBuf)> {
+    for _ in 0..16 {
+        let path = parent.join(format!(
+            ".{}{}",
+            SegmentId::generate(),
+            GITHUB_MIRROR_CONFIGURATION_STAGING_SUFFIX
+        ));
+        match OpenOptions::new().create_new(true).write(true).open(&path) {
+            Ok(file) => return Ok((file, path)),
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(error) => {
+                return Err(io_error(
+                    error,
+                    "GitHub mirror configuration staging file could not be created",
+                ));
+            }
+        }
+    }
+    Err(Error::new(
+        ErrorKind::Conflict,
+        "GitHub mirror configuration staging path could not be allocated",
+    ))
+}
+
 fn create_bootstrap_staging<F: LocalRepositoryFilesystem>(
     parent: &Path,
     filesystem: &F,
@@ -5526,6 +5716,104 @@ fn read_bounded_regular_file(path: &Path, maximum_bytes: u64) -> Result<Vec<u8>>
             ));
         }
         Err(error) => return Err(io_error(error, "blob manifest file could not be read")),
+    }
+    Ok(bytes)
+}
+
+fn validate_github_mirror_directory(path: &Path) -> Result<()> {
+    validate_directory(path, false)?;
+    let entries = fs::read_dir(path)
+        .map_err(|error| io_error(error, "GitHub mirror directory could not be read"))?;
+    let mut entry_count = 0usize;
+    for entry in entries {
+        let entry =
+            entry.map_err(|error| io_error(error, "GitHub mirror directory could not be read"))?;
+        entry_count = increment_directory_entries(
+            entry_count,
+            GITHUB_MIRROR_DIRECTORY_MAXIMUM_ENTRIES,
+            "GitHub mirror directory exceeds the entry limit",
+        )?;
+        let name = entry.file_name();
+        let name = name.to_str().ok_or_else(|| {
+            Error::new(
+                ErrorKind::CorruptData,
+                "GitHub mirror directory has an invalid entry name",
+            )
+        })?;
+        if name == "github.ykgm" || is_github_mirror_configuration_staging_filename(name) {
+            continue;
+        }
+        return Err(Error::new(
+            ErrorKind::CorruptData,
+            "GitHub mirror directory has an unexpected entry",
+        ));
+    }
+    Ok(())
+}
+
+fn is_github_mirror_configuration_staging_filename(name: &str) -> bool {
+    name.strip_prefix('.')
+        .and_then(|name| name.strip_suffix(GITHUB_MIRROR_CONFIGURATION_STAGING_SUFFIX))
+        .is_some_and(|id| id.parse::<SegmentId>().is_ok())
+}
+
+fn read_bounded_github_mirror_configuration_file(path: &Path) -> Result<Vec<u8>> {
+    let metadata = fs::symlink_metadata(path).map_err(|error| {
+        if error.kind() == io::ErrorKind::NotFound {
+            Error::new(
+                ErrorKind::NotFound,
+                "GitHub mirror configuration is missing",
+            )
+        } else {
+            io_error(error, "GitHub mirror configuration could not be inspected")
+        }
+    })?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(Error::new(
+            ErrorKind::CorruptData,
+            "GitHub mirror configuration is not a regular file",
+        ));
+    }
+    if metadata.len() > GITHUB_MIRROR_CONFIGURATION_MAXIMUM_BYTES {
+        return Err(Error::new(
+            ErrorKind::Unsupported,
+            "GitHub mirror configuration exceeds the byte limit",
+        ));
+    }
+    let length = usize::try_from(metadata.len()).map_err(|_| {
+        Error::new(
+            ErrorKind::Unsupported,
+            "GitHub mirror configuration exceeds the byte limit",
+        )
+    })?;
+    let mut file = File::open(path)
+        .map_err(|error| io_error(error, "GitHub mirror configuration could not be opened"))?;
+    let mut bytes = vec![0; length];
+    file.read_exact(&mut bytes).map_err(|error| {
+        if error.kind() == io::ErrorKind::UnexpectedEof {
+            Error::new(
+                ErrorKind::CorruptData,
+                "GitHub mirror configuration is truncated",
+            )
+        } else {
+            io_error(error, "GitHub mirror configuration could not be read")
+        }
+    })?;
+    let mut extra = [0; 1];
+    match file.read(&mut extra) {
+        Ok(0) => {}
+        Ok(_) => {
+            return Err(Error::new(
+                ErrorKind::CorruptData,
+                "GitHub mirror configuration changed while being read",
+            ));
+        }
+        Err(error) => {
+            return Err(io_error(
+                error,
+                "GitHub mirror configuration could not be read",
+            ));
+        }
     }
     Ok(bytes)
 }
@@ -6236,6 +6524,9 @@ fn is_recovery_staging_file(relative: &BackendKey) -> bool {
             is_ref_snapshot_staging_filename(name)
         }
         (Some("journals"), Some("refs"), Some(name), None) => is_ref_event_staging_filename(name),
+        (Some("mirrors"), Some(name), None, None) => {
+            is_github_mirror_configuration_staging_filename(name)
+        }
         _ => false,
     }
 }
@@ -6269,6 +6560,7 @@ fn is_canonical_recovery_file(relative: &BackendKey) -> bool {
         (Some("journals"), Some("refs"), Some(name), None) => {
             parse_ref_event_filename(name).is_ok()
         }
+        (Some("mirrors"), Some("github.ykgm"), None, None) => true,
         _ => false,
     }
 }
@@ -6505,9 +6797,11 @@ mod tests {
 
     use super::*;
     use crate::{
-        EncryptedBackend, FilesystemBackend, GitRefState, GitRepository, RefName,
-        RepositoryEncryptionKey, SegmentReadLimits, SegmentReader, SegmentRecord,
-        SegmentWriteLimits, SegmentWriter, TinyBlobAggregation, WholeBlobRecord,
+        EncryptedBackend, FilesystemBackend, GitRefState, GitRepository, GithubForceUpdatePolicy,
+        GithubMirrorCheckpoint, GithubMirrorConfiguration, GithubMirrorDirection,
+        GithubPublicationRule, GithubRepository, RefName, RepositoryEncryptionKey,
+        SegmentReadLimits, SegmentReader, SegmentRecord, SegmentWriteLimits, SegmentWriter,
+        TinyBlobAggregation, WholeBlobRecord,
     };
 
     const TEST_ID: &str = "550e8400-e29b-41d4-a716-446655440000";
@@ -6577,6 +6871,165 @@ mod tests {
     fn ref_snapshot_path(root: &Path, id: ManifestId) -> PathBuf {
         root.join(REF_SNAPSHOT_DIRECTORY)
             .join(ref_snapshot_filename(id))
+    }
+
+    fn github_mirror_configuration(
+        repository: &LocalRepository,
+        publication_rules: impl IntoIterator<Item = GithubPublicationRule>,
+    ) -> GithubMirrorConfiguration {
+        GithubMirrorConfiguration::new(
+            repository.id(),
+            "yeokcham/example"
+                .parse::<GithubRepository>()
+                .expect("target"),
+            GithubMirrorDirection::BidirectionalFastForward,
+            GithubForceUpdatePolicy::Reject,
+            publication_rules,
+        )
+        .expect("GitHub mirror configuration")
+    }
+
+    #[test]
+    fn persists_and_verifies_github_mirror_configuration() {
+        let temporary = TestDirectory::new();
+        let root = temporary.path().join("repository");
+        let repository = LocalRepository::create(&root).expect("create repository");
+        assert_eq!(
+            repository
+                .github_mirror_configuration()
+                .expect("read absent configuration"),
+            None
+        );
+        let configuration = github_mirror_configuration(
+            &repository,
+            [GithubPublicationRule::Heads, GithubPublicationRule::Tags],
+        );
+        repository
+            .configure_github_mirror(&configuration)
+            .expect("persist configuration");
+        assert_eq!(
+            repository
+                .github_mirror_configuration()
+                .expect("read configuration"),
+            Some(configuration.clone())
+        );
+        assert_eq!(
+            LocalRepository::open(&root)
+                .expect("reopen repository")
+                .github_mirror_configuration()
+                .expect("read reopened configuration"),
+            Some(configuration)
+        );
+
+        let mirror_directory = root.join(GITHUB_MIRROR_DIRECTORY);
+        fs::write(
+            mirror_directory.join(format!(
+                ".{}{}",
+                SEGMENT_ID_C, GITHUB_MIRROR_CONFIGURATION_STAGING_SUFFIX
+            )),
+            b"interrupted configuration",
+        )
+        .expect("write staging configuration");
+        repository
+            .github_mirror_configuration()
+            .expect("ignore recognized staging configuration");
+        let unexpected = mirror_directory.join("unexpected");
+        fs::write(&unexpected, b"unexpected").expect("write unexpected mirror entry");
+        let error = repository
+            .github_mirror_configuration()
+            .expect_err("unexpected mirror entry");
+        assert_eq!(error.kind(), ErrorKind::CorruptData);
+        fs::remove_file(unexpected).expect("remove unexpected mirror entry");
+
+        let other = LocalRepository::create(temporary.path().join("other"))
+            .expect("create other repository");
+        let error = repository
+            .configure_github_mirror(&github_mirror_configuration(
+                &other,
+                [GithubPublicationRule::Heads],
+            ))
+            .expect_err("foreign configuration");
+        assert_eq!(error.kind(), ErrorKind::InvalidInput);
+
+        let path = root.join(GITHUB_MIRROR_CONFIGURATION_PATH);
+        let mut bytes = fs::read(&path).expect("read configuration");
+        bytes[20] ^= 1;
+        fs::write(&path, bytes).expect("tamper configuration");
+        let error = repository
+            .verify(verification_limits())
+            .expect_err("tampered configuration");
+        assert_eq!(error.kind(), ErrorKind::CorruptData);
+    }
+
+    #[test]
+    fn records_github_mirror_checkpoints_only_for_current_selected_refs() {
+        let temporary = TestDirectory::new();
+        let root = temporary.path().join("repository");
+        let repository = LocalRepository::create(&root).expect("create repository");
+        let manifest = whole_blob_manifest(
+            &repository,
+            MANIFEST_ID_A.parse().expect("manifest ID"),
+            SEGMENT_ID_A.parse().expect("segment ID"),
+            b"GitHub checkpoint target",
+        );
+        repository
+            .publish_blob_manifest(&manifest)
+            .expect("publish blob manifest");
+        let reference: RefName = "refs/heads/main".parse().expect("reference");
+        let snapshot = RefSnapshot::new(
+            repository.id(),
+            MANIFEST_ID_B.parse().expect("manifest ID"),
+            GitRefState::new(
+                BTreeMap::from([(reference.clone(), manifest.git_object_id())]),
+                HeadState::Symbolic(reference.clone()),
+            )
+            .expect("ref state"),
+        )
+        .expect("snapshot");
+        repository
+            .publish_ref_snapshot(&snapshot, ref_snapshot_publication_limits())
+            .expect("publish ref snapshot");
+        repository
+            .configure_github_mirror(&github_mirror_configuration(
+                &repository,
+                [GithubPublicationRule::Heads],
+            ))
+            .expect("configure mirror");
+        let checkpoint = GithubMirrorCheckpoint::new(
+            manifest.git_object_id(),
+            "refs/heads/mirror-main".parse().expect("remote reference"),
+            GitObjectId::from_bytes([9; GitObjectId::BYTE_LENGTH]),
+            1_720_000_000,
+        );
+        repository
+            .record_github_mirror_checkpoint(
+                reference.clone(),
+                checkpoint.clone(),
+                ref_snapshot_limits(),
+            )
+            .expect("record checkpoint");
+        assert_eq!(
+            repository
+                .github_mirror_configuration()
+                .expect("read configuration")
+                .expect("configuration")
+                .checkpoints()
+                .get(&reference),
+            Some(&checkpoint)
+        );
+        let error = repository
+            .record_github_mirror_checkpoint(
+                reference,
+                GithubMirrorCheckpoint::new(
+                    GitObjectId::from_bytes([8; GitObjectId::BYTE_LENGTH]),
+                    "refs/heads/mirror-main".parse().expect("remote reference"),
+                    GitObjectId::from_bytes([7; GitObjectId::BYTE_LENGTH]),
+                    1_720_000_001,
+                ),
+                ref_snapshot_limits(),
+            )
+            .expect_err("stale checkpoint");
+        assert_eq!(error.kind(), ErrorKind::Conflict);
     }
 
     struct RefJournalCrashFixture {
@@ -6807,6 +7260,36 @@ mod tests {
         let exported_path = fixture._directory.path().join("exported.git");
         let key =
             RepositoryEncryptionKey::generate(fixture.repository.id()).expect("encryption key");
+        let reference: RefName = "refs/heads/main".parse().expect("reference");
+        let local_object_id = *fixture
+            .old_state
+            .regular_refs()
+            .get(&reference)
+            .expect("main ref");
+        fixture
+            .repository
+            .configure_github_mirror(&github_mirror_configuration(
+                &fixture.repository,
+                [GithubPublicationRule::Heads],
+            ))
+            .expect("configure GitHub mirror");
+        fixture
+            .repository
+            .record_github_mirror_checkpoint(
+                reference,
+                GithubMirrorCheckpoint::new(
+                    local_object_id,
+                    "refs/heads/mirror-main".parse().expect("remote reference"),
+                    GitObjectId::from_bytes([4; GitObjectId::BYTE_LENGTH]),
+                    1_720_000_000,
+                ),
+                fixture.limits.ref_snapshot_limits(),
+            )
+            .expect("record checkpoint");
+        let expected_configuration = fixture
+            .repository
+            .github_mirror_configuration()
+            .expect("read configuration");
         let staging_path = fixture
             .repository
             .path()
@@ -6844,6 +7327,12 @@ mod tests {
         ))
         .expect("restore");
         assert_eq!(report, backup);
+        assert_eq!(
+            restored
+                .github_mirror_configuration()
+                .expect("read restored configuration"),
+            expected_configuration
+        );
         assert!(
             !restored
                 .path()

@@ -148,7 +148,7 @@ The default `drive.file` scope covers only folders/files created or explicitly o
 
 An access token is renewed only by posting the stored refresh token and client ID to Google's fixed HTTPS token endpoint. The refresh response supplies a new in-memory Bearer token and lifetime; it does not replace a stored refresh token. Rejected or malformed refresh responses fail closed and require reauthorization rather than a plaintext credential fallback.
 
-GitHub tokens should follow least privilege and repository-specific scope where possible.
+GitHub tokens should follow least privilege and repository-specific scope where possible. The current GitHub mirror configuration accepts no token and stores none. Its optional canonical `mirrors/github.ykgm` record contains the selected-ref policy, target metadata, and checkpoints; it is checksummed, repository-ID-bound, bounded, atomically replaced, and included only through encrypted recovery snapshots. Local filesystem access therefore exposes that configuration metadata. Configuration and inspection CLI output omit the target and ref names by default. A future GitHub credential flow must use operating-system credential storage rather than this record.
 
 ## 8. Input validation
 

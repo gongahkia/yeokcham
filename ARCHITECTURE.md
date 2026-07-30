@@ -362,16 +362,9 @@ Receive-pack staging is never cached. A push-specific private bare export starts
 
 ### 3.12 GitHub mirror
 
-Mirror state should record:
+The initial local configuration is one optional atomic `mirrors/github.ykgm` `YKGM` version-1 record. It binds the repository UUID, a credential-free `owner/repository` target, one or more selected `heads`, `tags`, or exact standard branch/tag rules, a direction policy, and a force-update policy. Its SHA-256 checksum detects accidental or hostile local corruption. The record remains portable canonical recovery data, but it is not a repository-format feature flag: stores without it remain valid.
 
-- Local ref.
-- Remote ref.
-- Last observed local object ID.
-- Last observed GitHub object ID.
-- Direction policy.
-- Force-update policy.
-- Last successful synchronisation.
-- Conflict state.
+Each acknowledged checkpoint maps a selected local ref to its remote ref and records their respective verified Git object IDs plus the observed Unix timestamp. Checkpoints are accepted only when the stored local object is still the effective acknowledged local ref target. V1 configuration creates no GitHub network connection, stores no token, and does not implement a remote ref-mapping UI; future publication records a target mapping only after a confirmed transport operation.
 
 Policies:
 
@@ -380,7 +373,7 @@ Policies:
 - `bidirectional-fast-forward`
 - `manual`
 
-No silent force-push in the default policy.
+The default force-update policy is `reject`. `require-exact-checkpoint` records an explicit future opt-in but does not itself force a remote update. No command in this milestone publishes, fetches, or otherwise contacts GitHub.
 
 ## 4. Data flows
 

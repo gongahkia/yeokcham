@@ -14,11 +14,12 @@ use std::{
 use yeokcham_core::{
     BackendListLimits, DeviceId, DeviceRegistryReadLimits, DriveBackend, DriveCredentialStore,
     DriveFolderId, DriveOAuthConfiguration, EncryptedBackend, EncryptedRepositoryRecoveryLimits,
-    Error, ErrorKind, GitImportLimits, GitObjectId, GitRepository, KeyringDriveCredentialStore,
-    LocalRepository, RefEvent, RefEventReadLimits, RefEventVerifyingKey, RemoteRefJournalLimits,
-    RemoteRefJournalReconciliation, RepositoryEncryptionKey, RepositoryKeyExport, Result,
-    StoredDriveAccessTokenProvider, UreqDriveHttpTransport, UreqDriveOAuthTransport,
-    fetch_remote_ref_journal,
+    Error, ErrorKind, GitImportLimits, GitObjectId, GitRepository, GithubForceUpdatePolicy,
+    GithubMirrorConfiguration, GithubMirrorDirection, GithubPublicationRule, GithubRepository,
+    KeyringDriveCredentialStore, LocalRepository, RefEvent, RefEventReadLimits,
+    RefEventVerifyingKey, RemoteRefJournalLimits, RemoteRefJournalReconciliation,
+    RepositoryEncryptionKey, RepositoryKeyExport, Result, StoredDriveAccessTokenProvider,
+    UreqDriveHttpTransport, UreqDriveOAuthTransport, fetch_remote_ref_journal,
 };
 use zeroize::Zeroizing;
 
@@ -77,6 +78,16 @@ enum Command {
     CacheTrim {
         repository: PathBuf,
         maximum_bytes: u64,
+    },
+    GithubConfigure {
+        repository: PathBuf,
+        target: GithubRepository,
+        direction: GithubMirrorDirection,
+        force_update_policy: GithubForceUpdatePolicy,
+        publication_rules: Vec<GithubPublicationRule>,
+    },
+    GithubInspect {
+        repository: PathBuf,
     },
     DriveAuth {
         client_id: String,
@@ -163,6 +174,20 @@ fn main() -> ExitCode {
             repository,
             maximum_bytes,
         } => cache_trim(repository, maximum_bytes),
+        Command::GithubConfigure {
+            repository,
+            target,
+            direction,
+            force_update_policy,
+            publication_rules,
+        } => github_configure(
+            repository,
+            target,
+            direction,
+            force_update_policy,
+            publication_rules,
+        ),
+        Command::GithubInspect { repository } => github_inspect(repository),
         Command::DriveAuth {
             client_id,
             redirect_port,
@@ -232,6 +257,7 @@ fn parse_command(arguments: Vec<OsString>) -> Result<Command> {
         "init" => parse_init(&arguments),
         "sync" => parse_sync(&arguments),
         "drive" => parse_drive(&arguments),
+        "github" => parse_github(&arguments),
         "key" => parse_key(&arguments),
         "verify" if arguments.len() == 2 => Ok(Command::Verify {
             repository: PathBuf::from(&arguments[1]),
@@ -293,6 +319,60 @@ fn parse_command(arguments: Vec<OsString>) -> Result<Command> {
         }
         _ => Err(usage_error()),
     }
+}
+
+fn parse_github(arguments: &[OsString]) -> Result<Command> {
+    if arguments.len() == 3 && arguments[1].as_os_str() == OsStr::new("inspect") {
+        return Ok(Command::GithubInspect {
+            repository: PathBuf::from(&arguments[2]),
+        });
+    }
+    if arguments.len() < 9 || arguments[1].as_os_str() != OsStr::new("configure") {
+        return Err(usage_error());
+    }
+    let repository = PathBuf::from(&arguments[2]);
+    let mut target = None;
+    let mut direction = None;
+    let mut force_update_policy = GithubForceUpdatePolicy::Reject;
+    let mut force_update_policy_seen = false;
+    let mut publication_rules = Vec::new();
+    let mut index = 3;
+    while index < arguments.len() {
+        let option = arguments[index].as_os_str();
+        let value = arguments.get(index + 1).and_then(|value| value.to_str());
+        let Some(value) = value else {
+            return Err(usage_error());
+        };
+        match option {
+            option if option == OsStr::new("--repository") && target.is_none() => {
+                target = Some(value.parse()?);
+            }
+            option if option == OsStr::new("--direction") && direction.is_none() => {
+                direction = Some(value.parse()?);
+            }
+            option if option == OsStr::new("--force-update") && !force_update_policy_seen => {
+                force_update_policy = value.parse()?;
+                force_update_policy_seen = true;
+            }
+            option if option == OsStr::new("--publish") => {
+                publication_rules.push(value.parse()?);
+            }
+            _ => return Err(usage_error()),
+        }
+        index += 2;
+    }
+    let target = target.ok_or_else(usage_error)?;
+    let direction = direction.ok_or_else(usage_error)?;
+    if publication_rules.is_empty() {
+        return Err(usage_error());
+    }
+    Ok(Command::GithubConfigure {
+        repository,
+        target,
+        direction,
+        force_update_policy,
+        publication_rules,
+    })
 }
 
 fn parse_key(arguments: &[OsString]) -> Result<Command> {
@@ -609,6 +689,46 @@ fn inspect_refs(repository: PathBuf) -> Result<()> {
     for event in events {
         println!("device={} sequence={}", event.device_id(), event.sequence());
     }
+    Ok(())
+}
+
+fn github_configure(
+    repository: PathBuf,
+    target: GithubRepository,
+    direction: GithubMirrorDirection,
+    force_update_policy: GithubForceUpdatePolicy,
+    publication_rules: Vec<GithubPublicationRule>,
+) -> Result<()> {
+    let repository = LocalRepository::open(repository)?;
+    let configuration = GithubMirrorConfiguration::new(
+        repository.id(),
+        target,
+        direction,
+        force_update_policy,
+        publication_rules,
+    )?;
+    repository.configure_github_mirror(&configuration)?;
+    println!(
+        "github_mirror_configured direction={} force_update_policy={} publication_rules={}",
+        configuration.direction().as_str(),
+        configuration.force_update_policy().as_str(),
+        configuration.publication_rules().len(),
+    );
+    Ok(())
+}
+
+fn github_inspect(repository: PathBuf) -> Result<()> {
+    let repository = LocalRepository::open(repository)?;
+    let configuration = repository
+        .github_mirror_configuration()?
+        .ok_or_else(|| Error::new(ErrorKind::NotFound, "GitHub mirror is not configured"))?;
+    println!(
+        "github_mirror_configured direction={} force_update_policy={} publication_rules={} checkpoints={}",
+        configuration.direction().as_str(),
+        configuration.force_update_policy().as_str(),
+        configuration.publication_rules().len(),
+        configuration.checkpoints().len(),
+    );
     Ok(())
 }
 
@@ -1467,13 +1587,77 @@ fn usage_error() -> Error {
 
 fn print_usage() {
     println!(
-        "usage:\n  yeokcham init --from-git <source-git-repo> <yeokcham-repo> [--chunked-blob-minimum <bytes>]\n  yeokcham sync --from-git <source-git-repo> <yeokcham-repo> --device <device-id>\n  yeokcham verify <yeokcham-repo>\n  yeokcham export-git <yeokcham-repo> <destination-git-repo>\n  yeokcham inspect object <yeokcham-repo> <git-object-id>\n  yeokcham inspect storage <yeokcham-repo>\n  yeokcham inspect refs <yeokcham-repo>\n  yeokcham cache inspect|verify|clear <yeokcham-repo>\n  yeokcham cache trim --max-bytes <bytes> <yeokcham-repo>\n  yeokcham key create-export --passphrase-stdin <yeokcham-repo> <recovery-key-export>\n  yeokcham drive auth --client-id <google-desktop-client-id> [--redirect-port <port>]\n  yeokcham drive init --client-id <google-desktop-client-id>\n  yeokcham drive backup|push --client-id <google-desktop-client-id> --folder-id <drive-folder-id> --key-export <recovery-key-export> --passphrase-stdin <yeokcham-repo>\n  yeokcham drive restore|clone --client-id <google-desktop-client-id> --folder-id <drive-folder-id> --key-export <recovery-key-export> --passphrase-stdin <destination>\n  yeokcham drive verify --client-id <google-desktop-client-id> --folder-id <drive-folder-id> --key-export <recovery-key-export> --passphrase-stdin\n  yeokcham drive journal inspect --client-id <google-desktop-client-id> --folder-id <drive-folder-id> --key-export <recovery-key-export> --root-key <root-ed25519-public-key-hex> --passphrase-stdin <yeokcham-repo>"
+        "usage:\n  yeokcham init --from-git <source-git-repo> <yeokcham-repo> [--chunked-blob-minimum <bytes>]\n  yeokcham sync --from-git <source-git-repo> <yeokcham-repo> --device <device-id>\n  yeokcham verify <yeokcham-repo>\n  yeokcham export-git <yeokcham-repo> <destination-git-repo>\n  yeokcham inspect object <yeokcham-repo> <git-object-id>\n  yeokcham inspect storage <yeokcham-repo>\n  yeokcham inspect refs <yeokcham-repo>\n  yeokcham cache inspect|verify|clear <yeokcham-repo>\n  yeokcham cache trim --max-bytes <bytes> <yeokcham-repo>\n  yeokcham github configure <yeokcham-repo> --repository <owner/repository> --direction <publish-only|pull-only|bidirectional-fast-forward|manual> [--force-update <reject|require-exact-checkpoint>] --publish <heads|tags|refs/heads/*|refs/tags/*> [--publish ...]\n  yeokcham github inspect <yeokcham-repo>\n  yeokcham key create-export --passphrase-stdin <yeokcham-repo> <recovery-key-export>\n  yeokcham drive auth --client-id <google-desktop-client-id> [--redirect-port <port>]\n  yeokcham drive init --client-id <google-desktop-client-id>\n  yeokcham drive backup|push --client-id <google-desktop-client-id> --folder-id <drive-folder-id> --key-export <recovery-key-export> --passphrase-stdin <yeokcham-repo>\n  yeokcham drive restore|clone --client-id <google-desktop-client-id> --folder-id <drive-folder-id> --key-export <recovery-key-export> --passphrase-stdin <destination>\n  yeokcham drive verify --client-id <google-desktop-client-id> --folder-id <drive-folder-id> --key-export <recovery-key-export> --passphrase-stdin\n  yeokcham drive journal inspect --client-id <google-desktop-client-id> --folder-id <drive-folder-id> --key-export <recovery-key-export> --root-key <root-ed25519-public-key-hex> --passphrase-stdin <yeokcham-repo>"
     );
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parses_github_mirror_configuration_and_rejects_ambiguous_policy() {
+        let command = parse_command(
+            [
+                "github",
+                "configure",
+                "repository",
+                "--repository",
+                "yeokcham/example",
+                "--direction",
+                "bidirectional-fast-forward",
+                "--force-update",
+                "require-exact-checkpoint",
+                "--publish",
+                "heads",
+                "--publish",
+                "refs/tags/v1.0",
+            ]
+            .map(OsString::from)
+            .to_vec(),
+        )
+        .expect("GitHub configuration");
+        assert!(matches!(
+            command,
+            Command::GithubConfigure {
+                repository,
+                target,
+                direction: GithubMirrorDirection::BidirectionalFastForward,
+                force_update_policy: GithubForceUpdatePolicy::RequireExactCheckpoint,
+                publication_rules,
+            } if repository == PathBuf::from("repository")
+                && target.owner() == "yeokcham"
+                && target.repository() == "example"
+                && publication_rules.len() == 2
+        ));
+        let inspect = parse_command(
+            ["github", "inspect", "repository"]
+                .map(OsString::from)
+                .to_vec(),
+        )
+        .expect("GitHub inspection");
+        assert!(matches!(inspect, Command::GithubInspect { .. }));
+        assert!(
+            parse_command(
+                [
+                    "github",
+                    "configure",
+                    "repository",
+                    "--repository",
+                    "yeokcham/example",
+                    "--direction",
+                    "manual",
+                    "--direction",
+                    "publish-only",
+                    "--publish",
+                    "heads",
+                ]
+                .map(OsString::from)
+                .to_vec(),
+            )
+            .is_err()
+        );
+    }
 
     #[test]
     fn parses_cache_workflows() {

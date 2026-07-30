@@ -236,6 +236,56 @@ fn cli_creates_a_non_overwriting_passphrase_encrypted_recovery_export() {
 }
 
 #[test]
+fn cli_persists_and_inspects_a_token_free_github_mirror_policy() {
+    let directory = TestDirectory::new();
+    let repository =
+        LocalRepository::create(directory.path().join("repository")).expect("create repository");
+    let output = Command::new(env!("CARGO_BIN_EXE_yeokcham"))
+        .args(["github", "configure"])
+        .arg(repository.path())
+        .args([
+            "--repository",
+            "yeokcham/example",
+            "--direction",
+            "bidirectional-fast-forward",
+            "--force-update",
+            "require-exact-checkpoint",
+            "--publish",
+            "heads",
+            "--publish",
+            "refs/tags/v1.0",
+        ])
+        .output()
+        .expect("configure GitHub mirror");
+    assert!(
+        output.status.success(),
+        "GitHub configuration must succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        output.stdout,
+        b"github_mirror_configured direction=bidirectional-fast-forward force_update_policy=require-exact-checkpoint publication_rules=2\n"
+    );
+    assert!(!String::from_utf8_lossy(&output.stderr).contains("yeokcham/example"));
+
+    let output = Command::new(env!("CARGO_BIN_EXE_yeokcham"))
+        .args(["github", "inspect"])
+        .arg(repository.path())
+        .output()
+        .expect("inspect GitHub mirror");
+    assert!(
+        output.status.success(),
+        "GitHub inspection must succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        output.stdout,
+        b"github_mirror_configured direction=bidirectional-fast-forward force_update_policy=require-exact-checkpoint publication_rules=2 checkpoints=0\n"
+    );
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("yeokcham/example"));
+}
+
+#[test]
 fn cli_import_verify_inspect_and_export_round_trip() {
     let directory = TestDirectory::new();
     let source = directory.path().join("source");

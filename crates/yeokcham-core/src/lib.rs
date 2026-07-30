@@ -19,6 +19,7 @@ mod filesystem_backend;
 mod git_object;
 mod git_object_id;
 mod git_repository;
+mod github_mirror;
 mod google_drive_backend;
 mod google_drive_credentials;
 mod google_drive_oauth;
@@ -72,6 +73,10 @@ pub use filesystem_backend::FilesystemBackend;
 pub use git_object::{GitObject, GitObjectKind};
 pub use git_object_id::GitObjectId;
 pub use git_repository::GitRepository;
+pub use github_mirror::{
+    GithubForceUpdatePolicy, GithubMirrorCheckpoint, GithubMirrorConfiguration,
+    GithubMirrorDirection, GithubPublicationRule, GithubRepository,
+};
 pub use google_drive_backend::{
     DriveAccessTokenProvider, DriveBackend, DriveFolderId, DriveHttpMethod, DriveHttpRequest,
     DriveHttpResponse, DriveHttpTransport, DriveRetryPolicy, DriveSleeper,

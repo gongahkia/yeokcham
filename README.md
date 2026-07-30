@@ -93,6 +93,8 @@ yeokcham inspect object <yeokcham-repo> <git-object-id>
 yeokcham export-git <yeokcham-repo> <destination-git-repo>
 yeokcham cache inspect|verify|clear <yeokcham-repo>
 yeokcham cache trim --max-bytes <bytes> <yeokcham-repo>
+yeokcham github configure <yeokcham-repo> --repository <owner/repository> --direction <publish-only|pull-only|bidirectional-fast-forward|manual> --publish <heads|tags|refs/heads/*|refs/tags/*>
+yeokcham github inspect <yeokcham-repo>
 yeokcham drive auth --client-id <google-desktop-client-id>
 git --git-dir=<destination-git-repo> fsck --full --strict
 ```
@@ -102,6 +104,8 @@ git --git-dir=<destination-git-repo> fsck --full --strict
 `sync` is a controlled local-source maintenance workflow, not `git push`: it imports only newly reachable verified objects, then appends a checked full ref-state transition. Reuse one canonical UUIDv4 `--device` value for its writer. The local CLI and remote helper remain V1 single-trusted-local-writer workflows. The core separately supports root-pinned remote device registries: immutable `YKDR` registration/revocation records authorize only matching Ed25519-signed V2 ref events, reject stale writers before publication, and retain every divergent branch for explicit resolution. The registry root public key is an out-of-band trust anchor and its signing key is caller-managed; Drive clone/push wiring remains unfinished.
 
 `drive auth` starts a Google Desktop OAuth PKCE flow, prints a one-time browser URL, and stores the returned refresh token only in the operating-system credential store. It needs an operator-created Desktop OAuth client ID with the Drive API and `drive.file` scope enabled. For a headless host, reserve a local port first, forward it with SSH, then run `yeokcham drive auth --client-id <id> --redirect-port <port>` and open the displayed URL on the forwarded machine. Do not use deprecated copy/paste authorization or place refresh tokens in repository configuration. `drive init` creates an opaque app-owned Drive folder; `key create-export`, `drive backup`, `drive restore`, and `drive verify` provide encrypted recovery-snapshot transfer with passphrases accepted only on standard input.
+
+`github configure` stores a local, token-free mirror policy only. At least one selected branch/tag rule and an explicit direction are required; `--force-update require-exact-checkpoint` is an explicit future policy choice, while omission uses `reject`. `github inspect` reports the policy and checkpoint counts without echoing the target or selected ref names. GitHub publication, fetching, pull-request branches, and credential handling are not implemented yet.
 
 See [Google Drive setup](docs/google-drive.md) for the exact Desktop-client, scope, headless, and recovery requirements.
 
