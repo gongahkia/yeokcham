@@ -6,14 +6,14 @@ Robustness tasks operate only on Paengi's pure functions and generated local fix
 ## Active vertical slice
 
 - Milestone: 4 — Change capsules.
-- Task: format-neutral capsule core, exact checkpoint-range draft derivation, capsule-boundary retention, and immutable in-memory revision catalog.
-- Modules/files: new `paengi_capsule`; `paengi_scratch` capsule-boundary retention helper; focused/property capsule tests.
-- Types: capsule/revision values, dependencies, exact file transitions, text anchors with exact fallback, validation evidence, explicit application conflicts, checkpoint-range draft, and revision catalog/history.
-- Formats: none. ADR-020 through ADR-024 objects, IDs, generation refs, cleanup, quarantine, resume, and prune semantics remain unchanged. Capsule/Capsule_revision objects and current-revision refs require approval before persistence.
-- Invariants: capsule IDs are caller-supplied 32-byte typed IDs; revisions never mutate; exact transitions retain entry/content/mode preconditions; text edits never claim exact application without an explicit fallback choice; a draft source is an ancestor of its target; capsule boundaries append existing retention records; a catalog parent belongs to the same capsule and no revision ID resolves to divergent content.
-- Tests: focused exact/text/base-conflict/draft/reopen/catalog tests and bounded deterministic QCheck replay/history properties. Focused tests verified with `PROPERTY_TEST_SEED=17`.
+- Task: ADR-025 durable capsules/revisions, CAS current refs, exact durable create/fold/read, and deterministic split/combine replay.
+- Modules/files: `paengi_capsule_store`; nested ref-file publication in `paengi_store`; idempotent capsule-boundary retention; capsule CLI reads; focused/state-machine tests and v1 goldens.
+- Types: stable caller-supplied `Capsule_id`; SHA-256 logical `Capsule_revision_id`; typed stored object links; immutable `Capsule_v1`/complete `Capsule_revision_v1`; checksummed current ref; source boundary and provenance values.
+- Formats: ADR-025 adds Capsule type-6 and Capsule_revision type-7 payloads plus `refs/capsules/<id>/current`; ADR-020 through ADR-024 objects, IDs, generation refs, cleanup, quarantine, resume, prune semantics, and existing goldens remain unchanged.
+- Invariants: current refs are the sole visibility point; all durable revisions independently replay from their declared base; logical and physical IDs remain distinct; parent links remain same-capsule and cycle-checked; boundary pins are durable and idempotent; stale updates reject; split/combine never mutate sources or accept an invalid replay chain.
+- Tests: canonical golden/inverse decoder, reopen, interruption, retry, CAS, pin, history, split/combine, and bounded deterministic restart state-machine tests. Forced seed `17` is printed by the property executable.
 - External libraries: existing Alcotest, QCheck, Profile 1 encoder, and Unix only.
-- ADR changes: none. Persistent schema approval is the next gate.
+- ADR changes: ADR-025 accepted and indexed.
 
 ## Milestone 0 — Project and model foundation
 
@@ -197,40 +197,43 @@ Robustness tasks operate only on Paengi's pure functions and generated local fix
 - [x] Define exact file transition operation.
 - [x] Define textual operation and fallback.
 - [x] Define validation evidence.
-- [ ] Define current-revision ref.
+- [x] Define current-revision ref.
 
 ### Creation
 
-- [ ] Create capsule from two checkpoints.
+- [x] Create capsule from two checkpoints.
 - [ ] Create capsule from current diff.
-- [ ] Record stable capsule ID.
-- [ ] Create first revision.
+- [x] Record stable capsule ID.
+- [x] Create first revision.
 - [x] Pin required scratch boundaries.
-- [ ] Add title and description.
-- [ ] Add `paengi capsule show`.
+- [x] Add title and description.
+- [x] Add `paengi capsule show`.
 
 ### Revision
 
 - [ ] Enable capsule for editing.
-- [ ] Fold selected scratch work into capsule.
-- [ ] Create new immutable revision.
-- [ ] Preserve old revision.
-- [ ] Keep capsule ID stable.
-- [ ] Add revision diff and history.
+- [x] Fold selected scratch work into capsule.
+- [x] Create new immutable revision.
+- [x] Preserve old revision.
+- [x] Keep capsule ID stable.
+- [x] Add revision diff and history.
 
 ### Split and combine
 
-- [ ] Propose path-based split.
+- [x] Require explicit deterministic operation-index split partition.
 - [ ] Require user confirmation.
-- [ ] Combine compatible capsules.
-- [ ] Preserve provenance.
-- [ ] Add tests for dependency updates.
+- [x] Combine compatible capsules.
+- [x] Preserve provenance.
+- [x] Add tests for dependency updates.
 
 ### Exit criteria
 
-- [ ] Messy scratch sequence can become one coherent capsule.
-- [ ] Stable identity and immutable revision properties pass.
-- [ ] Applying a revision to its declared base reproduces expected snapshot or explicit conflict.
+- [x] Messy scratch sequence can become one coherent capsule.
+- [x] Stable identity and immutable revision properties pass.
+- [x] Applying a revision to its declared base reproduces expected snapshot or explicit conflict.
+- [x] Capsules/revisions survive reopen with logical/physical identity separation.
+- [x] Current-revision CAS, boundary retention, creation/folding interruption, show/diff/history, and split/combine exact replay pass.
+- [ ] Corrupt cyclic parent-link fixture is covered without bypassing immutable object identity checks.
 
 ## Milestone 5 — Workspaces and conflicts
 

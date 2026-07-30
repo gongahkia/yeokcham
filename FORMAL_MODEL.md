@@ -293,12 +293,9 @@ separate experiments; no semantic equivalence claim is made.
 ```ocaml
 type capsule = {
   id : capsule_id;
-  title : string;
-  description : string;
+  initial_title : string;
+  initial_description : string;
   created_at : timestamp;
-  dependencies : dependency list;
-  revisions : capsule_revision_id list;
-  current_revision : capsule_revision_id;
 }
 ```
 
@@ -321,25 +318,31 @@ type capsule_revision = {
   parent_revision : capsule_revision_id option;
   declared_base : snapshot_id;
   operations : change_operation list;
-  expected_result : snapshot_id option;
+  expected_result : snapshot_id;
+  dependencies : dependency list;
   evidence : validation_evidence list;
+  source_boundaries : (checkpoint_id * checkpoint_id) list;
+  provenance : created | folded | split_from | combined_from;
   created_at : timestamp;
 }
 ```
 
-The capsule ID is stable. The revision ID is immutable.
+The capsule ID is stable and caller-supplied as exactly 32 typed bytes. It is
+not derived from presentation metadata, checkpoint boundaries, or a current
+revision. A revision ID is immutable and is the SHA-256 logical identity over
+the ADR-025 canonical semantic preimage; it excludes its own ID and
+observational timestamps. Each revision is complete and directly applies from
+its declared base; parent links retain history and provenance only.
 
-### Milestone 4 pure-core boundary
+### Durable Milestone 4 representation
 
-Before a Capsule or Capsule_revision object schema is approved, the core accepts
-caller-supplied 32-byte typed capsule and revision IDs and keeps them in an
-in-memory immutable catalog. Adding a revision requires an already registered
-capsule and an already registered parent revision of that same capsule. A
-duplicate revision ID is accepted only for an identical revision value; a
-different value is an explicit collision. The catalog's current-revision
-selection and revision history are process-local model values, not persistent
-refs. Persistent capsule objects and a current-revision ref require an approved
-format decision.
+`Capsule_v1` is immutable initial metadata. `Capsule_revision_v1` holds
+dependencies, full exact operations, evidence, boundaries, and provenance.
+`refs/capsules/<capsule-id>/current` is the only mutable selection and contains
+both logical and physical identities with a generation and checksum. Revision
+history follows same-capsule immutable parent links, detects cycles and invalid
+links, and never relies on a mutable catalog. The prior in-memory catalog
+remains a pure-core test utility; it is not repository state.
 
 ## 6. Change operations
 

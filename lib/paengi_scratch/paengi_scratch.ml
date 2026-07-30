@@ -2355,7 +2355,8 @@ let has_capsule_boundary repository checkpoint ~capsule =
              | Capsule_boundary existing ->
                  Paengi_id.Capsule_id.equal existing capsule
              | User_pinned | Release_boundary _ | Validation_passed _
-             | Periodic_retention | Recent_window | Conflict_reference _ -> false)
+             | Periodic_retention | Recent_window | Conflict_reference _ ->
+                 false)
            entry.effective_retention)
   | [] -> Error (Checkpoint_not_retained checkpoint)
   | _ -> assert false

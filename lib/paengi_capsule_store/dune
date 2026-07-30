@@ -1,3 +1,11 @@
 (library
  (name paengi_capsule_store)
- (libraries paengi_capsule paengi_encoding paengi_envelope paengi_hash paengi_id paengi_scratch paengi_snapshot paengi_store))
+ (libraries
+  paengi_capsule
+  paengi_encoding
+  paengi_envelope
+  paengi_hash
+  paengi_id
+  paengi_scratch
+  paengi_snapshot
+  paengi_store))

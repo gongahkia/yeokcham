@@ -261,10 +261,11 @@ let error_to_string = function
   | Ref_generation_exhausted name ->
       Printf.sprintf "mutable ref generation is exhausted: %s" name
   | Invalid_ref_path components ->
-      Printf.sprintf "invalid mutable ref path: %s" (String.concat "/" components)
+      Printf.sprintf "invalid mutable ref path: %s"
+        (String.concat "/" components)
   | Concurrent_ref_file_update { path; expected_present; actual_present } ->
-      Printf.sprintf "mutable ref file %s changed concurrently: expected %s, got %s"
-        path
+      Printf.sprintf
+        "mutable ref file %s changed concurrently: expected %s, got %s" path
         (if expected_present then "present" else "absent")
         (if actual_present then "present" else "absent")
 

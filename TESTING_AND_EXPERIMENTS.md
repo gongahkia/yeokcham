@@ -96,12 +96,13 @@ Running compaction again without new data does not change repository meaning.
 
 A revision ID never resolves to different content.
 
-The Milestone 4 pure core checks exact transition replay over bounded generated
-scratch states, explicit text-fallback conflicts, ancestry-validated
-checkpoint-range derivation, persisted capsule-boundary retention after reopen,
-and immutable in-memory revision-catalog collisions/history. Persistent
-Capsule/Capsule_revision object, current-ref, and restart tests begin only once
-their format is approved.
+Milestone 4 checks exact transition replay over bounded generated scratch
+states, explicit text-fallback conflicts, ancestry-validated checkpoint-range
+derivation, persistent Capsule/Capsule_revision/current-ref canonical goldens
+and inverse decoders, reopen resolution, idempotent retry, current-ref CAS,
+failure before/after visibility, pinned boundaries, parent/type/corruption
+rejection, split/combine replay, and a seeded create/fold/show/split/combine
+restart state machine. The forced seed is reported by the property executable.
 
 #### P7 — Stable capsule identity
 

@@ -44,8 +44,11 @@ The supported compiler is OCaml 5.5.0. The exact constraint is recorded in `dune
 
 ## Status
 
-Milestone 3 has retained-ID scratch compaction: immutable compacted generations
-shorten retained replay chains and quarantine superseded scratch records.
+Milestone 4 has durable capsules: immutable Capsule and complete revision
+objects, CAS-protected current refs, exact replay validation, pinned scratch
+boundaries, and split/combine replay checks. Milestone 3 has retained-ID scratch
+compaction: immutable compacted generations shorten retained replay chains and
+quarantine superseded scratch records.
 `compact --prune` is irreversible. paengi remains a portfolio and research
 prototype, not a production Git replacement.
 
@@ -78,6 +81,9 @@ dune exec bin/paengi.exe -- compact --explain
 dune exec bin/paengi.exe -- compact --resume
 dune exec bin/paengi.exe -- compact --prune
 dune exec bin/paengi.exe -- watch --interval-ms 500 --debounce-ms 500
+dune exec bin/paengi.exe -- capsule show <capsule-id>
+dune exec bin/paengi.exe -- capsule current-diff <capsule-id>
+dune exec bin/paengi.exe -- capsule history <capsule-id>
 ```
 
 `restore` creates a durable safety checkpoint for divergent work, validates its
@@ -93,6 +99,11 @@ previous generation's quarantined history. `compact --dry-run --explain`
 reports the exact canonical cleanup IDs, expected types, count, and stored
 object-file bytes; these exclude payload-only and filesystem-allocation
 estimates and are checked again during activation.
+
+Capsule read commands report logical capsule and revision IDs. They resolve the
+checksummed current ref, exact immutable object types, logical/physical links,
+parent chain, and direct replay before displaying data; corrupt or stale state
+returns an error rather than a best-effort result.
 
 ## Testing scope
 

@@ -205,6 +205,21 @@
   paengi_store))
 
 (test
+ (name capsule_durable_property_test)
+ (modules capsule_durable_property_test)
+ (libraries
+  alcotest
+  qcheck-core
+  qcheck-alcotest
+  paengi_capsule
+  paengi_capsule_store
+  paengi_id
+  paengi_scratch
+  paengi_snapshot
+  paengi_store
+  unix))
+
+(test
  (name encoding_property_test)
  (modules encoding_property_test)
  (libraries
@@ -254,6 +269,7 @@
   (:scratch_property_test scratch_property_test.exe)
   (:compaction_property_test compaction_property_test.exe)
   (:capsule_property_test capsule_property_test.exe)
+  (:capsule_durable_property_test capsule_durable_property_test.exe)
   (source_tree fixtures/encoding))
  (action
   (progn
@@ -263,4 +279,5 @@
    (run %{snapshot_property_test})
    (run %{scratch_property_test})
    (run %{compaction_property_test})
-   (run %{capsule_property_test}))))
+   (run %{capsule_property_test})
+   (run %{capsule_durable_property_test}))))

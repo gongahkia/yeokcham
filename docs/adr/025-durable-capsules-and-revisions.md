@@ -112,9 +112,10 @@ bytewise ascending and unique. Boundaries retain explicit source order.
 
 Every durable revision has an expected result snapshot and is complete: it
 applies directly from its declared base snapshot without replaying parents.
-Parent links serve provenance and history only. A decoder verifies the logical
-revision ID preimage, object type, parent object/type/capsule agreement,
-operation replay where snapshot state is available, and direct expected result.
+Parent links serve provenance and history only. The payload decoder verifies its
+logical revision ID preimage and canonical bytes; the repository resolver then
+verifies object type, parent object/type/capsule agreement, operation replay,
+and direct expected result.
 
 The only mutable capsule state is:
 
@@ -161,12 +162,12 @@ publishes/pins/verifies it, rechecks the old ref, then CAS-updates current. A
 failed CAS leaves harmless unreachable immutable data; the old revision remains
 addressable.
 
-Future split uses a deterministic ordered chain: the first new capsule starts
+Split uses a deterministic ordered chain: the first new capsule starts
 at the source revision base and reaches an explicitly replayed intermediate
 snapshot; the second new capsule declares that intermediate snapshot as base,
 requires the first exact revision, and reaches the source result. Both source
-capsules are new immutable objects; the source remains unchanged. Partitions
-that cannot validate this chain reject. Future combine accepts an explicit
+output capsules are new immutable objects; the source remains unchanged. Partitions
+that cannot validate this chain reject. Combine accepts an explicit
 already-compatible source order whose base/result chain replays exactly; it
 creates one new complete capsule revision and retains all source links in
 provenance. It never silently concatenates incompatible operations.
@@ -212,11 +213,11 @@ readers/goldens, and coexistence or an atomically published migration.
   ref replacement.
 - Existing ADR-020 through ADR-024 goldens remain byte-identical.
 - Split/combine replay, invalid partition, and incompatible composition tests
-  are required when those commands are implemented.
+  cover the implemented deterministic chain model.
 
 ## CLI and user impact
 
 `capsule show`, `capsule current-diff`, and `capsule history` report logical
 capsule/revision IDs and resolve only verified immutable records. Creation and
 folding never expose a partial capsule. Split/combine commands follow the
-documented future exact-replay models.
+documented exact-replay model.

@@ -79,8 +79,16 @@ val capsule_created_at : capsule -> int64
 val capsule_model : capsule -> Capsule.capsule
 val capsule_payload : capsule -> (Paengi_encoding.t, error) result
 val decode_capsule_payload : Paengi_encoding.t -> (capsule, error) result
-val store_capsule : Paengi_store.repository -> capsule -> (Paengi_store.Stored_object_id.t, error) result
-val load_capsule : Paengi_store.repository -> Paengi_store.Stored_object_id.t -> (capsule, error) result
+
+val store_capsule :
+  Paengi_store.repository ->
+  capsule ->
+  (Paengi_store.Stored_object_id.t, error) result
+
+val load_capsule :
+  Paengi_store.repository ->
+  Paengi_store.Stored_object_id.t ->
+  (capsule, error) result
 
 val create_revision :
   capsule:capsule ->
@@ -109,8 +117,16 @@ val revision_created_at : revision -> int64
 val revision_model : revision -> Capsule.revision
 val revision_payload : revision -> (Paengi_encoding.t, error) result
 val decode_revision_payload : Paengi_encoding.t -> (revision, error) result
-val store_revision : Paengi_store.repository -> revision -> (Paengi_store.Stored_object_id.t, error) result
-val load_revision : Paengi_store.repository -> Paengi_store.Stored_object_id.t -> (revision, error) result
+
+val store_revision :
+  Paengi_store.repository ->
+  revision ->
+  (Paengi_store.Stored_object_id.t, error) result
+
+val load_revision :
+  Paengi_store.repository ->
+  Paengi_store.Stored_object_id.t ->
+  (revision, error) result
 
 val derive_revision_id : revision -> Paengi_id.Capsule_revision_id.t
 
@@ -178,10 +194,14 @@ module Durable : sig
     (resolved, error) result
 
   val read_current :
-    Paengi_store.repository -> Paengi_id.Capsule_id.t -> (resolved, error) result
+    Paengi_store.repository ->
+    Paengi_id.Capsule_id.t ->
+    (resolved, error) result
 
   val show :
-    Paengi_store.repository -> Paengi_id.Capsule_id.t -> (resolved, error) result
+    Paengi_store.repository ->
+    Paengi_id.Capsule_id.t ->
+    (resolved, error) result
 
   val current_diff :
     Paengi_store.repository ->
@@ -189,7 +209,9 @@ module Durable : sig
     (Capsule.operation list, error) result
 
   val history :
-    Paengi_store.repository -> Paengi_id.Capsule_id.t -> (revision list, error) result
+    Paengi_store.repository ->
+    Paengi_id.Capsule_id.t ->
+    (revision list, error) result
 
   val list : Paengi_store.repository -> (resolved list, error) result
 
@@ -207,7 +229,7 @@ module Durable : sig
     created_at:int64 ->
     changed_at:int64 ->
     unit ->
-    ((resolved * resolved), error) result
+    (resolved * resolved, error) result
 
   val combine :
     store:Paengi_store.repository ->

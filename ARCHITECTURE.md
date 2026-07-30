@@ -303,13 +303,17 @@ A capsule service supports:
 
 The first capsule representation should use exact file transitions and textual edits. Semantic operations come later.
 
-The current Milestone 4 core is `paengi_capsule`: it builds immutable capsule
-and revision values, derives deterministic exact operations from an
-ancestry-validated scratch checkpoint range, and appends existing
-`Capsule_boundary` retention records for selected boundaries. Its catalog and
-current-revision selection are pure in-memory values. It writes no Capsule or
-Capsule_revision object and no capsule ref; those persistent adapters require
-an approved additive schema and ref decision before CLI exposure.
+The Milestone 4 capsule service combines the pure `paengi_capsule` transition
+core with `paengi_capsule_store`. ADR-025 adds immutable `Capsule_v1` and
+complete `Capsule_revision_v1` Envelope-1 objects, and a checksummed
+generation-CAS current ref at `refs/capsules/<capsule-id>/current`. Durable
+creation/folding holds the repository writer lock, publishes immutable objects
+and idempotent boundary pins before the current ref visibility point, and
+revalidates exact replay on every resolution. History derives solely from
+physical parent links; ref-directory enumeration is the rebuildable listing
+mechanism. Split produces a validated base-to-intermediate then
+intermediate-to-result chain; combine accepts only an explicit replay-valid
+base/result source chain. No mutable capsule catalog is canonical.
 
 ## 9. Workspace materialiser
 

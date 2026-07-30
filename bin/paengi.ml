@@ -351,17 +351,18 @@ let capsule root arguments =
   | [ "show"; identity ] -> (
       match Store.open_repository ~root with
       | Error error -> fail Store.error_to_string error
-      | Ok store ->
+      | Ok store -> (
           let resolved =
             Capsule_store.Durable.show store (capsule_id identity)
             |> Result.map_error Capsule_store.error_to_string
           in
-          (match resolved with
+          match resolved with
           | Error error -> fail Fun.id error
           | Ok resolved ->
               let capsule = Capsule_store.Durable.resolved_capsule resolved in
               let revision = Capsule_store.Durable.resolved_revision resolved in
-              Printf.printf "capsule %s\nrevision %s\ntitle %s\ndescription %s\n"
+              Printf.printf
+                "capsule %s\nrevision %s\ntitle %s\ndescription %s\n"
                 (Paengi_id.Capsule_id.to_hex (Capsule_store.capsule_id capsule))
                 (Paengi_id.Capsule_revision_id.to_hex
                    (Capsule_store.revision_id revision))
@@ -370,7 +371,7 @@ let capsule root arguments =
   | [ "current-diff"; identity ] -> (
       match Store.open_repository ~root with
       | Error error -> fail Store.error_to_string error
-      | Ok store ->
+      | Ok store -> (
           Capsule_store.Durable.current_diff store (capsule_id identity)
           |> Result.map_error Capsule_store.error_to_string
           |> function
@@ -379,11 +380,11 @@ let capsule root arguments =
               List.iter
                 (fun operation ->
                   print_endline (render_capsule_operation operation))
-                operations)
+                operations))
   | [ "history"; identity ] -> (
       match Store.open_repository ~root with
       | Error error -> fail Store.error_to_string error
-      | Ok store ->
+      | Ok store -> (
           Capsule_store.Durable.history store (capsule_id identity)
           |> Result.map_error Capsule_store.error_to_string
           |> function
@@ -394,12 +395,13 @@ let capsule root arguments =
                   print_endline
                     (Paengi_id.Capsule_revision_id.to_hex
                        (Capsule_store.revision_id revision)))
-                revisions)
+                revisions))
   | _ -> exit 2
 
 let usage () =
   prerr_endline
-    "usage: paengi <init|checkpoint|timeline|restore|pin|unpin|compact|watch|capsule> \
+    "usage: paengi \
+     <init|checkpoint|timeline|restore|pin|unpin|compact|watch|capsule> \
      [--root PATH] ...";
   exit 2
 
