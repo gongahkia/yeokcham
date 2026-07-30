@@ -60,6 +60,16 @@ yeokcham drive clone --client-id <desktop-client-id> --folder-id <drive-folder-i
 
 The snapshot manifest is immutable. A changed repository cannot replace an accepted snapshot; the command reports a conflict. Use this transfer for the initial copy and recovery only, not as a mutable remote-push substitute.
 
+## Signed device journal inspection
+
+The multi-device core requires an operator-pinned root Ed25519 public key. To inspect an encrypted remote journal against a local repository's initial ref snapshot, provide that non-secret key as 64 hexadecimal characters. The command reports the resolved ref count or every unresolved device/sequence branch; it never selects a branch.
+
+```text
+yeokcham drive journal inspect --client-id <desktop-client-id> --folder-id <drive-folder-id> --key-export <recovery-key-export> --root-key <root-ed25519-public-key-hex> --passphrase-stdin <yeokcham-repo>
+```
+
+The CLI does not generate, store, register, revoke, or use device signing keys. An operator must use the root-pinned core APIs to publish registrations, revocations, and an explicit signed resolution event.
+
 The restore command verifies the reconstructed repository before it reports success. To verify backend data without retaining a repository, use:
 
 ```text

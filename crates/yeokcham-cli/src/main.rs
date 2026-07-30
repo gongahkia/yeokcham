@@ -12,11 +12,13 @@ use std::{
 };
 
 use yeokcham_core::{
-    DeviceId, DriveBackend, DriveCredentialStore, DriveFolderId, DriveOAuthConfiguration,
-    EncryptedBackend, EncryptedRepositoryRecoveryLimits, Error, ErrorKind, GitImportLimits,
-    GitObjectId, GitRepository, KeyringDriveCredentialStore, LocalRepository, RefEventReadLimits,
-    RepositoryEncryptionKey, RepositoryKeyExport, Result, StoredDriveAccessTokenProvider,
-    UreqDriveHttpTransport, UreqDriveOAuthTransport,
+    BackendListLimits, DeviceId, DeviceRegistryReadLimits, DriveBackend, DriveCredentialStore,
+    DriveFolderId, DriveOAuthConfiguration, EncryptedBackend, EncryptedRepositoryRecoveryLimits,
+    Error, ErrorKind, GitImportLimits, GitObjectId, GitRepository, KeyringDriveCredentialStore,
+    LocalRepository, RefEventReadLimits, RefEventVerifyingKey, RemoteRefJournalLimits,
+    RemoteRefJournalReconciliation, RepositoryEncryptionKey, RepositoryKeyExport, Result,
+    StoredDriveAccessTokenProvider, UreqDriveHttpTransport, UreqDriveOAuthTransport,
+    fetch_remote_ref_journal,
 };
 use zeroize::Zeroizing;
 
@@ -97,6 +99,13 @@ enum Command {
         folder_id: DriveFolderId,
         key_export: PathBuf,
     },
+    DriveJournalInspect {
+        client_id: String,
+        folder_id: DriveFolderId,
+        key_export: PathBuf,
+        root_verifying_key: RefEventVerifyingKey,
+        repository: PathBuf,
+    },
     KeyCreateExport {
         repository: PathBuf,
         destination: PathBuf,
@@ -166,6 +175,19 @@ fn main() -> ExitCode {
             folder_id,
             key_export,
         } => drive_verify(client_id, folder_id, key_export),
+        Command::DriveJournalInspect {
+            client_id,
+            folder_id,
+            key_export,
+            root_verifying_key,
+            repository,
+        } => drive_journal_inspect(
+            client_id,
+            folder_id,
+            key_export,
+            root_verifying_key,
+            repository,
+        ),
         Command::KeyCreateExport {
             repository,
             destination,
@@ -338,6 +360,27 @@ fn parse_drive(arguments: &[OsString]) -> Result<Command> {
                 arguments[5].to_str().ok_or_else(usage_error)?.to_owned(),
             )?,
             key_export: PathBuf::from(&arguments[7]),
+        });
+    }
+    if arguments.len() == 13
+        && arguments[1].as_os_str() == OsStr::new("journal")
+        && arguments[2].as_os_str() == OsStr::new("inspect")
+        && arguments[3].as_os_str() == OsStr::new("--client-id")
+        && arguments[5].as_os_str() == OsStr::new("--folder-id")
+        && arguments[7].as_os_str() == OsStr::new("--key-export")
+        && arguments[9].as_os_str() == OsStr::new("--root-key")
+        && arguments[11].as_os_str() == OsStr::new("--passphrase-stdin")
+    {
+        return Ok(Command::DriveJournalInspect {
+            client_id: arguments[4].to_str().ok_or_else(usage_error)?.to_owned(),
+            folder_id: DriveFolderId::new(
+                arguments[6].to_str().ok_or_else(usage_error)?.to_owned(),
+            )?,
+            key_export: PathBuf::from(&arguments[8]),
+            root_verifying_key: parse_root_verifying_key(
+                arguments[10].to_str().ok_or_else(usage_error)?,
+            )?,
+            repository: PathBuf::from(&arguments[12]),
         });
     }
     Err(usage_error())
@@ -677,6 +720,82 @@ fn drive_verify(client_id: String, folder_id: DriveFolderId, key_export: PathBuf
     }
 }
 
+fn drive_journal_inspect(
+    client_id: String,
+    folder_id: DriveFolderId,
+    key_export: PathBuf,
+    root_verifying_key: RefEventVerifyingKey,
+    repository: PathBuf,
+) -> Result<()> {
+    let repository = LocalRepository::open(repository)?;
+    let key = read_recovery_key(key_export)?;
+    if repository.id() != key.repository_id() {
+        return Err(Error::new(
+            ErrorKind::Conflict,
+            "recovery key does not belong to the local repository",
+        ));
+    }
+    let local_limits = GitImportLimits::initial()?;
+    let initial = repository
+        .resolve_ref_snapshot(local_limits.ref_snapshot_limits())?
+        .ok_or_else(|| Error::new(ErrorKind::NotFound, "local repository has no ref snapshot"))?;
+    let backend = encrypted_drive_backend(client_id, folder_id, key)?;
+    let journal = block_on(fetch_remote_ref_journal(
+        &backend,
+        repository.id(),
+        root_verifying_key,
+        remote_journal_limits(local_limits)?,
+    ))?;
+    match journal.reconcile(initial.state()) {
+        RemoteRefJournalReconciliation::Resolved(state) => println!(
+            "remote_refs={} events={} registry_events={}",
+            state.regular_refs().len(),
+            journal.events().len(),
+            journal.device_registry().events().len(),
+        ),
+        RemoteRefJournalReconciliation::Divergent(divergence) => {
+            println!(
+                "remote_refs=unresolved events={} registry_events={} unresolved_events={} base_refs={}",
+                journal.events().len(),
+                journal.device_registry().events().len(),
+                divergence.unresolved_events().len(),
+                divergence.base_state().regular_refs().len(),
+            );
+            for event in divergence.unresolved_events() {
+                println!("device={} sequence={}", event.device_id(), event.sequence());
+            }
+        }
+    }
+    Ok(())
+}
+
+fn remote_journal_limits(limits: GitImportLimits) -> Result<RemoteRefJournalLimits> {
+    let ref_limits = limits.ref_snapshot_limits();
+    RemoteRefJournalLimits::new(
+        DeviceRegistryReadLimits::new(
+            ref_limits.maximum_directory_entries(),
+            ref_limits.maximum_snapshot_bytes(),
+        )?,
+        RefEventReadLimits::new(
+            ref_limits.maximum_directory_entries(),
+            ref_limits.maximum_snapshot_bytes(),
+            ref_limits.maximum_reference_entries(),
+        )?,
+        BackendListLimits::new(1_000, 1_000)?,
+    )
+}
+
+fn parse_root_verifying_key(value: &str) -> Result<RefEventVerifyingKey> {
+    let mut bytes = [0; 32];
+    hex::decode_to_slice(value, &mut bytes).map_err(|_| {
+        Error::new(
+            ErrorKind::InvalidInput,
+            "device registry root key is invalid",
+        )
+    })?;
+    RefEventVerifyingKey::from_bytes(bytes)
+}
+
 fn key_create_export(repository: PathBuf, destination: PathBuf) -> Result<()> {
     let repository = LocalRepository::open(repository)?;
     let key = RepositoryEncryptionKey::generate(repository.id())?;
@@ -842,7 +961,7 @@ fn usage_error() -> Error {
 
 fn print_usage() {
     println!(
-        "usage:\n  yeokcham init --from-git <source-git-repo> <yeokcham-repo> [--chunked-blob-minimum <bytes>]\n  yeokcham sync --from-git <source-git-repo> <yeokcham-repo> --device <device-id>\n  yeokcham verify <yeokcham-repo>\n  yeokcham export-git <yeokcham-repo> <destination-git-repo>\n  yeokcham inspect object <yeokcham-repo> <git-object-id>\n  yeokcham inspect storage <yeokcham-repo>\n  yeokcham inspect refs <yeokcham-repo>\n  yeokcham key create-export --passphrase-stdin <yeokcham-repo> <recovery-key-export>\n  yeokcham drive auth --client-id <google-desktop-client-id> [--redirect-port <port>]\n  yeokcham drive init --client-id <google-desktop-client-id>\n  yeokcham drive backup|push --client-id <google-desktop-client-id> --folder-id <drive-folder-id> --key-export <recovery-key-export> --passphrase-stdin <yeokcham-repo>\n  yeokcham drive restore|clone --client-id <google-desktop-client-id> --folder-id <drive-folder-id> --key-export <recovery-key-export> --passphrase-stdin <destination>\n  yeokcham drive verify --client-id <google-desktop-client-id> --folder-id <drive-folder-id> --key-export <recovery-key-export> --passphrase-stdin"
+        "usage:\n  yeokcham init --from-git <source-git-repo> <yeokcham-repo> [--chunked-blob-minimum <bytes>]\n  yeokcham sync --from-git <source-git-repo> <yeokcham-repo> --device <device-id>\n  yeokcham verify <yeokcham-repo>\n  yeokcham export-git <yeokcham-repo> <destination-git-repo>\n  yeokcham inspect object <yeokcham-repo> <git-object-id>\n  yeokcham inspect storage <yeokcham-repo>\n  yeokcham inspect refs <yeokcham-repo>\n  yeokcham key create-export --passphrase-stdin <yeokcham-repo> <recovery-key-export>\n  yeokcham drive auth --client-id <google-desktop-client-id> [--redirect-port <port>]\n  yeokcham drive init --client-id <google-desktop-client-id>\n  yeokcham drive backup|push --client-id <google-desktop-client-id> --folder-id <drive-folder-id> --key-export <recovery-key-export> --passphrase-stdin <yeokcham-repo>\n  yeokcham drive restore|clone --client-id <google-desktop-client-id> --folder-id <drive-folder-id> --key-export <recovery-key-export> --passphrase-stdin <destination>\n  yeokcham drive verify --client-id <google-desktop-client-id> --folder-id <drive-folder-id> --key-export <recovery-key-export> --passphrase-stdin\n  yeokcham drive journal inspect --client-id <google-desktop-client-id> --folder-id <drive-folder-id> --key-export <recovery-key-export> --root-key <root-ed25519-public-key-hex> --passphrase-stdin <yeokcham-repo>"
     );
 }
 
@@ -1006,6 +1125,30 @@ mod tests {
         )
         .expect("Drive clone");
         assert!(matches!(clone, Command::DriveClone { .. }));
+
+        let root = yeokcham_core::RefEventSigningKey::from_secret_bytes([3; 32]);
+        let root = hex::encode(root.verifying_key().as_bytes());
+        let journal = parse_command(
+            [
+                "drive",
+                "journal",
+                "inspect",
+                "--client-id",
+                "123.apps.googleusercontent.com",
+                "--folder-id",
+                "folder_id",
+                "--key-export",
+                "key.ykrk",
+                "--root-key",
+                root.as_str(),
+                "--passphrase-stdin",
+                "repository",
+            ]
+            .map(OsString::from)
+            .to_vec(),
+        )
+        .expect("Drive journal inspection");
+        assert!(matches!(journal, Command::DriveJournalInspect { .. }));
 
         let verify = parse_command(
             [
