@@ -3,6 +3,7 @@
 #![deny(missing_docs)]
 
 mod backend;
+mod backend_wrappers;
 mod blob_manifest;
 mod canonical;
 mod chunk_record;
@@ -38,6 +39,10 @@ pub use backend::{
     Backend, BackendByteRange, BackendCursor, BackendFuture, BackendKey, BackendListEntry,
     BackendListLimits, BackendListPage, BackendObjectMetadata, BackendPrefix, BackendPutResult,
     BackendReadLimits, BackendReadRequest, BackendResumablePutStart, BackendUploadSession,
+};
+pub use backend_wrappers::{
+    BackendMetrics, BackendOperation, BackendOperationMetrics, FaultInjectingBackend,
+    MetricsBackend,
 };
 pub use blob_manifest::{BlobManifest, BlobManifestRepresentation, BlobStoragePolicyDecision};
 pub use canonical::{CanonicalDecoder, CanonicalEncoder};

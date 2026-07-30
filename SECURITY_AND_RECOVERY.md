@@ -68,6 +68,8 @@ The current local remote-helper pack cache contains conventional plaintext Git o
 
 The current `FilesystemBackend` is a bounded local object-store implementation, not an encrypted repository backend. It rejects path traversal and symlinked root, parent, object, and private-upload paths, but its object bytes remain plaintext until the encryption milestone. No repository workflow publishes Yeokcham source data through it yet.
 
+`MetricsBackend` keeps only operation counts and aggregate byte counts in process; it stores no keys, sessions, object bytes, or error sources. These counters can still reveal activity volume, so callers must not emit them in default logs without an explicit telemetry policy. `FaultInjectingBackend` exposes only a configured failure position and operation count through its API; it retains no backend data.
+
 ## 4. Key hierarchy
 
 Conceptual hierarchy:

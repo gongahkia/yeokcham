@@ -24,6 +24,7 @@ Cover:
 - Ed25519 ref-event signing, wrong-key rejection, and signature tampering with a recomputed checksum.
 - Backend key generation.
 - Filesystem backend create-only writes, bounded range reads, paginated listing, deletion, resumable completion, and symlink rejection.
+- Backend fault injection before delegation, dynamic backend wrapping, and metrics counts for successful and failed operations plus transferred bytes.
 - Encryption and decryption.
 - Storage policy selection.
 

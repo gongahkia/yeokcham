@@ -400,6 +400,69 @@ pub trait Backend: Send + Sync {
     fn abort_resumable<'a>(&'a self, session: &'a BackendUploadSession) -> BackendFuture<'a, ()>;
 }
 
+impl<B: Backend + ?Sized> Backend for Box<B> {
+    fn put_if_absent<'a>(
+        &'a self,
+        key: &'a BackendKey,
+        data: &'a [u8],
+    ) -> BackendFuture<'a, BackendPutResult> {
+        (**self).put_if_absent(key, data)
+    }
+
+    fn get<'a>(
+        &'a self,
+        key: &'a BackendKey,
+        request: BackendReadRequest,
+    ) -> BackendFuture<'a, Vec<u8>> {
+        (**self).get(key, request)
+    }
+
+    fn head<'a>(&'a self, key: &'a BackendKey) -> BackendFuture<'a, BackendObjectMetadata> {
+        (**self).head(key)
+    }
+
+    fn list<'a>(
+        &'a self,
+        prefix: &'a BackendPrefix,
+        cursor: Option<&'a BackendCursor>,
+        limits: BackendListLimits,
+    ) -> BackendFuture<'a, BackendListPage> {
+        (**self).list(prefix, cursor, limits)
+    }
+
+    fn delete<'a>(&'a self, key: &'a BackendKey) -> BackendFuture<'a, ()> {
+        (**self).delete(key)
+    }
+
+    fn start_resumable_put_if_absent<'a>(
+        &'a self,
+        key: &'a BackendKey,
+        total_length: u64,
+    ) -> BackendFuture<'a, BackendResumablePutStart> {
+        (**self).start_resumable_put_if_absent(key, total_length)
+    }
+
+    fn write_resumable<'a>(
+        &'a self,
+        session: &'a BackendUploadSession,
+        offset: u64,
+        data: &'a [u8],
+    ) -> BackendFuture<'a, ()> {
+        (**self).write_resumable(session, offset, data)
+    }
+
+    fn complete_resumable<'a>(
+        &'a self,
+        session: &'a BackendUploadSession,
+    ) -> BackendFuture<'a, BackendPutResult> {
+        (**self).complete_resumable(session)
+    }
+
+    fn abort_resumable<'a>(&'a self, session: &'a BackendUploadSession) -> BackendFuture<'a, ()> {
+        (**self).abort_resumable(session)
+    }
+}
+
 fn validate_key(bytes: &[u8], allow_empty: bool) -> Result<()> {
     if bytes.len() > MAXIMUM_KEY_BYTES || (!allow_empty && bytes.is_empty()) {
         return Err(Error::new(

@@ -160,9 +160,9 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 - [x] Implement filesystem backend.
 - [x] Implement range reads.
 - [x] Implement resumable upload abstraction.
-- [ ] Implement fault-injecting wrapper.
-- [ ] Implement metrics wrapper.
-- [ ] Document consistency assumptions.
+- [x] Implement fault-injecting wrapper.
+- [x] Implement metrics wrapper.
+- [x] Document consistency assumptions.
 
 ### Encryption
 

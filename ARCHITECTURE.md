@@ -287,6 +287,10 @@ Backend-specific consistency behaviour must be documented.
 
 `FilesystemBackend` maps each backend key under a caller-owned root and reserves `.yeokcham-uploads/` for resumable staging. It uses create-new staging files, hard-link publication without replacement, and file/directory synchronization on Unix. Its own list implementation returns lexically ordered pages, but callers must not generalize that order or local visibility guarantee to remote providers. Reads reject ranges outside the exact current file length and caller byte limits. The implementation is runtime-neutral but performs filesystem I/O when its future is polled; callers that require nonblocking scheduling must use an appropriate blocking executor.
 
+`FaultInjectingBackend` returns one configured injected I/O error before it delegates that one-based global operation attempt. It is deterministic only when callers serialize operations, and it simulates a pre-call failure rather than a crash after a backend mutation. `MetricsBackend` records in-process, saturating atomic counts per operation plus supplied put/write and returned get bytes. Its snapshot is not a transaction boundary: concurrent calls can make related counters observe different instants. Neither wrapper adds locks, retries, ordering, durability, authentication, or cross-object consistency.
+
+A successful `put_if_absent` or resumable completion only establishes the backend's result for that one key. A later list can omit it, a returned cursor can race other writers, and an `AlreadyExists` result cannot authenticate existing bytes. A recovery workflow must enumerate with bounded retries appropriate to its provider, fetch the exact immutable record, and verify higher-level checksums, signatures, and Git identities before advancing any ref.
+
 The repository layer must not assume:
 
 - Atomic directory rename.
