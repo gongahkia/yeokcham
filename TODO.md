@@ -106,7 +106,7 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 - [x] Handle deleted refs.
 - [x] Verify checkout equivalence.
 - [x] Test repeated fetch with no changes.
-- [ ] Cache synthesised packs where safe.
+- [x] Cache synthesised packs where safe.
 
 ### Exit criteria
 

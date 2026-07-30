@@ -64,6 +64,8 @@ Current local `YKRE` V1 ref events use SHA-256 checksums and predecessor-state b
 
 Do not invent cryptography.
 
+The current local remote-helper pack cache contains conventional plaintext Git objects under `<store>/cache/packs/`. It is neither canonical repository data nor an encrypted backend format. The helper verifies the canonical store before cache use and validates each matching cache entry with exact refs plus `git fsck --full --strict`; a missing or invalid entry is rebuilt. Cache deletion or corruption must never be a recovery dependency.
+
 ## 4. Key hierarchy
 
 Conceptual hierarchy:

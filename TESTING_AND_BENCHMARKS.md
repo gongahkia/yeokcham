@@ -82,7 +82,7 @@ Test:
 - Submodules, initially as unsupported or opaque depending on implementation.
 - Interrupted remote operations.
 
-The current local remote-helper integration test builds a repository containing a branch and annotated tag, imports it, runs `git ls-remote`, clones through `yeokcham::<absolute-path>`, compares checkout bytes and reachable object IDs, runs `git fsck --full --strict`, repeats an unchanged `git fetch`, then runs `yeokcham sync`, fetches an updated branch, prunes a deleted branch, and checks the resulting checkout and fsck. It also verifies debug telemetry does not emit the requested source location. Multi-Git-version coverage remains pending.
+The current local remote-helper integration test builds a repository containing a branch and annotated tag, imports it, runs `git ls-remote`, clones through `yeokcham::<absolute-path>`, compares checkout bytes and reachable object IDs, and runs `git fsck --full --strict`. It proves that an unchanged effective ref state reuses a validated snapshot pack, that a corrupted cached pack index is rebuilt before use, and that a later ref transition creates a separate validated cache entry. It then runs `yeokcham sync`, fetches an updated branch, prunes a deleted branch, and checks the resulting checkout and fsck. It also verifies debug telemetry does not emit the requested source location. Multi-Git-version coverage remains pending.
 
 ### Crash-injection tests
 

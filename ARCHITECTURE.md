@@ -79,7 +79,7 @@ Initial strategy:
 - Prefer delegation to mature Git pack readers and writers.
 - Add smart HTTP only after local end-to-end correctness.
 
-Current local bridge: `git-remote-yeokcham` advertises only `connect`, accepts only `connect git-upload-pack`, verifies and exports the effective local ref state into a private temporary bare repository, then proxies C Git's smart upload-pack byte stream. It performs no pack parsing or buffering itself. This proves Git compatibility before native pack synthesis; it is not a performance path. A trusted local `yeokcham sync` can append checked ref transitions for fetch updates, while Git push and signed multi-device journal authorization remain separate work.
+Current local bridge: `git-remote-yeokcham` advertises only `connect`, accepts only `connect git-upload-pack`, and verifies the effective local ref state before C Git sees it. It uses a local bare snapshot-pack cache keyed by the SHA-256 identity of that complete state. A cache hit requires exact ref-state equality and `git fsck --full --strict`; cache corruption, partial publication, or an incorrect state is discarded and rebuilt from a verified export. C Git still performs every client-specific upload-pack negotiation, so the cache is not a protocol-response cache. This proves Git compatibility before native pack synthesis; it is not a performance path. A trusted local `yeokcham sync` can append checked ref transitions for fetch updates, while Git push and signed multi-device journal authorization remain separate work.
 
 ### 3.2 Repository service
 
@@ -327,6 +327,8 @@ Cache layers:
 5. Synthesised pack cache.
 
 Every cache entry must be treated as disposable and integrity-checked.
+
+The initial local helper cache is a complete packed bare Git snapshot under `cache/packs/<effective-ref-state-sha256>`. It has no canonical or recovery role, has no capacity policy yet, and is recreated from verified Yeokcham records if its exact state or C Git fsck check fails. It cannot cache a negotiated upload-pack response because wants, haves, and capabilities vary per client connection.
 
 ### 3.12 GitHub mirror
 

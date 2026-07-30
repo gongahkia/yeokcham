@@ -62,3 +62,4 @@ Valid statuses are `Proposed`, `Accepted`, `Rejected`, `Deprecated`, and `Supers
 | [ADR-0054](0054-compact-tiny-blob-group-manifests.md) | Accepted | Publish compact mappings for tiny-blob aggregations |
 | [ADR-0055](0055-local-remote-helper-upload-pack-bridge.md) | Superseded by ADR-0056 | Serve local clone and unchanged fetch through an upload-pack bridge |
 | [ADR-0056](0056-checked-local-ref-journal-and-fetch-updates.md) | Accepted | Append checked local ref transitions for fetch updates |
+| [ADR-0057](0057-verified-local-snapshot-pack-cache.md) | Accepted | Cache verified full local snapshot packs, never negotiated responses |

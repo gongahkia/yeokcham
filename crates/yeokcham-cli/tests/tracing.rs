@@ -68,6 +68,49 @@ fn remote_uri(repository: &Path) -> String {
     format!("yeokcham::{}", repository.display())
 }
 
+fn pack_cache_entries(repository: &Path) -> Vec<PathBuf> {
+    let cache = repository.join("cache/packs");
+    fs::read_dir(&cache)
+        .expect("read pack cache")
+        .map(|entry| entry.expect("read pack cache entry").path())
+        .filter(|path| path.is_dir())
+        .collect()
+}
+
+fn pack_cache_entry(repository: &Path) -> PathBuf {
+    let entries = pack_cache_entries(repository);
+    assert_eq!(entries.len(), 1, "one effective ref state must be cached");
+    entries.into_iter().next().expect("cached entry")
+}
+
+fn run_git_bare(repository: &Path, arguments: &[&str]) -> Vec<u8> {
+    let output = Command::new("git")
+        .arg("--git-dir")
+        .arg(repository)
+        .args(arguments)
+        .output()
+        .expect("run Git in bare repository");
+    assert!(
+        output.status.success(),
+        "Git command must succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    output.stdout
+}
+
+#[cfg(unix)]
+fn make_cache_file_writable(path: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+
+    fs::set_permissions(path, fs::Permissions::from_mode(0o600))
+        .expect("make disposable cache file writable");
+}
+
+#[cfg(not(unix))]
+fn make_cache_file_writable(_: &Path) {
+    panic!("pack-cache corruption test requires Unix permissions");
+}
+
 #[test]
 fn default_filter_emits_no_debug_output() {
     let output = Command::new(env!("CARGO_BIN_EXE_yeokcham"))
@@ -281,6 +324,16 @@ fn remote_helper_clones_lists_refs_and_repeats_fetch_without_source_disclosure()
     );
     run_git(&checkout, &["fsck", "--full", "--strict"]);
 
+    let cached_repository = pack_cache_entry(&repository);
+    run_git_bare(&cached_repository, &["fsck", "--full", "--strict"]);
+    let pack_directory = cached_repository.join("objects/pack");
+    let cache_index = fs::read_dir(&pack_directory)
+        .expect("read cached pack directory")
+        .map(|entry| entry.expect("read cached pack entry").path())
+        .find(|path| path.extension().is_some_and(|extension| extension == "idx"))
+        .expect("cached repository must contain one pack index");
+    let original_index = fs::read(&cache_index).expect("read cached pack index");
+
     let output = Command::new("git")
         .arg("-C")
         .arg(&checkout)
@@ -294,6 +347,32 @@ fn remote_helper_clones_lists_refs_and_repeats_fetch_without_source_disclosure()
         String::from_utf8_lossy(&output.stderr)
     );
     assert!(run_git(&checkout, &["status", "--porcelain"]).is_empty());
+    assert_eq!(
+        fs::read(&cache_index).expect("read cache index after cache hit"),
+        original_index,
+        "an unchanged ref state must reuse its validated pack cache",
+    );
+
+    make_cache_file_writable(&cache_index);
+    fs::write(&cache_index, b"corrupt cache index").expect("corrupt disposable cache");
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(&checkout)
+        .args(["fetch", "--quiet", "origin"])
+        .env("PATH", &helper_path)
+        .output()
+        .expect("fetch after cache corruption");
+    assert!(
+        output.status.success(),
+        "fetch must rebuild a corrupt disposable cache: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_ne!(
+        fs::read(&cache_index).expect("read rebuilt cache index"),
+        b"corrupt cache index",
+        "a cache index must be regenerated before use",
+    );
+    run_git_bare(&cached_repository, &["fsck", "--full", "--strict"]);
 
     fs::write(
         source.join("README.md"),
@@ -338,6 +417,17 @@ fn remote_helper_clones_lists_refs_and_repeats_fetch_without_source_disclosure()
         "fetch update must succeed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
+    let cache_entries = pack_cache_entries(&repository);
+    assert_eq!(
+        cache_entries.len(),
+        2,
+        "an updated ref state must use a distinct cache entry",
+    );
+    let updated_cache = cache_entries
+        .iter()
+        .find(|entry| *entry != &cached_repository)
+        .expect("updated cache entry");
+    run_git_bare(updated_cache, &["fsck", "--full", "--strict"]);
     assert_eq!(
         run_git(&source, &["rev-parse", "refs/heads/main"]),
         run_git(&checkout, &["rev-parse", "refs/remotes/origin/main"])
