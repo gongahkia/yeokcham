@@ -5,7 +5,7 @@ OCAML_VERSION := 5.5.0
 OCAMLFORMAT_VERSION := 0.29.0
 LOCAL_SWITCH := $(CURDIR)
 
-.PHONY: setup deps build test property-test benchmark-encoding marshal-audit lint check format workflow-lint ci
+.PHONY: setup deps build test property-test benchmark-encoding benchmark-large-content marshal-audit lint check format workflow-lint ci
 
 setup:
 	$(OPAM) init --bare --no-setup --yes
@@ -29,6 +29,9 @@ property-test:
 
 benchmark-encoding:
 	BENCHMARK_DUNE_PROFILE=release $(DUNE) exec --profile release bench/encoding_benchmark.exe -- --output bench/results/canonical-codec-v1.json
+
+benchmark-large-content:
+	BENCHMARK_DUNE_PROFILE=release $(DUNE) exec --profile release bench/large_content_benchmark.exe -- --output bench/results/large-content-v1.json
 
 marshal-audit:
 	sh tools/check_persistent_format.sh
