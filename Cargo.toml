@@ -27,5 +27,6 @@ sha2 = { version = "=0.11.0", default-features = false }
 thiserror = "2.0.19"
 tracing = { version = "0.1.44", default-features = false, features = ["std"] }
 tracing-subscriber = { version = "0.3.23", default-features = false, features = ["env-filter", "fmt"] }
+ureq = { version = "=2.12.1", default-features = false, features = ["json", "tls"] }
 uuid = { version = "1.24.0", default-features = false, features = ["v4"] }
 zeroize = { version = "=1.9.0", default-features = false, features = ["alloc"] }

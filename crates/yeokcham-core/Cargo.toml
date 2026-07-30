@@ -16,13 +16,14 @@ gix.workspace = true
 hex.workspace = true
 hkdf.workspace = true
 rusqlite.workspace = true
+serde_json.workspace = true
 sha1.workspace = true
 sha2.workspace = true
 thiserror.workspace = true
+ureq.workspace = true
 uuid.workspace = true
 zeroize.workspace = true
 
 [dev-dependencies]
 jsonschema.workspace = true
 proptest.workspace = true
-serde_json.workspace = true
