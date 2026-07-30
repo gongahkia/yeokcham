@@ -138,6 +138,11 @@
   (source_tree golden)))
 
 (test
+ (name test_capsule)
+ (modules test_capsule)
+ (libraries alcotest paengi_capsule paengi_id paengi_scratch paengi_snapshot paengi_store))
+
+(test
  (name scratch_property_test)
  (modules scratch_property_test)
  (libraries
@@ -161,6 +166,19 @@
   paengi_snapshot
   paengi_store
   unix))
+
+(test
+ (name capsule_property_test)
+ (modules capsule_property_test)
+ (libraries
+  alcotest
+  qcheck-core
+  qcheck-alcotest
+  paengi_capsule
+  paengi_id
+  paengi_scratch
+  paengi_snapshot
+  paengi_store))
 
 (test
  (name encoding_property_test)
@@ -211,6 +229,7 @@
   (:snapshot_property_test snapshot_property_test.exe)
   (:scratch_property_test scratch_property_test.exe)
   (:compaction_property_test compaction_property_test.exe)
+  (:capsule_property_test capsule_property_test.exe)
   (source_tree fixtures/encoding))
  (action
   (progn
@@ -219,4 +238,5 @@
    (run %{store_property_test})
    (run %{snapshot_property_test})
    (run %{scratch_property_test})
-   (run %{compaction_property_test}))))
+   (run %{compaction_property_test})
+   (run %{capsule_property_test}))))
