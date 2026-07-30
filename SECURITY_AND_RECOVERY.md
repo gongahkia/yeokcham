@@ -60,7 +60,7 @@ A reasonable initial design:
 
 The final choice must be documented in an ADR and reviewed before declaring a stable format.
 
-Current local `YKRE` V1 ref events use SHA-256 checksums and predecessor-state binding to detect corruption, stale transitions, and divergence. They do not authenticate a writer; only one trusted local sync writer is supported until the planned Ed25519 device-authorisation design exists.
+Current local `YKRE` V1 ref events use SHA-256 checksums and predecessor-state binding to detect corruption, stale transitions, and divergence. V2 records additionally carry an Ed25519 public key and detached signature over their canonical transition fields; decoding verifies that signature before materialization. A valid V2 signature proves possession of its embedded key only: Yeokcham has no persistent key storage, device-key registration, authorization policy, or revocation yet. `sync` and the remote helper therefore remain V1 single-trusted-local-writer workflows.
 
 Do not invent cryptography.
 
@@ -204,7 +204,7 @@ Expected behaviour:
 - User selects, merges, or publishes a resolution event.
 - No last-writer-wins data loss.
 
-The local remote-helper push bridge uses a deterministic repository-derived V1 journal writer only to serialize one trusted local service. It compares the staged predecessor against the canonical state before publication and fails closed on conflicts. This is not device authentication or multi-device authorization: unsigned device events remain unsuitable for untrusted writers until signatures and authorization are implemented.
+The local remote-helper push bridge uses a deterministic repository-derived V1 journal writer only to serialize one trusted local service. It compares the staged predecessor against the canonical state before publication and fails closed on conflicts. The V2 signature foundation does not change this: unregistered signers are not authorized, and unsigned V1 events remain unsuitable for untrusted writers.
 
 ### Scenario E — Lost local machine
 

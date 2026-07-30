@@ -63,3 +63,5 @@ Valid statuses are `Proposed`, `Accepted`, `Rejected`, `Deprecated`, and `Supers
 | [ADR-0055](0055-local-remote-helper-upload-pack-bridge.md) | Superseded by ADR-0056 | Serve local clone and unchanged fetch through an upload-pack bridge |
 | [ADR-0056](0056-checked-local-ref-journal-and-fetch-updates.md) | Accepted | Append checked local ref transitions for fetch updates |
 | [ADR-0057](0057-verified-local-snapshot-pack-cache.md) | Accepted | Cache verified full local snapshot packs, never negotiated responses |
+| [ADR-0058](0058-staged-local-receive-pack-ingestion.md) | Accepted | Stage local receive-pack before publishing a Yeokcham ref transition |
+| [ADR-0059](0059-ed25519-signed-ref-events.md) | Accepted | Add caller-supplied Ed25519 signatures to ref events |

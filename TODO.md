@@ -131,7 +131,7 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 
 - [x] Define canonical ref-event encoding.
 - [x] Implement per-device sequence chain.
-- [ ] Implement signatures.
+- [x] Implement signatures.
 - [x] Implement local atomic append.
 - [x] Implement ref-state materialisation.
 - [x] Detect divergence.

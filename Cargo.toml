@@ -9,6 +9,7 @@ rust-version = "1.85"
 version = "0.1.0"
 
 [workspace.dependencies]
+ed25519-dalek = { version = "=3.0.0", default-features = false, features = ["fast", "zeroize"] }
 fastcdc = { version = "=4.0.1", default-features = false }
 flate2 = { version = "=1.1.1", default-features = false, features = ["zlib-rs"] }
 gix = { version = "=0.85.0", default-features = false, features = ["sha1", "sha256"] }

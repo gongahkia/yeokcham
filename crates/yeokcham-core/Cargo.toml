@@ -6,6 +6,7 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+ed25519-dalek.workspace = true
 fastcdc.workspace = true
 flate2.workspace = true
 gix.workspace = true

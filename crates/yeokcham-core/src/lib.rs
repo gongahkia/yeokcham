@@ -48,7 +48,7 @@ pub use git_repository::GitRepository;
 pub use manifest_id::ManifestId;
 pub use metadata_object_manifest::MetadataObjectManifest;
 pub use metadata_object_record::MetadataObjectRecord;
-pub use ref_event::{RefEvent, RefEventReadLimits};
+pub use ref_event::{RefEvent, RefEventReadLimits, RefEventSigningKey, RefEventVerifyingKey};
 pub use ref_name::RefName;
 pub use ref_snapshot::{GitRefState, HeadState, RefSnapshot, RefSnapshotReadLimits};
 pub use repository::{

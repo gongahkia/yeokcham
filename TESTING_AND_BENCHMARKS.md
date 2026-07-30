@@ -21,6 +21,7 @@ Cover:
 - Segment parsing.
 - Index lookup.
 - Ref event validation.
+- Ed25519 ref-event signing, wrong-key rejection, and signature tampering with a recomputed checksum.
 - Backend key generation.
 - Encryption and decryption.
 - Storage policy selection.

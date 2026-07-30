@@ -18,10 +18,11 @@ use crate::{
     ChunkReference, ChunkedBlobRecord, ContentDefinedChunker, ContentDefinedChunkingParameters,
     DeviceId, Error, ErrorKind, GitObject, GitObjectId, GitObjectKind, GitRefState, GitRepository,
     HeadState, ManifestId, MetadataObjectManifest, MetadataObjectRecord, ReadSegment,
-    ReadSegmentRecord, RefEvent, RefEventReadLimits, RefSnapshot, RefSnapshotReadLimits,
-    RepositoryFormat, RepositoryId, Result, SegmentId, SegmentIndex, SegmentReadLimits,
-    SegmentReader, SegmentRecord, SegmentWriteLimits, SegmentWriter, TinyBlobAggregation,
-    TinyBlobGroupManifest, TinyBlobGroupManifestEntry, WholeBlobRecord, YeokchamContentId,
+    ReadSegmentRecord, RefEvent, RefEventReadLimits, RefEventSigningKey, RefSnapshot,
+    RefSnapshotReadLimits, RepositoryFormat, RepositoryId, Result, SegmentId, SegmentIndex,
+    SegmentReadLimits, SegmentReader, SegmentRecord, SegmentWriteLimits, SegmentWriter,
+    TinyBlobAggregation, TinyBlobGroupManifest, TinyBlobGroupManifestEntry, WholeBlobRecord,
+    YeokchamContentId,
 };
 
 const BOOTSTRAP_MAGIC: [u8; 4] = *b"YKRB";
@@ -1422,6 +1423,7 @@ impl LocalRepository {
             ref_state,
             device_id,
             Some(expected_state),
+            None,
             limits.ref_snapshot_publication_limits()?,
             limits.ref_snapshot_limits(),
         )?;
@@ -2604,7 +2606,33 @@ impl LocalRepository {
         publication_limits: RefSnapshotPublicationLimits,
         read_limits: RefSnapshotReadLimits,
     ) -> Result<()> {
-        self.append_ref_state_if_current(state, device_id, None, publication_limits, read_limits)
+        self.append_ref_state_if_current(
+            state,
+            device_id,
+            None,
+            None,
+            publication_limits,
+            read_limits,
+        )
+    }
+
+    /// appends one Ed25519-signed durable local state transition.
+    pub fn append_signed_ref_state(
+        &self,
+        state: GitRefState,
+        device_id: DeviceId,
+        signing_key: &RefEventSigningKey,
+        publication_limits: RefSnapshotPublicationLimits,
+        read_limits: RefSnapshotReadLimits,
+    ) -> Result<()> {
+        self.append_ref_state_if_current(
+            state,
+            device_id,
+            None,
+            Some(signing_key),
+            publication_limits,
+            read_limits,
+        )
     }
 
     fn append_ref_state_if_current(
@@ -2612,6 +2640,7 @@ impl LocalRepository {
         state: GitRefState,
         device_id: DeviceId,
         expected_current: Option<&GitRefState>,
+        signing_key: Option<&RefEventSigningKey>,
         publication_limits: RefSnapshotPublicationLimits,
         read_limits: RefSnapshotReadLimits,
     ) -> Result<()> {
@@ -2643,14 +2672,25 @@ impl LocalRepository {
             ),
             None => (1, [0; 32]),
         };
-        let event = RefEvent::new(
-            self.id,
-            device_id,
-            sequence,
-            previous_event_id,
-            RefEvent::state_id(&current),
-            state,
-        )?;
+        let event = match signing_key {
+            Some(signing_key) => RefEvent::new_signed(
+                self.id,
+                device_id,
+                sequence,
+                previous_event_id,
+                RefEvent::state_id(&current),
+                state,
+                signing_key,
+            )?,
+            None => RefEvent::new(
+                self.id,
+                device_id,
+                sequence,
+                previous_event_id,
+                RefEvent::state_id(&current),
+                state,
+            )?,
+        };
         self.ensure_ref_journal_format()?;
         self.publish_ref_event(&event, event_limits)?;
         let current = self.resolve_ref_state(read_limits)?.ok_or_else(|| {
@@ -5685,6 +5725,7 @@ mod tests {
                     materialized_state.clone(),
                     device_id,
                     Some(&materialized_state),
+                    None,
                     limits
                         .ref_snapshot_publication_limits()
                         .expect("publication limits"),
@@ -5791,6 +5832,66 @@ mod tests {
                 .resolve_ref_state(limits.ref_snapshot_limits())
                 .expect("resolve state after rejection"),
             Some(current_state)
+        );
+    }
+
+    #[test]
+    fn appends_and_materializes_a_signed_ref_event() {
+        let directory = TestDirectory::new();
+        let source_path = directory.path().join("source");
+        let repository_path = directory.path().join("repository");
+        fs::create_dir(&source_path).expect("create source path");
+        run_git_in(&source_path, &["init", "-b", "main"]);
+        run_git_in(&source_path, &["config", "user.name", "Yeokcham Test"]);
+        run_git_in(
+            &source_path,
+            &["config", "user.email", "yeokcham-test@example.invalid"],
+        );
+        fs::write(source_path.join("README.md"), b"first\n").expect("write source");
+        run_git_in(&source_path, &["add", "README.md"]);
+        run_git_in(&source_path, &["commit", "-m", "first"]);
+
+        let limits = GitImportLimits::initial().expect("limits");
+        let repository = LocalRepository::create(&repository_path).expect("create destination");
+        repository
+            .import_git_repository(
+                &GitRepository::open(&source_path).expect("open source"),
+                limits,
+            )
+            .expect("initial import");
+        let state = GitRefState::new(
+            BTreeMap::new(),
+            HeadState::Symbolic(RefName::from_bytes(b"refs/heads/main").expect("HEAD")),
+        )
+        .expect("signed successor state");
+        let device_id: DeviceId = "6ba7b814-9dad-41d1-80b4-00c04fd430c8"
+            .parse()
+            .expect("device ID");
+        let signing_key = crate::RefEventSigningKey::from_secret_bytes([9; 32]);
+        repository
+            .append_signed_ref_state(
+                state.clone(),
+                device_id,
+                &signing_key,
+                limits
+                    .ref_snapshot_publication_limits()
+                    .expect("publication limits"),
+                limits.ref_snapshot_limits(),
+            )
+            .expect("append signed transition");
+
+        let events = repository
+            .ref_events(ref_event_limits(limits.ref_snapshot_limits()).expect("event limits"))
+            .expect("read signed event");
+        assert_eq!(events.len(), 1);
+        assert!(events[0].is_signed());
+        assert_eq!(events[0].signer(), Some(signing_key.verifying_key()));
+        events[0].verify_signature().expect("verify signed event");
+        assert_eq!(
+            repository
+                .resolve_ref_state(limits.ref_snapshot_limits())
+                .expect("materialize signed state"),
+            Some(state)
         );
     }
 

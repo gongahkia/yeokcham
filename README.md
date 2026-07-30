@@ -96,7 +96,7 @@ git --git-dir=<destination-git-repo> fsck --full --strict
 
 `init` requires a destination path that does not exist. A failed import can leave unreachable immutable records in that fresh path; remove the failed destination before retrying. The initial CDC threshold is 4 KiB; `--chunked-blob-minimum <bytes>` is available for controlled storage-policy comparison, not as a benchmark-backed default recommendation.
 
-`sync` is a controlled local-source maintenance workflow, not `git push`: it imports only newly reachable verified objects, then appends a checked full ref-state transition. Reuse one canonical UUIDv4 `--device` value for its writer. V1 journal events detect corruption, stale expected state, and divergent histories but are not signed; use only one trusted local writer until signed device authorization exists.
+`sync` is a controlled local-source maintenance workflow, not `git push`: it imports only newly reachable verified objects, then appends a checked full ref-state transition. Reuse one canonical UUIDv4 `--device` value for its writer. V1 journal events detect corruption, stale expected state, and divergent histories but are not signed. The core also supports caller-supplied Ed25519-signed V2 events, but it has no persistent key store, device-key registration, authorization, or revocation yet; `sync` therefore remains a single-trusted-local-writer workflow.
 
 ## Local remote helper
 
