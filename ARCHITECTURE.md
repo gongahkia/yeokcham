@@ -79,7 +79,7 @@ Initial strategy:
 - Prefer delegation to mature Git pack readers and writers.
 - Add smart HTTP only after local end-to-end correctness.
 
-Current local bridge: `git-remote-yeokcham` advertises only `connect`, accepts `connect git-upload-pack` and `connect git-receive-pack`, and verifies the effective local ref state before C Git sees it. Upload-pack uses a local bare snapshot-pack cache keyed by the SHA-256 identity of that complete state. A cache hit requires exact ref-state equality and `git fsck --full --strict`; cache corruption, partial publication, or an incorrect state is discarded and rebuilt from a verified export. C Git still performs every client-specific upload-pack negotiation, so the cache is not a protocol-response cache. Receive-pack uses a private temporary export instead: it relays the initial advertisement, collects the final protocol response, verifies and imports the staged repository with an exact predecessor state, then releases success only after a checked canonical journal append. C Git enforces advertised old refs and non-fast-forward branch rejection; an isolated hook makes tags create-only. This proves local Git compatibility before native pack synthesis; it is not a performance path. Signed multi-device journal authorization remains separate work.
+Current local bridge: `git-remote-yeokcham` advertises only `connect`, accepts `connect git-upload-pack` and `connect git-receive-pack`, and verifies the effective local ref state before C Git sees it. Upload-pack uses a local bare snapshot-pack cache keyed by the SHA-256 identity of that complete state. A cache hit requires exact ref-state equality and `git fsck --full --strict`; cache corruption, partial publication, or an incorrect state is discarded and rebuilt from a verified export. C Git still performs every client-specific upload-pack negotiation, so the cache is not a protocol-response cache. The helper invokes only this disposable verified export with `uploadpack.allowFilter=true` and `uploadpack.allowReachableSHA1InWant=true`. C Git therefore advertises native filter support for `blob:none` and `blob:limit=<bytes>`, marks omitted objects as promisor objects, and reconnects through the helper to hydrate a missing reachable blob. It does not enable arbitrary object-ID wants or give Yeokcham's persistent store partial-object semantics. Receive-pack uses a private temporary export instead: it relays the initial advertisement, collects the final protocol response, verifies and imports the staged repository with an exact predecessor state, then releases success only after a checked canonical journal append. C Git enforces advertised old refs and non-fast-forward branch rejection; an isolated hook makes tags create-only. This proves local Git compatibility before native pack synthesis; it is not a performance path. Signed multi-device journal authorization remains separate work.
 
 ### 3.2 Repository service
 
@@ -507,17 +507,13 @@ Remote deletion should be optional in early releases. A leak is safer than data 
 
 ## 8. Partial retrieval
 
-Initial implementation should rely on Git-compatible filtering where possible.
+The local helper relies on C Git-compatible filtering rather than inventing a Yeokcham filter protocol. Its verified complete snapshot lets C Git serve `blob:none` and `blob:limit=<bytes>` with normal promisor configuration and lazy hydration. The complete cache remains an implementation boundary, so this does not yet reduce Yeokcham-side reconstruction or remote-backend reads.
 
 Possible progression:
 
-1. Clone/fetch all metadata and current blobs.
-2. Support `blob:none`.
-3. Support size filters.
-4. Track promisor state.
-5. Hydrate missing blobs on demand.
-6. Add sparse path-aware prefetch.
-7. Add daemon-assisted prediction.
+1. Add sparse path-aware prefetch.
+2. Avoid reconstructing excluded records before C Git pack filtering.
+3. Add daemon-assisted prediction.
 
 Do not build a virtual filesystem until benchmark results show that ordinary sparse checkout is insufficient.
 

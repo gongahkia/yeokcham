@@ -114,7 +114,14 @@ git ls-remote yeokcham::/absolute/path/to/yeokcham-repository
 git clone yeokcham::/absolute/path/to/yeokcham-repository
 ```
 
-For each `connect git-upload-pack` request, the helper verifies the effective Yeokcham ref state. It reuses a full bare snapshot pack under `<store>/cache/packs/<ref-state-sha256>` only after exact-ref comparison and `git fsck --full --strict`; a missing, partial, or corrupt entry is rebuilt from a verified export. This cache contains local conventional Git objects, is disposable, and is not a cache of a negotiated upload-pack response. The helper then delegates the smart protocol and negotiated pack stream to C Git. This remains a correctness bridge, not a measured performance path. After a successful `yeokcham sync`, ordinary Git can fetch updated and deleted refs with `git fetch --prune`.
+For each `connect git-upload-pack` request, the helper verifies the effective Yeokcham ref state. It reuses a full bare snapshot pack under `<store>/cache/packs/<ref-state-sha256>` only after exact-ref comparison and `git fsck --full --strict`; a missing, partial, or corrupt entry is rebuilt from a verified export. This cache contains local conventional Git objects, is disposable, and is not a cache of a negotiated upload-pack response. The helper then delegates the smart protocol and negotiated pack stream to C Git. Its disposable C Git invocation enables `uploadpack.allowFilter` and accepts only reachable object-ID wants, so native filtered clones work:
+
+```bash
+git clone --filter=blob:none --no-checkout yeokcham::/absolute/path/to/yeokcham-repository
+git clone --filter=blob:limit=1048576 --no-checkout yeokcham::/absolute/path/to/yeokcham-repository
+```
+
+C Git records promisor state and hydrates omitted reachable blobs on checkout or access through a new helper connection. Yeokcham still reconstructs a complete disposable snapshot before C Git filters its outgoing pack, so this is Git-transfer compatibility rather than measured backend partial retrieval. After a successful `yeokcham sync`, ordinary Git can fetch updated and deleted refs with `git fetch --prune`.
 
 `git push` stages each `connect git-receive-pack` operation in a private temporary bare repository. C Git checks the pack and advertised old ref values, then Yeokcham imports and verifies the complete staged graph using its normal storage policy. The helper relays a successful final status only after a checked canonical ref-journal append. Fast-forward branch create, update, and deletion are allowed; force branch replacement is rejected. Tags are immutable after creation: move and delete requests are rejected. Push remains an unsigned single-trusted-local-writer workflow, and shallow operations remain deferred.
 

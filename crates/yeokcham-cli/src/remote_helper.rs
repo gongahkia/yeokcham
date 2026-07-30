@@ -512,6 +512,12 @@ fn create_private_temporary_directory() -> Result<PathBuf> {
 
 fn proxy_upload_pack(repository: &Path) -> Result<()> {
     let status = git_command()
+        .args([
+            "-c",
+            "uploadpack.allowFilter=true",
+            "-c",
+            "uploadpack.allowReachableSHA1InWant=true",
+        ])
         .arg("upload-pack")
         .arg(repository)
         .stdin(Stdio::inherit())

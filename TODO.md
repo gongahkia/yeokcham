@@ -225,12 +225,12 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 
 ### Git filtering
 
-- [ ] Investigate remote-helper support requirements for partial clone.
-- [ ] Implement `blob:none` workflow or document required protocol transition.
-- [ ] Implement size-filter workflow.
-- [ ] Track promisor objects.
-- [ ] Hydrate missing blobs.
-- [ ] Verify object IDs after hydration.
+- [x] Investigate remote-helper support requirements for partial clone.
+- [x] Implement `blob:none` workflow or document required protocol transition.
+- [x] Implement size-filter workflow.
+- [x] Track promisor objects.
+- [x] Hydrate missing blobs.
+- [x] Verify object IDs after hydration.
 
 ### Cache
 

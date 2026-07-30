@@ -76,3 +76,4 @@ Valid statuses are `Proposed`, `Accepted`, `Rejected`, `Deprecated`, and `Supers
 | [ADR-0068](0068-drive-desktop-oauth-and-dedicated-folder.md) | Accepted | Use Desktop OAuth and a dedicated Drive folder |
 | [ADR-0069](0069-opaque-drive-object-names.md) | Accepted | Derive opaque Drive object names from repository key material |
 | [ADR-0070](0070-root-pinned-device-journal-authorization.md) | Accepted | Authorize remote device journals with a pinned root registry |
+| [ADR-0071](0071-native-filtered-upload-pack-bridge.md) | Accepted | Delegate partial-clone filtering to C Git upload-pack |

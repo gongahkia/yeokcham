@@ -221,6 +221,8 @@ The local remote-helper push bridge uses a deterministic repository-derived V1 j
 
 The local ref transaction has a test-only fault-injecting filesystem wrapper. It simulates abrupt termination after every bootstrap-upgrade and journal-publication mutation boundary, then reopens and verifies the repository. The tests accept only the complete prior or complete successor ref state; immutable records written before the journal may remain unreachable and are not an acknowledged ref update.
 
+The local upload-pack bridge enables C Git filtering only with command-scoped configuration on the helper-created verified snapshot. `uploadpack.allowFilter` allows standard `blob:none` and `blob:limit` requests; `uploadpack.allowReachableSHA1InWant` permits later hydration only for objects reachable from advertised refs. It does not enable arbitrary object-ID wants. Filtered packs are marked promisor by C Git and a later hydration reconnects through the same helper. The canonical Yeokcham store remains complete and verified before this disposable bridge is entered.
+
 ### Scenario E — Lost local machine
 
 Expected behaviour:

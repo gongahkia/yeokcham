@@ -308,6 +308,91 @@ fn cli_import_verify_inspect_and_export_round_trip() {
 }
 
 #[test]
+fn remote_helper_serves_blob_none_and_size_filtered_promisor_clones() {
+    let directory = TestDirectory::new();
+    let source = directory.path().join("source");
+    let repository = directory.path().join("repository");
+    fs::create_dir(&source).expect("create source repository");
+    run_git(&source, &["init", "-b", "main"]);
+    run_git(&source, &["config", "user.name", "Yeokcham Test"]);
+    run_git(
+        &source,
+        &["config", "user.email", "yeokcham-test@example.invalid"],
+    );
+    fs::write(source.join("large.bin"), vec![0x4b; 64 * 1024]).expect("write large blob");
+    run_git(&source, &["add", "large.bin"]);
+    run_git(&source, &["commit", "-m", "partial clone fixture"]);
+    let output = Command::new(env!("CARGO_BIN_EXE_yeokcham"))
+        .args(["init", "--from-git"])
+        .arg(&source)
+        .arg(&repository)
+        .output()
+        .expect("import source repository");
+    assert!(
+        output.status.success(),
+        "import must succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let helper_path = remote_helper_path();
+    let remote = remote_uri(&repository);
+    for (filter, name) in [("blob:none", "blob-none"), ("blob:limit=1", "blob-limit")] {
+        let checkout = directory.path().join(name);
+        let output = Command::new("git")
+            .args(["clone", "--quiet", "--no-checkout", "--filter"])
+            .arg(filter)
+            .arg(&remote)
+            .arg(&checkout)
+            .env("PATH", &helper_path)
+            .output()
+            .expect("clone filtered remote helper");
+        assert!(
+            output.status.success(),
+            "filtered clone must succeed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            run_git(&checkout, &["config", "--get", "remote.origin.promisor"]),
+            b"true\n"
+        );
+        assert_eq!(
+            run_git(
+                &checkout,
+                &["config", "--get", "remote.origin.partialclonefilter"],
+            ),
+            format!("{filter}\n").into_bytes(),
+        );
+        let missing = run_git(
+            &checkout,
+            &["rev-list", "--objects", "--missing=print", "HEAD"],
+        );
+        assert!(
+            String::from_utf8_lossy(&missing)
+                .lines()
+                .any(|line| line.starts_with('?')),
+            "filtered clone must retain at least one promisor object",
+        );
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(&checkout)
+            .args(["checkout", "--quiet", "main"])
+            .env("PATH", &helper_path)
+            .output()
+            .expect("lazy checkout");
+        assert!(
+            output.status.success(),
+            "lazy checkout must succeed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            fs::read(source.join("large.bin")).expect("read source"),
+            fs::read(checkout.join("large.bin")).expect("read checkout")
+        );
+        run_git(&checkout, &["fsck", "--full", "--strict"]);
+    }
+}
+
+#[test]
 fn remote_helper_clones_lists_refs_and_repeats_fetch_without_source_disclosure() {
     let directory = TestDirectory::new();
     let source = directory.path().join("source");
