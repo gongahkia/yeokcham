@@ -65,3 +65,4 @@ Valid statuses are `Proposed`, `Accepted`, `Rejected`, `Deprecated`, and `Supers
 | [ADR-0057](0057-verified-local-snapshot-pack-cache.md) | Accepted | Cache verified full local snapshot packs, never negotiated responses |
 | [ADR-0058](0058-staged-local-receive-pack-ingestion.md) | Accepted | Stage local receive-pack before publishing a Yeokcham ref transition |
 | [ADR-0059](0059-ed25519-signed-ref-events.md) | Accepted | Add caller-supplied Ed25519 signatures to ref events |
+| [ADR-0060](0060-fault-injected-ref-transactions.md) | Accepted | Fault-inject local bootstrap and ref-journal transactions |

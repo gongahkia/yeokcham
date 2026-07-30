@@ -140,17 +140,17 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 
 ### Fault handling
 
-- [ ] Add fault-injecting filesystem backend.
-- [ ] Inject crashes after each mutation boundary.
-- [ ] Verify old-or-new state property.
-- [ ] Add restart recovery.
+- [x] Add fault-injecting filesystem backend.
+- [x] Inject crashes after each mutation boundary.
+- [x] Verify old-or-new state property.
+- [x] Add restart recovery.
 - [ ] Add idempotent push retry.
 
 ### Exit criteria
 
 - [x] Git push works for local yeokcham stores.
-- [ ] No injected crash creates an acknowledged but unrecoverable ref state.
-- [ ] Divergent device-style events are preserved rather than overwritten.
+- [x] No injected crash creates an acknowledged but unrecoverable ref state.
+- [x] Divergent device-style events are preserved rather than overwritten.
 
 ## Milestone 4 — Backend abstraction and encryption
 

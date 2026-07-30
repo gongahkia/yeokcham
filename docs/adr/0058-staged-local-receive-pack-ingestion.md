@@ -22,7 +22,7 @@ Use the repository UUID as the deterministic V1 writer identity for this local s
 
 Git clients can push fast-forward branch creation, update, and deletion to a local store. Existing tags are immutable. C Git validates client-advertised old refs and pack connectivity; Yeokcham repeats object and ref-target verification before publishing its canonical journal transition.
 
-If the canonical predecessor changes after staging, or any import check fails, immutable staged-object records may have been written but remain unreachable. The helper does not acknowledge those refs, does not overwrite another transition, and discards the temporary conventional Git repository. Crash injection and signed multi-device authorization remain separate work.
+If the canonical predecessor changes after staging, or any import check fails, immutable staged-object records may have been written but remain unreachable. The helper does not acknowledge those refs, does not overwrite another transition, and discards the temporary conventional Git repository. ADR-0060 adds crash injection for the canonical bootstrap and journal transition; signed multi-device authorization remains separate work.
 
 ## Invariants
 

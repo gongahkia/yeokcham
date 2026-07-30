@@ -83,6 +83,187 @@ const INITIAL_IMPORT_TINY_AGGREGATION_MAXIMUM_BYTES: usize =
 
 type RefEventChains = BTreeMap<DeviceId, (u64, [u8; 32])>;
 
+struct RefStateAppend<'a> {
+    state: GitRefState,
+    device_id: DeviceId,
+    expected_current: Option<&'a GitRefState>,
+    signing_key: Option<&'a RefEventSigningKey>,
+    publication_limits: RefSnapshotPublicationLimits,
+    read_limits: RefSnapshotReadLimits,
+}
+
+trait LocalRepositoryFilesystem {
+    fn create_new(&self, path: &Path) -> io::Result<File>;
+    fn write_all(&self, file: &mut File, bytes: &[u8]) -> io::Result<()>;
+    fn sync_file(&self, file: &File) -> io::Result<()>;
+    fn hard_link(&self, existing: &Path, new: &Path) -> io::Result<()>;
+    fn rename(&self, from: &Path, to: &Path) -> io::Result<()>;
+    fn remove_file(&self, path: &Path) -> io::Result<()>;
+    fn sync_directory(&self, path: &Path) -> io::Result<()>;
+}
+
+struct HostFilesystem;
+
+impl LocalRepositoryFilesystem for HostFilesystem {
+    fn create_new(&self, path: &Path) -> io::Result<File> {
+        OpenOptions::new().create_new(true).write(true).open(path)
+    }
+
+    fn write_all(&self, file: &mut File, bytes: &[u8]) -> io::Result<()> {
+        file.write_all(bytes)
+    }
+
+    fn sync_file(&self, file: &File) -> io::Result<()> {
+        file.sync_all()
+    }
+
+    fn hard_link(&self, existing: &Path, new: &Path) -> io::Result<()> {
+        fs::hard_link(existing, new)
+    }
+
+    fn rename(&self, from: &Path, to: &Path) -> io::Result<()> {
+        fs::rename(from, to)
+    }
+
+    fn remove_file(&self, path: &Path) -> io::Result<()> {
+        fs::remove_file(path)
+    }
+
+    fn sync_directory(&self, path: &Path) -> io::Result<()> {
+        sync_directory_raw(path)
+    }
+}
+
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum RefJournalMutation {
+    BootstrapStagingCreated,
+    BootstrapStagingWritten,
+    BootstrapStagingSynchronized,
+    BootstrapReplaced,
+    BootstrapDirectorySynchronized,
+    EventStagingCreated,
+    EventStagingWritten,
+    EventStagingSynchronized,
+    EventPublished,
+    EventDirectorySynchronized,
+    EventStagingRemoved,
+    EventCleanupDirectorySynchronized,
+}
+
+#[cfg(test)]
+struct FaultInjectingFilesystem {
+    crash_after: usize,
+    mutations: std::cell::RefCell<Vec<RefJournalMutation>>,
+    next_create_is_bootstrap: std::cell::Cell<bool>,
+    next_sync_is_bootstrap: std::cell::Cell<bool>,
+    next_directory_sync_is_bootstrap: std::cell::Cell<bool>,
+    event_directory_sync_count: std::cell::Cell<usize>,
+}
+
+#[cfg(test)]
+impl FaultInjectingFilesystem {
+    fn new(crash_after: usize) -> Self {
+        Self {
+            crash_after,
+            mutations: std::cell::RefCell::new(Vec::new()),
+            next_create_is_bootstrap: std::cell::Cell::new(true),
+            next_sync_is_bootstrap: std::cell::Cell::new(true),
+            next_directory_sync_is_bootstrap: std::cell::Cell::new(true),
+            event_directory_sync_count: std::cell::Cell::new(0),
+        }
+    }
+
+    fn mutation_count(&self) -> usize {
+        self.mutations.borrow().len()
+    }
+
+    fn mutations(&self) -> Vec<RefJournalMutation> {
+        self.mutations.borrow().clone()
+    }
+
+    fn after(&self, mutation: RefJournalMutation) {
+        let mut mutations = self.mutations.borrow_mut();
+        mutations.push(mutation);
+        let count = mutations.len();
+        drop(mutations);
+        assert_ne!(count, self.crash_after, "injected crash after {mutation:?}");
+    }
+}
+
+#[cfg(test)]
+impl LocalRepositoryFilesystem for FaultInjectingFilesystem {
+    fn create_new(&self, path: &Path) -> io::Result<File> {
+        let file = HostFilesystem.create_new(path)?;
+        let mutation = if self.next_create_is_bootstrap.replace(false) {
+            RefJournalMutation::BootstrapStagingCreated
+        } else {
+            RefJournalMutation::EventStagingCreated
+        };
+        self.after(mutation);
+        Ok(file)
+    }
+
+    fn write_all(&self, file: &mut File, bytes: &[u8]) -> io::Result<()> {
+        HostFilesystem.write_all(file, bytes)?;
+        let mutation = if self.next_sync_is_bootstrap.get() {
+            RefJournalMutation::BootstrapStagingWritten
+        } else {
+            RefJournalMutation::EventStagingWritten
+        };
+        self.after(mutation);
+        Ok(())
+    }
+
+    fn sync_file(&self, file: &File) -> io::Result<()> {
+        HostFilesystem.sync_file(file)?;
+        let mutation = if self.next_sync_is_bootstrap.replace(false) {
+            RefJournalMutation::BootstrapStagingSynchronized
+        } else {
+            RefJournalMutation::EventStagingSynchronized
+        };
+        self.after(mutation);
+        Ok(())
+    }
+
+    fn hard_link(&self, existing: &Path, new: &Path) -> io::Result<()> {
+        HostFilesystem.hard_link(existing, new)?;
+        self.after(RefJournalMutation::EventPublished);
+        Ok(())
+    }
+
+    fn rename(&self, from: &Path, to: &Path) -> io::Result<()> {
+        HostFilesystem.rename(from, to)?;
+        self.after(RefJournalMutation::BootstrapReplaced);
+        Ok(())
+    }
+
+    fn remove_file(&self, path: &Path) -> io::Result<()> {
+        HostFilesystem.remove_file(path)?;
+        self.after(RefJournalMutation::EventStagingRemoved);
+        Ok(())
+    }
+
+    fn sync_directory(&self, path: &Path) -> io::Result<()> {
+        HostFilesystem.sync_directory(path)?;
+        let mutation = if self.next_directory_sync_is_bootstrap.replace(false) {
+            RefJournalMutation::BootstrapDirectorySynchronized
+        } else {
+            match self.event_directory_sync_count.get() {
+                0 => RefJournalMutation::EventDirectorySynchronized,
+                1 => RefJournalMutation::EventCleanupDirectorySynchronized,
+                _ => unreachable!("unexpected ref journal directory synchronization"),
+            }
+        };
+        if !matches!(mutation, RefJournalMutation::BootstrapDirectorySynchronized) {
+            self.event_directory_sync_count
+                .set(self.event_directory_sync_count.get() + 1);
+        }
+        self.after(mutation);
+        Ok(())
+    }
+}
+
 /// Verified local metadata for one Git object.
 ///
 /// This is rebuildable local coordination state. It contains no object body,
@@ -961,7 +1142,10 @@ impl LocalRepository {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
-    fn ensure_ref_journal_format(&self) -> Result<()> {
+    fn ensure_ref_journal_format_with_filesystem<F: LocalRepositoryFilesystem>(
+        &self,
+        filesystem: &F,
+    ) -> Result<()> {
         let mut current = self
             .format
             .lock()
@@ -970,7 +1154,7 @@ impl LocalRepository {
             return Ok(());
         }
         let upgraded = current.with_version(crate::RepositoryFormatVersion::V2);
-        replace_bootstrap(&self.root, self.id, *current, upgraded)?;
+        replace_bootstrap(&self.root, self.id, *current, upgraded, filesystem)?;
         *current = upgraded;
         Ok(())
     }
@@ -2644,6 +2828,32 @@ impl LocalRepository {
         publication_limits: RefSnapshotPublicationLimits,
         read_limits: RefSnapshotReadLimits,
     ) -> Result<()> {
+        self.append_ref_state_with_filesystem(
+            RefStateAppend {
+                state,
+                device_id,
+                expected_current,
+                signing_key,
+                publication_limits,
+                read_limits,
+            },
+            &HostFilesystem,
+        )
+    }
+
+    fn append_ref_state_with_filesystem<F: LocalRepositoryFilesystem>(
+        &self,
+        append: RefStateAppend<'_>,
+        filesystem: &F,
+    ) -> Result<()> {
+        let RefStateAppend {
+            state,
+            device_id,
+            expected_current,
+            signing_key,
+            publication_limits,
+            read_limits,
+        } = append;
         let Some(snapshot) = self.resolve_ref_snapshot(read_limits)? else {
             return Err(Error::new(
                 ErrorKind::NotFound,
@@ -2691,8 +2901,8 @@ impl LocalRepository {
                 state,
             )?,
         };
-        self.ensure_ref_journal_format()?;
-        self.publish_ref_event(&event, event_limits)?;
+        self.ensure_ref_journal_format_with_filesystem(filesystem)?;
+        self.publish_ref_event_with_filesystem(&event, event_limits, filesystem)?;
         let current = self.resolve_ref_state(read_limits)?.ok_or_else(|| {
             Error::new(ErrorKind::CorruptData, "published ref state is unavailable")
         })?;
@@ -2902,7 +3112,12 @@ impl LocalRepository {
         Ok((current, chains))
     }
 
-    fn publish_ref_event(&self, event: &RefEvent, limits: RefEventReadLimits) -> Result<()> {
+    fn publish_ref_event_with_filesystem<F: LocalRepositoryFilesystem>(
+        &self,
+        event: &RefEvent,
+        limits: RefEventReadLimits,
+        filesystem: &F,
+    ) -> Result<()> {
         if event.repository_id() != self.id {
             return Err(Error::new(
                 ErrorKind::InvalidInput,
@@ -2945,37 +3160,39 @@ impl LocalRepository {
                 "ref journal directory exceeds the entry limit",
             ));
         }
-        let (mut staging, staging_path) = create_ref_event_staging(&directory)?;
-        if let Err(error) = staging.write_all(&bytes) {
+        let (mut staging, staging_path) = create_ref_event_staging(&directory, filesystem)?;
+        if let Err(error) = filesystem.write_all(&mut staging, &bytes) {
             drop(staging);
-            let _ = fs::remove_file(&staging_path);
+            let _ = filesystem.remove_file(&staging_path);
             return Err(io_error(
                 error,
                 "ref event staging file could not be written",
             ));
         }
-        if let Err(error) = staging.sync_all() {
+        if let Err(error) = filesystem.sync_file(&staging) {
             drop(staging);
-            let _ = fs::remove_file(&staging_path);
+            let _ = filesystem.remove_file(&staging_path);
             return Err(io_error(
                 error,
                 "ref event staging file could not be synchronized",
             ));
         }
         drop(staging);
-        match fs::hard_link(&staging_path, &destination) {
+        match filesystem.hard_link(&staging_path, &destination) {
             Ok(()) => {
-                sync_directory(&directory)?;
-                let _ = fs::remove_file(&staging_path);
-                let _ = sync_directory(&directory);
+                filesystem.sync_directory(&directory).map_err(|error| {
+                    io_error(error, "ref journal directory could not be synchronized")
+                })?;
+                let _ = filesystem.remove_file(&staging_path);
+                let _ = filesystem.sync_directory(&directory);
                 Ok(())
             }
             Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
-                let _ = fs::remove_file(&staging_path);
+                let _ = filesystem.remove_file(&staging_path);
                 self.verify_existing_ref_event(&destination, event, limits)
             }
             Err(error) => {
-                let _ = fs::remove_file(&staging_path);
+                let _ = filesystem.remove_file(&staging_path);
                 Err(io_error(error, "ref event could not be published"))
             }
         }
@@ -4222,14 +4439,17 @@ fn create_ref_snapshot_staging(parent: &Path) -> Result<(File, PathBuf)> {
     ))
 }
 
-fn create_ref_event_staging(parent: &Path) -> Result<(File, PathBuf)> {
+fn create_ref_event_staging<F: LocalRepositoryFilesystem>(
+    parent: &Path,
+    filesystem: &F,
+) -> Result<(File, PathBuf)> {
     for _ in 0..16 {
         let path = parent.join(format!(
             ".{}{}",
             SegmentId::generate(),
             REF_EVENT_STAGING_SUFFIX
         ));
-        match OpenOptions::new().create_new(true).write(true).open(&path) {
+        match filesystem.create_new(&path) {
             Ok(file) => return Ok((file, path)),
             Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
             Err(error) => {
@@ -4246,14 +4466,17 @@ fn create_ref_event_staging(parent: &Path) -> Result<(File, PathBuf)> {
     ))
 }
 
-fn create_bootstrap_staging(parent: &Path) -> Result<(File, PathBuf)> {
+fn create_bootstrap_staging<F: LocalRepositoryFilesystem>(
+    parent: &Path,
+    filesystem: &F,
+) -> Result<(File, PathBuf)> {
     for _ in 0..16 {
         let path = parent.join(format!(
             ".{}{}",
             SegmentId::generate(),
             REF_EVENT_STAGING_SUFFIX
         ));
-        match OpenOptions::new().create_new(true).write(true).open(&path) {
+        match filesystem.create_new(&path) {
             Ok(file) => return Ok((file, path)),
             Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
             Err(error) => {
@@ -5155,11 +5378,12 @@ fn encode_bootstrap(id: RepositoryId, format: RepositoryFormat) -> Vec<u8> {
     encoder.into_bytes()
 }
 
-fn replace_bootstrap(
+fn replace_bootstrap<F: LocalRepositoryFilesystem>(
     root: &Path,
     id: RepositoryId,
     expected_format: RepositoryFormat,
     format: RepositoryFormat,
+    filesystem: &F,
 ) -> Result<()> {
     let (existing_id, existing_format) = read_bootstrap(root)?;
     if existing_id != id || existing_format != expected_format {
@@ -5179,32 +5403,37 @@ fn replace_bootstrap(
             "repository bootstrap is not a regular file",
         ));
     }
-    let (mut staging, staging_path) = create_bootstrap_staging(&directory)?;
-    if let Err(error) = staging.write_all(&encode_bootstrap(id, format)) {
+    let (mut staging, staging_path) = create_bootstrap_staging(&directory, filesystem)?;
+    if let Err(error) = filesystem.write_all(&mut staging, &encode_bootstrap(id, format)) {
         drop(staging);
-        let _ = fs::remove_file(&staging_path);
+        let _ = filesystem.remove_file(&staging_path);
         return Err(io_error(
             error,
             "repository bootstrap staging file could not be written",
         ));
     }
-    if let Err(error) = staging.sync_all() {
+    if let Err(error) = filesystem.sync_file(&staging) {
         drop(staging);
-        let _ = fs::remove_file(&staging_path);
+        let _ = filesystem.remove_file(&staging_path);
         return Err(io_error(
             error,
             "repository bootstrap staging file could not be synchronized",
         ));
     }
     drop(staging);
-    if let Err(error) = fs::rename(&staging_path, &destination) {
-        let _ = fs::remove_file(&staging_path);
+    if let Err(error) = filesystem.rename(&staging_path, &destination) {
+        let _ = filesystem.remove_file(&staging_path);
         return Err(io_error(
             error,
             "repository bootstrap could not be upgraded",
         ));
     }
-    sync_directory(&directory)
+    filesystem.sync_directory(&directory).map_err(|error| {
+        io_error(
+            error,
+            "repository bootstrap directory could not be synchronized",
+        )
+    })
 }
 
 fn read_bootstrap(root: &Path) -> Result<(RepositoryId, RepositoryFormat)> {
@@ -5334,14 +5563,23 @@ fn io_error(error: io::Error, message: &'static str) -> Error {
 
 #[cfg(unix)]
 fn sync_directory(path: &Path) -> Result<()> {
-    File::open(path)
-        .map_err(|error| io_error(error, "repository directory could not be synchronized"))?
-        .sync_all()
+    HostFilesystem
+        .sync_directory(path)
         .map_err(|error| io_error(error, "repository directory could not be synchronized"))
 }
 
 #[cfg(not(unix))]
 fn sync_directory(_: &Path) -> Result<()> {
+    Ok(())
+}
+
+#[cfg(unix)]
+fn sync_directory_raw(path: &Path) -> io::Result<()> {
+    File::open(path)?.sync_all()
+}
+
+#[cfg(not(unix))]
+fn sync_directory_raw(_: &Path) -> io::Result<()> {
     Ok(())
 }
 
@@ -5430,6 +5668,82 @@ mod tests {
     fn ref_snapshot_path(root: &Path, id: ManifestId) -> PathBuf {
         root.join(REF_SNAPSHOT_DIRECTORY)
             .join(ref_snapshot_filename(id))
+    }
+
+    struct RefJournalCrashFixture {
+        _directory: TestDirectory,
+        repository_path: PathBuf,
+        repository: LocalRepository,
+        limits: GitImportLimits,
+        old_state: GitRefState,
+        new_state: GitRefState,
+        device_id: DeviceId,
+    }
+
+    impl RefJournalCrashFixture {
+        fn new() -> Self {
+            let directory = TestDirectory::new();
+            let source_path = directory.path().join("source");
+            let repository_path = directory.path().join("repository");
+            fs::create_dir(&source_path).expect("create source path");
+            run_git_in(&source_path, &["init", "-b", "main"]);
+            run_git_in(&source_path, &["config", "user.name", "Yeokcham Test"]);
+            run_git_in(
+                &source_path,
+                &["config", "user.email", "yeokcham-test@example.invalid"],
+            );
+            fs::write(source_path.join("README.md"), b"first\n").expect("write source");
+            run_git_in(&source_path, &["add", "README.md"]);
+            run_git_in(&source_path, &["commit", "-m", "first"]);
+
+            let limits = GitImportLimits::initial().expect("limits");
+            let repository = LocalRepository::create(&repository_path).expect("create repository");
+            repository
+                .import_git_repository(
+                    &GitRepository::open(&source_path).expect("open source"),
+                    limits,
+                )
+                .expect("import source");
+            let old_state = repository
+                .resolve_ref_state(limits.ref_snapshot_limits())
+                .expect("read initial state")
+                .expect("initial state");
+            let new_state = GitRefState::new(
+                BTreeMap::new(),
+                HeadState::Symbolic(RefName::from_bytes(b"refs/heads/main").expect("HEAD")),
+            )
+            .expect("new state");
+            let device_id: DeviceId = "6ba7b814-9dad-41d1-80b4-00c04fd430c8"
+                .parse()
+                .expect("device ID");
+
+            Self {
+                _directory: directory,
+                repository_path,
+                repository,
+                limits,
+                old_state,
+                new_state,
+                device_id,
+            }
+        }
+
+        fn append_with<F: LocalRepositoryFilesystem>(&self, filesystem: &F) -> Result<()> {
+            self.repository.append_ref_state_with_filesystem(
+                RefStateAppend {
+                    state: self.new_state.clone(),
+                    device_id: self.device_id,
+                    expected_current: Some(&self.old_state),
+                    signing_key: None,
+                    publication_limits: self
+                        .limits
+                        .ref_snapshot_publication_limits()
+                        .expect("publication limits"),
+                    read_limits: self.limits.ref_snapshot_limits(),
+                },
+                filesystem,
+            )
+        }
     }
 
     fn manifest_limits() -> BlobManifestReadLimits {
@@ -5748,9 +6062,10 @@ mod tests {
         )
         .expect("divergent event");
         repository
-            .publish_ref_event(
+            .publish_ref_event_with_filesystem(
                 &divergent,
                 ref_event_limits(limits.ref_snapshot_limits()).expect("event limits"),
+                &HostFilesystem,
             )
             .expect("preserve divergent event");
         assert_eq!(
@@ -5893,6 +6208,70 @@ mod tests {
                 .expect("materialize signed state"),
             Some(state)
         );
+    }
+
+    #[test]
+    fn injected_crashes_at_every_ref_transaction_boundary_recover_old_or_new_state() {
+        let baseline = RefJournalCrashFixture::new();
+        let no_crash = FaultInjectingFilesystem::new(usize::MAX);
+        baseline
+            .append_with(&no_crash)
+            .expect("complete baseline transition");
+        assert_eq!(
+            baseline
+                .repository
+                .resolve_ref_state(baseline.limits.ref_snapshot_limits())
+                .expect("read completed state"),
+            Some(baseline.new_state.clone())
+        );
+        let mutation_count = no_crash.mutation_count();
+        assert_eq!(
+            no_crash.mutations(),
+            vec![
+                RefJournalMutation::BootstrapStagingCreated,
+                RefJournalMutation::BootstrapStagingWritten,
+                RefJournalMutation::BootstrapStagingSynchronized,
+                RefJournalMutation::BootstrapReplaced,
+                RefJournalMutation::BootstrapDirectorySynchronized,
+                RefJournalMutation::EventStagingCreated,
+                RefJournalMutation::EventStagingWritten,
+                RefJournalMutation::EventStagingSynchronized,
+                RefJournalMutation::EventPublished,
+                RefJournalMutation::EventDirectorySynchronized,
+                RefJournalMutation::EventStagingRemoved,
+                RefJournalMutation::EventCleanupDirectorySynchronized,
+            ]
+        );
+
+        for crash_after in 1..=mutation_count {
+            let fixture = RefJournalCrashFixture::new();
+            let filesystem = FaultInjectingFilesystem::new(crash_after);
+            let crashed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                fixture.append_with(&filesystem).expect("injected crash")
+            }));
+            assert!(
+                crashed.is_err(),
+                "crash boundary {crash_after} did not panic"
+            );
+
+            let recovered = LocalRepository::open(&fixture.repository_path).expect("restart");
+            let state = recovered
+                .resolve_ref_state(fixture.limits.ref_snapshot_limits())
+                .expect("recover ref state");
+            assert!(
+                state == Some(fixture.old_state.clone())
+                    || state == Some(fixture.new_state.clone()),
+                "crash boundary {crash_after} produced a mixed ref state"
+            );
+            recovered
+                .verify(
+                    fixture
+                        .limits
+                        .verification_limits()
+                        .expect("verification limits"),
+                )
+                .expect("recoverable repository");
+        }
     }
 
     #[test]

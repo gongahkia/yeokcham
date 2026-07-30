@@ -206,6 +206,8 @@ Expected behaviour:
 
 The local remote-helper push bridge uses a deterministic repository-derived V1 journal writer only to serialize one trusted local service. It compares the staged predecessor against the canonical state before publication and fails closed on conflicts. The V2 signature foundation does not change this: unregistered signers are not authorized, and unsigned V1 events remain unsuitable for untrusted writers.
 
+The local ref transaction has a test-only fault-injecting filesystem wrapper. It simulates abrupt termination after every bootstrap-upgrade and journal-publication mutation boundary, then reopens and verifies the repository. The tests accept only the complete prior or complete successor ref state; immutable records written before the journal may remain unreachable and are not an acknowledged ref update.
+
 ### Scenario E — Lost local machine
 
 Expected behaviour:

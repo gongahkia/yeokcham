@@ -108,6 +108,8 @@ After restart, the repository must be:
 
 Never silently inconsistent.
 
+The implemented local ref-transaction harness runs each bootstrap-upgrade and ref-event mutation through a fault-injecting filesystem wrapper. It aborts after staging-file creation, write, synchronization, bootstrap replacement, event hard-link publication, directory synchronization, and staging cleanup; each abort reopens the repository and verifies its ref state is either the complete predecessor or complete successor. Immutable object ingestion occurs before this transaction and may leave unreachable records after interruption, but it cannot acknowledge a ref update.
+
 ### Fuzz tests
 
 Targets:

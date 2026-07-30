@@ -17,7 +17,7 @@ Yeokcham is intended for ordinary software developers who want to keep using Git
 
 ## Status
 
-Milestones 1 and 2 are implemented. The local `git-remote-yeokcham` bridge supports ref discovery, clone, fetch, and a staged local `git push` workflow through C Git, using verified Yeokcham storage and a disposable snapshot-pack cache. Push accepts fast-forward branch creation, update, and deletion; tags are create-only. Signed multi-device updates, crash injection, encryption, and remote backends remain unfinished.
+Milestones 1 and 2 are implemented. The local `git-remote-yeokcham` bridge supports ref discovery, clone, fetch, and a staged local `git push` workflow through C Git, using verified Yeokcham storage and a disposable snapshot-pack cache. Push accepts fast-forward branch creation, update, and deletion; tags are create-only. Ref-transaction crash injection covers bootstrap and journal mutation boundaries. Signed multi-device authorization, idempotent push retry, encryption, and remote backends remain unfinished.
 
 ## Recommended implementation language
 
