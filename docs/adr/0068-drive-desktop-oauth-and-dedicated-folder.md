@@ -34,19 +34,19 @@ Request unrestricted Drive access. This has more consent and verification burden
 
 ## Decision
 
-Use Option 1. The current core exposes a bounded `DriveOAuthLoopback`: it binds only `127.0.0.1`, generates fresh state and PKCE verifier bytes through the operating-system random source, uses `S256`, and sends the code only to the fixed Google token endpoint through a bounded HTTPS transport. A successful exchange accepts only Bearer access/refresh token pairs and validates a returned scope when present. Default diagnostics redact authorization state, verifier, HTTP body, access token, and refresh token.
+Use Option 1. The current core exposes a bounded `DriveOAuthLoopback`: it binds only `127.0.0.1`, generates fresh state and PKCE verifier bytes through the operating-system random source, uses `S256`, and sends the code only to the fixed Google token endpoint through a bounded HTTPS transport. A successful exchange accepts only Bearer access/refresh token pairs and validates a returned scope when present. `KeyringDriveCredentialStore` writes only the refresh token to the platform Keychain/keyring under an account label derived from SHA-256 of the client ID. Default diagnostics redact authorization state, verifier, HTTP body, access token, and refresh token.
 
-The Drive root-folder identifier, Drive file mapping, token persistence, refresh, headless device flow, and repository CLI commands are separate subsequent slices. The OAuth client ID is operator configuration, not a secret embedded in Yeokcham.
+The Drive root-folder identifier, Drive file mapping, token refresh, headless device flow, and repository CLI commands are separate subsequent slices. The OAuth client ID is operator configuration, not a secret embedded in Yeokcham.
 
 ## Consequences
 
-The operator must create or supply a Google Desktop OAuth client ID with the Drive API enabled. A browser-capable desktop is required for this loopback flow. A headless authorization route needs an explicit later Google-supported device flow rather than deprecated copy/paste redirects.
+The operator must create or supply a Google Desktop OAuth client ID with the Drive API enabled. A browser-capable desktop is required for this loopback flow. The current implementation relies on platform Keychain/keyring availability and fails rather than creating a plaintext token file. A headless authorization route needs an explicit later Google-supported device flow rather than deprecated copy/paste redirects.
 
 The selected folder can be inspected, retained, shared deliberately, and used for recovery. Names and IDs inside it must remain opaque once the Drive backend maps Yeokcham keys; that remote-key format is not selected by this ADR.
 
 ## Security and recovery
 
-The listener is loopback-only and accepts one bounded HTTP callback. State mismatch, malformed callbacks, non-Bearer token types, omitted refresh tokens, unsupported scopes, and non-success token responses fail closed. Network and JSON error sources are retained for explicit diagnosis but default error rendering omits them. OAuth credentials do not enter repository bytes, manifests, key exports, or default logs.
+The listener is loopback-only and accepts one bounded HTTP callback. State mismatch, malformed callbacks, non-Bearer token types, omitted refresh tokens, unsupported scopes, and non-success token responses fail closed. Network, JSON, and platform-credential error sources are retained for explicit diagnosis but default error rendering omits them. OAuth credentials do not enter repository bytes, manifests, key exports, or default logs.
 
 ## Compatibility and migration
 
@@ -54,4 +54,4 @@ This adds no repository record format. A future authorization method or scope ch
 
 ## Verification
 
-Unit tests prove a valid loopback callback exchanges a code only after state validation, wrong state never reaches the token transport, PKCE S256 parameters are emitted, invalid client IDs and missing refresh tokens fail, and token diagnostics are redacted. Full workspace CI, rustdoc with warnings denied, and fuzz smoke run before acceptance.
+Unit tests prove a valid loopback callback exchanges a code only after state validation, wrong state never reaches the token transport, PKCE S256 parameters are emitted, invalid client IDs and missing refresh tokens fail, token diagnostics are redacted, and a credential-store seam persists, loads, and deletes refresh tokens without accessing the operator's OS store. Full workspace CI, rustdoc with warnings denied, and fuzz smoke run before acceptance.

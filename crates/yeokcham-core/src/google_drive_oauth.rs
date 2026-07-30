@@ -47,6 +47,10 @@ impl DriveOAuthConfiguration {
     pub fn begin_loopback(self) -> Result<DriveOAuthLoopback> {
         DriveOAuthLoopback::begin(self)
     }
+
+    pub(crate) fn client_id(&self) -> &str {
+        &self.client_id
+    }
 }
 
 impl std::fmt::Debug for DriveOAuthConfiguration {
@@ -192,6 +196,17 @@ impl DriveOAuthToken {
 impl std::fmt::Debug for DriveOAuthToken {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.write_str("DriveOAuthToken(<redacted>)")
+    }
+}
+
+#[cfg(test)]
+impl DriveOAuthToken {
+    pub(crate) fn test_token(access_token: &str, refresh_token: &str) -> Self {
+        Self {
+            access_token: Zeroizing::new(access_token.to_owned()),
+            refresh_token: Zeroizing::new(refresh_token.to_owned()),
+            expires_in: Duration::from_secs(3600),
+        }
     }
 }
 

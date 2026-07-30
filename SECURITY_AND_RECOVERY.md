@@ -138,6 +138,8 @@ Do not place OAuth refresh tokens in plaintext repository configuration.
 
 Drive uses a user-supplied Google Desktop OAuth client ID with the non-sensitive `https://www.googleapis.com/auth/drive.file` scope. Desktop authorization uses PKCE S256 and a random-port `127.0.0.1` loopback callback with state verification; it does not embed an OAuth client secret or use deprecated copy/paste authorization. Authorization URLs, callback codes, access tokens, refresh tokens, and token endpoint responses must not appear in default logs.
 
+`KeyringDriveCredentialStore` persists only the Drive refresh token in the OS credential store. It derives the credential account label from SHA-256 of the non-secret client ID and does not use a local-file fallback. Missing or inaccessible credential storage fails closed and requires explicit reauthorization when the Drive CLI surface is added.
+
 GitHub tokens should follow least privilege and repository-specific scope where possible.
 
 ## 8. Input validation

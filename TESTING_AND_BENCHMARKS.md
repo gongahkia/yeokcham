@@ -29,6 +29,7 @@ Cover:
 - Recovery-key export/import, wrong-passphrase and tamper rejection, fixed Argon2id parameter validation, and encrypted recovery material redaction.
 - Clean-machine-style encrypted repository recovery from backend plus imported recovery export, recognized-staging exclusion, post-restore Yeokcham verification, and `git fsck` of a fresh Git export.
 - Drive Desktop OAuth PKCE URL construction, loopback state binding, malformed-token rejection, bounded transport responses, and credential redaction.
+- Drive credential persistence, retrieval, deletion, missing-entry handling, and refresh-token redaction through an injected store seam; unit tests never access the user credential store.
 - Encryption and decryption.
 - Storage policy selection.
 

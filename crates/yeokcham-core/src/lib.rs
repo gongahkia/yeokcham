@@ -17,6 +17,7 @@ mod filesystem_backend;
 mod git_object;
 mod git_object_id;
 mod git_repository;
+mod google_drive_credentials;
 mod google_drive_oauth;
 mod key_export;
 mod manifest_id;
@@ -63,6 +64,9 @@ pub use filesystem_backend::FilesystemBackend;
 pub use git_object::{GitObject, GitObjectKind};
 pub use git_object_id::GitObjectId;
 pub use git_repository::GitRepository;
+pub use google_drive_credentials::{
+    DriveCredentialStore, DriveStoredCredential, KeyringDriveCredentialStore,
+};
 pub use google_drive_oauth::{
     DRIVE_FILE_SCOPE, DriveOAuthConfiguration, DriveOAuthHttpResponse, DriveOAuthLoopback,
     DriveOAuthToken, DriveOAuthTransport, UreqDriveOAuthTransport,
