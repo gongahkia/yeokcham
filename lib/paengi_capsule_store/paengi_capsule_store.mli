@@ -61,6 +61,14 @@ type error =
   | Revision_history_cycle of Paengi_id.Capsule_revision_id.t
   | Revision_application_conflict of Capsule.application_conflict list
   | Revision_expected_result_mismatch
+  | Current_working_directory_changed of {
+      expected : Paengi_snapshot.Snapshot.id;
+      actual : Paengi_snapshot.Snapshot.id;
+    }
+  | Scratch_head_changed of {
+      expected : Paengi_scratch.Checkpoint_id.t;
+      actual : Paengi_scratch.Checkpoint_id.t option;
+    }
   | Injected_interruption of string
 
 val error_to_string : error -> string
@@ -150,6 +158,17 @@ val current_ref_components : Paengi_id.Capsule_id.t -> string list
 module Durable : sig
   type resolved
 
+  type current_creation =
+    | No_current_changes of {
+        checkpoint : Paengi_scratch.Checkpoint_id.t;
+        snapshot : Paengi_snapshot.Snapshot.id;
+      }
+    | Created_from_current of {
+        resolved : resolved;
+        source : Paengi_scratch.Checkpoint_id.t;
+        target : Paengi_scratch.Checkpoint_id.t;
+      }
+
   type failure_point =
     | Before_create_current_ref
     | After_create_current_ref
@@ -177,6 +196,22 @@ module Durable : sig
     ?fail_at:failure_point ->
     unit ->
     (resolved, error) result
+
+  val create_from_current :
+    store:Paengi_store.repository ->
+    scratch:Paengi_scratch.repository ->
+    root:string ->
+    id:Paengi_id.Capsule_id.t ->
+    title:string ->
+    description:string ->
+    dependencies:Capsule.dependency list ->
+    evidence:Capsule.validation_evidence list ->
+    created_at:int64 ->
+    changed_at:int64 ->
+    ?before_verify:(unit -> unit) ->
+    ?fail_at:failure_point ->
+    unit ->
+    (current_creation, error) result
 
   val fold_from_checkpoints :
     store:Paengi_store.repository ->

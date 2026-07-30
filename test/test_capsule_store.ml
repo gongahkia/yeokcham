@@ -369,6 +369,153 @@ let durable_creation_interruptions_retry_and_conflict_reuse () =
         (Capsule_store.Durable.read_current store after_id
         |> require_ok Capsule_store.error_to_string))
 
+let current_working_diff_creation_is_exact_and_pins_after_reopen () =
+  with_store (fun root store ->
+      let fixture = make_scratch_fixture root store in
+      write_file (Filename.concat root "tracked") "current";
+      let id = capsule_id 95 in
+      let created =
+        Capsule_store.Durable.create_from_current ~store
+          ~scratch:fixture.scratch ~root ~id ~title:"current"
+          ~description:"working diff" ~dependencies:[] ~evidence:[]
+          ~created_at:9L ~changed_at:9L ()
+        |> require_ok Capsule_store.error_to_string
+      in
+      let resolved, source, target =
+        match created with
+        | Capsule_store.Durable.No_current_changes _ ->
+            Alcotest.fail "current working diff was not published"
+        | Capsule_store.Durable.Created_from_current value ->
+            (value.resolved, value.source, value.target)
+      in
+      Alcotest.(check bool)
+        "current creation starts at the old scratch head" true
+        (Scratch.Checkpoint_id.equal fixture.second source);
+      let head =
+        Scratch.head_id fixture.scratch |> require_ok Scratch.error_to_string
+      in
+      Alcotest.(check bool)
+        "current creation advances scratch head" true
+        (Option.exists (Scratch.Checkpoint_id.equal target) head);
+      Alcotest.(check int)
+        "current revision has the exact delta" 1
+        (List.length
+           (Capsule_store.revision_operations
+              (Capsule_store.Durable.resolved_revision resolved)));
+      let reopened_store =
+        Store.open_repository ~root |> require_ok Store.error_to_string
+      in
+      let reopened_scratch = Scratch.open_repository reopened_store in
+      let reopened =
+        Capsule_store.Durable.read_current reopened_store id
+        |> require_ok Capsule_store.error_to_string
+      in
+      Alcotest.(check bool)
+        "current revision survives reopen" true
+        (Id.Capsule_revision_id.equal
+           (Capsule_store.revision_id
+              (Capsule_store.Durable.resolved_revision resolved))
+           (Capsule_store.revision_id
+              (Capsule_store.Durable.resolved_revision reopened)));
+      List.iter
+        (fun checkpoint ->
+          Alcotest.(check bool)
+            "current creation boundary remains pinned after reopen" true
+            (Scratch.has_capsule_boundary reopened_scratch checkpoint
+               ~capsule:id
+            |> require_ok Scratch.error_to_string))
+        [ source; target ])
+
+let current_working_diff_no_changes_and_mutation_reject_safely () =
+  with_store (fun root store ->
+      let fixture = make_scratch_fixture root store in
+      let unchanged_id = capsule_id 96 in
+      let unchanged =
+        Capsule_store.Durable.create_from_current ~store
+          ~scratch:fixture.scratch ~root ~id:unchanged_id ~title:"unchanged"
+          ~description:"unchanged" ~dependencies:[] ~evidence:[] ~created_at:10L
+          ~changed_at:10L ()
+        |> require_ok Capsule_store.error_to_string
+      in
+      (match unchanged with
+      | Capsule_store.Durable.No_current_changes { checkpoint; _ } ->
+          Alcotest.(check bool)
+            "no-change result names the existing head" true
+            (Scratch.Checkpoint_id.equal fixture.second checkpoint)
+      | Capsule_store.Durable.Created_from_current _ ->
+          Alcotest.fail "no-change creation published a capsule");
+      (match Capsule_store.Durable.read_current store unchanged_id with
+      | Error (Capsule_store.Current_ref_missing _) -> ()
+      | Error error -> Alcotest.fail (Capsule_store.error_to_string error)
+      | Ok _ -> Alcotest.fail "no-change creation published a current ref");
+      write_file (Filename.concat root "tracked") "before-verification";
+      let mutated =
+        Capsule_store.Durable.create_from_current ~store
+          ~scratch:fixture.scratch ~root ~id:(capsule_id 97) ~title:"mutated"
+          ~description:"mutated" ~dependencies:[] ~evidence:[] ~created_at:11L
+          ~changed_at:11L
+          ~before_verify:(fun () ->
+            write_file (Filename.concat root "tracked") "after-verification")
+          ()
+      in
+      (match mutated with
+      | Error (Capsule_store.Current_working_directory_changed _) -> ()
+      | Error error -> Alcotest.fail (Capsule_store.error_to_string error)
+      | Ok _ -> Alcotest.fail "working-directory mutation was accepted");
+      let head =
+        Scratch.head_id fixture.scratch |> require_ok Scratch.error_to_string
+      in
+      Alcotest.(check bool)
+        "mutation rejection leaves scratch head unchanged" true
+        (Option.exists (Scratch.Checkpoint_id.equal fixture.second) head))
+
+let current_working_diff_interruption_retries_idempotently () =
+  with_store (fun root store ->
+      let fixture = make_scratch_fixture root store in
+      write_file (Filename.concat root "tracked") "interrupted";
+      let id = capsule_id 98 in
+      let interrupted =
+        Capsule_store.Durable.create_from_current ~store
+          ~scratch:fixture.scratch ~root ~id ~title:"retry current"
+          ~description:"retry current" ~dependencies:[] ~evidence:[]
+          ~created_at:12L ~changed_at:12L
+          ~fail_at:Capsule_store.Durable.Before_create_current_ref ()
+      in
+      (match interrupted with
+      | Error (Capsule_store.Injected_interruption _) -> ()
+      | Error error -> Alcotest.fail (Capsule_store.error_to_string error)
+      | Ok _ -> Alcotest.fail "pre-ref interruption published a capsule");
+      let target =
+        Scratch.head_id fixture.scratch
+        |> require_ok Scratch.error_to_string
+        |> Option.get
+      in
+      Alcotest.(check bool)
+        "interruption leaves the new work checkpointed" false
+        (Scratch.Checkpoint_id.equal fixture.second target);
+      (match Capsule_store.Durable.read_current store id with
+      | Error (Capsule_store.Current_ref_missing _) -> ()
+      | Error error -> Alcotest.fail (Capsule_store.error_to_string error)
+      | Ok _ -> Alcotest.fail "interruption left a partial capsule visible");
+      let retry () =
+        Capsule_store.Durable.create_from_current ~store
+          ~scratch:fixture.scratch ~root ~id ~title:"retry current"
+          ~description:"retry current" ~dependencies:[] ~evidence:[]
+          ~created_at:12L ~changed_at:12L ()
+        |> require_ok Capsule_store.error_to_string
+      in
+      let first = retry () in
+      let second = retry () in
+      let revision = function
+        | Capsule_store.Durable.Created_from_current { resolved; _ } ->
+            Capsule_store.Durable.resolved_revision_object resolved
+        | Capsule_store.Durable.No_current_changes _ ->
+            Alcotest.fail "retry did not resume the interrupted creation"
+      in
+      Alcotest.(check bool)
+        "current creation retry is idempotent" true
+        (Store.Stored_object_id.equal (revision first) (revision second)))
+
 let folding_is_cas_protected_and_preserves_history () =
   with_store (fun root store ->
       let id = capsule_id 100 in
@@ -627,6 +774,13 @@ let () =
             durable_creation_reopens_pins_and_resolves_exactly;
           Alcotest.test_case "creation interruption retry and reuse" `Quick
             durable_creation_interruptions_retry_and_conflict_reuse;
+          Alcotest.test_case "current working diff creates and pins" `Quick
+            current_working_diff_creation_is_exact_and_pins_after_reopen;
+          Alcotest.test_case
+            "current working diff no-change and mutation safety" `Quick
+            current_working_diff_no_changes_and_mutation_reject_safely;
+          Alcotest.test_case "current working diff interruption retry" `Quick
+            current_working_diff_interruption_retries_idempotently;
           Alcotest.test_case "folding is CAS protected" `Quick
             folding_is_cas_protected_and_preserves_history;
           Alcotest.test_case "split and combine replay exactly" `Quick

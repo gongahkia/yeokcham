@@ -344,6 +344,15 @@ history follows same-capsule immutable parent links, detects cycles and invalid
 links, and never relies on a mutable catalog. The prior in-memory catalog
 remains a pure-core test utility; it is not repository state.
 
+Current-working-diff creation holds the repository writer lock, resolves the
+verified logical scratch head, and performs two exact scans. A differing pair
+rejects as an external working-directory change. If the verified snapshot equals
+the scratch-head snapshot, the result is `no_changes` and no scratch or capsule
+ref is published. Otherwise it is recorded through the ordinary immutable
+Scratch_event/Checkpoint publication, then becomes the target of the ordinary
+checkpoint-range capsule creation path. The new source/target boundaries are
+durably pinned before the capsule current ref is visible.
+
 ## 6. Change operations
 
 ```ocaml

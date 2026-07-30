@@ -85,6 +85,14 @@ type error =
   | Revision_history_cycle of Id.Capsule_revision_id.t
   | Revision_application_conflict of Capsule.application_conflict list
   | Revision_expected_result_mismatch
+  | Current_working_directory_changed of {
+      expected : Snapshot.Snapshot.id;
+      actual : Snapshot.Snapshot.id;
+    }
+  | Scratch_head_changed of {
+      expected : Scratch.Checkpoint_id.t;
+      actual : Scratch.Checkpoint_id.t option;
+    }
   | Injected_interruption of string
 
 let error_to_string = function
@@ -136,6 +144,10 @@ let error_to_string = function
           (List.map Capsule.application_conflict_to_string conflicts)
   | Revision_expected_result_mismatch ->
       "capsule revision replay does not reproduce its expected snapshot"
+  | Current_working_directory_changed _ ->
+      "working directory changed while capsule creation was being verified"
+  | Scratch_head_changed _ ->
+      "scratch head changed while capsule creation was in progress"
   | Injected_interruption point -> "injected interruption at " ^ point
 
 let ( let* ) = Result.bind
@@ -1182,6 +1194,17 @@ module Durable = struct
     current : current_ref;
   }
 
+  type current_creation =
+    | No_current_changes of {
+        checkpoint : Scratch.Checkpoint_id.t;
+        snapshot : Snapshot.Snapshot.id;
+      }
+    | Created_from_current of {
+        resolved : resolved;
+        source : Scratch.Checkpoint_id.t;
+        target : Scratch.Checkpoint_id.t;
+      }
+
   type failure_point =
     | Before_create_current_ref
     | After_create_current_ref
@@ -1436,57 +1459,200 @@ module Durable = struct
     |> Result.map_error (fun error ->
         Draft_error (Capsule.Draft.error_to_string error))
 
+  let create_from_checkpoints_unlocked ~store ~scratch ~id ~title ~description
+      ~dependencies ~evidence ~from ~target ~created_at ~changed_at ?fail_at ()
+      =
+    let* capsule = create_capsule ~id ~title ~description ~created_at in
+    let* draft =
+      draft_from_checkpoints store scratch capsule ~from ~target ~evidence
+        ~created_at
+    in
+    let boundary = { source = from; target } in
+    let* revision =
+      create_revision ~capsule ~parent:None
+        ~declared_base:(Capsule.Draft.source_snapshot draft)
+        ~expected_result:(Capsule.Draft.target_snapshot draft)
+        ~operations:(Capsule.revision_operations (Capsule.Draft.revision draft))
+        ~dependencies ~evidence ~boundaries:[ boundary ] ~provenance:Created
+        ~created_at
+    in
+    let* existing_bytes = read_ref_bytes store id in
+    let* capsule_object = store_capsule store capsule in
+    let* revision_object = store_revision store revision in
+    let* () = validate_revision store ~capsule:id revision in
+    let* () = pin_boundaries scratch id ~changed_at [ boundary ] in
+    let* () = verify_boundaries scratch id [ boundary ] in
+    match existing_bytes with
+    | Some bytes ->
+        let* existing =
+          decode_current_ref bytes
+          |> Result.map_error (fun error ->
+              Current_ref_corrupt (error_to_string error))
+        in
+        if
+          Store.Stored_object_id.equal capsule_object
+            (current_capsule_object existing)
+          && Store.Stored_object_id.equal revision_object
+               (current_revision_object existing)
+          && Id.Capsule_revision_id.equal (revision_id revision)
+               (current_revision existing)
+        then resolve_from_ref store existing
+        else Error (Conflicting_capsule_id_reuse id)
+    | None ->
+        let* () = expect_failure fail_at Before_create_current_ref in
+        let* current =
+          make_current_ref ~generation:0L ~capsule:id ~capsule_object
+            ~revision:(revision_id revision) ~revision_object
+        in
+        let* () = publish_current store ~expected:None ~next:current in
+        let* resolved = resolve_from_ref store current in
+        let* () = expect_failure fail_at After_create_current_ref in
+        Ok resolved
+
   let create_from_checkpoints ~store ~scratch ~id ~title ~description
       ~dependencies ~evidence ~from ~target ~created_at ~changed_at ?fail_at ()
       =
     with_capsule_lock store id (fun () ->
-        let* capsule = create_capsule ~id ~title ~description ~created_at in
-        let* draft =
-          draft_from_checkpoints store scratch capsule ~from ~target ~evidence
-            ~created_at
-        in
-        let boundary = { source = from; target } in
-        let* revision =
-          create_revision ~capsule ~parent:None
-            ~declared_base:(Capsule.Draft.source_snapshot draft)
-            ~expected_result:(Capsule.Draft.target_snapshot draft)
-            ~operations:
-              (Capsule.revision_operations (Capsule.Draft.revision draft))
-            ~dependencies ~evidence ~boundaries:[ boundary ] ~provenance:Created
-            ~created_at
-        in
-        let* existing_bytes = read_ref_bytes store id in
-        let* capsule_object = store_capsule store capsule in
-        let* revision_object = store_revision store revision in
-        let* () = validate_revision store ~capsule:id revision in
-        let* () = pin_boundaries scratch id ~changed_at [ boundary ] in
-        let* () = verify_boundaries scratch id [ boundary ] in
-        match existing_bytes with
-        | Some bytes ->
-            let* existing =
-              decode_current_ref bytes
-              |> Result.map_error (fun error ->
-                  Current_ref_corrupt (error_to_string error))
-            in
-            if
-              Store.Stored_object_id.equal capsule_object
-                (current_capsule_object existing)
-              && Store.Stored_object_id.equal revision_object
-                   (current_revision_object existing)
-              && Id.Capsule_revision_id.equal (revision_id revision)
-                   (current_revision existing)
-            then resolve_from_ref store existing
-            else Error (Conflicting_capsule_id_reuse id)
+        create_from_checkpoints_unlocked ~store ~scratch ~id ~title ~description
+          ~dependencies ~evidence ~from ~target ~created_at ~changed_at ?fail_at
+          ())
+
+  let has_boundary boundaries ~source ~target =
+    List.exists
+      (fun boundary ->
+        Scratch.Checkpoint_id.equal source boundary.source
+        && Scratch.Checkpoint_id.equal target boundary.target)
+      boundaries
+
+  let resume_current_creation ~store ~scratch ~id ~title ~description
+      ~dependencies ~evidence ~created_at ~changed_at ~target =
+    let* target_checkpoint =
+      Scratch.head scratch
+      |> Result.map_error (fun error -> Scratch_error error)
+    in
+    match target_checkpoint with
+    | None -> Error (Draft_error "scratch history is not initialized")
+    | Some target_checkpoint -> (
+        match Scratch.Checkpoint.parent target_checkpoint with
         | None ->
-            let* () = expect_failure fail_at Before_create_current_ref in
-            let* current =
-              make_current_ref ~generation:0L ~capsule:id ~capsule_object
-                ~revision:(revision_id revision) ~revision_object
+            Ok
+              (No_current_changes
+                 {
+                   checkpoint = target;
+                   snapshot = Scratch.Checkpoint.snapshot target_checkpoint;
+                 })
+        | Some source -> (
+            let* current = read_ref store id in
+            match current with
+            | Some current ->
+                let* resolved = resolve_from_ref store current in
+                if
+                  not
+                    (String.equal title (capsule_title resolved.capsule)
+                    && String.equal description
+                         (capsule_description resolved.capsule))
+                then Error (Conflicting_capsule_id_reuse id)
+                else if
+                  has_boundary
+                    (revision_boundaries resolved.revision)
+                    ~source ~target
+                then Ok (Created_from_current { resolved; source; target })
+                else
+                  Ok
+                    (No_current_changes
+                       {
+                         checkpoint = target;
+                         snapshot =
+                           Scratch.Checkpoint.snapshot target_checkpoint;
+                       })
+            | None ->
+                let* source_pinned =
+                  Scratch.has_capsule_boundary scratch source ~capsule:id
+                  |> Result.map_error (fun error -> Scratch_error error)
+                in
+                let* target_pinned =
+                  Scratch.has_capsule_boundary scratch target ~capsule:id
+                  |> Result.map_error (fun error -> Scratch_error error)
+                in
+                if not (source_pinned && target_pinned) then
+                  Ok
+                    (No_current_changes
+                       {
+                         checkpoint = target;
+                         snapshot =
+                           Scratch.Checkpoint.snapshot target_checkpoint;
+                       })
+                else
+                  let* resolved =
+                    create_from_checkpoints_unlocked ~store ~scratch ~id ~title
+                      ~description ~dependencies ~evidence ~from:source ~target
+                      ~created_at ~changed_at ()
+                  in
+                  Ok (Created_from_current { resolved; source; target })))
+
+  let create_from_current ~store ~scratch ~root ~id ~title ~description
+      ~dependencies ~evidence ~created_at ~changed_at ?before_verify ?fail_at ()
+      =
+    with_capsule_lock store id (fun () ->
+        let* source =
+          Scratch.head_id scratch
+          |> Result.map_error (fun error -> Scratch_error error)
+        in
+        let* source =
+          match source with
+          | Some checkpoint -> Ok checkpoint
+          | None -> Error (Draft_error "scratch history is not initialized")
+        in
+        let* source_snapshot = checkpoint_snapshot scratch source in
+        let* scanned, _ =
+          Snapshot.scan ~root ~store
+          |> Result.map_error (fun error -> Snapshot_error error)
+        in
+        Option.iter (fun callback -> callback ()) before_verify;
+        let* verified, _ =
+          Snapshot.scan ~root ~store
+          |> Result.map_error (fun error -> Snapshot_error error)
+        in
+        if not (Snapshot.Snapshot.equal_id scanned verified) then
+          Error
+            (Current_working_directory_changed
+               { expected = scanned; actual = verified })
+        else
+          let* source_again =
+            Scratch.head_id scratch
+            |> Result.map_error (fun error -> Scratch_error error)
+          in
+          if
+            not
+              (Option.equal Scratch.Checkpoint_id.equal (Some source)
+                 source_again)
+          then
+            Error
+              (Scratch_head_changed { expected = source; actual = source_again })
+          else if Snapshot.Snapshot.equal_id source_snapshot verified then
+            resume_current_creation ~store ~scratch ~id ~title ~description
+              ~dependencies ~evidence ~created_at ~changed_at ~target:source
+          else
+            let* checkpoint =
+              Scratch.checkpoint scratch ~snapshot:verified ~source:Scratch.Scan
+                ~observed_at:changed_at ~created_at
+              |> Result.map_error (fun error -> Scratch_error error)
             in
-            let* () = publish_current store ~expected:None ~next:current in
-            let* resolved = resolve_from_ref store current in
-            let* () = expect_failure fail_at After_create_current_ref in
-            Ok resolved)
+            match checkpoint with
+            | Scratch.Unchanged _ ->
+                let* actual =
+                  Scratch.head_id scratch
+                  |> Result.map_error (fun error -> Scratch_error error)
+                in
+                Error (Scratch_head_changed { expected = source; actual })
+            | Scratch.Created checkpoint ->
+                let target = Scratch.Checkpoint.id checkpoint in
+                let* resolved =
+                  create_from_checkpoints_unlocked ~store ~scratch ~id ~title
+                    ~description ~dependencies ~evidence ~from:source ~target
+                    ~created_at ~changed_at ?fail_at ()
+                in
+                Ok (Created_from_current { resolved; source; target }))
 
   let fold_from_checkpoints ~store ~scratch ~capsule ~expected_revision
       ~expected_generation ~evidence ~from ~target ~created_at ~changed_at

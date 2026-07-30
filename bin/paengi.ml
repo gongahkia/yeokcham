@@ -348,6 +348,45 @@ let watch root arguments =
 
 let capsule root arguments =
   match arguments with
+  | "create" :: "--current" :: options -> (
+      let rec parse id title description = function
+        | [] -> (
+            match (id, title, description) with
+            | Some id, Some title, Some description -> (id, title, description)
+            | _ -> exit 2)
+        | "--id" :: value :: rest ->
+            parse (Some (capsule_id value)) title description rest
+        | "--title" :: value :: rest -> parse id (Some value) description rest
+        | "--description" :: value :: rest -> parse id title (Some value) rest
+        | _ -> exit 2
+      in
+      let id, title, description = parse None None None options in
+      match open_scratch root with
+      | Error error -> fail Fun.id error
+      | Ok (store, scratch) -> (
+          let timestamp = now () in
+          Capsule_store.Durable.create_from_current ~store ~scratch ~root ~id
+            ~title ~description ~dependencies:[] ~evidence:[]
+            ~created_at:timestamp ~changed_at:timestamp ()
+          |> Result.map_error Capsule_store.error_to_string
+          |> function
+          | Error error -> fail Fun.id error
+          | Ok (Capsule_store.Durable.No_current_changes { checkpoint; _ }) ->
+              Printf.printf "no-changes checkpoint=%s\n"
+                (Store.Stored_object_id.to_hex
+                   (Scratch.Checkpoint_id.stored_object_id checkpoint))
+          | Ok
+              (Capsule_store.Durable.Created_from_current
+                 { resolved; source; target }) ->
+              let revision = Capsule_store.Durable.resolved_revision resolved in
+              Printf.printf "capsule=%s revision=%s from=%s to=%s\n"
+                (Paengi_id.Capsule_id.to_hex id)
+                (Paengi_id.Capsule_revision_id.to_hex
+                   (Capsule_store.revision_id revision))
+                (Store.Stored_object_id.to_hex
+                   (Scratch.Checkpoint_id.stored_object_id source))
+                (Store.Stored_object_id.to_hex
+                   (Scratch.Checkpoint_id.stored_object_id target))))
   | [ "show"; identity ] -> (
       match Store.open_repository ~root with
       | Error error -> fail Store.error_to_string error

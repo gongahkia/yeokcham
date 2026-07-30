@@ -6,14 +6,14 @@ Robustness tasks operate only on Paengi's pure functions and generated local fix
 ## Active vertical slice
 
 - Milestone: 4 — Change capsules.
-- Task: ADR-025 durable capsules/revisions, CAS current refs, exact durable create/fold/read, and deterministic split/combine replay.
-- Modules/files: `paengi_capsule_store`; nested ref-file publication in `paengi_store`; idempotent capsule-boundary retention; capsule CLI reads; focused/state-machine tests and v1 goldens.
-- Types: stable caller-supplied `Capsule_id`; SHA-256 logical `Capsule_revision_id`; typed stored object links; immutable `Capsule_v1`/complete `Capsule_revision_v1`; checksummed current ref; source boundary and provenance values.
-- Formats: ADR-025 adds Capsule type-6 and Capsule_revision type-7 payloads plus `refs/capsules/<id>/current`; ADR-020 through ADR-024 objects, IDs, generation refs, cleanup, quarantine, resume, prune semantics, and existing goldens remain unchanged.
-- Invariants: current refs are the sole visibility point; all durable revisions independently replay from their declared base; logical and physical IDs remain distinct; parent links remain same-capsule and cycle-checked; boundary pins are durable and idempotent; stale updates reject; split/combine never mutate sources or accept an invalid replay chain.
-- Tests: canonical golden/inverse decoder, reopen, interruption, retry, CAS, pin, history, split/combine, and bounded deterministic restart state-machine tests. Forced seed `17` is printed by the property executable.
+- Task: Slice 1 complete — current-working-diff capsule creation uses the existing scratch/checkpoint and ADR-025 publication paths.
+- Modules/files: `paengi_capsule_store`; capsule CLI; focused current-working-diff tests.
+- Types: `current_creation` result with `no_changes` or a resolved durable capsule plus source/target checkpoints; existing stable caller-supplied `Capsule_id`, logical revision ID, stored-object links, and source boundaries.
+- Formats: no new schema, object type, ref, or golden. ADR-020 through ADR-025 remain unchanged.
+- Invariants: the repository writer lock covers verified scratch-head read, exact scan verification, checkpoint publication, pins, and current-ref publication; equal snapshots publish nothing; a pre-ref failure leaves no visible capsule; same-input retries are idempotent through retained boundary pins; a changed working directory before checkpoint publication rejects.
+- Tests: exact current-diff replay, no-change non-publication, scan/publication mutation rejection, post-checkpoint/pre-ref interruption, retry, reopen pin retention, and deterministic restart coverage. Forced seed `17` is printed by the property executable.
 - External libraries: existing Alcotest, QCheck, Profile 1 encoder, and Unix only.
-- ADR changes: ADR-025 accepted and indexed.
+- ADR changes: no format change; ADR-025 clarifies current-working-diff creation semantics.
 
 ## Milestone 0 — Project and model foundation
 
@@ -202,7 +202,7 @@ Robustness tasks operate only on Paengi's pure functions and generated local fix
 ### Creation
 
 - [x] Create capsule from two checkpoints.
-- [ ] Create capsule from current diff.
+- [x] Create capsule from current diff.
 - [x] Record stable capsule ID.
 - [x] Create first revision.
 - [x] Pin required scratch boundaries.

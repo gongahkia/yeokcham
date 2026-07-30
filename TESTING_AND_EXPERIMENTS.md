@@ -103,6 +103,10 @@ and inverse decoders, reopen resolution, idempotent retry, current-ref CAS,
 failure before/after visibility, pinned boundaries, parent/type/corruption
 rejection, split/combine replay, and a seeded create/fold/show/split/combine
 restart state machine. The forced seed is reported by the property executable.
+Current-working-diff creation additionally checks exact double-scan creation,
+no-change non-publication, deterministic external mutation rejection before
+checkpoint publication, pre-current-ref interruption with a safely retained
+checkpoint, idempotent retry, and boundary retention after reopen.
 
 #### P7 — Stable capsule identity
 

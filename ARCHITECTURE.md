@@ -315,6 +315,14 @@ mechanism. Split produces a validated base-to-intermediate then
 intermediate-to-result chain; combine accepts only an explicit replay-valid
 base/result source chain. No mutable capsule catalog is canonical.
 
+`capsule create --current` uses no separate working-diff format. Under the same
+writer lock it verifies a scratch head, double-scans the working directory, and
+uses the ordinary scratch checkpoint writer for a verified difference. The
+existing durable checkpoint-range creator then performs capsule publication.
+An equal verified scan returns a structured no-change result. Immutable scan
+objects left by a failed scan are unreachable; no scratch-head or capsule-ref
+publication occurs before the checkpoint/current-ref visibility points.
+
 ## 9. Workspace materialiser
 
 Inputs:

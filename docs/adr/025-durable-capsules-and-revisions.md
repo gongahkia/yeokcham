@@ -155,6 +155,16 @@ possibly extra safe pins; post-ref crashes resolve a complete capsule. Retry is
 idempotent for byte-identical objects/pins/ref and rejects conflicting capsule
 ID reuse.
 
+Creation from the current working directory is an adapter over that same range
+path, not a separate working-diff object. It holds the repository writer lock,
+reads the verified scratch head, scans the directory twice, and rejects if the
+two exact snapshots differ. An equal snapshot returns a structured no-change
+result and publishes nothing. A verified difference first publishes the normal
+scratch event/checkpoint, then uses the old head and new checkpoint as the
+range. Thus a failure before the current ref leaves work recoverable in scratch
+history but exposes no partial capsule; the existing durable boundaries identify
+the same-input retry path without a new persistent attempt record.
+
 Folding holds the same lock, verifies the current ref and selected range begins
 at the current revision result, derives extra exact operations, creates a new
 complete revision from the original declared base to the new expected result,

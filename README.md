@@ -81,6 +81,7 @@ dune exec bin/paengi.exe -- compact --explain
 dune exec bin/paengi.exe -- compact --resume
 dune exec bin/paengi.exe -- compact --prune
 dune exec bin/paengi.exe -- watch --interval-ms 500 --debounce-ms 500
+dune exec bin/paengi.exe -- capsule create --current --id <capsule-id> --title <title> --description <description>
 dune exec bin/paengi.exe -- capsule show <capsule-id>
 dune exec bin/paengi.exe -- capsule current-diff <capsule-id>
 dune exec bin/paengi.exe -- capsule history <capsule-id>
@@ -104,6 +105,15 @@ Capsule read commands report logical capsule and revision IDs. They resolve the
 checksummed current ref, exact immutable object types, logical/physical links,
 parent chain, and direct replay before displaying data; corrupt or stale state
 returns an error rather than a best-effort result.
+
+`capsule create --current` takes a caller-supplied 32-byte hexadecimal capsule
+ID, scans the working directory twice while holding the repository writer lock,
+and creates a normal scratch checkpoint only for a verified difference from the
+scratch head. Equal snapshots print `no-changes` and publish neither a capsule
+ref nor a checkpoint. A changed state is checkpointed before the immutable
+capsule objects and current ref are published; an interrupted pre-ref attempt
+is safely checkpointed, remains invisible as a capsule, and can be retried
+with the same inputs through its retained boundaries.
 
 ## Testing scope
 
