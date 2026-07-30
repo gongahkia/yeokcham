@@ -45,7 +45,7 @@ json_string() {
 }
 
 seconds_to_ns() {
-  perl -e 'printf "%.0f", $ARGV[0] * 1000000000' "$1"
+  perl -e 'printf "%.0f\n", $ARGV[0] * 1000000000' "$1"
 }
 
 quantile_file() {
