@@ -198,7 +198,7 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 - [x] Map opaque yeokcham keys to Drive files.
 - [x] Implement put-if-absent semantics.
 - [x] Implement resumable upload.
-- [ ] Implement metadata cache.
+- [x] Implement metadata cache.
 - [x] Implement paginated listing.
 - [x] Handle rate limiting with backoff.
 - [x] Handle interrupted upload.

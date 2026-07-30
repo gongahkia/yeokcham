@@ -24,6 +24,8 @@ The same repository key and logical backend key produce the same opaque Drive na
 
 Drive permits duplicate file names and offers no atomic create-if-absent primitive. Yeokcham queries before upload, confirms after finalization, and fails closed on unexplained duplicates. If that confirmation identifies the just-created file alongside one existing file, it deletes only the identified new duplicate and reports `AlreadyExists`; it never overwrites an existing file. A resumable session is private until its final range is accepted. The implementation retries bounded read/list/delete requests for rate-limit and transient-service responses but does not blindly replay session creation.
 
+Each backend keeps a bounded positive metadata cache keyed by opaque name. It never caches a missing file, creation always runs a fresh Drive lookup, and a local delete invalidates the entry. Eviction is a disposable optimization and cannot affect reconstruction correctness.
+
 ## Security and recovery
 
 The mapping and capsule key are domain-separated from segment, metadata, and backend-object encryption subkeys. Losing the repository key makes both object ciphertext and opaque name derivation unavailable, consistent with the existing recovery model. Names and derived keys redact through `Debug`. The backend rejects standalone `chunks/` keys: chunks remain packed into immutable segments, so Drive does not receive one file per chunk.

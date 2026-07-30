@@ -276,7 +276,7 @@ impl std::fmt::Debug for DriveObjectNamingKey {
 }
 
 /// One fixed-length opaque Google Drive file name.
-#[derive(Clone)]
+#[derive(Clone, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct DriveObjectName(String);
 
 impl DriveObjectName {

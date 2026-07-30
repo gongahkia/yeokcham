@@ -25,6 +25,7 @@ const MAXIMUM_DRIVE_RESPONSE_BYTES: usize = 64 * 1024;
 const DRIVE_LIST_PAGE_SIZE: usize = 1_000;
 const RESUMABLE_CHUNK_BYTES: usize = 256 * 1024;
 const CAPSULE_PREFIX_BYTES: usize = 32;
+const MAXIMUM_METADATA_CACHE_ENTRIES: usize = 4_096;
 
 /// One validated opaque Google Drive folder identifier.
 #[derive(Clone, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -421,11 +422,35 @@ impl DriveSleeper for SystemDriveSleeper {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 struct DriveFile {
     id: String,
     name: String,
     size: u64,
+}
+
+#[derive(Default)]
+struct DriveMetadataCache {
+    files: BTreeMap<DriveObjectName, DriveFile>,
+}
+
+impl DriveMetadataCache {
+    fn get(&self, name: &DriveObjectName) -> Option<DriveFile> {
+        self.files.get(name).cloned()
+    }
+
+    fn insert(&mut self, name: DriveObjectName, file: DriveFile) {
+        if !self.files.contains_key(&name) && self.files.len() >= MAXIMUM_METADATA_CACHE_ENTRIES {
+            if let Some(oldest) = self.files.keys().next().cloned() {
+                self.files.remove(&oldest);
+            }
+        }
+        self.files.insert(name, file);
+    }
+
+    fn remove(&mut self, name: &DriveObjectName) {
+        self.files.remove(name);
+    }
 }
 
 struct DriveUploadState {
@@ -453,6 +478,7 @@ pub struct DriveBackend<T, A, S = SystemDriveSleeper> {
     access_tokens: A,
     retry_policy: DriveRetryPolicy,
     sleeper: S,
+    metadata_cache: Mutex<DriveMetadataCache>,
     uploads: Mutex<BTreeMap<[u8; 16], DriveUploadState>>,
 }
 
@@ -471,6 +497,7 @@ impl<T, A> DriveBackend<T, A, SystemDriveSleeper> {
             access_tokens,
             retry_policy: DriveRetryPolicy::default_bounded(),
             sleeper: SystemDriveSleeper,
+            metadata_cache: Mutex::new(DriveMetadataCache::default()),
             uploads: Mutex::new(BTreeMap::new()),
         }
     }
@@ -492,6 +519,7 @@ impl<T, A, S> DriveBackend<T, A, S> {
             access_tokens: self.access_tokens,
             retry_policy: self.retry_policy,
             sleeper,
+            metadata_cache: self.metadata_cache,
             uploads: self.uploads,
         }
     }
@@ -570,6 +598,7 @@ impl<T: DriveHttpTransport, A: DriveAccessTokenProvider, S: DriveSleeper> DriveB
                     })?,
                 )
                 .ok_or_else(|| Error::new(ErrorKind::CorruptData, "Drive object is truncated"))?;
+            self.cache_insert(name.clone(), file.clone())?;
             if key.as_bytes().starts_with(prefix.as_bytes())
                 && entries
                     .insert(key.clone(), BackendObjectMetadata::new(length))
@@ -599,7 +628,7 @@ impl<T: DriveHttpTransport, A: DriveAccessTokenProvider, S: DriveSleeper> DriveB
     }
 
     fn delete_sync(&self, key: &BackendKey) -> Result<()> {
-        let (file, _) = self.lookup_key(key)?;
+        let (file, name) = self.lookup_key(key)?;
         let response = self.authorized_request(
             DriveHttpRequest::new(
                 DriveHttpMethod::Delete,
@@ -610,7 +639,8 @@ impl<T: DriveHttpTransport, A: DriveAccessTokenProvider, S: DriveSleeper> DriveB
             )?,
             true,
         )?;
-        require_status(&response, &[200, 204], "Drive object could not be deleted")
+        require_status(&response, &[200, 204], "Drive object could not be deleted")?;
+        self.cache_remove(&name)
     }
 
     fn start_resumable_sync(
@@ -619,7 +649,7 @@ impl<T: DriveHttpTransport, A: DriveAccessTokenProvider, S: DriveSleeper> DriveB
         total_length: u64,
     ) -> Result<BackendResumablePutStart> {
         let name = self.drive_name(key)?;
-        if let Some(file) = self.lookup_name(&name)? {
+        if let Some(file) = self.lookup_name_fresh(&name)? {
             let (_, logical_length) = self.verify_capsule(key, &name, &file)?;
             return Ok(BackendResumablePutStart::AlreadyExists(
                 BackendObjectMetadata::new(logical_length),
@@ -951,10 +981,23 @@ impl<T: DriveHttpTransport, A: DriveAccessTokenProvider, S: DriveSleeper> DriveB
     }
 
     fn lookup_name(&self, name: &DriveObjectName) -> Result<Option<DriveFile>> {
+        if let Some(file) = self.cache_get(name)? {
+            return Ok(Some(file));
+        }
+        self.lookup_name_fresh(name)
+    }
+
+    fn lookup_name_fresh(&self, name: &DriveObjectName) -> Result<Option<DriveFile>> {
         let files = self.files_named(name)?;
         match files.len() {
             0 => Ok(None),
-            1 => Ok(files.into_iter().next()),
+            1 => {
+                let file = files.into_iter().next().ok_or_else(|| {
+                    Error::new(ErrorKind::Internal, "Drive file lookup is inconsistent")
+                })?;
+                self.cache_insert(name.clone(), file.clone())?;
+                Ok(Some(file))
+            }
             _ => Err(Error::new(
                 ErrorKind::Conflict,
                 "Drive backend contains duplicate object names",
@@ -983,6 +1026,30 @@ impl<T: DriveHttpTransport, A: DriveAccessTokenProvider, S: DriveSleeper> DriveB
             true,
         )?;
         require_status(&response, &[200, 204], "Drive object could not be deleted")
+    }
+
+    fn cache_get(&self, name: &DriveObjectName) -> Result<Option<DriveFile>> {
+        Ok(self
+            .metadata_cache
+            .lock()
+            .map_err(|_| Error::new(ErrorKind::Internal, "Drive metadata cache lock is poisoned"))?
+            .get(name))
+    }
+
+    fn cache_insert(&self, name: DriveObjectName, file: DriveFile) -> Result<()> {
+        self.metadata_cache
+            .lock()
+            .map_err(|_| Error::new(ErrorKind::Internal, "Drive metadata cache lock is poisoned"))?
+            .insert(name, file);
+        Ok(())
+    }
+
+    fn cache_remove(&self, name: &DriveObjectName) -> Result<()> {
+        self.metadata_cache
+            .lock()
+            .map_err(|_| Error::new(ErrorKind::Internal, "Drive metadata cache lock is poisoned"))?
+            .remove(name);
+        Ok(())
     }
 
     fn list_all_files(&self, maximum_scanned_entries: usize) -> Result<Vec<DriveFile>> {
@@ -1715,6 +1782,14 @@ mod tests {
             .expect("state")
             .pending
             .clone();
+        assert!(
+            backend
+                .metadata_cache
+                .lock()
+                .expect("cache lock")
+                .files
+                .is_empty()
+        );
         let name = object_name(&key);
         backend
             .transport
@@ -1775,6 +1850,76 @@ mod tests {
         let chunk = BackendKey::from_bytes(b"chunks/standalone").expect("chunk key");
         let error = block_on(backend.head(&chunk)).expect_err("standalone chunk");
         assert_eq!(error.kind(), ErrorKind::Unsupported);
+    }
+
+    #[test]
+    fn caches_only_confirmed_positive_file_metadata() {
+        let transport = FakeTransport::with_responses(vec![
+            response(200, Vec::new(), r#"{"files":[],"incompleteSearch":false}"#),
+            response(
+                200,
+                vec![(
+                    "location",
+                    "https://www.googleapis.com/upload/drive/v3/files?upload_id=123",
+                )],
+                "{}",
+            ),
+        ]);
+        let backend = backend(transport);
+        let key = key();
+        let session =
+            match block_on(backend.start_resumable_put_if_absent(&key, 3)).expect("start upload") {
+                BackendResumablePutStart::Started(session) => session,
+                BackendResumablePutStart::AlreadyExists(_) => panic!("unexpected existing object"),
+            };
+        let capsule = backend
+            .uploads
+            .lock()
+            .expect("upload lock")
+            .get(&session.id())
+            .expect("state")
+            .pending
+            .clone();
+        let name = object_name(&key);
+        backend.metadata_cache.lock().expect("cache lock").insert(
+            name.clone(),
+            DriveFile {
+                id: "file123".to_owned(),
+                name: name.as_str().to_owned(),
+                size: u64::try_from(capsule.len() + 3).expect("size"),
+            },
+        );
+        for _ in 0..2 {
+            backend.transport.push_response(bytes_response(
+                206,
+                capsule[..CAPSULE_PREFIX_BYTES].to_vec(),
+            ));
+            backend
+                .transport
+                .push_response(bytes_response(206, capsule.clone()));
+        }
+        assert_eq!(
+            block_on(backend.head(&key)).expect("first head").length(),
+            3
+        );
+        assert_eq!(
+            block_on(backend.head(&key)).expect("second head").length(),
+            3
+        );
+        assert_eq!(
+            backend
+                .transport
+                .requests
+                .lock()
+                .expect("requests")
+                .iter()
+                .filter(|request| {
+                    request.method() == DriveHttpMethod::Get
+                        && request.url().contains("/drive/v3/files?")
+                })
+                .count(),
+            1,
+        );
     }
 
     #[test]
