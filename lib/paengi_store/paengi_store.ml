@@ -206,6 +206,12 @@ type error =
     }
   | Ref_lock_held of string
   | Ref_generation_exhausted of string
+  | Invalid_ref_path of string list
+  | Concurrent_ref_file_update of {
+      path : string;
+      expected_present : bool;
+      actual_present : bool;
+    }
 
 let error_to_string = function
   | Root_not_directory path ->
@@ -254,6 +260,13 @@ let error_to_string = function
   | Ref_lock_held name -> Printf.sprintf "mutable ref lock is held: %s" name
   | Ref_generation_exhausted name ->
       Printf.sprintf "mutable ref generation is exhausted: %s" name
+  | Invalid_ref_path components ->
+      Printf.sprintf "invalid mutable ref path: %s" (String.concat "/" components)
+  | Concurrent_ref_file_update { path; expected_present; actual_present } ->
+      Printf.sprintf "mutable ref file %s changed concurrently: expected %s, got %s"
+        path
+        (if expected_present then "present" else "absent")
+        (if actual_present then "present" else "absent")
 
 let repository_format =
   "paengi-repository-format 1\n" ^ "stored-object-hash sha256\n"
@@ -749,3 +762,48 @@ let compare_and_swap_ref repository ~name ~expected ~target =
             Error error
         | Ok () ->
             fsync_directory repository.refs |> Result.map (fun () -> next))
+
+module Ref_file = struct
+  let valid_component component = valid_ref_name component
+
+  let checked_components components =
+    if components = [] || not (List.for_all valid_component components) then
+      Error (Invalid_ref_path components)
+    else Ok ()
+
+  let path repository components =
+    List.fold_left Filename.concat repository.refs components
+
+  let read repository ~components =
+    let* () = checked_components components in
+    let file = path repository components in
+    match lstat_or_missing file with
+    | Ok None -> Ok None
+    | Ok (Some _) -> read_regular_file file |> Result.map Option.some
+    | Error error -> Error error
+
+  let compare_and_swap repository ~components ~expected ~replacement =
+    let* () = checked_components components in
+    let file = path repository components in
+    let* actual = read repository ~components in
+    if not (Option.equal String.equal expected actual) then
+      Error
+        (Concurrent_ref_file_update
+           {
+             path = file;
+             expected_present = Option.is_some expected;
+             actual_present = Option.is_some actual;
+           })
+    else
+      let directory = Filename.dirname file in
+      let* () = ensure_directory directory in
+      let* temporary =
+        create_temporary directory (Filename.basename file)
+          (Bytes.of_string replacement)
+      in
+      match rename_ref_temporary ~temporary ~final:file with
+      | Error error ->
+          ignore (unlink_if_present temporary);
+          Error error
+      | Ok () -> fsync_directory directory
+end

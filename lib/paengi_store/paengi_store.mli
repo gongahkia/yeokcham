@@ -49,6 +49,24 @@ type error =
     }
   | Ref_lock_held of string
   | Ref_generation_exhausted of string
+  | Invalid_ref_path of string list
+  | Concurrent_ref_file_update of {
+      path : string;
+      expected_present : bool;
+      actual_present : bool;
+    }
+
+module Ref_file : sig
+  val read :
+    repository -> components:string list -> (string option, error) result
+
+  val compare_and_swap :
+    repository ->
+    components:string list ->
+    expected:string option ->
+    replacement:string ->
+    (unit, error) result
+end
 
 val error_to_string : error -> string
 val repository_format : string

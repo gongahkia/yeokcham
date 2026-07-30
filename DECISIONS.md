@@ -135,3 +135,4 @@ The ADR lifecycle, numbering rules, and template are defined in [`docs/adr/READM
 - [ADR-022 — Large-content chunks and file manifests](docs/adr/022-large-content-chunks-and-file-manifests.md) — Accepted.
 - [ADR-023 — Scratch records, retention, and mutable refs](docs/adr/023-scratch-records-retention-and-mutable-refs.md) — Accepted.
 - [ADR-024 — Compacted scratch generations](docs/adr/024-compacted-scratch-generations.md) — Accepted.
+- [ADR-025 — Durable capsules and revisions](docs/adr/025-durable-capsules-and-revisions.md) — Accepted.

@@ -2345,9 +2345,27 @@ let unpin repository checkpoint ~changed_at =
   change_retention repository checkpoint ~action:Remove ~reason:User_pinned
     ~changed_at
 
+let has_capsule_boundary repository checkpoint ~capsule =
+  let* entries = timeline repository ~start:checkpoint ~limit:1 () in
+  match entries with
+  | [ entry ] ->
+      Ok
+        (List.exists
+           (function
+             | Capsule_boundary existing ->
+                 Paengi_id.Capsule_id.equal existing capsule
+             | User_pinned | Release_boundary _ | Validation_passed _
+             | Periodic_retention | Recent_window | Conflict_reference _ -> false)
+           entry.effective_retention)
+  | [] -> Error (Checkpoint_not_retained checkpoint)
+  | _ -> assert false
+
 let pin_capsule_boundary repository checkpoint ~capsule ~changed_at =
-  change_retention repository checkpoint ~action:Add
-    ~reason:(Capsule_boundary capsule) ~changed_at
+  let* already_pinned = has_capsule_boundary repository checkpoint ~capsule in
+  if already_pinned then Ok ()
+  else
+    change_retention repository checkpoint ~action:Add
+      ~reason:(Capsule_boundary capsule) ~changed_at
 
 module Polling = struct
   type t = {

@@ -309,6 +309,12 @@ val pin_capsule_boundary :
   changed_at:int64 ->
   (unit, error) result
 
+val has_capsule_boundary :
+  repository ->
+  Checkpoint_id.t ->
+  capsule:Paengi_id.Capsule_id.t ->
+  (bool, error) result
+
 module Polling : sig
   type t
 
