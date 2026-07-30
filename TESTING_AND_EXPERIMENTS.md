@@ -112,6 +112,14 @@ safety checkpointing of divergent work, bytes/mode/symlink exactness, anchor
 reuse when the result is already current, stale apply rejection without target
 head publication, and folding from the returned anchor into a new immutable
 revision.
+Split/combine tests additionally prove that plans are read-only and expose
+selected/source order, output bases/results, composition, provenance, and pins;
+unconfirmed calls reject; confirmed calls retain exact replay and sources; and
+the seeded restart state machine includes current creation, edit, fold, and
+confirmed split/combine. Parent-cycle coverage uses the pure logical resolver
+with a synthetic cycle. Persistent tests separately retain wrong-ID, corrupt,
+missing-parent, wrong-type, and cross-capsule-parent rejection; no impossible
+hash-verifying cyclic object fixture is claimed.
 
 #### P7 — Stable capsule identity
 

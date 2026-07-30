@@ -143,14 +143,15 @@ let create_fold_show_split_combine_reopen =
                 ~left_id:(capsule_id 151) ~left_title:"left"
                 ~left_description:"left" ~right_id:(capsule_id 152)
                 ~right_title:"right" ~right_description:"right"
-                ~left_operation_indices:[ 0 ] ~created_at:10L ~changed_at:10L ()
+                ~left_operation_indices:[ 0 ] ~created_at:10L ~changed_at:10L
+                ~confirmed:true ()
               |> Result.get_ok
             in
             let combined =
               Capsule_store.Durable.combine ~store ~scratch ~id:(capsule_id 153)
                 ~title:"combined" ~description:"combined"
                 ~sources:[ link left; link right ]
-                ~created_at:11L ~changed_at:11L ()
+                ~created_at:11L ~changed_at:11L ~confirmed:true ()
               |> Result.get_ok
             in
             match Store.open_repository ~root with
@@ -171,6 +172,107 @@ let create_fold_show_split_combine_reopen =
                         (Capsule_store.Durable.resolved_capsule combined)))
       with _ -> false)
 
+let current_create_edit_fold_split_combine_reopen =
+  QCheck2.Test.make ~count:40
+    ~name:
+      "current creation/edit/fold/confirmed split/combine state machine \
+       survives reopen"
+    QCheck2.Gen.(int_range 2 6)
+    (fun steps ->
+      try
+        with_repository (fun root store ->
+            let tracked = Filename.concat root "tracked" in
+            write_file tracked "0";
+            let scratch = Scratch.open_repository store in
+            let initial_snapshot, _ =
+              Snapshot.scan ~root ~store |> Result.get_ok
+            in
+            let initial =
+              Scratch.create_initial scratch ~snapshot:initial_snapshot
+                ~created_at:0L
+              |> Result.get_ok |> Scratch.Checkpoint.id
+            in
+            write_file tracked "1";
+            let id = capsule_id 160 in
+            let created =
+              Capsule_store.Durable.create_from_current ~store ~scratch ~root
+                ~id ~title:"current property" ~description:"current property"
+                ~dependencies:[] ~evidence:[] ~created_at:1L ~changed_at:1L ()
+              |> Result.get_ok
+            in
+            let initial_current, anchor =
+              match created with
+              | Capsule_store.Durable.No_current_changes _ -> raise Exit
+              | Capsule_store.Durable.Created_from_current
+                  { resolved; source; target } ->
+                  if not (Scratch.Checkpoint_id.equal initial source) then
+                    raise Exit;
+                  (resolved, target)
+            in
+            let reused =
+              Capsule_store.Durable.enable_for_editing ~store ~scratch ~root
+                ~capsule:id ~observed_at:2L ~created_at:2L ()
+              |> Result.get_ok
+            in
+            if not (Scratch.Checkpoint_id.equal anchor reused) then false
+            else
+              let _current, _anchor =
+                List.fold_left
+                  (fun (current, anchor) index ->
+                    let timestamp = Int64.of_int (index + 2) in
+                    write_file tracked (string_of_int (index + 1));
+                    let target = checkpoint scratch store root timestamp in
+                    let reference =
+                      Capsule_store.Durable.resolved_current_ref current
+                    in
+                    let next =
+                      Capsule_store.Durable.fold_from_checkpoints ~store
+                        ~scratch ~capsule:id
+                        ~expected_revision:
+                          (Capsule_store.current_revision reference)
+                        ~expected_generation:
+                          (Capsule_store.current_generation reference)
+                        ~evidence:[] ~from:anchor ~target ~created_at:timestamp
+                        ~changed_at:timestamp ()
+                      |> Result.get_ok
+                    in
+                    (next, target))
+                  (initial_current, anchor)
+                  (List.init (steps - 1) (fun index -> index + 1))
+              in
+              let left, right =
+                Capsule_store.Durable.split ~store ~scratch ~source:id
+                  ~left_id:(capsule_id 161) ~left_title:"left"
+                  ~left_description:"left" ~right_id:(capsule_id 162)
+                  ~right_title:"right" ~right_description:"right"
+                  ~left_operation_indices:[ 0 ] ~created_at:20L ~changed_at:20L
+                  ~confirmed:true ()
+                |> Result.get_ok
+              in
+              let combined =
+                Capsule_store.Durable.combine ~store ~scratch
+                  ~id:(capsule_id 163) ~title:"combined" ~description:"combined"
+                  ~sources:[ link left; link right ]
+                  ~created_at:21L ~changed_at:21L ~confirmed:true ()
+                |> Result.get_ok
+              in
+              match Store.open_repository ~root with
+              | Error _ -> false
+              | Ok reopened ->
+                  let history =
+                    Capsule_store.Durable.history reopened id |> Result.get_ok
+                  in
+                  let combined_diff =
+                    Capsule_store.Durable.current_diff reopened (capsule_id 163)
+                    |> Result.get_ok
+                  in
+                  List.length history = steps
+                  && List.length combined_diff = steps
+                  && Id.Capsule_id.equal (capsule_id 163)
+                       (Capsule_store.capsule_id
+                          (Capsule_store.Durable.resolved_capsule combined)))
+      with Exit | _ -> false)
+
 let () =
   Alcotest.run "durable capsule properties"
     [
@@ -179,5 +281,8 @@ let () =
           QCheck_alcotest.to_alcotest ~speed_level:`Quick
             ~rand:(state_for "create-fold-show-split-combine")
             create_fold_show_split_combine_reopen;
+          QCheck_alcotest.to_alcotest ~speed_level:`Quick
+            ~rand:(state_for "current-create-edit-fold-split-combine")
+            current_create_edit_fold_split_combine_reopen;
         ] );
     ]

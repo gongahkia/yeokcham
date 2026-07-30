@@ -362,6 +362,18 @@ the new head and editing anchor. If the verified working state and current head
 already equal the revision result, the head itself is reused. No edit-session
 ref exists. A later fold names this anchor and a descendant scratch checkpoint.
 
+Split and combine have a pure, read-only planning phase. A split plan preserves
+the caller's strictly ascending selected operation indices, produces an exact
+left intermediate snapshot and a dependent right revision, and reports both
+declared bases/results and all boundary pins. A combine plan preserves the
+caller-supplied source order, validates its complete base/result chain and
+dependency closure, and reports the resulting complete revision. Publication
+requires an explicit confirmation and recomputes the plan while holding the
+repository writer lock. Parent-cycle validation remains required in durable
+history; synthetic parent cycles are exercised through the pure
+`Parent_resolver` graph seam because a hash-verifying persistent cycle is not a
+constructible fixture.
+
 ## 6. Change operations
 
 ```ocaml

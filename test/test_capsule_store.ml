@@ -772,12 +772,68 @@ let split_and_combine_preserve_sources_and_replay () =
         Capsule_store.revision_id
           (Capsule_store.Durable.resolved_revision source)
       in
+      let plan =
+        Capsule_store.Durable.plan_split ~store ~source:source_id
+          ~left_id:(capsule_id 111) ~left_title:"left" ~left_description:"left"
+          ~right_id:(capsule_id 112) ~right_title:"right"
+          ~right_description:"right" ~left_operation_indices:[ 0 ]
+          ~created_at:5L
+        |> require_ok Capsule_store.error_to_string
+      in
+      let planned_outputs = Capsule_store.Durable.split_plan_outputs plan in
+      let planned_source = Capsule_store.Durable.split_plan_source plan in
+      Alcotest.(check bool)
+        "split plan preserves source revision" true
+        (Id.Capsule_revision_id.equal source_revision
+           (Capsule_store.revision_link_revision planned_source));
+      Alcotest.(check int)
+        "split plan has two output capsules" 2
+        (List.length planned_outputs);
+      let planned_left, planned_right =
+        match planned_outputs with
+        | [ left; right ] -> (left, right)
+        | _ -> Alcotest.fail "split plan output count changed"
+      in
+      let _, planned_left_revision = planned_left in
+      let _, planned_right_revision = planned_right in
+      Alcotest.(check bool)
+        "split plan preserves source selection" true
+        (Capsule_store.Durable.split_plan_selected_operation_indices plan
+        = [ 0 ]);
+      Alcotest.(check bool)
+        "split plan exposes declared composition base" true
+        (Snapshot.Snapshot.equal_id
+           (Capsule_store.revision_declared_base planned_right_revision)
+           (Capsule_store.revision_expected_result planned_left_revision));
+      Alcotest.(check int)
+        "split plan declares output order" 2
+        (List.length (Capsule_store.Durable.split_plan_composition_order plan));
+      Alcotest.(check int)
+        "split plan lists boundary pins" 2
+        (List.length (Capsule_store.Durable.split_plan_boundary_pins plan));
+      Alcotest.(check int)
+        "split plan publishes no output current refs" 1
+        (List.length
+           (Capsule_store.Durable.list store
+           |> require_ok Capsule_store.error_to_string));
+      (match
+         Capsule_store.Durable.split ~store ~scratch:fixture.scratch
+           ~source:source_id ~left_id:(capsule_id 111) ~left_title:"left"
+           ~left_description:"left" ~right_id:(capsule_id 112)
+           ~right_title:"right" ~right_description:"right"
+           ~left_operation_indices:[ 0 ] ~created_at:5L ~changed_at:5L
+           ~confirmed:false ()
+       with
+      | Error (Capsule_store.Confirmation_required "split") -> ()
+      | Error error -> Alcotest.fail (Capsule_store.error_to_string error)
+      | Ok _ -> Alcotest.fail "unconfirmed split published output capsules");
       let left, right =
         Capsule_store.Durable.split ~store ~scratch:fixture.scratch
           ~source:source_id ~left_id:(capsule_id 111) ~left_title:"left"
           ~left_description:"left" ~right_id:(capsule_id 112)
           ~right_title:"right" ~right_description:"right"
-          ~left_operation_indices:[ 0 ] ~created_at:5L ~changed_at:5L ()
+          ~left_operation_indices:[ 0 ] ~created_at:5L ~changed_at:5L
+          ~confirmed:true ()
         |> require_ok Capsule_store.error_to_string
       in
       Alcotest.(check bool)
@@ -802,7 +858,7 @@ let split_and_combine_preserve_sources_and_replay () =
            ~source:source_id ~left_id:(capsule_id 113) ~left_title:"bad"
            ~left_description:"bad" ~right_id:(capsule_id 114) ~right_title:"bad"
            ~right_description:"bad" ~left_operation_indices:[ 1 ] ~created_at:6L
-           ~changed_at:6L ()
+           ~changed_at:6L ~confirmed:true ()
        with
       | Error _ -> ()
       | Ok _ -> Alcotest.fail "dependency-breaking split partition was accepted");
@@ -818,11 +874,39 @@ let split_and_combine_preserve_sources_and_replay () =
             Capsule_store.Durable.resolved_revision_object resolved;
         }
       in
+      let sources = [ source_link left; source_link right ] in
+      let combine_plan =
+        Capsule_store.Durable.plan_combine ~store ~id:(capsule_id 115)
+          ~title:"combined" ~description:"combined" ~sources ~created_at:7L
+        |> require_ok Capsule_store.error_to_string
+      in
+      Alcotest.(check int)
+        "combine plan publishes no output current ref" 3
+        (List.length
+           (Capsule_store.Durable.list store
+           |> require_ok Capsule_store.error_to_string));
+      Alcotest.(check int)
+        "combine plan preserves explicit source order" 2
+        (List.length
+           (Capsule_store.Durable.combine_plan_composition_order combine_plan));
+      let _, planned_combined =
+        Capsule_store.Durable.combine_plan_output combine_plan
+      in
+      Alcotest.(check int)
+        "combine plan exposes exact operations" 2
+        (List.length (Capsule_store.revision_operations planned_combined));
+      (match
+         Capsule_store.Durable.combine ~store ~scratch:fixture.scratch
+           ~id:(capsule_id 115) ~title:"combined" ~description:"combined"
+           ~sources ~created_at:7L ~changed_at:7L ~confirmed:false ()
+       with
+      | Error (Capsule_store.Confirmation_required "combine") -> ()
+      | Error error -> Alcotest.fail (Capsule_store.error_to_string error)
+      | Ok _ -> Alcotest.fail "unconfirmed combine published a capsule");
       let combined =
         Capsule_store.Durable.combine ~store ~scratch:fixture.scratch
           ~id:(capsule_id 115) ~title:"combined" ~description:"combined"
-          ~sources:[ source_link left; source_link right ]
-          ~created_at:7L ~changed_at:7L ()
+          ~sources ~created_at:7L ~changed_at:7L ~confirmed:true ()
         |> require_ok Capsule_store.error_to_string
       in
       Alcotest.(check int)
@@ -834,7 +918,7 @@ let split_and_combine_preserve_sources_and_replay () =
         Capsule_store.Durable.combine ~store ~scratch:fixture.scratch
           ~id:(capsule_id 116) ~title:"bad" ~description:"bad"
           ~sources:[ source_link right; source_link left ]
-          ~created_at:8L ~changed_at:8L ()
+          ~created_at:8L ~changed_at:8L ~confirmed:true ()
       with
       | Error _ -> ()
       | Ok _ -> Alcotest.fail "incompatible combine sources were accepted")

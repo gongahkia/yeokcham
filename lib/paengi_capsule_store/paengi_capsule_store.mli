@@ -16,6 +16,16 @@ type parent_link = {
   object_id : Paengi_store.Stored_object_id.t;
 }
 
+val make_revision_link :
+  capsule:Paengi_id.Capsule_id.t ->
+  revision:Paengi_id.Capsule_revision_id.t ->
+  object_id:Paengi_store.Stored_object_id.t ->
+  revision_link
+
+val revision_link_capsule : revision_link -> Paengi_id.Capsule_id.t
+val revision_link_revision : revision_link -> Paengi_id.Capsule_revision_id.t
+val revision_link_object : revision_link -> Paengi_store.Stored_object_id.t
+
 type provenance =
   | Created
   | Folded
@@ -61,6 +71,7 @@ type error =
   | Revision_history_cycle of Paengi_id.Capsule_revision_id.t
   | Revision_application_conflict of Capsule.application_conflict list
   | Revision_expected_result_mismatch
+  | Confirmation_required of string
   | Current_working_directory_changed of {
       expected : Paengi_snapshot.Snapshot.id;
       actual : Paengi_snapshot.Snapshot.id;
@@ -261,6 +272,32 @@ module Durable : sig
 
   val list : Paengi_store.repository -> (resolved list, error) result
 
+  type split_plan
+  type combine_plan
+
+  val split_plan_source : split_plan -> revision_link
+  val split_plan_selected_operation_indices : split_plan -> int list
+  val split_plan_outputs : split_plan -> (capsule * revision) list
+
+  val split_plan_composition_order :
+    split_plan ->
+    (Paengi_id.Capsule_id.t * Paengi_id.Capsule_revision_id.t) list
+
+  val split_plan_boundary_pins : split_plan -> source_boundary list
+
+  val plan_split :
+    store:Paengi_store.repository ->
+    source:Paengi_id.Capsule_id.t ->
+    left_id:Paengi_id.Capsule_id.t ->
+    left_title:string ->
+    left_description:string ->
+    right_id:Paengi_id.Capsule_id.t ->
+    right_title:string ->
+    right_description:string ->
+    left_operation_indices:int list ->
+    created_at:int64 ->
+    (split_plan, error) result
+
   val split :
     store:Paengi_store.repository ->
     scratch:Paengi_scratch.repository ->
@@ -274,8 +311,23 @@ module Durable : sig
     left_operation_indices:int list ->
     created_at:int64 ->
     changed_at:int64 ->
+    confirmed:bool ->
     unit ->
     (resolved * resolved, error) result
+
+  val combine_plan_sources : combine_plan -> revision_link list
+  val combine_plan_output : combine_plan -> capsule * revision
+  val combine_plan_composition_order : combine_plan -> revision_link list
+  val combine_plan_boundary_pins : combine_plan -> source_boundary list
+
+  val plan_combine :
+    store:Paengi_store.repository ->
+    id:Paengi_id.Capsule_id.t ->
+    title:string ->
+    description:string ->
+    sources:revision_link list ->
+    created_at:int64 ->
+    (combine_plan, error) result
 
   val combine :
     store:Paengi_store.repository ->
@@ -286,6 +338,7 @@ module Durable : sig
     sources:revision_link list ->
     created_at:int64 ->
     changed_at:int64 ->
+    confirmed:bool ->
     unit ->
     (resolved, error) result
 end

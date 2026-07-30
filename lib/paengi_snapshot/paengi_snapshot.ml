@@ -577,6 +577,11 @@ module Tree = struct
     let* entries = encoding_array values in
     encoding_array [ Encoding.integer 1L; entries ]
 
+  let id tree =
+    let* payload = payload tree in
+    let* object_ = envelope Envelope.Tree payload in
+    Ok (Store.id_of_envelope object_)
+
   let store repository tree =
     let* payload = payload tree in
     let* object_ = envelope Envelope.Tree payload in
@@ -695,6 +700,11 @@ module Snapshot = struct
         Encoding.integer 1L;
         Encoding.bytes (Store.Stored_object_id.to_raw_bytes snapshot.root);
       ]
+
+  let id snapshot =
+    let* payload = payload snapshot in
+    let* object_ = envelope Envelope.Snapshot payload in
+    Ok (Store.id_of_envelope object_)
 
   let store repository snapshot =
     let* payload = payload snapshot in

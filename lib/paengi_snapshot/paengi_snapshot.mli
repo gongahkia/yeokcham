@@ -91,6 +91,7 @@ module Tree : sig
   val equal_id : id -> id -> bool
   val create : (string * entry) list -> (t, error) result
   val entries : t -> (string * entry) list
+  val id : t -> (id, error) result
   val store : Paengi_store.repository -> t -> (id, error) result
   val load : Paengi_store.repository -> id -> (t, error) result
 end
@@ -104,6 +105,7 @@ module Snapshot : sig
   val equal_id : id -> id -> bool
   val create : root:Tree.id -> t
   val root : t -> Tree.id
+  val id : t -> (id, error) result
   val store : Paengi_store.repository -> t -> (id, error) result
   val load : Paengi_store.repository -> id -> (t, error) result
 end

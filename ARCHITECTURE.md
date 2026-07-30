@@ -331,6 +331,16 @@ becomes `scratch-head` only after rescan verification; a failed apply leaves the
 capsule/ref unchanged and never selects that target. The returned checkpoint is
 the explicit input to normal range-based folding.
 
+Split/combine planning is pure with respect to repository publication. The
+planner derives deterministic snapshot identities from canonical tree/snapshot
+bytes without writing objects, then exposes output revisions, bases/results,
+provenance, ordering, and required pins to the CLI. The publisher requires an
+explicit confirmation, obtains the writer lock, and rebuilds the plan from the
+current verified immutable inputs immediately before publication. A narrow
+`paengi_capsule.Parent_resolver` accepts synthetic logical parent graphs for
+cycle tests; it supplements rather than bypasses the production durable
+resolver's type/ID/parent checks.
+
 ## 9. Workspace materialiser
 
 Inputs:

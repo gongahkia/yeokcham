@@ -199,6 +199,14 @@ every visible output is individually complete and resolvable, and sources are
 unchanged. Retrying with the same output IDs is idempotent only for identical
 objects/refs; divergent output-ID reuse rejects.
 
+Split and combine first expose a deterministic, read-only plan. It includes
+source logical/physical IDs, selected operation indices or exact source order,
+output count, declared bases/results, dependencies or composition order,
+provenance, and boundary pins. A CLI publication needs `--confirm`; absence of
+that acknowledgement returns a non-zero result after the plan and publishes
+nothing. Confirmed execution holds the writer lock and recomputes the plan from
+the resolved immutable inputs immediately before publication.
+
 ## Consequences
 
 - Stable capsule IDs never change as revisions are folded.
@@ -241,6 +249,11 @@ readers/goldens, and coexistence or an atomically published migration.
 - Existing ADR-020 through ADR-024 goldens remain byte-identical.
 - Split/combine replay, invalid partition, and incompatible composition tests
   cover the implemented deterministic chain model.
+- Parent-cycle coverage injects a synthetic logical graph into the pure
+  `Parent_resolver` seam. Persistent wrong-ID, corrupt, missing-parent,
+  wrong-type, and cross-capsule-parent cases remain separate. A valid
+  hash-verifying cyclic immutable-object fixture is cryptographically
+  impractical and is not required to preserve the production cycle invariant.
 
 ## CLI and user impact
 

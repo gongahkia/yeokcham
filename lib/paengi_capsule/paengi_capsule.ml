@@ -475,6 +475,91 @@ module Draft = struct
       |> Result.map_error (fun error -> Scratch_error error)
 end
 
+module Parent_resolver = struct
+  type node = {
+    revision : Id.Capsule_revision_id.t;
+    capsule : Id.Capsule_id.t;
+    parent : Id.Capsule_revision_id.t option;
+  }
+
+  type error =
+    | Duplicate_revision of Id.Capsule_revision_id.t
+    | Unknown_revision of Id.Capsule_revision_id.t
+    | Parent_capsule_mismatch of {
+        parent : Id.Capsule_revision_id.t;
+        expected_capsule : Id.Capsule_id.t;
+        actual_capsule : Id.Capsule_id.t;
+      }
+    | Cycle of Id.Capsule_revision_id.t
+
+  let error_to_string = function
+    | Duplicate_revision revision ->
+        "duplicate synthetic revision: "
+        ^ Id.Capsule_revision_id.to_hex revision
+    | Unknown_revision revision ->
+        "unknown synthetic revision: " ^ Id.Capsule_revision_id.to_hex revision
+    | Parent_capsule_mismatch { parent; expected_capsule; actual_capsule } ->
+        Printf.sprintf "synthetic parent %s belongs to capsule %s, not %s"
+          (Id.Capsule_revision_id.to_hex parent)
+          (Id.Capsule_id.to_hex actual_capsule)
+          (Id.Capsule_id.to_hex expected_capsule)
+    | Cycle revision ->
+        "synthetic revision parent cycle: "
+        ^ Id.Capsule_revision_id.to_hex revision
+
+  let history ~nodes ~capsule ~current =
+    let rec add index = function
+      | [] -> Ok index
+      | node :: rest ->
+          if
+            List.exists
+              (fun existing ->
+                Id.Capsule_revision_id.equal existing.revision node.revision)
+              index
+          then Error (Duplicate_revision node.revision)
+          else add (node :: index) rest
+    in
+    let* index = add [] nodes in
+    let find revision =
+      List.find_opt
+        (fun node -> Id.Capsule_revision_id.equal revision node.revision)
+        index
+    in
+    let rec walk seen reversed revision =
+      if List.exists (Id.Capsule_revision_id.equal revision) seen then
+        Error (Cycle revision)
+      else
+        match find revision with
+        | None -> Error (Unknown_revision revision)
+        | Some node when not (Id.Capsule_id.equal capsule node.capsule) ->
+            Error
+              (Parent_capsule_mismatch
+                 {
+                   parent = revision;
+                   expected_capsule = capsule;
+                   actual_capsule = node.capsule;
+                 })
+        | Some node -> (
+            match node.parent with
+            | None -> Ok (List.rev (node :: reversed))
+            | Some parent -> (
+                match find parent with
+                | None -> Error (Unknown_revision parent)
+                | Some parent_node ->
+                    if Id.Capsule_id.equal capsule parent_node.capsule then
+                      walk (revision :: seen) (node :: reversed) parent
+                    else
+                      Error
+                        (Parent_capsule_mismatch
+                           {
+                             parent;
+                             expected_capsule = capsule;
+                             actual_capsule = parent_node.capsule;
+                           })))
+    in
+    walk [] [] current
+end
+
 module Catalog = struct
   module Capsule_map = Map.Make (struct
     type t = Id.Capsule_id.t

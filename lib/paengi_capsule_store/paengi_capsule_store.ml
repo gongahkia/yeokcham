@@ -25,6 +25,13 @@ type parent_link = {
   object_id : Store.Stored_object_id.t;
 }
 
+let make_revision_link ~capsule ~revision ~object_id =
+  { capsule; revision; object_id }
+
+let revision_link_capsule (link : revision_link) = link.capsule
+let revision_link_revision (link : revision_link) = link.revision
+let revision_link_object (link : revision_link) = link.object_id
+
 type provenance =
   | Created
   | Folded
@@ -85,6 +92,7 @@ type error =
   | Revision_history_cycle of Id.Capsule_revision_id.t
   | Revision_application_conflict of Capsule.application_conflict list
   | Revision_expected_result_mismatch
+  | Confirmation_required of string
   | Current_working_directory_changed of {
       expected : Snapshot.Snapshot.id;
       actual : Snapshot.Snapshot.id;
@@ -144,6 +152,8 @@ let error_to_string = function
           (List.map Capsule.application_conflict_to_string conflicts)
   | Revision_expected_result_mismatch ->
       "capsule revision replay does not reproduce its expected snapshot"
+  | Confirmation_required operation ->
+      "explicit confirmation is required before capsule " ^ operation
   | Current_working_directory_changed _ ->
       "working directory changed while capsule creation was being verified"
   | Scratch_head_changed _ ->
@@ -1887,15 +1897,42 @@ module Durable = struct
     Snapshot.Snapshot.store store (Snapshot.Snapshot.create ~root)
     |> Result.map_error (fun error -> Snapshot_error error)
 
-  let apply_operations store capsule ~base ~operations =
-    let* base_snapshot =
-      Snapshot.Snapshot.load store base
+  let snapshot_id_of_state state =
+    let entries = Scratch.State.entries state in
+    let rec tree_id prefix =
+      let direct =
+        List.filter_map
+          (fun (path, entry) ->
+            match direct_child_name prefix path with
+            | None -> None
+            | Some name -> Some (name, entry))
+          entries
+      in
+      let rec make_entries reversed = function
+        | [] -> Ok (List.rev reversed)
+        | (name, Scratch.File { mode; content }) :: rest ->
+            make_entries
+              ((name, Snapshot.Tree.File { mode; content }) :: reversed)
+              rest
+        | (name, Scratch.Directory) :: rest ->
+            let* child = tree_id (prefix @ [ name ]) in
+            make_entries
+              ((name, Snapshot.Tree.Directory child) :: reversed)
+              rest
+      in
+      let* tree_entries = make_entries [] direct in
+      let* tree =
+        Snapshot.Tree.create tree_entries
+        |> Result.map_error (fun error -> Snapshot_error error)
+      in
+      Snapshot.Tree.id tree
       |> Result.map_error (fun error -> Snapshot_error error)
     in
-    let* state =
-      Scratch.State.of_snapshot store base_snapshot
-      |> Result.map_error (fun error -> Scratch_error error)
-    in
+    let* root = tree_id [] in
+    Snapshot.Snapshot.id (Snapshot.Snapshot.create ~root)
+    |> Result.map_error (fun error -> Snapshot_error error)
+
+  let apply_operations_to_state capsule ~base ~state ~operations =
     let temporary_id =
       Id.Capsule_revision_id.of_bytes (String.make 32 '\000') |> Result.get_ok
     in
@@ -1909,6 +1946,17 @@ module Durable = struct
     let applied = Capsule.apply ~actual_base:base ~state revision in
     if applied.Capsule.conflicts = [] then Ok applied.Capsule.state
     else Error (Revision_application_conflict applied.Capsule.conflicts)
+
+  let apply_operations store capsule ~base ~operations =
+    let* base_snapshot =
+      Snapshot.Snapshot.load store base
+      |> Result.map_error (fun error -> Snapshot_error error)
+    in
+    let* state =
+      Scratch.State.of_snapshot store base_snapshot
+      |> Result.map_error (fun error -> Scratch_error error)
+    in
+    apply_operations_to_state capsule ~base ~state ~operations
 
   let checked_partition operation_count indices =
     let sorted = List.sort Int.compare indices in
@@ -1954,9 +2002,38 @@ module Durable = struct
          (Ok (None, []))
     |> Result.map (fun (_, values) -> List.rev values)
 
-  let split ~store ~scratch ~source ~left_id ~left_title ~left_description
-      ~right_id ~right_title ~right_description ~left_operation_indices
-      ~created_at ~changed_at () =
+  type split_plan = {
+    source_link : revision_link;
+    selected_indices : int list;
+    left_state : Scratch.State.t;
+    left_capsule : capsule;
+    left_revision : revision;
+    right_capsule : capsule;
+    right_revision : revision;
+    boundaries : source_boundary list;
+  }
+
+  let split_plan_source (plan : split_plan) = plan.source_link
+
+  let split_plan_selected_operation_indices (plan : split_plan) =
+    plan.selected_indices
+
+  let split_plan_outputs (plan : split_plan) =
+    [
+      (plan.left_capsule, plan.left_revision);
+      (plan.right_capsule, plan.right_revision);
+    ]
+
+  let split_plan_composition_order (plan : split_plan) =
+    [
+      (capsule_id plan.left_capsule, revision_id plan.left_revision);
+      (capsule_id plan.right_capsule, revision_id plan.right_revision);
+    ]
+
+  let split_plan_boundary_pins (plan : split_plan) = plan.boundaries
+
+  let plan_split ~store ~source ~left_id ~left_title ~left_description ~right_id
+      ~right_title ~right_description ~left_operation_indices ~created_at =
     if
       Id.Capsule_id.equal source left_id
       || Id.Capsule_id.equal source right_id
@@ -1967,97 +2044,121 @@ module Durable = struct
            "split output capsule IDs must be distinct from the source and each \
             other")
     else
+      let* source = read_current store source in
+      let operations = revision_operations source.revision in
+      let* () =
+        checked_partition (List.length operations) left_operation_indices
+      in
+      let left_operations, right_operations =
+        partition_operations operations left_operation_indices
+      in
+      if left_operations = [] || right_operations = [] then
+        Error (Draft_error "split requires two non-empty operation partitions")
+      else
+        let* left_state =
+          apply_operations store
+            (capsule_model source.capsule)
+            ~base:(revision_declared_base source.revision)
+            ~operations:left_operations
+        in
+        let* intermediate = snapshot_id_of_state left_state in
+        let* right_state =
+          apply_operations_to_state
+            (capsule_model source.capsule)
+            ~base:intermediate ~state:left_state ~operations:right_operations
+        in
+        let* source_expected =
+          Snapshot.Snapshot.load store
+            (revision_expected_result source.revision)
+          |> Result.map_error (fun error -> Snapshot_error error)
+        in
+        let* expected_state =
+          Scratch.State.of_snapshot store source_expected
+          |> Result.map_error (fun error -> Scratch_error error)
+        in
+        if not (Scratch.State.equal right_state expected_state) then
+          Error
+            (Draft_error "split partitions do not compose to the source result")
+        else
+          let source_link = link_of_resolved source in
+          let* left_capsule =
+            create_capsule ~id:left_id ~title:left_title
+              ~description:left_description ~created_at
+          in
+          let* left_dependencies =
+            normalise_dependencies (revision_dependencies source.revision)
+          in
+          let boundaries = revision_boundaries source.revision in
+          let* left_revision =
+            create_revision ~capsule:left_capsule ~parent:None
+              ~declared_base:(revision_declared_base source.revision)
+              ~expected_result:intermediate ~operations:left_operations
+              ~dependencies:left_dependencies
+              ~evidence:(revision_evidence source.revision)
+              ~boundaries ~provenance:(Split_from source_link) ~created_at
+          in
+          let* right_capsule =
+            create_capsule ~id:right_id ~title:right_title
+              ~description:right_description ~created_at
+          in
+          let* right_dependencies =
+            normalise_dependencies
+              (Capsule.Requires_capsule
+                 {
+                   capsule = left_id;
+                   revision = Some (revision_id left_revision);
+                 }
+              :: revision_dependencies source.revision)
+          in
+          let* right_revision =
+            create_revision ~capsule:right_capsule ~parent:None
+              ~declared_base:intermediate
+              ~expected_result:(revision_expected_result source.revision)
+              ~operations:right_operations ~dependencies:right_dependencies
+              ~evidence:(revision_evidence source.revision)
+              ~boundaries ~provenance:(Split_from source_link) ~created_at
+          in
+          Ok
+            {
+              source_link;
+              selected_indices = left_operation_indices;
+              left_state;
+              left_capsule;
+              left_revision;
+              right_capsule;
+              right_revision;
+              boundaries;
+            }
+
+  let split ~store ~scratch ~source ~left_id ~left_title ~left_description
+      ~right_id ~right_title ~right_description ~left_operation_indices
+      ~created_at ~changed_at ~confirmed () =
+    if not confirmed then Error (Confirmation_required "split")
+    else
       with_repository_lock store (fun () ->
-          let* source = read_current store source in
-          let operations = revision_operations source.revision in
-          let* () =
-            checked_partition (List.length operations) left_operation_indices
+          let* plan =
+            plan_split ~store ~source ~left_id ~left_title ~left_description
+              ~right_id ~right_title ~right_description ~left_operation_indices
+              ~created_at
           in
-          let left_operations, right_operations =
-            partition_operations operations left_operation_indices
-          in
-          if left_operations = [] || right_operations = [] then
-            Error
-              (Draft_error "split requires two non-empty operation partitions")
+          let* intermediate = store_state_snapshot store plan.left_state in
+          if
+            not
+              (Snapshot.Snapshot.equal_id intermediate
+                 (revision_expected_result plan.left_revision))
+          then Error (Draft_error "split plan intermediate snapshot changed")
           else
-            let* left_state =
-              apply_operations store
-                (capsule_model source.capsule)
-                ~base:(revision_declared_base source.revision)
-                ~operations:left_operations
+            let* left =
+              publish_new_unlocked ~store ~scratch ~capsule:plan.left_capsule
+                ~revision:plan.left_revision ~boundaries:plan.boundaries
+                ~changed_at
             in
-            let* intermediate = store_state_snapshot store left_state in
-            let* right_state =
-              apply_operations store
-                (capsule_model source.capsule)
-                ~base:intermediate ~operations:right_operations
+            let* right =
+              publish_new_unlocked ~store ~scratch ~capsule:plan.right_capsule
+                ~revision:plan.right_revision ~boundaries:plan.boundaries
+                ~changed_at
             in
-            let* source_expected =
-              Snapshot.Snapshot.load store
-                (revision_expected_result source.revision)
-              |> Result.map_error (fun error -> Snapshot_error error)
-            in
-            let* expected_state =
-              Scratch.State.of_snapshot store source_expected
-              |> Result.map_error (fun error -> Scratch_error error)
-            in
-            if not (Scratch.State.equal right_state expected_state) then
-              Error
-                (Draft_error
-                   "split partitions do not compose to the source result")
-            else
-              let source_link = link_of_resolved source in
-              let* left_capsule =
-                create_capsule ~id:left_id ~title:left_title
-                  ~description:left_description ~created_at
-              in
-              let* left_dependencies =
-                normalise_dependencies (revision_dependencies source.revision)
-              in
-              let* left_revision =
-                create_revision ~capsule:left_capsule ~parent:None
-                  ~declared_base:(revision_declared_base source.revision)
-                  ~expected_result:intermediate ~operations:left_operations
-                  ~dependencies:left_dependencies
-                  ~evidence:(revision_evidence source.revision)
-                  ~boundaries:(revision_boundaries source.revision)
-                  ~provenance:(Split_from source_link) ~created_at
-              in
-              let* right_capsule =
-                create_capsule ~id:right_id ~title:right_title
-                  ~description:right_description ~created_at
-              in
-              let* right_dependencies =
-                normalise_dependencies
-                  (Capsule.Requires_capsule
-                     {
-                       capsule = left_id;
-                       revision = Some (revision_id left_revision);
-                     }
-                  :: revision_dependencies source.revision)
-              in
-              let* right_revision =
-                create_revision ~capsule:right_capsule ~parent:None
-                  ~declared_base:intermediate
-                  ~expected_result:(revision_expected_result source.revision)
-                  ~operations:right_operations ~dependencies:right_dependencies
-                  ~evidence:(revision_evidence source.revision)
-                  ~boundaries:(revision_boundaries source.revision)
-                  ~provenance:(Split_from source_link) ~created_at
-              in
-              let* left =
-                publish_new_unlocked ~store ~scratch ~capsule:left_capsule
-                  ~revision:left_revision
-                  ~boundaries:(revision_boundaries source.revision)
-                  ~changed_at
-              in
-              let* right =
-                publish_new_unlocked ~store ~scratch ~capsule:right_capsule
-                  ~revision:right_revision
-                  ~boundaries:(revision_boundaries source.revision)
-                  ~changed_at
-              in
-              Ok (left, right))
+            Ok (left, right))
 
   let link_matches_revision (link : revision_link) (revision : revision) =
     Id.Capsule_id.equal link.capsule (revision_capsule revision)
@@ -2124,64 +2225,98 @@ module Durable = struct
     in
     check [] revisions
 
-  let combine ~store ~scratch ~id ~title ~description ~sources ~created_at
-      ~changed_at () =
+  let load_combine_sources store sources =
+    let rec loop reversed = function
+      | [] -> Ok (List.rev reversed)
+      | (link : revision_link) :: rest ->
+          let* revision = load_revision store link.object_id in
+          if not (link_matches_revision link revision) then
+            Error
+              (Parent_link_mismatch
+                 "combine source link does not match its object")
+          else
+            let* () = validate_revision store ~capsule:link.capsule revision in
+            loop (revision :: reversed) rest
+    in
+    loop [] sources
+
+  let validate_combine_chain revisions =
+    let rec loop = function
+      | [] | [ _ ] -> Ok ()
+      | previous :: (next :: _ as rest) ->
+          if
+            Snapshot.Snapshot.equal_id
+              (revision_expected_result previous)
+              (revision_declared_base next)
+          then loop rest
+          else
+            Error
+              (Draft_error
+                 "combine source revisions do not form a base/result chain")
+    in
+    loop revisions
+
+  type combine_plan = {
+    sources : revision_link list;
+    capsule : capsule;
+    revision : revision;
+    boundaries : source_boundary list;
+  }
+
+  let combine_plan_sources (plan : combine_plan) = plan.sources
+  let combine_plan_output (plan : combine_plan) = (plan.capsule, plan.revision)
+  let combine_plan_composition_order (plan : combine_plan) = plan.sources
+  let combine_plan_boundary_pins (plan : combine_plan) = plan.boundaries
+
+  let plan_combine ~store ~id ~title ~description ~sources ~created_at =
     if sources = [] then
       Error (Draft_error "combine requires at least one source revision")
     else
+      let* revisions = load_combine_sources store sources in
+      let* () = validate_dependency_closure sources revisions in
+      let* () = validate_combine_chain revisions in
+      let first = List.hd revisions in
+      let last = List.hd (List.rev revisions) in
+      let* capsule = create_capsule ~id ~title ~description ~created_at in
+      let operations = List.concat_map revision_operations revisions in
+      let dependencies = List.concat_map revision_dependencies revisions in
+      let* dependencies = normalise_dependencies dependencies in
+      let evidence = List.concat_map revision_evidence revisions in
+      let boundaries = List.concat_map revision_boundaries revisions in
+      let* replayed =
+        apply_operations store (capsule_model capsule)
+          ~base:(revision_declared_base first)
+          ~operations
+      in
+      let* expected_snapshot =
+        Snapshot.Snapshot.load store (revision_expected_result last)
+        |> Result.map_error (fun error -> Snapshot_error error)
+      in
+      let* expected_state =
+        Scratch.State.of_snapshot store expected_snapshot
+        |> Result.map_error (fun error -> Scratch_error error)
+      in
+      if not (Scratch.State.equal replayed expected_state) then
+        Error
+          (Draft_error "combine operations do not replay to the source result")
+      else
+        let* revision =
+          create_revision ~capsule ~parent:None
+            ~declared_base:(revision_declared_base first)
+            ~expected_result:(revision_expected_result last)
+            ~operations ~dependencies ~evidence ~boundaries
+            ~provenance:(Combined_from sources) ~created_at
+        in
+        Ok { sources; capsule; revision; boundaries }
+
+  let combine ~store ~scratch ~id ~title ~description ~sources ~created_at
+      ~changed_at ~confirmed () =
+    if not confirmed then Error (Confirmation_required "combine")
+    else
       with_repository_lock store (fun () ->
-          let rec load_sources reversed (links : revision_link list) =
-            match links with
-            | [] -> Ok (List.rev reversed)
-            | (link : revision_link) :: rest ->
-                let* revision = load_revision store link.object_id in
-                if not (link_matches_revision link revision) then
-                  Error
-                    (Parent_link_mismatch
-                       "combine source link does not match its object")
-                else
-                  let* () =
-                    validate_revision store ~capsule:link.capsule revision
-                  in
-                  load_sources (revision :: reversed) rest
+          let* plan =
+            plan_combine ~store ~id ~title ~description ~sources ~created_at
           in
-          let* revisions = load_sources [] sources in
-          let* () = validate_dependency_closure sources revisions in
-          let first = List.hd revisions in
-          let* () =
-            List.fold_left
-              (fun result (previous, revision) ->
-                let* () = result in
-                if
-                  Snapshot.Snapshot.equal_id
-                    (revision_expected_result previous)
-                    (revision_declared_base revision)
-                then Ok ()
-                else
-                  Error
-                    (Draft_error
-                       "combine source revisions do not form a base/result \
-                        chain"))
-              (Ok ())
-              (List.combine revisions
-                 (List.tl revisions @ [ List.hd (List.rev revisions) ])
-              |> List.filter (fun (left, right) ->
-                  revision_id left <> revision_id right))
-          in
-          let last = List.hd (List.rev revisions) in
-          let* capsule = create_capsule ~id ~title ~description ~created_at in
-          let operations = List.concat_map revision_operations revisions in
-          let dependencies = List.concat_map revision_dependencies revisions in
-          let* dependencies = normalise_dependencies dependencies in
-          let evidence = List.concat_map revision_evidence revisions in
-          let boundaries = List.concat_map revision_boundaries revisions in
-          let* revision =
-            create_revision ~capsule ~parent:None
-              ~declared_base:(revision_declared_base first)
-              ~expected_result:(revision_expected_result last)
-              ~operations ~dependencies ~evidence ~boundaries
-              ~provenance:(Combined_from sources) ~created_at
-          in
-          publish_new_unlocked ~store ~scratch ~capsule ~revision ~boundaries
-            ~changed_at)
+          publish_new_unlocked ~store ~scratch ~capsule:plan.capsule
+            ~revision:plan.revision ~boundaries:plan.boundaries ~changed_at)
 end

@@ -84,6 +84,8 @@ dune exec bin/paengi.exe -- watch --interval-ms 500 --debounce-ms 500
 dune exec bin/paengi.exe -- capsule create --current --id <capsule-id> --title <title> --description <description>
 dune exec bin/paengi.exe -- capsule edit <capsule-id>
 dune exec bin/paengi.exe -- capsule fold <capsule-id> --from <editing-anchor> --to <checkpoint>
+dune exec bin/paengi.exe -- capsule split <capsule-id> --left-id <capsule-id> --left-title <title> --left-description <description> --right-id <capsule-id> --right-title <title> --right-description <description> --left-indices <indices> --confirm
+dune exec bin/paengi.exe -- capsule combine --id <capsule-id> --title <title> --description <description> --source <capsule-id> --source <capsule-id> --confirm
 dune exec bin/paengi.exe -- capsule show <capsule-id>
 dune exec bin/paengi.exe -- capsule current-diff <capsule-id>
 dune exec bin/paengi.exe -- capsule history <capsule-id>
@@ -123,6 +125,14 @@ then materialises and verifies the revision result. It prints a scratch editing
 anchor; if both the working directory and scratch head already equal that result,
 the existing checkpoint is reused. `capsule fold` requires that explicit anchor
 and a later checkpoint, then uses the existing CAS-protected range fold path.
+
+`capsule split` and `capsule combine` always print a deterministic read-only
+plan. The plan identifies source capsule/revision/object IDs, operation indices
+or ordered sources, output bases/results, operation/dependency counts,
+provenance, composition order, and boundary pins. Publication requires
+`--confirm`; without it the command exits non-zero after printing its plan.
+Confirmed execution re-resolves and revalidates immutable sources before it
+publishes any output.
 
 ## Testing scope
 

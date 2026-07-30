@@ -346,6 +346,94 @@ let watch root arguments =
       in
       loop 0
 
+let revision_link_capsule = Capsule_store.revision_link_capsule
+let revision_link_revision = Capsule_store.revision_link_revision
+let revision_link_object = Capsule_store.revision_link_object
+
+let render_revision_provenance = function
+  | Capsule_store.Created -> "created"
+  | Capsule_store.Folded -> "folded"
+  | Capsule_store.Split_from (link : Capsule_store.revision_link) ->
+      "split-from="
+      ^ Paengi_id.Capsule_revision_id.to_hex (revision_link_revision link)
+  | Capsule_store.Combined_from links ->
+      "combined-from="
+      ^ String.concat ","
+          (List.map
+             (fun (link : Capsule_store.revision_link) ->
+               Paengi_id.Capsule_revision_id.to_hex
+                 (revision_link_revision link))
+             links)
+
+let print_plan_output (capsule, revision) =
+  Printf.printf
+    "output capsule=%s revision=%s base=%s expected=%s operations=%d \
+     dependencies=%d provenance=%s\n"
+    (Paengi_id.Capsule_id.to_hex (Capsule_store.capsule_id capsule))
+    (Paengi_id.Capsule_revision_id.to_hex (Capsule_store.revision_id revision))
+    (Store.Stored_object_id.to_hex
+       (Snapshot.Snapshot.stored_object_id
+          (Capsule_store.revision_declared_base revision)))
+    (Store.Stored_object_id.to_hex
+       (Snapshot.Snapshot.stored_object_id
+          (Capsule_store.revision_expected_result revision)))
+    (List.length (Capsule_store.revision_operations revision))
+    (List.length (Capsule_store.revision_dependencies revision))
+    (render_revision_provenance (Capsule_store.revision_provenance revision))
+
+let print_boundary_pins boundaries =
+  List.iter
+    (fun boundary ->
+      Printf.printf "pin from=%s to=%s\n"
+        (Store.Stored_object_id.to_hex
+           (Scratch.Checkpoint_id.stored_object_id boundary.Capsule_store.source))
+        (Store.Stored_object_id.to_hex
+           (Scratch.Checkpoint_id.stored_object_id boundary.Capsule_store.target)))
+    boundaries
+
+let print_split_plan plan =
+  let source = Capsule_store.Durable.split_plan_source plan in
+  Printf.printf
+    "plan split source-capsule=%s source-revision=%s source-object=%s\n"
+    (Paengi_id.Capsule_id.to_hex (revision_link_capsule source))
+    (Paengi_id.Capsule_revision_id.to_hex (revision_link_revision source))
+    (Store.Stored_object_id.to_hex (revision_link_object source));
+  Printf.printf "selected-indices=%s outputs=%d\n"
+    (String.concat ","
+       (List.map string_of_int
+          (Capsule_store.Durable.split_plan_selected_operation_indices plan)))
+    (List.length (Capsule_store.Durable.split_plan_outputs plan));
+  List.iter print_plan_output (Capsule_store.Durable.split_plan_outputs plan);
+  List.iter
+    (fun (capsule, revision) ->
+      Printf.printf "composition capsule=%s revision=%s\n"
+        (Paengi_id.Capsule_id.to_hex capsule)
+        (Paengi_id.Capsule_revision_id.to_hex revision))
+    (Capsule_store.Durable.split_plan_composition_order plan);
+  print_boundary_pins (Capsule_store.Durable.split_plan_boundary_pins plan)
+
+let print_combine_plan plan =
+  let sources = Capsule_store.Durable.combine_plan_sources plan in
+  Printf.printf "plan combine sources=%d outputs=1\n" (List.length sources);
+  List.iteri
+    (fun index source ->
+      Printf.printf "source[%d] capsule=%s revision=%s object=%s\n" index
+        (Paengi_id.Capsule_id.to_hex (revision_link_capsule source))
+        (Paengi_id.Capsule_revision_id.to_hex (revision_link_revision source))
+        (Store.Stored_object_id.to_hex (revision_link_object source)))
+    (Capsule_store.Durable.combine_plan_composition_order plan);
+  print_plan_output (Capsule_store.Durable.combine_plan_output plan);
+  print_boundary_pins (Capsule_store.Durable.combine_plan_boundary_pins plan)
+
+let operation_indices value =
+  let values = String.split_on_char ',' value in
+  if values = [] || List.exists String.is_empty values then exit 2
+  else
+    match List.map int_of_string_opt values with
+    | values when List.for_all Option.is_some values ->
+        List.map Option.get values
+    | _ -> exit 2
+
 let capsule root arguments =
   match arguments with
   | "create" :: "--current" :: options -> (
@@ -387,6 +475,187 @@ let capsule root arguments =
                    (Scratch.Checkpoint_id.stored_object_id source))
                 (Store.Stored_object_id.to_hex
                    (Scratch.Checkpoint_id.stored_object_id target))))
+  | "split" :: source :: options -> (
+      let rec parse left_id left_title left_description right_id right_title
+          right_description indices confirmed = function
+        | [] -> (
+            match
+              ( left_id,
+                left_title,
+                left_description,
+                right_id,
+                right_title,
+                right_description,
+                indices )
+            with
+            | ( Some left_id,
+                Some left_title,
+                Some left_description,
+                Some right_id,
+                Some right_title,
+                Some right_description,
+                Some indices ) ->
+                ( left_id,
+                  left_title,
+                  left_description,
+                  right_id,
+                  right_title,
+                  right_description,
+                  indices,
+                  confirmed )
+            | _ -> exit 2)
+        | "--left-id" :: value :: rest ->
+            parse
+              (Some (capsule_id value))
+              left_title left_description right_id right_title right_description
+              indices confirmed rest
+        | "--left-title" :: value :: rest ->
+            parse left_id (Some value) left_description right_id right_title
+              right_description indices confirmed rest
+        | "--left-description" :: value :: rest ->
+            parse left_id left_title (Some value) right_id right_title
+              right_description indices confirmed rest
+        | "--right-id" :: value :: rest ->
+            parse left_id left_title left_description
+              (Some (capsule_id value))
+              right_title right_description indices confirmed rest
+        | "--right-title" :: value :: rest ->
+            parse left_id left_title left_description right_id (Some value)
+              right_description indices confirmed rest
+        | "--right-description" :: value :: rest ->
+            parse left_id left_title left_description right_id right_title
+              (Some value) indices confirmed rest
+        | "--left-indices" :: value :: rest ->
+            parse left_id left_title left_description right_id right_title
+              right_description
+              (Some (operation_indices value))
+              confirmed rest
+        | "--confirm" :: rest ->
+            parse left_id left_title left_description right_id right_title
+              right_description indices true rest
+        | _ -> exit 2
+      in
+      let ( left_id,
+            left_title,
+            left_description,
+            right_id,
+            right_title,
+            right_description,
+            indices,
+            confirmed ) =
+        parse None None None None None None None false options
+      in
+      match open_scratch root with
+      | Error error -> fail Fun.id error
+      | Ok (store, scratch) -> (
+          let timestamp = now () in
+          let source = capsule_id source in
+          let plan =
+            Capsule_store.Durable.plan_split ~store ~source ~left_id ~left_title
+              ~left_description ~right_id ~right_title ~right_description
+              ~left_operation_indices:indices ~created_at:timestamp
+          in
+          match plan with
+          | Error error -> fail Capsule_store.error_to_string error
+          | Ok plan -> (
+              print_split_plan plan;
+              if not confirmed then
+                fail Fun.id
+                  "explicit confirmation is required before capsule split"
+              else
+                Capsule_store.Durable.split ~store ~scratch ~source ~left_id
+                  ~left_title ~left_description ~right_id ~right_title
+                  ~right_description ~left_operation_indices:indices
+                  ~created_at:timestamp ~changed_at:timestamp ~confirmed:true ()
+                |> Result.map_error Capsule_store.error_to_string
+                |> function
+                | Error error -> fail Fun.id error
+                | Ok (left, right) ->
+                    Printf.printf "published left=%s right=%s\n"
+                      (Paengi_id.Capsule_id.to_hex
+                         (Capsule_store.capsule_id
+                            (Capsule_store.Durable.resolved_capsule left)))
+                      (Paengi_id.Capsule_id.to_hex
+                         (Capsule_store.capsule_id
+                            (Capsule_store.Durable.resolved_capsule right))))))
+  | "combine" :: options -> (
+      let rec parse id title description sources confirmed = function
+        | [] -> (
+            match (id, title, description, List.rev sources) with
+            | Some id, Some title, Some description, (_ :: _ as sources) ->
+                (id, title, description, sources, confirmed)
+            | _ -> exit 2)
+        | "--id" :: value :: rest ->
+            parse
+              (Some (capsule_id value))
+              title description sources confirmed rest
+        | "--title" :: value :: rest ->
+            parse id (Some value) description sources confirmed rest
+        | "--description" :: value :: rest ->
+            parse id title (Some value) sources confirmed rest
+        | "--source" :: value :: rest ->
+            parse id title description
+              (capsule_id value :: sources)
+              confirmed rest
+        | "--confirm" :: rest -> parse id title description sources true rest
+        | _ -> exit 2
+      in
+      let id, title, description, source_ids, confirmed =
+        parse None None None [] false options
+      in
+      match open_scratch root with
+      | Error error -> fail Fun.id error
+      | Ok (store, scratch) -> (
+          let rec resolve_links reversed = function
+            | [] -> Ok (List.rev reversed)
+            | capsule :: rest -> (
+                match Capsule_store.Durable.read_current store capsule with
+                | Error _ as error -> error
+                | Ok resolved ->
+                    let link : Capsule_store.revision_link =
+                      Capsule_store.make_revision_link ~capsule
+                        ~revision:
+                          (Capsule_store.revision_id
+                             (Capsule_store.Durable.resolved_revision resolved))
+                        ~object_id:
+                          (Capsule_store.Durable.resolved_revision_object
+                             resolved)
+                    in
+                    resolve_links (link :: reversed) rest)
+          in
+          let sources =
+            resolve_links [] source_ids
+            |> Result.map_error Capsule_store.error_to_string
+          in
+          match sources with
+          | Error error -> fail Fun.id error
+          | Ok sources -> (
+              let timestamp = now () in
+              let plan =
+                Capsule_store.Durable.plan_combine ~store ~id ~title
+                  ~description ~sources ~created_at:timestamp
+              in
+              match plan with
+              | Error error -> fail Capsule_store.error_to_string error
+              | Ok plan -> (
+                  print_combine_plan plan;
+                  if not confirmed then
+                    fail Fun.id
+                      "explicit confirmation is required before capsule combine"
+                  else
+                    Capsule_store.Durable.combine ~store ~scratch ~id ~title
+                      ~description ~sources ~created_at:timestamp
+                      ~changed_at:timestamp ~confirmed:true ()
+                    |> Result.map_error Capsule_store.error_to_string
+                    |> function
+                    | Error error -> fail Fun.id error
+                    | Ok resolved ->
+                        Printf.printf "published capsule=%s revision=%s\n"
+                          (Paengi_id.Capsule_id.to_hex id)
+                          (Paengi_id.Capsule_revision_id.to_hex
+                             (Capsule_store.revision_id
+                                (Capsule_store.Durable.resolved_revision
+                                   resolved)))))))
   | [ "edit"; identity ] -> (
       match open_scratch root with
       | Error error -> fail Fun.id error

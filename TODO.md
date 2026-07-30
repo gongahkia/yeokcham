@@ -6,12 +6,12 @@ Robustness tasks operate only on Paengi's pure functions and generated local fix
 ## Active vertical slice
 
 - Milestone: 4 — Change capsules.
-- Task: Slice 2 complete — single-capsule guarded editing returns a durable scratch anchor for the existing range-based fold path.
-- Modules/files: `paengi_scratch` guarded restore; `paengi_capsule_store`; capsule CLI; focused editing-workflow tests.
-- Types: an in-memory guarded materialisation plan targeting an existing immutable snapshot and a returned `Checkpoint_id` editing anchor; existing stable `Capsule_id`, immutable revision, and scratch checkpoint/event types.
+- Task: Milestone 4 complete — all exit criteria verified; stop before Milestone 5.
+- Modules/files: `paengi_capsule`; `paengi_capsule_store`; capsule CLI; focused plan/confirmation/cycle tests.
+- Types: immutable source/output plan values, explicit confirmation argument, and a pure logical revision-parent graph resolver; existing stable `Capsule_id`, immutable revisions, boundaries, and provenance.
 - Formats: no new schema, object type, ref, or golden. ADR-020 through ADR-025 remain unchanged.
-- Invariants: a resolved revision replays exactly before editing; divergent working state is safety-checkpointed through guarded restore; materialisation verifies bytes/modes/symlink targets before target-head publication; an already-current revision snapshot reuses its checkpoint; failure never advances to the editing anchor or mutates the capsule/current ref.
-- Tests: exact materialisation, prior-work safety checkpoint, anchor reuse, materialisation failure target-head preservation, and fold from the returned anchor. Forced seed `17` is printed by the property executable.
+- Invariants: plans are read-only and preserve supplied operation/source ordering; execution rejects without confirmation and re-resolves/revalidates immutable inputs immediately before publication; split/combine preserve source capsules and exact replay; production history detection remains active while the pure resolver rejects synthetic cycles deterministically.
+- Tests: plan contents, unconfirmed rejection, confirmed exact replay, source preservation, synthetic parent cycles, and existing persistent wrong-ID/missing-parent/wrong-type/cross-capsule rejection. `make format`, `make check`, `make property-test PROPERTY_TEST_SEED=17`, and forced capsule state-machine seed `17` pass.
 - External libraries: existing Alcotest, QCheck, Profile 1 encoder, and Unix only.
 - ADR changes: no format change; ADR-025 clarifies current-working-diff creation semantics.
 
@@ -221,7 +221,7 @@ Robustness tasks operate only on Paengi's pure functions and generated local fix
 ### Split and combine
 
 - [x] Require explicit deterministic operation-index split partition.
-- [ ] Require user confirmation.
+- [x] Require user confirmation.
 - [x] Combine compatible capsules.
 - [x] Preserve provenance.
 - [x] Add tests for dependency updates.
@@ -233,7 +233,7 @@ Robustness tasks operate only on Paengi's pure functions and generated local fix
 - [x] Applying a revision to its declared base reproduces expected snapshot or explicit conflict.
 - [x] Capsules/revisions survive reopen with logical/physical identity separation.
 - [x] Current-revision CAS, boundary retention, creation/folding interruption, show/diff/history, and split/combine exact replay pass.
-- [ ] Corrupt cyclic parent-link fixture is covered without bypassing immutable object identity checks.
+- [x] Parent-cycle detection is covered through the pure resolver seam; persistent fixtures retain identity/type/parent corruption checks.
 
 ## Milestone 5 — Workspaces and conflicts
 

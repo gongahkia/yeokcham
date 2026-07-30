@@ -482,6 +482,32 @@ let catalog_preserves_immutable_revisions_and_history () =
   | Error (Capsule.Catalog.Parent_capsule_mismatch _) -> ()
   | Error _ | Ok _ -> Alcotest.fail "cross-capsule parent was accepted"
 
+let pure_parent_resolver_rejects_synthetic_cycles () =
+  let capsule = capsule_id 70 in
+  let first = revision_id 71 in
+  let second = revision_id 72 in
+  let nodes : Capsule.Parent_resolver.node list =
+    [
+      {
+        Capsule.Parent_resolver.revision = first;
+        capsule;
+        parent = Some second;
+      };
+      {
+        Capsule.Parent_resolver.revision = second;
+        capsule;
+        parent = Some first;
+      };
+    ]
+  in
+  match Capsule.Parent_resolver.history ~nodes ~capsule ~current:first with
+  | Error (Capsule.Parent_resolver.Cycle cycle) ->
+      Alcotest.(check bool)
+        "cycle rejection identifies the repeated logical revision" true
+        (Id.Capsule_revision_id.equal first cycle)
+  | Error error -> Alcotest.fail (Capsule.Parent_resolver.error_to_string error)
+  | Ok _ -> Alcotest.fail "synthetic parent cycle resolved"
+
 let () =
   Alcotest.run "capsule core"
     [
@@ -504,5 +530,7 @@ let () =
             `Quick draft_rejects_missing_checkpoint;
           Alcotest.test_case "catalog preserves immutable revisions and history"
             `Quick catalog_preserves_immutable_revisions_and_history;
+          Alcotest.test_case "pure parent resolver rejects cycles" `Quick
+            pure_parent_resolver_rejects_synthetic_cycles;
         ] );
     ]

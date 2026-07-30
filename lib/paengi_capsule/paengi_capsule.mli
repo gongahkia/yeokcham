@@ -173,6 +173,32 @@ module Draft : sig
     Paengi_scratch.repository -> t -> changed_at:int64 -> (unit, error) result
 end
 
+module Parent_resolver : sig
+  type node = {
+    revision : Paengi_id.Capsule_revision_id.t;
+    capsule : Paengi_id.Capsule_id.t;
+    parent : Paengi_id.Capsule_revision_id.t option;
+  }
+
+  type error =
+    | Duplicate_revision of Paengi_id.Capsule_revision_id.t
+    | Unknown_revision of Paengi_id.Capsule_revision_id.t
+    | Parent_capsule_mismatch of {
+        parent : Paengi_id.Capsule_revision_id.t;
+        expected_capsule : Paengi_id.Capsule_id.t;
+        actual_capsule : Paengi_id.Capsule_id.t;
+      }
+    | Cycle of Paengi_id.Capsule_revision_id.t
+
+  val error_to_string : error -> string
+
+  val history :
+    nodes:node list ->
+    capsule:Paengi_id.Capsule_id.t ->
+    current:Paengi_id.Capsule_revision_id.t ->
+    (node list, error) result
+end
+
 module Catalog : sig
   type t
 
