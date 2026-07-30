@@ -208,11 +208,11 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 
 ### Multi-device state
 
-- [ ] Fetch device journals.
-- [ ] Reconcile journal heads.
-- [ ] Detect stale local state before push.
-- [ ] Preserve divergent refs.
-- [ ] Add device registration and revocation.
+- [x] Fetch device journals.
+- [x] Reconcile journal heads.
+- [x] Detect stale local state before push.
+- [x] Preserve divergent refs.
+- [x] Add device registration and revocation.
 
 ### Exit criteria
 

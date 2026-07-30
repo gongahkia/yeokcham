@@ -178,12 +178,12 @@ pub fn publish_device_registry_event<'a, B: Backend>(
 }
 
 /// fetches and verifies a remote immutable root-authorized device registry.
-pub fn fetch_remote_device_registry<'a, B: Backend>(
-    backend: &'a EncryptedBackend<B>,
+pub fn fetch_remote_device_registry<B: Backend>(
+    backend: &EncryptedBackend<B>,
     repository_id: RepositoryId,
     root_verifying_key: RefEventVerifyingKey,
     limits: RemoteRefJournalLimits,
-) -> BackendFuture<'a, RemoteDeviceRegistry> {
+) -> BackendFuture<'_, RemoteDeviceRegistry> {
     Box::pin(async move {
         ensure_backend_repository(backend, repository_id)?;
         let events = fetch_device_registry_events(backend, repository_id, limits).await?;
@@ -198,12 +198,12 @@ pub fn fetch_remote_device_registry<'a, B: Backend>(
 }
 
 /// fetches all remote signed device journals and validates each against the root-pinned registry.
-pub fn fetch_remote_ref_journal<'a, B: Backend>(
-    backend: &'a EncryptedBackend<B>,
+pub fn fetch_remote_ref_journal<B: Backend>(
+    backend: &EncryptedBackend<B>,
     repository_id: RepositoryId,
     root_verifying_key: RefEventVerifyingKey,
     limits: RemoteRefJournalLimits,
-) -> BackendFuture<'a, RemoteRefJournal> {
+) -> BackendFuture<'_, RemoteRefJournal> {
     Box::pin(async move {
         ensure_backend_repository(backend, repository_id)?;
         let device_registry =
@@ -543,11 +543,15 @@ fn parse_device_registry_event_key(
     key: &BackendKey,
 ) -> Result<(u64, [u8; 32])> {
     let prefix = remote_directory_prefix(repository_id, REGISTRY_DIRECTORY)?;
+    let prefix = std::str::from_utf8(prefix.as_bytes()).map_err(|_| {
+        Error::new(
+            ErrorKind::Internal,
+            "remote device registry prefix is invalid",
+        )
+    })?;
     let name = std::str::from_utf8(key.as_bytes())
         .ok()
-        .and_then(|key| {
-            key.strip_prefix(std::str::from_utf8(prefix.as_bytes()).unwrap_or_default())
-        })
+        .and_then(|key| key.strip_prefix(prefix))
         .ok_or_else(|| {
             Error::new(
                 ErrorKind::CorruptData,
@@ -582,11 +586,11 @@ fn parse_remote_ref_event_key(
     key: &BackendKey,
 ) -> Result<(u64, crate::DeviceId, [u8; 32])> {
     let prefix = remote_directory_prefix(repository_id, REF_EVENT_DIRECTORY)?;
+    let prefix = std::str::from_utf8(prefix.as_bytes())
+        .map_err(|_| Error::new(ErrorKind::Internal, "remote ref journal prefix is invalid"))?;
     let name = std::str::from_utf8(key.as_bytes())
         .ok()
-        .and_then(|key| {
-            key.strip_prefix(std::str::from_utf8(prefix.as_bytes()).unwrap_or_default())
-        })
+        .and_then(|key| key.strip_prefix(prefix))
         .ok_or_else(|| Error::new(ErrorKind::CorruptData, "remote ref journal key is invalid"))?;
     let stem = name
         .strip_suffix(REF_EVENT_EXTENSION)
