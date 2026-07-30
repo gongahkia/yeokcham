@@ -3,11 +3,13 @@ use std::{
     ffi::{OsStr, OsString},
     path::PathBuf,
     process::ExitCode,
+    time::Duration,
 };
 
 use yeokcham_core::{
-    DeviceId, Error, ErrorKind, GitImportLimits, GitObjectId, GitRepository, LocalRepository,
-    RefEventReadLimits, Result,
+    DeviceId, DriveCredentialStore, DriveOAuthConfiguration, Error, ErrorKind, GitImportLimits,
+    GitObjectId, GitRepository, KeyringDriveCredentialStore, LocalRepository, RefEventReadLimits,
+    Result, UreqDriveOAuthTransport,
 };
 
 mod telemetry;
@@ -41,6 +43,10 @@ enum Command {
     InspectRefs {
         repository: PathBuf,
     },
+    DriveAuth {
+        client_id: String,
+        redirect_port: Option<u16>,
+    },
 }
 
 fn main() -> ExitCode {
@@ -72,6 +78,10 @@ fn main() -> ExitCode {
         Command::InspectObject { repository, id } => inspect_object(repository, id),
         Command::InspectStorage { repository } => inspect_storage(repository),
         Command::InspectRefs { repository } => inspect_refs(repository),
+        Command::DriveAuth {
+            client_id,
+            redirect_port,
+        } => drive_auth(client_id, redirect_port),
     }) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
@@ -89,6 +99,7 @@ fn parse_command(arguments: Vec<OsString>) -> Result<Command> {
         "help" | "--help" | "-h" if arguments.len() == 1 => Ok(Command::Help),
         "init" => parse_init(&arguments),
         "sync" => parse_sync(&arguments),
+        "drive" => parse_drive(&arguments),
         "verify" if arguments.len() == 2 => Ok(Command::Verify {
             repository: PathBuf::from(&arguments[1]),
         }),
@@ -119,6 +130,34 @@ fn parse_command(arguments: Vec<OsString>) -> Result<Command> {
         }
         _ => Err(usage_error()),
     }
+}
+
+fn parse_drive(arguments: &[OsString]) -> Result<Command> {
+    if arguments.len() == 4
+        && arguments[1].as_os_str() == OsStr::new("auth")
+        && arguments[2].as_os_str() == OsStr::new("--client-id")
+    {
+        return Ok(Command::DriveAuth {
+            client_id: arguments[3].to_str().ok_or_else(usage_error)?.to_owned(),
+            redirect_port: None,
+        });
+    }
+    if arguments.len() == 6
+        && arguments[1].as_os_str() == OsStr::new("auth")
+        && arguments[2].as_os_str() == OsStr::new("--client-id")
+        && arguments[4].as_os_str() == OsStr::new("--redirect-port")
+    {
+        let redirect_port = arguments[5]
+            .to_str()
+            .ok_or_else(usage_error)?
+            .parse()
+            .map_err(|_| Error::new(ErrorKind::InvalidInput, "Drive redirect port is invalid"))?;
+        return Ok(Command::DriveAuth {
+            client_id: arguments[3].to_str().ok_or_else(usage_error)?.to_owned(),
+            redirect_port: Some(redirect_port),
+        });
+    }
+    Err(usage_error())
 }
 
 fn parse_sync(arguments: &[OsString]) -> Result<Command> {
@@ -295,6 +334,23 @@ fn inspect_refs(repository: PathBuf) -> Result<()> {
     Ok(())
 }
 
+fn drive_auth(client_id: String, redirect_port: Option<u16>) -> Result<()> {
+    let configuration = DriveOAuthConfiguration::new(client_id)?;
+    let loopback = match redirect_port {
+        Some(port) => configuration.clone().begin_loopback_on(port)?,
+        None => configuration.clone().begin_loopback()?,
+    };
+    println!(
+        "Open this URL in a system browser:\n{}",
+        loopback.authorization_url()
+    );
+    let transport = UreqDriveOAuthTransport::new(Duration::from_secs(30))?;
+    let token = loopback.complete(&transport, Duration::from_secs(300))?;
+    KeyringDriveCredentialStore.store(&configuration, &token)?;
+    println!("Google Drive authorization stored in the OS credential store");
+    Ok(())
+}
+
 fn usage_error() -> Error {
     Error::new(
         ErrorKind::InvalidInput,
@@ -304,6 +360,53 @@ fn usage_error() -> Error {
 
 fn print_usage() {
     println!(
-        "usage:\n  yeokcham init --from-git <source-git-repo> <yeokcham-repo> [--chunked-blob-minimum <bytes>]\n  yeokcham sync --from-git <source-git-repo> <yeokcham-repo> --device <device-id>\n  yeokcham verify <yeokcham-repo>\n  yeokcham export-git <yeokcham-repo> <destination-git-repo>\n  yeokcham inspect object <yeokcham-repo> <git-object-id>\n  yeokcham inspect storage <yeokcham-repo>\n  yeokcham inspect refs <yeokcham-repo>"
+        "usage:\n  yeokcham init --from-git <source-git-repo> <yeokcham-repo> [--chunked-blob-minimum <bytes>]\n  yeokcham sync --from-git <source-git-repo> <yeokcham-repo> --device <device-id>\n  yeokcham verify <yeokcham-repo>\n  yeokcham export-git <yeokcham-repo> <destination-git-repo>\n  yeokcham inspect object <yeokcham-repo> <git-object-id>\n  yeokcham inspect storage <yeokcham-repo>\n  yeokcham inspect refs <yeokcham-repo>\n  yeokcham drive auth --client-id <google-desktop-client-id> [--redirect-port <port>]"
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_manual_drive_authorization_with_an_optional_redirect_port() {
+        let command = parse_command(
+            [
+                "drive",
+                "auth",
+                "--client-id",
+                "123.apps.googleusercontent.com",
+            ]
+            .map(OsString::from)
+            .to_vec(),
+        )
+        .expect("default drive auth");
+        assert!(matches!(
+            command,
+            Command::DriveAuth {
+                ref client_id,
+                redirect_port: None,
+            } if client_id == "123.apps.googleusercontent.com"
+        ));
+        let command = parse_command(
+            [
+                "drive",
+                "auth",
+                "--client-id",
+                "123.apps.googleusercontent.com",
+                "--redirect-port",
+                "8787",
+            ]
+            .map(OsString::from)
+            .to_vec(),
+        )
+        .expect("forwarded drive auth");
+        assert!(matches!(
+            command,
+            Command::DriveAuth {
+                redirect_port: Some(8787),
+                ..
+            }
+        ));
+    }
 }

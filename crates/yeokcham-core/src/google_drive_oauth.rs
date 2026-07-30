@@ -23,6 +23,7 @@ const MAXIMUM_LOOPBACK_REQUEST_BYTES: usize = 16 * 1024;
 const MAXIMUM_TOKEN_RESPONSE_BYTES: usize = 64 * 1024;
 
 /// Non-secret configuration for one Google Desktop OAuth client.
+#[derive(Clone)]
 pub struct DriveOAuthConfiguration {
     client_id: String,
 }
@@ -45,7 +46,16 @@ impl DriveOAuthConfiguration {
 
     /// Starts one PKCE-protected loopback authorization request.
     pub fn begin_loopback(self) -> Result<DriveOAuthLoopback> {
-        DriveOAuthLoopback::begin(self)
+        self.begin_loopback_on(0)
+    }
+
+    /// Starts one PKCE-protected loopback authorization request on the selected port.
+    ///
+    /// A nonzero port permits an operator to forward the loopback callback over
+    /// SSH before starting a headless authorization session. Port zero selects a
+    /// fresh operating-system port.
+    pub fn begin_loopback_on(self, port: u16) -> Result<DriveOAuthLoopback> {
+        DriveOAuthLoopback::begin(self, port)
     }
 
     pub(crate) fn client_id(&self) -> &str {
@@ -221,8 +231,8 @@ pub struct DriveOAuthLoopback {
 }
 
 impl DriveOAuthLoopback {
-    fn begin(configuration: DriveOAuthConfiguration) -> Result<Self> {
-        let listener = TcpListener::bind("127.0.0.1:0").map_err(|error| {
+    fn begin(configuration: DriveOAuthConfiguration, requested_port: u16) -> Result<Self> {
+        let listener = TcpListener::bind(("127.0.0.1", requested_port)).map_err(|error| {
             Error::with_source(
                 ErrorKind::Io,
                 "Google OAuth loopback listener could not be bound",

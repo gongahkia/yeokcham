@@ -91,12 +91,15 @@ yeokcham inspect refs <yeokcham-repo>
 yeokcham inspect storage <yeokcham-repo>
 yeokcham inspect object <yeokcham-repo> <git-object-id>
 yeokcham export-git <yeokcham-repo> <destination-git-repo>
+yeokcham drive auth --client-id <google-desktop-client-id>
 git --git-dir=<destination-git-repo> fsck --full --strict
 ```
 
 `init` requires a destination path that does not exist. A failed import can leave unreachable immutable records in that fresh path; remove the failed destination before retrying. The initial CDC threshold is 4 KiB; `--chunked-blob-minimum <bytes>` is available for controlled storage-policy comparison, not as a benchmark-backed default recommendation.
 
 `sync` is a controlled local-source maintenance workflow, not `git push`: it imports only newly reachable verified objects, then appends a checked full ref-state transition. Reuse one canonical UUIDv4 `--device` value for its writer. V1 journal events detect corruption, stale expected state, and divergent histories but are not signed. The core also supports caller-supplied Ed25519-signed V2 events, but it has no persistent key store, device-key registration, authorization, or revocation yet; `sync` therefore remains a single-trusted-local-writer workflow.
+
+`drive auth` starts a Google Desktop OAuth PKCE flow, prints a one-time browser URL, and stores the returned refresh token only in the operating-system credential store. It needs an operator-created Desktop OAuth client ID with the Drive API and `drive.file` scope enabled. For a headless host, reserve a local port first, forward it with SSH, then run `yeokcham drive auth --client-id <id> --redirect-port <port>` and open the displayed URL on the forwarded machine. Do not use deprecated copy/paste authorization or place refresh tokens in repository configuration.
 
 ## Local remote helper
 

@@ -36,11 +36,11 @@ Request unrestricted Drive access. This has more consent and verification burden
 
 Use Option 1. The current core exposes a bounded `DriveOAuthLoopback`: it binds only `127.0.0.1`, generates fresh state and PKCE verifier bytes through the operating-system random source, uses `S256`, and sends the code only to the fixed Google token endpoint through a bounded HTTPS transport. A successful exchange accepts only Bearer access/refresh token pairs and validates a returned scope when present. `KeyringDriveCredentialStore` writes only the refresh token to the platform Keychain/keyring under an account label derived from SHA-256 of the client ID. Default diagnostics redact authorization state, verifier, HTTP body, access token, and refresh token.
 
-The Drive root-folder identifier, Drive file mapping, token refresh, headless device flow, and repository CLI commands are separate subsequent slices. The OAuth client ID is operator configuration, not a secret embedded in Yeokcham.
+The Drive root-folder identifier, Drive file mapping, token refresh, and a hardware-device OAuth flow are separate subsequent slices. The OAuth client ID is operator configuration, not a secret embedded in Yeokcham. The `yeokcham drive auth` command prints rather than launches the consent URL; its caller can choose a fixed loopback port for SSH forwarding from a headless host to a browser-capable machine.
 
 ## Consequences
 
-The operator must create or supply a Google Desktop OAuth client ID with the Drive API enabled. A browser-capable desktop is required for this loopback flow. The current implementation relies on platform Keychain/keyring availability and fails rather than creating a plaintext token file. A headless authorization route needs an explicit later Google-supported device flow rather than deprecated copy/paste redirects.
+The operator must create or supply a Google Desktop OAuth client ID with the Drive API enabled. A browser-capable machine is required for this loopback flow, but it may connect through an explicitly forwarded fixed loopback port. The current implementation relies on platform Keychain/keyring availability and fails rather than creating a plaintext token file. A hardware-device OAuth flow is deferred because Google directs normal desktop/CLI applications to the Desktop flow; deprecated copy/paste redirects are never used.
 
 The selected folder can be inspected, retained, shared deliberately, and used for recovery. Names and IDs inside it must remain opaque once the Drive backend maps Yeokcham keys; that remote-key format is not selected by this ADR.
 
