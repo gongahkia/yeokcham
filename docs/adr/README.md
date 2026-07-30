@@ -67,3 +67,4 @@ Valid statuses are `Proposed`, `Accepted`, `Rejected`, `Deprecated`, and `Supers
 | [ADR-0059](0059-ed25519-signed-ref-events.md) | Accepted | Add caller-supplied Ed25519 signatures to ref events |
 | [ADR-0060](0060-fault-injected-ref-transactions.md) | Accepted | Fault-inject local bootstrap and ref-journal transactions |
 | [ADR-0061](0061-runtime-neutral-async-backend-contract.md) | Accepted | Define a runtime-neutral async backend contract |
+| [ADR-0062](0062-bounded-local-filesystem-backend.md) | Accepted | Implement bounded local backend object storage |

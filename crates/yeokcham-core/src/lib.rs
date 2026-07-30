@@ -11,6 +11,7 @@ mod compression;
 mod content_defined_chunking;
 mod device_id;
 mod error;
+mod filesystem_backend;
 mod git_object;
 mod git_object_id;
 mod git_repository;
@@ -48,6 +49,7 @@ pub use content_defined_chunking::{
 };
 pub use device_id::DeviceId;
 pub use error::{Error, ErrorKind, Result};
+pub use filesystem_backend::FilesystemBackend;
 pub use git_object::{GitObject, GitObjectKind};
 pub use git_object_id::GitObjectId;
 pub use git_repository::GitRepository;

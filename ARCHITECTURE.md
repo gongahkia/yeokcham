@@ -285,6 +285,8 @@ trait Backend {
 
 Backend-specific consistency behaviour must be documented.
 
+`FilesystemBackend` maps each backend key under a caller-owned root and reserves `.yeokcham-uploads/` for resumable staging. It uses create-new staging files, hard-link publication without replacement, and file/directory synchronization on Unix. Its own list implementation returns lexically ordered pages, but callers must not generalize that order or local visibility guarantee to remote providers. Reads reject ranges outside the exact current file length and caller byte limits. The implementation is runtime-neutral but performs filesystem I/O when its future is polled; callers that require nonblocking scheduling must use an appropriate blocking executor.
+
 The repository layer must not assume:
 
 - Atomic directory rename.

@@ -66,6 +66,8 @@ Do not invent cryptography.
 
 The current local remote-helper pack cache contains conventional plaintext Git objects under `<store>/cache/packs/`. It is neither canonical repository data nor an encrypted backend format. The helper verifies the canonical store before cache use and validates each matching cache entry with exact refs plus `git fsck --full --strict`; a missing or invalid entry is rebuilt. Cache deletion or corruption must never be a recovery dependency.
 
+The current `FilesystemBackend` is a bounded local object-store implementation, not an encrypted repository backend. It rejects path traversal and symlinked root, parent, object, and private-upload paths, but its object bytes remain plaintext until the encryption milestone. No repository workflow publishes Yeokcham source data through it yet.
+
 ## 4. Key hierarchy
 
 Conceptual hierarchy:
