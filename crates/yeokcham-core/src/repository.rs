@@ -85,8 +85,180 @@ const INITIAL_IMPORT_MAXIMUM_CHUNKS: usize = 4_096;
 const INITIAL_IMPORT_SEGMENT_MAXIMUM_BYTES: u64 = 65 * 1024 * 1024;
 const INITIAL_IMPORT_TINY_AGGREGATION_MAXIMUM_BYTES: usize =
     INITIAL_IMPORT_TINY_BLOB_MAXIMUM_BYTES * INITIAL_IMPORT_TINY_BLOBS_PER_AGGREGATION;
+const RESOLVER_CHUNK_CACHE_MAXIMUM_BYTES: usize = 32 * 1024 * 1024;
+const RESOLVER_CHUNK_CACHE_MAXIMUM_ENTRIES: usize = 1_024;
+const RESOLVER_OBJECT_CACHE_MAXIMUM_BYTES: usize = 32 * 1024 * 1024;
+const RESOLVER_OBJECT_CACHE_MAXIMUM_ENTRIES: usize = 1_024;
 
 type RefEventChains = BTreeMap<DeviceId, (u64, [u8; 32])>;
+
+#[derive(Default)]
+struct ResolverCaches {
+    chunks: BTreeMap<ResolverChunkCacheKey, ResolverChunkCacheEntry>,
+    objects: BTreeMap<GitObjectId, ResolverObjectCacheEntry>,
+    chunk_bytes: usize,
+    object_bytes: usize,
+    access: u64,
+}
+
+#[derive(Clone, Copy, Eq, Ord, PartialEq, PartialOrd)]
+struct ResolverChunkCacheKey {
+    content_id: YeokchamContentId,
+    plaintext_bytes: u64,
+    segment_id: SegmentId,
+    segment_checksum: [u8; 32],
+}
+
+impl From<ChunkReference> for ResolverChunkCacheKey {
+    fn from(reference: ChunkReference) -> Self {
+        Self {
+            content_id: reference.content_id(),
+            plaintext_bytes: reference.plaintext_bytes(),
+            segment_id: reference.segment_id(),
+            segment_checksum: reference.segment_checksum(),
+        }
+    }
+}
+
+struct ResolverChunkCacheEntry {
+    data: Vec<u8>,
+    last_used: u64,
+}
+
+struct ResolverObjectCacheEntry {
+    kind: GitObjectKind,
+    manifest: Vec<u8>,
+    data: Vec<u8>,
+    last_used: u64,
+}
+
+impl ResolverCaches {
+    fn cached_chunk(&mut self, reference: ChunkReference) -> Option<Vec<u8>> {
+        let last_used = self.next_access();
+        let entry = self.chunks.get_mut(&reference.into())?;
+        entry.last_used = last_used;
+        Some(entry.data.clone())
+    }
+
+    fn insert_chunk(&mut self, reference: ChunkReference, data: Vec<u8>) {
+        if data.len() > RESOLVER_CHUNK_CACHE_MAXIMUM_BYTES {
+            return;
+        }
+        let key = ResolverChunkCacheKey::from(reference);
+        let data_len = data.len();
+        let last_used = self.next_access();
+        if let Some(previous) = self
+            .chunks
+            .insert(key, ResolverChunkCacheEntry { data, last_used })
+        {
+            self.chunk_bytes = self.chunk_bytes.saturating_sub(previous.data.len());
+        }
+        self.chunk_bytes = self.chunk_bytes.checked_add(data_len).unwrap_or(usize::MAX);
+        self.trim_chunks();
+    }
+
+    fn remove_chunk(&mut self, reference: ChunkReference) {
+        self.remove_chunk_key(reference.into());
+    }
+
+    fn remove_chunk_key(&mut self, key: ResolverChunkCacheKey) {
+        if let Some(entry) = self.chunks.remove(&key) {
+            self.chunk_bytes = self.chunk_bytes.saturating_sub(entry.data.len());
+        }
+    }
+
+    fn cached_object(
+        &mut self,
+        id: GitObjectId,
+        kind: GitObjectKind,
+        manifest: &[u8],
+    ) -> Option<Vec<u8>> {
+        let last_used = self.next_access();
+        let entry = self.objects.get_mut(&id)?;
+        if entry.kind != kind || entry.manifest != manifest {
+            return None;
+        }
+        entry.last_used = last_used;
+        Some(entry.data.clone())
+    }
+
+    fn insert_object(
+        &mut self,
+        id: GitObjectId,
+        kind: GitObjectKind,
+        manifest: Vec<u8>,
+        data: Vec<u8>,
+    ) {
+        let entry_bytes = data.len().checked_add(manifest.len()).unwrap_or(usize::MAX);
+        if entry_bytes > RESOLVER_OBJECT_CACHE_MAXIMUM_BYTES {
+            return;
+        }
+        let last_used = self.next_access();
+        if let Some(previous) = self.objects.insert(
+            id,
+            ResolverObjectCacheEntry {
+                kind,
+                manifest,
+                data,
+                last_used,
+            },
+        ) {
+            self.object_bytes = self
+                .object_bytes
+                .saturating_sub(previous.data.len().saturating_add(previous.manifest.len()));
+        }
+        self.object_bytes = self
+            .object_bytes
+            .checked_add(entry_bytes)
+            .unwrap_or(usize::MAX);
+        self.trim_objects();
+    }
+
+    fn remove_object(&mut self, id: GitObjectId) {
+        if let Some(entry) = self.objects.remove(&id) {
+            self.object_bytes = self
+                .object_bytes
+                .saturating_sub(entry.data.len().saturating_add(entry.manifest.len()));
+        }
+    }
+
+    fn next_access(&mut self) -> u64 {
+        self.access = self.access.saturating_add(1);
+        self.access
+    }
+
+    fn trim_chunks(&mut self) {
+        while self.chunk_bytes > RESOLVER_CHUNK_CACHE_MAXIMUM_BYTES
+            || self.chunks.len() > RESOLVER_CHUNK_CACHE_MAXIMUM_ENTRIES
+        {
+            let Some(id) = self
+                .chunks
+                .iter()
+                .min_by_key(|(_, entry)| entry.last_used)
+                .map(|(id, _)| *id)
+            else {
+                break;
+            };
+            self.remove_chunk_key(id);
+        }
+    }
+
+    fn trim_objects(&mut self) {
+        while self.object_bytes > RESOLVER_OBJECT_CACHE_MAXIMUM_BYTES
+            || self.objects.len() > RESOLVER_OBJECT_CACHE_MAXIMUM_ENTRIES
+        {
+            let Some(id) = self
+                .objects
+                .iter()
+                .min_by_key(|(_, entry)| entry.last_used)
+                .map(|(id, _)| *id)
+            else {
+                break;
+            };
+            self.remove_object(id);
+        }
+    }
+}
 
 /// Caller-selected bounds for encrypted repository backup and recovery.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -1128,6 +1300,7 @@ pub struct LocalRepository {
     root: PathBuf,
     id: RepositoryId,
     format: Mutex<RepositoryFormat>,
+    resolver_caches: Mutex<ResolverCaches>,
 }
 
 impl LocalRepository {
@@ -1192,6 +1365,7 @@ impl LocalRepository {
             root: root.to_path_buf(),
             id,
             format: Mutex::new(format),
+            resolver_caches: Mutex::new(ResolverCaches::default()),
         })
     }
 
@@ -1220,6 +1394,70 @@ impl LocalRepository {
             .format
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    fn cached_chunk(&self, reference: ChunkReference) -> Option<ChunkRecord> {
+        let data = self
+            .resolver_caches
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .cached_chunk(reference)?;
+        let record = match ChunkRecord::from_bytes(&data) {
+            Ok(record) => record,
+            Err(_) => {
+                self.resolver_caches
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .remove_chunk(reference);
+                return None;
+            }
+        };
+        if record.content_id() != reference.content_id()
+            || u64::try_from(record.data().len()).ok() != Some(reference.plaintext_bytes())
+        {
+            self.resolver_caches
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .remove_chunk(reference);
+            return None;
+        }
+        Some(record)
+    }
+
+    fn cache_chunk(&self, reference: ChunkReference, record: &ChunkRecord) {
+        self.resolver_caches
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .insert_chunk(reference, record.data().to_vec());
+    }
+
+    fn cached_git_object(
+        &self,
+        id: GitObjectId,
+        kind: GitObjectKind,
+        manifest: &[u8],
+    ) -> Option<GitObject> {
+        let data = self
+            .resolver_caches
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .cached_object(id, kind, manifest)?;
+        let object = GitObject::new(id, kind, data);
+        if object.verify_id().is_ok() {
+            return Some(object);
+        }
+        self.resolver_caches
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remove_object(id);
+        None
+    }
+
+    fn cache_git_object(&self, object: &GitObject, manifest: Vec<u8>) {
+        self.resolver_caches
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .insert_object(object.id(), object.kind(), manifest, object.data().to_vec());
     }
 
     /// Publishes a bounded encrypted copy of this repository's canonical files.
@@ -2370,10 +2608,20 @@ impl LocalRepository {
         maximum_segment_bytes: u64,
         limits: SegmentReadLimits,
     ) -> Result<GitObject> {
-        verified_reconstructed_blob(
+        let manifest_bytes = manifest.encode();
+        if let Some(object) = self.cached_git_object(
+            manifest.git_object_id(),
+            GitObjectKind::Blob,
+            &manifest_bytes,
+        ) {
+            return Ok(object);
+        }
+        let object = verified_reconstructed_blob(
             manifest.git_object_id(),
             self.reconstruct_blob_bytes(manifest, maximum_segment_bytes, limits)?,
-        )
+        )?;
+        self.cache_git_object(&object, manifest_bytes);
+        Ok(object)
     }
 
     fn reconstruct_tiny_blob_group(
@@ -2580,6 +2828,9 @@ impl LocalRepository {
         maximum_segment_bytes: u64,
         limits: SegmentReadLimits,
     ) -> Result<ChunkRecord> {
+        if let Some(record) = self.cached_chunk(reference) {
+            return Ok(record);
+        }
         let bytes = read_bounded_segment_file(
             &self.segment_path(reference.segment_id()),
             maximum_segment_bytes,
@@ -2624,6 +2875,7 @@ impl LocalRepository {
                 "chunk record length does not match its reference",
             ));
         }
+        self.cache_chunk(reference, &record);
         Ok(record)
     }
 
@@ -2795,13 +3047,21 @@ impl LocalRepository {
         maximum_segment_bytes: u64,
         limits: SegmentReadLimits,
     ) -> Result<GitObject> {
+        let manifest_bytes = manifest.encode();
+        if let Some(object) =
+            self.cached_git_object(manifest.git_object_id(), manifest.kind(), &manifest_bytes)
+        {
+            return Ok(object);
+        }
         let record =
             self.resolve_metadata_object_record(manifest, maximum_segment_bytes, limits)?;
-        verified_reconstructed_metadata_object(
+        let object = verified_reconstructed_metadata_object(
             manifest.git_object_id(),
             manifest.kind(),
             record.data().to_vec(),
-        )
+        )?;
+        self.cache_git_object(&object, manifest_bytes);
+        Ok(object)
     }
 
     /// Publishes the only immutable ref snapshot after checking every direct target.
@@ -8908,6 +9168,214 @@ mod tests {
                 .expect("verification limits"),
             )
             .expect("verify chunked storage");
+    }
+
+    #[test]
+    fn resolver_caches_revalidate_chunks_and_git_objects_before_reuse() {
+        let temporary = TestDirectory::new();
+        let root = temporary.path().join("repository");
+        let repository = LocalRepository::create(&root).expect("create repository");
+        let chunker = ContentDefinedChunker::new(
+            crate::ContentDefinedChunkingParameters::new(64, 256, 1_024, 64)
+                .expect("chunking parameters"),
+        );
+        let chunked_data: Vec<u8> = (0..8_192).map(|index| (index % 251) as u8).collect();
+        let manifest = repository
+            .store_chunked_blob(
+                MANIFEST_ID_A.parse().expect("manifest ID"),
+                &verified_object(GitObjectKind::Blob, &chunked_data),
+                chunker,
+                ChunkedBlobStorageLimits::new(64, 4_096, segment_limits())
+                    .expect("chunk storage limits"),
+            )
+            .expect("store chunked blob");
+        let descriptor = repository
+            .resolve_manifest_record(&manifest, 4_096, segment_limits())
+            .expect("resolve descriptor");
+        let reference = descriptor
+            .as_chunked_blob()
+            .expect("chunked descriptor")
+            .chunks()[0];
+        assert_ne!(reference.segment_id(), manifest.segment_id());
+
+        repository
+            .resolver_caches
+            .lock()
+            .expect("cache lock")
+            .insert_chunk(reference, b"corrupt cache chunk".to_vec());
+        let first_chunk = repository
+            .resolve_chunk_reference(reference, 4_096, segment_limits())
+            .expect("reconstruct chunk after corrupt cache");
+        fs::remove_file(repository.segment_path(reference.segment_id())).expect("remove segment");
+        assert_eq!(
+            repository
+                .resolve_chunk_reference(reference, 4_096, segment_limits())
+                .expect("reuse repaired chunk cache")
+                .data(),
+            first_chunk.data()
+        );
+
+        let blob = whole_blob_manifest(
+            &repository,
+            MANIFEST_ID_B.parse().expect("manifest ID"),
+            SEGMENT_ID_B.parse().expect("segment ID"),
+            b"verified cached blob",
+        );
+        repository
+            .resolver_caches
+            .lock()
+            .expect("cache lock")
+            .insert_object(
+                blob.git_object_id(),
+                GitObjectKind::Blob,
+                blob.encode(),
+                b"corrupt cached blob".to_vec(),
+            );
+        let first_blob = repository
+            .reconstruct_blob(&blob, 4_096, segment_limits())
+            .expect("reconstruct blob after corrupt cache");
+        fs::remove_file(repository.segment_path(blob.segment_id())).expect("remove blob segment");
+        assert_eq!(
+            repository
+                .reconstruct_blob(&blob, 4_096, segment_limits())
+                .expect("reuse repaired object cache")
+                .data(),
+            first_blob.data()
+        );
+        let alternate_blob = whole_blob_manifest(
+            &repository,
+            ManifestId::generate(),
+            SegmentId::generate(),
+            b"verified cached blob",
+        );
+        fs::remove_file(repository.segment_path(alternate_blob.segment_id()))
+            .expect("remove alternate blob segment");
+        assert_eq!(
+            repository
+                .reconstruct_blob(&alternate_blob, 4_096, segment_limits())
+                .expect_err("different manifest must not use cached object")
+                .kind(),
+            ErrorKind::NotFound
+        );
+
+        let metadata = metadata_object_manifest(
+            &repository,
+            SEGMENT_ID_C.parse().expect("segment ID"),
+            GitObjectKind::Tree,
+            b"100644 cache\0\x01\xff",
+        );
+        repository
+            .resolver_caches
+            .lock()
+            .expect("cache lock")
+            .insert_object(
+                metadata.git_object_id(),
+                GitObjectKind::Tree,
+                metadata.encode(),
+                b"corrupt cached metadata".to_vec(),
+            );
+        let first_metadata = repository
+            .reconstruct_metadata_object(&metadata, 4_096, segment_limits())
+            .expect("reconstruct metadata after corrupt cache");
+        fs::remove_file(repository.segment_path(metadata.segment_id()))
+            .expect("remove metadata segment");
+        assert_eq!(
+            repository
+                .reconstruct_metadata_object(&metadata, 4_096, segment_limits())
+                .expect("reuse repaired metadata cache")
+                .data(),
+            first_metadata.data()
+        );
+    }
+
+    #[test]
+    fn resolver_caches_bound_entries_and_evict_the_least_recently_used() {
+        let mut caches = ResolverCaches::default();
+        let mut ids = Vec::with_capacity(RESOLVER_CHUNK_CACHE_MAXIMUM_ENTRIES + 1);
+        for index in 0..=RESOLVER_CHUNK_CACHE_MAXIMUM_ENTRIES {
+            let data = index.to_le_bytes().to_vec();
+            let id = crate::yeokcham_content_id::sha256_content_id(&data);
+            let reference = ChunkReference::new(
+                id,
+                u64::try_from(data.len()).expect("cache data length"),
+                SegmentId::generate(),
+                [index as u8; 32],
+            )
+            .expect("cache reference");
+            caches.insert_chunk(reference, data);
+            ids.push(reference);
+        }
+
+        assert_eq!(caches.chunks.len(), RESOLVER_CHUNK_CACHE_MAXIMUM_ENTRIES);
+        assert!(!caches.chunks.contains_key(&ids[0].into()));
+        assert!(
+            caches
+                .chunks
+                .contains_key(&(*ids.last().expect("last cache reference")).into())
+        );
+
+        let retained = ids[1];
+        assert!(caches.cached_chunk(retained).is_some());
+        let replacement_data = b"new cache entry".to_vec();
+        let replacement = ChunkReference::new(
+            crate::yeokcham_content_id::sha256_content_id(&replacement_data),
+            u64::try_from(replacement_data.len()).expect("replacement data length"),
+            SegmentId::generate(),
+            [255; 32],
+        )
+        .expect("replacement reference");
+        caches.insert_chunk(replacement, replacement_data);
+        assert!(caches.chunks.contains_key(&retained.into()));
+        assert!(!caches.chunks.contains_key(&ids[2].into()));
+        assert!(caches.chunks.contains_key(&replacement.into()));
+
+        let oversized_data = vec![0; RESOLVER_CHUNK_CACHE_MAXIMUM_BYTES + 1];
+        let oversized = ChunkReference::new(
+            crate::yeokcham_content_id::sha256_content_id(b"oversized cache entry"),
+            u64::try_from(oversized_data.len()).expect("oversized data length"),
+            SegmentId::generate(),
+            [254; 32],
+        )
+        .expect("oversized reference");
+        caches.insert_chunk(oversized, oversized_data);
+        assert!(!caches.chunks.contains_key(&oversized.into()));
+
+        let mut object_ids = Vec::with_capacity(RESOLVER_OBJECT_CACHE_MAXIMUM_ENTRIES + 1);
+        for index in 0..=RESOLVER_OBJECT_CACHE_MAXIMUM_ENTRIES {
+            let mut bytes = [0; GitObjectId::BYTE_LENGTH];
+            bytes[..std::mem::size_of::<usize>()].copy_from_slice(&index.to_le_bytes());
+            let id = GitObjectId::from_bytes(bytes);
+            caches.insert_object(
+                id,
+                GitObjectKind::Blob,
+                index.to_le_bytes().to_vec(),
+                Vec::new(),
+            );
+            object_ids.push(id);
+        }
+        assert_eq!(caches.objects.len(), RESOLVER_OBJECT_CACHE_MAXIMUM_ENTRIES);
+        assert!(!caches.objects.contains_key(&object_ids[0]));
+
+        let retained_object = object_ids[1];
+        assert!(
+            caches
+                .cached_object(retained_object, GitObjectKind::Blob, &1_usize.to_le_bytes(),)
+                .is_some()
+        );
+        let mut replacement_bytes = [0; GitObjectId::BYTE_LENGTH];
+        replacement_bytes[..std::mem::size_of::<usize>()]
+            .copy_from_slice(&RESOLVER_OBJECT_CACHE_MAXIMUM_ENTRIES.to_le_bytes());
+        replacement_bytes[GitObjectId::BYTE_LENGTH - 1] = 1;
+        let replacement_object = GitObjectId::from_bytes(replacement_bytes);
+        caches.insert_object(
+            replacement_object,
+            GitObjectKind::Blob,
+            b"replacement manifest".to_vec(),
+            Vec::new(),
+        );
+        assert!(caches.objects.contains_key(&retained_object));
+        assert!(!caches.objects.contains_key(&object_ids[2]));
+        assert!(caches.objects.contains_key(&replacement_object));
     }
 
     #[test]

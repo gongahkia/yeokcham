@@ -34,6 +34,7 @@ Cover:
 - Drive refresh exchange with the stored credential, a fixed token endpoint, `refresh_token` grant parameters, access-token lifetime validation, and no refresh-token replacement requirement.
 - Encryption and decryption.
 - Storage policy selection.
+- In-memory decrypted-chunk and reconstructed-object cache bounds, corruption fallback, manifest/reference binding, and reuse after a valid cache fill.
 
 ### Property tests
 
