@@ -261,6 +261,214 @@ let planner_rejects_missing_reachable_record () =
       | Error _ -> ()
       | Ok _ -> Alcotest.fail "planner accepted missing reachable event")
 
+let activated_generation_preserves_logical_history_and_allows_new_work () =
+  with_history (fun root store scratch initial middle head ->
+      let logical_snapshot checkpoint =
+        Scratch.Checkpoint.snapshot checkpoint
+      in
+      let before =
+        [
+          (Scratch.Checkpoint.id head, logical_snapshot head);
+          (Scratch.Checkpoint.id initial, logical_snapshot initial);
+        ]
+      in
+      let execution =
+        Compaction.activate ~store scratch
+          ~policy:(policy ~recent:6L ~periodic:0L)
+          ~now:25L
+        |> require_ok Compaction.error_to_string
+      in
+      let cleanup = Compaction.execution_cleanup execution in
+      Alcotest.(check int)
+        "superseded checkpoint and event objects quarantined" 4
+        cleanup.Compaction.quarantined_objects;
+      let generation =
+        Scratch.active_generation scratch
+        |> require_ok Scratch.error_to_string
+        |> Option.get
+      in
+      let entries = Scratch.Generation.entries generation in
+      Alcotest.(check int)
+        "only retained aliases are active" 2 (List.length entries);
+      let timeline =
+        Scratch.timeline scratch ~limit:8 ()
+        |> require_ok Scratch.error_to_string
+      in
+      ignore
+        (Compaction.analyze ~store scratch
+           ~policy:(policy ~recent:6L ~periodic:0L)
+           ~now:25L
+        |> require_ok Compaction.error_to_string);
+      Alcotest.(check int) "compacted timeline length" 2 (List.length timeline);
+      List.iter2
+        (fun (logical, snapshot) entry ->
+          Alcotest.(check bool)
+            "logical timeline ID is stable" true
+            (Scratch.Checkpoint_id.equal logical entry.Scratch.logical_id);
+          Alcotest.(check bool)
+            "retained snapshot is stable" true
+            (Snapshot.Snapshot.equal_id snapshot
+               (Scratch.Checkpoint.snapshot entry.Scratch.checkpoint)))
+        before timeline;
+      (match
+         Scratch.resolve_checkpoint scratch (Scratch.Checkpoint.id middle)
+       with
+      | Error _ -> ()
+      | Ok _ -> Alcotest.fail "quarantined unretained checkpoint still resolves");
+      let resumed =
+        Compaction.resume_cleanup ~store scratch
+        |> require_ok Compaction.error_to_string
+      in
+      Alcotest.(check int)
+        "cleanup resume accepts every quarantined candidate" 4
+        resumed.Compaction.already_quarantined_objects;
+      let reopened_store =
+        Store.open_repository ~root |> require_ok Store.error_to_string
+      in
+      let reopened = Scratch.open_repository reopened_store in
+      let reopened_timeline =
+        Scratch.timeline reopened ~limit:8 ()
+        |> require_ok Scratch.error_to_string
+      in
+      Alcotest.(check int)
+        "reopen resolves compacted timeline" 2
+        (List.length reopened_timeline);
+      Scratch.Restore.restore scratch ~root
+        ~target:(Scratch.Checkpoint.id initial)
+        ~observed_at:26L ~created_at:26L
+      |> require_ok Scratch.error_to_string
+      |> ignore;
+      Alcotest.(check string)
+        "restore by retained logical ID remains exact" "zero"
+        (In_channel.with_open_bin
+           (Filename.concat root "file")
+           In_channel.input_all);
+      write_file (Filename.concat root "file") "three";
+      let snapshot, _ =
+        Snapshot.scan ~root ~store |> require_ok Snapshot.error_to_string
+      in
+      let created =
+        Scratch.checkpoint scratch ~snapshot ~source:Scratch.Explicit
+          ~observed_at:27L ~created_at:27L
+        |> require_ok Scratch.error_to_string
+      in
+      (match created with
+      | Scratch.Created _ -> ()
+      | Scratch.Unchanged _ ->
+          Alcotest.fail "new checkpoint after compaction is unchanged");
+      Scratch.pin scratch (Scratch.Checkpoint.id initial) ~changed_at:28L
+      |> require_ok Scratch.error_to_string;
+      Scratch.unpin scratch (Scratch.Checkpoint.id initial) ~changed_at:29L
+      |> require_ok Scratch.error_to_string;
+      let initial_entry =
+        Scratch.timeline scratch
+          ~start:(Scratch.Checkpoint.id initial)
+          ~limit:1 ()
+        |> require_ok Scratch.error_to_string
+        |> List.hd
+      in
+      Alcotest.(check bool)
+        "post-compaction unpin applies after generation retention cutoff" false
+        (List.mem Scratch.User_pinned initial_entry.Scratch.effective_retention);
+      let second =
+        Compaction.activate ~store scratch
+          ~policy:(policy ~recent:6L ~periodic:0L)
+          ~now:32L
+        |> require_ok Compaction.error_to_string
+      in
+      Alcotest.(check bool)
+        "second generation differs" true
+        (not
+           (Scratch.Generation_id.equal
+              (Compaction.execution_generation execution)
+              (Compaction.execution_generation second)));
+      let pruned =
+        Compaction.prune ~store scratch |> require_ok Compaction.error_to_string
+      in
+      Alcotest.(check int)
+        "prune reports actual quarantined objects"
+        (Compaction.execution_cleanup second).Compaction.quarantined_objects
+        pruned.Compaction.pruned_objects;
+      let after_prune =
+        Compaction.resume_cleanup ~store scratch
+        |> require_ok Compaction.error_to_string
+      in
+      Alcotest.(check int)
+        "resume accepts every permanently pruned candidate"
+        pruned.Compaction.pruned_objects
+        after_prune.Compaction.already_pruned_objects)
+
+let activation_before_cleanup_and_corrupt_alias_are_detected () =
+  with_history (fun _root store scratch initial middle _head ->
+      ignore
+        (Compaction.activate ~cleanup:false ~store scratch
+           ~policy:(policy ~recent:6L ~periodic:0L)
+           ~now:25L
+        |> require_ok Compaction.error_to_string);
+      (match
+         Scratch.resolve_checkpoint scratch (Scratch.Checkpoint.id middle)
+       with
+      | Ok _ -> ()
+      | Error _ -> Alcotest.fail "unretained object disappeared before cleanup");
+      ignore
+        (Compaction.resume_cleanup ~store scratch
+        |> require_ok Compaction.error_to_string);
+      (match
+         Scratch.resolve_checkpoint scratch (Scratch.Checkpoint.id middle)
+       with
+      | Error _ -> ()
+      | Ok _ -> Alcotest.fail "unretained object resolves after cleanup");
+      let generation =
+        Scratch.active_generation scratch
+        |> require_ok Scratch.error_to_string
+        |> Option.get
+      in
+      let physical =
+        Scratch.Generation.entries generation
+        |> List.hd |> Scratch.Generation.physical
+      in
+      Unix.unlink
+        (Store.object_path store
+           (Scratch.Checkpoint_id.stored_object_id physical));
+      match
+        Scratch.resolve_checkpoint scratch (Scratch.Checkpoint.id initial)
+      with
+      | Error _ -> ()
+      | Ok _ -> Alcotest.fail "missing active alias target was accepted")
+
+let source_ref_race_aborts_before_generation_publication () =
+  with_history (fun _root store scratch _initial _middle _head ->
+      let advance name =
+        let reference =
+          Store.read_ref store ~name
+          |> require_ok Store.error_to_string
+          |> Option.get
+        in
+        ignore
+          (Store.compare_and_swap_ref store ~name ~expected:(Some reference)
+             ~target:(Store.Mutable_ref.target reference)
+          |> require_ok Store.error_to_string)
+      in
+      (match
+         Compaction.activate ~store scratch
+           ~policy:(policy ~recent:6L ~periodic:0L) ~now:25L
+           ~before_publish:(fun () -> advance "scratch-head")
+       with
+      | Error _ -> ()
+      | Ok _ -> Alcotest.fail "scratch-head race activated a generation");
+      Alcotest.(check bool)
+        "generation ref remains absent after source race" true
+        (Option.is_none
+           (Store.read_ref store ~name:"scratch-generation"
+           |> require_ok Store.error_to_string));
+      match
+        Compaction.activate ~store scratch
+          ~policy:(policy ~recent:6L ~periodic:0L) ~now:25L
+          ~before_publish:(fun () -> advance "retention-head")
+      with
+      | Error _ -> ()
+      | Ok _ -> Alcotest.fail "retention-head race activated a generation")
+
 let () =
   Alcotest.run "scratch compaction"
     [
@@ -274,5 +482,14 @@ let () =
             `Quick planner_is_read_only_and_explains_blocked_removal;
           Alcotest.test_case "planner rejects missing reachable record" `Quick
             planner_rejects_missing_reachable_record;
+          Alcotest.test_case
+            "generation preserves logical history and accepts subsequent work"
+            `Quick
+            activated_generation_preserves_logical_history_and_allows_new_work;
+          Alcotest.test_case
+            "activation survives pre-cleanup state and rejects corrupt aliases"
+            `Quick activation_before_cleanup_and_corrupt_alias_are_detected;
+          Alcotest.test_case "source ref races abort activation" `Quick
+            source_ref_race_aborts_before_generation_publication;
         ] );
     ]

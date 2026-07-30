@@ -44,10 +44,10 @@ The supported compiler is OCaml 5.5.0. The exact constraint is recorded in `dune
 
 ## Status
 
-Milestone 3 has a read-only scratch-compaction policy/planner: it explains
-retention selection, reachability, and why current immutable ancestry blocks
-physical removal. paengi remains a portfolio and research prototype, not a
-production Git replacement.
+Milestone 3 has retained-ID scratch compaction: immutable compacted generations
+shorten retained replay chains and quarantine superseded scratch records.
+`compact --prune` is irreversible. paengi remains a portfolio and research
+prototype, not a production Git replacement.
 
 See `CONTRIBUTING.md` for development rules. Paengi is licensed under the MIT License.
 
@@ -74,6 +74,9 @@ dune exec bin/paengi.exe -- restore <checkpoint>
 dune exec bin/paengi.exe -- pin <checkpoint>
 dune exec bin/paengi.exe -- unpin <checkpoint>
 dune exec bin/paengi.exe -- compact --dry-run --explain
+dune exec bin/paengi.exe -- compact --explain
+dune exec bin/paengi.exe -- compact --resume
+dune exec bin/paengi.exe -- compact --prune
 dune exec bin/paengi.exe -- watch --interval-ms 500 --debounce-ms 500
 ```
 
@@ -81,6 +84,12 @@ dune exec bin/paengi.exe -- watch --interval-ms 500 --debounce-ms 500
 plan immediately before applying, and moves `scratch-head` only after exact
 result verification. It is not crash-atomic for a populated working directory;
 on a reported partial failure, restore the reported safety checkpoint.
+
+Compaction keeps CLI checkpoint IDs logical. An activated generation resolves
+retained logical IDs to verified physical checkpoints; unretained IDs become
+unavailable only after their objects move to `.paengi/trash/<generation-id>/`.
+Quarantine can be inspected or resumed. Permanent prune cannot restore the
+previous generation's quarantined history.
 
 ## Testing scope
 

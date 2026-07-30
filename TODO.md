@@ -6,14 +6,14 @@ Robustness tasks operate only on Paengi's pure functions and generated local fix
 ## Active vertical slice
 
 - Milestone: 3 — Scratch compaction.
-- Task: completed three slices: (1) pure deterministic recent-window/periodic policy selection with pin precedence; (2) verified read-only reachability planner and byte estimates; (3) `compact --dry-run --explain`. Stop before safe publication.
-- Modules/files: new `paengi_compaction`; CLI compact dry-run; compaction unit/property tests; model, architecture, testing, README, and TODO documentation.
-- Types: ephemeral `Policy.t`, checkpoint selections, blocked-removal explanation, and read-only compaction plan. Scratch/checkpoint/ref types remain unchanged.
-- Formats: no persistent format, ref, or existing golden bytes changed.
-- Invariants: non-Recent effective retention reasons override expiry; selection is deterministic; every analysed timeline checkpoint is verified through ADR-023 replay; dry-run is read-only; immutable scratch-head ancestry blocks physical removal.
-- Tests: focused policy/planner/missing-record Alcotest tests; bounded deterministic QCheck selection and pin properties with printed seed. Verified with `make check` and `make property-test PROPERTY_TEST_SEED=17`.
+- Task: compacted-generation publication and conservative quarantine.
+- Modules/files: `paengi_scratch` generation schemas/resolver; `paengi_compaction` construction, verification, activation, cleanup; CLI compact modes; focused/property tests and canonical goldens.
+- Types: `Generation_id`, `Cleanup_manifest_id`, bounded ordered generation entries, direct logical/physical resolver result, cleanup report, and immutable cleanup manifest.
+- Formats: additive Envelope object types 16–18 and `refs/scratch-generation`; ADR-020 through ADR-023 bytes remain unchanged.
+- Invariants: active aliases resolve before direct lookup; physical parents remain logical; retained replay/snapshot equivalence is verified before ref CAS; retention changes are folded from the cutoff; cleanup only quarantines manifest-listed scratch records after activation.
+- Tests: generation schema goldens/inverse decoder; focused activation/reopen/resume/post-compaction checkpoint/retention/repeated-generation test; deterministic compacted-state property. Verified with `make format`, `make check`, and `make property-test PROPERTY_TEST_SEED=17`.
 - External libraries: existing Alcotest, QCheck, SHA-256, Profile 1 encoder, and Unix only.
-- ADR changes: none. A new ADR is required before compacted-generation publication because Checkpoint v1 parent/event links preserve full ancestry.
+- ADR changes: ADR-024 accepted.
 
 ## Milestone 0 — Project and model foundation
 
@@ -160,32 +160,32 @@ Robustness tasks operate only on Paengi's pure functions and generated local fix
 - [x] Calculate reachable objects.
 - [x] Identify removable events and objects.
 - [x] Estimate storage before and after.
-- [ ] Plan periodic materialisation boundaries.
-- [ ] Verify every retained snapshot in temporary generation.
+- [x] Plan periodic materialisation boundaries through retained direct deltas.
+- [x] Verify every retained snapshot in temporary generation.
 
 ### Safe publication
 
-- [ ] Write new generation.
-- [ ] Verify new generation.
-- [ ] Atomically publish generation ref.
-- [ ] Retain old generation during grace period.
-- [ ] Add process-interruption testing.
-- [ ] Add idempotent restart.
+- [x] Write new generation.
+- [x] Verify new generation.
+- [x] Atomically publish generation ref.
+- [x] Retain prior generation root and quarantine before irreversible prune.
+- [ ] Add interruption injection at every individual candidate movement.
+- [x] Add idempotent restart/resume.
 
 ### Experiments
 
-- [ ] Implement reachability-only baseline.
-- [ ] Implement chain-collapse strategy.
+- [x] Implement conservative scratch-record reachability/quarantine baseline.
+- [x] Implement retained-chain collapse with direct exact deltas.
 - [ ] Implement inverse-pair elimination only where exact.
 - [ ] Benchmark retention policies.
 - [ ] Publish storage versus restore-latency results.
 
 ### Exit criteria
 
-- [ ] Property test proves retained-state equivalence.
-- [ ] No pinned checkpoint is deleted.
-- [ ] Interruption at every publication point leaves a valid generation.
-- [ ] Dry-run explains every removal.
+- [x] Property test proves retained-state equivalence.
+- [x] No pinned checkpoint is deleted without a valid active alias.
+- [ ] Interruption at every publication and cleanup candidate point leaves a valid generation.
+- [ ] Dry-run explains every physical removal and estimates actual quarantine bytes.
 
 ## Milestone 4 — Change capsules
 

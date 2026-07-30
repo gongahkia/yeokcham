@@ -20,6 +20,9 @@ type object_type =
   | Chunk
   | File_manifest
   | Retention_change
+  | Scratch_generation_segment
+  | Scratch_generation
+  | Scratch_cleanup_manifest
 
 val object_type_code : object_type -> int
 val object_type_of_code : int -> object_type option

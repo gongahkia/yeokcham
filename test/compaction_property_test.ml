@@ -1,5 +1,6 @@
 module Compaction = Paengi_compaction
 module Scratch = Paengi_scratch
+module Snapshot = Paengi_snapshot
 module Store = Paengi_store
 
 let default_seed = 20_260_730
@@ -108,6 +109,85 @@ let pinned_checkpoints_never_expire =
       | Compaction.Policy.Expired ->
           false)
 
+let rec remove_tree path =
+  try
+    match (Unix.lstat path).Unix.st_kind with
+    | Unix.S_DIR ->
+        Sys.readdir path
+        |> Array.iter (fun name -> remove_tree (Filename.concat path name));
+        Unix.rmdir path
+    | Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO
+    | Unix.S_SOCK ->
+        Unix.unlink path
+  with Unix.Unix_error (Unix.ENOENT, _, _) -> ()
+
+let compacted_logical_checkpoints_preserve_snapshots =
+  QCheck2.Test.make ~count:20
+    ~name:"compacted retained logical checkpoints preserve snapshots"
+    QCheck2.Gen.(int_range 1 6)
+    (fun count ->
+      let root = Filename.temp_file "paengi-compaction-property-" "" in
+      Unix.unlink root;
+      Unix.mkdir root 0o700;
+      Fun.protect
+        ~finally:(fun () -> remove_tree root)
+        (fun () ->
+          try
+            let file = Filename.concat root "file" in
+            Out_channel.with_open_bin file (fun channel ->
+                Out_channel.output_string channel "base");
+            let store = Store.init ~root |> Result.get_ok in
+            let scratch = Scratch.open_repository store in
+            let base, _ = Snapshot.scan ~root ~store |> Result.get_ok in
+            let initial =
+              Scratch.create_initial scratch ~snapshot:base ~created_at:0L
+              |> Result.get_ok
+            in
+            Scratch.pin scratch (Scratch.Checkpoint.id initial) ~changed_at:1L
+            |> Result.get_ok;
+            let head = ref initial in
+            for index = 1 to count do
+              Out_channel.with_open_bin file (fun channel ->
+                  Out_channel.output_string channel
+                    (Printf.sprintf "edit-%d" index));
+              let snapshot, _ = Snapshot.scan ~root ~store |> Result.get_ok in
+              match
+                Scratch.checkpoint scratch ~snapshot ~source:Scratch.Explicit
+                  ~observed_at:(Int64.of_int index)
+                  ~created_at:(Int64.of_int index)
+                |> Result.get_ok
+              with
+              | Scratch.Created checkpoint -> head := checkpoint
+              | Scratch.Unchanged _ -> raise Exit
+            done;
+            let expected =
+              [
+                (Scratch.Checkpoint.id !head, Scratch.Checkpoint.snapshot !head);
+                ( Scratch.Checkpoint.id initial,
+                  Scratch.Checkpoint.snapshot initial );
+              ]
+            in
+            let policy =
+              Compaction.Policy.create ~recent_window_seconds:1L
+                ~periodic_interval_seconds:0L ~storage_budget_bytes:None
+              |> Result.get_ok
+            in
+            ignore
+              (Compaction.activate ~store scratch ~policy
+                 ~now:(Int64.of_int (count + 1))
+              |> Result.get_ok);
+            let actual =
+              Scratch.timeline scratch ~limit:8 () |> Result.get_ok
+            in
+            List.length actual = List.length expected
+            && List.for_all2
+                 (fun (logical, snapshot) entry ->
+                   Scratch.Checkpoint_id.equal logical entry.Scratch.logical_id
+                   && Snapshot.Snapshot.equal_id snapshot
+                        (Scratch.Checkpoint.snapshot entry.Scratch.checkpoint))
+                 expected actual
+          with Exit | Failure _ -> false))
+
 let () =
   Alcotest.run "compaction properties"
     [
@@ -118,5 +198,8 @@ let () =
             permutation_does_not_change_selection;
           QCheck_alcotest.to_alcotest ~speed_level:`Quick
             ~rand:(state_for "pins") pinned_checkpoints_never_expire;
+          QCheck_alcotest.to_alcotest ~speed_level:`Quick
+            ~rand:(state_for "compacted-logical-snapshots")
+            compacted_logical_checkpoints_preserve_snapshots;
         ] );
     ]

@@ -70,10 +70,12 @@ target-head advancement; it is not represented as crash-atomic unless an
 operation journal is implemented.
 
 Milestone 3 additionally checks deterministic recent-window and periodic
-selection, pin precedence, permutation-independent selection, verified
-reachability accounting, read-only dry-run behaviour, and rejection of missing
-reachable records. The current planner must report blocked removal rather than
-claim physical compaction while `scratch-head` reaches immutable ancestry.
+selection, pin precedence, permutation-independent selection, retained logical
+snapshot equivalence after activated generation compaction, direct generation
+schema decoding/goldens, replay verification, post-compaction checkpointing and
+retention changes, repeated generation activation, resolver corruption
+rejection, and idempotent cleanup resume. The current cleanup scope excludes
+shared content-domain objects pending full cross-domain reachability.
 
 #### P4 — Compaction preservation
 
@@ -147,6 +149,11 @@ Expected result:
 - Old valid state.
 - New valid state.
 - Detectable recoverable staging state.
+
+Generation failure states are: pre-activation immutable-object leftovers with
+the prior ref unchanged; post-activation/pre-cleanup valid logical resolution
+with excess objects; and partially quarantined manifest candidates resumed
+idempotently. Permanent prune is tested separately from recoverable quarantine.
 
 ## 3. Filesystem fixtures
 

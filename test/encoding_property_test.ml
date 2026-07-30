@@ -93,6 +93,10 @@ let object_type_generator =
       Envelope.Repository_config;
       Envelope.Chunk;
       Envelope.File_manifest;
+      Envelope.Retention_change;
+      Envelope.Scratch_generation_segment;
+      Envelope.Scratch_generation;
+      Envelope.Scratch_cleanup_manifest;
     ]
 
 let boundary_lengths =

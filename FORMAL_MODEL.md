@@ -243,14 +243,20 @@ the greatest checkpoint object ID on ties. An interval of zero retains no
 periodic checkpoint. The planner reports a budget overrun but cannot override a
 protected checkpoint.
 
-The current read-only planner verifies the full scratch timeline and follows
-the object graph from `scratch-head` and `retention-head`. Because a retained
-`Scratch_checkpoint` v1 stores immutable parent and event references,
-`scratch-head` reaches its complete ancestry. Therefore it reports policy
-expiry as a blocked removal and estimates identical before/after bytes. It does
-not claim to perform deletion or generation publication. A later physical
-compaction representation must be introduced by ADR with retained-v1 readers,
-migration analysis, and interruption tests.
+ADR-024 adds immutable compacted generations without changing v1 checkpoint,
+event, retention, or head records. A generation maps every retained logical
+checkpoint ID directly to a verified physical Checkpoint v1 object. Its ordered
+entries bind logical ID, physical ID, snapshot ID, predecessor logical ID, and
+effective retention base. Physical event/checkpoint parents retain the prior
+logical ID; a single resolver expands it before loading. The active generation
+mapping wins over direct old-object lookup.
+
+Generation activation is a separate CAS ref publication. A missing generation
+ref uses legacy direct lookup. Retention resolution folds changes newer than
+the recorded retention-head cutoff over the generation base. Cleanup moves only
+superseded scratch events/checkpoints and pre-cutoff retention records to a
+generation quarantine; shared content-domain objects are retained until a full
+cross-domain mark exists. Explicit prune is irreversible.
 
 ### Compaction invariants
 
@@ -260,17 +266,12 @@ migration analysis, and interruption tests.
 4. No pinned checkpoint is removed.
 5. Compaction is idempotent with respect to repository meaning.
 6. A failed compaction leaves the old valid generation available.
+7. A retained logical ID resolves to the generation-declared exact snapshot.
+8. An active alias is direct; alias-to-alias traversal is invalid.
 
-Until that generation representation exists, only read-only compaction analysis
-is implemented; no checkpoint, event, or object is physically removed.
-
-Possible transformations:
-
-- Remove exact inverse event pairs between retained boundaries.
-- Replace chains with direct snapshot deltas.
-- Deduplicate repeated content.
-- Keep periodic materialised snapshots to bound replay depth.
-- Remove unreferenced short-lived checkpoints after retention expiry.
+Implemented transformation: replace retained boundaries with exact direct
+snapshot deltas. Inverse-pair elimination and shared-content collection remain
+separate experiments; no semantic equivalence claim is made.
 
 ## 5. Intent history
 

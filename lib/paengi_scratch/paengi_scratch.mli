@@ -61,6 +61,22 @@ module Retention_change_id : sig
   val equal : t -> t -> bool
 end
 
+module Generation_id : sig
+  type t
+
+  val of_stored_object_id : Paengi_store.Stored_object_id.t -> t
+  val stored_object_id : t -> Paengi_store.Stored_object_id.t
+  val equal : t -> t -> bool
+end
+
+module Cleanup_manifest_id : sig
+  type t
+
+  val of_stored_object_id : Paengi_store.Stored_object_id.t -> t
+  val stored_object_id : t -> Paengi_store.Stored_object_id.t
+  val equal : t -> t -> bool
+end
+
 module State : sig
   type t
 
@@ -112,6 +128,20 @@ module Checkpoint : sig
     created_at:int64 ->
     t
 
+  val create_initial_with_retention :
+    snapshot:Paengi_snapshot.Snapshot.id ->
+    created_at:int64 ->
+    intrinsic_retention:retention_reason list ->
+    t
+
+  val create_with_retention :
+    parent:Checkpoint_id.t ->
+    event:Event_id.t ->
+    snapshot:Paengi_snapshot.Snapshot.id ->
+    created_at:int64 ->
+    intrinsic_retention:retention_reason list ->
+    t
+
   val id : t -> Checkpoint_id.t
   val parent : t -> Checkpoint_id.t option
   val event : t -> Event_id.t option
@@ -120,6 +150,78 @@ module Checkpoint : sig
   val intrinsic_retention : t -> retention_reason list
   val store : Paengi_store.repository -> t -> (Checkpoint_id.t, error) result
   val load : Paengi_store.repository -> Checkpoint_id.t -> (t, error) result
+end
+
+module Cleanup_manifest : sig
+  type candidate = {
+    object_id : Paengi_store.Stored_object_id.t;
+    expected_type : Paengi_envelope.object_type;
+  }
+
+  type t
+
+  val create : candidate list -> (t, error) result
+  val id : t -> Cleanup_manifest_id.t
+  val candidates : t -> candidate list
+
+  val store :
+    Paengi_store.repository -> t -> (Cleanup_manifest_id.t, error) result
+
+  val load :
+    Paengi_store.repository -> Cleanup_manifest_id.t -> (t, error) result
+end
+
+module Generation : sig
+  type entry
+  type t
+
+  val max_entries_per_segment : int
+
+  val entry :
+    logical:Checkpoint_id.t ->
+    physical:Checkpoint_id.t ->
+    snapshot:Paengi_snapshot.Snapshot.id ->
+    previous_logical:Checkpoint_id.t option ->
+    effective_retention:retention_reason list ->
+    entry
+
+  val logical : entry -> Checkpoint_id.t
+  val physical : entry -> Checkpoint_id.t
+  val snapshot : entry -> Paengi_snapshot.Snapshot.id
+  val previous_logical : entry -> Checkpoint_id.t option
+  val effective_retention : entry -> retention_reason list
+
+  val store :
+    Paengi_store.repository ->
+    previous:Generation_id.t option ->
+    source_scratch_head:Checkpoint_id.t ->
+    source_scratch_ref_generation:int64 ->
+    source_retention_head:Retention_change_id.t option ->
+    source_retention_ref_generation:int64 option ->
+    recent_window_seconds:int64 ->
+    periodic_interval_seconds:int64 ->
+    storage_budget_bytes:int64 option ->
+    entries:entry list ->
+    physical_head:Checkpoint_id.t ->
+    retention_cutoff:Retention_change_id.t option ->
+    cleanup_manifest:Cleanup_manifest_id.t ->
+    (Generation_id.t, error) result
+
+  val load : Paengi_store.repository -> Generation_id.t -> (t, error) result
+  val id : t -> Generation_id.t
+  val previous : t -> Generation_id.t option
+  val source_scratch_head : t -> Checkpoint_id.t
+  val source_scratch_ref_generation : t -> int64
+  val source_retention_head : t -> Retention_change_id.t option
+  val source_retention_ref_generation : t -> int64 option
+  val recent_window_seconds : t -> int64
+  val periodic_interval_seconds : t -> int64
+  val storage_budget_bytes : t -> int64 option
+  val segment_ids : t -> Generation_id.t list
+  val entries : t -> entry list
+  val physical_head : t -> Checkpoint_id.t
+  val retention_cutoff : t -> Retention_change_id.t option
+  val cleanup_manifest : t -> Cleanup_manifest_id.t
 end
 
 module Retention_change : sig
@@ -150,14 +252,26 @@ end
 
 type repository
 type checkpoint_result = Created of Checkpoint.t | Unchanged of Checkpoint.t
+type resolved_checkpoint
+
+val resolved_logical_id : resolved_checkpoint -> Checkpoint_id.t
+val resolved_physical_id : resolved_checkpoint -> Checkpoint_id.t
+val resolved_checkpoint : resolved_checkpoint -> Checkpoint.t
 
 type timeline_entry = {
+  logical_id : Checkpoint_id.t;
   checkpoint : Checkpoint.t;
   depth : int;
   effective_retention : retention_reason list;
 }
 
 val open_repository : Paengi_store.repository -> repository
+val active_generation : repository -> (Generation.t option, error) result
+
+val resolve_checkpoint :
+  repository -> Checkpoint_id.t -> (resolved_checkpoint, error) result
+
+val head_id : repository -> (Checkpoint_id.t option, error) result
 
 val create_initial :
   repository ->

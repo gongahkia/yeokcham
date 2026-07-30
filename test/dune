@@ -124,6 +124,20 @@
   unix))
 
 (test
+ (name test_generation)
+ (modules test_generation)
+ (libraries
+  alcotest
+  paengi_envelope
+  paengi_scratch
+  paengi_snapshot
+  paengi_store
+  paengi_testkit
+  unix)
+ (deps
+  (source_tree golden)))
+
+(test
  (name scratch_property_test)
  (modules scratch_property_test)
  (libraries
@@ -144,7 +158,9 @@
   qcheck-alcotest
   paengi_compaction
   paengi_scratch
-  paengi_store))
+  paengi_snapshot
+  paengi_store
+  unix))
 
 (test
  (name encoding_property_test)

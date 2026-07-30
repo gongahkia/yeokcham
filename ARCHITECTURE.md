@@ -170,6 +170,7 @@ Conceptual local layout:
     aa/bb/<object-id>
   refs/
     scratch-head
+    scratch-generation
     workspace
     capsules/
     releases/
@@ -178,12 +179,13 @@ Conceptual local layout:
     scratch.sqlite
   journal/
   locks/
+  trash/
   tmp/
 ```
 
 Milestone 2 uses immutable Envelope-1 objects for scratch events, checkpoints,
-and retention changes.  `refs/scratch-head` and `refs/retention-head` are the
-only mutable scratch records; they use canonical, checksummed ref bytes and
+and retention changes. `refs/scratch-head`, `refs/retention-head`, and the
+additive `refs/scratch-generation` use canonical, checksummed ref bytes and
 same-directory temporary-write, lock, compare-and-swap, rename-over, and
 directory-fsync publication from ADR-023.  Timeline and path indexes remain
 rebuildable cache data and cannot be required to recover history.
@@ -251,14 +253,21 @@ analyse scratch graph
 
 Strategies should be pluggable and independently benchmarked.
 
-Milestone 3 currently provides a read-only planner. It applies an explicit
-in-memory recent-window/periodic/storage-budget policy to the verified
-ancestry, traverses all objects reachable from `scratch-head` and
-`retention-head`, and reports exact byte estimates. It does not publish a
-generation or delete records: immutable Checkpoint v1 parent/event links make
-every ancestor reachable from the current head. Introducing a compacted
-generation while retaining checkpoint IDs requires a new ADR rather than a
-rewrite of ADR-023 records.
+Milestone 3 provides a deterministic planner over the verified ancestry. It
+applies explicit recent-window/periodic/storage-budget policy and reports
+reachable-object accounting before generation construction. Immutable
+Checkpoint v1 parent/event links still require a generation layer rather than
+record rewriting.
+
+ADR-024 implements that additive generation layer. `refs/scratch-generation`
+is an ADR-023 mutable CAS ref to a bounded-segment immutable generation root.
+The scratch resolver returns logical and physical checkpoint identities, with
+active aliases preceding direct lookup. Generation construction creates direct
+retained-snapshot deltas, verifies replay, then publishes the ref under a
+repository compaction lock. Cleanup begins only after publication and moves
+manifest-listed obsolete scratch records to same-filesystem quarantine. Content,
+trees, snapshots, chunks, and manifests are outside cleanup until canonical
+cross-domain reachability exists.
 
 Initial strategies:
 

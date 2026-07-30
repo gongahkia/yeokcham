@@ -60,6 +60,22 @@ module Retention_change_id = struct
   let equal = Store.Stored_object_id.equal
 end
 
+module Generation_id = struct
+  type t = Store.Stored_object_id.t
+
+  let of_stored_object_id identity = identity
+  let stored_object_id identity = identity
+  let equal = Store.Stored_object_id.equal
+end
+
+module Cleanup_manifest_id = struct
+  type t = Store.Stored_object_id.t
+
+  let of_stored_object_id identity = identity
+  let stored_object_id identity = identity
+  let equal = Store.Stored_object_id.equal
+end
+
 type error =
   | Store_error of Store.error
   | Snapshot_error of Snapshot.error
@@ -93,6 +109,14 @@ type error =
   | Scratch_head_missing
   | Scratch_head_is_null
   | Scratch_already_initialized
+  | Scratch_generation_is_null
+  | Generation_corrupt of string
+  | Checkpoint_not_retained of Checkpoint_id.t
+  | Generation_alias_target_invalid of {
+      logical : Checkpoint_id.t;
+      detail : string;
+    }
+  | Generation_alias_snapshot_mismatch of Checkpoint_id.t
   | Retention_cycle of Retention_change_id.t
   | Checkpoint_cycle of Checkpoint_id.t
   | Checkpoint_event_mismatch of Checkpoint_id.t
@@ -170,6 +194,21 @@ let error_to_string = function
   | Scratch_head_missing -> "scratch history is not initialized"
   | Scratch_head_is_null -> "scratch-head ref has an invalid null target"
   | Scratch_already_initialized -> "scratch history is already initialized"
+  | Scratch_generation_is_null ->
+      "scratch-generation ref has an invalid null target"
+  | Generation_corrupt detail ->
+      "active scratch generation is corrupt: " ^ detail
+  | Checkpoint_not_retained identity ->
+      Printf.sprintf "checkpoint is not retained: %s"
+        (Store.Stored_object_id.to_hex
+           (Checkpoint_id.stored_object_id identity))
+  | Generation_alias_target_invalid { logical; detail } ->
+      Printf.sprintf "generation alias target for %s is invalid: %s"
+        (Store.Stored_object_id.to_hex (Checkpoint_id.stored_object_id logical))
+        detail
+  | Generation_alias_snapshot_mismatch logical ->
+      Printf.sprintf "generation alias snapshot mismatch for %s"
+        (Store.Stored_object_id.to_hex (Checkpoint_id.stored_object_id logical))
   | Retention_cycle identity ->
       Printf.sprintf "retention chain cycle at %s"
         (Store.Stored_object_id.to_hex
@@ -1003,9 +1042,17 @@ module Checkpoint = struct
     make ~parent:None ~event:None ~snapshot ~created_at
       ~intrinsic_retention:[ Recent_window ]
 
+  let create_initial_with_retention ~snapshot ~created_at ~intrinsic_retention =
+    make ~parent:None ~event:None ~snapshot ~created_at ~intrinsic_retention
+
   let create ~parent ~event ~snapshot ~created_at =
     make ~parent:(Some parent) ~event:(Some event) ~snapshot ~created_at
       ~intrinsic_retention:[ Recent_window ]
+
+  let create_with_retention ~parent ~event ~snapshot ~created_at
+      ~intrinsic_retention =
+    make ~parent:(Some parent) ~event:(Some event) ~snapshot ~created_at
+      ~intrinsic_retention
 
   let id (checkpoint : t) = checkpoint.checkpoint_id
   let parent (checkpoint : t) = checkpoint.parent
@@ -1203,10 +1250,728 @@ module Retention_change = struct
     else decode (Envelope.payload object_) identity
 end
 
+module Cleanup_manifest = struct
+  type candidate = {
+    object_id : Store.Stored_object_id.t;
+    expected_type : Envelope.object_type;
+  }
+
+  type t = { manifest_id : Cleanup_manifest_id.t; candidates : candidate list }
+
+  let allowed_type = function
+    | Envelope.Scratch_event | Envelope.Checkpoint | Envelope.Retention_change
+      ->
+        true
+    | Envelope.Content | Envelope.Tree | Envelope.Snapshot | Envelope.Capsule
+    | Envelope.Capsule_revision | Envelope.Release | Envelope.Conflict
+    | Envelope.Validation | Envelope.Resolution | Envelope.Repository_config
+    | Envelope.Chunk | Envelope.File_manifest
+    | Envelope.Scratch_generation_segment | Envelope.Scratch_generation
+    | Envelope.Scratch_cleanup_manifest ->
+        false
+
+  let compare_candidate left right =
+    Store.Stored_object_id.compare left.object_id right.object_id
+
+  let valid_candidates candidates =
+    let rec loop previous = function
+      | [] -> Ok ()
+      | candidate :: rest -> (
+          if not (allowed_type candidate.expected_type) then
+            Error (Invalid_schema "cleanup manifest contains a protected type")
+          else
+            match previous with
+            | Some previous when compare_candidate previous candidate >= 0 ->
+                Error
+                  (Invalid_schema
+                     "cleanup manifest candidates must be strictly sorted")
+            | None | Some _ -> loop (Some candidate) rest)
+    in
+    loop None candidates
+
+  let candidate_value candidate =
+    value_array
+      [
+        Encoding.bytes (Store.Stored_object_id.to_raw_bytes candidate.object_id);
+        Encoding.integer
+          (Int64.of_int (Envelope.object_type_code candidate.expected_type));
+      ]
+
+  let payload candidates =
+    let* candidates =
+      let rec encode reversed = function
+        | [] -> Ok (List.rev reversed)
+        | candidate :: rest ->
+            let* candidate = candidate_value candidate in
+            encode (candidate :: reversed) rest
+      in
+      encode [] candidates
+    in
+    let* candidates =
+      Encoding.array candidates
+      |> Result.map_error (fun error -> Encoding_error error)
+    in
+    value_array [ Encoding.integer 1L; candidates ]
+
+  let envelope candidates =
+    let* payload = payload candidates in
+    object_envelope Envelope.Scratch_cleanup_manifest payload
+
+  let identity candidates =
+    match envelope candidates with
+    | Ok envelope ->
+        Cleanup_manifest_id.of_stored_object_id (Store.id_of_envelope envelope)
+    | Error _ -> assert false
+
+  let create candidates =
+    let candidates = List.sort compare_candidate candidates in
+    let* () = valid_candidates candidates in
+    Ok { manifest_id = identity candidates; candidates }
+
+  let id manifest = manifest.manifest_id
+  let candidates manifest = manifest.candidates
+
+  let store repository manifest =
+    let* envelope = envelope manifest.candidates in
+    let* identity =
+      Store.put repository envelope
+      |> Result.map_error (fun error -> Store_error error)
+    in
+    let identity = Cleanup_manifest_id.of_stored_object_id identity in
+    if Cleanup_manifest_id.equal identity manifest.manifest_id then Ok identity
+    else
+      Error (Invalid_schema "cleanup manifest identity changed during storage")
+
+  let candidate_of_value value =
+    let* fields = exact_array "cleanup candidate" 2 value in
+    match fields with
+    | [ object_id; expected_type ] -> (
+        let* object_id = raw_object_id object_id in
+        let* expected_type =
+          integer "cleanup candidate object type" expected_type
+        in
+        if
+          Int64.compare expected_type 0L < 0
+          || Int64.compare expected_type (Int64.of_int max_int) > 0
+        then Error (Invalid_schema "cleanup candidate object type is invalid")
+        else
+          match Envelope.object_type_of_code (Int64.to_int expected_type) with
+          | Some expected_type when allowed_type expected_type ->
+              Ok { object_id; expected_type }
+          | Some _ ->
+              Error
+                (Invalid_schema "cleanup manifest contains a protected type")
+          | None ->
+              Error (Invalid_schema "cleanup candidate object type is unknown"))
+    | _ -> assert false
+
+  let decode input manifest_id =
+    let* fields = exact_array "scratch cleanup manifest" 2 input in
+    match fields with
+    | [ version; candidates ] ->
+        let* version = integer "scratch cleanup manifest version" version in
+        if not (Int64.equal version 1L) then
+          Error (Unsupported_schema_version version)
+        else
+          let* candidates =
+            array_values "cleanup manifest candidates" candidates
+          in
+          let rec decode reversed = function
+            | [] -> Ok (List.rev reversed)
+            | value :: rest ->
+                let* candidate = candidate_of_value value in
+                decode (candidate :: reversed) rest
+          in
+          let* candidates = decode [] candidates in
+          let* () = valid_candidates candidates in
+          let manifest = { manifest_id; candidates } in
+          let* expected = payload candidates in
+          if String.equal (Encoding.encode expected) (Encoding.encode input)
+          then Ok manifest
+          else Error Noncanonical_schema
+    | _ -> assert false
+
+  let load repository manifest_id =
+    let* object_ =
+      Store.get repository (Cleanup_manifest_id.stored_object_id manifest_id)
+      |> Result.map_error (fun error -> Store_error error)
+    in
+    if Envelope.object_type object_ <> Envelope.Scratch_cleanup_manifest then
+      Error
+        (Unexpected_object_type
+           {
+             expected = Envelope.Scratch_cleanup_manifest;
+             actual = Envelope.object_type object_;
+           })
+    else decode (Envelope.payload object_) manifest_id
+end
+
+module Generation = struct
+  let max_entries_per_segment = 128
+  let max_segments = 128
+
+  type entry = {
+    logical : Checkpoint_id.t;
+    physical : Checkpoint_id.t;
+    snapshot : Snapshot.Snapshot.id;
+    previous_logical : Checkpoint_id.t option;
+    effective_retention : retention_reason list;
+  }
+
+  type segment = {
+    segment_id : Store.Stored_object_id.t;
+    segment_entries : entry list;
+  }
+
+  type t = {
+    generation_id : Generation_id.t;
+    previous : Generation_id.t option;
+    source_scratch_head : Checkpoint_id.t;
+    source_scratch_ref_generation : int64;
+    source_retention_head : Retention_change_id.t option;
+    source_retention_ref_generation : int64 option;
+    recent_window_seconds : int64;
+    periodic_interval_seconds : int64;
+    storage_budget_bytes : int64 option;
+    segment_ids : Generation_id.t list;
+    entries : entry list;
+    physical_head : Checkpoint_id.t;
+    retention_cutoff : Retention_change_id.t option;
+    cleanup_manifest : Cleanup_manifest_id.t;
+  }
+
+  type root_input = {
+    root_previous : Generation_id.t option;
+    root_source_scratch_head : Checkpoint_id.t;
+    root_source_scratch_ref_generation : int64;
+    root_source_retention_head : Retention_change_id.t option;
+    root_source_retention_ref_generation : int64 option;
+    root_recent_window_seconds : int64;
+    root_periodic_interval_seconds : int64;
+    root_storage_budget_bytes : int64 option;
+    root_segments : Generation_id.t list;
+    root_physical_head : Checkpoint_id.t;
+    root_retention_cutoff : Retention_change_id.t option;
+    root_cleanup_manifest : Cleanup_manifest_id.t;
+  }
+
+  let entry ~logical ~physical ~snapshot ~previous_logical ~effective_retention
+      =
+    {
+      logical;
+      physical;
+      snapshot;
+      previous_logical;
+      effective_retention = normalise_retention effective_retention;
+    }
+
+  let logical (entry : entry) = entry.logical
+  let physical (entry : entry) = entry.physical
+  let snapshot (entry : entry) = entry.snapshot
+  let previous_logical (entry : entry) = entry.previous_logical
+  let effective_retention (entry : entry) = entry.effective_retention
+
+  let raw_checkpoint identity =
+    Encoding.bytes
+      (Store.Stored_object_id.to_raw_bytes
+         (Checkpoint_id.stored_object_id identity))
+
+  let raw_snapshot identity =
+    Encoding.bytes
+      (Store.Stored_object_id.to_raw_bytes
+         (Snapshot.Snapshot.stored_object_id identity))
+
+  let raw_generation identity =
+    Encoding.bytes
+      (Store.Stored_object_id.to_raw_bytes
+         (Generation_id.stored_object_id identity))
+
+  let raw_retention identity =
+    Encoding.bytes
+      (Store.Stored_object_id.to_raw_bytes
+         (Retention_change_id.stored_object_id identity))
+
+  let raw_manifest identity =
+    Encoding.bytes
+      (Store.Stored_object_id.to_raw_bytes
+         (Cleanup_manifest_id.stored_object_id identity))
+
+  let optional encode = function
+    | None -> Encoding.null
+    | Some value -> encode value
+
+  let retention_list_value reasons =
+    let* values = intrinsic_value (normalise_retention reasons) in
+    Ok values
+
+  let entry_value entry =
+    let* retention = retention_list_value entry.effective_retention in
+    value_array
+      [
+        raw_checkpoint entry.logical;
+        raw_checkpoint entry.physical;
+        raw_snapshot entry.snapshot;
+        optional raw_checkpoint entry.previous_logical;
+        retention;
+      ]
+
+  let segment_payload entries =
+    let rec encode reversed = function
+      | [] -> Ok (List.rev reversed)
+      | entry :: rest ->
+          let* entry = entry_value entry in
+          encode (entry :: reversed) rest
+    in
+    let* entries = encode [] entries in
+    let* entries =
+      Encoding.array entries
+      |> Result.map_error (fun error -> Encoding_error error)
+    in
+    value_array [ Encoding.integer 1L; entries ]
+
+  let segment_envelope entries =
+    let* payload = segment_payload entries in
+    object_envelope Envelope.Scratch_generation_segment payload
+
+  let segment_identity entries =
+    match segment_envelope entries with
+    | Ok envelope -> Store.id_of_envelope envelope
+    | Error _ -> assert false
+
+  let entry_of_value value =
+    let* fields = exact_array "scratch generation entry" 5 value in
+    match fields with
+    | [ logical; physical; snapshot; previous_logical; effective_retention ] ->
+        let* logical = raw_object_id logical in
+        let* physical = raw_object_id physical in
+        let* snapshot = raw_object_id snapshot in
+        let* previous_logical = optional_object_id previous_logical in
+        let* effective_retention = intrinsic_of_value effective_retention in
+        Ok
+          (entry
+             ~logical:(Checkpoint_id.of_stored_object_id logical)
+             ~physical:(Checkpoint_id.of_stored_object_id physical)
+             ~snapshot:(Snapshot.Snapshot.of_stored_object_id snapshot)
+             ~previous_logical:
+               (Option.map Checkpoint_id.of_stored_object_id previous_logical)
+             ~effective_retention)
+    | _ -> assert false
+
+  let validate_entries entries =
+    let rec loop previous logicals physicals = function
+      | [] -> Ok ()
+      | entry :: rest ->
+          if List.exists (Checkpoint_id.equal entry.logical) logicals then
+            Error
+              (Invalid_schema "scratch generation has duplicate logical IDs")
+          else if List.exists (Checkpoint_id.equal entry.physical) physicals
+          then
+            Error
+              (Invalid_schema "scratch generation has duplicate physical IDs")
+          else if
+            not
+              (Option.equal Checkpoint_id.equal entry.previous_logical previous)
+          then
+            Error
+              (Invalid_schema
+                 "scratch generation entries do not form a predecessor chain")
+          else
+            loop (Some entry.logical)
+              (entry.logical :: logicals)
+              (entry.physical :: physicals)
+              rest
+    in
+    loop None [] [] entries
+
+  let decode_segment payload identity =
+    let* fields = exact_array "scratch generation segment" 2 payload in
+    match fields with
+    | [ version; entries ] ->
+        let* version = integer "scratch generation segment version" version in
+        if not (Int64.equal version 1L) then
+          Error (Unsupported_schema_version version)
+        else
+          let* entries = array_values "scratch generation entries" entries in
+          if entries = [] || List.length entries > max_entries_per_segment then
+            Error
+              (Invalid_schema "scratch generation segment has invalid length")
+          else
+            let rec decode reversed = function
+              | [] -> Ok (List.rev reversed)
+              | value :: rest ->
+                  let* entry = entry_of_value value in
+                  decode (entry :: reversed) rest
+            in
+            let* entries = decode [] entries in
+            let segment : segment =
+              { segment_id = identity; segment_entries = entries }
+            in
+            let* expected = segment_payload entries in
+            if String.equal (Encoding.encode expected) (Encoding.encode payload)
+            then Ok segment
+            else Error Noncanonical_schema
+    | _ -> assert false
+
+  let store_segment repository entries =
+    let* envelope = segment_envelope entries in
+    let* identity =
+      Store.put repository envelope
+      |> Result.map_error (fun error -> Store_error error)
+    in
+    if Store.Stored_object_id.equal identity (segment_identity entries) then
+      Ok identity
+    else Error (Invalid_schema "scratch generation segment identity changed")
+
+  let load_segment repository identity =
+    let* object_ =
+      Store.get repository identity
+      |> Result.map_error (fun error -> Store_error error)
+    in
+    if Envelope.object_type object_ <> Envelope.Scratch_generation_segment then
+      Error
+        (Unexpected_object_type
+           {
+             expected = Envelope.Scratch_generation_segment;
+             actual = Envelope.object_type object_;
+           })
+    else decode_segment (Envelope.payload object_) identity
+
+  let chunks entries =
+    let rec split reversed current size = function
+      | [] ->
+          List.rev
+            (if current = [] then reversed else List.rev current :: reversed)
+      | entry :: rest when size = max_entries_per_segment ->
+          split (List.rev current :: reversed) [ entry ] 1 rest
+      | entry :: rest -> split reversed (entry :: current) (size + 1) rest
+    in
+    split [] [] 0 entries
+
+  let policy_value ~recent_window_seconds ~periodic_interval_seconds
+      ~storage_budget_bytes =
+    value_array
+      [
+        Encoding.integer recent_window_seconds;
+        Encoding.integer periodic_interval_seconds;
+        optional Encoding.integer storage_budget_bytes;
+      ]
+
+  let root_payload (input : root_input) =
+    let* policy =
+      policy_value ~recent_window_seconds:input.root_recent_window_seconds
+        ~periodic_interval_seconds:input.root_periodic_interval_seconds
+        ~storage_budget_bytes:input.root_storage_budget_bytes
+    in
+    let segments =
+      List.map (fun identity -> raw_generation identity) input.root_segments
+    in
+    let* segments =
+      Encoding.array segments
+      |> Result.map_error (fun error -> Encoding_error error)
+    in
+    value_array
+      [
+        Encoding.integer 1L;
+        optional raw_generation input.root_previous;
+        raw_checkpoint input.root_source_scratch_head;
+        Encoding.integer input.root_source_scratch_ref_generation;
+        optional raw_retention input.root_source_retention_head;
+        optional Encoding.integer input.root_source_retention_ref_generation;
+        policy;
+        segments;
+        raw_checkpoint input.root_physical_head;
+        optional raw_retention input.root_retention_cutoff;
+        raw_manifest input.root_cleanup_manifest;
+      ]
+
+  let root_envelope arguments =
+    let* payload = root_payload arguments in
+    object_envelope Envelope.Scratch_generation payload
+
+  let root_identity arguments =
+    match root_envelope arguments with
+    | Ok envelope ->
+        Generation_id.of_stored_object_id (Store.id_of_envelope envelope)
+    | Error _ -> assert false
+
+  let nonnegative name value =
+    if Int64.compare value 0L < 0 then
+      Error (Invalid_schema (name ^ " is negative"))
+    else Ok value
+
+  let policy_of_value value =
+    let* fields = exact_array "scratch generation policy" 3 value in
+    match fields with
+    | [ recent; periodic; budget ] ->
+        let* recent = integer "generation recent window" recent in
+        let* periodic = integer "generation periodic interval" periodic in
+        let* recent = nonnegative "generation recent window" recent in
+        let* periodic = nonnegative "generation periodic interval" periodic in
+        let* budget =
+          match budget with
+          | Encoding.Null -> Ok None
+          | Encoding.Integer budget ->
+              let* budget = nonnegative "generation storage budget" budget in
+              Ok (Some budget)
+          | Encoding.Bytes _ | Encoding.Text _ | Encoding.Array _
+          | Encoding.Map _ | Encoding.Bool _ ->
+              Error
+                (Invalid_schema "generation storage budget must be an integer")
+        in
+        Ok (recent, periodic, budget)
+    | _ -> assert false
+
+  let raw_generation_of_value value =
+    raw_object_id value |> Result.map Generation_id.of_stored_object_id
+
+  let raw_retention_of_value value =
+    raw_object_id value |> Result.map Retention_change_id.of_stored_object_id
+
+  let raw_manifest_of_value value =
+    raw_object_id value |> Result.map Cleanup_manifest_id.of_stored_object_id
+
+  let optional_with decode = function
+    | Encoding.Null -> Ok None
+    | ( Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _
+      | Encoding.Array _ | Encoding.Map _ | Encoding.Bool _ ) as value ->
+        decode value |> Result.map Option.some
+
+  let decode_root repository payload generation_id =
+    let* fields = exact_array "scratch generation" 11 payload in
+    match fields with
+    | [
+     version;
+     previous;
+     source_scratch_head;
+     source_scratch_ref_generation;
+     source_retention_head;
+     source_retention_ref_generation;
+     policy;
+     segments;
+     physical_head;
+     retention_cutoff;
+     cleanup_manifest;
+    ] ->
+        let* version = integer "scratch generation version" version in
+        if not (Int64.equal version 1L) then
+          Error (Unsupported_schema_version version)
+        else
+          let* previous = optional_with raw_generation_of_value previous in
+          let* source_scratch_head = raw_object_id source_scratch_head in
+          let* source_scratch_ref_generation =
+            integer "source scratch ref generation"
+              source_scratch_ref_generation
+          in
+          let* source_scratch_ref_generation =
+            nonnegative "source scratch ref generation"
+              source_scratch_ref_generation
+          in
+          let* source_retention_head =
+            optional_with raw_retention_of_value source_retention_head
+          in
+          let* source_retention_ref_generation =
+            optional_with
+              (fun value ->
+                let* generation =
+                  integer "source retention ref generation" value
+                in
+                nonnegative "source retention ref generation" generation)
+              source_retention_ref_generation
+          in
+          let* ( recent_window_seconds,
+                 periodic_interval_seconds,
+                 storage_budget_bytes ) =
+            policy_of_value policy
+          in
+          let* segment_values =
+            array_values "scratch generation segments" segments
+          in
+          if segment_values = [] || List.length segment_values > max_segments
+          then
+            Error
+              (Invalid_schema "scratch generation has invalid segment count")
+          else
+            let rec decode_segments reversed = function
+              | [] -> Ok (List.rev reversed)
+              | value :: rest ->
+                  let* identity = raw_generation_of_value value in
+                  let* segment =
+                    load_segment repository
+                      (Generation_id.stored_object_id identity)
+                  in
+                  decode_segments (segment :: reversed) rest
+            in
+            let* segments = decode_segments [] segment_values in
+            let entries =
+              List.concat_map
+                (fun (segment : segment) -> segment.segment_entries)
+                segments
+            in
+            let* () = validate_entries entries in
+            let* physical_head = raw_object_id physical_head in
+            let* retention_cutoff =
+              optional_with raw_retention_of_value retention_cutoff
+            in
+            let* cleanup_manifest = raw_manifest_of_value cleanup_manifest in
+            let segment_ids =
+              List.map
+                (fun (segment : segment) ->
+                  Generation_id.of_stored_object_id segment.segment_id)
+                segments
+            in
+            let generation =
+              {
+                generation_id;
+                previous;
+                source_scratch_head =
+                  Checkpoint_id.of_stored_object_id source_scratch_head;
+                source_scratch_ref_generation;
+                source_retention_head;
+                source_retention_ref_generation;
+                recent_window_seconds;
+                periodic_interval_seconds;
+                storage_budget_bytes;
+                segment_ids;
+                entries;
+                physical_head = Checkpoint_id.of_stored_object_id physical_head;
+                retention_cutoff;
+                cleanup_manifest;
+              }
+            in
+            let arguments : root_input =
+              {
+                root_previous = generation.previous;
+                root_source_scratch_head = generation.source_scratch_head;
+                root_source_scratch_ref_generation =
+                  generation.source_scratch_ref_generation;
+                root_source_retention_head = generation.source_retention_head;
+                root_source_retention_ref_generation =
+                  generation.source_retention_ref_generation;
+                root_recent_window_seconds = generation.recent_window_seconds;
+                root_periodic_interval_seconds =
+                  generation.periodic_interval_seconds;
+                root_storage_budget_bytes = generation.storage_budget_bytes;
+                root_segments = segment_ids;
+                root_physical_head = generation.physical_head;
+                root_retention_cutoff = generation.retention_cutoff;
+                root_cleanup_manifest = generation.cleanup_manifest;
+              }
+            in
+            let* expected = root_payload arguments in
+            if String.equal (Encoding.encode expected) (Encoding.encode payload)
+            then Ok generation
+            else Error Noncanonical_schema
+    | _ -> assert false
+
+  let store repository ~previous ~source_scratch_head
+      ~source_scratch_ref_generation ~source_retention_head
+      ~source_retention_ref_generation ~recent_window_seconds
+      ~periodic_interval_seconds ~storage_budget_bytes ~entries ~physical_head
+      ~retention_cutoff ~cleanup_manifest =
+    let* () = validate_entries entries in
+    if entries = [] then
+      Error (Invalid_schema "scratch generation cannot be empty")
+    else if
+      not
+        (Checkpoint_id.equal physical_head
+           (physical (List.hd (List.rev entries))))
+    then
+      Error
+        (Invalid_schema "scratch generation physical head is not final entry")
+    else
+      let segments = chunks entries in
+      if List.length segments > max_segments then
+        Error
+          (Invalid_schema "scratch generation exceeds bounded segment count")
+      else
+        let rec store_segments reversed = function
+          | [] -> Ok (List.rev reversed)
+          | entries :: rest ->
+              let* identity = store_segment repository entries in
+              store_segments
+                (Generation_id.of_stored_object_id identity :: reversed)
+                rest
+        in
+        let* segments = store_segments [] segments in
+        let arguments : root_input =
+          {
+            root_previous = previous;
+            root_source_scratch_head = source_scratch_head;
+            root_source_scratch_ref_generation = source_scratch_ref_generation;
+            root_source_retention_head = source_retention_head;
+            root_source_retention_ref_generation =
+              source_retention_ref_generation;
+            root_recent_window_seconds = recent_window_seconds;
+            root_periodic_interval_seconds = periodic_interval_seconds;
+            root_storage_budget_bytes = storage_budget_bytes;
+            root_segments = segments;
+            root_physical_head = physical_head;
+            root_retention_cutoff = retention_cutoff;
+            root_cleanup_manifest = cleanup_manifest;
+          }
+        in
+        let* envelope = root_envelope arguments in
+        let* identity =
+          Store.put repository envelope
+          |> Result.map_error (fun error -> Store_error error)
+        in
+        let identity = Generation_id.of_stored_object_id identity in
+        if Generation_id.equal identity (root_identity arguments) then
+          Ok identity
+        else
+          Error
+            (Invalid_schema "scratch generation identity changed during storage")
+
+  let load repository generation_id =
+    let* object_ =
+      Store.get repository (Generation_id.stored_object_id generation_id)
+      |> Result.map_error (fun error -> Store_error error)
+    in
+    if Envelope.object_type object_ <> Envelope.Scratch_generation then
+      Error
+        (Unexpected_object_type
+           {
+             expected = Envelope.Scratch_generation;
+             actual = Envelope.object_type object_;
+           })
+    else decode_root repository (Envelope.payload object_) generation_id
+
+  let id generation = generation.generation_id
+  let previous (generation : t) = generation.previous
+  let source_scratch_head (generation : t) = generation.source_scratch_head
+
+  let source_scratch_ref_generation (generation : t) =
+    generation.source_scratch_ref_generation
+
+  let source_retention_head (generation : t) = generation.source_retention_head
+
+  let source_retention_ref_generation generation =
+    generation.source_retention_ref_generation
+
+  let recent_window_seconds (generation : t) = generation.recent_window_seconds
+
+  let periodic_interval_seconds (generation : t) =
+    generation.periodic_interval_seconds
+
+  let storage_budget_bytes (generation : t) = generation.storage_budget_bytes
+  let segment_ids (generation : t) = generation.segment_ids
+  let entries (generation : t) = generation.entries
+  let physical_head (generation : t) = generation.physical_head
+  let retention_cutoff (generation : t) = generation.retention_cutoff
+  let cleanup_manifest (generation : t) = generation.cleanup_manifest
+end
+
 type repository = { store : Store.repository }
 type checkpoint_result = Created of Checkpoint.t | Unchanged of Checkpoint.t
 
+type resolved_checkpoint = {
+  resolved_logical : Checkpoint_id.t;
+  resolved_physical : Checkpoint_id.t;
+  resolved_value : Checkpoint.t;
+}
+
 type timeline_entry = {
+  logical_id : Checkpoint_id.t;
   checkpoint : Checkpoint.t;
   depth : int;
   effective_retention : retention_reason list;
@@ -1215,6 +1980,106 @@ type timeline_entry = {
 let open_repository store = { store }
 let scratch_head_name = "scratch-head"
 let retention_head_name = "retention-head"
+let scratch_generation_name = "scratch-generation"
+let resolved_logical_id resolved = resolved.resolved_logical
+let resolved_physical_id resolved = resolved.resolved_physical
+let resolved_checkpoint resolved = resolved.resolved_value
+
+let verify_generation_aliases repository generation =
+  List.fold_left
+    (fun result entry ->
+      let* () = result in
+      let logical = Generation.logical entry in
+      let physical = Generation.physical entry in
+      let* checkpoint =
+        Checkpoint.load repository.store physical
+        |> Result.map_error (fun error ->
+            Generation_alias_target_invalid
+              { logical; detail = error_to_string error })
+      in
+      if
+        Snapshot.Snapshot.equal_id
+          (Generation.snapshot entry)
+          (Checkpoint.snapshot checkpoint)
+      then Ok ()
+      else Error (Generation_alias_snapshot_mismatch logical))
+    (Ok ())
+    (Generation.entries generation)
+
+let active_generation repository =
+  let* reference =
+    Store.read_ref repository.store ~name:scratch_generation_name
+    |> Result.map_error (fun error -> Store_error error)
+  in
+  match reference with
+  | None -> Ok None
+  | Some reference -> (
+      match Store.Mutable_ref.target reference with
+      | None -> Error Scratch_generation_is_null
+      | Some identity ->
+          let* generation =
+            Generation.load repository.store
+              (Generation_id.of_stored_object_id identity)
+            |> Result.map_error (fun error ->
+                Generation_corrupt (error_to_string error))
+          in
+          let* () = verify_generation_aliases repository generation in
+          Ok (Some generation))
+
+let resolve_checkpoint repository logical_id =
+  let* generation = active_generation repository in
+  match generation with
+  | None ->
+      let* checkpoint = Checkpoint.load repository.store logical_id in
+      Ok
+        {
+          resolved_logical = logical_id;
+          resolved_physical = logical_id;
+          resolved_value = checkpoint;
+        }
+  | Some generation -> (
+      match
+        List.find_opt
+          (fun entry ->
+            Checkpoint_id.equal logical_id (Generation.logical entry))
+          (Generation.entries generation)
+      with
+      | Some entry ->
+          let physical_id = Generation.physical entry in
+          let* checkpoint =
+            Checkpoint.load repository.store physical_id
+            |> Result.map_error (fun error ->
+                Generation_alias_target_invalid
+                  { logical = logical_id; detail = error_to_string error })
+          in
+          if
+            not
+              (Snapshot.Snapshot.equal_id
+                 (Generation.snapshot entry)
+                 (Checkpoint.snapshot checkpoint))
+          then Error (Generation_alias_snapshot_mismatch logical_id)
+          else
+            Ok
+              {
+                resolved_logical = logical_id;
+                resolved_physical = physical_id;
+                resolved_value = checkpoint;
+              }
+      | None ->
+          let path =
+            Store.object_path repository.store
+              (Checkpoint_id.stored_object_id logical_id)
+          in
+          if not (Sys.file_exists path) then
+            Error (Checkpoint_not_retained logical_id)
+          else
+            let* checkpoint = Checkpoint.load repository.store logical_id in
+            Ok
+              {
+                resolved_logical = logical_id;
+                resolved_physical = logical_id;
+                resolved_value = checkpoint;
+              })
 
 let read_checkpoint_ref repository =
   let* reference =
@@ -1228,8 +2093,8 @@ let read_checkpoint_ref repository =
       | None -> Error Scratch_head_is_null
       | Some identity ->
           let identity = Checkpoint_id.of_stored_object_id identity in
-          let* checkpoint = Checkpoint.load repository.store identity in
-          Ok (Some (reference, checkpoint)))
+          let* resolved = resolve_checkpoint repository identity in
+          Ok (Some (reference, resolved)))
 
 let read_retention_ref repository =
   let* reference =
@@ -1268,7 +2133,11 @@ let create_initial repository ~snapshot ~created_at =
 
 let head repository =
   let* value = read_checkpoint_ref repository in
-  Ok (Option.map snd value)
+  Ok (Option.map (fun (_, resolved) -> resolved.resolved_value) value)
+
+let head_id repository =
+  let* value = read_checkpoint_ref repository in
+  Ok (Option.map (fun (_, resolved) -> resolved.resolved_logical) value)
 
 let checkpoint repository ~snapshot ~source ~observed_at ~created_at =
   let* _ =
@@ -1279,11 +2148,16 @@ let checkpoint repository ~snapshot ~source ~observed_at ~created_at =
   match current with
   | None -> Error Scratch_head_missing
   | Some (reference, parent) ->
-      if Snapshot.Snapshot.equal_id (Checkpoint.snapshot parent) snapshot then
-        Ok (Unchanged parent)
+      let parent_checkpoint = parent.resolved_value in
+      if
+        Snapshot.Snapshot.equal_id
+          (Checkpoint.snapshot parent_checkpoint)
+          snapshot
+      then Ok (Unchanged parent_checkpoint)
       else
         let* base =
-          Snapshot.Snapshot.load repository.store (Checkpoint.snapshot parent)
+          Snapshot.Snapshot.load repository.store
+            (Checkpoint.snapshot parent_checkpoint)
           |> Result.map_error (fun error -> Snapshot_error error)
         in
         let* resulting =
@@ -1295,16 +2169,16 @@ let checkpoint repository ~snapshot ~source ~observed_at ~created_at =
         let operations = State.diff ~from:base_state ~to_:resulting_state in
         let* replayed = State.apply base_state operations in
         if not (State.equal replayed resulting_state) then
-          Error (Replay_mismatch (Checkpoint.id parent))
+          Error (Replay_mismatch parent.resolved_logical)
         else
           let event =
-            Event.create ~parent:(Checkpoint.id parent)
-              ~base:(Checkpoint.snapshot parent)
+            Event.create ~parent:parent.resolved_logical
+              ~base:(Checkpoint.snapshot parent_checkpoint)
               ~resulting:snapshot ~operations ~source ~observed_at
           in
           let* event = Event.store repository.store event in
           let checkpoint =
-            Checkpoint.create ~parent:(Checkpoint.id parent) ~event ~snapshot
+            Checkpoint.create ~parent:parent.resolved_logical ~event ~snapshot
               ~created_at
           in
           let* identity = Checkpoint.store repository.store checkpoint in
@@ -1316,12 +2190,36 @@ let checkpoint repository ~snapshot ~source ~observed_at ~created_at =
           in
           Ok (Created checkpoint)
 
-let effective_retention repository checkpoint =
+let effective_retention repository ~logical_id checkpoint =
+  let* generation = active_generation repository in
+  let base, cutoff =
+    match generation with
+    | None -> (Checkpoint.intrinsic_retention checkpoint, None)
+    | Some generation -> (
+        match
+          List.find_opt
+            (fun entry ->
+              Checkpoint_id.equal logical_id (Generation.logical entry))
+            (Generation.entries generation)
+        with
+        | Some entry ->
+            ( Generation.effective_retention entry,
+              Generation.retention_cutoff generation )
+        | None ->
+            ( Checkpoint.intrinsic_retention checkpoint,
+              Generation.retention_cutoff generation ))
+  in
   let* _, head = read_retention_ref repository in
   let rec walk seen reversed = function
-    | None -> Ok reversed
+    | None -> (
+        match cutoff with
+        | None -> Ok reversed
+        | Some _ -> Error (Generation_corrupt "retention cutoff is unreachable")
+        )
     | Some identity ->
-        if List.exists (Retention_change_id.equal identity) seen then
+        if Option.exists (Retention_change_id.equal identity) cutoff then
+          Ok reversed
+        else if List.exists (Retention_change_id.equal identity) seen then
           Error (Retention_cycle identity)
         else
           let* change = Retention_change.load repository.store identity in
@@ -1336,7 +2234,7 @@ let effective_retention repository checkpoint =
           not
             (Checkpoint_id.equal
                (Retention_change.checkpoint change)
-               (Checkpoint.id checkpoint))
+               logical_id)
         then reasons
         else
           match Retention_change.action change with
@@ -1346,16 +2244,17 @@ let effective_retention repository checkpoint =
                 (fun reason ->
                   compare_retention reason (Retention_change.reason change) <> 0)
                 reasons)
-      (Checkpoint.intrinsic_retention checkpoint)
-      changes
+      base changes
   in
   Ok (normalise_retention reasons)
 
-let validate_child repository checkpoint =
+let validate_child repository resolved =
+  let checkpoint = resolved.resolved_value in
   match (Checkpoint.parent checkpoint, Checkpoint.event checkpoint) with
   | None, None -> Ok None
   | Some parent, Some event ->
-      let* parent_checkpoint = Checkpoint.load repository.store parent in
+      let* parent_resolved = resolve_checkpoint repository parent in
+      let parent_checkpoint = parent_resolved.resolved_value in
       let* event = Event.load repository.store event in
       if
         (not (Checkpoint_id.equal (Event.parent event) parent))
@@ -1365,7 +2264,7 @@ let validate_child repository checkpoint =
         || not
              (Snapshot.Snapshot.equal_id (Event.resulting event)
                 (Checkpoint.snapshot checkpoint))
-      then Error (Checkpoint_event_mismatch (Checkpoint.id checkpoint))
+      then Error (Checkpoint_event_mismatch resolved.resolved_logical)
       else
         let* parent_snapshot =
           Snapshot.Snapshot.load repository.store
@@ -1382,8 +2281,8 @@ let validate_child repository checkpoint =
         in
         let* child_state = State.of_snapshot repository.store child_snapshot in
         let* replayed = State.apply parent_state (Event.operations event) in
-        if State.equal replayed child_state then Ok (Some parent)
-        else Error (Replay_mismatch (Checkpoint.id checkpoint))
+        if State.equal replayed child_state then Ok (Some parent_resolved)
+        else Error (Replay_mismatch resolved.resolved_logical)
   | None, Some _ | Some _, None -> Error Invalid_checkpoint_structure
 
 let timeline repository ?start ~limit () =
@@ -1392,36 +2291,39 @@ let timeline repository ?start ~limit () =
     let* start =
       match start with
       | Some identity ->
-          Checkpoint.load repository.store identity |> Result.map Option.some
-      | None -> head repository
+          resolve_checkpoint repository identity |> Result.map Option.some
+      | None ->
+          read_checkpoint_ref repository
+          |> Result.map (Option.map (fun (_, resolved) -> resolved))
     in
     let rec walk seen depth remaining reversed = function
       | _ when remaining = 0 -> Ok (List.rev reversed)
       | None -> Ok (List.rev reversed)
-      | Some checkpoint ->
-          let identity = Checkpoint.id checkpoint in
+      | Some resolved ->
+          let identity = resolved.resolved_logical in
           if List.exists (Checkpoint_id.equal identity) seen then
             Error (Checkpoint_cycle identity)
           else
             let* effective_retention =
-              effective_retention repository checkpoint
+              effective_retention repository ~logical_id:identity
+                resolved.resolved_value
             in
-            let entry = { checkpoint; depth; effective_retention } in
-            let* parent = validate_child repository checkpoint in
-            let* parent =
-              match parent with
-              | None -> Ok None
-              | Some parent ->
-                  Checkpoint.load repository.store parent
-                  |> Result.map Option.some
+            let entry =
+              {
+                logical_id = identity;
+                checkpoint = resolved.resolved_value;
+                depth;
+                effective_retention;
+              }
             in
+            let* parent = validate_child repository resolved in
             walk (identity :: seen) (depth + 1) (remaining - 1)
               (entry :: reversed) parent
     in
     walk [] 0 limit [] start
 
 let change_retention repository checkpoint ~action ~reason ~changed_at =
-  let* _ = Checkpoint.load repository.store checkpoint in
+  let* _ = resolve_checkpoint repository checkpoint in
   let* reference, previous = read_retention_ref repository in
   let change =
     Retention_change.create ~previous ~checkpoint ~action ~reason ~changed_at
@@ -1504,9 +2406,9 @@ module Restore = struct
            })
 
   let checked_target repository target =
-    let* checkpoint = Checkpoint.load repository.store target in
+    let* resolved = resolve_checkpoint repository target in
     let* _ = timeline repository ~start:target ~limit:1 () in
-    Ok checkpoint
+    Ok resolved.resolved_value
 
   let build repository ~current_snapshot ~target_checkpoint ~safety_checkpoint
       ~require_current_head =
@@ -1524,11 +2426,12 @@ module Restore = struct
     let* current_head = read_checkpoint_ref repository in
     let expected_head =
       match current_head with
-      | Some (reference, checkpoint) ->
+      | Some (reference, resolved) ->
+          let checkpoint = resolved.resolved_value in
           let expected =
             match safety_checkpoint with
             | Some safety ->
-                Checkpoint_id.equal safety (Checkpoint.id checkpoint)
+                Checkpoint_id.equal safety resolved.resolved_logical
             | None ->
                 (not require_current_head)
                 || Snapshot.Snapshot.equal_id current_snapshot

@@ -30,4 +30,9 @@ links, timestamps, intrinsic retention, and immutable pin changes.
 `scratch-v1-head.ref.hex` is the exact checksummed mutable-ref v1 byte record;
 it is deliberately not an Envelope-1 object.
 
+`scratch-v1-cleanup-manifest.peng.hex`, `scratch-v1-generation-segment.peng.hex`,
+and `scratch-v1-generation.peng.hex` are ADR-024's canonical immutable cleanup,
+bounded alias-segment, and generation-root objects. `scratch-v1-generation.ref.hex`
+is the unchanged mutable-ref v1 encoding when naming a generation.
+
 Changing any fixture bytes requires a format decision and retained compatibility evidence; adding a new schema requires a new named fixture.

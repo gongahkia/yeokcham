@@ -53,6 +53,7 @@ type error =
 val error_to_string : error -> string
 val repository_format : string
 val max_object_bytes : int
+val root : repository -> string
 val init : root:string -> (repository, error) result
 val open_repository : root:string -> (repository, error) result
 val object_path : repository -> Stored_object_id.t -> string
@@ -67,3 +68,10 @@ val compare_and_swap_ref :
   expected:Mutable_ref.t option ->
   target:Stored_object_id.t option ->
   (Mutable_ref.t, error) result
+
+val with_lock :
+  repository ->
+  name:string ->
+  on_error:(error -> 'e) ->
+  (unit -> ('a, 'e) result) ->
+  ('a, 'e) result

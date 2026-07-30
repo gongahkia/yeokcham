@@ -113,7 +113,7 @@ let timeline root arguments =
               Printf.printf "%d %s %Ld %s\n" entry.Scratch.depth
                 (Store.Stored_object_id.to_hex
                    (Scratch.Checkpoint_id.stored_object_id
-                      (Scratch.Checkpoint.id checkpoint)))
+                      entry.Scratch.logical_id))
                 (Scratch.Checkpoint.created_at checkpoint)
                 retention)
             entries)
@@ -171,43 +171,44 @@ let parse_int64 value =
 
 let compact root arguments =
   let default = Compaction.Policy.default in
-  let rec parse dry_run explain recent periodic budget timestamp = function
+  let rec parse mode explain recent periodic budget timestamp = function
     | [] ->
-        if (not dry_run) || not explain then exit 2
-        else
-          let policy =
-            Compaction.Policy.create ~recent_window_seconds:recent
-              ~periodic_interval_seconds:periodic ~storage_budget_bytes:budget
-            |> Result.map_error Compaction.Policy.error_to_string
-          in
-          (policy, Option.value timestamp ~default:(now ()))
+        let policy =
+          Compaction.Policy.create ~recent_window_seconds:recent
+            ~periodic_interval_seconds:periodic ~storage_budget_bytes:budget
+          |> Result.map_error Compaction.Policy.error_to_string
+        in
+        (mode, explain, policy, Option.value timestamp ~default:(now ()))
     | "--dry-run" :: rest ->
-        parse true explain recent periodic budget timestamp rest
+        parse `Dry_run explain recent periodic budget timestamp rest
+    | "--resume" :: rest ->
+        parse `Resume explain recent periodic budget timestamp rest
+    | "--prune" :: rest ->
+        parse `Prune explain recent periodic budget timestamp rest
     | "--explain" :: rest ->
-        parse dry_run true recent periodic budget timestamp rest
+        parse mode true recent periodic budget timestamp rest
     | "--recent-seconds" :: value :: rest -> (
         match parse_int64 value with
-        | Some value ->
-            parse dry_run explain value periodic budget timestamp rest
+        | Some value -> parse mode explain value periodic budget timestamp rest
         | None -> exit 2)
     | "--periodic-seconds" :: value :: rest -> (
         match parse_int64 value with
-        | Some value -> parse dry_run explain recent value budget timestamp rest
+        | Some value -> parse mode explain recent value budget timestamp rest
         | None -> exit 2)
     | "--storage-budget-bytes" :: value :: rest -> (
         match parse_int64 value with
         | Some value ->
-            parse dry_run explain recent periodic (Some value) timestamp rest
+            parse mode explain recent periodic (Some value) timestamp rest
         | None -> exit 2)
     | "--now-unix-seconds" :: value :: rest -> (
         match parse_int64 value with
         | Some value ->
-            parse dry_run explain recent periodic budget (Some value) rest
+            parse mode explain recent periodic budget (Some value) rest
         | None -> exit 2)
     | _ -> exit 2
   in
-  let policy, timestamp =
-    parse false false
+  let mode, explain, policy, timestamp =
+    parse `Activate false
       (Compaction.Policy.recent_window_seconds default)
       (Compaction.Policy.periodic_interval_seconds default)
       (Compaction.Policy.storage_budget_bytes default)
@@ -219,10 +220,47 @@ let compact root arguments =
       match open_scratch root with
       | Error error -> fail Fun.id error
       | Ok (store, scratch) -> (
-          match Compaction.analyze ~store scratch ~policy ~now:timestamp with
-          | Error error -> fail Compaction.error_to_string error
-          | Ok plan -> Compaction.render_explain plan |> List.iter print_endline
-          ))
+          let print_cleanup report =
+            Printf.printf
+              "generation=%s quarantined-objects=%d quarantined-bytes=%Ld \
+               pruned-objects=%d pruned-bytes=%Ld already-quarantined=%d \
+               already-pruned=%d\n"
+              (Store.Stored_object_id.to_hex
+                 (Scratch.Generation_id.stored_object_id
+                    report.Compaction.generation))
+              report.Compaction.quarantined_objects
+              report.Compaction.quarantined_bytes
+              report.Compaction.pruned_objects report.Compaction.pruned_bytes
+              report.Compaction.already_quarantined_objects
+              report.Compaction.already_pruned_objects
+          in
+          match mode with
+          | `Dry_run -> (
+              match
+                Compaction.analyze ~store scratch ~policy ~now:timestamp
+              with
+              | Error error -> fail Compaction.error_to_string error
+              | Ok plan ->
+                  Compaction.render_explain plan |> List.iter print_endline)
+          | `Activate -> (
+              match
+                Compaction.activate ~store scratch ~policy ~now:timestamp
+              with
+              | Error error -> fail Compaction.error_to_string error
+              | Ok execution ->
+                  if explain then
+                    Compaction.render_explain
+                      (Compaction.execution_plan execution)
+                    |> List.iter print_endline;
+                  print_cleanup (Compaction.execution_cleanup execution))
+          | `Resume -> (
+              match Compaction.resume_cleanup ~store scratch with
+              | Error error -> fail Compaction.error_to_string error
+              | Ok report -> print_cleanup report)
+          | `Prune -> (
+              match Compaction.prune ~store scratch with
+              | Error error -> fail Compaction.error_to_string error
+              | Ok report -> print_cleanup report)))
 
 let watch root arguments =
   let interval_ms, debounce_ms, iterations =

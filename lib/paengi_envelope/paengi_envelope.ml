@@ -25,6 +25,9 @@ type object_type =
   | Chunk
   | File_manifest
   | Retention_change
+  | Scratch_generation_segment
+  | Scratch_generation
+  | Scratch_cleanup_manifest
 
 let object_type_code = function
   | Content -> 1
@@ -42,6 +45,9 @@ let object_type_code = function
   | Chunk -> 13
   | File_manifest -> 14
   | Retention_change -> 15
+  | Scratch_generation_segment -> 16
+  | Scratch_generation -> 17
+  | Scratch_cleanup_manifest -> 18
 
 let object_type_of_code = function
   | 1 -> Some Content
@@ -59,6 +65,9 @@ let object_type_of_code = function
   | 13 -> Some Chunk
   | 14 -> Some File_manifest
   | 15 -> Some Retention_change
+  | 16 -> Some Scratch_generation_segment
+  | 17 -> Some Scratch_generation
+  | 18 -> Some Scratch_cleanup_manifest
   | _ -> None
 
 type creation_error =

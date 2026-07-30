@@ -48,6 +48,17 @@ type blocked_removal = {
 }
 
 type plan
+type execution
+
+type cleanup_report = {
+  generation : Paengi_scratch.Generation_id.t;
+  quarantined_objects : int;
+  quarantined_bytes : int64;
+  pruned_objects : int;
+  pruned_bytes : int64;
+  already_quarantined_objects : int;
+  already_pruned_objects : int;
+}
 
 val policy : plan -> Policy.t
 val selections : plan -> Policy.selection list
@@ -68,3 +79,26 @@ val analyze :
   (plan, error) result
 
 val render_explain : plan -> string list
+
+val activate :
+  ?cleanup:bool ->
+  ?before_publish:(unit -> unit) ->
+  store:Paengi_store.repository ->
+  Paengi_scratch.repository ->
+  policy:Policy.t ->
+  now:int64 ->
+  (execution, error) result
+
+val execution_generation : execution -> Paengi_scratch.Generation_id.t
+val execution_plan : execution -> plan
+val execution_cleanup : execution -> cleanup_report
+
+val resume_cleanup :
+  store:Paengi_store.repository ->
+  Paengi_scratch.repository ->
+  (cleanup_report, error) result
+
+val prune :
+  store:Paengi_store.repository ->
+  Paengi_scratch.repository ->
+  (cleanup_report, error) result

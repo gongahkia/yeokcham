@@ -261,6 +261,7 @@ let repository_format =
   ^ "object-format-version 1\n"
 
 let max_object_bytes = 128 * 1024 * 1024
+let root repository = repository.root
 let object_domain = "paengi:object:v1\000"
 let format_name = "format"
 let paengi_name = ".paengi"
@@ -695,6 +696,21 @@ let with_ref_lock repository name action =
   | Ok () -> result
   | Error release_error -> (
       match result with Ok _ -> Error release_error | Error _ -> result)
+
+let with_lock repository ~name ~on_error action =
+  match checked_ref_name name with
+  | Error error -> Error (on_error error)
+  | Ok () -> (
+      match acquire_ref_lock repository name with
+      | Error error -> Error (on_error error)
+      | Ok lock_path -> (
+          let result = action () in
+          match release_ref_lock repository lock_path with
+          | Ok () -> result
+          | Error error -> (
+              match result with
+              | Ok _ -> Error (on_error error)
+              | Error _ -> result)))
 
 let rename_ref_temporary ~temporary ~final =
   try
