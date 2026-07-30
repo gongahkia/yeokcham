@@ -379,8 +379,17 @@ fn remote_helper_serves_blob_none_and_size_filtered_promisor_clones() {
         &source,
         &["config", "user.email", "yeokcham-test@example.invalid"],
     );
+    fs::write(source.join("historical.bin"), vec![0x48; 64 * 1024]).expect("write historical blob");
+    run_git(&source, &["add", "historical.bin"]);
+    run_git(&source, &["commit", "-m", "historical blob fixture"]);
+    let historical_blob =
+        String::from_utf8(run_git(&source, &["rev-parse", "HEAD:historical.bin"]))
+            .expect("historical blob ID is UTF-8")
+            .trim()
+            .to_owned();
+    fs::remove_file(source.join("historical.bin")).expect("remove historical blob");
     fs::write(source.join("large.bin"), vec![0x4b; 64 * 1024]).expect("write large blob");
-    run_git(&source, &["add", "large.bin"]);
+    run_git(&source, &["add", "-A"]);
     run_git(&source, &["commit", "-m", "partial clone fixture"]);
     let output = Command::new(env!("CARGO_BIN_EXE_yeokcham"))
         .args(["init", "--from-git"])
@@ -396,6 +405,7 @@ fn remote_helper_serves_blob_none_and_size_filtered_promisor_clones() {
 
     let helper_path = remote_helper_path();
     let remote = remote_uri(&repository);
+    let historical_missing = format!("?{historical_blob}");
     for (filter, name) in [("blob:none", "blob-none"), ("blob:limit=1", "blob-limit")] {
         let checkout = directory.path().join(name);
         let output = Command::new("git")
@@ -432,6 +442,12 @@ fn remote_helper_serves_blob_none_and_size_filtered_promisor_clones() {
                 .any(|line| line.starts_with('?')),
             "filtered clone must retain at least one promisor object",
         );
+        assert!(
+            String::from_utf8_lossy(&missing)
+                .lines()
+                .any(|line| line == historical_missing),
+            "filtered clone must not download an unrelated historical blob",
+        );
         let output = Command::new("git")
             .arg("-C")
             .arg(&checkout)
@@ -447,6 +463,15 @@ fn remote_helper_serves_blob_none_and_size_filtered_promisor_clones() {
         assert_eq!(
             fs::read(source.join("large.bin")).expect("read source"),
             fs::read(checkout.join("large.bin")).expect("read checkout")
+        );
+        assert!(
+            String::from_utf8_lossy(&run_git(
+                &checkout,
+                &["rev-list", "--objects", "--missing=print", "HEAD"],
+            ))
+            .lines()
+            .any(|line| line == historical_missing),
+            "hydration must not download an unrelated historical blob",
         );
         run_git(&checkout, &["fsck", "--full", "--strict"]);
     }

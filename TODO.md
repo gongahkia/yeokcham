@@ -253,7 +253,7 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 
 ### Exit criteria
 
-- [ ] A documented clone workflow avoids downloading unrelated historical blobs.
+- [x] A documented clone workflow avoids downloading unrelated historical blobs.
 - [x] Cache deletion never changes repository correctness.
 - [ ] Benchmark results show transfer and latency behaviour under cold and warm cache.
 
