@@ -166,7 +166,7 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 
 ### Encryption
 
-- [ ] Select primitives through ADR.
+- [x] Select primitives through ADR.
 - [ ] Implement repository key generation.
 - [ ] Implement key hierarchy.
 - [ ] Encrypt segment records or complete segments.

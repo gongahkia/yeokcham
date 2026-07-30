@@ -58,7 +58,7 @@ A reasonable initial design:
 - Ed25519 signatures for device ref journal entries.
 - Cryptographic hashes for plaintext identities and segment integrity.
 
-The final choice must be documented in an ADR and reviewed before declaring a stable format.
+ADR-0064 selects the initial suite and versioned parameters. A new format version is required to change any primitive, KDF parameter, nonce size, associated-data field, or domain-separation label.
 
 Current local `YKRE` V1 ref events use SHA-256 checksums and predecessor-state binding to detect corruption, stale transitions, and divergence. V2 records additionally carry an Ed25519 public key and detached signature over their canonical transition fields; decoding verifies that signature before materialization. A valid V2 signature proves possession of its embedded key only: Yeokcham has no persistent key storage, device-key registration, authorization policy, or revocation yet. `sync` and the remote helper therefore remain V1 single-trusted-local-writer workflows.
 

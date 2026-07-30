@@ -301,7 +301,7 @@ The repository layer must not assume:
 
 ### 3.10 Encryption layer
 
-Encryption occurs after chunking and compression, before remote persistence.
+Encryption occurs after chunking and compression, before remote persistence. ADR-0064 fixes the initial suite as XChaCha20-Poly1305 with fresh 192-bit nonces, HKDF-SHA-256 domain-separated subkeys, Argon2id passphrase wrapping, system entropy through `getrandom`, and `zeroize`-backed secret storage. These values are format inputs, not runtime preferences.
 
 Suggested envelope structure:
 
