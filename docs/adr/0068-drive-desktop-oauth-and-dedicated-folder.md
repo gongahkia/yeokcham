@@ -36,7 +36,7 @@ Request unrestricted Drive access. This has more consent and verification burden
 
 Use Option 1. The current core exposes a bounded `DriveOAuthLoopback`: it binds only `127.0.0.1`, generates fresh state and PKCE verifier bytes through the operating-system random source, uses `S256`, and sends the code only to the fixed Google token endpoint through a bounded HTTPS transport. A successful exchange accepts only Bearer access/refresh token pairs and validates a returned scope when present. `KeyringDriveCredentialStore` writes only the refresh token to the platform Keychain/keyring under an account label derived from SHA-256 of the client ID. Default diagnostics redact authorization state, verifier, HTTP body, access token, and refresh token.
 
-The Drive root-folder identifier, Drive file mapping, token refresh, and a hardware-device OAuth flow are separate subsequent slices. The OAuth client ID is operator configuration, not a secret embedded in Yeokcham. The `yeokcham drive auth` command prints rather than launches the consent URL; its caller can choose a fixed loopback port for SSH forwarding from a headless host to a browser-capable machine.
+The Drive root-folder identifier, Drive file mapping, and a hardware-device OAuth flow are separate subsequent slices. The OAuth client ID is operator configuration, not a secret embedded in Yeokcham. A stored credential can refresh a short-lived in-memory access token at the fixed Google token endpoint without changing its Keychain/keyring refresh token. The `yeokcham drive auth` command prints rather than launches the consent URL; its caller can choose a fixed loopback port for SSH forwarding from a headless host to a browser-capable machine.
 
 ## Consequences
 
@@ -46,7 +46,7 @@ The selected folder can be inspected, retained, shared deliberately, and used fo
 
 ## Security and recovery
 
-The listener is loopback-only and accepts one bounded HTTP callback. State mismatch, malformed callbacks, non-Bearer token types, omitted refresh tokens, unsupported scopes, and non-success token responses fail closed. Network, JSON, and platform-credential error sources are retained for explicit diagnosis but default error rendering omits them. OAuth credentials do not enter repository bytes, manifests, key exports, or default logs.
+The listener is loopback-only and accepts one bounded HTTP callback. State mismatch, malformed callbacks, non-Bearer token types, omitted refresh tokens, unsupported scopes, and non-success token responses fail closed. Refresh accepts only a new Bearer access token and does not silently replace the persisted refresh token. Network, JSON, and platform-credential error sources are retained for explicit diagnosis but default error rendering omits them. OAuth credentials do not enter repository bytes, manifests, key exports, or default logs.
 
 ## Compatibility and migration
 

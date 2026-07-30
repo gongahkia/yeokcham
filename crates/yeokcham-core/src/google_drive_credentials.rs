@@ -1,7 +1,10 @@
 use sha2::{Digest, Sha256};
 use zeroize::Zeroizing;
 
-use crate::{DriveOAuthConfiguration, DriveOAuthToken, Error, ErrorKind, Result};
+use crate::{
+    DriveAccessToken, DriveOAuthConfiguration, DriveOAuthToken, DriveOAuthTransport, Error,
+    ErrorKind, Result,
+};
 
 const CREDENTIAL_SERVICE: &str = "io.github.yeokcham.google-drive";
 const MAXIMUM_REFRESH_TOKEN_BYTES: usize = 16 * 1024;
@@ -15,6 +18,15 @@ impl DriveStoredCredential {
     /// Returns the refresh token for an immediate Google token-refresh request only.
     pub fn refresh_token(&self) -> &str {
         &self.refresh_token
+    }
+
+    /// Exchanges this stored refresh token for one new in-memory bearer access token.
+    pub fn refresh_access_token<T: DriveOAuthTransport>(
+        &self,
+        configuration: &DriveOAuthConfiguration,
+        transport: &T,
+    ) -> Result<DriveAccessToken> {
+        configuration.refresh_access_token(&self.refresh_token, transport)
     }
 }
 
@@ -123,10 +135,32 @@ mod tests {
     use std::{collections::BTreeMap, sync::Mutex};
 
     use super::*;
+    use crate::DriveOAuthHttpResponse;
 
     #[derive(Default)]
     struct MemoryCredentialStore {
         credentials: Mutex<BTreeMap<String, String>>,
+    }
+
+    struct RefreshTransport {
+        form: Mutex<BTreeMap<String, String>>,
+    }
+
+    impl DriveOAuthTransport for RefreshTransport {
+        fn post_form(
+            &self,
+            _endpoint: &str,
+            form: &[(&str, &str)],
+        ) -> Result<DriveOAuthHttpResponse> {
+            self.form.lock().expect("form mutex").extend(
+                form.iter()
+                    .map(|(name, value)| ((*name).to_owned(), (*value).to_owned())),
+            );
+            DriveOAuthHttpResponse::new(
+                200,
+                br#"{"access_token":"refreshed-access-token","token_type":"Bearer","expires_in":3600}"#.to_vec(),
+            )
+        }
     }
 
     impl DriveCredentialStore for MemoryCredentialStore {
@@ -190,6 +224,37 @@ mod tests {
                 .expect_err("deleted token")
                 .kind(),
             ErrorKind::NotFound
+        );
+    }
+
+    #[test]
+    fn refreshes_a_loaded_credential_without_persisting_an_access_token() {
+        let store = MemoryCredentialStore::default();
+        let configuration = configuration();
+        store.store(&configuration, &token()).expect("store token");
+        let credential = store.load(&configuration).expect("load token");
+        let transport = RefreshTransport {
+            form: Mutex::new(BTreeMap::new()),
+        };
+
+        let access_token = credential
+            .refresh_access_token(&configuration, &transport)
+            .expect("refresh access token");
+        assert_eq!(access_token.access_token(), "refreshed-access-token");
+        assert_eq!(
+            transport
+                .form
+                .lock()
+                .expect("form mutex")
+                .get("refresh_token"),
+            Some(&"refresh-token".to_owned())
+        );
+        assert_eq!(
+            store
+                .load(&configuration)
+                .expect("stored token")
+                .refresh_token(),
+            "refresh-token"
         );
     }
 }

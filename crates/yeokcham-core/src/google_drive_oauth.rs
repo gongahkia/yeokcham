@@ -58,6 +58,29 @@ impl DriveOAuthConfiguration {
         DriveOAuthLoopback::begin(self, port)
     }
 
+    /// Exchanges a persisted refresh token for a new in-memory bearer access token.
+    pub fn refresh_access_token<T: DriveOAuthTransport>(
+        &self,
+        refresh_token: &str,
+        transport: &T,
+    ) -> Result<DriveAccessToken> {
+        if refresh_token.is_empty() || refresh_token.len() > MAXIMUM_TOKEN_RESPONSE_BYTES {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "Google OAuth refresh token is invalid",
+            ));
+        }
+        let response = transport.post_form(
+            TOKEN_ENDPOINT,
+            &[
+                ("client_id", &self.client_id),
+                ("grant_type", "refresh_token"),
+                ("refresh_token", refresh_token),
+            ],
+        )?;
+        parse_access_token_response(response)
+    }
+
     pub(crate) fn client_id(&self) -> &str {
         &self.client_id
     }
@@ -206,6 +229,30 @@ impl DriveOAuthToken {
 impl std::fmt::Debug for DriveOAuthToken {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.write_str("DriveOAuthToken(<redacted>)")
+    }
+}
+
+/// One short-lived bearer access token obtained through Google OAuth.
+pub struct DriveAccessToken {
+    access_token: Zeroizing<String>,
+    expires_in: Duration,
+}
+
+impl DriveAccessToken {
+    /// Returns the bearer token for one immediate authenticated Google API request.
+    pub fn access_token(&self) -> &str {
+        &self.access_token
+    }
+
+    /// Returns the lifetime reported by Google for this access token.
+    pub const fn expires_in(&self) -> Duration {
+        self.expires_in
+    }
+}
+
+impl std::fmt::Debug for DriveAccessToken {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("DriveAccessToken(<redacted>)")
     }
 }
 
@@ -407,6 +454,26 @@ fn exchange_code<T: DriveOAuthTransport>(
 }
 
 fn parse_token_response(response: DriveOAuthHttpResponse) -> Result<DriveOAuthToken> {
+    let (access_token, expires_in, value) = parse_access_token_values(response)?;
+    let refresh_token = required_token_string(&value, "refresh_token")?;
+    Ok(DriveOAuthToken {
+        access_token,
+        refresh_token,
+        expires_in,
+    })
+}
+
+fn parse_access_token_response(response: DriveOAuthHttpResponse) -> Result<DriveAccessToken> {
+    let (access_token, expires_in, _) = parse_access_token_values(response)?;
+    Ok(DriveAccessToken {
+        access_token,
+        expires_in,
+    })
+}
+
+fn parse_access_token_values(
+    response: DriveOAuthHttpResponse,
+) -> Result<(Zeroizing<String>, Duration, Value)> {
     if response.status() != 200 {
         return Err(Error::new(
             ErrorKind::Conflict,
@@ -421,7 +488,6 @@ fn parse_token_response(response: DriveOAuthHttpResponse) -> Result<DriveOAuthTo
         )
     })?;
     let access_token = required_token_string(&value, "access_token")?;
-    let refresh_token = required_token_string(&value, "refresh_token")?;
     let token_type = required_token_string(&value, "token_type")?;
     if !token_type.eq_ignore_ascii_case("bearer") {
         return Err(Error::new(
@@ -456,11 +522,7 @@ fn parse_token_response(response: DriveOAuthHttpResponse) -> Result<DriveOAuthTo
                 "Google OAuth token expiration is invalid",
             )
         })?;
-    Ok(DriveOAuthToken {
-        access_token,
-        refresh_token,
-        expires_in: Duration::from_secs(expires_in),
-    })
+    Ok((access_token, Duration::from_secs(expires_in), value))
 }
 
 fn required_token_string(value: &Value, field: &str) -> Result<Zeroizing<String>> {
@@ -843,5 +905,29 @@ mod tests {
                 .kind(),
             ErrorKind::CorruptData
         );
+    }
+
+    #[test]
+    fn refreshes_an_access_token_without_requiring_a_new_refresh_token() {
+        let transport = FakeTransport::new(
+            DriveOAuthHttpResponse::new(
+                200,
+                br#"{"access_token":"fresh-access-token","token_type":"Bearer","scope":"https://www.googleapis.com/auth/drive.file","expires_in":3600}"#.to_vec(),
+            )
+            .expect("response"),
+        );
+
+        let token = configuration()
+            .refresh_access_token("persisted-refresh-token", &transport)
+            .expect("refresh token");
+        let form = transport.form.lock().expect("form mutex");
+        assert_eq!(form.get("grant_type"), Some(&"refresh_token".to_owned()));
+        assert_eq!(
+            form.get("refresh_token"),
+            Some(&"persisted-refresh-token".to_owned())
+        );
+        assert_eq!(token.access_token(), "fresh-access-token");
+        assert_eq!(token.expires_in(), Duration::from_secs(3600));
+        assert_eq!(format!("{token:?}"), "DriveAccessToken(<redacted>)");
     }
 }

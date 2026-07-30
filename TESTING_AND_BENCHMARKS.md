@@ -31,6 +31,7 @@ Cover:
 - Drive Desktop OAuth PKCE URL construction, loopback state binding, malformed-token rejection, bounded transport responses, and credential redaction.
 - Drive credential persistence, retrieval, deletion, missing-entry handling, and refresh-token redaction through an injected store seam; unit tests never access the user credential store.
 - Drive CLI parsing for interactive and fixed-port forwarded authorization; integration tests do not create credentials or make network calls.
+- Drive refresh exchange with the stored credential, a fixed token endpoint, `refresh_token` grant parameters, access-token lifetime validation, and no refresh-token replacement requirement.
 - Encryption and decryption.
 - Storage policy selection.
 

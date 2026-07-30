@@ -68,8 +68,8 @@ pub use google_drive_credentials::{
     DriveCredentialStore, DriveStoredCredential, KeyringDriveCredentialStore,
 };
 pub use google_drive_oauth::{
-    DRIVE_FILE_SCOPE, DriveOAuthConfiguration, DriveOAuthHttpResponse, DriveOAuthLoopback,
-    DriveOAuthToken, DriveOAuthTransport, UreqDriveOAuthTransport,
+    DRIVE_FILE_SCOPE, DriveAccessToken, DriveOAuthConfiguration, DriveOAuthHttpResponse,
+    DriveOAuthLoopback, DriveOAuthToken, DriveOAuthTransport, UreqDriveOAuthTransport,
 };
 pub use key_export::RepositoryKeyExport;
 pub use manifest_id::ManifestId;

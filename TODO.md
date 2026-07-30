@@ -190,7 +190,7 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 - [x] Implement OAuth flow.
 - [x] Store credentials in OS credential store.
 - [x] Support headless/manual authentication where practical.
-- [ ] Implement token refresh.
+- [x] Implement token refresh.
 - [ ] Document required scopes.
 
 ### Storage behaviour
