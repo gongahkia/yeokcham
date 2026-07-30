@@ -51,6 +51,15 @@ On another machine, reauthorize the same Desktop OAuth client, supply the same f
 yeokcham drive restore --client-id <desktop-client-id> --folder-id <drive-folder-id> --key-export <recovery-key-export> --passphrase-stdin <destination>
 ```
 
+`drive push` and `drive clone` are explicit aliases for this initial immutable snapshot transfer. They make the two-machine workflow clear without claiming Git smart-protocol support:
+
+```text
+yeokcham drive push --client-id <desktop-client-id> --folder-id <drive-folder-id> --key-export <recovery-key-export> --passphrase-stdin <yeokcham-repo>
+yeokcham drive clone --client-id <desktop-client-id> --folder-id <drive-folder-id> --key-export <recovery-key-export> --passphrase-stdin <destination>
+```
+
+The snapshot manifest is immutable. A changed repository cannot replace an accepted snapshot; the command reports a conflict. Use this transfer for the initial copy and recovery only, not as a mutable remote-push substitute.
+
 The restore command verifies the reconstructed repository before it reports success. To verify backend data without retaining a repository, use:
 
 ```text
@@ -64,6 +73,6 @@ yeokcham drive verify --client-id <desktop-client-id> --folder-id <drive-folder-
 - `DriveBackend` maps logical keys to keyed opaque file names, stores an authenticated encrypted key capsule before each physical payload, uses bounded pagination and a positive metadata cache, and uses Google resumable uploads. The cache never records absence, create checks always query Drive, and local deletes invalidate cached metadata. Repository payloads must be wrapped in `EncryptedBackend`; the physical Drive backend does not make caller bytes confidential by itself.
 - Create races fail closed. If final confirmation identifies the newly-created duplicate next to one existing file, Yeokcham removes only its own duplicate and returns `AlreadyExists`; it never replaces an existing Drive file. Incomplete resumable sessions are not accepted as backend objects and can be abandoned safely.
 - Standalone `chunks/` objects are rejected. Content-defined chunks stay packed in immutable segments, preventing one Drive file per chunk.
-- Drive synchronization currently publishes the immutable recovery snapshot; direct remote-helper clone/fetch and multi-device journal reconciliation are not yet available.
+- Drive synchronization currently publishes the immutable recovery snapshot. The core exposes signed remote device-journal fetch, reconciliation, stale-write rejection, divergence reporting, and root-pinned registration/revocation; the CLI does not yet own device-key or root-anchor workflows. Direct remote-helper clone/fetch remains unavailable.
 - Only the operator's configured Desktop OAuth client can access its app-created Drive files under `drive.file`.
 - Sharing or moving the dedicated root remains a later Drive backend workflow and must retain opaque encrypted object names.

@@ -74,7 +74,19 @@ enum Command {
         key_export: PathBuf,
         repository: PathBuf,
     },
+    DrivePush {
+        client_id: String,
+        folder_id: DriveFolderId,
+        key_export: PathBuf,
+        repository: PathBuf,
+    },
     DriveRestore {
+        client_id: String,
+        folder_id: DriveFolderId,
+        key_export: PathBuf,
+        destination: PathBuf,
+    },
+    DriveClone {
         client_id: String,
         folder_id: DriveFolderId,
         key_export: PathBuf,
@@ -131,12 +143,24 @@ fn main() -> ExitCode {
             key_export,
             repository,
         } => drive_backup(client_id, folder_id, key_export, repository),
+        Command::DrivePush {
+            client_id,
+            folder_id,
+            key_export,
+            repository,
+        } => drive_push(client_id, folder_id, key_export, repository),
         Command::DriveRestore {
             client_id,
             folder_id,
             key_export,
             destination,
         } => drive_restore(client_id, folder_id, key_export, destination),
+        Command::DriveClone {
+            client_id,
+            folder_id,
+            key_export,
+            destination,
+        } => drive_clone(client_id, folder_id, key_export, destination),
         Command::DriveVerify {
             client_id,
             folder_id,
@@ -244,36 +268,62 @@ fn parse_drive(arguments: &[OsString]) -> Result<Command> {
         });
     }
     if arguments.len() == 10
-        && arguments[1].as_os_str() == OsStr::new("backup")
+        && (arguments[1].as_os_str() == OsStr::new("backup")
+            || arguments[1].as_os_str() == OsStr::new("push"))
         && arguments[2].as_os_str() == OsStr::new("--client-id")
         && arguments[4].as_os_str() == OsStr::new("--folder-id")
         && arguments[6].as_os_str() == OsStr::new("--key-export")
         && arguments[8].as_os_str() == OsStr::new("--passphrase-stdin")
     {
-        return Ok(Command::DriveBackup {
-            client_id: arguments[3].to_str().ok_or_else(usage_error)?.to_owned(),
-            folder_id: DriveFolderId::new(
-                arguments[5].to_str().ok_or_else(usage_error)?.to_owned(),
-            )?,
-            key_export: PathBuf::from(&arguments[7]),
-            repository: PathBuf::from(&arguments[9]),
-        });
+        let client_id = arguments[3].to_str().ok_or_else(usage_error)?.to_owned();
+        let folder_id =
+            DriveFolderId::new(arguments[5].to_str().ok_or_else(usage_error)?.to_owned())?;
+        let key_export = PathBuf::from(&arguments[7]);
+        let repository = PathBuf::from(&arguments[9]);
+        return if arguments[1].as_os_str() == OsStr::new("push") {
+            Ok(Command::DrivePush {
+                client_id,
+                folder_id,
+                key_export,
+                repository,
+            })
+        } else {
+            Ok(Command::DriveBackup {
+                client_id,
+                folder_id,
+                key_export,
+                repository,
+            })
+        };
     }
     if arguments.len() == 10
-        && arguments[1].as_os_str() == OsStr::new("restore")
+        && (arguments[1].as_os_str() == OsStr::new("restore")
+            || arguments[1].as_os_str() == OsStr::new("clone"))
         && arguments[2].as_os_str() == OsStr::new("--client-id")
         && arguments[4].as_os_str() == OsStr::new("--folder-id")
         && arguments[6].as_os_str() == OsStr::new("--key-export")
         && arguments[8].as_os_str() == OsStr::new("--passphrase-stdin")
     {
-        return Ok(Command::DriveRestore {
-            client_id: arguments[3].to_str().ok_or_else(usage_error)?.to_owned(),
-            folder_id: DriveFolderId::new(
-                arguments[5].to_str().ok_or_else(usage_error)?.to_owned(),
-            )?,
-            key_export: PathBuf::from(&arguments[7]),
-            destination: PathBuf::from(&arguments[9]),
-        });
+        let client_id = arguments[3].to_str().ok_or_else(usage_error)?.to_owned();
+        let folder_id =
+            DriveFolderId::new(arguments[5].to_str().ok_or_else(usage_error)?.to_owned())?;
+        let key_export = PathBuf::from(&arguments[7]);
+        let destination = PathBuf::from(&arguments[9]);
+        return if arguments[1].as_os_str() == OsStr::new("clone") {
+            Ok(Command::DriveClone {
+                client_id,
+                folder_id,
+                key_export,
+                destination,
+            })
+        } else {
+            Ok(Command::DriveRestore {
+                client_id,
+                folder_id,
+                key_export,
+                destination,
+            })
+        };
     }
     if arguments.len() == 9
         && arguments[1].as_os_str() == OsStr::new("verify")
@@ -504,6 +554,25 @@ fn drive_backup(
     key_export: PathBuf,
     repository: PathBuf,
 ) -> Result<()> {
+    drive_snapshot_backup("drive_backup", client_id, folder_id, key_export, repository)
+}
+
+fn drive_push(
+    client_id: String,
+    folder_id: DriveFolderId,
+    key_export: PathBuf,
+    repository: PathBuf,
+) -> Result<()> {
+    drive_snapshot_backup("drive_push", client_id, folder_id, key_export, repository)
+}
+
+fn drive_snapshot_backup(
+    operation: &str,
+    client_id: String,
+    folder_id: DriveFolderId,
+    key_export: PathBuf,
+    repository: PathBuf,
+) -> Result<()> {
     let repository = LocalRepository::open(repository)?;
     let key = read_recovery_key(key_export)?;
     if repository.id() != key.repository_id() {
@@ -515,7 +584,7 @@ fn drive_backup(
     let backend = encrypted_drive_backend(client_id, folder_id, key)?;
     let report = block_on(repository.backup_to_backend(&backend, recovery_limits()?))?;
     println!(
-        "drive_backup files={} bytes={}",
+        "{operation} files={} bytes={}",
         report.file_count(),
         report.total_bytes(),
     );
@@ -523,6 +592,31 @@ fn drive_backup(
 }
 
 fn drive_restore(
+    client_id: String,
+    folder_id: DriveFolderId,
+    key_export: PathBuf,
+    destination: PathBuf,
+) -> Result<()> {
+    drive_snapshot_restore(
+        "drive_restore",
+        client_id,
+        folder_id,
+        key_export,
+        destination,
+    )
+}
+
+fn drive_clone(
+    client_id: String,
+    folder_id: DriveFolderId,
+    key_export: PathBuf,
+    destination: PathBuf,
+) -> Result<()> {
+    drive_snapshot_restore("drive_clone", client_id, folder_id, key_export, destination)
+}
+
+fn drive_snapshot_restore(
+    operation: &str,
     client_id: String,
     folder_id: DriveFolderId,
     key_export: PathBuf,
@@ -539,7 +633,7 @@ fn drive_restore(
     ))?;
     repository.verify(GitImportLimits::initial()?.verification_limits()?)?;
     println!(
-        "drive_restore files={} bytes={}",
+        "{operation} files={} bytes={}",
         report.file_count(),
         report.total_bytes(),
     );
@@ -748,7 +842,7 @@ fn usage_error() -> Error {
 
 fn print_usage() {
     println!(
-        "usage:\n  yeokcham init --from-git <source-git-repo> <yeokcham-repo> [--chunked-blob-minimum <bytes>]\n  yeokcham sync --from-git <source-git-repo> <yeokcham-repo> --device <device-id>\n  yeokcham verify <yeokcham-repo>\n  yeokcham export-git <yeokcham-repo> <destination-git-repo>\n  yeokcham inspect object <yeokcham-repo> <git-object-id>\n  yeokcham inspect storage <yeokcham-repo>\n  yeokcham inspect refs <yeokcham-repo>\n  yeokcham key create-export --passphrase-stdin <yeokcham-repo> <recovery-key-export>\n  yeokcham drive auth --client-id <google-desktop-client-id> [--redirect-port <port>]\n  yeokcham drive init --client-id <google-desktop-client-id>\n  yeokcham drive backup --client-id <google-desktop-client-id> --folder-id <drive-folder-id> --key-export <recovery-key-export> --passphrase-stdin <yeokcham-repo>\n  yeokcham drive restore --client-id <google-desktop-client-id> --folder-id <drive-folder-id> --key-export <recovery-key-export> --passphrase-stdin <destination>\n  yeokcham drive verify --client-id <google-desktop-client-id> --folder-id <drive-folder-id> --key-export <recovery-key-export> --passphrase-stdin"
+        "usage:\n  yeokcham init --from-git <source-git-repo> <yeokcham-repo> [--chunked-blob-minimum <bytes>]\n  yeokcham sync --from-git <source-git-repo> <yeokcham-repo> --device <device-id>\n  yeokcham verify <yeokcham-repo>\n  yeokcham export-git <yeokcham-repo> <destination-git-repo>\n  yeokcham inspect object <yeokcham-repo> <git-object-id>\n  yeokcham inspect storage <yeokcham-repo>\n  yeokcham inspect refs <yeokcham-repo>\n  yeokcham key create-export --passphrase-stdin <yeokcham-repo> <recovery-key-export>\n  yeokcham drive auth --client-id <google-desktop-client-id> [--redirect-port <port>]\n  yeokcham drive init --client-id <google-desktop-client-id>\n  yeokcham drive backup|push --client-id <google-desktop-client-id> --folder-id <drive-folder-id> --key-export <recovery-key-export> --passphrase-stdin <yeokcham-repo>\n  yeokcham drive restore|clone --client-id <google-desktop-client-id> --folder-id <drive-folder-id> --key-export <recovery-key-export> --passphrase-stdin <destination>\n  yeokcham drive verify --client-id <google-desktop-client-id> --folder-id <drive-folder-id> --key-export <recovery-key-export> --passphrase-stdin"
     );
 }
 
@@ -874,6 +968,44 @@ mod tests {
         )
         .expect("Drive restore");
         assert!(matches!(restore, Command::DriveRestore { .. }));
+
+        let push = parse_command(
+            [
+                "drive",
+                "push",
+                "--client-id",
+                "123.apps.googleusercontent.com",
+                "--folder-id",
+                "folder_id",
+                "--key-export",
+                "key.ykrk",
+                "--passphrase-stdin",
+                "repository",
+            ]
+            .map(OsString::from)
+            .to_vec(),
+        )
+        .expect("Drive push");
+        assert!(matches!(push, Command::DrivePush { .. }));
+
+        let clone = parse_command(
+            [
+                "drive",
+                "clone",
+                "--client-id",
+                "123.apps.googleusercontent.com",
+                "--folder-id",
+                "folder_id",
+                "--key-export",
+                "key.ykrk",
+                "--passphrase-stdin",
+                "destination",
+            ]
+            .map(OsString::from)
+            .to_vec(),
+        )
+        .expect("Drive clone");
+        assert!(matches!(clone, Command::DriveClone { .. }));
 
         let verify = parse_command(
             [
