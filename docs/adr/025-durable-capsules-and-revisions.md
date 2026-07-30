@@ -172,6 +172,13 @@ already-compatible source order whose base/result chain replays exactly; it
 creates one new complete capsule revision and retains all source links in
 provenance. It never silently concatenates incompatible operations.
 
+Split and combine hold the repository writer lock and publish each output's
+immutable objects and boundary pins before that output's current ref. There is
+no multi-ref transaction: a crash can leave zero, one, or all output refs, but
+every visible output is individually complete and resolvable, and sources are
+unchanged. Retrying with the same output IDs is idempotent only for identical
+objects/refs; divergent output-ID reuse rejects.
+
 ## Consequences
 
 - Stable capsule IDs never change as revisions are folded.
