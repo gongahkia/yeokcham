@@ -323,6 +323,14 @@ An equal verified scan returns a structured no-change result. Immutable scan
 objects left by a failed scan are unreachable; no scratch-head or capsule-ref
 publication occurs before the checkpoint/current-ref visibility points.
 
+Single-capsule editing reuses the guarded restore shell rather than creating a
+workspace or edit-session schema. It verifies the current immutable revision,
+safety-checkpoints divergent bytes, stages a normal Scratch_event/Checkpoint
+for the exact revision result, and applies the guarded plan. The staged target
+becomes `scratch-head` only after rescan verification; a failed apply leaves the
+capsule/ref unchanged and never selects that target. The returned checkpoint is
+the explicit input to normal range-based folding.
+
 ## 9. Workspace materialiser
 
 Inputs:

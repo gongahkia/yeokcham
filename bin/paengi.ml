@@ -390,7 +390,7 @@ let capsule root arguments =
   | [ "edit"; identity ] -> (
       match open_scratch root with
       | Error error -> fail Fun.id error
-      | Ok (store, scratch) ->
+      | Ok (store, scratch) -> (
           let timestamp = now () in
           Capsule_store.Durable.enable_for_editing ~store ~scratch ~root
             ~capsule:(capsule_id identity) ~observed_at:timestamp
@@ -401,21 +401,23 @@ let capsule root arguments =
           | Ok anchor ->
               Printf.printf "editing-anchor=%s\n"
                 (Store.Stored_object_id.to_hex
-                   (Scratch.Checkpoint_id.stored_object_id anchor)))
-  | "fold" :: identity :: options ->
+                   (Scratch.Checkpoint_id.stored_object_id anchor))))
+  | "fold" :: identity :: options -> (
       let rec parse from target = function
         | [] -> (
             match (from, target) with
             | Some from, Some target -> (from, target)
             | _ -> exit 2)
-        | "--from" :: value :: rest -> parse (Some (checkpoint_id value)) target rest
-        | "--to" :: value :: rest -> parse from (Some (checkpoint_id value)) rest
+        | "--from" :: value :: rest ->
+            parse (Some (checkpoint_id value)) target rest
+        | "--to" :: value :: rest ->
+            parse from (Some (checkpoint_id value)) rest
         | _ -> exit 2
       in
       let from, target = parse None None options in
-      (match open_scratch root with
+      match open_scratch root with
       | Error error -> fail Fun.id error
-      | Ok (store, scratch) ->
+      | Ok (store, scratch) -> (
           let capsule = capsule_id identity in
           let current =
             Capsule_store.Durable.read_current store capsule
@@ -423,7 +425,7 @@ let capsule root arguments =
           in
           match current with
           | Error error -> fail Fun.id error
-          | Ok current ->
+          | Ok current -> (
               let reference =
                 Capsule_store.Durable.resolved_current_ref current
               in
@@ -431,7 +433,8 @@ let capsule root arguments =
               Capsule_store.Durable.fold_from_checkpoints ~store ~scratch
                 ~capsule
                 ~expected_revision:(Capsule_store.current_revision reference)
-                ~expected_generation:(Capsule_store.current_generation reference)
+                ~expected_generation:
+                  (Capsule_store.current_generation reference)
                 ~evidence:[] ~from ~target ~created_at:timestamp
                 ~changed_at:timestamp ()
               |> Result.map_error Capsule_store.error_to_string
@@ -442,7 +445,8 @@ let capsule root arguments =
                     (Paengi_id.Capsule_id.to_hex capsule)
                     (Paengi_id.Capsule_revision_id.to_hex
                        (Capsule_store.revision_id
-                          (Capsule_store.Durable.resolved_revision resolved))))
+                          (Capsule_store.Durable.resolved_revision resolved)))))
+      )
   | [ "show"; identity ] -> (
       match Store.open_repository ~root with
       | Error error -> fail Store.error_to_string error

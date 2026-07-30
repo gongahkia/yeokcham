@@ -6,7 +6,7 @@ Robustness tasks operate only on Paengi's pure functions and generated local fix
 ## Active vertical slice
 
 - Milestone: 4 — Change capsules.
-- Task: Slice 2 — enable one capsule for exact guarded editing and return a durable scratch editing anchor for the existing range-based fold path.
+- Task: Slice 2 complete — single-capsule guarded editing returns a durable scratch anchor for the existing range-based fold path.
 - Modules/files: `paengi_scratch` guarded restore; `paengi_capsule_store`; capsule CLI; focused editing-workflow tests.
 - Types: an in-memory guarded materialisation plan targeting an existing immutable snapshot and a returned `Checkpoint_id` editing anchor; existing stable `Capsule_id`, immutable revision, and scratch checkpoint/event types.
 - Formats: no new schema, object type, ref, or golden. ADR-020 through ADR-025 remain unchanged.
@@ -211,7 +211,7 @@ Robustness tasks operate only on Paengi's pure functions and generated local fix
 
 ### Revision
 
-- [ ] Enable capsule for editing.
+- [x] Enable capsule for editing.
 - [x] Fold selected scratch work into capsule.
 - [x] Create new immutable revision.
 - [x] Preserve old revision.

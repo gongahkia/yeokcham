@@ -353,6 +353,15 @@ Scratch_event/Checkpoint publication, then becomes the target of the ordinary
 checkpoint-range capsule creation path. The new source/target boundaries are
 durably pinned before the capsule current ref is visible.
 
+Enabling one capsule for editing resolves and verifies its current complete
+revision, then invokes guarded scratch materialisation for the revision's
+expected-result snapshot. A divergent working directory receives an ordinary
+safety checkpoint. The target checkpoint/event is staged from that head without
+moving `scratch-head`; only exact filesystem-result verification publishes it as
+the new head and editing anchor. If the verified working state and current head
+already equal the revision result, the head itself is reused. No edit-session
+ref exists. A later fold names this anchor and a descendant scratch checkpoint.
+
 ## 6. Change operations
 
 ```ocaml

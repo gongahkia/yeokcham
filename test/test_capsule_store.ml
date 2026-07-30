@@ -531,18 +531,22 @@ let enabling_capsule_is_exact_and_safety_checkpoints_existing_work () =
       in
       Alcotest.(check string)
         "editing materialises expected bytes" "first"
-        (In_channel.with_open_bin (Filename.concat root "tracked")
+        (In_channel.with_open_bin
+           (Filename.concat root "tracked")
            In_channel.input_all);
       let anchor_checkpoint =
-        Scratch.Checkpoint.load store anchor |> require_ok Scratch.error_to_string
+        Scratch.Checkpoint.load store anchor
+        |> require_ok Scratch.error_to_string
       in
       let safety =
         match Scratch.Checkpoint.parent anchor_checkpoint with
         | Some checkpoint -> checkpoint
-        | None -> Alcotest.fail "editing anchor was not staged after safety work"
+        | None ->
+            Alcotest.fail "editing anchor was not staged after safety work"
       in
       let safety_checkpoint =
-        Scratch.Checkpoint.load store safety |> require_ok Scratch.error_to_string
+        Scratch.Checkpoint.load store safety
+        |> require_ok Scratch.error_to_string
       in
       Alcotest.(check bool)
         "existing work is safety checkpointed before materialisation" true
@@ -611,12 +615,14 @@ let enabling_capsule_restores_bytes_mode_and_symlink_target_exactly () =
         (Capsule_store.Durable.enable_for_editing ~store ~scratch ~root
            ~capsule:id ~observed_at:23L ~created_at:23L ()
         |> require_ok Capsule_store.error_to_string);
-      Alcotest.(check string) "editing restores exact file bytes" "target"
+      Alcotest.(check string)
+        "editing restores exact file bytes" "target"
         (In_channel.with_open_bin tracked In_channel.input_all);
-      Alcotest.(check bool) "editing restores executable mode" true
+      Alcotest.(check bool)
+        "editing restores executable mode" true
         ((Unix.stat tracked).Unix.st_perm land 0o111 <> 0);
-      Alcotest.(check string) "editing restores exact symlink target" "tracked"
-        (Unix.readlink link))
+      Alcotest.(check string)
+        "editing restores exact symlink target" "tracked" (Unix.readlink link))
 
 let enabling_reuses_matching_head_and_failed_apply_keeps_it () =
   with_store (fun root store ->
@@ -639,7 +645,8 @@ let enabling_reuses_matching_head_and_failed_apply_keeps_it () =
           ~root ~capsule:id ~observed_at:15L ~created_at:15L ()
         |> require_ok Capsule_store.error_to_string
       in
-      Alcotest.(check bool) "matching scratch head is the editing anchor" true
+      Alcotest.(check bool)
+        "matching scratch head is the editing anchor" true
         (Scratch.Checkpoint_id.equal matching reused);
       let head_before =
         Scratch.head_id fixture.scratch |> require_ok Scratch.error_to_string
@@ -688,8 +695,8 @@ let folding_from_editing_anchor_creates_an_immutable_revision () =
       in
       let current = Capsule_store.Durable.resolved_current_ref created in
       let folded =
-        Capsule_store.Durable.fold_from_checkpoints ~store ~scratch:fixture.scratch
-          ~capsule:id
+        Capsule_store.Durable.fold_from_checkpoints ~store
+          ~scratch:fixture.scratch ~capsule:id
           ~expected_revision:(Capsule_store.current_revision current)
           ~expected_generation:(Capsule_store.current_generation current)
           ~evidence:[] ~from:anchor ~target ~created_at:19L ~changed_at:19L ()
@@ -974,11 +981,13 @@ let () =
           Alcotest.test_case "current working diff interruption retry" `Quick
             current_working_diff_interruption_retries_idempotently;
           Alcotest.test_case "editing is exact and safety checkpoints work"
-            `Quick enabling_capsule_is_exact_and_safety_checkpoints_existing_work;
+            `Quick
+            enabling_capsule_is_exact_and_safety_checkpoints_existing_work;
           Alcotest.test_case "editing restores bytes modes and symlinks" `Quick
             enabling_capsule_restores_bytes_mode_and_symlink_target_exactly;
-          Alcotest.test_case "editing reuses matching head and rejects stale apply"
-            `Quick enabling_reuses_matching_head_and_failed_apply_keeps_it;
+          Alcotest.test_case
+            "editing reuses matching head and rejects stale apply" `Quick
+            enabling_reuses_matching_head_and_failed_apply_keeps_it;
           Alcotest.test_case "folding from editing anchor is immutable" `Quick
             folding_from_editing_anchor_creates_an_immutable_revision;
           Alcotest.test_case "folding is CAS protected" `Quick

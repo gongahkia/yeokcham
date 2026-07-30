@@ -2509,7 +2509,8 @@ module Restore = struct
     let parent_id = parent.resolved_logical in
     let parent_checkpoint = parent.resolved_value in
     if
-      Snapshot.Snapshot.equal_id (Checkpoint.snapshot parent_checkpoint)
+      Snapshot.Snapshot.equal_id
+        (Checkpoint.snapshot parent_checkpoint)
         target_snapshot
     then Ok parent_id
     else
@@ -2568,7 +2569,8 @@ module Restore = struct
       | None -> Error Scratch_head_missing
     in
     let* target_checkpoint =
-      stage_snapshot repository ~parent ~target_snapshot ~observed_at ~created_at
+      stage_snapshot repository ~parent ~target_snapshot ~observed_at
+        ~created_at
     in
     build repository ~current_snapshot ~target_checkpoint ~safety_checkpoint
       ~require_current_head:true

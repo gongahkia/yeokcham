@@ -82,6 +82,8 @@ dune exec bin/paengi.exe -- compact --resume
 dune exec bin/paengi.exe -- compact --prune
 dune exec bin/paengi.exe -- watch --interval-ms 500 --debounce-ms 500
 dune exec bin/paengi.exe -- capsule create --current --id <capsule-id> --title <title> --description <description>
+dune exec bin/paengi.exe -- capsule edit <capsule-id>
+dune exec bin/paengi.exe -- capsule fold <capsule-id> --from <editing-anchor> --to <checkpoint>
 dune exec bin/paengi.exe -- capsule show <capsule-id>
 dune exec bin/paengi.exe -- capsule current-diff <capsule-id>
 dune exec bin/paengi.exe -- capsule history <capsule-id>
@@ -114,6 +116,13 @@ ref nor a checkpoint. A changed state is checkpointed before the immutable
 capsule objects and current ref are published; an interrupted pre-ref attempt
 is safely checkpointed, remains invisible as a capsule, and can be retried
 with the same inputs through its retained boundaries.
+
+`capsule edit <capsule-id>` resolves and directly replays the immutable current
+revision, safety-checkpoints divergent working state through guarded restore,
+then materialises and verifies the revision result. It prints a scratch editing
+anchor; if both the working directory and scratch head already equal that result,
+the existing checkpoint is reused. `capsule fold` requires that explicit anchor
+and a later checkpoint, then uses the existing CAS-protected range fold path.
 
 ## Testing scope
 

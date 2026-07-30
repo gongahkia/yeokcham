@@ -165,6 +165,16 @@ range. Thus a failure before the current ref leaves work recoverable in scratch
 history but exposes no partial capsule; the existing durable boundaries identify
 the same-input retry path without a new persistent attempt record.
 
+Enabling a single capsule for editing resolves and directly validates its
+current complete revision, then uses the existing guarded scratch restore path
+against that revision's expected-result snapshot. Divergent work is safety
+checkpointed first. The exact target event/checkpoint is staged from the safe
+head and becomes `scratch-head` only after guarded materialisation and rescan
+verification. If that verified state is already the current scratch head, the
+head is the editing anchor and no duplicate checkpoint is made. This adds no
+workspace or edit-session ref; folding retains its existing explicit
+checkpoint-range and current-ref-CAS protocol.
+
 Folding holds the same lock, verifies the current ref and selected range begins
 at the current revision result, derives extra exact operations, creates a new
 complete revision from the original declared base to the new expected result,

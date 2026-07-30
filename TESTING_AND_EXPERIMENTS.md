@@ -107,6 +107,11 @@ Current-working-diff creation additionally checks exact double-scan creation,
 no-change non-publication, deterministic external mutation rejection before
 checkpoint publication, pre-current-ref interruption with a safely retained
 checkpoint, idempotent retry, and boundary retention after reopen.
+Single-capsule editing additionally checks revision-result materialisation,
+safety checkpointing of divergent work, bytes/mode/symlink exactness, anchor
+reuse when the result is already current, stale apply rejection without target
+head publication, and folding from the returned anchor into a new immutable
+revision.
 
 #### P7 — Stable capsule identity
 
