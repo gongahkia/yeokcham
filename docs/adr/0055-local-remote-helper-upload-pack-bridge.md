@@ -1,10 +1,10 @@
 # ADR-0055: Serve local clone and unchanged fetch through an upload-pack bridge
 
-- Status: Accepted
+- Status: Superseded by ADR-0056
 - Date: 2026-07-30
 - Deciders: Yeokcham maintainers
 - Supersedes: None
-- Superseded by: None
+- Superseded by: ADR-0056
 
 ## Context
 

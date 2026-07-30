@@ -17,7 +17,7 @@ Yeokcham is intended for ordinary software developers who want to keep using Git
 
 ## Status
 
-Milestone 1 is implemented. The local `git-remote-yeokcham` compatibility bridge supports ref discovery, clone, and unchanged fetch through C Git's `upload-pack`; push, mutable fetch updates, encryption, and remote backends remain unfinished.
+Milestone 1 and the local clone/fetch portion of Milestone 2 are implemented. The local `git-remote-yeokcham` bridge supports ref discovery, clone, and fetch through C Git's `upload-pack`; `yeokcham sync` imports a trusted local Git source into a checked ref transition before Git fetches updates. Push, signed multi-device updates, encryption, and remote backends remain unfinished.
 
 ## Recommended implementation language
 
@@ -83,7 +83,9 @@ Run `make help` to list development targets and `make ci` for the complete locke
 
 ```bash
 yeokcham init --from-git <source-git-repo> <yeokcham-repo>
+yeokcham sync --from-git <source-git-repo> <yeokcham-repo> --device <device-id>
 yeokcham verify <yeokcham-repo>
+yeokcham inspect refs <yeokcham-repo>
 yeokcham inspect storage <yeokcham-repo>
 yeokcham inspect object <yeokcham-repo> <git-object-id>
 yeokcham export-git <yeokcham-repo> <destination-git-repo>
@@ -91,6 +93,8 @@ git --git-dir=<destination-git-repo> fsck --full --strict
 ```
 
 `init` requires a destination path that does not exist. A failed import can leave unreachable immutable records in that fresh path; remove the failed destination before retrying. The initial CDC threshold is 4 KiB; `--chunked-blob-minimum <bytes>` is available for controlled storage-policy comparison, not as a benchmark-backed default recommendation.
+
+`sync` is a controlled local-source maintenance workflow, not `git push`: it imports only newly reachable verified objects, then appends a checked full ref-state transition. Reuse one canonical UUIDv4 `--device` value for its writer. V1 journal events detect corruption, stale expected state, and divergent histories but are not signed; use only one trusted local writer until signed device authorization exists.
 
 ## Local remote helper
 
@@ -103,7 +107,7 @@ git ls-remote yeokcham::/absolute/path/to/yeokcham-repository
 git clone yeokcham::/absolute/path/to/yeokcham-repository
 ```
 
-For each `connect git-upload-pack` request, the helper verifies and exports the immutable Yeokcham repository into a private temporary bare repository, then delegates the smart protocol and pack stream to C Git. This is a correctness bridge, not a measured performance path. It supports clone and unchanged fetch only; push, shallow operations, and ref updates are deferred.
+For each `connect git-upload-pack` request, the helper verifies and exports the effective Yeokcham ref state into a private temporary bare repository, then delegates the smart protocol and pack stream to C Git. This is a correctness bridge, not a measured performance path. After a successful `yeokcham sync`, ordinary Git can fetch updated and deleted refs with `git fetch --prune`; push and shallow operations remain deferred.
 
 ## Contributing and licence
 

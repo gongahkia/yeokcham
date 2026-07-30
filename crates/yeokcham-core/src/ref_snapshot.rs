@@ -172,52 +172,7 @@ impl RefSnapshot {
                 "ref snapshot has an invalid manifest ID",
             )
         })?;
-        let head = match decoder.read_u8()? {
-            SYMBOLIC_HEAD_TAG => HeadState::Symbolic(decode_regular_ref_name(
-                decoder.read_byte_string()?,
-                "ref snapshot has an invalid symbolic HEAD",
-            )?),
-            DETACHED_HEAD_TAG => {
-                HeadState::Detached(GitObjectId::from_bytes(decoder.read_fixed()?))
-            }
-            _ => {
-                return Err(Error::new(
-                    ErrorKind::CorruptData,
-                    "ref snapshot has an invalid HEAD state",
-                ));
-            }
-        };
-        let reference_count = usize::try_from(decoder.read_u64()?).map_err(|_| {
-            Error::new(
-                ErrorKind::CorruptData,
-                "ref snapshot reference count is invalid",
-            )
-        })?;
-        if reference_count > limits.maximum_reference_entries {
-            return Err(Error::new(
-                ErrorKind::Unsupported,
-                "ref snapshot exceeds the reference-entry limit",
-            ));
-        }
-        let mut regular_refs = BTreeMap::new();
-        let mut previous = None;
-        for _ in 0..reference_count {
-            let name = decode_regular_ref_name(
-                decoder.read_byte_string()?,
-                "ref snapshot has an invalid regular ref",
-            )?;
-            if previous
-                .as_ref()
-                .is_some_and(|previous: &RefName| previous >= &name)
-            {
-                return Err(Error::new(
-                    ErrorKind::CorruptData,
-                    "ref snapshot references are not strictly sorted",
-                ));
-            }
-            previous = Some(name.clone());
-            regular_refs.insert(name, GitObjectId::from_bytes(decoder.read_fixed()?));
-        }
+        let state = decode_ref_state(&mut decoder, limits.maximum_reference_entries)?;
         if decoder.read_fixed::<4>()? != FOOTER_MAGIC {
             return Err(Error::new(
                 ErrorKind::CorruptData,
@@ -236,12 +191,6 @@ impl RefSnapshot {
                 "ref snapshot checksum does not match its bytes",
             ));
         }
-        let state = GitRefState::new(regular_refs, head).map_err(|_| {
-            Error::new(
-                ErrorKind::CorruptData,
-                "ref snapshot contains an invalid ref state",
-            )
-        })?;
         Ok(Self {
             repository_id,
             manifest_id,
@@ -273,27 +222,89 @@ impl RefSnapshot {
         encoder.write_u64(0);
         encoder.write_fixed(self.repository_id.as_bytes());
         encoder.write_fixed(self.manifest_id.as_bytes());
-        match self.state.head() {
-            HeadState::Symbolic(name) => {
-                encoder.write_u8(SYMBOLIC_HEAD_TAG);
-                encoder.write_byte_string(name.as_bytes());
-            }
-            HeadState::Detached(id) => {
-                encoder.write_u8(DETACHED_HEAD_TAG);
-                encoder.write_fixed(id.as_bytes());
-            }
-        }
-        encoder.write_u64(self.state.regular_refs().len() as u64);
-        for (name, target) in self.state.regular_refs() {
-            encoder.write_byte_string(name.as_bytes());
-            encoder.write_fixed(target.as_bytes());
-        }
+        encode_ref_state(&mut encoder, &self.state);
         encoder.write_fixed(&FOOTER_MAGIC);
         let mut bytes = encoder.into_bytes();
         let checksum: [u8; 32] = Sha256::digest(&bytes).into();
         bytes.extend_from_slice(&checksum);
         bytes
     }
+}
+
+pub(crate) fn encode_ref_state(encoder: &mut CanonicalEncoder, state: &GitRefState) {
+    match state.head() {
+        HeadState::Symbolic(name) => {
+            encoder.write_u8(SYMBOLIC_HEAD_TAG);
+            encoder.write_byte_string(name.as_bytes());
+        }
+        HeadState::Detached(id) => {
+            encoder.write_u8(DETACHED_HEAD_TAG);
+            encoder.write_fixed(id.as_bytes());
+        }
+    }
+    encoder.write_u64(state.regular_refs().len() as u64);
+    for (name, target) in state.regular_refs() {
+        encoder.write_byte_string(name.as_bytes());
+        encoder.write_fixed(target.as_bytes());
+    }
+}
+
+pub(crate) fn canonical_ref_state_bytes(state: &GitRefState) -> Vec<u8> {
+    let mut encoder = CanonicalEncoder::new();
+    encode_ref_state(&mut encoder, state);
+    encoder.into_bytes()
+}
+
+pub(crate) fn decode_ref_state(
+    decoder: &mut CanonicalDecoder<'_>,
+    maximum_reference_entries: usize,
+) -> Result<GitRefState> {
+    let head = match decoder.read_u8()? {
+        SYMBOLIC_HEAD_TAG => HeadState::Symbolic(decode_regular_ref_name(
+            decoder.read_byte_string()?,
+            "ref state has an invalid symbolic HEAD",
+        )?),
+        DETACHED_HEAD_TAG => HeadState::Detached(GitObjectId::from_bytes(decoder.read_fixed()?)),
+        _ => {
+            return Err(Error::new(
+                ErrorKind::CorruptData,
+                "ref state has an invalid HEAD state",
+            ));
+        }
+    };
+    let reference_count = usize::try_from(decoder.read_u64()?).map_err(|_| {
+        Error::new(
+            ErrorKind::CorruptData,
+            "ref state reference count is invalid",
+        )
+    })?;
+    if reference_count > maximum_reference_entries {
+        return Err(Error::new(
+            ErrorKind::Unsupported,
+            "ref state exceeds the reference-entry limit",
+        ));
+    }
+    let mut regular_refs = BTreeMap::new();
+    let mut previous = None;
+    for _ in 0..reference_count {
+        let name = decode_regular_ref_name(
+            decoder.read_byte_string()?,
+            "ref state has an invalid regular ref",
+        )?;
+        if previous
+            .as_ref()
+            .is_some_and(|previous: &RefName| previous >= &name)
+        {
+            return Err(Error::new(
+                ErrorKind::CorruptData,
+                "ref state references are not strictly sorted",
+            ));
+        }
+        previous = Some(name.clone());
+        regular_refs.insert(name, GitObjectId::from_bytes(decoder.read_fixed()?));
+    }
+    GitRefState::new(regular_refs, head)
+        .map_err(|_| Error::new(ErrorKind::CorruptData, "ref state is invalid"))
 }
 
 impl fmt::Debug for RefSnapshot {

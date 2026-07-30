@@ -56,8 +56,9 @@ Valid statuses are `Proposed`, `Accepted`, `Rejected`, `Deprecated`, and `Supers
 | [ADR-0048](0048-store-nonblob-git-objects-in-segments.md) | Accepted | Store and resolve non-blob Git objects through segments and direct manifests |
 | [ADR-0049](0049-verify-published-immutable-local-storage.md) | Accepted | Publish and fully verify immutable local storage |
 | [ADR-0050](0050-export-published-objects-as-loose-git-objects.md) | Accepted | Export published objects as standard loose Git objects |
-| [ADR-0051](0051-immutable-local-ref-snapshot.md) | Accepted | Publish one immutable local ref snapshot before journals |
+| [ADR-0051](0051-immutable-local-ref-snapshot.md) | Superseded by ADR-0056 | Publish one immutable local ref snapshot before journals |
 | [ADR-0052](0052-chunked-blob-descriptor-and-manifest-v2.md) | Accepted | Store chunked blobs through immutable descriptors and `YKMF` version 2 |
 | [ADR-0053](0053-bounded-git-import-and-local-cli-workflows.md) | Accepted | Import Git repositories through bounded local CLI workflows |
 | [ADR-0054](0054-compact-tiny-blob-group-manifests.md) | Accepted | Publish compact mappings for tiny-blob aggregations |
-| [ADR-0055](0055-local-remote-helper-upload-pack-bridge.md) | Accepted | Serve local clone and unchanged fetch through an upload-pack bridge |
+| [ADR-0055](0055-local-remote-helper-upload-pack-bridge.md) | Superseded by ADR-0056 | Serve local clone and unchanged fetch through an upload-pack bridge |
+| [ADR-0056](0056-checked-local-ref-journal-and-fetch-updates.md) | Accepted | Append checked local ref transitions for fetch updates |

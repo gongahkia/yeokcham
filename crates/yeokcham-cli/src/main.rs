@@ -6,7 +6,8 @@ use std::{
 };
 
 use yeokcham_core::{
-    Error, ErrorKind, GitImportLimits, GitObjectId, GitRepository, LocalRepository, Result,
+    DeviceId, Error, ErrorKind, GitImportLimits, GitObjectId, GitRepository, LocalRepository,
+    RefEventReadLimits, Result,
 };
 
 mod telemetry;
@@ -17,6 +18,11 @@ enum Command {
         source: PathBuf,
         destination: PathBuf,
         chunked_blob_minimum_bytes: Option<usize>,
+    },
+    Sync {
+        source: PathBuf,
+        repository: PathBuf,
+        device_id: DeviceId,
     },
     Verify {
         repository: PathBuf,
@@ -30,6 +36,9 @@ enum Command {
         id: GitObjectId,
     },
     InspectStorage {
+        repository: PathBuf,
+    },
+    InspectRefs {
         repository: PathBuf,
     },
 }
@@ -50,6 +59,11 @@ fn main() -> ExitCode {
             destination,
             chunked_blob_minimum_bytes,
         } => init(source, destination, chunked_blob_minimum_bytes),
+        Command::Sync {
+            source,
+            repository,
+            device_id,
+        } => sync(source, repository, device_id),
         Command::Verify { repository } => verify(repository),
         Command::ExportGit {
             repository,
@@ -57,6 +71,7 @@ fn main() -> ExitCode {
         } => export_git(repository, destination),
         Command::InspectObject { repository, id } => inspect_object(repository, id),
         Command::InspectStorage { repository } => inspect_storage(repository),
+        Command::InspectRefs { repository } => inspect_refs(repository),
     }) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
@@ -73,6 +88,7 @@ fn parse_command(arguments: Vec<OsString>) -> Result<Command> {
     match command {
         "help" | "--help" | "-h" if arguments.len() == 1 => Ok(Command::Help),
         "init" => parse_init(&arguments),
+        "sync" => parse_sync(&arguments),
         "verify" if arguments.len() == 2 => Ok(Command::Verify {
             repository: PathBuf::from(&arguments[1]),
         }),
@@ -96,8 +112,32 @@ fn parse_command(arguments: Vec<OsString>) -> Result<Command> {
                 repository: PathBuf::from(&arguments[2]),
             })
         }
+        "inspect" if arguments.len() == 3 && arguments[1].as_os_str() == OsStr::new("refs") => {
+            Ok(Command::InspectRefs {
+                repository: PathBuf::from(&arguments[2]),
+            })
+        }
         _ => Err(usage_error()),
     }
+}
+
+fn parse_sync(arguments: &[OsString]) -> Result<Command> {
+    if arguments.len() != 6
+        || arguments[1].as_os_str() != OsStr::new("--from-git")
+        || arguments[4].as_os_str() != OsStr::new("--device")
+    {
+        return Err(usage_error());
+    }
+    let device_id = arguments[5]
+        .to_str()
+        .ok_or_else(usage_error)?
+        .parse()
+        .map_err(|_| Error::new(ErrorKind::InvalidInput, "device ID is invalid"))?;
+    Ok(Command::Sync {
+        source: PathBuf::from(&arguments[2]),
+        repository: PathBuf::from(&arguments[3]),
+        device_id,
+    })
 }
 
 fn parse_init(arguments: &[OsString]) -> Result<Command> {
@@ -141,6 +181,23 @@ fn init(
     let report = repository.import_git_repository(&source, limits)?;
     println!(
         "imported objects={} tiny_blobs={} whole_blobs={} chunked_blobs={} metadata_objects={} refs={}",
+        report.object_count(),
+        report.tiny_blob_count(),
+        report.whole_blob_count(),
+        report.chunked_blob_count(),
+        report.metadata_object_count(),
+        report.ref_count(),
+    );
+    Ok(())
+}
+
+fn sync(source: PathBuf, repository: PathBuf, device_id: DeviceId) -> Result<()> {
+    let source = GitRepository::open(source)?;
+    let repository = LocalRepository::open(repository)?;
+    let limits = GitImportLimits::initial()?;
+    let report = repository.sync_git_repository(&source, device_id, limits)?;
+    println!(
+        "synced objects={} tiny_blobs={} whole_blobs={} chunked_blobs={} metadata_objects={} refs={}",
         report.object_count(),
         report.tiny_blob_count(),
         report.whole_blob_count(),
@@ -213,6 +270,31 @@ fn inspect_storage(repository: PathBuf) -> Result<()> {
     verify(repository)
 }
 
+fn inspect_refs(repository: PathBuf) -> Result<()> {
+    let limits = GitImportLimits::initial()?;
+    let repository = LocalRepository::open(repository)?;
+    let events = repository.ref_events(RefEventReadLimits::new(
+        limits.ref_snapshot_limits().maximum_directory_entries(),
+        limits.ref_snapshot_limits().maximum_snapshot_bytes(),
+        limits.ref_snapshot_limits().maximum_reference_entries(),
+    )?)?;
+    match repository.resolve_ref_state(limits.ref_snapshot_limits()) {
+        Ok(state) => {
+            let ref_count = state.as_ref().map_or(0, |state| state.regular_refs().len());
+            println!("refs={ref_count} events={}", events.len());
+        }
+        Err(error) => println!(
+            "refs=unresolved events={} state_error={}",
+            events.len(),
+            error.code()
+        ),
+    }
+    for event in events {
+        println!("device={} sequence={}", event.device_id(), event.sequence());
+    }
+    Ok(())
+}
+
 fn usage_error() -> Error {
     Error::new(
         ErrorKind::InvalidInput,
@@ -222,6 +304,6 @@ fn usage_error() -> Error {
 
 fn print_usage() {
     println!(
-        "usage:\n  yeokcham init --from-git <source-git-repo> <yeokcham-repo> [--chunked-blob-minimum <bytes>]\n  yeokcham verify <yeokcham-repo>\n  yeokcham export-git <yeokcham-repo> <destination-git-repo>\n  yeokcham inspect object <yeokcham-repo> <git-object-id>\n  yeokcham inspect storage <yeokcham-repo>"
+        "usage:\n  yeokcham init --from-git <source-git-repo> <yeokcham-repo> [--chunked-blob-minimum <bytes>]\n  yeokcham sync --from-git <source-git-repo> <yeokcham-repo> --device <device-id>\n  yeokcham verify <yeokcham-repo>\n  yeokcham export-git <yeokcham-repo> <destination-git-repo>\n  yeokcham inspect object <yeokcham-repo> <git-object-id>\n  yeokcham inspect storage <yeokcham-repo>\n  yeokcham inspect refs <yeokcham-repo>"
     );
 }

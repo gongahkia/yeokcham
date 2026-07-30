@@ -10,10 +10,14 @@ impl RepositoryFormatVersion {
     /// First Yeokcham persistent repository format version.
     pub const V1: Self = Self(1);
 
+    /// Ref-journal repository format version.
+    pub const V2: Self = Self(2);
+
     /// Validates a raw persistent repository format version.
     pub fn from_raw(raw: u16) -> Result<Self> {
         match raw {
             1 => Ok(Self::V1),
+            2 => Ok(Self::V2),
             _ => Err(Error::new(
                 ErrorKind::Unsupported,
                 "repository format version is not supported",
@@ -106,6 +110,14 @@ impl RepositoryFormat {
         self.version
     }
 
+    /// Returns this format with a caller-selected supported version.
+    pub const fn with_version(self, version: RepositoryFormatVersion) -> Self {
+        Self {
+            version,
+            features: self.features,
+        }
+    }
+
     /// Returns validated feature flags.
     pub const fn features(self) -> RepositoryFeatureFlags {
         self.features
@@ -135,7 +147,7 @@ mod tests {
 
     #[test]
     fn rejects_unknown_format_versions() {
-        for version in [0, 2, u16::MAX] {
+        for version in [0, 3, u16::MAX] {
             let error = RepositoryFormatVersion::from_raw(version)
                 .expect_err("unsupported version must fail");
 
@@ -175,7 +187,7 @@ mod tests {
     #[test]
     fn format_validation_rejects_unsupported_components() {
         let version_error =
-            RepositoryFormat::from_raw(2, 0, 0).expect_err("unsupported version must fail");
+            RepositoryFormat::from_raw(3, 0, 0).expect_err("unsupported version must fail");
         let feature_error = RepositoryFormat::from_raw(1, 1, 0)
             .expect_err("unsupported required features must fail");
 

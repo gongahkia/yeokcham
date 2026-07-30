@@ -108,6 +108,7 @@ impl ExportedRepository {
         let result = (|| {
             let source = LocalRepository::open(source)?;
             let limits = GitImportLimits::initial()?;
+            source.verify(limits.verification_limits()?)?;
             source.export_loose_objects(&repository, limits.export_limits()?)
         })();
         match result {

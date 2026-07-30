@@ -101,9 +101,9 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 ### Clone and fetch
 
 - [x] `git clone yeokcham::/absolute/path`.
-- [ ] Fetch updated branches.
+- [x] Fetch updated branches.
 - [x] Fetch tags.
-- [ ] Handle deleted refs.
+- [x] Handle deleted refs.
 - [x] Verify checkout equivalence.
 - [x] Test repeated fetch with no changes.
 - [ ] Cache synthesised packs where safe.
@@ -111,7 +111,7 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 ### Exit criteria
 
 - [x] Ordinary Git can clone a yeokcham local store.
-- [ ] Ordinary Git can fetch updates.
+- [x] Ordinary Git can fetch updates.
 - [x] Checkout and reachable object IDs match the original.
 - [ ] Integration suite runs against at least two maintained Git versions.
 
@@ -129,14 +129,14 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 
 ### Ref journal
 
-- [ ] Define canonical ref-event encoding.
-- [ ] Implement per-device sequence chain.
+- [x] Define canonical ref-event encoding.
+- [x] Implement per-device sequence chain.
 - [ ] Implement signatures.
-- [ ] Implement local atomic append.
-- [ ] Implement ref-state materialisation.
-- [ ] Detect divergence.
-- [ ] Preserve rejected/divergent events for inspection.
-- [ ] Implement ref-log inspection CLI.
+- [x] Implement local atomic append.
+- [x] Implement ref-state materialisation.
+- [x] Detect divergence.
+- [x] Preserve rejected/divergent events for inspection.
+- [x] Implement ref-log inspection CLI.
 
 ### Fault handling
 

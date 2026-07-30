@@ -79,7 +79,7 @@ Initial strategy:
 - Prefer delegation to mature Git pack readers and writers.
 - Add smart HTTP only after local end-to-end correctness.
 
-Current local bridge: `git-remote-yeokcham` advertises only `connect`, accepts only `connect git-upload-pack`, verifies and exports the immutable store into a private temporary bare repository, then proxies C Git's smart upload-pack byte stream. It performs no pack parsing or buffering itself. This proves Git compatibility before native pack synthesis; it is not a performance path and cannot serve mutable ref updates until push/journal work exists.
+Current local bridge: `git-remote-yeokcham` advertises only `connect`, accepts only `connect git-upload-pack`, verifies and exports the effective local ref state into a private temporary bare repository, then proxies C Git's smart upload-pack byte stream. It performs no pack parsing or buffering itself. This proves Git compatibility before native pack synthesis; it is not a performance path. A trusted local `yeokcham sync` can append checked ref transitions for fetch updates, while Git push and signed multi-device journal authorization remain separate work.
 
 ### 3.2 Repository service
 

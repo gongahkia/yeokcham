@@ -60,6 +60,8 @@ A reasonable initial design:
 
 The final choice must be documented in an ADR and reviewed before declaring a stable format.
 
+Current local `YKRE` V1 ref events use SHA-256 checksums and predecessor-state binding to detect corruption, stale transitions, and divergence. They do not authenticate a writer; only one trusted local sync writer is supported until the planned Ed25519 device-authorisation design exists.
+
 Do not invent cryptography.
 
 ## 4. Key hierarchy

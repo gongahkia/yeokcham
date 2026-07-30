@@ -3,6 +3,7 @@ use std::{
     fs::{self, File, OpenOptions},
     io::{self, Read, Write},
     path::{Path, PathBuf},
+    sync::Mutex,
     time::Duration,
 };
 
@@ -15,12 +16,12 @@ use rusqlite::{
 use crate::{
     BlobManifest, BlobManifestRepresentation, CanonicalDecoder, CanonicalEncoder, ChunkRecord,
     ChunkReference, ChunkedBlobRecord, ContentDefinedChunker, ContentDefinedChunkingParameters,
-    Error, ErrorKind, GitObject, GitObjectId, GitObjectKind, GitRepository, HeadState, ManifestId,
-    MetadataObjectManifest, MetadataObjectRecord, ReadSegment, ReadSegmentRecord, RefSnapshot,
-    RefSnapshotReadLimits, RepositoryFormat, RepositoryId, Result, SegmentId, SegmentIndex,
-    SegmentReadLimits, SegmentReader, SegmentRecord, SegmentWriteLimits, SegmentWriter,
-    TinyBlobAggregation, TinyBlobGroupManifest, TinyBlobGroupManifestEntry, WholeBlobRecord,
-    YeokchamContentId,
+    DeviceId, Error, ErrorKind, GitObject, GitObjectId, GitObjectKind, GitRefState, GitRepository,
+    HeadState, ManifestId, MetadataObjectManifest, MetadataObjectRecord, ReadSegment,
+    ReadSegmentRecord, RefEvent, RefEventReadLimits, RefSnapshot, RefSnapshotReadLimits,
+    RepositoryFormat, RepositoryId, Result, SegmentId, SegmentIndex, SegmentReadLimits,
+    SegmentReader, SegmentRecord, SegmentWriteLimits, SegmentWriter, TinyBlobAggregation,
+    TinyBlobGroupManifest, TinyBlobGroupManifestEntry, WholeBlobRecord, YeokchamContentId,
 };
 
 const BOOTSTRAP_MAGIC: [u8; 4] = *b"YKRB";
@@ -47,6 +48,11 @@ const REF_SNAPSHOT_STAGING_SUFFIX: &str = ".partial";
 const PUBLISHED_REF_SNAPSHOT_MAX_DIRECTORY_ENTRIES: usize = 1_000_000;
 const PUBLISHED_REF_SNAPSHOT_MAX_BYTES: u64 = 128 * 1024 * 1024;
 const PUBLISHED_REF_SNAPSHOT_MAX_REFERENCE_ENTRIES: usize = 1_000_000;
+const REF_JOURNAL_DIRECTORY: &str = "journals/refs";
+const REF_EVENT_EXTENSION: &str = ".ykre";
+const REF_EVENT_STAGING_SUFFIX: &str = ".partial";
+const PUBLISHED_REF_EVENT_MAX_DIRECTORY_ENTRIES: usize = 1_000_000;
+const PUBLISHED_REF_EVENT_MAX_BYTES: u64 = 128 * 1024 * 1024;
 const SEGMENT_INDEX_EXTENSION: &str = ".ykix";
 const SEGMENT_INDEX_STAGING_SUFFIX: &str = ".partial";
 const LAYOUT_DIRECTORIES: &[&str] = &[
@@ -73,6 +79,8 @@ const INITIAL_IMPORT_MAXIMUM_CHUNKS: usize = 4_096;
 const INITIAL_IMPORT_SEGMENT_MAXIMUM_BYTES: u64 = 65 * 1024 * 1024;
 const INITIAL_IMPORT_TINY_AGGREGATION_MAXIMUM_BYTES: usize =
     INITIAL_IMPORT_TINY_BLOB_MAXIMUM_BYTES * INITIAL_IMPORT_TINY_BLOBS_PER_AGGREGATION;
+
+type RefEventChains = BTreeMap<DeviceId, (u64, [u8; 32])>;
 
 /// Verified local metadata for one Git object.
 ///
@@ -857,7 +865,7 @@ impl GitObjectMetadata {
 pub struct LocalRepository {
     root: PathBuf,
     id: RepositoryId,
-    format: RepositoryFormat,
+    format: Mutex<RepositoryFormat>,
 }
 
 impl LocalRepository {
@@ -906,7 +914,7 @@ impl LocalRepository {
         Self::open(root)
     }
 
-    /// Opens an existing repository after validating its V1 bootstrap record.
+    /// Opens an existing repository after validating its bootstrap record.
     pub fn open(root: impl AsRef<Path>) -> Result<Self> {
         let root = root.as_ref();
         validate_directory(root, true)?;
@@ -921,7 +929,7 @@ impl LocalRepository {
         Ok(Self {
             root: root.to_path_buf(),
             id,
-            format,
+            format: Mutex::new(format),
         })
     }
 
@@ -945,8 +953,25 @@ impl LocalRepository {
     }
 
     /// Returns the validated persistent format declaration.
-    pub const fn format(&self) -> RepositoryFormat {
-        self.format
+    pub fn format(&self) -> RepositoryFormat {
+        *self
+            .format
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    fn ensure_ref_journal_format(&self) -> Result<()> {
+        let mut current = self
+            .format
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if current.version() == crate::RepositoryFormatVersion::V2 {
+            return Ok(());
+        }
+        let upgraded = current.with_version(crate::RepositoryFormatVersion::V2);
+        replace_bootstrap(&self.root, self.id, *current, upgraded)?;
+        *current = upgraded;
+        Ok(())
     }
 
     /// Returns the canonical final path for one sealed local segment.
@@ -1102,7 +1127,7 @@ impl LocalRepository {
             self.export_blob_manifests(&objects_directory, limits, &mut exported_ids)?;
         let metadata_object_count =
             self.export_metadata_object_manifests(&objects_directory, limits, &mut exported_ids)?;
-        let ref_count = self.export_ref_snapshot(destination, limits, &exported_ids)?;
+        let ref_count = self.export_ref_state(destination, limits, &exported_ids)?;
         sync_export_repository(destination, &objects_directory)?;
         Ok(LooseObjectExportReport {
             blob_count,
@@ -1273,6 +1298,110 @@ impl LocalRepository {
         self.verify(verification_limits)?;
         let snapshot = RefSnapshot::new(self.id, ManifestId::generate(), ref_state)?;
         self.publish_ref_snapshot(&snapshot, limits.ref_snapshot_publication_limits()?)?;
+        self.verify(verification_limits)?;
+        Ok(report)
+    }
+
+    /// Imports newly reachable source objects, then appends one checked local
+    /// ref-state transition for the source's current refs.
+    ///
+    /// This is a single-writer local maintenance operation. It preserves every
+    /// old immutable record and rejects a concurrent or divergent transition
+    /// instead of replacing refs. V1 events have integrity checks but no
+    /// signatures, so callers must use one trusted local writer identity.
+    pub fn sync_git_repository(
+        &self,
+        source: &GitRepository,
+        device_id: DeviceId,
+        limits: GitImportLimits,
+    ) -> Result<GitImportReport> {
+        let verification_limits = limits.verification_limits()?;
+        let Some(expected_state) = self.resolve_ref_state(limits.ref_snapshot_limits())? else {
+            return Err(Error::new(
+                ErrorKind::NotFound,
+                "Git sync requires an initial ref snapshot",
+            ));
+        };
+        let ids = source.reachable_object_ids()?;
+        if ids.len() > limits.maximum_objects() {
+            return Err(Error::new(
+                ErrorKind::Unsupported,
+                "Git import exceeds the object-count limit",
+            ));
+        }
+        let ref_state = source.ref_state()?;
+        let mut tiny_blobs = Vec::new();
+        let mut report = GitImportReport {
+            ref_count: ref_state.regular_refs().len(),
+            ..GitImportReport::default()
+        };
+
+        for id in ids {
+            let object = source.read_verified_object(id, limits.maximum_object_bytes())?;
+            if let Some(existing) = self.find_published_git_object(
+                id,
+                limits.chunked_blob_storage_limits().maximum_segment_bytes(),
+                limits.chunked_blob_storage_limits().segment_read_limits(),
+                limits.blob_manifest_limits(),
+                limits.metadata_object_manifest_limits(),
+            )? {
+                if existing != object {
+                    return Err(Error::new(
+                        ErrorKind::Conflict,
+                        "published Git object conflicts with source bytes",
+                    ));
+                }
+                self.record_object_metadata(&object)?;
+                continue;
+            }
+            self.record_object_metadata(&object)?;
+            match object.kind() {
+                GitObjectKind::Blob if object.data().len() <= limits.tiny_blob_maximum_bytes() => {
+                    tiny_blobs.push(object);
+                    report.tiny_blob_count =
+                        report.tiny_blob_count.checked_add(1).ok_or_else(|| {
+                            Error::new(ErrorKind::Unsupported, "Git import object count overflows")
+                        })?;
+                }
+                GitObjectKind::Blob
+                    if object.data().len() >= limits.chunked_blob_minimum_bytes() =>
+                {
+                    self.store_chunked_blob(
+                        ManifestId::generate(),
+                        &object,
+                        limits.chunker(),
+                        limits.chunked_blob_storage_limits(),
+                    )?;
+                    report.chunked_blob_count =
+                        report.chunked_blob_count.checked_add(1).ok_or_else(|| {
+                            Error::new(ErrorKind::Unsupported, "Git import object count overflows")
+                        })?;
+                }
+                GitObjectKind::Blob => {
+                    self.store_whole_blob(&object, limits)?;
+                    report.whole_blob_count =
+                        report.whole_blob_count.checked_add(1).ok_or_else(|| {
+                            Error::new(ErrorKind::Unsupported, "Git import object count overflows")
+                        })?;
+                }
+                GitObjectKind::Tree | GitObjectKind::Commit | GitObjectKind::Tag => {
+                    self.store_metadata_object(&object, limits)?;
+                    report.metadata_object_count =
+                        report.metadata_object_count.checked_add(1).ok_or_else(|| {
+                            Error::new(ErrorKind::Unsupported, "Git import object count overflows")
+                        })?;
+                }
+            }
+        }
+        self.store_tiny_blobs(&tiny_blobs, limits)?;
+        self.verify(verification_limits)?;
+        self.append_ref_state_if_current(
+            ref_state,
+            device_id,
+            Some(&expected_state),
+            limits.ref_snapshot_publication_limits()?,
+            limits.ref_snapshot_limits(),
+        )?;
         self.verify(verification_limits)?;
         Ok(report)
     }
@@ -2361,13 +2490,174 @@ impl LocalRepository {
         Ok(resolved)
     }
 
+    /// Resolves the effective Git ref state after all checked local events.
+    ///
+    /// The initial `YKRF` snapshot remains immutable. Later `YKRE` records
+    /// are applied only as one unambiguous sequence-chain continuation; a
+    /// missing, conflicting, or divergent event fails closed.
+    pub fn resolve_ref_state(&self, limits: RefSnapshotReadLimits) -> Result<Option<GitRefState>> {
+        let Some(snapshot) = self.resolve_ref_snapshot(limits)? else {
+            if self.ref_events(ref_event_limits(limits)?)?.is_empty() {
+                return Ok(None);
+            }
+            return Err(Error::new(
+                ErrorKind::CorruptData,
+                "ref journal exists without an initial ref snapshot",
+            ));
+        };
+        self.materialize_ref_state(snapshot.state(), ref_event_limits(limits)?)
+            .map(Some)
+    }
+
+    /// Returns every validated immutable local ref event in filename order.
+    ///
+    /// Callers must materialize through [`Self::resolve_ref_state`] before
+    /// treating the records as an acknowledged ref state.
+    pub fn ref_events(&self, limits: RefEventReadLimits) -> Result<Vec<RefEvent>> {
+        let directory = self.root.join(REF_JOURNAL_DIRECTORY);
+        match fs::symlink_metadata(&directory) {
+            Ok(_) => validate_directory(&directory, false)?,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(error) => {
+                return Err(io_error(
+                    error,
+                    "ref journal directory could not be inspected",
+                ));
+            }
+        }
+        let mut paths = Vec::new();
+        let mut inspected_entries = 0usize;
+        for entry in fs::read_dir(&directory)
+            .map_err(|error| io_error(error, "ref journal directory could not be read"))?
+        {
+            let entry = entry
+                .map_err(|error| io_error(error, "ref journal directory could not be read"))?;
+            inspected_entries = increment_directory_entries(
+                inspected_entries,
+                limits.maximum_directory_entries(),
+                "ref journal directory exceeds the entry limit",
+            )?;
+            paths.push(entry.path());
+        }
+        paths.sort();
+        let mut events = Vec::new();
+        for path in paths {
+            let name = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .ok_or_else(|| {
+                    Error::new(
+                        ErrorKind::CorruptData,
+                        "ref journal directory has an invalid entry name",
+                    )
+                })?;
+            if is_ref_event_staging_filename(name) {
+                continue;
+            }
+            let (sequence, device_id, expected_id) = parse_ref_event_filename(name)?;
+            let bytes = read_bounded_ref_event_file(&path, limits.maximum_event_bytes())?;
+            let event = RefEvent::decode(&bytes, limits)?;
+            if event.repository_id() != self.id
+                || event.sequence() != sequence
+                || event.device_id() != device_id
+                || event.event_id() != expected_id
+            {
+                return Err(Error::new(
+                    ErrorKind::CorruptData,
+                    "ref journal filename does not match its event",
+                ));
+            }
+            events.push(event);
+        }
+        Ok(events)
+    }
+
+    /// Appends one durable local state transition after verifying all target
+    /// objects and its exact expected predecessor state.
+    pub fn append_ref_state(
+        &self,
+        state: GitRefState,
+        device_id: DeviceId,
+        publication_limits: RefSnapshotPublicationLimits,
+        read_limits: RefSnapshotReadLimits,
+    ) -> Result<()> {
+        self.append_ref_state_if_current(state, device_id, None, publication_limits, read_limits)
+    }
+
+    fn append_ref_state_if_current(
+        &self,
+        state: GitRefState,
+        device_id: DeviceId,
+        expected_current: Option<&GitRefState>,
+        publication_limits: RefSnapshotPublicationLimits,
+        read_limits: RefSnapshotReadLimits,
+    ) -> Result<()> {
+        let Some(snapshot) = self.resolve_ref_snapshot(read_limits)? else {
+            return Err(Error::new(
+                ErrorKind::NotFound,
+                "ref update requires an initial ref snapshot",
+            ));
+        };
+        let event_limits = ref_event_limits(read_limits)?;
+        let (current, chains) =
+            self.materialize_ref_state_with_chains(snapshot.state(), event_limits)?;
+        if expected_current.is_some_and(|expected| *expected != current) {
+            return Err(Error::new(
+                ErrorKind::Conflict,
+                "ref state changed before the requested transition",
+            ));
+        }
+        if current == state {
+            return Ok(());
+        }
+        self.verify_ref_state_targets_for_publication(&state, publication_limits)?;
+        let (sequence, previous_event_id) = match chains.get(&device_id) {
+            Some((sequence, event_id)) => (
+                sequence.checked_add(1).ok_or_else(|| {
+                    Error::new(ErrorKind::Unsupported, "ref event sequence overflows")
+                })?,
+                *event_id,
+            ),
+            None => (1, [0; 32]),
+        };
+        let event = RefEvent::new(
+            self.id,
+            device_id,
+            sequence,
+            previous_event_id,
+            RefEvent::state_id(&current),
+            state,
+        )?;
+        self.ensure_ref_journal_format()?;
+        self.publish_ref_event(&event, event_limits)?;
+        let current = self.resolve_ref_state(read_limits)?.ok_or_else(|| {
+            Error::new(ErrorKind::CorruptData, "published ref state is unavailable")
+        })?;
+        if current == *event.state() {
+            Ok(())
+        } else {
+            Err(Error::new(
+                ErrorKind::Conflict,
+                "ref event conflicts with the materialized ref state",
+            ))
+        }
+    }
+
     fn verify_ref_snapshot_targets_for_publication(
         &self,
         snapshot: &RefSnapshot,
         limits: RefSnapshotPublicationLimits,
     ) -> Result<()> {
-        self.verify_ref_snapshot_targets(
-            snapshot,
+        self.verify_ref_state_targets_for_publication(snapshot.state(), limits)
+    }
+
+    fn verify_ref_state_targets_for_publication(
+        &self,
+        state: &GitRefState,
+        limits: RefSnapshotPublicationLimits,
+    ) -> Result<()> {
+        self.verify_ref_state_targets(
+            state,
             limits.maximum_segment_bytes,
             limits.segment_read_limits,
             limits.blob_manifest_limits,
@@ -2375,15 +2665,15 @@ impl LocalRepository {
         )
     }
 
-    fn verify_ref_snapshot_targets(
+    fn verify_ref_state_targets(
         &self,
-        snapshot: &RefSnapshot,
+        state: &GitRefState,
         maximum_segment_bytes: u64,
         segment_read_limits: SegmentReadLimits,
         blob_manifest_limits: BlobManifestReadLimits,
         metadata_object_manifest_limits: MetadataObjectManifestReadLimits,
     ) -> Result<()> {
-        for target in ref_snapshot_target_ids(snapshot) {
+        for target in ref_state_target_ids(state) {
             self.reconstruct_published_git_object(
                 target,
                 maximum_segment_bytes,
@@ -2403,22 +2693,37 @@ impl LocalRepository {
         blob_manifest_limits: BlobManifestReadLimits,
         metadata_object_manifest_limits: MetadataObjectManifestReadLimits,
     ) -> Result<GitObject> {
+        self.find_published_git_object(
+            id,
+            maximum_segment_bytes,
+            segment_read_limits,
+            blob_manifest_limits,
+            metadata_object_manifest_limits,
+        )?
+        .ok_or_else(|| Error::new(ErrorKind::NotFound, "ref target is unavailable"))
+    }
+
+    fn find_published_git_object(
+        &self,
+        id: GitObjectId,
+        maximum_segment_bytes: u64,
+        segment_read_limits: SegmentReadLimits,
+        blob_manifest_limits: BlobManifestReadLimits,
+        metadata_object_manifest_limits: MetadataObjectManifestReadLimits,
+    ) -> Result<Option<GitObject>> {
         if let Some(manifest) = self.resolve_blob_manifest(id, blob_manifest_limits)? {
-            return self.reconstruct_blob(&manifest, maximum_segment_bytes, segment_read_limits);
+            return self
+                .reconstruct_blob(&manifest, maximum_segment_bytes, segment_read_limits)
+                .map(Some);
         }
         if let Some(manifest) =
             self.resolve_metadata_object_manifest(id, metadata_object_manifest_limits)?
         {
-            return self.reconstruct_metadata_object(
-                &manifest,
-                maximum_segment_bytes,
-                segment_read_limits,
-            );
+            return self
+                .reconstruct_metadata_object(&manifest, maximum_segment_bytes, segment_read_limits)
+                .map(Some);
         }
-        Err(Error::new(
-            ErrorKind::NotFound,
-            "ref snapshot target is unavailable",
-        ))
+        Ok(None)
     }
 
     fn ensure_ref_snapshot_directory(&self) -> Result<PathBuf> {
@@ -2460,6 +2765,168 @@ impl LocalRepository {
             ));
         }
         Ok(snapshot)
+    }
+
+    fn materialize_ref_state(
+        &self,
+        initial: &GitRefState,
+        limits: RefEventReadLimits,
+    ) -> Result<GitRefState> {
+        self.materialize_ref_state_with_chains(initial, limits)
+            .map(|(state, _)| state)
+    }
+
+    fn materialize_ref_state_with_chains(
+        &self,
+        initial: &GitRefState,
+        limits: RefEventReadLimits,
+    ) -> Result<(GitRefState, RefEventChains)> {
+        let mut current = initial.clone();
+        let mut chains = RefEventChains::new();
+        let mut pending = self.ref_events(limits)?;
+        while !pending.is_empty() {
+            let expected_state_id = RefEvent::state_id(&current);
+            let candidates: Vec<usize> = pending
+                .iter()
+                .enumerate()
+                .filter_map(|(index, event)| {
+                    (event.expected_state_id() == expected_state_id).then_some(index)
+                })
+                .collect();
+            let index = match candidates.as_slice() {
+                [index] => *index,
+                [] => {
+                    return Err(Error::new(
+                        ErrorKind::Conflict,
+                        "ref journal does not continue the materialized ref state",
+                    ));
+                }
+                _ => {
+                    return Err(Error::new(
+                        ErrorKind::Conflict,
+                        "ref journal has divergent ref events",
+                    ));
+                }
+            };
+            let event = pending.remove(index);
+            let expected_chain = match chains.get(&event.device_id()) {
+                Some((sequence, event_id)) => (
+                    sequence.checked_add(1).ok_or_else(|| {
+                        Error::new(ErrorKind::Unsupported, "ref event sequence overflows")
+                    })?,
+                    *event_id,
+                ),
+                None => (1, [0; 32]),
+            };
+            if event.sequence() != expected_chain.0 || event.previous_event_id() != expected_chain.1
+            {
+                return Err(Error::new(
+                    ErrorKind::Conflict,
+                    "ref journal device sequence chain diverges",
+                ));
+            }
+            let event_id = event.event_id();
+            current = event.state().clone();
+            chains.insert(event.device_id(), (event.sequence(), event_id));
+        }
+        Ok((current, chains))
+    }
+
+    fn publish_ref_event(&self, event: &RefEvent, limits: RefEventReadLimits) -> Result<()> {
+        if event.repository_id() != self.id {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "ref event belongs to a different repository",
+            ));
+        }
+        let bytes = event.encode();
+        let bytes_len = u64::try_from(bytes.len())
+            .map_err(|_| Error::new(ErrorKind::Unsupported, "ref event is too large to publish"))?;
+        if bytes_len > PUBLISHED_REF_EVENT_MAX_BYTES {
+            return Err(Error::new(
+                ErrorKind::Unsupported,
+                "ref event is too large to publish",
+            ));
+        }
+        let directory = self.root.join(REF_JOURNAL_DIRECTORY);
+        validate_directory(&directory, false)?;
+        let destination = directory.join(ref_event_filename(event));
+        match fs::symlink_metadata(&destination) {
+            Ok(_) => return self.verify_existing_ref_event(&destination, event, limits),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(io_error(
+                    error,
+                    "ref event destination could not be inspected",
+                ));
+            }
+        }
+        if self
+            .ref_events(RefEventReadLimits::new(
+                PUBLISHED_REF_EVENT_MAX_DIRECTORY_ENTRIES,
+                PUBLISHED_REF_EVENT_MAX_BYTES,
+                PUBLISHED_REF_SNAPSHOT_MAX_REFERENCE_ENTRIES,
+            )?)?
+            .len()
+            >= PUBLISHED_REF_EVENT_MAX_DIRECTORY_ENTRIES
+        {
+            return Err(Error::new(
+                ErrorKind::Unsupported,
+                "ref journal directory exceeds the entry limit",
+            ));
+        }
+        let (mut staging, staging_path) = create_ref_event_staging(&directory)?;
+        if let Err(error) = staging.write_all(&bytes) {
+            drop(staging);
+            let _ = fs::remove_file(&staging_path);
+            return Err(io_error(
+                error,
+                "ref event staging file could not be written",
+            ));
+        }
+        if let Err(error) = staging.sync_all() {
+            drop(staging);
+            let _ = fs::remove_file(&staging_path);
+            return Err(io_error(
+                error,
+                "ref event staging file could not be synchronized",
+            ));
+        }
+        drop(staging);
+        match fs::hard_link(&staging_path, &destination) {
+            Ok(()) => {
+                sync_directory(&directory)?;
+                let _ = fs::remove_file(&staging_path);
+                let _ = sync_directory(&directory);
+                Ok(())
+            }
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                let _ = fs::remove_file(&staging_path);
+                self.verify_existing_ref_event(&destination, event, limits)
+            }
+            Err(error) => {
+                let _ = fs::remove_file(&staging_path);
+                Err(io_error(error, "ref event could not be published"))
+            }
+        }
+    }
+
+    fn verify_existing_ref_event(
+        &self,
+        path: &Path,
+        event: &RefEvent,
+        limits: RefEventReadLimits,
+    ) -> Result<()> {
+        let bytes = read_bounded_ref_event_file(path, limits.maximum_event_bytes())?;
+        let existing = RefEvent::decode(&bytes, limits)?;
+        if existing == *event {
+            Ok(())
+        } else {
+            Err(Error::new(
+                ErrorKind::Conflict,
+                "ref event conflicts with an existing event",
+            ))
+        }
     }
 
     fn verify_existing_blob_manifest(
@@ -2837,25 +3304,25 @@ impl LocalRepository {
         Ok(object_count)
     }
 
-    fn export_ref_snapshot(
+    fn export_ref_state(
         &self,
         destination: &Path,
         limits: LooseObjectExportLimits,
         exported_ids: &BTreeSet<GitObjectId>,
     ) -> Result<usize> {
-        let Some(snapshot) = self.resolve_ref_snapshot(limits.ref_snapshot_limits)? else {
+        let Some(state) = self.resolve_ref_state(limits.ref_snapshot_limits)? else {
             return Ok(0);
         };
-        for target in ref_snapshot_target_ids(&snapshot) {
+        for target in ref_state_target_ids(&state) {
             if !exported_ids.contains(&target) {
                 return Err(Error::new(
                     ErrorKind::NotFound,
-                    "ref snapshot target was not exported",
+                    "ref state target was not exported",
                 ));
             }
         }
-        restore_exported_ref_snapshot(destination, &snapshot)?;
-        Ok(snapshot.state().regular_refs().len())
+        restore_exported_ref_state(destination, &state)?;
+        Ok(state.regular_refs().len())
     }
 
     fn verify_segments(
@@ -2914,7 +3381,7 @@ impl LocalRepository {
         validate_optional_directory(&self.root.join(REF_SNAPSHOT_DIRECTORY))?;
         validate_optional_directory(&self.root.join(TINY_BLOB_GROUP_MANIFEST_DIRECTORY))?;
         let (id, format) = read_bootstrap(&self.root)?;
-        if id != self.id || format != self.format {
+        if id != self.id || format != self.format() {
             return Err(Error::new(
                 ErrorKind::CorruptData,
                 "repository bootstrap changed after open",
@@ -3196,10 +3663,30 @@ impl LocalRepository {
 
     fn verify_ref_snapshots(&self, limits: RepositoryVerificationLimits) -> Result<usize> {
         let Some(snapshot) = self.resolve_ref_snapshot(limits.ref_snapshot_limits)? else {
+            if !self
+                .ref_events(ref_event_limits(limits.ref_snapshot_limits)?)?
+                .is_empty()
+            {
+                return Err(Error::new(
+                    ErrorKind::CorruptData,
+                    "ref journal exists without an initial ref snapshot",
+                ));
+            }
             return Ok(0);
         };
-        self.verify_ref_snapshot_targets(
-            &snapshot,
+        let event_limits = ref_event_limits(limits.ref_snapshot_limits)?;
+        for event in self.ref_events(event_limits)? {
+            self.verify_ref_state_targets(
+                event.state(),
+                limits.maximum_segment_bytes,
+                limits.segment_read_limits,
+                limits.blob_manifest_limits,
+                limits.metadata_object_manifest_limits,
+            )?;
+        }
+        let state = self.materialize_ref_state(snapshot.state(), event_limits)?;
+        self.verify_ref_state_targets(
+            &state,
             limits.maximum_segment_bytes,
             limits.segment_read_limits,
             limits.blob_manifest_limits,
@@ -3293,6 +3780,16 @@ fn metadata_object_manifest_filename(id: GitObjectId) -> String {
 
 fn ref_snapshot_filename(id: ManifestId) -> String {
     format!("{id}{REF_SNAPSHOT_EXTENSION}")
+}
+
+fn ref_event_filename(event: &RefEvent) -> String {
+    format!(
+        "{:020}-{}-{}{}",
+        event.sequence(),
+        event.device_id(),
+        hex::encode(event.event_id()),
+        REF_EVENT_EXTENSION
+    )
 }
 
 fn segment_index_filename(id: SegmentId) -> String {
@@ -3417,11 +3914,65 @@ fn parse_ref_snapshot_filename(name: &str) -> Result<ManifestId> {
     })
 }
 
+fn parse_ref_event_filename(name: &str) -> Result<(u64, DeviceId, [u8; 32])> {
+    let stem = name.strip_suffix(REF_EVENT_EXTENSION).ok_or_else(|| {
+        Error::new(
+            ErrorKind::CorruptData,
+            "ref journal directory has an invalid entry name",
+        )
+    })?;
+    if !stem.is_ascii()
+        || stem.len() != 122
+        || stem.as_bytes().get(20) != Some(&b'-')
+        || stem.as_bytes().get(57) != Some(&b'-')
+    {
+        return Err(Error::new(
+            ErrorKind::CorruptData,
+            "ref journal directory has an invalid entry name",
+        ));
+    }
+    let sequence_text = &stem[..20];
+    let sequence = sequence_text.parse::<u64>().map_err(|_| {
+        Error::new(
+            ErrorKind::CorruptData,
+            "ref journal directory has an invalid entry name",
+        )
+    })?;
+    if sequence == 0 || format!("{sequence:020}") != sequence_text {
+        return Err(Error::new(
+            ErrorKind::CorruptData,
+            "ref journal directory has an invalid entry name",
+        ));
+    }
+    let device_id = stem[21..57].parse().map_err(|_| {
+        Error::new(
+            ErrorKind::CorruptData,
+            "ref journal directory has an invalid entry name",
+        )
+    })?;
+    let mut event_id = [0; 32];
+    hex::decode_to_slice(&stem[58..], &mut event_id).map_err(|_| {
+        Error::new(
+            ErrorKind::CorruptData,
+            "ref journal directory has an invalid entry name",
+        )
+    })?;
+    Ok((sequence, device_id, event_id))
+}
+
 fn published_ref_snapshot_read_limits() -> Result<RefSnapshotReadLimits> {
     RefSnapshotReadLimits::new(
         PUBLISHED_REF_SNAPSHOT_MAX_DIRECTORY_ENTRIES,
         PUBLISHED_REF_SNAPSHOT_MAX_BYTES,
         PUBLISHED_REF_SNAPSHOT_MAX_REFERENCE_ENTRIES,
+    )
+}
+
+fn ref_event_limits(snapshot_limits: RefSnapshotReadLimits) -> Result<RefEventReadLimits> {
+    RefEventReadLimits::new(
+        snapshot_limits.maximum_directory_entries(),
+        snapshot_limits.maximum_snapshot_bytes(),
+        snapshot_limits.maximum_reference_entries(),
     )
 }
 
@@ -3473,6 +4024,12 @@ fn is_ref_snapshot_staging_filename(name: &str) -> bool {
     name.strip_prefix('.')
         .and_then(|name| name.strip_suffix(REF_SNAPSHOT_STAGING_SUFFIX))
         .is_some_and(|id| id.parse::<ManifestId>().is_ok())
+}
+
+fn is_ref_event_staging_filename(name: &str) -> bool {
+    name.strip_prefix('.')
+        .and_then(|name| name.strip_suffix(REF_EVENT_STAGING_SUFFIX))
+        .is_some_and(|id| id.parse::<SegmentId>().is_ok())
 }
 
 fn create_segment_index_staging(parent: &Path) -> Result<(File, PathBuf)> {
@@ -3595,21 +4152,68 @@ fn create_ref_snapshot_staging(parent: &Path) -> Result<(File, PathBuf)> {
     ))
 }
 
-fn ref_snapshot_target_ids(snapshot: &RefSnapshot) -> BTreeSet<GitObjectId> {
-    let mut targets: BTreeSet<GitObjectId> =
-        snapshot.state().regular_refs().values().copied().collect();
-    if let HeadState::Detached(target) = snapshot.state().head() {
+fn create_ref_event_staging(parent: &Path) -> Result<(File, PathBuf)> {
+    for _ in 0..16 {
+        let path = parent.join(format!(
+            ".{}{}",
+            SegmentId::generate(),
+            REF_EVENT_STAGING_SUFFIX
+        ));
+        match OpenOptions::new().create_new(true).write(true).open(&path) {
+            Ok(file) => return Ok((file, path)),
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(error) => {
+                return Err(io_error(
+                    error,
+                    "ref event staging file could not be created",
+                ));
+            }
+        }
+    }
+    Err(Error::new(
+        ErrorKind::Conflict,
+        "ref event staging path could not be allocated",
+    ))
+}
+
+fn create_bootstrap_staging(parent: &Path) -> Result<(File, PathBuf)> {
+    for _ in 0..16 {
+        let path = parent.join(format!(
+            ".{}{}",
+            SegmentId::generate(),
+            REF_EVENT_STAGING_SUFFIX
+        ));
+        match OpenOptions::new().create_new(true).write(true).open(&path) {
+            Ok(file) => return Ok((file, path)),
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(error) => {
+                return Err(io_error(
+                    error,
+                    "repository bootstrap staging file could not be created",
+                ));
+            }
+        }
+    }
+    Err(Error::new(
+        ErrorKind::Conflict,
+        "repository bootstrap staging path could not be allocated",
+    ))
+}
+
+fn ref_state_target_ids(state: &GitRefState) -> BTreeSet<GitObjectId> {
+    let mut targets: BTreeSet<GitObjectId> = state.regular_refs().values().copied().collect();
+    if let HeadState::Detached(target) = state.head() {
         targets.insert(*target);
     }
     targets
 }
 
-fn restore_exported_ref_snapshot(destination: &Path, snapshot: &RefSnapshot) -> Result<()> {
-    for (name, target) in snapshot.state().regular_refs() {
+fn restore_exported_ref_state(destination: &Path, state: &GitRefState) -> Result<()> {
+    for (name, target) in state.regular_refs() {
         write_export_ref(destination, name.as_bytes(), *target)?;
     }
     let mut head = Vec::new();
-    match snapshot.state().head() {
+    match state.head() {
         HeadState::Symbolic(name) => {
             head.extend_from_slice(b"ref: ");
             head.extend_from_slice(name.as_bytes());
@@ -4232,6 +4836,53 @@ fn read_bounded_ref_snapshot_file(path: &Path, maximum_bytes: u64) -> Result<Vec
     }
 }
 
+fn read_bounded_ref_event_file(path: &Path, maximum_bytes: u64) -> Result<Vec<u8>> {
+    let metadata = fs::symlink_metadata(path).map_err(|error| {
+        if error.kind() == io::ErrorKind::NotFound {
+            Error::new(ErrorKind::CorruptData, "ref event file is missing")
+        } else {
+            io_error(error, "ref event file could not be inspected")
+        }
+    })?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(Error::new(
+            ErrorKind::CorruptData,
+            "ref event file is not a regular file",
+        ));
+    }
+    if metadata.len() > maximum_bytes {
+        return Err(Error::new(
+            ErrorKind::Unsupported,
+            "ref event file exceeds the byte limit",
+        ));
+    }
+    let length = usize::try_from(metadata.len()).map_err(|_| {
+        Error::new(
+            ErrorKind::Unsupported,
+            "ref event file exceeds the byte limit",
+        )
+    })?;
+    let mut file =
+        File::open(path).map_err(|error| io_error(error, "ref event file could not be opened"))?;
+    let mut bytes = vec![0; length];
+    file.read_exact(&mut bytes).map_err(|error| {
+        if error.kind() == io::ErrorKind::UnexpectedEof {
+            Error::new(ErrorKind::CorruptData, "ref event file is truncated")
+        } else {
+            io_error(error, "ref event file could not be read")
+        }
+    })?;
+    let mut extra = [0; 1];
+    match file.read(&mut extra) {
+        Ok(0) => Ok(bytes),
+        Ok(_) => Err(Error::new(
+            ErrorKind::CorruptData,
+            "ref event file changed while being read",
+        )),
+        Err(error) => Err(io_error(error, "ref event file could not be read")),
+    }
+}
+
 fn read_bounded_segment_index_file(path: &Path, maximum_bytes: u64) -> Result<Vec<u8>> {
     let metadata = fs::symlink_metadata(path).map_err(|error| {
         if error.kind() == io::ErrorKind::NotFound {
@@ -4432,6 +5083,58 @@ fn encode_bootstrap(id: RepositoryId, format: RepositoryFormat) -> Vec<u8> {
     encoder.write_u64(format.features().optional_bits());
     encoder.write_fixed(id.as_bytes());
     encoder.into_bytes()
+}
+
+fn replace_bootstrap(
+    root: &Path,
+    id: RepositoryId,
+    expected_format: RepositoryFormat,
+    format: RepositoryFormat,
+) -> Result<()> {
+    let (existing_id, existing_format) = read_bootstrap(root)?;
+    if existing_id != id || existing_format != expected_format {
+        return Err(Error::new(
+            ErrorKind::Conflict,
+            "repository bootstrap conflicts with the ref-journal upgrade",
+        ));
+    }
+    let directory = root.join("format");
+    validate_directory(&directory, false)?;
+    let destination = root.join(BOOTSTRAP_PATH);
+    let metadata = fs::symlink_metadata(&destination)
+        .map_err(|error| io_error(error, "repository bootstrap could not be inspected"))?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(Error::new(
+            ErrorKind::CorruptData,
+            "repository bootstrap is not a regular file",
+        ));
+    }
+    let (mut staging, staging_path) = create_bootstrap_staging(&directory)?;
+    if let Err(error) = staging.write_all(&encode_bootstrap(id, format)) {
+        drop(staging);
+        let _ = fs::remove_file(&staging_path);
+        return Err(io_error(
+            error,
+            "repository bootstrap staging file could not be written",
+        ));
+    }
+    if let Err(error) = staging.sync_all() {
+        drop(staging);
+        let _ = fs::remove_file(&staging_path);
+        return Err(io_error(
+            error,
+            "repository bootstrap staging file could not be synchronized",
+        ));
+    }
+    drop(staging);
+    if let Err(error) = fs::rename(&staging_path, &destination) {
+        let _ = fs::remove_file(&staging_path);
+        return Err(io_error(
+            error,
+            "repository bootstrap could not be upgraded",
+        ));
+    }
+    sync_directory(&directory)
 }
 
 fn read_bootstrap(root: &Path) -> Result<(RepositoryId, RepositoryFormat)> {
@@ -4838,6 +5541,160 @@ mod tests {
         assert_eq!(
             git_output_in(&source_path, &["rev-parse", "HEAD^{tree}"]),
             git_output_in(&exported_path, &["rev-parse", "HEAD^{tree}"])
+        );
+    }
+
+    #[test]
+    fn syncs_new_objects_and_ref_deletions_through_checked_journal_events() {
+        let directory = TestDirectory::new();
+        let source_path = directory.path().join("source");
+        let repository_path = directory.path().join("repository");
+        let exported_path = directory.path().join("exported.git");
+        fs::create_dir(&source_path).expect("create source path");
+        run_git_in(&source_path, &["init", "-b", "main"]);
+        run_git_in(&source_path, &["config", "user.name", "Yeokcham Test"]);
+        run_git_in(
+            &source_path,
+            &["config", "user.email", "yeokcham-test@example.invalid"],
+        );
+        fs::write(source_path.join("README.md"), b"first\n").expect("write first body");
+        run_git_in(&source_path, &["add", "README.md"]);
+        run_git_in(&source_path, &["commit", "-m", "first"]);
+        run_git_in(&source_path, &["branch", "obsolete"]);
+
+        let limits = GitImportLimits::initial().expect("limits");
+        let repository = LocalRepository::create(&repository_path).expect("create destination");
+        repository
+            .import_git_repository(
+                &GitRepository::open(&source_path).expect("open initial source"),
+                limits,
+            )
+            .expect("initial import");
+        fs::write(source_path.join("README.md"), b"second\n").expect("write second body");
+        run_git_in(&source_path, &["add", "README.md"]);
+        run_git_in(&source_path, &["commit", "-m", "second"]);
+        run_git_in(&source_path, &["branch", "-D", "obsolete"]);
+        let source = GitRepository::open(&source_path).expect("open updated source");
+        let source_state = source.ref_state().expect("read updated refs");
+        let device_id: DeviceId = "6ba7b814-9dad-41d1-80b4-00c04fd430c8"
+            .parse()
+            .expect("device ID");
+        let report = repository
+            .sync_git_repository(&source, device_id, limits)
+            .expect("sync updated source");
+        assert!(report.object_count() > 0);
+        assert_eq!(
+            repository
+                .resolve_ref_state(limits.ref_snapshot_limits())
+                .expect("resolve synced refs"),
+            Some(source_state.clone())
+        );
+        assert_eq!(
+            repository
+                .ref_events(ref_event_limits(limits.ref_snapshot_limits()).expect("event limits"))
+                .expect("read events")
+                .len(),
+            1
+        );
+        assert_eq!(
+            repository.format().version(),
+            crate::RepositoryFormatVersion::V2
+        );
+        assert_eq!(
+            LocalRepository::open(&repository_path)
+                .expect("reopen V2 repository")
+                .format()
+                .version(),
+            crate::RepositoryFormatVersion::V2
+        );
+
+        let unchanged = repository
+            .sync_git_repository(&source, device_id, limits)
+            .expect("repeat unchanged sync");
+        assert_eq!(unchanged.object_count(), 0);
+        assert_eq!(
+            repository
+                .ref_events(ref_event_limits(limits.ref_snapshot_limits()).expect("event limits"))
+                .expect("read events")
+                .len(),
+            1
+        );
+
+        repository
+            .export_loose_objects(
+                &exported_path,
+                limits.export_limits().expect("export limits"),
+            )
+            .expect("export synced repository");
+        let exported = GitRepository::open(&exported_path).expect("open export");
+        assert_eq!(exported.ref_state().expect("exported refs"), source_state);
+        git_fsck(&exported_path);
+
+        let materialized_state = repository
+            .resolve_ref_state(limits.ref_snapshot_limits())
+            .expect("resolve current state")
+            .expect("current state");
+        let alternate_state = GitRefState::new(
+            BTreeMap::new(),
+            HeadState::Symbolic(RefName::from_bytes(b"refs/heads/main").expect("HEAD")),
+        )
+        .expect("alternate state");
+        repository
+            .append_ref_state(
+                alternate_state.clone(),
+                device_id,
+                limits
+                    .ref_snapshot_publication_limits()
+                    .expect("publication limits"),
+                limits.ref_snapshot_limits(),
+            )
+            .expect("append competing current transition");
+        assert_eq!(
+            repository
+                .append_ref_state_if_current(
+                    materialized_state.clone(),
+                    device_id,
+                    Some(&materialized_state),
+                    limits
+                        .ref_snapshot_publication_limits()
+                        .expect("publication limits"),
+                    limits.ref_snapshot_limits(),
+                )
+                .expect_err("stale expected state must not overwrite refs")
+                .kind(),
+            ErrorKind::Conflict
+        );
+        let second_device: DeviceId = "7c9e6679-7425-40de-944b-e07fc1f90ae7"
+            .parse()
+            .expect("second device ID");
+        let divergent = RefEvent::new(
+            repository.id(),
+            second_device,
+            1,
+            [0; 32],
+            RefEvent::state_id(&materialized_state),
+            alternate_state,
+        )
+        .expect("divergent event");
+        repository
+            .publish_ref_event(
+                &divergent,
+                ref_event_limits(limits.ref_snapshot_limits()).expect("event limits"),
+            )
+            .expect("preserve divergent event");
+        assert_eq!(
+            repository
+                .resolve_ref_state(limits.ref_snapshot_limits())
+                .expect_err("divergence must fail closed")
+                .kind(),
+            ErrorKind::Conflict
+        );
+        assert_eq!(
+            repository
+                .ref_events(ref_event_limits(limits.ref_snapshot_limits()).expect("event limits"))
+                .expect("preserved events")
+                .len(),
+            3
         );
     }
 
@@ -5934,7 +6791,7 @@ mod tests {
         let id: RepositoryId = TEST_ID.parse().expect("valid test ID");
 
         for bytes in [
-            bootstrap_with(id.into_bytes(), 2, 0, 0),
+            bootstrap_with(id.into_bytes(), 3, 0, 0),
             bootstrap_with(id.into_bytes(), 1, 1, 0),
         ] {
             fs::write(bootstrap_path(&root), bytes).expect("replace bootstrap");

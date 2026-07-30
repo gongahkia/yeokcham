@@ -295,6 +295,67 @@ fn remote_helper_clones_lists_refs_and_repeats_fetch_without_source_disclosure()
     );
     assert!(run_git(&checkout, &["status", "--porcelain"]).is_empty());
 
+    fs::write(
+        source.join("README.md"),
+        b"remote helper fixture, updated\n",
+    )
+    .expect("update fixture");
+    run_git(&source, &["add", "README.md"]);
+    run_git(&source, &["commit", "-m", "updated fixture"]);
+    run_git(&source, &["branch", "-D", "topic"]);
+    let device_id = "6ba7b814-9dad-41d1-80b4-00c04fd430c8";
+    let output = Command::new(env!("CARGO_BIN_EXE_yeokcham"))
+        .args(["sync", "--from-git"])
+        .arg(&source)
+        .arg(&repository)
+        .args(["--device", device_id])
+        .output()
+        .expect("sync updated source");
+    assert!(
+        output.status.success(),
+        "sync must succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let output = Command::new(env!("CARGO_BIN_EXE_yeokcham"))
+        .args(["inspect", "refs"])
+        .arg(&repository)
+        .output()
+        .expect("inspect ref journal");
+    assert!(output.status.success());
+    let refs = String::from_utf8(output.stdout).expect("ref inspection is UTF-8");
+    assert!(refs.contains("events=1"));
+    assert!(refs.contains(device_id));
+
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(&checkout)
+        .args(["fetch", "--quiet", "--prune", "origin"])
+        .env("PATH", &helper_path)
+        .output()
+        .expect("fetch update");
+    assert!(
+        output.status.success(),
+        "fetch update must succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        run_git(&source, &["rev-parse", "refs/heads/main"]),
+        run_git(&checkout, &["rev-parse", "refs/remotes/origin/main"])
+    );
+    run_git(&checkout, &["merge", "--ff-only", "origin/main"]);
+    assert_eq!(
+        fs::read(source.join("README.md")).expect("read updated source"),
+        fs::read(checkout.join("README.md")).expect("read checkout before fast-forward")
+    );
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(&checkout)
+        .args(["rev-parse", "--verify", "refs/remotes/origin/topic"])
+        .output()
+        .expect("check pruned branch");
+    assert!(!output.status.success(), "deleted branch must be pruned");
+    run_git(&checkout, &["fsck", "--full", "--strict"]);
+
     let mut helper = Command::new(env!("CARGO_BIN_EXE_git-remote-yeokcham"))
         .arg("secret-source-location")
         .env("YEOKCHAM_LOG", "debug")

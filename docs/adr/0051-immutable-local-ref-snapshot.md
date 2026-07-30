@@ -1,10 +1,10 @@
 # ADR-0051: Publish one immutable local ref snapshot before journals
 
-- Status: Accepted
+- Status: Superseded by ADR-0056
 - Date: 2026-07-30
 - Deciders: Yeokcham maintainers
 - Supersedes: None
-- Superseded by: None
+- Superseded by: ADR-0056
 
 ## Context
 
