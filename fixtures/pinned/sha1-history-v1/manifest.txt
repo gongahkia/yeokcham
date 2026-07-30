@@ -1,0 +1,11 @@
+fixture_format=1
+hash_algorithm=sha1
+commit_v1=56f16e8db29248b7f73e66f65329a05317aed0a7
+commit_v2=5993e62c12dfaeb50db82428d907579ce166da1c
+tag_v2=c76a1dbed3ebe6aba004308376818e617573c5e7
+tree_v2=a3390a92ddcf5610676c9d925bb9006bb08c9aaa
+large_blob_v2=8b0c356d4917209cf7c3825806b11c873710e996
+reachable_object_ids_sha256=c02e63b6d8550d9323a685ddf2abd00993437585a5c6b5dc3cfa48ca45d292ac
+ref_main=refs/heads/main
+ref_release=refs/heads/release
+ref_tag=refs/tags/fixture-v2

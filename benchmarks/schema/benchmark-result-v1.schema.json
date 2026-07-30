@@ -67,6 +67,10 @@
       "type": "integer",
       "minimum": 0
     },
+    "nonNegativeIntegerOrNull": {
+      "type": ["integer", "null"],
+      "minimum": 0
+    },
     "positiveInteger": {
       "type": "integer",
       "minimum": 1
@@ -307,10 +311,10 @@
           "$ref": "#/$defs/nonNegativeInteger"
         },
         "io_bytes_read": {
-          "$ref": "#/$defs/nonNegativeInteger"
+          "$ref": "#/$defs/nonNegativeIntegerOrNull"
         },
         "io_bytes_written": {
-          "$ref": "#/$defs/nonNegativeInteger"
+          "$ref": "#/$defs/nonNegativeIntegerOrNull"
         },
         "network_request_count": {
           "$ref": "#/$defs/nonNegativeInteger"

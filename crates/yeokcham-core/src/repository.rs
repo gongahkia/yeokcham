@@ -14,11 +14,12 @@ use rusqlite::{
 
 use crate::{
     BlobManifest, BlobManifestRepresentation, CanonicalDecoder, CanonicalEncoder, ChunkRecord,
-    ChunkReference, ChunkedBlobRecord, ContentDefinedChunker, Error, ErrorKind, GitObject,
-    GitObjectId, GitObjectKind, HeadState, ManifestId, MetadataObjectManifest,
-    MetadataObjectRecord, ReadSegment, ReadSegmentRecord, RefSnapshot, RefSnapshotReadLimits,
-    RepositoryFormat, RepositoryId, Result, SegmentId, SegmentIndex, SegmentReadLimits,
-    SegmentReader, SegmentRecord, SegmentWriteLimits, SegmentWriter, YeokchamContentId,
+    ChunkReference, ChunkedBlobRecord, ContentDefinedChunker, ContentDefinedChunkingParameters,
+    Error, ErrorKind, GitObject, GitObjectId, GitObjectKind, GitRepository, HeadState, ManifestId,
+    MetadataObjectManifest, MetadataObjectRecord, ReadSegment, ReadSegmentRecord, RefSnapshot,
+    RefSnapshotReadLimits, RepositoryFormat, RepositoryId, Result, SegmentId, SegmentIndex,
+    SegmentReadLimits, SegmentReader, SegmentRecord, SegmentWriteLimits, SegmentWriter,
+    TinyBlobAggregation, WholeBlobRecord, YeokchamContentId,
 };
 
 const BOOTSTRAP_MAGIC: [u8; 4] = *b"YKRB";
@@ -55,6 +56,18 @@ const LAYOUT_DIRECTORIES: &[&str] = &[
     "summaries",
     "summaries/current",
 ];
+const INITIAL_IMPORT_MAXIMUM_OBJECTS: usize = 100_000;
+const INITIAL_IMPORT_MAXIMUM_OBJECT_BYTES: usize = 64 * 1024 * 1024;
+const INITIAL_IMPORT_TINY_BLOB_MAXIMUM_BYTES: usize = 1_024;
+const INITIAL_IMPORT_TINY_BLOBS_PER_AGGREGATION: usize = 512;
+const INITIAL_IMPORT_CHUNKED_BLOB_MINIMUM_BYTES: usize = 4 * 1024;
+const INITIAL_IMPORT_CHUNK_MINIMUM_BYTES: usize = 16 * 1024;
+const INITIAL_IMPORT_CHUNK_AVERAGE_BYTES: usize = 64 * 1024;
+const INITIAL_IMPORT_CHUNK_MAXIMUM_BYTES: usize = 256 * 1024;
+const INITIAL_IMPORT_MAXIMUM_CHUNKS: usize = 4_096;
+const INITIAL_IMPORT_SEGMENT_MAXIMUM_BYTES: u64 = 65 * 1024 * 1024;
+const INITIAL_IMPORT_TINY_AGGREGATION_MAXIMUM_BYTES: usize =
+    INITIAL_IMPORT_TINY_BLOB_MAXIMUM_BYTES * INITIAL_IMPORT_TINY_BLOBS_PER_AGGREGATION;
 
 /// Verified local metadata for one Git object.
 ///
@@ -73,6 +86,317 @@ pub struct ChunkedBlobStorageLimits {
     maximum_segment_entries: usize,
     maximum_segment_bytes: u64,
     segment_read_limits: SegmentReadLimits,
+}
+
+/// Bounded storage and verification policy for one Git import.
+///
+/// The initial policy stores blobs through tiny aggregations up to 1 KiB,
+/// whole-blob records below 4 KiB, and FastCDC records at or above 4 KiB.
+/// These are bootstrap compatibility settings, not benchmark-backed claims.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct GitImportLimits {
+    maximum_objects: usize,
+    maximum_object_bytes: usize,
+    tiny_blob_maximum_bytes: usize,
+    tiny_blobs_per_aggregation: usize,
+    chunked_blob_minimum_bytes: usize,
+    chunker: ContentDefinedChunker,
+    chunked_blob_storage_limits: ChunkedBlobStorageLimits,
+    blob_manifest_limits: BlobManifestReadLimits,
+    metadata_object_manifest_limits: MetadataObjectManifestReadLimits,
+    ref_snapshot_limits: RefSnapshotReadLimits,
+}
+
+impl GitImportLimits {
+    /// Returns the explicit bounded policy used by the command-line import workflow.
+    pub fn initial() -> Result<Self> {
+        let segment_read_limits = SegmentReadLimits::new(
+            1,
+            INITIAL_IMPORT_SEGMENT_MAXIMUM_BYTES,
+            usize::try_from(INITIAL_IMPORT_SEGMENT_MAXIMUM_BYTES).map_err(|_| {
+                Error::new(
+                    ErrorKind::Unsupported,
+                    "initial segment limit exceeds this platform",
+                )
+            })?,
+            INITIAL_IMPORT_MAXIMUM_OBJECT_BYTES,
+            INITIAL_IMPORT_MAXIMUM_CHUNKS,
+            INITIAL_IMPORT_TINY_AGGREGATION_MAXIMUM_BYTES,
+        )?;
+        let chunked_blob_storage_limits = ChunkedBlobStorageLimits::new(
+            Self::maximum_possible_segments(
+                INITIAL_IMPORT_MAXIMUM_OBJECTS,
+                INITIAL_IMPORT_MAXIMUM_CHUNKS,
+            )?,
+            INITIAL_IMPORT_SEGMENT_MAXIMUM_BYTES,
+            segment_read_limits,
+        )?;
+        Self::new(
+            INITIAL_IMPORT_MAXIMUM_OBJECTS,
+            INITIAL_IMPORT_MAXIMUM_OBJECT_BYTES,
+            INITIAL_IMPORT_TINY_BLOB_MAXIMUM_BYTES,
+            INITIAL_IMPORT_TINY_BLOBS_PER_AGGREGATION,
+            INITIAL_IMPORT_CHUNKED_BLOB_MINIMUM_BYTES,
+            ContentDefinedChunker::new(ContentDefinedChunkingParameters::new(
+                INITIAL_IMPORT_CHUNK_MINIMUM_BYTES,
+                INITIAL_IMPORT_CHUNK_AVERAGE_BYTES,
+                INITIAL_IMPORT_CHUNK_MAXIMUM_BYTES,
+                INITIAL_IMPORT_MAXIMUM_CHUNKS,
+            )?),
+            chunked_blob_storage_limits,
+            BlobManifestReadLimits::new(
+                INITIAL_IMPORT_MAXIMUM_OBJECTS,
+                PUBLISHED_BLOB_MANIFEST_MAX_BYTES,
+                INITIAL_IMPORT_MAXIMUM_OBJECT_BYTES as u64,
+            )?,
+            MetadataObjectManifestReadLimits::new(
+                PUBLISHED_METADATA_OBJECT_MANIFEST_MAX_BYTES,
+                INITIAL_IMPORT_MAXIMUM_OBJECT_BYTES as u64,
+            )?,
+            RefSnapshotReadLimits::new(
+                PUBLISHED_REF_SNAPSHOT_MAX_DIRECTORY_ENTRIES,
+                PUBLISHED_REF_SNAPSHOT_MAX_BYTES,
+                PUBLISHED_REF_SNAPSHOT_MAX_REFERENCE_ENTRIES,
+            )?,
+        )
+    }
+
+    /// Validates one caller-selected Git import policy.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        maximum_objects: usize,
+        maximum_object_bytes: usize,
+        tiny_blob_maximum_bytes: usize,
+        tiny_blobs_per_aggregation: usize,
+        chunked_blob_minimum_bytes: usize,
+        chunker: ContentDefinedChunker,
+        chunked_blob_storage_limits: ChunkedBlobStorageLimits,
+        blob_manifest_limits: BlobManifestReadLimits,
+        metadata_object_manifest_limits: MetadataObjectManifestReadLimits,
+        ref_snapshot_limits: RefSnapshotReadLimits,
+    ) -> Result<Self> {
+        if maximum_objects == 0
+            || maximum_object_bytes == 0
+            || tiny_blobs_per_aggregation == 0
+            || tiny_blobs_per_aggregation
+                > chunked_blob_storage_limits
+                    .segment_read_limits()
+                    .maximum_tiny_blob_entries()
+            || tiny_blob_maximum_bytes >= chunked_blob_minimum_bytes
+            || chunked_blob_minimum_bytes > maximum_object_bytes
+            || chunker.parameters().maximum_chunks()
+                > chunked_blob_storage_limits
+                    .segment_read_limits()
+                    .maximum_tiny_blob_entries()
+            || chunker.parameters().maximum_size()
+                > chunked_blob_storage_limits
+                    .segment_read_limits()
+                    .maximum_whole_blob_body_bytes()
+            || maximum_object_bytes
+                > chunked_blob_storage_limits
+                    .segment_read_limits()
+                    .maximum_whole_blob_body_bytes()
+            || tiny_blob_maximum_bytes
+                .checked_mul(tiny_blobs_per_aggregation)
+                .is_none_or(|maximum| {
+                    maximum
+                        > chunked_blob_storage_limits
+                            .segment_read_limits()
+                            .maximum_tiny_blob_body_bytes()
+                })
+            || blob_manifest_limits.maximum_entries() < maximum_objects
+            || blob_manifest_limits.maximum_plaintext_bytes() < maximum_object_bytes as u64
+            || metadata_object_manifest_limits.maximum_plaintext_bytes()
+                < maximum_object_bytes as u64
+        {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "Git import limits are inconsistent",
+            ));
+        }
+        Ok(Self {
+            maximum_objects,
+            maximum_object_bytes,
+            tiny_blob_maximum_bytes,
+            tiny_blobs_per_aggregation,
+            chunked_blob_minimum_bytes,
+            chunker,
+            chunked_blob_storage_limits,
+            blob_manifest_limits,
+            metadata_object_manifest_limits,
+            ref_snapshot_limits,
+        })
+    }
+
+    /// Returns the maximum reachable object count accepted by this import.
+    pub const fn maximum_objects(self) -> usize {
+        self.maximum_objects
+    }
+
+    /// Returns the maximum decompressed body bytes accepted for one Git object.
+    pub const fn maximum_object_bytes(self) -> usize {
+        self.maximum_object_bytes
+    }
+
+    /// Returns the largest blob body stored in a tiny aggregation.
+    pub const fn tiny_blob_maximum_bytes(self) -> usize {
+        self.tiny_blob_maximum_bytes
+    }
+
+    /// Returns the maximum tiny entries placed in one aggregation record.
+    pub const fn tiny_blobs_per_aggregation(self) -> usize {
+        self.tiny_blobs_per_aggregation
+    }
+
+    /// Returns the smallest non-tiny blob body selected for CDC storage.
+    pub const fn chunked_blob_minimum_bytes(self) -> usize {
+        self.chunked_blob_minimum_bytes
+    }
+
+    /// Returns this policy with a different CDC-selection threshold.
+    ///
+    /// This leaves every decoding, segment, and verification bound unchanged,
+    /// so callers can compare representation policies without changing the
+    /// storage safety envelope.
+    pub fn with_chunked_blob_minimum_bytes(self, minimum_bytes: usize) -> Result<Self> {
+        Self::new(
+            self.maximum_objects,
+            self.maximum_object_bytes,
+            self.tiny_blob_maximum_bytes,
+            self.tiny_blobs_per_aggregation,
+            minimum_bytes,
+            self.chunker,
+            self.chunked_blob_storage_limits,
+            self.blob_manifest_limits,
+            self.metadata_object_manifest_limits,
+            self.ref_snapshot_limits,
+        )
+    }
+
+    /// Returns the deterministic CDC boundary selector.
+    pub const fn chunker(self) -> ContentDefinedChunker {
+        self.chunker
+    }
+
+    /// Returns bounded chunk lookup and publication limits.
+    pub const fn chunked_blob_storage_limits(self) -> ChunkedBlobStorageLimits {
+        self.chunked_blob_storage_limits
+    }
+
+    /// Returns blob manifest lookup limits.
+    pub const fn blob_manifest_limits(self) -> BlobManifestReadLimits {
+        self.blob_manifest_limits
+    }
+
+    /// Returns metadata-object manifest lookup limits.
+    pub const fn metadata_object_manifest_limits(self) -> MetadataObjectManifestReadLimits {
+        self.metadata_object_manifest_limits
+    }
+
+    /// Returns ref snapshot lookup limits.
+    pub const fn ref_snapshot_limits(self) -> RefSnapshotReadLimits {
+        self.ref_snapshot_limits
+    }
+
+    /// Returns limits for a complete immutable-storage verification after import.
+    pub fn verification_limits(self) -> Result<RepositoryVerificationLimits> {
+        RepositoryVerificationLimits::new(
+            self.chunked_blob_storage_limits.maximum_segment_entries(),
+            self.chunked_blob_storage_limits.maximum_segment_bytes(),
+            self.chunked_blob_storage_limits.segment_read_limits(),
+            self.chunked_blob_storage_limits.maximum_segment_entries(),
+            4_096,
+            1,
+            self.chunked_blob_storage_limits.maximum_segment_bytes(),
+            self.blob_manifest_limits,
+            self.maximum_objects,
+            self.metadata_object_manifest_limits,
+            self.ref_snapshot_limits,
+        )
+    }
+
+    /// Returns limits for exporting data created under this import policy.
+    pub fn export_limits(self) -> Result<LooseObjectExportLimits> {
+        LooseObjectExportLimits::new(
+            self.chunked_blob_storage_limits.maximum_segment_bytes(),
+            self.chunked_blob_storage_limits.segment_read_limits(),
+            self.blob_manifest_limits,
+            self.maximum_objects,
+            self.metadata_object_manifest_limits,
+            self.ref_snapshot_limits,
+        )
+    }
+
+    fn ref_snapshot_publication_limits(self) -> Result<RefSnapshotPublicationLimits> {
+        RefSnapshotPublicationLimits::new(
+            self.chunked_blob_storage_limits.maximum_segment_bytes(),
+            self.chunked_blob_storage_limits.segment_read_limits(),
+            self.blob_manifest_limits,
+            self.metadata_object_manifest_limits,
+        )
+    }
+
+    fn maximum_possible_segments(maximum_objects: usize, maximum_chunks: usize) -> Result<usize> {
+        maximum_objects
+            .checked_mul(maximum_chunks.checked_add(1).ok_or_else(|| {
+                Error::new(
+                    ErrorKind::InvalidInput,
+                    "Git import segment limit overflows",
+                )
+            })?)
+            .and_then(|count| count.checked_add(maximum_objects))
+            .ok_or_else(|| {
+                Error::new(
+                    ErrorKind::InvalidInput,
+                    "Git import segment limit overflows",
+                )
+            })
+    }
+}
+
+/// Counts returned only after a Git import and final full verification succeed.
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+pub struct GitImportReport {
+    tiny_blob_count: usize,
+    whole_blob_count: usize,
+    chunked_blob_count: usize,
+    metadata_object_count: usize,
+    ref_count: usize,
+}
+
+impl GitImportReport {
+    /// Returns imported blobs stored in tiny aggregations.
+    pub const fn tiny_blob_count(self) -> usize {
+        self.tiny_blob_count
+    }
+
+    /// Returns imported blobs stored as whole records.
+    pub const fn whole_blob_count(self) -> usize {
+        self.whole_blob_count
+    }
+
+    /// Returns imported blobs stored through CDC descriptors.
+    pub const fn chunked_blob_count(self) -> usize {
+        self.chunked_blob_count
+    }
+
+    /// Returns imported trees, commits, and annotated tags.
+    pub const fn metadata_object_count(self) -> usize {
+        self.metadata_object_count
+    }
+
+    /// Returns imported regular Git refs.
+    pub const fn ref_count(self) -> usize {
+        self.ref_count
+    }
+
+    /// Returns every imported reachable Git object.
+    pub const fn object_count(self) -> usize {
+        self.tiny_blob_count
+            + self.whole_blob_count
+            + self.chunked_blob_count
+            + self.metadata_object_count
+    }
 }
 
 impl ChunkedBlobStorageLimits {
@@ -848,6 +1172,138 @@ impl LocalRepository {
         }))
     }
 
+    /// Imports every reachable SHA-1 object and regular ref from `source`.
+    ///
+    /// The destination must contain no published immutable records. Object
+    /// bytes are verified before storage, all manifests are reconstructed
+    /// before refs publish, and a final complete verification precedes a
+    /// successful report. A failed import can leave unreachable immutable
+    /// records; discard that fresh destination before retrying.
+    pub fn import_git_repository(
+        &self,
+        source: &GitRepository,
+        limits: GitImportLimits,
+    ) -> Result<GitImportReport> {
+        let verification_limits = limits.verification_limits()?;
+        let existing = self.verify(verification_limits)?;
+        if existing.segment_count() != 0
+            || existing.index_count() != 0
+            || existing.blob_manifest_count() != 0
+            || existing.metadata_object_manifest_count() != 0
+            || existing.ref_snapshot_count() != 0
+        {
+            return Err(Error::new(
+                ErrorKind::Conflict,
+                "Git import destination already contains immutable records",
+            ));
+        }
+
+        let ids = source.reachable_object_ids()?;
+        if ids.len() > limits.maximum_objects() {
+            return Err(Error::new(
+                ErrorKind::Unsupported,
+                "Git import exceeds the object-count limit",
+            ));
+        }
+        let ref_state = source.ref_state()?;
+        let mut tiny_blobs = Vec::new();
+        let mut report = GitImportReport {
+            ref_count: ref_state.regular_refs().len(),
+            ..GitImportReport::default()
+        };
+
+        for id in ids {
+            let object = source.read_verified_object(id, limits.maximum_object_bytes())?;
+            self.record_object_metadata(&object)?;
+            match object.kind() {
+                GitObjectKind::Blob if object.data().len() <= limits.tiny_blob_maximum_bytes() => {
+                    tiny_blobs.push(object);
+                    report.tiny_blob_count =
+                        report.tiny_blob_count.checked_add(1).ok_or_else(|| {
+                            Error::new(ErrorKind::Unsupported, "Git import object count overflows")
+                        })?;
+                }
+                GitObjectKind::Blob
+                    if object.data().len() >= limits.chunked_blob_minimum_bytes() =>
+                {
+                    self.store_chunked_blob(
+                        ManifestId::generate(),
+                        &object,
+                        limits.chunker(),
+                        limits.chunked_blob_storage_limits(),
+                    )?;
+                    report.chunked_blob_count =
+                        report.chunked_blob_count.checked_add(1).ok_or_else(|| {
+                            Error::new(ErrorKind::Unsupported, "Git import object count overflows")
+                        })?;
+                }
+                GitObjectKind::Blob => {
+                    self.store_whole_blob(&object, limits)?;
+                    report.whole_blob_count =
+                        report.whole_blob_count.checked_add(1).ok_or_else(|| {
+                            Error::new(ErrorKind::Unsupported, "Git import object count overflows")
+                        })?;
+                }
+                GitObjectKind::Tree | GitObjectKind::Commit | GitObjectKind::Tag => {
+                    self.store_metadata_object(&object, limits)?;
+                    report.metadata_object_count =
+                        report.metadata_object_count.checked_add(1).ok_or_else(|| {
+                            Error::new(ErrorKind::Unsupported, "Git import object count overflows")
+                        })?;
+                }
+            }
+        }
+        self.store_tiny_blobs(&tiny_blobs, limits)?;
+        self.verify(verification_limits)?;
+        let snapshot = RefSnapshot::new(self.id, ManifestId::generate(), ref_state)?;
+        self.publish_ref_snapshot(&snapshot, limits.ref_snapshot_publication_limits()?)?;
+        self.verify(verification_limits)?;
+        Ok(report)
+    }
+
+    fn store_whole_blob(&self, object: &GitObject, limits: GitImportLimits) -> Result<()> {
+        let record = WholeBlobRecord::from_verified_blob(object)?;
+        let segment = self.publish_records_segment(
+            &[SegmentRecord::from_whole_blob(&record)?],
+            limits.chunked_blob_storage_limits().maximum_segment_bytes(),
+            limits.chunked_blob_storage_limits().segment_read_limits(),
+        )?;
+        let manifest = BlobManifest::from_whole_blob(ManifestId::generate(), &segment, &record)?;
+        self.publish_blob_manifest(&manifest)
+    }
+
+    fn store_tiny_blobs(&self, objects: &[GitObject], limits: GitImportLimits) -> Result<()> {
+        for group in objects.chunks(limits.tiny_blobs_per_aggregation()) {
+            let aggregation = TinyBlobAggregation::from_verified_blobs(group)?;
+            let segment = self.publish_records_segment(
+                &[SegmentRecord::from_tiny_blob_aggregation(&aggregation)?],
+                limits.chunked_blob_storage_limits().maximum_segment_bytes(),
+                limits.chunked_blob_storage_limits().segment_read_limits(),
+            )?;
+            for entry in aggregation.entries() {
+                let manifest = BlobManifest::from_tiny_blob_aggregation(
+                    ManifestId::generate(),
+                    &segment,
+                    &aggregation,
+                    entry.git_object_id(),
+                )?;
+                self.publish_blob_manifest(&manifest)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn store_metadata_object(&self, object: &GitObject, limits: GitImportLimits) -> Result<()> {
+        let record = MetadataObjectRecord::from_verified_object(object)?;
+        let segment = self.publish_records_segment(
+            &[SegmentRecord::from_metadata_object(&record)?],
+            limits.chunked_blob_storage_limits().maximum_segment_bytes(),
+            limits.chunked_blob_storage_limits().segment_read_limits(),
+        )?;
+        let manifest = MetadataObjectManifest::from_metadata_object(&segment, &record)?;
+        self.publish_metadata_object_manifest(&manifest)
+    }
+
     /// Stores one verified blob through content-defined chunk records.
     ///
     /// Existing immutable chunk records with the same plaintext identity are
@@ -896,9 +1352,10 @@ impl LocalRepository {
             references.push(self.find_or_publish_chunk(&record, limits)?);
         }
         let descriptor = ChunkedBlobRecord::from_verified_blob(self.id, object, references)?;
-        let descriptor_segment = self.publish_single_record_segment(
-            &SegmentRecord::from_chunked_blob(&descriptor)?,
-            limits,
+        let descriptor_segment = self.publish_records_segment(
+            &[SegmentRecord::from_chunked_blob(&descriptor)?],
+            limits.maximum_segment_bytes(),
+            limits.segment_read_limits(),
         )?;
         let manifest =
             BlobManifest::from_chunked_blob(manifest_id, &descriptor_segment, &descriptor)?;
@@ -1203,8 +1660,11 @@ impl LocalRepository {
             }
             return Ok(reference);
         }
-        let segment =
-            self.publish_single_record_segment(&SegmentRecord::from_chunk(record)?, limits)?;
+        let segment = self.publish_records_segment(
+            &[SegmentRecord::from_chunk(record)?],
+            limits.maximum_segment_bytes(),
+            limits.segment_read_limits(),
+        )?;
         ChunkReference::new(
             record.content_id(),
             u64::try_from(record.data().len())
@@ -1278,15 +1738,27 @@ impl LocalRepository {
         Ok(found)
     }
 
-    fn publish_single_record_segment(
+    fn publish_records_segment(
         &self,
-        record: &SegmentRecord,
-        limits: ChunkedBlobStorageLimits,
+        records: &[SegmentRecord],
+        maximum_segment_bytes: u64,
+        read_limits: SegmentReadLimits,
     ) -> Result<ReadSegment> {
-        if record.stored_len() > limits.maximum_segment_bytes() {
+        if records.is_empty() {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "segment requires at least one record",
+            ));
+        }
+        let total_stored_bytes = records.iter().try_fold(0u64, |total, record| {
+            total
+                .checked_add(record.stored_len())
+                .ok_or_else(|| Error::new(ErrorKind::Unsupported, "segment stored bytes overflow"))
+        })?;
+        if total_stored_bytes > maximum_segment_bytes {
             return Err(Error::new(
                 ErrorKind::Unsupported,
-                "chunk segment exceeds the byte limit",
+                "segment exceeds the byte limit",
             ));
         }
         for _ in 0..16 {
@@ -1295,16 +1767,18 @@ impl LocalRepository {
             let mut writer = SegmentWriter::new(
                 self.id,
                 segment_id,
-                SegmentWriteLimits::new(1, record.stored_len())?,
+                SegmentWriteLimits::new(records.len(), total_stored_bytes)?,
             );
-            writer.add(record.clone())?;
+            for record in records {
+                writer.add(record.clone())?;
+            }
             match writer.seal_to(&path) {
                 Ok(_) => {}
                 Err(error) if error.kind() == ErrorKind::Conflict => continue,
                 Err(error) => return Err(error),
             }
-            let bytes = read_bounded_segment_file(&path, limits.maximum_segment_bytes())?;
-            let segment = SegmentReader::decode(&bytes, limits.segment_read_limits())?;
+            let bytes = read_bounded_segment_file(&path, maximum_segment_bytes)?;
+            let segment = SegmentReader::decode(&bytes, read_limits)?;
             if segment.repository_id() != self.id || segment.segment_id() != segment_id {
                 return Err(Error::new(
                     ErrorKind::CorruptData,
@@ -1317,7 +1791,7 @@ impl LocalRepository {
         }
         Err(Error::new(
             ErrorKind::Conflict,
-            "chunk segment identity could not be allocated",
+            "segment identity could not be allocated",
         ))
     }
 
@@ -3811,6 +4285,21 @@ mod tests {
         );
     }
 
+    fn git_output_in(directory: &Path, arguments: &[&str]) -> Vec<u8> {
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(directory)
+            .args(arguments)
+            .output()
+            .expect("run Git");
+        assert!(
+            output.status.success(),
+            "Git command must succeed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        output.stdout
+    }
+
     fn run_git_in(directory: &Path, arguments: &[&str]) {
         let output = Command::new("git")
             .arg("-C")
@@ -3823,6 +4312,131 @@ mod tests {
             "Git command must succeed: {}",
             String::from_utf8_lossy(&output.stderr)
         );
+    }
+
+    #[test]
+    fn imports_packed_repository_with_every_initial_blob_representation() {
+        let directory = TestDirectory::new();
+        let source_path = directory.path().join("source");
+        let destination_path = directory.path().join("destination");
+        let exported_path = directory.path().join("exported.git");
+        fs::create_dir(&source_path).expect("create source path");
+        run_git_in(&source_path, &["init", "-b", "main"]);
+        run_git_in(&source_path, &["config", "user.name", "Yeokcham Test"]);
+        run_git_in(
+            &source_path,
+            &["config", "user.email", "yeokcham-test@example.invalid"],
+        );
+        fs::write(source_path.join("tiny.txt"), b"tiny").expect("write tiny blob");
+        fs::write(source_path.join("whole.bin"), vec![0x5a; 2_048]).expect("write whole blob");
+        fs::write(source_path.join("chunked.bin"), vec![0x6b; 64 * 1024])
+            .expect("write chunked blob");
+        run_git_in(&source_path, &["add", "."]);
+        run_git_in(&source_path, &["commit", "-m", "fixture"]);
+        run_git_in(&source_path, &["gc", "--prune=now"]);
+
+        let source = GitRepository::open(&source_path).expect("open packed source");
+        let source_ids = source.reachable_object_ids().expect("source reachable IDs");
+        let source_refs = source.ref_state().expect("source refs");
+        let repository = LocalRepository::create(&destination_path).expect("create destination");
+        let limits = GitImportLimits::initial().expect("initial import limits");
+        let report = repository
+            .import_git_repository(&source, limits)
+            .expect("import source repository");
+
+        assert_eq!(report.object_count(), source_ids.len());
+        assert_eq!(report.tiny_blob_count(), 1);
+        assert_eq!(report.whole_blob_count(), 1);
+        assert_eq!(report.chunked_blob_count(), 1);
+        assert!(report.metadata_object_count() >= 2);
+        assert_eq!(report.ref_count(), source_refs.regular_refs().len());
+        repository
+            .export_loose_objects(
+                &exported_path,
+                limits.export_limits().expect("export limits"),
+            )
+            .expect("export imported repository");
+        git_fsck(&exported_path);
+        let exported = GitRepository::open(&exported_path).expect("open exported repository");
+        assert_eq!(
+            exported.reachable_object_ids().expect("exported IDs"),
+            source_ids
+        );
+        assert_eq!(exported.ref_state().expect("exported refs"), source_refs);
+        assert_eq!(
+            git_output_in(&source_path, &["rev-parse", "HEAD^{tree}"]),
+            git_output_in(&exported_path, &["rev-parse", "HEAD^{tree}"])
+        );
+    }
+
+    #[test]
+    fn pinned_history_fixtures_preserve_objects_refs_checkouts_and_fsck() {
+        let fixture_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .join("fixtures/pinned/sha1-history-v1");
+        let limits = GitImportLimits::initial().expect("initial import limits");
+
+        for source_name in ["loose.git", "packed.git"] {
+            let directory = TestDirectory::new();
+            let source_path = fixture_root.join(source_name);
+            let destination_path = directory.path().join("destination");
+            let exported_path = directory.path().join("exported.git");
+            let source_checkout = directory.path().join("source-checkout");
+            let exported_checkout = directory.path().join("exported-checkout");
+            let source = GitRepository::open(&source_path).expect("open pinned fixture");
+            let source_ids = source.reachable_object_ids().expect("source reachable IDs");
+            let source_refs = source.ref_state().expect("source refs");
+            let repository =
+                LocalRepository::create(&destination_path).expect("create destination");
+
+            let report = repository
+                .import_git_repository(&source, limits)
+                .expect("import pinned fixture");
+            assert_eq!(report.object_count(), source_ids.len());
+            assert_eq!(report.ref_count(), source_refs.regular_refs().len());
+            assert!(report.chunked_blob_count() >= 2);
+            repository
+                .export_loose_objects(
+                    &exported_path,
+                    limits.export_limits().expect("export limits"),
+                )
+                .expect("export pinned fixture");
+            git_fsck(&exported_path);
+            let exported = GitRepository::open(&exported_path).expect("open exported fixture");
+            assert_eq!(
+                exported.reachable_object_ids().expect("exported IDs"),
+                source_ids
+            );
+            assert_eq!(exported.ref_state().expect("exported refs"), source_refs);
+
+            for (remote, checkout) in [
+                (&source_path, &source_checkout),
+                (&exported_path, &exported_checkout),
+            ] {
+                let output = Command::new("git")
+                    .args(["clone", "--quiet"])
+                    .arg(remote)
+                    .arg(checkout)
+                    .output()
+                    .expect("clone fixture");
+                assert!(
+                    output.status.success(),
+                    "Git clone must succeed: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                );
+            }
+            let output = Command::new("diff")
+                .args(["-ru", "--exclude=.git"])
+                .arg(&source_checkout)
+                .arg(&exported_checkout)
+                .output()
+                .expect("compare checkouts");
+            assert!(
+                output.status.success(),
+                "checkout bytes differ: {}",
+                String::from_utf8_lossy(&output.stdout)
+            );
+        }
     }
 
     fn verified_segment(repository: &LocalRepository, id: SegmentId) -> ReadSegment {

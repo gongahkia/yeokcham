@@ -49,9 +49,10 @@ pub use metadata_object_record::MetadataObjectRecord;
 pub use ref_name::RefName;
 pub use ref_snapshot::{GitRefState, HeadState, RefSnapshot, RefSnapshotReadLimits};
 pub use repository::{
-    BlobManifestReadLimits, ChunkedBlobStorageLimits, GitObjectMetadata, LocalRepository,
-    LooseObjectExportLimits, LooseObjectExportReport, MetadataObjectManifestReadLimits,
-    RefSnapshotPublicationLimits, RepositoryVerificationLimits, RepositoryVerificationReport,
+    BlobManifestReadLimits, ChunkedBlobStorageLimits, GitImportLimits, GitImportReport,
+    GitObjectMetadata, LocalRepository, LooseObjectExportLimits, LooseObjectExportReport,
+    MetadataObjectManifestReadLimits, RefSnapshotPublicationLimits, RepositoryVerificationLimits,
+    RepositoryVerificationReport,
 };
 pub use repository_format::{RepositoryFeatureFlags, RepositoryFormat, RepositoryFormatVersion};
 pub use repository_id::RepositoryId;

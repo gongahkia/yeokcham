@@ -36,5 +36,6 @@ doc:
 
 fixtures:
 	scripts/verify-git-fixtures.sh
+	scripts/verify-pinned-history-fixture.sh
 
 ci: fixtures fmt-check check lint test doc

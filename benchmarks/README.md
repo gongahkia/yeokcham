@@ -6,4 +6,8 @@ Benchmark results use [`benchmark-result-v1.schema.json`](schema/benchmark-resul
 
 Results must not contain credentials, keys, source content, private paths, remote URLs, or other sensitive data. `contains_sensitive_data` is fixed to `false`; producers must redact configuration parameters before writing a result.
 
+`io_bytes_read` and `io_bytes_written` may be `null` only when the platform collector cannot report byte counts; `null` is not zero I/O. The initial macOS whole-vs-chunked harness records CPU, peak RSS, wall time, and final storage size, and uses `null` for unavailable byte-level I/O counters.
+
+Run `scripts/benchmark-whole-vs-chunked.sh [output-directory] [repetitions]` on macOS after `make fixtures`. It compares a pinned two-revision SHA-1 history under whole-record and CDC policies, writes two schema-validated measured result files, and makes no performance claim by itself.
+
 Version 1 is immutable after measured results exist. Backward-compatible descriptions may be clarified, but removing fields, changing meaning or units, or tightening accepted values requires a new schema version and migration note.
