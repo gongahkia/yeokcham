@@ -47,6 +47,25 @@ type blocked_removal = {
   reason : string;
 }
 
+type cleanup_candidate = {
+  candidate_object_id : Paengi_store.Stored_object_id.t;
+  candidate_expected_type : Paengi_envelope.object_type;
+}
+
+type cleanup_metric = {
+  metric_object_id : Paengi_store.Stored_object_id.t;
+  metric_expected_type : Paengi_envelope.object_type;
+  stored_bytes : int64;
+}
+
+module Fault : sig
+  type boundary = Before_candidate of int | After_candidate of int
+  type t
+
+  val before_candidate : int -> t
+  val after_candidate : int -> t
+end
+
 type plan
 type execution
 
@@ -58,6 +77,10 @@ type cleanup_report = {
   pruned_bytes : int64;
   already_quarantined_objects : int;
   already_pruned_objects : int;
+  quarantined_candidates : cleanup_metric list;
+  pruned_candidates : cleanup_metric list;
+  already_quarantined_candidates : cleanup_candidate list;
+  already_pruned_candidates : cleanup_candidate list;
 }
 
 val policy : plan -> Policy.t
@@ -68,6 +91,9 @@ val estimated_after_bytes : plan -> int64
 val removable_checkpoints : plan -> Paengi_scratch.Checkpoint_id.t list
 val removable_events : plan -> Paengi_scratch.Event_id.t list
 val removable_objects : plan -> Paengi_store.Stored_object_id.t list
+val planned_cleanup : plan -> cleanup_metric list
+val planned_cleanup_count : plan -> int
+val planned_cleanup_bytes : plan -> int64
 val blocked_removals : plan -> blocked_removal list
 val budget_exceeded_by : plan -> int64 option
 
@@ -82,6 +108,7 @@ val render_explain : plan -> string list
 
 val activate :
   ?cleanup:bool ->
+  ?cleanup_fault:Fault.t ->
   ?before_publish:(unit -> unit) ->
   store:Paengi_store.repository ->
   Paengi_scratch.repository ->
@@ -94,11 +121,15 @@ val execution_plan : execution -> plan
 val execution_cleanup : execution -> cleanup_report
 
 val resume_cleanup :
+  ?fault:Fault.t ->
+  ?expected_generation:Paengi_scratch.Generation_id.t ->
   store:Paengi_store.repository ->
   Paengi_scratch.repository ->
   (cleanup_report, error) result
 
 val prune :
+  ?fault:Fault.t ->
+  ?expected_generation:Paengi_scratch.Generation_id.t ->
   store:Paengi_store.repository ->
   Paengi_scratch.repository ->
   (cleanup_report, error) result

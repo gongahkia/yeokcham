@@ -188,6 +188,254 @@ let compacted_logical_checkpoints_preserve_snapshots =
                  expected actual
           with Exit | Failure _ -> false))
 
+let metrics_equal left right =
+  List.length left = List.length right
+  && List.for_all2
+       (fun left right ->
+         Store.Stored_object_id.equal left.Compaction.metric_object_id
+           right.Compaction.metric_object_id
+         && left.Compaction.metric_expected_type
+            = right.Compaction.metric_expected_type
+         && Int64.equal left.Compaction.stored_bytes
+              right.Compaction.stored_bytes)
+       left right
+
+let with_cleanup_fixture count run =
+  let root = Filename.temp_file "paengi-compaction-cleanup-property-" "" in
+  Unix.unlink root;
+  Unix.mkdir root 0o700;
+  Fun.protect
+    ~finally:(fun () -> remove_tree root)
+    (fun () ->
+      let file = Filename.concat root "file" in
+      Out_channel.with_open_bin file (fun channel ->
+          Out_channel.output_string channel "base");
+      let store = Store.init ~root |> Result.get_ok in
+      let scratch = Scratch.open_repository store in
+      let base, _ = Snapshot.scan ~root ~store |> Result.get_ok in
+      let initial =
+        Scratch.create_initial scratch ~snapshot:base ~created_at:0L
+        |> Result.get_ok
+      in
+      let head = ref initial in
+      for index = 1 to count do
+        Out_channel.with_open_bin file (fun channel ->
+            Out_channel.output_string channel (Printf.sprintf "edit-%d" index));
+        let snapshot, _ = Snapshot.scan ~root ~store |> Result.get_ok in
+        match
+          Scratch.checkpoint scratch ~snapshot ~source:Scratch.Explicit
+            ~observed_at:(Int64.of_int index) ~created_at:(Int64.of_int index)
+          |> Result.get_ok
+        with
+        | Scratch.Created checkpoint -> head := checkpoint
+        | Scratch.Unchanged _ -> raise Exit
+      done;
+      Scratch.pin scratch
+        (Scratch.Checkpoint.id initial)
+        ~changed_at:(Int64.of_int (count + 1))
+      |> Result.get_ok;
+      let policy =
+        Compaction.Policy.create ~recent_window_seconds:1L
+          ~periodic_interval_seconds:0L ~storage_budget_bytes:None
+        |> Result.get_ok
+      in
+      run root store scratch initial !head policy)
+
+let active_generation_id scratch =
+  Scratch.active_generation scratch
+  |> Result.get_ok |> Option.get |> Scratch.Generation.id
+
+let all_candidates_in_quarantine store root generation planned =
+  let trash =
+    Filename.concat
+      (Filename.concat root ".paengi/trash")
+      (Store.Stored_object_id.to_hex
+         (Scratch.Generation_id.stored_object_id generation))
+  in
+  List.for_all
+    (fun metric ->
+      let name =
+        Store.Stored_object_id.to_hex metric.Compaction.metric_object_id
+      in
+      (not
+         (Sys.file_exists
+            (Store.object_path store metric.Compaction.metric_object_id)))
+      && Sys.file_exists (Filename.concat trash name))
+    planned
+
+let all_candidates_pruned store root generation planned =
+  let trash =
+    Filename.concat
+      (Filename.concat root ".paengi/trash")
+      (Store.Stored_object_id.to_hex
+         (Scratch.Generation_id.stored_object_id generation))
+  in
+  List.for_all
+    (fun metric ->
+      let name =
+        Store.Stored_object_id.to_hex metric.Compaction.metric_object_id
+      in
+      (not
+         (Sys.file_exists
+            (Store.object_path store metric.Compaction.metric_object_id)))
+      && not (Sys.file_exists (Filename.concat trash name)))
+    planned
+
+let retained_resolution_is_stable scratch initial head =
+  List.for_all
+    (fun checkpoint ->
+      match
+        Scratch.resolve_checkpoint scratch (Scratch.Checkpoint.id checkpoint)
+      with
+      | Ok resolved ->
+          Snapshot.Snapshot.equal_id
+            (Scratch.Checkpoint.snapshot checkpoint)
+            (Scratch.Checkpoint.snapshot (Scratch.resolved_checkpoint resolved))
+      | Error _ -> false)
+    [ initial; head ]
+
+let planned_cleanup_matches_actual_quarantine =
+  QCheck2.Test.make ~count:10
+    ~name:"dry-run cleanup IDs types counts and stored bytes match quarantine"
+    QCheck2.Gen.(int_range 2 5)
+    (fun count ->
+      try
+        with_cleanup_fixture count
+          (fun _root store scratch _initial _head policy ->
+            let plan =
+              Compaction.analyze ~store scratch ~policy
+                ~now:(Int64.of_int (count + 1))
+              |> Result.get_ok
+            in
+            let execution =
+              Compaction.activate ~cleanup:false ~store scratch ~policy
+                ~now:(Int64.of_int (count + 1))
+              |> Result.get_ok
+            in
+            let actual =
+              Compaction.resume_cleanup ~store scratch |> Result.get_ok
+            in
+            metrics_equal
+              (Compaction.planned_cleanup plan)
+              actual.Compaction.quarantined_candidates
+            && Int64.equal
+                 (Compaction.planned_cleanup_bytes plan)
+                 actual.Compaction.quarantined_bytes
+            && Compaction.planned_cleanup_count plan
+               = actual.Compaction.quarantined_objects
+            && Scratch.Generation_id.equal
+                 (Compaction.execution_generation execution)
+                 (active_generation_id scratch))
+      with Exit | Failure _ | Invalid_argument _ -> false)
+
+let quarantine_resume_is_independent_of_interruption =
+  QCheck2.Test.make ~count:10
+    ~name:
+      "quarantine resume reaches one exact active quarantine for every boundary"
+    QCheck2.Gen.(pair (int_range 2 5) (pair (int_range 0 31) bool))
+    (fun (count, (raw_index, after)) ->
+      try
+        with_cleanup_fixture count
+          (fun root store scratch initial head policy ->
+            let plan =
+              Compaction.analyze ~store scratch ~policy
+                ~now:(Int64.of_int (count + 1))
+              |> Result.get_ok
+            in
+            let planned = Compaction.planned_cleanup plan in
+            let candidate_count = List.length planned in
+            let index = raw_index mod candidate_count in
+            let fault =
+              if after then Compaction.Fault.after_candidate index
+              else Compaction.Fault.before_candidate index
+            in
+            let execution =
+              Compaction.activate ~cleanup:false ~store scratch ~policy
+                ~now:(Int64.of_int (count + 1))
+              |> Result.get_ok
+            in
+            let interrupted = Compaction.resume_cleanup ~fault ~store scratch in
+            let reopened_store = Store.open_repository ~root |> Result.get_ok in
+            let reopened = Scratch.open_repository reopened_store in
+            let resumed =
+              Compaction.resume_cleanup ~store:reopened_store reopened
+              |> Result.get_ok
+            in
+            let repeated =
+              Compaction.resume_cleanup ~store:reopened_store reopened
+              |> Result.get_ok
+            in
+            Result.is_error interrupted
+            && all_candidates_in_quarantine reopened_store root
+                 (Compaction.execution_generation execution)
+                 planned
+            && resumed.Compaction.quarantined_objects
+               + resumed.Compaction.already_quarantined_objects
+               = candidate_count
+            && repeated.Compaction.already_quarantined_objects = candidate_count
+            && Scratch.Generation_id.equal
+                 (Compaction.execution_generation execution)
+                 (active_generation_id reopened)
+            && retained_resolution_is_stable reopened initial head
+            && Sys.file_exists
+                 (Store.object_path reopened_store
+                    (Snapshot.Snapshot.stored_object_id
+                       (Scratch.Checkpoint.snapshot head))))
+      with Exit | Failure _ | Invalid_argument _ -> false)
+
+let prune_resume_is_independent_of_interruption =
+  QCheck2.Test.make ~count:10
+    ~name:"prune resume reaches one exact pruned state for every boundary"
+    QCheck2.Gen.(pair (int_range 2 5) (pair (int_range 0 31) bool))
+    (fun (count, (raw_index, after)) ->
+      try
+        with_cleanup_fixture count
+          (fun root store scratch initial head policy ->
+            let plan =
+              Compaction.analyze ~store scratch ~policy
+                ~now:(Int64.of_int (count + 1))
+              |> Result.get_ok
+            in
+            let planned = Compaction.planned_cleanup plan in
+            let candidate_count = List.length planned in
+            let index = raw_index mod candidate_count in
+            let fault =
+              if after then Compaction.Fault.after_candidate index
+              else Compaction.Fault.before_candidate index
+            in
+            let execution =
+              Compaction.activate ~cleanup:false ~store scratch ~policy
+                ~now:(Int64.of_int (count + 1))
+              |> Result.get_ok
+            in
+            ignore (Compaction.resume_cleanup ~store scratch |> Result.get_ok);
+            let interrupted = Compaction.prune ~fault ~store scratch in
+            let reopened_store = Store.open_repository ~root |> Result.get_ok in
+            let reopened = Scratch.open_repository reopened_store in
+            let resumed =
+              Compaction.prune ~store:reopened_store reopened |> Result.get_ok
+            in
+            let repeated =
+              Compaction.prune ~store:reopened_store reopened |> Result.get_ok
+            in
+            Result.is_error interrupted
+            && all_candidates_pruned reopened_store root
+                 (Compaction.execution_generation execution)
+                 planned
+            && resumed.Compaction.pruned_objects
+               + resumed.Compaction.already_pruned_objects
+               = candidate_count
+            && repeated.Compaction.already_pruned_objects = candidate_count
+            && Scratch.Generation_id.equal
+                 (Compaction.execution_generation execution)
+                 (active_generation_id reopened)
+            && retained_resolution_is_stable reopened initial head
+            && Sys.file_exists
+                 (Store.object_path reopened_store
+                    (Snapshot.Snapshot.stored_object_id
+                       (Scratch.Checkpoint.snapshot head))))
+      with Exit | Failure _ | Invalid_argument _ -> false)
+
 let () =
   Alcotest.run "compaction properties"
     [
@@ -201,5 +449,14 @@ let () =
           QCheck_alcotest.to_alcotest ~speed_level:`Quick
             ~rand:(state_for "compacted-logical-snapshots")
             compacted_logical_checkpoints_preserve_snapshots;
+          QCheck_alcotest.to_alcotest ~speed_level:`Quick
+            ~rand:(state_for "planned-cleanup-metrics")
+            planned_cleanup_matches_actual_quarantine;
+          QCheck_alcotest.to_alcotest ~speed_level:`Quick
+            ~rand:(state_for "quarantine-interruptions")
+            quarantine_resume_is_independent_of_interruption;
+          QCheck_alcotest.to_alcotest ~speed_level:`Quick
+            ~rand:(state_for "prune-interruptions")
+            prune_resume_is_independent_of_interruption;
         ] );
     ]

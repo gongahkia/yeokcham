@@ -6,12 +6,12 @@ Robustness tasks operate only on Paengi's pure functions and generated local fix
 ## Active vertical slice
 
 - Milestone: 3 — Scratch compaction.
-- Task: compacted-generation publication and conservative quarantine.
+- Task: compacted-generation publication, exact cleanup accounting, and conservative quarantine.
 - Modules/files: `paengi_scratch` generation schemas/resolver; `paengi_compaction` construction, verification, activation, cleanup; CLI compact modes; focused/property tests and canonical goldens.
-- Types: `Generation_id`, `Cleanup_manifest_id`, bounded ordered generation entries, direct logical/physical resolver result, cleanup report, and immutable cleanup manifest.
+- Types: `Generation_id`, `Cleanup_manifest_id`, bounded ordered generation entries, direct logical/physical resolver result, immutable cleanup manifest, exact cleanup metric, and deterministic candidate-boundary fault.
 - Formats: additive Envelope object types 16–18 and `refs/scratch-generation`; ADR-020 through ADR-023 bytes remain unchanged.
-- Invariants: active aliases resolve before direct lookup; physical parents remain logical; retained replay/snapshot equivalence is verified before ref CAS; retention changes are folded from the cutoff; cleanup only quarantines manifest-listed scratch records after activation.
-- Tests: generation schema goldens/inverse decoder; focused activation/reopen/resume/post-compaction checkpoint/retention/repeated-generation test; deterministic compacted-state property. Verified with `make format`, `make check`, and `make property-test PROPERTY_TEST_SEED=17`.
+- Invariants: active aliases resolve before direct lookup; physical parents remain logical; retained replay/snapshot equivalence is verified before ref CAS; retention changes are folded from the cutoff; cleanup only quarantines manifest-listed scratch records after activation; dry-run candidate IDs/types/count/stored-byte sum equal actual quarantine; resume never crosses an active generation.
+- Tests: generation schema goldens/inverse decoder; deterministic planner-versus-actual fixture; per-candidate quarantine/prune interruption/reopen/resume suite; focused activation/reopen/resume/post-compaction checkpoint/retention/repeated-generation test; deterministic compacted-state property. Verified with `make format`, `make check`, and `make property-test PROPERTY_TEST_SEED=17`.
 - External libraries: existing Alcotest, QCheck, SHA-256, Profile 1 encoder, and Unix only.
 - ADR changes: ADR-024 accepted.
 
@@ -169,7 +169,7 @@ Robustness tasks operate only on Paengi's pure functions and generated local fix
 - [x] Verify new generation.
 - [x] Atomically publish generation ref.
 - [x] Retain prior generation root and quarantine before irreversible prune.
-- [ ] Add interruption injection at every individual candidate movement.
+- [x] Add interruption injection at every individual candidate movement.
 - [x] Add idempotent restart/resume.
 
 ### Experiments
@@ -184,8 +184,8 @@ Robustness tasks operate only on Paengi's pure functions and generated local fix
 
 - [x] Property test proves retained-state equivalence.
 - [x] No pinned checkpoint is deleted without a valid active alias.
-- [ ] Interruption at every publication and cleanup candidate point leaves a valid generation.
-- [ ] Dry-run explains every physical removal and estimates actual quarantine bytes.
+- [x] Interruption at every publication and cleanup candidate point leaves a valid generation.
+- [x] Dry-run explains every physical removal and estimates actual quarantine bytes.
 
 ## Milestone 4 — Change capsules
 

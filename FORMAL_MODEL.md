@@ -258,6 +258,19 @@ superseded scratch events/checkpoints and pre-cutoff retention records to a
 generation quarantine; shared content-domain objects are retained until a full
 cross-domain mark exists. Explicit prune is irreversible.
 
+For a compaction dry run, the planned cleanup set is the canonical unique
+candidate list that will become the generation cleanup manifest. Planned object
+count is its number of immutable object files. Planned bytes are the sum of
+the exact pre-quarantine regular-file lengths at their object-store paths;
+they exclude logical payload size, allocated blocks, directories, refs,
+temporary files, and quarantine metadata. Activation rederives the candidate
+set and rejects a mismatch of ID, expected object type, count, or stored-byte
+sum before publication. Quarantine and prune test faults may stop before or
+after each candidate; resuming revalidates the active generation, manifest,
+candidate identity, type, and location. Missing candidates are errors during
+quarantine; prune accepts a missing active-manifest candidate only as an
+already-pruned result.
+
 ### Compaction invariants
 
 1. Every retained checkpoint ID still resolves.

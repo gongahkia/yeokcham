@@ -160,6 +160,27 @@ module Policy = struct
     | Protected_by _ | Recent_window | Periodic_bucket _ -> true
 end
 
+module Fault = struct
+  type boundary = Before_candidate of int | After_candidate of int
+  type t = boundary
+
+  let before_candidate index = Before_candidate index
+  let after_candidate index = After_candidate index
+
+  let boundary_to_string = function
+    | Before_candidate index -> Printf.sprintf "before-candidate-%d" index
+    | After_candidate index -> Printf.sprintf "after-candidate-%d" index
+
+  let equal left right =
+    match (left, right) with
+    | Before_candidate left, Before_candidate right
+    | After_candidate left, After_candidate right ->
+        left = right
+    | Before_candidate _, After_candidate _
+    | After_candidate _, Before_candidate _ ->
+        false
+end
+
 type error =
   | Scratch_error of Scratch.error
   | Snapshot_error of Snapshot.error
@@ -172,6 +193,11 @@ type error =
   | Active_generation_missing
   | Cleanup_manifest_error of string
   | Cleanup_error of string
+  | Cleanup_fault_injected of Fault.boundary
+  | Cleanup_generation_changed of {
+      expected : Scratch.Generation_id.t;
+      actual : Scratch.Generation_id.t;
+    }
 
 let error_to_string = function
   | Scratch_error error -> Scratch.error_to_string error
@@ -190,6 +216,14 @@ let error_to_string = function
   | Active_generation_missing -> "no active scratch generation"
   | Cleanup_manifest_error detail -> "cleanup manifest error: " ^ detail
   | Cleanup_error detail -> "cleanup error: " ^ detail
+  | Cleanup_fault_injected boundary ->
+      "cleanup fault injected at " ^ Fault.boundary_to_string boundary
+  | Cleanup_generation_changed { expected; actual } ->
+      Printf.sprintf "cleanup generation changed: expected %s, active %s"
+        (Store.Stored_object_id.to_hex
+           (Scratch.Generation_id.stored_object_id expected))
+        (Store.Stored_object_id.to_hex
+           (Scratch.Generation_id.stored_object_id actual))
 
 let ( let* ) = Result.bind
 
@@ -322,6 +356,20 @@ let add_size total size =
     Error Estimated_size_overflow
   else Ok (Int64.add total size)
 
+let stored_file_length store identity =
+  let path = Store.object_path store identity in
+  try
+    let stat = Unix.stat path in
+    if stat.Unix.st_kind <> Unix.S_REG then
+      Error (Cleanup_manifest_error ("object is not a regular file: " ^ path))
+    else Ok (Int64.of_int stat.Unix.st_size)
+  with Unix.Unix_error (error, _, _) ->
+    Error
+      (Cleanup_manifest_error
+         ("cannot stat object "
+         ^ Store.Stored_object_id.to_hex identity
+         ^ ": " ^ Unix.error_message error))
+
 let reachable scratch store roots =
   let rec visit visited total = function
     | [] -> Ok (visited, total)
@@ -332,7 +380,7 @@ let reachable scratch store roots =
           Store.get store identity
           |> Result.map_error (fun error -> Store_error error)
         in
-        let size = Int64.of_int (String.length (Envelope.encode envelope)) in
+        let* size = stored_file_length store identity in
         let* total = add_size total size in
         let* children = object_children scratch store identity envelope in
         visit
@@ -344,6 +392,17 @@ let reachable scratch store roots =
 
 type blocked_removal = { checkpoint : Scratch.Checkpoint_id.t; reason : string }
 
+type cleanup_candidate = {
+  candidate_object_id : Store.Stored_object_id.t;
+  candidate_expected_type : Envelope.object_type;
+}
+
+type cleanup_metric = {
+  metric_object_id : Store.Stored_object_id.t;
+  metric_expected_type : Envelope.object_type;
+  stored_bytes : int64;
+}
+
 type plan = {
   policy : Policy.t;
   selections : Policy.selection list;
@@ -353,6 +412,7 @@ type plan = {
   removable_checkpoints : Scratch.Checkpoint_id.t list;
   removable_events : Scratch.Event_id.t list;
   removable_objects : Store.Stored_object_id.t list;
+  planned_cleanup : cleanup_metric list;
   blocked_removals : blocked_removal list;
   budget_exceeded_by : int64 option;
 }
@@ -365,6 +425,14 @@ let estimated_after_bytes plan = plan.estimated_after_bytes
 let removable_checkpoints plan = plan.removable_checkpoints
 let removable_events plan = plan.removable_events
 let removable_objects plan = plan.removable_objects
+let planned_cleanup plan = plan.planned_cleanup
+let planned_cleanup_count plan = List.length plan.planned_cleanup
+
+let planned_cleanup_bytes plan =
+  List.fold_left
+    (fun total metric -> Int64.add total metric.stored_bytes)
+    0L plan.planned_cleanup
+
 let blocked_removals plan = plan.blocked_removals
 let budget_exceeded_by plan = plan.budget_exceeded_by
 
@@ -375,7 +443,7 @@ let retention_head_root store =
   in
   Ok (Option.bind reference Store.Mutable_ref.target)
 
-let analyze ~store scratch ~policy ~now =
+let analyze_reachable ~store scratch ~policy ~now =
   let* timeline =
     Scratch.timeline scratch ~limit:max_int ()
     |> Result.map_error (fun error -> Scratch_error error)
@@ -439,6 +507,7 @@ let analyze ~store scratch ~policy ~now =
       removable_checkpoints = [];
       removable_events = [];
       removable_objects = [];
+      planned_cleanup = [];
       blocked_removals;
       budget_exceeded_by;
     }
@@ -477,6 +546,8 @@ let render_explain plan =
       Printf.sprintf "removable-events=%d" (List.length (removable_events plan));
       Printf.sprintf "removable-objects=%d"
         (List.length (removable_objects plan));
+      Printf.sprintf "planned-cleanup-objects=%d" (planned_cleanup_count plan);
+      Printf.sprintf "planned-cleanup-bytes=%Ld" (planned_cleanup_bytes plan);
     ]
   in
   let selections =
@@ -500,7 +571,38 @@ let render_explain plan =
     | None -> []
     | Some bytes -> [ Printf.sprintf "budget-exceeded-bytes=%Ld" bytes ]
   in
-  lines @ selections @ blocked @ budget
+  let cleanup_types =
+    planned_cleanup plan
+    |> List.map (fun metric -> metric.metric_expected_type)
+    |> List.sort_uniq compare
+    |> List.concat_map (fun expected_type ->
+        let metrics =
+          List.filter
+            (fun metric -> metric.metric_expected_type = expected_type)
+            (planned_cleanup plan)
+        in
+        let bytes =
+          List.fold_left
+            (fun total metric -> Int64.add total metric.stored_bytes)
+            0L metrics
+        in
+        let code = Envelope.object_type_code expected_type in
+        [
+          Printf.sprintf "planned-cleanup-type-%d-objects=%d" code
+            (List.length metrics);
+          Printf.sprintf "planned-cleanup-type-%d-bytes=%Ld" code bytes;
+        ])
+  in
+  let cleanup_objects =
+    List.map
+      (fun metric ->
+        Printf.sprintf "planned-cleanup-object %s type=%d stored-bytes=%Ld"
+          (Store.Stored_object_id.to_hex metric.metric_object_id)
+          (Envelope.object_type_code metric.metric_expected_type)
+          metric.stored_bytes)
+      (planned_cleanup plan)
+  in
+  lines @ cleanup_types @ cleanup_objects @ selections @ blocked @ budget
 
 type source_refs = {
   scratch_ref : Store.Mutable_ref.t;
@@ -525,6 +627,10 @@ and cleanup_report = {
   pruned_bytes : int64;
   already_quarantined_objects : int;
   already_pruned_objects : int;
+  quarantined_candidates : cleanup_metric list;
+  pruned_candidates : cleanup_metric list;
+  already_quarantined_candidates : cleanup_candidate list;
+  already_pruned_candidates : cleanup_candidate list;
 }
 
 let execution_generation (execution : execution) =
@@ -621,7 +727,13 @@ let source_event_metadata store checkpoint =
       Scratch.Event.load store event
       |> Result.map_error (fun error -> Scratch_error error)
 
-let construct_physical_chain store retained =
+type generated_checkpoint = {
+  entry : Scratch.Generation.entry;
+  checkpoint : Scratch.Checkpoint.t;
+  event : Scratch.Event.t option;
+}
+
+let build_physical_chain store retained =
   let rec build reversed previous = function
     | [] -> Ok (List.rev reversed)
     | (entry, _) :: rest ->
@@ -632,18 +744,14 @@ let construct_physical_chain store retained =
         let intrinsic_retention =
           Scratch.Checkpoint.intrinsic_retention source
         in
-        let* physical, previous_logical =
+        let* checkpoint, event, previous_logical =
           match previous with
           | None ->
               let checkpoint =
                 Scratch.Checkpoint.create_initial_with_retention ~snapshot
                   ~created_at ~intrinsic_retention
               in
-              let* identity =
-                Scratch.Checkpoint.store store checkpoint
-                |> Result.map_error (fun error -> Scratch_error error)
-              in
-              Ok (identity, None)
+              Ok (checkpoint, None, None)
           | Some (prior_logical, prior_checkpoint) ->
               let* base_state = checkpoint_state store prior_checkpoint in
               let* target_state = checkpoint_state store source in
@@ -667,32 +775,67 @@ let construct_physical_chain store retained =
                     ~source:(Scratch.Event.source metadata)
                     ~observed_at:(Scratch.Event.observed_at metadata)
                 in
-                let* event =
-                  Scratch.Event.store store event
-                  |> Result.map_error (fun error -> Scratch_error error)
-                in
                 let checkpoint =
                   Scratch.Checkpoint.create_with_retention ~parent:prior_logical
-                    ~event ~snapshot ~created_at ~intrinsic_retention
+                    ~event:(Scratch.Event.id event) ~snapshot ~created_at
+                    ~intrinsic_retention
                 in
-                let* identity =
-                  Scratch.Checkpoint.store store checkpoint
-                  |> Result.map_error (fun error -> Scratch_error error)
-                in
-                Ok (identity, Some prior_logical)
+                Ok (checkpoint, Some event, Some prior_logical)
         in
-        let generated =
-          Scratch.Generation.entry ~logical ~physical ~snapshot
-            ~previous_logical
+        let generated_entry =
+          Scratch.Generation.entry ~logical
+            ~physical:(Scratch.Checkpoint.id checkpoint)
+            ~snapshot ~previous_logical
             ~effective_retention:entry.Scratch.effective_retention
         in
-        let* physical_checkpoint =
-          Scratch.Checkpoint.load store physical
-          |> Result.map_error (fun error -> Scratch_error error)
-        in
-        build (generated :: reversed) (Some (logical, physical_checkpoint)) rest
+        build
+          ({ entry = generated_entry; checkpoint; event } :: reversed)
+          (Some (logical, checkpoint))
+          rest
   in
   build [] None retained
+
+let persist_physical_chain store generated =
+  let rec persist reversed = function
+    | [] -> Ok (List.rev reversed)
+    | generated :: rest ->
+        let* () =
+          match generated.event with
+          | None -> Ok ()
+          | Some event ->
+              let* identity =
+                Scratch.Event.store store event
+                |> Result.map_error (fun error -> Scratch_error error)
+              in
+              if Scratch.Event_id.equal identity (Scratch.Event.id event) then
+                Ok ()
+              else
+                Error
+                  (Cleanup_manifest_error
+                     "generated compacted event identity changed during storage")
+        in
+        let* identity =
+          Scratch.Checkpoint.store store generated.checkpoint
+          |> Result.map_error (fun error -> Scratch_error error)
+        in
+        if
+          Scratch.Checkpoint_id.equal identity
+            (Scratch.Checkpoint.id generated.checkpoint)
+        then persist (generated.entry :: reversed) rest
+        else
+          Error
+            (Cleanup_manifest_error
+               "generated compacted checkpoint identity changed during storage")
+  in
+  persist [] generated
+
+let construct_physical_chain store retained =
+  let* generated = build_physical_chain store retained in
+  let* _ = persist_physical_chain store generated in
+  Ok generated
+
+let generated_entries generated =
+  List.map (fun generated -> generated.entry) generated
 
 let object_id_of_checkpoint checkpoint =
   Scratch.Checkpoint_id.stored_object_id checkpoint
@@ -702,8 +845,21 @@ let object_id_of_event event = Scratch.Event_id.stored_object_id event
 let object_id_of_retention change =
   Scratch.Retention_change_id.stored_object_id change
 
-let candidate object_id expected_type : Scratch.Cleanup_manifest.candidate =
-  { Scratch.Cleanup_manifest.object_id; expected_type }
+let candidate object_id expected_type : cleanup_candidate =
+  { candidate_object_id = object_id; candidate_expected_type = expected_type }
+
+let manifest_candidate candidate : Scratch.Cleanup_manifest.candidate =
+  {
+    Scratch.Cleanup_manifest.object_id = candidate.candidate_object_id;
+    expected_type = candidate.candidate_expected_type;
+  }
+
+let cleanup_candidate_of_manifest
+    (candidate : Scratch.Cleanup_manifest.candidate) =
+  {
+    candidate_object_id = candidate.Scratch.Cleanup_manifest.object_id;
+    candidate_expected_type = candidate.Scratch.Cleanup_manifest.expected_type;
+  }
 
 let active_physical_ids store previous_generation =
   match previous_generation with
@@ -754,29 +910,24 @@ let older_retention_candidates store cutoff =
       in
       walk [ cutoff ] [] (Scratch.Retention_change.previous change)
 
-let cleanup_manifest store ~previous_generation ~timeline ~generated ~cutoff =
+let cleanup_candidates store ~previous_generation ~timeline ~generated ~cutoff =
   let* protected = active_physical_ids store previous_generation in
   let protected =
     List.fold_left
       (fun kept entry ->
-        let physical = Scratch.Generation.physical entry in
-        Object_set.add (object_id_of_checkpoint physical) kept)
+        Object_set.add
+          (object_id_of_checkpoint (Scratch.Generation.physical entry.entry))
+          kept)
       protected generated
   in
-  let* protected =
+  let protected =
     List.fold_left
-      (fun result entry ->
-        let* kept = result in
-        let physical = Scratch.Generation.physical entry in
-        let* checkpoint =
-          Scratch.Checkpoint.load store physical
-          |> Result.map_error (fun error -> Scratch_error error)
-        in
-        Ok
-          (match Scratch.Checkpoint.event checkpoint with
-          | None -> kept
-          | Some event -> Object_set.add (object_id_of_event event) kept))
-      (Ok protected) generated
+      (fun kept entry ->
+        match entry.event with
+        | None -> kept
+        | Some event ->
+            Object_set.add (object_id_of_event (Scratch.Event.id event)) kept)
+      protected generated
   in
   let source_candidates =
     List.concat_map
@@ -792,8 +943,7 @@ let cleanup_manifest store ~previous_generation ~timeline ~generated ~cutoff =
             [ candidate (object_id_of_event event) Envelope.Scratch_event ]))
       timeline
     |> List.filter (fun candidate ->
-        not
-          (Object_set.mem candidate.Scratch.Cleanup_manifest.object_id protected))
+        not (Object_set.mem candidate.candidate_object_id protected))
   in
   let* retention = older_retention_candidates store cutoff in
   let candidates =
@@ -803,8 +953,100 @@ let cleanup_manifest store ~previous_generation ~timeline ~generated ~cutoff =
           candidate (object_id_of_retention identity) Envelope.Retention_change)
         retention
   in
-  Scratch.Cleanup_manifest.create candidates
-  |> Result.map_error (fun error -> Scratch_error error)
+  let* manifest =
+    Scratch.Cleanup_manifest.create (List.map manifest_candidate candidates)
+    |> Result.map_error (fun error -> Scratch_error error)
+  in
+  Ok
+    (List.map cleanup_candidate_of_manifest
+       (Scratch.Cleanup_manifest.candidates manifest))
+
+let metric_of_candidate store candidate =
+  let* envelope =
+    Store.get store candidate.candidate_object_id
+    |> Result.map_error (fun error -> Store_error error)
+  in
+  if Envelope.object_type envelope <> candidate.candidate_expected_type then
+    Error (Cleanup_manifest_error "planned cleanup candidate type mismatches")
+  else
+    let* stored_bytes =
+      stored_file_length store candidate.candidate_object_id
+    in
+    Ok
+      {
+        metric_object_id = candidate.candidate_object_id;
+        metric_expected_type = candidate.candidate_expected_type;
+        stored_bytes;
+      }
+
+let cleanup_metrics store candidates =
+  let rec collect reversed = function
+    | [] -> Ok (List.rev reversed)
+    | candidate :: rest ->
+        let* metric = metric_of_candidate store candidate in
+        collect (metric :: reversed) rest
+  in
+  collect [] candidates
+
+let cleanup_metrics_equal left right =
+  List.length left = List.length right
+  && List.for_all2
+       (fun left right ->
+         Store.Stored_object_id.equal left.metric_object_id
+           right.metric_object_id
+         && left.metric_expected_type = right.metric_expected_type
+         && Int64.equal left.stored_bytes right.stored_bytes)
+       left right
+
+let analyze ~store scratch ~policy ~now =
+  let* baseline = analyze_reachable ~store scratch ~policy ~now in
+  let* source = read_source_refs store in
+  let* timeline =
+    Scratch.timeline scratch ~limit:max_int ()
+    |> Result.map_error (fun error -> Scratch_error error)
+  in
+  let retained = retained_timeline baseline timeline in
+  let head_retained =
+    List.exists
+      (fun (entry, _) ->
+        Scratch.Checkpoint_id.equal entry.Scratch.logical_id source.scratch_head)
+      retained
+  in
+  if not head_retained then Error (Source_head_not_retained source.scratch_head)
+  else
+    let* generated = build_physical_chain store retained in
+    let* candidates =
+      cleanup_candidates store ~previous_generation:source.previous_generation
+        ~timeline ~generated ~cutoff:source.retention_head
+    in
+    let* planned_cleanup = cleanup_metrics store candidates in
+    let removable_checkpoints =
+      List.filter_map
+        (fun metric ->
+          if metric.metric_expected_type = Envelope.Checkpoint then
+            Some
+              (Scratch.Checkpoint_id.of_stored_object_id metric.metric_object_id)
+          else None)
+        planned_cleanup
+    in
+    let removable_events =
+      List.filter_map
+        (fun metric ->
+          if metric.metric_expected_type = Envelope.Scratch_event then
+            Some (Scratch.Event_id.of_stored_object_id metric.metric_object_id)
+          else None)
+        planned_cleanup
+    in
+    Ok
+      {
+        baseline with
+        removable_checkpoints;
+        removable_events;
+        removable_objects =
+          List.map (fun metric -> metric.metric_object_id) planned_cleanup;
+        planned_cleanup;
+        blocked_removals = [];
+      }
 
 let verify_generation store ~plan ~retained generation_id =
   let _ = plan.policy in
@@ -987,8 +1229,38 @@ let check_object_file path candidate =
           Envelope.object_type envelope
           <> candidate.Scratch.Cleanup_manifest.expected_type
         then Error (Cleanup_error "quarantine object type mismatches")
-        else Ok (Int64.of_int (String.length bytes))
-  with Sys_error message -> Error (Cleanup_error message)
+        else
+          let stat = Unix.stat path in
+          if stat.Unix.st_kind <> Unix.S_REG then
+            Error (Cleanup_error "cleanup candidate is not a regular file")
+          else
+            let stored_bytes = Int64.of_int stat.Unix.st_size in
+            if Int64.equal stored_bytes (Int64.of_int (String.length bytes))
+            then Ok stored_bytes
+            else
+              Error (Cleanup_error "cleanup candidate changed while verified")
+  with
+  | Sys_error message -> Error (Cleanup_error message)
+  | Unix.Unix_error (error, _, _) ->
+      Error (Cleanup_error (Unix.error_message error ^ ": " ^ path))
+
+let candidate_in_other_quarantine ~trash_root ~generation candidate =
+  if not (Sys.file_exists trash_root) then Ok false
+  else
+    try
+      let active = generation_hex generation in
+      let candidate = candidate_hex candidate in
+      let found =
+        Sys.readdir trash_root
+        |> Array.exists (fun directory ->
+            (not (String.equal directory active))
+            && Sys.file_exists
+                 (Filename.concat
+                    (Filename.concat trash_root directory)
+                    candidate))
+      in
+      Ok found
+    with Sys_error message -> Error (Cleanup_error message)
 
 let active_cleanup_generation store =
   let* reference =
@@ -1044,9 +1316,36 @@ let active_keep_set store generation root =
     (Ok initial)
     (Scratch.Generation.entries root)
 
-let cleanup_internal store ~prune =
+let inject_fault fault boundary =
+  match fault with
+  | Some fault when Fault.equal fault boundary ->
+      Error (Cleanup_fault_injected boundary)
+  | None | Some _ -> Ok ()
+
+let cleanup_metric_of_manifest_candidate candidate stored_bytes =
+  {
+    metric_object_id = candidate.Scratch.Cleanup_manifest.object_id;
+    metric_expected_type = candidate.Scratch.Cleanup_manifest.expected_type;
+    stored_bytes;
+  }
+
+let cleanup_candidate_of_manifest_candidate candidate =
+  {
+    candidate_object_id = candidate.Scratch.Cleanup_manifest.object_id;
+    candidate_expected_type = candidate.Scratch.Cleanup_manifest.expected_type;
+  }
+
+let cleanup_internal ?fault ?expected_generation store ~prune =
   let* reference, generation, root, manifest =
     active_cleanup_generation store
+  in
+  let* () =
+    match expected_generation with
+    | None -> Ok ()
+    | Some expected when Scratch.Generation_id.equal expected generation ->
+        Ok ()
+    | Some expected ->
+        Error (Cleanup_generation_changed { expected; actual = generation })
   in
   let* keep = active_keep_set store generation root in
   let trash_root = Filename.concat (Store.root store) ".paengi/trash" in
@@ -1055,9 +1354,20 @@ let cleanup_internal store ~prune =
   in
   let* () = ensure_directory trash_root in
   let* () = ensure_directory generation_trash in
-  let rec move report = function
-    | [] -> Ok report
+  let rec move index report = function
+    | [] ->
+        Ok
+          {
+            report with
+            quarantined_candidates = List.rev report.quarantined_candidates;
+            pruned_candidates = List.rev report.pruned_candidates;
+            already_quarantined_candidates =
+              List.rev report.already_quarantined_candidates;
+            already_pruned_candidates =
+              List.rev report.already_pruned_candidates;
+          }
     | candidate :: rest ->
+        let* () = inject_fault fault (Fault.Before_candidate index) in
         let* current =
           Store.read_ref store ~name:scratch_generation_name
           |> Result.map_error (fun error -> Store_error error)
@@ -1077,43 +1387,53 @@ let cleanup_internal store ~prune =
           in
           let source_exists = Sys.file_exists source in
           let destination_exists = Sys.file_exists destination in
-          if prune then
-            if destination_exists then
-              let* bytes = check_object_file destination candidate in
-              try
-                Unix.unlink destination;
-                let* () = fsync_directory generation_trash in
-                move
-                  {
-                    report with
-                    pruned_objects = report.pruned_objects + 1;
-                    pruned_bytes = Int64.add report.pruned_bytes bytes;
-                  }
-                  rest
-              with Unix.Unix_error (error, _, _) ->
+          let* report =
+            if prune then
+              if source_exists then
+                let* _ = check_object_file source candidate in
                 Error
-                  (Cleanup_error ("prune unlink: " ^ Unix.error_message error))
+                  (Cleanup_error "refusing to prune object not in quarantine")
+              else if destination_exists then
+                let* bytes = check_object_file destination candidate in
+                let metric =
+                  cleanup_metric_of_manifest_candidate candidate bytes
+                in
+                try
+                  Unix.unlink destination;
+                  let* () = fsync_directory generation_trash in
+                  Ok
+                    {
+                      report with
+                      pruned_objects = report.pruned_objects + 1;
+                      pruned_bytes = Int64.add report.pruned_bytes bytes;
+                      pruned_candidates = metric :: report.pruned_candidates;
+                    }
+                with Unix.Unix_error (error, _, _) ->
+                  Error
+                    (Cleanup_error ("prune unlink: " ^ Unix.error_message error))
+              else
+                let* foreign =
+                  candidate_in_other_quarantine ~trash_root ~generation
+                    candidate
+                in
+                if foreign then
+                  Error
+                    (Cleanup_error
+                       "cleanup candidate belongs to a different generation \
+                        quarantine")
+                else
+                  Ok
+                    {
+                      report with
+                      already_pruned_objects = report.already_pruned_objects + 1;
+                      already_pruned_candidates =
+                        cleanup_candidate_of_manifest_candidate candidate
+                        :: report.already_pruned_candidates;
+                    }
             else if source_exists then
-              Error (Cleanup_error "refusing to prune object not in quarantine")
-            else
-              move
-                {
-                  report with
-                  already_pruned_objects = report.already_pruned_objects + 1;
-                }
-                rest
-          else if source_exists then
-            let* envelope =
-              Store.get store candidate.Scratch.Cleanup_manifest.object_id
-              |> Result.map_error (fun error -> Store_error error)
-            in
-            if
-              Envelope.object_type envelope
-              <> candidate.Scratch.Cleanup_manifest.expected_type
-            then Error (Cleanup_error "cleanup candidate type mismatches")
-            else
-              let bytes =
-                Int64.of_int (String.length (Envelope.encode envelope))
+              let* bytes = check_object_file source candidate in
+              let metric =
+                cleanup_metric_of_manifest_candidate candidate bytes
               in
               if destination_exists then
                 let* _ = check_object_file destination candidate in
@@ -1125,36 +1445,49 @@ let cleanup_internal store ~prune =
                   Unix.rename source destination;
                   let* () = fsync_directory (Filename.dirname source) in
                   let* () = fsync_directory generation_trash in
-                  move
+                  Ok
                     {
                       report with
                       quarantined_objects = report.quarantined_objects + 1;
                       quarantined_bytes =
                         Int64.add report.quarantined_bytes bytes;
+                      quarantined_candidates =
+                        metric :: report.quarantined_candidates;
                     }
-                    rest
                 with Unix.Unix_error (error, _, _) ->
                   Error
                     (Cleanup_error
                        ("quarantine rename: " ^ Unix.error_message error))
-          else if destination_exists then
-            let* _ = check_object_file destination candidate in
-            move
-              {
-                report with
-                already_quarantined_objects =
-                  report.already_quarantined_objects + 1;
-              }
-              rest
-          else
-            move
-              {
-                report with
-                already_pruned_objects = report.already_pruned_objects + 1;
-              }
-              rest
+            else if destination_exists then
+              let* _ = check_object_file destination candidate in
+              Ok
+                {
+                  report with
+                  already_quarantined_objects =
+                    report.already_quarantined_objects + 1;
+                  already_quarantined_candidates =
+                    cleanup_candidate_of_manifest_candidate candidate
+                    :: report.already_quarantined_candidates;
+                }
+            else
+              let* foreign =
+                candidate_in_other_quarantine ~trash_root ~generation candidate
+              in
+              if foreign then
+                Error
+                  (Cleanup_error
+                     "cleanup candidate belongs to a different generation \
+                      quarantine")
+              else
+                Error
+                  (Cleanup_error
+                     "cleanup candidate unexpectedly absent from object store \
+                      and quarantine")
+          in
+          let* () = inject_fault fault (Fault.After_candidate index) in
+          move (index + 1) report rest
   in
-  move
+  move 0
     {
       generation;
       quarantined_objects = 0;
@@ -1163,10 +1496,15 @@ let cleanup_internal store ~prune =
       pruned_bytes = 0L;
       already_quarantined_objects = 0;
       already_pruned_objects = 0;
+      quarantined_candidates = [];
+      pruned_candidates = [];
+      already_quarantined_candidates = [];
+      already_pruned_candidates = [];
     }
     (Scratch.Cleanup_manifest.candidates manifest)
 
-let activate ?(cleanup = true) ?before_publish ~store scratch ~policy ~now =
+let activate ?(cleanup = true) ?cleanup_fault ?before_publish ~store scratch
+    ~policy ~now =
   Store.with_lock store ~name:compaction_lock_name
     ~on_error:(fun error -> Store_error error)
     (fun () ->
@@ -1188,16 +1526,32 @@ let activate ?(cleanup = true) ?before_publish ~store scratch ~policy ~now =
         Error (Source_head_not_retained source.scratch_head)
       else
         let* generated = construct_physical_chain store retained in
+        let* candidates =
+          cleanup_candidates store
+            ~previous_generation:source.previous_generation ~timeline ~generated
+            ~cutoff:source.retention_head
+        in
+        let* actual_cleanup = cleanup_metrics store candidates in
+        let* () =
+          if cleanup_metrics_equal (planned_cleanup plan) actual_cleanup then
+            Ok ()
+          else
+            Error
+              (Cleanup_manifest_error
+                 "dry-run cleanup candidates disagree with activation")
+        in
         let* manifest =
-          cleanup_manifest store ~previous_generation:source.previous_generation
-            ~timeline ~generated ~cutoff:source.retention_head
+          Scratch.Cleanup_manifest.create
+            (List.map manifest_candidate candidates)
+          |> Result.map_error (fun error -> Scratch_error error)
         in
         let* manifest =
           Scratch.Cleanup_manifest.store store manifest
           |> Result.map_error (fun error -> Scratch_error error)
         in
         let physical_head =
-          Scratch.Generation.physical (List.hd (List.rev generated))
+          Scratch.Generation.physical
+            (List.hd (List.rev (generated_entries generated)))
         in
         let* generation =
           Scratch.Generation.store store ~previous:source.previous_generation
@@ -1210,8 +1564,9 @@ let activate ?(cleanup = true) ?before_publish ~store scratch ~policy ~now =
             ~recent_window_seconds:(Policy.recent_window_seconds policy)
             ~periodic_interval_seconds:(Policy.periodic_interval_seconds policy)
             ~storage_budget_bytes:(Policy.storage_budget_bytes policy)
-            ~entries:generated ~physical_head
-            ~retention_cutoff:source.retention_head ~cleanup_manifest:manifest
+            ~entries:(generated_entries generated)
+            ~physical_head ~retention_cutoff:source.retention_head
+            ~cleanup_manifest:manifest
           |> Result.map_error (fun error -> Scratch_error error)
         in
         let* _ = verify_generation store ~plan ~retained generation in
@@ -1224,7 +1579,8 @@ let activate ?(cleanup = true) ?before_publish ~store scratch ~policy ~now =
           |> Result.map_error (fun error -> Store_error error)
         in
         let* cleanup_report =
-          if cleanup then cleanup_internal store ~prune:false
+          if cleanup then
+            cleanup_internal ?fault:cleanup_fault store ~prune:false
           else
             Ok
               {
@@ -1235,6 +1591,10 @@ let activate ?(cleanup = true) ?before_publish ~store scratch ~policy ~now =
                 pruned_bytes = 0L;
                 already_quarantined_objects = 0;
                 already_pruned_objects = 0;
+                quarantined_candidates = [];
+                pruned_candidates = [];
+                already_quarantined_candidates = [];
+                already_pruned_candidates = [];
               }
         in
         Ok
@@ -1244,12 +1604,12 @@ let activate ?(cleanup = true) ?before_publish ~store scratch ~policy ~now =
             cleanup = cleanup_report;
           })
 
-let resume_cleanup ~store _scratch =
+let resume_cleanup ?fault ?expected_generation ~store _scratch =
   Store.with_lock store ~name:compaction_lock_name
     ~on_error:(fun error -> Store_error error)
-    (fun () -> cleanup_internal store ~prune:false)
+    (fun () -> cleanup_internal ?fault ?expected_generation store ~prune:false)
 
-let prune ~store _scratch =
+let prune ?fault ?expected_generation ~store _scratch =
   Store.with_lock store ~name:compaction_lock_name
     ~on_error:(fun error -> Store_error error)
-    (fun () -> cleanup_internal store ~prune:true)
+    (fun () -> cleanup_internal ?fault ?expected_generation store ~prune:true)

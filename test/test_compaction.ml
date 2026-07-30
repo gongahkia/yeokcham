@@ -180,14 +180,123 @@ let with_history run =
       |> require_ok Scratch.error_to_string;
       run root store scratch initial middle head)
 
-let planner_is_read_only_and_explains_blocked_removal () =
+let with_cleanup_fixture run =
+  with_history (fun root store scratch initial middle head ->
+      Scratch.unpin scratch (Scratch.Checkpoint.id initial) ~changed_at:31L
+      |> require_ok Scratch.error_to_string;
+      Scratch.pin scratch (Scratch.Checkpoint.id initial) ~changed_at:32L
+      |> require_ok Scratch.error_to_string;
+      run root store scratch initial middle head)
+
+let metrics_equal left right =
+  List.length left = List.length right
+  && List.for_all2
+       (fun left right ->
+         Store.Stored_object_id.equal left.Compaction.metric_object_id
+           right.Compaction.metric_object_id
+         && left.Compaction.metric_expected_type
+            = right.Compaction.metric_expected_type
+         && Int64.equal left.Compaction.stored_bytes
+              right.Compaction.stored_bytes)
+       left right
+
+let metric_bytes metrics =
+  List.fold_left
+    (fun total metric -> Int64.add total metric.Compaction.stored_bytes)
+    0L metrics
+
+let metric_ids_are_unique metrics =
+  let ids =
+    List.map (fun metric -> metric.Compaction.metric_object_id) metrics
+  in
+  List.length ids
+  = List.length (List.sort_uniq Store.Stored_object_id.compare ids)
+
+let generation_trash root generation =
+  Filename.concat
+    (Filename.concat root ".paengi/trash")
+    (Store.Stored_object_id.to_hex
+       (Scratch.Generation_id.stored_object_id generation))
+
+let candidate_paths store trash metric =
+  ( Store.object_path store metric.Compaction.metric_object_id,
+    Filename.concat trash
+      (Store.Stored_object_id.to_hex metric.Compaction.metric_object_id) )
+
+let active_generation_id scratch =
+  Scratch.active_generation scratch
+  |> require_ok Scratch.error_to_string
+  |> Option.map Scratch.Generation.id
+  |> Option.get
+
+let assert_retained_resolution_and_restore root scratch initial head =
+  List.iter
+    (fun checkpoint ->
+      let resolved =
+        Scratch.resolve_checkpoint scratch (Scratch.Checkpoint.id checkpoint)
+        |> require_ok Scratch.error_to_string
+      in
+      Alcotest.(check bool)
+        "retained logical snapshot is unchanged" true
+        (Snapshot.Snapshot.equal_id
+           (Scratch.Checkpoint.snapshot checkpoint)
+           (Scratch.Checkpoint.snapshot (Scratch.resolved_checkpoint resolved))))
+    [ initial; head ];
+  Scratch.Restore.restore scratch ~root
+    ~target:(Scratch.Checkpoint.id initial)
+    ~observed_at:50L ~created_at:50L
+  |> require_ok Scratch.error_to_string
+  |> ignore;
+  Alcotest.(check string)
+    "retained initial checkpoint restores" "zero"
+    (In_channel.with_open_bin
+       (Filename.concat root "file")
+       In_channel.input_all);
+  Scratch.Restore.restore scratch ~root
+    ~target:(Scratch.Checkpoint.id head)
+    ~observed_at:51L ~created_at:51L
+  |> require_ok Scratch.error_to_string
+  |> ignore;
+  Alcotest.(check string)
+    "retained head checkpoint restores" "two"
+    (In_channel.with_open_bin
+       (Filename.concat root "file")
+       In_channel.input_all)
+
+let assert_quarantined store root generation planned =
+  let trash = generation_trash root generation in
+  List.iter
+    (fun metric ->
+      let source, destination = candidate_paths store trash metric in
+      Alcotest.(check bool)
+        "candidate is absent from main object store" false
+        (Sys.file_exists source);
+      Alcotest.(check bool)
+        "candidate is present once in active quarantine" true
+        (Sys.file_exists destination))
+    planned
+
+let assert_pruned store root generation planned =
+  let trash = generation_trash root generation in
+  List.iter
+    (fun metric ->
+      let source, destination = candidate_paths store trash metric in
+      Alcotest.(check bool)
+        "candidate is absent from main object store" false
+        (Sys.file_exists source);
+      Alcotest.(check bool)
+        "candidate is absent from active quarantine" false
+        (Sys.file_exists destination))
+    planned
+
+let planner_is_read_only_and_explains_exact_cleanup () =
   with_history (fun root store scratch initial middle head ->
       let head_path = Filename.concat root ".paengi/refs/scratch-head" in
       let before = In_channel.with_open_bin head_path In_channel.input_all in
       let plan =
         Compaction.analyze ~store scratch
-          ~policy:(policy ~recent:0L ~periodic:0L)
-          ~now:100L
+          ~policy:(policy ~recent:6L ~periodic:0L)
+          ~now:25L
         |> require_ok Compaction.error_to_string
       in
       let after = In_channel.with_open_bin head_path In_channel.input_all in
@@ -197,14 +306,20 @@ let planner_is_read_only_and_explains_blocked_removal () =
         "all reachable objects counted" true
         (Compaction.reachable_object_count plan > 0);
       Alcotest.(check int64)
-        "no safe rewrite keeps byte estimate"
+        "reachable estimate uses stored object lengths"
         (Compaction.estimated_before_bytes plan)
         (Compaction.estimated_after_bytes plan);
       Alcotest.(check int)
-        "no checkpoints are removable" 0
+        "obsolete source checkpoints are removable" 2
         (List.length (Compaction.removable_checkpoints plan));
       Alcotest.(check int)
-        "expired checkpoints explain their block" 2
+        "candidate set contains checkpoints and events" 4
+        (Compaction.planned_cleanup_count plan);
+      Alcotest.(check bool)
+        "planned stored bytes are nonzero" true
+        (Int64.compare (Compaction.planned_cleanup_bytes plan) 0L > 0);
+      Alcotest.(check int)
+        "generation rewrite removes ancestry blocks" 0
         (List.length (Compaction.blocked_removals plan));
       let selected = Compaction.selections plan in
       (match
@@ -230,18 +345,18 @@ let planner_is_read_only_and_explains_blocked_removal () =
          Compaction.Policy.decision
            (selection_for (Scratch.Checkpoint.id head) selected)
        with
-      | Compaction.Policy.Expired -> ()
-      | Compaction.Policy.Protected_by _ | Compaction.Policy.Recent_window
-      | Compaction.Policy.Periodic_bucket _ ->
-          Alcotest.fail "expired head was not reported");
+      | Compaction.Policy.Recent_window -> ()
+      | Compaction.Policy.Protected_by _ | Compaction.Policy.Periodic_bucket _
+      | Compaction.Policy.Expired ->
+          Alcotest.fail "head was not retained");
       let explanation = Compaction.render_explain plan in
       Alcotest.(check bool)
-        "explanation reports no removal" true
-        (List.mem "removable-checkpoints=0" explanation);
+        "explanation reports planned candidate count" true
+        (List.mem "planned-cleanup-objects=4" explanation);
       Alcotest.(check bool)
-        "explanation reports blocked ancestry" true
+        "explanation lists stored candidate bytes" true
         (List.exists
-           (String.starts_with ~prefix:"blocked-removal ")
+           (String.starts_with ~prefix:"planned-cleanup-object ")
            explanation))
 
 let planner_rejects_missing_reachable_record () =
@@ -260,6 +375,397 @@ let planner_rejects_missing_reachable_record () =
       with
       | Error _ -> ()
       | Ok _ -> Alcotest.fail "planner accepted missing reachable event")
+
+let planner_matches_actual_quarantine_and_prune () =
+  with_cleanup_fixture (fun root store scratch initial _middle head ->
+      let policy = policy ~recent:6L ~periodic:0L in
+      let plan =
+        Compaction.analyze ~store scratch ~policy ~now:25L
+        |> require_ok Compaction.error_to_string
+      in
+      let planned = Compaction.planned_cleanup plan in
+      Alcotest.(check int)
+        "fixture has six cleanup candidates" 6
+        (Compaction.planned_cleanup_count plan);
+      Alcotest.(check int64)
+        "planned bytes equal planned metric sum" (metric_bytes planned)
+        (Compaction.planned_cleanup_bytes plan);
+      Alcotest.(check bool)
+        "planned IDs are unique" true
+        (metric_ids_are_unique planned);
+      Alcotest.(check int)
+        "planned candidates cover three scratch types" 3
+        (List.length
+           (List.sort_uniq compare
+              (List.map
+                 (fun metric -> metric.Compaction.metric_expected_type)
+                 planned)));
+      let checkpoint_objects checkpoint =
+        let snapshot =
+          Snapshot.Snapshot.load store (Scratch.Checkpoint.snapshot checkpoint)
+          |> require_ok Snapshot.error_to_string
+        in
+        ignore
+          (Snapshot.Tree.load store (Snapshot.Snapshot.root snapshot)
+          |> require_ok Snapshot.error_to_string);
+        [
+          Snapshot.Snapshot.stored_object_id
+            (Scratch.Checkpoint.snapshot checkpoint);
+          Snapshot.Tree.stored_object_id (Snapshot.Snapshot.root snapshot);
+        ]
+      in
+      let keep_objects =
+        checkpoint_objects initial @ checkpoint_objects head
+        |> List.sort_uniq Store.Stored_object_id.compare
+      in
+      let execution =
+        Compaction.activate ~cleanup:false ~store scratch ~policy ~now:25L
+        |> require_ok Compaction.error_to_string
+      in
+      Alcotest.(check bool)
+        "activation plan matches dry run" true
+        (metrics_equal planned
+           (Compaction.planned_cleanup (Compaction.execution_plan execution)));
+      let generation = Compaction.execution_generation execution in
+      let cleanup =
+        Compaction.resume_cleanup ~store scratch
+        |> require_ok Compaction.error_to_string
+      in
+      Alcotest.(check bool)
+        "actual quarantine matches dry run exactly" true
+        (metrics_equal planned cleanup.Compaction.quarantined_candidates);
+      Alcotest.(check int)
+        "actual quarantine count matches dry run"
+        (Compaction.planned_cleanup_count plan)
+        cleanup.Compaction.quarantined_objects;
+      Alcotest.(check int64)
+        "actual quarantine bytes match dry run"
+        (Compaction.planned_cleanup_bytes plan)
+        cleanup.Compaction.quarantined_bytes;
+      let trash = generation_trash root generation in
+      List.iter
+        (fun metric ->
+          let source, destination = candidate_paths store trash metric in
+          Alcotest.(check bool)
+            "candidate leaves main object store" false (Sys.file_exists source);
+          Alcotest.(check bool)
+            "candidate enters generation quarantine" true
+            (Sys.file_exists destination))
+        planned;
+      List.iter
+        (fun identity ->
+          Alcotest.(check bool)
+            "cross-domain object remains in main store" true
+            (Sys.file_exists (Store.object_path store identity)))
+        keep_objects;
+      let pruned =
+        Compaction.prune ~store scratch |> require_ok Compaction.error_to_string
+      in
+      Alcotest.(check bool)
+        "actual prune matches dry-run metrics" true
+        (metrics_equal planned pruned.Compaction.pruned_candidates);
+      Alcotest.(check int)
+        "actual prune count matches dry run"
+        (Compaction.planned_cleanup_count plan)
+        pruned.Compaction.pruned_objects;
+      Alcotest.(check int64)
+        "actual prune bytes match dry run"
+        (Compaction.planned_cleanup_bytes plan)
+        pruned.Compaction.pruned_bytes;
+      List.iter
+        (fun metric ->
+          let source, destination = candidate_paths store trash metric in
+          Alcotest.(check bool)
+            "pruned candidate is absent from main store" false
+            (Sys.file_exists source);
+          Alcotest.(check bool)
+            "pruned candidate is absent from quarantine" false
+            (Sys.file_exists destination))
+        planned;
+      List.iter
+        (fun identity ->
+          Alcotest.(check bool)
+            "unrelated object remains after prune" true
+            (Sys.file_exists (Store.object_path store identity)))
+        keep_objects;
+      List.iter
+        (fun checkpoint ->
+          Scratch.resolve_checkpoint scratch (Scratch.Checkpoint.id checkpoint)
+          |> require_ok Scratch.error_to_string
+          |> ignore)
+        [ initial; head ];
+      Scratch.Restore.restore scratch ~root
+        ~target:(Scratch.Checkpoint.id initial)
+        ~observed_at:40L ~created_at:40L
+      |> require_ok Scratch.error_to_string
+      |> ignore;
+      Alcotest.(check string)
+        "retained initial checkpoint restores" "zero"
+        (In_channel.with_open_bin
+           (Filename.concat root "file")
+           In_channel.input_all);
+      Scratch.Restore.restore scratch ~root
+        ~target:(Scratch.Checkpoint.id head)
+        ~observed_at:41L ~created_at:41L
+      |> require_ok Scratch.error_to_string
+      |> ignore;
+      Alcotest.(check string)
+        "retained head checkpoint restores" "two"
+        (In_channel.with_open_bin
+           (Filename.concat root "file")
+           In_channel.input_all))
+
+let quarantine_interruptions_resume_at_every_candidate_boundary () =
+  let candidate_count = 6 in
+  let run label fault =
+    with_cleanup_fixture (fun root store scratch initial _middle head ->
+        let policy = policy ~recent:6L ~periodic:0L in
+        let plan =
+          Compaction.analyze ~store scratch ~policy ~now:25L
+          |> require_ok Compaction.error_to_string
+        in
+        let planned = Compaction.planned_cleanup plan in
+        Alcotest.(check int)
+          (label ^ " candidate count")
+          candidate_count (List.length planned);
+        let execution =
+          Compaction.activate ~cleanup:false ~store scratch ~policy ~now:25L
+          |> require_ok Compaction.error_to_string
+        in
+        let generation = Compaction.execution_generation execution in
+        let source, _ =
+          candidate_paths store
+            (generation_trash root generation)
+            (List.hd planned)
+        in
+        Alcotest.(check bool)
+          (label ^ " starts in object store")
+          true (Sys.file_exists source);
+        (match Compaction.resume_cleanup ~fault ~store scratch with
+        | Error _ -> ()
+        | Ok _ -> Alcotest.fail (label ^ " did not interrupt cleanup"));
+        let reopened_store =
+          Store.open_repository ~root |> require_ok Store.error_to_string
+        in
+        let reopened = Scratch.open_repository reopened_store in
+        let resumed =
+          Compaction.resume_cleanup ~store:reopened_store reopened
+          |> require_ok Compaction.error_to_string
+        in
+        assert_quarantined reopened_store root generation planned;
+        Alcotest.(check bool)
+          (label ^ " active generation remains unchanged")
+          true
+          (Scratch.Generation_id.equal generation
+             (active_generation_id reopened));
+        Alcotest.(check bool)
+          (label ^ " no unrelated snapshot moved")
+          true
+          (Sys.file_exists
+             (Store.object_path reopened_store
+                (Snapshot.Snapshot.stored_object_id
+                   (Scratch.Checkpoint.snapshot head))));
+        Alcotest.(check int)
+          (label ^ " resumed report only moves candidates")
+          (candidate_count
+          - List.length resumed.Compaction.already_quarantined_candidates)
+          resumed.Compaction.quarantined_objects;
+        let repeated =
+          Compaction.resume_cleanup ~store:reopened_store reopened
+          |> require_ok Compaction.error_to_string
+        in
+        Alcotest.(check int)
+          (label ^ " repeat resume is idempotent")
+          candidate_count repeated.Compaction.already_quarantined_objects;
+        assert_retained_resolution_and_restore root reopened initial head)
+  in
+  List.iter
+    (fun index ->
+      run
+        (Printf.sprintf "before-%d" index)
+        (Compaction.Fault.before_candidate index);
+      run
+        (Printf.sprintf "after-%d" index)
+        (Compaction.Fault.after_candidate index))
+    (List.init candidate_count Fun.id)
+
+let prune_interruptions_resume_at_every_candidate_boundary () =
+  let candidate_count = 6 in
+  let run label fault =
+    with_cleanup_fixture (fun root store scratch initial _middle head ->
+        let policy = policy ~recent:6L ~periodic:0L in
+        let plan =
+          Compaction.analyze ~store scratch ~policy ~now:25L
+          |> require_ok Compaction.error_to_string
+        in
+        let planned = Compaction.planned_cleanup plan in
+        let execution =
+          Compaction.activate ~cleanup:false ~store scratch ~policy ~now:25L
+          |> require_ok Compaction.error_to_string
+        in
+        let generation = Compaction.execution_generation execution in
+        ignore
+          (Compaction.resume_cleanup ~store scratch
+          |> require_ok Compaction.error_to_string);
+        (match Compaction.prune ~fault ~store scratch with
+        | Error _ -> ()
+        | Ok _ -> Alcotest.fail (label ^ " did not interrupt prune"));
+        let reopened_store =
+          Store.open_repository ~root |> require_ok Store.error_to_string
+        in
+        let reopened = Scratch.open_repository reopened_store in
+        let resumed =
+          Compaction.prune ~store:reopened_store reopened
+          |> require_ok Compaction.error_to_string
+        in
+        assert_pruned reopened_store root generation planned;
+        Alcotest.(check bool)
+          (label ^ " active generation remains unchanged")
+          true
+          (Scratch.Generation_id.equal generation
+             (active_generation_id reopened));
+        Alcotest.(check bool)
+          (label ^ " no unrelated snapshot deleted")
+          true
+          (Sys.file_exists
+             (Store.object_path reopened_store
+                (Snapshot.Snapshot.stored_object_id
+                   (Scratch.Checkpoint.snapshot head))));
+        Alcotest.(check int)
+          (label ^ " resumed prune only deletes candidates")
+          (candidate_count
+          - List.length resumed.Compaction.already_pruned_candidates)
+          resumed.Compaction.pruned_objects;
+        let repeated =
+          Compaction.prune ~store:reopened_store reopened
+          |> require_ok Compaction.error_to_string
+        in
+        Alcotest.(check int)
+          (label ^ " repeat prune is idempotent")
+          candidate_count repeated.Compaction.already_pruned_objects;
+        assert_retained_resolution_and_restore root reopened initial head)
+  in
+  List.iter
+    (fun index ->
+      run
+        (Printf.sprintf "before-%d" index)
+        (Compaction.Fault.before_candidate index);
+      run
+        (Printf.sprintf "after-%d" index)
+        (Compaction.Fault.after_candidate index))
+    (List.init candidate_count Fun.id)
+
+let cleanup_rejects_invalid_resume_states () =
+  let policy = policy ~recent:6L ~periodic:0L in
+  let expect_error setup =
+    with_cleanup_fixture (fun root store scratch _initial _middle _head ->
+        let plan =
+          Compaction.analyze ~store scratch ~policy ~now:25L
+          |> require_ok Compaction.error_to_string
+        in
+        let execution =
+          Compaction.activate ~cleanup:false ~store scratch ~policy ~now:25L
+          |> require_ok Compaction.error_to_string
+        in
+        setup root store scratch execution
+          (List.hd (Compaction.planned_cleanup plan));
+        let reopened_store =
+          Store.open_repository ~root |> require_ok Store.error_to_string
+        in
+        let reopened = Scratch.open_repository reopened_store in
+        match Compaction.resume_cleanup ~store:reopened_store reopened with
+        | Error _ -> ()
+        | Ok _ -> Alcotest.fail "invalid cleanup state was accepted")
+  in
+  expect_error (fun root store _scratch execution metric ->
+      Unix.unlink (Store.object_path store metric.Compaction.metric_object_id);
+      ignore root;
+      ignore execution);
+  expect_error (fun _root store scratch _execution metric ->
+      let checkpoint =
+        Scratch.head scratch |> require_ok Scratch.error_to_string |> Option.get
+      in
+      let wrong_object =
+        Store.object_path store
+          (Snapshot.Snapshot.stored_object_id
+             (Scratch.Checkpoint.snapshot checkpoint))
+      in
+      let bytes = In_channel.with_open_bin wrong_object In_channel.input_all in
+      write_file
+        (Store.object_path store metric.Compaction.metric_object_id)
+        bytes);
+  expect_error (fun root store _scratch execution metric ->
+      let trash_root = Filename.concat root ".paengi/trash" in
+      Unix.mkdir trash_root 0o700;
+      let other = Filename.concat trash_root "other-generation" in
+      Unix.mkdir other 0o700;
+      Unix.rename
+        (Store.object_path store metric.Compaction.metric_object_id)
+        (Filename.concat other
+           (Store.Stored_object_id.to_hex metric.Compaction.metric_object_id));
+      ignore execution);
+  with_cleanup_fixture (fun _root store scratch initial _middle _head ->
+      let first =
+        Compaction.activate ~cleanup:false ~store scratch ~policy ~now:25L
+        |> require_ok Compaction.error_to_string
+      in
+      Scratch.pin scratch (Scratch.Checkpoint.id initial) ~changed_at:60L
+      |> require_ok Scratch.error_to_string;
+      ignore
+        (Compaction.activate ~cleanup:false ~store scratch ~policy ~now:25L
+        |> require_ok Compaction.error_to_string);
+      match
+        Compaction.resume_cleanup
+          ~expected_generation:(Compaction.execution_generation first)
+          ~store scratch
+      with
+      | Error _ -> ()
+      | Ok _ -> Alcotest.fail "stale generation resume was accepted");
+  with_cleanup_fixture (fun _root store scratch _initial _middle _head ->
+      let execution =
+        Compaction.activate ~cleanup:false ~store scratch ~policy ~now:25L
+        |> require_ok Compaction.error_to_string
+      in
+      let manifest =
+        Scratch.Generation.cleanup_manifest
+          (Scratch.active_generation scratch
+          |> require_ok Scratch.error_to_string
+          |> Option.get)
+      in
+      write_file
+        (Store.object_path store
+           (Scratch.Cleanup_manifest_id.stored_object_id manifest))
+        "corrupt cleanup manifest";
+      ignore execution;
+      match Compaction.resume_cleanup ~store scratch with
+      | Error _ -> ()
+      | Ok _ -> Alcotest.fail "corrupt cleanup manifest was accepted");
+  with_cleanup_fixture (fun _root store scratch _initial _middle _head ->
+      ignore
+        (Compaction.activate ~cleanup:false ~store scratch ~policy ~now:25L
+        |> require_ok Compaction.error_to_string);
+      let generation =
+        Scratch.active_generation scratch
+        |> require_ok Scratch.error_to_string
+        |> Option.get
+      in
+      let checkpoint =
+        Scratch.head scratch |> require_ok Scratch.error_to_string |> Option.get
+      in
+      let snapshot_path =
+        Store.object_path store
+          (Snapshot.Snapshot.stored_object_id
+             (Scratch.Checkpoint.snapshot checkpoint))
+      in
+      let bytes = In_channel.with_open_bin snapshot_path In_channel.input_all in
+      write_file
+        (Store.object_path store
+           (Scratch.Cleanup_manifest_id.stored_object_id
+              (Scratch.Generation.cleanup_manifest generation)))
+        bytes;
+      match Compaction.resume_cleanup ~store scratch with
+      | Error _ -> ()
+      | Ok _ -> Alcotest.fail "wrong-type cleanup manifest was accepted")
 
 let activated_generation_preserves_logical_history_and_allows_new_work () =
   with_history (fun root store scratch initial middle head ->
@@ -390,11 +896,10 @@ let activated_generation_preserves_logical_history_and_allows_new_work () =
         (Compaction.execution_cleanup second).Compaction.quarantined_objects
         pruned.Compaction.pruned_objects;
       let after_prune =
-        Compaction.resume_cleanup ~store scratch
-        |> require_ok Compaction.error_to_string
+        Compaction.prune ~store scratch |> require_ok Compaction.error_to_string
       in
       Alcotest.(check int)
-        "resume accepts every permanently pruned candidate"
+        "prune accepts every permanently pruned candidate"
         pruned.Compaction.pruned_objects
         after_prune.Compaction.already_pruned_objects)
 
@@ -478,10 +983,21 @@ let () =
             policy_retain_recent_periodic_and_pinned;
           Alcotest.test_case "invalid policy values reject" `Quick
             invalid_policy_values_are_rejected;
-          Alcotest.test_case "planner is read-only and explains blocked removal"
-            `Quick planner_is_read_only_and_explains_blocked_removal;
+          Alcotest.test_case "planner is read-only and explains exact cleanup"
+            `Quick planner_is_read_only_and_explains_exact_cleanup;
           Alcotest.test_case "planner rejects missing reachable record" `Quick
             planner_rejects_missing_reachable_record;
+          Alcotest.test_case
+            "dry-run candidate metrics equal quarantine and prune" `Quick
+            planner_matches_actual_quarantine_and_prune;
+          Alcotest.test_case
+            "quarantine resumes at every candidate interruption boundary" `Slow
+            quarantine_interruptions_resume_at_every_candidate_boundary;
+          Alcotest.test_case
+            "prune resumes at every candidate interruption boundary" `Slow
+            prune_interruptions_resume_at_every_candidate_boundary;
+          Alcotest.test_case "cleanup rejects invalid resume states" `Quick
+            cleanup_rejects_invalid_resume_states;
           Alcotest.test_case
             "generation preserves logical history and accepts subsequent work"
             `Quick

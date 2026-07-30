@@ -89,7 +89,10 @@ Compaction keeps CLI checkpoint IDs logical. An activated generation resolves
 retained logical IDs to verified physical checkpoints; unretained IDs become
 unavailable only after their objects move to `.paengi/trash/<generation-id>/`.
 Quarantine can be inspected or resumed. Permanent prune cannot restore the
-previous generation's quarantined history.
+previous generation's quarantined history. `compact --dry-run --explain`
+reports the exact canonical cleanup IDs, expected types, count, and stored
+object-file bytes; these exclude payload-only and filesystem-allocation
+estimates and are checked again during activation.
 
 ## Testing scope
 

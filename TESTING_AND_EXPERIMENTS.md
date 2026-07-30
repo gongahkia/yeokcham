@@ -74,8 +74,15 @@ selection, pin precedence, permutation-independent selection, retained logical
 snapshot equivalence after activated generation compaction, direct generation
 schema decoding/goldens, replay verification, post-compaction checkpointing and
 retention changes, repeated generation activation, resolver corruption
-rejection, and idempotent cleanup resume. The current cleanup scope excludes
-shared content-domain objects pending full cross-domain reachability.
+rejection, and idempotent cleanup resume. Deterministic fixtures compare the
+dry-run canonical cleanup IDs, expected types, object count, and exact stored
+file lengths with quarantine and prune results. Candidate-boundary faults run
+before and after every quarantine and prune movement, reopen the repository,
+resume, and verify retained logical restoration, active-generation stability,
+and idempotence. Missing, wrong-path/type, foreign-generation quarantine,
+stale-generation, and corrupt-manifest states reject structurally. The current
+cleanup scope excludes shared content-domain objects pending full cross-domain
+reachability.
 
 #### P4 — Compaction preservation
 
@@ -153,7 +160,11 @@ Expected result:
 Generation failure states are: pre-activation immutable-object leftovers with
 the prior ref unchanged; post-activation/pre-cleanup valid logical resolution
 with excess objects; and partially quarantined manifest candidates resumed
-idempotently. Permanent prune is tested separately from recoverable quarantine.
+idempotently. Candidate-level injection occurs before candidate zero, before
+every later candidate, and after every candidate including the final movement
+before normal completion. Permanent prune is tested separately from recoverable
+quarantine; a prune retry accepts an absent candidate only when the active
+generation's verified manifest names it.
 
 ## 3. Filesystem fixtures
 

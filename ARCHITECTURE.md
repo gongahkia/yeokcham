@@ -269,6 +269,14 @@ manifest-listed obsolete scratch records to same-filesystem quarantine. Content,
 trees, snapshots, chunks, and manifests are outside cleanup until canonical
 cross-domain reachability exists.
 
+The dry-run planner simulates the compacted physical chain without writing it,
+then emits the exact canonical cleanup candidate IDs, expected types, counts,
+and stored object-file lengths. Activation rederives that set before manifest
+storage and rejects any mismatch. Cleanup supports deterministic test-only
+fault boundaries immediately before and after every candidate operation; the
+imperative shell reopens and revalidates the active generation and manifest on
+resume. This mechanism does not add rollback or persistent cleanup state.
+
 Initial strategies:
 
 1. Delete expired unpinned checkpoint records while preserving referenced snapshots.
