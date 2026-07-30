@@ -368,3 +368,5 @@ Yeokcham may lose to modern Git on small, source-only repositories; this should 
 Do not rely only on microbenchmarks. End-to-end process benchmarks are required.
 
 The W5 harness is `scripts/benchmark-sparse-workspace.sh`. It times `git clone --no-checkout --filter=blob:none`, cone sparse selection of `app/`, and `git checkout main` as the usable-workspace boundary. Cold samples clear only Yeokcham's disposable snapshot-pack cache before every timed run; warm samples populate it once before timing. It records client `.pack` payload bytes as local remote-helper transport bytes and does not claim physical-network or OS-cache control.
+
+The committed 2026-07-31 W5 result has five clean Apple M3 samples at commit `4d31ebe`: 0.83 s median cold and 0.30 s median warm usable-workspace time, with 772 B median received helper pack payload in both states. It establishes this fixture's local cold/warm behavior only.

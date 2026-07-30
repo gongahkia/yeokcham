@@ -248,14 +248,14 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 
 - [x] Integrate with Git sparse checkout.
 - [x] Prefetch current sparse paths.
-- [ ] Measure time to usable workspace.
+- [x] Measure time to usable workspace.
 - [x] Document unsupported Git clients or workflows.
 
 ### Exit criteria
 
 - [x] A documented clone workflow avoids downloading unrelated historical blobs.
 - [x] Cache deletion never changes repository correctness.
-- [ ] Benchmark results show transfer and latency behaviour under cold and warm cache.
+- [x] Benchmark results show transfer and latency behaviour under cold and warm cache.
 
 ## Milestone 7 — GitHub mirror
 
