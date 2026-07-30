@@ -57,6 +57,19 @@ The external backend key is not encoded again. The caller constructs associated 
 
 Readers reject unsupported format, algorithm, parameters, invalid UUID, ciphertext length, truncation, and trailing bytes before passphrase derivation. Associated data exactly encodes every preceding cleartext field. The caller supplies a nonempty passphrase separately; no passphrase bytes are serialized.
 
+## Encrypted repository recovery manifest version 1
+
+`YKRM` records one immutable canonical repository-file snapshot after its file objects are acknowledged through `EncryptedBackend`. Its fields are:
+
+1. Magic `YKRM`.
+2. Schema version `1`.
+3. Raw 16-byte repository UUIDv4.
+4. `u32` file count.
+5. Entries strictly ascending by safe relative backend key: length-delimited key bytes, `u64` plaintext file length, and raw 32-byte SHA-256 checksum.
+6. Raw 32-byte SHA-256 checksum of every prior `YKRM` byte.
+
+SQLite `metadata.sqlite3` and recognized interrupted staging names are excluded. Every other source and manifest path must be a canonical repository file name. The manifest is itself an encrypted backend object at `recovery/<repository-id>/manifest`; each file uses `recovery/<repository-id>/files/<relative-key>`. Readers apply caller file/count/total/manifest limits, reject unsorted paths, duplicate paths, noncanonical names, malformed UUIDs, invalid checksum, and trailing bytes, decrypt each named file, verify its exact length/checksum, then use ordinary repository validation and object identity checks.
+
 ## Evolution
 
 Each new record family documents its magic, schema version, field order, limits, and feature effects before implementation. Incompatible changes require a new schema version or required feature bit and a copy-on-write migration. Existing records retain their original encoding forever.

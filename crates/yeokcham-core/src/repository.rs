@@ -12,17 +12,19 @@ use rusqlite::{
     Connection, Error as SqliteError, ErrorCode as SqliteErrorCode, OpenFlags, OptionalExtension,
     TransactionBehavior, params,
 };
+use sha2::{Digest, Sha256};
 
 use crate::{
+    Backend, BackendFuture, BackendKey, BackendPutResult, BackendReadLimits, BackendReadRequest,
     BlobManifest, BlobManifestRepresentation, CanonicalDecoder, CanonicalEncoder, ChunkRecord,
     ChunkReference, ChunkedBlobRecord, ContentDefinedChunker, ContentDefinedChunkingParameters,
-    DeviceId, Error, ErrorKind, GitObject, GitObjectId, GitObjectKind, GitRefState, GitRepository,
-    HeadState, ManifestId, MetadataObjectManifest, MetadataObjectRecord, ReadSegment,
-    ReadSegmentRecord, RefEvent, RefEventReadLimits, RefEventSigningKey, RefSnapshot,
-    RefSnapshotReadLimits, RepositoryFormat, RepositoryId, Result, SegmentId, SegmentIndex,
-    SegmentReadLimits, SegmentReader, SegmentRecord, SegmentWriteLimits, SegmentWriter,
-    TinyBlobAggregation, TinyBlobGroupManifest, TinyBlobGroupManifestEntry, WholeBlobRecord,
-    YeokchamContentId,
+    DeviceId, EncryptedBackend, Error, ErrorKind, GitObject, GitObjectId, GitObjectKind,
+    GitRefState, GitRepository, HeadState, ManifestId, MetadataObjectManifest,
+    MetadataObjectRecord, ReadSegment, ReadSegmentRecord, RefEvent, RefEventReadLimits,
+    RefEventSigningKey, RefSnapshot, RefSnapshotReadLimits, RepositoryFormat, RepositoryId, Result,
+    SegmentId, SegmentIndex, SegmentReadLimits, SegmentReader, SegmentRecord, SegmentWriteLimits,
+    SegmentWriter, TinyBlobAggregation, TinyBlobGroupManifest, TinyBlobGroupManifestEntry,
+    WholeBlobRecord, YeokchamContentId,
 };
 
 const BOOTSTRAP_MAGIC: [u8; 4] = *b"YKRB";
@@ -56,6 +58,9 @@ const PUBLISHED_REF_EVENT_MAX_DIRECTORY_ENTRIES: usize = 1_000_000;
 const PUBLISHED_REF_EVENT_MAX_BYTES: u64 = 128 * 1024 * 1024;
 const SEGMENT_INDEX_EXTENSION: &str = ".ykix";
 const SEGMENT_INDEX_STAGING_SUFFIX: &str = ".partial";
+const RECOVERY_MANIFEST_MAGIC: [u8; 4] = *b"YKRM";
+const RECOVERY_MANIFEST_VERSION: u16 = 1;
+const RECOVERY_PREFIX: &str = "recovery";
 const LAYOUT_DIRECTORIES: &[&str] = &[
     "format",
     "segments",
@@ -82,6 +87,81 @@ const INITIAL_IMPORT_TINY_AGGREGATION_MAXIMUM_BYTES: usize =
     INITIAL_IMPORT_TINY_BLOB_MAXIMUM_BYTES * INITIAL_IMPORT_TINY_BLOBS_PER_AGGREGATION;
 
 type RefEventChains = BTreeMap<DeviceId, (u64, [u8; 32])>;
+
+/// Caller-selected bounds for encrypted repository backup and recovery.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct EncryptedRepositoryRecoveryLimits {
+    maximum_files: usize,
+    maximum_file_bytes: u64,
+    maximum_total_bytes: u64,
+    maximum_manifest_bytes: u64,
+}
+
+impl EncryptedRepositoryRecoveryLimits {
+    /// Validates bounds for one complete encrypted repository backup or recovery.
+    pub fn new(
+        maximum_files: usize,
+        maximum_file_bytes: u64,
+        maximum_total_bytes: u64,
+        maximum_manifest_bytes: u64,
+    ) -> Result<Self> {
+        if maximum_files == 0
+            || maximum_file_bytes == 0
+            || maximum_total_bytes == 0
+            || maximum_manifest_bytes == 0
+        {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "encrypted repository recovery limits must not be zero",
+            ));
+        }
+        Ok(Self {
+            maximum_files,
+            maximum_file_bytes,
+            maximum_total_bytes,
+            maximum_manifest_bytes,
+        })
+    }
+
+    /// Returns the maximum canonical files accepted in one backup manifest.
+    pub const fn maximum_files(self) -> usize {
+        self.maximum_files
+    }
+
+    /// Returns the maximum bytes accepted from one canonical repository file.
+    pub const fn maximum_file_bytes(self) -> u64 {
+        self.maximum_file_bytes
+    }
+
+    /// Returns the maximum cumulative file bytes accepted by the operation.
+    pub const fn maximum_total_bytes(self) -> u64 {
+        self.maximum_total_bytes
+    }
+
+    /// Returns the maximum bytes accepted for one recovery manifest.
+    pub const fn maximum_manifest_bytes(self) -> u64 {
+        self.maximum_manifest_bytes
+    }
+}
+
+/// A successful encrypted repository backup or recovery summary.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct EncryptedRepositoryRecoveryReport {
+    file_count: usize,
+    total_bytes: u64,
+}
+
+impl EncryptedRepositoryRecoveryReport {
+    /// Returns the canonical file count covered by the encrypted snapshot.
+    pub const fn file_count(self) -> usize {
+        self.file_count
+    }
+
+    /// Returns the exact cumulative plaintext file bytes covered by the snapshot.
+    pub const fn total_bytes(self) -> u64 {
+        self.total_bytes
+    }
+}
 
 struct RefStateAppend<'a> {
     state: GitRefState,
@@ -1140,6 +1220,173 @@ impl LocalRepository {
             .format
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// Publishes a bounded encrypted copy of this repository's canonical files.
+    ///
+    /// The caller must pass an authenticated encrypted backend bound to this
+    /// repository's encryption key. The final recovery manifest is published
+    /// only after every listed immutable file has been acknowledged.
+    pub fn backup_to_backend<'a, B: Backend>(
+        &'a self,
+        backend: &'a EncryptedBackend<B>,
+        limits: EncryptedRepositoryRecoveryLimits,
+    ) -> BackendFuture<'a, EncryptedRepositoryRecoveryReport> {
+        Box::pin(async move {
+            self.verify_layout_and_bootstrap()?;
+            let files = collect_recovery_files(&self.root, limits)?;
+            let mut manifest_files = Vec::with_capacity(files.len());
+            let mut total_bytes = 0_u64;
+            for file in files {
+                total_bytes = total_bytes
+                    .checked_add(file.bytes.len() as u64)
+                    .ok_or_else(|| {
+                        Error::new(
+                            ErrorKind::Unsupported,
+                            "encrypted repository recovery bytes overflow",
+                        )
+                    })?;
+                if total_bytes > limits.maximum_total_bytes() {
+                    return Err(Error::new(
+                        ErrorKind::Unsupported,
+                        "encrypted repository recovery exceeds the total byte limit",
+                    ));
+                }
+                let key = recovery_file_key(self.id, &file.relative)?;
+                match backend.put_if_absent(&key, &file.bytes).await? {
+                    BackendPutResult::Created(_) => {}
+                    BackendPutResult::AlreadyExists(metadata) => {
+                        if metadata.length() != file.bytes.len() as u64
+                            || backend
+                                .get(
+                                    &key,
+                                    BackendReadRequest::full(BackendReadLimits::new(
+                                        limits.maximum_file_bytes(),
+                                    )),
+                                )
+                                .await?
+                                != file.bytes
+                        {
+                            return Err(Error::new(
+                                ErrorKind::Conflict,
+                                "encrypted recovery file conflicts with existing data",
+                            ));
+                        }
+                    }
+                }
+                manifest_files.push(RecoveryManifestFile {
+                    relative: file.relative,
+                    length: file.bytes.len() as u64,
+                    checksum: Sha256::digest(&file.bytes).into(),
+                });
+            }
+            let manifest = encode_recovery_manifest(self.id, &manifest_files)?;
+            if manifest.len() as u64 > limits.maximum_manifest_bytes() {
+                return Err(Error::new(
+                    ErrorKind::Unsupported,
+                    "encrypted recovery manifest exceeds the byte limit",
+                ));
+            }
+            let manifest_key = recovery_manifest_key(self.id)?;
+            match backend.put_if_absent(&manifest_key, &manifest).await? {
+                BackendPutResult::Created(_) => {}
+                BackendPutResult::AlreadyExists(metadata) => {
+                    if metadata.length() != manifest.len() as u64
+                        || backend
+                            .get(
+                                &manifest_key,
+                                BackendReadRequest::full(BackendReadLimits::new(
+                                    limits.maximum_manifest_bytes(),
+                                )),
+                            )
+                            .await?
+                            != manifest
+                    {
+                        return Err(Error::new(
+                            ErrorKind::Conflict,
+                            "encrypted recovery manifest conflicts with existing data",
+                        ));
+                    }
+                }
+            }
+            Ok(EncryptedRepositoryRecoveryReport {
+                file_count: manifest_files.len(),
+                total_bytes,
+            })
+        })
+    }
+
+    /// Restores a bounded encrypted repository snapshot into a fresh destination.
+    ///
+    /// A failed restore can leave an incomplete destination which callers must
+    /// explicitly remove before retrying.
+    pub fn restore_from_backend<'a, B: Backend>(
+        destination: &'a Path,
+        repository_id: RepositoryId,
+        backend: &'a EncryptedBackend<B>,
+        limits: EncryptedRepositoryRecoveryLimits,
+    ) -> BackendFuture<'a, (Self, EncryptedRepositoryRecoveryReport)> {
+        Box::pin(async move {
+            let manifest_key = recovery_manifest_key(repository_id)?;
+            let manifest = backend
+                .get(
+                    &manifest_key,
+                    BackendReadRequest::full(BackendReadLimits::new(
+                        limits.maximum_manifest_bytes(),
+                    )),
+                )
+                .await?;
+            let files = decode_recovery_manifest(&manifest, repository_id, limits)?;
+            create_recovery_destination(destination)?;
+            let mut total_bytes = 0_u64;
+            for file in &files {
+                total_bytes = total_bytes.checked_add(file.length).ok_or_else(|| {
+                    Error::new(
+                        ErrorKind::Unsupported,
+                        "encrypted repository recovery bytes overflow",
+                    )
+                })?;
+                if total_bytes > limits.maximum_total_bytes() {
+                    return Err(Error::new(
+                        ErrorKind::Unsupported,
+                        "encrypted repository recovery exceeds the total byte limit",
+                    ));
+                }
+                let key = recovery_file_key(repository_id, &file.relative)?;
+                let bytes = backend
+                    .get(
+                        &key,
+                        BackendReadRequest::full(BackendReadLimits::new(
+                            limits.maximum_file_bytes(),
+                        )),
+                    )
+                    .await?;
+                if bytes.len() as u64 != file.length
+                    || Sha256::digest(&bytes).as_slice() != file.checksum
+                {
+                    return Err(Error::new(
+                        ErrorKind::CorruptData,
+                        "encrypted recovery file integrity check failed",
+                    ));
+                }
+                write_recovery_file(destination, &file.relative, &bytes)?;
+            }
+            sync_recovery_directories(destination)?;
+            let repository = Self::open(destination)?;
+            if repository.id != repository_id {
+                return Err(Error::new(
+                    ErrorKind::CorruptData,
+                    "encrypted recovery repository identity is invalid",
+                ));
+            }
+            Ok((
+                repository,
+                EncryptedRepositoryRecoveryReport {
+                    file_count: files.len(),
+                    total_bytes,
+                },
+            ))
+        })
     }
 
     fn ensure_ref_journal_format_with_filesystem<F: LocalRepositoryFilesystem>(
@@ -5368,6 +5615,404 @@ fn metadata_error(error: SqliteError) -> Error {
     Error::with_source(kind, message, error)
 }
 
+struct RecoverySourceFile {
+    relative: BackendKey,
+    bytes: Vec<u8>,
+}
+
+struct RecoveryManifestFile {
+    relative: BackendKey,
+    length: u64,
+    checksum: [u8; 32],
+}
+
+fn recovery_manifest_key(repository_id: RepositoryId) -> Result<BackendKey> {
+    BackendKey::from_bytes(format!("{RECOVERY_PREFIX}/{repository_id}/manifest").as_bytes())
+}
+
+fn recovery_file_key(repository_id: RepositoryId, relative: &BackendKey) -> Result<BackendKey> {
+    BackendKey::from_bytes(
+        format!(
+            "{RECOVERY_PREFIX}/{repository_id}/files/{}",
+            std::str::from_utf8(relative.as_bytes()).map_err(|_| {
+                Error::new(ErrorKind::Internal, "encrypted recovery path is invalid")
+            })?
+        )
+        .as_bytes(),
+    )
+}
+
+fn collect_recovery_files(
+    root: &Path,
+    limits: EncryptedRepositoryRecoveryLimits,
+) -> Result<Vec<RecoverySourceFile>> {
+    let mut files = Vec::new();
+    let mut total_bytes = 0_u64;
+    collect_recovery_directory(root, root, &mut files, &mut total_bytes, limits)?;
+    files.sort_by(|left, right| left.relative.cmp(&right.relative));
+    if files.len() > limits.maximum_files() {
+        return Err(Error::new(
+            ErrorKind::Unsupported,
+            "encrypted recovery file count exceeds the limit",
+        ));
+    }
+    Ok(files)
+}
+
+fn collect_recovery_directory(
+    root: &Path,
+    directory: &Path,
+    files: &mut Vec<RecoverySourceFile>,
+    total_bytes: &mut u64,
+    limits: EncryptedRepositoryRecoveryLimits,
+) -> Result<()> {
+    validate_directory(directory, directory == root)?;
+    for entry in fs::read_dir(directory)
+        .map_err(|error| io_error(error, "encrypted recovery directory could not be read"))?
+    {
+        let entry = entry
+            .map_err(|error| io_error(error, "encrypted recovery directory could not be read"))?;
+        let path = entry.path();
+        let relative = path.strip_prefix(root).map_err(|_| {
+            Error::new(
+                ErrorKind::Internal,
+                "encrypted recovery path escapes the repository",
+            )
+        })?;
+        let relative = relative.to_str().ok_or_else(|| {
+            Error::new(ErrorKind::CorruptData, "encrypted recovery path is invalid")
+        })?;
+        if relative == METADATA_PATH {
+            continue;
+        }
+        let key = BackendKey::from_bytes(relative.as_bytes()).map_err(|_| {
+            Error::new(ErrorKind::CorruptData, "encrypted recovery path is invalid")
+        })?;
+        let metadata = fs::symlink_metadata(&path)
+            .map_err(|error| io_error(error, "encrypted recovery entry could not be inspected"))?;
+        if metadata.file_type().is_symlink() {
+            return Err(Error::new(
+                ErrorKind::CorruptData,
+                "encrypted recovery source contains a symbolic link",
+            ));
+        }
+        if metadata.is_dir() {
+            collect_recovery_directory(root, &path, files, total_bytes, limits)?;
+            continue;
+        }
+        if is_recovery_staging_file(&key) {
+            continue;
+        }
+        if !is_canonical_recovery_file(&key) {
+            return Err(Error::new(
+                ErrorKind::CorruptData,
+                "encrypted recovery source contains a noncanonical file",
+            ));
+        }
+        if !metadata.is_file() || metadata.len() > limits.maximum_file_bytes() {
+            return Err(Error::new(
+                ErrorKind::CorruptData,
+                "encrypted recovery source file is invalid",
+            ));
+        }
+        if files.len() >= limits.maximum_files() {
+            return Err(Error::new(
+                ErrorKind::Unsupported,
+                "encrypted recovery file count exceeds the limit",
+            ));
+        }
+        *total_bytes = total_bytes.checked_add(metadata.len()).ok_or_else(|| {
+            Error::new(
+                ErrorKind::Unsupported,
+                "encrypted repository recovery bytes overflow",
+            )
+        })?;
+        if *total_bytes > limits.maximum_total_bytes() {
+            return Err(Error::new(
+                ErrorKind::Unsupported,
+                "encrypted repository recovery exceeds the total byte limit",
+            ));
+        }
+        let length = usize::try_from(metadata.len()).map_err(|_| {
+            Error::new(
+                ErrorKind::Unsupported,
+                "encrypted recovery source file exceeds the byte limit",
+            )
+        })?;
+        let mut file = File::open(&path).map_err(|error| {
+            io_error(error, "encrypted recovery source file could not be opened")
+        })?;
+        let mut bytes = vec![0; length];
+        file.read_exact(&mut bytes)
+            .map_err(|error| io_error(error, "encrypted recovery source file could not be read"))?;
+        let mut extra = [0; 1];
+        match file.read(&mut extra) {
+            Ok(0) => {}
+            Ok(_) => {
+                return Err(Error::new(
+                    ErrorKind::CorruptData,
+                    "encrypted recovery source file changed while being read",
+                ));
+            }
+            Err(error) => {
+                return Err(io_error(
+                    error,
+                    "encrypted recovery source file could not be read",
+                ));
+            }
+        }
+        files.push(RecoverySourceFile {
+            relative: key,
+            bytes,
+        });
+    }
+    Ok(())
+}
+
+fn encode_recovery_manifest(
+    repository_id: RepositoryId,
+    files: &[RecoveryManifestFile],
+) -> Result<Vec<u8>> {
+    let count = u32::try_from(files.len()).map_err(|_| {
+        Error::new(
+            ErrorKind::Unsupported,
+            "encrypted recovery file count exceeds the limit",
+        )
+    })?;
+    let mut encoder = CanonicalEncoder::new();
+    encoder.write_fixed(&RECOVERY_MANIFEST_MAGIC);
+    encoder.write_u16(RECOVERY_MANIFEST_VERSION);
+    encoder.write_fixed(repository_id.as_bytes());
+    encoder.write_u32(count);
+    for file in files {
+        encoder.write_byte_string(file.relative.as_bytes());
+        encoder.write_u64(file.length);
+        encoder.write_fixed(&file.checksum);
+    }
+    let checksum: [u8; 32] = Sha256::digest(encoder.as_bytes()).into();
+    encoder.write_fixed(&checksum);
+    Ok(encoder.into_bytes())
+}
+
+fn decode_recovery_manifest(
+    bytes: &[u8],
+    repository_id: RepositoryId,
+    limits: EncryptedRepositoryRecoveryLimits,
+) -> Result<Vec<RecoveryManifestFile>> {
+    if bytes.len() as u64 > limits.maximum_manifest_bytes() || bytes.len() < 32 {
+        return Err(Error::new(
+            ErrorKind::CorruptData,
+            "encrypted recovery manifest is invalid",
+        ));
+    }
+    let checksum_offset = bytes.len() - 32;
+    let checksum: [u8; 32] = Sha256::digest(&bytes[..checksum_offset]).into();
+    if checksum != bytes[checksum_offset..] {
+        return Err(Error::new(
+            ErrorKind::CorruptData,
+            "encrypted recovery manifest checksum is invalid",
+        ));
+    }
+    let mut decoder = CanonicalDecoder::new(&bytes[..checksum_offset]);
+    if decoder.read_fixed::<4>()? != RECOVERY_MANIFEST_MAGIC
+        || decoder.read_u16()? != RECOVERY_MANIFEST_VERSION
+        || RepositoryId::from_bytes(decoder.read_fixed()?)? != repository_id
+    {
+        return Err(Error::new(
+            ErrorKind::CorruptData,
+            "encrypted recovery manifest is invalid",
+        ));
+    }
+    let count = usize::try_from(decoder.read_u32()?).map_err(|_| {
+        Error::new(
+            ErrorKind::CorruptData,
+            "encrypted recovery manifest file count is invalid",
+        )
+    })?;
+    if count > limits.maximum_files() {
+        return Err(Error::new(
+            ErrorKind::Unsupported,
+            "encrypted recovery file count exceeds the limit",
+        ));
+    }
+    let mut files = Vec::with_capacity(count);
+    let mut previous = None;
+    for _ in 0..count {
+        let relative = BackendKey::from_bytes(decoder.read_byte_string()?).map_err(|_| {
+            Error::new(ErrorKind::CorruptData, "encrypted recovery path is invalid")
+        })?;
+        if previous
+            .as_ref()
+            .is_some_and(|previous: &BackendKey| previous >= &relative)
+        {
+            return Err(Error::new(
+                ErrorKind::CorruptData,
+                "encrypted recovery manifest file order is invalid",
+            ));
+        }
+        if !is_canonical_recovery_file(&relative) {
+            return Err(Error::new(
+                ErrorKind::CorruptData,
+                "encrypted recovery manifest contains a noncanonical file",
+            ));
+        }
+        let length = decoder.read_u64()?;
+        if length > limits.maximum_file_bytes() {
+            return Err(Error::new(
+                ErrorKind::Unsupported,
+                "encrypted recovery source file exceeds the byte limit",
+            ));
+        }
+        let checksum = decoder.read_fixed()?;
+        previous = Some(relative.clone());
+        files.push(RecoveryManifestFile {
+            relative,
+            length,
+            checksum,
+        });
+    }
+    decoder.finish()?;
+    Ok(files)
+}
+
+fn create_recovery_destination(destination: &Path) -> Result<()> {
+    match fs::symlink_metadata(destination) {
+        Ok(_) => {
+            return Err(Error::new(
+                ErrorKind::Conflict,
+                "encrypted recovery destination already exists",
+            ));
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(io_error(
+                error,
+                "encrypted recovery destination could not be inspected",
+            ));
+        }
+    }
+    fs::create_dir(destination)
+        .map_err(|error| io_error(error, "encrypted recovery destination could not be created"))?;
+    for relative in LAYOUT_DIRECTORIES {
+        fs::create_dir(destination.join(relative))
+            .map_err(|error| io_error(error, "encrypted recovery layout could not be created"))?;
+    }
+    Ok(())
+}
+
+fn write_recovery_file(destination: &Path, relative: &BackendKey, bytes: &[u8]) -> Result<()> {
+    let relative = std::str::from_utf8(relative.as_bytes())
+        .map_err(|_| Error::new(ErrorKind::Internal, "encrypted recovery path is invalid"))?;
+    let path = destination.join(relative);
+    let parent = path
+        .parent()
+        .ok_or_else(|| Error::new(ErrorKind::Internal, "encrypted recovery path has no parent"))?;
+    fs::create_dir_all(parent)
+        .map_err(|error| io_error(error, "encrypted recovery parent could not be created"))?;
+    let mut file = OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(&path)
+        .map_err(|error| io_error(error, "encrypted recovery file could not be created"))?;
+    file.write_all(bytes)
+        .map_err(|error| io_error(error, "encrypted recovery file could not be written"))?;
+    file.sync_all()
+        .map_err(|error| io_error(error, "encrypted recovery file could not be synchronized"))?;
+    sync_directory_raw(parent)
+        .map_err(|error| io_error(error, "encrypted recovery parent could not be synchronized"))
+}
+
+fn sync_recovery_directories(directory: &Path) -> Result<()> {
+    for entry in fs::read_dir(directory)
+        .map_err(|error| io_error(error, "encrypted recovery directory could not be read"))?
+    {
+        let entry = entry
+            .map_err(|error| io_error(error, "encrypted recovery directory could not be read"))?;
+        let path = entry.path();
+        let metadata = fs::symlink_metadata(&path)
+            .map_err(|error| io_error(error, "encrypted recovery entry could not be inspected"))?;
+        if metadata.file_type().is_symlink() || (!metadata.is_dir() && !metadata.is_file()) {
+            return Err(Error::new(
+                ErrorKind::CorruptData,
+                "encrypted recovery destination contains an invalid entry",
+            ));
+        }
+        if metadata.is_dir() {
+            sync_recovery_directories(&path)?;
+        }
+    }
+    sync_directory_raw(directory).map_err(|error| {
+        io_error(
+            error,
+            "encrypted recovery directory could not be synchronized",
+        )
+    })
+}
+
+fn is_recovery_staging_file(relative: &BackendKey) -> bool {
+    let Ok(relative) = std::str::from_utf8(relative.as_bytes()) else {
+        return false;
+    };
+    let mut components = relative.split('/');
+    match (
+        components.next(),
+        components.next(),
+        components.next(),
+        components.next(),
+    ) {
+        (Some("format"), Some(name), None, None) => is_ref_event_staging_filename(name),
+        (Some("segments"), Some(name), None, None) => is_segment_staging_filename(name),
+        (Some("indexes"), Some(name), None, None) => is_segment_index_staging_filename(name),
+        (Some("manifests"), Some("blobs"), Some(name), None) => {
+            is_blob_manifest_staging_filename(name)
+        }
+        (Some("manifests"), Some("tiny-groups"), Some(name), None) => {
+            is_tiny_blob_group_manifest_staging_filename(name)
+        }
+        (Some("manifests"), Some("objects"), Some(name), None) => {
+            is_metadata_object_manifest_staging_filename(name)
+        }
+        (Some("manifests"), Some("refs"), Some(name), None) => {
+            is_ref_snapshot_staging_filename(name)
+        }
+        (Some("journals"), Some("refs"), Some(name), None) => is_ref_event_staging_filename(name),
+        _ => false,
+    }
+}
+
+fn is_canonical_recovery_file(relative: &BackendKey) -> bool {
+    let Ok(relative) = std::str::from_utf8(relative.as_bytes()) else {
+        return false;
+    };
+    let mut components = relative.split('/');
+    match (
+        components.next(),
+        components.next(),
+        components.next(),
+        components.next(),
+    ) {
+        (Some("format"), Some("repository.bin"), None, None) => true,
+        (Some("segments"), Some(name), None, None) => parse_segment_filename(name).is_ok(),
+        (Some("indexes"), Some(name), None, None) => parse_segment_index_filename(name).is_ok(),
+        (Some("manifests"), Some("blobs"), Some(name), None) => {
+            parse_blob_manifest_filename(name).is_ok()
+        }
+        (Some("manifests"), Some("tiny-groups"), Some(name), None) => {
+            parse_tiny_blob_group_manifest_filename(name).is_ok()
+        }
+        (Some("manifests"), Some("objects"), Some(name), None) => {
+            parse_metadata_object_manifest_filename(name).is_ok()
+        }
+        (Some("manifests"), Some("refs"), Some(name), None) => {
+            parse_ref_snapshot_filename(name).is_ok()
+        }
+        (Some("journals"), Some("refs"), Some(name), None) => {
+            parse_ref_event_filename(name).is_ok()
+        }
+        _ => false,
+    }
+}
+
 fn encode_bootstrap(id: RepositoryId, format: RepositoryFormat) -> Vec<u8> {
     let mut encoder = CanonicalEncoder::new();
     encoder.write_fixed(&BOOTSTRAP_MAGIC);
@@ -5587,8 +6232,11 @@ fn sync_directory_raw(_: &Path) -> io::Result<()> {
 mod tests {
     use std::{
         fs,
+        future::Future,
         path::{Path, PathBuf},
         process::Command,
+        sync::Arc,
+        task::{Context, Poll, Wake, Waker},
     };
 
     use proptest::prelude::*;
@@ -5597,7 +6245,8 @@ mod tests {
 
     use super::*;
     use crate::{
-        GitRefState, GitRepository, RefName, SegmentReadLimits, SegmentReader, SegmentRecord,
+        EncryptedBackend, FilesystemBackend, GitRefState, GitRepository, RefName,
+        RepositoryEncryptionKey, SegmentReadLimits, SegmentReader, SegmentRecord,
         SegmentWriteLimits, SegmentWriter, TinyBlobAggregation, WholeBlobRecord,
     };
 
@@ -5867,6 +6516,88 @@ mod tests {
             "Git command must succeed: {}",
             String::from_utf8_lossy(&output.stderr)
         );
+    }
+
+    struct NoopWake;
+
+    impl Wake for NoopWake {
+        fn wake(self: Arc<Self>) {}
+    }
+
+    fn block_on<T>(future: impl Future<Output = T>) -> T {
+        let waker = Waker::from(Arc::new(NoopWake));
+        let mut context = Context::from_waker(&waker);
+        let mut future = Box::pin(future);
+        match future.as_mut().poll(&mut context) {
+            Poll::Ready(value) => value,
+            Poll::Pending => panic!("repository recovery future unexpectedly yielded"),
+        }
+    }
+
+    fn recovery_limits() -> EncryptedRepositoryRecoveryLimits {
+        EncryptedRepositoryRecoveryLimits::new(64, 4_096, 64 * 4_096, 64 * 4_096)
+            .expect("recovery limits")
+    }
+
+    #[test]
+    fn restores_a_repository_from_encrypted_backend_and_exported_key() {
+        let fixture = RefJournalCrashFixture::new();
+        let backend_path = fixture._directory.path().join("backend");
+        let restored_path = fixture._directory.path().join("restored");
+        let exported_path = fixture._directory.path().join("exported.git");
+        let key =
+            RepositoryEncryptionKey::generate(fixture.repository.id()).expect("encryption key");
+        let staging_path = fixture
+            .repository
+            .path()
+            .join("segments")
+            .join(format!(".yeokcham-{}.partial", SegmentId::generate()));
+        fs::write(&staging_path, b"interrupted segment").expect("write staging file");
+        let export = key
+            .export_with_passphrase(b"recovery passphrase")
+            .expect("key export");
+        let backend = EncryptedBackend::new(
+            FilesystemBackend::create(&backend_path).expect("backend"),
+            key,
+        );
+        let backup = block_on(
+            fixture
+                .repository
+                .backup_to_backend(&backend, recovery_limits()),
+        )
+        .expect("backup");
+        assert!(backup.file_count() > 1);
+        drop(backend);
+
+        let recovered_key =
+            RepositoryEncryptionKey::import_with_passphrase(&export, b"recovery passphrase")
+                .expect("key import");
+        let recovered_backend = EncryptedBackend::new(
+            FilesystemBackend::open(&backend_path).expect("backend reopen"),
+            recovered_key,
+        );
+        let (restored, report) = block_on(LocalRepository::restore_from_backend(
+            &restored_path,
+            fixture.repository.id(),
+            &recovered_backend,
+            recovery_limits(),
+        ))
+        .expect("restore");
+        assert_eq!(report, backup);
+        assert!(
+            !restored
+                .path()
+                .join("segments")
+                .join(staging_path.file_name().expect("staging name"))
+                .exists()
+        );
+        restored
+            .verify(verification_limits())
+            .expect("verify restored");
+        restored
+            .export_loose_objects(&exported_path, export_limits())
+            .expect("export restored");
+        git_fsck(&exported_path);
     }
 
     #[test]

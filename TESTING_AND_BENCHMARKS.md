@@ -27,6 +27,7 @@ Cover:
 - Backend fault injection before delegation, dynamic backend wrapping, and metrics counts for successful and failed operations plus transferred bytes.
 - Encrypted backend ciphertext-only filesystem storage, plaintext round trips, domain-separated key derivation, wrong-key rejection, tamper rejection, associated-data mismatch rejection, and secret-redacted diagnostics.
 - Recovery-key export/import, wrong-passphrase and tamper rejection, fixed Argon2id parameter validation, and encrypted recovery material redaction.
+- Clean-machine-style encrypted repository recovery from backend plus imported recovery export, recognized-staging exclusion, post-restore Yeokcham verification, and `git fsck` of a fresh Git export.
 - Encryption and decryption.
 - Storage policy selection.
 

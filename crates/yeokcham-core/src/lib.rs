@@ -70,8 +70,9 @@ pub use ref_event::{RefEvent, RefEventReadLimits, RefEventSigningKey, RefEventVe
 pub use ref_name::RefName;
 pub use ref_snapshot::{GitRefState, HeadState, RefSnapshot, RefSnapshotReadLimits};
 pub use repository::{
-    BlobManifestReadLimits, ChunkedBlobStorageLimits, GitImportLimits, GitImportReport,
-    GitObjectMetadata, LocalRepository, LooseObjectExportLimits, LooseObjectExportReport,
+    BlobManifestReadLimits, ChunkedBlobStorageLimits, EncryptedRepositoryRecoveryLimits,
+    EncryptedRepositoryRecoveryReport, GitImportLimits, GitImportReport, GitObjectMetadata,
+    LocalRepository, LooseObjectExportLimits, LooseObjectExportReport,
     MetadataObjectManifestReadLimits, RefSnapshotPublicationLimits, RepositoryVerificationLimits,
     RepositoryVerificationReport,
 };

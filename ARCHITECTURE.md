@@ -307,6 +307,8 @@ Encryption occurs after chunking and compression, before remote persistence. ADR
 
 `RepositoryEncryptionKey::export_with_passphrase` produces a canonical `YKRK` recovery export and `import_with_passphrase` verifies and restores it. The export records fixed Argon2id parameters, salt, nonce, and authenticated encrypted master key. The core API accepts explicit passphrase bytes and never persists the master key automatically; command-line key management is a later CLI surface.
 
+`LocalRepository::backup_to_backend` requires `EncryptedBackend` and publishes each bounded canonical recovery file under `recovery/<repository-id>/files/` before a canonical `YKRM` manifest is acknowledged. Recognized interrupted staging files and SQLite metadata are excluded; every other noncanonical source file fails the backup. `restore_from_backend` accepts only those canonical relative names from the manifest, verifies each encrypted file's SHA-256 checksum and length, writes and synchronizes a fresh layout, and opens it through normal repository validation. The recovery APIs do not remove an incomplete destination after failure.
+
 Suggested envelope structure:
 
 ```text

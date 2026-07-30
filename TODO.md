@@ -174,14 +174,14 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 - [x] Bind associated data.
 - [x] Implement key export.
 - [x] Implement key import.
-- [ ] Implement clean-machine recovery test.
+- [x] Implement clean-machine recovery test.
 - [x] Ensure secrets are redacted from logs.
 
 ### Exit criteria
 
-- [ ] Encrypted filesystem backend contains no plaintext fixture strings.
-- [ ] Repository can be recovered from backend plus exported key.
-- [ ] Wrong keys and tampered records fail safely.
+- [x] Encrypted filesystem backend contains no plaintext fixture strings.
+- [x] Repository can be recovered from backend plus exported key.
+- [x] Wrong keys and tampered records fail safely.
 
 ## Milestone 5 — Google Drive backend
 

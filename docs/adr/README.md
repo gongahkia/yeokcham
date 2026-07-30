@@ -72,3 +72,4 @@ Valid statuses are `Proposed`, `Accepted`, `Rejected`, `Deprecated`, and `Supers
 | [ADR-0064](0064-versioned-encryption-suite.md) | Accepted | Select the initial versioned encryption suite |
 | [ADR-0065](0065-complete-object-encrypted-backend-envelopes.md) | Accepted | Encrypt complete backend objects with bound envelopes |
 | [ADR-0066](0066-passphrase-encrypted-recovery-key-exports.md) | Accepted | Export and import repository keys with Argon2id |
+| [ADR-0067](0067-encrypted-repository-recovery-snapshots.md) | Accepted | Recover canonical repository files from encrypted backend storage |
