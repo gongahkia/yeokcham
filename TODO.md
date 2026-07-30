@@ -246,10 +246,10 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 
 ### Sparse workflow
 
-- [ ] Integrate with Git sparse checkout.
-- [ ] Prefetch current sparse paths.
+- [x] Integrate with Git sparse checkout.
+- [x] Prefetch current sparse paths.
 - [ ] Measure time to usable workspace.
-- [ ] Document unsupported Git clients or workflows.
+- [x] Document unsupported Git clients or workflows.
 
 ### Exit criteria
 

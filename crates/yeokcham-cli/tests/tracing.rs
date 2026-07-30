@@ -398,18 +398,30 @@ fn remote_helper_serves_blob_none_and_size_filtered_promisor_clones() {
         &source,
         &["config", "user.email", "yeokcham-test@example.invalid"],
     );
-    fs::write(source.join("historical.bin"), vec![0x48; 64 * 1024]).expect("write historical blob");
-    run_git(&source, &["add", "historical.bin"]);
+    fs::create_dir(source.join("history")).expect("create history directory");
+    fs::write(source.join("history/historical.bin"), vec![0x48; 64 * 1024])
+        .expect("write historical blob");
+    run_git(&source, &["add", "history/historical.bin"]);
     run_git(&source, &["commit", "-m", "historical blob fixture"]);
-    let historical_blob =
-        String::from_utf8(run_git(&source, &["rev-parse", "HEAD:historical.bin"]))
-            .expect("historical blob ID is UTF-8")
-            .trim()
-            .to_owned();
-    fs::remove_file(source.join("historical.bin")).expect("remove historical blob");
-    fs::write(source.join("large.bin"), vec![0x4b; 64 * 1024]).expect("write large blob");
+    let historical_blob = String::from_utf8(run_git(
+        &source,
+        &["rev-parse", "HEAD:history/historical.bin"],
+    ))
+    .expect("historical blob ID is UTF-8")
+    .trim()
+    .to_owned();
+    fs::remove_file(source.join("history/historical.bin")).expect("remove historical blob");
+    fs::create_dir(source.join("assets")).expect("create assets directory");
+    fs::create_dir(source.join("app")).expect("create app directory");
+    fs::write(source.join("assets/large.bin"), vec![0x4b; 64 * 1024]).expect("write large blob");
+    fs::write(source.join("app/selected.txt"), b"selected sparse path\n")
+        .expect("write selected sparse path");
     run_git(&source, &["add", "-A"]);
     run_git(&source, &["commit", "-m", "partial clone fixture"]);
+    let current_blob = String::from_utf8(run_git(&source, &["rev-parse", "HEAD:assets/large.bin"]))
+        .expect("current blob ID is UTF-8")
+        .trim()
+        .to_owned();
     let output = Command::new(env!("CARGO_BIN_EXE_yeokcham"))
         .args(["init", "--from-git"])
         .arg(&source)
@@ -425,6 +437,7 @@ fn remote_helper_serves_blob_none_and_size_filtered_promisor_clones() {
     let helper_path = remote_helper_path();
     let remote = remote_uri(&repository);
     let historical_missing = format!("?{historical_blob}");
+    let current_missing = format!("?{current_blob}");
     for (filter, name) in [("blob:none", "blob-none"), ("blob:limit=1", "blob-limit")] {
         let checkout = directory.path().join(name);
         let output = Command::new("git")
@@ -480,8 +493,8 @@ fn remote_helper_serves_blob_none_and_size_filtered_promisor_clones() {
             String::from_utf8_lossy(&output.stderr)
         );
         assert_eq!(
-            fs::read(source.join("large.bin")).expect("read source"),
-            fs::read(checkout.join("large.bin")).expect("read checkout")
+            fs::read(source.join("assets/large.bin")).expect("read source"),
+            fs::read(checkout.join("assets/large.bin")).expect("read checkout")
         );
         assert!(
             String::from_utf8_lossy(&run_git(
@@ -494,6 +507,49 @@ fn remote_helper_serves_blob_none_and_size_filtered_promisor_clones() {
         );
         run_git(&checkout, &["fsck", "--full", "--strict"]);
     }
+
+    let sparse_checkout = directory.path().join("sparse-checkout");
+    let output = Command::new("git")
+        .args(["clone", "--quiet", "--no-checkout", "--filter=blob:none"])
+        .arg(&remote)
+        .arg(&sparse_checkout)
+        .env("PATH", &helper_path)
+        .output()
+        .expect("clone sparse remote helper");
+    assert!(
+        output.status.success(),
+        "sparse clone must succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    run_git(&sparse_checkout, &["sparse-checkout", "init", "--cone"]);
+    run_git(&sparse_checkout, &["sparse-checkout", "set", "app"]);
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(&sparse_checkout)
+        .args(["checkout", "--quiet", "main"])
+        .env("PATH", &helper_path)
+        .output()
+        .expect("checkout sparse path");
+    assert!(
+        output.status.success(),
+        "sparse checkout must succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        fs::read(source.join("app/selected.txt")).expect("read source sparse path"),
+        fs::read(sparse_checkout.join("app/selected.txt")).expect("read checkout sparse path")
+    );
+    assert!(!sparse_checkout.join("assets/large.bin").exists());
+    assert!(
+        String::from_utf8_lossy(&run_git(
+            &sparse_checkout,
+            &["rev-list", "--objects", "--missing=print", "HEAD"],
+        ))
+        .lines()
+        .any(|line| line == current_missing),
+        "sparse checkout must not hydrate an excluded current blob",
+    );
+    run_git(&sparse_checkout, &["fsck", "--full", "--strict"]);
 }
 
 #[test]
