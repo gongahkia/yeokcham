@@ -8,8 +8,8 @@ use std::{
 use sha2::{Digest, Sha256};
 
 use crate::{
-    CompressionAlgorithm, Error, ErrorKind, MetadataObjectRecord, RepositoryId, Result, SegmentId,
-    TinyBlobAggregation, WholeBlobRecord, YeokchamContentId,
+    ChunkRecord, ChunkedBlobRecord, CompressionAlgorithm, Error, ErrorKind, MetadataObjectRecord,
+    RepositoryId, Result, SegmentId, TinyBlobAggregation, WholeBlobRecord, YeokchamContentId,
 };
 
 pub(crate) const MAGIC: [u8; 4] = *b"YKSG";
@@ -27,6 +27,10 @@ pub enum SegmentRecordKind {
     TinyBlobAggregation,
     /// One [`MetadataObjectRecord`] encoding.
     MetadataObject,
+    /// One [`ChunkRecord`] encoding.
+    Chunk,
+    /// One [`ChunkedBlobRecord`] encoding.
+    ChunkedBlob,
 }
 
 impl SegmentRecordKind {
@@ -35,6 +39,8 @@ impl SegmentRecordKind {
             Self::WholeBlob => 1,
             Self::TinyBlobAggregation => 2,
             Self::MetadataObject => 3,
+            Self::Chunk => 4,
+            Self::ChunkedBlob => 5,
         }
     }
 
@@ -43,6 +49,8 @@ impl SegmentRecordKind {
             1 => Some(Self::WholeBlob),
             2 => Some(Self::TinyBlobAggregation),
             3 => Some(Self::MetadataObject),
+            4 => Some(Self::Chunk),
+            5 => Some(Self::ChunkedBlob),
             _ => None,
         }
     }
@@ -53,7 +61,7 @@ impl SegmentRecordKind {
 /// Constructors accept only existing verified Yeokcham record types. Stored
 /// payload bytes and content identity are therefore bound before this wrapper
 /// is created.
-#[derive(Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub struct SegmentRecord {
     kind: SegmentRecordKind,
     content_id: YeokchamContentId,
@@ -84,6 +92,24 @@ impl SegmentRecord {
     pub fn from_metadata_object(record: &MetadataObjectRecord) -> Result<Self> {
         Self::new(
             SegmentRecordKind::MetadataObject,
+            record.content_id(),
+            record.encode(),
+        )
+    }
+
+    /// Wraps a verified chunk record for segment storage.
+    pub fn from_chunk(record: &ChunkRecord) -> Result<Self> {
+        Self::new(
+            SegmentRecordKind::Chunk,
+            record.content_id(),
+            record.encode(),
+        )
+    }
+
+    /// Wraps a verified chunked-blob descriptor for segment storage.
+    pub fn from_chunked_blob(record: &ChunkedBlobRecord) -> Result<Self> {
+        Self::new(
+            SegmentRecordKind::ChunkedBlob,
             record.content_id(),
             record.encode(),
         )

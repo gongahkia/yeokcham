@@ -4,9 +4,9 @@ use sha2::{Digest, Sha256};
 
 use crate::segment_writer::{FOOTER_MAGIC, MAGIC, REQUIRED_FEATURE_METADATA_OBJECT, VERSION};
 use crate::{
-    CanonicalDecoder, CompressionAlgorithm, ContentHashAlgorithm, Error, ErrorKind,
-    MetadataObjectRecord, RepositoryId, Result, SegmentId, SegmentRecordKind, TinyBlobAggregation,
-    WholeBlobRecord, YeokchamContentId,
+    CanonicalDecoder, ChunkRecord, ChunkedBlobRecord, CompressionAlgorithm, ContentHashAlgorithm,
+    Error, ErrorKind, MetadataObjectRecord, RepositoryId, Result, SegmentId, SegmentRecordKind,
+    TinyBlobAggregation, WholeBlobRecord, YeokchamContentId,
 };
 
 /// Caller-selected bounds for decoding one immutable segment.
@@ -135,6 +135,10 @@ pub enum ReadSegmentRecord {
     TinyBlobAggregation(TinyBlobAggregation),
     /// A verified non-blob Git object record.
     MetadataObject(MetadataObjectRecord),
+    /// A verified independently addressed chunk record.
+    Chunk(ChunkRecord),
+    /// A structurally verified chunked-blob descriptor record.
+    ChunkedBlob(ChunkedBlobRecord),
 }
 
 impl ReadSegmentRecord {
@@ -144,6 +148,8 @@ impl ReadSegmentRecord {
             Self::WholeBlob(_) => SegmentRecordKind::WholeBlob,
             Self::TinyBlobAggregation(_) => SegmentRecordKind::TinyBlobAggregation,
             Self::MetadataObject(_) => SegmentRecordKind::MetadataObject,
+            Self::Chunk(_) => SegmentRecordKind::Chunk,
+            Self::ChunkedBlob(_) => SegmentRecordKind::ChunkedBlob,
         }
     }
 
@@ -153,6 +159,8 @@ impl ReadSegmentRecord {
             Self::WholeBlob(record) => record.content_id(),
             Self::TinyBlobAggregation(record) => record.content_id(),
             Self::MetadataObject(record) => record.content_id(),
+            Self::Chunk(record) => record.content_id(),
+            Self::ChunkedBlob(record) => record.content_id(),
         }
     }
 
@@ -160,14 +168,17 @@ impl ReadSegmentRecord {
     pub const fn as_whole_blob(&self) -> Option<&WholeBlobRecord> {
         match self {
             Self::WholeBlob(record) => Some(record),
-            Self::TinyBlobAggregation(_) | Self::MetadataObject(_) => None,
+            Self::TinyBlobAggregation(_)
+            | Self::MetadataObject(_)
+            | Self::Chunk(_)
+            | Self::ChunkedBlob(_) => None,
         }
     }
 
     /// Returns the tiny-blob aggregation when this is that payload family.
     pub const fn as_tiny_blob_aggregation(&self) -> Option<&TinyBlobAggregation> {
         match self {
-            Self::WholeBlob(_) => None,
+            Self::WholeBlob(_) | Self::Chunk(_) | Self::ChunkedBlob(_) => None,
             Self::TinyBlobAggregation(record) => Some(record),
             Self::MetadataObject(_) => None,
         }
@@ -177,7 +188,32 @@ impl ReadSegmentRecord {
     pub const fn as_metadata_object(&self) -> Option<&MetadataObjectRecord> {
         match self {
             Self::MetadataObject(record) => Some(record),
-            Self::WholeBlob(_) | Self::TinyBlobAggregation(_) => None,
+            Self::WholeBlob(_)
+            | Self::TinyBlobAggregation(_)
+            | Self::Chunk(_)
+            | Self::ChunkedBlob(_) => None,
+        }
+    }
+
+    /// Returns the chunk record when this is that payload family.
+    pub const fn as_chunk(&self) -> Option<&ChunkRecord> {
+        match self {
+            Self::Chunk(record) => Some(record),
+            Self::WholeBlob(_)
+            | Self::TinyBlobAggregation(_)
+            | Self::MetadataObject(_)
+            | Self::ChunkedBlob(_) => None,
+        }
+    }
+
+    /// Returns the chunked-blob descriptor when this is that payload family.
+    pub const fn as_chunked_blob(&self) -> Option<&ChunkedBlobRecord> {
+        match self {
+            Self::ChunkedBlob(record) => Some(record),
+            Self::WholeBlob(_)
+            | Self::TinyBlobAggregation(_)
+            | Self::MetadataObject(_)
+            | Self::Chunk(_) => None,
         }
     }
 }
@@ -475,6 +511,13 @@ fn decode_record(
         )),
         SegmentRecordKind::MetadataObject => Ok(ReadSegmentRecord::MetadataObject(
             MetadataObjectRecord::decode(payload, limits.maximum_whole_blob_body_bytes)?,
+        )),
+        SegmentRecordKind::Chunk => Ok(ReadSegmentRecord::Chunk(ChunkRecord::decode(
+            payload,
+            limits.maximum_whole_blob_body_bytes,
+        )?)),
+        SegmentRecordKind::ChunkedBlob => Ok(ReadSegmentRecord::ChunkedBlob(
+            ChunkedBlobRecord::decode(payload, limits.maximum_tiny_blob_entries)?,
         )),
     }
 }

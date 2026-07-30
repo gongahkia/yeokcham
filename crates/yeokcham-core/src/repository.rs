@@ -13,11 +13,12 @@ use rusqlite::{
 };
 
 use crate::{
-    BlobManifest, BlobManifestRepresentation, CanonicalDecoder, CanonicalEncoder, Error, ErrorKind,
-    GitObject, GitObjectId, GitObjectKind, HeadState, ManifestId, MetadataObjectManifest,
+    BlobManifest, BlobManifestRepresentation, CanonicalDecoder, CanonicalEncoder, ChunkRecord,
+    ChunkReference, ChunkedBlobRecord, ContentDefinedChunker, Error, ErrorKind, GitObject,
+    GitObjectId, GitObjectKind, HeadState, ManifestId, MetadataObjectManifest,
     MetadataObjectRecord, ReadSegment, ReadSegmentRecord, RefSnapshot, RefSnapshotReadLimits,
     RepositoryFormat, RepositoryId, Result, SegmentId, SegmentIndex, SegmentReadLimits,
-    SegmentReader,
+    SegmentReader, SegmentRecord, SegmentWriteLimits, SegmentWriter, YeokchamContentId,
 };
 
 const BOOTSTRAP_MAGIC: [u8; 4] = *b"YKRB";
@@ -64,6 +65,50 @@ pub struct GitObjectMetadata {
     id: GitObjectId,
     kind: GitObjectKind,
     size: u64,
+}
+
+/// Caller-selected bounds for storing and reusing chunked blob records.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct ChunkedBlobStorageLimits {
+    maximum_segment_entries: usize,
+    maximum_segment_bytes: u64,
+    segment_read_limits: SegmentReadLimits,
+}
+
+impl ChunkedBlobStorageLimits {
+    /// Validates bounds for scanning and publishing immutable chunk segments.
+    pub fn new(
+        maximum_segment_entries: usize,
+        maximum_segment_bytes: u64,
+        segment_read_limits: SegmentReadLimits,
+    ) -> Result<Self> {
+        if maximum_segment_entries == 0 || maximum_segment_bytes == 0 {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "chunked-blob storage limit must not be zero",
+            ));
+        }
+        Ok(Self {
+            maximum_segment_entries,
+            maximum_segment_bytes,
+            segment_read_limits,
+        })
+    }
+
+    /// Returns the maximum existing segment files inspected for chunk reuse.
+    pub const fn maximum_segment_entries(self) -> usize {
+        self.maximum_segment_entries
+    }
+
+    /// Returns the maximum bytes accepted from one chunk segment.
+    pub const fn maximum_segment_bytes(self) -> u64 {
+        self.maximum_segment_bytes
+    }
+
+    /// Returns nested `YKSG` decoding bounds.
+    pub const fn segment_read_limits(self) -> SegmentReadLimits {
+        self.segment_read_limits
+    }
 }
 
 /// Caller-selected bounds for scanning local immutable blob manifests.
@@ -803,6 +848,65 @@ impl LocalRepository {
         }))
     }
 
+    /// Stores one verified blob through content-defined chunk records.
+    ///
+    /// Existing immutable chunk records with the same plaintext identity are
+    /// reused. New chunks and the descriptor are sealed before the portable
+    /// manifest is published, so an interrupted call can leave only disposable
+    /// unreachable immutable records.
+    pub fn store_chunked_blob(
+        &self,
+        manifest_id: ManifestId,
+        object: &GitObject,
+        chunker: ContentDefinedChunker,
+        limits: ChunkedBlobStorageLimits,
+    ) -> Result<BlobManifest> {
+        if object.kind() != GitObjectKind::Blob {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "chunked storage requires a Git blob",
+            ));
+        }
+        object.verify_id()?;
+        let chunks = chunker.chunk(object.data())?;
+        if chunks.is_empty() {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "chunked storage requires a nonempty Git blob",
+            ));
+        }
+        let mut references = Vec::new();
+        for chunk in chunks {
+            let start = usize::try_from(chunk.offset()).map_err(|_| {
+                Error::new(ErrorKind::Internal, "chunk offset cannot be represented")
+            })?;
+            let end = start.checked_add(chunk.length()).ok_or_else(|| {
+                Error::new(ErrorKind::Internal, "chunk range cannot be represented")
+            })?;
+            let bytes = object.data().get(start..end).ok_or_else(|| {
+                Error::new(ErrorKind::Internal, "chunk range is outside the Git blob")
+            })?;
+            let record = ChunkRecord::from_bytes(bytes)?;
+            if record.content_id() != chunk.content_id() {
+                return Err(Error::new(
+                    ErrorKind::Internal,
+                    "chunker identity does not match the selected bytes",
+                ));
+            }
+            references.push(self.find_or_publish_chunk(&record, limits)?);
+        }
+        let descriptor = ChunkedBlobRecord::from_verified_blob(self.id, object, references)?;
+        let descriptor_segment = self.publish_single_record_segment(
+            &SegmentRecord::from_chunked_blob(&descriptor)?,
+            limits,
+        )?;
+        let manifest =
+            BlobManifest::from_chunked_blob(manifest_id, &descriptor_segment, &descriptor)?;
+        self.publish_blob_manifest(&manifest)?;
+        self.record_object_metadata(object)?;
+        Ok(manifest)
+    }
+
     /// Publishes one immutable blob manifest without replacing an existing ID.
     ///
     /// The manifest must belong to this repository. Repeating byte-identical
@@ -1034,6 +1138,35 @@ impl LocalRepository {
                         "tiny-blob aggregation does not contain the manifest blob",
                     )
                 }),
+            BlobManifestRepresentation::ChunkedBlob => {
+                let descriptor = record.as_chunked_blob().ok_or_else(|| {
+                    Error::new(
+                        ErrorKind::CorruptData,
+                        "segment record type does not match the blob manifest",
+                    )
+                })?;
+                let capacity = usize::try_from(manifest.plaintext_bytes()).map_err(|_| {
+                    Error::new(
+                        ErrorKind::Unsupported,
+                        "chunked blob exceeds the platform byte limit",
+                    )
+                })?;
+                let mut data = Vec::with_capacity(capacity);
+                for reference in descriptor.chunks() {
+                    let chunk =
+                        self.resolve_chunk_reference(*reference, maximum_segment_bytes, limits)?;
+                    data.extend_from_slice(chunk.data());
+                }
+                if u64::try_from(data.len()).ok() != Some(manifest.plaintext_bytes())
+                    || crate::yeokcham_content_id::sha256_content_id(&data) != manifest.content_id()
+                {
+                    return Err(Error::new(
+                        ErrorKind::CorruptData,
+                        "resolved chunks do not match the blob manifest",
+                    ));
+                }
+                Ok(data)
+            }
         }
     }
 
@@ -1051,6 +1184,194 @@ impl LocalRepository {
             manifest.git_object_id(),
             self.reconstruct_blob_bytes(manifest, maximum_segment_bytes, limits)?,
         )
+    }
+
+    fn find_or_publish_chunk(
+        &self,
+        record: &ChunkRecord,
+        limits: ChunkedBlobStorageLimits,
+    ) -> Result<ChunkReference> {
+        if let Some(reference) = self.find_chunk_reference(record.content_id(), limits)? {
+            if reference.plaintext_bytes()
+                != u64::try_from(record.data().len())
+                    .map_err(|_| Error::new(ErrorKind::Unsupported, "chunk record is too large"))?
+            {
+                return Err(Error::new(
+                    ErrorKind::CorruptData,
+                    "existing chunk reference length does not match its bytes",
+                ));
+            }
+            return Ok(reference);
+        }
+        let segment =
+            self.publish_single_record_segment(&SegmentRecord::from_chunk(record)?, limits)?;
+        ChunkReference::new(
+            record.content_id(),
+            u64::try_from(record.data().len())
+                .map_err(|_| Error::new(ErrorKind::Unsupported, "chunk record is too large"))?,
+            segment.segment_id(),
+            segment.checksum(),
+        )
+    }
+
+    fn find_chunk_reference(
+        &self,
+        content_id: YeokchamContentId,
+        limits: ChunkedBlobStorageLimits,
+    ) -> Result<Option<ChunkReference>> {
+        let directory = self.root.join("segments");
+        validate_directory(&directory, false)?;
+        let entries = fs::read_dir(&directory)
+            .map_err(|error| io_error(error, "segment directory could not be read"))?;
+        let mut inspected_entries = 0usize;
+        let mut found = None;
+        for entry in entries {
+            let entry =
+                entry.map_err(|error| io_error(error, "segment directory could not be read"))?;
+            inspected_entries = increment_directory_entries(
+                inspected_entries,
+                limits.maximum_segment_entries(),
+                "segment directory exceeds the entry limit",
+            )?;
+            let name = entry.file_name();
+            let name = name.to_str().ok_or_else(|| {
+                Error::new(
+                    ErrorKind::CorruptData,
+                    "segment directory has an invalid entry name",
+                )
+            })?;
+            if is_segment_staging_filename(name) {
+                continue;
+            }
+            let segment_id = parse_segment_filename(name)?;
+            let bytes = read_bounded_segment_file(&entry.path(), limits.maximum_segment_bytes())?;
+            let segment = SegmentReader::decode(&bytes, limits.segment_read_limits())?;
+            if segment.repository_id() != self.id || segment.segment_id() != segment_id {
+                return Err(Error::new(
+                    ErrorKind::CorruptData,
+                    "segment filename does not match its bound identity",
+                ));
+            }
+            for record in segment.records() {
+                let Some(chunk) = record.as_chunk() else {
+                    continue;
+                };
+                if chunk.content_id() != content_id {
+                    continue;
+                }
+                let reference = ChunkReference::new(
+                    chunk.content_id(),
+                    u64::try_from(chunk.data().len()).map_err(|_| {
+                        Error::new(ErrorKind::Unsupported, "chunk record is too large")
+                    })?,
+                    segment_id,
+                    segment.checksum(),
+                )?;
+                if found.replace(reference).is_some() {
+                    return Err(Error::new(
+                        ErrorKind::CorruptData,
+                        "multiple immutable chunk records share one content identity",
+                    ));
+                }
+            }
+        }
+        Ok(found)
+    }
+
+    fn publish_single_record_segment(
+        &self,
+        record: &SegmentRecord,
+        limits: ChunkedBlobStorageLimits,
+    ) -> Result<ReadSegment> {
+        if record.stored_len() > limits.maximum_segment_bytes() {
+            return Err(Error::new(
+                ErrorKind::Unsupported,
+                "chunk segment exceeds the byte limit",
+            ));
+        }
+        for _ in 0..16 {
+            let segment_id = SegmentId::generate();
+            let path = self.segment_path(segment_id);
+            let mut writer = SegmentWriter::new(
+                self.id,
+                segment_id,
+                SegmentWriteLimits::new(1, record.stored_len())?,
+            );
+            writer.add(record.clone())?;
+            match writer.seal_to(&path) {
+                Ok(_) => {}
+                Err(error) if error.kind() == ErrorKind::Conflict => continue,
+                Err(error) => return Err(error),
+            }
+            let bytes = read_bounded_segment_file(&path, limits.maximum_segment_bytes())?;
+            let segment = SegmentReader::decode(&bytes, limits.segment_read_limits())?;
+            if segment.repository_id() != self.id || segment.segment_id() != segment_id {
+                return Err(Error::new(
+                    ErrorKind::CorruptData,
+                    "published chunk segment identity does not match its filename",
+                ));
+            }
+            let index = SegmentIndex::from_segment(&segment)?;
+            self.publish_segment_index(&segment, &index)?;
+            return Ok(segment);
+        }
+        Err(Error::new(
+            ErrorKind::Conflict,
+            "chunk segment identity could not be allocated",
+        ))
+    }
+
+    fn resolve_chunk_reference(
+        &self,
+        reference: ChunkReference,
+        maximum_segment_bytes: u64,
+        limits: SegmentReadLimits,
+    ) -> Result<ChunkRecord> {
+        let bytes = read_bounded_segment_file(
+            &self.segment_path(reference.segment_id()),
+            maximum_segment_bytes,
+        )?;
+        let segment = SegmentReader::decode(&bytes, limits)?;
+        if segment.repository_id() != self.id
+            || segment.segment_id() != reference.segment_id()
+            || segment.checksum() != reference.segment_checksum()
+        {
+            return Err(Error::new(
+                ErrorKind::CorruptData,
+                "chunk segment does not match the chunk reference",
+            ));
+        }
+        let mut matching = segment.into_records().into_iter().filter_map(|record| {
+            record
+                .as_chunk()
+                .is_some_and(|chunk| chunk.content_id() == reference.content_id())
+                .then(|| match record {
+                    ReadSegmentRecord::Chunk(chunk) => chunk,
+                    _ => unreachable!("chunk accessor and enum variant disagree"),
+                })
+        });
+        let record = matching.next().ok_or_else(|| {
+            Error::new(
+                ErrorKind::CorruptData,
+                "chunk segment does not contain the referenced chunk",
+            )
+        })?;
+        if matching.next().is_some() {
+            return Err(Error::new(
+                ErrorKind::CorruptData,
+                "chunk segment contains duplicate referenced chunks",
+            ));
+        }
+        if u64::try_from(record.data().len())
+            .map_err(|_| Error::new(ErrorKind::Unsupported, "chunk record is too large"))?
+            != reference.plaintext_bytes()
+        {
+            return Err(Error::new(
+                ErrorKind::CorruptData,
+                "chunk record length does not match its reference",
+            ));
+        }
+        Ok(record)
     }
 
     /// Publishes one immutable non-blob object manifest without using SQLite.
@@ -2703,6 +3024,7 @@ fn manifest_representation_matches(
         BlobManifestRepresentation::TinyBlobAggregation => {
             record.as_tiny_blob_aggregation().is_some()
         }
+        BlobManifestRepresentation::ChunkedBlob => record.as_chunked_blob().is_some(),
     }
 }
 
@@ -2748,6 +3070,24 @@ fn verify_manifest_record(manifest: &BlobManifest, record: &ReadSegmentRecord) -
                 return Err(Error::new(
                     ErrorKind::CorruptData,
                     "tiny-blob entry does not match the blob manifest",
+                ));
+            }
+        }
+        BlobManifestRepresentation::ChunkedBlob => {
+            let chunked = record.as_chunked_blob().ok_or_else(|| {
+                Error::new(
+                    ErrorKind::CorruptData,
+                    "segment record type does not match the blob manifest",
+                )
+            })?;
+            if chunked.repository_id() != manifest.repository_id()
+                || chunked.git_object_id() != manifest.git_object_id()
+                || chunked.content_id() != manifest.content_id()
+                || chunked.plaintext_bytes() != manifest.plaintext_bytes()
+            {
+                return Err(Error::new(
+                    ErrorKind::CorruptData,
+                    "chunked-blob record does not match the blob manifest",
                 ));
             }
         }
@@ -5062,6 +5402,158 @@ mod tests {
         assert_eq!(object.kind(), GitObjectKind::Blob);
         assert_eq!(object.data(), b"\0verified\xff");
         object.verify_id().expect("verify final blob ID");
+    }
+
+    #[test]
+    fn stores_reuses_and_reconstructs_content_defined_chunks() {
+        let temporary = TestDirectory::new();
+        let root = temporary.path().join("repository");
+        let repository = LocalRepository::create(&root).expect("create repository");
+        let chunker = ContentDefinedChunker::new(
+            crate::ContentDefinedChunkingParameters::new(64, 256, 1_024, 64)
+                .expect("chunking parameters"),
+        );
+        let first_data: Vec<u8> = (0..8_192).map(|index| (index % 251) as u8).collect();
+        let mut second_data = first_data.clone();
+        *second_data.last_mut().expect("nonempty data") ^= 1;
+        let limits = ChunkedBlobStorageLimits::new(64, 4_096, segment_limits())
+            .expect("chunk storage limits");
+
+        let first = repository
+            .store_chunked_blob(
+                MANIFEST_ID_A.parse().expect("manifest ID"),
+                &verified_object(GitObjectKind::Blob, &first_data),
+                chunker,
+                limits,
+            )
+            .expect("store first chunked blob");
+        let second = repository
+            .store_chunked_blob(
+                MANIFEST_ID_B.parse().expect("manifest ID"),
+                &verified_object(GitObjectKind::Blob, &second_data),
+                chunker,
+                limits,
+            )
+            .expect("store second chunked blob");
+
+        let first_descriptor = repository
+            .resolve_manifest_record(&first, 4_096, segment_limits())
+            .expect("resolve first descriptor");
+        let first_chunks = first_descriptor
+            .as_chunked_blob()
+            .expect("first chunked descriptor")
+            .chunks()
+            .to_vec();
+        let second_descriptor = repository
+            .resolve_manifest_record(&second, 4_096, segment_limits())
+            .expect("resolve second descriptor");
+        let second_chunks = second_descriptor
+            .as_chunked_blob()
+            .expect("second chunked descriptor")
+            .chunks()
+            .to_vec();
+        assert!(
+            first_chunks
+                .iter()
+                .any(|first| second_chunks.iter().any(|second| first == second))
+        );
+
+        assert_eq!(
+            repository
+                .reconstruct_blob(&first, 4_096, segment_limits())
+                .expect("reconstruct first")
+                .data(),
+            first_data
+        );
+        assert_eq!(
+            repository
+                .reconstruct_blob(&second, 4_096, segment_limits())
+                .expect("reconstruct second")
+                .data(),
+            second_data
+        );
+        repository
+            .verify(
+                RepositoryVerificationLimits::new(
+                    64,
+                    4_096,
+                    segment_limits(),
+                    64,
+                    4_096,
+                    4,
+                    4_096,
+                    BlobManifestReadLimits::new(8, 4_096, 8_192).expect("manifest limits"),
+                    8,
+                    metadata_object_manifest_limits(),
+                    ref_snapshot_limits(),
+                )
+                .expect("verification limits"),
+            )
+            .expect("verify chunked storage");
+    }
+
+    #[test]
+    fn verification_rejects_rechecksummed_chunk_payload_tampering() {
+        let temporary = TestDirectory::new();
+        let root = temporary.path().join("repository");
+        let repository = LocalRepository::create(&root).expect("create repository");
+        let chunker = ContentDefinedChunker::new(
+            crate::ContentDefinedChunkingParameters::new(64, 256, 1_024, 64)
+                .expect("chunking parameters"),
+        );
+        let data: Vec<u8> = (0..8_192).map(|index| (index % 251) as u8).collect();
+        let storage_limits = ChunkedBlobStorageLimits::new(64, 4_096, segment_limits())
+            .expect("chunk storage limits");
+        let manifest = repository
+            .store_chunked_blob(
+                MANIFEST_ID_A.parse().expect("manifest ID"),
+                &verified_object(GitObjectKind::Blob, &data),
+                chunker,
+                storage_limits,
+            )
+            .expect("store chunked blob");
+        let descriptor = repository
+            .resolve_manifest_record(&manifest, 4_096, segment_limits())
+            .expect("resolve descriptor");
+        let reference = descriptor
+            .as_chunked_blob()
+            .expect("chunked descriptor")
+            .chunks()[0];
+        let path = repository.segment_path(reference.segment_id());
+        let mut bytes = fs::read(&path).expect("read chunk segment");
+        let segment =
+            SegmentReader::decode(&bytes, segment_limits()).expect("decode chunk segment");
+        let location = segment.locations()[0];
+        let payload_start = usize::try_from(location.payload_offset()).expect("payload offset");
+        let payload_len = usize::try_from(location.stored_bytes()).expect("payload length");
+        bytes[payload_start + payload_len - 1] ^= 1;
+        let checksum_offset = bytes.len() - 32;
+        let checksum: [u8; 32] = Sha256::digest(&bytes[..checksum_offset]).into();
+        bytes[checksum_offset..].copy_from_slice(&checksum);
+        fs::write(path, bytes).expect("tamper chunk segment");
+
+        assert_eq!(
+            repository
+                .verify(
+                    RepositoryVerificationLimits::new(
+                        64,
+                        4_096,
+                        segment_limits(),
+                        64,
+                        4_096,
+                        4,
+                        4_096,
+                        BlobManifestReadLimits::new(8, 4_096, 8_192).expect("manifest limits"),
+                        8,
+                        metadata_object_manifest_limits(),
+                        ref_snapshot_limits(),
+                    )
+                    .expect("verification limits"),
+                )
+                .expect_err("tampered chunk must fail verification")
+                .kind(),
+            ErrorKind::CorruptData
+        );
     }
 
     proptest! {

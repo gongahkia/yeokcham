@@ -3,15 +3,17 @@ use std::fmt;
 use sha2::{Digest, Sha256};
 
 use crate::{
-    CanonicalDecoder, CanonicalEncoder, ContentHashAlgorithm, Error, ErrorKind, GitObjectId,
-    ManifestId, ReadSegment, RepositoryId, Result, SegmentId, TinyBlobAggregation, WholeBlobRecord,
-    YeokchamContentId,
+    CanonicalDecoder, CanonicalEncoder, ChunkedBlobRecord, ContentHashAlgorithm, Error, ErrorKind,
+    GitObjectId, ManifestId, ReadSegment, RepositoryId, Result, SegmentId, TinyBlobAggregation,
+    WholeBlobRecord, YeokchamContentId,
 };
 
 const MAGIC: [u8; 4] = *b"YKMF";
 const FOOTER_MAGIC: [u8; 4] = *b"YKBF";
-const VERSION: u16 = 1;
+const VERSION_V1: u16 = 1;
+const VERSION_V2: u16 = 2;
 const STORAGE_POLICY_FEATURE: u64 = 1;
+const CHUNKED_BLOB_FEATURE: u64 = 1 << 1;
 
 /// The verified record family referenced by a [`BlobManifest`].
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -21,6 +23,8 @@ pub enum BlobManifestRepresentation {
     WholeBlob,
     /// One tiny-blob aggregation contains the selected blob entry.
     TinyBlobAggregation,
+    /// One chunked-blob descriptor references ordered chunk records.
+    ChunkedBlob,
 }
 
 impl BlobManifestRepresentation {
@@ -28,6 +32,7 @@ impl BlobManifestRepresentation {
         match self {
             Self::WholeBlob => 1,
             Self::TinyBlobAggregation => 2,
+            Self::ChunkedBlob => 3,
         }
     }
 
@@ -35,6 +40,7 @@ impl BlobManifestRepresentation {
         match tag {
             1 => Some(Self::WholeBlob),
             2 => Some(Self::TinyBlobAggregation),
+            3 => Some(Self::ChunkedBlob),
             _ => None,
         }
     }
@@ -48,6 +54,8 @@ pub enum BlobStoragePolicyDecision {
     WholeBlob,
     /// Store the blob as one entry in a tiny-blob aggregation.
     TinyBlobAggregation,
+    /// Store the blob through a content-defined chunk descriptor.
+    ChunkedBlob,
 }
 
 impl BlobStoragePolicyDecision {
@@ -55,6 +63,7 @@ impl BlobStoragePolicyDecision {
         match self {
             Self::WholeBlob => 1,
             Self::TinyBlobAggregation => 2,
+            Self::ChunkedBlob => 3,
         }
     }
 
@@ -62,6 +71,7 @@ impl BlobStoragePolicyDecision {
         match tag {
             1 => Some(Self::WholeBlob),
             2 => Some(Self::TinyBlobAggregation),
+            3 => Some(Self::ChunkedBlob),
             _ => None,
         }
     }
@@ -70,6 +80,7 @@ impl BlobStoragePolicyDecision {
         match self {
             Self::WholeBlob => BlobManifestRepresentation::WholeBlob,
             Self::TinyBlobAggregation => BlobManifestRepresentation::TinyBlobAggregation,
+            Self::ChunkedBlob => BlobManifestRepresentation::ChunkedBlob,
         }
     }
 }
@@ -149,7 +160,29 @@ impl BlobManifest {
         })
     }
 
-    /// Decodes one caller-bounded version-1 blob manifest.
+    /// Creates a manifest for a chunked-blob descriptor found in a verified segment.
+    pub fn from_chunked_blob(
+        manifest_id: ManifestId,
+        segment: &ReadSegment,
+        record: &ChunkedBlobRecord,
+    ) -> Result<Self> {
+        let representation = BlobManifestRepresentation::ChunkedBlob;
+        ensure_chunked_blob_record(segment, record)?;
+        Ok(Self {
+            repository_id: segment.repository_id(),
+            manifest_id,
+            git_object_id: record.git_object_id(),
+            content_id: record.content_id(),
+            plaintext_bytes: record.plaintext_bytes(),
+            representation,
+            storage_policy: Some(BlobStoragePolicyDecision::ChunkedBlob),
+            segment_id: segment.segment_id(),
+            segment_checksum: segment.checksum(),
+            record_content_id: record.content_id(),
+        })
+    }
+
+    /// Decodes one caller-bounded version-1 or version-2 blob manifest.
     pub fn decode(bytes: &[u8], maximum_plaintext_bytes: u64) -> Result<Self> {
         let mut d = CanonicalDecoder::new(bytes);
         if d.read_fixed::<4>()? != MAGIC {
@@ -158,14 +191,17 @@ impl BlobManifest {
                 "blob manifest has invalid magic",
             ));
         }
-        if d.read_u16()? != VERSION {
+        let version = d.read_u16()?;
+        if !matches!(version, VERSION_V1 | VERSION_V2) {
             return Err(Error::new(
                 ErrorKind::Unsupported,
                 "blob manifest version is unsupported",
             ));
         }
         let required_features = d.read_u64()?;
-        if required_features & !STORAGE_POLICY_FEATURE != 0 || d.read_u64()? != 0 {
+        if required_features & !(STORAGE_POLICY_FEATURE | CHUNKED_BLOB_FEATURE) != 0
+            || d.read_u64()? != 0
+        {
             return Err(Error::new(
                 ErrorKind::Unsupported,
                 "blob manifest uses unsupported features",
@@ -199,6 +235,21 @@ impl BlobManifest {
                     "blob manifest has an invalid representation",
                 )
             })?;
+        if representation == BlobManifestRepresentation::ChunkedBlob {
+            if version != VERSION_V2
+                || required_features != STORAGE_POLICY_FEATURE | CHUNKED_BLOB_FEATURE
+            {
+                return Err(Error::new(
+                    ErrorKind::Unsupported,
+                    "chunked blob manifest requires version 2 support",
+                ));
+            }
+        } else if version != VERSION_V1 || required_features & CHUNKED_BLOB_FEATURE != 0 {
+            return Err(Error::new(
+                ErrorKind::Unsupported,
+                "blob manifest version is unsupported for its representation",
+            ));
+        }
         let storage_policy = if required_features & STORAGE_POLICY_FEATURE != 0 {
             let policy =
                 BlobStoragePolicyDecision::from_binary_tag(d.read_u8()?).ok_or_else(|| {
@@ -225,8 +276,10 @@ impl BlobManifest {
         })?;
         let segment_checksum = d.read_fixed()?;
         let record_content_id = read_sha256_content_id(&mut d)?;
-        if representation == BlobManifestRepresentation::WholeBlob
-            && record_content_id != content_id
+        if matches!(
+            representation,
+            BlobManifestRepresentation::WholeBlob | BlobManifestRepresentation::ChunkedBlob
+        ) && record_content_id != content_id
         {
             return Err(Error::new(
                 ErrorKind::CorruptData,
@@ -325,11 +378,13 @@ impl BlobManifest {
     pub fn encode(&self) -> Vec<u8> {
         let mut e = CanonicalEncoder::new();
         e.write_fixed(&MAGIC);
-        e.write_u16(VERSION);
-        e.write_u64(if self.storage_policy.is_some() {
-            STORAGE_POLICY_FEATURE
-        } else {
-            0
+        let is_chunked = self.representation == BlobManifestRepresentation::ChunkedBlob;
+        e.write_u16(if is_chunked { VERSION_V2 } else { VERSION_V1 });
+        e.write_u64(match (self.storage_policy.is_some(), is_chunked) {
+            (false, false) => 0,
+            (true, false) => STORAGE_POLICY_FEATURE,
+            (true, true) => STORAGE_POLICY_FEATURE | CHUNKED_BLOB_FEATURE,
+            (false, true) => unreachable!("chunked manifests always record their storage policy"),
         });
         e.write_u64(0);
         e.write_fixed(self.repository_id.as_bytes());
@@ -374,6 +429,27 @@ fn ensure_tiny_blob_aggregation(
         candidate
             .as_tiny_blob_aggregation()
             .is_some_and(|stored| stored == aggregation)
+    }) {
+        Ok(())
+    } else {
+        Err(Error::new(
+            ErrorKind::NotFound,
+            "verified segment does not contain the manifest record",
+        ))
+    }
+}
+
+fn ensure_chunked_blob_record(segment: &ReadSegment, record: &ChunkedBlobRecord) -> Result<()> {
+    if record.repository_id() != segment.repository_id() {
+        return Err(Error::new(
+            ErrorKind::InvalidInput,
+            "chunked-blob record belongs to a different repository",
+        ));
+    }
+    if segment.records().iter().any(|candidate| {
+        candidate
+            .as_chunked_blob()
+            .is_some_and(|stored| stored == record)
     }) {
         Ok(())
     } else {

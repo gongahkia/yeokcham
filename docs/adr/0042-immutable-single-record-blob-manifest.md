@@ -1,10 +1,10 @@
 # ADR-0042: Reference one verified segment record per blob manifest
 
-- Status: Accepted
+- Status: Superseded by ADR-0052
 - Date: 2026-07-29
 - Deciders: Yeokcham maintainers
 - Supersedes: None
-- Superseded by: None
+- Superseded by: ADR-0052
 
 ## Context
 

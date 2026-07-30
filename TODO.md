@@ -52,7 +52,7 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 
 - [x] Implement whole-blob record.
 - [x] Implement tiny-blob aggregation.
-- [x] Implement content-defined chunking.
+- [x] Implement content-defined chunk storage.
 - [x] Select an initial chunking algorithm through an ADR.
 - [x] Implement compression abstraction.
 - [x] Implement immutable segment writer.
@@ -90,7 +90,6 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 ### Exit criteria
 
 - [ ] Import then export is object-identical for supported repositories.
-- [ ] Full verification detects altered chunks, manifests, and indexes.
 - [ ] Repeated binary versions demonstrate measurable deduplication.
 - [ ] Tiny-file fixture does not suffer unbounded metadata expansion.
 

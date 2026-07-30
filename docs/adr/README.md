@@ -47,7 +47,7 @@ Valid statuses are `Proposed`, `Accepted`, `Rejected`, `Deprecated`, and `Supers
 | [ADR-0039](0039-append-only-segment-v1-writer.md) | Accepted | Write sealed append-only segments with create-new publication |
 | [ADR-0040](0040-bounded-segment-v1-reader.md) | Accepted | Read and verify bounded `YKSG` version-1 segments |
 | [ADR-0041](0041-rebuildable-per-segment-index.md) | Accepted | Use a rebuildable canonical index per immutable segment |
-| [ADR-0042](0042-immutable-single-record-blob-manifest.md) | Accepted | Reference one verified segment record per blob manifest |
+| [ADR-0042](0042-immutable-single-record-blob-manifest.md) | Superseded by ADR-0052 | Reference one verified segment record per blob manifest |
 | [ADR-0043](0043-record-explicit-blob-storage-policy.md) | Accepted | Record explicit storage policy in new blob manifests |
 | [ADR-0044](0044-immutable-local-blob-manifest-publication.md) | Accepted | Publish and scan immutable local blob manifests |
 | [ADR-0045](0045-verify-local-manifest-record-resolution.md) | Accepted | Resolve manifest records through verified local segments |
@@ -57,3 +57,4 @@ Valid statuses are `Proposed`, `Accepted`, `Rejected`, `Deprecated`, and `Supers
 | [ADR-0049](0049-verify-published-immutable-local-storage.md) | Accepted | Publish and fully verify immutable local storage |
 | [ADR-0050](0050-export-published-objects-as-loose-git-objects.md) | Accepted | Export published objects as standard loose Git objects |
 | [ADR-0051](0051-immutable-local-ref-snapshot.md) | Accepted | Publish one immutable local ref snapshot before journals |
+| [ADR-0052](0052-chunked-blob-descriptor-and-manifest-v2.md) | Accepted | Store chunked blobs through immutable descriptors and `YKMF` version 2 |

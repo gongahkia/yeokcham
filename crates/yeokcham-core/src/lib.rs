@@ -4,6 +4,8 @@
 
 mod blob_manifest;
 mod canonical;
+mod chunk_record;
+mod chunked_blob_record;
 mod compression;
 mod content_defined_chunking;
 mod device_id;
@@ -30,6 +32,8 @@ mod yeokcham_content_id;
 
 pub use blob_manifest::{BlobManifest, BlobManifestRepresentation, BlobStoragePolicyDecision};
 pub use canonical::{CanonicalDecoder, CanonicalEncoder};
+pub use chunk_record::ChunkRecord;
+pub use chunked_blob_record::{ChunkReference, ChunkedBlobRecord};
 pub use compression::{CompressionAlgorithm, CompressionCodec};
 pub use content_defined_chunking::{
     ContentDefinedChunk, ContentDefinedChunker, ContentDefinedChunkingParameters,
@@ -45,9 +49,9 @@ pub use metadata_object_record::MetadataObjectRecord;
 pub use ref_name::RefName;
 pub use ref_snapshot::{GitRefState, HeadState, RefSnapshot, RefSnapshotReadLimits};
 pub use repository::{
-    BlobManifestReadLimits, GitObjectMetadata, LocalRepository, LooseObjectExportLimits,
-    LooseObjectExportReport, MetadataObjectManifestReadLimits, RefSnapshotPublicationLimits,
-    RepositoryVerificationLimits, RepositoryVerificationReport,
+    BlobManifestReadLimits, ChunkedBlobStorageLimits, GitObjectMetadata, LocalRepository,
+    LooseObjectExportLimits, LooseObjectExportReport, MetadataObjectManifestReadLimits,
+    RefSnapshotPublicationLimits, RepositoryVerificationLimits, RepositoryVerificationReport,
 };
 pub use repository_format::{RepositoryFeatureFlags, RepositoryFormat, RepositoryFormatVersion};
 pub use repository_id::RepositoryId;
