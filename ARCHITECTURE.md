@@ -303,6 +303,14 @@ A capsule service supports:
 
 The first capsule representation should use exact file transitions and textual edits. Semantic operations come later.
 
+The current Milestone 4 core is `paengi_capsule`: it builds immutable capsule
+and revision values, derives deterministic exact operations from an
+ancestry-validated scratch checkpoint range, and appends existing
+`Capsule_boundary` retention records for selected boundaries. Its catalog and
+current-revision selection are pure in-memory values. It writes no Capsule or
+Capsule_revision object and no capsule ref; those persistent adapters require
+an approved additive schema and ref decision before CLI exposure.
+
 ## 9. Workspace materialiser
 
 Inputs:

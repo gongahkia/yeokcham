@@ -107,10 +107,7 @@ type application_conflict =
       path : path;
       detail : string;
     }
-  | Text_fallback_required of {
-      operation_index : int;
-      edit : text_edit;
-    }
+  | Text_fallback_required of { operation_index : int; edit : text_edit }
   | Move_rejected of {
       operation_index : int;
       source : path;
@@ -143,3 +140,87 @@ val apply :
 
 val apply_text_fallback :
   Paengi_scratch.State.t -> text_edit -> (Paengi_scratch.State.t, string) result
+
+module Draft : sig
+  type error
+  type t
+
+  val error_to_string : error -> string
+
+  val operations_between :
+    from:Paengi_scratch.State.t ->
+    to_:Paengi_scratch.State.t ->
+    (operation list, error) result
+
+  val from_checkpoints :
+    store:Paengi_store.repository ->
+    scratch:Paengi_scratch.repository ->
+    capsule:capsule ->
+    revision_id:Paengi_id.Capsule_revision_id.t ->
+    from:Paengi_scratch.Checkpoint_id.t ->
+    target:Paengi_scratch.Checkpoint_id.t ->
+    evidence:validation_evidence list ->
+    created_at:int64 ->
+    (t, error) result
+
+  val source_checkpoint : t -> Paengi_scratch.Checkpoint_id.t
+  val target_checkpoint : t -> Paengi_scratch.Checkpoint_id.t
+  val source_snapshot : t -> Paengi_snapshot.Snapshot.id
+  val target_snapshot : t -> Paengi_snapshot.Snapshot.id
+  val revision : t -> revision
+
+  val pin_boundaries :
+    Paengi_scratch.repository -> t -> changed_at:int64 -> (unit, error) result
+end
+
+module Catalog : sig
+  type t
+
+  type error =
+    | Capsule_id_collision of Paengi_id.Capsule_id.t
+    | Unknown_capsule of Paengi_id.Capsule_id.t
+    | Revision_id_collision of Paengi_id.Capsule_revision_id.t
+    | Unknown_parent_revision of Paengi_id.Capsule_revision_id.t
+    | Parent_capsule_mismatch of {
+        parent : Paengi_id.Capsule_revision_id.t;
+        expected_capsule : Paengi_id.Capsule_id.t;
+        actual_capsule : Paengi_id.Capsule_id.t;
+      }
+    | Unknown_revision of Paengi_id.Capsule_revision_id.t
+    | Revision_capsule_mismatch of {
+        revision : Paengi_id.Capsule_revision_id.t;
+        expected_capsule : Paengi_id.Capsule_id.t;
+        actual_capsule : Paengi_id.Capsule_id.t;
+      }
+
+  type revision_diff = {
+    from_revision : Paengi_id.Capsule_revision_id.t;
+    to_revision : Paengi_id.Capsule_revision_id.t;
+    declared_base_changed : bool;
+    expected_result_changed : bool;
+    from_operations : operation list;
+    to_operations : operation list;
+  }
+
+  val error_to_string : error -> string
+  val empty : t
+  val add_capsule : t -> capsule -> (t, error) result
+  val add_revision : t -> revision -> (t, error) result
+
+  val select_current :
+    t ->
+    capsule:Paengi_id.Capsule_id.t ->
+    revision:Paengi_id.Capsule_revision_id.t ->
+    (t, error) result
+
+  val find_capsule : t -> Paengi_id.Capsule_id.t -> capsule option
+  val find_revision : t -> Paengi_id.Capsule_revision_id.t -> revision option
+  val current_revision : t -> Paengi_id.Capsule_id.t -> revision option
+  val history : t -> Paengi_id.Capsule_id.t -> (revision list, error) result
+
+  val diff :
+    t ->
+    from:Paengi_id.Capsule_revision_id.t ->
+    to_:Paengi_id.Capsule_revision_id.t ->
+    (revision_diff, error) result
+end

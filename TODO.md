@@ -5,15 +5,15 @@ Robustness tasks operate only on Paengi's pure functions and generated local fix
 
 ## Active vertical slice
 
-- Milestone: 3 — Scratch compaction.
-- Task: compacted-generation publication, exact cleanup accounting, and conservative quarantine.
-- Modules/files: `paengi_scratch` generation schemas/resolver; `paengi_compaction` construction, verification, activation, cleanup; CLI compact modes; focused/property tests and canonical goldens.
-- Types: `Generation_id`, `Cleanup_manifest_id`, bounded ordered generation entries, direct logical/physical resolver result, immutable cleanup manifest, exact cleanup metric, and deterministic candidate-boundary fault.
-- Formats: additive Envelope object types 16–18 and `refs/scratch-generation`; ADR-020 through ADR-023 bytes remain unchanged.
-- Invariants: active aliases resolve before direct lookup; physical parents remain logical; retained replay/snapshot equivalence is verified before ref CAS; retention changes are folded from the cutoff; cleanup only quarantines manifest-listed scratch records after activation; dry-run candidate IDs/types/count/stored-byte sum equal actual quarantine; resume never crosses an active generation.
-- Tests: generation schema goldens/inverse decoder; deterministic planner-versus-actual fixture; per-candidate quarantine/prune interruption/reopen/resume suite; focused activation/reopen/resume/post-compaction checkpoint/retention/repeated-generation test; deterministic compacted-state property. Verified with `make format`, `make check`, and `make property-test PROPERTY_TEST_SEED=17`.
-- External libraries: existing Alcotest, QCheck, SHA-256, Profile 1 encoder, and Unix only.
-- ADR changes: ADR-024 accepted.
+- Milestone: 4 — Change capsules.
+- Task: format-neutral capsule core, exact checkpoint-range draft derivation, capsule-boundary retention, and immutable in-memory revision catalog.
+- Modules/files: new `paengi_capsule`; `paengi_scratch` capsule-boundary retention helper; focused/property capsule tests.
+- Types: capsule/revision values, dependencies, exact file transitions, text anchors with exact fallback, validation evidence, explicit application conflicts, checkpoint-range draft, and revision catalog/history.
+- Formats: none. ADR-020 through ADR-024 objects, IDs, generation refs, cleanup, quarantine, resume, and prune semantics remain unchanged. Capsule/Capsule_revision objects and current-revision refs require approval before persistence.
+- Invariants: capsule IDs are caller-supplied 32-byte typed IDs; revisions never mutate; exact transitions retain entry/content/mode preconditions; text edits never claim exact application without an explicit fallback choice; a draft source is an ancestor of its target; capsule boundaries append existing retention records; a catalog parent belongs to the same capsule and no revision ID resolves to divergent content.
+- Tests: focused exact/text/base-conflict/draft/reopen/catalog tests and bounded deterministic QCheck replay/history properties. Focused tests verified with `PROPERTY_TEST_SEED=17`.
+- External libraries: existing Alcotest, QCheck, Profile 1 encoder, and Unix only.
+- ADR changes: none. Persistent schema approval is the next gate.
 
 ## Milestone 0 — Project and model foundation
 
@@ -191,12 +191,12 @@ Robustness tasks operate only on Paengi's pure functions and generated local fix
 
 ### Capsule types
 
-- [ ] Define capsule.
-- [ ] Define immutable capsule revision.
-- [ ] Define dependency.
-- [ ] Define exact file transition operation.
-- [ ] Define textual operation and fallback.
-- [ ] Define validation evidence.
+- [x] Define capsule.
+- [x] Define immutable capsule revision.
+- [x] Define dependency.
+- [x] Define exact file transition operation.
+- [x] Define textual operation and fallback.
+- [x] Define validation evidence.
 - [ ] Define current-revision ref.
 
 ### Creation
@@ -205,7 +205,7 @@ Robustness tasks operate only on Paengi's pure functions and generated local fix
 - [ ] Create capsule from current diff.
 - [ ] Record stable capsule ID.
 - [ ] Create first revision.
-- [ ] Pin required scratch boundaries.
+- [x] Pin required scratch boundaries.
 - [ ] Add title and description.
 - [ ] Add `paengi capsule show`.
 

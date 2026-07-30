@@ -140,7 +140,13 @@
 (test
  (name test_capsule)
  (modules test_capsule)
- (libraries alcotest paengi_capsule paengi_id paengi_scratch paengi_snapshot paengi_store))
+ (libraries
+  alcotest
+  paengi_capsule
+  paengi_id
+  paengi_scratch
+  paengi_snapshot
+  paengi_store))
 
 (test
  (name scratch_property_test)

@@ -2345,6 +2345,10 @@ let unpin repository checkpoint ~changed_at =
   change_retention repository checkpoint ~action:Remove ~reason:User_pinned
     ~changed_at
 
+let pin_capsule_boundary repository checkpoint ~capsule ~changed_at =
+  change_retention repository checkpoint ~action:Add
+    ~reason:(Capsule_boundary capsule) ~changed_at
+
 module Polling = struct
   type t = {
     debounce_ms : int64;

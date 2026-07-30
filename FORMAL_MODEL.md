@@ -329,6 +329,18 @@ type capsule_revision = {
 
 The capsule ID is stable. The revision ID is immutable.
 
+### Milestone 4 pure-core boundary
+
+Before a Capsule or Capsule_revision object schema is approved, the core accepts
+caller-supplied 32-byte typed capsule and revision IDs and keeps them in an
+in-memory immutable catalog. Adding a revision requires an already registered
+capsule and an already registered parent revision of that same capsule. A
+duplicate revision ID is accepted only for an identical revision value; a
+different value is an explicit collision. The catalog's current-revision
+selection and revision history are process-local model values, not persistent
+refs. Persistent capsule objects and a current-revision ref require an approved
+format decision.
+
 ## 6. Change operations
 
 ```ocaml
@@ -361,14 +373,34 @@ type semantic_operation =
   | Delete_node of semantic_anchor
 
 type change_operation =
-  | Exact_file_transition of path * content_id option * content_id option
-  | Text_edit of path * text_anchor * bytes
+  | Exact_file_transition of exact_file_transition
+  | Text_edit of text_edit
   | Semantic_edit of path * semantic_operation * confidence
   | Move of path * path
   | Mode_change of path * file_mode * file_mode
+
+and exact_file_transition = {
+  path : path;
+  expected : exact_entry option;
+  replacement : exact_entry option;
+}
+
+and exact_entry =
+  | Exact_directory
+  | Exact_file of file_mode * content_id
+
+and text_edit = {
+  path : path;
+  anchor : text_anchor;
+  replacement : bytes;
+  fallback : exact_file_transition;
+}
 ```
 
 Exact bytes remain authoritative. Semantic operations are replay assistance and explanation.
+The Milestone 4 text core retains, but does not silently apply, its exact
+fallback: application returns an explicit fallback-required conflict until a
+later text engine or user choice selects it.
 
 ## 7. Application result
 
