@@ -146,7 +146,7 @@ let feed splitter bytes =
 
 let finish = function
   | Fixed_splitter { current; _ } | Buzhash_splitter { current; _ } ->
-      if Buffer.length current = 0 then [] else [ Buffer.contents current ]
+      if Buffer.length current = 0 then [] else emit current []
 
 let split strategy bytes =
   match create_splitter strategy with

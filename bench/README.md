@@ -25,3 +25,7 @@ python3 -m jsonschema \
 ## Canonical codec baseline
 
 Run `make benchmark-encoding` to create `results/canonical-codec-v1.json`. The benchmark uses a fixed nested Snapshot fixture and exactly 10,000 encode/decode iterations; its compact output schema is `schema/canonical-codec-benchmark-result.schema.json`. The checked-in result is a host-specific baseline, not a performance claim.
+
+## Large-content format decision
+
+Run `make benchmark-large-content` to create `results/large-content-v1.json`. It uses fixed seed `20260730`, five repetitions, and deterministic empty/tiny/boundary/medium/large/low-entropy/high-entropy/gzip-like/local-edit/insertion fixtures. It compares 8/64/256 KiB inline thresholds, fixed 64 KiB chunks, and Buzhash-64-v1 chunks. Its JSON is a versioned machine-readable experiment record; encoded bytes/object counts/reuse are representation measurements, while timing and allocation are host-specific evidence only. ADR-022 records the 64 KiB plus Buzhash decision.

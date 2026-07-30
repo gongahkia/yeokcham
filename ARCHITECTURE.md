@@ -197,7 +197,7 @@ The snapshot engine:
 - Produces a snapshot ID.
 - Reuses unchanged object identities.
 
-The initial scanner implements exact-path `.paengiignore` entries, excludes the root `.paengi`, stores content/tree/snapshot schemas from ADR-021, and supports regular files, executable mode, and symlinks without following them. Chunk manifests and unsupported node kinds remain later work with explicit errors in this slice.
+The initial scanner implements exact-path `.paengiignore` entries, excludes the root `.paengi`, stores Content/Tree/Snapshot schemas from ADR-021, and stores Chunk/File_manifest schemas from ADR-022. It keeps files at or below 64 KiB as Content v1 and streams larger files through deterministic Buzhash-64-v1 chunks (64-byte window; 16/64/128 KiB min/average/max). It supports regular files, executable mode, and symlinks without following them. Sockets, FIFOs, character devices, block devices, and other unsupported kinds return structured path/category errors before a snapshot is published.
 
 Initial implementation should use full or metadata-assisted scans. Filesystem watching is a later optimisation.
 

@@ -409,8 +409,44 @@ let inline_and_manifest_content_round_trip () =
         "manifest representation is deterministic" true
         (Snapshot_store.Content.equal_id manifest_id duplicate))
 
+let insertion_resynchronises_buzhash_chunks () =
+  with_store (fun _ store ->
+      let original = deterministic_bytes (8 * 131_072) in
+      let inserted = deterministic_bytes 257 ^ original in
+      let content bytes =
+        Snapshot_store.Content.store store bytes
+        |> require_ok Snapshot_store.error_to_string
+      in
+      let chunks content =
+        Snapshot_store.Manifest.load store
+          (Snapshot_store.Manifest.of_stored_object_id
+             (Snapshot_store.Content.stored_object_id content))
+        |> require_ok Snapshot_store.error_to_string
+        |> Snapshot_store.Manifest.chunks
+      in
+      let original = chunks (content original) in
+      let inserted = chunks (content inserted) in
+      Alcotest.(check bool)
+        "insertion retains at least one canonical chunk" true
+        (List.exists
+           (fun (left, _) ->
+             List.exists
+               (fun (right, _) -> Snapshot_store.Chunk.equal_id left right)
+               inserted)
+           original))
+
 let manifest_failures_are_structured () =
   with_store (fun _ store ->
+      let malformed =
+        Encoding.array [ Encoding.integer 1L ]
+        |> require_ok Encoding.construction_error_to_string |> store_manifest store
+      in
+      (match
+         Snapshot_store.Content.load store
+           (Snapshot_store.Content.of_stored_object_id malformed)
+       with
+      | Error _ -> ()
+      | Ok _ -> Alcotest.fail "malformed manifest was accepted");
       let contents = deterministic_bytes (3 * 131_072 + 17) in
       let content =
         Snapshot_store.Content.store store contents
@@ -457,7 +493,7 @@ let manifest_failures_are_structured () =
              wrong_references)
       in
       (match
-       Snapshot_store.Content.load store
+         Snapshot_store.Content.load store
            (Snapshot_store.Content.of_stored_object_id wrong_type)
        with
       | Error error ->
@@ -466,12 +502,25 @@ let manifest_failures_are_structured () =
             (Snapshot_store.error_to_string error)
       | Ok _ -> Alcotest.fail "non-chunk reference was accepted");
       let missing, _ = List.hd references in
+      write_file
+        (Store.object_path store
+           (Snapshot_store.Chunk.stored_object_id missing))
+        "corrupt";
+      (match Snapshot_store.Content.load store content with
+      | Error _ -> ()
+      | Ok _ -> Alcotest.fail "corrupt chunk was accepted");
       Unix.unlink
         (Store.object_path store
            (Snapshot_store.Chunk.stored_object_id missing));
+      (match Snapshot_store.Content.load store content with
+      | Error _ -> ()
+      | Ok _ -> Alcotest.fail "missing chunk was accepted");
+      write_file
+        (Store.object_path store (Snapshot_store.Content.stored_object_id content))
+        "corrupt";
       match Snapshot_store.Content.load store content with
       | Error _ -> ()
-      | Ok _ -> Alcotest.fail "missing chunk was accepted")
+      | Ok _ -> Alcotest.fail "corrupt manifest was accepted")
 
 let unsupported_fifo_does_not_publish_a_snapshot () =
   with_directory "paengi-unsupported-node-" (fun root ->
@@ -517,6 +566,8 @@ let () =
             large_content_goldens;
           Alcotest.test_case "inline and manifest content round-trip" `Quick
             inline_and_manifest_content_round_trip;
+          Alcotest.test_case "Buzhash resynchronises after insertion" `Quick
+            insertion_resynchronises_buzhash_chunks;
           Alcotest.test_case "manifest failures are structured" `Quick
             manifest_failures_are_structured;
           Alcotest.test_case "unsupported fifo does not publish a snapshot"

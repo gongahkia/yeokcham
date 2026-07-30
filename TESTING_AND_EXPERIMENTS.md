@@ -150,6 +150,10 @@ Include:
 - Already-compressed binaries.
 - Mixed line endings.
 - Non-UTF-8 bytes where platform support permits.
+- Files immediately below, at, and above the inline/manifest cutoff.
+- Multi-chunk files, local large-file edits, and insertions near the beginning.
+- Corrupt/missing/reordered chunks and manifests.
+- Unsupported FIFOs, sockets, and device nodes where portable; each must return a structured path/category error without publishing a partial snapshot.
 
 ## 4. Scratch-history experiments
 
@@ -298,6 +302,7 @@ Benchmarks:
 - Semantic retargeting.
 - Release creation.
 - Git import/export.
+- Large-content representation: encoded bytes, object count, reused bytes across versions, encoding, materialisation, and approximate allocation for deterministic content fixtures. These results choose a format but never act as CI timing thresholds.
 
 ## 9. Comparative demonstrations
 

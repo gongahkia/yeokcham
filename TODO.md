@@ -6,13 +6,13 @@ Robustness tasks operate only on Paengi's pure functions and generated local fix
 ## Active vertical slice
 
 - Milestone: 1 — Canonical object store and snapshots.
-- Task: immutable Envelope-1 store/init, persisted content/tree/snapshot scanner, and safe empty-destination materialisation (complete).
-- Modules/files: `paengi_store`; `paengi_snapshot`; store, snapshot, and materialisation tests/properties; three persisted-object golden fixtures; ADR-020 and ADR-021; model and architecture documentation.
-- Types: abstract `Stored_object_id`, distinct persisted content/tree/snapshot ID wrappers, typed tree entries, scanner errors, and materialisation plans/errors; existing semantic model IDs and M0 payload schemas are unchanged.
-- Invariants: stored ID is the ADR-020 domain-separated hash of exact Envelope-1 bytes; final objects are hard-link published without overwrite; tree names/order and references are canonical; scan excludes `.paengi`; materialisation only writes safe plans to empty destinations.
-- Tests: focused Alcotest corruption/restart/schema/scan/materialisation tests; golden Content/Tree/Snapshot Envelope-1 bytes; bounded deterministic store, scan, and scan/materialise properties with printed seeds. Full `make check` and `make property-test PROPERTY_TEST_SEED=17` remain required after the slice.
+- Task: large-content benchmark/decision, Chunk/File_manifest storage, generated filesystem histories, and Milestone 1 closeout (complete).
+- Modules/files: `paengi_store`; `paengi_chunking`; `paengi_snapshot`; large-content benchmark/result; store, snapshot, materialisation, golden, and generated-history tests; ADR-020 through ADR-022; model, architecture, testing, and benchmark documentation.
+- Types: abstract stored, semantic content, chunk, manifest, tree, and snapshot IDs; typed tree entries; structured scanner/schema/materialisation errors; existing semantic model IDs and M0 payload schemas remain unchanged.
+- Invariants: stored ID is the ADR-020 domain-separated hash of exact Envelope-1 bytes; final objects are hard-link published without overwrite; inline Content v1 is canonical through 64 KiB; larger bytes use verified Buzhash Chunk/File_manifest v1; tree names/order and references are canonical; scan excludes `.paengi`; materialisation only writes safe plans to empty destinations.
+- Tests: focused corruption/restart/schema/scan/materialisation tests; goldens for Content/Chunk/File_manifest/Tree/Snapshot Envelope-1 bytes; bounded deterministic generated store/scan/history/scan-materialise properties with printed seeds; host-specific benchmark results. Full `make check` and `make property-test PROPERTY_TEST_SEED=17` remain required after the slice.
 - External libraries: existing Alcotest, QCheck, SHA-256, Profile 1 encoder, and Unix only.
-- ADR changes: ADR-020 specifies stored-object identity/publication; ADR-021 specifies Content/Tree/Snapshot schemas.
+- ADR changes: ADR-020 specifies stored-object identity/publication; ADR-021 specifies Content/Tree/Snapshot schemas; ADR-022 specifies Chunk/File_manifest schemas and Buzhash parameters.
 
 ## Milestone 0 — Project and model foundation
 
@@ -67,7 +67,7 @@ Robustness tasks operate only on Paengi's pure functions and generated local fix
 - [x] Implement object-type envelope.
 - [x] Implement content-addressed path layout.
 - [x] Implement corruption detection.
-- [ ] Implement rebuildable SQLite index if needed.
+- [x] Determine rebuildable index need: SQLite is not required for Milestone 1.
 
 ### Filesystem scanning
 
@@ -84,11 +84,11 @@ Robustness tasks operate only on Paengi's pure functions and generated local fix
 
 ### Large content
 
-- [ ] Define inline versus chunk-manifest threshold.
-- [ ] Implement fixed or content-defined chunks after benchmark.
-- [ ] Implement file manifest.
-- [ ] Add already-compressed fixture.
-- [ ] Add large changing binary fixture.
+- [x] Define inline versus chunk-manifest threshold.
+- [x] Implement deterministic content-defined chunks after benchmark.
+- [x] Implement versioned file manifest.
+- [x] Add deterministic gzip-like binary fixture.
+- [x] Add large changing binary fixture.
 
 ### Materialisation
 
@@ -102,8 +102,8 @@ Robustness tasks operate only on Paengi's pure functions and generated local fix
 
 - [x] Snapshot round trip is exact.
 - [x] Corruption is detected.
-- [ ] Generated filesystem fixtures pass.
-- [ ] Unknown file types remain byte-correct.
+- [x] Generated filesystem fixtures pass.
+- [x] Unsupported filesystem nodes return structured errors without publishing a partial snapshot.
 
 ## Milestone 2 — Scratch history and restore
 

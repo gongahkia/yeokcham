@@ -92,13 +92,27 @@ Milestone 1 stores content, trees, and snapshots as separate Envelope-1 objects 
 
 ```text
 content-v1 = [1, bytes]
+chunk-v1 = [1, bytes]
+file-manifest-v1 = [
+  1,
+  total-plaintext-length,
+  chunking-algorithm,
+  window-size,
+  min-chunk-size,
+  average-chunk-size,
+  max-chunk-size,
+  full-content-id,
+  [* [chunk-stored-object-id, plaintext-chunk-length]]
+]
 tree-v1 = [1, [* tree-entry-v1]]
 file-entry-v1 = [0, name-bytes, mode, content-stored-object-id]
 directory-entry-v1 = [1, name-bytes, tree-stored-object-id]
 snapshot-v1 = [1, root-tree-stored-object-id]
 ```
 
-Every stored-object reference is exactly 32 raw bytes. Tree names are nonempty safe path components and are strictly bytewise ascending. Mode codes are regular `0`, executable `1`, and symlink `2`. A scanner stores a symlink target as authoritative content bytes without following it; `.paengi` is excluded and `.paengiignore` uses exact safe relative paths only.
+Every stored-object reference and `full-content-id` is exactly 32 raw bytes. A Tree v1 file reference resolves to Content v1 or File_manifest v1. Content v1 is canonical for file lengths `<= 65536`; empty and exactly-boundary-sized files are inline. File_manifest v1 is canonical above that limit and currently accepts only Buzhash-64-v1 (`algorithm=1`, window `64`, minimum `16384`, average `65536`, maximum `131072`). Its full-content ID is `SHA-256("paengi:content:v1\000" || complete plaintext)`. Tree names are nonempty safe path components and are strictly bytewise ascending. Mode codes are regular `0`, executable `1`, and symlink `2`. A scanner stores a symlink target as authoritative content bytes without following it; `.paengi` is excluded and `.paengiignore` uses exact safe relative paths only.
+
+Manifest invariant: every referenced object is a verified Chunk v1; declared chunk lengths sum to total plaintext length; chunk order is significant and matches canonical Buzhash boundaries; and the reconstructed bytes match `full-content-id`. Missing, malformed, corrupt, incorrectly typed, reordered, or noncanonical chunk sequences reject.
 
 ### Materialisation invariant
 

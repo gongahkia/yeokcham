@@ -634,7 +634,7 @@ module Tree = struct
           Ok tree
     | _ -> Error (Invalid_schema "tree must contain two values")
 
-  let load repository identity =
+  let rec load repository identity =
     let* object_ =
       Store.get repository (stored_object_id identity)
       |> Result.map_error (fun error -> Store_error error)
@@ -651,18 +651,8 @@ module Tree = struct
             let* _ = Content.load repository content in
             validate_references rest
         | (_, Directory child) :: rest ->
-            let* child_object =
-              Store.get repository child
-              |> Result.map_error (fun error -> Store_error error)
-            in
-            if Envelope.object_type child_object <> Envelope.Tree then
-              Error
-                (Unexpected_object_type
-                   {
-                     expected = Envelope.Tree;
-                     actual = Envelope.object_type child_object;
-                   })
-            else validate_references rest
+            let* _ = load repository child in
+            validate_references rest
       in
       let* () = validate_references tree in
       Ok tree

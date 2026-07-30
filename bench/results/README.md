@@ -9,3 +9,7 @@ python3 -m jsonschema \
   --instance bench/results/canonical-codec-v1.json \
   bench/schema/canonical-codec-benchmark-result.schema.json
 ```
+
+## Large-content decision result
+
+`large-content-v1.json` records deterministic candidate comparisons used by ADR-022. Regenerate it with `make benchmark-large-content`. It is host-specific evidence, not a performance target.
