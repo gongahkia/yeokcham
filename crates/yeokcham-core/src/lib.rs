@@ -2,6 +2,7 @@
 
 #![deny(missing_docs)]
 
+mod backend;
 mod blob_manifest;
 mod canonical;
 mod chunk_record;
@@ -32,6 +33,11 @@ mod tiny_blob_group_manifest;
 mod whole_blob_record;
 mod yeokcham_content_id;
 
+pub use backend::{
+    Backend, BackendByteRange, BackendCursor, BackendFuture, BackendKey, BackendListEntry,
+    BackendListLimits, BackendListPage, BackendObjectMetadata, BackendPrefix, BackendPutResult,
+    BackendReadLimits, BackendReadRequest, BackendResumablePutStart, BackendUploadSession,
+};
 pub use blob_manifest::{BlobManifest, BlobManifestRepresentation, BlobStoragePolicyDecision};
 pub use canonical::{CanonicalDecoder, CanonicalEncoder};
 pub use chunk_record::ChunkRecord;

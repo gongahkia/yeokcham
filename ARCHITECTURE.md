@@ -267,15 +267,19 @@ A consolidated manifest may periodically summarise accepted journal heads.
 
 ### 3.9 Backend interface
 
-The backend should be intentionally weak.
+The backend should be intentionally weak. The current core contract is runtime-neutral and object-safe: it returns boxed sendable futures rather than using native `async fn` trait methods. It accepts bounded in-memory reads and bytes, create-only immutable publication, opaque slash-delimited keys, paginated listing, maintenance-only deletion, and explicit resumable-upload sessions. Key syntax is intentionally limited to safe opaque ASCII path components; encryption and opaque key derivation remain separate work.
 
 ```rust
 trait Backend {
-    async fn put_if_absent(&self, key: &ObjectKey, data: ByteStream) -> Result<PutResult>;
-    async fn get(&self, key: &ObjectKey, range: Option<ByteRange>) -> Result<ByteStream>;
-    async fn head(&self, key: &ObjectKey) -> Result<ObjectMetadata>;
-    async fn list(&self, prefix: &Prefix, cursor: Option<Cursor>) -> Result<ListPage>;
-    async fn delete(&self, key: &ObjectKey) -> Result<()>;
+    fn put_if_absent(&self, key: &BackendKey, data: &[u8]) -> BackendFuture<BackendPutResult>;
+    fn get(&self, key: &BackendKey, request: BackendReadRequest) -> BackendFuture<Vec<u8>>;
+    fn head(&self, key: &BackendKey) -> BackendFuture<BackendObjectMetadata>;
+    fn list(&self, prefix: &BackendPrefix, cursor: Option<&BackendCursor>, limits: BackendListLimits) -> BackendFuture<BackendListPage>;
+    fn delete(&self, key: &BackendKey) -> BackendFuture<()>;
+    fn start_resumable_put_if_absent(&self, key: &BackendKey, total_length: u64) -> BackendFuture<BackendResumablePutStart>;
+    fn write_resumable(&self, session: &BackendUploadSession, offset: u64, data: &[u8]) -> BackendFuture<()>;
+    fn complete_resumable(&self, session: &BackendUploadSession) -> BackendFuture<BackendPutResult>;
+    fn abort_resumable(&self, session: &BackendUploadSession) -> BackendFuture<()>;
 }
 ```
 

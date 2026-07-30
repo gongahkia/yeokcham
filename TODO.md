@@ -156,7 +156,7 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 
 ### Backend interface
 
-- [ ] Define async backend trait.
+- [x] Define async backend trait.
 - [ ] Implement filesystem backend.
 - [ ] Implement range reads.
 - [ ] Implement resumable upload abstraction.
