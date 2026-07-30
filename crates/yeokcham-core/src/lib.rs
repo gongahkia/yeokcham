@@ -28,6 +28,7 @@ mod metadata_object_record;
 mod ref_event;
 mod ref_name;
 mod ref_snapshot;
+mod remote_ref_journal;
 mod repository;
 mod repository_format;
 mod repository_id;
@@ -88,6 +89,11 @@ pub use metadata_object_record::MetadataObjectRecord;
 pub use ref_event::{RefEvent, RefEventReadLimits, RefEventSigningKey, RefEventVerifyingKey};
 pub use ref_name::RefName;
 pub use ref_snapshot::{GitRefState, HeadState, RefSnapshot, RefSnapshotReadLimits};
+pub use remote_ref_journal::{
+    RemoteDeviceRegistry, RemoteRefJournal, RemoteRefJournalDivergence, RemoteRefJournalLimits,
+    RemoteRefJournalReconciliation, fetch_remote_device_registry, fetch_remote_ref_journal,
+    publish_device_registry_event, publish_remote_ref_event,
+};
 pub use repository::{
     BlobManifestReadLimits, ChunkedBlobStorageLimits, EncryptedRepositoryRecoveryLimits,
     EncryptedRepositoryRecoveryReport, GitImportLimits, GitImportReport, GitObjectMetadata,
