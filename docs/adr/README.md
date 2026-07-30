@@ -58,3 +58,4 @@ Valid statuses are `Proposed`, `Accepted`, `Rejected`, `Deprecated`, and `Supers
 | [ADR-0050](0050-export-published-objects-as-loose-git-objects.md) | Accepted | Export published objects as standard loose Git objects |
 | [ADR-0051](0051-immutable-local-ref-snapshot.md) | Accepted | Publish one immutable local ref snapshot before journals |
 | [ADR-0052](0052-chunked-blob-descriptor-and-manifest-v2.md) | Accepted | Store chunked blobs through immutable descriptors and `YKMF` version 2 |
+| [ADR-0053](0053-bounded-git-import-and-local-cli-workflows.md) | Accepted | Import Git repositories through bounded local CLI workflows |

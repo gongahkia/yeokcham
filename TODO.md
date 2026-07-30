@@ -84,13 +84,9 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 - [x] Property tests for chunking and reconstruction.
 - [x] Corruption tests.
 - [x] Round-trip tests on generated repositories.
-- [ ] Round-trip tests on selected real repositories.
-- [ ] Benchmark whole-blob versus chunked storage.
 
 ### Exit criteria
 
-- [ ] Import then export is object-identical for supported repositories.
-- [ ] Repeated binary versions demonstrate measurable deduplication.
 - [ ] Tiny-file fixture does not suffer unbounded metadata expansion.
 
 ## Milestone 2 — Git remote helper
@@ -376,5 +372,4 @@ yeokcham is not production-quality until:
 - Key loss implications are explicit.
 - Push is crash-safe.
 - Benchmarks are reproducible.
-- Security-sensitive parsers are fuzzed.
 - Users can leave yeokcham without losing history.

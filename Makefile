@@ -1,6 +1,6 @@
 CARGO ?= cargo
 
-.PHONY: help build check fmt fmt-check lint test doc fixtures ci
+.PHONY: help build check fmt fmt-check lint test doc fixtures fuzz-smoke ci
 
 help:
 	@echo "make build      build all workspace targets"
@@ -11,6 +11,7 @@ help:
 	@echo "make test       run all tests and doctests"
 	@echo "make doc        build documentation with warnings denied"
 	@echo "make fixtures   regenerate and verify temporary Git fixtures"
+	@echo "make fuzz-smoke run bounded libFuzzer smoke campaigns"
 	@echo "make ci         run the complete local CI gate"
 
 build:
@@ -37,5 +38,8 @@ doc:
 fixtures:
 	scripts/verify-git-fixtures.sh
 	scripts/verify-pinned-history-fixture.sh
+
+fuzz-smoke:
+	scripts/fuzz-smoke.sh
 
 ci: fixtures fmt-check check lint test doc

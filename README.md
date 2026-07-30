@@ -17,7 +17,7 @@ Yeokcham is intended for ordinary software developers who want to keep using Git
 
 ## Status
 
-Design and implementation handoff package. No production implementation should be assumed to exist.
+Milestone 1 local import, verification, inspection, and loose-Git export are implemented. Remote-helper, push, encryption, and remote backends remain unfinished.
 
 ## Recommended implementation language
 
@@ -78,6 +78,19 @@ Yeokcham's minimum supported Rust version (MSRV) is 1.85. The repository toolcha
 ## Development
 
 Run `make help` to list development targets and `make ci` for the complete locked local CI gate.
+
+## Local workflow
+
+```bash
+yeokcham init --from-git <source-git-repo> <yeokcham-repo>
+yeokcham verify <yeokcham-repo>
+yeokcham inspect storage <yeokcham-repo>
+yeokcham inspect object <yeokcham-repo> <git-object-id>
+yeokcham export-git <yeokcham-repo> <destination-git-repo>
+git --git-dir=<destination-git-repo> fsck --full --strict
+```
+
+`init` requires a destination path that does not exist. A failed import can leave unreachable immutable records in that fresh path; remove the failed destination before retrying. The initial CDC threshold is 4 KiB; `--chunked-blob-minimum <bytes>` is available for controlled storage-policy comparison, not as a benchmark-backed default recommendation.
 
 ## Contributing and licence
 

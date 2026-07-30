@@ -1,5 +1,5 @@
-use std::{fs, fs::File};
 use std::path::{Path, PathBuf};
+use std::{fs, fs::File};
 
 use serde_json::Value;
 
@@ -109,7 +109,10 @@ fn collect_json_files(directory: &Path, files: &mut Vec<PathBuf>) {
         let path = entry.path();
         if path.is_dir() {
             collect_json_files(&path, files);
-        } else if path.extension().is_some_and(|extension| extension == "json") {
+        } else if path
+            .extension()
+            .is_some_and(|extension| extension == "json")
+        {
             files.push(path);
         }
     }

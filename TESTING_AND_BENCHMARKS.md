@@ -119,6 +119,8 @@ Targets:
 - Remote-helper command parser.
 - HTTP endpoints when added.
 
+The current `fuzz/` cargo-fuzz package covers canonical decoding, `YKSG` segment reading, `YKIX` index decoding, blob/metadata/chunk manifests, and ref names/snapshots. Run `make fuzz-smoke` for 1,000 bounded executions per target, or `scripts/fuzz-smoke.sh <runs>` for a longer local campaign; it requires the Rust nightly toolchain. Fuzzer corpora and crash artifacts are local-only; minimized reproductions must become deterministic regression tests before committing.
+
 ### Compatibility fixtures
 
 Maintain fixtures for:
