@@ -366,3 +366,5 @@ Yeokcham may lose to modern Git on small, source-only repositories; this should 
 - Sanitised fixture generation scripts
 
 Do not rely only on microbenchmarks. End-to-end process benchmarks are required.
+
+The W5 harness is `scripts/benchmark-sparse-workspace.sh`. It times `git clone --no-checkout --filter=blob:none`, cone sparse selection of `app/`, and `git checkout main` as the usable-workspace boundary. Cold samples clear only Yeokcham's disposable snapshot-pack cache before every timed run; warm samples populate it once before timing. It records client `.pack` payload bytes as local remote-helper transport bytes and does not claim physical-network or OS-cache control.

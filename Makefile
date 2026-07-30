@@ -38,6 +38,7 @@ doc:
 fixtures:
 	scripts/verify-git-fixtures.sh
 	scripts/verify-pinned-history-fixture.sh
+	scripts/verify-sparse-workspace-fixture.sh
 
 fuzz-smoke:
 	scripts/fuzz-smoke.sh

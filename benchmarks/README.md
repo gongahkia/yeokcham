@@ -10,4 +10,6 @@ Results must not contain credentials, keys, source content, private paths, remot
 
 Run `scripts/benchmark-whole-vs-chunked.sh [output-directory] [repetitions]` on macOS after `make fixtures`. It compares a pinned two-revision SHA-1 history under whole-record and CDC policies, writes two schema-validated measured result files, and makes no performance claim by itself.
 
+Run `scripts/benchmark-sparse-workspace.sh [output-directory] [repetitions]` on macOS for W5. It generates a deterministic sparse fixture, imports it once, then times the documented `blob:none` + cone sparse `app/` checkout after clearing the snapshot-pack cache for each cold repetition and after one warm-up for warm repetitions. `network_bytes_received` is the received Git-client `.pack` payload size across the local remote-helper transport; it is not a physical-network measurement. OS filesystem caches are not cleared.
+
 Version 1 is immutable after measured results exist. Backward-compatible descriptions may be clarified, but removing fields, changing meaning or units, or tightening accepted values requires a new schema version and migration note.
