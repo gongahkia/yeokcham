@@ -192,4 +192,32 @@ module Durable : sig
     Paengi_store.repository -> Paengi_id.Capsule_id.t -> (revision list, error) result
 
   val list : Paengi_store.repository -> (resolved list, error) result
+
+  val split :
+    store:Paengi_store.repository ->
+    scratch:Paengi_scratch.repository ->
+    source:Paengi_id.Capsule_id.t ->
+    left_id:Paengi_id.Capsule_id.t ->
+    left_title:string ->
+    left_description:string ->
+    right_id:Paengi_id.Capsule_id.t ->
+    right_title:string ->
+    right_description:string ->
+    left_operation_indices:int list ->
+    created_at:int64 ->
+    changed_at:int64 ->
+    unit ->
+    ((resolved * resolved), error) result
+
+  val combine :
+    store:Paengi_store.repository ->
+    scratch:Paengi_scratch.repository ->
+    id:Paengi_id.Capsule_id.t ->
+    title:string ->
+    description:string ->
+    sources:revision_link list ->
+    created_at:int64 ->
+    changed_at:int64 ->
+    unit ->
+    (resolved, error) result
 end

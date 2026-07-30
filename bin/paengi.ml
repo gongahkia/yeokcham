@@ -2,6 +2,8 @@ module Scratch = Paengi_scratch
 module Snapshot = Paengi_snapshot
 module Store = Paengi_store
 module Compaction = Paengi_compaction
+module Capsule = Paengi_capsule
+module Capsule_store = Paengi_capsule_store
 
 let now () = Int64.of_float (Unix.gettimeofday ())
 
@@ -13,6 +15,11 @@ let checkpoint_id value =
   match Store.Stored_object_id.of_hex value with
   | Ok identity -> Scratch.Checkpoint_id.of_stored_object_id identity
   | Error error -> fail Store.Stored_object_id.parse_error_to_string error
+
+let capsule_id value =
+  match Paengi_id.Capsule_id.of_hex value with
+  | Ok identity -> identity
+  | Error error -> fail Paengi_id.parse_error_to_string error
 
 let print_checkpoint checkpoint =
   print_endline
@@ -29,6 +36,14 @@ let render_operation = function
   | Scratch.Change_mode { path; _ } -> "mode " ^ render_path path
   | Scratch.Move { source; destination; _ } ->
       "move " ^ render_path source ^ " -> " ^ render_path destination
+
+let render_capsule_operation = function
+  | Capsule.Exact_file_transition transition ->
+      "exact " ^ render_path transition.Capsule.transition_path
+  | Capsule.Text_edit edit -> "text " ^ render_path edit.Capsule.edit_path
+  | Capsule.Move { source; destination; _ } ->
+      "move " ^ render_path source ^ " -> " ^ render_path destination
+  | Capsule.Mode_change { path; _ } -> "mode " ^ render_path path
 
 let parse_root arguments =
   let rec loop root reversed = function
@@ -331,9 +346,60 @@ let watch root arguments =
       in
       loop 0
 
+let capsule root arguments =
+  match arguments with
+  | [ "show"; identity ] -> (
+      match Store.open_repository ~root with
+      | Error error -> fail Store.error_to_string error
+      | Ok store ->
+          let resolved =
+            Capsule_store.Durable.show store (capsule_id identity)
+            |> Result.map_error Capsule_store.error_to_string
+          in
+          (match resolved with
+          | Error error -> fail Fun.id error
+          | Ok resolved ->
+              let capsule = Capsule_store.Durable.resolved_capsule resolved in
+              let revision = Capsule_store.Durable.resolved_revision resolved in
+              Printf.printf "capsule %s\nrevision %s\ntitle %s\ndescription %s\n"
+                (Paengi_id.Capsule_id.to_hex (Capsule_store.capsule_id capsule))
+                (Paengi_id.Capsule_revision_id.to_hex
+                   (Capsule_store.revision_id revision))
+                (Capsule_store.capsule_title capsule)
+                (Capsule_store.capsule_description capsule)))
+  | [ "current-diff"; identity ] -> (
+      match Store.open_repository ~root with
+      | Error error -> fail Store.error_to_string error
+      | Ok store ->
+          Capsule_store.Durable.current_diff store (capsule_id identity)
+          |> Result.map_error Capsule_store.error_to_string
+          |> function
+          | Error error -> fail Fun.id error
+          | Ok operations ->
+              List.iter
+                (fun operation ->
+                  print_endline (render_capsule_operation operation))
+                operations)
+  | [ "history"; identity ] -> (
+      match Store.open_repository ~root with
+      | Error error -> fail Store.error_to_string error
+      | Ok store ->
+          Capsule_store.Durable.history store (capsule_id identity)
+          |> Result.map_error Capsule_store.error_to_string
+          |> function
+          | Error error -> fail Fun.id error
+          | Ok revisions ->
+              List.iter
+                (fun revision ->
+                  print_endline
+                    (Paengi_id.Capsule_revision_id.to_hex
+                       (Capsule_store.revision_id revision)))
+                revisions)
+  | _ -> exit 2
+
 let usage () =
   prerr_endline
-    "usage: paengi <init|checkpoint|timeline|restore|pin|unpin|compact|watch> \
+    "usage: paengi <init|checkpoint|timeline|restore|pin|unpin|compact|watch|capsule> \
      [--root PATH] ...";
   exit 2
 
@@ -352,6 +418,7 @@ let () =
         | "unpin" -> change_pin root arguments false
         | "compact" -> compact root arguments
         | "watch" -> watch root arguments
+        | "capsule" -> capsule root arguments
         | _ -> usage ())
     | _ -> usage ()
   with Sys.Break -> print_endline "watch stopped"

@@ -1,6 +1,8 @@
 (executable
  (name paengi)
  (libraries
+  paengi_capsule
+  paengi_capsule_store
   paengi_compaction
   paengi_scratch
   paengi_snapshot

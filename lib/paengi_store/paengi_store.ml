@@ -774,6 +774,20 @@ module Ref_file = struct
   let path repository components =
     List.fold_left Filename.concat repository.refs components
 
+  let ensure_parent_directory repository components =
+    match List.rev components with
+    | [] -> Error (Invalid_ref_path components)
+    | _file :: reversed_directories ->
+        List.rev reversed_directories
+        |> List.fold_left
+             (fun result component ->
+               let* directory = result in
+               let next = Filename.concat directory component in
+               let* () = ensure_directory next in
+               Ok next)
+             (Ok repository.refs)
+        |> Result.map (fun _ -> ())
+
   let read repository ~components =
     let* () = checked_components components in
     let file = path repository components in
@@ -796,7 +810,7 @@ module Ref_file = struct
            })
     else
       let directory = Filename.dirname file in
-      let* () = ensure_directory directory in
+      let* () = ensure_parent_directory repository components in
       let* temporary =
         create_temporary directory (Filename.basename file)
           (Bytes.of_string replacement)

@@ -71,6 +71,24 @@ type error =
       derived : Id.Capsule_revision_id.t;
     }
   | Invalid_current_ref_checksum
+  | Scratch_error of Scratch.error
+  | Snapshot_error of Snapshot.error
+  | Draft_error of string
+  | Current_ref_missing of Id.Capsule_id.t
+  | Current_ref_corrupt of string
+  | Concurrent_current_update of {
+      capsule : Id.Capsule_id.t;
+      expected_generation : int64 option;
+      actual_generation : int64 option;
+    }
+  | Conflicting_capsule_id_reuse of Id.Capsule_id.t
+  | Current_ref_capsule_mismatch
+  | Current_ref_revision_mismatch
+  | Parent_link_mismatch of string
+  | Revision_history_cycle of Id.Capsule_revision_id.t
+  | Revision_application_conflict of Capsule.application_conflict list
+  | Revision_expected_result_mismatch
+  | Injected_interruption of string
 
 let error_to_string = function
   | Store_error error -> Store.error_to_string error
@@ -880,3 +898,387 @@ let decode_current_ref input =
   | _ -> assert false
 
 let current_ref_components capsule = [ "capsules"; Id.Capsule_id.to_hex capsule; "current" ]
+
+module Durable = struct
+  type resolved = {
+    capsule : capsule;
+    capsule_object : Store.Stored_object_id.t;
+    revision : revision;
+    revision_object : Store.Stored_object_id.t;
+    current : current_ref;
+  }
+
+  type failure_point =
+    | Before_create_current_ref
+    | After_create_current_ref
+    | Before_fold_current_ref
+    | After_fold_current_ref
+
+  let resolved_capsule (resolved : resolved) = resolved.capsule
+  let resolved_capsule_object (resolved : resolved) = resolved.capsule_object
+  let resolved_revision (resolved : resolved) = resolved.revision
+  let resolved_revision_object (resolved : resolved) = resolved.revision_object
+  let resolved_current_ref (resolved : resolved) = resolved.current
+
+  let lock_name capsule = "capsule-" ^ Id.Capsule_id.to_hex capsule
+
+  let with_capsule_lock store capsule action =
+    Store.with_lock store ~name:"repository-writer"
+      ~on_error:(fun error -> Store_error error) (fun () ->
+        Store.with_lock store ~name:(lock_name capsule)
+          ~on_error:(fun error -> Store_error error) action)
+
+  let read_ref_bytes store capsule =
+    Store.Ref_file.read store ~components:(current_ref_components capsule)
+    |> Result.map_error (fun error -> Store_error error)
+
+  let decode_ref_bytes = function
+    | None -> Ok None
+    | Some bytes ->
+        decode_current_ref bytes |> Result.map Option.some
+        |> Result.map_error (fun error -> Current_ref_corrupt (error_to_string error))
+
+  let read_ref store capsule =
+    let* bytes = read_ref_bytes store capsule in
+    decode_ref_bytes bytes
+
+  let checkpoint_snapshot scratch checkpoint =
+    let* resolved =
+      Scratch.resolve_checkpoint scratch checkpoint
+      |> Result.map_error (fun error -> Scratch_error error)
+    in
+    Ok (Scratch.Checkpoint.snapshot (Scratch.resolved_checkpoint resolved))
+
+  let validate_parent store capsule revision =
+    match revision_parent revision with
+    | None -> Ok ()
+    | Some parent ->
+        let* candidate = load_revision store parent.object_id in
+        if not (Id.Capsule_revision_id.equal parent.revision (revision_id candidate)) then
+          Error (Parent_link_mismatch "logical revision ID differs from parent object")
+        else if not (Id.Capsule_id.equal capsule (revision_capsule candidate)) then
+          Error (Parent_link_mismatch "parent revision belongs to another capsule")
+        else Ok ()
+
+  let validate_revision store ~capsule revision =
+    let* () = validate_parent store capsule revision in
+    let* base =
+      Snapshot.Snapshot.load store (revision_declared_base revision)
+      |> Result.map_error (fun error -> Snapshot_error error)
+    in
+    let* base_state =
+      Scratch.State.of_snapshot store base
+      |> Result.map_error (fun error -> Scratch_error error)
+    in
+    let applied =
+      Capsule.apply ~actual_base:(revision_declared_base revision) ~state:base_state
+        (revision_model revision)
+    in
+    if applied.Capsule.conflicts <> [] then
+      Error (Revision_application_conflict applied.Capsule.conflicts)
+    else
+      let* expected =
+        Snapshot.Snapshot.load store (revision_expected_result revision)
+        |> Result.map_error (fun error -> Snapshot_error error)
+      in
+      let* expected_state =
+        Scratch.State.of_snapshot store expected
+        |> Result.map_error (fun error -> Scratch_error error)
+      in
+      if Scratch.State.equal applied.Capsule.state expected_state then Ok ()
+      else Error Revision_expected_result_mismatch
+
+  let resolve_from_ref store current =
+    let* capsule = load_capsule store (current_capsule_object current) in
+    if not (Id.Capsule_id.equal (current_capsule current) (capsule_id capsule)) then
+      Error Current_ref_capsule_mismatch
+    else
+      let* revision = load_revision store (current_revision_object current) in
+      if not (Id.Capsule_revision_id.equal (current_revision current) (revision_id revision)) then
+        Error Current_ref_revision_mismatch
+      else if not (Id.Capsule_id.equal (capsule_id capsule) (revision_capsule revision)) then
+        Error Current_ref_capsule_mismatch
+      else
+        let* () = validate_revision store ~capsule:(capsule_id capsule) revision in
+        Ok
+          {
+            capsule;
+            capsule_object = current_capsule_object current;
+            revision;
+            revision_object = current_revision_object current;
+            current;
+          }
+
+  let read_current store capsule =
+    let* current = read_ref store capsule in
+    match current with
+    | None -> Error (Current_ref_missing capsule)
+    | Some current ->
+        if not (Id.Capsule_id.equal capsule (current_capsule current)) then
+          Error Current_ref_capsule_mismatch
+        else resolve_from_ref store current
+
+  let show = read_current
+
+  let current_diff store capsule =
+    let* current = read_current store capsule in
+    Ok (revision_operations current.revision)
+
+  let history store capsule =
+    let* current = read_current store capsule in
+    let rec walk seen current reversed =
+      let identity = revision_id current in
+      if List.exists (Id.Capsule_revision_id.equal identity) seen then
+        Error (Revision_history_cycle identity)
+      else
+        let* () = validate_revision store ~capsule current |> Result.map_error Fun.id in
+        let reversed = current :: reversed in
+        match revision_parent current with
+        | None -> Ok (List.rev reversed)
+        | Some parent ->
+            let* next = load_revision store parent.object_id in
+            if not (Id.Capsule_revision_id.equal parent.revision (revision_id next)) then
+              Error (Parent_link_mismatch "history parent logical ID differs")
+            else if not (Id.Capsule_id.equal capsule (revision_capsule next)) then
+              Error (Parent_link_mismatch "history parent belongs to another capsule")
+            else walk (identity :: seen) next reversed
+    in
+    walk [] current.revision []
+
+  let unique_boundaries boundaries =
+    let compare left right =
+      let source =
+        Store.Stored_object_id.compare
+          (Scratch.Checkpoint_id.stored_object_id left.source)
+          (Scratch.Checkpoint_id.stored_object_id right.source)
+      in
+      if source <> 0 then source
+      else
+        Store.Stored_object_id.compare
+          (Scratch.Checkpoint_id.stored_object_id left.target)
+          (Scratch.Checkpoint_id.stored_object_id right.target)
+    in
+    List.sort_uniq compare boundaries
+
+  let pin_boundaries scratch capsule ~changed_at boundaries =
+    let rec loop = function
+      | [] -> Ok ()
+      | boundary :: rest ->
+          let* () =
+            Scratch.pin_capsule_boundary scratch boundary.source ~capsule ~changed_at
+            |> Result.map_error (fun error -> Scratch_error error)
+          in
+          let* () =
+            Scratch.pin_capsule_boundary scratch boundary.target ~capsule ~changed_at
+            |> Result.map_error (fun error -> Scratch_error error)
+          in
+          loop rest
+    in
+    loop (unique_boundaries boundaries)
+
+  let verify_boundaries scratch capsule boundaries =
+    let rec loop = function
+      | [] -> Ok ()
+      | boundary :: rest ->
+          let* source =
+            Scratch.has_capsule_boundary scratch boundary.source ~capsule
+            |> Result.map_error (fun error -> Scratch_error error)
+          in
+          let* target =
+            Scratch.has_capsule_boundary scratch boundary.target ~capsule
+            |> Result.map_error (fun error -> Scratch_error error)
+          in
+          if source && target then loop rest
+          else Error (Draft_error "capsule boundary retention verification failed")
+    in
+    loop (unique_boundaries boundaries)
+
+  let publish_current store ~expected ~next =
+    Store.Ref_file.compare_and_swap store
+      ~components:(current_ref_components (current_capsule next)) ~expected
+      ~replacement:(encode_current_ref next)
+    |> Result.map_error (function
+         | Store.Concurrent_ref_file_update _ ->
+             Concurrent_current_update
+               {
+                 capsule = current_capsule next;
+                 expected_generation =
+                   Option.bind expected (fun bytes ->
+                       decode_current_ref bytes |> Result.to_option
+                       |> Option.map current_generation);
+                 actual_generation = None;
+               }
+         | error -> Store_error error)
+
+  let expect_failure fail_at point =
+    match fail_at with
+    | Some actual when actual = point ->
+        Error
+          (Injected_interruption
+             (match point with
+             | Before_create_current_ref -> "before create current ref"
+             | After_create_current_ref -> "after create current ref"
+             | Before_fold_current_ref -> "before fold current ref"
+             | After_fold_current_ref -> "after fold current ref"))
+    | Some _ | None -> Ok ()
+
+  let draft_from_checkpoints store scratch capsule ~from ~target ~evidence ~created_at =
+    let temporary_id =
+      Id.Capsule_revision_id.of_bytes (String.make 32 '\000') |> Result.get_ok
+    in
+    Capsule.Draft.from_checkpoints ~store ~scratch ~capsule:(capsule_model capsule)
+      ~revision_id:temporary_id ~from ~target ~evidence ~created_at
+    |> Result.map_error (fun error -> Draft_error (Capsule.Draft.error_to_string error))
+
+  let create_from_checkpoints ~store ~scratch ~id ~title ~description ~dependencies
+      ~evidence ~from ~target ~created_at ~changed_at ?fail_at () =
+    with_capsule_lock store id (fun () ->
+        let* capsule = create_capsule ~id ~title ~description ~created_at in
+        let* draft =
+          draft_from_checkpoints store scratch capsule ~from ~target ~evidence
+            ~created_at
+        in
+        let boundary = { source = from; target } in
+        let* revision =
+          create_revision ~capsule ~parent:None
+            ~declared_base:(Capsule.Draft.source_snapshot draft)
+            ~expected_result:(Capsule.Draft.target_snapshot draft)
+            ~operations:(Capsule.revision_operations (Capsule.Draft.revision draft))
+            ~dependencies ~evidence ~boundaries:[ boundary ] ~provenance:Created
+            ~created_at
+        in
+        let* existing_bytes = read_ref_bytes store id in
+        let* capsule_object = store_capsule store capsule in
+        let* revision_object = store_revision store revision in
+        let* () = validate_revision store ~capsule:id revision in
+        let* () = pin_boundaries scratch id ~changed_at [ boundary ] in
+        let* () = verify_boundaries scratch id [ boundary ] in
+        match existing_bytes with
+        | Some bytes ->
+            let* existing =
+              decode_current_ref bytes
+              |> Result.map_error (fun error -> Current_ref_corrupt (error_to_string error))
+            in
+            if
+              Store.Stored_object_id.equal capsule_object
+                (current_capsule_object existing)
+              && Store.Stored_object_id.equal revision_object
+                   (current_revision_object existing)
+              && Id.Capsule_revision_id.equal (revision_id revision)
+                   (current_revision existing)
+            then resolve_from_ref store existing
+            else Error (Conflicting_capsule_id_reuse id)
+        | None ->
+            let* () = expect_failure fail_at Before_create_current_ref in
+            let* current =
+              make_current_ref ~generation:0L ~capsule:id ~capsule_object
+                ~revision:(revision_id revision) ~revision_object
+            in
+            let* () = publish_current store ~expected:None ~next:current in
+            let* resolved = resolve_from_ref store current in
+            let* () = expect_failure fail_at After_create_current_ref in
+            Ok resolved)
+
+  let fold_from_checkpoints ~store ~scratch ~capsule ~expected_revision
+      ~expected_generation ~evidence ~from ~target ~created_at ~changed_at
+      ?fail_at () =
+    with_capsule_lock store capsule (fun () ->
+        let* existing_bytes = read_ref_bytes store capsule in
+        let* current =
+          match existing_bytes with
+          | None -> Error (Current_ref_missing capsule)
+          | Some bytes ->
+              decode_current_ref bytes
+              |> Result.map_error (fun error -> Current_ref_corrupt (error_to_string error))
+        in
+        if
+          not (Id.Capsule_revision_id.equal expected_revision (current_revision current))
+          || not (Int64.equal expected_generation (current_generation current))
+        then
+          Error
+            (Concurrent_current_update
+               {
+                 capsule;
+                 expected_generation = Some expected_generation;
+                 actual_generation = Some (current_generation current);
+               })
+        else
+          let* resolved = resolve_from_ref store current in
+          let* source_snapshot = checkpoint_snapshot scratch from in
+          if
+            not
+              (Snapshot.Snapshot.equal_id source_snapshot
+                 (revision_expected_result resolved.revision))
+          then Error (Draft_error "fold source checkpoint is not the current capsule result")
+          else
+            let* draft =
+              draft_from_checkpoints store scratch resolved.capsule ~from ~target
+                ~evidence ~created_at
+            in
+            let parent : parent_link =
+              {
+                revision = current_revision current;
+                object_id = current_revision_object current;
+              }
+            in
+            let boundary = { source = from; target } in
+            let boundaries = revision_boundaries resolved.revision @ [ boundary ] in
+            let* revision =
+              create_revision ~capsule:resolved.capsule ~parent:(Some parent)
+                ~declared_base:(revision_declared_base resolved.revision)
+                ~expected_result:(Capsule.Draft.target_snapshot draft)
+                ~operations:
+                  (revision_operations resolved.revision
+                  @ Capsule.revision_operations (Capsule.Draft.revision draft))
+                ~dependencies:(revision_dependencies resolved.revision) ~evidence
+                ~boundaries ~provenance:Folded ~created_at
+            in
+            let* revision_object = store_revision store revision in
+            let* () = validate_revision store ~capsule revision in
+            let* () = pin_boundaries scratch capsule ~changed_at [ boundary ] in
+            let* () = verify_boundaries scratch capsule [ boundary ] in
+            let* current_again = read_ref_bytes store capsule in
+            if not (Option.equal String.equal existing_bytes current_again) then
+              Error
+                (Concurrent_current_update
+                   {
+                     capsule;
+                     expected_generation = Some expected_generation;
+                     actual_generation = None;
+                   })
+            else if Int64.equal (current_generation current) Int64.max_int then
+              Error (Draft_error "capsule current ref generation is exhausted")
+            else
+              let* () = expect_failure fail_at Before_fold_current_ref in
+              let* next =
+                make_current_ref
+                  ~generation:(Int64.succ (current_generation current)) ~capsule
+                  ~capsule_object:(current_capsule_object current)
+                  ~revision:(revision_id revision) ~revision_object
+              in
+              let* () = publish_current store ~expected:existing_bytes ~next in
+              let* resolved = resolve_from_ref store next in
+              let* () = expect_failure fail_at After_fold_current_ref in
+              Ok resolved)
+
+  let list store =
+    let directory =
+      Filename.concat (Filename.concat (Filename.concat (Store.root store) ".paengi") "refs")
+        "capsules"
+    in
+    match Sys.readdir directory with
+    | exception Sys_error message when String.ends_with ~suffix:"No such file or directory" message ->
+        Ok []
+    | exception Sys_error message -> Error (Draft_error message)
+    | names ->
+        let rec loop reversed = function
+          | [] -> Ok (List.rev reversed)
+          | name :: rest -> (
+              match Id.Capsule_id.of_hex name with
+              | Error _ -> loop reversed rest
+              | Ok capsule ->
+                  let* resolved = read_current store capsule in
+                  loop (resolved :: reversed) rest)
+        in
+        loop [] (List.sort String.compare (Array.to_list names))
+end

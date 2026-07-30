@@ -96,10 +96,72 @@ let with_store run =
   in
   Fun.protect ~finally:(fun () -> remove root) (fun () ->
       let store = Store.init ~root |> require_ok Store.error_to_string in
-      run store)
+      run root store)
+
+let write_file path bytes =
+  Out_channel.with_open_bin path (fun channel -> Out_channel.output_string channel bytes)
+
+type scratch_fixture = {
+  scratch : Scratch.repository;
+  initial : Scratch.Checkpoint_id.t;
+  first : Scratch.Checkpoint_id.t;
+  second : Scratch.Checkpoint_id.t;
+}
+
+let checkpoint_id_of checkpoint = Scratch.Checkpoint.id checkpoint
+
+let make_scratch_fixture root store =
+  let file = Filename.concat root "tracked" in
+  write_file file "before";
+  let scratch = Scratch.open_repository store in
+  let initial_snapshot, _ =
+    Snapshot.scan ~root ~store |> require_ok Snapshot.error_to_string
+  in
+  let initial =
+    Scratch.create_initial scratch ~snapshot:initial_snapshot ~created_at:0L
+    |> require_ok Scratch.error_to_string |> checkpoint_id_of
+  in
+  write_file file "first";
+  let first_snapshot, _ =
+    Snapshot.scan ~root ~store |> require_ok Snapshot.error_to_string
+  in
+  let first =
+    Scratch.checkpoint scratch ~snapshot:first_snapshot ~source:Scratch.Explicit
+      ~observed_at:1L ~created_at:1L
+    |> require_ok Scratch.error_to_string
+  in
+  let first =
+    match first with
+    | Scratch.Created checkpoint | Scratch.Unchanged checkpoint -> checkpoint_id_of checkpoint
+  in
+  write_file file "second";
+  let second_snapshot, _ =
+    Snapshot.scan ~root ~store |> require_ok Snapshot.error_to_string
+  in
+  let second =
+    Scratch.checkpoint scratch ~snapshot:second_snapshot ~source:Scratch.Explicit
+      ~observed_at:2L ~created_at:2L
+    |> require_ok Scratch.error_to_string
+  in
+  let second =
+    match second with
+    | Scratch.Created checkpoint | Scratch.Unchanged checkpoint -> checkpoint_id_of checkpoint
+  in
+  { scratch; initial; first; second }
+
+let durable_create root store id =
+  let fixture = make_scratch_fixture root store in
+  let resolved =
+    Capsule_store.Durable.create_from_checkpoints ~store ~scratch:fixture.scratch
+      ~id ~title:"durable" ~description:"durable capsule" ~dependencies:[]
+      ~evidence:[] ~from:fixture.initial ~target:fixture.first ~created_at:3L
+      ~changed_at:3L ()
+    |> require_ok Capsule_store.error_to_string
+  in
+  (fixture, resolved)
 
 let schemas_have_canonical_goldens_and_inverse_decoders () =
-  with_store (fun store ->
+  with_store (fun _ store ->
       let capsule, revision, current = fixture () in
       let capsule_object =
         Capsule_store.store_capsule store capsule
@@ -146,7 +208,7 @@ let schemas_have_canonical_goldens_and_inverse_decoders () =
            (Capsule_store.current_revision decoded_current)))
 
 let decoders_reject_noncanonical_and_wrong_types () =
-  with_store (fun store ->
+  with_store (fun _ store ->
       let capsule, revision, current = fixture () in
       let capsule_object =
         Capsule_store.store_capsule store capsule
@@ -163,6 +225,146 @@ let decoders_reject_noncanonical_and_wrong_types () =
       | Ok _ -> Alcotest.fail "noncanonical ref bytes decoded");
       ignore revision)
 
+let durable_creation_reopens_pins_and_resolves_exactly () =
+  with_store (fun root store ->
+      let id = capsule_id 80 in
+      let fixture, created = durable_create root store id in
+      let reopened =
+        Store.open_repository ~root |> require_ok Store.error_to_string
+      in
+      let resolved =
+        Capsule_store.Durable.read_current reopened id
+        |> require_ok Capsule_store.error_to_string
+      in
+      Alcotest.(check bool)
+        "stable logical capsule ID" true
+        (Id.Capsule_id.equal id
+           (Capsule_store.capsule_id
+              (Capsule_store.Durable.resolved_capsule resolved)));
+      Alcotest.(check bool)
+        "immutable revision resolves" true
+        (Id.Capsule_revision_id.equal
+           (Capsule_store.revision_id
+              (Capsule_store.Durable.resolved_revision created))
+           (Capsule_store.revision_id
+              (Capsule_store.Durable.resolved_revision resolved)));
+      Alcotest.(check int)
+        "current exact changes" 1
+        (List.length
+           (Capsule_store.Durable.current_diff reopened id
+           |> require_ok Capsule_store.error_to_string));
+      Alcotest.(check int)
+        "one revision in history" 1
+        (List.length
+           (Capsule_store.Durable.history reopened id
+           |> require_ok Capsule_store.error_to_string));
+      Alcotest.(check int)
+        "listing derives from refs" 1
+        (List.length
+           (Capsule_store.Durable.list reopened
+           |> require_ok Capsule_store.error_to_string));
+      Alcotest.(check bool)
+        "source boundary remains pinned" true
+        (Scratch.has_capsule_boundary fixture.scratch fixture.initial ~capsule:id
+        |> require_ok Scratch.error_to_string);
+      Alcotest.(check bool)
+        "target boundary remains pinned" true
+        (Scratch.has_capsule_boundary fixture.scratch fixture.first ~capsule:id
+        |> require_ok Scratch.error_to_string))
+
+let durable_creation_interruptions_retry_and_conflict_reuse () =
+  with_store (fun root store ->
+      let fixture = make_scratch_fixture root store in
+      let id = capsule_id 90 in
+      let before =
+        Capsule_store.Durable.create_from_checkpoints ~store ~scratch:fixture.scratch
+          ~id ~title:"retry" ~description:"safe" ~dependencies:[] ~evidence:[]
+          ~from:fixture.initial ~target:fixture.first ~created_at:3L ~changed_at:3L
+          ~fail_at:Capsule_store.Durable.Before_create_current_ref ()
+      in
+      (match before with
+      | Error (Capsule_store.Injected_interruption _) -> ()
+      | Error error -> Alcotest.fail (Capsule_store.error_to_string error)
+      | Ok _ -> Alcotest.fail "pre-ref interruption exposed a capsule");
+      (match Capsule_store.Durable.read_current store id with
+      | Error (Capsule_store.Current_ref_missing _) -> ()
+      | Error error -> Alcotest.fail (Capsule_store.error_to_string error)
+      | Ok _ -> Alcotest.fail "pre-ref interruption left a visible capsule");
+      let created =
+        Capsule_store.Durable.create_from_checkpoints ~store ~scratch:fixture.scratch
+          ~id ~title:"retry" ~description:"safe" ~dependencies:[] ~evidence:[]
+          ~from:fixture.initial ~target:fixture.first ~created_at:3L ~changed_at:3L ()
+        |> require_ok Capsule_store.error_to_string
+      in
+      let retried =
+        Capsule_store.Durable.create_from_checkpoints ~store ~scratch:fixture.scratch
+          ~id ~title:"retry" ~description:"safe" ~dependencies:[] ~evidence:[]
+          ~from:fixture.initial ~target:fixture.first ~created_at:3L ~changed_at:3L ()
+        |> require_ok Capsule_store.error_to_string
+      in
+      Alcotest.(check bool)
+        "retry preserves physical revision" true
+        (Store.Stored_object_id.equal
+           (Capsule_store.Durable.resolved_revision_object created)
+           (Capsule_store.Durable.resolved_revision_object retried));
+      (match
+         Capsule_store.Durable.create_from_checkpoints ~store ~scratch:fixture.scratch
+           ~id ~title:"different" ~description:"safe" ~dependencies:[] ~evidence:[]
+           ~from:fixture.initial ~target:fixture.first ~created_at:3L ~changed_at:3L ()
+       with
+      | Error (Capsule_store.Conflicting_capsule_id_reuse _) -> ()
+      | Error error -> Alcotest.fail (Capsule_store.error_to_string error)
+      | Ok _ -> Alcotest.fail "conflicting capsule reuse was accepted");
+      let after_id = capsule_id 91 in
+      let after =
+        Capsule_store.Durable.create_from_checkpoints ~store ~scratch:fixture.scratch
+          ~id:after_id ~title:"after" ~description:"safe" ~dependencies:[] ~evidence:[]
+          ~from:fixture.initial ~target:fixture.first ~created_at:3L ~changed_at:3L
+          ~fail_at:Capsule_store.Durable.After_create_current_ref ()
+      in
+      (match after with
+      | Error (Capsule_store.Injected_interruption _) -> ()
+      | Error error -> Alcotest.fail (Capsule_store.error_to_string error)
+      | Ok _ -> Alcotest.fail "post-ref interruption did not interrupt");
+      ignore
+        (Capsule_store.Durable.read_current store after_id
+        |> require_ok Capsule_store.error_to_string))
+
+let folding_is_cas_protected_and_preserves_history () =
+  with_store (fun root store ->
+      let id = capsule_id 100 in
+      let fixture, initial = durable_create root store id in
+      let expected_revision =
+        Capsule_store.revision_id (Capsule_store.Durable.resolved_revision initial)
+      in
+      let folded =
+        Capsule_store.Durable.fold_from_checkpoints ~store ~scratch:fixture.scratch
+          ~capsule:id ~expected_revision ~expected_generation:0L ~evidence:[]
+          ~from:fixture.first ~target:fixture.second ~created_at:4L ~changed_at:4L ()
+        |> require_ok Capsule_store.error_to_string
+      in
+      let folded_revision = Capsule_store.Durable.resolved_revision folded in
+      Alcotest.(check bool)
+        "fold creates a new logical revision" false
+        (Id.Capsule_revision_id.equal expected_revision
+           (Capsule_store.revision_id folded_revision));
+      Alcotest.(check bool)
+        "fold retains capsule ID" true
+        (Id.Capsule_id.equal id (Capsule_store.revision_capsule folded_revision));
+      Alcotest.(check int)
+        "history retains old revision" 2
+        (List.length
+           (Capsule_store.Durable.history store id
+           |> require_ok Capsule_store.error_to_string));
+      (match
+         Capsule_store.Durable.fold_from_checkpoints ~store ~scratch:fixture.scratch
+           ~capsule:id ~expected_revision ~expected_generation:0L ~evidence:[]
+           ~from:fixture.first ~target:fixture.second ~created_at:4L ~changed_at:4L ()
+       with
+      | Error (Capsule_store.Concurrent_current_update _) -> ()
+      | Error error -> Alcotest.fail (Capsule_store.error_to_string error)
+      | Ok _ -> Alcotest.fail "stale fold was accepted"))
+
 let () =
   Alcotest.run "capsule persistent schemas"
     [
@@ -172,5 +374,11 @@ let () =
             schemas_have_canonical_goldens_and_inverse_decoders;
           Alcotest.test_case "wrong types and malformed bytes reject" `Quick
             decoders_reject_noncanonical_and_wrong_types;
+          Alcotest.test_case "durable creation reopens and pins" `Quick
+            durable_creation_reopens_pins_and_resolves_exactly;
+          Alcotest.test_case "creation interruption retry and reuse" `Quick
+            durable_creation_interruptions_retry_and_conflict_reuse;
+          Alcotest.test_case "folding is CAS protected" `Quick
+            folding_is_cas_protected_and_preserves_history;
         ] );
     ]
