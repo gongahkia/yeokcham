@@ -220,6 +220,38 @@ type compaction_plan = {
 }
 ```
 
+### Retention policy selection
+
+The initial Milestone 3 policy is an in-memory command configuration, not a
+persisted record:
+
+```ocaml
+type retention_policy = {
+  recent_window_seconds : int64;
+  periodic_interval_seconds : int64;
+  storage_budget_bytes : int64 option;
+}
+```
+
+All durations and an optional budget are non-negative. For deterministic
+planning at `now`, a checkpoint with any effective retention reason other than
+`Recent_window` is protected. An otherwise unprotected checkpoint is retained
+when `created_at >= now - recent_window_seconds`. From the remaining expired
+checkpoints, a positive periodic interval retains one checkpoint per
+`created_at / periodic_interval_seconds` bucket: the greatest timestamp, then
+the greatest checkpoint object ID on ties. An interval of zero retains no
+periodic checkpoint. The planner reports a budget overrun but cannot override a
+protected checkpoint.
+
+The current read-only planner verifies the full scratch timeline and follows
+the object graph from `scratch-head` and `retention-head`. Because a retained
+`Scratch_checkpoint` v1 stores immutable parent and event references,
+`scratch-head` reaches its complete ancestry. Therefore it reports policy
+expiry as a blocked removal and estimates identical before/after bytes. It does
+not claim to perform deletion or generation publication. A later physical
+compaction representation must be introduced by ADR with retained-v1 readers,
+migration analysis, and interruption tests.
+
 ### Compaction invariants
 
 1. Every retained checkpoint ID still resolves.
@@ -228,6 +260,9 @@ type compaction_plan = {
 4. No pinned checkpoint is removed.
 5. Compaction is idempotent with respect to repository meaning.
 6. A failed compaction leaves the old valid generation available.
+
+Until that generation representation exists, only read-only compaction analysis
+is implemented; no checkpoint, event, or object is physically removed.
 
 Possible transformations:
 

@@ -5,15 +5,15 @@ Robustness tasks operate only on Paengi's pure functions and generated local fix
 
 ## Active vertical slice
 
-- Milestone: 2 — Scratch history and restore.
-- Task: completed three approved slices: (1) immutable event/checkpoint records, CAS refs, timeline, and retention; (2) guarded exact restore; (3) narrow CLI/watch plus state-machine/recovery closeout.  Do not begin Milestone 3 without a new selection.
-- Modules/files: `paengi_store`; new `paengi_scratch`; `paengi_snapshot`; new CLI executable; scratch, restore, CLI, golden, restart, and state-machine tests; ADR-023; model, architecture, testing, and TODO documentation.
-- Types: typed event, checkpoint, retention-change, snapshot, and mutable-ref handles; exact scratch operations and state; structured record/ref/timeline/restore errors; M0 model payloads remain unchanged.
-- Formats: Scratch_event v1, Scratch_checkpoint v1, Retention_change v1, and mutable-ref v1 from ADR-023.  Timeline/path indexes, if any, are rebuildable caches only.
-- Invariants: immutable records use ADR-020 IDs; checkpoint/event/base/result/replay agreement is verified; CAS refs have no silent last-writer-wins update; pinning never changes checkpoint identity; timeline is bounded ancestry order; restore validates a safety checkpoint, plan preconditions, exact result, and target-head publication order.
-- Tests: focused schema/CAS/timeline/pin/restore tests; deterministic QCheck replay and state-machine properties with printed seeds; corruption, restart, external-mutation, and failed-publication cases; v1 golden bytes. Verified with `make check` and `make property-test PROPERTY_TEST_SEED=17`.
+- Milestone: 3 — Scratch compaction.
+- Task: completed three slices: (1) pure deterministic recent-window/periodic policy selection with pin precedence; (2) verified read-only reachability planner and byte estimates; (3) `compact --dry-run --explain`. Stop before safe publication.
+- Modules/files: new `paengi_compaction`; CLI compact dry-run; compaction unit/property tests; model, architecture, testing, README, and TODO documentation.
+- Types: ephemeral `Policy.t`, checkpoint selections, blocked-removal explanation, and read-only compaction plan. Scratch/checkpoint/ref types remain unchanged.
+- Formats: no persistent format, ref, or existing golden bytes changed.
+- Invariants: non-Recent effective retention reasons override expiry; selection is deterministic; every analysed timeline checkpoint is verified through ADR-023 replay; dry-run is read-only; immutable scratch-head ancestry blocks physical removal.
+- Tests: focused policy/planner/missing-record Alcotest tests; bounded deterministic QCheck selection and pin properties with printed seed. Verified with `make check` and `make property-test PROPERTY_TEST_SEED=17`.
 - External libraries: existing Alcotest, QCheck, SHA-256, Profile 1 encoder, and Unix only.
-- ADR changes: ADR-023 accepted for scratch records, retention changes, mutable refs, index rebuildability, and restore durability limits.
+- ADR changes: none. A new ADR is required before compacted-generation publication because Checkpoint v1 parent/event links preserve full ancestry.
 
 ## Milestone 0 — Project and model foundation
 
@@ -147,19 +147,19 @@ Robustness tasks operate only on Paengi's pure functions and generated local fix
 
 ### Retention policy
 
-- [ ] Define policy configuration.
-- [ ] Implement recent full-retention window.
-- [ ] Implement periodic thinning.
+- [x] Define policy configuration.
+- [x] Implement recent full-retention window.
+- [x] Implement periodic thinning.
 - [ ] Implement storage budget.
-- [ ] Ensure pins override expiry.
-- [ ] Add `paengi compact --dry-run --explain`.
+- [x] Ensure pins override expiry.
+- [x] Add `paengi compact --dry-run --explain`.
 
 ### Compaction planner
 
-- [ ] Calculate retained checkpoint set.
-- [ ] Calculate reachable objects.
-- [ ] Identify removable events and objects.
-- [ ] Estimate storage before and after.
+- [x] Calculate retained checkpoint set.
+- [x] Calculate reachable objects.
+- [x] Identify removable events and objects.
+- [x] Estimate storage before and after.
 - [ ] Plan periodic materialisation boundaries.
 - [ ] Verify every retained snapshot in temporary generation.
 

@@ -251,6 +251,15 @@ analyse scratch graph
 
 Strategies should be pluggable and independently benchmarked.
 
+Milestone 3 currently provides a read-only planner. It applies an explicit
+in-memory recent-window/periodic/storage-budget policy to the verified
+ancestry, traverses all objects reachable from `scratch-head` and
+`retention-head`, and reports exact byte estimates. It does not publish a
+generation or delete records: immutable Checkpoint v1 parent/event links make
+every ancestor reachable from the current head. Introducing a compacted
+generation while retaining checkpoint IDs requires a new ADR rather than a
+rewrite of ADR-023 records.
+
 Initial strategies:
 
 1. Delete expired unpinned checkpoint records while preserving referenced snapshots.

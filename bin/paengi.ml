@@ -1,6 +1,7 @@
 module Scratch = Paengi_scratch
 module Snapshot = Paengi_snapshot
 module Store = Paengi_store
+module Compaction = Paengi_compaction
 
 let now () = Int64.of_float (Unix.gettimeofday ())
 
@@ -165,6 +166,64 @@ let change_pin root arguments pin =
           | Error error -> fail Scratch.error_to_string error))
   | _ -> exit 2
 
+let parse_int64 value =
+  try Some (Int64.of_string value) with Failure _ -> None
+
+let compact root arguments =
+  let default = Compaction.Policy.default in
+  let rec parse dry_run explain recent periodic budget timestamp = function
+    | [] ->
+        if (not dry_run) || not explain then exit 2
+        else
+          let policy =
+            Compaction.Policy.create ~recent_window_seconds:recent
+              ~periodic_interval_seconds:periodic ~storage_budget_bytes:budget
+            |> Result.map_error Compaction.Policy.error_to_string
+          in
+          (policy, Option.value timestamp ~default:(now ()))
+    | "--dry-run" :: rest ->
+        parse true explain recent periodic budget timestamp rest
+    | "--explain" :: rest ->
+        parse dry_run true recent periodic budget timestamp rest
+    | "--recent-seconds" :: value :: rest -> (
+        match parse_int64 value with
+        | Some value ->
+            parse dry_run explain value periodic budget timestamp rest
+        | None -> exit 2)
+    | "--periodic-seconds" :: value :: rest -> (
+        match parse_int64 value with
+        | Some value -> parse dry_run explain recent value budget timestamp rest
+        | None -> exit 2)
+    | "--storage-budget-bytes" :: value :: rest -> (
+        match parse_int64 value with
+        | Some value ->
+            parse dry_run explain recent periodic (Some value) timestamp rest
+        | None -> exit 2)
+    | "--now-unix-seconds" :: value :: rest -> (
+        match parse_int64 value with
+        | Some value ->
+            parse dry_run explain recent periodic budget (Some value) rest
+        | None -> exit 2)
+    | _ -> exit 2
+  in
+  let policy, timestamp =
+    parse false false
+      (Compaction.Policy.recent_window_seconds default)
+      (Compaction.Policy.periodic_interval_seconds default)
+      (Compaction.Policy.storage_budget_bytes default)
+      None arguments
+  in
+  match policy with
+  | Error error -> fail Fun.id error
+  | Ok policy -> (
+      match open_scratch root with
+      | Error error -> fail Fun.id error
+      | Ok (store, scratch) -> (
+          match Compaction.analyze ~store scratch ~policy ~now:timestamp with
+          | Error error -> fail Compaction.error_to_string error
+          | Ok plan -> Compaction.render_explain plan |> List.iter print_endline
+          ))
+
 let watch root arguments =
   let interval_ms, debounce_ms, iterations =
     let rec parse interval debounce iterations = function
@@ -236,8 +295,8 @@ let watch root arguments =
 
 let usage () =
   prerr_endline
-    "usage: paengi <init|checkpoint|timeline|restore|pin|unpin|watch> [--root \
-     PATH] ...";
+    "usage: paengi <init|checkpoint|timeline|restore|pin|unpin|compact|watch> \
+     [--root PATH] ...";
   exit 2
 
 let () =
@@ -253,6 +312,7 @@ let () =
         | "restore" -> restore root arguments
         | "pin" -> change_pin root arguments true
         | "unpin" -> change_pin root arguments false
+        | "compact" -> compact root arguments
         | "watch" -> watch root arguments
         | _ -> usage ())
     | _ -> usage ()

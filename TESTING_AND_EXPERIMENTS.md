@@ -69,6 +69,12 @@ populated-directory restore is tested for an available safety checkpoint and no
 target-head advancement; it is not represented as crash-atomic unless an
 operation journal is implemented.
 
+Milestone 3 additionally checks deterministic recent-window and periodic
+selection, pin precedence, permutation-independent selection, verified
+reachability accounting, read-only dry-run behaviour, and rejection of missing
+reachable records. The current planner must report blocked removal rather than
+claim physical compaction while `scratch-head` reaches immutable ancestry.
+
 #### P4 — Compaction preservation
 
 Before and after compaction, every retained checkpoint resolves to the same snapshot.

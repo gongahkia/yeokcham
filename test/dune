@@ -113,6 +113,17 @@
  (libraries alcotest paengi_scratch paengi_snapshot paengi_store unix))
 
 (test
+ (name test_compaction)
+ (modules test_compaction)
+ (libraries
+  alcotest
+  paengi_compaction
+  paengi_scratch
+  paengi_snapshot
+  paengi_store
+  unix))
+
+(test
  (name scratch_property_test)
  (modules scratch_property_test)
  (libraries
@@ -123,6 +134,17 @@
   paengi_snapshot
   paengi_store
   unix))
+
+(test
+ (name compaction_property_test)
+ (modules compaction_property_test)
+ (libraries
+  alcotest
+  qcheck-core
+  qcheck-alcotest
+  paengi_compaction
+  paengi_scratch
+  paengi_store))
 
 (test
  (name encoding_property_test)
@@ -172,6 +194,7 @@
   (:store_property_test store_property_test.exe)
   (:snapshot_property_test snapshot_property_test.exe)
   (:scratch_property_test scratch_property_test.exe)
+  (:compaction_property_test compaction_property_test.exe)
   (source_tree fixtures/encoding))
  (action
   (progn
@@ -179,4 +202,5 @@
    (run %{model_property_test})
    (run %{store_property_test})
    (run %{snapshot_property_test})
-   (run %{scratch_property_test}))))
+   (run %{scratch_property_test})
+   (run %{compaction_property_test}))))

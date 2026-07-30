@@ -44,9 +44,10 @@ The supported compiler is OCaml 5.5.0. The exact constraint is recorded in `dune
 
 ## Status
 
-Milestone 2 implements local scratch checkpoints, exact guarded restore, immutable
-retention changes, and an explicit polling command. paengi remains a portfolio
-and research prototype, not a production Git replacement.
+Milestone 3 has a read-only scratch-compaction policy/planner: it explains
+retention selection, reachability, and why current immutable ancestry blocks
+physical removal. paengi remains a portfolio and research prototype, not a
+production Git replacement.
 
 See `CONTRIBUTING.md` for development rules. Paengi is licensed under the MIT License.
 
@@ -72,6 +73,7 @@ dune exec bin/paengi.exe -- restore --dry-run <checkpoint>
 dune exec bin/paengi.exe -- restore <checkpoint>
 dune exec bin/paengi.exe -- pin <checkpoint>
 dune exec bin/paengi.exe -- unpin <checkpoint>
+dune exec bin/paengi.exe -- compact --dry-run --explain
 dune exec bin/paengi.exe -- watch --interval-ms 500 --debounce-ms 500
 ```
 
