@@ -352,7 +352,7 @@ Cache layers:
 
 Every cache entry must be treated as disposable and integrity-checked.
 
-The initial local helper cache is a complete packed bare Git snapshot under `cache/packs/<effective-ref-state-sha256>`. It has no canonical or recovery role, has no capacity policy yet, and is recreated from verified Yeokcham records if its exact state or C Git fsck check fails. It cannot cache a negotiated upload-pack response because wants, haves, and capabilities vary per client connection.
+The initial local helper cache is a complete packed bare Git snapshot under `cache/packs/<effective-ref-state-sha256>`. It has no canonical or recovery role, has no capacity policy yet, and is recreated from verified Yeokcham records if its exact state or C Git fsck check fails. `yeokcham cache clear <repo>` reopens the repository bootstrap, rejects a symlink or non-directory cache path, removes only that `cache/` directory, and synchronizes the repository directory. It cannot cache a negotiated upload-pack response because wants, haves, and capabilities vary per client connection.
 
 Receive-pack staging is never cached. A push-specific private bare export starts at one effective ref state, and the later canonical import uses that state as a compare-and-swap predecessor. A conflicting canonical transition can leave only unreachable immutable records; it cannot overwrite refs or receive a success status. The initial advertisement is relayed as packet lines, while the post-request response is bounded to 128 MiB and held until canonical verification succeeds.
 

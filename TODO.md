@@ -242,7 +242,7 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 - [ ] Implement LRU or benchmarked replacement policy.
 - [ ] Add cache verification.
 - [ ] Add cache statistics.
-- [ ] Add cache clearing without repository damage.
+- [x] Add cache clearing without repository damage.
 
 ### Sparse workflow
 
@@ -254,7 +254,7 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 ### Exit criteria
 
 - [ ] A documented clone workflow avoids downloading unrelated historical blobs.
-- [ ] Cache deletion never changes repository correctness.
+- [x] Cache deletion never changes repository correctness.
 - [ ] Benchmark results show transfer and latency behaviour under cold and warm cache.
 
 ## Milestone 7 — GitHub mirror

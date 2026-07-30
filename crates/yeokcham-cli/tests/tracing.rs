@@ -308,6 +308,66 @@ fn cli_import_verify_inspect_and_export_round_trip() {
 }
 
 #[test]
+fn cli_clears_disposable_cache_without_damaging_repository() {
+    let directory = TestDirectory::new();
+    let repository = directory.path().join("repository");
+    let repository = LocalRepository::create(&repository).expect("create repository");
+    let cache_entry = repository.path().join("cache/packs/stale/entry");
+    fs::create_dir_all(cache_entry.parent().expect("cache entry parent")).expect("create cache");
+    fs::write(&cache_entry, b"disposable cache").expect("write cache entry");
+
+    for _ in 0..2 {
+        let output = Command::new(env!("CARGO_BIN_EXE_yeokcham"))
+            .args(["cache", "clear"])
+            .arg(repository.path())
+            .output()
+            .expect("clear cache");
+        assert!(
+            output.status.success(),
+            "cache clear must succeed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(output.stdout, b"cache_cleared\n");
+        assert!(!repository.path().join("cache").exists());
+    }
+
+    let output = Command::new(env!("CARGO_BIN_EXE_yeokcham"))
+        .arg("verify")
+        .arg(repository.path())
+        .output()
+        .expect("verify after cache clear");
+    assert!(
+        output.status.success(),
+        "cache deletion must not damage canonical storage: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn cli_refuses_a_symlinked_cache_path() {
+    use std::os::unix::fs::symlink;
+
+    let directory = TestDirectory::new();
+    let repository = directory.path().join("repository");
+    let repository = LocalRepository::create(&repository).expect("create repository");
+    let target = directory.path().join("outside-cache");
+    fs::create_dir(&target).expect("create outside directory");
+    let sentinel = target.join("sentinel");
+    fs::write(&sentinel, b"preserve").expect("write sentinel");
+    symlink(&target, repository.path().join("cache")).expect("symlink cache");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_yeokcham"))
+        .args(["cache", "clear"])
+        .arg(repository.path())
+        .output()
+        .expect("clear symlinked cache");
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("error[corrupt_data]"));
+    assert_eq!(fs::read(sentinel).expect("read sentinel"), b"preserve");
+}
+
+#[test]
 fn remote_helper_serves_blob_none_and_size_filtered_promisor_clones() {
     let directory = TestDirectory::new();
     let source = directory.path().join("source");

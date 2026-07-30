@@ -91,6 +91,7 @@ yeokcham inspect refs <yeokcham-repo>
 yeokcham inspect storage <yeokcham-repo>
 yeokcham inspect object <yeokcham-repo> <git-object-id>
 yeokcham export-git <yeokcham-repo> <destination-git-repo>
+yeokcham cache clear <yeokcham-repo>
 yeokcham drive auth --client-id <google-desktop-client-id>
 git --git-dir=<destination-git-repo> fsck --full --strict
 ```
@@ -121,7 +122,7 @@ git clone --filter=blob:none --no-checkout yeokcham::/absolute/path/to/yeokcham-
 git clone --filter=blob:limit=1048576 --no-checkout yeokcham::/absolute/path/to/yeokcham-repository
 ```
 
-C Git records promisor state and hydrates omitted reachable blobs on checkout or access through a new helper connection. Yeokcham still reconstructs a complete disposable snapshot before C Git filters its outgoing pack, so this is Git-transfer compatibility rather than measured backend partial retrieval. After a successful `yeokcham sync`, ordinary Git can fetch updated and deleted refs with `git fetch --prune`.
+C Git records promisor state and hydrates omitted reachable blobs on checkout or access through a new helper connection. Yeokcham still reconstructs a complete disposable snapshot before C Git filters its outgoing pack, so this is Git-transfer compatibility rather than measured backend partial retrieval. `yeokcham cache clear <repo>` validates the repository bootstrap, rejects a symlink or non-directory cache path, and removes only `<repo>/cache`; the next helper connection rebuilds a required snapshot from verified storage. After a successful `yeokcham sync`, ordinary Git can fetch updated and deleted refs with `git fetch --prune`.
 
 `git push` stages each `connect git-receive-pack` operation in a private temporary bare repository. C Git checks the pack and advertised old ref values, then Yeokcham imports and verifies the complete staged graph using its normal storage policy. The helper relays a successful final status only after a checked canonical ref-journal append. Fast-forward branch create, update, and deletion are allowed; force branch replacement is rejected. Tags are immutable after creation: move and delete requests are rejected. Push remains an unsigned single-trusted-local-writer workflow, and shallow operations remain deferred.
 

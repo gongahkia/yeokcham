@@ -63,6 +63,9 @@ enum Command {
     InspectRefs {
         repository: PathBuf,
     },
+    CacheClear {
+        repository: PathBuf,
+    },
     DriveAuth {
         client_id: String,
         redirect_port: Option<u16>,
@@ -141,6 +144,7 @@ fn main() -> ExitCode {
         Command::InspectObject { repository, id } => inspect_object(repository, id),
         Command::InspectStorage { repository } => inspect_storage(repository),
         Command::InspectRefs { repository } => inspect_refs(repository),
+        Command::CacheClear { repository } => cache_clear(repository),
         Command::DriveAuth {
             client_id,
             redirect_port,
@@ -236,6 +240,11 @@ fn parse_command(arguments: Vec<OsString>) -> Result<Command> {
         }
         "inspect" if arguments.len() == 3 && arguments[1].as_os_str() == OsStr::new("refs") => {
             Ok(Command::InspectRefs {
+                repository: PathBuf::from(&arguments[2]),
+            })
+        }
+        "cache" if arguments.len() == 3 && arguments[1].as_os_str() == OsStr::new("clear") => {
+            Ok(Command::CacheClear {
                 repository: PathBuf::from(&arguments[2]),
             })
         }
@@ -557,6 +566,47 @@ fn inspect_refs(repository: PathBuf) -> Result<()> {
     for event in events {
         println!("device={} sequence={}", event.device_id(), event.sequence());
     }
+    Ok(())
+}
+
+fn cache_clear(repository: PathBuf) -> Result<()> {
+    let repository = LocalRepository::open(repository)?;
+    let cache = repository.path().join("cache");
+    match fs::symlink_metadata(&cache) {
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
+            return Err(Error::new(
+                ErrorKind::CorruptData,
+                "repository cache path is invalid",
+            ));
+        }
+        Ok(_) => {
+            fs::remove_dir_all(&cache).map_err(|error| {
+                Error::with_source(
+                    ErrorKind::Io,
+                    "repository cache could not be removed",
+                    error,
+                )
+            })?;
+            File::open(repository.path())
+                .and_then(|directory| directory.sync_all())
+                .map_err(|error| {
+                    Error::with_source(
+                        ErrorKind::Io,
+                        "repository cache deletion could not be synchronized",
+                        error,
+                    )
+                })?;
+        }
+        Err(error) => {
+            return Err(Error::with_source(
+                ErrorKind::Io,
+                "repository cache could not be inspected",
+                error,
+            ));
+        }
+    }
+    println!("cache_cleared");
     Ok(())
 }
 
@@ -961,13 +1011,27 @@ fn usage_error() -> Error {
 
 fn print_usage() {
     println!(
-        "usage:\n  yeokcham init --from-git <source-git-repo> <yeokcham-repo> [--chunked-blob-minimum <bytes>]\n  yeokcham sync --from-git <source-git-repo> <yeokcham-repo> --device <device-id>\n  yeokcham verify <yeokcham-repo>\n  yeokcham export-git <yeokcham-repo> <destination-git-repo>\n  yeokcham inspect object <yeokcham-repo> <git-object-id>\n  yeokcham inspect storage <yeokcham-repo>\n  yeokcham inspect refs <yeokcham-repo>\n  yeokcham key create-export --passphrase-stdin <yeokcham-repo> <recovery-key-export>\n  yeokcham drive auth --client-id <google-desktop-client-id> [--redirect-port <port>]\n  yeokcham drive init --client-id <google-desktop-client-id>\n  yeokcham drive backup|push --client-id <google-desktop-client-id> --folder-id <drive-folder-id> --key-export <recovery-key-export> --passphrase-stdin <yeokcham-repo>\n  yeokcham drive restore|clone --client-id <google-desktop-client-id> --folder-id <drive-folder-id> --key-export <recovery-key-export> --passphrase-stdin <destination>\n  yeokcham drive verify --client-id <google-desktop-client-id> --folder-id <drive-folder-id> --key-export <recovery-key-export> --passphrase-stdin\n  yeokcham drive journal inspect --client-id <google-desktop-client-id> --folder-id <drive-folder-id> --key-export <recovery-key-export> --root-key <root-ed25519-public-key-hex> --passphrase-stdin <yeokcham-repo>"
+        "usage:\n  yeokcham init --from-git <source-git-repo> <yeokcham-repo> [--chunked-blob-minimum <bytes>]\n  yeokcham sync --from-git <source-git-repo> <yeokcham-repo> --device <device-id>\n  yeokcham verify <yeokcham-repo>\n  yeokcham export-git <yeokcham-repo> <destination-git-repo>\n  yeokcham inspect object <yeokcham-repo> <git-object-id>\n  yeokcham inspect storage <yeokcham-repo>\n  yeokcham inspect refs <yeokcham-repo>\n  yeokcham cache clear <yeokcham-repo>\n  yeokcham key create-export --passphrase-stdin <yeokcham-repo> <recovery-key-export>\n  yeokcham drive auth --client-id <google-desktop-client-id> [--redirect-port <port>]\n  yeokcham drive init --client-id <google-desktop-client-id>\n  yeokcham drive backup|push --client-id <google-desktop-client-id> --folder-id <drive-folder-id> --key-export <recovery-key-export> --passphrase-stdin <yeokcham-repo>\n  yeokcham drive restore|clone --client-id <google-desktop-client-id> --folder-id <drive-folder-id> --key-export <recovery-key-export> --passphrase-stdin <destination>\n  yeokcham drive verify --client-id <google-desktop-client-id> --folder-id <drive-folder-id> --key-export <recovery-key-export> --passphrase-stdin\n  yeokcham drive journal inspect --client-id <google-desktop-client-id> --folder-id <drive-folder-id> --key-export <recovery-key-export> --root-key <root-ed25519-public-key-hex> --passphrase-stdin <yeokcham-repo>"
     );
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parses_cache_clear() {
+        let command = parse_command(
+            ["cache", "clear", "repository"]
+                .map(OsString::from)
+                .to_vec(),
+        )
+        .expect("cache clear");
+        assert!(matches!(
+            command,
+            Command::CacheClear { repository } if repository == PathBuf::from("repository")
+        ));
+    }
 
     #[test]
     fn parses_manual_drive_authorization_with_an_optional_redirect_port() {
