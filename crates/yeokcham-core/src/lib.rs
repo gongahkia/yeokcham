@@ -64,8 +64,8 @@ pub use git_object::{GitObject, GitObjectKind};
 pub use git_object_id::GitObjectId;
 pub use git_repository::GitRepository;
 pub use google_drive_oauth::{
-    DriveOAuthConfiguration, DriveOAuthHttpResponse, DriveOAuthLoopback, DriveOAuthToken,
-    DriveOAuthTransport, UreqDriveOAuthTransport, DRIVE_FILE_SCOPE,
+    DRIVE_FILE_SCOPE, DriveOAuthConfiguration, DriveOAuthHttpResponse, DriveOAuthLoopback,
+    DriveOAuthToken, DriveOAuthTransport, UreqDriveOAuthTransport,
 };
 pub use key_export::RepositoryKeyExport;
 pub use manifest_id::ManifestId;

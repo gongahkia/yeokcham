@@ -136,6 +136,8 @@ Backend credentials must be stored using the operating system credential store w
 
 Do not place OAuth refresh tokens in plaintext repository configuration.
 
+Drive uses a user-supplied Google Desktop OAuth client ID with the non-sensitive `https://www.googleapis.com/auth/drive.file` scope. Desktop authorization uses PKCE S256 and a random-port `127.0.0.1` loopback callback with state verification; it does not embed an OAuth client secret or use deprecated copy/paste authorization. Authorization URLs, callback codes, access tokens, refresh tokens, and token endpoint responses must not appear in default logs.
+
 GitHub tokens should follow least privilege and repository-specific scope where possible.
 
 ## 8. Input validation

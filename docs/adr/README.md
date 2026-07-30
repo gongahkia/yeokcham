@@ -73,3 +73,4 @@ Valid statuses are `Proposed`, `Accepted`, `Rejected`, `Deprecated`, and `Supers
 | [ADR-0065](0065-complete-object-encrypted-backend-envelopes.md) | Accepted | Encrypt complete backend objects with bound envelopes |
 | [ADR-0066](0066-passphrase-encrypted-recovery-key-exports.md) | Accepted | Export and import repository keys with Argon2id |
 | [ADR-0067](0067-encrypted-repository-recovery-snapshots.md) | Accepted | Recover canonical repository files from encrypted backend storage |
+| [ADR-0068](0068-drive-desktop-oauth-and-dedicated-folder.md) | Accepted | Use Desktop OAuth and a user-selected Drive folder |
