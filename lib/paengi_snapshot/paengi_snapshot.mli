@@ -85,7 +85,9 @@ module Materialize : sig
     | Io_error of { path : string; operation : string; message : string }
 
   val error_to_string : error -> string
-  val plan : Paengi_store.repository -> Snapshot.t -> (action list, error) result
+
+  val plan :
+    Paengi_store.repository -> Snapshot.t -> (action list, error) result
 
   val write :
     destination:string ->

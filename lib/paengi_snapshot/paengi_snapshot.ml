@@ -33,21 +33,27 @@ let error_to_string = function
   | Encoding_error error -> Encoding.construction_error_to_string error
   | Envelope_creation_error error -> Envelope.creation_error_to_string error
   | Unexpected_object_type { expected; actual } ->
-      Printf.sprintf "expected %s, got %s" (object_type_name expected)
+      Printf.sprintf "expected %s, got %s"
+        (object_type_name expected)
         (object_type_name actual)
-  | Invalid_schema message -> Printf.sprintf "invalid persisted snapshot schema: %s" message
+  | Invalid_schema message ->
+      Printf.sprintf "invalid persisted snapshot schema: %s" message
   | Unsupported_schema_version version ->
-      Printf.sprintf "unsupported persisted snapshot schema version: %Ld" version
+      Printf.sprintf "unsupported persisted snapshot schema version: %Ld"
+        version
   | Invalid_name name -> Printf.sprintf "invalid tree entry name: %S" name
   | Duplicate_name name -> Printf.sprintf "duplicate tree entry name: %S" name
   | Unordered_name { previous; current } ->
-      Printf.sprintf "tree names are not strictly ordered: %S then %S" previous current
+      Printf.sprintf "tree names are not strictly ordered: %S then %S" previous
+        current
   | Invalid_mode mode -> Printf.sprintf "invalid persisted file mode: %Ld" mode
   | Invalid_object_id_length length ->
       Printf.sprintf "stored object ID must be 32 bytes, got %d" length
-  | Noncanonical_schema_bytes -> "persisted snapshot schema bytes are noncanonical"
+  | Noncanonical_schema_bytes ->
+      "persisted snapshot schema bytes are noncanonical"
   | File_too_large { path; size; limit } ->
-      Printf.sprintf "file exceeds inline storage limit (%d > %d bytes): %s" size limit path
+      Printf.sprintf "file exceeds inline storage limit (%d > %d bytes): %s"
+        size limit path
   | Scan_error { path; operation; message } ->
       Printf.sprintf "%s failed for %s: %s" operation path message
   | Unsupported_file_type { path; kind } ->
@@ -104,10 +110,10 @@ let canonical_payload_matches expected payload =
   else Error Noncanonical_schema_bytes
 
 let valid_name name =
-  not (String.is_empty name)
-  && not (String.equal name ".")
-  && not (String.equal name "..")
-  && not (String.contains name '/')
+  (not (String.is_empty name))
+  && (not (String.equal name "."))
+  && (not (String.equal name ".."))
+  && (not (String.contains name '/'))
   && not (String.contains name '\000')
 
 let mode_code = function Regular -> 0L | Executable -> 1L | Symlink -> 2L
@@ -125,23 +131,28 @@ module Content = struct
   let stored_object_id identity = identity
   let equal_id = Store.Stored_object_id.equal
 
-  let payload value = encoding_array [ Encoding.integer 1L; Encoding.bytes value ]
+  let payload value =
+    encoding_array [ Encoding.integer 1L; Encoding.bytes value ]
 
   let store repository value =
     let* payload = payload value in
     let* object_ = envelope Envelope.Content payload in
-    Store.put repository object_ |> Result.map_error (fun error -> Store_error error)
+    Store.put repository object_
+    |> Result.map_error (fun error -> Store_error error)
 
   let decode payload_value =
     let* fields = exact_array "content" 2 payload_value in
     match fields with
     | [ version; value ] ->
         let* version = integer "content version" version in
-        if not (Int64.equal version 1L) then Error (Unsupported_schema_version version)
+        if not (Int64.equal version 1L) then
+          Error (Unsupported_schema_version version)
         else
           let* value = bytes "content value" value in
           let* canonical = payload value in
-          let* () = canonical_payload_matches (Encoding.encode canonical) payload_value in
+          let* () =
+            canonical_payload_matches (Encoding.encode canonical) payload_value
+          in
           Ok value
     | _ -> Error (Invalid_schema "content must contain two values")
 
@@ -153,7 +164,10 @@ module Content = struct
     if Envelope.object_type object_ <> Envelope.Content then
       Error
         (Unexpected_object_type
-           { expected = Envelope.Content; actual = Envelope.object_type object_ })
+           {
+             expected = Envelope.Content;
+             actual = Envelope.object_type object_;
+           })
     else decode (Envelope.payload object_)
 end
 
@@ -172,7 +186,9 @@ module Tree = struct
   let entries tree = tree
 
   let create entries =
-    let sorted = List.sort (fun (left, _) (right, _) -> String.compare left right) entries in
+    let sorted =
+      List.sort (fun (left, _) (right, _) -> String.compare left right) entries
+    in
     let rec validate previous = function
       | [] -> Ok sorted
       | (name, _) :: rest ->
@@ -183,8 +199,7 @@ module Tree = struct
               | None -> Ok ()
               | Some prior ->
                   let comparison = String.compare prior name in
-                  if comparison = 0 then Error (Duplicate_name name)
-                  else Ok ()
+                  if comparison = 0 then Error (Duplicate_name name) else Ok ()
             in
             validate (Some name) rest
     in
@@ -222,7 +237,8 @@ module Tree = struct
   let store repository tree =
     let* payload = payload tree in
     let* object_ = envelope Envelope.Tree payload in
-    Store.put repository object_ |> Result.map_error (fun error -> Store_error error)
+    Store.put repository object_
+    |> Result.map_error (fun error -> Store_error error)
 
   let decode_entry value =
     let* fields = array_values "tree entry" value in
@@ -237,15 +253,20 @@ module Tree = struct
               let* mode = mode_of_code mode in
               let* content = raw_object_id content in
               Ok (name, File { mode; content })
-          | _ -> Error (Invalid_schema "file tree entry must contain four values")
+          | _ ->
+              Error (Invalid_schema "file tree entry must contain four values")
         else if Int64.equal tag 1L then
           match fields with
           | [ name; child ] ->
               let* name = bytes "tree directory name" name in
               let* child = raw_object_id child in
               Ok (name, Directory child)
-          | _ -> Error (Invalid_schema "directory tree entry must contain three values")
-        else Error (Invalid_schema (Printf.sprintf "unknown tree entry tag: %Ld" tag))
+          | _ ->
+              Error
+                (Invalid_schema "directory tree entry must contain three values")
+        else
+          Error
+            (Invalid_schema (Printf.sprintf "unknown tree entry tag: %Ld" tag))
     | [] -> Error (Invalid_schema "tree entry is empty")
 
   let ensure_input_order entries =
@@ -271,7 +292,8 @@ module Tree = struct
     match fields with
     | [ version; entries_value ] ->
         let* version = integer "tree version" version in
-        if not (Int64.equal version 1L) then Error (Unsupported_schema_version version)
+        if not (Int64.equal version 1L) then
+          Error (Unsupported_schema_version version)
         else
           let* entries_value = array_values "tree entries" entries_value in
           let rec decode_entries reversed = function
@@ -284,7 +306,9 @@ module Tree = struct
           let* () = ensure_input_order entries in
           let* tree = create entries in
           let* canonical = payload tree in
-          let* () = canonical_payload_matches (Encoding.encode canonical) payload_value in
+          let* () =
+            canonical_payload_matches (Encoding.encode canonical) payload_value
+          in
           Ok tree
     | _ -> Error (Invalid_schema "tree must contain two values")
 
@@ -342,19 +366,23 @@ module Snapshot = struct
   let store repository snapshot =
     let* payload = payload snapshot in
     let* object_ = envelope Envelope.Snapshot payload in
-    Store.put repository object_ |> Result.map_error (fun error -> Store_error error)
+    Store.put repository object_
+    |> Result.map_error (fun error -> Store_error error)
 
   let decode payload_value =
     let* fields = exact_array "snapshot" 2 payload_value in
     match fields with
     | [ version; root ] ->
         let* version = integer "snapshot version" version in
-        if not (Int64.equal version 1L) then Error (Unsupported_schema_version version)
+        if not (Int64.equal version 1L) then
+          Error (Unsupported_schema_version version)
         else
           let* root = raw_object_id root in
           let snapshot = create ~root in
           let* canonical = payload snapshot in
-          let* () = canonical_payload_matches (Encoding.encode canonical) payload_value in
+          let* () =
+            canonical_payload_matches (Encoding.encode canonical) payload_value
+          in
           Ok snapshot
     | _ -> Error (Invalid_schema "snapshot must contain two values")
 
@@ -366,7 +394,10 @@ module Snapshot = struct
     if Envelope.object_type object_ <> Envelope.Snapshot then
       Error
         (Unexpected_object_type
-           { expected = Envelope.Snapshot; actual = Envelope.object_type object_ })
+           {
+             expected = Envelope.Snapshot;
+             actual = Envelope.object_type object_;
+           })
     else
       let* snapshot = decode (Envelope.payload object_) in
       let* _ = Tree.load repository snapshot.root in
@@ -374,6 +405,7 @@ module Snapshot = struct
 end
 
 let snapshot_error_to_string = error_to_string
+
 type snapshot_model_error = error
 
 module Materialize = struct
@@ -401,9 +433,11 @@ module Materialize = struct
     | Destination_not_empty path ->
         Printf.sprintf "materialisation destination is not empty: %s" path
     | Unsafe_destination_path components ->
-        Printf.sprintf "unsafe materialisation path: %s" (String.concat "/" components)
+        Printf.sprintf "unsafe materialisation path: %s"
+          (String.concat "/" components)
     | Invalid_symlink_target components ->
-        Printf.sprintf "symlink target contains NUL bytes: %s" (String.concat "/" components)
+        Printf.sprintf "symlink target contains NUL bytes: %s"
+          (String.concat "/" components)
     | Io_error { path; operation; message } ->
         Printf.sprintf "%s failed for %s: %s" operation path message
 
@@ -418,7 +452,8 @@ module Materialize = struct
   let plan repository snapshot =
     let rec plan_tree prefix identity =
       let* tree =
-        Tree.load repository identity |> Result.map_error (fun error -> Snapshot_error error)
+        Tree.load repository identity
+        |> Result.map_error (fun error -> Snapshot_error error)
       in
       let rec plan_entries reversed = function
         | [] -> Ok (List.rev reversed)
@@ -428,7 +463,7 @@ module Materialize = struct
               match entry with
               | Tree.File { mode = Symlink; content } ->
                   Ok [ Create_symlink { path; target = content } ]
-              | Tree.File { mode = (Regular | Executable as mode); content } ->
+              | Tree.File { mode = (Regular | Executable) as mode; content } ->
                   Ok [ Write_file { path; content; mode } ]
               | Tree.Directory child ->
                   let* descendants = plan_tree path child in
@@ -443,14 +478,17 @@ module Materialize = struct
   let validate_destination destination =
     try
       let stat = Unix.lstat destination in
-      if stat.Unix.st_kind <> Unix.S_DIR then Error (Destination_not_directory destination)
+      if stat.Unix.st_kind <> Unix.S_DIR then
+        Error (Destination_not_directory destination)
       else
         try
           if Array.length (Sys.readdir destination) = 0 then Ok ()
           else Error (Destination_not_empty destination)
         with Sys_error message ->
-          Error (Io_error { path = destination; operation = "readdir"; message })
-    with Unix.Unix_error (error, _, _) -> Error (io_error "lstat" destination error)
+          Error
+            (Io_error { path = destination; operation = "readdir"; message })
+    with Unix.Unix_error (error, _, _) ->
+      Error (io_error "lstat" destination error)
 
   let write_all descriptor path bytes =
     let length = Bytes.length bytes in
@@ -468,7 +506,8 @@ module Materialize = struct
                      message = "write returned zero before completion";
                    })
           | count -> write (offset + count)
-        with Unix.Unix_error (error, _, _) -> Error (io_error "write" path error)
+        with Unix.Unix_error (error, _, _) ->
+          Error (io_error "write" path error)
     in
     write 0
 
@@ -488,10 +527,11 @@ module Materialize = struct
       let* () = write_result in
       let* () = close_result in
       let permissions = if mode = Executable then 0o755 else 0o644 in
-      (try
-         Unix.chmod path permissions;
-         Ok ()
-       with Unix.Unix_error (error, _, _) -> Error (io_error "chmod" path error))
+      try
+        Unix.chmod path permissions;
+        Ok ()
+      with Unix.Unix_error (error, _, _) ->
+        Error (io_error "chmod" path error)
     with Unix.Unix_error (error, _, _) -> Error (io_error "create" path error)
 
   let create_directory path =
@@ -501,12 +541,14 @@ module Materialize = struct
     with Unix.Unix_error (error, _, _) -> Error (io_error "mkdir" path error)
 
   let create_symlink path target components =
-    if String.contains target '\000' then Error (Invalid_symlink_target components)
+    if String.contains target '\000' then
+      Error (Invalid_symlink_target components)
     else
       try
         Unix.symlink target path;
         Ok ()
-      with Unix.Unix_error (error, _, _) -> Error (io_error "symlink" path error)
+      with Unix.Unix_error (error, _, _) ->
+        Error (io_error "symlink" path error)
 
   let write ~destination repository snapshot =
     let* () = validate_destination destination in
@@ -566,13 +608,15 @@ let read_file path size =
                          message = "file ended before its recorded size";
                        })
               | count -> read (offset + count)
-            with Unix.Unix_error (error, _, _) -> Error (scan_error "read" path error)
+            with Unix.Unix_error (error, _, _) ->
+              Error (scan_error "read" path error)
         in
         let* () = read 0 in
         let probe = Bytes.create 1 in
         let* extra =
           try Ok (Unix.read descriptor probe 0 1)
-          with Unix.Unix_error (error, _, _) -> Error (scan_error "read" path error)
+          with Unix.Unix_error (error, _, _) ->
+            Error (scan_error "read" path error)
         in
         if extra = 0 then Ok (Bytes.unsafe_to_string bytes)
         else
@@ -598,13 +642,15 @@ let read_ignore_file root =
     if stat.Unix.st_kind <> Unix.S_REG then
       Error (Invalid_ignore_path { line = 0; path = ".paengiignore" })
     else if stat.Unix.st_size > inline_file_limit then
-      Error (File_too_large { path; size = stat.Unix.st_size; limit = inline_file_limit })
+      Error
+        (File_too_large
+           { path; size = stat.Unix.st_size; limit = inline_file_limit })
     else
       let* contents = read_file path stat.Unix.st_size in
       let lines = String.split_on_char '\n' contents in
       let rec parse line_number reversed = function
         | [] -> Ok (List.rev reversed)
-        | line :: rest ->
+        | line :: rest -> (
             let line =
               if String.ends_with ~suffix:"\r" line then
                 String.sub line 0 (String.length line - 1)
@@ -614,8 +660,11 @@ let read_ignore_file root =
               parse (line_number + 1) reversed rest
             else
               match safe_ignore_components line with
-              | Some components -> parse (line_number + 1) (components :: reversed) rest
-              | None -> Error (Invalid_ignore_path { line = line_number; path = line })
+              | Some components ->
+                  parse (line_number + 1) (components :: reversed) rest
+              | None ->
+                  Error
+                    (Invalid_ignore_path { line = line_number; path = line }))
       in
       parse 1 [] lines
   with
@@ -629,12 +678,14 @@ let rec is_prefix prefix path =
   | left :: left_rest, right :: right_rest ->
       String.equal left right && is_prefix left_rest right_rest
 
-let is_ignored rules components = List.exists (fun rule -> is_prefix rule components) rules
+let is_ignored rules components =
+  List.exists (fun rule -> is_prefix rule components) rules
 
 let scan ~root ~store =
   let* root_stat =
     try Ok (Unix.lstat root)
-    with Unix.Unix_error (error, _, _) -> Error (scan_error "lstat" root error)
+    with Unix.Unix_error (error, _, _) ->
+      Error (scan_error "lstat" root error)
   in
   if root_stat.Unix.st_kind <> Unix.S_DIR then
     Error (Unsupported_file_type { path = root; kind = "not a directory" })
@@ -679,7 +730,8 @@ let scan ~root ~store =
                     let* contents = read_file child_path stat.Unix.st_size in
                     let* content = Content.store store contents in
                     let mode =
-                      if stat.Unix.st_perm land 0o111 = 0 then Regular else Executable
+                      if stat.Unix.st_perm land 0o111 = 0 then Regular
+                      else Executable
                     in
                     Ok (Tree.File { mode; content })
                 else if stat.Unix.st_kind = Unix.S_LNK then
@@ -693,7 +745,10 @@ let scan ~root ~store =
                 else
                   Error
                     (Unsupported_file_type
-                       { path = child_path; kind = "non-regular filesystem node" })
+                       {
+                         path = child_path;
+                         kind = "non-regular filesystem node";
+                       })
               in
               scan_entries ((name, entry) :: reversed) rest
       in

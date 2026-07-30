@@ -37,12 +37,15 @@ let with_store run =
       run root store)
 
 let write_file path bytes =
-  Out_channel.with_open_bin path (fun channel -> Out_channel.output_string channel bytes)
+  Out_channel.with_open_bin path (fun channel ->
+      Out_channel.output_string channel bytes)
 
 let make_directory path = Unix.mkdir path 0o700
 
 let stored_envelope store identity =
-  Store.get store identity |> require_ok Store.error_to_string |> Envelope.encode
+  Store.get store identity
+  |> require_ok Store.error_to_string
+  |> Envelope.encode
 
 let require_golden name =
   Golden.read_lower_hex_file (Filename.concat "golden" name)
@@ -74,19 +77,23 @@ let canonical_tree_order_and_reference_types () =
         |> require_ok Snapshot_store.error_to_string
       in
       let identity =
-        Snapshot_store.Tree.store store tree |> require_ok Snapshot_store.error_to_string
+        Snapshot_store.Tree.store store tree
+        |> require_ok Snapshot_store.error_to_string
       in
       let loaded =
-        Snapshot_store.Tree.load store identity |> require_ok Snapshot_store.error_to_string
+        Snapshot_store.Tree.load store identity
+        |> require_ok Snapshot_store.error_to_string
       in
-      Alcotest.(check (list string)) "tree names are canonical" [ "a"; "z" ]
-        (entry_names loaded);
+      Alcotest.(check (list string))
+        "tree names are canonical" [ "a"; "z" ] (entry_names loaded);
       match find_entry "a" loaded with
       | Snapshot_store.Tree.File { mode = Executable; content } ->
-          Alcotest.(check bool) "content identity is preserved" true
+          Alcotest.(check bool)
+            "content identity is preserved" true
             (Snapshot_store.Content.equal_id left content)
       | Snapshot_store.Tree.File { mode = Regular | Symlink; _ }
-      | Snapshot_store.Tree.Directory _ -> Alcotest.fail "stored tree entry changed")
+      | Snapshot_store.Tree.Directory _ ->
+          Alcotest.fail "stored tree entry changed")
 
 let scanner_preserves_bytes_modes_symlinks_and_ignores () =
   with_directory "paengi-scan-" (fun root ->
@@ -95,55 +102,73 @@ let scanner_preserves_bytes_modes_symlinks_and_ignores () =
       write_file (Filename.concat root "binary") "\000\255bytes";
       write_file (Filename.concat root "run") "#!/bin/sh\necho paengi\n";
       Unix.chmod (Filename.concat root "run") 0o755;
-      write_file (Filename.concat (Filename.concat root "nested") "guide") "guide\n";
+      write_file
+        (Filename.concat (Filename.concat root "nested") "guide")
+        "guide\n";
       Unix.symlink "nested/guide" (Filename.concat root "guide-link");
       write_file (Filename.concat root "ignored") "skip";
-      write_file (Filename.concat (Filename.concat root "ignored-directory") "skip") "skip";
-      write_file (Filename.concat root ".paengiignore") "ignored\nignored-directory\n";
+      write_file
+        (Filename.concat (Filename.concat root "ignored-directory") "skip")
+        "skip";
+      write_file
+        (Filename.concat root ".paengiignore")
+        "ignored\nignored-directory\n";
       let store = Store.init ~root |> require_ok Store.error_to_string in
       let identity, snapshot =
-        Snapshot_store.scan ~root ~store |> require_ok Snapshot_store.error_to_string
+        Snapshot_store.scan ~root ~store
+        |> require_ok Snapshot_store.error_to_string
       in
       let duplicate, _ =
-        Snapshot_store.scan ~root ~store |> require_ok Snapshot_store.error_to_string
+        Snapshot_store.scan ~root ~store
+        |> require_ok Snapshot_store.error_to_string
       in
-      Alcotest.(check bool) "scan identity is deterministic" true
+      Alcotest.(check bool)
+        "scan identity is deterministic" true
         (Snapshot_store.Snapshot.equal_id identity duplicate);
       let loaded =
         Snapshot_store.Snapshot.load store identity
         |> require_ok Snapshot_store.error_to_string
       in
-      Alcotest.(check bool) "snapshot root is preserved" true
-        (Snapshot_store.Tree.equal_id (Snapshot_store.Snapshot.root snapshot)
+      Alcotest.(check bool)
+        "snapshot root is preserved" true
+        (Snapshot_store.Tree.equal_id
+           (Snapshot_store.Snapshot.root snapshot)
            (Snapshot_store.Snapshot.root loaded));
       let root_tree =
         Snapshot_store.Tree.load store (Snapshot_store.Snapshot.root loaded)
         |> require_ok Snapshot_store.error_to_string
       in
-      Alcotest.(check (list string)) "root entries"
+      Alcotest.(check (list string))
+        "root entries"
         [ ".paengiignore"; "binary"; "guide-link"; "nested"; "run" ]
         (entry_names root_tree);
       (match find_entry "binary" root_tree with
       | Snapshot_store.Tree.File { mode = Regular; content } ->
-          Alcotest.(check string) "binary bytes" "\000\255bytes"
+          Alcotest.(check string)
+            "binary bytes" "\000\255bytes"
             (Snapshot_store.Content.load store content
             |> require_ok Snapshot_store.error_to_string)
       | Snapshot_store.Tree.File { mode = Executable | Symlink; _ }
-      | Snapshot_store.Tree.Directory _ -> Alcotest.fail "binary entry mode changed");
+      | Snapshot_store.Tree.Directory _ ->
+          Alcotest.fail "binary entry mode changed");
       (match find_entry "run" root_tree with
       | Snapshot_store.Tree.File { mode = Executable; content } ->
-          Alcotest.(check string) "executable bytes" "#!/bin/sh\necho paengi\n"
+          Alcotest.(check string)
+            "executable bytes" "#!/bin/sh\necho paengi\n"
             (Snapshot_store.Content.load store content
             |> require_ok Snapshot_store.error_to_string)
       | Snapshot_store.Tree.File { mode = Regular | Symlink; _ }
-      | Snapshot_store.Tree.Directory _ -> Alcotest.fail "executable mode changed");
-      (match find_entry "guide-link" root_tree with
+      | Snapshot_store.Tree.Directory _ ->
+          Alcotest.fail "executable mode changed");
+      match find_entry "guide-link" root_tree with
       | Snapshot_store.Tree.File { mode = Symlink; content } ->
-          Alcotest.(check string) "symlink target bytes" "nested/guide"
+          Alcotest.(check string)
+            "symlink target bytes" "nested/guide"
             (Snapshot_store.Content.load store content
             |> require_ok Snapshot_store.error_to_string)
       | Snapshot_store.Tree.File { mode = Regular | Executable; _ }
-      | Snapshot_store.Tree.Directory _ -> Alcotest.fail "symlink mode changed"))
+      | Snapshot_store.Tree.Directory _ ->
+          Alcotest.fail "symlink mode changed")
 
 let duplicate_content_is_reused () =
   with_directory "paengi-content-reuse-" (fun root ->
@@ -151,7 +176,8 @@ let duplicate_content_is_reused () =
       write_file (Filename.concat root "right") "same";
       let store = Store.init ~root |> require_ok Store.error_to_string in
       let identity, _ =
-        Snapshot_store.scan ~root ~store |> require_ok Snapshot_store.error_to_string
+        Snapshot_store.scan ~root ~store
+        |> require_ok Snapshot_store.error_to_string
       in
       let snapshot =
         Snapshot_store.Snapshot.load store identity
@@ -165,9 +191,11 @@ let duplicate_content_is_reused () =
       | Snapshot_store.Tree.File { content = left; _ } -> (
           match find_entry "right" tree with
           | Snapshot_store.Tree.File { content = right; _ } ->
-              Alcotest.(check bool) "content object reused" true
+              Alcotest.(check bool)
+                "content object reused" true
                 (Snapshot_store.Content.equal_id left right)
-          | Snapshot_store.Tree.Directory _ -> Alcotest.fail "right file disappeared")
+          | Snapshot_store.Tree.Directory _ ->
+              Alcotest.fail "right file disappeared")
       | Snapshot_store.Tree.Directory _ -> Alcotest.fail "left file disappeared")
 
 let malformed_tree_and_ignore_are_rejected () =
@@ -192,8 +220,8 @@ let malformed_tree_and_ignore_are_rejected () =
         Encoding.array
           [
             Encoding.integer 1L;
-            (Encoding.array [ entry "z"; entry "a" ]
-            |> require_ok Encoding.construction_error_to_string);
+            Encoding.array [ entry "z"; entry "a" ]
+            |> require_ok Encoding.construction_error_to_string;
           ]
         |> require_ok Encoding.construction_error_to_string
       in
@@ -203,20 +231,24 @@ let malformed_tree_and_ignore_are_rejected () =
           ~mandatory_features:Envelope.supported_mandatory_features ~payload ()
         |> require_envelope
       in
-      let stored = Store.put store envelope |> require_ok Store.error_to_string in
+      let stored =
+        Store.put store envelope |> require_ok Store.error_to_string
+      in
       let typed = Snapshot_store.Tree.of_stored_object_id stored in
-      (match Snapshot_store.Tree.load store typed with
+      match Snapshot_store.Tree.load store typed with
       | Error error ->
-          Alcotest.(check bool) "unordered tree rejection" true
+          Alcotest.(check bool)
+            "unordered tree rejection" true
             (String.starts_with ~prefix:"tree names are not strictly ordered: "
                (Snapshot_store.error_to_string error))
-      | Ok _ -> Alcotest.fail "unordered tree was accepted"));
+      | Ok _ -> Alcotest.fail "unordered tree was accepted");
   with_directory "paengi-invalid-ignore-" (fun root ->
       write_file (Filename.concat root ".paengiignore") "../outside\n";
       let store = Store.init ~root |> require_ok Store.error_to_string in
       match Snapshot_store.scan ~root ~store with
       | Error error ->
-          Alcotest.(check string) "unsafe ignore rejection"
+          Alcotest.(check string)
+            "unsafe ignore rejection"
             "invalid .paengiignore path on line 1: \"../outside\""
             (Snapshot_store.error_to_string error)
       | Ok _ -> Alcotest.fail "unsafe ignore path was accepted")
@@ -233,21 +265,28 @@ let persisted_object_goldens () =
         |> require_ok Snapshot_store.error_to_string
       in
       let tree_id =
-        Snapshot_store.Tree.store store tree |> require_ok Snapshot_store.error_to_string
+        Snapshot_store.Tree.store store tree
+        |> require_ok Snapshot_store.error_to_string
       in
       let snapshot = Snapshot_store.Snapshot.create ~root:tree_id in
       let snapshot_id =
         Snapshot_store.Snapshot.store store snapshot
         |> require_ok Snapshot_store.error_to_string
       in
-      Alcotest.(check string) "content golden"
+      Alcotest.(check string)
+        "content golden"
         (require_golden "store-v1-content.peng.hex")
-        (stored_envelope store (Snapshot_store.Content.stored_object_id content));
-      Alcotest.(check string) "tree golden" (require_golden "store-v1-tree.peng.hex")
+        (stored_envelope store
+           (Snapshot_store.Content.stored_object_id content));
+      Alcotest.(check string)
+        "tree golden"
+        (require_golden "store-v1-tree.peng.hex")
         (stored_envelope store (Snapshot_store.Tree.stored_object_id tree_id));
-      Alcotest.(check string) "snapshot golden"
+      Alcotest.(check string)
+        "snapshot golden"
         (require_golden "store-v1-snapshot.peng.hex")
-        (stored_envelope store (Snapshot_store.Snapshot.stored_object_id snapshot_id)))
+        (stored_envelope store
+           (Snapshot_store.Snapshot.stored_object_id snapshot_id)))
 
 let () =
   Alcotest.run "persisted snapshots"

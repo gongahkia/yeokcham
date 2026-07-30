@@ -26,7 +26,8 @@ let with_directory prefix run =
   Fun.protect ~finally:(fun () -> remove_tree path) (fun () -> run path)
 
 let write_file path bytes =
-  Out_channel.with_open_bin path (fun channel -> Out_channel.output_string channel bytes)
+  Out_channel.with_open_bin path (fun channel ->
+      Out_channel.output_string channel bytes)
 
 let read_file path = In_channel.with_open_bin path In_channel.input_all
 
@@ -36,12 +37,17 @@ let scanned_fixture run =
           with_directory "paengi-materialize-destination-" (fun destination ->
               Unix.mkdir (Filename.concat source "nested") 0o700;
               write_file (Filename.concat source "binary") "\000\255bytes";
-              write_file (Filename.concat source "run") "#!/bin/sh\necho paengi\n";
+              write_file
+                (Filename.concat source "run")
+                "#!/bin/sh\necho paengi\n";
               Unix.chmod (Filename.concat source "run") 0o755;
-              write_file (Filename.concat (Filename.concat source "nested") "guide")
+              write_file
+                (Filename.concat (Filename.concat source "nested") "guide")
                 "guide\n";
               Unix.symlink "nested/guide" (Filename.concat source "guide-link");
-              let store = Store.init ~root:store_root |> require_ok Store.error_to_string in
+              let store =
+                Store.init ~root:store_root |> require_ok Store.error_to_string
+              in
               let _, snapshot =
                 Snapshot_store.scan ~root:source ~store
                 |> require_ok Snapshot_store.error_to_string
@@ -57,16 +63,23 @@ let plan_and_write_exact_snapshot () =
       Alcotest.(check int) "dry-run action count" 5 (List.length plan);
       Snapshot_store.Materialize.write ~destination store snapshot
       |> require_ok Snapshot_store.Materialize.error_to_string;
-      Alcotest.(check string) "binary bytes" "\000\255bytes"
+      Alcotest.(check string)
+        "binary bytes" "\000\255bytes"
         (read_file (Filename.concat destination "binary"));
-      Alcotest.(check string) "nested bytes" "guide\n"
-        (read_file (Filename.concat (Filename.concat destination "nested") "guide"));
-      Alcotest.(check bool) "executable mode" true
-        ((Unix.stat (Filename.concat destination "run")).Unix.st_perm land 0o111 <> 0);
+      Alcotest.(check string)
+        "nested bytes" "guide\n"
+        (read_file
+           (Filename.concat (Filename.concat destination "nested") "guide"));
+      Alcotest.(check bool)
+        "executable mode" true
+        ((Unix.stat (Filename.concat destination "run")).Unix.st_perm land 0o111
+        <> 0);
       let link = Filename.concat destination "guide-link" in
-      Alcotest.(check bool) "symlink kind" true
+      Alcotest.(check bool)
+        "symlink kind" true
         ((Unix.lstat link).Unix.st_kind = Unix.S_LNK);
-      Alcotest.(check string) "symlink target" "nested/guide" (Unix.readlink link))
+      Alcotest.(check string)
+        "symlink target" "nested/guide" (Unix.readlink link))
 
 let nonempty_destination_is_unchanged () =
   scanned_fixture (fun _ store snapshot destination ->
@@ -74,16 +87,22 @@ let nonempty_destination_is_unchanged () =
       write_file existing "preserve";
       match Snapshot_store.Materialize.write ~destination store snapshot with
       | Error error ->
-          Alcotest.(check string) "nonempty destination rejection"
-            (Printf.sprintf "materialisation destination is not empty: %s" destination)
+          Alcotest.(check string)
+            "nonempty destination rejection"
+            (Printf.sprintf "materialisation destination is not empty: %s"
+               destination)
             (Snapshot_store.Materialize.error_to_string error);
-          Alcotest.(check string) "existing file unchanged" "preserve" (read_file existing)
+          Alcotest.(check string)
+            "existing file unchanged" "preserve" (read_file existing)
       | Ok () -> Alcotest.fail "nonempty destination was materialised")
 
 let unsafe_tree_name_cannot_materialise () =
   with_directory "paengi-materialize-unsafe-store-" (fun store_root ->
-      with_directory "paengi-materialize-unsafe-destination-" (fun destination ->
-          let store = Store.init ~root:store_root |> require_ok Store.error_to_string in
+      with_directory "paengi-materialize-unsafe-destination-"
+        (fun destination ->
+          let store =
+            Store.init ~root:store_root |> require_ok Store.error_to_string
+          in
           let content =
             Snapshot_store.Content.store store "value"
             |> require_ok Snapshot_store.error_to_string
@@ -104,28 +123,35 @@ let unsafe_tree_name_cannot_materialise () =
             Encoding.array
               [
                 Encoding.integer 1L;
-                (Encoding.array [ entry ]
-                |> require_ok Encoding.construction_error_to_string);
+                Encoding.array [ entry ]
+                |> require_ok Encoding.construction_error_to_string;
               ]
             |> require_ok Encoding.construction_error_to_string
           in
           let envelope =
             Envelope.create ~object_type:Envelope.Tree
               ~object_format_version:Envelope.current_object_format_version
-              ~mandatory_features:Envelope.supported_mandatory_features ~payload ()
+              ~mandatory_features:Envelope.supported_mandatory_features ~payload
+              ()
             |> require_ok Envelope.creation_error_to_string
           in
-          let stored = Store.put store envelope |> require_ok Store.error_to_string in
+          let stored =
+            Store.put store envelope |> require_ok Store.error_to_string
+          in
           let snapshot =
             Snapshot_store.Snapshot.create
               ~root:(Snapshot_store.Tree.of_stored_object_id stored)
           in
-          match Snapshot_store.Materialize.write ~destination store snapshot with
+          match
+            Snapshot_store.Materialize.write ~destination store snapshot
+          with
           | Error error ->
-              Alcotest.(check bool) "unsafe tree rejection" true
+              Alcotest.(check bool)
+                "unsafe tree rejection" true
                 (String.starts_with ~prefix:"invalid tree entry name: \"..\""
                    (Snapshot_store.Materialize.error_to_string error));
-              Alcotest.(check int) "destination remains empty" 0
+              Alcotest.(check int)
+                "destination remains empty" 0
                 (Array.length (Sys.readdir destination))
           | Ok () -> Alcotest.fail "unsafe tree name was materialised"))
 

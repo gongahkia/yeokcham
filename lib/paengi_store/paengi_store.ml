@@ -10,10 +10,13 @@ module Stored_object_id = struct
 
   let parse_error_to_string = function
     | Invalid_length length ->
-        Printf.sprintf "stored object ID must contain 64 hexadecimal characters, got %d"
+        Printf.sprintf
+          "stored object ID must contain 64 hexadecimal characters, got %d"
           length
     | Invalid_hex_character (offset, character) ->
-        Printf.sprintf "stored object ID has invalid lowercase hexadecimal character %C at %d"
+        Printf.sprintf
+          "stored object ID has invalid lowercase hexadecimal character %C at \
+           %d"
           character offset
 
   let nibble = function
@@ -36,7 +39,8 @@ module Stored_object_id = struct
               Bytes.set raw (offset / 2) (Char.chr ((high lsl 4) lor low));
               decode (offset + 2)
           | None, _ -> Error (Invalid_hex_character (offset, hex.[offset]))
-          | _, None -> Error (Invalid_hex_character (offset + 1, hex.[offset + 1]))
+          | _, None ->
+              Error (Invalid_hex_character (offset + 1, hex.[offset + 1]))
       in
       decode 0
 
@@ -70,15 +74,13 @@ type error =
       actual : Stored_object_id.t;
     }
   | Object_integrity_error of Envelope.decode_error
-  | Collision_or_corruption of {
-      id : Stored_object_id.t;
-      detail : string;
-    }
+  | Collision_or_corruption of { id : Stored_object_id.t; detail : string }
   | Unsupported_publication of { path : string; detail : string }
   | Temporary_name_exhausted of string
 
 let error_to_string = function
-  | Root_not_directory path -> Printf.sprintf "repository root is not a directory: %s" path
+  | Root_not_directory path ->
+      Printf.sprintf "repository root is not a directory: %s" path
   | Repository_not_initialized path ->
       Printf.sprintf "repository is not initialized: %s" path
   | Incompatible_repository_format path ->
@@ -86,7 +88,8 @@ let error_to_string = function
   | Not_regular_file path -> Printf.sprintf "expected regular file: %s" path
   | Object_too_large { path; size; limit } ->
       Printf.sprintf "object is too large (%d > %d bytes): %s" size limit path
-  | File_size_changed path -> Printf.sprintf "file size changed while reading: %s" path
+  | File_size_changed path ->
+      Printf.sprintf "file size changed while reading: %s" path
   | Io_error { operation; path; message } ->
       Printf.sprintf "%s failed for %s: %s" operation path message
   | Object_identity_mismatch { expected; actual } ->
@@ -96,17 +99,18 @@ let error_to_string = function
   | Object_integrity_error error -> Envelope.decode_error_to_string error
   | Collision_or_corruption { id; detail } ->
       Printf.sprintf "existing object %s is divergent or corrupt: %s"
-        (Stored_object_id.to_hex id) detail
+        (Stored_object_id.to_hex id)
+        detail
   | Unsupported_publication { path; detail } ->
-      Printf.sprintf "hard-link publication is unsupported for %s: %s" path detail
+      Printf.sprintf "hard-link publication is unsupported for %s: %s" path
+        detail
   | Temporary_name_exhausted path ->
-      Printf.sprintf "could not allocate a unique temporary object path in %s" path
+      Printf.sprintf "could not allocate a unique temporary object path in %s"
+        path
 
 let repository_format =
-  "paengi-repository-format 1\n"
-  ^ "stored-object-hash sha256\n"
-  ^ "stored-object-preimage envelope-1-domain-v1\n"
-  ^ "envelope-version 1\n"
+  "paengi-repository-format 1\n" ^ "stored-object-hash sha256\n"
+  ^ "stored-object-preimage envelope-1-domain-v1\n" ^ "envelope-version 1\n"
   ^ "object-format-version 1\n"
 
 let max_object_bytes = 128 * 1024 * 1024
@@ -114,7 +118,6 @@ let object_domain = "paengi:object:v1\000"
 let format_name = "format"
 let paengi_name = ".paengi"
 let objects_name = "objects"
-
 let ( let* ) = Result.bind
 
 let io_error operation path error =
@@ -125,8 +128,7 @@ let lstat path =
   with Unix.Unix_error (error, _, _) -> Error (io_error "lstat" path error)
 
 let lstat_or_missing path =
-  try Ok (Some (Unix.lstat path))
-  with
+  try Ok (Some (Unix.lstat path)) with
   | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok None
   | Unix.Unix_error (error, _, _) -> Error (io_error "lstat" path error)
 
@@ -174,7 +176,8 @@ let write_all descriptor path bytes =
                    message = "write returned zero before completion";
                  })
         | written -> write (offset + written)
-      with Unix.Unix_error (error, _, _) -> Error (io_error "write" path error)
+      with Unix.Unix_error (error, _, _) ->
+        Error (io_error "write" path error)
   in
   write 0
 
@@ -200,7 +203,8 @@ let fsync_directory path =
         | Unix.Unix_error (error, _, _)
           when directory_fsync_is_unsupported error ->
             Ok ()
-        | Unix.Unix_error (error, _, _) -> Error (io_error "fsync directory" path error))
+        | Unix.Unix_error (error, _, _) ->
+            Error (io_error "fsync directory" path error))
   with Unix.Unix_error (error, _, _) ->
     if directory_fsync_is_unsupported error then Ok ()
     else Error (io_error "open directory for fsync" path error)
@@ -234,25 +238,29 @@ let read_regular_file path =
               if offset = stat.Unix.st_size then Ok ()
               else
                 try
-                  match Unix.read descriptor bytes offset (stat.Unix.st_size - offset) with
+                  match
+                    Unix.read descriptor bytes offset
+                      (stat.Unix.st_size - offset)
+                  with
                   | 0 -> Error (File_size_changed path)
                   | count -> read (offset + count)
-                with Unix.Unix_error (error, _, _) -> Error (io_error "read" path error)
+                with Unix.Unix_error (error, _, _) ->
+                  Error (io_error "read" path error)
             in
             let* () = read 0 in
             let extra = Bytes.create 1 in
             let* extra_count =
               try Ok (Unix.read descriptor extra 0 1)
-              with Unix.Unix_error (error, _, _) -> Error (io_error "read" path error)
+              with Unix.Unix_error (error, _, _) ->
+                Error (io_error "read" path error)
             in
             if extra_count = 0 then Ok (Bytes.unsafe_to_string bytes)
             else Error (File_size_changed path))
     with Unix.Unix_error (error, _, _) -> Error (io_error "open" path error)
 
 let stored_object_id bytes =
-  Hash.feed_string Hash.empty object_domain
-  |> fun context -> Hash.feed_string context bytes
-  |> Hash.get |> Hash.to_raw_string
+  Hash.feed_string Hash.empty object_domain |> fun context ->
+  Hash.feed_string context bytes |> Hash.get |> Hash.to_raw_string
 
 let stored_object_id_of_bytes bytes = stored_object_id bytes
 
@@ -289,14 +297,15 @@ let create_temporary directory final_name bytes =
         let result =
           match result with Error error -> Error error | Ok () -> close_result
         in
-        (match result with
+        match result with
         | Ok () -> Ok path
         | Error error ->
             ignore (unlink_if_present path);
-            Error error)
+            Error error
       with
       | Unix.Unix_error (Unix.EEXIST, _, _) -> attempt (number + 1)
-      | Unix.Unix_error (error, _, _) -> Error (io_error "create temporary" path error)
+      | Unix.Unix_error (error, _, _) ->
+          Error (io_error "create temporary" path error)
   in
   attempt 0
 
@@ -324,10 +333,13 @@ let ensure_repository_format repository =
       let* bytes = read_regular_file path in
       if String.equal bytes repository_format then Ok ()
       else Error (Incompatible_repository_format path)
-  | Ok None ->
-      let* temporary = create_temporary repository.paengi format_name (Bytes.of_string repository_format) in
+  | Ok None -> (
+      let* temporary =
+        create_temporary repository.paengi format_name
+          (Bytes.of_string repository_format)
+      in
       let result = link_without_replace ~temporary ~final:path in
-      (match result with
+      match result with
       | Error error -> Error error
       | Ok Published ->
           let* () = fsync_directory repository.paengi in
@@ -367,11 +379,14 @@ let object_path repository id =
     (Filename.concat (String.sub hex 0 2)
        (Filename.concat (String.sub hex 2 2) (String.sub hex 4 60)))
 
-let object_directory repository id = Filename.dirname (object_path repository id)
+let object_directory repository id =
+  Filename.dirname (object_path repository id)
 
 let ensure_object_shard repository id =
   let hex = Stored_object_id.to_hex id in
-  let* () = ensure_directory (Filename.concat repository.objects (String.sub hex 0 2)) in
+  let* () =
+    ensure_directory (Filename.concat repository.objects (String.sub hex 0 2))
+  in
   ensure_directory (object_directory repository id)
 
 let get repository id =
@@ -388,9 +403,8 @@ let existing_matches repository id expected =
   let path = object_path repository id in
   match read_regular_file path with
   | Error error ->
-      Error
-        (Collision_or_corruption { id; detail = error_to_string error })
-  | Ok actual ->
+      Error (Collision_or_corruption { id; detail = error_to_string error })
+  | Ok actual -> (
       let actual_id = stored_object_id_of_bytes actual in
       if not (Stored_object_id.equal id actual_id) then
         Error
@@ -399,7 +413,8 @@ let existing_matches repository id expected =
                id;
                detail =
                  error_to_string
-                   (Object_identity_mismatch { expected = id; actual = actual_id });
+                   (Object_identity_mismatch
+                      { expected = id; actual = actual_id });
              })
       else
         match Envelope.decode actual with
@@ -411,7 +426,10 @@ let existing_matches repository id expected =
         | Ok _ ->
             Error
               (Collision_or_corruption
-                 { id; detail = "verified object bytes differ from proposed bytes" })
+                 {
+                   id;
+                   detail = "verified object bytes differ from proposed bytes";
+                 }))
 
 let put repository envelope =
   let bytes = Envelope.encode envelope in
@@ -429,7 +447,8 @@ let put repository envelope =
     let directory = object_directory repository id in
     let final = object_path repository id in
     let* temporary =
-      create_temporary directory (Filename.basename final) (Bytes.of_string bytes)
+      create_temporary directory (Filename.basename final)
+        (Bytes.of_string bytes)
     in
     let link_result = link_without_replace ~temporary ~final in
     match link_result with

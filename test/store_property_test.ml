@@ -8,12 +8,15 @@ let base_seed =
   match Sys.getenv_opt "PROPERTY_TEST_SEED" with
   | None -> default_seed
   | Some value -> (
-      match int_of_string_opt value with Some seed -> seed | None -> default_seed)
+      match int_of_string_opt value with
+      | Some seed -> seed
+      | None -> default_seed)
 
 let stable_seed name =
   let value = ref base_seed in
   String.iter
-    (fun character -> value := ((!value * 65599) lxor Char.code character) land max_int)
+    (fun character ->
+      value := !value * 65599 lxor Char.code character land max_int)
     name;
   !value
 
@@ -47,7 +50,9 @@ let with_repository check =
   let root = Filename.temp_file "paengi-store-property-" "" in
   Unix.unlink root;
   Unix.mkdir root 0o700;
-  Fun.protect ~finally:(fun () -> remove_tree root) (fun () ->
+  Fun.protect
+    ~finally:(fun () -> remove_tree root)
+    (fun () ->
       match Store.init ~root with
       | Error _ -> false
       | Ok repository -> check root repository)
@@ -55,8 +60,8 @@ let with_repository check =
 let bytes_generator = QCheck2.Gen.string_size (QCheck2.Gen.int_range 0 4096)
 
 let restart_round_trip =
-  QCheck2.Test.make ~count:100 ~name:"store put/reopen/get is exact" bytes_generator
-    (fun bytes ->
+  QCheck2.Test.make ~count:100 ~name:"store put/reopen/get is exact"
+    bytes_generator (fun bytes ->
       with_repository (fun root repository ->
           let envelope = content_envelope bytes in
           match Store.put repository envelope with
@@ -64,7 +69,7 @@ let restart_round_trip =
           | Ok id -> (
               match Store.put repository envelope with
               | Error _ -> false
-              | Ok duplicate ->
+              | Ok duplicate -> (
                   if not (Store.Stored_object_id.equal id duplicate) then false
                   else
                     match Store.open_repository ~root with
@@ -72,8 +77,9 @@ let restart_round_trip =
                     | Ok reopened -> (
                         match Store.get reopened id with
                         | Ok actual ->
-                            String.equal (Envelope.encode envelope) (Envelope.encode actual)
-                        | Error _ -> false))))
+                            String.equal (Envelope.encode envelope)
+                              (Envelope.encode actual)
+                        | Error _ -> false)))))
 
 let () =
   Alcotest.run "object store properties"
@@ -81,6 +87,7 @@ let () =
       ( "property",
         [
           QCheck_alcotest.to_alcotest ~speed_level:`Quick
-            ~rand:(state_for "restart-round-trip") restart_round_trip;
+            ~rand:(state_for "restart-round-trip")
+            restart_round_trip;
         ] );
     ]

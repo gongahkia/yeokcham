@@ -29,10 +29,7 @@ type error =
       actual : Stored_object_id.t;
     }
   | Object_integrity_error of Paengi_envelope.decode_error
-  | Collision_or_corruption of {
-      id : Stored_object_id.t;
-      detail : string;
-    }
+  | Collision_or_corruption of { id : Stored_object_id.t; detail : string }
   | Unsupported_publication of { path : string; detail : string }
   | Temporary_name_exhausted of string
 
