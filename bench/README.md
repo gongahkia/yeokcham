@@ -29,3 +29,11 @@ Run `make benchmark-encoding` to create `results/canonical-codec-v1.json`. The b
 ## Large-content format decision
 
 Run `make benchmark-large-content` to create `results/large-content-v1.json`. It uses fixed seed `20260730`, five repetitions, and deterministic empty/tiny/boundary/medium/large/low-entropy/high-entropy/gzip-like/local-edit/insertion fixtures. It compares 8/64/256 KiB inline thresholds, fixed 64 KiB chunks, and Buzhash-64-v1 chunks. Its JSON is a versioned machine-readable experiment record; encoded bytes/object counts/reuse are representation measurements, while timing and allocation are host-specific evidence only. ADR-022 records the 64 KiB plus Buzhash decision.
+
+Validate it with:
+
+```bash
+python3 -m jsonschema \
+  --instance bench/results/large-content-v1.json \
+  bench/schema/large-content-benchmark-result.schema.json
+```

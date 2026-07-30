@@ -73,8 +73,8 @@ let error_to_string = function
   | Invalid_chunk_length length ->
       Printf.sprintf "invalid manifest chunk length: %Ld" length
   | Manifest_length_mismatch { declared; actual } ->
-      Printf.sprintf "manifest length mismatch: declared %d bytes, got %d" declared
-        actual
+      Printf.sprintf "manifest length mismatch: declared %d bytes, got %d"
+        declared actual
   | Manifest_content_identity_mismatch ->
       "manifest full-content identity does not match reconstructed bytes"
   | Noncanonical_chunk_boundaries ->
@@ -142,9 +142,8 @@ let inline_file_limit = 64 * 1024
 let content_domain = "paengi:content:v1\000"
 
 let content_identity bytes =
-  Hash.feed_string Hash.empty content_domain
-  |> fun context -> Hash.feed_string context bytes
-  |> Hash.get |> Hash.to_raw_string
+  Hash.feed_string Hash.empty content_domain |> fun context ->
+  Hash.feed_string context bytes |> Hash.get |> Hash.to_raw_string
 
 let canonical_payload_matches expected payload =
   if String.equal expected (Encoding.encode payload) then Ok ()
@@ -224,7 +223,6 @@ module Manifest = struct
   let min_size = 16_384L
   let average_size = 65_536L
   let max_size = 131_072L
-
   let of_stored_object_id identity = identity
   let stored_object_id identity = identity
   let equal_id = Store.Stored_object_id.equal
@@ -271,7 +269,8 @@ module Manifest = struct
       let total =
         List.fold_left
           (fun total (_, length) ->
-            if length <= 0 then Error (Invalid_chunk_length (Int64.of_int length))
+            if length <= 0 then
+              Error (Invalid_chunk_length (Int64.of_int length))
             else
               match total with
               | Error _ as error -> error
@@ -282,7 +281,8 @@ module Manifest = struct
           (Ok 0) manifest.chunks
       in
       let* total = total in
-      if manifest.chunks = [] then Error (Invalid_schema "manifest has no chunks")
+      if manifest.chunks = [] then
+        Error (Invalid_schema "manifest has no chunks")
       else if total <> manifest.total_length then
         Error
           (Manifest_length_mismatch
@@ -308,14 +308,15 @@ module Manifest = struct
       let* chunks =
         Paengi_chunking.split Paengi_chunking.default value
         |> Result.map_error (fun error ->
-               Unsupported_chunking_parameters
-                 (Paengi_chunking.error_to_string error))
+            Unsupported_chunking_parameters
+              (Paengi_chunking.error_to_string error))
       in
       let rec store_chunk_objects reversed = function
         | [] -> Ok (List.rev reversed)
         | chunk :: rest ->
             let* identity = Chunk.store repository chunk in
-            store_chunk_objects ((identity, String.length chunk) :: reversed)
+            store_chunk_objects
+              ((identity, String.length chunk) :: reversed)
               rest
       in
       let* chunks = store_chunk_objects [] chunks in
@@ -328,10 +329,14 @@ module Manifest = struct
     | [ identity; length ] ->
         let* identity = raw_object_id identity in
         let* length = integer "manifest chunk length" length in
-        if Int64.compare length 0L <= 0 || Int64.compare length (Int64.of_int max_int) > 0
+        if
+          Int64.compare length 0L <= 0
+          || Int64.compare length (Int64.of_int max_int) > 0
         then Error (Invalid_chunk_length length)
         else Ok (Chunk.of_stored_object_id identity, Int64.to_int length)
-    | _ -> Error (Invalid_schema "manifest chunk reference must contain two values")
+    | _ ->
+        Error
+          (Invalid_schema "manifest chunk reference must contain two values")
 
   let exact_parameters values =
     match values with
@@ -345,8 +350,10 @@ module Manifest = struct
           let* average = integer "manifest average chunk size" average in
           let* maximum = integer "manifest maximum chunk size" maximum in
           if
-            Int64.equal window_value window_size && Int64.equal minimum min_size
-            && Int64.equal average average_size && Int64.equal maximum max_size
+            Int64.equal window_value window_size
+            && Int64.equal minimum min_size
+            && Int64.equal average average_size
+            && Int64.equal maximum max_size
           then Ok ()
           else
             Error
@@ -358,13 +365,25 @@ module Manifest = struct
   let decode payload_value =
     let* fields = exact_array "file manifest" 9 payload_value in
     match fields with
-    | [ version; total; algorithm_value; window_value; minimum; average; maximum; full_id; references ] ->
+    | [
+     version;
+     total;
+     algorithm_value;
+     window_value;
+     minimum;
+     average;
+     maximum;
+     full_id;
+     references;
+    ] ->
         let* version = integer "file manifest version" version in
         if not (Int64.equal version schema_version) then
           Error (Unsupported_schema_version version)
         else
           let* total = integer "manifest total length" total in
-          if Int64.compare total 0L <= 0 || Int64.compare total (Int64.of_int max_int) > 0
+          if
+            Int64.compare total 0L <= 0
+            || Int64.compare total (Int64.of_int max_int) > 0
           then Error (Invalid_chunk_length total)
           else
             let* () =
@@ -372,7 +391,9 @@ module Manifest = struct
                 [ algorithm_value; window_value; minimum; average; maximum ]
             in
             let* full_content_id = raw_content_id full_id in
-            let* references = array_values "manifest chunk references" references in
+            let* references =
+              array_values "manifest chunk references" references
+            in
             let rec decode_references reversed = function
               | [] -> Ok (List.rev reversed)
               | reference :: rest ->
@@ -381,16 +402,14 @@ module Manifest = struct
             in
             let* chunks = decode_references [] references in
             let manifest =
-              {
-                total_length = Int64.to_int total;
-                full_content_id;
-                chunks;
-              }
+              { total_length = Int64.to_int total; full_content_id; chunks }
             in
             let* () = check_representation manifest in
             let* canonical = payload manifest in
             let* () =
-              canonical_payload_matches (Encoding.encode canonical) payload_value
+              canonical_payload_matches
+                (Encoding.encode canonical)
+                payload_value
             in
             Ok manifest
     | _ -> Error (Invalid_schema "file manifest must contain nine values")
@@ -408,15 +427,17 @@ module Manifest = struct
           else if actual_length > max_int - actual_chunk_length then
             Error (Invalid_chunk_length (Int64.of_int actual_chunk_length))
           else
-            load_chunks (chunk :: reversed) (actual_length + actual_chunk_length)
+            load_chunks (chunk :: reversed)
+              (actual_length + actual_chunk_length)
               rest
     in
-    let* (chunks, actual_length) = load_chunks [] 0 manifest.chunks in
+    let* chunks, actual_length = load_chunks [] 0 manifest.chunks in
     if actual_length <> manifest.total_length then
       Error
         (Manifest_length_mismatch
            { declared = manifest.total_length; actual = actual_length })
-    else if not (Paengi_chunking.chunks_are_canonical Paengi_chunking.default chunks)
+    else if
+      not (Paengi_chunking.chunks_are_canonical Paengi_chunking.default chunks)
     then Error Noncanonical_chunk_boundaries
     else
       let contents = String.concat "" chunks in
@@ -487,9 +508,9 @@ module Content = struct
     let actual = Envelope.object_type object_ in
     if actual = Envelope.Content then decode (Envelope.payload object_)
     else if actual = Envelope.File_manifest then
-        let manifest = Manifest.of_stored_object_id identity in
-        let* manifest = Manifest.load repository manifest in
-        Manifest.contents repository manifest
+      let manifest = Manifest.of_stored_object_id identity in
+      let* manifest = Manifest.load repository manifest in
+      Manifest.contents repository manifest
     else Error (Unexpected_object_type { expected = Envelope.Content; actual })
 end
 
@@ -896,7 +917,12 @@ end
 let scan_error operation path error =
   Scan_error { path; operation; message = Unix.error_message error }
 
-let read_file path size =
+let same_file_identity expected actual =
+  expected.Unix.st_kind = actual.Unix.st_kind
+  && expected.Unix.st_dev = actual.Unix.st_dev
+  && expected.Unix.st_ino = actual.Unix.st_ino
+
+let read_file path expected =
   try
     let descriptor = Unix.openfile path [ Unix.O_RDONLY ] 0 in
     Fun.protect
@@ -906,7 +932,16 @@ let read_file path size =
         let stat = Unix.fstat descriptor in
         if stat.Unix.st_kind <> Unix.S_REG then
           Error (Unsupported_file_type { path; kind = "non-regular file" })
+        else if not (same_file_identity expected stat) then
+          Error
+            (Scan_error
+               {
+                 path;
+                 operation = "open";
+                 message = "file identity changed while it was scanned";
+               })
         else
+          let size = expected.Unix.st_size in
           let bytes = Bytes.create size in
           let rec read offset =
             if offset = size then Ok ()
@@ -943,7 +978,7 @@ let read_file path size =
                  }))
   with Unix.Unix_error (error, _, _) -> Error (scan_error "open" path error)
 
-let store_large_file repository path expected_size =
+let store_large_file repository path expected =
   try
     let descriptor = Unix.openfile path [ Unix.O_RDONLY ] 0 in
     Fun.protect
@@ -953,15 +988,25 @@ let store_large_file repository path expected_size =
         let stat = Unix.fstat descriptor in
         if stat.Unix.st_kind <> Unix.S_REG then
           Error (Unsupported_file_type { path; kind = "non-regular file" })
+        else if not (same_file_identity expected stat) then
+          Error
+            (Scan_error
+               {
+                 path;
+                 operation = "open";
+                 message = "file identity changed while it was scanned";
+               })
         else
           let* splitter =
             Paengi_chunking.create_splitter Paengi_chunking.default
             |> Result.map_error (fun error ->
-                   Unsupported_chunking_parameters
-                     (Paengi_chunking.error_to_string error))
+                Unsupported_chunking_parameters
+                  (Paengi_chunking.error_to_string error))
           in
           let buffer = Bytes.create (32 * 1024) in
-          let full_content_hash = ref (Hash.feed_string Hash.empty content_domain) in
+          let full_content_hash =
+            ref (Hash.feed_string Hash.empty content_domain)
+          in
           let total = ref 0 in
           let chunk_references = ref [] in
           let store_chunks chunks =
@@ -978,7 +1023,8 @@ let store_large_file repository path expected_size =
           let rec read () =
             let* count =
               try Ok (Unix.read descriptor buffer 0 (Bytes.length buffer))
-              with Unix.Unix_error (error, _, _) -> Error (scan_error "read" path error)
+              with Unix.Unix_error (error, _, _) ->
+                Error (scan_error "read" path error)
             in
             if count = 0 then Ok ()
             else
@@ -991,7 +1037,11 @@ let store_large_file repository path expected_size =
           let* () = read () in
           let* () = store_chunks (Paengi_chunking.finish splitter) in
           let final_stat = Unix.fstat descriptor in
-          if !total <> expected_size || final_stat.Unix.st_size <> expected_size then
+          if
+            !total <> expected.Unix.st_size
+            || final_stat.Unix.st_size <> expected.Unix.st_size
+            || not (same_file_identity expected final_stat)
+          then
             Error
               (Scan_error
                  {
@@ -1000,21 +1050,23 @@ let store_large_file repository path expected_size =
                    message = "file size changed while it was scanned";
                  })
           else
-            let full_content_id = Hash.get !full_content_hash |> Hash.to_raw_string in
+            let full_content_id =
+              Hash.get !full_content_hash |> Hash.to_raw_string
+            in
             let* manifest =
-              Manifest.store_chunks repository ~total_length:!total ~full_content_id
+              Manifest.store_chunks repository ~total_length:!total
+                ~full_content_id
                 (List.rev !chunk_references)
             in
             Ok
-              (Content.of_stored_object_id
-                 (Manifest.stored_object_id manifest)))
+              (Content.of_stored_object_id (Manifest.stored_object_id manifest)))
   with Unix.Unix_error (error, _, _) -> Error (scan_error "open" path error)
 
 let store_regular_file repository path stat =
   if stat.Unix.st_size <= inline_file_limit then
-    let* contents = read_file path stat.Unix.st_size in
+    let* contents = read_file path stat in
     Content.store repository contents
-  else store_large_file repository path stat.Unix.st_size
+  else store_large_file repository path stat
 
 let unsupported_node_kind = function
   | Unix.S_SOCK -> "socket"
@@ -1042,7 +1094,7 @@ let read_ignore_file root =
         (File_too_large
            { path; size = stat.Unix.st_size; limit = inline_file_limit })
     else
-      let* contents = read_file path stat.Unix.st_size in
+      let* contents = read_file path stat in
       let lines = String.split_on_char '\n' contents in
       let rec parse line_number reversed = function
         | [] -> Ok (List.rev reversed)

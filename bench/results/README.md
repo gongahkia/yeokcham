@@ -13,3 +13,5 @@ python3 -m jsonschema \
 ## Large-content decision result
 
 `large-content-v1.json` records deterministic candidate comparisons used by ADR-022. Regenerate it with `make benchmark-large-content`. It is host-specific evidence, not a performance target.
+
+Validate it with `bench/schema/large-content-benchmark-result.schema.json`.

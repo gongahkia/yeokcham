@@ -19,7 +19,8 @@ type error =
 let error_to_string = function
   | Invalid_chunk_size chunk_size ->
       Printf.sprintf "invalid fixed chunk size: %d" chunk_size
-  | Invalid_buzhash_parameters { window_size; min_size; average_size; max_size } ->
+  | Invalid_buzhash_parameters { window_size; min_size; average_size; max_size }
+    ->
       Printf.sprintf
         "invalid Buzhash-v1 parameters: window=%d min=%d average=%d max=%d"
         window_size min_size average_size max_size
@@ -34,7 +35,6 @@ let default =
     }
 
 let fixed_64k = Fixed { chunk_size = 64 * 1024 }
-
 let power_of_two value = value > 0 && value land (value - 1) = 0
 
 let validate = function
@@ -53,15 +53,15 @@ let buzhash_table =
   let state = ref 0x6a09e667f3bcc909L in
   Array.init 256 (fun _ ->
       state :=
-        Int64.add (Int64.mul !state 6364136223846793005L)
-          1442695040888963407L;
+        Int64.add (Int64.mul !state 6364136223846793005L) 1442695040888963407L;
       !state)
 
 let rotate_left value bits =
   let bits = bits mod 64 in
   if bits = 0 then value
   else
-    Int64.logor (Int64.shift_left value bits)
+    Int64.logor
+      (Int64.shift_left value bits)
       (Int64.shift_right_logical value (64 - bits))
 
 type splitter =
@@ -112,11 +112,13 @@ let feed splitter bytes =
       match splitter with
       | Fixed_splitter { chunk_size; current } ->
           Buffer.add_char current incoming;
-          if Buffer.length current = chunk_size then chunks := emit current !chunks
+          if Buffer.length current = chunk_size then
+            chunks := emit current !chunks
       | Buzhash_splitter state ->
           let outgoing =
             if state.seen < state.window_size then None
-            else Some (Bytes.get state.window (state.seen mod state.window_size))
+            else
+              Some (Bytes.get state.window (state.seen mod state.window_size))
           in
           state.hash <-
             Int64.logxor (rotate_left state.hash 1)
@@ -125,7 +127,8 @@ let feed splitter bytes =
             (fun character ->
               state.hash <-
                 Int64.logxor state.hash
-                  (rotate_left buzhash_table.(Char.code character)
+                  (rotate_left
+                     buzhash_table.(Char.code character)
                      state.window_size))
             outgoing;
           Bytes.set state.window (state.seen mod state.window_size) incoming;
@@ -135,8 +138,8 @@ let feed splitter bytes =
           let mask = Int64.of_int (state.average_size - 1) in
           let cut =
             state.current_length >= state.max_size
-            || (state.current_length >= state.min_size
-               && Int64.equal (Int64.logand state.hash mask) 0L)
+            || state.current_length >= state.min_size
+               && Int64.equal (Int64.logand state.hash mask) 0L
           in
           if cut then (
             chunks := emit state.current !chunks;
@@ -158,9 +161,9 @@ let split strategy bytes =
 let chunks_are_canonical strategy chunks =
   match validate strategy with
   | Error _ -> false
-  | Ok () ->
+  | Ok () -> (
       if List.exists String.is_empty chunks then false
       else
         match split strategy (String.concat "" chunks) with
         | Ok expected -> List.equal String.equal expected chunks
-        | Error _ -> false
+        | Error _ -> false)

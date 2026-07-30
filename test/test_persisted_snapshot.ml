@@ -300,12 +300,14 @@ let large_content_goldens () =
         |> require_ok Snapshot_store.error_to_string
       in
       Alcotest.(check string)
-        "chunk golden" (require_golden "store-v1-chunk.peng.hex")
+        "chunk golden"
+        (require_golden "store-v1-chunk.peng.hex")
         (stored_envelope store (Snapshot_store.Chunk.stored_object_id chunk));
       Alcotest.(check string)
         "file manifest golden"
         (require_golden "store-v1-file-manifest.peng.hex")
-        (stored_envelope store (Snapshot_store.Content.stored_object_id manifest)))
+        (stored_envelope store
+           (Snapshot_store.Content.stored_object_id manifest)))
 
 let deterministic_bytes length =
   let state = ref 0x243f6a8885a308d3L in
@@ -342,7 +344,8 @@ let manifest_payload ~total_length ~full_content_id references =
       Encoding.integer 131_072L;
       Encoding.bytes
         (Snapshot_store.Content.identity_to_raw_bytes full_content_id);
-      Encoding.array references |> require_ok Encoding.construction_error_to_string;
+      Encoding.array references
+      |> require_ok Encoding.construction_error_to_string;
     ]
   |> require_ok Encoding.construction_error_to_string
 
@@ -350,19 +353,22 @@ let store_manifest store payload =
   Envelope.create ~object_type:Envelope.File_manifest
     ~object_format_version:Envelope.current_object_format_version
     ~mandatory_features:Envelope.supported_mandatory_features ~payload ()
-  |> require_envelope |> Store.put store |> require_ok Store.error_to_string
+  |> require_envelope |> Store.put store
+  |> require_ok Store.error_to_string
 
 let inline_and_manifest_content_round_trip () =
   with_store (fun _ store ->
       let inline = deterministic_bytes Snapshot_store.inline_file_limit in
-      let manifest = deterministic_bytes (3 * 131_072 + 17) in
+      let manifest = deterministic_bytes ((3 * 131_072) + 17) in
       let split =
         Paengi_chunking.split Paengi_chunking.default manifest
         |> require_ok Paengi_chunking.error_to_string
       in
       Alcotest.(check int)
         "chunker retains all input bytes" (String.length manifest)
-        (List.fold_left (fun total chunk -> total + String.length chunk) 0 split);
+        (List.fold_left
+           (fun total chunk -> total + String.length chunk)
+           0 split);
       let inline_id =
         Snapshot_store.Content.store store inline
         |> require_ok Snapshot_store.error_to_string
@@ -439,7 +445,8 @@ let manifest_failures_are_structured () =
   with_store (fun _ store ->
       let malformed =
         Encoding.array [ Encoding.integer 1L ]
-        |> require_ok Encoding.construction_error_to_string |> store_manifest store
+        |> require_ok Encoding.construction_error_to_string
+        |> store_manifest store
       in
       (match
          Snapshot_store.Content.load store
@@ -447,7 +454,7 @@ let manifest_failures_are_structured () =
        with
       | Error _ -> ()
       | Ok _ -> Alcotest.fail "malformed manifest was accepted");
-      let contents = deterministic_bytes (3 * 131_072 + 17) in
+      let contents = deterministic_bytes ((3 * 131_072) + 17) in
       let content =
         Snapshot_store.Content.store store contents
         |> require_ok Snapshot_store.error_to_string
@@ -462,11 +469,12 @@ let manifest_failures_are_structured () =
       let reordered =
         store_manifest store
           (manifest_payload ~total_length:(String.length contents)
-             ~full_content_id:(Snapshot_store.Content.identity_of_bytes contents)
+             ~full_content_id:
+               (Snapshot_store.Content.identity_of_bytes contents)
              (List.rev references))
       in
       (match
-       Snapshot_store.Content.load store
+         Snapshot_store.Content.load store
            (Snapshot_store.Content.of_stored_object_id reordered)
        with
       | Error _ -> ()
@@ -484,12 +492,14 @@ let manifest_failures_are_structured () =
           (wrong_reference, String.length "not-a-chunk") :: List.tl references
         in
         let wrong_total =
-          List.fold_left (fun total (_, length) -> total + length) 0
-            wrong_references
+          List.fold_left
+            (fun total (_, length) -> total + length)
+            0 wrong_references
         in
         store_manifest store
           (manifest_payload ~total_length:wrong_total
-             ~full_content_id:(Snapshot_store.Content.identity_of_bytes contents)
+             ~full_content_id:
+               (Snapshot_store.Content.identity_of_bytes contents)
              wrong_references)
       in
       (match
@@ -498,7 +508,8 @@ let manifest_failures_are_structured () =
        with
       | Error error ->
           Alcotest.(check string)
-            "wrong chunk type is explicit" "expected object type 13, got object type 1"
+            "wrong chunk type is explicit"
+            "expected object type 13, got object type 1"
             (Snapshot_store.error_to_string error)
       | Ok _ -> Alcotest.fail "non-chunk reference was accepted");
       let missing, _ = List.hd references in
@@ -516,7 +527,8 @@ let manifest_failures_are_structured () =
       | Error _ -> ()
       | Ok _ -> Alcotest.fail "missing chunk was accepted");
       write_file
-        (Store.object_path store (Snapshot_store.Content.stored_object_id content))
+        (Store.object_path store
+           (Snapshot_store.Content.stored_object_id content))
         "corrupt";
       match Snapshot_store.Content.load store content with
       | Error _ -> ()
@@ -545,7 +557,9 @@ let unsupported_fifo_does_not_publish_a_snapshot () =
           (Snapshot_store.Snapshot.load store snapshot_id
           |> require_ok Snapshot_store.error_to_string)
       with
-      | Unix.Unix_error (Unix.EPERM, _, _) | Unix.Unix_error (Unix.EACCES, _, _) -> ())
+      | Unix.Unix_error (Unix.EPERM, _, _) | Unix.Unix_error (Unix.EACCES, _, _)
+      ->
+        ())
 
 let () =
   Alcotest.run "persisted snapshots"

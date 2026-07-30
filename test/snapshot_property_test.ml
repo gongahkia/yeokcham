@@ -63,7 +63,8 @@ let write_byte path offset value =
       ignore (Unix.lseek descriptor offset Unix.SEEK_SET);
       ignore (Unix.write descriptor (Bytes.make 1 value) 0 1))
 
-let small_bytes_generator = QCheck2.Gen.string_size (QCheck2.Gen.int_range 0 512)
+let small_bytes_generator =
+  QCheck2.Gen.string_size (QCheck2.Gen.int_range 0 512)
 
 let bytes_generator = small_bytes_generator
 
@@ -142,7 +143,9 @@ let file_content_at repository snapshot path =
     | directory :: rest -> (
         match Snapshot_store.Tree.load repository identity with
         | Ok tree -> (
-            match List.assoc_opt directory (Snapshot_store.Tree.entries tree) with
+            match
+              List.assoc_opt directory (Snapshot_store.Tree.entries tree)
+            with
             | Some (Snapshot_store.Tree.Directory child) -> find child rest
             | Some (Snapshot_store.Tree.File _) | None -> None)
         | Error _ -> None)
@@ -153,7 +156,8 @@ let manifest_chunks repository content =
   Snapshot_store.Manifest.load repository
     (Snapshot_store.Manifest.of_stored_object_id
        (Snapshot_store.Content.stored_object_id content))
-  |> Result.to_option |> Option.map Snapshot_store.Manifest.chunks
+  |> Result.to_option
+  |> Option.map Snapshot_store.Manifest.chunks
 
 let has_shared_chunk left right =
   List.exists
@@ -166,8 +170,7 @@ let has_shared_chunk left right =
 let generated_filesystem_history =
   QCheck2.Test.make ~count:6
     ~name:"generated filesystem histories preserve exact snapshots"
-    (QCheck2.Gen.int_range 1 1_000_000)
-    (fun seed ->
+    (QCheck2.Gen.int_range 1 1_000_000) (fun seed ->
       with_directory (fun source ->
           with_directory (fun store_root ->
               with_directory (fun destination ->
@@ -179,15 +182,19 @@ let generated_filesystem_history =
                   Unix.mkdir wide 0o700;
                   Unix.mkdir (Filename.concat source "empty-directory") 0o700;
                   write_file (Filename.concat source "empty-file") "";
-                  write_file (Filename.concat source "binary")
+                  write_file
+                    (Filename.concat source "binary")
                     ("\000\255" ^ deterministic_bytes seed 4096);
-                  write_file (Filename.concat source "threshold-minus")
+                  write_file
+                    (Filename.concat source "threshold-minus")
                     (deterministic_bytes (seed + 1)
                        (Snapshot_store.inline_file_limit - 1));
-                  write_file (Filename.concat source "threshold-at")
+                  write_file
+                    (Filename.concat source "threshold-at")
                     (deterministic_bytes (seed + 2)
                        Snapshot_store.inline_file_limit);
-                  write_file (Filename.concat source "threshold-plus")
+                  write_file
+                    (Filename.concat source "threshold-plus")
                     (deterministic_bytes (seed + 3)
                        (Snapshot_store.inline_file_limit + 1));
                   let large_path = Filename.concat deep "large.bin" in
@@ -195,12 +202,15 @@ let generated_filesystem_history =
                     deterministic_bytes (seed + 4) ((3 * 131_072) + 17)
                   in
                   write_file large_path large;
-                  write_file (Filename.concat source "run") "#!/bin/sh\nexit 0\n";
+                  write_file
+                    (Filename.concat source "run")
+                    "#!/bin/sh\nexit 0\n";
                   Unix.chmod (Filename.concat source "run") 0o755;
                   write_file (Filename.concat source "rename-source") "history";
                   Unix.symlink "nested/deep/large.bin"
                     (Filename.concat source "large-link");
-                  write_file (Filename.concat source "café-雪")
+                  write_file
+                    (Filename.concat source "café-雪")
                     (deterministic_bytes (seed + 5) 19);
                   for index = 0 to 11 do
                     write_file
@@ -219,7 +229,9 @@ let generated_filesystem_history =
                           with
                           | Error _ -> false
                           | Ok () -> (
-                              match Snapshot_store.scan ~root:destination ~store with
+                              match
+                                Snapshot_store.scan ~root:destination ~store
+                              with
                               | Error _ -> false
                               | Ok (destination_id, _) ->
                                   let materialized_metadata_is_exact =
@@ -228,88 +240,105 @@ let generated_filesystem_history =
                                     = "nested/deep/large.bin"
                                     && (Unix.stat
                                           (Filename.concat destination "run"))
-                                         .Unix.st_perm
-                                       land 0o111
+                                         .Unix.st_perm land 0o111
                                        <> 0
                                     && (Unix.lstat
                                           (Filename.concat destination
                                              "empty-directory"))
-                                         .Unix.st_kind
-                                       = Unix.S_DIR
+                                         .Unix.st_kind = Unix.S_DIR
                                   in
                                   if
-                                    not materialized_metadata_is_exact
+                                    (not materialized_metadata_is_exact)
                                     || not
-                                         (Snapshot_store.Snapshot.equal_id base_id
-                                            destination_id)
+                                         (Snapshot_store.Snapshot.equal_id
+                                            base_id destination_id)
                                   then false
                                   else (
                                     Unix.rename
                                       (Filename.concat source "rename-source")
                                       (Filename.concat source "renamed");
-                                    match Snapshot_store.scan ~root:source ~store with
+                                    match
+                                      Snapshot_store.scan ~root:source ~store
+                                    with
                                     | Error _ -> false
                                     | Ok (renamed_id, _) ->
                                         if
-                                          Snapshot_store.Snapshot.equal_id base_id
-                                            renamed_id
+                                          Snapshot_store.Snapshot.equal_id
+                                            base_id renamed_id
                                         then false
                                         else (
                                           Unix.unlink
                                             (Filename.concat source "renamed");
                                           write_file
-                                            (Filename.concat source "rename-source")
+                                            (Filename.concat source
+                                               "rename-source")
                                             "history";
                                           match
                                             Snapshot_store.scan ~root:source
                                               ~store
                                           with
                                           | Error _ -> false
-                                          | Ok (recreated_id, _) ->
+                                          | Ok (recreated_id, _) -> (
                                               if
                                                 not
-                                                  (Snapshot_store.Snapshot.equal_id
-                                                     base_id recreated_id)
+                                                  (Snapshot_store.Snapshot
+                                                   .equal_id base_id
+                                                     recreated_id)
                                               then false
-                                              else (
+                                              else
                                                 let replacement =
-                                                  if large.[200_000] = '\000' then
-                                                    '\001'
+                                                  if large.[200_000] = '\000'
+                                                  then '\001'
                                                   else '\000'
                                                 in
                                                 write_byte large_path 200_000
                                                   replacement;
                                                 match
-                                                  Snapshot_store.scan ~root:source
-                                                    ~store
+                                                  Snapshot_store.scan
+                                                    ~root:source ~store
                                                 with
                                                 | Error _ -> false
-                                                | Ok (changed_id, changed_snapshot) ->
+                                                | Ok
+                                                    ( changed_id,
+                                                      changed_snapshot ) -> (
                                                     if
-                                                      Snapshot_store.Snapshot.equal_id
-                                                        base_id changed_id
+                                                      Snapshot_store.Snapshot
+                                                      .equal_id base_id
+                                                        changed_id
                                                     then false
                                                     else
                                                       match
                                                         ( file_content_at store
                                                             base_snapshot
-                                                            [ "nested"; "deep";
-                                                              "large.bin" ],
+                                                            [
+                                                              "nested";
+                                                              "deep";
+                                                              "large.bin";
+                                                            ],
                                                           file_content_at store
                                                             changed_snapshot
-                                                            [ "nested"; "deep";
-                                                              "large.bin" ] )
+                                                            [
+                                                              "nested";
+                                                              "deep";
+                                                              "large.bin";
+                                                            ] )
                                                       with
-                                                      | Some base, Some changed -> (
+                                                      | Some base, Some changed
+                                                        -> (
                                                           match
-                                                            ( manifest_chunks store base,
-                                                              manifest_chunks store changed )
+                                                            ( manifest_chunks
+                                                                store base,
+                                                              manifest_chunks
+                                                                store changed )
                                                           with
-                                                          | Some base, Some changed ->
-                                                              has_shared_chunk base
-                                                                changed
-                                                          | None, _ | _, None -> false)
-                                                      | None, _ | _, None -> false))))))))))
+                                                          | ( Some base,
+                                                              Some changed ) ->
+                                                              has_shared_chunk
+                                                                base changed
+                                                          | None, _ | _, None ->
+                                                              false)
+                                                      | None, _ | _, None ->
+                                                          false)))))))))))
 
 let () =
   Alcotest.run "persisted snapshot properties"

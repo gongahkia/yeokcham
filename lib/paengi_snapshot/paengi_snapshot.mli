@@ -74,7 +74,6 @@ module Manifest : sig
     (id, error) result
 
   val store_bytes : Paengi_store.repository -> string -> (id, error) result
-
   val load : Paengi_store.repository -> id -> (t, error) result
 end
 

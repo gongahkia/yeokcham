@@ -1,0 +1,128 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/gongahkia/paengi/blob/main/bench/schema/large-content-benchmark-result.schema.json",
+  "title": "Paengi large-content benchmark result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "benchmark_id",
+    "purpose",
+    "recorded_at_utc",
+    "host",
+    "toolchain",
+    "fixed_seed",
+    "repetitions",
+    "candidate_inline_thresholds_bytes",
+    "candidate_chunking",
+    "allocation_metric",
+    "fixtures",
+    "version_sets"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "benchmark_id": { "const": "large-content-v1" },
+    "purpose": { "const": "host_specific_format_decision_evidence_not_performance_claim" },
+    "recorded_at_utc": { "type": "string", "format": "date-time" },
+    "fixed_seed": { "const": 20260730 },
+    "repetitions": { "const": 5 },
+    "candidate_inline_thresholds_bytes": {
+      "const": [8192, 65536, 262144]
+    },
+    "candidate_chunking": {
+      "const": ["fixed-65536", "buzhash-v1-64-16384-65536-131072"]
+    },
+    "allocation_metric": {
+      "const": "approximate_working_set_bytes_not_peak_rss"
+    },
+    "host": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["os", "architecture", "cpu_model", "memory_bytes", "filesystem"],
+      "properties": {
+        "os": { "type": "string", "minLength": 1 },
+        "architecture": { "type": "string", "minLength": 1 },
+        "cpu_model": { "type": "string", "minLength": 1 },
+        "memory_bytes": { "type": "string", "minLength": 1 },
+        "filesystem": { "type": "string", "minLength": 1 }
+      }
+    },
+    "toolchain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ocaml_version", "dune_profile"],
+      "properties": {
+        "ocaml_version": { "type": "string", "minLength": 1 },
+        "dune_profile": { "type": "string", "minLength": 1 }
+      }
+    },
+    "fixtures": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/fixture" }
+    },
+    "version_sets": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/version_set" }
+    }
+  },
+  "$defs": {
+    "fixture": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "configuration",
+        "inline_threshold_bytes",
+        "chunking",
+        "fixture",
+        "fixture_sha256",
+        "plaintext_bytes",
+        "encoded_bytes_stored",
+        "object_count",
+        "max_encoded_object_bytes",
+        "encoding_median_ns",
+        "decoding_materialisation_median_ns",
+        "approximate_allocation_bytes"
+      ],
+      "properties": {
+        "configuration": { "type": "string", "minLength": 1 },
+        "inline_threshold_bytes": { "type": "integer", "minimum": 0 },
+        "chunking": { "type": "string", "minLength": 1 },
+        "fixture": { "type": "string", "minLength": 1 },
+        "fixture_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "plaintext_bytes": { "type": "integer", "minimum": 0 },
+        "encoded_bytes_stored": { "type": "integer", "minimum": 0 },
+        "object_count": { "type": "integer", "minimum": 0 },
+        "max_encoded_object_bytes": { "type": "integer", "minimum": 0 },
+        "encoding_median_ns": { "type": "integer", "minimum": 0 },
+        "decoding_materialisation_median_ns": { "type": "integer", "minimum": 0 },
+        "approximate_allocation_bytes": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "version_set": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "configuration",
+        "set",
+        "first_plaintext_bytes",
+        "second_plaintext_bytes",
+        "unique_encoded_bytes",
+        "unique_object_count",
+        "deduplicated_bytes_reused_across_versions",
+        "reused_object_count"
+      ],
+      "properties": {
+        "configuration": { "type": "string", "minLength": 1 },
+        "set": { "type": "string", "minLength": 1 },
+        "first_plaintext_bytes": { "type": "integer", "minimum": 0 },
+        "second_plaintext_bytes": { "type": "integer", "minimum": 0 },
+        "unique_encoded_bytes": { "type": "integer", "minimum": 0 },
+        "unique_object_count": { "type": "integer", "minimum": 0 },
+        "deduplicated_bytes_reused_across_versions": { "type": "integer", "minimum": 0 },
+        "reused_object_count": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}

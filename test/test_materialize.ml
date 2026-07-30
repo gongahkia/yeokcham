@@ -170,7 +170,7 @@ let manifest_backed_file_materialises_exactly () =
       with_directory "paengi-large-materialize-store-" (fun store_root ->
           with_directory "paengi-large-materialize-destination-"
             (fun destination ->
-              let contents = deterministic_bytes (3 * 131_072 + 17) in
+              let contents = deterministic_bytes ((3 * 131_072) + 17) in
               write_file (Filename.concat source "large.bin") contents;
               let store =
                 Store.init ~root:store_root |> require_ok Store.error_to_string

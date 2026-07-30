@@ -1,7 +1,9 @@
 (executable
  (name encoding_benchmark)
+ (modules encoding_benchmark)
  (libraries unix paengi_encoding paengi_envelope paengi_hash paengi_model))
 
 (executable
  (name large_content_benchmark)
+ (modules large_content_benchmark)
  (libraries unix paengi_chunking paengi_encoding paengi_envelope paengi_hash))

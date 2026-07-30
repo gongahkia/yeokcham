@@ -1,3 +1,9 @@
 (library
  (name paengi_snapshot)
- (libraries unix paengi_chunking paengi_encoding paengi_envelope paengi_hash paengi_store))
+ (libraries
+  unix
+  paengi_chunking
+  paengi_encoding
+  paengi_envelope
+  paengi_hash
+  paengi_store))
