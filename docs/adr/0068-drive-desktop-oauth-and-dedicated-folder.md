@@ -1,4 +1,4 @@
-# ADR-0068: Use Desktop OAuth and a user-selected Drive folder
+# ADR-0068: Use Desktop OAuth and a dedicated Drive folder
 
 - Status: Accepted
 - Date: 2026-07-30

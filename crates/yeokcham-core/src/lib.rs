@@ -87,7 +87,7 @@ pub use repository::{
 };
 pub use repository_format::{RepositoryFeatureFlags, RepositoryFormat, RepositoryFormatVersion};
 pub use repository_id::RepositoryId;
-pub use repository_key::RepositoryEncryptionKey;
+pub use repository_key::{DriveObjectName, DriveObjectNamingKey, RepositoryEncryptionKey};
 pub use segment_id::SegmentId;
 pub use segment_index::{SegmentIndex, SegmentIndexEntry};
 pub use segment_reader::{

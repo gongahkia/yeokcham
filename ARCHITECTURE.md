@@ -458,7 +458,7 @@ yeokcham-repository/
     current/<summary-id>
 ```
 
-Remote keys should be opaque when metadata confidentiality is enabled.
+Remote keys should be opaque when metadata confidentiality is enabled. `RepositoryEncryptionKey::derive_drive_object_naming_key` derives a separate repository-bound key, then maps each validated backend key through HKDF-SHA-256 to a fixed 64-character hexadecimal Drive file name. The Drive client receives the opaque name only; this mapping has no database, cache, or cleartext name fallback.
 
 The current local V1 implementation uses flat `segments/<segment-uuid>` paths and `indexes/<segment-uuid>.ykix` paths before future sharding or opaque remote keys. `YKIX` remains rebuildable acceleration metadata and is never trusted instead of the matching sealed segment.
 

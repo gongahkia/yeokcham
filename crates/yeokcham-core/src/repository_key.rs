@@ -9,6 +9,8 @@ const DOMAIN_SEPARATOR: &[u8] = b"yeokcham/";
 const SEGMENT_PURPOSE: &[u8] = b"segment-encryption/v1\0";
 const METADATA_PURPOSE: &[u8] = b"metadata-encryption/v1\0";
 const BACKEND_OBJECT_PURPOSE: &[u8] = b"backend-object-encryption/v1\0";
+const DRIVE_OBJECT_NAMING_PURPOSE: &[u8] = b"drive-object-naming/v1\0";
+const DRIVE_OBJECT_NAME_PURPOSE: &[u8] = b"yeokcham/drive-object-name/v1\0";
 
 /// One repository-bound master encryption key held only in process memory.
 pub struct RepositoryEncryptionKey {
@@ -54,6 +56,13 @@ impl RepositoryEncryptionKey {
         key: &BackendKey,
     ) -> Result<DerivedEncryptionKey> {
         self.derive(BACKEND_OBJECT_PURPOSE, key.as_bytes())
+    }
+
+    /// Derives a repository-bound key for opaque Google Drive object names.
+    pub fn derive_drive_object_naming_key(&self) -> Result<DriveObjectNamingKey> {
+        Ok(DriveObjectNamingKey(
+            self.derive(DRIVE_OBJECT_NAMING_PURPOSE, b"")?.0,
+        ))
     }
 
     fn derive(&self, purpose: &[u8], identity: &[u8]) -> Result<DerivedEncryptionKey> {
@@ -114,6 +123,42 @@ impl DerivedEncryptionKey {
 impl std::fmt::Debug for DerivedEncryptionKey {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.write_str("DerivedEncryptionKey(<redacted>)")
+    }
+}
+
+/// One repository-bound key that maps backend keys to opaque Drive object names.
+pub struct DriveObjectNamingKey(Zeroizing<[u8; MASTER_KEY_BYTES]>);
+
+impl DriveObjectNamingKey {
+    /// Maps one validated backend key to its fixed-length opaque Drive object name.
+    pub fn object_name(&self, key: &BackendKey) -> Result<DriveObjectName> {
+        let hkdf = Hkdf::<Sha256>::new(Some(&*self.0), key.as_bytes());
+        let mut name = [0; MASTER_KEY_BYTES];
+        hkdf.expand(DRIVE_OBJECT_NAME_PURPOSE, &mut name)
+            .map_err(|_| Error::new(ErrorKind::Internal, "Drive object name derivation failed"))?;
+        Ok(DriveObjectName(hex::encode(name)))
+    }
+}
+
+impl std::fmt::Debug for DriveObjectNamingKey {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("DriveObjectNamingKey(<redacted>)")
+    }
+}
+
+/// One fixed-length opaque Google Drive file name.
+pub struct DriveObjectName(String);
+
+impl DriveObjectName {
+    /// Returns the opaque ASCII object name for a Drive API request.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Debug for DriveObjectName {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("DriveObjectName(<redacted>)")
     }
 }
 
@@ -190,5 +235,39 @@ mod tests {
                 .expect("second key")
                 .as_bytes()
         );
+    }
+
+    #[test]
+    fn derives_fixed_length_opaque_drive_object_names() {
+        let key =
+            RepositoryEncryptionKey::from_master_bytes(repository_id(), [7; MASTER_KEY_BYTES]);
+        let repeated = key
+            .derive_drive_object_naming_key()
+            .expect("first naming key");
+        let naming = key
+            .derive_drive_object_naming_key()
+            .expect("second naming key");
+        let first = BackendKey::from_bytes(b"segments/a").expect("first backend key");
+        let second = BackendKey::from_bytes(b"segments/b").expect("second backend key");
+        let first_name = naming.object_name(&first).expect("first name");
+
+        assert_eq!(first_name.as_str().len(), 64);
+        assert!(
+            first_name
+                .as_str()
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit())
+        );
+        assert_eq!(
+            first_name.as_str(),
+            repeated.object_name(&first).expect("same name").as_str()
+        );
+        assert_ne!(
+            first_name.as_str(),
+            naming.object_name(&second).expect("second name").as_str()
+        );
+        assert!(!first_name.as_str().contains("segments"));
+        assert_eq!(format!("{naming:?}"), "DriveObjectNamingKey(<redacted>)");
+        assert_eq!(format!("{first_name:?}"), "DriveObjectName(<redacted>)");
     }
 }
