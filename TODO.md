@@ -167,15 +167,15 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 ### Encryption
 
 - [x] Select primitives through ADR.
-- [ ] Implement repository key generation.
-- [ ] Implement key hierarchy.
-- [ ] Encrypt segment records or complete segments.
-- [ ] Encrypt sensitive metadata.
-- [ ] Bind associated data.
+- [x] Implement repository key generation.
+- [x] Implement key hierarchy.
+- [x] Encrypt segment records or complete segments.
+- [x] Encrypt sensitive metadata.
+- [x] Bind associated data.
 - [ ] Implement key export.
 - [ ] Implement key import.
 - [ ] Implement clean-machine recovery test.
-- [ ] Ensure secrets are redacted from logs.
+- [x] Ensure secrets are redacted from logs.
 
 ### Exit criteria
 

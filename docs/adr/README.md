@@ -70,3 +70,4 @@ Valid statuses are `Proposed`, `Accepted`, `Rejected`, `Deprecated`, and `Supers
 | [ADR-0062](0062-bounded-local-filesystem-backend.md) | Accepted | Implement bounded local backend object storage |
 | [ADR-0063](0063-backend-observability-and-fault-wrappers.md) | Accepted | Add backend fault-injection and metrics wrappers |
 | [ADR-0064](0064-versioned-encryption-suite.md) | Accepted | Select the initial versioned encryption suite |
+| [ADR-0065](0065-complete-object-encrypted-backend-envelopes.md) | Accepted | Encrypt complete backend objects with bound envelopes |

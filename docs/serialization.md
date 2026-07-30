@@ -29,6 +29,18 @@ Record schemas may use a fixed ordered sequence of fields or an ordered repeated
 - Validate IDs, ref names, lengths, counts, checksums, and required-feature bits before trust.
 - Readers do not normalize, repair, or silently skip malformed bytes.
 
+## Encrypted backend envelope version 1
+
+`YKCE` wraps one complete backend object after chunking/compression and before encrypted backend storage. Its fields are:
+
+1. Magic `YKCE`.
+2. Schema version `1`.
+3. Raw 24-byte XChaCha20-Poly1305 nonce.
+4. `u64` plaintext byte length.
+5. A length-delimited ciphertext whose exact byte length is plaintext length plus the 16-byte authentication tag.
+
+The external backend key is not encoded again. The caller constructs associated data from the magic/version, repository UUID, selected segment/metadata/backend-object domain, external key, canonical segment UUID when applicable, and plaintext length. Readers receive a caller byte limit, reject invalid magic/version, truncated fields, a ciphertext length inconsistent with the tag, and trailing bytes before attempting AEAD authentication. The fixed header is 46 bytes and carries public length information; callers must not trust it as authenticated metadata until complete envelope authentication succeeds. Version 1 encrypts complete objects and rejects range/resumable operations; a streaming layout requires a new format version.
+
 ## Evolution
 
 Each new record family documents its magic, schema version, field order, limits, and feature effects before implementation. Incompatible changes require a new schema version or required feature bit and a copy-on-write migration. Existing records retain their original encoding forever.

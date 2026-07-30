@@ -303,6 +303,8 @@ The repository layer must not assume:
 
 Encryption occurs after chunking and compression, before remote persistence. ADR-0064 fixes the initial suite as XChaCha20-Poly1305 with fresh 192-bit nonces, HKDF-SHA-256 domain-separated subkeys, Argon2id passphrase wrapping, system entropy through `getrandom`, and `zeroize`-backed secret storage. These values are format inputs, not runtime preferences.
 
+`EncryptedBackend` seals each complete backend object in a version-1 `YKCE` envelope. Canonical associated data binds the repository UUID, encrypted-object domain, backend key, segment UUID when applicable, and plaintext length. `segments/<uuid>` derives a segment subkey; `indexes/`, `manifests/`, `refs/`, and `format/` derive metadata subkeys; other keys derive backend-object subkeys. The wrapper preserves create-only publication and returns plaintext lengths for head/list, but complete-object AEAD currently rejects range reads and resumable uploads rather than silently buffering an unbounded object. Backend keys remain cleartext routing data; opaque encrypted key derivation is later remote-format work.
+
 Suggested envelope structure:
 
 ```text

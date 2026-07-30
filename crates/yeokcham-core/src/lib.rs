@@ -11,6 +11,7 @@ mod chunked_blob_record;
 mod compression;
 mod content_defined_chunking;
 mod device_id;
+mod encrypted_backend;
 mod error;
 mod filesystem_backend;
 mod git_object;
@@ -25,6 +26,7 @@ mod ref_snapshot;
 mod repository;
 mod repository_format;
 mod repository_id;
+mod repository_key;
 mod segment_id;
 mod segment_index;
 mod segment_reader;
@@ -53,6 +55,7 @@ pub use content_defined_chunking::{
     ContentDefinedChunk, ContentDefinedChunker, ContentDefinedChunkingParameters,
 };
 pub use device_id::DeviceId;
+pub use encrypted_backend::EncryptedBackend;
 pub use error::{Error, ErrorKind, Result};
 pub use filesystem_backend::FilesystemBackend;
 pub use git_object::{GitObject, GitObjectKind};
@@ -72,6 +75,7 @@ pub use repository::{
 };
 pub use repository_format::{RepositoryFeatureFlags, RepositoryFormat, RepositoryFormatVersion};
 pub use repository_id::RepositoryId;
+pub use repository_key::RepositoryEncryptionKey;
 pub use segment_id::SegmentId;
 pub use segment_index::{SegmentIndex, SegmentIndexEntry};
 pub use segment_reader::{

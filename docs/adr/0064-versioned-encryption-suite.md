@@ -37,11 +37,11 @@ Avoid a key hierarchy. This binds unrelated formats to one long-lived key and ma
 Use the following exact initial suite:
 
 - `chacha20poly1305 = 0.11.0` `XChaCha20Poly1305` for AEAD encryption and authentication, with a unique fresh 24-byte nonce from `getrandom = 0.4.3` for every envelope.
-- `hkdf = 0.13.0` over `sha2::Sha256` for 32-byte subkeys. HKDF salt is the repository UUID. Information is canonical ASCII: `yeokcham/<purpose>/v1\0` followed by any fixed-width object identity required by that purpose.
+- `hkdf = 0.13.0` over `sha2 = 0.11.0` SHA-256 for 32-byte subkeys. HKDF salt is the repository UUID. Information is canonical ASCII: `yeokcham/<purpose>/v1\0` followed by any fixed-width object identity required by that purpose.
 - `argon2 = 0.5.3` Argon2id version 0x13 for passphrase wrapping. Recovery exports record Argon2id `m=65536` KiB, `t=3`, `p=4`, a fresh 16-byte salt, and a 32-byte derived wrapping key. These are RFC 9106's second recommended parameters for memory-constrained environments.
 - `zeroize = 1.9.0` for master keys, derived keys, passphrases, and temporary plaintext buffers where API ownership permits.
 
-The initial master key is 32 random bytes. It remains a root secret and is never used directly for AEAD. Distinct segment, metadata, backend-object, and export-wrapping keys use distinct HKDF purpose labels. Envelopes carry a magic, schema version, nonce, ciphertext with its 16-byte Poly1305 tag, and bounded cleartext routing fields only. Associated data canonically binds the envelope version, repository UUID, purpose, object identity, and declared plaintext length. A wrong key, modified cleartext header, nonce, ciphertext, tag, or associated-data binding returns `corrupt_data` without plaintext.
+The initial master key is 32 random bytes. It remains a root secret and is never used directly for AEAD. Distinct segment, metadata, backend-object, and export-wrapping keys use distinct HKDF purpose labels. Envelopes carry a magic, schema version, nonce, plaintext length, and ciphertext with its 16-byte Poly1305 tag; callers supply the external backend-key routing identity. Associated data canonically binds the envelope version, repository UUID, purpose, object identity, and declared plaintext length. A wrong key, modified cleartext header, nonce, ciphertext, tag, or associated-data binding returns `corrupt_data` without plaintext.
 
 ## Consequences
 
