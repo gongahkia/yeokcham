@@ -679,11 +679,9 @@ mod tests {
         let waker = Waker::from(Arc::new(NoopWake));
         let mut context = Context::from_waker(&waker);
         let mut future = std::pin::pin!(future);
-        loop {
-            match future.as_mut().poll(&mut context) {
-                Poll::Ready(value) => return value,
-                Poll::Pending => panic!("remote journal future unexpectedly yielded"),
-            }
+        match future.as_mut().poll(&mut context) {
+            Poll::Ready(value) => value,
+            Poll::Pending => panic!("remote journal future unexpectedly yielded"),
         }
     }
 
