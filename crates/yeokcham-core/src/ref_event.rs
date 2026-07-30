@@ -37,7 +37,7 @@ impl RefEventVerifyingKey {
         &self.0
     }
 
-    fn dalek_key(self) -> Result<VerifyingKey> {
+    pub(crate) fn dalek_key(self) -> Result<VerifyingKey> {
         VerifyingKey::from_bytes(&self.0)
             .map_err(|_| Error::new(ErrorKind::CorruptData, "ref event verifying key is invalid"))
     }
@@ -63,7 +63,7 @@ impl RefEventSigningKey {
         RefEventVerifyingKey(self.0.verifying_key().to_bytes())
     }
 
-    fn sign(&self, bytes: &[u8]) -> [u8; 64] {
+    pub(crate) fn sign(&self, bytes: &[u8]) -> [u8; 64] {
         self.0.sign(bytes).to_bytes()
     }
 }

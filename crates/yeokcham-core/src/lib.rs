@@ -11,6 +11,7 @@ mod chunked_blob_record;
 mod compression;
 mod content_defined_chunking;
 mod device_id;
+mod device_registry;
 mod encrypted_backend;
 mod error;
 mod filesystem_backend;
@@ -59,6 +60,9 @@ pub use content_defined_chunking::{
     ContentDefinedChunk, ContentDefinedChunker, ContentDefinedChunkingParameters,
 };
 pub use device_id::DeviceId;
+pub use device_registry::{
+    DeviceRegistration, DeviceRegistry, DeviceRegistryEvent, DeviceRegistryReadLimits,
+};
 pub use encrypted_backend::EncryptedBackend;
 pub use error::{Error, ErrorKind, Result};
 pub use filesystem_backend::FilesystemBackend;
