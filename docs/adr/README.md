@@ -78,3 +78,4 @@ Valid statuses are `Proposed`, `Accepted`, `Rejected`, `Deprecated`, and `Supers
 | [ADR-0070](0070-root-pinned-device-journal-authorization.md) | Accepted | Authorize remote device journals with a pinned root registry |
 | [ADR-0071](0071-native-filtered-upload-pack-bridge.md) | Accepted | Delegate partial-clone filtering to C Git upload-pack |
 | [ADR-0072](0072-explicit-lru-snapshot-cache-trimming.md) | Accepted | Trim snapshot cache explicitly with LRU |
+| [ADR-0073](0073-checksummed-ciphertext-read-cache.md) | Accepted | Cache immutable encrypted segments and indexes by opaque key |

@@ -234,8 +234,8 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 
 ### Cache
 
-- [ ] Cache indexes.
-- [ ] Cache encrypted segments.
+- [x] Cache indexes.
+- [x] Cache encrypted segments.
 - [ ] Cache decrypted chunks with safe local policy.
 - [ ] Cache reconstructed Git objects.
 - [x] Implement capacity limits.

@@ -8,6 +8,7 @@ mod blob_manifest;
 mod canonical;
 mod chunk_record;
 mod chunked_blob_record;
+mod ciphertext_cache;
 mod compression;
 mod content_defined_chunking;
 mod device_id;
@@ -56,6 +57,7 @@ pub use blob_manifest::{BlobManifest, BlobManifestRepresentation, BlobStoragePol
 pub use canonical::{CanonicalDecoder, CanonicalEncoder};
 pub use chunk_record::ChunkRecord;
 pub use chunked_blob_record::{ChunkReference, ChunkedBlobRecord};
+pub use ciphertext_cache::{CachedBackend, CiphertextCache, CiphertextCacheMetrics};
 pub use compression::{CompressionAlgorithm, CompressionCodec};
 pub use content_defined_chunking::{
     ContentDefinedChunk, ContentDefinedChunker, ContentDefinedChunkingParameters,
