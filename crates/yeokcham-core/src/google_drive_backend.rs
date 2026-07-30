@@ -1559,7 +1559,7 @@ mod tests {
     };
 
     use super::*;
-    use crate::{BackendReadLimits, RepositoryEncryptionKey};
+    use crate::{BackendReadLimits, EncryptedBackend, RepositoryEncryptionKey};
 
     struct NoopWake;
 
@@ -1618,6 +1618,102 @@ mod tests {
                 .expect("response lock")
                 .pop_front()
                 .ok_or_else(|| Error::new(ErrorKind::Internal, "unexpected Drive request"))
+        }
+    }
+
+    #[derive(Default)]
+    struct EncryptedUploadTransport {
+        requests: Mutex<Vec<DriveHttpRequest>>,
+        uploaded: Mutex<Option<Vec<u8>>>,
+        name: Mutex<Option<String>>,
+    }
+
+    impl DriveHttpTransport for EncryptedUploadTransport {
+        fn request(&self, request: &DriveHttpRequest) -> Result<DriveHttpResponse> {
+            self.requests
+                .lock()
+                .expect("request lock")
+                .push(request.clone());
+            match (request.method(), request.url()) {
+                (DriveHttpMethod::Get, url) if url.contains("?alt=media") => {
+                    let range = request
+                        .headers()
+                        .iter()
+                        .find_map(|(name, value)| (name == "range").then_some(value))
+                        .ok_or_else(|| Error::new(ErrorKind::Internal, "missing range header"))?;
+                    let range = range.strip_prefix("bytes=").ok_or_else(|| {
+                        Error::new(ErrorKind::Internal, "range header is invalid")
+                    })?;
+                    let (start, end) = range.split_once('-').ok_or_else(|| {
+                        Error::new(ErrorKind::Internal, "range header is invalid")
+                    })?;
+                    let start = start
+                        .parse::<usize>()
+                        .map_err(|_| Error::new(ErrorKind::Internal, "range header is invalid"))?;
+                    let end = end
+                        .parse::<usize>()
+                        .map_err(|_| Error::new(ErrorKind::Internal, "range header is invalid"))?;
+                    let uploaded = self
+                        .uploaded
+                        .lock()
+                        .expect("upload lock")
+                        .clone()
+                        .ok_or_else(|| Error::new(ErrorKind::Internal, "upload is missing"))?;
+                    let end = end.checked_add(1).ok_or_else(|| {
+                        Error::new(ErrorKind::Internal, "range header is invalid")
+                    })?;
+                    let bytes = uploaded
+                        .get(start..end)
+                        .ok_or_else(|| Error::new(ErrorKind::Internal, "range exceeds upload"))?;
+                    Ok(bytes_response(206, bytes.to_vec()))
+                }
+                (DriveHttpMethod::Get, url) if url.contains("/drive/v3/files?") => {
+                    let uploaded = self.uploaded.lock().expect("upload lock");
+                    match uploaded.as_ref() {
+                        Some(uploaded) => {
+                            let name =
+                                self.name
+                                    .lock()
+                                    .expect("name lock")
+                                    .clone()
+                                    .ok_or_else(|| {
+                                        Error::new(ErrorKind::Internal, "Drive name is missing")
+                                    })?;
+                            Ok(files_response("file123", &name, uploaded.len()))
+                        }
+                        None => Ok(response(
+                            200,
+                            Vec::new(),
+                            r#"{"files":[],"incompleteSearch":false}"#,
+                        )),
+                    }
+                }
+                (DriveHttpMethod::Post, _) => {
+                    let metadata: Value = serde_json::from_slice(request.body()).map_err(|_| {
+                        Error::new(ErrorKind::Internal, "Drive metadata is invalid")
+                    })?;
+                    let name = metadata
+                        .get("name")
+                        .and_then(Value::as_str)
+                        .ok_or_else(|| {
+                            Error::new(ErrorKind::Internal, "Drive metadata has no name")
+                        })?;
+                    *self.name.lock().expect("name lock") = Some(name.to_owned());
+                    Ok(response(
+                        200,
+                        vec![(
+                            "location",
+                            "https://www.googleapis.com/upload/drive/v3/files?upload_id=123",
+                        )],
+                        "{}",
+                    ))
+                }
+                (DriveHttpMethod::Put, _) => {
+                    *self.uploaded.lock().expect("upload lock") = Some(request.body().to_vec());
+                    Ok(response(200, Vec::new(), r#"{"id":"file123"}"#))
+                }
+                _ => Err(Error::new(ErrorKind::Internal, "unexpected Drive request")),
+            }
         }
     }
 
@@ -1871,6 +1967,71 @@ mod tests {
                 .any(|(name, value)| name == "content-range" && value.ends_with("/73"))
         );
         assert!(requests[2].body().starts_with(&capsule));
+    }
+
+    #[test]
+    fn encrypted_drive_composition_hides_source_bytes_and_logical_keys() {
+        let repository_id = "550e8400-e29b-41d4-a716-446655440000"
+            .parse()
+            .expect("repository ID");
+        let repository_key = RepositoryEncryptionKey::from_master_bytes(repository_id, [8; 32]);
+        let physical = DriveBackend::new(
+            DriveFolderId::new("folder_id").expect("folder"),
+            repository_key
+                .derive_drive_object_naming_key()
+                .expect("naming key"),
+            EncryptedUploadTransport::default(),
+            FixedTokenProvider,
+        )
+        .with_sleeper(FakeSleeper::default());
+        let backend = EncryptedBackend::new(physical, repository_key);
+        let key = BackendKey::from_bytes(b"manifests/objects/opaque-record").expect("key");
+        let source = b"source bytes must not reach Drive plaintext";
+        assert_eq!(
+            block_on(backend.put_if_absent(&key, source)).expect("upload"),
+            BackendPutResult::Created(BackendObjectMetadata::new(source.len() as u64)),
+        );
+        let physical = backend.into_inner();
+        let uploaded = physical
+            .transport
+            .uploaded
+            .lock()
+            .expect("upload lock")
+            .clone()
+            .expect("upload");
+        assert!(uploaded.starts_with(b"YKDO"));
+        assert!(uploaded.windows(4).any(|window| window == b"YKCE"));
+        assert!(
+            !uploaded
+                .windows(source.len())
+                .any(|window| window == source)
+        );
+        assert!(
+            !uploaded
+                .windows(key.as_bytes().len())
+                .any(|window| window == key.as_bytes())
+        );
+        for request in physical
+            .transport
+            .requests
+            .lock()
+            .expect("request lock")
+            .iter()
+        {
+            assert!(!request.url().contains("manifests/objects/opaque-record"));
+            assert!(
+                !request
+                    .body()
+                    .windows(source.len())
+                    .any(|window| window == source)
+            );
+            assert!(
+                !request
+                    .body()
+                    .windows(key.as_bytes().len())
+                    .any(|window| window == key.as_bytes())
+            );
+        }
     }
 
     #[test]

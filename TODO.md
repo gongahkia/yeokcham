@@ -217,7 +217,7 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 ### Exit criteria
 
 - [x] A repository can be pushed from one machine and cloned on another.
-- [ ] Drive contains only encrypted opaque files.
+- [x] Drive contains only encrypted opaque files.
 - [x] Interrupted uploads do not create accepted broken state.
 - [x] Divergent updates are visible and recoverable.
 
