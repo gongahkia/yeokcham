@@ -523,6 +523,10 @@ fn remote_helper_pushes_only_verified_durable_ref_transitions() {
         .expect("update first client");
     run_git(&first_client, &["add", "README.md"]);
     run_git(&first_client, &["commit", "-m", "accepted main update"]);
+    let initial_remote_main = run_git(&first_client, &["rev-parse", "refs/remotes/origin/main"]);
+    let initial_remote_main = std::str::from_utf8(&initial_remote_main)
+        .expect("initial remote main is UTF-8")
+        .trim();
     let accepted_main = run_git(&first_client, &["rev-parse", "HEAD"]);
     let output = Command::new("git")
         .arg("-C")
@@ -536,6 +540,33 @@ fn remote_helper_pushes_only_verified_durable_ref_transitions() {
         "fast-forward push must succeed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
+    run_git(
+        &first_client,
+        &[
+            "update-ref",
+            "refs/remotes/origin/main",
+            initial_remote_main,
+        ],
+    );
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(&first_client)
+        .args(["push", "origin", "main"])
+        .env("PATH", &helper_path)
+        .output()
+        .expect("retry accepted main push after a lost response");
+    assert!(
+        output.status.success(),
+        "retry must converge after ref rediscovery: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let output = Command::new(env!("CARGO_BIN_EXE_yeokcham"))
+        .args(["inspect", "refs"])
+        .arg(&repository)
+        .output()
+        .expect("inspect retry journal");
+    assert!(output.status.success());
+    assert!(String::from_utf8_lossy(&output.stdout).contains("events=1"));
 
     run_git(&first_client, &["switch", "-c", "topic"]);
     fs::write(first_client.join("topic.txt"), b"topic\n").expect("write topic fixture");

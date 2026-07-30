@@ -144,7 +144,7 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 - [x] Inject crashes after each mutation boundary.
 - [x] Verify old-or-new state property.
 - [x] Add restart recovery.
-- [ ] Add idempotent push retry.
+- [x] Add idempotent push retry.
 
 ### Exit criteria
 

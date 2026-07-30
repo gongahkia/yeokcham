@@ -20,7 +20,7 @@ Use the repository UUID as the deterministic V1 writer identity for this local s
 
 ## Consequences
 
-Git clients can push fast-forward branch creation, update, and deletion to a local store. Existing tags are immutable. C Git validates client-advertised old refs and pack connectivity; Yeokcham repeats object and ref-target verification before publishing its canonical journal transition.
+Git clients can push fast-forward branch creation, update, and deletion to a local store. Existing tags are immutable. C Git validates client-advertised old refs and pack connectivity; Yeokcham repeats object and ref-target verification before publishing its canonical journal transition. The integration test restores a stale local remote-tracking ref after accepted publication, then verifies a fresh standard Git push rediscovers canonical refs without creating another event.
 
 If the canonical predecessor changes after staging, or any import check fails, immutable staged-object records may have been written but remain unreachable. The helper does not acknowledge those refs, does not overwrite another transition, and discards the temporary conventional Git repository. ADR-0060 adds crash injection for the canonical bootstrap and journal transition; signed multi-device authorization remains separate work.
 
@@ -43,4 +43,4 @@ The helper clears Git path and configuration environment overrides, invokes fixe
 
 ## Verification
 
-Core tests prove a stale expected state rejects synchronization and that a later transition after revisiting a prior ref state stays linear through the device sequence chain. Remote-helper integration covers accepted fast-forward push, branch creation and deletion, tag creation, rejected forced tag and branch replacement, a fresh clone, `git fsck --full --strict`, and canonical verification. The checksum-pinned Git 2.54.0 and 2.55.0 CI matrix runs both clone/fetch and push integration tests.
+Core tests prove a stale expected state rejects synchronization and that a later transition after revisiting a prior ref state stays linear through the device sequence chain. Remote-helper integration covers accepted fast-forward push, response-loss retry with stale local remote-tracking state, branch creation and deletion, tag creation, rejected forced tag and branch replacement, a fresh clone, `git fsck --full --strict`, and canonical verification. The checksum-pinned Git 2.54.0 and 2.55.0 CI matrix runs both clone/fetch and push integration tests.
