@@ -113,7 +113,7 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 - [x] Ordinary Git can clone a yeokcham local store.
 - [x] Ordinary Git can fetch updates.
 - [x] Checkout and reachable object IDs match the original.
-- [ ] Integration suite runs against at least two maintained Git versions.
+- [x] Integration suite runs against at least two maintained Git versions.
 
 ## Milestone 3 — Push and crash-safe refs
 

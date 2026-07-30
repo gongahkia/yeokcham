@@ -75,6 +75,8 @@ Do not start with Google Drive, GitHub synchronisation, a daemon, a web UI, or p
 
 Yeokcham's minimum supported Rust version (MSRV) is 1.85. The repository toolchain is pinned to 1.85.0, and CI also tests the latest stable Rust release. Raising the MSRV requires an explicit documented change.
 
+The remote-helper integration suite runs with the two latest pinned upstream C Git releases, currently 2.54.0 and 2.55.0. Updating this matrix requires updating the checksum-pinned build script and exercising the same clone/fetch/prune scenario.
+
 ## Development
 
 Run `make help` to list development targets and `make ci` for the complete locked local CI gate.

@@ -24,3 +24,27 @@ jobs:
         run: rustup toolchain install "${{ matrix.toolchain }}" --profile minimal --component clippy --component rustfmt --no-self-update
       - name: Run CI gate
         run: make ci
+
+  git-integration:
+    name: Git ${{ matrix.git-version }} remote-helper integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        git-version: ["2.54.0", "2.55.0"]
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install Rust
+        run: rustup toolchain install "1.85.0" --profile minimal --component clippy --component rustfmt --no-self-update
+      - name: Install Git build dependencies
+        run: sudo apt-get update && sudo apt-get install --yes build-essential libcurl4-openssl-dev libexpat1-dev zlib1g-dev
+      - name: Build pinned Git
+        run: |
+          git_prefix="$RUNNER_TEMP/git-${{ matrix.git-version }}"
+          scripts/build-pinned-git.sh "${{ matrix.git-version }}" "$git_prefix"
+          echo "$git_prefix/bin" >> "$GITHUB_PATH"
+      - name: Run remote-helper integration
+        env:
+          RUSTUP_TOOLCHAIN: "1.85.0"
+        run: scripts/verify-git-remote-helper-integration.sh "${{ matrix.git-version }}"
