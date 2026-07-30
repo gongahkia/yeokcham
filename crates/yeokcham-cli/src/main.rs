@@ -1,18 +1,36 @@
 use std::{
     env,
     ffi::{OsStr, OsString},
+    fs::{self, File, OpenOptions},
+    future::Future,
+    io::{self, Read, Write},
     path::PathBuf,
     process::ExitCode,
+    sync::Arc,
+    task::{Context, Poll, Wake, Waker},
     time::Duration,
 };
 
 use yeokcham_core::{
-    DeviceId, DriveCredentialStore, DriveOAuthConfiguration, Error, ErrorKind, GitImportLimits,
+    DeviceId, DriveBackend, DriveCredentialStore, DriveFolderId, DriveOAuthConfiguration,
+    EncryptedBackend, EncryptedRepositoryRecoveryLimits, Error, ErrorKind, GitImportLimits,
     GitObjectId, GitRepository, KeyringDriveCredentialStore, LocalRepository, RefEventReadLimits,
-    Result, UreqDriveOAuthTransport,
+    RepositoryEncryptionKey, RepositoryKeyExport, Result, StoredDriveAccessTokenProvider,
+    UreqDriveHttpTransport, UreqDriveOAuthTransport,
 };
+use zeroize::Zeroizing;
 
 mod telemetry;
+
+const MAXIMUM_KEY_EXPORT_BYTES: u64 = 8 * 1024;
+const MAXIMUM_PASSPHRASE_INPUT_BYTES: u64 = 1_025;
+
+type DefaultDriveBackend = EncryptedBackend<
+    DriveBackend<
+        UreqDriveHttpTransport,
+        StoredDriveAccessTokenProvider<KeyringDriveCredentialStore, UreqDriveOAuthTransport>,
+    >,
+>;
 
 enum Command {
     Help,
@@ -46,6 +64,30 @@ enum Command {
     DriveAuth {
         client_id: String,
         redirect_port: Option<u16>,
+    },
+    DriveInit {
+        client_id: String,
+    },
+    DriveBackup {
+        client_id: String,
+        folder_id: DriveFolderId,
+        key_export: PathBuf,
+        repository: PathBuf,
+    },
+    DriveRestore {
+        client_id: String,
+        folder_id: DriveFolderId,
+        key_export: PathBuf,
+        destination: PathBuf,
+    },
+    DriveVerify {
+        client_id: String,
+        folder_id: DriveFolderId,
+        key_export: PathBuf,
+    },
+    KeyCreateExport {
+        repository: PathBuf,
+        destination: PathBuf,
     },
 }
 
@@ -82,6 +124,28 @@ fn main() -> ExitCode {
             client_id,
             redirect_port,
         } => drive_auth(client_id, redirect_port),
+        Command::DriveInit { client_id } => drive_init(client_id),
+        Command::DriveBackup {
+            client_id,
+            folder_id,
+            key_export,
+            repository,
+        } => drive_backup(client_id, folder_id, key_export, repository),
+        Command::DriveRestore {
+            client_id,
+            folder_id,
+            key_export,
+            destination,
+        } => drive_restore(client_id, folder_id, key_export, destination),
+        Command::DriveVerify {
+            client_id,
+            folder_id,
+            key_export,
+        } => drive_verify(client_id, folder_id, key_export),
+        Command::KeyCreateExport {
+            repository,
+            destination,
+        } => key_create_export(repository, destination),
     }) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
@@ -100,6 +164,7 @@ fn parse_command(arguments: Vec<OsString>) -> Result<Command> {
         "init" => parse_init(&arguments),
         "sync" => parse_sync(&arguments),
         "drive" => parse_drive(&arguments),
+        "key" => parse_key(&arguments),
         "verify" if arguments.len() == 2 => Ok(Command::Verify {
             repository: PathBuf::from(&arguments[1]),
         }),
@@ -132,7 +197,28 @@ fn parse_command(arguments: Vec<OsString>) -> Result<Command> {
     }
 }
 
+fn parse_key(arguments: &[OsString]) -> Result<Command> {
+    if arguments.len() == 5
+        && arguments[1].as_os_str() == OsStr::new("create-export")
+        && arguments[2].as_os_str() == OsStr::new("--passphrase-stdin")
+    {
+        return Ok(Command::KeyCreateExport {
+            repository: PathBuf::from(&arguments[3]),
+            destination: PathBuf::from(&arguments[4]),
+        });
+    }
+    Err(usage_error())
+}
+
 fn parse_drive(arguments: &[OsString]) -> Result<Command> {
+    if arguments.len() == 4
+        && arguments[1].as_os_str() == OsStr::new("init")
+        && arguments[2].as_os_str() == OsStr::new("--client-id")
+    {
+        return Ok(Command::DriveInit {
+            client_id: arguments[3].to_str().ok_or_else(usage_error)?.to_owned(),
+        });
+    }
     if arguments.len() == 4
         && arguments[1].as_os_str() == OsStr::new("auth")
         && arguments[2].as_os_str() == OsStr::new("--client-id")
@@ -155,6 +241,53 @@ fn parse_drive(arguments: &[OsString]) -> Result<Command> {
         return Ok(Command::DriveAuth {
             client_id: arguments[3].to_str().ok_or_else(usage_error)?.to_owned(),
             redirect_port: Some(redirect_port),
+        });
+    }
+    if arguments.len() == 10
+        && arguments[1].as_os_str() == OsStr::new("backup")
+        && arguments[2].as_os_str() == OsStr::new("--client-id")
+        && arguments[4].as_os_str() == OsStr::new("--folder-id")
+        && arguments[6].as_os_str() == OsStr::new("--key-export")
+        && arguments[8].as_os_str() == OsStr::new("--passphrase-stdin")
+    {
+        return Ok(Command::DriveBackup {
+            client_id: arguments[3].to_str().ok_or_else(usage_error)?.to_owned(),
+            folder_id: DriveFolderId::new(
+                arguments[5].to_str().ok_or_else(usage_error)?.to_owned(),
+            )?,
+            key_export: PathBuf::from(&arguments[7]),
+            repository: PathBuf::from(&arguments[9]),
+        });
+    }
+    if arguments.len() == 10
+        && arguments[1].as_os_str() == OsStr::new("restore")
+        && arguments[2].as_os_str() == OsStr::new("--client-id")
+        && arguments[4].as_os_str() == OsStr::new("--folder-id")
+        && arguments[6].as_os_str() == OsStr::new("--key-export")
+        && arguments[8].as_os_str() == OsStr::new("--passphrase-stdin")
+    {
+        return Ok(Command::DriveRestore {
+            client_id: arguments[3].to_str().ok_or_else(usage_error)?.to_owned(),
+            folder_id: DriveFolderId::new(
+                arguments[5].to_str().ok_or_else(usage_error)?.to_owned(),
+            )?,
+            key_export: PathBuf::from(&arguments[7]),
+            destination: PathBuf::from(&arguments[9]),
+        });
+    }
+    if arguments.len() == 9
+        && arguments[1].as_os_str() == OsStr::new("verify")
+        && arguments[2].as_os_str() == OsStr::new("--client-id")
+        && arguments[4].as_os_str() == OsStr::new("--folder-id")
+        && arguments[6].as_os_str() == OsStr::new("--key-export")
+        && arguments[8].as_os_str() == OsStr::new("--passphrase-stdin")
+    {
+        return Ok(Command::DriveVerify {
+            client_id: arguments[3].to_str().ok_or_else(usage_error)?.to_owned(),
+            folder_id: DriveFolderId::new(
+                arguments[5].to_str().ok_or_else(usage_error)?.to_owned(),
+            )?,
+            key_export: PathBuf::from(&arguments[7]),
         });
     }
     Err(usage_error())
@@ -351,6 +484,261 @@ fn drive_auth(client_id: String, redirect_port: Option<u16>) -> Result<()> {
     Ok(())
 }
 
+fn drive_init(client_id: String) -> Result<()> {
+    let configuration = DriveOAuthConfiguration::new(client_id)?;
+    let token_transport = UreqDriveOAuthTransport::new(Duration::from_secs(30))?;
+    let access_tokens = StoredDriveAccessTokenProvider::new(
+        configuration,
+        KeyringDriveCredentialStore,
+        token_transport,
+    );
+    let transport = UreqDriveHttpTransport::new(Duration::from_secs(30))?;
+    let folder = DriveFolderId::create(&transport, &access_tokens)?;
+    println!("created_drive_folder_id={}", folder.as_str());
+    Ok(())
+}
+
+fn drive_backup(
+    client_id: String,
+    folder_id: DriveFolderId,
+    key_export: PathBuf,
+    repository: PathBuf,
+) -> Result<()> {
+    let repository = LocalRepository::open(repository)?;
+    let key = read_recovery_key(key_export)?;
+    if repository.id() != key.repository_id() {
+        return Err(Error::new(
+            ErrorKind::Conflict,
+            "recovery key does not belong to the local repository",
+        ));
+    }
+    let backend = encrypted_drive_backend(client_id, folder_id, key)?;
+    let report = block_on(repository.backup_to_backend(&backend, recovery_limits()?))?;
+    println!(
+        "drive_backup files={} bytes={}",
+        report.file_count(),
+        report.total_bytes(),
+    );
+    Ok(())
+}
+
+fn drive_restore(
+    client_id: String,
+    folder_id: DriveFolderId,
+    key_export: PathBuf,
+    destination: PathBuf,
+) -> Result<()> {
+    let key = read_recovery_key(key_export)?;
+    let repository_id = key.repository_id();
+    let backend = encrypted_drive_backend(client_id, folder_id, key)?;
+    let (repository, report) = block_on(LocalRepository::restore_from_backend(
+        &destination,
+        repository_id,
+        &backend,
+        recovery_limits()?,
+    ))?;
+    repository.verify(GitImportLimits::initial()?.verification_limits()?)?;
+    println!(
+        "drive_restore files={} bytes={}",
+        report.file_count(),
+        report.total_bytes(),
+    );
+    Ok(())
+}
+
+fn drive_verify(client_id: String, folder_id: DriveFolderId, key_export: PathBuf) -> Result<()> {
+    let key = read_recovery_key(key_export)?;
+    let repository_id = key.repository_id();
+    let backend = encrypted_drive_backend(client_id, folder_id, key)?;
+    let destination =
+        env::temp_dir().join(format!("yeokcham-drive-verify-{}", uuid::Uuid::new_v4()));
+    let result = block_on(LocalRepository::restore_from_backend(
+        &destination,
+        repository_id,
+        &backend,
+        recovery_limits()?,
+    ))
+    .and_then(|(repository, report)| {
+        repository.verify(GitImportLimits::initial()?.verification_limits()?)?;
+        Ok(report)
+    });
+    let cleanup = fs::remove_dir_all(&destination).map_err(|error| {
+        Error::with_source(
+            ErrorKind::Io,
+            "temporary Drive verification files could not be removed",
+            error,
+        )
+    });
+    match (result, cleanup) {
+        (Err(error), _) => Err(error),
+        (Ok(_), Err(error)) => Err(error),
+        (Ok(report), Ok(())) => {
+            println!(
+                "drive_verified files={} bytes={}",
+                report.file_count(),
+                report.total_bytes(),
+            );
+            Ok(())
+        }
+    }
+}
+
+fn key_create_export(repository: PathBuf, destination: PathBuf) -> Result<()> {
+    let repository = LocalRepository::open(repository)?;
+    let key = RepositoryEncryptionKey::generate(repository.id())?;
+    let passphrase = read_passphrase()?;
+    let export = key.export_with_passphrase(&passphrase)?;
+    let mut destination_file = OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(destination)
+        .map_err(|error| {
+            Error::with_source(
+                ErrorKind::Io,
+                "recovery key export could not be created",
+                error,
+            )
+        })?;
+    destination_file
+        .write_all(export.as_bytes())
+        .map_err(|error| {
+            Error::with_source(
+                ErrorKind::Io,
+                "recovery key export could not be written",
+                error,
+            )
+        })?;
+    destination_file.sync_all().map_err(|error| {
+        Error::with_source(
+            ErrorKind::Io,
+            "recovery key export could not be synchronized",
+            error,
+        )
+    })?;
+    println!("created encrypted recovery key export");
+    Ok(())
+}
+
+fn encrypted_drive_backend(
+    client_id: String,
+    folder_id: DriveFolderId,
+    key: RepositoryEncryptionKey,
+) -> Result<DefaultDriveBackend> {
+    let configuration = DriveOAuthConfiguration::new(client_id)?;
+    let naming_key = key.derive_drive_object_naming_key()?;
+    let token_transport = UreqDriveOAuthTransport::new(Duration::from_secs(30))?;
+    let access_tokens = StoredDriveAccessTokenProvider::new(
+        configuration,
+        KeyringDriveCredentialStore,
+        token_transport,
+    );
+    let transport = UreqDriveHttpTransport::new(Duration::from_secs(30))?;
+    Ok(EncryptedBackend::new(
+        DriveBackend::new(folder_id, naming_key, transport, access_tokens),
+        key,
+    ))
+}
+
+fn read_recovery_key(path: PathBuf) -> Result<RepositoryEncryptionKey> {
+    let export =
+        RepositoryKeyExport::from_bytes(read_bounded_file(&path, MAXIMUM_KEY_EXPORT_BYTES)?)?;
+    let passphrase = read_passphrase()?;
+    RepositoryEncryptionKey::import_with_passphrase(&export, &passphrase)
+}
+
+fn read_bounded_file(path: &PathBuf, maximum_bytes: u64) -> Result<Vec<u8>> {
+    let mut file = File::open(path).map_err(|error| {
+        Error::with_source(
+            ErrorKind::Io,
+            "recovery key export could not be opened",
+            error,
+        )
+    })?;
+    let mut bytes = Vec::new();
+    Read::by_ref(&mut file)
+        .take(maximum_bytes.checked_add(1).ok_or_else(|| {
+            Error::new(ErrorKind::Internal, "recovery key export bound is invalid")
+        })?)
+        .read_to_end(&mut bytes)
+        .map_err(|error| {
+            Error::with_source(
+                ErrorKind::Io,
+                "recovery key export could not be read",
+                error,
+            )
+        })?;
+    if u64::try_from(bytes.len())
+        .ok()
+        .is_none_or(|length| length > maximum_bytes)
+    {
+        return Err(Error::new(
+            ErrorKind::Unsupported,
+            "recovery key export exceeds the byte limit",
+        ));
+    }
+    Ok(bytes)
+}
+
+fn read_passphrase() -> Result<Zeroizing<Vec<u8>>> {
+    let mut passphrase = Zeroizing::new(Vec::new());
+    io::stdin()
+        .lock()
+        .take(MAXIMUM_PASSPHRASE_INPUT_BYTES)
+        .read_to_end(&mut passphrase)
+        .map_err(|error| {
+            Error::with_source(ErrorKind::Io, "passphrase could not be read", error)
+        })?;
+    if passphrase.last() == Some(&b'\n') {
+        passphrase.pop();
+        if passphrase.last() == Some(&b'\r') {
+            passphrase.pop();
+        }
+    }
+    if passphrase.is_empty() || passphrase.len() > 1_024 {
+        return Err(Error::new(
+            ErrorKind::InvalidInput,
+            "recovery export passphrase is invalid",
+        ));
+    }
+    Ok(passphrase)
+}
+
+fn recovery_limits() -> Result<EncryptedRepositoryRecoveryLimits> {
+    let maximum_file_bytes = 64 * 1024 * 1024;
+    let maximum_files = 100_000;
+    EncryptedRepositoryRecoveryLimits::new(
+        maximum_files,
+        maximum_file_bytes,
+        maximum_file_bytes
+            .checked_mul(
+                u64::try_from(maximum_files).map_err(|_| {
+                    Error::new(ErrorKind::Internal, "recovery file count is invalid")
+                })?,
+            )
+            .ok_or_else(|| Error::new(ErrorKind::Internal, "recovery total bound overflows"))?,
+        128 * 1024 * 1024,
+    )
+}
+
+struct NoopWake;
+
+impl Wake for NoopWake {
+    fn wake(self: Arc<Self>) {}
+}
+
+fn block_on<T>(future: impl Future<Output = Result<T>>) -> Result<T> {
+    let waker = Waker::from(Arc::new(NoopWake));
+    let mut context = Context::from_waker(&waker);
+    let mut future = Box::pin(future);
+    match future.as_mut().poll(&mut context) {
+        Poll::Ready(value) => value,
+        Poll::Pending => Err(Error::new(
+            ErrorKind::Internal,
+            "backend future unexpectedly yielded",
+        )),
+    }
+}
+
 fn usage_error() -> Error {
     Error::new(
         ErrorKind::InvalidInput,
@@ -360,7 +748,7 @@ fn usage_error() -> Error {
 
 fn print_usage() {
     println!(
-        "usage:\n  yeokcham init --from-git <source-git-repo> <yeokcham-repo> [--chunked-blob-minimum <bytes>]\n  yeokcham sync --from-git <source-git-repo> <yeokcham-repo> --device <device-id>\n  yeokcham verify <yeokcham-repo>\n  yeokcham export-git <yeokcham-repo> <destination-git-repo>\n  yeokcham inspect object <yeokcham-repo> <git-object-id>\n  yeokcham inspect storage <yeokcham-repo>\n  yeokcham inspect refs <yeokcham-repo>\n  yeokcham drive auth --client-id <google-desktop-client-id> [--redirect-port <port>]"
+        "usage:\n  yeokcham init --from-git <source-git-repo> <yeokcham-repo> [--chunked-blob-minimum <bytes>]\n  yeokcham sync --from-git <source-git-repo> <yeokcham-repo> --device <device-id>\n  yeokcham verify <yeokcham-repo>\n  yeokcham export-git <yeokcham-repo> <destination-git-repo>\n  yeokcham inspect object <yeokcham-repo> <git-object-id>\n  yeokcham inspect storage <yeokcham-repo>\n  yeokcham inspect refs <yeokcham-repo>\n  yeokcham key create-export --passphrase-stdin <yeokcham-repo> <recovery-key-export>\n  yeokcham drive auth --client-id <google-desktop-client-id> [--redirect-port <port>]\n  yeokcham drive init --client-id <google-desktop-client-id>\n  yeokcham drive backup --client-id <google-desktop-client-id> --folder-id <drive-folder-id> --key-export <recovery-key-export> --passphrase-stdin <yeokcham-repo>\n  yeokcham drive restore --client-id <google-desktop-client-id> --folder-id <drive-folder-id> --key-export <recovery-key-export> --passphrase-stdin <destination>\n  yeokcham drive verify --client-id <google-desktop-client-id> --folder-id <drive-folder-id> --key-export <recovery-key-export> --passphrase-stdin"
     );
 }
 
@@ -408,5 +796,101 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn parses_drive_root_backup_restore_and_verification_workflows() {
+        let key_export = parse_command(
+            [
+                "key",
+                "create-export",
+                "--passphrase-stdin",
+                "repository",
+                "key.ykrk",
+            ]
+            .map(OsString::from)
+            .to_vec(),
+        )
+        .expect("key export");
+        assert!(matches!(key_export, Command::KeyCreateExport { .. }));
+
+        let command = parse_command(
+            [
+                "drive",
+                "init",
+                "--client-id",
+                "123.apps.googleusercontent.com",
+            ]
+            .map(OsString::from)
+            .to_vec(),
+        )
+        .expect("Drive init");
+        assert!(matches!(command, Command::DriveInit { .. }));
+
+        let backup = parse_command(
+            [
+                "drive",
+                "backup",
+                "--client-id",
+                "123.apps.googleusercontent.com",
+                "--folder-id",
+                "folder_id",
+                "--key-export",
+                "key.ykrk",
+                "--passphrase-stdin",
+                "repository",
+            ]
+            .map(OsString::from)
+            .to_vec(),
+        )
+        .expect("Drive backup");
+        assert!(matches!(
+            backup,
+            Command::DriveBackup {
+                folder_id,
+                key_export,
+                repository,
+                ..
+            } if folder_id.as_str() == "folder_id"
+                && key_export == PathBuf::from("key.ykrk")
+                && repository == PathBuf::from("repository")
+        ));
+
+        let restore = parse_command(
+            [
+                "drive",
+                "restore",
+                "--client-id",
+                "123.apps.googleusercontent.com",
+                "--folder-id",
+                "folder_id",
+                "--key-export",
+                "key.ykrk",
+                "--passphrase-stdin",
+                "destination",
+            ]
+            .map(OsString::from)
+            .to_vec(),
+        )
+        .expect("Drive restore");
+        assert!(matches!(restore, Command::DriveRestore { .. }));
+
+        let verify = parse_command(
+            [
+                "drive",
+                "verify",
+                "--client-id",
+                "123.apps.googleusercontent.com",
+                "--folder-id",
+                "folder_id",
+                "--key-export",
+                "key.ykrk",
+                "--passphrase-stdin",
+            ]
+            .map(OsString::from)
+            .to_vec(),
+        )
+        .expect("Drive verification");
+        assert!(matches!(verify, Command::DriveVerify { .. }));
     }
 }

@@ -43,6 +43,42 @@ impl DriveFolderId {
     pub fn as_str(&self) -> &str {
         &self.0
     }
+
+    /// Creates one visible dedicated Drive folder with an opaque random name.
+    ///
+    /// The caller's OAuth client creates this folder under `drive.file`; no
+    /// pre-existing arbitrary folder access is assumed or requested.
+    pub fn create<T: DriveHttpTransport, A: DriveAccessTokenProvider>(
+        transport: &T,
+        access_tokens: &A,
+    ) -> Result<Self> {
+        let mut name = [0; 32];
+        getrandom::fill(&mut name).map_err(|error| {
+            Error::with_source(
+                ErrorKind::Io,
+                "Drive folder name could not be generated",
+                error,
+            )
+        })?;
+        let metadata = format!(
+            r#"{{"name":"{}","mimeType":"application/vnd.google-apps.folder"}}"#,
+            hex::encode(name),
+        );
+        let request = DriveHttpRequest::new(
+            DriveHttpMethod::Post,
+            format!("{DRIVE_API_ROOT}/files?fields=id&supportsAllDrives=true"),
+            vec![(
+                "content-type".to_owned(),
+                "application/json; charset=UTF-8".to_owned(),
+            )],
+            metadata.into_bytes(),
+            MAXIMUM_DRIVE_RESPONSE_BYTES,
+        )?;
+        let token = access_tokens.access_token()?;
+        let response = transport.request(&request.with_bearer_token(token.access_token())?)?;
+        require_status(&response, &[200, 201], "Drive folder could not be created")?;
+        Self::new(parse_created_file_id(response.body())?)
+    }
 }
 
 impl std::fmt::Debug for DriveFolderId {
@@ -1679,6 +1715,19 @@ mod tests {
             format!("{:?}", DriveFolderId::new("folder_id").expect("folder")),
             "DriveFolderId(<redacted>)"
         );
+    }
+
+    #[test]
+    fn creates_an_opaque_dedicated_drive_folder() {
+        let transport =
+            FakeTransport::with_responses(vec![response(200, Vec::new(), r#"{"id":"folder_id"}"#)]);
+        let folder = DriveFolderId::create(&transport, &FixedTokenProvider).expect("folder");
+        assert_eq!(folder.as_str(), "folder_id");
+        let request = &transport.requests.lock().expect("requests")[0];
+        assert_eq!(request.method(), DriveHttpMethod::Post);
+        let body = String::from_utf8_lossy(request.body());
+        assert!(body.contains("application/vnd.google-apps.folder"));
+        assert!(!body.contains("Yeokcham"));
     }
 
     #[test]

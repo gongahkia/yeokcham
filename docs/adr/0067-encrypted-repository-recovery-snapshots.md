@@ -42,7 +42,7 @@ Use Option 1. `LocalRepository::backup_to_backend` takes only `EncryptedBackend<
 
 Recovery snapshots currently leave backend path names, repository UUID, per-file ciphertext size, timing, and number of files visible. The encrypted contents and recovery manifest itself are protected by `EncryptedBackend`. Snapshot publication is create-only, so an already-published manifest represents one exact immutable repository state; a later state needs a future generation/discovery design rather than replacement.
 
-The current snapshot wrapper copies whole files into bounded memory and encrypted backend envelopes reject range/resumable requests. It is correctness-first recovery, not a benchmarked transfer or incremental synchronization design. Drive listing/discovery, opaque remote keys, resumable encrypted multipart upload, generations, garbage collection, and recovery CLI commands remain later work.
+The current snapshot wrapper copies whole files into bounded memory and encrypted backend envelopes reject caller-managed range/resumable requests. It is correctness-first recovery, not a benchmarked transfer or incremental synchronization design. The Drive physical backend now performs resumable transport beneath complete-object encryption, derives opaque paths, and supports recovery CLI backup, restore, and verification. Direct remote-helper clone/fetch, generations, garbage collection, and multi-device journal reconciliation remain later work.
 
 ## Invariants
 
@@ -62,4 +62,4 @@ Authentication in `EncryptedBackend` precedes access to manifest and file plaint
 
 ## Verification
 
-One integration test imports a real Git repository, generates and exports a repository key, publishes an encrypted canonical recovery snapshot, imports that key into a fresh backend wrapper, restores to a new path, runs Yeokcham verification, exports a new bare Git repository, and passes `git fsck --full`. Unit tests also cover ciphertext-only files, wrong keys, tampering, and export authentication. Full workspace CI, rustdoc with warnings denied, and fuzz smoke run before acceptance.
+One integration test imports a real Git repository, generates and exports a repository key, publishes an encrypted canonical recovery snapshot, imports that key into a fresh backend wrapper, restores to a new path, runs Yeokcham verification, exports a new bare Git repository, and passes `git fsck --full`. Unit tests also cover ciphertext-only files, wrong keys, tampering, export authentication, and Drive opaque resumable publication. Full workspace CI, rustdoc with warnings denied, and fuzz smoke run before acceptance.

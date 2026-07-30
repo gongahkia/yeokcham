@@ -2834,6 +2834,7 @@ dependencies = [
  "tracing-subscriber",
  "uuid",
  "yeokcham-core",
+ "zeroize",
 ]
 
 [[package]]

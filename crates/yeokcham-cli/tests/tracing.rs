@@ -9,7 +9,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use yeokcham_core::GitRepository;
+use yeokcham_core::{GitRepository, LocalRepository, RepositoryEncryptionKey, RepositoryKeyExport};
 
 static TEST_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
@@ -151,6 +151,69 @@ fn invalid_filter_does_not_echo_input() {
         "error[invalid_input]: invalid YEOKCHAM_LOG filter\n"
     );
     assert!(!stderr.contains("secret-content"));
+}
+
+#[test]
+fn cli_creates_a_non_overwriting_passphrase_encrypted_recovery_export() {
+    let directory = TestDirectory::new();
+    let repository = directory.path().join("repository");
+    let export_path = directory.path().join("repository.ykrk");
+    let repository = LocalRepository::create(&repository).expect("create repository");
+    let passphrase = b"test recovery passphrase\n";
+    let mut command = Command::new(env!("CARGO_BIN_EXE_yeokcham"))
+        .args(["key", "create-export", "--passphrase-stdin"])
+        .arg(repository.path())
+        .arg(&export_path)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("start key export");
+    command
+        .stdin
+        .take()
+        .expect("key-export stdin")
+        .write_all(passphrase)
+        .expect("write passphrase");
+    let output = command.wait_with_output().expect("wait key export");
+    assert!(
+        output.status.success(),
+        "key export must succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("created encrypted recovery key export")
+    );
+    assert!(!String::from_utf8_lossy(&output.stderr).contains("test recovery passphrase"));
+    let export = RepositoryKeyExport::from_bytes(fs::read(&export_path).expect("read export"))
+        .expect("parse export");
+    assert_eq!(
+        RepositoryEncryptionKey::import_with_passphrase(&export, b"test recovery passphrase")
+            .expect("import export")
+            .repository_id(),
+        repository.id(),
+    );
+
+    let mut duplicate = Command::new(env!("CARGO_BIN_EXE_yeokcham"))
+        .args(["key", "create-export", "--passphrase-stdin"])
+        .arg(repository.path())
+        .arg(&export_path)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("start duplicate key export");
+    duplicate
+        .stdin
+        .take()
+        .expect("duplicate stdin")
+        .write_all(passphrase)
+        .expect("write duplicate passphrase");
+    let output = duplicate
+        .wait_with_output()
+        .expect("wait duplicate key export");
+    assert!(!output.status.success());
+    assert!(!String::from_utf8_lossy(&output.stderr).contains("test recovery passphrase"));
 }
 
 #[test]

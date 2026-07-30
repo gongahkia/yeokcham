@@ -203,8 +203,8 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 - [x] Handle rate limiting with backoff.
 - [x] Handle interrupted upload.
 - [x] Avoid one Drive file per chunk.
-- [ ] Upload immutable segments and indexes.
-- [ ] Add backend verification command.
+- [x] Upload immutable segments and indexes.
+- [x] Add backend verification command.
 
 ### Multi-device state
 

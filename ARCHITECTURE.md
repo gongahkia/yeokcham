@@ -313,6 +313,8 @@ Encryption occurs after chunking and compression, before remote persistence. ADR
 
 `LocalRepository::backup_to_backend` requires `EncryptedBackend` and publishes each bounded canonical recovery file under `recovery/<repository-id>/files/` before a canonical `YKRM` manifest is acknowledged. Recognized interrupted staging files and SQLite metadata are excluded; every other noncanonical source file fails the backup. `restore_from_backend` accepts only those canonical relative names from the manifest, verifies each encrypted file's SHA-256 checksum and length, writes and synchronizes a fresh layout, and opens it through normal repository validation. The recovery APIs do not remove an incomplete destination after failure.
 
+The CLI's `key create-export` generates a new repository-bound master key and writes one create-new passphrase-encrypted `YKRK` export. `drive init` creates an opaque app-owned folder; `drive backup` wraps `DriveBackend` in `EncryptedBackend` and publishes the canonical recovery snapshot, including immutable segment and index files, through `YKRM`. `drive restore` requires an absent destination and runs ordinary repository verification after recovery. `drive verify` restores into a unique temporary directory, verifies it, then removes only that generated directory. Passphrases are accepted only from stdin and are not command-line options or repository configuration.
+
 Suggested envelope structure:
 
 ```text
