@@ -41,6 +41,22 @@ Record schemas may use a fixed ordered sequence of fields or an ordered repeated
 
 The external backend key is not encoded again. The caller constructs associated data from the magic/version, repository UUID, selected segment/metadata/backend-object domain, external key, canonical segment UUID when applicable, and plaintext length. Readers receive a caller byte limit, reject invalid magic/version, truncated fields, a ciphertext length inconsistent with the tag, and trailing bytes before attempting AEAD authentication. The fixed header is 46 bytes and carries public length information; callers must not trust it as authenticated metadata until complete envelope authentication succeeds. Version 1 encrypts complete objects and rejects range/resumable operations; a streaming layout requires a new format version.
 
+## Recovery-key export version 1
+
+`YKRK` is one portable passphrase-encrypted 32-byte repository master key. Its fields are:
+
+1. Magic `YKRK`.
+2. Schema version `1`.
+3. One-byte KDF algorithm tag `1` for Argon2id v0x13.
+4. One-byte AEAD algorithm tag `1` for XChaCha20-Poly1305.
+5. Raw 16-byte repository UUIDv4.
+6. Argon2 `u32` memory KiB `65536`, iterations `3`, and lanes `4`.
+7. Raw 16-byte random salt.
+8. Raw 24-byte random nonce.
+9. A length-delimited 48-byte ciphertext: encrypted 32-byte master key plus 16-byte authentication tag.
+
+Readers reject unsupported format, algorithm, parameters, invalid UUID, ciphertext length, truncation, and trailing bytes before passphrase derivation. Associated data exactly encodes every preceding cleartext field. The caller supplies a nonempty passphrase separately; no passphrase bytes are serialized.
+
 ## Evolution
 
 Each new record family documents its magic, schema version, field order, limits, and feature effects before implementation. Incompatible changes require a new schema version or required feature bit and a copy-on-write migration. Existing records retain their original encoding forever.

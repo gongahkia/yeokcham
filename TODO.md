@@ -172,8 +172,8 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 - [x] Encrypt segment records or complete segments.
 - [x] Encrypt sensitive metadata.
 - [x] Bind associated data.
-- [ ] Implement key export.
-- [ ] Implement key import.
+- [x] Implement key export.
+- [x] Implement key import.
 - [ ] Implement clean-machine recovery test.
 - [x] Ensure secrets are redacted from logs.
 

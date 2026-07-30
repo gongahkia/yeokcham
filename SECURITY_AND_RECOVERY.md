@@ -105,13 +105,14 @@ yeokcham device list
 yeokcham device revoke <device-id>
 ```
 
-Key exports should be:
+The current core API provides `RepositoryEncryptionKey::export_with_passphrase` and `import_with_passphrase`; CLI key commands remain pending. Key exports are:
 
-- Explicit.
-- Encrypted or clearly marked as sensitive.
+- Explicit and passphrase-encrypted.
 - Versioned.
 - Integrity-checked.
 - Test-restored during release validation.
+
+The caller must store an export through an explicit recovery workflow. The current key generator does not write master keys into the local repository layout, operating-system credential stores, or backend automatically.
 
 Yeokcham must not promise that lost keys can be recovered from the backend.
 

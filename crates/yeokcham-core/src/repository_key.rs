@@ -81,7 +81,6 @@ impl RepositoryEncryptionKey {
         Ok(DerivedEncryptionKey(key))
     }
 
-    #[cfg(test)]
     pub(crate) fn from_master_bytes(
         repository_id: RepositoryId,
         master: [u8; MASTER_KEY_BYTES],
@@ -90,6 +89,10 @@ impl RepositoryEncryptionKey {
             repository_id,
             master: Zeroizing::new(master),
         }
+    }
+
+    pub(crate) fn master_bytes(&self) -> &[u8; MASTER_KEY_BYTES] {
+        &self.master
     }
 }
 

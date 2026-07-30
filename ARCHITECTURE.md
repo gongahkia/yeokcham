@@ -305,6 +305,8 @@ Encryption occurs after chunking and compression, before remote persistence. ADR
 
 `EncryptedBackend` seals each complete backend object in a version-1 `YKCE` envelope. Canonical associated data binds the repository UUID, encrypted-object domain, backend key, segment UUID when applicable, and plaintext length. `segments/<uuid>` derives a segment subkey; `indexes/`, `manifests/`, `refs/`, and `format/` derive metadata subkeys; other keys derive backend-object subkeys. The wrapper preserves create-only publication and returns plaintext lengths for head/list, but complete-object AEAD currently rejects range reads and resumable uploads rather than silently buffering an unbounded object. Backend keys remain cleartext routing data; opaque encrypted key derivation is later remote-format work.
 
+`RepositoryEncryptionKey::export_with_passphrase` produces a canonical `YKRK` recovery export and `import_with_passphrase` verifies and restores it. The export records fixed Argon2id parameters, salt, nonce, and authenticated encrypted master key. The core API accepts explicit passphrase bytes and never persists the master key automatically; command-line key management is a later CLI surface.
+
 Suggested envelope structure:
 
 ```text

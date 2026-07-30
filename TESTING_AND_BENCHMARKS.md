@@ -26,6 +26,7 @@ Cover:
 - Filesystem backend create-only writes, bounded range reads, paginated listing, deletion, resumable completion, and symlink rejection.
 - Backend fault injection before delegation, dynamic backend wrapping, and metrics counts for successful and failed operations plus transferred bytes.
 - Encrypted backend ciphertext-only filesystem storage, plaintext round trips, domain-separated key derivation, wrong-key rejection, tamper rejection, associated-data mismatch rejection, and secret-redacted diagnostics.
+- Recovery-key export/import, wrong-passphrase and tamper rejection, fixed Argon2id parameter validation, and encrypted recovery material redaction.
 - Encryption and decryption.
 - Storage policy selection.
 
