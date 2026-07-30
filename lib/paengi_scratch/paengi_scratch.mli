@@ -347,6 +347,14 @@ module Restore : sig
     created_at:int64 ->
     (plan, error) result
 
+  val prepare_snapshot :
+    repository ->
+    root:string ->
+    target_snapshot:Paengi_snapshot.Snapshot.id ->
+    observed_at:int64 ->
+    created_at:int64 ->
+    (plan, error) result
+
   val apply : repository -> root:string -> plan -> (unit, error) result
 
   val restore :

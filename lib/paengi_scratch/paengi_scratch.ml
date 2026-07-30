@@ -2503,6 +2503,76 @@ module Restore = struct
     build repository ~current_snapshot ~target_checkpoint:target
       ~safety_checkpoint ~require_current_head:true
 
+  let stage_snapshot repository ~parent ~target_snapshot ~observed_at
+      ~created_at =
+    let* parent = resolve_checkpoint repository parent in
+    let parent_id = parent.resolved_logical in
+    let parent_checkpoint = parent.resolved_value in
+    if
+      Snapshot.Snapshot.equal_id (Checkpoint.snapshot parent_checkpoint)
+        target_snapshot
+    then Ok parent_id
+    else
+      let* base =
+        Snapshot.Snapshot.load repository.store
+          (Checkpoint.snapshot parent_checkpoint)
+        |> Result.map_error (fun error -> Snapshot_error error)
+      in
+      let* target =
+        Snapshot.Snapshot.load repository.store target_snapshot
+        |> Result.map_error (fun error -> Snapshot_error error)
+      in
+      let* base_state = State.of_snapshot repository.store base in
+      let* target_state = State.of_snapshot repository.store target in
+      let operations = State.diff ~from:base_state ~to_:target_state in
+      let* replayed = State.apply base_state operations in
+      if not (State.equal replayed target_state) then
+        Error (Replay_mismatch parent_id)
+      else
+        let event =
+          Event.create ~parent:parent_id
+            ~base:(Checkpoint.snapshot parent_checkpoint)
+            ~resulting:target_snapshot ~operations ~source:Explicit ~observed_at
+        in
+        let* event = Event.store repository.store event in
+        let checkpoint =
+          Checkpoint.create ~parent:parent_id ~event ~snapshot:target_snapshot
+            ~created_at
+        in
+        Checkpoint.store repository.store checkpoint
+
+  let prepare_snapshot repository ~root ~target_snapshot ~observed_at
+      ~created_at =
+    let* current_snapshot, _ = scan root repository in
+    let* current_head = head repository in
+    let* safety_checkpoint =
+      match current_head with
+      | None -> Error Scratch_head_missing
+      | Some checkpoint
+        when Snapshot.Snapshot.equal_id current_snapshot
+               (Checkpoint.snapshot checkpoint) ->
+          Ok None
+      | Some _ -> (
+          let* result =
+            checkpoint repository ~snapshot:current_snapshot ~source:Scan
+              ~observed_at ~created_at
+          in
+          match result with
+          | Created checkpoint -> Ok (Some (Checkpoint.id checkpoint))
+          | Unchanged checkpoint -> Ok (Some (Checkpoint.id checkpoint)))
+    in
+    let* parent = head_id repository in
+    let* parent =
+      match parent with
+      | Some checkpoint -> Ok checkpoint
+      | None -> Error Scratch_head_missing
+    in
+    let* target_checkpoint =
+      stage_snapshot repository ~parent ~target_snapshot ~observed_at ~created_at
+    in
+    build repository ~current_snapshot ~target_checkpoint ~safety_checkpoint
+      ~require_current_head:true
+
   let restore_error plan path operation error =
     Restore_apply_error
       {

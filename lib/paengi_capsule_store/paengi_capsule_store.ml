@@ -1654,6 +1654,29 @@ module Durable = struct
                 in
                 Ok (Created_from_current { resolved; source; target }))
 
+  let enable_for_editing ~store ~scratch ~root ~capsule ~observed_at
+      ~created_at ?before_apply () =
+    with_capsule_lock store capsule (fun () ->
+        let* resolved = read_current store capsule in
+        let target_snapshot = revision_expected_result resolved.revision in
+        let* plan =
+          Scratch.Restore.prepare_snapshot scratch ~root ~target_snapshot
+            ~observed_at ~created_at
+          |> Result.map_error (fun error -> Scratch_error error)
+        in
+        Option.iter (fun callback -> callback ()) before_apply;
+        let anchor = Scratch.Restore.target_checkpoint plan in
+        let* () =
+          Scratch.Restore.apply scratch ~root plan
+          |> Result.map_error (fun error -> Scratch_error error)
+        in
+        let* head =
+          Scratch.head_id scratch
+          |> Result.map_error (fun error -> Scratch_error error)
+        in
+        if Option.exists (Scratch.Checkpoint_id.equal anchor) head then Ok anchor
+        else Error (Draft_error "editing materialisation did not advance scratch head"))
+
   let fold_from_checkpoints ~store ~scratch ~capsule ~expected_revision
       ~expected_generation ~evidence ~from ~target ~created_at ~changed_at
       ?fail_at () =

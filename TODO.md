@@ -6,12 +6,12 @@ Robustness tasks operate only on Paengi's pure functions and generated local fix
 ## Active vertical slice
 
 - Milestone: 4 — Change capsules.
-- Task: Slice 1 complete — current-working-diff capsule creation uses the existing scratch/checkpoint and ADR-025 publication paths.
-- Modules/files: `paengi_capsule_store`; capsule CLI; focused current-working-diff tests.
-- Types: `current_creation` result with `no_changes` or a resolved durable capsule plus source/target checkpoints; existing stable caller-supplied `Capsule_id`, logical revision ID, stored-object links, and source boundaries.
+- Task: Slice 2 — enable one capsule for exact guarded editing and return a durable scratch editing anchor for the existing range-based fold path.
+- Modules/files: `paengi_scratch` guarded restore; `paengi_capsule_store`; capsule CLI; focused editing-workflow tests.
+- Types: an in-memory guarded materialisation plan targeting an existing immutable snapshot and a returned `Checkpoint_id` editing anchor; existing stable `Capsule_id`, immutable revision, and scratch checkpoint/event types.
 - Formats: no new schema, object type, ref, or golden. ADR-020 through ADR-025 remain unchanged.
-- Invariants: the repository writer lock covers verified scratch-head read, exact scan verification, checkpoint publication, pins, and current-ref publication; equal snapshots publish nothing; a pre-ref failure leaves no visible capsule; same-input retries are idempotent through retained boundary pins; a changed working directory before checkpoint publication rejects.
-- Tests: exact current-diff replay, no-change non-publication, scan/publication mutation rejection, post-checkpoint/pre-ref interruption, retry, reopen pin retention, and deterministic restart coverage. Forced seed `17` is printed by the property executable.
+- Invariants: a resolved revision replays exactly before editing; divergent working state is safety-checkpointed through guarded restore; materialisation verifies bytes/modes/symlink targets before target-head publication; an already-current revision snapshot reuses its checkpoint; failure never advances to the editing anchor or mutates the capsule/current ref.
+- Tests: exact materialisation, prior-work safety checkpoint, anchor reuse, materialisation failure target-head preservation, and fold from the returned anchor. Forced seed `17` is printed by the property executable.
 - External libraries: existing Alcotest, QCheck, Profile 1 encoder, and Unix only.
 - ADR changes: no format change; ADR-025 clarifies current-working-diff creation semantics.
 

@@ -516,6 +516,198 @@ let current_working_diff_interruption_retries_idempotently () =
         "current creation retry is idempotent" true
         (Store.Stored_object_id.equal (revision first) (revision second)))
 
+let enabling_capsule_is_exact_and_safety_checkpoints_existing_work () =
+  with_store (fun root store ->
+      let id = capsule_id 99 in
+      let fixture, created = durable_create root store id in
+      write_file (Filename.concat root "tracked") "uncheckpointed work";
+      let safety_snapshot, _ =
+        Snapshot.scan ~root ~store |> require_ok Snapshot.error_to_string
+      in
+      let anchor =
+        Capsule_store.Durable.enable_for_editing ~store ~scratch:fixture.scratch
+          ~root ~capsule:id ~observed_at:13L ~created_at:13L ()
+        |> require_ok Capsule_store.error_to_string
+      in
+      Alcotest.(check string)
+        "editing materialises expected bytes" "first"
+        (In_channel.with_open_bin (Filename.concat root "tracked")
+           In_channel.input_all);
+      let anchor_checkpoint =
+        Scratch.Checkpoint.load store anchor |> require_ok Scratch.error_to_string
+      in
+      let safety =
+        match Scratch.Checkpoint.parent anchor_checkpoint with
+        | Some checkpoint -> checkpoint
+        | None -> Alcotest.fail "editing anchor was not staged after safety work"
+      in
+      let safety_checkpoint =
+        Scratch.Checkpoint.load store safety |> require_ok Scratch.error_to_string
+      in
+      Alcotest.(check bool)
+        "existing work is safety checkpointed before materialisation" true
+        (Snapshot.Snapshot.equal_id safety_snapshot
+           (Scratch.Checkpoint.snapshot safety_checkpoint));
+      let materialised, _ =
+        Snapshot.scan ~root ~store |> require_ok Snapshot.error_to_string
+      in
+      Alcotest.(check bool)
+        "editing result equals immutable revision result" true
+        (Snapshot.Snapshot.equal_id materialised
+           (Capsule_store.revision_expected_result
+              (Capsule_store.Durable.resolved_revision created)));
+      let current =
+        Capsule_store.Durable.read_current store id
+        |> require_ok Capsule_store.error_to_string
+      in
+      Alcotest.(check bool)
+        "editing does not mutate the capsule revision" true
+        (Id.Capsule_revision_id.equal
+           (Capsule_store.revision_id
+              (Capsule_store.Durable.resolved_revision created))
+           (Capsule_store.revision_id
+              (Capsule_store.Durable.resolved_revision current))))
+
+let enabling_capsule_restores_bytes_mode_and_symlink_target_exactly () =
+  with_store (fun root store ->
+      let tracked = Filename.concat root "tracked" in
+      let link = Filename.concat root "link" in
+      write_file tracked "base";
+      Unix.chmod tracked 0o644;
+      let scratch = Scratch.open_repository store in
+      let base, _ =
+        Snapshot.scan ~root ~store |> require_ok Snapshot.error_to_string
+      in
+      let initial =
+        Scratch.create_initial scratch ~snapshot:base ~created_at:20L
+        |> require_ok Scratch.error_to_string
+        |> Scratch.Checkpoint.id
+      in
+      write_file tracked "target";
+      Unix.chmod tracked 0o755;
+      Unix.symlink "tracked" link;
+      let target, _ =
+        Snapshot.scan ~root ~store |> require_ok Snapshot.error_to_string
+      in
+      let target_checkpoint =
+        Scratch.checkpoint scratch ~snapshot:target ~source:Scratch.Explicit
+          ~observed_at:21L ~created_at:21L
+        |> require_ok Scratch.error_to_string
+        |> function
+        | Scratch.Created checkpoint | Scratch.Unchanged checkpoint ->
+            Scratch.Checkpoint.id checkpoint
+      in
+      let id = capsule_id 102 in
+      ignore
+        (Capsule_store.Durable.create_from_checkpoints ~store ~scratch ~id
+           ~title:"exact edit" ~description:"exact edit" ~dependencies:[]
+           ~evidence:[] ~from:initial ~target:target_checkpoint ~created_at:22L
+           ~changed_at:22L ()
+        |> require_ok Capsule_store.error_to_string);
+      write_file tracked "diverged";
+      Unix.chmod tracked 0o644;
+      Unix.unlink link;
+      ignore
+        (Capsule_store.Durable.enable_for_editing ~store ~scratch ~root
+           ~capsule:id ~observed_at:23L ~created_at:23L ()
+        |> require_ok Capsule_store.error_to_string);
+      Alcotest.(check string) "editing restores exact file bytes" "target"
+        (In_channel.with_open_bin tracked In_channel.input_all);
+      Alcotest.(check bool) "editing restores executable mode" true
+        ((Unix.stat tracked).Unix.st_perm land 0o111 <> 0);
+      Alcotest.(check string) "editing restores exact symlink target" "tracked"
+        (Unix.readlink link))
+
+let enabling_reuses_matching_head_and_failed_apply_keeps_it () =
+  with_store (fun root store ->
+      let id = capsule_id 100 in
+      let fixture, _ = durable_create root store id in
+      write_file (Filename.concat root "tracked") "first";
+      let snapshot, _ =
+        Snapshot.scan ~root ~store |> require_ok Snapshot.error_to_string
+      in
+      let matching =
+        Scratch.checkpoint fixture.scratch ~snapshot ~source:Scratch.Explicit
+          ~observed_at:14L ~created_at:14L
+        |> require_ok Scratch.error_to_string
+        |> function
+        | Scratch.Created checkpoint | Scratch.Unchanged checkpoint ->
+            Scratch.Checkpoint.id checkpoint
+      in
+      let reused =
+        Capsule_store.Durable.enable_for_editing ~store ~scratch:fixture.scratch
+          ~root ~capsule:id ~observed_at:15L ~created_at:15L ()
+        |> require_ok Capsule_store.error_to_string
+      in
+      Alcotest.(check bool) "matching scratch head is the editing anchor" true
+        (Scratch.Checkpoint_id.equal matching reused);
+      let head_before =
+        Scratch.head_id fixture.scratch |> require_ok Scratch.error_to_string
+      in
+      let failed =
+        Capsule_store.Durable.enable_for_editing ~store ~scratch:fixture.scratch
+          ~root ~capsule:id ~observed_at:16L ~created_at:16L
+          ~before_apply:(fun () ->
+            write_file (Filename.concat root "tracked") "external mutation")
+          ()
+      in
+      (match failed with
+      | Error error
+        when String.starts_with ~prefix:"restore plan is stale: "
+               (Capsule_store.error_to_string error) ->
+          ()
+      | Error error -> Alcotest.fail (Capsule_store.error_to_string error)
+      | Ok _ -> Alcotest.fail "stale editing materialisation was accepted");
+      let head_after =
+        Scratch.head_id fixture.scratch |> require_ok Scratch.error_to_string
+      in
+      Alcotest.(check bool)
+        "failed editing materialisation does not advance scratch head" true
+        (Option.equal Scratch.Checkpoint_id.equal head_before head_after))
+
+let folding_from_editing_anchor_creates_an_immutable_revision () =
+  with_store (fun root store ->
+      let id = capsule_id 101 in
+      let fixture, created = durable_create root store id in
+      let anchor =
+        Capsule_store.Durable.enable_for_editing ~store ~scratch:fixture.scratch
+          ~root ~capsule:id ~observed_at:17L ~created_at:17L ()
+        |> require_ok Capsule_store.error_to_string
+      in
+      write_file (Filename.concat root "tracked") "folded after editing";
+      let snapshot, _ =
+        Snapshot.scan ~root ~store |> require_ok Snapshot.error_to_string
+      in
+      let target =
+        Scratch.checkpoint fixture.scratch ~snapshot ~source:Scratch.Explicit
+          ~observed_at:18L ~created_at:18L
+        |> require_ok Scratch.error_to_string
+        |> function
+        | Scratch.Created checkpoint | Scratch.Unchanged checkpoint ->
+            Scratch.Checkpoint.id checkpoint
+      in
+      let current = Capsule_store.Durable.resolved_current_ref created in
+      let folded =
+        Capsule_store.Durable.fold_from_checkpoints ~store ~scratch:fixture.scratch
+          ~capsule:id
+          ~expected_revision:(Capsule_store.current_revision current)
+          ~expected_generation:(Capsule_store.current_generation current)
+          ~evidence:[] ~from:anchor ~target ~created_at:19L ~changed_at:19L ()
+        |> require_ok Capsule_store.error_to_string
+      in
+      Alcotest.(check bool)
+        "fold keeps the stable capsule identity" true
+        (Id.Capsule_id.equal id
+           (Capsule_store.revision_capsule
+              (Capsule_store.Durable.resolved_revision folded)));
+      Alcotest.(check bool)
+        "fold creates a distinct immutable revision" false
+        (Id.Capsule_revision_id.equal
+           (Capsule_store.revision_id
+              (Capsule_store.Durable.resolved_revision created))
+           (Capsule_store.revision_id
+              (Capsule_store.Durable.resolved_revision folded))))
+
 let folding_is_cas_protected_and_preserves_history () =
   with_store (fun root store ->
       let id = capsule_id 100 in
@@ -781,6 +973,14 @@ let () =
             current_working_diff_no_changes_and_mutation_reject_safely;
           Alcotest.test_case "current working diff interruption retry" `Quick
             current_working_diff_interruption_retries_idempotently;
+          Alcotest.test_case "editing is exact and safety checkpoints work"
+            `Quick enabling_capsule_is_exact_and_safety_checkpoints_existing_work;
+          Alcotest.test_case "editing restores bytes modes and symlinks" `Quick
+            enabling_capsule_restores_bytes_mode_and_symlink_target_exactly;
+          Alcotest.test_case "editing reuses matching head and rejects stale apply"
+            `Quick enabling_reuses_matching_head_and_failed_apply_keeps_it;
+          Alcotest.test_case "folding from editing anchor is immutable" `Quick
+            folding_from_editing_anchor_creates_an_immutable_revision;
           Alcotest.test_case "folding is CAS protected" `Quick
             folding_is_cas_protected_and_preserves_history;
           Alcotest.test_case "split and combine replay exactly" `Quick

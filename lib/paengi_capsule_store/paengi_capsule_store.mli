@@ -213,6 +213,17 @@ module Durable : sig
     unit ->
     (current_creation, error) result
 
+  val enable_for_editing :
+    store:Paengi_store.repository ->
+    scratch:Paengi_scratch.repository ->
+    root:string ->
+    capsule:Paengi_id.Capsule_id.t ->
+    observed_at:int64 ->
+    created_at:int64 ->
+    ?before_apply:(unit -> unit) ->
+    unit ->
+    (Paengi_scratch.Checkpoint_id.t, error) result
+
   val fold_from_checkpoints :
     store:Paengi_store.repository ->
     scratch:Paengi_scratch.repository ->
