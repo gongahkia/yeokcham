@@ -33,6 +33,9 @@ Losing the OS credential entry requires running `drive auth` again. It does not 
 
 ## Current limitations
 
-- The Drive file backend, remote-key mapping, transfer resume, metadata cache, and repository verification command are not yet available.
+- `DriveBackend` maps logical keys to keyed opaque file names, stores an authenticated encrypted key capsule before each physical payload, uses bounded pagination, and uses Google resumable uploads. Repository payloads must be wrapped in `EncryptedBackend`; the physical Drive backend does not make caller bytes confidential by itself.
+- Create races fail closed. If final confirmation identifies the newly-created duplicate next to one existing file, Yeokcham removes only its own duplicate and returns `AlreadyExists`; it never replaces an existing Drive file. Incomplete resumable sessions are not accepted as backend objects and can be abandoned safely.
+- Standalone `chunks/` objects are rejected. Content-defined chunks stay packed in immutable segments, preventing one Drive file per chunk.
+- Drive root creation/configuration, metadata caching, full repository upload, and a Drive backend verification command are not yet available.
 - Only the operator's configured Desktop OAuth client can access its app-created Drive files under `drive.file`.
 - Sharing or moving the dedicated root remains a later Drive backend workflow and must retain opaque encrypted object names.

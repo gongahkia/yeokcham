@@ -1,3 +1,7 @@
+use chacha20poly1305::{
+    Key, XChaCha20Poly1305, XNonce,
+    aead::{Aead, KeyInit, Payload},
+};
 use hkdf::Hkdf;
 use sha2::Sha256;
 use zeroize::Zeroizing;
@@ -11,6 +15,12 @@ const METADATA_PURPOSE: &[u8] = b"metadata-encryption/v1\0";
 const BACKEND_OBJECT_PURPOSE: &[u8] = b"backend-object-encryption/v1\0";
 const DRIVE_OBJECT_NAMING_PURPOSE: &[u8] = b"drive-object-naming/v1\0";
 const DRIVE_OBJECT_NAME_PURPOSE: &[u8] = b"yeokcham/drive-object-name/v1\0";
+const DRIVE_OBJECT_CAPSULE_PURPOSE: &[u8] = b"yeokcham/drive-object-capsule/v1\0";
+const DRIVE_OBJECT_CAPSULE_MAGIC: [u8; 4] = *b"YKDO";
+const DRIVE_OBJECT_CAPSULE_VERSION: u16 = 1;
+const DRIVE_OBJECT_CAPSULE_NONCE_BYTES: usize = 24;
+const DRIVE_OBJECT_CAPSULE_FIXED_BYTES: usize = 4 + 2 + 2 + DRIVE_OBJECT_CAPSULE_NONCE_BYTES;
+const DRIVE_OBJECT_CAPSULE_TAG_BYTES: usize = 16;
 
 /// One repository-bound master encryption key held only in process memory.
 pub struct RepositoryEncryptionKey {
@@ -138,6 +148,125 @@ impl DriveObjectNamingKey {
             .map_err(|_| Error::new(ErrorKind::Internal, "Drive object name derivation failed"))?;
         Ok(DriveObjectName(hex::encode(name)))
     }
+
+    pub(crate) fn seal_backend_key(
+        &self,
+        key: &BackendKey,
+        name: &DriveObjectName,
+    ) -> Result<Vec<u8>> {
+        let key_length = u16::try_from(key.as_bytes().len()).map_err(|_| {
+            Error::new(
+                ErrorKind::Unsupported,
+                "Drive backend key exceeds the capsule limit",
+            )
+        })?;
+        let mut nonce = [0; DRIVE_OBJECT_CAPSULE_NONCE_BYTES];
+        getrandom::fill(&mut nonce).map_err(|error| {
+            Error::with_source(
+                ErrorKind::Io,
+                "Drive object capsule nonce could not be generated",
+                error,
+            )
+        })?;
+        let capsule_key = self.capsule_key()?;
+        let ciphertext = XChaCha20Poly1305::new(&Key::from(capsule_key))
+            .encrypt(
+                &XNonce::from(nonce),
+                Payload {
+                    msg: key.as_bytes(),
+                    aad: name.as_str().as_bytes(),
+                },
+            )
+            .map_err(|_| {
+                Error::new(
+                    ErrorKind::Internal,
+                    "Drive object capsule encryption failed",
+                )
+            })?;
+        let mut capsule = Vec::with_capacity(
+            DRIVE_OBJECT_CAPSULE_FIXED_BYTES
+                .checked_add(ciphertext.len())
+                .ok_or_else(|| {
+                    Error::new(
+                        ErrorKind::Unsupported,
+                        "Drive object capsule exceeds the byte limit",
+                    )
+                })?,
+        );
+        capsule.extend_from_slice(&DRIVE_OBJECT_CAPSULE_MAGIC);
+        capsule.extend_from_slice(&DRIVE_OBJECT_CAPSULE_VERSION.to_be_bytes());
+        capsule.extend_from_slice(&key_length.to_be_bytes());
+        capsule.extend_from_slice(&nonce);
+        capsule.extend_from_slice(&ciphertext);
+        Ok(capsule)
+    }
+
+    pub(crate) fn open_backend_key(
+        &self,
+        capsule: &[u8],
+        name: &DriveObjectName,
+    ) -> Result<BackendKey> {
+        let (key_length, nonce, ciphertext) = parse_drive_object_capsule(capsule)?;
+        let capsule_key = self.capsule_key()?;
+        let nonce: [u8; DRIVE_OBJECT_CAPSULE_NONCE_BYTES] = nonce.try_into().map_err(|_| {
+            Error::new(
+                ErrorKind::CorruptData,
+                "Drive object capsule nonce is invalid",
+            )
+        })?;
+        let plaintext = XChaCha20Poly1305::new(&Key::from(capsule_key))
+            .decrypt(
+                &XNonce::from(nonce),
+                Payload {
+                    msg: ciphertext,
+                    aad: name.as_str().as_bytes(),
+                },
+            )
+            .map_err(|_| Error::new(ErrorKind::CorruptData, "Drive object capsule is invalid"))?;
+        if plaintext.len() != key_length {
+            return Err(Error::new(
+                ErrorKind::CorruptData,
+                "Drive object capsule length is invalid",
+            ));
+        }
+        BackendKey::from_bytes(&plaintext).map_err(|_| {
+            Error::new(
+                ErrorKind::CorruptData,
+                "Drive object capsule key is invalid",
+            )
+        })
+    }
+
+    pub(crate) fn capsule_length(prefix: &[u8]) -> Result<usize> {
+        let (key_length, _, _) = parse_drive_object_capsule_prefix(prefix)?;
+        DRIVE_OBJECT_CAPSULE_FIXED_BYTES
+            .checked_add(key_length)
+            .and_then(|value| value.checked_add(DRIVE_OBJECT_CAPSULE_TAG_BYTES))
+            .ok_or_else(|| {
+                Error::new(
+                    ErrorKind::CorruptData,
+                    "Drive object capsule length is invalid",
+                )
+            })
+    }
+
+    fn capsule_key(&self) -> Result<[u8; MASTER_KEY_BYTES]> {
+        let hkdf = Hkdf::<Sha256>::from_prk(&*self.0).map_err(|_| {
+            Error::new(
+                ErrorKind::Internal,
+                "Drive object capsule key derivation failed",
+            )
+        })?;
+        let mut key = [0; MASTER_KEY_BYTES];
+        hkdf.expand(DRIVE_OBJECT_CAPSULE_PURPOSE, &mut key)
+            .map_err(|_| {
+                Error::new(
+                    ErrorKind::Internal,
+                    "Drive object capsule key derivation failed",
+                )
+            })?;
+        Ok(key)
+    }
 }
 
 impl std::fmt::Debug for DriveObjectNamingKey {
@@ -147,6 +276,7 @@ impl std::fmt::Debug for DriveObjectNamingKey {
 }
 
 /// One fixed-length opaque Google Drive file name.
+#[derive(Clone)]
 pub struct DriveObjectName(String);
 
 impl DriveObjectName {
@@ -154,12 +284,70 @@ impl DriveObjectName {
     pub fn as_str(&self) -> &str {
         &self.0
     }
+
+    pub(crate) fn from_remote_name(name: &str) -> Result<Self> {
+        if name.len() != MASTER_KEY_BYTES * 2
+            || !name.bytes().all(|byte| {
+                byte.is_ascii_digit() || (byte.is_ascii_lowercase() && byte.is_ascii_hexdigit())
+            })
+        {
+            return Err(Error::new(
+                ErrorKind::CorruptData,
+                "Drive object name is invalid",
+            ));
+        }
+        Ok(Self(name.to_owned()))
+    }
 }
 
 impl std::fmt::Debug for DriveObjectName {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.write_str("DriveObjectName(<redacted>)")
     }
+}
+
+fn parse_drive_object_capsule(capsule: &[u8]) -> Result<(usize, &[u8], &[u8])> {
+    let (key_length, nonce, ciphertext) = parse_drive_object_capsule_prefix(capsule)?;
+    let expected_length = DRIVE_OBJECT_CAPSULE_FIXED_BYTES
+        .checked_add(key_length)
+        .and_then(|value| value.checked_add(DRIVE_OBJECT_CAPSULE_TAG_BYTES))
+        .ok_or_else(|| {
+            Error::new(
+                ErrorKind::CorruptData,
+                "Drive object capsule length is invalid",
+            )
+        })?;
+    if capsule.len() != expected_length
+        || ciphertext.len() != key_length + DRIVE_OBJECT_CAPSULE_TAG_BYTES
+    {
+        return Err(Error::new(
+            ErrorKind::CorruptData,
+            "Drive object capsule length is invalid",
+        ));
+    }
+    Ok((key_length, nonce, ciphertext))
+}
+
+fn parse_drive_object_capsule_prefix(prefix: &[u8]) -> Result<(usize, &[u8], &[u8])> {
+    if prefix.len() < DRIVE_OBJECT_CAPSULE_FIXED_BYTES
+        || prefix[..4] != DRIVE_OBJECT_CAPSULE_MAGIC
+        || u16::from_be_bytes([prefix[4], prefix[5]]) != DRIVE_OBJECT_CAPSULE_VERSION
+    {
+        return Err(Error::new(
+            ErrorKind::CorruptData,
+            "Drive object capsule is invalid",
+        ));
+    }
+    let key_length = usize::from(u16::from_be_bytes([prefix[6], prefix[7]]));
+    if key_length == 0 || key_length > 1_024 {
+        return Err(Error::new(
+            ErrorKind::CorruptData,
+            "Drive object capsule key length is invalid",
+        ));
+    }
+    let nonce = &prefix[8..DRIVE_OBJECT_CAPSULE_FIXED_BYTES];
+    let ciphertext = &prefix[DRIVE_OBJECT_CAPSULE_FIXED_BYTES..];
+    Ok((key_length, nonce, ciphertext))
 }
 
 #[cfg(test)]
@@ -269,5 +457,36 @@ mod tests {
         assert!(!first_name.as_str().contains("segments"));
         assert_eq!(format!("{naming:?}"), "DriveObjectNamingKey(<redacted>)");
         assert_eq!(format!("{first_name:?}"), "DriveObjectName(<redacted>)");
+    }
+
+    #[test]
+    fn authenticates_drive_object_key_capsules() {
+        let key =
+            RepositoryEncryptionKey::from_master_bytes(repository_id(), [7; MASTER_KEY_BYTES]);
+        let naming = key.derive_drive_object_naming_key().expect("naming key");
+        let backend_key = BackendKey::from_bytes(b"segments/opaque-record").expect("backend key");
+        let name = naming.object_name(&backend_key).expect("object name");
+        let mut capsule = naming
+            .seal_backend_key(&backend_key, &name)
+            .expect("key capsule");
+        assert_eq!(
+            DriveObjectNamingKey::capsule_length(&capsule[..DRIVE_OBJECT_CAPSULE_FIXED_BYTES])
+                .expect("capsule length"),
+            capsule.len(),
+        );
+        assert_eq!(
+            naming
+                .open_backend_key(&capsule, &name)
+                .expect("open capsule"),
+            backend_key,
+        );
+        *capsule.last_mut().expect("capsule byte") ^= 1;
+        assert_eq!(
+            naming
+                .open_backend_key(&capsule, &name)
+                .expect_err("tampered capsule")
+                .kind(),
+            ErrorKind::CorruptData,
+        );
     }
 }

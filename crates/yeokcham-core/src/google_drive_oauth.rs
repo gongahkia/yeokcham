@@ -155,7 +155,10 @@ impl UreqDriveOAuthTransport {
             ));
         }
         Ok(Self {
-            agent: ureq::AgentBuilder::new().timeout(request_timeout).build(),
+            agent: ureq::AgentBuilder::new()
+                .timeout(request_timeout)
+                .redirects(0)
+                .build(),
         })
     }
 }
@@ -262,6 +265,16 @@ impl DriveOAuthToken {
         Self {
             access_token: Zeroizing::new(access_token.to_owned()),
             refresh_token: Zeroizing::new(refresh_token.to_owned()),
+            expires_in: Duration::from_secs(3600),
+        }
+    }
+}
+
+#[cfg(test)]
+impl DriveAccessToken {
+    pub(crate) fn test_access_token(access_token: &str) -> Self {
+        Self {
+            access_token: Zeroizing::new(access_token.to_owned()),
             expires_in: Duration::from_secs(3600),
         }
     }

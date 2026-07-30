@@ -195,14 +195,14 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 
 ### Storage behaviour
 
-- [ ] Map opaque yeokcham keys to Drive files.
-- [ ] Implement put-if-absent semantics.
-- [ ] Implement resumable upload.
+- [x] Map opaque yeokcham keys to Drive files.
+- [x] Implement put-if-absent semantics.
+- [x] Implement resumable upload.
 - [ ] Implement metadata cache.
-- [ ] Implement paginated listing.
-- [ ] Handle rate limiting with backoff.
-- [ ] Handle interrupted upload.
-- [ ] Avoid one Drive file per chunk.
+- [x] Implement paginated listing.
+- [x] Handle rate limiting with backoff.
+- [x] Handle interrupted upload.
+- [x] Avoid one Drive file per chunk.
 - [ ] Upload immutable segments and indexes.
 - [ ] Add backend verification command.
 
