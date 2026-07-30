@@ -101,6 +101,8 @@ git --git-dir=<destination-git-repo> fsck --full --strict
 
 `drive auth` starts a Google Desktop OAuth PKCE flow, prints a one-time browser URL, and stores the returned refresh token only in the operating-system credential store. It needs an operator-created Desktop OAuth client ID with the Drive API and `drive.file` scope enabled. For a headless host, reserve a local port first, forward it with SSH, then run `yeokcham drive auth --client-id <id> --redirect-port <port>` and open the displayed URL on the forwarded machine. Do not use deprecated copy/paste authorization or place refresh tokens in repository configuration.
 
+See [Google Drive setup](docs/google-drive.md) for the exact Desktop-client, scope, headless, and recovery requirements.
+
 ## Local remote helper
 
 Build the binaries, place the build directory on `PATH`, then use Git's explicit remote-helper syntax:

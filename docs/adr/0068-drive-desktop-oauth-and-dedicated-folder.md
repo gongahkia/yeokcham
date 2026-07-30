@@ -22,7 +22,7 @@ Milestone 5 needs a Google Drive authorization boundary and a location for encry
 
 ### Option 1: Desktop OAuth, `drive.file`, and a selected folder
 
-Use an operator-supplied Google Desktop OAuth client ID. Open consent in the system browser, receive the authorization code on a random localhost port, use PKCE S256 and state verification, then store only opaque encrypted files under an explicit user-selected Drive folder.
+Use an operator-supplied Google Desktop OAuth client ID. Open consent in the system browser, receive the authorization code on a random localhost port, use PKCE S256 and state verification, then store only opaque encrypted files under an explicit dedicated Drive folder created or opened by the application.
 
 ### Option 2: `appDataFolder`
 
@@ -42,7 +42,7 @@ The Drive root-folder identifier, Drive file mapping, and a hardware-device OAut
 
 The operator must create or supply a Google Desktop OAuth client ID with the Drive API enabled. A browser-capable machine is required for this loopback flow, but it may connect through an explicitly forwarded fixed loopback port. The current implementation relies on platform Keychain/keyring availability and fails rather than creating a plaintext token file. A hardware-device OAuth flow is deferred because Google directs normal desktop/CLI applications to the Desktop flow; deprecated copy/paste redirects are never used.
 
-The selected folder can be inspected, retained, shared deliberately, and used for recovery. Names and IDs inside it must remain opaque once the Drive backend maps Yeokcham keys; that remote-key format is not selected by this ADR.
+The dedicated folder can be inspected, retained, shared deliberately, and used for recovery. `drive.file` does not grant arbitrary existing-folder access from a known ID; that selection needs a Picker-capable workflow or an explicit broader-scope decision. Names and IDs inside the dedicated folder must remain opaque once the Drive backend maps Yeokcham keys; that remote-key format is not selected by this ADR.
 
 ## Security and recovery
 

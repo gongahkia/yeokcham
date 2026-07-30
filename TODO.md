@@ -191,7 +191,7 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 - [x] Store credentials in OS credential store.
 - [x] Support headless/manual authentication where practical.
 - [x] Implement token refresh.
-- [ ] Document required scopes.
+- [x] Document required scopes.
 
 ### Storage behaviour
 
