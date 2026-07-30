@@ -240,8 +240,8 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 - [ ] Cache reconstructed Git objects.
 - [ ] Implement capacity limits.
 - [ ] Implement LRU or benchmarked replacement policy.
-- [ ] Add cache verification.
-- [ ] Add cache statistics.
+- [x] Add cache verification.
+- [x] Add cache statistics.
 - [x] Add cache clearing without repository damage.
 
 ### Sparse workflow

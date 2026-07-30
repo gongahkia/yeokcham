@@ -559,6 +559,30 @@ fn remote_helper_clones_lists_refs_and_repeats_fetch_without_source_disclosure()
 
     let cached_repository = pack_cache_entry(&repository);
     run_git_bare(&cached_repository, &["fsck", "--full", "--strict"]);
+    let output = Command::new(env!("CARGO_BIN_EXE_yeokcham"))
+        .args(["cache", "inspect"])
+        .arg(&repository)
+        .output()
+        .expect("inspect pack cache");
+    assert!(
+        output.status.success(),
+        "cache inspection must succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let cache_statistics = String::from_utf8(output.stdout).expect("cache statistics are UTF-8");
+    assert!(cache_statistics.contains("pack_cache_entries=1"));
+    assert!(cache_statistics.contains("pack_cache_files="));
+    let output = Command::new(env!("CARGO_BIN_EXE_yeokcham"))
+        .args(["cache", "verify"])
+        .arg(&repository)
+        .output()
+        .expect("verify pack cache");
+    assert!(
+        output.status.success(),
+        "cache verification must succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(String::from_utf8_lossy(&output.stdout).contains("verified_pack_cache_entries=1"));
     let pack_directory = cached_repository.join("objects/pack");
     let cache_index = fs::read_dir(&pack_directory)
         .expect("read cached pack directory")
@@ -588,6 +612,13 @@ fn remote_helper_clones_lists_refs_and_repeats_fetch_without_source_disclosure()
 
     make_cache_file_writable(&cache_index);
     fs::write(&cache_index, b"corrupt cache index").expect("corrupt disposable cache");
+    let output = Command::new(env!("CARGO_BIN_EXE_yeokcham"))
+        .args(["cache", "verify"])
+        .arg(&repository)
+        .output()
+        .expect("verify corrupt pack cache");
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("error[corrupt_data]"));
     let output = Command::new("git")
         .arg("-C")
         .arg(&checkout)
