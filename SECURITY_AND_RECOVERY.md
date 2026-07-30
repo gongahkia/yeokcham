@@ -204,6 +204,8 @@ Expected behaviour:
 - User selects, merges, or publishes a resolution event.
 - No last-writer-wins data loss.
 
+The local remote-helper push bridge uses a deterministic repository-derived V1 journal writer only to serialize one trusted local service. It compares the staged predecessor against the canonical state before publication and fails closed on conflicts. This is not device authentication or multi-device authorization: unsigned device events remain unsuitable for untrusted writers until signatures and authorization are implemented.
+
 ### Scenario E — Lost local machine
 
 Expected behaviour:

@@ -13,5 +13,8 @@ if [[ "$actual_version" != "git version $expected_version" ]]; then
   exit 1
 fi
 
-cargo test -p yeokcham-cli --test tracing \
-  remote_helper_clones_lists_refs_and_repeats_fetch_without_source_disclosure -- --exact
+for test_name in \
+  remote_helper_clones_lists_refs_and_repeats_fetch_without_source_disclosure \
+  remote_helper_pushes_only_verified_durable_ref_transitions; do
+  cargo test -p yeokcham-cli --test tracing "$test_name" -- --exact
+done

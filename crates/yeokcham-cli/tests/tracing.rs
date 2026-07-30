@@ -467,3 +467,197 @@ fn remote_helper_clones_lists_refs_and_repeats_fetch_without_source_disclosure()
     assert!(stderr.contains("remote_helper_command"));
     assert!(!stderr.contains("secret-source-location"));
 }
+
+#[test]
+fn remote_helper_pushes_only_verified_durable_ref_transitions() {
+    let directory = TestDirectory::new();
+    let source = directory.path().join("source");
+    let repository = directory.path().join("repository");
+    let first_client = directory.path().join("first-client");
+    let second_client = directory.path().join("second-client");
+    let verification_clone = directory.path().join("verification-clone");
+    fs::create_dir(&source).expect("create source repository");
+    run_git(&source, &["init", "-b", "main"]);
+    run_git(&source, &["config", "user.name", "Yeokcham Test"]);
+    run_git(
+        &source,
+        &["config", "user.email", "yeokcham-test@example.invalid"],
+    );
+    fs::write(source.join("README.md"), b"initial\n").expect("write initial fixture");
+    run_git(&source, &["add", "README.md"]);
+    run_git(&source, &["commit", "-m", "initial"]);
+    let output = Command::new(env!("CARGO_BIN_EXE_yeokcham"))
+        .args(["init", "--from-git"])
+        .arg(&source)
+        .arg(&repository)
+        .output()
+        .expect("import source repository");
+    assert!(
+        output.status.success(),
+        "import must succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let helper_path = remote_helper_path();
+    let remote = remote_uri(&repository);
+    for client in [&first_client, &second_client] {
+        let output = Command::new("git")
+            .args(["clone", "--quiet", &remote])
+            .arg(client)
+            .env("PATH", &helper_path)
+            .output()
+            .expect("clone Yeokcham remote");
+        assert!(
+            output.status.success(),
+            "clone must succeed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        run_git(client, &["config", "user.name", "Yeokcham Test"]);
+        run_git(
+            client,
+            &["config", "user.email", "yeokcham-test@example.invalid"],
+        );
+    }
+
+    fs::write(first_client.join("README.md"), b"accepted main update\n")
+        .expect("update first client");
+    run_git(&first_client, &["add", "README.md"]);
+    run_git(&first_client, &["commit", "-m", "accepted main update"]);
+    let accepted_main = run_git(&first_client, &["rev-parse", "HEAD"]);
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(&first_client)
+        .args(["push", "origin", "main"])
+        .env("PATH", &helper_path)
+        .output()
+        .expect("push fast-forward main");
+    assert!(
+        output.status.success(),
+        "fast-forward push must succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    run_git(&first_client, &["switch", "-c", "topic"]);
+    fs::write(first_client.join("topic.txt"), b"topic\n").expect("write topic fixture");
+    run_git(&first_client, &["add", "topic.txt"]);
+    run_git(&first_client, &["commit", "-m", "topic"]);
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(&first_client)
+        .args(["push", "--set-upstream", "origin", "topic"])
+        .env("PATH", &helper_path)
+        .output()
+        .expect("create topic branch");
+    assert!(
+        output.status.success(),
+        "branch creation must succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(&first_client)
+        .args(["push", "origin", "--delete", "topic"])
+        .env("PATH", &helper_path)
+        .output()
+        .expect("delete topic branch");
+    assert!(
+        output.status.success(),
+        "branch deletion must succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    run_git(&first_client, &["switch", "main"]);
+    run_git(&first_client, &["tag", "-a", "v1", "-m", "version one"]);
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(&first_client)
+        .args(["push", "origin", "v1"])
+        .env("PATH", &helper_path)
+        .output()
+        .expect("create immutable tag");
+    assert!(
+        output.status.success(),
+        "tag creation must succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    run_git(&first_client, &["tag", "-f", "v1", "HEAD"]);
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(&first_client)
+        .args(["push", "--force", "origin", "v1"])
+        .env("PATH", &helper_path)
+        .output()
+        .expect("attempt tag replacement");
+    assert!(
+        !output.status.success(),
+        "immutable tag replacement must fail: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(&second_client)
+        .args(["fetch", "--quiet", "origin"])
+        .env("PATH", &helper_path)
+        .output()
+        .expect("refresh second client remote tracking refs");
+    assert!(
+        output.status.success(),
+        "fetch must succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    fs::write(second_client.join("README.md"), b"divergent update\n")
+        .expect("write divergent update");
+    run_git(&second_client, &["add", "README.md"]);
+    run_git(&second_client, &["commit", "-m", "divergent update"]);
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(&second_client)
+        .args(["push", "--force", "origin", "HEAD:main"])
+        .env("PATH", &helper_path)
+        .output()
+        .expect("attempt non-fast-forward branch replacement");
+    assert!(
+        !output.status.success(),
+        "forced branch replacement must fail: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let output = Command::new("git")
+        .args(["clone", "--quiet", &remote])
+        .arg(&verification_clone)
+        .env("PATH", &helper_path)
+        .output()
+        .expect("clone verified pushed state");
+    assert!(
+        output.status.success(),
+        "verification clone must succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        run_git(&verification_clone, &["rev-parse", "HEAD"]),
+        accepted_main,
+        "rejected branch replacement must not alter the canonical ref",
+    );
+    assert_eq!(
+        fs::read(verification_clone.join("README.md")).expect("read verified clone"),
+        b"accepted main update\n",
+    );
+    run_git(&verification_clone, &["fsck", "--full", "--strict"]);
+    let output = Command::new(env!("CARGO_BIN_EXE_yeokcham"))
+        .arg("verify")
+        .arg(&repository)
+        .output()
+        .expect("verify pushed Yeokcham repository");
+    assert!(
+        output.status.success(),
+        "canonical verification must succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let output = Command::new(env!("CARGO_BIN_EXE_yeokcham"))
+        .args(["inspect", "refs"])
+        .arg(&repository)
+        .output()
+        .expect("inspect push journal");
+    assert!(output.status.success());
+    assert!(String::from_utf8_lossy(&output.stdout).contains("events=4"));
+}

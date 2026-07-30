@@ -17,7 +17,7 @@ Yeokcham is intended for ordinary software developers who want to keep using Git
 
 ## Status
 
-Milestone 1 and the local clone/fetch portion of Milestone 2 are implemented. The local `git-remote-yeokcham` bridge supports ref discovery, clone, and fetch through C Git's `upload-pack`, using a validated disposable snapshot-pack cache; `yeokcham sync` imports a trusted local Git source into a checked ref transition before Git fetches updates. Push, signed multi-device updates, encryption, and remote backends remain unfinished.
+Milestones 1 and 2 are implemented. The local `git-remote-yeokcham` bridge supports ref discovery, clone, fetch, and a staged local `git push` workflow through C Git, using verified Yeokcham storage and a disposable snapshot-pack cache. Push accepts fast-forward branch creation, update, and deletion; tags are create-only. Signed multi-device updates, crash injection, encryption, and remote backends remain unfinished.
 
 ## Recommended implementation language
 
@@ -109,7 +109,9 @@ git ls-remote yeokcham::/absolute/path/to/yeokcham-repository
 git clone yeokcham::/absolute/path/to/yeokcham-repository
 ```
 
-For each `connect git-upload-pack` request, the helper verifies the effective Yeokcham ref state. It reuses a full bare snapshot pack under `<store>/cache/packs/<ref-state-sha256>` only after exact-ref comparison and `git fsck --full --strict`; a missing, partial, or corrupt entry is rebuilt from a verified export. This cache contains local conventional Git objects, is disposable, and is not a cache of a negotiated upload-pack response. The helper then delegates the smart protocol and negotiated pack stream to C Git. This remains a correctness bridge, not a measured performance path. After a successful `yeokcham sync`, ordinary Git can fetch updated and deleted refs with `git fetch --prune`; push and shallow operations remain deferred.
+For each `connect git-upload-pack` request, the helper verifies the effective Yeokcham ref state. It reuses a full bare snapshot pack under `<store>/cache/packs/<ref-state-sha256>` only after exact-ref comparison and `git fsck --full --strict`; a missing, partial, or corrupt entry is rebuilt from a verified export. This cache contains local conventional Git objects, is disposable, and is not a cache of a negotiated upload-pack response. The helper then delegates the smart protocol and negotiated pack stream to C Git. This remains a correctness bridge, not a measured performance path. After a successful `yeokcham sync`, ordinary Git can fetch updated and deleted refs with `git fetch --prune`.
+
+`git push` stages each `connect git-receive-pack` operation in a private temporary bare repository. C Git checks the pack and advertised old ref values, then Yeokcham imports and verifies the complete staged graph using its normal storage policy. The helper relays a successful final status only after a checked canonical ref-journal append. Fast-forward branch create, update, and deletion are allowed; force branch replacement is rejected. Tags are immutable after creation: move and delete requests are rejected. Push remains an unsigned single-trusted-local-writer workflow, and shallow operations remain deferred.
 
 ## Contributing and licence
 

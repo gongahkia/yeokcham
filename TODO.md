@@ -119,13 +119,13 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 
 ### Push ingestion
 
-- [ ] Receive pack data from Git.
-- [ ] Validate object graph.
-- [ ] Ingest new objects using storage policies.
-- [ ] Reject missing required objects.
-- [ ] Support branch create, update, and delete.
-- [ ] Support tag updates with explicit policy.
-- [ ] Validate expected old ref values.
+- [x] Receive pack data from Git.
+- [x] Validate object graph.
+- [x] Ingest new objects using storage policies.
+- [x] Reject missing required objects.
+- [x] Support branch create, update, and delete.
+- [x] Support tag updates with explicit policy.
+- [x] Validate expected old ref values.
 
 ### Ref journal
 
@@ -148,7 +148,7 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 
 ### Exit criteria
 
-- [ ] Git push works for local yeokcham stores.
+- [x] Git push works for local yeokcham stores.
 - [ ] No injected crash creates an acknowledged but unrecoverable ref state.
 - [ ] Divergent device-style events are preserved rather than overwritten.
 

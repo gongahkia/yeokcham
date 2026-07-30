@@ -1315,13 +1315,36 @@ impl LocalRepository {
         device_id: DeviceId,
         limits: GitImportLimits,
     ) -> Result<GitImportReport> {
-        let verification_limits = limits.verification_limits()?;
         let Some(expected_state) = self.resolve_ref_state(limits.ref_snapshot_limits())? else {
             return Err(Error::new(
                 ErrorKind::NotFound,
                 "Git sync requires an initial ref snapshot",
             ));
         };
+        self.sync_git_repository_from_expected_state(source, &expected_state, device_id, limits)
+    }
+
+    /// syncs only when `expected_state` remains the local ref predecessor.
+    pub fn sync_git_repository_from_expected_state(
+        &self,
+        source: &GitRepository,
+        expected_state: &GitRefState,
+        device_id: DeviceId,
+        limits: GitImportLimits,
+    ) -> Result<GitImportReport> {
+        let verification_limits = limits.verification_limits()?;
+        let Some(current_state) = self.resolve_ref_state(limits.ref_snapshot_limits())? else {
+            return Err(Error::new(
+                ErrorKind::NotFound,
+                "Git sync requires an initial ref snapshot",
+            ));
+        };
+        if current_state != *expected_state {
+            return Err(Error::new(
+                ErrorKind::Conflict,
+                "ref state changed before the Git source could be synchronized",
+            ));
+        }
         let ids = source.reachable_object_ids()?;
         if ids.len() > limits.maximum_objects() {
             return Err(Error::new(
@@ -1398,7 +1421,7 @@ impl LocalRepository {
         self.append_ref_state_if_current(
             ref_state,
             device_id,
-            Some(&expected_state),
+            Some(expected_state),
             limits.ref_snapshot_publication_limits()?,
             limits.ref_snapshot_limits(),
         )?;
@@ -2790,7 +2813,14 @@ impl LocalRepository {
                 .iter()
                 .enumerate()
                 .filter_map(|(index, event)| {
-                    (event.expected_state_id() == expected_state_id).then_some(index)
+                    let expected_chain = match chains.get(&event.device_id()) {
+                        Some((sequence, event_id)) => (sequence.checked_add(1)?, *event_id),
+                        None => (1, [0; 32]),
+                    };
+                    (event.expected_state_id() == expected_state_id
+                        && event.sequence() == expected_chain.0
+                        && event.previous_event_id() == expected_chain.1)
+                        .then_some(index)
                 })
                 .collect();
             let index = match candidates.as_slice() {
@@ -5693,6 +5723,138 @@ mod tests {
             repository
                 .ref_events(ref_event_limits(limits.ref_snapshot_limits()).expect("event limits"))
                 .expect("preserved events")
+                .len(),
+            3
+        );
+    }
+
+    #[test]
+    fn sync_rejects_a_stale_expected_ref_state() {
+        let directory = TestDirectory::new();
+        let source_path = directory.path().join("source");
+        let repository_path = directory.path().join("repository");
+        fs::create_dir(&source_path).expect("create source path");
+        run_git_in(&source_path, &["init", "-b", "main"]);
+        run_git_in(&source_path, &["config", "user.name", "Yeokcham Test"]);
+        run_git_in(
+            &source_path,
+            &["config", "user.email", "yeokcham-test@example.invalid"],
+        );
+        fs::write(source_path.join("README.md"), b"first\n").expect("write source");
+        run_git_in(&source_path, &["add", "README.md"]);
+        run_git_in(&source_path, &["commit", "-m", "first"]);
+
+        let limits = GitImportLimits::initial().expect("limits");
+        let repository = LocalRepository::create(&repository_path).expect("create destination");
+        repository
+            .import_git_repository(
+                &GitRepository::open(&source_path).expect("open initial source"),
+                limits,
+            )
+            .expect("initial import");
+        let expected_state = repository
+            .resolve_ref_state(limits.ref_snapshot_limits())
+            .expect("resolve initial state")
+            .expect("initial state");
+
+        run_git_in(&source_path, &["branch", "topic"]);
+        let source = GitRepository::open(&source_path).expect("open updated source");
+        let current_state = source.ref_state().expect("read updated source state");
+        let device_id: DeviceId = "6ba7b814-9dad-41d1-80b4-00c04fd430c8"
+            .parse()
+            .expect("device ID");
+        repository
+            .append_ref_state(
+                current_state.clone(),
+                device_id,
+                limits
+                    .ref_snapshot_publication_limits()
+                    .expect("publication limits"),
+                limits.ref_snapshot_limits(),
+            )
+            .expect("publish competing transition");
+
+        assert_eq!(
+            repository
+                .sync_git_repository_from_expected_state(
+                    &source,
+                    &expected_state,
+                    device_id,
+                    limits
+                )
+                .expect_err("stale predecessor must reject the synchronization")
+                .kind(),
+            ErrorKind::Conflict
+        );
+        assert_eq!(
+            repository
+                .resolve_ref_state(limits.ref_snapshot_limits())
+                .expect("resolve state after rejection"),
+            Some(current_state)
+        );
+    }
+
+    #[test]
+    fn syncs_a_later_transition_after_a_ref_state_is_revisited() {
+        let directory = TestDirectory::new();
+        let source_path = directory.path().join("source");
+        let repository_path = directory.path().join("repository");
+        fs::create_dir(&source_path).expect("create source path");
+        run_git_in(&source_path, &["init", "-b", "main"]);
+        run_git_in(&source_path, &["config", "user.name", "Yeokcham Test"]);
+        run_git_in(
+            &source_path,
+            &["config", "user.email", "yeokcham-test@example.invalid"],
+        );
+        fs::write(source_path.join("README.md"), b"first\n").expect("write source");
+        run_git_in(&source_path, &["add", "README.md"]);
+        run_git_in(&source_path, &["commit", "-m", "first"]);
+
+        let limits = GitImportLimits::initial().expect("limits");
+        let repository = LocalRepository::create(&repository_path).expect("create destination");
+        repository
+            .import_git_repository(
+                &GitRepository::open(&source_path).expect("open initial source"),
+                limits,
+            )
+            .expect("initial import");
+        let device_id: DeviceId = "6ba7b814-9dad-41d1-80b4-00c04fd430c8"
+            .parse()
+            .expect("device ID");
+
+        run_git_in(&source_path, &["branch", "topic"]);
+        repository
+            .sync_git_repository(
+                &GitRepository::open(&source_path).expect("open branch source"),
+                device_id,
+                limits,
+            )
+            .expect("sync branch creation");
+        run_git_in(&source_path, &["branch", "-D", "topic"]);
+        repository
+            .sync_git_repository(
+                &GitRepository::open(&source_path).expect("open branch deletion source"),
+                device_id,
+                limits,
+            )
+            .expect("sync branch deletion");
+        run_git_in(&source_path, &["tag", "-a", "v1", "-m", "version one"]);
+        let source = GitRepository::open(&source_path).expect("open tagged source");
+        let tagged_state = source.ref_state().expect("read tagged state");
+        repository
+            .sync_git_repository(&source, device_id, limits)
+            .expect("sync transition after revisiting a state");
+
+        assert_eq!(
+            repository
+                .resolve_ref_state(limits.ref_snapshot_limits())
+                .expect("resolve tagged state"),
+            Some(tagged_state)
+        );
+        assert_eq!(
+            repository
+                .ref_events(ref_event_limits(limits.ref_snapshot_limits()).expect("event limits"))
+                .expect("read event sequence")
                 .len(),
             3
         );

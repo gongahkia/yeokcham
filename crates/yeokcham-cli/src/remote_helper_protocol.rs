@@ -12,6 +12,8 @@ pub enum RemoteHelperCommand {
     Capabilities,
     /// Connect Git directly to the upload-pack service.
     ConnectUploadPack,
+    /// Connect Git directly to the receive-pack service.
+    ConnectReceivePack,
     /// End the command stream.
     End,
 }
@@ -61,10 +63,13 @@ pub fn parse_command(line: &[u8]) -> Result<RemoteHelperCommand> {
     if line == b"connect git-upload-pack" {
         return Ok(RemoteHelperCommand::ConnectUploadPack);
     }
+    if line == b"connect git-receive-pack" {
+        return Ok(RemoteHelperCommand::ConnectReceivePack);
+    }
     if line.starts_with(b"connect ") {
         return Err(Error::new(
             ErrorKind::Unsupported,
-            "remote helper only supports git-upload-pack",
+            "remote helper only supports Git pack services",
         ));
     }
     Err(Error::new(
@@ -91,10 +96,8 @@ mod tests {
         );
         assert_eq!(parse_command(b"").expect("end"), RemoteHelperCommand::End);
         assert_eq!(
-            parse_command(b"connect git-receive-pack")
-                .expect_err("receive-pack is deferred")
-                .kind(),
-            ErrorKind::Unsupported
+            parse_command(b"connect git-receive-pack").expect("receive-pack"),
+            RemoteHelperCommand::ConnectReceivePack
         );
         assert_eq!(
             parse_command(b"fetch 0000000000000000000000000000000000000000 refs/heads/main")

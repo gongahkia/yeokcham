@@ -79,7 +79,7 @@ Initial strategy:
 - Prefer delegation to mature Git pack readers and writers.
 - Add smart HTTP only after local end-to-end correctness.
 
-Current local bridge: `git-remote-yeokcham` advertises only `connect`, accepts only `connect git-upload-pack`, and verifies the effective local ref state before C Git sees it. It uses a local bare snapshot-pack cache keyed by the SHA-256 identity of that complete state. A cache hit requires exact ref-state equality and `git fsck --full --strict`; cache corruption, partial publication, or an incorrect state is discarded and rebuilt from a verified export. C Git still performs every client-specific upload-pack negotiation, so the cache is not a protocol-response cache. This proves Git compatibility before native pack synthesis; it is not a performance path. A trusted local `yeokcham sync` can append checked ref transitions for fetch updates, while Git push and signed multi-device journal authorization remain separate work.
+Current local bridge: `git-remote-yeokcham` advertises only `connect`, accepts `connect git-upload-pack` and `connect git-receive-pack`, and verifies the effective local ref state before C Git sees it. Upload-pack uses a local bare snapshot-pack cache keyed by the SHA-256 identity of that complete state. A cache hit requires exact ref-state equality and `git fsck --full --strict`; cache corruption, partial publication, or an incorrect state is discarded and rebuilt from a verified export. C Git still performs every client-specific upload-pack negotiation, so the cache is not a protocol-response cache. Receive-pack uses a private temporary export instead: it relays the initial advertisement, collects the final protocol response, verifies and imports the staged repository with an exact predecessor state, then releases success only after a checked canonical journal append. C Git enforces advertised old refs and non-fast-forward branch rejection; an isolated hook makes tags create-only. This proves local Git compatibility before native pack synthesis; it is not a performance path. Signed multi-device journal authorization remains separate work.
 
 ### 3.2 Repository service
 
@@ -329,6 +329,8 @@ Cache layers:
 Every cache entry must be treated as disposable and integrity-checked.
 
 The initial local helper cache is a complete packed bare Git snapshot under `cache/packs/<effective-ref-state-sha256>`. It has no canonical or recovery role, has no capacity policy yet, and is recreated from verified Yeokcham records if its exact state or C Git fsck check fails. It cannot cache a negotiated upload-pack response because wants, haves, and capabilities vary per client connection.
+
+Receive-pack staging is never cached. A push-specific private bare export starts at one effective ref state, and the later canonical import uses that state as a compare-and-swap predecessor. A conflicting canonical transition can leave only unreachable immutable records; it cannot overwrite refs or receive a success status. The initial advertisement is relayed as packet lines, while the post-request response is bounded to 128 MiB and held until canonical verification succeeds.
 
 ### 3.12 GitHub mirror
 
