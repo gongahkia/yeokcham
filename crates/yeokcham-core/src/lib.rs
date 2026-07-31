@@ -17,6 +17,7 @@ mod device_registry;
 mod encrypted_backend;
 mod error;
 mod filesystem_backend;
+mod filesystem_monitor;
 mod git_object;
 mod git_object_id;
 mod git_repository;
@@ -76,6 +77,9 @@ pub use device_registry::{
 pub use encrypted_backend::EncryptedBackend;
 pub use error::{Error, ErrorKind, Result};
 pub use filesystem_backend::FilesystemBackend;
+pub use filesystem_monitor::{
+    FilesystemChange, FilesystemChangeKind, FilesystemMonitor, FilesystemMonitorLimits,
+};
 pub use git_object::{GitObject, GitObjectKind};
 pub use git_object_id::GitObjectId;
 pub use git_repository::GitRepository;

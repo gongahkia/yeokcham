@@ -87,3 +87,4 @@ Valid statuses are `Proposed`, `Accepted`, `Rejected`, `Deprecated`, and `Supers
 | [ADR-0079](0079-explicit-github-ref-resolution.md) | Accepted | Resolve GitHub refs only through explicit expected-state updates |
 | [ADR-0080](0080-versioned-local-daemon-protocol.md) | Accepted | Define a versioned, bounded local daemon protocol |
 | [ADR-0081](0081-explicit-root-local-repository-discovery.md) | Accepted | Discover only validated Yeokcham stores under explicit roots |
+| [ADR-0082](0082-bounded-polling-filesystem-monitor.md) | Accepted | Monitor explicit roots through bounded polling snapshots |
