@@ -5,11 +5,14 @@
 ## Start
 
 ```bash
-yeokcham-server --repository <yeokcham-repo>
-yeokcham-server --repository <yeokcham-repo> --bind 127.0.0.1:9181
+yeokcham-server token create <private-token-file>
+yeokcham-server --repository <yeokcham-repo> --auth-token-file <private-token-file>
+yeokcham-server --repository <yeokcham-repo> --auth-token-file <private-token-file> --bind 127.0.0.1:9181
 ```
 
-The default bind is the operating system-selected port on `127.0.0.1`. Startup prints the actual address. `--bind` accepts a numeric socket address only and rejects every non-loopback address, including `0.0.0.0`, so V1 cannot expose an unauthenticated public listener. IPv6 loopback uses `[::1]:<port>`.
+`token create` creates a new regular mode-0600 file without replacing an existing pathname and prints no secret. The file contains 32 random bytes as 64 lowercase hexadecimal characters plus one newline. Server startup requires this file, opens it without following symlinks, and rejects group-readable, world-readable, or non-regular files. Do not pass the token through a command line or environment variable.
+
+The default bind is the operating system-selected port on `127.0.0.1`. Startup prints the actual address. `--bind` accepts a numeric socket address only and rejects every non-loopback address, including `0.0.0.0`. IPv6 loopback uses `[::1]:<port>`.
 
 ## HTTP rules
 
@@ -21,6 +24,8 @@ The default bind is the operating system-selected port on `127.0.0.1`. Startup p
 - Each read or write phase has a five-second deadline.
 - Four request workers and eight queued accepted sockets bound local resource use.
 - JSON response bodies and raw-object bodies are limited to 64 MiB.
+- Every endpoint requires exactly one `Authorization: Bearer <64-lowercase-hex>` header.
+- Absent, malformed, duplicate, or wrong credentials receive the same `401` response and `WWW-Authenticate: Bearer` header.
 
 Every error response has `application/json` content and this envelope:
 
@@ -28,7 +33,7 @@ Every error response has `application/json` content and this envelope:
 {"version":1,"error":"machine_readable_code"}
 ```
 
-The server deliberately does not expose repository paths, internal error detail, source bodies in logs, or a filesystem endpoint.
+The server deliberately does not expose repository paths, internal error detail, source bodies, or tokens in logs, or a filesystem endpoint.
 
 ## Endpoints
 
@@ -79,6 +84,6 @@ The body is the exact decompressed Git object body without the canonical loose-o
 
 ## Security boundary
 
-V1 has no authentication and is deliberately loopback-only. Loopback prevents network peers from connecting by default, but does not isolate processes sharing the host. Treat a host that permits an untrusted local process as unsuitable for serving source through V1. Do not use a generic port forward or reverse proxy to expose V1. Authentication, non-loopback deployment, TLS termination, write operations, and browser sessions are separate milestones.
+V1 requires one bearer token and is deliberately loopback-only. Loopback prevents network peers from connecting, while authentication rejects a local process that lacks the token; neither protects a compromised account, process memory, or operating system. Treat the token file as a full read credential. Do not use a generic port forward or reverse proxy to expose V1. Non-loopback deployment, TLS termination, write operations, token reload/rotation without restart, and browser sessions are separate milestones.
 
-The service is read-only. Its loss or termination cannot change a Yeokcham repository; recovery remains the existing local export and encrypted recovery path.
+The service is read-only. Its loss or termination cannot change a Yeokcham repository; recovery remains the existing local export and encrypted recovery path. To rotate a token, create a new file, restart the server with it, and update clients; a lost token does not affect repository recovery.

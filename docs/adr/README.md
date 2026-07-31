@@ -98,3 +98,4 @@ Valid statuses are `Proposed`, `Accepted`, `Rejected`, `Deprecated`, and `Supers
 | [ADR-0090](0090-opt-in-git-cone-sparse-checkout-daemon-prefetch.md) | Accepted | Derive daemon prefetch paths from an explicit cone sparse-checkout file |
 | [ADR-0091](0091-daemon-prewarms-verified-snapshot-pack-cache.md) | Accepted | Prewarm the existing verified snapshot-pack cache from the daemon |
 | [ADR-0092](0092-loopback-native-http-v1.md) | Accepted | Serve a bounded loopback Yeokcham-native HTTP V1 transport |
+| [ADR-0093](0093-single-user-native-http-bearer-authentication.md) | Accepted | Require one private bearer token for native HTTP V1 |

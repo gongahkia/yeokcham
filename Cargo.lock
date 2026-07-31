@@ -2892,9 +2892,13 @@ dependencies = [
 name = "yeokcham-server"
 version = "0.1.0"
 dependencies = [
+ "getrandom 0.4.3",
  "hex",
+ "libc",
+ "subtle",
  "uuid",
  "yeokcham-core",
+ "zeroize",
 ]
 
 [[package]]

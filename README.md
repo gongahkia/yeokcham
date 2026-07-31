@@ -150,7 +150,7 @@ The local daemon accepts either explicit `--sparse-path` values or one opt-in `-
 
 ## Native HTTP V1
 
-`yeokcham-server --repository <yeokcham-repo>` starts the read-only Yeokcham-native HTTP V1 service on an ephemeral `127.0.0.1` port and prints its address. `--bind 127.0.0.1:<port>` selects a known loopback port. It serves native health, ref discovery, and verified raw Git-object retrieval; it is not Git smart HTTP, accepts no public address, and has no authentication yet. See [the V1 contract](docs/native-http-v1.md).
+`yeokcham-server token create <private-token-file>` creates a private random bearer-token file without printing its secret. `yeokcham-server --repository <yeokcham-repo> --auth-token-file <private-token-file>` then starts the read-only Yeokcham-native HTTP V1 service on an ephemeral `127.0.0.1` port and prints its address. `--bind 127.0.0.1:<port>` selects a known loopback port. Every endpoint requires the token; it serves native health, ref discovery, and verified raw Git-object retrieval. It is not Git smart HTTP and accepts no public address. See [the V1 contract](docs/native-http-v1.md).
 
 `git push` stages each `connect git-receive-pack` operation in a private temporary bare repository. C Git checks the pack and advertised old ref values, then Yeokcham imports and verifies the complete staged graph using its normal storage policy. The helper relays a successful final status only after a checked canonical ref-journal append. Fast-forward branch create, update, and deletion are allowed; force branch replacement is rejected. Tags are immutable after creation: move and delete requests are rejected. Push remains an unsigned single-trusted-local-writer workflow, and shallow operations remain deferred.
 

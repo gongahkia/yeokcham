@@ -10,8 +10,12 @@ name = "yeokcham-server"
 path = "src/main.rs"
 
 [dependencies]
+getrandom.workspace = true
 hex.workspace = true
+libc.workspace = true
+subtle.workspace = true
 yeokcham-core = { path = "../yeokcham-core" }
+zeroize.workspace = true
 
 [dev-dependencies]
 uuid.workspace = true
