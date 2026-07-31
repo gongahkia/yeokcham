@@ -84,3 +84,4 @@ Valid statuses are `Proposed`, `Accepted`, `Rejected`, `Deprecated`, and `Supers
 | [ADR-0076](0076-standard-git-github-publication.md) | Accepted | Publish selected GitHub refs through standard Git credentials |
 | [ADR-0077](0077-explicit-github-pull-request-branch-mapping.md) | Accepted | Publish one selected branch to an explicit pull-request branch |
 | [ADR-0078](0078-verified-github-object-ingestion-without-ref-mutation.md) | Accepted | Import selected GitHub objects without ref mutation |
+| [ADR-0079](0079-explicit-github-ref-resolution.md) | Accepted | Resolve GitHub refs only through explicit expected-state updates |

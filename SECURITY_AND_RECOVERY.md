@@ -152,6 +152,8 @@ GitHub publication uses no Yeokcham credential API. `github publish --apply --tr
 
 `github fetch` uses the same credential boundary. It lists and fetches only bounded selected standard refs into a temporary bare Git repository, verifies fetched IDs against the preflight remote listing, imports verified immutable objects, and removes that repository. It does not print ref metadata without `--show-refs`, mutate canonical Git refs, or silently choose a divergence. The temporary bare repository contains ordinary Git objects while it exists and is not canonical or recoverable data; an interrupted process can leave it under the operating system temporary directory for operator cleanup.
 
+`github resolve --apply` is the only GitHub ingestion command that mutates canonical refs. It requires an explicitly supplied selected local-to-remote mapping, fresh remote read/fetch verification, and an expected-state checked journal append. A concurrent local mutation fails without replacing a ref. The final checkpoint write occurs after the durable event; a filesystem failure can leave a valid accepted ref transition with a stale checkpoint, which a retry must repair rather than conceal.
+
 ## 8. Input validation
 
 Treat all external bytes as hostile.

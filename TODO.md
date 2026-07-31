@@ -281,7 +281,7 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 - [x] Detect remote-only commits.
 - [x] Import remote objects.
 - [x] Detect divergence.
-- [ ] Require explicit conflict resolution.
+- [x] Require explicit conflict resolution.
 - [x] Avoid silent force updates.
 
 ### Exit criteria

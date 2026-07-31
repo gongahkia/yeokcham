@@ -779,7 +779,8 @@ impl GitImportLimits {
         )
     }
 
-    fn ref_snapshot_publication_limits(self) -> Result<RefSnapshotPublicationLimits> {
+    /// Returns bounded target-resolution limits for a checked ref transition.
+    pub fn ref_snapshot_publication_limits(self) -> Result<RefSnapshotPublicationLimits> {
         RefSnapshotPublicationLimits::new(
             self.chunked_blob_storage_limits.maximum_segment_bytes(),
             self.chunked_blob_storage_limits.segment_read_limits(),
@@ -3454,6 +3455,26 @@ impl LocalRepository {
             state,
             device_id,
             None,
+            None,
+            publication_limits,
+            read_limits,
+        )
+    }
+
+    /// Appends one durable local state transition only when `expected_state`
+    /// still equals the materialized current state.
+    pub fn append_ref_state_if_expected(
+        &self,
+        state: GitRefState,
+        expected_state: &GitRefState,
+        device_id: DeviceId,
+        publication_limits: RefSnapshotPublicationLimits,
+        read_limits: RefSnapshotReadLimits,
+    ) -> Result<()> {
+        self.append_ref_state_if_current(
+            state,
+            device_id,
+            Some(expected_state),
             None,
             publication_limits,
             read_limits,
@@ -7716,6 +7737,22 @@ mod tests {
                 limits.ref_snapshot_limits(),
             )
             .expect("publish competing transition");
+
+        assert_eq!(
+            repository
+                .append_ref_state_if_expected(
+                    current_state.clone(),
+                    &expected_state,
+                    device_id,
+                    limits
+                        .ref_snapshot_publication_limits()
+                        .expect("publication limits"),
+                    limits.ref_snapshot_limits(),
+                )
+                .expect_err("stale expected state must reject direct append")
+                .kind(),
+            ErrorKind::Conflict
+        );
 
         assert_eq!(
             repository

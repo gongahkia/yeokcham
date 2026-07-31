@@ -143,6 +143,12 @@ enum Command {
         transport: GithubTransport,
         show_refs: bool,
     },
+    GithubResolve {
+        repository: PathBuf,
+        local: yeokcham_core::RefName,
+        remote: yeokcham_core::RefName,
+        transport: GithubTransport,
+    },
     DriveAuth {
         client_id: String,
         redirect_port: Option<u16>,
@@ -261,6 +267,12 @@ fn main() -> ExitCode {
             transport,
             show_refs,
         } => github_fetch(repository, transport, show_refs),
+        Command::GithubResolve {
+            repository,
+            local,
+            remote,
+            transport,
+        } => github_resolve_remote(repository, local, remote, transport),
         Command::DriveAuth {
             client_id,
             redirect_port,
@@ -537,6 +549,67 @@ fn parse_github(arguments: &[OsString]) -> Result<Command> {
             repository,
             transport,
             show_refs,
+        });
+    }
+    if arguments.len() >= 3 && arguments[1].as_os_str() == OsStr::new("resolve") {
+        let repository = PathBuf::from(&arguments[2]);
+        let mut local = None;
+        let mut remote = None;
+        let mut transport = GithubTransport::Https;
+        let mut transport_seen = false;
+        let mut apply = false;
+        let mut index = 3;
+        while index < arguments.len() {
+            let option = arguments[index].as_os_str();
+            if option == OsStr::new("--apply") && !apply {
+                apply = true;
+                index += 1;
+                continue;
+            }
+            if option == OsStr::new("--transport") && !transport_seen {
+                let Some(value) = arguments.get(index + 1).and_then(|value| value.to_str()) else {
+                    return Err(usage_error());
+                };
+                transport = value.parse()?;
+                transport_seen = true;
+                index += 2;
+                continue;
+            }
+            if option == OsStr::new("--accept-remote") && local.is_none() {
+                let Some(value) = arguments.get(index + 1).and_then(|value| value.to_str()) else {
+                    return Err(usage_error());
+                };
+                local = Some(github_resolution_reference(value)?);
+                index += 2;
+                continue;
+            }
+            if option == OsStr::new("--remote") && remote.is_none() {
+                let Some(value) = arguments.get(index + 1).and_then(|value| value.to_str()) else {
+                    return Err(usage_error());
+                };
+                remote = Some(github_resolution_reference(value)?);
+                index += 2;
+                continue;
+            }
+            return Err(usage_error());
+        }
+        if !apply {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "GitHub resolution requires --apply; run github fetch first",
+            ));
+        }
+        let (Some(local), Some(remote)) = (local, remote) else {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "GitHub resolution requires --accept-remote and --remote",
+            ));
+        };
+        return Ok(Command::GithubResolve {
+            repository,
+            local,
+            remote,
+            transport,
         });
     }
     if arguments.len() < 9 || arguments[1].as_os_str() != OsStr::new("configure") {
@@ -1051,7 +1124,7 @@ fn github_fetch(repository: PathBuf, transport: GithubTransport, show_refs: bool
     let references =
         selected_github_ingestion_references(&repository, &configuration, &remote_refs, limits)?;
     let imported_object_count =
-        github_fetch_remote_objects(&repository, &references, &remote_url, limits)?;
+        github_fetch_remote_objects(&repository, &references, &remote_url, limits, true)?;
     let remote_reference_count = references
         .iter()
         .filter(|reference| reference.remote_object_id.is_some())
@@ -1101,6 +1174,116 @@ fn github_fetch(repository: PathBuf, transport: GithubTransport, show_refs: bool
     Ok(())
 }
 
+fn github_resolve_remote(
+    repository: PathBuf,
+    local: yeokcham_core::RefName,
+    remote: yeokcham_core::RefName,
+    transport: GithubTransport,
+) -> Result<()> {
+    let limits = GitImportLimits::initial()?;
+    let repository = LocalRepository::open(repository)?;
+    let configuration = repository
+        .github_mirror_configuration()?
+        .ok_or_else(|| Error::new(ErrorKind::NotFound, "GitHub mirror is not configured"))?;
+    if configuration.direction() == GithubMirrorDirection::PublishOnly {
+        return Err(Error::new(
+            ErrorKind::InvalidInput,
+            "GitHub mirror direction does not allow ingestion",
+        ));
+    }
+    let remote_url = github_remote_url(&configuration, transport);
+    let remote_object_id = github_resolve_remote_reference(
+        &repository,
+        &configuration,
+        &remote_url,
+        local.clone(),
+        remote.clone(),
+        limits,
+    )?;
+    println!(
+        "github_resolved transport={} local={} remote={} object={}",
+        transport.as_str(),
+        github_reference_text(&local)?,
+        github_reference_text(&remote)?,
+        remote_object_id,
+    );
+    Ok(())
+}
+
+fn github_resolve_remote_reference(
+    repository: &LocalRepository,
+    configuration: &GithubMirrorConfiguration,
+    remote_url: &str,
+    local: yeokcham_core::RefName,
+    remote: yeokcham_core::RefName,
+    limits: GitImportLimits,
+) -> Result<GitObjectId> {
+    let remote_refs = github_all_remote_refs(remote_url)?;
+    let reference =
+        selected_github_ingestion_references(repository, configuration, &remote_refs, limits)?
+            .into_iter()
+            .find(|reference| reference.local == local && reference.remote == remote)
+            .ok_or_else(|| {
+                Error::new(
+                    ErrorKind::InvalidInput,
+                    "GitHub resolution mapping is not selected",
+                )
+            })?;
+    let remote_object_id = reference.remote_object_id.ok_or_else(|| {
+        Error::new(
+            ErrorKind::NotFound,
+            "GitHub resolution remote reference is unavailable",
+        )
+    })?;
+    let expected_state = repository
+        .resolve_ref_state(limits.ref_snapshot_limits())?
+        .ok_or_else(|| {
+            Error::new(
+                ErrorKind::NotFound,
+                "repository has no acknowledged ref state",
+            )
+        })?;
+    if expected_state.regular_refs().get(&local).copied() != reference.local_object_id {
+        return Err(Error::new(
+            ErrorKind::Conflict,
+            "GitHub local ref changed during resolution",
+        ));
+    }
+    github_fetch_remote_objects(
+        repository,
+        std::slice::from_ref(&reference),
+        remote_url,
+        limits,
+        false,
+    )?;
+    let mut regular_refs = expected_state.regular_refs().clone();
+    regular_refs.insert(local.clone(), remote_object_id);
+    let resolved_state =
+        yeokcham_core::GitRefState::new(regular_refs, expected_state.head().clone())?;
+    repository.append_ref_state_if_expected(
+        resolved_state,
+        &expected_state,
+        DeviceId::from_bytes(*repository.id().as_bytes())?,
+        limits.ref_snapshot_publication_limits()?,
+        limits.ref_snapshot_limits(),
+    )?;
+    let observed_at_unix_seconds = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map_err(|_| Error::new(ErrorKind::Internal, "system clock is before Unix epoch"))?
+        .as_secs();
+    repository.record_github_mirror_checkpoint(
+        local.clone(),
+        yeokcham_core::GithubMirrorCheckpoint::new(
+            remote_object_id,
+            remote.clone(),
+            remote_object_id,
+            observed_at_unix_seconds,
+        ),
+        limits.ref_snapshot_limits(),
+    )?;
+    Ok(remote_object_id)
+}
+
 struct GithubIngestionReference {
     local: yeokcham_core::RefName,
     remote: yeokcham_core::RefName,
@@ -1120,6 +1303,12 @@ fn github_ingestion_state(reference: &GithubIngestionReference) -> &'static str 
         (Some(_), None) => "local-only",
         (None, None) => "absent",
     }
+}
+
+fn github_resolution_reference(value: &str) -> Result<yeokcham_core::RefName> {
+    let reference = value.parse::<yeokcham_core::RefName>()?;
+    github_reference_text(&reference)?;
+    Ok(reference)
 }
 
 fn selected_github_ingestion_references(
@@ -1184,6 +1373,7 @@ fn github_fetch_remote_objects(
     references: &[GithubIngestionReference],
     remote_url: &str,
     limits: GitImportLimits,
+    record_checkpoints: bool,
 ) -> Result<usize> {
     let fetched_references = references
         .iter()
@@ -1211,21 +1401,25 @@ fn github_fetch_remote_objects(
             .duration_since(SystemTime::UNIX_EPOCH)
             .map_err(|_| Error::new(ErrorKind::Internal, "system clock is before Unix epoch"))?
             .as_secs();
-        let checkpoints = references.iter().filter_map(|reference| {
-            Some((
-                reference.local.clone(),
-                yeokcham_core::GithubMirrorCheckpoint::new(
-                    reference.local_object_id?,
-                    reference.remote.clone(),
-                    reference.remote_object_id?,
-                    observed_at_unix_seconds,
-                ),
-            ))
-        });
-        let checkpoints = checkpoints.collect::<Vec<_>>();
-        if !checkpoints.is_empty() {
-            repository
-                .record_github_mirror_checkpoints(checkpoints, limits.ref_snapshot_limits())?;
+        if record_checkpoints {
+            let checkpoints = references
+                .iter()
+                .filter_map(|reference| {
+                    Some((
+                        reference.local.clone(),
+                        yeokcham_core::GithubMirrorCheckpoint::new(
+                            reference.local_object_id?,
+                            reference.remote.clone(),
+                            reference.remote_object_id?,
+                            observed_at_unix_seconds,
+                        ),
+                    ))
+                })
+                .collect::<Vec<_>>();
+            if !checkpoints.is_empty() {
+                repository
+                    .record_github_mirror_checkpoints(checkpoints, limits.ref_snapshot_limits())?;
+            }
         }
         Ok(report.object_count())
     })();
@@ -1826,15 +2020,11 @@ fn github_reference_text(reference: &yeokcham_core::RefName) -> Result<&str> {
     if !is_github_standard_reference(reference) {
         return Err(Error::new(
             ErrorKind::Unsupported,
-            "GitHub publication reference is not supported",
+            "GitHub reference is not supported",
         ));
     }
-    std::str::from_utf8(reference.as_bytes()).map_err(|_| {
-        Error::new(
-            ErrorKind::Internal,
-            "GitHub publication reference is not valid UTF-8",
-        )
-    })
+    std::str::from_utf8(reference.as_bytes())
+        .map_err(|_| Error::new(ErrorKind::Internal, "GitHub reference is not valid UTF-8"))
 }
 
 fn is_github_standard_reference(reference: &yeokcham_core::RefName) -> bool {
@@ -3127,7 +3317,7 @@ mod tests {
             1
         );
         assert!(
-            github_fetch_remote_objects(&repository, &references, remote_text, limits)
+            github_fetch_remote_objects(&repository, &references, remote_text, limits, true)
                 .expect("fetch and import remote objects")
                 > 0
         );
@@ -3177,6 +3367,49 @@ mod tests {
                 .expect("local main")
         );
         assert_ne!(checkpoint.remote_object_id(), checkpoint.local_object_id());
+        let remote_main = references
+            .iter()
+            .find(|reference| reference.local == main)
+            .expect("remote main reference")
+            .remote_object_id
+            .expect("remote main object");
+        assert_eq!(
+            github_resolve_remote_reference(
+                &repository,
+                &fetched_configuration,
+                remote_text,
+                main.clone(),
+                main.clone(),
+                limits,
+            )
+            .expect("explicit remote resolution"),
+            remote_main
+        );
+        let resolved_state = repository
+            .resolve_ref_state(limits.ref_snapshot_limits())
+            .expect("resolve accepted remote refs")
+            .expect("accepted remote refs");
+        assert_eq!(resolved_state.regular_refs().get(&main), Some(&remote_main));
+        assert_eq!(
+            repository
+                .ref_events(
+                    yeokcham_core::RefEventReadLimits::new(1_024, 1_024 * 1_024, 1_024,)
+                        .expect("event limits"),
+                )
+                .expect("read resolution event")
+                .len(),
+            1
+        );
+        let resolved_checkpoint = repository
+            .github_mirror_configuration()
+            .expect("read resolved configuration")
+            .expect("resolved configuration")
+            .checkpoints()
+            .get(&main)
+            .expect("resolved checkpoint")
+            .clone();
+        assert_eq!(resolved_checkpoint.local_object_id(), remote_main);
+        assert_eq!(resolved_checkpoint.remote_object_id(), remote_main);
     }
 
     #[test]
@@ -3303,6 +3536,54 @@ mod tests {
                 show_refs: true,
             } if repository == PathBuf::from("repository")
         ));
+        let resolve = parse_command(
+            [
+                "github",
+                "resolve",
+                "repository",
+                "--accept-remote",
+                "refs/heads/main",
+                "--remote",
+                "refs/heads/main",
+                "--apply",
+                "--transport",
+                "ssh",
+            ]
+            .map(OsString::from)
+            .to_vec(),
+        )
+        .expect("GitHub resolution");
+        assert!(matches!(
+            resolve,
+            Command::GithubResolve {
+                repository,
+                local,
+                remote,
+                transport: GithubTransport::Ssh,
+            } if repository == PathBuf::from("repository")
+                && local.as_bytes() == b"refs/heads/main"
+                && remote.as_bytes() == b"refs/heads/main"
+        ));
+        let error = match parse_command(
+            [
+                "github",
+                "resolve",
+                "repository",
+                "--accept-remote",
+                "refs/heads/main",
+                "--remote",
+                "refs/heads/main",
+            ]
+            .map(OsString::from)
+            .to_vec(),
+        ) {
+            Ok(_) => panic!("resolution must require explicit application"),
+            Err(error) => error,
+        };
+        assert_eq!(
+            error.public_message(),
+            "GitHub resolution requires --apply; run github fetch first"
+        );
         let error = match parse_command(
             ["github", "publish", "repository"]
                 .map(OsString::from)
