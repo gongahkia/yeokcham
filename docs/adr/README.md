@@ -95,3 +95,6 @@ Valid statuses are `Proposed`, `Accepted`, `Rejected`, `Deprecated`, and `Supers
 | [ADR-0087](0087-verified-current-head-sparse-hydration.md) | Accepted | Verify and cache only current-HEAD sparse paths |
 | [ADR-0088](0088-explicit-daemon-current-sparse-prefetch.md) | Accepted | Run daemon sparse prefetch only from explicit local selections |
 | [ADR-0089](0089-bounded-parallel-git-object-reads.md) | Accepted | Read and verify bounded Git object batches in parallel |
+| [ADR-0090](0090-opt-in-git-cone-sparse-checkout-daemon-prefetch.md) | Accepted | Derive daemon prefetch paths from an explicit cone sparse-checkout file |
+| [ADR-0091](0091-daemon-prewarms-verified-snapshot-pack-cache.md) | Accepted | Prewarm the existing verified snapshot-pack cache from the daemon |
+| [ADR-0092](0092-loopback-native-http-v1.md) | Accepted | Serve a bounded loopback Yeokcham-native HTTP V1 transport |

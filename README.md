@@ -148,6 +148,10 @@ C Git records promisor state and hydrates omitted reachable blobs on checkout or
 
 The local daemon accepts either explicit `--sparse-path` values or one opt-in `--sparse-checkout-file <path>` alongside `--repository <yeokcham-repo>`. The latter reads only that supplied regular file, polls only its metadata for changes, and never discovers a worktree. It accepts a 4 MiB maximum canonical C Git cone-mode configuration, derives its recursive directory entries, and refreshes the disposable object cache and verified snapshot-pack cache after a file or acknowledged-ref change. Non-cone, escaped, malformed, and root-only configurations fail closed; use explicit `--sparse-path` values for those cases. The [committed W5 result](benchmarks/results/2026-07-31-daemon-prewarmed/) has a later daemon-prebuilt helper checkout median of 1.10 s versus 2.56 s cold; it excludes daemon startup and prewarm cost, and does not exceed an already-warm helper cache.
 
+## Native HTTP V1
+
+`yeokcham-server --repository <yeokcham-repo>` starts the read-only Yeokcham-native HTTP V1 service on an ephemeral `127.0.0.1` port and prints its address. `--bind 127.0.0.1:<port>` selects a known loopback port. It serves native health, ref discovery, and verified raw Git-object retrieval; it is not Git smart HTTP, accepts no public address, and has no authentication yet. See [the V1 contract](docs/native-http-v1.md).
+
 `git push` stages each `connect git-receive-pack` operation in a private temporary bare repository. C Git checks the pack and advertised old ref values, then Yeokcham imports and verifies the complete staged graph using its normal storage policy. The helper relays a successful final status only after a checked canonical ref-journal append. Fast-forward branch create, update, and deletion are allowed; force branch replacement is rejected. Tags are immutable after creation: move and delete requests are rejected. Push remains an unsigned single-trusted-local-writer workflow, and shallow operations remain deferred.
 
 ## Contributing and licence

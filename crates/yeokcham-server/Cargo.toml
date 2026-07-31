@@ -1,0 +1,17 @@
+[package]
+name = "yeokcham-server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "yeokcham-server"
+path = "src/main.rs"
+
+[dependencies]
+hex.workspace = true
+yeokcham-core = { path = "../yeokcham-core" }
+
+[dev-dependencies]
+uuid.workspace = true

@@ -3349,6 +3349,24 @@ impl LocalRepository {
         Ok(object)
     }
 
+    /// Reconstructs one published Git object through bounded verified manifests.
+    ///
+    /// The result is available only after its manifest record and canonical Git
+    /// identity verify. This does not export or mutate repository state.
+    pub fn reconstruct_git_object(
+        &self,
+        id: GitObjectId,
+        limits: GitImportLimits,
+    ) -> Result<GitObject> {
+        self.reconstruct_published_git_object(
+            id,
+            limits.chunked_blob_storage_limits().maximum_segment_bytes(),
+            limits.chunked_blob_storage_limits().segment_read_limits(),
+            limits.blob_manifest_limits(),
+            limits.metadata_object_manifest_limits(),
+        )
+    }
+
     /// Publishes the only immutable ref snapshot after checking every direct target.
     ///
     /// A symbolic `HEAD` may be unborn. Regular refs and a detached `HEAD`

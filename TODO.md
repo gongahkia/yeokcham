@@ -321,8 +321,8 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 
 ## Milestone 9 — Self-hosted HTTP service
 
-- [ ] Add smart HTTP or documented yeokcham-native transport.
-- [ ] Bind to loopback by default.
+- [x] Add smart HTTP or documented yeokcham-native transport. Native HTTP V1 serves bounded verified health, refs, and raw Git objects; it is not Git smart HTTP.
+- [x] Bind to loopback by default. V1 rejects every non-loopback address and defaults to ephemeral `127.0.0.1:0`.
 - [ ] Add single-user authentication.
 - [ ] Add repository browser.
 - [ ] Add commit and tree viewer.
@@ -335,8 +335,8 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 ### Exit criteria
 
 - [ ] Single-user server can be deployed without a hosted control plane.
-- [ ] Network threat model is documented.
-- [ ] No unauthenticated public listener is enabled by default.
+- [x] Network threat model is documented. V1 documents loopback-only unauthenticated exposure, local-process risk, parser and resource bounds, and prohibited public forwarding.
+- [x] No unauthenticated public listener is enabled by default. V1 rejects every non-loopback bind, including explicit public addresses.
 
 ## Milestone 10 — Production hardening
 
