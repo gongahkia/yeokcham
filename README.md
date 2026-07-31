@@ -75,6 +75,11 @@ participate in restore, materialisation, export, or verification. Helper
 absence, invalid output, timeout, or incomplete analysis returns
 semantic-unavailable and preserves the textual operation.
 
+Milestone 8 has begun with a non-persistent bounded Git preflight adapter. It
+uses direct `git` argv only to identify a local repository's bare status and
+declared object format; it imports or exports nothing and creates no Paengi
+mapping, object, ref, or Git compatibility promise.
+
 See `CONTRIBUTING.md` for development rules. Paengi is licensed under the MIT License.
 
 ## Development

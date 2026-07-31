@@ -559,6 +559,20 @@ uses only evidence bound to the exact final snapshot.
 
 Use a mature Git library or invoke Git plumbing through a controlled adapter.
 
+Milestone 8 starts with the non-persistent `paengi_git` preflight adapter. It
+resolves the configured Git executable before use, accepts only an absolute
+existing repository directory, invokes Git by direct argv with a bounded
+process runner, and parses only bounded single-line `rev-parse` facts for bare
+status and Git's declared object format. It creates no Paengi object, ref,
+mapping, Git repository, or checkout. Git remains the owner of Git-object,
+pack, delta, and compatibility parsing; Paengi has not yet declared a
+Git-format compatibility contract.
+
+The next import slice requires an approved immutable mapping schema before any
+Git blob, tree, commit, tag, parent, or metadata data enters persistent Paengi
+state. The preflight result is process-local and must not be used as repository
+identity or persistent metadata.
+
 Import:
 
 - Commit graph.

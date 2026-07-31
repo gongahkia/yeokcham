@@ -5,15 +5,15 @@ Robustness tasks operate only on Paengi's pure functions and generated local fix
 
 ## Active vertical slice
 
-- Milestone: 7 — TypeScript semantic sidecar.
-- Task: Milestone 7 complete. Slice 1 added the independent bounded contextual textual patch core; Slice 2 added inspectable deterministic semantic evidence stages and the shared 40-case v1 fixture dataset; Slice 3 added versioned comparative results, schema validation, and closeout. Do not begin Milestone 8 here.
-- Modules/files: pure `paengi_textual_patch` byte-only baseline; pure `paengi_semantic_retarget` ordered evidence selector; pure `paengi_semantic_fixtures` shared v1 dataset; pure `paengi_semantic_experiment` report runner; pure `paengi_semantic`; nonpersistent `paengi_typescript_adapter`; pinned `tools/paengi-typescript-adapter`; focused baseline/semantic/adapter tests, checked-in local fixtures, JSON schema, and report.
-- Types: textual patch operation/stage/outcome/conflict and byte-splice validator; nonpersistent evidence anchor/candidate/candidate report/stage/completeness/confidence result; parser error, declaration/structural path, semantic anchor, exact textual fallback, rename/move/replacement proposal, confidence/evidence, structured match/application conflict, protocol declaration evidence, semantic-unavailable reason, and replace-node outcome.
-- Formats: none. No object schema, identity, ref, golden byte format, or capsule/workspace/release encoding changes.
-- Invariants: exact file bytes remain canonical; a proposal retains complete expected/replacement fallback bytes; parse failure makes no proposal; automatic rename requires one same-kind/name/signature declaration; compiler evidence is nonpersistent and snapshot-bound; adapter failure is semantic-unavailable; exact replace-node verifies preimage bytes/hash, kind, shape, post-parse context, and unchanged outside bytes.
-- Tests: textual exact/context/relaxation/conflict/byte-splice cases; evidence ordering/candidate reports/alias/overload/scope/incompleteness/ambiguity checks; fixture-oracle, confidence-ceiling, shared-strategy, false-confidence, deterministic-metrics, schema, and adapter-optionality tests; pinned-helper protocol/TS/TSX/snapshot/replacement failure tests; seeded baseline and semantic properties. `make check` validates the checked-in report schema.
-- External libraries: existing Alcotest/QCheck plus exact-pinned local TypeScript `5.9.3`; no parser dependency beyond the approved isolated helper.
-- ADR changes: none; no persistent format change.
+- Milestone: 8 — Git import and export.
+- Task: Slice 1 selected controlled Git plumbing: non-persistent `paengi_git` performs bounded direct-argv preflight for an absolute local repository. Stop before persistent mappings or import/export object schemas are approved.
+- Modules/files: `paengi_git`; focused local Git/runner tests; Architecture, README, and this roadmap.
+- Types: process-local `object_format`, `inspection`, configuration, and structured adapter errors.
+- Formats: none. No Paengi object schema, identity, ref, mapping, golden byte format, or Git-format compatibility contract changed.
+- Invariants: Paengi creates no object/ref/mapping; Git receives direct argv only; repository paths, process duration, retained stdout/stderr, and parsed line shape are bounded; Git object/pack/delta parsing remains Git-owned.
+- Tests: fake runner direct-argv/path/output failures plus local temporary Git repository inspection.
+- External libraries: existing `Unix`/`paengi_validation` process runner and host Git; no new dependency.
+- ADR changes: none. A durable Git mapping requires a new approved schema/ADR before the next slice.
 
 ## Milestone 0 — Project and model foundation
 
@@ -352,7 +352,7 @@ Robustness tasks operate only on Paengi's pure functions and generated local fix
 
 ### Import
 
-- [ ] Select Git adapter strategy.
+- [x] Select Git adapter strategy: bounded Paengi-owned direct-argv preflight around host Git plumbing; no persistent mapping or Git-format contract.
 - [ ] Import blobs and trees.
 - [ ] Import commits and parents.
 - [ ] Import tags.

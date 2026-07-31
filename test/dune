@@ -18,6 +18,11 @@
   (source_tree ../tools/paengi-typescript-adapter)))
 
 (test
+ (name test_git)
+ (modules test_git)
+ (libraries alcotest paengi_git paengi_validation unix))
+
+(test
  (name test_fixture)
  (modules test_fixture)
  (libraries alcotest qcheck-core qcheck-alcotest paengi_testkit unix))
