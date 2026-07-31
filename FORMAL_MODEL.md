@@ -541,6 +541,32 @@ medium, and unknown results are explicit uncertainty, not automatic semantic
 application. Compiler strings remain transient evidence and never become
 Paengi identities.
 
+### Milestone 7 comparative result
+
+The experiment report is a versioned documentation artifact, not a Paengi
+object or model value. For each shared fixture and strategy it records selected
+path/span, oracle correctness, confidence/stage, completeness, fallback,
+candidate count, byte-splice validation, and host-specific elapsed time. Let
+`target_ok` mean the selected span equals the oracle span, `bytes_ok` mean the
+resulting bytes equal the oracle bytes, and `outside_ok` mean the splice changes
+no bytes outside its selected span.
+
+```text
+correct_exact = target_ok and bytes_ok and (semantic_confidence = Exact or textual_exact_span)
+correct_nonexact = target_ok and bytes_ok and not correct_exact
+safe_conflict = oracle_requires_or_permits_refusal and no_bytes_modified
+false_confident = semantic_confidence in {Exact, High}
+                   and application
+                   and (not target_ok or not bytes_ok or not outside_ok
+                        or oracle_requires_conflict)
+false_negative = oracle_has_unique_target and outcome in {missing, ambiguous, rejected}
+```
+
+Safe conflicts do not count as applications. A report with any known
+`false_confident` semantic application cannot satisfy the Milestone 7 safety
+gate. Schema/report bytes and metric aggregation remain outside all Paengi
+persistent contracts.
+
 ## 7. Application result
 
 ```ocaml

@@ -83,36 +83,40 @@ let both_strategies_receive_shared_bytes_and_oracles () =
         true
         (List.mem_assoc fixture.Dataset.target_path
            fixture.Dataset.retarget_base);
-      match fixture.Dataset.expected_outcome with
-      | Dataset.Exact_bytes expected -> (
-          Alcotest.(check bool)
-            (fixture.Dataset.fixture_id ^ " oracle bytes")
-            true
-            (String.length expected > 0);
-          match fixture.Dataset.expected_target_span with
-          | Some selected_span ->
-              Alcotest.(check bool)
-                (fixture.Dataset.fixture_id ^ " oracle is exact byte splice")
-                true
-                (Patch.validates_splice ~source:target ~selected_span
-                   ~expected_preimage:textual_operation.Dataset.expected_preimage
-                   ~replacement:textual_operation.Dataset.replacement
-                   ~output:expected)
-          | None ->
-              Alcotest.(check string)
-                (fixture.Dataset.fixture_id ^ " already-satisfied oracle")
-                target expected)
-      | Dataset.Safe_conflict ->
-          Alcotest.(check bool)
-            (fixture.Dataset.fixture_id ^ " conflict has no target span") true
-            (Option.is_none fixture.Dataset.expected_target_span);
-      let semantic = Dataset.semantic_result fixture in
+      let () =
+        match fixture.Dataset.expected_outcome with
+        | Dataset.Exact_bytes expected -> (
+            Alcotest.(check bool)
+              (fixture.Dataset.fixture_id ^ " oracle bytes")
+              true
+              (String.length expected > 0);
+            match fixture.Dataset.expected_target_span with
+            | Some selected_span ->
+                Alcotest.(check bool)
+                  (fixture.Dataset.fixture_id ^ " oracle is exact byte splice")
+                  true
+                  (Patch.validates_splice ~source:target ~selected_span
+                     ~expected_preimage:
+                       textual_operation.Dataset.expected_preimage
+                     ~replacement:textual_operation.Dataset.replacement
+                     ~output:expected)
+            | None ->
+                Alcotest.(check string)
+                  (fixture.Dataset.fixture_id ^ " already-satisfied oracle")
+                  target expected)
+        | Dataset.Safe_conflict ->
+            Alcotest.(check bool)
+              (fixture.Dataset.fixture_id ^ " conflict has no target span")
+              true
+              (Option.is_none fixture.Dataset.expected_target_span)
+      in
       Alcotest.(check bool)
         (fixture.Dataset.fixture_id ^ " parser expectation")
         fixture.Dataset.parser_complete semantic.Retarget.parser_complete;
       Alcotest.(check bool)
         (fixture.Dataset.fixture_id ^ " resolution expectation")
-        fixture.Dataset.resolution_complete semantic.Retarget.resolution_complete;
+        fixture.Dataset.resolution_complete
+        semantic.Retarget.resolution_complete;
       Alcotest.(check bool)
         (fixture.Dataset.fixture_id ^ " type resolution expectation")
         fixture.Dataset.type_resolution_complete
@@ -133,10 +137,55 @@ let fixture_confidence_ceilings_are_respected () =
     (fun fixture ->
       let result = Dataset.semantic_result fixture in
       Alcotest.(check bool)
-        (fixture.Dataset.fixture_id ^ " confidence ceiling") true
+        (fixture.Dataset.fixture_id ^ " confidence ceiling")
+        true
         (confidence_rank result.Retarget.confidence
         <= confidence_rank fixture.Dataset.acceptable_confidence_ceiling))
     Dataset.all
+
+let fixture id = Dataset.find id |> Option.get
+let source fixture = Dataset.target_bytes fixture
+
+let categories_contain_their_adversarial_bytes () =
+  let contains id needle =
+    Alcotest.(check bool)
+      (id ^ " source") true
+      (String.contains (source (fixture id)) needle)
+  in
+  let contains_text id needle =
+    Alcotest.(check bool)
+      (id ^ " source") true
+      (let bytes = source (fixture id) in
+       let length = String.length needle in
+       let rec loop offset =
+         offset + length <= String.length bytes
+         && (String.equal (String.sub bytes offset length) needle
+            || loop (offset + 1))
+       in
+       loop 0)
+  in
+  contains_text "class-rename" "class greet";
+  contains_text "method-rename" "class Api";
+  contains_text "default-exports" "export default";
+  contains_text "re-export-aliases" "as publicGreet";
+  contains_text "imports-and-aliases" "localGreet";
+  contains_text "overloads" "value: number";
+  contains_text "merged-declarations" "namespace greet";
+  contains_text "decorators" "@sealed";
+  contains_text "arrow-functions" "=> value";
+  contains_text "tsx-functions-components" "<div>Hello</div>";
+  contains_text "jsx-text-attributes" "<Button title";
+  contains_text "tsconfig-path-mappings" "@app/helper";
+  contains_text "unicode-identifiers-strings" "grüß";
+  contains_text "emoji-before-spans" "😀";
+  contains "crlf" '\r';
+  let bom = source (fixture "utf8-bom") in
+  Alcotest.(check string) "BOM bytes" "\239\187\191" (String.sub bom 0 3);
+  contains "binary-textual-only" '\000';
+  contains_text "parse-damaged-source" "function greet( {";
+  Alcotest.(check string)
+    "cross-file target path" "src/moved/greeting.ts"
+    (fixture "function-move-across-files").Dataset.target_path
 
 let adversarial_semantic_matches_never_auto_apply () =
   [ "duplicate-highly-similar"; "deliberately-ambiguous" ]
@@ -166,6 +215,8 @@ let () =
             both_strategies_receive_shared_bytes_and_oracles;
           Alcotest.test_case "oracle confidence ceilings" `Quick
             fixture_confidence_ceilings_are_respected;
+          Alcotest.test_case "category adversarial byte sources" `Quick
+            categories_contain_their_adversarial_bytes;
           Alcotest.test_case "adversarial confidence gate" `Quick
             adversarial_semantic_matches_never_auto_apply;
           Alcotest.test_case "lexical scope disambiguation" `Quick

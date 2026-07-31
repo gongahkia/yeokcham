@@ -43,8 +43,7 @@ then caller-requested relaxed nearest context. Relaxation is bounded to
 applies only a unique candidate; missing or ambiguous candidates are structured
 conflicts. The result is an exact byte splice with unchanged prefix/suffix
 validation. A contextual textual match does not report semantic `exact`
-confidence. The versioned shared semantic-versus-textual aggregate comparison
-remains subsequent Milestone 7 work.
+confidence. It is not weakened or given parser-derived hints for comparison.
 
 The full-parser response is language-neutral. It includes project-relative
 declaration/name UTF-8 byte spans, declaration kind, lexical parent path,
@@ -110,24 +109,44 @@ retargeting dataset or a semantic-versus-contextual-textual comparison.
 
 ## Results
 
-| Case | Exact-text fallback baseline | Semantic result |
-| --- | --- | --- |
-| Rename onto formatting-only target | Rejects source mismatch | Correct declaration-name rewrite, exact confidence |
-| Duplicate exact fingerprints | Rejects source mismatch | Structured `ambiguous-anchor` conflict |
-| Same structure, different name | Rejects source mismatch | Structured `manual-review-required` outcome |
-| Low token similarity | Rejects source mismatch | Structured `low-confidence-anchor` conflict |
-| Invalid source | No transform | Parser error; no proposal |
-| Move or replacement proposal | No transform | Proposal only; automatic application requires review |
+`docs/experiments/schema/semantic-retargeting-v1.schema.json` defines the
+checked v1 report. `docs/experiments/results/semantic-retargeting-v1.json` is
+generated locally from the shared dataset; every per-strategy case records its
+oracle, selected file/span, exact-byte correctness, confidence, stage,
+completeness, fallback use, candidate count, byte-integrity validation,
+classification, host-specific elapsed time, and tool versions. The schema is
+validated by `make semantic-experiment` and revalidated by `make check`.
 
-The defined formatting-retarget workload improves from `0/1` baseline
-applications to `1/1` correct automatic declaration-name rewrites. This is a
-fixture result only; it is not a general success rate.
+Correct exact application means selected target and produced bytes equal the
+oracle at Exact semantic confidence or the textual exact-span stage. A correct
+non-exact application is oracle-correct through another allowed stage. A safe
+conflict refuses an oracle-permitted/required refusal without modifying bytes;
+it is not an application. False confidence is an Exact/High semantic
+application with a wrong target, wrong result bytes, outside-span change, or a
+required conflict. A false negative is missing, ambiguity, or rejection where
+the oracle defines one uniquely applicable target.
 
-Automatic applications observed: `1`. Observed false-confident applications:
-`0`. Safe non-applications/conflicts observed: `5`. The generated suite adds
-100 formatting variants and 100 duplicate-anchor cases with seed `17`; it
-observed no automatic duplicate application. These counts are too small to
-estimate a false-confidence rate.
+| Metric | Semantic | Textual |
+| --- | ---: | ---: |
+| Cases | 40 | 40 |
+| Correct exact applications | 21 | 21 |
+| Correct non-exact applications | 9 | 14 |
+| Safe conflicts | 3 | 3 |
+| False-confident applications | 0 | 0 |
+| False negatives | 6 | 1 |
+| False applications | 0 | 0 |
+| Already satisfied | 0 | 1 |
+
+Semantic confidence distribution is Exact `21`, High `9`, Low `4`, Medium
+`1`, Unknown `5`; parser completeness is `34/40`, project/type-resolution
+completeness is `33/40`, and no semantic textual-fallback stage was used.
+Textual results use `not-semantic` confidence by design. Both strategies are
+correct on 32 cases; semantic-only correctness is the lexical-scope
+disambiguation case; textual-only correctness is 7 cases:
+`already-satisfied-change`, `binary-textual-only`, `changed-function-signature`,
+`function-merge`, `function-split`, `parse-damaged-source`, and
+`unresolved-imports`. Timings remain host-specific evidence, not a correctness
+gate.
 
 ## Failure examples and limitations
 
@@ -143,14 +162,26 @@ estimate a false-confidence rate.
 - The Compiler API adapter can apply only an exact-span, exact-preimage
   replace-node request. It reports `exact` only after byte, kind, shape, parse,
   lexical-context, and outside-byte checks; it does not retarget a moved node.
-- Fair same-fixture semantic/textual aggregate metrics and any persistent
-  sidecar format remain undone.
+- The shared dataset is bounded evidence, not a rate estimate for arbitrary
+  TypeScript projects. It contains adversarial bytes and safe conflicts, but
+  does not claim complete TypeScript grammar or reference-rename coverage.
+- Textual matching currently outperforms this bounded semantic selector on the
+  seven listed cases; this result is preserved rather than averaged away.
+- The v1 report has no known false-confident Exact/High semantic application.
+  The gate is only evidence for this checked-in dataset, not a universal safety
+  guarantee.
 
 ## Reproduction
 
 ```sh
 opam exec -- dune exec test/test_semantic.exe
 PROPERTY_TEST_SEED=17 opam exec -- dune exec test/semantic_property_test.exe
+PROPERTY_TEST_SEED=17 opam exec -- dune exec test/semantic_retarget_property_test.exe
+opam exec -- dune exec test/test_textual_patch.exe
+opam exec -- dune exec test/test_semantic_retarget.exe
+opam exec -- dune exec test/test_semantic_fixture_dataset.exe
+opam exec -- dune exec test/test_semantic_experiment.exe
 cd tools/paengi-typescript-adapter && npm ci --ignore-scripts --no-audit --no-fund && npm test
 opam exec -- dune exec test/test_typescript_adapter.exe
+make semantic-experiment
 ```
