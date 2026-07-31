@@ -1,3 +1,5 @@
+[@@@warning "-40-42"]
+
 module Experiment = Paengi_semantic_experiment
 
 let deterministic_classifications_and_metrics () =

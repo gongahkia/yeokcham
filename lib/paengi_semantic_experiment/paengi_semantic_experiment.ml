@@ -83,8 +83,6 @@ let same_span left right =
   left.Patch.start_byte = right.Patch.start_byte
   && left.Patch.end_byte = right.Patch.end_byte
 
-let string_of_optional = function None -> "null" | Some value -> value
-
 let target_is_uniquely_applicable fixture =
   match fixture.Dataset.expected_outcome with
   | Dataset.Exact_bytes _ -> Option.is_some fixture.Dataset.expected_target_span
@@ -107,7 +105,9 @@ let classify ~fixture ~strategy ~actual_outcome ~selected_span ~contents
     match (fixture.Dataset.expected_target_span, selected_span) with
     | Some expected, Some actual -> same_span expected actual
     | None, None -> exact_resulting_bytes_correct
-    | Some _, None | None, Some _ -> false
+    | None, Some _ ->
+        actual_outcome = Already_satisfied && exact_resulting_bytes_correct
+    | Some _, None -> false
   in
   let safe_conflict =
     match (fixture.Dataset.expected_outcome, actual_outcome) with
@@ -312,6 +312,11 @@ let increment name values =
 
 let aggregate cases =
   let count predicate = List.length (List.filter predicate cases) in
+  let exact_stage case =
+    String.equal
+      (Option.value ~default:"" case.match_stage)
+      "exact-original-span"
+  in
   let confidence_distribution =
     cases
     |> List.fold_left (fun values case -> increment case.confidence values) []
@@ -324,16 +329,14 @@ let aggregate cases =
           case.actual_outcome = Applied
           && case.target_selection_correct && case.exact_resulting_bytes_correct
           && (String.equal case.confidence "exact"
-             || String.equal case.match_stage
-                |> Option.value ~default:"" "exact-original-span"));
+             || exact_stage case));
     nonexact_correct_applications =
       count (fun case ->
           case.actual_outcome = Applied
           && case.target_selection_correct && case.exact_resulting_bytes_correct
           && not
                (String.equal case.confidence "exact"
-               || String.equal case.match_stage
-                  |> Option.value ~default:"" "exact-original-span"));
+               || exact_stage case));
     safe_conflicts = count (fun case -> case.safe_conflict);
     false_confident_applications = count (fun case -> case.false_confident);
     false_negatives = count (fun case -> case.false_negative);
@@ -492,7 +495,7 @@ let aggregate_to_json aggregate =
   let confidence_distribution =
     aggregate.confidence_distribution
     |> List.map (fun (name, count) ->
-        Printf.sprintf "{%s:%d}" (json_string name) count)
+        Printf.sprintf "%s:%d" (json_string name) count)
     |> String.concat ","
   in
   Printf.sprintf
