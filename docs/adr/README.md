@@ -81,3 +81,4 @@ Valid statuses are `Proposed`, `Accepted`, `Rejected`, `Deprecated`, and `Supers
 | [ADR-0073](0073-checksummed-ciphertext-read-cache.md) | Accepted | Cache immutable encrypted segments and indexes by opaque key |
 | [ADR-0074](0074-bounded-in-memory-plaintext-resolver-caches.md) | Accepted | Cache verified resolver plaintext only in bounded process memory |
 | [ADR-0075](0075-checksummed-token-free-github-mirror-policy.md) | Accepted | Store token-free GitHub mirror policy and checkpoints canonically |
+| [ADR-0076](0076-standard-git-github-publication.md) | Accepted | Publish selected GitHub refs through standard Git credentials |

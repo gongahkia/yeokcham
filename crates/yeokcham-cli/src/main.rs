@@ -2434,12 +2434,14 @@ mod tests {
                 transport: GithubTransport::Ssh,
             } if repository == PathBuf::from("repository")
         ));
-        let error = parse_command(
+        let error = match parse_command(
             ["github", "publish", "repository"]
                 .map(OsString::from)
                 .to_vec(),
-        )
-        .expect_err("publication must require explicit application");
+        ) {
+            Ok(_) => panic!("publication must require explicit application"),
+            Err(error) => error,
+        };
         assert_eq!(
             error.public_message(),
             "GitHub publication requires --apply; run github plan first"
@@ -2501,7 +2503,11 @@ mod tests {
         assert_eq!(
             github_force_leases(&configuration, &[reference.clone()], &matching_remote)
                 .expect("matching checkpoint lease"),
-            vec![format!("--force-with-lease={remote}:{checkpoint_id}")]
+            vec![format!(
+                "--force-with-lease={}:{}",
+                github_reference_text(&remote).expect("remote reference"),
+                checkpoint_id,
+            )]
         );
         let changed_remote = BTreeMap::from([(remote, changed_remote_id)]);
         assert!(

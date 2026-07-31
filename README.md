@@ -96,6 +96,7 @@ yeokcham cache trim --max-bytes <bytes> <yeokcham-repo>
 yeokcham github configure <yeokcham-repo> --repository <owner/repository> --direction <publish-only|pull-only|bidirectional-fast-forward|manual> --publish <heads|tags|refs/heads/*|refs/tags/*>
 yeokcham github inspect <yeokcham-repo>
 yeokcham github plan [--show-objects] <yeokcham-repo>
+yeokcham github publish <yeokcham-repo> --apply [--transport <https|ssh>]
 yeokcham drive auth --client-id <google-desktop-client-id>
 git --git-dir=<destination-git-repo> fsck --full --strict
 ```
@@ -106,7 +107,9 @@ git --git-dir=<destination-git-repo> fsck --full --strict
 
 `drive auth` starts a Google Desktop OAuth PKCE flow, prints a one-time browser URL, and stores the returned refresh token only in the operating-system credential store. It needs an operator-created Desktop OAuth client ID with the Drive API and `drive.file` scope enabled. For a headless host, reserve a local port first, forward it with SSH, then run `yeokcham drive auth --client-id <id> --redirect-port <port>` and open the displayed URL on the forwarded machine. Do not use deprecated copy/paste authorization or place refresh tokens in repository configuration. `drive init` creates an opaque app-owned Drive folder; `key create-export`, `drive backup`, `drive restore`, and `drive verify` provide encrypted recovery-snapshot transfer with passphrases accepted only on standard input.
 
-`github configure` stores a local, token-free mirror policy only. At least one selected branch/tag rule and an explicit direction are required; `--force-update require-exact-checkpoint` is an explicit future policy choice, while omission uses `reject`. `github inspect` reports the policy and checkpoint counts without echoing the target or selected ref names. `github plan` reconstructs a verified temporary bare export, reports each selected local/remote ref and the complete reachable-object count, then removes that export. `--show-objects` emits every selected graph object ID but no object body. Network publication, fetching, pull-request branches, and credential handling are not implemented yet.
+`github configure` stores a local, token-free mirror policy. At least one selected branch/tag rule and an explicit direction are required; omission of `--force-update` uses `reject`. `github inspect` reports the policy and checkpoint counts without echoing the target or selected ref names. `github plan` reconstructs a verified temporary bare export, reports each selected local/remote ref and the complete reachable-object count, then removes that export. `--show-objects` emits every selected graph object ID but no object body.
+
+`github publish` requires the deliberate `--apply` switch and pushes only those configured selected refs. It uses either `https://github.com/<owner>/<repository>.git` (default) through the standard preconfigured Git credential helper or `git@github.com:<owner>/<repository>.git` through the standard SSH agent. Yeokcham stores no GitHub token, disables terminal/askpass prompts, and does not permit inherited Git/SSH command overrides; authenticate with Git before publishing. The push requests atomic remote application, rejects tag replacement, confirms every remote object ID by a second ref read, then atomically records checkpoints only if the local refs remain current. `require-exact-checkpoint` grants a non-fast-forward branch lease only when the remote still equals its recorded checkpoint. Fetching and pull-request branch publication remain unfinished.
 
 See [Google Drive setup](docs/google-drive.md) for the exact Desktop-client, scope, headless, and recovery requirements.
 

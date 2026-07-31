@@ -270,8 +270,8 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 ### Publication
 
 - [x] Reconstruct required Git objects.
-- [ ] Push selected refs.
-- [ ] Confirm remote object IDs.
+- [x] Push selected refs.
+- [x] Confirm remote object IDs.
 - [ ] Support pull-request branch publication.
 - [x] Report exactly what code will be uploaded.
 

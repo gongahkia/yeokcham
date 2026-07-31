@@ -364,7 +364,7 @@ Receive-pack staging is never cached. A push-specific private bare export starts
 
 The initial local configuration is one optional atomic `mirrors/github.ykgm` `YKGM` version-1 record. It binds the repository UUID, a credential-free `owner/repository` target, one or more selected `heads`, `tags`, or exact standard branch/tag rules, a direction policy, and a force-update policy. Its SHA-256 checksum detects accidental or hostile local corruption. The record remains portable canonical recovery data, but it is not a repository-format feature flag: stores without it remain valid.
 
-Each acknowledged checkpoint maps a selected local ref to its remote ref and records their respective verified Git object IDs plus the observed Unix timestamp. Checkpoints are accepted only when the stored local object is still the effective acknowledged local ref target. `yeokcham github plan` reconstructs a fresh verified temporary bare Git export and walks only selected refs through C Git; it reports selected tip IDs and, when explicitly requested, each reachable object ID before removing the export. V1 configuration and preview create no GitHub network connection, store no token, and do not implement a remote ref-mapping UI; future publication records a target mapping only after a confirmed transport operation.
+Each acknowledged checkpoint maps a selected local ref to its remote ref and records their respective verified Git object IDs plus the observed Unix timestamp. Checkpoints are accepted only when the stored local object is still the effective acknowledged local ref target. `yeokcham github plan` reconstructs a fresh verified temporary bare Git export and walks only selected refs through C Git; it reports selected tip IDs and, when explicitly requested, each reachable object ID before removing the export.
 
 Policies:
 
@@ -373,7 +373,7 @@ Policies:
 - `bidirectional-fast-forward`
 - `manual`
 
-The default force-update policy is `reject`. `require-exact-checkpoint` records an explicit future opt-in but does not itself force a remote update. No command in this milestone publishes, fetches, or otherwise contacts GitHub.
+`yeokcham github publish <repo> --apply` re-creates that verified temporary export, reads exactly the selected remote refs, then requests one C Git `push --atomic --porcelain` operation. HTTPS uses the user's standard Git credential helper; SSH uses the standard agent. The process inherits neither Git/SSH command overrides nor askpass configuration, has terminal prompting disabled, stores no token, and retains no credential data. It verifies every selected remote ref against the local Git ID after success, then writes all corresponding checkpoints in one local policy update. A stale local ref prevents every checkpoint update. The default force-update policy is `reject`; `require-exact-checkpoint` emits `--force-with-lease` only for a branch whose current remote object exactly equals its persisted checkpoint. Existing tags are never replaced. Pull-only rejects publication; `manual` requires this explicit command. The transport fails closed if the remote does not support atomic pushes. Fetching and pull-request branch publication remain separate work.
 
 ## 4. Data flows
 
