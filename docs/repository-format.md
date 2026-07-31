@@ -1,47 +1,138 @@
-# Local repository format
+# Yeokcham repository format
 
-This specifies the first local Yeokcham repository. Creation is empty; later Milestone-1 publication may add immutable segments, segment indexes, and blob or metadata-object manifests.
+This is the normative local-repository layout and compatibility contract for
+the currently supported Yeokcham formats. It complements the byte-level record
+definitions in [`serialization.md`](serialization.md). A repository is
+trustworthy only after the normal bounded verification path validates this
+layout, every referenced immutable record, and every reconstructed Git object.
 
-## Layout
+## Compatibility
 
-```text
-<repository>/
-  format/repository.bin
-  segments/
-  indexes/
-  manifests/blobs/
-  manifests/tiny-groups/ # created on first tiny-blob aggregation publication
-  manifests/objects/ # created on first metadata-object publication
-  manifests/refs/ # created on first ref-snapshot publication
-  manifests/generations/
-  journals/refs/
-  summaries/current/
-```
-
-`LocalRepository::create` requires a nonexistent repository root and an existing parent directory. It creates each directory, writes the bootstrap last with exclusive creation, syncs it, then validates the resulting repository. An interrupted initialization with no valid bootstrap is not an opened repository and contains no acknowledged Git data.
-
-`LocalRepository::open` requires every fixed path to be a directory and `format/repository.bin` to be a regular file. `manifests/tiny-groups/`, `manifests/objects/`, and `manifests/refs/` are optional until their corresponding immutable records exist. It rejects symlinks at these owned paths. The bootstrap file is bounded to 4096 bytes before reading.
-
-## Bootstrap record
-
-`format/repository.bin` is a canonical binary record with this V1 layout:
+`format/repository.bin` is the `YKRB` bootstrap record. It is exactly 38 bytes:
 
 | Offset | Size | Field |
 | --- | ---: | --- |
 | 0 | 4 | ASCII magic `YKRB` |
-| 4 | 2 | format version, unsigned big-endian `u16` |
-| 6 | 8 | required feature flags, unsigned big-endian `u64` |
-| 14 | 8 | optional feature flags, unsigned big-endian `u64` |
+| 4 | 2 | format version, big-endian `u16` |
+| 6 | 8 | required feature flags, big-endian `u64` |
+| 14 | 8 | optional feature flags, big-endian `u64` |
 | 22 | 16 | raw RFC 9562 UUIDv4 repository ID |
 
-The V1 record is exactly 38 bytes. Existing V1 readers reject malformed, truncated, trailing, unknown-required-feature, and unsupported-version data before returning a repository handle. Unknown optional features are retained by the in-memory format declaration; V1 migration does not rewrite the bootstrap.
+The implementation accepts only zero required flags, preserves optional flags,
+and rejects an unsupported bootstrap version before returning a handle.
 
-## Migration and deferred work
+| Version | Meaning | Writer behaviour |
+| --- | --- | --- |
+| 1 | Initial immutable-object and optional `YKRF` snapshot layout. | `create` writes V1. |
+| 2 | V1 layout plus checked append-only `YKRE` local ref journals. | The first `sync` or accepted local push upgrades only the bootstrap after immutable objects are verified. |
 
-V1 is the first persisted repository format, so `LocalRepository::migrate` validates and returns the repository without writing. A future migration must use a new supported version or required feature bit, write a copy-on-write generation, verify it, retain the old readable bootstrap until finalization, and document recovery from interruption.
+The V1-to-V2 upgrade replaces the bootstrap atomically; it does not rewrite
+segments, indexes, manifests, snapshots, or Git objects. An older V1-only
+reader rejects V2. `LocalRepository::migrate` currently validates rather than
+rewrites. A future format change must allocate a version or required feature,
+use copy-on-write publication, verify the successor, retain the previous
+readable bootstrap until finalisation, and document interrupted recovery.
 
-SQLite metadata is disposable local coordination state, not a recovery source. The local V1 ref snapshot is a one-time import/export bridge; append-only ref journals, encryption, and remote backends are deferred to later milestones. Current immutable record layouts and publication paths are specified in [`docs/serialization.md`](serialization.md).
+## Layout
 
-## Loose-object export
+`create` requires an absent root and an existing parent. It creates the
+required directories, writes and synchronizes the bootstrap last, then reopens
+the result. A directory without a valid bootstrap contains no acknowledged Git
+state. Every owned path below is a real directory or regular file; symlinks and
+unexpected final names fail verification.
 
-`LocalRepository::export_loose_objects` creates a new bare SHA-1 Git repository and writes every published blob (`YKMF` or `YKTG`) and metadata-object manifest as a standard zlib-compressed loose object. The destination must not already exist. When exactly one published `YKRF` ref snapshot is present, it restores its regular refs and symbolic or detached `HEAD` only after every target object has been exported; an absent snapshot leaves an object-only bare repository. The export verifies each reconstructed object ID before writing, creates each loose file without replacement, synchronizes its object and repository metadata, and returns counts only after completion. A failed export can leave an incomplete destination that must be discarded before retrying.
+```text
+<repository>/
+  format/repository.bin                 # required YKRB bootstrap
+  segments/<segment-uuid>               # immutable YKSG
+  indexes/<segment-uuid>.ykix           # rebuildable YKIX
+  manifests/blobs/<manifest-uuid>.ykmf  # immutable YKMF
+  manifests/tiny-groups/<uuid>.yktg     # optional immutable YKTG
+  manifests/objects/<git-sha1>.ykom     # optional immutable YKOM
+  manifests/refs/<snapshot-uuid>.ykrf   # optional immutable YKRF
+  journals/refs/<event>.ykre            # V2 immutable YKRE events
+  mirrors/github.ykgm                   # optional checked YKGM policy
+```
+
+The following directories are required even when empty: `format`, `segments`,
+`indexes`, `manifests`, `manifests/blobs`, `manifests/generations`, `journals`,
+`journals/refs`, `summaries`, and `summaries/current`. `manifests/tiny-groups`,
+`manifests/objects`, `manifests/refs`, and `mirrors` are created on their first
+publication and otherwise remain absent. `manifests/generations` and
+`summaries/current` are reserved in the current layout and contain no accepted
+V1/V2 canonical records.
+
+All UUID filenames are lowercase canonical UUIDv4 text. The `YKOM` filename is
+the lowercase 40-hex Git SHA-1 ID. A journal filename is exactly
+`<20-decimal-sequence>-<device-uuid>-<64-hex-event-sha256>.ykre`; every component
+must match the decoded event. Final filenames bind the record identity and are
+not advisory metadata.
+
+Publication uses a regular same-directory staging file, data synchronization,
+create-without-replacement finalization where applicable, and directory
+synchronization. Recognized `.partial` staging names may remain after an
+interruption and are ignored; any other unexpected entry is corrupt. Immutable
+final records are idempotent only when their exact bytes already exist.
+
+## Canonical and disposable state
+
+Canonical recovery data is the bootstrap plus final recognized segments,
+indexes, manifests, snapshots, journals, and optional mirror policy. SQLite is
+not a resolver or recovery dependency. The encrypted recovery manifest (`YKRM`)
+admits only these canonical names, excludes `metadata.sqlite3` and recognized
+staging files, and rejects all other source paths.
+
+The following are explicitly disposable and must not be relied upon for
+recovery:
+
+- `metadata.sqlite3` (SQLite application ID `YKMD`), local coordination metadata;
+- `cache/`, including ref-state-keyed C Git snapshot packs and their last-used
+  markers;
+- process-memory decrypted chunk/object caches;
+- `YKCC` ciphertext-cache entries, `YKFC` daemon file-metadata snapshots, and
+  `YKDP` daemon protocol messages.
+
+Deleting or corrupting disposable data can cause rebuild work but cannot alter
+the verified canonical Git graph. `YKCE`, `YKRK`, `YKRM`, `YKDO`, and `YKDR`
+are backend, recovery, or remote-replication records, not files required below
+the local repository root; their byte contracts are also specified in
+[`serialization.md`](serialization.md).
+
+## Object and ref resolution
+
+`YKMF`, `YKTG`, and `YKOM` bind a repository ID, immutable segment ID, and
+segment checksum. Resolution first fully validates that exact `YKSG`, then its
+nested record, then the representation-specific identity and final Git object
+ID. `YKIX` can accelerate lookup only after the matching segment has been
+verified and is always rebuildable.
+
+The current repository accepts either one initial `YKRF` snapshot without a
+journal or one complete checked `YKRE` journal continuation rooted in that
+state. It never selects an order-dependent journal branch. A journal event must
+bind the expected predecessor state and its filename identity; V2 events also
+verify their embedded Ed25519 signature. Remote device authorization is a
+separate root-pinned `YKDR` protocol and does not authorize the local V1 helper
+writer.
+
+`mirrors/github.ykgm` is optional, token-free local policy state. It is included
+only in encrypted recovery snapshots, is not required for Git export, and a
+missing mirror policy is not an error. Its corruption fails closed instead of
+changing refs or contacting GitHub.
+
+## Reader requirements
+
+Readers must bound directory scans, file reads, entries, aggregate bytes, and
+decoded bodies before allocation. They reject nonregular files, symlinks,
+truncation, trailing bytes, malformed names, unknown required semantics,
+checksum failures, and incompatible version/feature combinations. Checksum
+success alone never establishes Git-object trust: the final reconstructed
+canonical Git header and SHA-1 object ID remain mandatory verification.
+
+## Implementation and verification status
+
+The supported writer/reader is the locked Yeokcham source at this revision.
+Per-family normal, bounds, malformed-input, checksum, and signature tests live
+with the codecs in `yeokcham-core`; repository integration tests exercise
+import, verification, export, restart, crash boundaries, and `git fsck`. The
+next roadmap item, old-format fixtures, will add independently retained sample
+repositories for each supported historical reader path.

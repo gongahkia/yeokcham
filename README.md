@@ -19,6 +19,10 @@ Yeokcham is intended for ordinary software developers who want to keep using Git
 
 Milestones 1 and 2 are implemented. The local `git-remote-yeokcham` bridge supports ref discovery, clone, fetch, and a staged local `git push` workflow through C Git, using verified Yeokcham storage and a disposable snapshot-pack cache. Push accepts fast-forward branch creation, update, and deletion; tags are create-only. Ref-transaction crash injection covers bootstrap and journal mutation boundaries. The integration test restores stale local remote-tracking state after an accepted push; a fresh retry then leaves the journal un-duplicated. Signed multi-device authorization, encryption, and remote backends remain unfinished.
 
+The current local repository layout and compatibility contract is
+[`docs/repository-format.md`](docs/repository-format.md); its canonical binary
+record definitions are in [`docs/serialization.md`](docs/serialization.md).
+
 ## Recommended implementation language
 
 Rust, using the stable toolchain.

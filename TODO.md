@@ -340,7 +340,7 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 
 ## Milestone 10 — Production hardening
 
-- [ ] Stable repository-format specification.
+- [x] Stable repository-format specification. `docs/repository-format.md` now defines supported V1/V2 bootstrap compatibility, canonical layout, recovery boundaries, and reader rules; `docs/serialization.md` defines every current local, backend, and remote record family.
 - [ ] Migration framework.
 - [ ] Old-format fixtures.
 - [ ] Signed release artefacts.
