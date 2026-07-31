@@ -97,6 +97,7 @@ yeokcham github configure <yeokcham-repo> --repository <owner/repository> --dire
 yeokcham github inspect <yeokcham-repo>
 yeokcham github plan [--show-objects] <yeokcham-repo>
 yeokcham github publish <yeokcham-repo> --apply [--transport <https|ssh>]
+yeokcham github publish-pr <yeokcham-repo> --source <refs/heads/branch> --branch <remote-branch> --apply [--transport <https|ssh>]
 yeokcham drive auth --client-id <google-desktop-client-id>
 git --git-dir=<destination-git-repo> fsck --full --strict
 ```
@@ -109,7 +110,9 @@ git --git-dir=<destination-git-repo> fsck --full --strict
 
 `github configure` stores a local, token-free mirror policy. At least one selected branch/tag rule and an explicit direction are required; omission of `--force-update` uses `reject`. `github inspect` reports the policy and checkpoint counts without echoing the target or selected ref names. `github plan` reconstructs a verified temporary bare export, reports each selected local/remote ref and the complete reachable-object count, then removes that export. `--show-objects` emits every selected graph object ID but no object body.
 
-`github publish` requires the deliberate `--apply` switch and pushes only those configured selected refs. It uses either `https://github.com/<owner>/<repository>.git` (default) through the standard preconfigured Git credential helper or `git@github.com:<owner>/<repository>.git` through the standard SSH agent. Yeokcham stores no GitHub token, disables terminal/askpass prompts, and does not permit inherited Git/SSH command overrides; authenticate with Git before publishing. The push requests atomic remote application, rejects tag replacement, confirms every remote object ID by a second ref read, then atomically records checkpoints only if the local refs remain current. `require-exact-checkpoint` grants a non-fast-forward branch lease only when the remote still equals its recorded checkpoint. Fetching and pull-request branch publication remain unfinished.
+`github publish` requires the deliberate `--apply` switch and pushes only those configured selected refs. It uses either `https://github.com/<owner>/<repository>.git` (default) through the standard preconfigured Git credential helper or `git@github.com:<owner>/<repository>.git` through the standard SSH agent. Yeokcham stores no GitHub token, disables terminal/askpass prompts, and does not permit inherited Git/SSH command overrides; authenticate with Git before publishing. The push requests atomic remote application, rejects tag replacement, confirms every remote object ID by a second ref read, then atomically records checkpoints only if the local refs remain current. `require-exact-checkpoint` grants a non-fast-forward branch lease only when the remote still equals its recorded checkpoint. Fetching remains unfinished.
+
+`github publish-pr` publishes one selected local branch to the named remote branch, records that explicit mapping as its checkpoint, and retains the same authentication, atomic-push, post-push-confirmation, and force-policy checks. It does not create a GitHub pull request; open the published branch through GitHub's normal UI or API. Fetching remains unfinished.
 
 See [Google Drive setup](docs/google-drive.md) for the exact Desktop-client, scope, headless, and recovery requirements.
 

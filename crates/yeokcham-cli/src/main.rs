@@ -31,6 +31,7 @@ const MAXIMUM_PASSPHRASE_INPUT_BYTES: u64 = 1_025;
 const MAXIMUM_CACHE_PATHS: usize = 100_000;
 const MAXIMUM_CACHE_DEPTH: usize = 32;
 const MAXIMUM_GITHUB_GIT_OUTPUT_BYTES: usize = 64 * 1024 * 1024;
+const MAXIMUM_GITHUB_REFERENCE_BYTES: usize = 255;
 
 type DefaultDriveBackend = EncryptedBackend<
     DriveBackend<
@@ -127,6 +128,12 @@ enum Command {
     },
     GithubPublish {
         repository: PathBuf,
+        transport: GithubTransport,
+    },
+    GithubPublishPullRequest {
+        repository: PathBuf,
+        source: yeokcham_core::RefName,
+        remote: yeokcham_core::RefName,
         transport: GithubTransport,
     },
     DriveAuth {
@@ -236,6 +243,12 @@ fn main() -> ExitCode {
             repository,
             transport,
         } => github_publish(repository, transport),
+        Command::GithubPublishPullRequest {
+            repository,
+            source,
+            remote,
+            transport,
+        } => github_publish_pull_request_branch(repository, source, remote, transport),
         Command::DriveAuth {
             client_id,
             redirect_port,
@@ -422,6 +435,67 @@ fn parse_github(arguments: &[OsString]) -> Result<Command> {
         }
         return Ok(Command::GithubPublish {
             repository,
+            transport,
+        });
+    }
+    if arguments.len() >= 3 && arguments[1].as_os_str() == OsStr::new("publish-pr") {
+        let repository = PathBuf::from(&arguments[2]);
+        let mut source = None;
+        let mut remote = None;
+        let mut transport = GithubTransport::Https;
+        let mut apply = false;
+        let mut transport_seen = false;
+        let mut index = 3;
+        while index < arguments.len() {
+            let option = arguments[index].as_os_str();
+            if option == OsStr::new("--apply") && !apply {
+                apply = true;
+                index += 1;
+                continue;
+            }
+            if option == OsStr::new("--transport") && !transport_seen {
+                let Some(value) = arguments.get(index + 1).and_then(|value| value.to_str()) else {
+                    return Err(usage_error());
+                };
+                transport = value.parse()?;
+                transport_seen = true;
+                index += 2;
+                continue;
+            }
+            if option == OsStr::new("--source") && source.is_none() {
+                let Some(value) = arguments.get(index + 1).and_then(|value| value.to_str()) else {
+                    return Err(usage_error());
+                };
+                source = Some(github_pull_request_source_reference(value)?);
+                index += 2;
+                continue;
+            }
+            if option == OsStr::new("--branch") && remote.is_none() {
+                let Some(value) = arguments.get(index + 1).and_then(|value| value.to_str()) else {
+                    return Err(usage_error());
+                };
+                remote = Some(github_pull_request_remote_reference(value)?);
+                index += 2;
+                continue;
+            }
+            return Err(usage_error());
+        }
+        if !apply {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "GitHub pull-request publication requires --apply; run github plan first",
+            ));
+        }
+        let (Some(source), Some(remote)) = (source, remote) else {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "GitHub pull-request publication requires --source and --branch",
+            ));
+        };
+        return Ok(Command::GithubPublishPullRequest {
+            repository,
+            source,
+            remote,
             transport,
         });
     }
@@ -890,11 +964,48 @@ fn github_publish(repository: PathBuf, transport: GithubTransport) -> Result<()>
         .github_mirror_configuration()?
         .ok_or_else(|| Error::new(ErrorKind::NotFound, "GitHub mirror is not configured"))?;
     let references = selected_github_publication_references(&repository, &configuration, limits)?;
-    let remote_url = github_remote_url(&configuration, transport);
-    let export = create_temporary_github_export(&repository, limits)?;
-    let result = github_publish_export(
+    github_publish_references(&repository, &configuration, references, transport, limits)
+}
+
+fn github_publish_pull_request_branch(
+    repository: PathBuf,
+    source: yeokcham_core::RefName,
+    remote: yeokcham_core::RefName,
+    transport: GithubTransport,
+) -> Result<()> {
+    let limits = GitImportLimits::initial()?;
+    let repository = LocalRepository::open(repository)?;
+    let configuration = repository
+        .github_mirror_configuration()?
+        .ok_or_else(|| Error::new(ErrorKind::NotFound, "GitHub mirror is not configured"))?;
+    let reference = selected_github_pull_request_reference(
         &repository,
         &configuration,
+        source,
+        remote,
+        limits,
+    )?;
+    github_publish_references(
+        &repository,
+        &configuration,
+        vec![reference],
+        transport,
+        limits,
+    )
+}
+
+fn github_publish_references(
+    repository: &LocalRepository,
+    configuration: &GithubMirrorConfiguration,
+    references: Vec<GithubPublicationReference>,
+    transport: GithubTransport,
+    limits: GitImportLimits,
+) -> Result<()> {
+    let remote_url = github_remote_url(configuration, transport);
+    let export = create_temporary_github_export(repository, limits)?;
+    let result = github_publish_export(
+        repository,
+        configuration,
         &remote_url,
         &export,
         &references,
@@ -921,6 +1032,24 @@ fn github_publish(repository: PathBuf, transport: GithubTransport) -> Result<()>
         );
     }
     Ok(())
+}
+
+fn github_pull_request_source_reference(value: &str) -> Result<yeokcham_core::RefName> {
+    let reference = value.parse::<yeokcham_core::RefName>()?;
+    if !reference.as_bytes().starts_with(b"refs/heads/") {
+        return Err(Error::new(
+            ErrorKind::InvalidInput,
+            "GitHub pull-request source must be a branch reference",
+        ));
+    }
+    github_reference_text(&reference)?;
+    Ok(reference)
+}
+
+fn github_pull_request_remote_reference(value: &str) -> Result<yeokcham_core::RefName> {
+    let reference = format!("refs/heads/{value}").parse::<yeokcham_core::RefName>()?;
+    github_reference_text(&reference)?;
+    Ok(reference)
 }
 
 struct GithubPublicationReport {
@@ -1171,6 +1300,46 @@ fn selected_github_publication_references(
     Ok(references)
 }
 
+fn selected_github_pull_request_reference(
+    repository: &LocalRepository,
+    configuration: &GithubMirrorConfiguration,
+    source: yeokcham_core::RefName,
+    remote: yeokcham_core::RefName,
+    limits: GitImportLimits,
+) -> Result<GithubPublicationReference> {
+    if configuration.direction() == GithubMirrorDirection::PullOnly {
+        return Err(Error::new(
+            ErrorKind::InvalidInput,
+            "GitHub mirror direction does not allow publication",
+        ));
+    }
+    if !configuration.selects_reference(&source) {
+        return Err(Error::new(
+            ErrorKind::InvalidInput,
+            "GitHub pull-request source is not selected for publication",
+        ));
+    }
+    let state = repository
+        .resolve_ref_state(limits.ref_snapshot_limits())?
+        .ok_or_else(|| {
+            Error::new(
+                ErrorKind::NotFound,
+                "repository has no acknowledged ref state",
+            )
+        })?;
+    let object_id = state.regular_refs().get(&source).ok_or_else(|| {
+        Error::new(
+            ErrorKind::NotFound,
+            "GitHub pull-request source is not an acknowledged reference",
+        )
+    })?;
+    Ok(GithubPublicationReference {
+        local: source,
+        remote,
+        object_id: *object_id,
+    })
+}
+
 fn create_temporary_github_export(
     repository: &LocalRepository,
     limits: GitImportLimits,
@@ -1273,10 +1442,20 @@ fn github_publication_object_ids(
 }
 
 fn github_reference_text(reference: &yeokcham_core::RefName) -> Result<&str> {
-    std::str::from_utf8(reference.as_bytes()).map_err(|_| {
-        Error::new(
+    let bytes = reference.as_bytes();
+    if bytes.len() > MAXIMUM_GITHUB_REFERENCE_BYTES
+        || !bytes.is_ascii()
+        || (!bytes.starts_with(b"refs/heads/") && !bytes.starts_with(b"refs/tags/"))
+    {
+        return Err(Error::new(
             ErrorKind::Unsupported,
-            "GitHub publication does not support a non-UTF-8 reference",
+            "GitHub publication reference is not supported",
+        ));
+    }
+    std::str::from_utf8(bytes).map_err(|_| {
+        Error::new(
+            ErrorKind::Internal,
+            "GitHub publication reference is not valid UTF-8",
         )
     })
 }
@@ -2217,7 +2396,7 @@ fn usage_error() -> Error {
 
 fn print_usage() {
     println!(
-        "usage:\n  yeokcham init --from-git <source-git-repo> <yeokcham-repo> [--chunked-blob-minimum <bytes>]\n  yeokcham sync --from-git <source-git-repo> <yeokcham-repo> --device <device-id>\n  yeokcham verify <yeokcham-repo>\n  yeokcham export-git <yeokcham-repo> <destination-git-repo>\n  yeokcham inspect object <yeokcham-repo> <git-object-id>\n  yeokcham inspect storage <yeokcham-repo>\n  yeokcham inspect refs <yeokcham-repo>\n  yeokcham cache inspect|verify|clear <yeokcham-repo>\n  yeokcham cache trim --max-bytes <bytes> <yeokcham-repo>\n  yeokcham github configure <yeokcham-repo> --repository <owner/repository> --direction <publish-only|pull-only|bidirectional-fast-forward|manual> [--force-update <reject|require-exact-checkpoint>] --publish <heads|tags|refs/heads/*|refs/tags/*> [--publish ...]\n  yeokcham github inspect <yeokcham-repo>\n  yeokcham github plan [--show-objects] <yeokcham-repo>\n  yeokcham github publish <yeokcham-repo> --apply [--transport <https|ssh>]\n  yeokcham key create-export --passphrase-stdin <yeokcham-repo> <recovery-key-export>\n  yeokcham drive auth --client-id <google-desktop-client-id> [--redirect-port <port>]\n  yeokcham drive init --client-id <google-desktop-client-id>\n  yeokcham drive backup|push --client-id <google-desktop-client-id> --folder-id <drive-folder-id> --key-export <recovery-key-export> --passphrase-stdin <yeokcham-repo>\n  yeokcham drive restore|clone --client-id <google-desktop-client-id> --folder-id <drive-folder-id> --key-export <recovery-key-export> --passphrase-stdin <destination>\n  yeokcham drive verify --client-id <google-desktop-client-id> --folder-id <drive-folder-id> --key-export <recovery-key-export> --passphrase-stdin\n  yeokcham drive journal inspect --client-id <google-desktop-client-id> --folder-id <drive-folder-id> --key-export <recovery-key-export> --root-key <root-ed25519-public-key-hex> --passphrase-stdin <yeokcham-repo>"
+        "usage:\n  yeokcham init --from-git <source-git-repo> <yeokcham-repo> [--chunked-blob-minimum <bytes>]\n  yeokcham sync --from-git <source-git-repo> <yeokcham-repo> --device <device-id>\n  yeokcham verify <yeokcham-repo>\n  yeokcham export-git <yeokcham-repo> <destination-git-repo>\n  yeokcham inspect object <yeokcham-repo> <git-object-id>\n  yeokcham inspect storage <yeokcham-repo>\n  yeokcham inspect refs <yeokcham-repo>\n  yeokcham cache inspect|verify|clear <yeokcham-repo>\n  yeokcham cache trim --max-bytes <bytes> <yeokcham-repo>\n  yeokcham github configure <yeokcham-repo> --repository <owner/repository> --direction <publish-only|pull-only|bidirectional-fast-forward|manual> [--force-update <reject|require-exact-checkpoint>] --publish <heads|tags|refs/heads/*|refs/tags/*> [--publish ...]\n  yeokcham github inspect <yeokcham-repo>\n  yeokcham github plan [--show-objects] <yeokcham-repo>\n  yeokcham github publish <yeokcham-repo> --apply [--transport <https|ssh>]\n  yeokcham github publish-pr <yeokcham-repo> --source <refs/heads/branch> --branch <remote-branch> --apply [--transport <https|ssh>]\n  yeokcham key create-export --passphrase-stdin <yeokcham-repo> <recovery-key-export>\n  yeokcham drive auth --client-id <google-desktop-client-id> [--redirect-port <port>]\n  yeokcham drive init --client-id <google-desktop-client-id>\n  yeokcham drive backup|push --client-id <google-desktop-client-id> --folder-id <drive-folder-id> --key-export <recovery-key-export> --passphrase-stdin <yeokcham-repo>\n  yeokcham drive restore|clone --client-id <google-desktop-client-id> --folder-id <drive-folder-id> --key-export <recovery-key-export> --passphrase-stdin <destination>\n  yeokcham drive verify --client-id <google-desktop-client-id> --folder-id <drive-folder-id> --key-export <recovery-key-export> --passphrase-stdin\n  yeokcham drive journal inspect --client-id <google-desktop-client-id> --folder-id <drive-folder-id> --key-export <recovery-key-export> --root-key <root-ed25519-public-key-hex> --passphrase-stdin <yeokcham-repo>"
     );
 }
 
@@ -2360,6 +2539,102 @@ mod tests {
     }
 
     #[test]
+    fn publishes_one_selected_branch_to_a_named_pull_request_branch() {
+        let temporary = TestDirectory::new();
+        let source = temporary.path().join("source");
+        let store = temporary.path().join("store");
+        let remote = temporary.path().join("remote.git");
+        fs::create_dir(&source).expect("create source");
+        run_test_git(&source, &["init", "-b", "main"]);
+        run_test_git(&source, &["config", "user.name", "Yeokcham Test"]);
+        run_test_git(
+            &source,
+            &["config", "user.email", "yeokcham-test@example.invalid"],
+        );
+        fs::write(source.join("change.txt"), b"pull request change\n").expect("write change");
+        run_test_git(&source, &["add", "change.txt"]);
+        run_test_git(&source, &["commit", "-m", "pull request change"]);
+        let output = ProcessCommand::new("git")
+            .args(["init", "--bare"])
+            .arg(&remote)
+            .output()
+            .expect("create remote");
+        assert!(output.status.success());
+
+        let limits = GitImportLimits::initial().expect("limits");
+        let repository = LocalRepository::create(&store).expect("create store");
+        repository
+            .import_git_repository(&GitRepository::open(&source).expect("open source"), limits)
+            .expect("import source");
+        let configuration = GithubMirrorConfiguration::new(
+            repository.id(),
+            "yeokcham/example".parse().expect("target"),
+            GithubMirrorDirection::PublishOnly,
+            GithubForceUpdatePolicy::Reject,
+            ["refs/heads/main".parse().expect("main rule")],
+        )
+        .expect("configuration");
+        repository
+            .configure_github_mirror(&configuration)
+            .expect("configure mirror");
+        let source_reference =
+            github_pull_request_source_reference("refs/heads/main").expect("source reference");
+        let remote_reference =
+            github_pull_request_remote_reference("review/first-change").expect("remote reference");
+        let reference = selected_github_pull_request_reference(
+            &repository,
+            &configuration,
+            source_reference.clone(),
+            remote_reference.clone(),
+            limits,
+        )
+        .expect("selected pull-request branch");
+        let unselected = match selected_github_pull_request_reference(
+            &repository,
+            &configuration,
+            "refs/heads/private".parse().expect("private branch"),
+            remote_reference.clone(),
+            limits,
+        ) {
+            Ok(_) => panic!("unselected pull-request source must fail"),
+            Err(error) => error,
+        };
+        assert_eq!(unselected.kind(), ErrorKind::InvalidInput);
+        let export = create_temporary_github_export(&repository, limits).expect("export");
+        github_publish_export(
+            &repository,
+            &configuration,
+            remote.to_str().expect("UTF-8 remote path"),
+            &export,
+            &[reference.clone()],
+            limits,
+        )
+        .expect("publish pull-request branch");
+        remove_temporary_github_export(&export).expect("remove export");
+
+        let remote_state = GitRepository::open(&remote)
+            .expect("open remote")
+            .ref_state()
+            .expect("remote refs");
+        assert_eq!(
+            remote_state.regular_refs().get(&remote_reference),
+            Some(&reference.object_id)
+        );
+        assert!(!remote_state.regular_refs().contains_key(&source_reference));
+        let checkpoint = repository
+            .github_mirror_configuration()
+            .expect("read configuration")
+            .expect("configuration")
+            .checkpoints()
+            .get(&source_reference)
+            .expect("checkpoint")
+            .clone();
+        assert_eq!(checkpoint.remote_reference(), &remote_reference);
+        assert_eq!(checkpoint.local_object_id(), reference.object_id);
+        assert_eq!(checkpoint.remote_object_id(), reference.object_id);
+    }
+
+    #[test]
     fn parses_github_mirror_configuration_and_rejects_ambiguous_policy() {
         let command = parse_command(
             [
@@ -2434,6 +2709,34 @@ mod tests {
                 transport: GithubTransport::Ssh,
             } if repository == PathBuf::from("repository")
         ));
+        let publish_pr = parse_command(
+            [
+                "github",
+                "publish-pr",
+                "repository",
+                "--source",
+                "refs/heads/main",
+                "--branch",
+                "review/change",
+                "--apply",
+                "--transport",
+                "ssh",
+            ]
+            .map(OsString::from)
+            .to_vec(),
+        )
+        .expect("GitHub pull-request publication");
+        assert!(matches!(
+            publish_pr,
+            Command::GithubPublishPullRequest {
+                repository,
+                source,
+                remote,
+                transport: GithubTransport::Ssh,
+            } if repository == PathBuf::from("repository")
+                && source.as_bytes() == b"refs/heads/main"
+                && remote.as_bytes() == b"refs/heads/review/change"
+        ));
         let error = match parse_command(
             ["github", "publish", "repository"]
                 .map(OsString::from)
@@ -2446,6 +2749,35 @@ mod tests {
             error.public_message(),
             "GitHub publication requires --apply; run github plan first"
         );
+        let error = match parse_command(
+            [
+                "github",
+                "publish-pr",
+                "repository",
+                "--source",
+                "refs/heads/main",
+                "--branch",
+                "review/change",
+            ]
+            .map(OsString::from)
+            .to_vec(),
+        ) {
+            Ok(_) => panic!("pull-request publication must require explicit application"),
+            Err(error) => error,
+        };
+        assert_eq!(
+            error.public_message(),
+            "GitHub pull-request publication requires --apply; run github plan first"
+        );
+        let error = github_pull_request_source_reference("refs/tags/v1.0")
+            .expect_err("pull-request source must be a branch");
+        assert_eq!(
+            error.public_message(),
+            "GitHub pull-request source must be a branch reference"
+        );
+        let error = github_pull_request_remote_reference(&"a".repeat(256))
+            .expect_err("oversized pull-request branch");
+        assert_eq!(error.kind(), ErrorKind::Unsupported);
         assert!(
             parse_command(
                 [
