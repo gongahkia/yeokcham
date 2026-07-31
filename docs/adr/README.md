@@ -103,3 +103,4 @@ Valid statuses are `Proposed`, `Accepted`, `Rejected`, `Deprecated`, and `Supers
 | [ADR-0095](0095-bounded-authenticated-commit-tree-browser.md) | Accepted | Render bounded authenticated commit and tree metadata |
 | [ADR-0096](0096-verified-local-storage-statistics.md) | Accepted | Report verified local storage and zero remote attachments |
 | [ADR-0097](0097-read-only-authenticated-integrity-check.md) | Accepted | Render a bounded read-only integrity result |
+| [ADR-0098](0098-redacted-authenticated-mirror-state.md) | Accepted | Render redacted local GitHub mirror policy state |

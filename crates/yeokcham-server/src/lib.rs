@@ -15,8 +15,8 @@ use std::{
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use subtle::ConstantTimeEq;
 use yeokcham_core::{
-    Error, ErrorKind, GitImportLimits, GitObject, GitObjectId, GitObjectKind, HeadState,
-    LocalRepository, Result,
+    Error, ErrorKind, GitImportLimits, GitObject, GitObjectId, GitObjectKind,
+    GithubMirrorConfiguration, HeadState, LocalRepository, Result,
 };
 use zeroize::Zeroizing;
 
@@ -350,6 +350,7 @@ enum Request {
     Commit(GitObjectId),
     Health,
     Integrity,
+    Mirror,
     Refs,
     Storage,
     Tree(GitObjectId),
@@ -516,6 +517,7 @@ fn parse_request(
     match target {
         "/" => Ok(Request::Browser),
         "/integrity" => Ok(Request::Integrity),
+        "/mirror" => Ok(Request::Mirror),
         "/storage" => Ok(Request::Storage),
         "/v1/health" => Ok(Request::Health),
         "/v1/refs" => Ok(Request::Refs),
@@ -576,6 +578,7 @@ fn route_request(repository: &LocalRepository, request: Request) -> Response {
             format!("{{\"version\":{NATIVE_HTTP_VERSION},\"status\":\"ok\"}}"),
         ),
         Request::Integrity => integrity_response(repository),
+        Request::Mirror => mirror_response(repository),
         Request::Refs => refs_response(repository),
         Request::Storage => storage_response(repository),
         Request::Tree(id) => tree_response(repository, id),
@@ -612,7 +615,7 @@ fn browser_response(repository: &LocalRepository) -> Response {
         HeadState::Symbolic(name) => body.push_str(&html_escape_ref_name(name.as_bytes())),
         HeadState::Detached(id) => body.push_str(&id.to_string()),
     }
-    body.push_str("</code></p><p><a href=\"/storage\">Storage</a></p><p><a href=\"/integrity\">Integrity check</a></p></main></body></html>");
+    body.push_str("</code></p><p><a href=\"/storage\">Storage</a></p><p><a href=\"/integrity\">Integrity check</a></p><p><a href=\"/mirror\">Mirror state</a></p></main></body></html>");
     if body.len() > MAXIMUM_RESPONSE_BODY_BYTES {
         return Response::error(500, "Internal Server Error", "response_too_large");
     }
@@ -1020,6 +1023,18 @@ fn integrity_response(repository: &LocalRepository) -> Response {
     html_response(body.into_string())
 }
 
+fn mirror_response(repository: &LocalRepository) -> Response {
+    let configuration = match repository.github_mirror_configuration() {
+        Ok(configuration) => configuration,
+        Err(_) => return Response::error(500, "Internal Server Error", "mirror_state_unavailable"),
+    };
+    let mut body = HtmlBody::new();
+    if render_mirror_html(&mut body, repository, configuration.as_ref()).is_err() {
+        return Response::error(500, "Internal Server Error", "response_too_large");
+    }
+    html_response(body.into_string())
+}
+
 fn verified_storage_report(
     repository: &LocalRepository,
 ) -> std::result::Result<yeokcham_core::RepositoryVerificationReport, ()> {
@@ -1077,6 +1092,49 @@ fn render_integrity_html(
     )?;
     render_storage_stat(body, "Ref snapshots", report.ref_snapshot_count())?;
     body.push("</dl><p>The check is read-only and does not repair, export, contact a backend, or load credentials.</p></main></body></html>")
+}
+
+fn render_mirror_html(
+    body: &mut HtmlBody,
+    repository: &LocalRepository,
+    configuration: Option<&GithubMirrorConfiguration>,
+) -> std::result::Result<(), ()> {
+    body.push("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>Yeokcham mirror state</title></head><body><main><p><a href=\"/\">Repository</a></p><h1>Mirror state</h1><p>Repository <code>")?;
+    body.push(&repository.id().to_string())?;
+    body.push("</code></p>")?;
+    let Some(configuration) = configuration else {
+        return body.push("<p>No GitHub mirror configuration is stored.</p></main></body></html>");
+    };
+    body.push("<p>GitHub mirror configuration is stored.</p><dl>")?;
+    render_mirror_stat(body, "Direction", configuration.direction().as_str())?;
+    render_mirror_stat(
+        body,
+        "Force-update policy",
+        configuration.force_update_policy().as_str(),
+    )?;
+    render_mirror_stat(
+        body,
+        "Publication rules",
+        &configuration.publication_rules().len().to_string(),
+    )?;
+    render_mirror_stat(
+        body,
+        "Confirmed checkpoints",
+        &configuration.checkpoints().len().to_string(),
+    )?;
+    body.push("</dl><p>GitHub target and ref/object identifiers are intentionally omitted. This page performs no provider network request, credential lookup, publish, fetch, or ref update.</p></main></body></html>")
+}
+
+fn render_mirror_stat(
+    body: &mut HtmlBody,
+    label: &str,
+    value: &str,
+) -> std::result::Result<(), ()> {
+    body.push("<dt>")?;
+    body.push(label)?;
+    body.push("</dt><dd>")?;
+    body.push(value)?;
+    body.push("</dd>")
 }
 
 fn render_storage_stat(
@@ -1238,7 +1296,9 @@ mod tests {
     };
 
     use base64::Engine as _;
-    use yeokcham_core::GitRepository;
+    use yeokcham_core::{
+        GitRepository, GithubForceUpdatePolicy, GithubMirrorDirection, GithubPublicationRule,
+    };
 
     use super::*;
 
@@ -1371,6 +1431,17 @@ mod tests {
     fn serves_bounded_v1_health_refs_and_verified_objects() {
         let directory = TestDirectory::new();
         let (repository, head_id, tree_id) = imported_repository(&directory);
+        let mirror = GithubMirrorConfiguration::new(
+            repository.id(),
+            "yeokcham/example".parse().expect("mirror target"),
+            GithubMirrorDirection::Manual,
+            GithubForceUpdatePolicy::Reject,
+            [GithubPublicationRule::Heads],
+        )
+        .expect("mirror configuration");
+        repository
+            .configure_github_mirror(&mirror)
+            .expect("configure mirror");
         let (authentication, token) = authentication(&directory);
         let server = Server::bind(
             repository,
@@ -1437,6 +1508,7 @@ mod tests {
         assert!(browser_text.contains(&head_id.to_string()));
         assert!(browser_text.contains("href=\"/storage\""));
         assert!(browser_text.contains("href=\"/integrity\""));
+        assert!(browser_text.contains("href=\"/mirror\""));
 
         let storage = serve_request(
             &server,
@@ -1462,6 +1534,20 @@ mod tests {
         let integrity_text = std::str::from_utf8(integrity_body).expect("integrity HTML");
         assert!(integrity_text.contains("<h1>Integrity check</h1>"));
         assert!(integrity_text.contains("All bounded canonical records passed verification."));
+
+        let mirror = serve_request(
+            &server,
+            address,
+            format!("GET /mirror HTTP/1.1\r\nAuthorization: Bearer {token}\r\n\r\n").as_bytes(),
+        );
+        let (mirror_head, mirror_body) = split_response(&mirror);
+        assert!(mirror_head.starts_with("HTTP/1.1 200 OK\r\n"));
+        assert!(mirror_head.contains("Content-Type: text/html; charset=utf-8"));
+        let mirror_text = std::str::from_utf8(mirror_body).expect("mirror HTML");
+        assert!(mirror_text.contains("<h1>Mirror state</h1>"));
+        assert!(mirror_text.contains("manual"));
+        assert!(mirror_text.contains("Publication rules</dt><dd>1"));
+        assert!(!mirror_text.contains("yeokcham/example"));
 
         let commit = serve_request(
             &server,
@@ -1645,6 +1731,43 @@ mod tests {
                 .expect("render binary preview")
         );
         assert_eq!(html.into_string(), "hex:ff");
+    }
+
+    #[test]
+    fn renders_mirror_state_without_disclosing_configuration() {
+        let directory = TestDirectory::new();
+        let repository = LocalRepository::create(directory.path().join("store")).expect("store");
+        let response = mirror_response(&repository);
+        assert_eq!(response.status, 200);
+        let unconfigured = std::str::from_utf8(&response.body).expect("mirror HTML");
+        assert!(unconfigured.contains("No GitHub mirror configuration is stored."));
+
+        let configuration = GithubMirrorConfiguration::new(
+            repository.id(),
+            "yeokcham/private".parse().expect("mirror target"),
+            GithubMirrorDirection::PublishOnly,
+            GithubForceUpdatePolicy::RequireExactCheckpoint,
+            [GithubPublicationRule::Tags],
+        )
+        .expect("mirror configuration");
+        repository
+            .configure_github_mirror(&configuration)
+            .expect("configure mirror");
+        let response = mirror_response(&repository);
+        assert_eq!(response.status, 200);
+        let configured = std::str::from_utf8(&response.body).expect("mirror HTML");
+        assert!(configured.contains("publish-only"));
+        assert!(configured.contains("require-exact-checkpoint"));
+        assert!(!configured.contains("yeokcham/private"));
+
+        fs::write(repository.path().join("mirrors/github.ykgm"), b"corrupt")
+            .expect("corrupt mirror configuration");
+        let response = mirror_response(&repository);
+        assert_eq!(response.status, 500);
+        assert_eq!(
+            response.body,
+            b"{\"version\":1,\"error\":\"mirror_state_unavailable\"}"
+        );
     }
 
     #[test]

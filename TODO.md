@@ -328,7 +328,7 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 - [x] Add commit and tree viewer. Authenticated pages reconstruct and verify objects, render bounded escaped commit/tree metadata, link verified commit/tree navigation, and never render blobs.
 - [x] Add storage and backend statistics. Authenticated `GET /storage` reports only verified canonical-record counts plus one local provider and zero attached remote backends; it performs no provider request or credential lookup.
 - [x] Add integrity-check UI. Authenticated `GET /integrity` reruns bounded verification, renders only a successful read-only result, and otherwise returns a generic failure without partial inventory or repair action.
-- [ ] Add mirror-state UI.
+- [x] Add mirror-state UI. Authenticated `GET /mirror` renders only redacted local GitHub policy direction/count state, never target/ref/object metadata, and performs no provider or credential operation.
 - [ ] Add export and recovery commands.
 - [ ] Publish Docker image only after local binary is stable.
 

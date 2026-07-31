@@ -55,6 +55,12 @@ Returns an authenticated static HTML integrity result only when the same bounded
 
 A failed verification returns `500` with `integrity_check_failed`, without a partial count, failed pathname, object ID, source body, or repair action. Use the existing CLI recovery workflows after diagnosing an unavailable repository; V1 does not mutate it.
 
+### `GET /mirror`
+
+Returns an authenticated static GitHub-mirror policy summary. With no stored `YKGM` policy it reports that no mirror is configured. With a valid policy it reports only the automatic direction, force-update policy, publication-rule count, and confirmed-checkpoint count. The GitHub target, ref names, object IDs, timestamps, and credentials are intentionally omitted.
+
+The page neither contacts GitHub nor reads a credential helper, agent, keyring, Drive token, or environment. It cannot publish, fetch, resolve, or update a ref. An invalid stored policy returns `500` with `mirror_state_unavailable` without a partial policy or storage detail.
+
 ### `GET /commits/<sha1>`
 
 `<sha1>` is exactly 40 lowercase hexadecimal SHA-1 digits. The server reconstructs and verifies the object before rendering a static HTML commit overview. It requires a Git commit object and returns `422` with `object_kind_mismatch` for a different verified object type or `invalid_commit_object` for malformed commit content.
