@@ -6,12 +6,15 @@
 (test
  (name test_typescript_adapter)
  (modules test_typescript_adapter)
- (libraries alcotest paengi_snapshot paengi_store paengi_typescript_adapter unix)
+ (libraries
+  alcotest
+  paengi_snapshot
+  paengi_store
+  paengi_typescript_adapter
+  unix)
  (deps
   (source_tree fixtures/semantic-adapter)
-  ../../tools/paengi-typescript-adapter/adapter.mjs
-  ../../tools/paengi-typescript-adapter/package-lock.json
-  ../../tools/paengi-typescript-adapter/package.json))
+  (source_tree ../tools/paengi-typescript-adapter)))
 
 (test
  (name test_fixture)

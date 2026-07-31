@@ -414,6 +414,28 @@ Where practical, also show:
 
 The comparison should acknowledge features those tools already provide.
 
+## 9.1 TypeScript sidecar protocol experiment
+
+The optional Compiler API helper is pinned to TypeScript `5.9.3` in
+`tools/paengi-typescript-adapter/package-lock.json`; its minimum Node version
+is `14.17.0`. Setup is one explicit local
+`npm ci --ignore-scripts --no-audit --no-fund`; tests do not download packages
+or use a global TypeScript installation.
+
+The deterministic protocol suite covers handshake/version pinning, virtual
+TypeScript and TSX input, UTF-8 byte spans with BOM/Unicode/emoji/CRLF, aliases
+and re-exports, parser damage, unresolved imports, bounded path mapping,
+unsafe input, output bounds, and a byte-splice replacement with stale-preimage
+and post-parse conflict cases. The OCaml suite separately covers the verified
+snapshot virtual-file boundary and unavailable outcomes for a missing helper,
+timeout, malformed response, crash, and oversized output.
+
+These are correctness checks, not performance gates. The current result is
+limited to exact-span replacement and the existing bounded declaration matcher;
+there is no published contextual textual-patch comparison or broad retargeting
+rate. `docs/experiments/semantic-sidecar-v1.md` records the only published
+false-confidence counts, and it must not be read as a general reliability claim.
+
 ## 10. Release gates
 
 ### Model prototype gate

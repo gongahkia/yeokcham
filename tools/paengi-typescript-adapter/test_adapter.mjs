@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 
 const adapter = fileURLToPath(new URL("./adapter.mjs", import.meta.url));
@@ -70,6 +71,54 @@ const importAlias = analyzed.result.declarations.find((declaration) => declarati
 const reexportAlias = analyzed.result.declarations.find((declaration) => declaration.declarationKind === "re-export-alias");
 assert.ok(importAlias?.symbol.aliasQualifiedName, "import alias evidence was not retained");
 assert.ok(reexportAlias?.symbol.aliasQualifiedName, "re-export alias evidence was not retained");
+
+const replaceSource = "// keep this comment\r\nexport function greet(name: string): string { return `hello ${name}`; }\r\n// keep this suffix\r\n";
+const replaceAnalysis = response(request([file("src/replace.ts", "ts", replaceSource)], ["src/replace.ts"], { strict: false }));
+const replaceDeclaration = replaceAnalysis.result.declarations.find((declaration) => declaration.syntacticName === "greet");
+assert.ok(replaceDeclaration, "replace target declaration was not extracted");
+const replaceBytes = Buffer.from(replaceSource, "utf8");
+const preimage = replaceBytes.subarray(replaceDeclaration.declarationStartByte, replaceDeclaration.declarationEndByte);
+const replacement = Buffer.from("export function greet(name: string): string { return `welcome ${name}`; }", "utf8");
+const replacementRequest = {
+  protocolVersion: 1,
+  operation: "replace-node",
+  snapshotId,
+  rootFiles: ["src/replace.ts"],
+  files: [file("src/replace.ts", "ts", replaceSource)],
+  compilerOptions: { strict: false },
+  timeoutMs: 10_000,
+  target: {
+    path: "src/replace.ts",
+    declarationStartByte: replaceDeclaration.declarationStartByte,
+    declarationEndByte: replaceDeclaration.declarationEndByte,
+    expectedPreimageHex: preimage.toString("hex"),
+    expectedPreimageSha256: createHash("sha256").update(preimage).digest("hex"),
+    declarationKind: replaceDeclaration.declarationKind,
+    declarationShapeDigest: replaceDeclaration.declarationShapeDigest,
+  },
+  replacementHex: replacement.toString("hex"),
+};
+const replaced = response(replacementRequest);
+assert.equal(replaced.status, "ok");
+assert.equal(replaced.result.confidence, "exact");
+assert.equal(replaced.result.fallbackUsed, false);
+const replacedBytes = Buffer.from(replaced.result.newFileContentsHex, "hex");
+assert.ok(replacedBytes.subarray(0, replaceDeclaration.declarationStartByte)
+  .equals(replaceBytes.subarray(0, replaceDeclaration.declarationStartByte)), "replace changed prefix bytes");
+assert.ok(replacedBytes.subarray(replaceDeclaration.declarationStartByte + replacement.length)
+  .equals(replaceBytes.subarray(replaceDeclaration.declarationEndByte)), "replace changed suffix bytes");
+const stalePreimage = response({
+  ...replacementRequest,
+  target: { ...replacementRequest.target, expectedPreimageSha256: "0".repeat(64) },
+});
+assert.equal(stalePreimage.status, "conflict");
+assert.equal(stalePreimage.conflict.code, "preimage-mismatch");
+const brokenReplacement = response({
+  ...replacementRequest,
+  replacementHex: Buffer.from("export function greet(", "utf8").toString("hex"),
+});
+assert.equal(brokenReplacement.status, "conflict");
+assert.equal(brokenReplacement.conflict.code, "post-parse-failure");
 
 const damaged = response(request([file("src/damaged.ts", "ts", "export function broken( {\n")], ["src/damaged.ts"]));
 assert.equal(damaged.status, "ok");

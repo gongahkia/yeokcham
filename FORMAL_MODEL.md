@@ -468,6 +468,45 @@ fallback applies only when the input file bytes exactly equal `expected_source`.
 This adapter does not claim a full TypeScript grammar, reference rename, or
 semantic correctness. It introduces no persistent semantic schema.
 
+### Optional Compiler API boundary
+
+`paengi_typescript_adapter` is an ephemeral protocol-v1 boundary, not a model
+object. It sends exact UTF-8 source bytes from a verified immutable snapshot to
+the locally pinned TypeScript `5.9.3` Compiler API and receives only
+language-neutral values: project-relative paths, declaration kind, byte spans,
+lexical parent path, export status, declaration-shape/signature evidence,
+symbol-derived evidence, diagnostics, and completeness flags. TypeScript
+UTF-16 source positions are converted before crossing the boundary:
+
+```text
+byte_offset(s, u16_position) = utf8_length(s[0:u16_position])
+```
+
+Only a boundary without a parser diagnostic may report parser completeness.
+Unresolved virtual modules or type diagnostics independently reduce resolution
+and type-resolution completeness. No compiler symbol, compiler internal ID, or
+derived evidence is a Paengi identity. The boundary is optional: missing Node or
+adapter, timeout, malformed response, unsupported version, compiler crash,
+invalid source, unresolved module, or configured bound failure produces
+semantic-unavailable and leaves byte-based operations and exact fallback intact.
+
+An exact `replace-node` attempt has the following preconditions:
+
+```text
+one candidate at (path, byte_span)
+and exact preimage bytes and SHA-256
+and declaration kind and shape digest
+and parser_complete
+```
+
+Its result is `prefix ++ replacement_bytes ++ suffix`. It must reparse, retain
+one declaration in the intended lexical context, and prove prefix and suffix
+byte equality. A failed precondition or postcondition is a structured conflict;
+it is not an edit. This statement does not establish behavioural equivalence.
+
+No request, response, result, evidence, or replacement output from this
+boundary is persistently encoded in Milestone 7.
+
 ## 7. Application result
 
 ```ocaml

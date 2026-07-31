@@ -1,3 +1,3 @@
 (library
  (name paengi_typescript_adapter)
- (libraries unix paengi_snapshot paengi_store))
+ (libraries unix paengi_hash paengi_snapshot paengi_store))

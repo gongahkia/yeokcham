@@ -65,9 +65,13 @@ quarantine superseded scratch records.
 prototype, not a production Git replacement.
 
 Milestone 7 has a bounded, non-persistent TypeScript declaration-sidecar
-foundation: exact textual fallback, confidence/evidence, and structured safe
-non-application. It is not a full TypeScript parser, performs no persistent
-semantic replay, and does not alter canonical file bytes or prior formats.
+foundation plus an optional isolated full-parser capability. The capability uses
+the locally pinned TypeScript Compiler API (`5.9.3`; Node `>=14.17.0`) through a
+versioned stdin/stdout protocol and a verified-snapshot virtual file map. It
+does not persist semantic data, alter canonical file bytes or prior formats, or
+participate in restore, materialisation, export, or verification. If the helper
+is absent, invalid, slow, or incomplete, Paengi returns semantic-unavailable
+and retains the exact textual fallback.
 
 See `CONTRIBUTING.md` for development rules. Paengi is licensed under the MIT License.
 

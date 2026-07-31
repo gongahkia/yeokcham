@@ -6,13 +6,13 @@ Robustness tasks operate only on Paengi's pure functions and generated local fix
 ## Active vertical slice
 
 - Milestone: 7 — TypeScript semantic sidecar.
-- Task: bounded non-persistent foundation complete — top-level declaration parser, proposals, confidence/evidence matching, explicit exact textual fallback, and fixture evidence; stop before a full parser integration or semantic persistence.
-- Modules/files: add pure `paengi_semantic`; focused semantic unit/property tests, checked-in TypeScript fixtures, and a fixture-results report.
-- Types: parser error, declaration/structural path, semantic anchor, exact textual fallback, rename/move/replacement proposal, confidence/evidence, and structured match/application conflict.
+- Task: bounded non-persistent foundation, isolated TypeScript Compiler API protocol v1, verified-snapshot virtual-file analysis, and exact preimage-guarded replace-node complete; contextual textual baseline and evidence-stage retargeting remain.
+- Modules/files: pure `paengi_semantic`; nonpersistent `paengi_typescript_adapter`; pinned `tools/paengi-typescript-adapter`; focused semantic/adapter tests, checked-in local fixtures, and a fixture-results report.
+- Types: parser error, declaration/structural path, semantic anchor, exact textual fallback, rename/move/replacement proposal, confidence/evidence, structured match/application conflict, protocol declaration evidence, semantic-unavailable reason, and replace-node outcome.
 - Formats: none. No object schema, identity, ref, golden byte format, or capsule/workspace/release encoding changes.
-- Invariants: exact file bytes remain canonical; a proposal retains complete expected/replacement fallback bytes; parse failure makes no proposal; automatic rename requires one same-kind/name/signature declaration; structural, similarity, move, and replacement results require review; ambiguity and low confidence are structured conflicts.
-- Tests: focused parser/inference/application cases; 100 generated formatting retargets and 100 duplicate-anchor cases with reported seed. Full `make check` and `make property-test PROPERTY_TEST_SEED=17` remain required before closeout.
-- External libraries: existing Alcotest and QCheck only; no parser dependency.
+- Invariants: exact file bytes remain canonical; a proposal retains complete expected/replacement fallback bytes; parse failure makes no proposal; automatic rename requires one same-kind/name/signature declaration; compiler evidence is nonpersistent and snapshot-bound; adapter failure is semantic-unavailable; exact replace-node verifies preimage bytes/hash, kind, shape, post-parse context, and unchanged outside bytes.
+- Tests: focused parser/inference/application cases; pinned-helper protocol/TS/TSX/snapshot/replacement failure tests; 100 generated formatting retargets and 100 duplicate-anchor cases with reported seed. Full `make check` and `make property-test PROPERTY_TEST_SEED=17` remain required before closeout.
+- External libraries: existing Alcotest/QCheck plus exact-pinned local TypeScript `5.9.3`; no parser dependency beyond the approved isolated helper.
 - ADR changes: none; no persistent format change.
 
 ## Milestone 0 — Project and model foundation
@@ -309,14 +309,14 @@ Robustness tasks operate only on Paengi's pure functions and generated local fix
 
 ### Parser adapter
 
-- [x] Select a Paengi-owned bounded top-level declaration adapter; no parser dependency is introduced.
-- [ ] Parse valid TypeScript.
+- [x] Select a Paengi-owned bounded top-level declaration adapter and isolated pinned Compiler API helper.
+- [x] Parse valid TypeScript and TSX through the virtual CompilerHost.
 - [x] Handle parse failure safely for the supported adapter.
 - [x] Identify supported top-level declarations and structural paths.
 - [x] Produce semantic anchors with an exact textual fallback.
 - [x] Detect simple declaration rename.
 - [x] Detect simple declaration move.
-- [ ] Detect replace-node proposal.
+- [x] Detect replace-node proposal.
 - [x] Detect bounded replacement-declaration proposal.
 
 ### Application
@@ -329,6 +329,7 @@ Robustness tasks operate only on Paengi's pure functions and generated local fix
 - [x] Emit confidence and matching evidence.
 - [x] Emit ambiguity and low-confidence conflicts.
 - [x] Never discard exact fallback.
+- [x] Apply exact-span replace-node only after byte/hash/kind/shape checks and post-parse verification.
 
 ### Experiments
 
@@ -339,6 +340,7 @@ Robustness tasks operate only on Paengi's pure functions and generated local fix
 - [x] Measure safe conflict for the fixture suite.
 - [x] Measure observed false-confident application for the fixture suite.
 - [x] Publish failure examples and scope limits in `docs/experiments/semantic-sidecar-v1.md`.
+- [x] Test optional adapter protocol/version, snapshot binding, failure containment, and byte-preserving replacement.
 
 ### Exit criteria
 

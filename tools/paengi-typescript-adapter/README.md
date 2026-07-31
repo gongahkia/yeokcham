@@ -4,8 +4,8 @@ This tool is an optional analysis adapter. It receives one bounded JSON request
 on stdin and writes one bounded JSON protocol response on stdout. Diagnostics
 and Node failures use stderr; stdout is protocol-only.
 
-It uses TypeScript `7.0.2` through the local package installed from the checked-in
-lockfile. Node `>=16.20.0` is required. Install dependencies once with:
+It uses TypeScript `5.9.3` through the local package installed from the checked-in
+lockfile. Node `>=14.17.0` is required. Install dependencies once with:
 
 ```sh
 npm ci --ignore-scripts --no-audit --no-fund
@@ -45,6 +45,13 @@ external config inheritance, plugins, and host dependency reads remain
 unavailable. TypeScript source positions are converted to UTF-8 byte offsets
 before output. Parse or resolution incompleteness is explicit in the response.
 
-The outer Paengi process runner enforces wall-clock timeout and output bounds;
-the helper also rejects request/response size excess and reports an elapsed-time
-overrun after a completed compiler call.
+`replace-node` requires one exact declaration byte span, expected preimage bytes
+and SHA-256, declaration kind, and declaration-shape digest. It splices only
+that range; reparses the candidate bytes; verifies one matching structural
+context; and returns a structured conflict if any check fails. It never prints a
+complete file or claims behavioural equivalence.
+
+The OCaml boundary materialises its bounded request into a private temporary
+stdin descriptor, uses direct argv for Node, and enforces wall-clock timeout and
+stdout/stderr bounds. The helper also rejects request/response size excess and
+reports an elapsed-time overrun after a completed compiler call.

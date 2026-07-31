@@ -551,6 +551,144 @@ function analyze(request) {
   return { protocolVersion: PROTOCOL_VERSION, status: "ok", result };
 }
 
+function conflict(code, message, detail = undefined) {
+  const result = { protocolVersion: PROTOCOL_VERSION, status: "conflict", conflict: { code, message } };
+  if (detail !== undefined) result.conflict.detail = detail;
+  return result;
+}
+
+function replaceNode(request) {
+  const analyzed = analyze(request);
+  if (analyzed.status !== "ok") return analyzed;
+  const target = request.target;
+  if (!target || Array.isArray(target) || typeof target !== "object") {
+    return fail("invalid-target", "replace-node target must be an object");
+  }
+  const relativePath = safeRelativePath(target.path);
+  if (!relativePath) return fail("invalid-target", "replace-node target path is unsafe");
+  if (!Number.isInteger(target.declarationStartByte) || !Number.isInteger(target.declarationEndByte)
+      || target.declarationStartByte < 0 || target.declarationEndByte < target.declarationStartByte) {
+    return fail("invalid-target", "replace-node target span is invalid");
+  }
+  if (typeof target.declarationKind !== "string" || typeof target.declarationShapeDigest !== "string") {
+    return fail("invalid-target", "replace-node target evidence is incomplete");
+  }
+  if (!isValidHex(target.expectedPreimageHex) || !/^[0-9a-f]{64}$/.test(target.expectedPreimageSha256 ?? "")) {
+    return fail("invalid-target", "replace-node target preimage evidence is invalid");
+  }
+  if (!isValidHex(request.replacementHex)) return fail("invalid-replacement", "replacementHex is invalid");
+  const replacement = Buffer.from(request.replacementHex, "hex");
+  const replacementText = replacement.toString("utf8");
+  if (!Buffer.from(replacementText, "utf8").equals(replacement)) {
+    return fail("invalid-replacement", "replacement bytes are not valid UTF-8");
+  }
+  if (!analyzed.result.parserComplete) {
+    return conflict("incomplete-parser", "replace-node requires a parser-complete source project", {
+      parserDiagnostics: analyzed.result.parserDiagnostics,
+    });
+  }
+  const candidates = analyzed.result.declarations.filter((declaration) =>
+    declaration.path === relativePath
+    && declaration.declarationStartByte === target.declarationStartByte
+    && declaration.declarationEndByte === target.declarationEndByte);
+  if (candidates.length === 0) {
+    return conflict("missing-anchor", "no declaration occupies the requested exact byte span", {
+      candidatesConsidered: analyzed.result.declarations.filter((declaration) => declaration.path === relativePath),
+    });
+  }
+  if (candidates.length !== 1) {
+    return conflict("ambiguous-anchor", "multiple declarations occupy the requested exact byte span", {
+      candidatesConsidered: candidates,
+    });
+  }
+  const candidate = candidates[0];
+  if (candidate.declarationKind !== target.declarationKind
+      || candidate.declarationShapeDigest !== target.declarationShapeDigest) {
+    return conflict("contradicting-evidence", "node kind or declaration-shape evidence changed", {
+      candidatesConsidered: candidates,
+      expectedKind: target.declarationKind,
+      expectedShapeDigest: target.declarationShapeDigest,
+    });
+  }
+  const sourceEntry = request.files.find((entry) => entry.path === relativePath);
+  const decoded = decodeFile(sourceEntry);
+  if (decoded.error) return fail("invalid-target", `replace-node target file is invalid: ${decoded.error}`);
+  if (target.declarationEndByte > decoded.bytes.length) {
+    return conflict("preimage-out-of-range", "replace-node target range exceeds exact source bytes");
+  }
+  const preimage = decoded.bytes.subarray(target.declarationStartByte, target.declarationEndByte);
+  if (!preimage.equals(Buffer.from(target.expectedPreimageHex, "hex"))
+      || sha256(preimage) !== target.expectedPreimageSha256) {
+    return conflict("preimage-mismatch", "replace-node preimage bytes or hash changed", {
+      expectedPreimageSha256: target.expectedPreimageSha256,
+      actualPreimageSha256: sha256(preimage),
+    });
+  }
+  const prefix = decoded.bytes.subarray(0, target.declarationStartByte);
+  const suffix = decoded.bytes.subarray(target.declarationEndByte);
+  const output = Buffer.concat([prefix, replacement, suffix]);
+  if (output.length > MAX_FILE_BYTES) return fail("invalid-replacement", "replacement exceeds the per-file byte limit");
+  const outputText = output.toString("utf8");
+  if (!Buffer.from(outputText, "utf8").equals(output)) {
+    return fail("invalid-replacement", "replacement result is not valid UTF-8");
+  }
+  const replacementRequest = {
+    ...request,
+    operation: "analyze",
+    files: request.files.map((entry) => entry.path === relativePath
+      ? { ...entry, contentsHex: output.toString("hex") }
+      : entry),
+  };
+  const reparsed = analyze(replacementRequest);
+  if (reparsed.status !== "ok" || !reparsed.result.parserComplete) {
+    return conflict("post-parse-failure", "replacement source did not parse completely", {
+      parserDiagnostics: reparsed.result?.parserDiagnostics ?? [],
+    });
+  }
+  const postCandidates = reparsed.result.declarations.filter((declaration) =>
+    declaration.path === relativePath
+    && declaration.declarationStartByte === target.declarationStartByte
+    && declaration.declarationKind === target.declarationKind
+    && JSON.stringify(declaration.parentDeclarationPath) === JSON.stringify(candidate.parentDeclarationPath));
+  if (postCandidates.length !== 1) {
+    return conflict(postCandidates.length === 0 ? "post-context-missing" : "post-context-ambiguous",
+      "replacement did not preserve one intended declaration context", { candidatesConsidered: postCandidates });
+  }
+  const outsideBytesUnchanged = output.subarray(0, target.declarationStartByte).equals(prefix)
+    && output.subarray(target.declarationStartByte + replacement.length).equals(suffix);
+  if (!outsideBytesUnchanged) {
+    return conflict("outside-bytes-changed", "replace-node modified bytes outside the selected range");
+  }
+  return {
+    protocolVersion: PROTOCOL_VERSION,
+    status: "ok",
+    result: {
+      snapshotId: request.snapshotId,
+      path: relativePath,
+      originalSpan: {
+        startByte: target.declarationStartByte,
+        endByte: target.declarationEndByte,
+      },
+      newFileContentsHex: output.toString("hex"),
+      parserComplete: reparsed.result.parserComplete,
+      resolutionComplete: reparsed.result.resolutionComplete,
+      typeResolutionComplete: reparsed.result.typeResolutionComplete,
+      candidatesConsidered: candidates,
+      evidence: [
+        "exact-byte-span",
+        "preimage-bytes",
+        "preimage-sha256",
+        "declaration-kind",
+        "declaration-shape-digest",
+        "post-parse-context",
+        "outside-bytes-unchanged",
+      ],
+      confidence: "exact",
+      fallbackUsed: false,
+    },
+  };
+}
+
 function handshake(request) {
   if (request.protocolVersion !== PROTOCOL_VERSION) {
     return fail("unsupported-protocol", `protocol version ${request.protocolVersion} is unsupported`);
@@ -563,7 +701,7 @@ function handshake(request) {
       minimumNodeVersion: MINIMUM_NODE_VERSION,
       requestLimitBytes: MAX_REQUEST_BYTES,
       responseLimitBytes: MAX_RESPONSE_BYTES,
-      capabilities: ["analyze", "ts", "tsx", "virtual-files", "symbol-evidence"],
+      capabilities: ["analyze", "replace-node", "ts", "tsx", "virtual-files", "symbol-evidence"],
     },
   };
 }
@@ -577,7 +715,8 @@ function dispatch(request) {
   }
   if (request.operation === "handshake") return handshake(request);
   if (request.operation === "analyze") return analyze(request);
-  return fail("unsupported-operation", "operation must be handshake or analyze");
+  if (request.operation === "replace-node") return replaceNode(request);
+  return fail("unsupported-operation", "operation must be handshake, analyze, or replace-node");
 }
 
 if (ts) {

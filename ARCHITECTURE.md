@@ -473,8 +473,28 @@ review. Parser errors, ambiguous anchors, low confidence, and textual-context
 matches return explicit sidecar results without changing bytes.
 
 This is an experiment boundary, not a persistent semantic format or a full
-TypeScript parser integration. Any parser dependency or semantic persistence
-requires separate approval and format design.
+TypeScript parser integration. `paengi_typescript_adapter` is the separately
+approved optional full-parser boundary: it invokes the locally pinned
+TypeScript `5.9.3` Compiler API through protocol v1 with direct Node argv,
+bounded stdin/stdout/stderr, and a timeout. It builds an in-memory virtual file
+map only from a verified immutable `Snapshot_id`; it never reads the live
+working directory, host `node_modules`, a global TypeScript package, or project
+configuration/plugins outside that map.
+
+The adapter returns language-neutral declaration evidence, diagnostics, UTF-8
+byte spans, and parser/resolution completeness. Compiler symbols and internal
+IDs never enter Paengi types or storage. A guarded `replace-node` request
+checks exact preimage bytes and SHA-256, node kind and shape digest, splices the
+selected byte range, reparses, verifies the structural context, and proves the
+prefix/suffix unchanged. Adapter absence, timeout, malformed output, crash,
+parse damage, resolution incompleteness, or size limits become a structured
+semantic-unavailable result; exact textual fallback remains independent.
+
+Neither module creates an object, ID, ref, schema, golden format, workspace
+state, capsule revision, release, validation result, or attestation. Semantic
+matching stages beyond the bounded core and the fair contextual textual baseline
+remain Milestone 7 work. Semantic persistence still requires separate format
+approval and an ADR.
 
 ## 11. Conflict storage
 
