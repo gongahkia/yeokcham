@@ -147,7 +147,10 @@ Current-HEAD sparse hydration is unit-tested against an imported real Git reposi
 
 Maintain fixtures for:
 
-- Repository format versions.
+- Repository format versions. Retained V1/V2 repositories at
+  `fixtures/pinned/repository-format-v1/` and
+  `fixtures/pinned/repository-format-v2/` are opened, fully verified, and
+  exported against the pinned SHA-1 source graph and refs.
 - Old Git versions where practical.
 - SHA-1 repositories.
 - Corrupted objects.

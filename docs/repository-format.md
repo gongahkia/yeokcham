@@ -139,6 +139,9 @@ canonical Git header and SHA-1 object ID remain mandatory verification.
 The supported writer/reader is the locked Yeokcham source at this revision.
 Per-family normal, bounds, malformed-input, checksum, and signature tests live
 with the codecs in `yeokcham-core`; repository integration tests exercise
-import, verification, export, restart, crash boundaries, and `git fsck`. The
-next roadmap item, old-format fixtures, will add independently retained sample
-repositories for each supported historical reader path.
+import, verification, export, restart, crash boundaries, and `git fsck`.
+Independently retained V1 and V2 reader fixtures live at
+`fixtures/pinned/repository-format-v1/` and
+`fixtures/pinned/repository-format-v2/`; core coverage opens, verifies, and
+exports both, then compares each exported graph and ref state with the pinned
+SHA-1 Git source.

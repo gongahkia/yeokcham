@@ -1,4 +1,17 @@
-# Git fixtures
+# Fixtures
+
+## Pinned Yeokcham repository-format fixtures
+
+`pinned/repository-format-v1/` and `pinned/repository-format-v2/` are retained
+canonical Yeokcham repositories imported from
+`pinned/sha1-history-v1/loose.git`. The V2 fixture is the explicit
+copy-on-write migration of the V1 fixture. They contain no SQLite, cache, or
+staging state. Core regression coverage opens, verifies, and exports both
+fixtures, then compares their exported object graph and refs against the
+pinned Git source. Do not regenerate either fixture during routine testing;
+replace both only with an intentional reviewed format-fixture update.
+
+## Git fixtures
 
 Run `scripts/generate-git-fixtures.sh` to create `fixtures/generated/`, or pass a different output directory. The generator refuses to overwrite an existing path and publishes the completed fixture directory atomically.
 

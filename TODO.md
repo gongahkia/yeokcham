@@ -342,7 +342,7 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 
 - [x] Stable repository-format specification. `docs/repository-format.md` now defines supported V1/V2 bootstrap compatibility, canonical layout, recovery boundaries, and reader rules; `docs/serialization.md` defines every current local, backend, and remote record family.
 - [x] Migration framework. `yeokcham migrate <source-v1-repo> <destination-v2-repo>` performs bounded copy-on-write V1-to-V2 migration: it verifies and scans the source before target creation, preserves the V1 source for rollback, excludes disposable state, writes the V2 bootstrap last, and verifies the target; failed targets require explicit discard before retry.
-- [ ] Old-format fixtures.
+- [x] Old-format fixtures. Retained canonical `fixtures/pinned/repository-format-v1/` and `repository-format-v2/` fixtures import the pinned SHA-1 history; core coverage opens, verifies, exports, and compares both reader paths to the pinned Git graph and refs.
 - [ ] Signed release artefacts.
 - [ ] SBOM generation.
 - [ ] Dependency audit.

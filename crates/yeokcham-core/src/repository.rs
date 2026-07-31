@@ -8297,6 +8297,12 @@ mod tests {
         RepositoryMigrationLimits::new(verification_limits(), recovery_limits())
     }
 
+    fn pinned_repository_format_fixture(name: &str) -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../fixtures/pinned")
+            .join(name)
+    }
+
     #[test]
     fn restores_a_repository_from_encrypted_backend_and_exported_key() {
         let fixture = RefJournalCrashFixture::new();
@@ -9657,6 +9663,49 @@ mod tests {
             fs::read(bootstrap_path(&destination_root))
                 .expect("read unchanged destination bootstrap")
         );
+    }
+
+    #[test]
+    fn opens_verifies_and_exports_pinned_v1_and_v2_repository_format_fixtures() {
+        let temporary = TestDirectory::new();
+        let source = GitRepository::open(pinned_repository_format_fixture(
+            "sha1-history-v1/loose.git",
+        ))
+        .expect("open pinned Git source");
+        let expected_ids = source
+            .reachable_object_ids()
+            .expect("read pinned source IDs");
+        let expected_refs = source.ref_state().expect("read pinned source refs");
+        let limits = GitImportLimits::initial().expect("initial limits");
+
+        for (name, version) in [
+            ("repository-format-v1", crate::RepositoryFormatVersion::V1),
+            ("repository-format-v2", crate::RepositoryFormatVersion::V2),
+        ] {
+            let repository = LocalRepository::open(pinned_repository_format_fixture(name))
+                .expect("open pinned repository-format fixture");
+            assert_eq!(repository.format().version(), version);
+            repository
+                .verify(limits.verification_limits().expect("verification limits"))
+                .expect("verify pinned repository-format fixture");
+
+            let export = temporary.path().join(format!("{name}.git"));
+            repository
+                .export_loose_objects(&export, limits.export_limits().expect("export limits"))
+                .expect("export pinned repository-format fixture");
+            git_fsck(&export);
+            let exported = GitRepository::open(&export).expect("open fixture export");
+            assert_eq!(
+                exported
+                    .reachable_object_ids()
+                    .expect("read fixture export IDs"),
+                expected_ids
+            );
+            assert_eq!(
+                exported.ref_state().expect("read fixture export refs"),
+                expected_refs
+            );
+        }
     }
 
     #[test]
