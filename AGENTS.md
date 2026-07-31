@@ -23,7 +23,7 @@ Before changing code, read:
 5. `DECISIONS.md`
 6. `SECURITY_AND_RECOVERY.md`
 7. `TESTING_AND_BENCHMARKS.md`
-8. `TODO.md`
+8. The relevant open GitHub issue
 
 ## Working rules
 
@@ -43,7 +43,7 @@ Before coding:
 
 After coding:
 
-- Mark completed TODO items.
+- Update the linked GitHub issue.
 - Record deferred work.
 - Add or update ADRs for architectural changes.
 - Report commands run and results.
@@ -129,7 +129,7 @@ A task is done only when:
 - Tests cover normal and failure cases.
 - Documentation matches behaviour.
 - Persistent format changes are versioned.
-- TODO is updated.
+- The linked GitHub issue is updated or closed.
 - No unrelated warnings are introduced.
 - Relevant benchmark or correctness evidence is recorded.
 

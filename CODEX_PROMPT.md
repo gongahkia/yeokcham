@@ -11,7 +11,7 @@ Read every root document in this order:
 5. DECISIONS.md
 6. SECURITY_AND_RECOVERY.md
 7. TESTING_AND_BENCHMARKS.md
-8. TODO.md
+8. The relevant open GitHub issue
 9. AGENTS.md
 
 Do not begin by implementing Google Drive, GitHub mirroring, a daemon, a server, or a UI.
@@ -44,7 +44,7 @@ Constraints:
 - Do not make performance claims without benchmark evidence.
 - Keep persistent encodings versioned.
 - Treat all external bytes as hostile.
-- Update TODO.md as work is completed.
+- Update the linked GitHub issue as work is completed.
 - Record any deviation from the documents in DECISIONS.md or a new ADR.
 
 The first success criterion is not speed. It is a verified, byte-exact Git object round trip with a clean architecture that can grow into the full storage engine.

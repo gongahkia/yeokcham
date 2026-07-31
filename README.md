@@ -63,7 +63,7 @@ Yeokcham should eventually support:
 4. `DECISIONS.md`
 5. `SECURITY_AND_RECOVERY.md`
 6. `TESTING_AND_BENCHMARKS.md`
-7. `TODO.md`
+7. The relevant [open GitHub issue](https://github.com/gongahkia/yeokcham/issues)
 8. `AGENTS.md`
 9. `CODEX_PROMPT.md`
 

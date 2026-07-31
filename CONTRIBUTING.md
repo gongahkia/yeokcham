@@ -2,7 +2,7 @@
 
 ## Before changing code
 
-Read the project documents in the order listed in [`README.md`](README.md#read-order-for-an-implementation-agent). Work on the earliest incomplete milestone in [`TODO.md`](TODO.md), and discuss large or architectural changes in an issue before implementation.
+Read the project documents in the order listed in [`README.md`](README.md#read-order-for-an-implementation-agent). Work from a scoped [open GitHub issue](https://github.com/gongahkia/yeokcham/issues), and discuss large or architectural changes there before implementation.
 
 ## Development
 
@@ -20,6 +20,6 @@ Run `make help` for individual build, format, lint, test, documentation, and fix
 
 ## Pull requests
 
-Describe the invariant introduced or preserved, tests proving it, format or migration impact, and deferred work. Update relevant documentation and `TODO.md`. Do not include secrets, keys, plaintext private source, generated build output, or unrelated changes.
+Describe the invariant introduced or preserved, tests proving it, format or migration impact, and deferred work. Update relevant documentation and the linked GitHub issue. Do not include secrets, keys, plaintext private source, generated build output, or unrelated changes.
 
 By submitting a contribution, you agree that it is licensed under the repository's [MIT License](LICENSE).
