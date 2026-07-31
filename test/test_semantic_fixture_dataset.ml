@@ -102,7 +102,8 @@ let adversarial_semantic_matches_never_auto_apply () =
 let lexical_scope_evidence_beats_duplicate_text () =
   let fixture = Dataset.find "same-name-different-scopes" |> Option.get in
   let result = Dataset.semantic_result fixture in
-  Alcotest.(check bool) "semantic scope evidence applies" true
+  Alcotest.(check bool)
+    "semantic scope evidence applies" true
     (Retarget.permits_automatic_application result)
 
 let () =

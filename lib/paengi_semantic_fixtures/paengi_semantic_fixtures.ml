@@ -245,11 +245,14 @@ let make_scope_disambiguated () =
     semantic_anchor = anchor;
     semantic_candidates =
       [
-        make_candidate ~candidate_id:(fixture_id ^ ":lexical-match")
+        make_candidate
+          ~candidate_id:(fixture_id ^ ":lexical-match")
           ~module_path:"src/greeting.ts" ~target ~name_start:first_start ();
-        make_candidate ~candidate_id:(fixture_id ^ ":other-scope")
+        make_candidate
+          ~candidate_id:(fixture_id ^ ":other-scope")
           ~module_path:"src/greeting.ts" ~target ~name_start:second_start
-          ~lexical_path:[ "namespace:Other"; "function:greet" ] ();
+          ~lexical_path:[ "namespace:Other"; "function:greet" ]
+          ();
       ];
     expected_target_span = Some target_span;
     expected_outcome = Exact_bytes (splice target target_span "welcome");

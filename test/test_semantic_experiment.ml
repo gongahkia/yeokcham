@@ -25,6 +25,9 @@ let no_known_false_confident_semantic_application () =
 let textual_advantages_remain_reported () =
   let report = Experiment.run () in
   Alcotest.(check bool)
+    "semantic improves the lexical-scope workload" true
+    (report.Experiment.semantic_only_correct > 0);
+  Alcotest.(check bool)
     "textual-only wins remain visible" true
     (report.Experiment.textual_only_correct > 0);
   Alcotest.(check bool)

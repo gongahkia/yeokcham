@@ -1,4 +1,5 @@
 module Adapter = Paengi_typescript_adapter
+module Patch = Paengi_textual_patch
 module Snapshot = Paengi_snapshot
 module Store = Paengi_store
 
@@ -177,6 +178,38 @@ let failures_are_semantic_unavailable () =
           ~adapter_path:(fixture_path "large-output.mjs")
           ~max_response_bytes:128 Adapter.default_configuration))
 
+let unavailable_adapter_preserves_textual_operation () =
+  let source = "// independent edit\nexport const value = 1;\n" in
+  let semantic =
+    Adapter.analyze_files
+      (Adapter.configuration_with ~adapter_path:"missing-adapter.mjs"
+         Adapter.default_configuration)
+      ~snapshot_id:(String.make 64 '3') ~root_files:[ "src/a.ts" ]
+      ~files:
+        [
+          Adapter.Protocol.make_source_file ~path:"src/a.ts"
+            ~language:Adapter.Protocol.Ts ~contents:source;
+        ]
+      ~compiler_options:options
+  in
+  assert_unavailable_contains "adapter is missing" semantic;
+  let start_byte = String.index source '1' in
+  let patch =
+    Patch.make
+      ~original_span:Patch.{ start_byte; end_byte = start_byte + 1 }
+      ~expected_preimage:"1" ~replacement:"2" ~before_context:"value = "
+      ~after_context:";\n"
+      ~relaxed_context_bytes:Patch.default_relaxed_context_bytes
+    |> require_ok Fun.id
+  in
+  match Patch.apply ~source patch with
+  | Patch.Applied applied ->
+      Alcotest.(check string)
+        "textual operation remains available"
+        "// independent edit\nexport const value = 2;\n" applied.contents
+  | Patch.Already_satisfied _ | Patch.Conflict _ ->
+      Alcotest.fail "unavailable semantic adapter blocked a textual operation"
+
 let unsafe_paths_do_not_start_analysis () =
   let source =
     Adapter.Protocol.make_source_file ~path:"../escape.ts"
@@ -304,6 +337,8 @@ let () =
             handshake_reports_pinned_local_compiler;
           Alcotest.test_case "adapter failures remain unavailable" `Quick
             failures_are_semantic_unavailable;
+          Alcotest.test_case "unavailable adapter preserves textual operation"
+            `Quick unavailable_adapter_preserves_textual_operation;
           Alcotest.test_case "unsafe virtual path is rejected" `Quick
             unsafe_paths_do_not_start_analysis;
           Alcotest.test_case "replace-node preserves exact outside bytes" `Quick

@@ -328,15 +328,12 @@ let aggregate cases =
       count (fun case ->
           case.actual_outcome = Applied
           && case.target_selection_correct && case.exact_resulting_bytes_correct
-          && (String.equal case.confidence "exact"
-             || exact_stage case));
+          && (String.equal case.confidence "exact" || exact_stage case));
     nonexact_correct_applications =
       count (fun case ->
           case.actual_outcome = Applied
           && case.target_selection_correct && case.exact_resulting_bytes_correct
-          && not
-               (String.equal case.confidence "exact"
-               || exact_stage case));
+          && not (String.equal case.confidence "exact" || exact_stage case));
     safe_conflicts = count (fun case -> case.safe_conflict);
     false_confident_applications = count (fun case -> case.false_confident);
     false_negatives = count (fun case -> case.false_negative);

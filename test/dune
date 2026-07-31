@@ -10,6 +10,7 @@
   alcotest
   paengi_snapshot
   paengi_store
+  paengi_textual_patch
   paengi_typescript_adapter
   unix)
  (deps
