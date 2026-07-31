@@ -330,11 +330,11 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 - [x] Add integrity-check UI. Authenticated `GET /integrity` reruns bounded verification, renders only a successful read-only result, and otherwise returns a generic failure without partial inventory or repair action.
 - [x] Add mirror-state UI. Authenticated `GET /mirror` renders only redacted local GitHub policy direction/count state, never target/ref/object metadata, and performs no provider or credential operation.
 - [x] Add export and recovery commands. `yeokcham recover --export-git` fully verifies a local canonical repository before creating a conventional bare Git export; Drive snapshot recovery remains `yeokcham drive restore`.
-- [ ] Publish Docker image only after local binary is stable.
+- [ ] Publish Docker image only after local binary is stable. Deferred by operator choice: V1 supports the standalone loopback release binary; container publication requires an approved host-network policy and registry/image namespace.
 
 ### Exit criteria
 
-- [ ] Single-user server can be deployed without a hosted control plane.
+- [x] Single-user server can be deployed without a hosted control plane. `make server-release` builds a standalone binary that requires only the local canonical repository and a private token file; the binary startup integration test serves authenticated loopback health traffic.
 - [x] Network threat model is documented. V1 documents loopback-only unauthenticated exposure, local-process risk, parser and resource bounds, and prohibited public forwarding.
 - [x] No unauthenticated public listener is enabled by default. V1 rejects every non-loopback bind, including explicit public addresses.
 

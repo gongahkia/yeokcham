@@ -37,6 +37,7 @@ Cover:
 - In-memory decrypted-chunk and reconstructed-object cache bounds, corruption fallback, manifest/reference binding, and reuse after a valid cache fill.
 - Parallel source-object read ordering, invalid worker bounds, serial/parallel import equivalence, final repository verification, conventional export, and C Git fsck.
 - Verified offline recovery export, C Git fsck of its destination, and fail-closed rejection before destination creation when a canonical segment is corrupt.
+- Standalone `yeokcham-server` binary token creation, authenticated loopback startup, and health response.
 
 ### Property tests
 

@@ -14,6 +14,18 @@ yeokcham-server --repository <yeokcham-repo> --auth-token-file <private-token-fi
 
 The default bind is the operating system-selected port on `127.0.0.1`. Startup prints the actual address. `--bind` accepts a numeric socket address only and rejects every non-loopback address, including `0.0.0.0`. IPv6 loopback uses `[::1]:<port>`.
 
+## Standalone deployment
+
+Build the supported release binary from the checked source tree:
+
+```bash
+make server-release
+target/release/yeokcham-server token create <private-token-file>
+target/release/yeokcham-server --repository <yeokcham-repo> --auth-token-file <private-token-file> --bind 127.0.0.1:9181
+```
+
+The process needs only its local canonical repository and private token file; it has no hosted control plane, backend client, or credential dependency. Keep both under the operator's account and use an operator-selected local supervisor if persistence across logout or reboot is required. V1 deliberately does not ship a Docker image: ordinary Docker port publishing cannot expose a process bound only to the container loopback address, while host networking changes the container isolation boundary. A container policy and registry namespace require a separate approval.
+
 ## HTTP rules
 
 - HTTP/1.1 only.

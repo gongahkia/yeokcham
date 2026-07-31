@@ -1,9 +1,10 @@
 CARGO ?= cargo
 
-.PHONY: help build check fmt fmt-check lint test doc fixtures fuzz-smoke ci
+.PHONY: help build server-release check fmt fmt-check lint test doc fixtures fuzz-smoke ci
 
 help:
 	@echo "make build      build all workspace targets"
+	@echo "make server-release build the standalone release server binary"
 	@echo "make check      type-check all workspace targets"
 	@echo "make fmt        format Rust sources"
 	@echo "make fmt-check  verify Rust formatting"
@@ -16,6 +17,9 @@ help:
 
 build:
 	$(CARGO) build --workspace --all-targets --all-features --locked
+
+server-release:
+	$(CARGO) build --release -p yeokcham-server --locked
 
 check:
 	$(CARGO) check --workspace --all-targets --all-features --locked
