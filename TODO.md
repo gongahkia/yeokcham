@@ -311,7 +311,7 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 - [ ] Add prefetch heuristics.
 - [x] Measure startup overhead.
 - [x] Measure daemon memory.
-- [ ] Publish cases where daemon is slower.
+- [x] Publish cases where daemon is slower.
 
 ### Exit criteria
 

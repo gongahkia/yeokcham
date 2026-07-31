@@ -381,6 +381,8 @@ The committed 2026-07-31 daemon baseline has five Apple M3 runs at commit `84390
 
 The V1 daemon is opt-in and has no repository-format or cache-file dependency. Existing local import/export, remote-helper, cache, encrypted-recovery, and fixture round trips run in CI without starting it. Snapshot-pack cache reuse is verified by exact ref-state reuse plus strict `git fsck`; sparse current-path prefetch remains deterministic and does not satisfy the separate daemon-heuristics roadmap item.
 
+Published loss case: for every current import, export, receive-pack, or remote-helper workload, starting V1 adds the measured 70 ms median process lifetime and up to 5,931,008 B RSS while contributing no work, because none of those paths connects to it. This is a baseline-overhead result, not a comparative workload claim; it must not be counted as a daemon improvement.
+
 An explicit daemon sparse-prefetch configuration validates one Yeokcham repository plus exact relative paths, fills the bounded process cache at startup, and reruns only after ref-snapshot or ref-journal metadata changes. Its tests verify selected-only hydration and cache rehydration after a metadata change. It has no remote-helper IPC yet, so it remains outside sparse-checkout performance claims.
 
 The committed 2026-07-31 W5 result has five clean Apple M3 samples at commit `4d31ebe`: 0.83 s median cold and 0.30 s median warm usable-workspace time, with 772 B median received helper pack payload in both states. It establishes this fixture's local cold/warm behavior only.
