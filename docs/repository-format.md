@@ -26,12 +26,18 @@ and rejects an unsupported bootstrap version before returning a handle.
 | 1 | Initial immutable-object and optional `YKRF` snapshot layout. | `create` writes V1. |
 | 2 | V1 layout plus checked append-only `YKRE` local ref journals. | The first `sync` or accepted local push upgrades only the bootstrap after immutable objects are verified. |
 
-The V1-to-V2 upgrade replaces the bootstrap atomically; it does not rewrite
-segments, indexes, manifests, snapshots, or Git objects. An older V1-only
-reader rejects V2. `LocalRepository::migrate` currently validates rather than
-rewrites. A future format change must allocate a version or required feature,
-use copy-on-write publication, verify the successor, retain the previous
-readable bootstrap until finalisation, and document interrupted recovery.
+`yeokcham migrate <source-v1-repo> <destination-v2-repo>` is the supported
+rollback-preserving V1-to-V2 migration. It fully verifies and scans the V1
+source before creating the absent destination, copies only canonical recovery
+files, writes a V2 bootstrap last, and fully verifies the destination. It
+never writes the source. A failed migration can leave an incomplete destination
+which must be explicitly discarded before retrying; it is safe to restart but
+does not resume an existing destination. SQLite and recognized staging files
+are not copied. An older V1-only reader rejects V2. `LocalRepository::migrate`
+only opens and validates a repository. A future format change must allocate a
+version or required feature, use copy-on-write publication, verify the
+successor, retain a readable rollback source until finalisation, and document
+interrupted recovery.
 
 ## Layout
 

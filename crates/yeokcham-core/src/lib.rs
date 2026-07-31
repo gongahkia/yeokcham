@@ -121,8 +121,9 @@ pub use repository::{
     BlobManifestReadLimits, ChunkedBlobStorageLimits, EncryptedRepositoryRecoveryLimits,
     EncryptedRepositoryRecoveryReport, GitImportLimits, GitImportReport, GitObjectMetadata,
     LocalRepository, LooseObjectExportLimits, LooseObjectExportReport,
-    MetadataObjectManifestReadLimits, RefSnapshotPublicationLimits, RepositoryVerificationLimits,
-    RepositoryVerificationReport, SparsePrefetchReport,
+    MetadataObjectManifestReadLimits, RefSnapshotPublicationLimits, RepositoryMigrationLimits,
+    RepositoryMigrationReport, RepositoryVerificationLimits, RepositoryVerificationReport,
+    SparsePrefetchReport,
 };
 pub use repository_discovery::{
     DiscoveredLocalRepository, RepositoryDiscoveryLimits, RepositoryDiscoveryReport,

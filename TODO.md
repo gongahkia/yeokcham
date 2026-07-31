@@ -341,7 +341,7 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 ## Milestone 10 — Production hardening
 
 - [x] Stable repository-format specification. `docs/repository-format.md` now defines supported V1/V2 bootstrap compatibility, canonical layout, recovery boundaries, and reader rules; `docs/serialization.md` defines every current local, backend, and remote record family.
-- [ ] Migration framework.
+- [x] Migration framework. `yeokcham migrate <source-v1-repo> <destination-v2-repo>` performs bounded copy-on-write V1-to-V2 migration: it verifies and scans the source before target creation, preserves the V1 source for rollback, excludes disposable state, writes the V2 bootstrap last, and verifies the target; failed targets require explicit discard before retry.
 - [ ] Old-format fixtures.
 - [ ] Signed release artefacts.
 - [ ] SBOM generation.

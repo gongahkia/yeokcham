@@ -19,8 +19,9 @@ use yeokcham_core::{
     GithubMirrorConfiguration, GithubMirrorDirection, GithubPublicationRule, GithubRepository,
     KeyringDriveCredentialStore, LocalRepository, RefEvent, RefEventReadLimits,
     RefEventVerifyingKey, RemoteRefJournalLimits, RemoteRefJournalReconciliation,
-    RepositoryEncryptionKey, RepositoryKeyExport, Result, StoredDriveAccessTokenProvider,
-    UreqDriveHttpTransport, UreqDriveOAuthTransport, fetch_remote_ref_journal,
+    RepositoryEncryptionKey, RepositoryKeyExport, RepositoryMigrationLimits, Result,
+    StoredDriveAccessTokenProvider, UreqDriveHttpTransport, UreqDriveOAuthTransport,
+    fetch_remote_ref_journal,
 };
 use zeroize::Zeroizing;
 
@@ -87,6 +88,10 @@ enum Command {
     },
     Verify {
         repository: PathBuf,
+    },
+    Migrate {
+        source: PathBuf,
+        destination: PathBuf,
     },
     ExportGit {
         repository: PathBuf,
@@ -231,6 +236,10 @@ fn main() -> ExitCode {
             device_id,
         } => sync(source, repository, device_id),
         Command::Verify { repository } => verify(repository),
+        Command::Migrate {
+            source,
+            destination,
+        } => migrate(source, destination),
         Command::ExportGit {
             repository,
             destination,
@@ -361,6 +370,10 @@ fn parse_command(arguments: Vec<OsString>) -> Result<Command> {
         "key" => parse_key(&arguments),
         "verify" if arguments.len() == 2 => Ok(Command::Verify {
             repository: PathBuf::from(&arguments[1]),
+        }),
+        "migrate" if arguments.len() == 3 => Ok(Command::Migrate {
+            source: PathBuf::from(&arguments[1]),
+            destination: PathBuf::from(&arguments[2]),
         }),
         "export-git" if arguments.len() == 3 => Ok(Command::ExportGit {
             repository: PathBuf::from(&arguments[1]),
@@ -949,6 +962,21 @@ fn verify(repository: PathBuf) -> Result<()> {
         report.tiny_blob_group_manifest_count(),
         report.metadata_object_manifest_count(),
         report.ref_snapshot_count(),
+    );
+    Ok(())
+}
+
+fn migrate(source: PathBuf, destination: PathBuf) -> Result<()> {
+    let import_limits = GitImportLimits::initial()?;
+    let limits =
+        RepositoryMigrationLimits::new(import_limits.verification_limits()?, recovery_limits()?);
+    let report = LocalRepository::open(source)?.migrate_v1_to_v2(destination, limits)?;
+    println!(
+        "migrated source_format={} destination_format={} files={} bytes={}",
+        report.source_version(),
+        report.destination_version(),
+        report.file_count(),
+        report.total_bytes(),
     );
     Ok(())
 }
@@ -3037,7 +3065,7 @@ fn usage_error() -> Error {
 
 fn print_usage() {
     println!(
-        "usage:\n  yeokcham init --from-git <source-git-repo> <yeokcham-repo> [--chunked-blob-minimum <bytes>] [--object-read-workers <1..8>]\n  yeokcham sync --from-git <source-git-repo> <yeokcham-repo> --device <device-id>\n  yeokcham verify <yeokcham-repo>\n  yeokcham export-git <yeokcham-repo> <destination-git-repo>\n  yeokcham recover --export-git <yeokcham-repo> <destination-git-repo>\n  yeokcham inspect object <yeokcham-repo> <git-object-id>\n  yeokcham inspect storage <yeokcham-repo>\n  yeokcham inspect refs <yeokcham-repo>\n  yeokcham cache inspect|verify|clear <yeokcham-repo>\n  yeokcham cache trim --max-bytes <bytes> <yeokcham-repo>\n  yeokcham github configure <yeokcham-repo> --repository <owner/repository> --direction <publish-only|pull-only|bidirectional-fast-forward|manual> [--force-update <reject|require-exact-checkpoint>] --publish <heads|tags|refs/heads/*|refs/tags/*> [--publish ...]\n  yeokcham github inspect <yeokcham-repo>\n  yeokcham github plan [--show-objects] <yeokcham-repo>\n  yeokcham github publish <yeokcham-repo> --apply [--transport <https|ssh>]\n  yeokcham github publish-pr <yeokcham-repo> --source <refs/heads/branch> --branch <remote-branch> --apply [--transport <https|ssh>]\n  yeokcham github fetch <yeokcham-repo> [--show-refs] [--transport <https|ssh>]\n  yeokcham key create-export --passphrase-stdin <yeokcham-repo> <recovery-key-export>\n  yeokcham drive auth --client-id <google-desktop-client-id> [--redirect-port <port>]\n  yeokcham drive init --client-id <google-desktop-client-id>\n  yeokcham drive backup|push --client-id <google-desktop-client-id> --folder-id <drive-folder-id> --key-export <recovery-key-export> --passphrase-stdin <yeokcham-repo>\n  yeokcham drive restore|clone --client-id <google-desktop-client-id> --folder-id <drive-folder-id> --key-export <recovery-key-export> --passphrase-stdin <destination>\n  yeokcham drive verify --client-id <google-desktop-client-id> --folder-id <drive-folder-id> --key-export <recovery-key-export> --passphrase-stdin\n  yeokcham drive journal inspect --client-id <google-desktop-client-id> --folder-id <drive-folder-id> --key-export <recovery-key-export> --root-key <root-ed25519-public-key-hex> --passphrase-stdin <yeokcham-repo>"
+        "usage:\n  yeokcham init --from-git <source-git-repo> <yeokcham-repo> [--chunked-blob-minimum <bytes>] [--object-read-workers <1..8>]\n  yeokcham sync --from-git <source-git-repo> <yeokcham-repo> --device <device-id>\n  yeokcham verify <yeokcham-repo>\n  yeokcham migrate <source-v1-repo> <destination-v2-repo>\n  yeokcham export-git <yeokcham-repo> <destination-git-repo>\n  yeokcham recover --export-git <yeokcham-repo> <destination-git-repo>\n  yeokcham inspect object <yeokcham-repo> <git-object-id>\n  yeokcham inspect storage <yeokcham-repo>\n  yeokcham inspect refs <yeokcham-repo>\n  yeokcham cache inspect|verify|clear <yeokcham-repo>\n  yeokcham cache trim --max-bytes <bytes> <yeokcham-repo>\n  yeokcham github configure <yeokcham-repo> --repository <owner/repository> --direction <publish-only|pull-only|bidirectional-fast-forward|manual> [--force-update <reject|require-exact-checkpoint>] --publish <heads|tags|refs/heads/*|refs/tags/*> [--publish ...]\n  yeokcham github inspect <yeokcham-repo>\n  yeokcham github plan [--show-objects] <yeokcham-repo>\n  yeokcham github publish <yeokcham-repo> --apply [--transport <https|ssh>]\n  yeokcham github publish-pr <yeokcham-repo> --source <refs/heads/branch> --branch <remote-branch> --apply [--transport <https|ssh>]\n  yeokcham github fetch <yeokcham-repo> [--show-refs] [--transport <https|ssh>]\n  yeokcham key create-export --passphrase-stdin <yeokcham-repo> <recovery-key-export>\n  yeokcham drive auth --client-id <google-desktop-client-id> [--redirect-port <port>]\n  yeokcham drive init --client-id <google-desktop-client-id>\n  yeokcham drive backup|push --client-id <google-desktop-client-id> --folder-id <drive-folder-id> --key-export <recovery-key-export> --passphrase-stdin <yeokcham-repo>\n  yeokcham drive restore|clone --client-id <google-desktop-client-id> --folder-id <drive-folder-id> --key-export <recovery-key-export> --passphrase-stdin <destination>\n  yeokcham drive verify --client-id <google-desktop-client-id> --folder-id <drive-folder-id> --key-export <recovery-key-export> --passphrase-stdin\n  yeokcham drive journal inspect --client-id <google-desktop-client-id> --folder-id <drive-folder-id> --key-export <recovery-key-export> --root-key <root-ed25519-public-key-hex> --passphrase-stdin <yeokcham-repo>"
     );
 }
 
@@ -3143,6 +3171,24 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn parses_copy_on_write_repository_migration() {
+        let command = parse_command(
+            ["migrate", "source-v1", "destination-v2"]
+                .map(OsString::from)
+                .to_vec(),
+        )
+        .expect("parse migration");
+        assert!(matches!(
+            command,
+            Command::Migrate {
+                source,
+                destination,
+            } if source == PathBuf::from("source-v1") && destination == PathBuf::from("destination-v2")
+        ));
+        assert!(parse_command(["migrate", "source-v1"].map(OsString::from).to_vec()).is_err());
     }
 
     #[test]

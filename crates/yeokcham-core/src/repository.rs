@@ -34,6 +34,7 @@ const BOOTSTRAP_MAGIC: [u8; 4] = *b"YKRB";
 const BOOTSTRAP_MAX_BYTES: u64 = 4096;
 const BOOTSTRAP_PATH: &str = "format/repository.bin";
 const METADATA_PATH: &str = "metadata.sqlite3";
+const CACHE_DIRECTORY: &str = "cache";
 const METADATA_APPLICATION_ID: i32 = 0x594b_4d44; // YKMD
 const METADATA_SCHEMA_VERSION: i32 = 1;
 const BLOB_MANIFEST_DIRECTORY: &str = "manifests/blobs";
@@ -341,6 +342,67 @@ impl EncryptedRepositoryRecoveryReport {
     }
 
     /// Returns the exact cumulative plaintext file bytes covered by the snapshot.
+    pub const fn total_bytes(self) -> u64 {
+        self.total_bytes
+    }
+}
+
+/// Caller-selected bounds for a copy-on-write repository-format migration.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct RepositoryMigrationLimits {
+    verification_limits: RepositoryVerificationLimits,
+    canonical_file_limits: EncryptedRepositoryRecoveryLimits,
+}
+
+impl RepositoryMigrationLimits {
+    /// Creates a migration policy from full-verification and canonical-file bounds.
+    pub const fn new(
+        verification_limits: RepositoryVerificationLimits,
+        canonical_file_limits: EncryptedRepositoryRecoveryLimits,
+    ) -> Self {
+        Self {
+            verification_limits,
+            canonical_file_limits,
+        }
+    }
+
+    /// Returns the source and destination immutable-storage verification bounds.
+    pub const fn verification_limits(self) -> RepositoryVerificationLimits {
+        self.verification_limits
+    }
+
+    /// Returns bounds for scanning and copying canonical repository files.
+    pub const fn canonical_file_limits(self) -> EncryptedRepositoryRecoveryLimits {
+        self.canonical_file_limits
+    }
+}
+
+/// Summary returned after a verified repository-format migration.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct RepositoryMigrationReport {
+    source_version: crate::RepositoryFormatVersion,
+    destination_version: crate::RepositoryFormatVersion,
+    file_count: usize,
+    total_bytes: u64,
+}
+
+impl RepositoryMigrationReport {
+    /// Returns the verified source repository-format version.
+    pub const fn source_version(self) -> crate::RepositoryFormatVersion {
+        self.source_version
+    }
+
+    /// Returns the verified destination repository-format version.
+    pub const fn destination_version(self) -> crate::RepositoryFormatVersion {
+        self.destination_version
+    }
+
+    /// Returns the canonical file count in the migrated repository.
+    pub const fn file_count(self) -> usize {
+        self.file_count
+    }
+
+    /// Returns the exact cumulative canonical-file byte count.
     pub const fn total_bytes(self) -> u64 {
         self.total_bytes
     }
@@ -1485,13 +1547,69 @@ impl LocalRepository {
         })
     }
 
-    /// Opens and validates a repository at the current supported format.
+    /// Opens and validates a repository without changing its format.
     ///
-    /// V1 is the first persisted format, so migration currently performs no
-    /// write. Future migrations must be copy-on-write and leave the prior
-    /// bootstrap readable until finalization.
+    /// Use [`Self::migrate_v1_to_v2`] for the supported copy-on-write V1-to-V2
+    /// migration.
     pub fn migrate(root: impl AsRef<Path>) -> Result<Self> {
         Self::open(root)
+    }
+
+    /// Copies a fully verified V1 repository to a new, verified V2 repository.
+    ///
+    /// `destination` must not exist. The source is fully verified and scanned
+    /// before the destination is created, and this method never writes to the
+    /// source. A failed copy can leave an incomplete destination; explicitly
+    /// discard that destination before retrying. SQLite and recognized staging
+    /// files are not copied because they are disposable state.
+    pub fn migrate_v1_to_v2(
+        &self,
+        destination: impl AsRef<Path>,
+        limits: RepositoryMigrationLimits,
+    ) -> Result<RepositoryMigrationReport> {
+        self.verify(limits.verification_limits())?;
+        let source_format = self.format();
+        if source_format.version() != crate::RepositoryFormatVersion::V1 {
+            return Err(Error::new(
+                ErrorKind::Conflict,
+                "repository migration source is not V1",
+            ));
+        }
+
+        visit_recovery_files(&self.root, limits.canonical_file_limits(), |_| Ok(()))?;
+
+        let destination = destination.as_ref();
+        create_recovery_destination(destination)?;
+        let bootstrap_key = BackendKey::from_bytes(BOOTSTRAP_PATH.as_bytes())
+            .map_err(|_| Error::new(ErrorKind::Internal, "repository bootstrap path is invalid"))?;
+        let copied = visit_recovery_files(&self.root, limits.canonical_file_limits(), |file| {
+            if file.relative == bootstrap_key {
+                return Ok(());
+            }
+            write_recovery_file(destination, &file.relative, &file.bytes)
+        })?;
+        let destination_format = source_format.with_version(crate::RepositoryFormatVersion::V2);
+        write_recovery_file(
+            destination,
+            &bootstrap_key,
+            &encode_bootstrap(self.id, destination_format),
+        )?;
+        sync_recovery_directories(destination)?;
+
+        let migrated = Self::open(destination)?;
+        if migrated.id() != self.id || migrated.format() != destination_format {
+            return Err(Error::new(
+                ErrorKind::CorruptData,
+                "repository migration destination bootstrap is invalid",
+            ));
+        }
+        migrated.verify(limits.verification_limits())?;
+        Ok(RepositoryMigrationReport {
+            source_version: source_format.version(),
+            destination_version: destination_format.version(),
+            file_count: copied.file_count(),
+            total_bytes: copied.total_bytes(),
+        })
     }
 
     /// Returns the repository root path.
@@ -7017,25 +7135,49 @@ fn collect_recovery_files(
     limits: EncryptedRepositoryRecoveryLimits,
 ) -> Result<Vec<RecoverySourceFile>> {
     let mut files = Vec::new();
-    let mut total_bytes = 0_u64;
-    collect_recovery_directory(root, root, &mut files, &mut total_bytes, limits)?;
+    visit_recovery_files(root, limits, |file| {
+        files.push(file);
+        Ok(())
+    })?;
     files.sort_by(|left, right| left.relative.cmp(&right.relative));
-    if files.len() > limits.maximum_files() {
-        return Err(Error::new(
-            ErrorKind::Unsupported,
-            "encrypted recovery file count exceeds the limit",
-        ));
-    }
     Ok(files)
 }
 
-fn collect_recovery_directory(
+fn visit_recovery_files<F>(
+    root: &Path,
+    limits: EncryptedRepositoryRecoveryLimits,
+    mut visitor: F,
+) -> Result<EncryptedRepositoryRecoveryReport>
+where
+    F: FnMut(RecoverySourceFile) -> Result<()>,
+{
+    let mut file_count = 0_usize;
+    let mut total_bytes = 0_u64;
+    visit_recovery_directory(
+        root,
+        root,
+        &mut file_count,
+        &mut total_bytes,
+        limits,
+        &mut visitor,
+    )?;
+    Ok(EncryptedRepositoryRecoveryReport {
+        file_count,
+        total_bytes,
+    })
+}
+
+fn visit_recovery_directory<F>(
     root: &Path,
     directory: &Path,
-    files: &mut Vec<RecoverySourceFile>,
+    file_count: &mut usize,
     total_bytes: &mut u64,
     limits: EncryptedRepositoryRecoveryLimits,
-) -> Result<()> {
+    visitor: &mut F,
+) -> Result<()>
+where
+    F: FnMut(RecoverySourceFile) -> Result<()>,
+{
     validate_directory(directory, directory == root)?;
     for entry in fs::read_dir(directory)
         .map_err(|error| io_error(error, "encrypted recovery directory could not be read"))?
@@ -7055,6 +7197,9 @@ fn collect_recovery_directory(
         if relative == METADATA_PATH {
             continue;
         }
+        if relative == CACHE_DIRECTORY {
+            continue;
+        }
         let key = BackendKey::from_bytes(relative.as_bytes()).map_err(|_| {
             Error::new(ErrorKind::CorruptData, "encrypted recovery path is invalid")
         })?;
@@ -7067,7 +7212,13 @@ fn collect_recovery_directory(
             ));
         }
         if metadata.is_dir() {
-            collect_recovery_directory(root, &path, files, total_bytes, limits)?;
+            if !is_canonical_recovery_directory(&key) {
+                return Err(Error::new(
+                    ErrorKind::CorruptData,
+                    "encrypted recovery source contains a noncanonical directory",
+                ));
+            }
+            visit_recovery_directory(root, &path, file_count, total_bytes, limits, visitor)?;
             continue;
         }
         if is_recovery_staging_file(&key) {
@@ -7085,7 +7236,7 @@ fn collect_recovery_directory(
                 "encrypted recovery source file is invalid",
             ));
         }
-        if files.len() >= limits.maximum_files() {
+        if *file_count >= limits.maximum_files() {
             return Err(Error::new(
                 ErrorKind::Unsupported,
                 "encrypted recovery file count exceeds the limit",
@@ -7131,10 +7282,11 @@ fn collect_recovery_directory(
                 ));
             }
         }
-        files.push(RecoverySourceFile {
+        visitor(RecoverySourceFile {
             relative: key,
             bytes,
-        });
+        })?;
+        *file_count += 1;
     }
     Ok(())
 }
@@ -7385,6 +7537,26 @@ fn is_canonical_recovery_file(relative: &BackendKey) -> bool {
         (Some("mirrors"), Some("github.ykgm"), None, None) => true,
         _ => false,
     }
+}
+
+fn is_canonical_recovery_directory(relative: &BackendKey) -> bool {
+    matches!(
+        std::str::from_utf8(relative.as_bytes()),
+        Ok("format")
+            | Ok("segments")
+            | Ok("indexes")
+            | Ok("manifests")
+            | Ok("manifests/blobs")
+            | Ok("manifests/generations")
+            | Ok("manifests/tiny-groups")
+            | Ok("manifests/objects")
+            | Ok("manifests/refs")
+            | Ok("journals")
+            | Ok("journals/refs")
+            | Ok("summaries")
+            | Ok("summaries/current")
+            | Ok("mirrors")
+    )
 }
 
 fn encode_bootstrap(id: RepositoryId, format: RepositoryFormat) -> Vec<u8> {
@@ -8119,6 +8291,10 @@ mod tests {
     fn recovery_limits() -> EncryptedRepositoryRecoveryLimits {
         EncryptedRepositoryRecoveryLimits::new(64, 4_096, 64 * 4_096, 64 * 4_096)
             .expect("recovery limits")
+    }
+
+    fn migration_limits() -> RepositoryMigrationLimits {
+        RepositoryMigrationLimits::new(verification_limits(), recovery_limits())
     }
 
     #[test]
@@ -9342,6 +9518,144 @@ mod tests {
         assert_eq!(
             before_migration,
             fs::read(bootstrap_path(&root)).expect("read bootstrap")
+        );
+    }
+
+    #[test]
+    fn copies_a_verified_v1_repository_to_v2_without_mutating_the_source() {
+        let temporary = TestDirectory::new();
+        let source_root = temporary.path().join("source");
+        let destination_root = temporary.path().join("destination");
+        let source = LocalRepository::create(&source_root).expect("create source");
+        verification_fixture(&source);
+        source
+            .record_object_metadata(&verified_object(GitObjectKind::Blob, b"disposable"))
+            .expect("record disposable metadata");
+        let staging = source_root
+            .join("segments")
+            .join(format!(".yeokcham-{}.partial", SEGMENT_ID_C));
+        fs::write(&staging, b"interrupted").expect("write recognized staging");
+        let cache = source_root.join("cache/packs/entry");
+        fs::create_dir_all(&cache).expect("create disposable cache");
+        fs::write(cache.join("pack"), b"disposable").expect("write disposable cache");
+        let expected = collect_recovery_files(&source_root, recovery_limits())
+            .expect("collect canonical source files");
+        let expected_bytes: u64 = expected
+            .iter()
+            .map(|file| u64::try_from(file.bytes.len()).expect("file length"))
+            .sum();
+        let source_bootstrap =
+            fs::read(bootstrap_path(&source_root)).expect("read source bootstrap");
+
+        let report = source
+            .migrate_v1_to_v2(&destination_root, migration_limits())
+            .expect("migrate V1 source");
+
+        assert_eq!(report.source_version(), crate::RepositoryFormatVersion::V1);
+        assert_eq!(
+            report.destination_version(),
+            crate::RepositoryFormatVersion::V2
+        );
+        assert_eq!(report.file_count(), expected.len());
+        assert_eq!(report.total_bytes(), expected_bytes);
+        assert_eq!(
+            source_bootstrap,
+            fs::read(bootstrap_path(&source_root)).expect("read unchanged source bootstrap")
+        );
+        assert!(staging.exists());
+        assert!(metadata_path(&source_root).exists());
+        assert!(cache.exists());
+        assert!(!metadata_path(&destination_root).exists());
+        assert!(!destination_root.join(CACHE_DIRECTORY).exists());
+        assert!(
+            !destination_root
+                .join("segments")
+                .join(staging.file_name().expect("staging name"))
+                .exists()
+        );
+
+        let destination = LocalRepository::open(&destination_root).expect("open destination");
+        assert_eq!(destination.id(), source.id());
+        assert_eq!(
+            source.format().version(),
+            crate::RepositoryFormatVersion::V1
+        );
+        assert_eq!(
+            destination.format().version(),
+            crate::RepositoryFormatVersion::V2
+        );
+        destination
+            .verify(verification_limits())
+            .expect("verify migrated destination");
+    }
+
+    #[test]
+    fn rejects_invalid_v1_to_v2_migration_preconditions_without_creating_a_target() {
+        let temporary = TestDirectory::new();
+        let corrupt_root = temporary.path().join("corrupt");
+        let corrupt_destination = temporary.path().join("corrupt-destination");
+        let corrupt_source = LocalRepository::create(&corrupt_root).expect("create corrupt source");
+        fs::write(bootstrap_path(&corrupt_root), b"corrupt").expect("corrupt source bootstrap");
+        let error = corrupt_source
+            .migrate_v1_to_v2(&corrupt_destination, migration_limits())
+            .expect_err("corrupt source must fail before target creation");
+        assert_eq!(error.kind(), ErrorKind::CorruptData);
+        assert!(!corrupt_destination.exists());
+
+        let unexpected_root = temporary.path().join("unexpected");
+        let unexpected_destination = temporary.path().join("unexpected-destination");
+        let unexpected = LocalRepository::create(&unexpected_root).expect("create source");
+        fs::create_dir(unexpected_root.join("unexpected")).expect("create unknown directory");
+        let error = unexpected
+            .migrate_v1_to_v2(&unexpected_destination, migration_limits())
+            .expect_err("unknown source directory must fail before target creation");
+        assert_eq!(error.kind(), ErrorKind::CorruptData);
+        assert!(!unexpected_destination.exists());
+
+        let v2_root = temporary.path().join("v2");
+        let v2_destination = temporary.path().join("v2-destination");
+        let v1 = LocalRepository::create(&v2_root).expect("create V1 source");
+        fs::write(
+            bootstrap_path(&v2_root),
+            encode_bootstrap(
+                v1.id(),
+                v1.format().with_version(crate::RepositoryFormatVersion::V2),
+            ),
+        )
+        .expect("write V2 bootstrap");
+        let v2 = LocalRepository::open(&v2_root).expect("open V2 source");
+        let error = v2
+            .migrate_v1_to_v2(&v2_destination, migration_limits())
+            .expect_err("V2 source must be rejected");
+        assert_eq!(error.kind(), ErrorKind::Conflict);
+        assert!(!v2_destination.exists());
+
+        let source_root = temporary.path().join("source");
+        let destination_root = temporary.path().join("destination");
+        let source = LocalRepository::create(&source_root).expect("create source");
+        let destination = LocalRepository::create(&destination_root).expect("create destination");
+        let source_bootstrap =
+            fs::read(bootstrap_path(&source_root)).expect("read source bootstrap");
+        let destination_bootstrap =
+            fs::read(bootstrap_path(&destination_root)).expect("read destination bootstrap");
+        let error = source
+            .migrate_v1_to_v2(&destination_root, migration_limits())
+            .expect_err("existing destination must be rejected");
+        assert_eq!(error.kind(), ErrorKind::Conflict);
+        assert_eq!(
+            source_bootstrap,
+            fs::read(bootstrap_path(&source_root)).expect("read unchanged source bootstrap")
+        );
+        assert_eq!(
+            destination.id(),
+            LocalRepository::open(&destination_root)
+                .expect("open destination")
+                .id()
+        );
+        assert_eq!(
+            destination_bootstrap,
+            fs::read(bootstrap_path(&destination_root))
+                .expect("read unchanged destination bootstrap")
         );
     }
 

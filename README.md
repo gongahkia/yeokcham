@@ -91,6 +91,7 @@ Run `make help` to list development targets and `make ci` for the complete locke
 yeokcham init --from-git <source-git-repo> <yeokcham-repo>
 yeokcham sync --from-git <source-git-repo> <yeokcham-repo> --device <device-id>
 yeokcham verify <yeokcham-repo>
+yeokcham migrate <source-v1-repo> <destination-v2-repo>
 yeokcham inspect refs <yeokcham-repo>
 yeokcham inspect storage <yeokcham-repo>
 yeokcham inspect object <yeokcham-repo> <git-object-id>
@@ -112,6 +113,8 @@ git --git-dir=<destination-git-repo> fsck --full --strict
 `init` requires a destination path that does not exist. A failed import can leave unreachable immutable records in that fresh path; remove the failed destination before retrying. The initial CDC threshold is 4 KiB; `--chunked-blob-minimum <bytes>` is available for controlled storage-policy comparison, not as a benchmark-backed default recommendation. Import source reads are serial by default; `--object-read-workers <1..8>` is a bounded controlled-comparison option that retains at most 64 MiB of verified bodies before serial publication.
 
 `recover --export-git` is the offline recovery export. It first fully verifies the supplied local canonical repository, then creates an absent conventional bare Git destination with reconstructed refs and objects. It makes no network or credential request. After `drive restore` has rebuilt a local destination from an encrypted snapshot, use this command to produce a conventional Git repository; a failed export can leave an incomplete destination that must be discarded before retrying.
+
+`migrate` is the explicit V1-to-V2 copy-on-write path. It fully verifies and scans the V1 source before creating the required-absent V2 destination, copies canonical recovery state only, and verifies that destination before success. The V1 source is unchanged for rollback. A failed migration may leave an incomplete destination; discard it before retrying. It makes no network or credential request.
 
 `sync` is a controlled local-source maintenance workflow, not `git push`: it imports only newly reachable verified objects, then appends a checked full ref-state transition. Reuse one canonical UUIDv4 `--device` value for its writer. The local CLI and remote helper remain V1 single-trusted-local-writer workflows. The core separately supports root-pinned remote device registries: immutable `YKDR` registration/revocation records authorize only matching Ed25519-signed V2 ref events, reject stale writers before publication, and retain every divergent branch for explicit resolution. The registry root public key is an out-of-band trust anchor and its signing key is caller-managed; Drive clone/push wiring remains unfinished.
 

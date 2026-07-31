@@ -106,3 +106,4 @@ Valid statuses are `Proposed`, `Accepted`, `Rejected`, `Deprecated`, and `Supers
 | [ADR-0098](0098-redacted-authenticated-mirror-state.md) | Accepted | Render redacted local GitHub mirror policy state |
 | [ADR-0099](0099-verified-offline-recovery-export.md) | Accepted | Verify local canonical storage before offline recovery export |
 | [ADR-0100](0100-standalone-loopback-server-delivery.md) | Accepted | Deliver HTTP V1 as a standalone loopback binary |
+| [ADR-0101](0101-copy-on-write-v1-v2-migration.md) | Accepted | Copy V1 repositories to verified V2 destinations |
