@@ -286,10 +286,10 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 
 ### Exit criteria
 
-- [ ] Selected refs support normal GitHub PR and CI workflows.
-- [ ] Unselected refs are not published.
-- [ ] Remote-created commits can be imported.
-- [ ] Divergence never causes silent data loss.
+- [x] Selected refs support normal GitHub PR and CI workflows.
+- [x] Unselected refs are not published.
+- [x] Remote-created commits can be imported.
+- [x] Divergence never causes silent data loss.
 
 ## Milestone 8 — Local daemon and performance work
 
