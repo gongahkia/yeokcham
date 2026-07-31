@@ -128,6 +128,7 @@ stop_daemon_prewarm() {
     wait "$benchmark_daemon_pid" 2>/dev/null || true
     benchmark_daemon_pid=
   fi
+  return 0
 }
 
 write_result() {
