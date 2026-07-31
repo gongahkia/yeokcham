@@ -1577,6 +1577,22 @@ impl LocalRepository {
         checkpoint: GithubMirrorCheckpoint,
         ref_snapshot_limits: RefSnapshotReadLimits,
     ) -> Result<()> {
+        self.record_github_mirror_checkpoints(
+            std::iter::once((reference, checkpoint)),
+            ref_snapshot_limits,
+        )
+    }
+
+    /// Records confirmed selected-ref checkpoints in one atomic local policy update.
+    ///
+    /// Every supplied local object ID must still match the acknowledged local
+    /// ref state. No checkpoint is replaced when any supplied ref is stale,
+    /// absent, duplicate, or unselected.
+    pub fn record_github_mirror_checkpoints(
+        &self,
+        checkpoints: impl IntoIterator<Item = (RefName, GithubMirrorCheckpoint)>,
+        ref_snapshot_limits: RefSnapshotReadLimits,
+    ) -> Result<()> {
         let mut configuration = self
             .github_mirror_configuration()?
             .ok_or_else(|| Error::new(ErrorKind::NotFound, "GitHub mirror is not configured"))?;
@@ -1588,19 +1604,34 @@ impl LocalRepository {
                     "repository has no acknowledged ref state",
                 )
             })?;
-        let local_object_id = state.regular_refs().get(&reference).ok_or_else(|| {
-            Error::new(
-                ErrorKind::NotFound,
-                "GitHub mirror checkpoint ref is unavailable",
-            )
-        })?;
-        if *local_object_id != checkpoint.local_object_id() {
+        let mut seen = BTreeSet::new();
+        for (reference, checkpoint) in checkpoints {
+            if !seen.insert(reference.clone()) {
+                return Err(Error::new(
+                    ErrorKind::InvalidInput,
+                    "GitHub mirror checkpoint reference is duplicated",
+                ));
+            }
+            let local_object_id = state.regular_refs().get(&reference).ok_or_else(|| {
+                Error::new(
+                    ErrorKind::NotFound,
+                    "GitHub mirror checkpoint ref is unavailable",
+                )
+            })?;
+            if *local_object_id != checkpoint.local_object_id() {
+                return Err(Error::new(
+                    ErrorKind::Conflict,
+                    "GitHub mirror checkpoint local object is stale",
+                ));
+            }
+            configuration.record_checkpoint(reference, checkpoint)?;
+        }
+        if seen.is_empty() {
             return Err(Error::new(
-                ErrorKind::Conflict,
-                "GitHub mirror checkpoint local object is stale",
+                ErrorKind::InvalidInput,
+                "GitHub mirror checkpoint set is empty",
             ));
         }
-        configuration.record_checkpoint(reference, checkpoint)?;
         self.configure_github_mirror(&configuration)
     }
 
@@ -6962,7 +6993,7 @@ mod tests {
     }
 
     #[test]
-    fn records_github_mirror_checkpoints_only_for_current_selected_refs() {
+    fn records_github_mirror_checkpoints_atomically_for_current_selected_refs() {
         let temporary = TestDirectory::new();
         let root = temporary.path().join("repository");
         let repository = LocalRepository::create(&root).expect("create repository");
@@ -6976,11 +7007,15 @@ mod tests {
             .publish_blob_manifest(&manifest)
             .expect("publish blob manifest");
         let reference: RefName = "refs/heads/main".parse().expect("reference");
+        let topic: RefName = "refs/heads/topic".parse().expect("topic reference");
         let snapshot = RefSnapshot::new(
             repository.id(),
             MANIFEST_ID_B.parse().expect("manifest ID"),
             GitRefState::new(
-                BTreeMap::from([(reference.clone(), manifest.git_object_id())]),
+                BTreeMap::from([
+                    (reference.clone(), manifest.git_object_id()),
+                    (topic.clone(), manifest.git_object_id()),
+                ]),
                 HeadState::Symbolic(reference.clone()),
             )
             .expect("ref state"),
@@ -7001,13 +7036,47 @@ mod tests {
             GitObjectId::from_bytes([9; GitObjectId::BYTE_LENGTH]),
             1_720_000_000,
         );
-        repository
-            .record_github_mirror_checkpoint(
-                reference.clone(),
-                checkpoint.clone(),
+        let topic_checkpoint = GithubMirrorCheckpoint::new(
+            manifest.git_object_id(),
+            "refs/heads/mirror-topic".parse().expect("remote reference"),
+            GitObjectId::from_bytes([6; GitObjectId::BYTE_LENGTH]),
+            1_720_000_000,
+        );
+        let error = repository
+            .record_github_mirror_checkpoints(
+                [
+                    (reference.clone(), checkpoint.clone()),
+                    (
+                        topic.clone(),
+                        GithubMirrorCheckpoint::new(
+                            GitObjectId::from_bytes([8; GitObjectId::BYTE_LENGTH]),
+                            "refs/heads/mirror-topic".parse().expect("remote reference"),
+                            GitObjectId::from_bytes([7; GitObjectId::BYTE_LENGTH]),
+                            1_720_000_001,
+                        ),
+                    ),
+                ],
                 ref_snapshot_limits(),
             )
-            .expect("record checkpoint");
+            .expect_err("stale batch checkpoint");
+        assert_eq!(error.kind(), ErrorKind::Conflict);
+        assert!(
+            repository
+                .github_mirror_configuration()
+                .expect("read configuration")
+                .expect("configuration")
+                .checkpoints()
+                .is_empty()
+        );
+        repository
+            .record_github_mirror_checkpoints(
+                [
+                    (reference.clone(), checkpoint.clone()),
+                    (topic.clone(), topic_checkpoint.clone()),
+                ],
+                ref_snapshot_limits(),
+            )
+            .expect("record checkpoints");
         assert_eq!(
             repository
                 .github_mirror_configuration()
@@ -7016,6 +7085,15 @@ mod tests {
                 .checkpoints()
                 .get(&reference),
             Some(&checkpoint)
+        );
+        assert_eq!(
+            repository
+                .github_mirror_configuration()
+                .expect("read configuration")
+                .expect("configuration")
+                .checkpoints()
+                .get(&topic),
+            Some(&topic_checkpoint)
         );
         let error = repository
             .record_github_mirror_checkpoint(
