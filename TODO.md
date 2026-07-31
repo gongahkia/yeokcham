@@ -6,12 +6,12 @@ Robustness tasks operate only on Paengi's pure functions and generated local fix
 ## Active vertical slice
 
 - Milestone: 7 — TypeScript semantic sidecar.
-- Task: Slice 1 complete: independent bounded contextual textual patch core. Slice 2 complete: inspectable deterministic semantic evidence stages and a shared 40-case v1 fixture dataset. Slice 3 will add versioned comparative experiment results and closeout.
-- Modules/files: pure `paengi_textual_patch` byte-only baseline; pure `paengi_semantic_retarget` ordered evidence selector; pure `paengi_semantic_fixtures` shared v1 dataset; pure `paengi_semantic`; nonpersistent `paengi_typescript_adapter`; pinned `tools/paengi-typescript-adapter`; focused baseline/semantic/adapter tests, checked-in local fixtures, and a fixture-results report.
+- Task: Milestone 7 complete. Slice 1 added the independent bounded contextual textual patch core; Slice 2 added inspectable deterministic semantic evidence stages and the shared 40-case v1 fixture dataset; Slice 3 added versioned comparative results, schema validation, and closeout. Do not begin Milestone 8 here.
+- Modules/files: pure `paengi_textual_patch` byte-only baseline; pure `paengi_semantic_retarget` ordered evidence selector; pure `paengi_semantic_fixtures` shared v1 dataset; pure `paengi_semantic_experiment` report runner; pure `paengi_semantic`; nonpersistent `paengi_typescript_adapter`; pinned `tools/paengi-typescript-adapter`; focused baseline/semantic/adapter tests, checked-in local fixtures, JSON schema, and report.
 - Types: textual patch operation/stage/outcome/conflict and byte-splice validator; nonpersistent evidence anchor/candidate/candidate report/stage/completeness/confidence result; parser error, declaration/structural path, semantic anchor, exact textual fallback, rename/move/replacement proposal, confidence/evidence, structured match/application conflict, protocol declaration evidence, semantic-unavailable reason, and replace-node outcome.
 - Formats: none. No object schema, identity, ref, golden byte format, or capsule/workspace/release encoding changes.
 - Invariants: exact file bytes remain canonical; a proposal retains complete expected/replacement fallback bytes; parse failure makes no proposal; automatic rename requires one same-kind/name/signature declaration; compiler evidence is nonpersistent and snapshot-bound; adapter failure is semantic-unavailable; exact replace-node verifies preimage bytes/hash, kind, shape, post-parse context, and unchanged outside bytes.
-- Tests: textual exact/context/relaxation/conflict/byte-splice cases; focused parser/inference/application cases; pinned-helper protocol/TS/TSX/snapshot/replacement failure tests; seeded baseline and semantic properties. Full `make check` and `make property-test PROPERTY_TEST_SEED=17` remain required before closeout.
+- Tests: textual exact/context/relaxation/conflict/byte-splice cases; evidence ordering/candidate reports/alias/overload/scope/incompleteness/ambiguity checks; fixture-oracle, confidence-ceiling, shared-strategy, false-confidence, deterministic-metrics, schema, and adapter-optionality tests; pinned-helper protocol/TS/TSX/snapshot/replacement failure tests; seeded baseline and semantic properties. `make check` validates the checked-in report schema.
 - External libraries: existing Alcotest/QCheck plus exact-pinned local TypeScript `5.9.3`; no parser dependency beyond the approved isolated helper.
 - ADR changes: none; no persistent format change.
 
@@ -321,7 +321,7 @@ Robustness tasks operate only on Paengi's pure functions and generated local fix
 
 ### Application
 
-- [ ] Match exact semantic identity.
+- [x] Match exact semantic evidence only where bytes, span, and context validate; otherwise retain explicit uncertainty.
 - [x] Match a bounded exact declaration fingerprint (kind, name, normalized signature).
 - [x] Match structural path.
 - [x] Match syntax/token similarity.
@@ -334,7 +334,7 @@ Robustness tasks operate only on Paengi's pure functions and generated local fix
 ### Experiments
 
 - [x] Build bounded local retargeting fixture suite.
-- [ ] Compare with textual patch baseline.
+- [x] Compare against the independent contextual textual patch baseline using the same fixture bytes, operation, oracle, integrity checks, and classifications.
 - [x] Compare with exact textual fallback baseline.
 - [x] Measure correct automatic application for the fixture suite.
 - [x] Measure safe conflict for the fixture suite.
@@ -344,9 +344,9 @@ Robustness tasks operate only on Paengi's pure functions and generated local fix
 
 ### Exit criteria
 
-- [ ] Semantic sidecars improve at least one defined retargeting workload.
-- [ ] False-confidence cases are reported.
-- [ ] Unsupported or invalid files remain byte-correct.
+- [x] Semantic sidecars improve one defined lexical-scope disambiguation workload; textual wins remain reported separately.
+- [x] Versioned results report false-confidence, false-negative, safe-conflict, and false-application counts; the semantic Exact/High gate is zero known failures.
+- [x] Unsupported, invalid, absent-adapter, and non-TypeScript inputs retain byte-based operation and exact-byte validation.
 
 ## Milestone 8 — Git import and export
 

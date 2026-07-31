@@ -55,3 +55,10 @@ The OCaml boundary materialises its bounded request into a private temporary
 stdin descriptor, uses direct argv for Node, and enforces wall-clock timeout and
 stdout/stderr bounds. The helper also rejects request/response size excess and
 reports an elapsed-time overrun after a completed compiler call.
+
+Adapter declarations, paths, aliases, types, and source positions are transient
+evidence only. Neither TypeScript `Symbol` objects nor internal IDs are Paengi
+identities. Adapter absence, failed startup, malformed protocol, timeout,
+compiler failure, unresolved imports, incomplete resolution, or configured
+limits return a structured unavailable or incomplete result; callers retain the
+independent exact byte-based textual operation.

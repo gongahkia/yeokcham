@@ -491,9 +491,8 @@ parse damage, resolution incompleteness, or size limits become a structured
 semantic-unavailable result; exact textual fallback remains independent.
 
 Neither module creates an object, ID, ref, schema, golden format, workspace
-state, capsule revision, release, validation result, or attestation. Semantic
-matching stages beyond the bounded core and the shared fair comparison remain
-Milestone 7 work. `paengi_textual_patch` is the independent baseline: it uses
+state, capsule revision, release, validation result, or attestation.
+`paengi_textual_patch` is the independent baseline: it uses
 only bytes, original spans, and bounded before/selected/after context. It
 neither links to the Compiler API nor accepts declaration, parser, symbol, type,
 or confidence evidence. Semantic persistence still requires separate format
@@ -506,6 +505,15 @@ uncertainty reason. `paengi_semantic_fixtures` is a checked-in versioned
 40-case dataset used by both strategies; its oracle names expected bytes or a
 safe conflict. The selector has no storage, compiler process, or permanent
 identity dependency.
+
+`paengi_semantic_experiment` runs both strategies with identical fixture bytes,
+operation intent, oracle, splice validation, and classification rules. It emits
+the checked-in version-1 report at
+`docs/experiments/results/semantic-retargeting-v1.json`, checked against the
+co-located JSON Schema by `make semantic-experiment`; `make check` validates
+the checked-in result. Timings are host-specific evidence, never a correctness
+gate. This experiment schema is documentation evidence only, not a Paengi
+persistent format.
 
 ## 11. Conflict storage
 

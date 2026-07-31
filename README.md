@@ -64,14 +64,16 @@ quarantine superseded scratch records.
 `compact --prune` is irreversible. paengi remains a portfolio and research
 prototype, not a production Git replacement.
 
-Milestone 7 has a bounded, non-persistent TypeScript declaration-sidecar
-foundation plus an optional isolated full-parser capability. The capability uses
-the locally pinned TypeScript Compiler API (`5.9.3`; Node `>=14.17.0`) through a
-versioned stdin/stdout protocol and a verified-snapshot virtual file map. It
+Milestone 7 is complete as a bounded, non-persistent TypeScript-sidecar
+experiment. It compares an independent byte-only contextual textual baseline
+with deterministic semantic evidence stages against one shared 40-case fixture
+dataset and checked v1 results. The optional full-parser capability uses the
+locally pinned TypeScript Compiler API (`5.9.3`; Node `>=14.17.0`) through a
+versioned stdin/stdout protocol and verified-snapshot virtual file map. It
 does not persist semantic data, alter canonical file bytes or prior formats, or
-participate in restore, materialisation, export, or verification. If the helper
-is absent, invalid, slow, or incomplete, Paengi returns semantic-unavailable
-and retains the exact textual fallback.
+participate in restore, materialisation, export, or verification. Helper
+absence, invalid output, timeout, or incomplete analysis returns
+semantic-unavailable and preserves the textual operation.
 
 See `CONTRIBUTING.md` for development rules. Paengi is licensed under the MIT License.
 
@@ -85,7 +87,7 @@ make setup
 make ci
 ```
 
-`make build`, `make test`, `make property-test`, `make lint`, and `make format` expose the individual steps. `make check` runs build, format verification, lint, package validation, and tests without the GitHub Actions linter.
+`make build`, `make test`, `make property-test`, `make semantic-experiment`, `make lint`, and `make format` expose the individual steps. `make check` runs build, format verification, lint, package validation, tests, the persistent-format audit, and static experiment-schema validation without the GitHub Actions linter.
 
 ## Current local CLI
 

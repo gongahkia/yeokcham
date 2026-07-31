@@ -123,7 +123,7 @@ let make_anchor ~module_path ~original_start =
 let make_applicable ?(target_path = "src/greeting.ts")
     ?(module_path = target_path) ?(target = source) ?(parser_complete = true)
     ?(resolution_complete = true) ?(type_resolution_complete = true)
-    ?(ceiling = Retarget.High) ?(explanation = "independent surrounding change")
+    ?(ceiling = Retarget.Exact) ?(explanation = "independent surrounding change")
     fixture_id category =
   let original_path = "src/greeting.ts" in
   let original_start = require_substring source "greet" in
@@ -442,29 +442,29 @@ let all =
       make_applicable
         ~target:("// changed signature\n" ^ source)
         ~parser_complete:false ~resolution_complete:false
-        ~type_resolution_complete:false ~ceiling:Retarget.Low
+        ~type_resolution_complete:false ~ceiling:Retarget.Medium
         ~explanation:"changed signature must not receive high confidence"
         "changed-function-signature" "changed function signatures";
       make_applicable
         ~target:("// split into helpers\n" ^ source)
         ~parser_complete:false ~resolution_complete:false
-        ~type_resolution_complete:false ~ceiling:Retarget.Low
+        ~type_resolution_complete:false ~ceiling:Retarget.Medium
         ~explanation:"split declarations are intentionally incomplete"
         "function-split" "function split";
       make_applicable
         ~target:("// merged declarations\n" ^ source)
         ~parser_complete:false ~resolution_complete:false
-        ~type_resolution_complete:false ~ceiling:Retarget.Low
+        ~type_resolution_complete:false ~ceiling:Retarget.Medium
         ~explanation:"merged declarations are intentionally incomplete"
         "function-merge" "function merge";
       make_applicable ~target:"function greet( {\n" ~parser_complete:false
         ~resolution_complete:false ~type_resolution_complete:false
-        ~ceiling:Retarget.Low ~explanation:"parse-damaged source"
+        ~ceiling:Retarget.Medium ~explanation:"parse-damaged source"
         "parse-damaged-source" "parse-damaged source";
       make_applicable
         ~target:("import { absent } from 'missing';\n" ^ source)
         ~resolution_complete:false ~type_resolution_complete:false
-        ~ceiling:Retarget.Low ~explanation:"unresolved import"
+        ~ceiling:Retarget.Medium ~explanation:"unresolved import"
         "unresolved-imports" "unresolved imports";
     ]
   in

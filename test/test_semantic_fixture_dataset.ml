@@ -70,6 +70,9 @@ let both_strategies_receive_shared_bytes_and_oracles () =
     (fun fixture ->
       let target = Dataset.target_bytes fixture in
       let patch = Dataset.textual_patch fixture |> Result.get_ok in
+      let textual_operation : Dataset.textual_operation =
+        fixture.Dataset.textual_operation
+      in
       ignore (Patch.apply ~source:target patch);
       let semantic = Dataset.semantic_result fixture in
       Alcotest.(check string)
@@ -81,12 +84,58 @@ let both_strategies_receive_shared_bytes_and_oracles () =
         (List.mem_assoc fixture.Dataset.target_path
            fixture.Dataset.retarget_base);
       match fixture.Dataset.expected_outcome with
-      | Dataset.Exact_bytes expected ->
+      | Dataset.Exact_bytes expected -> (
           Alcotest.(check bool)
             (fixture.Dataset.fixture_id ^ " oracle bytes")
             true
-            (String.length expected > 0)
-      | Dataset.Safe_conflict -> ())
+            (String.length expected > 0);
+          match fixture.Dataset.expected_target_span with
+          | Some selected_span ->
+              Alcotest.(check bool)
+                (fixture.Dataset.fixture_id ^ " oracle is exact byte splice")
+                true
+                (Patch.validates_splice ~source:target ~selected_span
+                   ~expected_preimage:textual_operation.Dataset.expected_preimage
+                   ~replacement:textual_operation.Dataset.replacement
+                   ~output:expected)
+          | None ->
+              Alcotest.(check string)
+                (fixture.Dataset.fixture_id ^ " already-satisfied oracle")
+                target expected)
+      | Dataset.Safe_conflict ->
+          Alcotest.(check bool)
+            (fixture.Dataset.fixture_id ^ " conflict has no target span") true
+            (Option.is_none fixture.Dataset.expected_target_span);
+      let semantic = Dataset.semantic_result fixture in
+      Alcotest.(check bool)
+        (fixture.Dataset.fixture_id ^ " parser expectation")
+        fixture.Dataset.parser_complete semantic.Retarget.parser_complete;
+      Alcotest.(check bool)
+        (fixture.Dataset.fixture_id ^ " resolution expectation")
+        fixture.Dataset.resolution_complete semantic.Retarget.resolution_complete;
+      Alcotest.(check bool)
+        (fixture.Dataset.fixture_id ^ " type resolution expectation")
+        fixture.Dataset.type_resolution_complete
+        semantic.Retarget.type_resolution_complete)
+    Dataset.all
+
+let confidence_rank confidence =
+  match Retarget.confidence_to_string confidence with
+  | "unknown" -> 0
+  | "low" -> 1
+  | "medium" -> 2
+  | "high" -> 3
+  | "exact" -> 4
+  | _ -> assert false
+
+let fixture_confidence_ceilings_are_respected () =
+  List.iter
+    (fun fixture ->
+      let result = Dataset.semantic_result fixture in
+      Alcotest.(check bool)
+        (fixture.Dataset.fixture_id ^ " confidence ceiling") true
+        (confidence_rank result.Retarget.confidence
+        <= confidence_rank fixture.Dataset.acceptable_confidence_ceiling))
     Dataset.all
 
 let adversarial_semantic_matches_never_auto_apply () =
@@ -115,6 +164,8 @@ let () =
             dataset_is_versioned_and_complete;
           Alcotest.test_case "shared strategy inputs and oracles" `Quick
             both_strategies_receive_shared_bytes_and_oracles;
+          Alcotest.test_case "oracle confidence ceilings" `Quick
+            fixture_confidence_ceilings_are_respected;
           Alcotest.test_case "adversarial confidence gate" `Quick
             adversarial_semantic_matches_never_auto_apply;
           Alcotest.test_case "lexical scope disambiguation" `Quick

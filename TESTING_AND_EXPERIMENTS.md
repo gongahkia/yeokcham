@@ -356,14 +356,24 @@ Compare conceptually with branch switching and virtual branches.
 
 ### Outcomes
 
-- Correct exact application.
-- Correct uncertain application.
-- Safe conflict.
-- False positive.
-- False negative.
-- Validation pass or failure.
+- Correct exact application: selected target and resulting bytes equal the
+  fixture oracle with Exact semantic confidence or the textual exact-span stage.
+- Correct non-exact application: target and bytes equal the oracle through a
+  lower-confidence semantic stage or a contextual textual stage.
+- Safe conflict: refusal where the oracle permits or requires refusal, with no
+  byte modification. It is not counted as an application.
+- False-confident application: Exact/High semantic application with a wrong
+  target, wrong bytes, outside-span bytes, or an oracle-required conflict.
+- False negative: missing, ambiguity, or rejection where the oracle has one
+  uniquely applicable target.
+- Validation pass or failure, including exact byte-splice invariance.
 
-The report must highlight false positives prominently.
+The report must highlight false-confident applications prominently. The checked
+v1 schema and report are
+`docs/experiments/schema/semantic-retargeting-v1.schema.json` and
+`docs/experiments/results/semantic-retargeting-v1.json`; use `make
+semantic-experiment` to regenerate and validate them. Its elapsed timings are
+host-specific evidence, not a gate.
 
 ## 8. Performance benchmarks
 
@@ -430,13 +440,13 @@ and post-parse conflict cases. The OCaml suite separately covers the verified
 snapshot virtual-file boundary and unavailable outcomes for a missing helper,
 timeout, malformed response, crash, and oversized output.
 
-These are correctness checks, not performance gates. The current result is
-limited to exact-span replacement, the bounded declaration matcher, and a
+These are correctness checks, not performance gates. The result remains limited
+to exact-span replacement, the bounded declaration matcher, and a
 nonpersistent evidence selector. The deterministic shared fixture dataset has
 40 cases and drives both the byte-only contextual baseline and semantic
-selector. The versioned comparative result schema/aggregate report remains
-required before a broad retargeting-rate claim.
-`docs/experiments/semantic-sidecar-v1.md` records the published scope and must
+selector. The checked-in versioned comparative report is schema-validated by
+`make semantic-experiment` and statically revalidated by `make check`.
+`docs/experiments/semantic-sidecar-v1.md` records the measured scope and must
 not be read as a general reliability claim.
 
 ## 10. Release gates
