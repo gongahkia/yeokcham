@@ -33,11 +33,11 @@ Each worker owns a cloned adapter and creates its own thread-local Git repositor
 
 ## Decision
 
-Enable gitoxide's `parallel` feature and use cloned `ThreadSafeRepository` handles only in bounded scoped import-read workers. The initial import policy selects `min(available_parallelism, 8)` workers. An explicit worker override accepts one through eight workers. Batches below 2 MiB and single-object batches remain serial; segment writes, SQLite updates, manifest publication, final verification, and ref publication remain serial.
+Enable gitoxide's `parallel` feature and use cloned `ThreadSafeRepository` handles only in bounded scoped import-read workers. The initial import policy remains serial. An explicit controlled-comparison override accepts one through eight workers. Batches below 2 MiB and single-object batches remain serial; segment writes, SQLite updates, manifest publication, final verification, and ref publication remain serial. A default change requires a reproducible material end-to-end gain with no tail regression.
 
 ## Consequences
 
-Import can use multiple cores for independent source-object reads and SHA-1 verification while retaining deterministic canonical writes. The adapter feature graph changes and reading a source concurrently remains only a point-in-time operation, as it was before. Large singleton objects are not parallelized because Git's object ID is a sequential SHA-1 input.
+Controlled imports can use multiple cores for independent source-object reads and SHA-1 verification while retaining deterministic canonical writes. The default resource profile remains unchanged until measured evidence justifies a change. The adapter feature graph changes and reading a source concurrently remains only a point-in-time operation, as it was before. Large singleton objects are not parallelized because Git's object ID is a sequential SHA-1 input.
 
 ## Invariants
 

@@ -696,8 +696,7 @@ impl GitImportLimits {
                 PUBLISHED_REF_SNAPSHOT_MAX_BYTES,
                 PUBLISHED_REF_SNAPSHOT_MAX_REFERENCE_ENTRIES,
             )?,
-        )?
-        .with_object_read_workers(initial_import_object_read_workers())
+        )
     }
 
     /// Validates one caller-selected Git import policy.
@@ -4905,13 +4904,6 @@ struct GitObjectRead {
     expected_body_bytes: Option<u64>,
 }
 
-fn initial_import_object_read_workers() -> usize {
-    thread::available_parallelism()
-        .map(|count| count.get())
-        .unwrap_or(1)
-        .min(INITIAL_IMPORT_MAXIMUM_OBJECT_READ_WORKERS)
-}
-
 fn git_object_read_batches(
     source: &GitRepository,
     ids: &[GitObjectId],
@@ -8361,10 +8353,7 @@ mod tests {
     #[test]
     fn bounds_parallel_object_read_workers() {
         let limits = GitImportLimits::initial().expect("limits");
-        assert!(
-            (1..=INITIAL_IMPORT_MAXIMUM_OBJECT_READ_WORKERS)
-                .contains(&limits.object_read_workers())
-        );
+        assert_eq!(limits.object_read_workers(), 1);
         for workers in [0, INITIAL_IMPORT_MAXIMUM_OBJECT_READ_WORKERS + 1] {
             let error = limits
                 .with_object_read_workers(workers)

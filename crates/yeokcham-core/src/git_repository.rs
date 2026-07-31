@@ -942,6 +942,32 @@ mod tests {
     }
 
     #[test]
+    fn rejects_a_worker_read_when_its_planned_body_size_changes() {
+        let temporary = TestDirectory::new();
+        let worktree = initialize_committed_worktree(&temporary);
+        fs::write(worktree.join("body.bin"), b"bounded body").expect("write blob body");
+        let id_text = git_stdout(&worktree, &["hash-object", "-w", "body.bin"]);
+        let id: GitObjectId = id_text.parse().expect("object ID");
+        let repository = GitRepository::open(&worktree).expect("open repository");
+        let body_bytes = repository
+            .object_body_bytes(id, 1024)
+            .expect("inspect body bytes");
+
+        let object = repository
+            .read_verified_object_with_expected_body_bytes(id, 1024, body_bytes)
+            .expect("planned body size");
+        assert_eq!(
+            object.data().len(),
+            usize::try_from(body_bytes).expect("body size")
+        );
+        let error = repository
+            .read_verified_object_with_expected_body_bytes(id, 1024, body_bytes + 1)
+            .expect_err("different planned body size must fail");
+        assert_eq!(error.kind(), ErrorKind::CorruptData);
+        assert!(!error.to_string().contains(&id_text));
+    }
+
+    #[test]
     fn rejects_read_limits_and_missing_objects_without_disclosing_ids() {
         let temporary = TestDirectory::new();
         let worktree = initialize_committed_worktree(&temporary);

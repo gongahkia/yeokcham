@@ -305,7 +305,7 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 
 ### Performance
 
-- [ ] Parallelise hashing where measured.
+- [ ] Parallelise hashing where measured. Deferred: the 2026-07-31 paired 2-worker result has a 5% lower median but worse p95, while 8 workers are slower; retain serial default pending a material no-tail-regression result.
 - [ ] Parallelise compression where measured.
 - [x] Add pack-synthesis cache.
 - [ ] Add prefetch heuristics.
