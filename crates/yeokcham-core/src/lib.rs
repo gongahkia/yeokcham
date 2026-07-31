@@ -33,6 +33,7 @@ mod ref_name;
 mod ref_snapshot;
 mod remote_ref_journal;
 mod repository;
+mod repository_discovery;
 mod repository_format;
 mod repository_id;
 mod repository_key;
@@ -112,6 +113,10 @@ pub use repository::{
     LocalRepository, LooseObjectExportLimits, LooseObjectExportReport,
     MetadataObjectManifestReadLimits, RefSnapshotPublicationLimits, RepositoryVerificationLimits,
     RepositoryVerificationReport,
+};
+pub use repository_discovery::{
+    DiscoveredLocalRepository, RepositoryDiscoveryLimits, RepositoryDiscoveryReport,
+    discover_local_repositories,
 };
 pub use repository_format::{RepositoryFeatureFlags, RepositoryFormat, RepositoryFormatVersion};
 pub use repository_id::RepositoryId;
