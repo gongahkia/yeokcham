@@ -291,4 +291,5 @@
    (run %{scratch_property_test})
    (run %{compaction_property_test})
    (run %{capsule_property_test})
-   (run %{capsule_durable_property_test}))))
+   (run %{capsule_durable_property_test})
+   (run %{workspace_property_test}))))

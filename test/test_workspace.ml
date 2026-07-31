@@ -131,6 +131,25 @@ let missing_requirements_and_cycles_reject () =
   | Error (Workspace.Required_capsule_missing _) -> ()
   | Error error -> Alcotest.fail (Workspace.error_to_string error)
   | Ok _ -> Alcotest.fail "missing required capsule was accepted");
+  let wrong_revision = revision_id 63 in
+  let mismatched =
+    [
+      selection capsule_a revision_a
+        ~dependencies:
+          [
+            Capsule.Requires_capsule
+              { capsule = capsule_b; revision = Some wrong_revision };
+          ];
+      selection capsule_b revision_b;
+    ]
+  in
+  (match Workspace.derive_order ~selected:mismatched ~explicit_order:None with
+  | Error (Workspace.Required_revision_missing { required_revision; _ }) ->
+      Alcotest.(check bool)
+        "required revision is identified" true
+        (Id.Capsule_revision_id.equal wrong_revision required_revision)
+  | Error error -> Alcotest.fail (Workspace.error_to_string error)
+  | Ok _ -> Alcotest.fail "mismatched required revision was accepted");
   let release = release_id 62 in
   let release_requirement =
     [
@@ -161,6 +180,36 @@ let missing_requirements_and_cycles_reject () =
   | Error error -> Alcotest.fail (Workspace.error_to_string error)
   | Ok _ -> Alcotest.fail "dependency cycle was accepted"
 
+let duplicate_selection_rejects () =
+  let capsule_a = capsule_id 70 in
+  let capsule_b = capsule_id 71 in
+  let revision_a = revision_id 70 in
+  let revision_b = revision_id 71 in
+  (match
+     Workspace.derive_order
+       ~selected:
+         [ selection capsule_a revision_a; selection capsule_a revision_b ]
+       ~explicit_order:None
+   with
+  | Error (Workspace.Duplicate_capsule actual) ->
+      Alcotest.(check bool)
+        "duplicate capsule is identified" true
+        (Id.Capsule_id.equal capsule_a actual)
+  | Error error -> Alcotest.fail (Workspace.error_to_string error)
+  | Ok _ -> Alcotest.fail "duplicate capsule selection was accepted");
+  match
+    Workspace.derive_order
+      ~selected:
+        [ selection capsule_a revision_a; selection capsule_b revision_a ]
+      ~explicit_order:None
+  with
+  | Error (Workspace.Duplicate_revision actual) ->
+      Alcotest.(check bool)
+        "duplicate revision is identified" true
+        (Id.Capsule_revision_id.equal revision_a actual)
+  | Error error -> Alcotest.fail (Workspace.error_to_string error)
+  | Ok _ -> Alcotest.fail "duplicate revision selection was accepted"
+
 let () =
   Alcotest.run "workspace"
     [
@@ -174,5 +223,7 @@ let () =
             incomplete_or_conflicting_selections_reject;
           Alcotest.test_case "requirements and cycles reject" `Quick
             missing_requirements_and_cycles_reject;
+          Alcotest.test_case "duplicate selections reject" `Quick
+            duplicate_selection_rejects;
         ] );
     ]

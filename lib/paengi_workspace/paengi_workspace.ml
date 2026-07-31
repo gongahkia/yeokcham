@@ -220,26 +220,24 @@ let declared_edges selected =
                      requiring = selection.revision;
                      required_capsule = capsule;
                    })
-          | Some required ->
-              if
-                Option.exists
-                  (fun expected ->
-                    not
-                      (Id.Capsule_revision_id.equal expected required.revision))
-                  revision
-              then
-                Error
-                  (Required_revision_missing
-                     {
-                       requiring = selection.revision;
-                       required_capsule = capsule;
-                       required_revision = Option.get revision;
-                     })
-              else
-                loop
-                  (add_edge edges ~before:required.revision
-                     ~after:selection.revision ~reason:Required_dependency)
-                  rest)
+          | Some required -> (
+              match revision with
+              | Some expected
+                when not
+                       (Id.Capsule_revision_id.equal expected required.revision)
+                ->
+                  Error
+                    (Required_revision_missing
+                       {
+                         requiring = selection.revision;
+                         required_capsule = capsule;
+                         required_revision = expected;
+                       })
+              | None | Some _ ->
+                  loop
+                    (add_edge edges ~before:required.revision
+                       ~after:selection.revision ~reason:Required_dependency)
+                    rest))
       | Capsule.Requires_release required_release :: _ ->
           Error
             (Required_release_unavailable
