@@ -91,6 +91,7 @@ yeokcham inspect refs <yeokcham-repo>
 yeokcham inspect storage <yeokcham-repo>
 yeokcham inspect object <yeokcham-repo> <git-object-id>
 yeokcham export-git <yeokcham-repo> <destination-git-repo>
+yeokcham recover --export-git <yeokcham-repo> <destination-git-repo>
 yeokcham cache inspect|verify|clear <yeokcham-repo>
 yeokcham cache trim --max-bytes <bytes> <yeokcham-repo>
 yeokcham github configure <yeokcham-repo> --repository <owner/repository> --direction <publish-only|pull-only|bidirectional-fast-forward|manual> --publish <heads|tags|refs/heads/*|refs/tags/*>
@@ -105,6 +106,8 @@ git --git-dir=<destination-git-repo> fsck --full --strict
 ```
 
 `init` requires a destination path that does not exist. A failed import can leave unreachable immutable records in that fresh path; remove the failed destination before retrying. The initial CDC threshold is 4 KiB; `--chunked-blob-minimum <bytes>` is available for controlled storage-policy comparison, not as a benchmark-backed default recommendation. Import source reads are serial by default; `--object-read-workers <1..8>` is a bounded controlled-comparison option that retains at most 64 MiB of verified bodies before serial publication.
+
+`recover --export-git` is the offline recovery export. It first fully verifies the supplied local canonical repository, then creates an absent conventional bare Git destination with reconstructed refs and objects. It makes no network or credential request. After `drive restore` has rebuilt a local destination from an encrypted snapshot, use this command to produce a conventional Git repository; a failed export can leave an incomplete destination that must be discarded before retrying.
 
 `sync` is a controlled local-source maintenance workflow, not `git push`: it imports only newly reachable verified objects, then appends a checked full ref-state transition. Reuse one canonical UUIDv4 `--device` value for its writer. The local CLI and remote helper remain V1 single-trusted-local-writer workflows. The core separately supports root-pinned remote device registries: immutable `YKDR` registration/revocation records authorize only matching Ed25519-signed V2 ref events, reject stale writers before publication, and retain every divergent branch for explicit resolution. The registry root public key is an out-of-band trust anchor and its signing key is caller-managed; Drive clone/push wiring remains unfinished.
 

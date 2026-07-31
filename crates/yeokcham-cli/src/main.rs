@@ -92,6 +92,10 @@ enum Command {
         repository: PathBuf,
         destination: PathBuf,
     },
+    RecoverExportGit {
+        repository: PathBuf,
+        destination: PathBuf,
+    },
     InspectObject {
         repository: PathBuf,
         id: GitObjectId,
@@ -231,6 +235,10 @@ fn main() -> ExitCode {
             repository,
             destination,
         } => export_git(repository, destination),
+        Command::RecoverExportGit {
+            repository,
+            destination,
+        } => recover_export_git(repository, destination),
         Command::InspectObject { repository, id } => inspect_object(repository, id),
         Command::InspectStorage { repository } => inspect_storage(repository),
         Command::InspectRefs { repository } => inspect_refs(repository),
@@ -358,6 +366,14 @@ fn parse_command(arguments: Vec<OsString>) -> Result<Command> {
             repository: PathBuf::from(&arguments[1]),
             destination: PathBuf::from(&arguments[2]),
         }),
+        "recover"
+            if arguments.len() == 4 && arguments[1].as_os_str() == OsStr::new("--export-git") =>
+        {
+            Ok(Command::RecoverExportGit {
+                repository: PathBuf::from(&arguments[2]),
+                destination: PathBuf::from(&arguments[3]),
+            })
+        }
         "inspect" if arguments.len() == 4 && arguments[1].as_os_str() == OsStr::new("object") => {
             let id = arguments[3]
                 .to_str()
@@ -947,6 +963,25 @@ fn export_git(repository: PathBuf, destination: PathBuf) -> Result<()> {
         report.blob_count(),
         report.metadata_object_count(),
         report.ref_count(),
+    );
+    Ok(())
+}
+
+fn recover_export_git(repository: PathBuf, destination: PathBuf) -> Result<()> {
+    let limits = GitImportLimits::initial()?;
+    let repository = LocalRepository::open(repository)?;
+    let verification = repository.verify(limits.verification_limits()?)?;
+    let export = repository.export_loose_objects(destination, limits.export_limits()?)?;
+    println!(
+        "recovered segments={} indexes={} blob_manifests={} tiny_blob_group_manifests={} metadata_manifests={} ref_snapshots={} objects={} refs={}",
+        verification.segment_count(),
+        verification.index_count(),
+        verification.blob_manifest_count(),
+        verification.tiny_blob_group_manifest_count(),
+        verification.metadata_object_manifest_count(),
+        verification.ref_snapshot_count(),
+        export.object_count(),
+        export.ref_count(),
     );
     Ok(())
 }
@@ -3002,7 +3037,7 @@ fn usage_error() -> Error {
 
 fn print_usage() {
     println!(
-        "usage:\n  yeokcham init --from-git <source-git-repo> <yeokcham-repo> [--chunked-blob-minimum <bytes>] [--object-read-workers <1..8>]\n  yeokcham sync --from-git <source-git-repo> <yeokcham-repo> --device <device-id>\n  yeokcham verify <yeokcham-repo>\n  yeokcham export-git <yeokcham-repo> <destination-git-repo>\n  yeokcham inspect object <yeokcham-repo> <git-object-id>\n  yeokcham inspect storage <yeokcham-repo>\n  yeokcham inspect refs <yeokcham-repo>\n  yeokcham cache inspect|verify|clear <yeokcham-repo>\n  yeokcham cache trim --max-bytes <bytes> <yeokcham-repo>\n  yeokcham github configure <yeokcham-repo> --repository <owner/repository> --direction <publish-only|pull-only|bidirectional-fast-forward|manual> [--force-update <reject|require-exact-checkpoint>] --publish <heads|tags|refs/heads/*|refs/tags/*> [--publish ...]\n  yeokcham github inspect <yeokcham-repo>\n  yeokcham github plan [--show-objects] <yeokcham-repo>\n  yeokcham github publish <yeokcham-repo> --apply [--transport <https|ssh>]\n  yeokcham github publish-pr <yeokcham-repo> --source <refs/heads/branch> --branch <remote-branch> --apply [--transport <https|ssh>]\n  yeokcham github fetch <yeokcham-repo> [--show-refs] [--transport <https|ssh>]\n  yeokcham key create-export --passphrase-stdin <yeokcham-repo> <recovery-key-export>\n  yeokcham drive auth --client-id <google-desktop-client-id> [--redirect-port <port>]\n  yeokcham drive init --client-id <google-desktop-client-id>\n  yeokcham drive backup|push --client-id <google-desktop-client-id> --folder-id <drive-folder-id> --key-export <recovery-key-export> --passphrase-stdin <yeokcham-repo>\n  yeokcham drive restore|clone --client-id <google-desktop-client-id> --folder-id <drive-folder-id> --key-export <recovery-key-export> --passphrase-stdin <destination>\n  yeokcham drive verify --client-id <google-desktop-client-id> --folder-id <drive-folder-id> --key-export <recovery-key-export> --passphrase-stdin\n  yeokcham drive journal inspect --client-id <google-desktop-client-id> --folder-id <drive-folder-id> --key-export <recovery-key-export> --root-key <root-ed25519-public-key-hex> --passphrase-stdin <yeokcham-repo>"
+        "usage:\n  yeokcham init --from-git <source-git-repo> <yeokcham-repo> [--chunked-blob-minimum <bytes>] [--object-read-workers <1..8>]\n  yeokcham sync --from-git <source-git-repo> <yeokcham-repo> --device <device-id>\n  yeokcham verify <yeokcham-repo>\n  yeokcham export-git <yeokcham-repo> <destination-git-repo>\n  yeokcham recover --export-git <yeokcham-repo> <destination-git-repo>\n  yeokcham inspect object <yeokcham-repo> <git-object-id>\n  yeokcham inspect storage <yeokcham-repo>\n  yeokcham inspect refs <yeokcham-repo>\n  yeokcham cache inspect|verify|clear <yeokcham-repo>\n  yeokcham cache trim --max-bytes <bytes> <yeokcham-repo>\n  yeokcham github configure <yeokcham-repo> --repository <owner/repository> --direction <publish-only|pull-only|bidirectional-fast-forward|manual> [--force-update <reject|require-exact-checkpoint>] --publish <heads|tags|refs/heads/*|refs/tags/*> [--publish ...]\n  yeokcham github inspect <yeokcham-repo>\n  yeokcham github plan [--show-objects] <yeokcham-repo>\n  yeokcham github publish <yeokcham-repo> --apply [--transport <https|ssh>]\n  yeokcham github publish-pr <yeokcham-repo> --source <refs/heads/branch> --branch <remote-branch> --apply [--transport <https|ssh>]\n  yeokcham github fetch <yeokcham-repo> [--show-refs] [--transport <https|ssh>]\n  yeokcham key create-export --passphrase-stdin <yeokcham-repo> <recovery-key-export>\n  yeokcham drive auth --client-id <google-desktop-client-id> [--redirect-port <port>]\n  yeokcham drive init --client-id <google-desktop-client-id>\n  yeokcham drive backup|push --client-id <google-desktop-client-id> --folder-id <drive-folder-id> --key-export <recovery-key-export> --passphrase-stdin <yeokcham-repo>\n  yeokcham drive restore|clone --client-id <google-desktop-client-id> --folder-id <drive-folder-id> --key-export <recovery-key-export> --passphrase-stdin <destination>\n  yeokcham drive verify --client-id <google-desktop-client-id> --folder-id <drive-folder-id> --key-export <recovery-key-export> --passphrase-stdin\n  yeokcham drive journal inspect --client-id <google-desktop-client-id> --folder-id <drive-folder-id> --key-export <recovery-key-export> --root-key <root-ed25519-public-key-hex> --passphrase-stdin <yeokcham-repo>"
     );
 }
 
@@ -3041,6 +3076,72 @@ mod tests {
             output.status.success(),
             "Git command must succeed: {}",
             String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    #[test]
+    fn recovers_verified_local_storage_to_a_conventional_git_repository() {
+        let temporary = TestDirectory::new();
+        let source = temporary.path().join("source");
+        let store = temporary.path().join("store");
+        let destination = temporary.path().join("recovered.git");
+        fs::create_dir(&source).expect("create source");
+        run_test_git(&source, &["init", "-b", "main"]);
+        run_test_git(&source, &["config", "user.name", "Yeokcham Test"]);
+        run_test_git(
+            &source,
+            &["config", "user.email", "yeokcham-test@example.invalid"],
+        );
+        fs::write(source.join("recovery.txt"), b"recovery\n").expect("write source");
+        run_test_git(&source, &["add", "recovery.txt"]);
+        run_test_git(&source, &["commit", "-m", "recovery fixture"]);
+        let repository = LocalRepository::create(&store).expect("create store");
+        repository
+            .import_git_repository(
+                &GitRepository::open(&source).expect("open source"),
+                GitImportLimits::initial().expect("limits"),
+            )
+            .expect("import source");
+
+        recover_export_git(store.clone(), destination.clone()).expect("recover verified store");
+        run_test_git(&destination, &["fsck", "--full", "--strict"]);
+
+        let segment = fs::read_dir(store.join("segments"))
+            .expect("read segments")
+            .next()
+            .expect("one segment")
+            .expect("read segment")
+            .path();
+        fs::write(segment, b"corrupt").expect("corrupt temporary segment");
+        let rejected_destination = temporary.path().join("rejected.git");
+        let error = recover_export_git(store, rejected_destination.clone())
+            .expect_err("corrupt storage must fail recovery");
+        assert_eq!(error.kind(), ErrorKind::CorruptData);
+        assert!(!rejected_destination.exists());
+    }
+
+    #[test]
+    fn parses_verified_recovery_export() {
+        let command = parse_command(
+            ["recover", "--export-git", "repository", "destination"]
+                .map(OsString::from)
+                .to_vec(),
+        )
+        .expect("parse recovery export");
+        assert!(matches!(
+            command,
+            Command::RecoverExportGit {
+                repository,
+                destination,
+            } if repository == PathBuf::from("repository") && destination == PathBuf::from("destination")
+        ));
+        assert!(
+            parse_command(
+                ["recover", "repository", "destination"]
+                    .map(OsString::from)
+                    .to_vec(),
+            )
+            .is_err()
         );
     }
 

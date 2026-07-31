@@ -104,3 +104,4 @@ Valid statuses are `Proposed`, `Accepted`, `Rejected`, `Deprecated`, and `Supers
 | [ADR-0096](0096-verified-local-storage-statistics.md) | Accepted | Report verified local storage and zero remote attachments |
 | [ADR-0097](0097-read-only-authenticated-integrity-check.md) | Accepted | Render a bounded read-only integrity result |
 | [ADR-0098](0098-redacted-authenticated-mirror-state.md) | Accepted | Render redacted local GitHub mirror policy state |
+| [ADR-0099](0099-verified-offline-recovery-export.md) | Accepted | Verify local canonical storage before offline recovery export |

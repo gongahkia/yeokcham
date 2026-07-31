@@ -241,7 +241,7 @@ Expected behaviour:
 - Imports recovery key.
 - Authenticates to backend.
 - Rebuilds local metadata.
-- Exports or clones repository.
+- Runs `yeokcham recover --export-git <yeokcham-repo> <destination-git-repo>`.
 
 ### Scenario F — Yeokcham project discontinued
 
@@ -249,7 +249,7 @@ Expected behaviour:
 
 - Published storage-format specification and open-source implementation remain sufficient.
 - User can build the recovery binary.
-- `yeokcham recover --export-git` reconstructs a conventional Git repository.
+- `yeokcham recover --export-git <yeokcham-repo> <destination-git-repo>` fully verifies local canonical storage before reconstructing a conventional Git repository.
 
 ## 11. Backup policy
 
