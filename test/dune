@@ -259,6 +259,11 @@
  (libraries alcotest paengi_textual_patch))
 
 (test
+ (name test_semantic_retarget)
+ (modules test_semantic_retarget)
+ (libraries alcotest paengi_semantic_retarget))
+
+(test
  (name semantic_property_test)
  (modules semantic_property_test)
  (libraries alcotest qcheck-core qcheck-alcotest paengi_semantic))
