@@ -108,6 +108,7 @@ let object_type_codes () =
       (Envelope.Workspace, 19);
       (Envelope.Workspace_revision, 20);
       (Envelope.Workspace_attempt, 21);
+      (Envelope.Release_attestation, 22);
     ]
   in
   List.iter
@@ -124,7 +125,7 @@ let object_type_codes () =
     (Option.is_none (Envelope.object_type_of_code 0));
   Alcotest.(check bool)
     "unassigned type is rejected" true
-    (Option.is_none (Envelope.object_type_of_code 22))
+    (Option.is_none (Envelope.object_type_of_code 23))
 
 let golden_envelope () =
   let expected = require_golden "envelope-v1-snapshot.peng.hex" in

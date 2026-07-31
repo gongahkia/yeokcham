@@ -350,7 +350,7 @@ let object_children scratch store identity envelope =
   | Envelope.Repository_config | Envelope.Scratch_generation_segment
   | Envelope.Scratch_generation | Envelope.Scratch_cleanup_manifest
   | Envelope.Workspace | Envelope.Workspace_revision
-  | Envelope.Workspace_attempt ->
+  | Envelope.Workspace_attempt | Envelope.Release_attestation ->
       Error (Reachable_object_type_unsupported (Envelope.object_type envelope))
 
 let add_size total size =

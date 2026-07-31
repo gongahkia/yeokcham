@@ -97,6 +97,10 @@ let object_type_generator =
       Envelope.Scratch_generation_segment;
       Envelope.Scratch_generation;
       Envelope.Scratch_cleanup_manifest;
+      Envelope.Workspace;
+      Envelope.Workspace_revision;
+      Envelope.Workspace_attempt;
+      Envelope.Release_attestation;
     ]
 
 let boundary_lengths =

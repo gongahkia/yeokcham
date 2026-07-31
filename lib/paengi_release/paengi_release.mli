@@ -15,6 +15,16 @@ type evidence_link = {
 type release
 type binding
 
+type attestation
+
+module type Signer = sig
+  val signer_identity : string
+  val algorithm : string
+  val sign : Paengi_id.Release_id.t -> string
+end
+
+module Deterministic_test_signer : Signer
+
 type error =
   | Store_error of Paengi_store.error
   | Envelope_error of Paengi_envelope.creation_error
@@ -29,6 +39,7 @@ type error =
   | Invalid_release of string
   | Logical_identity_mismatch
   | Invalid_binding_checksum
+  | Invalid_attestation of string
   | Release_missing of Paengi_id.Release_id.t
   | Binding_release_mismatch
   | Conflicting_release_id_reuse of Paengi_id.Release_id.t
@@ -99,6 +110,38 @@ val make_binding :
 val encode_binding : binding -> string
 val decode_binding : string -> (binding, error) result
 val binding_components : Paengi_id.Release_id.t -> string list
+
+val create_attestation :
+  release:Paengi_id.Release_id.t ->
+  signer_identity:string ->
+  algorithm:string ->
+  signature:string ->
+  signed_at:int64 ->
+  (attestation, error) result
+
+val attest :
+  signer:(module Signer) ->
+  release:Paengi_id.Release_id.t ->
+  signed_at:int64 ->
+  (attestation, error) result
+
+val attestation_release : attestation -> Paengi_id.Release_id.t
+val attestation_signer_identity : attestation -> string
+val attestation_algorithm : attestation -> string
+val attestation_signature : attestation -> string
+val attestation_signed_at : attestation -> int64
+val attestation_payload : attestation -> (Paengi_encoding.t, error) result
+val decode_attestation_payload : Paengi_encoding.t -> (attestation, error) result
+
+val store_attestation :
+  Paengi_store.repository ->
+  attestation ->
+  (Paengi_store.Stored_object_id.t, error) result
+
+val load_attestation :
+  Paengi_store.repository ->
+  Paengi_store.Stored_object_id.t ->
+  (attestation, error) result
 
 module Parent_resolver : sig
   type t =

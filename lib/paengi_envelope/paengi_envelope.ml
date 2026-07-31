@@ -31,6 +31,7 @@ type object_type =
   | Workspace
   | Workspace_revision
   | Workspace_attempt
+  | Release_attestation
 
 let object_type_code = function
   | Content -> 1
@@ -54,6 +55,7 @@ let object_type_code = function
   | Workspace -> 19
   | Workspace_revision -> 20
   | Workspace_attempt -> 21
+  | Release_attestation -> 22
 
 let object_type_of_code = function
   | 1 -> Some Content
@@ -77,6 +79,7 @@ let object_type_of_code = function
   | 19 -> Some Workspace
   | 20 -> Some Workspace_revision
   | 21 -> Some Workspace_attempt
+  | 22 -> Some Release_attestation
   | _ -> None
 
 type creation_error =

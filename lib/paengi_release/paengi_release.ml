@@ -39,6 +39,29 @@ type binding = {
   object_id : Store.Stored_object_id.t;
 }
 
+type attestation = {
+  release : Id.Release_id.t;
+  signer_identity : string;
+  algorithm : string;
+  signature : string;
+  signed_at : int64;
+}
+
+module type Signer = sig
+  val signer_identity : string
+  val algorithm : string
+  val sign : Id.Release_id.t -> string
+end
+
+module Deterministic_test_signer : Signer = struct
+  let signer_identity = "paengi deterministic test signer"
+  let algorithm = "paengi-test-only-not-cryptographic-v1"
+
+  let sign release =
+    "paengi:deterministic-test-attestation:v1\000"
+    ^ Id.Release_id.to_bytes release
+end
+
 type error =
   | Store_error of Store.error
   | Envelope_error of Envelope.creation_error
@@ -53,6 +76,7 @@ type error =
   | Invalid_release of string
   | Logical_identity_mismatch
   | Invalid_binding_checksum
+  | Invalid_attestation of string
   | Release_missing of Id.Release_id.t
   | Binding_release_mismatch
   | Conflicting_release_id_reuse of Id.Release_id.t
@@ -83,6 +107,7 @@ let error_to_string = function
   | Logical_identity_mismatch ->
       "release logical ID does not match canonical preimage"
   | Invalid_binding_checksum -> "release binding checksum is invalid"
+  | Invalid_attestation message -> "invalid release attestation: " ^ message
   | Release_missing release ->
       "release binding is missing: " ^ Id.Release_id.to_hex release
   | Binding_release_mismatch ->
@@ -726,6 +751,97 @@ let binding_object binding = binding.object_id
 let make_binding ~release ~object_id = { release; object_id }
 let binding_components release = [ "releases"; Id.Release_id.to_hex release ]
 
+let validate_attestation_fields ~signer_identity ~algorithm ~signature =
+  if String.length signer_identity = 0 then
+    Error (Invalid_attestation "signer identity is empty")
+  else if String.length algorithm = 0 then
+    Error (Invalid_attestation "algorithm identifier is empty")
+  else if String.length signature = 0 then
+    Error (Invalid_attestation "signature is empty")
+  else Ok ()
+
+let create_attestation ~release ~signer_identity ~algorithm ~signature ~signed_at =
+  let* () = validate_attestation_fields ~signer_identity ~algorithm ~signature in
+  let* _ = raw_id "attested release ID" Id.Release_id.to_bytes release in
+  let* _ = text signer_identity in
+  let* _ = text algorithm in
+  Ok { release; signer_identity; algorithm; signature; signed_at }
+
+let attest ~signer:(module Signer) ~release ~signed_at =
+  create_attestation ~release ~signer_identity:Signer.signer_identity
+    ~algorithm:Signer.algorithm ~signature:(Signer.sign release) ~signed_at
+
+let attestation_release attestation = attestation.release
+let attestation_signer_identity attestation = attestation.signer_identity
+let attestation_algorithm attestation = attestation.algorithm
+let attestation_signature attestation = attestation.signature
+let attestation_signed_at attestation = attestation.signed_at
+
+let attestation_payload attestation =
+  let* () =
+    validate_attestation_fields ~signer_identity:attestation.signer_identity
+      ~algorithm:attestation.algorithm ~signature:attestation.signature
+  in
+  let* release =
+    raw_id "attested release ID" Id.Release_id.to_bytes attestation.release
+  in
+  let* signer_identity = text attestation.signer_identity in
+  let* algorithm = text attestation.algorithm in
+  value_array
+    [
+      Encoding.integer 1L;
+      Encoding.bytes release;
+      signer_identity;
+      algorithm;
+      Encoding.bytes attestation.signature;
+      Encoding.integer attestation.signed_at;
+    ]
+
+let decode_attestation_payload value =
+  let* values = fields "release attestation" 6 value in
+  match values with
+  | [ version; release; signer_identity; algorithm; signature; signed_at ] ->
+      let* version = integer "release attestation version" version in
+      if version <> 1L then Error (Unsupported_schema_version version)
+      else
+        let* release =
+          parse_typed "attested release ID" Id.Release_id.of_bytes release
+        in
+        let* signer_identity =
+          text_field "release attestation signer identity" signer_identity
+        in
+        let* algorithm =
+          text_field "release attestation algorithm" algorithm
+        in
+        let* signature = bytes "release attestation signature" signature in
+        let* signed_at = integer "release attestation timestamp" signed_at in
+        let* attestation =
+          create_attestation ~release ~signer_identity ~algorithm ~signature
+            ~signed_at
+        in
+        let* canonical = attestation_payload attestation in
+        if Encoding.equal canonical value then Ok attestation
+        else Error (Decode_error "release attestation bytes are noncanonical")
+  | _ -> assert false
+
+let store_attestation store attestation =
+  let* payload = attestation_payload attestation in
+  let* envelope = object_envelope Envelope.Release_attestation payload in
+  Store.put store envelope |> Result.map_error (fun error -> Store_error error)
+
+let load_attestation store object_id =
+  let* envelope =
+    Store.get store object_id |> Result.map_error (fun error -> Store_error error)
+  in
+  if Envelope.object_type envelope <> Envelope.Release_attestation then
+    Error
+      (Unexpected_object_type
+         {
+           expected = Envelope.Release_attestation;
+           actual = Envelope.object_type envelope;
+         })
+  else decode_attestation_payload (Envelope.payload envelope)
+
 module Parent_resolver = struct
   type t = Id.Release_id.t -> (Id.Release_id.t list, string) result
 
@@ -996,7 +1112,8 @@ module Durable = struct
            | Decode_error _ | Unsupported_schema_version _
            | Unexpected_object_type _ | Invalid_identity_length _
            | Invalid_release _ | Logical_identity_mismatch
-           | Invalid_binding_checksum | Binding_release_mismatch
+           | Invalid_binding_checksum | Invalid_attestation _
+           | Binding_release_mismatch
            | Conflicting_release_id_reuse _ | Workspace_error _
            | Validation_error _ | Snapshot_error _ | Workspace_attempt_missing _
            | Unresolved_conflicts _ | Required_validation_failed _

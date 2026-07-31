@@ -1270,7 +1270,7 @@ module Cleanup_manifest = struct
     | Envelope.Scratch_cleanup_manifest ->
         false
     | Envelope.Workspace | Envelope.Workspace_revision
-    | Envelope.Workspace_attempt ->
+    | Envelope.Workspace_attempt | Envelope.Release_attestation ->
         false
 
   let compare_candidate left right =

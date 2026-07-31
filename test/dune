@@ -219,6 +219,21 @@
   (source_tree golden)))
 
 (test
+ (name test_attestation)
+ (modules test_attestation)
+ (libraries
+  alcotest
+  paengi_encoding
+  paengi_envelope
+  paengi_id
+  paengi_release
+  paengi_store
+  paengi_testkit
+  unix)
+ (deps
+  (source_tree golden)))
+
+(test
  (name test_capsule_store)
  (modules test_capsule_store)
  (libraries
