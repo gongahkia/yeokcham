@@ -100,3 +100,4 @@ Valid statuses are `Proposed`, `Accepted`, `Rejected`, `Deprecated`, and `Supers
 | [ADR-0092](0092-loopback-native-http-v1.md) | Accepted | Serve a bounded loopback Yeokcham-native HTTP V1 transport |
 | [ADR-0093](0093-single-user-native-http-bearer-authentication.md) | Superseded by ADR-0094 | Require one private bearer token for native HTTP V1 |
 | [ADR-0094](0094-authenticated-native-http-repository-browser.md) | Accepted | Add a token-authenticated native HTTP repository browser |
+| [ADR-0095](0095-bounded-authenticated-commit-tree-browser.md) | Accepted | Render bounded authenticated commit and tree metadata |

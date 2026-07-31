@@ -26,6 +26,11 @@ const MAXIMUM_AUTHENTICATION_TOKEN_FILE_BYTES: usize = AUTHENTICATION_TOKEN_HEX_
 const MAXIMUM_BASIC_AUTHORIZATION_BYTES: usize = 128;
 const MAXIMUM_REQUEST_HEADER_BYTES: usize = 8 * 1024;
 const MAXIMUM_RESPONSE_BODY_BYTES: usize = 64 * 1024 * 1024;
+const MAXIMUM_RENDERED_COMMIT_PARENTS: usize = 1024;
+const MAXIMUM_RENDERED_COMMIT_TEXT_BYTES: usize = 64 * 1024;
+const MAXIMUM_RENDERED_SIGNATURE_BYTES: usize = 4 * 1024;
+const MAXIMUM_RENDERED_TREE_ENTRIES: usize = 10_000;
+const MAXIMUM_RENDERED_TREE_NAME_BYTES: usize = 1024;
 const MAXIMUM_CONNECTIONS: usize = 4;
 const MAXIMUM_PENDING_CONNECTIONS: usize = 8;
 const CONNECTION_TIMEOUT: Duration = Duration::from_secs(5);
@@ -342,8 +347,10 @@ impl Server {
 #[derive(Clone, Copy)]
 enum Request {
     Browser,
+    Commit(GitObjectId),
     Health,
     Refs,
+    Tree(GitObjectId),
     Object(GitObjectId),
 }
 
@@ -508,14 +515,19 @@ fn parse_request(
         "/" => Ok(Request::Browser),
         "/v1/health" => Ok(Request::Health),
         "/v1/refs" => Ok(Request::Refs),
-        _ => target
-            .strip_prefix("/v1/objects/")
-            .filter(|id| id.len() == GitObjectId::HEX_LENGTH)
-            .ok_or_else(|| Response::error(404, "Not Found", "not_found"))?
-            .parse()
-            .map(Request::Object)
-            .map_err(|_| Response::error(404, "Not Found", "not_found")),
+        _ => parse_object_target(target, "/commits/")
+            .map(Request::Commit)
+            .or_else(|| parse_object_target(target, "/trees/").map(Request::Tree))
+            .or_else(|| parse_object_target(target, "/v1/objects/").map(Request::Object))
+            .ok_or_else(|| Response::error(404, "Not Found", "not_found")),
     }
+}
+
+fn parse_object_target(target: &str, prefix: &str) -> Option<GitObjectId> {
+    target
+        .strip_prefix(prefix)
+        .filter(|id| id.len() == GitObjectId::HEX_LENGTH)
+        .and_then(|id| id.parse().ok())
 }
 
 fn unauthorized_response() -> Response {
@@ -553,12 +565,14 @@ fn is_header_name_byte(byte: u8) -> bool {
 fn route_request(repository: &LocalRepository, request: Request) -> Response {
     match request {
         Request::Browser => browser_response(repository),
+        Request::Commit(id) => commit_response(repository, id),
         Request::Health => Response::json(
             200,
             "OK",
             format!("{{\"version\":{NATIVE_HTTP_VERSION},\"status\":\"ok\"}}"),
         ),
         Request::Refs => refs_response(repository),
+        Request::Tree(id) => tree_response(repository, id),
         Request::Object(id) => object_response(repository, id),
     }
 }
@@ -629,6 +643,351 @@ fn html_escape_ref_name(bytes: &[u8]) -> String {
     escaped
 }
 
+struct HtmlBody(String);
+
+impl HtmlBody {
+    fn new() -> Self {
+        Self(String::with_capacity(1024))
+    }
+
+    fn push(&mut self, value: &str) -> std::result::Result<(), ()> {
+        let length = self.0.len().checked_add(value.len()).ok_or(())?;
+        if length > MAXIMUM_RESPONSE_BODY_BYTES {
+            return Err(());
+        }
+        self.0.push_str(value);
+        Ok(())
+    }
+
+    fn push_id(&mut self, id: GitObjectId) -> std::result::Result<(), ()> {
+        self.push(&id.to_string())
+    }
+
+    fn push_escaped_preview(
+        &mut self,
+        bytes: &[u8],
+        maximum_input_bytes: usize,
+    ) -> std::result::Result<bool, ()> {
+        if let Ok(value) = std::str::from_utf8(bytes) {
+            let mut rendered_input_bytes: usize = 0;
+            for character in value.chars() {
+                let character_bytes = character.len_utf8();
+                let next = rendered_input_bytes
+                    .checked_add(character_bytes)
+                    .ok_or(())?;
+                if next > maximum_input_bytes {
+                    return Ok(true);
+                }
+                rendered_input_bytes = next;
+                match character {
+                    '&' => self.push("&amp;")?,
+                    '<' => self.push("&lt;")?,
+                    '>' => self.push("&gt;")?,
+                    '\"' => self.push("&quot;")?,
+                    '\'' => self.push("&#39;")?,
+                    _ => {
+                        let mut rendered = [0; 4];
+                        self.push(character.encode_utf8(&mut rendered))?;
+                    }
+                }
+            }
+            Ok(false)
+        } else {
+            self.push("hex:")?;
+            for byte in bytes.iter().take(maximum_input_bytes) {
+                self.push(&format!("{byte:02x}"))?;
+            }
+            Ok(bytes.len() > maximum_input_bytes)
+        }
+    }
+
+    fn into_string(self) -> String {
+        self.0
+    }
+}
+
+struct CommitView<'a> {
+    tree: GitObjectId,
+    parents: Vec<GitObjectId>,
+    parent_count: usize,
+    author: Option<&'a [u8]>,
+    committer: Option<&'a [u8]>,
+    message: &'a [u8],
+}
+
+struct TreeView<'a> {
+    entries: Vec<TreeEntry<'a>>,
+    entry_count: usize,
+}
+
+struct TreeEntry<'a> {
+    mode: &'a [u8],
+    name: &'a [u8],
+    id: GitObjectId,
+}
+
+fn parse_commit_view(bytes: &[u8]) -> std::result::Result<CommitView<'_>, ()> {
+    let separator = bytes
+        .windows(2)
+        .position(|window| window == b"\n\n")
+        .ok_or(())?;
+    let (headers, message) = bytes.split_at(separator);
+    let message = &message[2..];
+    let mut tree = None;
+    let mut parents = Vec::new();
+    let mut parent_count: usize = 0;
+    let mut author = None;
+    let mut committer = None;
+    for line in headers.split(|byte| *byte == b'\n') {
+        if line.starts_with(b" ") {
+            continue;
+        }
+        let separator = line.iter().position(|byte| *byte == b' ').ok_or(())?;
+        let (name, value) = line.split_at(separator);
+        let value = &value[1..];
+        match name {
+            b"tree" => {
+                if tree.replace(parse_object_id(value)?).is_some() {
+                    return Err(());
+                }
+            }
+            b"parent" => {
+                let parent = parse_object_id(value)?;
+                parent_count = parent_count.checked_add(1).ok_or(())?;
+                if parents.len() < MAXIMUM_RENDERED_COMMIT_PARENTS {
+                    parents.push(parent);
+                }
+            }
+            b"author" => {
+                author.get_or_insert(value);
+            }
+            b"committer" => {
+                committer.get_or_insert(value);
+            }
+            _ => {}
+        }
+    }
+    Ok(CommitView {
+        tree: tree.ok_or(())?,
+        parents,
+        parent_count,
+        author,
+        committer,
+        message,
+    })
+}
+
+fn parse_tree_view(bytes: &[u8]) -> std::result::Result<TreeView<'_>, ()> {
+    let mut entries = Vec::new();
+    let mut entry_count: usize = 0;
+    let mut offset = 0;
+    while offset < bytes.len() {
+        let mode_end = bytes[offset..]
+            .iter()
+            .position(|byte| *byte == b' ')
+            .map(|length| offset + length)
+            .ok_or(())?;
+        let mode = &bytes[offset..mode_end];
+        if mode.is_empty() || mode.iter().any(|byte| !matches!(byte, b'0'..=b'7')) {
+            return Err(());
+        }
+        let name_start = mode_end.checked_add(1).ok_or(())?;
+        let name_end = bytes[name_start..]
+            .iter()
+            .position(|byte| *byte == 0)
+            .map(|length| name_start + length)
+            .ok_or(())?;
+        let name = &bytes[name_start..name_end];
+        if name.is_empty() || name == b"." || name == b".." || name.contains(&b'/') {
+            return Err(());
+        }
+        let id_start = name_end.checked_add(1).ok_or(())?;
+        let id_end = id_start.checked_add(GitObjectId::BYTE_LENGTH).ok_or(())?;
+        let id_bytes: [u8; GitObjectId::BYTE_LENGTH] = bytes
+            .get(id_start..id_end)
+            .ok_or(())?
+            .try_into()
+            .map_err(|_| ())?;
+        entry_count = entry_count.checked_add(1).ok_or(())?;
+        if entries.len() < MAXIMUM_RENDERED_TREE_ENTRIES {
+            entries.push(TreeEntry {
+                mode,
+                name,
+                id: GitObjectId::from_bytes(id_bytes),
+            });
+        }
+        offset = id_end;
+    }
+    Ok(TreeView {
+        entries,
+        entry_count,
+    })
+}
+
+fn parse_object_id(bytes: &[u8]) -> std::result::Result<GitObjectId, ()> {
+    std::str::from_utf8(bytes)
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .ok_or(())
+}
+
+fn commit_response(repository: &LocalRepository, id: GitObjectId) -> Response {
+    let object = match reconstruct_object(repository, id) {
+        Ok(object) => object,
+        Err(response) => return response,
+    };
+    if object.kind() != GitObjectKind::Commit {
+        return Response::error(422, "Unprocessable Content", "object_kind_mismatch");
+    }
+    let commit = match parse_commit_view(object.data()) {
+        Ok(commit) => commit,
+        Err(()) => return Response::error(422, "Unprocessable Content", "invalid_commit_object"),
+    };
+    let mut body = HtmlBody::new();
+    if render_commit_html(&mut body, id, &commit).is_err() {
+        return Response::error(500, "Internal Server Error", "response_too_large");
+    }
+    html_response(body.into_string())
+}
+
+fn tree_response(repository: &LocalRepository, id: GitObjectId) -> Response {
+    let object = match reconstruct_object(repository, id) {
+        Ok(object) => object,
+        Err(response) => return response,
+    };
+    if object.kind() != GitObjectKind::Tree {
+        return Response::error(422, "Unprocessable Content", "object_kind_mismatch");
+    }
+    let tree = match parse_tree_view(object.data()) {
+        Ok(tree) => tree,
+        Err(()) => return Response::error(422, "Unprocessable Content", "invalid_tree_object"),
+    };
+    let mut body = HtmlBody::new();
+    if render_tree_html(&mut body, id, &tree).is_err() {
+        return Response::error(500, "Internal Server Error", "response_too_large");
+    }
+    html_response(body.into_string())
+}
+
+fn render_commit_html(
+    body: &mut HtmlBody,
+    id: GitObjectId,
+    commit: &CommitView<'_>,
+) -> std::result::Result<(), ()> {
+    body.push("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>Yeokcham commit</title></head><body><main><p><a href=\"/\">Repository</a></p><h1>Commit <code>")?;
+    body.push_id(id)?;
+    body.push("</code></h1><h2>Tree</h2><p><a href=\"/trees/")?;
+    body.push_id(commit.tree)?;
+    body.push("\"><code>")?;
+    body.push_id(commit.tree)?;
+    body.push("</code></a></p><h2>Parents</h2><ul>")?;
+    for parent in &commit.parents {
+        body.push("<li><a href=\"/commits/")?;
+        body.push_id(*parent)?;
+        body.push("\"><code>")?;
+        body.push_id(*parent)?;
+        body.push("</code></a></li>")?;
+    }
+    body.push("</ul>")?;
+    if commit.parent_count > commit.parents.len() {
+        body.push("<p>Showing the first ")?;
+        body.push(&commit.parents.len().to_string())?;
+        body.push(" of ")?;
+        body.push(&commit.parent_count.to_string())?;
+        body.push(" parents.</p>")?;
+    }
+    render_commit_field(body, "Author", commit.author)?;
+    render_commit_field(body, "Committer", commit.committer)?;
+    body.push("<h2>Message preview</h2><pre>")?;
+    if body.push_escaped_preview(commit.message, MAXIMUM_RENDERED_COMMIT_TEXT_BYTES)? {
+        body.push(" [truncated]")?;
+    }
+    body.push("</pre></main></body></html>")
+}
+
+fn render_commit_field(
+    body: &mut HtmlBody,
+    label: &str,
+    value: Option<&[u8]>,
+) -> std::result::Result<(), ()> {
+    let Some(value) = value else {
+        return Ok(());
+    };
+    body.push("<h2>")?;
+    body.push(label)?;
+    body.push("</h2><p><code>")?;
+    if body.push_escaped_preview(value, MAXIMUM_RENDERED_SIGNATURE_BYTES)? {
+        body.push(" [truncated]")?;
+    }
+    body.push("</code></p>")
+}
+
+fn render_tree_html(
+    body: &mut HtmlBody,
+    id: GitObjectId,
+    tree: &TreeView<'_>,
+) -> std::result::Result<(), ()> {
+    body.push("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>Yeokcham tree</title></head><body><main><p><a href=\"/\">Repository</a></p><h1>Tree <code>")?;
+    body.push_id(id)?;
+    body.push("</code></h1><ul>")?;
+    for entry in &tree.entries {
+        body.push("<li><code>")?;
+        body.push(std::str::from_utf8(entry.mode).map_err(|_| ())?)?;
+        body.push("</code> <code>")?;
+        if body.push_escaped_preview(entry.name, MAXIMUM_RENDERED_TREE_NAME_BYTES)? {
+            body.push(" [truncated]")?;
+        }
+        body.push("</code> ")?;
+        render_tree_entry_id(body, entry)?;
+        body.push("</li>")?;
+    }
+    body.push("</ul>")?;
+    if tree.entry_count > tree.entries.len() {
+        body.push("<p>Showing the first ")?;
+        body.push(&tree.entries.len().to_string())?;
+        body.push(" of ")?;
+        body.push(&tree.entry_count.to_string())?;
+        body.push(" entries.</p>")?;
+    }
+    body.push("</main></body></html>")
+}
+
+fn render_tree_entry_id(body: &mut HtmlBody, entry: &TreeEntry<'_>) -> std::result::Result<(), ()> {
+    let path = match entry.mode {
+        b"40000" => Some("/trees/"),
+        _ => None,
+    };
+    if let Some(path) = path {
+        body.push("<a href=\"")?;
+        body.push(path)?;
+        body.push_id(entry.id)?;
+        body.push("\">")?;
+    }
+    body.push("<code>")?;
+    body.push_id(entry.id)?;
+    body.push("</code>")?;
+    if path.is_some() {
+        body.push("</a>")?;
+    }
+    Ok(())
+}
+
+fn html_response(body: String) -> Response {
+    Response {
+        status: 200,
+        reason: "OK",
+        content_type: "text/html; charset=utf-8",
+        headers: vec![
+            (
+                "Content-Security-Policy",
+                "default-src 'none'; base-uri 'none'; form-action 'none'".to_owned(),
+            ),
+            ("X-Content-Type-Options", "nosniff".to_owned()),
+        ],
+        body: body.into_bytes(),
+    }
+}
+
 fn refs_response(repository: &LocalRepository) -> Response {
     let limits = match GitImportLimits::initial() {
         Ok(limits) => limits,
@@ -677,18 +1036,27 @@ fn refs_response(repository: &LocalRepository) -> Response {
 }
 
 fn object_response(repository: &LocalRepository, id: GitObjectId) -> Response {
-    let limits = match GitImportLimits::initial() {
-        Ok(limits) => limits,
-        Err(_) => return Response::error(500, "Internal Server Error", "internal"),
-    };
-    let object = match repository.reconstruct_git_object(id, limits) {
+    let object = match reconstruct_object(repository, id) {
         Ok(object) => object,
-        Err(error) if error.kind() == ErrorKind::NotFound => {
-            return Response::error(404, "Not Found", "not_found");
-        }
-        Err(_) => return Response::error(500, "Internal Server Error", "repository_unavailable"),
+        Err(response) => return response,
     };
     object_response_from_verified(object)
+}
+
+fn reconstruct_object(
+    repository: &LocalRepository,
+    id: GitObjectId,
+) -> std::result::Result<GitObject, Response> {
+    let limits = match GitImportLimits::initial() {
+        Ok(limits) => limits,
+        Err(_) => return Err(Response::error(500, "Internal Server Error", "internal")),
+    };
+    repository
+        .reconstruct_git_object(id, limits)
+        .map_err(|error| match error.kind() {
+            ErrorKind::NotFound => Response::error(404, "Not Found", "not_found"),
+            _ => Response::error(500, "Internal Server Error", "repository_unavailable"),
+        })
 }
 
 fn object_response_from_verified(object: GitObject) -> Response {
@@ -806,7 +1174,9 @@ mod tests {
         );
     }
 
-    fn imported_repository(directory: &TestDirectory) -> (LocalRepository, GitObjectId) {
+    fn imported_repository(
+        directory: &TestDirectory,
+    ) -> (LocalRepository, GitObjectId, GitObjectId) {
         let source = directory.path().join("source");
         let store = directory.path().join("store");
         fs::create_dir(&source).expect("create source");
@@ -816,9 +1186,10 @@ mod tests {
             &source,
             &["config", "user.email", "yeokcham-test@example.invalid"],
         );
-        fs::write(source.join("readme.txt"), b"native transport\n").expect("write fixture");
-        git(&source, &["add", "readme.txt"]);
-        git(&source, &["commit", "-m", "native transport"]);
+        fs::write(source.join("readme & <browser>.txt"), b"native transport\n")
+            .expect("write fixture");
+        git(&source, &["add", "."]);
+        git(&source, &["commit", "-m", "native <transport> & viewer"]);
         let limits = GitImportLimits::initial().expect("limits");
         let repository = LocalRepository::create(&store).expect("create store");
         repository
@@ -832,7 +1203,19 @@ mod tests {
             HeadState::Symbolic(name) => *state.regular_refs().get(name).expect("main ref"),
             HeadState::Detached(id) => *id,
         };
-        (repository, head)
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(&source)
+            .args(["rev-parse", "HEAD^{tree}"])
+            .output()
+            .expect("resolve tree");
+        assert!(output.status.success(), "resolve tree");
+        let tree = std::str::from_utf8(&output.stdout)
+            .expect("tree ID UTF-8")
+            .trim()
+            .parse()
+            .expect("tree ID");
+        (repository, head, tree)
     }
 
     fn request(address: SocketAddr, request: &[u8]) -> Vec<u8> {
@@ -884,7 +1267,7 @@ mod tests {
     #[test]
     fn serves_bounded_v1_health_refs_and_verified_objects() {
         let directory = TestDirectory::new();
-        let (repository, head_id) = imported_repository(&directory);
+        let (repository, head_id, tree_id) = imported_repository(&directory);
         let (authentication, token) = authentication(&directory);
         let server = Server::bind(
             repository,
@@ -950,6 +1333,52 @@ mod tests {
         assert!(browser_text.contains("refs/heads/main"));
         assert!(browser_text.contains(&head_id.to_string()));
 
+        let commit = serve_request(
+            &server,
+            address,
+            format!(
+                "GET /commits/{head_id} HTTP/1.1\r\nAuthorization: Basic {}\r\n\r\n",
+                basic_authorization(&token)
+            )
+            .as_bytes(),
+        );
+        let (commit_head, commit_body) = split_response(&commit);
+        assert!(commit_head.starts_with("HTTP/1.1 200 OK\r\n"));
+        assert!(commit_head.contains("Content-Type: text/html; charset=utf-8"));
+        let commit_text = std::str::from_utf8(commit_body).expect("commit HTML");
+        assert!(commit_text.contains(&format!("/trees/{tree_id}")));
+        assert!(commit_text.contains("native &lt;transport&gt; &amp; viewer"));
+
+        let tree = serve_request(
+            &server,
+            address,
+            format!("GET /trees/{tree_id} HTTP/1.1\r\nAuthorization: Bearer {token}\r\n\r\n")
+                .as_bytes(),
+        );
+        let (tree_head, tree_body) = split_response(&tree);
+        assert!(tree_head.starts_with("HTTP/1.1 200 OK\r\n"));
+        assert!(tree_head.contains("Content-Type: text/html; charset=utf-8"));
+        let tree_text = std::str::from_utf8(tree_body).expect("tree HTML");
+        assert!(tree_text.contains("readme &amp; &lt;browser&gt;.txt"));
+
+        let commit_kind = serve_request(
+            &server,
+            address,
+            format!("GET /commits/{tree_id} HTTP/1.1\r\nAuthorization: Bearer {token}\r\n\r\n")
+                .as_bytes(),
+        );
+        let (commit_kind_head, _) = split_response(&commit_kind);
+        assert!(commit_kind_head.starts_with("HTTP/1.1 422 Unprocessable Content\r\n"));
+
+        let tree_kind = serve_request(
+            &server,
+            address,
+            format!("GET /trees/{head_id} HTTP/1.1\r\nAuthorization: Bearer {token}\r\n\r\n")
+                .as_bytes(),
+        );
+        let (tree_kind_head, _) = split_response(&tree_kind);
+        assert!(tree_kind_head.starts_with("HTTP/1.1 422 Unprocessable Content\r\n"));
+
         let refs = serve_request(
             &server,
             address,
@@ -992,6 +1421,69 @@ mod tests {
         let (method_head, _) = split_response(&method);
         assert!(method_head.starts_with("HTTP/1.1 405 Method Not Allowed\r\n"));
         assert!(method_head.contains("Allow: GET"));
+    }
+
+    #[test]
+    fn parses_commit_and_tree_views_without_relaxing_binary_bounds() {
+        let tree: GitObjectId = "0123456789012345678901234567890123456789"
+            .parse()
+            .expect("tree ID");
+        let parent: GitObjectId = "1123456789012345678901234567890123456789"
+            .parse()
+            .expect("parent ID");
+        let commit = format!(
+            "tree {tree}\nparent {parent}\nauthor Yeokcham <test@example.invalid> 0 +0000\ncommitter Yeokcham <test@example.invalid> 0 +0000\ngpgsig signature\n continuation\n\nsubject"
+        );
+        let parsed = parse_commit_view(commit.as_bytes()).expect("valid commit view");
+        assert_eq!(parsed.tree, tree);
+        assert_eq!(parsed.parents, vec![parent]);
+        assert_eq!(parsed.parent_count, 1);
+        assert_eq!(parsed.message, b"subject");
+        assert!(parse_commit_view(b"tree invalid\n\nsubject").is_err());
+
+        let mut many_parents = format!("tree {tree}\n");
+        for _ in 0..=MAXIMUM_RENDERED_COMMIT_PARENTS {
+            many_parents.push_str(&format!("parent {parent}\n"));
+        }
+        many_parents.push_str("\nsubject");
+        let parsed = parse_commit_view(many_parents.as_bytes()).expect("bounded parent view");
+        assert_eq!(parsed.parents.len(), MAXIMUM_RENDERED_COMMIT_PARENTS);
+        assert_eq!(parsed.parent_count, MAXIMUM_RENDERED_COMMIT_PARENTS + 1);
+
+        let mut tree_bytes = b"100644 safe-name\0".to_vec();
+        tree_bytes.extend_from_slice(tree.as_bytes());
+        let parsed = parse_tree_view(&tree_bytes).expect("valid tree view");
+        assert_eq!(parsed.entry_count, 1);
+        assert_eq!(parsed.entries[0].mode, b"100644");
+        assert_eq!(parsed.entries[0].name, b"safe-name");
+        assert_eq!(parsed.entries[0].id, tree);
+
+        let mut many_entries = Vec::new();
+        for index in 0..=MAXIMUM_RENDERED_TREE_ENTRIES {
+            many_entries.extend_from_slice(format!("100644 entry-{index}\0").as_bytes());
+            many_entries.extend_from_slice(tree.as_bytes());
+        }
+        let parsed = parse_tree_view(&many_entries).expect("bounded tree view");
+        assert_eq!(parsed.entries.len(), MAXIMUM_RENDERED_TREE_ENTRIES);
+        assert_eq!(parsed.entry_count, MAXIMUM_RENDERED_TREE_ENTRIES + 1);
+
+        let mut unsafe_tree = b"100644 unsafe/name\0".to_vec();
+        unsafe_tree.extend_from_slice(tree.as_bytes());
+        assert!(parse_tree_view(&unsafe_tree).is_err());
+
+        let mut html = HtmlBody::new();
+        assert!(
+            html.push_escaped_preview(b"<>&", 2)
+                .expect("render escaped preview")
+        );
+        assert_eq!(html.into_string(), "&lt;&gt;");
+        let mut html = HtmlBody::new();
+        assert!(
+            !html
+                .push_escaped_preview(b"\xff", 1)
+                .expect("render binary preview")
+        );
+        assert_eq!(html.into_string(), "hex:ff");
     }
 
     #[test]

@@ -23,7 +23,7 @@ The default bind is the operating system-selected port on `127.0.0.1`. Startup p
 - `Content-Length` and `Transfer-Encoding` are rejected; V1 accepts no request body.
 - Each read or write phase has a five-second deadline.
 - Four request workers and eight queued accepted sockets bound local resource use.
-- JSON response bodies and raw-object bodies are limited to 64 MiB.
+- Every response body is limited to 64 MiB.
 - Every endpoint requires exactly one authorization header: `Authorization: Bearer <64-lowercase-hex>` for native clients, or `Authorization: Basic <base64(yeokcham:<token>)>` for a browser.
 - Absent, malformed, duplicate, or wrong credentials receive the same `401` response and both Basic and Bearer `WWW-Authenticate` headers.
 
@@ -33,7 +33,7 @@ Every error response has `application/json` content and this envelope:
 {"version":1,"error":"machine_readable_code"}
 ```
 
-The server deliberately does not expose repository paths, internal error detail, source bodies, or tokens in logs, or a filesystem endpoint.
+The server deliberately does not expose repository paths, internal error detail, raw blob/object bodies through HTML, tokens in logs, or a filesystem endpoint.
 
 ## Endpoints
 
@@ -41,7 +41,19 @@ The server deliberately does not expose repository paths, internal error detail,
 
 Returns an authenticated static HTML repository page with the repository ID, regular ref names/object IDs, and `HEAD`. Navigate to the printed loopback address; when the browser prompts, use username `yeokcham` and the 64-character token as the password. Basic credentials are Base64-encoded, not encrypted, so do not forward, proxy, or tunnel this endpoint.
 
-Valid UTF-8 ref names are HTML-escaped. Non-UTF-8 names appear as `hex:<lowercase-hex>`. V1 deliberately has no object-body, commit, tree, write, export, recovery, script, form, cookie, or token-bearing-link page.
+Valid UTF-8 ref names are HTML-escaped. Non-UTF-8 names appear as `hex:<lowercase-hex>`. V1 has no raw-object or blob browser page, write, export, recovery, script, form, cookie, or token-bearing link.
+
+### `GET /commits/<sha1>`
+
+`<sha1>` is exactly 40 lowercase hexadecimal SHA-1 digits. The server reconstructs and verifies the object before rendering a static HTML commit overview. It requires a Git commit object and returns `422` with `object_kind_mismatch` for a different verified object type or `invalid_commit_object` for malformed commit content.
+
+The page contains the commit ID, a link to its tree, links to the first 1,024 parent commits, author and committer previews limited to 4 KiB, and a 64 KiB commit-message preview. Values are HTML-escaped when valid UTF-8 and otherwise display as lowercase `hex:` bytes; previews append ` [truncated]`. It does not show raw object data or blobs.
+
+### `GET /trees/<sha1>`
+
+`<sha1>` is exactly 40 lowercase hexadecimal SHA-1 digits. The server reconstructs and verifies the object before rendering a static HTML tree overview. It requires a Git tree object and returns `422` with `object_kind_mismatch` for a different verified object type or `invalid_tree_object` for malformed tree bytes.
+
+The page lists the first 10,000 validated tree entries in stored tree order. Each filename is HTML-escaped when valid UTF-8 and otherwise displays as lowercase `hex:` bytes; a name preview is limited to 1 KiB. Child tree IDs link to their tree pages. Blob, symlink, and gitlink IDs are textual metadata only, so the browser never renders source content or assumes a submodule commit is stored locally.
 
 ### `GET /v1/health`
 

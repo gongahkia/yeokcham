@@ -16,7 +16,7 @@ The native V1 service has a private Bearer-token API, but ordinary web browsers 
 - Reuse the existing 256-bit operator token and file lifecycle.
 - Keep every route authenticated and all bindings loopback-only.
 - Render ref names without HTML injection or loss of non-UTF-8 bytes.
-- Avoid adding commit and tree views before their separate TODO items.
+- Keep later commit and tree views separate from the initial repository/ref page.
 
 ## Considered options
 
@@ -36,7 +36,7 @@ This lets browsers prompt for one user/password pair while retaining the current
 
 Accept either exactly one `Authorization: Bearer <token>` header or exactly one HTTP Basic credential with username `yeokcham` and the same token as password. Base64 decoding is bounded to 128 bytes, the decoded credential is zeroized, and the token comparison remains constant-time. Failure continues to return generic `401` with both Basic and Bearer challenges.
 
-Add authenticated `GET /`, a static HTML repository browser that shows the repository ID, regular refs, their current object IDs, and `HEAD`. Valid UTF-8 ref names are HTML-escaped; non-UTF-8 ref names display as `hex:<lowercase-hex>`. It has no token-bearing links, scripts, forms, object-body display, commit view, tree view, write operation, or persistent browser state.
+Add authenticated `GET /`, a static HTML repository browser that shows the repository ID, regular refs, their current object IDs, and `HEAD`. Valid UTF-8 ref names are HTML-escaped; non-UTF-8 ref names display as `hex:<lowercase-hex>`. At adoption it has no token-bearing links, scripts, forms, object-body display, commit view, tree view, write operation, or persistent browser state. ADR-0095 adds bounded commit/tree metadata pages without changing this authentication decision.
 
 ## Consequences
 
