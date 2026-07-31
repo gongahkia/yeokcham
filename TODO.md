@@ -315,7 +315,7 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 
 ### Exit criteria
 
-- [ ] Warm-cache benchmark suite is reproducible.
+- [x] Warm-cache benchmark suite is reproducible.
 - [ ] Daemon improves at least one target workload materially.
 - [x] Daemon can be disabled without data-format changes.
 

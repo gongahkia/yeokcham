@@ -386,3 +386,5 @@ Published loss case: for every current import, export, receive-pack, or remote-h
 An explicit daemon sparse-prefetch configuration validates one Yeokcham repository plus exact relative paths, fills the bounded process cache at startup, and reruns only after ref-snapshot or ref-journal metadata changes. Its tests verify selected-only hydration and cache rehydration after a metadata change. It has no remote-helper IPC yet, so it remains outside sparse-checkout performance claims.
 
 The committed 2026-07-31 W5 result has five clean Apple M3 samples at commit `4d31ebe`: 0.83 s median cold and 0.30 s median warm usable-workspace time, with 772 B median received helper pack payload in both states. It establishes this fixture's local cold/warm behavior only.
+
+The same harness reproduced those medians and the 772 B payload on five clean samples at commit `a740b46`; the schema-validated files are `benchmarks/results/2026-07-31-sparse-workspace-a740b46/`. This closes same-host harness reproducibility only; results across hardware, filesystems, and Git versions remain separate measurements.
