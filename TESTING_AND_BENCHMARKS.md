@@ -373,4 +373,8 @@ Do not rely only on microbenchmarks. End-to-end process benchmarks are required.
 
 The W5 harness is `scripts/benchmark-sparse-workspace.sh`. It times `git clone --no-checkout --filter=blob:none`, cone sparse selection of `app/`, and `git checkout main` as the usable-workspace boundary. Cold samples clear only Yeokcham's disposable snapshot-pack cache before every timed run; warm samples populate it once before timing. It records client `.pack` payload bytes as local remote-helper transport bytes and does not claim physical-network or OS-cache control.
 
+The daemon harness is `scripts/benchmark-daemon.sh`. It runs a private Unix-socket daemon through V1 `ping` and orderly `shutdown`, recording launch-to-exit wall/CPU time and peak RSS with macOS `/usr/bin/time -l`. It measures daemon baseline overhead only; it does not claim a workload improvement.
+
+The committed 2026-07-31 daemon baseline has five Apple M3 runs at commit `8439053`: 70 ms median launch-to-shutdown wall time and 5,931,008 B peak RSS. It establishes only V1 daemon control overhead on that machine.
+
 The committed 2026-07-31 W5 result has five clean Apple M3 samples at commit `4d31ebe`: 0.83 s median cold and 0.30 s median warm usable-workspace time, with 772 B median received helper pack payload in both states. It establishes this fixture's local cold/warm behavior only.

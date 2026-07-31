@@ -309,8 +309,8 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 - [ ] Parallelise compression where measured.
 - [ ] Add pack-synthesis cache.
 - [ ] Add prefetch heuristics.
-- [ ] Measure startup overhead.
-- [ ] Measure daemon memory.
+- [x] Measure startup overhead.
+- [x] Measure daemon memory.
 - [ ] Publish cases where daemon is slower.
 
 ### Exit criteria
