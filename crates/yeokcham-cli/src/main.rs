@@ -35,6 +35,8 @@ const MAXIMUM_GITHUB_GIT_OUTPUT_BYTES: usize = 64 * 1024 * 1024;
 const MAXIMUM_GITHUB_REFERENCE_BYTES: usize = 255;
 const MAXIMUM_GITHUB_REMOTE_REFS: usize = 2_048;
 const MAXIMUM_GITHUB_FETCH_REFSPEC_BYTES: usize = 512 * 1024;
+const MAXIMUM_MIGRATION_FILES: usize = 1_000_000;
+const MAXIMUM_MIGRATION_FILE_BYTES: u64 = 128 * 1024 * 1024;
 
 type DefaultDriveBackend = EncryptedBackend<
     DriveBackend<
@@ -968,8 +970,10 @@ fn verify(repository: PathBuf) -> Result<()> {
 
 fn migrate(source: PathBuf, destination: PathBuf) -> Result<()> {
     let import_limits = GitImportLimits::initial()?;
-    let limits =
-        RepositoryMigrationLimits::new(import_limits.verification_limits()?, recovery_limits()?);
+    let limits = RepositoryMigrationLimits::new(
+        import_limits.verification_limits()?,
+        migration_file_limits()?,
+    );
     let report = LocalRepository::open(source)?.migrate_v1_to_v2(destination, limits)?;
     println!(
         "migrated source_format={} destination_format={} files={} bytes={}",
@@ -3034,6 +3038,21 @@ fn recovery_limits() -> Result<EncryptedRepositoryRecoveryLimits> {
             )
             .ok_or_else(|| Error::new(ErrorKind::Internal, "recovery total bound overflows"))?,
         128 * 1024 * 1024,
+    )
+}
+
+fn migration_file_limits() -> Result<EncryptedRepositoryRecoveryLimits> {
+    EncryptedRepositoryRecoveryLimits::new(
+        MAXIMUM_MIGRATION_FILES,
+        MAXIMUM_MIGRATION_FILE_BYTES,
+        MAXIMUM_MIGRATION_FILE_BYTES
+            .checked_mul(
+                u64::try_from(MAXIMUM_MIGRATION_FILES).map_err(|_| {
+                    Error::new(ErrorKind::Internal, "migration file count is invalid")
+                })?,
+            )
+            .ok_or_else(|| Error::new(ErrorKind::Internal, "migration total bound overflows"))?,
+        MAXIMUM_MIGRATION_FILE_BYTES,
     )
 }
 
