@@ -1,3 +1,10 @@
 (library
  (name paengi_validation)
- (libraries paengi_encoding paengi_envelope paengi_hash paengi_id paengi_snapshot paengi_store unix))
+ (libraries
+  paengi_encoding
+  paengi_envelope
+  paengi_hash
+  paengi_id
+  paengi_snapshot
+  paengi_store
+  unix))

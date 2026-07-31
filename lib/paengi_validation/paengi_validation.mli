@@ -17,12 +17,7 @@ type command = {
 }
 
 type status = Passed | Failed | Timed_out | Execution_error
-
-type captured_stream = {
-  digest : string;
-  retained : string;
-  truncated : bool;
-}
+type captured_stream = { digest : string; retained : string; truncated : bool }
 
 type process_result = {
   runner_status : status;
@@ -42,7 +37,6 @@ end
 module Unix_runner : Process_runner
 
 type evidence
-
 type error
 
 val error_to_string : error -> string
@@ -50,7 +44,6 @@ val make_command : command -> (command, error) result
 val command_payload : command -> (Paengi_encoding.t, error) result
 val decode_command_payload : Paengi_encoding.t -> (command, error) result
 val command_equal : command -> command -> bool
-
 val evidence_id : evidence -> Paengi_id.Validation_id.t
 val evidence_snapshot : evidence -> Snapshot.Snapshot.id
 val evidence_command : evidence -> command
@@ -83,10 +76,16 @@ val create_evidence :
 
 val evidence_payload : evidence -> (Paengi_encoding.t, error) result
 val decode_evidence_payload : Paengi_encoding.t -> (evidence, error) result
+
 val store_evidence :
-  Paengi_store.repository -> evidence -> (Paengi_store.Stored_object_id.t, error) result
+  Paengi_store.repository ->
+  evidence ->
+  (Paengi_store.Stored_object_id.t, error) result
+
 val load_evidence :
-  Paengi_store.repository -> Paengi_store.Stored_object_id.t -> (evidence, error) result
+  Paengi_store.repository ->
+  Paengi_store.Stored_object_id.t ->
+  (evidence, error) result
 
 val run :
   ?runner:(module Process_runner) ->

@@ -6,6 +6,7 @@ module Capsule = Paengi_capsule
 module Capsule_store = Paengi_capsule_store
 module Workspace = Paengi_workspace
 module Workspace_store = Paengi_workspace_store
+module Validation = Paengi_validation
 
 let now () = Int64.of_float (Unix.gettimeofday ())
 
@@ -42,6 +43,152 @@ let conflict_id value =
   match Paengi_id.Conflict_id.of_hex value with
   | Ok identity -> identity
   | Error error -> fail Paengi_id.parse_error_to_string error
+
+let validation root arguments =
+  match arguments with
+  | "run" :: options -> (
+      let parse_environment value =
+        match String.index_opt value '=' with
+        | None -> None
+        | Some index ->
+            Some
+              ( String.sub value 0 index,
+                String.sub value (index + 1) (String.length value - index - 1)
+              )
+      in
+      let parse_working_directory value =
+        if String.is_empty value then Some []
+        else
+          let values = String.split_on_char '/' value in
+          if List.exists String.is_empty values then None else Some values
+      in
+      let rec parse snapshot executable arguments working_directory timeout_ms
+          max_stdout_bytes max_stderr_bytes environment environment_policy
+          retain_output = function
+        | [] -> (
+            match (snapshot, executable) with
+            | Some snapshot, Some executable ->
+                ( snapshot,
+                  executable,
+                  List.rev arguments,
+                  working_directory,
+                  timeout_ms,
+                  max_stdout_bytes,
+                  max_stderr_bytes,
+                  List.sort
+                    (fun (left, _) (right, _) -> String.compare left right)
+                    environment,
+                  environment_policy,
+                  retain_output )
+            | _ -> exit 2)
+        | "--snapshot" :: value :: rest ->
+            parse
+              (Some (snapshot_id value))
+              executable arguments working_directory timeout_ms max_stdout_bytes
+              max_stderr_bytes environment environment_policy retain_output rest
+        | "--exec" :: value :: rest ->
+            parse snapshot (Some value) arguments working_directory timeout_ms
+              max_stdout_bytes max_stderr_bytes environment environment_policy
+              retain_output rest
+        | "--arg" :: value :: rest ->
+            parse snapshot executable (value :: arguments) working_directory
+              timeout_ms max_stdout_bytes max_stderr_bytes environment
+              environment_policy retain_output rest
+        | "--cwd" :: value :: rest -> (
+            match parse_working_directory value with
+            | None -> exit 2
+            | Some working_directory ->
+                parse snapshot executable arguments working_directory timeout_ms
+                  max_stdout_bytes max_stderr_bytes environment
+                  environment_policy retain_output rest)
+        | "--timeout-ms" :: value :: rest -> (
+            match try Some (Int64.of_string value) with Failure _ -> None with
+            | Some value ->
+                parse snapshot executable arguments working_directory value
+                  max_stdout_bytes max_stderr_bytes environment
+                  environment_policy retain_output rest
+            | None -> exit 2)
+        | "--max-stdout-bytes" :: value :: rest -> (
+            match int_of_string_opt value with
+            | Some value ->
+                parse snapshot executable arguments working_directory timeout_ms
+                  value max_stderr_bytes environment environment_policy
+                  retain_output rest
+            | None -> exit 2)
+        | "--max-stderr-bytes" :: value :: rest -> (
+            match int_of_string_opt value with
+            | Some value ->
+                parse snapshot executable arguments working_directory timeout_ms
+                  max_stdout_bytes value environment environment_policy
+                  retain_output rest
+            | None -> exit 2)
+        | "--env" :: value :: rest -> (
+            match parse_environment value with
+            | None -> exit 2
+            | Some entry ->
+                parse snapshot executable arguments working_directory timeout_ms
+                  max_stdout_bytes max_stderr_bytes (entry :: environment)
+                  environment_policy retain_output rest)
+        | "--inherit-env" :: rest ->
+            parse snapshot executable arguments working_directory timeout_ms
+              max_stdout_bytes max_stderr_bytes environment Validation.Inherit
+              retain_output rest
+        | "--retain-output" :: rest ->
+            parse snapshot executable arguments working_directory timeout_ms
+              max_stdout_bytes max_stderr_bytes environment environment_policy
+              true rest
+        | _ -> exit 2
+      in
+      let ( snapshot,
+            executable,
+            arguments,
+            working_directory,
+            timeout_ms,
+            max_stdout_bytes,
+            max_stderr_bytes,
+            environment,
+            environment_policy,
+            retain_output ) =
+        parse None None [] [] 60000L 65536 65536 [] Validation.Empty false
+          options
+      in
+      let command =
+        {
+          Validation.executable;
+          arguments;
+          working_directory;
+          timeout_ms;
+          max_stdout_bytes;
+          max_stderr_bytes;
+          environment_policy;
+          environment;
+          retain_output;
+          format_version = 1L;
+          mandatory_features = 0L;
+        }
+      in
+      match Store.open_repository ~root with
+      | Error error -> fail Store.error_to_string error
+      | Ok store -> (
+          Validation.run ~store ~snapshot ~command ~command_index:0
+            ~observed_at:(now ()) ()
+          |> Result.map_error Validation.error_to_string
+          |> function
+          | Error error -> fail Fun.id error
+          | Ok (evidence, object_id) ->
+              let status =
+                match Validation.evidence_status evidence with
+                | Validation.Passed -> "passed"
+                | Validation.Failed -> "failed"
+                | Validation.Timed_out -> "timed-out"
+                | Validation.Execution_error -> "execution-error"
+              in
+              Printf.printf "evidence=%s object=%s status=%s\n"
+                (Paengi_id.Validation_id.to_hex
+                   (Validation.evidence_id evidence))
+                (Store.Stored_object_id.to_hex object_id)
+                status))
+  | _ -> exit 2
 
 let print_checkpoint checkpoint =
   print_endline
@@ -1048,7 +1195,7 @@ let conflict root arguments =
 let usage () =
   prerr_endline
     "usage: paengi \
-     <init|checkpoint|timeline|restore|pin|unpin|compact|watch|capsule|work|conflict> \
+     <init|checkpoint|timeline|restore|pin|unpin|compact|watch|capsule|work|conflict|validation> \
      [--root PATH] ...";
   exit 2
 
@@ -1070,6 +1217,7 @@ let () =
         | "capsule" -> capsule root arguments
         | "work" -> workspace root arguments
         | "conflict" -> conflict root arguments
+        | "validation" -> validation root arguments
         | _ -> usage ())
     | _ -> usage ()
   with Sys.Break -> print_endline "watch stopped"

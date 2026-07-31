@@ -277,13 +277,13 @@ Robustness tasks operate only on Paengi's pure functions and generated local fix
 
 ### Validation
 
-- [ ] Configure commands.
-- [ ] Run command against a specific snapshot.
-- [ ] Record exit status and duration.
-- [ ] Bound output.
-- [ ] Hash retained output.
-- [ ] Add optional environment fingerprint.
-- [ ] Pin passing checkpoints according to policy.
+- [x] Configure canonical direct-argv commands.
+- [x] Run command against a specific immutable snapshot.
+- [x] Record status, signal/timeout state, and duration.
+- [x] Bound output and hash full observed streams.
+- [x] Optionally retain bounded output Content objects.
+- [x] Add optional environment fingerprint.
+- [ ] Pin passing checkpoints according to policy (deferred: M6 validation must not advance canonical refs).
 
 ### Release
 

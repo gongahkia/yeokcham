@@ -141,6 +141,13 @@ materialise, conflict, resolve, and rematerialise. Properties remain bounded
 and seeded; release dependencies still return the explicit unsupported resolver
 error.
 
+Milestone 6 validation checks canonical command/evidence goldens and inverse
+decoders; exact-snapshot materialisation; passing, failed, signalled, timeout,
+and execution-error observations; bounded stdout/stderr retention and hashes;
+reopen; malformed command rejection; and the invariant that validation cannot
+move scratch, workspace, or release refs. Runner tests inject deterministic
+process outcomes and use direct local argv fixtures for the Unix timeout path.
+
 #### P9 — Dependency safety
 
 No materialisation silently omits an unsatisfied required dependency.

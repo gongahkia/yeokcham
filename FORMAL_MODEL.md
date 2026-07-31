@@ -642,7 +642,7 @@ type release = {
 - `final_snapshot` is reproducible from declared inputs.
 - The release is immutable.
 - Validation evidence is bound to the final snapshot.
-- Signatures bind all release fields.
+- Attestations are separate immutable objects and do not alter `release_id`.
 - Exported bytes match the final snapshot.
 
 ## 12. Validation evidence
@@ -650,21 +650,58 @@ type release = {
 ```ocaml
 type validation_status =
   | Passed
-  | Failed of int
+  | Failed
   | Timed_out
-  | Not_run
+  | Execution_error
+
+type validation_command = {
+  executable : string;
+  arguments : string list;
+  repository_relative_working_directory : path;
+  timeout_ms : int64;
+  maximum_stdout_bytes : int;
+  maximum_stderr_bytes : int;
+  environment_policy : Empty_environment | Inherit_environment;
+  environment_additions : (string * string) list;
+  retain_output : bool;
+  format_version : int;
+  mandatory_features : int64;
+}
 
 type validation_evidence = {
-  command : string list;
-  environment_fingerprint : string option;
+  id : validation_id;
   snapshot : snapshot_id;
+  command : validation_command;
+  command_index : int;
   status : validation_status;
-  stdout_digest : content_id option;
-  stderr_digest : content_id option;
-  started_at : timestamp;
+  exit_code : int option;
+  signal : int option;
+  execution_error : string option;
+  stdout_digest : bytes;
+  stderr_digest : bytes;
+  stdout_truncated : bool;
+  stderr_truncated : bool;
+  retained_stdout : stored_object_id option;
+  retained_stderr : stored_object_id option;
+  environment_fingerprint : bytes option;
+  runner_format_version : int;
+  observed_at : timestamp;
   duration_ms : int64;
 }
-```
+
+Validation execution resolves and materialises the exact immutable snapshot into
+a fresh temporary directory, then invokes the executable plus argument vector
+directly. It never validates a live working directory and never advances
+scratch, workspace, or release refs. Stream retention is bounded while hashes
+cover all observed bytes. Timeout terminates the started process group where the
+host permits; escaped descendants remain a documented portability limitation.
+Repeated observations may have different physical evidence objects because
+duration and observation time are observational rather than correctness inputs.
+
+The logical validation identity derives from canonical command/result fields
+excluding its own ID, duration, and observation timestamp. A stored evidence
+object includes its own logical identity and complete observations, so logical,
+physical, and snapshot identities remain type-distinct.
 
 paengi records evidence. It does not claim that passing tests proves correctness.
 

@@ -105,6 +105,7 @@ dune exec bin/paengi.exe -- work materialise <workspace-id> [--dry-run]
 dune exec bin/paengi.exe -- conflict list <workspace-id>
 dune exec bin/paengi.exe -- conflict show <conflict-id>
 dune exec bin/paengi.exe -- conflict resolve <workspace-id> <conflict-id> --action skip
+dune exec bin/paengi.exe -- validation run --snapshot <snapshot-id> --exec <program> [--arg <argument>] [--cwd <relative-path>] [--timeout-ms <milliseconds>] [--max-stdout-bytes <bytes>] [--max-stderr-bytes <bytes>] [--env <name=value>] [--inherit-env] [--retain-output]
 ```
 
 `work explain-order` is read-only. It resolves each enabled capsule's current
@@ -117,6 +118,12 @@ physical revision object is stored in every workspace revision.
 records a partial attempt when conflicts exist, and uses guarded scratch
 materialisation. `conflict resolve --action skip` is deliberately the only v1
 resolution action; no content, mode, or path is guessed or rewritten.
+
+`validation run` resolves and materialises only the supplied immutable snapshot
+to a fresh temporary directory before direct argv execution. It never validates
+the live working directory or moves any canonical ref. Output capture is
+bounded; full-stream digests, truncation, outcome, and optional bounded Content
+objects are immutable evidence.
 
 `restore` creates a durable safety checkpoint for divergent work, validates its
 plan immediately before applying, and moves `scratch-head` only after exact

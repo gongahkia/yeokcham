@@ -26,7 +26,11 @@ let digest value = Hash.digest_string value |> Hash.to_raw_string
 
 let stream ?(limit = max_int) value =
   let retained = String.sub value 0 (min limit (String.length value)) in
-  { Validation.digest = digest value; retained; truncated = String.length retained < String.length value }
+  {
+    Validation.digest = digest value;
+    retained;
+    truncated = String.length retained < String.length value;
+  }
 
 let result ?(status = Validation.Passed) ?(exit_code = Some 0) ?signal
     ?execution_error ?(stdout = stream "") ?(stderr = stream "") () =
@@ -70,24 +74,30 @@ let with_store run =
   let rec remove path =
     match (Unix.lstat path).Unix.st_kind with
     | Unix.S_DIR ->
-        Sys.readdir path |> Array.iter (fun name -> remove (Filename.concat path name));
+        Sys.readdir path
+        |> Array.iter (fun name -> remove (Filename.concat path name));
         Unix.rmdir path
     | Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO
-    | Unix.S_SOCK -> Unix.unlink path
+    | Unix.S_SOCK ->
+        Unix.unlink path
   in
-  Fun.protect ~finally:(fun () -> remove root) (fun () ->
+  Fun.protect
+    ~finally:(fun () -> remove root)
+    (fun () ->
       let store = Store.init ~root |> require_ok Store.error_to_string in
       let source = Filename.concat root "source" in
       Unix.mkdir source 0o700;
-      Out_channel.with_open_bin (Filename.concat source "tracked") (fun channel ->
-          Out_channel.output_string channel "snapshot-bytes");
+      Out_channel.with_open_bin (Filename.concat source "tracked")
+        (fun channel -> Out_channel.output_string channel "snapshot-bytes");
       let snapshot, _ =
         Snapshot.scan ~root:source ~store |> require_ok Snapshot.error_to_string
       in
       run root source store snapshot)
 
 let golden name =
-  let paths = [ Filename.concat "golden" name; Filename.concat "test/golden" name ] in
+  let paths =
+    [ Filename.concat "golden" name; Filename.concat "test/golden" name ]
+  in
   match List.find_opt Sys.file_exists paths with
   | Some path -> Golden.read_lower_hex_file path |> require_ok Fun.id
   | None -> Alcotest.fail ("missing golden fixture: " ^ name)
@@ -101,45 +111,70 @@ let evidence_fixture () =
   let evidence =
     Validation.create_evidence ~snapshot ~command ~command_index:4
       ~result:
-        (result ~stdout:(stream ~limit:3 "abcd") ~stderr:(stream ~limit:2 "xyz") ())
+        (result ~stdout:(stream ~limit:3 "abcd") ~stderr:(stream ~limit:2 "xyz")
+           ())
       ~stdout_output:None ~stderr_output:None ~observed_at:9L
     |> require_ok Validation.error_to_string
   in
-  let payload = Validation.evidence_payload evidence |> require_ok Validation.error_to_string in
+  let payload =
+    Validation.evidence_payload evidence
+    |> require_ok Validation.error_to_string
+  in
   Envelope.create ~object_type:Envelope.Validation ~object_format_version:1
     ~mandatory_features:0L ~payload ()
-  |> require_ok Envelope.creation_error_to_string |> Envelope.encode
+  |> require_ok Envelope.creation_error_to_string
+  |> Envelope.encode
 
 let canonical_golden_and_inverse_decoder () =
   let bytes = evidence_fixture () in
-  Alcotest.(check string) "validation evidence golden"
-    (golden "validation-evidence-v1.peng.hex") bytes;
-  let envelope = Envelope.decode bytes |> require_ok Envelope.decode_error_to_string in
+  Alcotest.(check string)
+    "validation evidence golden"
+    (golden "validation-evidence-v1.peng.hex")
+    bytes;
+  let envelope =
+    Envelope.decode bytes |> require_ok Envelope.decode_error_to_string
+  in
   let evidence =
     Validation.decode_evidence_payload (Envelope.payload envelope)
     |> require_ok Validation.error_to_string
   in
-  let encoded = Validation.evidence_payload evidence |> require_ok Validation.error_to_string in
-  Alcotest.(check bool) "validation inverse decoder" true
+  let encoded =
+    Validation.evidence_payload evidence
+    |> require_ok Validation.error_to_string
+  in
+  Alcotest.(check bool)
+    "validation inverse decoder" true
     (Encoding.equal encoded (Envelope.payload envelope))
 
 let validation_targets_exact_snapshot_and_survives_reopen () =
   with_store (fun _root _source store snapshot ->
       fake_result := result ~stdout:(stream "ok") ();
       let evidence, object_id =
-        Validation.run ~runner:(module Fake_runner) ~store ~snapshot
-          ~command:(command ~retain_output:true ()) ~command_index:0 ~observed_at:1L ()
+        Validation.run
+          ~runner:(module Fake_runner)
+          ~store ~snapshot
+          ~command:(command ~retain_output:true ())
+          ~command_index:0 ~observed_at:1L ()
         |> require_ok Validation.error_to_string
       in
-      Alcotest.(check bool) "evidence snapshot is exact" true
-        (Snapshot.Snapshot.equal_id snapshot (Validation.evidence_snapshot evidence));
-      let reopened = Store.open_repository ~root:(Store.root store) |> require_ok Store.error_to_string in
-      let loaded =
-        Validation.load_evidence reopened object_id |> require_ok Validation.error_to_string
+      Alcotest.(check bool)
+        "evidence snapshot is exact" true
+        (Snapshot.Snapshot.equal_id snapshot
+           (Validation.evidence_snapshot evidence));
+      let reopened =
+        Store.open_repository ~root:(Store.root store)
+        |> require_ok Store.error_to_string
       in
-      Alcotest.(check bool) "reopen preserves binding" true
-        (Snapshot.Snapshot.equal_id snapshot (Validation.evidence_snapshot loaded));
-      Alcotest.(check bool) "retained stdout object" true
+      let loaded =
+        Validation.load_evidence reopened object_id
+        |> require_ok Validation.error_to_string
+      in
+      Alcotest.(check bool)
+        "reopen preserves binding" true
+        (Snapshot.Snapshot.equal_id snapshot
+           (Validation.evidence_snapshot loaded));
+      Alcotest.(check bool)
+        "retained stdout object" true
         (Option.is_some (Validation.evidence_stdout_output loaded)))
 
 let statuses_and_bounds_are_evidence () =
@@ -148,7 +183,9 @@ let statuses_and_bounds_are_evidence () =
         [
           ("passed", result ());
           ("failed", result ~status:Validation.Failed ~exit_code:(Some 7) ());
-          ("timeout", result ~status:Validation.Timed_out ~exit_code:None ~signal:Sys.sigterm ());
+          ( "timeout",
+            result ~status:Validation.Timed_out ~exit_code:None
+              ~signal:Sys.sigterm () );
           ( "execution-error",
             result ~status:Validation.Execution_error ~exit_code:None
               ~execution_error:"execve failed" () );
@@ -158,11 +195,14 @@ let statuses_and_bounds_are_evidence () =
         (fun index (name, next) ->
           fake_result := next;
           let evidence, _ =
-            Validation.run ~runner:(module Fake_runner) ~store ~snapshot
-              ~command:(command ()) ~command_index:index ~observed_at:(Int64.of_int index) ()
+            Validation.run
+              ~runner:(module Fake_runner)
+              ~store ~snapshot ~command:(command ()) ~command_index:index
+              ~observed_at:(Int64.of_int index) ()
             |> require_ok Validation.error_to_string
           in
-          Alcotest.(check string) name name
+          Alcotest.(check string)
+            name name
             (match Validation.evidence_status evidence with
             | Validation.Passed -> "passed"
             | Validation.Failed -> "failed"
@@ -170,21 +210,28 @@ let statuses_and_bounds_are_evidence () =
             | Validation.Execution_error -> "execution-error"))
         cases;
       fake_result :=
-        result ~stdout:(stream ~limit:3 "abcdef") ~stderr:(stream ~limit:2 "wxyz") ();
+        result ~stdout:(stream ~limit:3 "abcdef")
+          ~stderr:(stream ~limit:2 "wxyz") ();
       let evidence, _ =
-        Validation.run ~runner:(module Fake_runner) ~store ~snapshot
+        Validation.run
+          ~runner:(module Fake_runner)
+          ~store ~snapshot
           ~command:(command ~max_stdout_bytes:3 ~max_stderr_bytes:2 ())
           ~command_index:9 ~observed_at:9L ()
         |> require_ok Validation.error_to_string
       in
-      Alcotest.(check bool) "stdout truncated" true
+      Alcotest.(check bool)
+        "stdout truncated" true
         (Validation.evidence_stdout_truncated evidence);
-      Alcotest.(check bool) "stderr truncated" true
+      Alcotest.(check bool)
+        "stderr truncated" true
         (Validation.evidence_stderr_truncated evidence))
 
 let malformed_commands_reject_and_validation_does_not_move_refs () =
   with_store (fun _root _source store snapshot ->
-      let invalid = { (command ()) with Validation.working_directory = [ ".." ] } in
+      let invalid =
+        { (command ()) with Validation.working_directory = [ ".." ] }
+      in
       (match Validation.make_command invalid with
       | Error _ -> ()
       | Ok _ -> Alcotest.fail "unsafe command accepted");
@@ -192,32 +239,73 @@ let malformed_commands_reject_and_validation_does_not_move_refs () =
       ignore
         (Scratch.create_initial scratch ~snapshot ~created_at:0L
         |> require_ok Scratch.error_to_string);
-      let before = Store.read_ref store ~name:"scratch-head" |> require_ok Store.error_to_string in
+      let before =
+        Store.read_ref store ~name:"scratch-head"
+        |> require_ok Store.error_to_string
+      in
       fake_result := result ();
       ignore
-        (Validation.run ~runner:(module Fake_runner) ~store ~snapshot
-           ~command:(command ()) ~command_index:0 ~observed_at:0L ()
+        (Validation.run
+           ~runner:(module Fake_runner)
+           ~store ~snapshot ~command:(command ()) ~command_index:0
+           ~observed_at:0L ()
         |> require_ok Validation.error_to_string);
-      let after = Store.read_ref store ~name:"scratch-head" |> require_ok Store.error_to_string in
-      Alcotest.(check bool) "validation does not move scratch head" true
+      let after =
+        Store.read_ref store ~name:"scratch-head"
+        |> require_ok Store.error_to_string
+      in
+      Alcotest.(check bool)
+        "validation does not move scratch head" true
         (Option.equal Store.Mutable_ref.equal before after))
 
 let unix_runner_timeout_and_direct_execution () =
   with_store (fun _root _source store snapshot ->
-      let passed = { (command ()) with Validation.executable = "/usr/bin/printf"; arguments = [ "ok" ] } in
+      let passed =
+        {
+          (command ()) with
+          Validation.executable = "/usr/bin/printf";
+          arguments = [ "ok" ];
+        }
+      in
       let evidence, _ =
-        Validation.run ~store ~snapshot ~command:passed ~command_index:0 ~observed_at:0L ()
+        Validation.run ~store ~snapshot ~command:passed ~command_index:0
+          ~observed_at:0L ()
         |> require_ok Validation.error_to_string
       in
-      Alcotest.(check bool) "direct argv command passes" true
+      Alcotest.(check bool)
+        "direct argv command passes" true
         (Validation.evidence_passed evidence);
-      let timeout = { (command ~timeout_ms:0L ()) with Validation.executable = "/bin/sleep"; arguments = [ "1" ] } in
-      Alcotest.(check int64) "timeout configuration" 0L timeout.Validation.timeout_ms;
+      let bounded =
+        {
+          (command ~max_stdout_bytes:2 ()) with
+          Validation.executable = "/usr/bin/printf";
+          arguments = [ "abcdef" ];
+        }
+      in
       let evidence, _ =
-        Validation.run ~store ~snapshot ~command:timeout ~command_index:1 ~observed_at:1L ()
+        Validation.run ~store ~snapshot ~command:bounded ~command_index:1
+          ~observed_at:1L ()
         |> require_ok Validation.error_to_string
       in
-      Alcotest.(check string) "timeout is evidence" "timeout"
+      Alcotest.(check bool)
+        "unix stdout is bounded" true
+        (Validation.evidence_stdout_truncated evidence);
+      let timeout =
+        {
+          (command ~timeout_ms:0L ()) with
+          Validation.executable = "/bin/sleep";
+          arguments = [ "1" ];
+        }
+      in
+      Alcotest.(check int64)
+        "timeout configuration" 0L timeout.Validation.timeout_ms;
+      let evidence, _ =
+        Validation.run ~store ~snapshot ~command:timeout ~command_index:2
+          ~observed_at:2L ()
+        |> require_ok Validation.error_to_string
+      in
+      Alcotest.(check string)
+        "timeout is evidence" "timeout"
         (match Validation.evidence_status evidence with
         | Validation.Passed -> "passed"
         | Validation.Failed -> "failed"

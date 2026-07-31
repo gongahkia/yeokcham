@@ -462,12 +462,18 @@ Validation commands are user-configured.
 
 The runner should:
 
-- Execute against a specific snapshot or materialised workspace.
-- Capture exit status and duration.
-- Hash output rather than retaining unlimited logs by default.
-- Record environment fingerprint optionally.
-- Enforce time and output limits.
+- Resolve a specific immutable snapshot and materialise it into a fresh temporary directory.
+- Directly execute the configured executable and argument vector without an implicit shell.
+- Capture exit status, signal, timeout, duration, full-stream hashes, and bounded prefixes.
+- Optionally persist only bounded output prefixes as Content objects.
+- Record an environment fingerprint optionally.
+- Enforce time and output limits through a Paengi-owned runner interface.
+- Clean temporary materialisation where possible; process-group termination is best effort by host.
 - Never equate success with proof of correctness.
+
+Milestone 6 adds immutable `Validation_evidence_v1`; it is not a mutable
+workspace/scratch annotation and cannot advance canonical refs. Release creation
+uses only evidence bound to the exact final snapshot.
 
 ## 13. Git bridge
 

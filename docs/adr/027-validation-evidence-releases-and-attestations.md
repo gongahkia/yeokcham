@@ -38,7 +38,8 @@ canonical Profile-1 value:
 validation-command-v1 = [
   1, executable-text, [* argument-text], working-directory-components,
   timeout-milliseconds, maximum-stdout-bytes, maximum-stderr-bytes,
-  environment-policy, [* environment-addition]
+  environment-policy, [* environment-addition], retain-output,
+  mandatory-features
 ]
 environment-policy = 0 / 1                 ; empty / inherited process environment
 environment-addition = [name-text, value-text]
@@ -57,10 +58,11 @@ versions, and unknown mandatory features.
 ```text
 validation-evidence-v1 = [
   1, validation-evidence-id, snapshot-id, validation-command-v1,
-  command-index, status, exit-code-or-null, signal-or-null, duration-milliseconds,
+  command-index, status, exit-code-or-null, signal-or-null, execution-error-or-null,
+  duration-milliseconds,
   stdout-sha256, stderr-sha256, stdout-truncated, stderr-truncated,
   retained-stdout-object-or-null, retained-stderr-object-or-null,
-  environment-fingerprint-or-null, runner-format-version, observed-at-unix-seconds
+  environment-fingerprint-bytes-or-null, runner-format-version, observed-at-unix-seconds
 ]
 ```
 
