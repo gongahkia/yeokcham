@@ -1042,7 +1042,7 @@ let verify_release store release =
   let* () = verify_parent_graph store release in
   Ok release
 
-let publish_binding store binding =
+let publish_binding store (binding : binding) =
   let* existing =
     Store.Ref_file.read store ~components:(binding_components binding.release)
     |> Result.map_error (fun error -> Store_error error)

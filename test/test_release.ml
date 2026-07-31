@@ -560,6 +560,99 @@ let missing_and_cross_context_links_reject () =
       | Error _ -> ()
       | Ok _ -> Alcotest.fail "cross-context workspace link verified")
 
+let conflicting_binding_reuse_rejects () =
+  with_root (fun root ->
+      let fixture = fixture root in
+      fake_result :=
+        { !fake_result with Validation.runner_status = Validation.Passed };
+      let visible =
+        Release.Durable.create
+          ~runner:(module Fake_runner)
+          ~store:fixture.store ~workspace:fixture.workspace ~parents:[]
+          ~commands:[ command () ]
+          ~message:(Some "binding conflict") ~observed_at:6L ~created_at:6L ()
+        |> require_ok Release.error_to_string
+      in
+      let alternate =
+        Release.create_release ~parents:[] ~workspace:fixture.workspace
+          ~workspace_revision:(Release.release_workspace_revision visible)
+          ~workspace_revision_object:
+            (Release.release_workspace_revision_object visible)
+          ~attempt:(Release.release_attempt visible)
+          ~base:(Release.release_base visible)
+          ~capsules:(Release.release_capsules visible)
+          ~resolutions:(Release.release_resolutions visible)
+          ~final_snapshot:(Release.release_final_snapshot visible)
+          ~evidence:[]
+          ~message:(Release.release_message visible)
+          ~created_at:(Int64.succ (Release.release_created_at visible))
+        |> require_ok Release.error_to_string
+      in
+      Alcotest.(check bool)
+        "same composition has same logical release ID" true
+        (Id.Release_id.equal
+           (Release.release_id visible)
+           (Release.release_id alternate));
+      let alternate_object =
+        Release.store_release fixture.store alternate
+        |> require_ok Release.error_to_string
+      in
+      let rejected =
+        Release.publish_binding fixture.store
+          (Release.make_binding
+             ~release:(Release.release_id alternate)
+             ~object_id:alternate_object)
+        |> Result.map_error Release.error_to_string
+        |> function
+        | Error message ->
+            String.starts_with
+              ~prefix:
+                "release ID is already bound to different immutable content"
+              message
+        | Ok () -> false
+      in
+      Alcotest.(check bool) "conflicting release binding rejects" true rejected)
+
+let deterministic_listing_and_show () =
+  with_root (fun root ->
+      let fixture = fixture root in
+      fake_result :=
+        { !fake_result with Validation.runner_status = Validation.Passed };
+      let first =
+        Release.Durable.create
+          ~runner:(module Fake_runner)
+          ~store:fixture.store ~workspace:fixture.workspace ~parents:[]
+          ~commands:[ command () ]
+          ~message:(Some "first") ~observed_at:6L ~created_at:6L ()
+        |> require_ok Release.error_to_string
+      in
+      let second =
+        Release.Durable.create
+          ~runner:(module Fake_runner)
+          ~store:fixture.store ~workspace:fixture.workspace
+          ~parents:[ Release.release_id first ]
+          ~commands:[ command () ]
+          ~message:(Some "second") ~observed_at:7L ~created_at:7L ()
+        |> require_ok Release.error_to_string
+      in
+      let listed =
+        Release.Durable.list fixture.store |> require_ok Release.error_to_string
+      in
+      let actual = List.map Release.release_id listed in
+      let expected = List.sort Id.Release_id.compare actual in
+      Alcotest.(check bool)
+        "release listing has canonical ID order" true
+        (List.for_all2 Id.Release_id.equal actual expected);
+      let shown =
+        Release.Durable.read fixture.store (Release.release_id second)
+        |> require_ok Release.error_to_string
+      in
+      Alcotest.(check bool)
+        "release show reads bound immutable object" true
+        (Id.Release_id.equal
+           (Release.release_id second)
+           (Release.release_id shown)))
+
 let parent_resolver_closure_and_cycles () =
   let a = release_id 60 in
   let b = release_id 61 in
@@ -609,6 +702,10 @@ let () =
                 wrong_type_evidence_link_rejects;
               Alcotest.test_case "missing and cross-context links reject" `Quick
                 missing_and_cross_context_links_reject;
+              Alcotest.test_case "conflicting binding reuse rejects" `Quick
+                conflicting_binding_reuse_rejects;
+              Alcotest.test_case "deterministic listing and show" `Quick
+                deterministic_listing_and_show;
               Alcotest.test_case "parent resolver closure and cycle seam" `Quick
                 parent_resolver_closure_and_cycles;
             ] );

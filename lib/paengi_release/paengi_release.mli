@@ -109,6 +109,7 @@ val make_binding :
 val encode_binding : binding -> string
 val decode_binding : string -> (binding, error) result
 val binding_components : Paengi_id.Release_id.t -> string list
+val publish_binding : Paengi_store.repository -> binding -> (unit, error) result
 
 val create_attestation :
   release:Paengi_id.Release_id.t ->
