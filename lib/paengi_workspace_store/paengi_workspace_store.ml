@@ -2803,6 +2803,43 @@ module Durable = struct
          (Ok [])
     |> Result.map List.rev
 
+  let verify_attempt ~store ~(revision : workspace_revision)
+      ~(attempt : workspace_attempt) =
+    if
+      not
+        (Id.Workspace_id.equal attempt.workspace revision.workspace)
+      || not
+           (Id.Workspace_revision_id.equal attempt.workspace_revision revision.id)
+    then Error Current_ref_attempt_mismatch
+    else
+      let* order = validate_revision_links store revision in
+      let* () = validate_resolution_bindings store revision in
+      let* () = validate_attempt_context store revision order attempt in
+      let* base =
+        Snapshot.Snapshot.load store revision.base
+        |> Result.map_error (fun error -> Snapshot_error error)
+      in
+      let* state =
+        Scratch.State.of_snapshot store base
+        |> Result.map_error (fun error -> Scratch_error error)
+      in
+      let* ordered = ordered_application_revisions store revision in
+      let* resolutions = resolution_actions store revision in
+      let application = Workspace.apply ~state ~ordered ~resolutions in
+      let* resulting =
+        Snapshot.Snapshot.load store attempt.resulting_snapshot
+        |> Result.map_error (fun error -> Snapshot_error error)
+      in
+      let* resulting =
+        Scratch.State.of_snapshot store resulting
+        |> Result.map_error (fun error -> Scratch_error error)
+      in
+      if Scratch.State.equal application.state resulting then Ok ()
+      else
+        Error
+          (Materialisation_error
+             "workspace attempt result disagrees with immutable replay")
+
   let materialise_application ~store ~(resolved : resolved) ~starting_checkpoint
       ~starting_snapshot ~created_at ~dry_run =
     let* base =

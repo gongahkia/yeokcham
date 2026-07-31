@@ -353,6 +353,12 @@ module Durable : sig
     Paengi_id.Workspace_id.t ->
     (Workspace.order, error) result
 
+  val verify_attempt :
+    store:Paengi_store.repository ->
+    revision:workspace_revision ->
+    attempt:workspace_attempt ->
+    (unit, error) result
+
   val materialise :
     store:Paengi_store.repository ->
     scratch:Paengi_scratch.repository ->
