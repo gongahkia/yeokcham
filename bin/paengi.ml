@@ -7,6 +7,7 @@ module Capsule_store = Paengi_capsule_store
 module Workspace = Paengi_workspace
 module Workspace_store = Paengi_workspace_store
 module Validation = Paengi_validation
+module Release = Paengi_release
 
 let now () = Int64.of_float (Unix.gettimeofday ())
 
@@ -42,6 +43,14 @@ let snapshot_id value =
 let conflict_id value =
   match Paengi_id.Conflict_id.of_hex value with
   | Ok identity -> identity
+  | Error error -> fail Paengi_id.parse_error_to_string error
+
+let release_id value =
+  match Paengi_id.Release_id.of_hex value with
+  | Ok identity when String.length (Paengi_id.Release_id.to_bytes identity) = 32
+    ->
+      identity
+  | Ok _ -> fail Fun.id "release ID must be 32 bytes"
   | Error error -> fail Paengi_id.parse_error_to_string error
 
 let validation root arguments =
@@ -188,6 +197,225 @@ let validation root arguments =
                    (Validation.evidence_id evidence))
                 (Store.Stored_object_id.to_hex object_id)
                 status))
+  | _ -> exit 2
+
+type validation_draft = {
+  executable : string;
+  arguments : string list;
+  working_directory : string list;
+  timeout_ms : int64;
+  max_stdout_bytes : int;
+  max_stderr_bytes : int;
+  environment : (string * string) list;
+  environment_policy : Validation.environment_policy;
+  retain_output : bool;
+}
+
+let default_validation_draft executable =
+  {
+    executable;
+    arguments = [];
+    working_directory = [];
+    timeout_ms = 60000L;
+    max_stdout_bytes = 65536;
+    max_stderr_bytes = 65536;
+    environment = [];
+    environment_policy = Validation.Empty;
+    retain_output = false;
+  }
+
+let validation_command_of_draft draft =
+  {
+    Validation.executable = draft.executable;
+    arguments = List.rev draft.arguments;
+    working_directory = draft.working_directory;
+    timeout_ms = draft.timeout_ms;
+    max_stdout_bytes = draft.max_stdout_bytes;
+    max_stderr_bytes = draft.max_stderr_bytes;
+    environment =
+      List.sort
+        (fun (left, _) (right, _) -> String.compare left right)
+        draft.environment;
+    environment_policy = draft.environment_policy;
+    retain_output = draft.retain_output;
+    format_version = 1L;
+    mandatory_features = 0L;
+  }
+
+let release root arguments =
+  let parse_environment value =
+    match String.index_opt value '=' with
+    | None -> None
+    | Some index ->
+        Some
+          ( String.sub value 0 index,
+            String.sub value (index + 1) (String.length value - index - 1) )
+  in
+  let parse_working_directory value =
+    if String.is_empty value then Some []
+    else
+      let values = String.split_on_char '/' value in
+      if List.exists String.is_empty values then None else Some values
+  in
+  let current_draft = function Some draft -> draft | None -> exit 2 in
+  match arguments with
+  | [ "show"; identity ] -> (
+      match Store.open_repository ~root with
+      | Error error -> fail Store.error_to_string error
+      | Ok store -> (
+          Release.Durable.read store (release_id identity)
+          |> Result.map_error Release.error_to_string
+          |> function
+          | Error error -> fail Fun.id error
+          | Ok release ->
+              Printf.printf
+                "release=%s workspace=%s revision=%s final=%s evidence=%d\n"
+                (Paengi_id.Release_id.to_hex (Release.release_id release))
+                (Paengi_id.Workspace_id.to_hex
+                   (Release.release_workspace release))
+                (Paengi_id.Workspace_revision_id.to_hex
+                   (Release.release_workspace_revision release))
+                (Store.Stored_object_id.to_hex
+                   (Snapshot.Snapshot.stored_object_id
+                      (Release.release_final_snapshot release)))
+                (List.length (Release.release_evidence release))))
+  | [ "verify"; identity ] -> (
+      match Store.open_repository ~root with
+      | Error error -> fail Store.error_to_string error
+      | Ok store -> (
+          Release.Durable.verify store (release_id identity)
+          |> Result.map_error Release.error_to_string
+          |> function
+          | Error error -> fail Fun.id error
+          | Ok release ->
+              Printf.printf "verified release=%s final=%s\n"
+                (Paengi_id.Release_id.to_hex (Release.release_id release))
+                (Store.Stored_object_id.to_hex
+                   (Snapshot.Snapshot.stored_object_id
+                      (Release.release_final_snapshot release)))))
+  | [ "list" ] -> (
+      match Store.open_repository ~root with
+      | Error error -> fail Store.error_to_string error
+      | Ok store -> (
+          Release.Durable.list store |> Result.map_error Release.error_to_string
+          |> function
+          | Error error -> fail Fun.id error
+          | Ok releases ->
+              List.iter
+                (fun release ->
+                  Printf.printf "%s %s\n"
+                    (Paengi_id.Release_id.to_hex (Release.release_id release))
+                    (Store.Stored_object_id.to_hex
+                       (Snapshot.Snapshot.stored_object_id
+                          (Release.release_final_snapshot release))))
+                releases))
+  | "create" :: options -> (
+      let rec parse workspace parents message drafts current = function
+        | [] -> (
+            match workspace with
+            | None -> exit 2
+            | Some workspace ->
+                let drafts =
+                  match current with
+                  | None -> drafts
+                  | Some draft -> draft :: drafts
+                in
+                (workspace, List.rev parents, message, List.rev drafts))
+        | "--workspace" :: value :: rest ->
+            parse
+              (Some (workspace_id value))
+              parents message drafts current rest
+        | "--parent" :: value :: rest ->
+            parse workspace
+              (release_id value :: parents)
+              message drafts current rest
+        | "--message" :: value :: rest ->
+            parse workspace parents (Some value) drafts current rest
+        | "--validation-exec" :: value :: rest ->
+            let drafts =
+              match current with
+              | None -> drafts
+              | Some draft -> draft :: drafts
+            in
+            parse workspace parents message drafts
+              (Some (default_validation_draft value))
+              rest
+        | "--validation-arg" :: value :: rest ->
+            let draft = current_draft current in
+            parse workspace parents message drafts
+              (Some { draft with arguments = value :: draft.arguments })
+              rest
+        | "--validation-cwd" :: value :: rest -> (
+            match parse_working_directory value with
+            | None -> exit 2
+            | Some working_directory ->
+                let draft = current_draft current in
+                parse workspace parents message drafts
+                  (Some { draft with working_directory })
+                  rest)
+        | "--validation-timeout-ms" :: value :: rest -> (
+            match try Some (Int64.of_string value) with Failure _ -> None with
+            | None -> exit 2
+            | Some timeout_ms ->
+                let draft = current_draft current in
+                parse workspace parents message drafts
+                  (Some { draft with timeout_ms })
+                  rest)
+        | "--validation-max-stdout-bytes" :: value :: rest -> (
+            match int_of_string_opt value with
+            | None -> exit 2
+            | Some max_stdout_bytes ->
+                let draft = current_draft current in
+                parse workspace parents message drafts
+                  (Some { draft with max_stdout_bytes })
+                  rest)
+        | "--validation-max-stderr-bytes" :: value :: rest -> (
+            match int_of_string_opt value with
+            | None -> exit 2
+            | Some max_stderr_bytes ->
+                let draft = current_draft current in
+                parse workspace parents message drafts
+                  (Some { draft with max_stderr_bytes })
+                  rest)
+        | "--validation-env" :: value :: rest -> (
+            match parse_environment value with
+            | None -> exit 2
+            | Some entry ->
+                let draft = current_draft current in
+                parse workspace parents message drafts
+                  (Some { draft with environment = entry :: draft.environment })
+                  rest)
+        | "--validation-inherit-env" :: rest ->
+            let draft = current_draft current in
+            parse workspace parents message drafts
+              (Some { draft with environment_policy = Validation.Inherit })
+              rest
+        | "--validation-retain-output" :: rest ->
+            let draft = current_draft current in
+            parse workspace parents message drafts
+              (Some { draft with retain_output = true })
+              rest
+        | _ -> exit 2
+      in
+      let workspace, parents, message, drafts =
+        parse None [] None [] None options
+      in
+      let commands = List.map validation_command_of_draft drafts in
+      match Store.open_repository ~root with
+      | Error error -> fail Store.error_to_string error
+      | Ok store -> (
+          Release.Durable.create ~store ~workspace ~parents ~commands ~message
+            ~observed_at:(now ()) ~created_at:(now ()) ()
+          |> Result.map_error Release.error_to_string
+          |> function
+          | Error error -> fail Fun.id error
+          | Ok release ->
+              Printf.printf "release=%s final=%s evidence=%d\n"
+                (Paengi_id.Release_id.to_hex (Release.release_id release))
+                (Store.Stored_object_id.to_hex
+                   (Snapshot.Snapshot.stored_object_id
+                      (Release.release_final_snapshot release)))
+                (List.length (Release.release_evidence release))))
   | _ -> exit 2
 
 let print_checkpoint checkpoint =
@@ -1195,7 +1423,7 @@ let conflict root arguments =
 let usage () =
   prerr_endline
     "usage: paengi \
-     <init|checkpoint|timeline|restore|pin|unpin|compact|watch|capsule|work|conflict|validation> \
+     <init|checkpoint|timeline|restore|pin|unpin|compact|watch|capsule|work|conflict|validation|release> \
      [--root PATH] ...";
   exit 2
 
@@ -1218,6 +1446,7 @@ let () =
         | "work" -> workspace root arguments
         | "conflict" -> conflict root arguments
         | "validation" -> validation root arguments
+        | "release" -> release root arguments
         | _ -> usage ())
     | _ -> usage ()
   with Sys.Break -> print_endline "watch stopped"

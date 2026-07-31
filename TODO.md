@@ -287,20 +287,20 @@ Robustness tasks operate only on Paengi's pure functions and generated local fix
 
 ### Release
 
-- [ ] Validate dependency closure.
-- [ ] Materialise final snapshot.
-- [ ] Record exact capsule revisions and order.
-- [ ] Record validation evidence.
-- [ ] Create immutable release ID.
-- [ ] Verify release reproduction.
+- [x] Validate durable workspace dependency closure and exact attempt context.
+- [x] Replay the final snapshot from immutable workspace inputs.
+- [x] Record exact ordered capsule revisions and resolution bindings.
+- [x] Record immutable validation evidence links.
+- [x] Create immutable logical Release IDs and create-only bindings.
+- [x] Verify release reproduction after reopen.
 - [ ] Add optional signing abstraction.
-- [ ] Add release inspection.
+- [x] Add release creation, inspection, verification, and deterministic listing.
 
 ### Exit criteria
 
-- [ ] Release final snapshot is reproducible.
-- [ ] Validation evidence is bound to snapshot.
-- [ ] Release remains unchanged when capsules receive later revisions.
+- [x] Release final snapshot is reproducible.
+- [x] Validation evidence is bound to snapshot.
+- [x] Release remains unchanged when capsules/workspaces receive later revisions.
 
 ## Milestone 7 — TypeScript semantic sidecar
 

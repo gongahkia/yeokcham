@@ -2806,10 +2806,10 @@ module Durable = struct
   let verify_attempt ~store ~(revision : workspace_revision)
       ~(attempt : workspace_attempt) =
     if
-      not
-        (Id.Workspace_id.equal attempt.workspace revision.workspace)
+      (not (Id.Workspace_id.equal attempt.workspace revision.workspace))
       || not
-           (Id.Workspace_revision_id.equal attempt.workspace_revision revision.id)
+           (Id.Workspace_revision_id.equal attempt.workspace_revision
+              revision.id)
     then Error Current_ref_attempt_mismatch
     else
       let* order = validate_revision_links store revision in

@@ -4,6 +4,7 @@
   paengi_capsule
   paengi_capsule_store
   paengi_compaction
+  paengi_release
   paengi_scratch
   paengi_snapshot
   paengi_store

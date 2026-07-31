@@ -196,6 +196,29 @@
   (source_tree golden)))
 
 (test
+ (name test_release)
+ (modules test_release)
+ (libraries
+  alcotest
+  paengi_capsule
+  paengi_capsule_store
+  paengi_encoding
+  paengi_envelope
+  paengi_hash
+  paengi_id
+  paengi_release
+  paengi_scratch
+  paengi_snapshot
+  paengi_store
+  paengi_testkit
+  paengi_validation
+  paengi_workspace
+  paengi_workspace_store
+  unix)
+ (deps
+  (source_tree golden)))
+
+(test
  (name test_capsule_store)
  (modules test_capsule_store)
  (libraries

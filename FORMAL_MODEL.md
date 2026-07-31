@@ -582,6 +582,13 @@ exact application and may be partial. The current ref is the sole mutable
 visibility point and carries logical/physical workspace and revision links,
 optional latest attempt, checksum, and CAS generation.
 
+`Workspace_revision_v1` records only `base_snapshot`, not a declared base
+release. Therefore it cannot prove `Requires_release` from release ancestry:
+snapshot equality is insufficient and must not be used as a substitute. The
+current durable resolver returns `Required_release_unavailable` pending an
+additive v2 schema with a typed base-release link; ADR-027 records the required
+compatibility and migration design.
+
 ### Composition invariant
 
 For identical:
@@ -628,12 +635,17 @@ Possible outcomes:
 type release = {
   id : release_id;
   parent_releases : release_id list;
+  workspace : workspace_id;
+  workspace_revision : workspace_revision_id;
+  workspace_revision_object : stored_object_id;
+  workspace_attempt : (workspace_attempt_id * stored_object_id) option;
   base_snapshot : snapshot_id;
-  capsules : capsule_revision_id list;
+  capsules : selected_capsule_revision list;
+  resolutions : (conflict_id * resolution_id * stored_object_id) list;
   final_snapshot : snapshot_id;
-  evidence : validation_evidence list;
+  evidence : (validation_id * stored_object_id) list;
+  message : string option;
   created_at : timestamp;
-  signature : signature option;
 }
 ```
 
@@ -644,6 +656,21 @@ type release = {
 - Validation evidence is bound to the final snapshot.
 - Attestations are separate immutable objects and do not alter `release_id`.
 - Exported bytes match the final snapshot.
+
+`Release_id` derives from its canonical composition (parents, workspace/revision
+and attempt links, base, ordered capsule links, resolution bindings, final
+snapshot, and message), never from its own bytes. Evidence links and creation
+time remain immutable observed metadata but are excluded from this logical
+identity so a retry after pre-binding interruption can reuse the release ID.
+The physical `Stored_object_id` still hashes the complete object.
+
+Visibility is one create-only checksummed binding at
+`refs/releases/<release-id>`. The binding names both logical and physical
+identity, is expected-absent, and is the sole canonical release listing source.
+Release verification loads all links, replays the immutable workspace attempt,
+checks exact capsule/resolution agreement and final state, checks all evidence
+targets the final snapshot, and traverses ordered parent links through immutable
+bindings with cycle detection.
 
 ## 12. Validation evidence
 

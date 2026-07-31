@@ -148,6 +148,14 @@ reopen; malformed command rejection; and the invariant that validation cannot
 move scratch, workspace, or release refs. Runner tests inject deterministic
 process outcomes and use direct local argv fixtures for the Unix timeout path.
 
+Milestone 6 release checks canonical Release/binding goldens and inverse
+decoders; create/reopen/show/list/verify; exact workspace-attempt replay;
+evidence/final-snapshot binding; failed-validation and unresolved-conflict
+publication rejection; interrupted pre-binding invisibility; retry idempotency;
+later immutable capsule/workspace revisions; corruption/type/context rejection;
+and parent closure/cycle traversal through a pure resolver seam. Release
+verification reads no rebuildable index.
+
 #### P9 — Dependency safety
 
 No materialisation silently omits an unsatisfied required dependency.

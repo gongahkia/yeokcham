@@ -381,6 +381,20 @@ The final two ref publications are not cross-ref atomic. Recovery re-resolves
 immutable workspace inputs and allows an exact retry when scratch-head
 publication succeeded before workspace-attempt publication.
 
+## 9.1 Release service
+
+`paengi_release` is a read-mostly durable adapter over verified immutable
+workspace revisions and attempts. Release creation holds the existing
+repository writer lock, rejects unresolved attempts, replays the exact attempt,
+runs required validation through `paengi_validation`, writes immutable evidence
+and a `Release_v1`, verifies reproduction, then creates the release binding.
+The binding at `refs/releases/<release-id>` is expected-absent and is the only
+visibility point. A crash before it leaves unreachable immutable objects only.
+
+Release verification never trusts workspace-current or a rebuildable index: it
+loads the release's physical workspace revision/attempt links and replays them.
+Parent traversal is isolated behind a pure resolver seam for cycle tests.
+
 Milestone 1 materialisation is intentionally narrower: it emits an inspectable dry-run plan and writes only to an existing empty destination with exclusive file creation. It preserves regular bytes, executable mode, directories, and symlink target bytes; unsafe decoded names and nonempty destinations reject. Workspace transactional replacement and safety checkpoints remain scratch/workspace work.
 
 Milestone 2 restore is a guarded, but not crash-atomic, populated-directory

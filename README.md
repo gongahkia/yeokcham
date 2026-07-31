@@ -106,6 +106,10 @@ dune exec bin/paengi.exe -- conflict list <workspace-id>
 dune exec bin/paengi.exe -- conflict show <conflict-id>
 dune exec bin/paengi.exe -- conflict resolve <workspace-id> <conflict-id> --action skip
 dune exec bin/paengi.exe -- validation run --snapshot <snapshot-id> --exec <program> [--arg <argument>] [--cwd <relative-path>] [--timeout-ms <milliseconds>] [--max-stdout-bytes <bytes>] [--max-stderr-bytes <bytes>] [--env <name=value>] [--inherit-env] [--retain-output]
+dune exec bin/paengi.exe -- release create --workspace <workspace-id> [--parent <release-id>] [--message <text>] [--validation-exec <program> [--validation-arg <argument>] [--validation-cwd <relative-path>] [--validation-timeout-ms <milliseconds>] [--validation-max-stdout-bytes <bytes>] [--validation-max-stderr-bytes <bytes>] [--validation-env <name=value>] [--validation-inherit-env] [--validation-retain-output]]
+dune exec bin/paengi.exe -- release show <release-id>
+dune exec bin/paengi.exe -- release verify <release-id>
+dune exec bin/paengi.exe -- release list
 ```
 
 `work explain-order` is read-only. It resolves each enabled capsule's current
@@ -124,6 +128,12 @@ to a fresh temporary directory before direct argv execution. It never validates
 the live working directory or moves any canonical ref. Output capture is
 bounded; full-stream digests, truncation, outcome, and optional bounded Content
 objects are immutable evidence.
+
+`release create` reads the current immutable workspace revision and its verified
+complete attempt, rejects unresolved conflicts, replays it, runs every supplied
+required validation against the resulting snapshot, then publishes an immutable
+release through a create-only binding. `release verify` replays durable inputs;
+it does not trust a workspace cache or current workspace selection.
 
 `restore` creates a durable safety checkpoint for divergent work, validates its
 plan immediately before applying, and moves `scratch-head` only after exact

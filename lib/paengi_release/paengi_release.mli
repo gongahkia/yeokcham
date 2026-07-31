@@ -15,7 +15,32 @@ type evidence_link = {
 type release
 type binding
 
-type error
+type error =
+  | Store_error of Paengi_store.error
+  | Envelope_error of Paengi_envelope.creation_error
+  | Encoding_error of Paengi_encoding.construction_error
+  | Decode_error of string
+  | Unsupported_schema_version of int64
+  | Unexpected_object_type of {
+      expected : Paengi_envelope.object_type;
+      actual : Paengi_envelope.object_type;
+    }
+  | Invalid_identity_length of { kind : string; length : int }
+  | Invalid_release of string
+  | Logical_identity_mismatch
+  | Invalid_binding_checksum
+  | Release_missing of Paengi_id.Release_id.t
+  | Binding_release_mismatch
+  | Conflicting_release_id_reuse of Paengi_id.Release_id.t
+  | Workspace_error of Paengi_workspace_store.error
+  | Validation_error of Paengi_validation.error
+  | Snapshot_error of Paengi_snapshot.error
+  | Workspace_attempt_missing of Paengi_id.Workspace_id.t
+  | Unresolved_conflicts of Paengi_id.Workspace_attempt_id.t
+  | Required_validation_failed of Paengi_id.Validation_id.t
+  | Release_reproduction_mismatch
+  | Parent_error of string
+  | Injected_interruption of string
 
 val error_to_string : error -> string
 
@@ -38,7 +63,10 @@ val release_id : release -> Paengi_id.Release_id.t
 val release_parents : release -> Paengi_id.Release_id.t list
 val release_workspace : release -> Paengi_id.Workspace_id.t
 val release_workspace_revision : release -> Paengi_id.Workspace_revision_id.t
-val release_workspace_revision_object : release -> Paengi_store.Stored_object_id.t
+
+val release_workspace_revision_object :
+  release -> Paengi_store.Stored_object_id.t
+
 val release_attempt : release -> attempt_link option
 val release_base : release -> Paengi_snapshot.Snapshot.id
 val release_capsules : release -> Capsule_store.revision_link list
@@ -47,22 +75,34 @@ val release_final_snapshot : release -> Paengi_snapshot.Snapshot.id
 val release_evidence : release -> evidence_link list
 val release_message : release -> string option
 val release_created_at : release -> int64
-
 val release_payload : release -> (Paengi_encoding.t, error) result
 val decode_release_payload : Paengi_encoding.t -> (release, error) result
+
 val store_release :
-  Paengi_store.repository -> release -> (Paengi_store.Stored_object_id.t, error) result
+  Paengi_store.repository ->
+  release ->
+  (Paengi_store.Stored_object_id.t, error) result
+
 val load_release :
-  Paengi_store.repository -> Paengi_store.Stored_object_id.t -> (release, error) result
+  Paengi_store.repository ->
+  Paengi_store.Stored_object_id.t ->
+  (release, error) result
 
 val binding_release : binding -> Paengi_id.Release_id.t
 val binding_object : binding -> Paengi_store.Stored_object_id.t
+
+val make_binding :
+  release:Paengi_id.Release_id.t ->
+  object_id:Paengi_store.Stored_object_id.t ->
+  binding
+
 val encode_binding : binding -> string
 val decode_binding : string -> (binding, error) result
 val binding_components : Paengi_id.Release_id.t -> string list
 
 module Parent_resolver : sig
-  type t = Paengi_id.Release_id.t -> (Paengi_id.Release_id.t list, string) result
+  type t =
+    Paengi_id.Release_id.t -> (Paengi_id.Release_id.t list, string) result
 
   val verify_acyclic : t -> Paengi_id.Release_id.t -> (unit, string) result
 
