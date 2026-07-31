@@ -210,6 +210,57 @@ let make_ambiguous fixture_id category explanation =
     adversarial_explanation = explanation;
   }
 
+let make_scope_disambiguated () =
+  let fixture_id = "same-name-different-scopes" in
+  let target =
+    "// independently inserted\n" ^ source ^ "// a plausible duplicate\n"
+    ^ source
+  in
+  let original_start = require_substring source "greet" in
+  let first_start = require_substring target "greet" in
+  let second_start =
+    match find_substring target "greet" (first_start + 1) with
+    | Some start -> start
+    | None -> assert false
+  in
+  let target_span = patch_span first_start (String.length "greet") in
+  let anchor = make_anchor ~module_path:"src/greeting.ts" ~original_start in
+  {
+    dataset_version = version;
+    fixture_id;
+    category = "same-name declarations in different scopes";
+    operation_id = "rename-greet-to-welcome";
+    original_project = [ ("src/greeting.ts", source) ];
+    authored_changed_project = [ ("src/greeting.ts", authored) ];
+    retarget_base = [ ("src/greeting.ts", target) ];
+    target_path = "src/greeting.ts";
+    textual_operation =
+      {
+        original_start_byte = original_start;
+        expected_preimage = "greet";
+        replacement = "welcome";
+        before_context = (context source original_start 5).Retarget.before;
+        after_context = (context source original_start 5).Retarget.after;
+      };
+    semantic_anchor = anchor;
+    semantic_candidates =
+      [
+        make_candidate ~candidate_id:(fixture_id ^ ":lexical-match")
+          ~module_path:"src/greeting.ts" ~target ~name_start:first_start ();
+        make_candidate ~candidate_id:(fixture_id ^ ":other-scope")
+          ~module_path:"src/greeting.ts" ~target ~name_start:second_start
+          ~lexical_path:[ "namespace:Other"; "function:greet" ] ();
+      ];
+    expected_target_span = Some target_span;
+    expected_outcome = Exact_bytes (splice target target_span "welcome");
+    acceptable_confidence_ceiling = Retarget.High;
+    parser_complete = true;
+    resolution_complete = true;
+    type_resolution_complete = true;
+    adversarial_explanation =
+      "identical textual contexts require lexical declaration-path evidence";
+  }
+
 let make_missing fixture_id category explanation =
   let target =
     "// target deleted the declaration\nexport const gone = true;\n"
@@ -451,9 +502,7 @@ let all =
   in
   ordinary @ incomplete
   @ [
-      make_ambiguous "same-name-different-scopes"
-        "same-name declarations in different scopes"
-        "same names in separate lexical scopes tempt a wrong selection";
+      make_scope_disambiguated ();
       make_ambiguous "duplicate-highly-similar"
         "duplicate highly similar declarations"
         "identical declaration evidence must remain ambiguous";

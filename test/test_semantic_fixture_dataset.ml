@@ -90,11 +90,7 @@ let both_strategies_receive_shared_bytes_and_oracles () =
     Dataset.all
 
 let adversarial_semantic_matches_never_auto_apply () =
-  [
-    "same-name-different-scopes";
-    "duplicate-highly-similar";
-    "deliberately-ambiguous";
-  ]
+  [ "duplicate-highly-similar"; "deliberately-ambiguous" ]
   |> List.iter (fun fixture_id ->
       let fixture = Dataset.find fixture_id |> Option.get in
       let result = Dataset.semantic_result fixture in
@@ -102,6 +98,12 @@ let adversarial_semantic_matches_never_auto_apply () =
         (fixture_id ^ " cannot auto apply")
         false
         (Retarget.permits_automatic_application result))
+
+let lexical_scope_evidence_beats_duplicate_text () =
+  let fixture = Dataset.find "same-name-different-scopes" |> Option.get in
+  let result = Dataset.semantic_result fixture in
+  Alcotest.(check bool) "semantic scope evidence applies" true
+    (Retarget.permits_automatic_application result)
 
 let () =
   Alcotest.run "semantic retargeting fixture dataset"
@@ -114,5 +116,7 @@ let () =
             both_strategies_receive_shared_bytes_and_oracles;
           Alcotest.test_case "adversarial confidence gate" `Quick
             adversarial_semantic_matches_never_auto_apply;
+          Alcotest.test_case "lexical scope disambiguation" `Quick
+            lexical_scope_evidence_beats_duplicate_text;
         ] );
     ]
