@@ -295,7 +295,7 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 
 ### Daemon
 
-- [ ] Define daemon protocol.
+- [x] Define daemon protocol.
 - [ ] Add repository discovery.
 - [ ] Add filesystem event monitoring.
 - [ ] Add persistent file metadata cache.

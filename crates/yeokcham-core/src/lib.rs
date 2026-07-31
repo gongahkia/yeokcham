@@ -11,6 +11,7 @@ mod chunked_blob_record;
 mod ciphertext_cache;
 mod compression;
 mod content_defined_chunking;
+mod daemon_protocol;
 mod device_id;
 mod device_registry;
 mod encrypted_backend;
@@ -62,6 +63,10 @@ pub use ciphertext_cache::{CachedBackend, CiphertextCache, CiphertextCacheMetric
 pub use compression::{CompressionAlgorithm, CompressionCodec};
 pub use content_defined_chunking::{
     ContentDefinedChunk, ContentDefinedChunker, ContentDefinedChunkingParameters,
+};
+pub use daemon_protocol::{
+    DAEMON_PROTOCOL_VERSION, DaemonMessage, DaemonProtocolFrame, DaemonRequest, DaemonResponse,
+    MAXIMUM_DAEMON_FRAME_BYTES,
 };
 pub use device_id::DeviceId;
 pub use device_registry::{
