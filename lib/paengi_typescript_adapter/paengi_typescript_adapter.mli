@@ -58,6 +58,7 @@ module Protocol : sig
 
   val source_file_path : source_file -> string
   val make_source_file : path:string -> language:language -> contents:string -> source_file
+  val default_compiler_options : compiler_options
   val analysis_snapshot_id : analysis -> string
   val analysis_typescript_version : analysis -> string
   val analysis_parser_complete : analysis -> bool
@@ -83,6 +84,14 @@ type configuration = {
 }
 
 val default_configuration : configuration
+val configuration_with :
+  ?node:string ->
+  ?adapter_path:string ->
+  ?timeout_ms:int ->
+  ?max_request_bytes:int ->
+  ?max_response_bytes:int ->
+  ?max_stderr_bytes:int ->
+  configuration -> configuration
 
 type unavailable_reason =
   | Adapter_missing of string
@@ -104,6 +113,10 @@ type handshake = {
   response_limit_bytes : int;
   capabilities : string list;
 }
+
+val handshake_typescript_version : handshake -> string
+val handshake_minimum_node_version : handshake -> string
+val handshake_capabilities : handshake -> string list
 
 type 'a result = Available of 'a | Unavailable of unavailable_reason
 

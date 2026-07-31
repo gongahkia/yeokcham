@@ -14,6 +14,14 @@ module Protocol = struct
     base_url : string option;
     paths : (string * string list) list;
   }
+  let default_compiler_options =
+    {
+      strict = true;
+      jsx = None;
+      module_resolution = None;
+      base_url = None;
+      paths = [];
+    }
   type span = { start_byte : int; end_byte : int }
   type symbol = {
     qualified_name : string;
@@ -141,6 +149,20 @@ let default_configuration =
     max_stderr_bytes = 64 * 1024;
   }
 
+let configuration_with ?node ?adapter_path ?timeout_ms ?max_request_bytes
+    ?max_response_bytes ?max_stderr_bytes configuration =
+  {
+    node = Option.value ~default:configuration.node node;
+    adapter_path = Option.value ~default:configuration.adapter_path adapter_path;
+    timeout_ms = Option.value ~default:configuration.timeout_ms timeout_ms;
+    max_request_bytes =
+      Option.value ~default:configuration.max_request_bytes max_request_bytes;
+    max_response_bytes =
+      Option.value ~default:configuration.max_response_bytes max_response_bytes;
+    max_stderr_bytes =
+      Option.value ~default:configuration.max_stderr_bytes max_stderr_bytes;
+  }
+
 type unavailable_reason =
   | Adapter_missing of string
   | Node_missing of string
@@ -177,6 +199,10 @@ type handshake = {
   response_limit_bytes : int;
   capabilities : string list;
 }
+
+let handshake_typescript_version handshake = handshake.typescript_version
+let handshake_minimum_node_version handshake = handshake.minimum_node_version
+let handshake_capabilities handshake = handshake.capabilities
 
 type 'a result = Available of 'a | Unavailable of unavailable_reason
 
