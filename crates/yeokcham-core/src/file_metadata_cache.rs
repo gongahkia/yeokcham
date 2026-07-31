@@ -30,7 +30,7 @@ pub struct FileMetadataCache {
 }
 
 impl FileMetadataCache {
-    /// Opens one existing or future cache file beneath an existing private directory.
+    /// Opens one existing or future cache file beneath an existing directory.
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         let path = path.as_ref();
         validate_cache_parent(path)?;

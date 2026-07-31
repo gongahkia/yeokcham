@@ -16,7 +16,7 @@ The polling monitor has a process-local metadata baseline. Restarting a daemon s
 
 ## Consequences
 
-The cache avoids an initial metadata-only rescan after restart when its caller associates it with the same repository/root. It retains source path metadata locally, so callers must keep it in a user-private directory. Corruption fails closed and the cache is disposable.
+The cache avoids an initial metadata-only rescan after restart when its caller associates it with the same repository/root. It retains source path metadata locally in a user-private file. Corruption fails closed and the cache is disposable.
 
 ## Invariants
 
@@ -31,7 +31,7 @@ The cache avoids an initial metadata-only rescan after restart when its caller a
 
 ## Security and recovery
 
-The cache is private on Unix, path-redacted in debug output, and rejects symlink files. It is not encrypted and must not be placed in a shared directory. Recovery relies on a fresh monitor scan, never this cache.
+The cache is private on Unix, path-redacted in debug output, and rejects symlink files. It is not encrypted. Recovery relies on a fresh monitor scan, never this cache.
 
 ## Verification
 
