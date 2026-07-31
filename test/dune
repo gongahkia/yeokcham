@@ -272,6 +272,16 @@
   paengi_semantic_retarget
   paengi_textual_patch))
 
+(executable
+ (name semantic_retargeting_experiment)
+ (modules semantic_retargeting_experiment)
+ (libraries paengi_semantic_experiment))
+
+(test
+ (name test_semantic_experiment)
+ (modules test_semantic_experiment)
+ (libraries alcotest paengi_semantic_experiment))
+
 (test
  (name semantic_property_test)
  (modules semantic_property_test)
