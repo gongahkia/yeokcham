@@ -43,6 +43,12 @@ Returns an authenticated static HTML repository page with the repository ID, reg
 
 Valid UTF-8 ref names are HTML-escaped. Non-UTF-8 names appear as `hex:<lowercase-hex>`. V1 has no raw-object or blob browser page, write, export, recovery, script, form, cookie, or token-bearing link.
 
+### `GET /storage`
+
+Returns an authenticated static HTML storage page. It runs the same bounded complete local immutable-storage verification as `yeokcham verify`, then reports only verified counts for sealed segments, indexes, blob manifests, tiny-blob group manifests, metadata-object manifests, and ref snapshots. A verification failure returns `500` with `storage_unavailable` without storage detail.
+
+The V1 process owns one local canonical storage provider and attaches zero remote backends. It reports those two values explicitly and never performs a backend network request or credential lookup. Google Drive backup/restore and GitHub mirrors remain separate CLI workflows; their health and state are not inferred by this page.
+
 ### `GET /commits/<sha1>`
 
 `<sha1>` is exactly 40 lowercase hexadecimal SHA-1 digits. The server reconstructs and verifies the object before rendering a static HTML commit overview. It requires a Git commit object and returns `422` with `object_kind_mismatch` for a different verified object type or `invalid_commit_object` for malformed commit content.

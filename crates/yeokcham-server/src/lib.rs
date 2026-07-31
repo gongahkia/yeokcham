@@ -350,6 +350,7 @@ enum Request {
     Commit(GitObjectId),
     Health,
     Refs,
+    Storage,
     Tree(GitObjectId),
     Object(GitObjectId),
 }
@@ -513,6 +514,7 @@ fn parse_request(
     }
     match target {
         "/" => Ok(Request::Browser),
+        "/storage" => Ok(Request::Storage),
         "/v1/health" => Ok(Request::Health),
         "/v1/refs" => Ok(Request::Refs),
         _ => parse_object_target(target, "/commits/")
@@ -572,6 +574,7 @@ fn route_request(repository: &LocalRepository, request: Request) -> Response {
             format!("{{\"version\":{NATIVE_HTTP_VERSION},\"status\":\"ok\"}}"),
         ),
         Request::Refs => refs_response(repository),
+        Request::Storage => storage_response(repository),
         Request::Tree(id) => tree_response(repository, id),
         Request::Object(id) => object_response(repository, id),
     }
@@ -606,7 +609,7 @@ fn browser_response(repository: &LocalRepository) -> Response {
         HeadState::Symbolic(name) => body.push_str(&html_escape_ref_name(name.as_bytes())),
         HeadState::Detached(id) => body.push_str(&id.to_string()),
     }
-    body.push_str("</code></p></main></body></html>");
+    body.push_str("</code></p><p><a href=\"/storage\">Storage</a></p></main></body></html>");
     if body.len() > MAXIMUM_RESPONSE_BODY_BYTES {
         return Response::error(500, "Internal Server Error", "response_too_large");
     }
@@ -988,6 +991,63 @@ fn html_response(body: String) -> Response {
     }
 }
 
+fn storage_response(repository: &LocalRepository) -> Response {
+    let limits = match GitImportLimits::initial() {
+        Ok(limits) => limits,
+        Err(_) => return Response::error(500, "Internal Server Error", "internal"),
+    };
+    let verification_limits = match limits.verification_limits() {
+        Ok(limits) => limits,
+        Err(_) => return Response::error(500, "Internal Server Error", "internal"),
+    };
+    let report = match repository.verify(verification_limits) {
+        Ok(report) => report,
+        Err(_) => return Response::error(500, "Internal Server Error", "storage_unavailable"),
+    };
+    let mut body = HtmlBody::new();
+    if render_storage_html(&mut body, repository, report).is_err() {
+        return Response::error(500, "Internal Server Error", "response_too_large");
+    }
+    html_response(body.into_string())
+}
+
+fn render_storage_html(
+    body: &mut HtmlBody,
+    repository: &LocalRepository,
+    report: yeokcham_core::RepositoryVerificationReport,
+) -> std::result::Result<(), ()> {
+    body.push("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>Yeokcham storage</title></head><body><main><p><a href=\"/\">Repository</a></p><h1>Storage</h1><p>Repository <code>")?;
+    body.push(&repository.id().to_string())?;
+    body.push("</code></p><h2>Verified canonical storage</h2><dl>")?;
+    render_storage_stat(body, "Segments", report.segment_count())?;
+    render_storage_stat(body, "Indexes", report.index_count())?;
+    render_storage_stat(body, "Blob manifests", report.blob_manifest_count())?;
+    render_storage_stat(
+        body,
+        "Tiny-blob group manifests",
+        report.tiny_blob_group_manifest_count(),
+    )?;
+    render_storage_stat(
+        body,
+        "Metadata-object manifests",
+        report.metadata_object_manifest_count(),
+    )?;
+    render_storage_stat(body, "Ref snapshots", report.ref_snapshot_count())?;
+    body.push("</dl><h2>Backend</h2><dl><dt>Canonical local storage providers</dt><dd>1</dd><dt>Attached remote backends</dt><dd>0</dd></dl><p>No remote backend is attached to native HTTP V1; this page performs no backend network request or credential lookup.</p></main></body></html>")
+}
+
+fn render_storage_stat(
+    body: &mut HtmlBody,
+    label: &str,
+    value: usize,
+) -> std::result::Result<(), ()> {
+    body.push("<dt>")?;
+    body.push(label)?;
+    body.push("</dt><dd>")?;
+    body.push(&value.to_string())?;
+    body.push("</dd>")
+}
+
 fn refs_response(repository: &LocalRepository) -> Response {
     let limits = match GitImportLimits::initial() {
         Ok(limits) => limits,
@@ -1332,6 +1392,20 @@ mod tests {
         assert!(browser_text.contains("<h1>Yeokcham repository</h1>"));
         assert!(browser_text.contains("refs/heads/main"));
         assert!(browser_text.contains(&head_id.to_string()));
+        assert!(browser_text.contains("href=\"/storage\""));
+
+        let storage = serve_request(
+            &server,
+            address,
+            format!("GET /storage HTTP/1.1\r\nAuthorization: Bearer {token}\r\n\r\n").as_bytes(),
+        );
+        let (storage_head, storage_body) = split_response(&storage);
+        assert!(storage_head.starts_with("HTTP/1.1 200 OK\r\n"));
+        assert!(storage_head.contains("Content-Type: text/html; charset=utf-8"));
+        let storage_text = std::str::from_utf8(storage_body).expect("storage HTML");
+        assert!(storage_text.contains("<h1>Storage</h1>"));
+        assert!(storage_text.contains("Verified canonical storage"));
+        assert!(storage_text.contains("No remote backend is attached to native HTTP V1"));
 
         let commit = serve_request(
             &server,
@@ -1421,6 +1495,25 @@ mod tests {
         let (method_head, _) = split_response(&method);
         assert!(method_head.starts_with("HTTP/1.1 405 Method Not Allowed\r\n"));
         assert!(method_head.contains("Allow: GET"));
+
+        let segment = fs::read_dir(server.repository.path().join("segments"))
+            .expect("read segments")
+            .next()
+            .expect("published segment")
+            .expect("segment entry")
+            .path();
+        fs::write(segment, b"corrupt").expect("corrupt segment");
+        let unavailable = serve_request(
+            &server,
+            address,
+            format!("GET /storage HTTP/1.1\r\nAuthorization: Bearer {token}\r\n\r\n").as_bytes(),
+        );
+        let (unavailable_head, unavailable_body) = split_response(&unavailable);
+        assert!(unavailable_head.starts_with("HTTP/1.1 500 Internal Server Error\r\n"));
+        assert_eq!(
+            unavailable_body,
+            b"{\"version\":1,\"error\":\"storage_unavailable\"}"
+        );
     }
 
     #[test]

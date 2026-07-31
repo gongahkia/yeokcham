@@ -101,3 +101,4 @@ Valid statuses are `Proposed`, `Accepted`, `Rejected`, `Deprecated`, and `Supers
 | [ADR-0093](0093-single-user-native-http-bearer-authentication.md) | Superseded by ADR-0094 | Require one private bearer token for native HTTP V1 |
 | [ADR-0094](0094-authenticated-native-http-repository-browser.md) | Accepted | Add a token-authenticated native HTTP repository browser |
 | [ADR-0095](0095-bounded-authenticated-commit-tree-browser.md) | Accepted | Render bounded authenticated commit and tree metadata |
+| [ADR-0096](0096-verified-local-storage-statistics.md) | Accepted | Report verified local storage and zero remote attachments |

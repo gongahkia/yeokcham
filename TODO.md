@@ -326,7 +326,7 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 - [x] Add single-user authentication. Every V1 endpoint requires one private generated 256-bit bearer token loaded from a regular non-symlinked file with no group or other permission bits.
 - [x] Add repository browser. Authenticated `GET /` renders bounded HTML repository, regular-ref, and `HEAD` metadata with escaped or hexadecimal ref names; commit and tree views remain separate.
 - [x] Add commit and tree viewer. Authenticated pages reconstruct and verify objects, render bounded escaped commit/tree metadata, link verified commit/tree navigation, and never render blobs.
-- [ ] Add storage and backend statistics.
+- [x] Add storage and backend statistics. Authenticated `GET /storage` reports only verified canonical-record counts plus one local provider and zero attached remote backends; it performs no provider request or credential lookup.
 - [ ] Add integrity-check UI.
 - [ ] Add mirror-state UI.
 - [ ] Add export and recovery commands.
