@@ -136,6 +136,8 @@ Targets:
 
 The current `fuzz/` cargo-fuzz package covers canonical decoding, `YKSG` segment reading, `YKIX` index decoding, blob/metadata/chunk manifests, ref names/snapshots/events, and remote-helper command parsing. Run `make fuzz-smoke` for 1,000 bounded executions per target, or `scripts/fuzz-smoke.sh <runs>` for a longer local campaign; it requires the Rust nightly toolchain. Fuzzer corpora and crash artifacts are local-only; minimized reproductions must become deterministic regression tests before committing.
 
+Current-HEAD sparse hydration is unit-tested against an imported real Git repository: selected current blobs enter the process cache, excluded current blobs do not, absent exact paths are reported, and a byte budget below the current commit body prevents all reconstruction. These are correctness tests only; no daemon speed claim is recorded until the daemon and remote-helper consume this cache in one measured workload.
+
 ### Compatibility fixtures
 
 Maintain fixtures for:

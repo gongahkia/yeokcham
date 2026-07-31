@@ -512,11 +512,11 @@ Remote deletion should be optional in early releases. A leak is safer than data 
 
 The local helper relies on C Git-compatible filtering rather than inventing a Yeokcham filter protocol. Its verified complete snapshot lets C Git serve `blob:none` and `blob:limit=<bytes>` with normal promisor configuration and lazy hydration. A C Git cone-mode sparse checkout configured before `checkout` hydrates only selected current paths through the same helper and retains excluded blobs as promisor objects. The complete cache remains an implementation boundary, so this does not yet reduce Yeokcham-side reconstruction or remote-backend reads. Shallow clone and native remote-backend sparse prefetch remain unsupported; non-cone and sparse-index combinations are not covered.
 
-Possible progression:
+Implemented core seam and remaining progression:
 
-1. Add sparse path-aware prefetch.
+1. `LocalRepository::prefetch_current_sparse_paths` verifies and caches only an explicit current-`HEAD` path set; it is not yet scheduled by the daemon or consumed by the helper.
 2. Avoid reconstructing excluded records before C Git pack filtering.
-3. Add daemon-assisted prediction.
+3. Add daemon-assisted current-path scheduling after measuring the native path-aware path.
 
 Do not build a virtual filesystem until benchmark results show that ordinary sparse checkout is insufficient.
 

@@ -121,7 +121,7 @@ pub use repository::{
     EncryptedRepositoryRecoveryReport, GitImportLimits, GitImportReport, GitObjectMetadata,
     LocalRepository, LooseObjectExportLimits, LooseObjectExportReport,
     MetadataObjectManifestReadLimits, RefSnapshotPublicationLimits, RepositoryVerificationLimits,
-    RepositoryVerificationReport,
+    RepositoryVerificationReport, SparsePrefetchReport,
 };
 pub use repository_discovery::{
     DiscoveredLocalRepository, RepositoryDiscoveryLimits, RepositoryDiscoveryReport,

@@ -42,6 +42,11 @@ impl SharedObjectCache {
         })
     }
 
+    /// Returns the maximum verified object-body bytes this cache retains.
+    pub const fn maximum_bytes(&self) -> usize {
+        self.maximum_bytes
+    }
+
     /// Returns a verified cached object only when its expected kind still matches.
     pub fn get(
         &self,

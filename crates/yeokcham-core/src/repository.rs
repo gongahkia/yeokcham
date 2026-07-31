@@ -1,5 +1,6 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
+    fmt,
     fs::{self, File, OpenOptions},
     io::{self, Read, Write},
     path::{Path, PathBuf},
@@ -23,8 +24,9 @@ use crate::{
     ManifestId, MetadataObjectManifest, MetadataObjectRecord, ReadSegment, ReadSegmentRecord,
     RefEvent, RefEventReadLimits, RefEventSigningKey, RefName, RefSnapshot, RefSnapshotReadLimits,
     RepositoryFormat, RepositoryId, Result, SegmentId, SegmentIndex, SegmentReadLimits,
-    SegmentReader, SegmentRecord, SegmentWriteLimits, SegmentWriter, TinyBlobAggregation,
-    TinyBlobGroupManifest, TinyBlobGroupManifestEntry, WholeBlobRecord, YeokchamContentId,
+    SegmentReader, SegmentRecord, SegmentWriteLimits, SegmentWriter, SharedObjectCache,
+    SparsePrefetchSelection, TinyBlobAggregation, TinyBlobGroupManifest,
+    TinyBlobGroupManifestEntry, WholeBlobRecord, YeokchamContentId,
 };
 
 const BOOTSTRAP_MAGIC: [u8; 4] = *b"YKRB";
@@ -530,6 +532,85 @@ pub struct GitObjectMetadata {
     id: GitObjectId,
     kind: GitObjectKind,
     size: u64,
+}
+
+/// Verified current-`HEAD` sparse-prefetch outcome.
+///
+/// The counts include only object bodies that were verified and retained in
+/// the caller-provided disposable shared cache. Paths and object identities
+/// are intentionally omitted from [`fmt::Debug`].
+#[derive(Clone, Copy, Eq, Hash, PartialEq)]
+pub struct SparsePrefetchReport {
+    head_id: GitObjectId,
+    object_count: usize,
+    blob_count: usize,
+    body_bytes: u64,
+    unmatched_path_count: usize,
+    gitlink_count: usize,
+    budget_exhausted: bool,
+}
+
+impl SparsePrefetchReport {
+    fn new(head_id: GitObjectId) -> Self {
+        Self {
+            head_id,
+            object_count: 0,
+            blob_count: 0,
+            body_bytes: 0,
+            unmatched_path_count: 0,
+            gitlink_count: 0,
+            budget_exhausted: false,
+        }
+    }
+
+    /// Returns the effective current `HEAD` object selected from the ref state.
+    pub const fn head_id(self) -> GitObjectId {
+        self.head_id
+    }
+
+    /// Returns the count of unique verified cached objects.
+    pub const fn object_count(self) -> usize {
+        self.object_count
+    }
+
+    /// Returns the count of unique verified cached blobs.
+    pub const fn blob_count(self) -> usize {
+        self.blob_count
+    }
+
+    /// Returns the exact verified object-body bytes retained for this selection.
+    pub const fn body_bytes(self) -> u64 {
+        self.body_bytes
+    }
+
+    /// Returns the number of requested exact paths absent from current `HEAD`.
+    pub const fn unmatched_path_count(self) -> usize {
+        self.unmatched_path_count
+    }
+
+    /// Returns selected Gitlink entries, which have no blob body in this repository.
+    pub const fn gitlink_count(self) -> usize {
+        self.gitlink_count
+    }
+
+    /// Returns whether the selection stopped before its full path set at its byte bound.
+    pub const fn budget_exhausted(self) -> bool {
+        self.budget_exhausted
+    }
+}
+
+impl fmt::Debug for SparsePrefetchReport {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("SparsePrefetchReport")
+            .field("object_count", &self.object_count)
+            .field("blob_count", &self.blob_count)
+            .field("body_bytes", &self.body_bytes)
+            .field("unmatched_path_count", &self.unmatched_path_count)
+            .field("gitlink_count", &self.gitlink_count)
+            .field("budget_exhausted", &self.budget_exhausted)
+            .finish()
+    }
 }
 
 /// Caller-selected bounds for storing and reusing chunked blob records.
@@ -3379,6 +3460,46 @@ impl LocalRepository {
             .map(Some)
     }
 
+    /// Reconstructs current-`HEAD` sparse-path objects into a disposable shared cache.
+    ///
+    /// The selection contains exact relative paths, not Git sparse-checkout
+    /// patterns. This reads only the current commit/tag chain, root tree,
+    /// selected path trees, and selected blob bodies; it never predicts or
+    /// traverses history. Every cached object is reconstructed and verified
+    /// before insertion. The caller owns the cache lifetime, so this method
+    /// never writes Git or Yeokcham repository data.
+    pub fn prefetch_current_sparse_paths(
+        &self,
+        selection: &SparsePrefetchSelection,
+        limits: GitImportLimits,
+        cache: &SharedObjectCache,
+    ) -> Result<SparsePrefetchReport> {
+        if selection.byte_budget()
+            > u64::try_from(cache.maximum_bytes()).map_err(|_| {
+                Error::new(
+                    ErrorKind::Unsupported,
+                    "shared object cache capacity exceeds this platform",
+                )
+            })?
+        {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "shared object cache cannot retain the sparse prefetch selection",
+            ));
+        }
+        let state = self
+            .resolve_ref_state(limits.ref_snapshot_limits())?
+            .ok_or_else(|| Error::new(ErrorKind::NotFound, "current ref state is unavailable"))?;
+        let head_id = effective_head_target(&state)?;
+        let mut prefetcher = SparsePathPrefetcher::new(self, selection, limits, cache, head_id);
+        let Some(root_tree) = prefetcher.current_head_tree()? else {
+            return Ok(prefetcher.report);
+        };
+        prefetcher
+            .prefetch_selection_tree(&root_tree, &SparsePathNode::from_selection(selection))?;
+        Ok(prefetcher.report)
+    }
+
     /// Returns every validated immutable local ref event in filename order.
     ///
     /// Callers must materialize through [`Self::resolve_ref_state`] before
@@ -3678,6 +3799,21 @@ impl LocalRepository {
                 .map(Some);
         }
         Ok(None)
+    }
+
+    fn find_sparse_prefetch_object_manifest(
+        &self,
+        id: GitObjectId,
+        limits: GitImportLimits,
+    ) -> Result<Option<SparsePrefetchObjectManifest>> {
+        if let Some(manifest) =
+            self.resolve_metadata_object_manifest(id, limits.metadata_object_manifest_limits())?
+        {
+            return Ok(Some(SparsePrefetchObjectManifest::Metadata(manifest)));
+        }
+        Ok(self
+            .resolve_blob_manifest(id, limits.blob_manifest_limits())?
+            .map(SparsePrefetchObjectManifest::Blob))
     }
 
     fn ensure_ref_snapshot_directory(&self) -> Result<PathBuf> {
@@ -5198,6 +5334,478 @@ fn create_bootstrap_staging<F: LocalRepositoryFilesystem>(
         ErrorKind::Conflict,
         "repository bootstrap staging path could not be allocated",
     ))
+}
+
+enum SparsePrefetchObjectManifest {
+    Blob(BlobManifest),
+    Metadata(MetadataObjectManifest),
+}
+
+impl SparsePrefetchObjectManifest {
+    fn kind(&self) -> GitObjectKind {
+        match self {
+            Self::Blob(_) => GitObjectKind::Blob,
+            Self::Metadata(manifest) => manifest.kind(),
+        }
+    }
+
+    fn plaintext_bytes(&self) -> u64 {
+        match self {
+            Self::Blob(manifest) => manifest.plaintext_bytes(),
+            Self::Metadata(manifest) => manifest.plaintext_bytes(),
+        }
+    }
+
+    fn reconstruct(
+        &self,
+        repository: &LocalRepository,
+        limits: GitImportLimits,
+    ) -> Result<GitObject> {
+        match self {
+            Self::Blob(manifest) => repository.reconstruct_blob(
+                manifest,
+                limits.chunked_blob_storage_limits().maximum_segment_bytes(),
+                limits.chunked_blob_storage_limits().segment_read_limits(),
+            ),
+            Self::Metadata(manifest) => repository.reconstruct_metadata_object(
+                manifest,
+                limits.chunked_blob_storage_limits().maximum_segment_bytes(),
+                limits.chunked_blob_storage_limits().segment_read_limits(),
+            ),
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum SparseTreeEntryKind {
+    Blob,
+    Gitlink,
+    Tree,
+}
+
+#[derive(Clone, Copy)]
+struct SparseTreeEntry {
+    id: GitObjectId,
+    kind: SparseTreeEntryKind,
+}
+
+#[derive(Default)]
+struct SparsePathNode {
+    selected: bool,
+    selection_count: usize,
+    children: BTreeMap<Vec<u8>, Self>,
+}
+
+impl SparsePathNode {
+    fn from_selection(selection: &SparsePrefetchSelection) -> Self {
+        let mut root = Self::default();
+        for path in selection.sparse_paths() {
+            let mut node = &mut root;
+            node.selection_count += 1;
+            for component in path.components() {
+                node = node
+                    .children
+                    .entry(component.as_os_str().as_encoded_bytes().to_vec())
+                    .or_default();
+                node.selection_count += 1;
+            }
+            node.selected = true;
+        }
+        root
+    }
+
+    fn descendant_selection_count(&self) -> Result<usize> {
+        self.selection_count
+            .checked_sub(usize::from(self.selected))
+            .ok_or_else(|| {
+                Error::new(
+                    ErrorKind::Internal,
+                    "sparse prefetch path trie is inconsistent",
+                )
+            })
+    }
+}
+
+struct SparsePathPrefetcher<'a> {
+    repository: &'a LocalRepository,
+    selection: &'a SparsePrefetchSelection,
+    limits: GitImportLimits,
+    cache: &'a SharedObjectCache,
+    report: SparsePrefetchReport,
+    prefetched_objects: BTreeSet<GitObjectId>,
+    walked_trees: BTreeSet<GitObjectId>,
+    active_trees: BTreeSet<GitObjectId>,
+    inspected_tree_entries: usize,
+}
+
+impl<'a> SparsePathPrefetcher<'a> {
+    fn new(
+        repository: &'a LocalRepository,
+        selection: &'a SparsePrefetchSelection,
+        limits: GitImportLimits,
+        cache: &'a SharedObjectCache,
+        head_id: GitObjectId,
+    ) -> Self {
+        Self {
+            repository,
+            selection,
+            limits,
+            cache,
+            report: SparsePrefetchReport::new(head_id),
+            prefetched_objects: BTreeSet::new(),
+            walked_trees: BTreeSet::new(),
+            active_trees: BTreeSet::new(),
+            inspected_tree_entries: 0,
+        }
+    }
+
+    fn current_head_tree(&mut self) -> Result<Option<GitObject>> {
+        let mut id = self.report.head_id;
+        let mut seen = BTreeSet::new();
+        loop {
+            if !seen.insert(id) {
+                return Err(Error::new(
+                    ErrorKind::CorruptData,
+                    "current HEAD tag chain contains a cycle",
+                ));
+            }
+            let Some(object) = self.prefetch_object(id)? else {
+                return Ok(None);
+            };
+            match object.kind() {
+                GitObjectKind::Commit => {
+                    let commit =
+                        gix::objs::CommitRef::from_bytes(object.data(), gix::hash::Kind::Sha1)
+                            .map_err(|_| {
+                                Error::new(
+                                    ErrorKind::CorruptData,
+                                    "current HEAD commit is malformed",
+                                )
+                            })?;
+                    return self.prefetch_object(git_object_id_from_gix_bytes(
+                        commit.tree().as_slice(),
+                        "current HEAD commit tree ID is invalid",
+                    )?);
+                }
+                GitObjectKind::Tree => return Ok(Some(object)),
+                GitObjectKind::Tag => {
+                    let tag = gix::objs::TagRef::from_bytes(object.data(), gix::hash::Kind::Sha1)
+                        .map_err(|_| {
+                        Error::new(ErrorKind::CorruptData, "current HEAD tag is malformed")
+                    })?;
+                    id = git_object_id_from_gix_bytes(
+                        tag.target().as_slice(),
+                        "current HEAD tag target ID is invalid",
+                    )?;
+                }
+                GitObjectKind::Blob => {
+                    return Err(Error::new(
+                        ErrorKind::CorruptData,
+                        "current HEAD does not resolve to a commit or tree",
+                    ));
+                }
+            }
+        }
+    }
+
+    fn prefetch_selection_tree(&mut self, tree: &GitObject, paths: &SparsePathNode) -> Result<()> {
+        if tree.kind() != GitObjectKind::Tree {
+            return Err(Error::new(
+                ErrorKind::CorruptData,
+                "sparse prefetch traversal reached a non-tree object",
+            ));
+        }
+        let entries = gix::objs::TreeRefIter::from_bytes(tree.data(), gix::hash::Kind::Sha1);
+        let mut matched = BTreeSet::new();
+        for entry in entries {
+            let entry = self.checked_tree_entry(entry.map_err(|_| {
+                Error::new(ErrorKind::CorruptData, "current HEAD tree is malformed")
+            })?)?;
+            if self.report.budget_exhausted {
+                break;
+            }
+            let Some(path) = paths.children.get(entry.filename) else {
+                continue;
+            };
+            if !matched.insert(entry.filename.to_vec()) {
+                return Err(Error::new(
+                    ErrorKind::CorruptData,
+                    "current HEAD tree contains duplicate path entries",
+                ));
+            }
+            self.prefetch_path_entry(entry.entry, path)?;
+        }
+        if !self.report.budget_exhausted {
+            for (name, path) in &paths.children {
+                if !matched.contains(name) {
+                    self.add_unmatched_paths(path.selection_count)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn prefetch_path_entry(&mut self, entry: SparseTreeEntry, path: &SparsePathNode) -> Result<()> {
+        if path.selected {
+            let result = self.prefetch_selected_entry(entry);
+            if !self.report.budget_exhausted && !matches!(entry.kind, SparseTreeEntryKind::Tree) {
+                self.add_unmatched_paths(path.descendant_selection_count()?)?;
+            }
+            return result;
+        }
+        if !matches!(entry.kind, SparseTreeEntryKind::Tree) {
+            return self.add_unmatched_paths(path.selection_count);
+        }
+        let Some(tree) = self.prefetch_object(entry.id)? else {
+            return Ok(());
+        };
+        if tree.kind() != GitObjectKind::Tree {
+            return Err(Error::new(
+                ErrorKind::CorruptData,
+                "tree entry does not resolve to a Git tree",
+            ));
+        }
+        self.prefetch_selection_tree(&tree, path)
+    }
+
+    fn prefetch_selected_entry(&mut self, entry: SparseTreeEntry) -> Result<()> {
+        match entry.kind {
+            SparseTreeEntryKind::Blob => {
+                let Some(object) = self.prefetch_object(entry.id)? else {
+                    return Ok(());
+                };
+                if object.kind() != GitObjectKind::Blob {
+                    return Err(Error::new(
+                        ErrorKind::CorruptData,
+                        "blob entry does not resolve to a Git blob",
+                    ));
+                }
+                Ok(())
+            }
+            SparseTreeEntryKind::Tree => {
+                let Some(tree) = self.prefetch_object(entry.id)? else {
+                    return Ok(());
+                };
+                if tree.kind() != GitObjectKind::Tree {
+                    return Err(Error::new(
+                        ErrorKind::CorruptData,
+                        "tree entry does not resolve to a Git tree",
+                    ));
+                }
+                self.prefetch_tree_contents(tree)
+            }
+            SparseTreeEntryKind::Gitlink => {
+                self.report.gitlink_count =
+                    self.report.gitlink_count.checked_add(1).ok_or_else(|| {
+                        Error::new(
+                            ErrorKind::Unsupported,
+                            "sparse prefetch Gitlink count overflows",
+                        )
+                    })?;
+                Ok(())
+            }
+        }
+    }
+
+    fn prefetch_tree_contents(&mut self, tree: GitObject) -> Result<()> {
+        if tree.kind() != GitObjectKind::Tree {
+            return Err(Error::new(
+                ErrorKind::CorruptData,
+                "selected tree does not resolve to a Git tree",
+            ));
+        }
+        let id = tree.id();
+        if self.walked_trees.contains(&id) {
+            return Ok(());
+        }
+        if !self.active_trees.insert(id) {
+            return Err(Error::new(
+                ErrorKind::CorruptData,
+                "current HEAD tree graph contains a cycle",
+            ));
+        }
+        let result = self.prefetch_tree_children(&tree);
+        self.active_trees.remove(&id);
+        result?;
+        self.walked_trees.insert(id);
+        Ok(())
+    }
+
+    fn prefetch_tree_children(&mut self, tree: &GitObject) -> Result<()> {
+        let entries = gix::objs::TreeRefIter::from_bytes(tree.data(), gix::hash::Kind::Sha1);
+        for entry in entries {
+            let entry = self
+                .checked_tree_entry(entry.map_err(|_| {
+                    Error::new(ErrorKind::CorruptData, "current HEAD tree is malformed")
+                })?)?
+                .entry;
+            if self.report.budget_exhausted {
+                break;
+            }
+            self.prefetch_selected_entry(entry)?;
+        }
+        Ok(())
+    }
+
+    fn checked_tree_entry<'b>(
+        &mut self,
+        entry: gix::objs::tree::EntryRef<'b>,
+    ) -> Result<CheckedSparseTreeEntry<'b>> {
+        self.inspected_tree_entries =
+            self.inspected_tree_entries.checked_add(1).ok_or_else(|| {
+                Error::new(
+                    ErrorKind::Unsupported,
+                    "sparse prefetch tree entry count overflows",
+                )
+            })?;
+        if self.inspected_tree_entries > self.limits.maximum_objects() {
+            return Err(Error::new(
+                ErrorKind::Unsupported,
+                "sparse prefetch tree entry limit is exceeded",
+            ));
+        }
+        let filename: &[u8] = entry.filename.as_ref();
+        if filename.is_empty() || filename.contains(&b'/') {
+            return Err(Error::new(
+                ErrorKind::CorruptData,
+                "current HEAD tree has an invalid entry name",
+            ));
+        }
+        let kind = if entry.mode.is_tree() {
+            SparseTreeEntryKind::Tree
+        } else if entry.mode.is_blob_or_symlink() {
+            SparseTreeEntryKind::Blob
+        } else if entry.mode.is_commit() {
+            SparseTreeEntryKind::Gitlink
+        } else {
+            return Err(Error::new(
+                ErrorKind::CorruptData,
+                "current HEAD tree has an unsupported entry kind",
+            ));
+        };
+        Ok(CheckedSparseTreeEntry {
+            filename,
+            entry: SparseTreeEntry {
+                id: git_object_id_from_gix_bytes(
+                    entry.oid.as_bytes(),
+                    "current HEAD tree entry ID is invalid",
+                )?,
+                kind,
+            },
+        })
+    }
+
+    fn add_unmatched_paths(&mut self, count: usize) -> Result<()> {
+        self.report.unmatched_path_count = self
+            .report
+            .unmatched_path_count
+            .checked_add(count)
+            .ok_or_else(|| {
+                Error::new(
+                    ErrorKind::Unsupported,
+                    "sparse prefetch path count overflows",
+                )
+            })?;
+        Ok(())
+    }
+
+    fn prefetch_object(&mut self, id: GitObjectId) -> Result<Option<GitObject>> {
+        let manifest = self
+            .repository
+            .find_sparse_prefetch_object_manifest(id, self.limits)?
+            .ok_or_else(|| Error::new(ErrorKind::NotFound, "current HEAD object is unavailable"))?;
+        let kind = manifest.kind();
+        let body_bytes = manifest.plaintext_bytes();
+        let first_visit = !self.prefetched_objects.contains(&id);
+        if first_visit {
+            if self.prefetched_objects.len() == self.limits.maximum_objects() {
+                return Err(Error::new(
+                    ErrorKind::Unsupported,
+                    "sparse prefetch object limit is exceeded",
+                ));
+            }
+            let Some(next_body_bytes) = self.report.body_bytes.checked_add(body_bytes) else {
+                return Err(Error::new(
+                    ErrorKind::Unsupported,
+                    "sparse prefetch byte count overflows",
+                ));
+            };
+            if next_body_bytes > self.selection.byte_budget() {
+                self.report.budget_exhausted = true;
+                return Ok(None);
+            }
+            self.prefetched_objects.insert(id);
+        }
+        let object = match self.cache.get(self.repository.id(), id, kind) {
+            Some(object) => object,
+            None => manifest.reconstruct(self.repository, self.limits)?,
+        };
+        if object.kind() != kind
+            || u64::try_from(object.data().len()).ok() != Some(body_bytes)
+            || object.id() != id
+        {
+            return Err(Error::new(
+                ErrorKind::CorruptData,
+                "cached object does not match its published manifest",
+            ));
+        }
+        self.cache.insert(self.repository.id(), &object)?;
+        if first_visit {
+            self.report.object_count =
+                self.report.object_count.checked_add(1).ok_or_else(|| {
+                    Error::new(
+                        ErrorKind::Unsupported,
+                        "sparse prefetch object count overflows",
+                    )
+                })?;
+            if kind == GitObjectKind::Blob {
+                self.report.blob_count =
+                    self.report.blob_count.checked_add(1).ok_or_else(|| {
+                        Error::new(
+                            ErrorKind::Unsupported,
+                            "sparse prefetch blob count overflows",
+                        )
+                    })?;
+            }
+            self.report.body_bytes =
+                self.report
+                    .body_bytes
+                    .checked_add(body_bytes)
+                    .ok_or_else(|| {
+                        Error::new(
+                            ErrorKind::Unsupported,
+                            "sparse prefetch byte count overflows",
+                        )
+                    })?;
+        }
+        Ok(Some(object))
+    }
+}
+
+struct CheckedSparseTreeEntry<'a> {
+    filename: &'a [u8],
+    entry: SparseTreeEntry,
+}
+
+fn effective_head_target(state: &GitRefState) -> Result<GitObjectId> {
+    match state.head() {
+        HeadState::Detached(id) => Ok(*id),
+        HeadState::Symbolic(name) => state.regular_refs().get(name).copied().ok_or_else(|| {
+            Error::new(
+                ErrorKind::NotFound,
+                "current HEAD symbolic reference is unavailable",
+            )
+        }),
+    }
+}
+
+fn git_object_id_from_gix_bytes(bytes: &[u8], message: &'static str) -> Result<GitObjectId> {
+    if bytes.len() != GitObjectId::BYTE_LENGTH {
+        return Err(Error::new(ErrorKind::CorruptData, message));
+    }
+    let mut digest = [0; GitObjectId::BYTE_LENGTH];
+    digest.copy_from_slice(bytes);
+    Ok(GitObjectId::from_bytes(digest))
 }
 
 fn ref_state_target_ids(state: &GitRefState) -> BTreeSet<GitObjectId> {
@@ -7463,6 +8071,122 @@ mod tests {
             git_output_in(&source_path, &["rev-parse", "HEAD^{tree}"]),
             git_output_in(&exported_path, &["rev-parse", "HEAD^{tree}"])
         );
+    }
+
+    #[test]
+    fn prefetches_only_current_selected_paths_into_the_shared_cache() {
+        let directory = TestDirectory::new();
+        let source_path = directory.path().join("source");
+        let repository_path = directory.path().join("repository");
+        fs::create_dir(&source_path).expect("create source");
+        run_git_in(&source_path, &["init", "-b", "main"]);
+        run_git_in(&source_path, &["config", "user.name", "Yeokcham Test"]);
+        run_git_in(
+            &source_path,
+            &["config", "user.email", "yeokcham-test@example.invalid"],
+        );
+        fs::create_dir(source_path.join("src")).expect("create selected directory");
+        fs::create_dir(source_path.join("docs")).expect("create excluded directory");
+        fs::write(source_path.join("src/lib.rs"), b"selected\n").expect("write selected blob");
+        fs::write(source_path.join("docs/guide.md"), b"excluded\n").expect("write excluded blob");
+        fs::write(source_path.join("README.md"), b"also excluded\n").expect("write root blob");
+        run_git_in(&source_path, &["add", "."]);
+        run_git_in(&source_path, &["commit", "-m", "fixture"]);
+
+        let limits = GitImportLimits::initial().expect("limits");
+        let repository = LocalRepository::create(&repository_path).expect("create repository");
+        repository
+            .import_git_repository(
+                &GitRepository::open(&source_path).expect("open source"),
+                limits,
+            )
+            .expect("import source");
+        let selected: GitObjectId = std::str::from_utf8(&git_output_in(
+            &source_path,
+            &["rev-parse", "HEAD:src/lib.rs"],
+        ))
+        .expect("selected ID UTF-8")
+        .trim()
+        .parse()
+        .expect("selected ID");
+        let excluded: GitObjectId = std::str::from_utf8(&git_output_in(
+            &source_path,
+            &["rev-parse", "HEAD:docs/guide.md"],
+        ))
+        .expect("excluded ID UTF-8")
+        .trim()
+        .parse()
+        .expect("excluded ID");
+        let selection = SparsePrefetchSelection::new(
+            [PathBuf::from("src"), PathBuf::from("missing")],
+            1024 * 1024,
+            crate::SparsePrefetchPolicy::default(),
+        )
+        .expect("selection");
+        let cache = SharedObjectCache::new(1024 * 1024).expect("cache");
+
+        let report = repository
+            .prefetch_current_sparse_paths(&selection, limits, &cache)
+            .expect("prefetch");
+
+        assert!(report.object_count() >= 4);
+        assert_eq!(report.blob_count(), 1);
+        assert!(report.body_bytes() > 0);
+        assert_eq!(report.unmatched_path_count(), 1);
+        assert_eq!(report.gitlink_count(), 0);
+        assert!(!report.budget_exhausted());
+        assert!(
+            cache
+                .get(repository.id(), selected, GitObjectKind::Blob)
+                .is_some()
+        );
+        assert_eq!(
+            cache.get(repository.id(), excluded, GitObjectKind::Blob),
+            None
+        );
+        assert!(!format!("{report:?}").contains(&report.head_id().to_string()));
+    }
+
+    #[test]
+    fn stops_current_sparse_prefetch_before_reading_beyond_its_budget() {
+        let directory = TestDirectory::new();
+        let source_path = directory.path().join("source");
+        let repository_path = directory.path().join("repository");
+        fs::create_dir(&source_path).expect("create source");
+        run_git_in(&source_path, &["init", "-b", "main"]);
+        run_git_in(&source_path, &["config", "user.name", "Yeokcham Test"]);
+        run_git_in(
+            &source_path,
+            &["config", "user.email", "yeokcham-test@example.invalid"],
+        );
+        fs::write(source_path.join("selected.txt"), b"selected body\n").expect("write blob");
+        run_git_in(&source_path, &["add", "."]);
+        run_git_in(&source_path, &["commit", "-m", "fixture"]);
+
+        let limits = GitImportLimits::initial().expect("limits");
+        let repository = LocalRepository::create(&repository_path).expect("create repository");
+        repository
+            .import_git_repository(
+                &GitRepository::open(&source_path).expect("open source"),
+                limits,
+            )
+            .expect("import source");
+        let selection = SparsePrefetchSelection::new(
+            [PathBuf::from("selected.txt")],
+            1,
+            crate::SparsePrefetchPolicy::default(),
+        )
+        .expect("selection");
+        let cache = SharedObjectCache::new(1).expect("cache");
+
+        let report = repository
+            .prefetch_current_sparse_paths(&selection, limits, &cache)
+            .expect("prefetch");
+
+        assert_eq!(report.object_count(), 0);
+        assert_eq!(report.body_bytes(), 0);
+        assert!(report.budget_exhausted());
+        assert_eq!(cache.object_count(), 0);
     }
 
     #[test]
