@@ -6,7 +6,7 @@ Use an ADR for decisions that constrain the model, persistent format, component 
 
 1. Copy `TEMPLATE.md` to `NNNN-kebab-case-title.md` using the next unused ID.
 2. Set status to `Proposed` and complete every required section before implementation.
-3. Link the proposal from `DECISIONS.md` and identify it in the active `TODO.md` slice.
+3. Link the proposal from `DECISIONS.md` and the governing GitHub issue.
 4. Resolve material objections and record rejected alternatives.
 5. Set status to `Accepted` when maintainer review approves the decision.
 6. Implement only after acceptance, then add verification and migration evidence.

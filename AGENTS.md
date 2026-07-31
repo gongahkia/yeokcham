@@ -16,7 +16,7 @@ The primary contribution is not a new command spelling or a faster Git clone. It
 6. `DECISIONS.md`
 7. `RESEARCH_QUESTIONS.md`
 8. `TESTING_AND_EXPERIMENTS.md`
-9. `TODO.md`
+9. `docs/ISSUE_TRACKING.md` and the linked open GitHub issue
 
 ## Working rules
 
@@ -80,7 +80,7 @@ Before coding:
 
 After coding:
 
-- Update TODO.
+- Update or close the linked GitHub issue after its acceptance criteria and verification pass.
 - Update formal model if semantics changed.
 - Add golden fixtures for persistent format.
 - Record experiment results separately from claims.
@@ -151,5 +151,5 @@ A task is done when:
 - Tests cover generated and edge cases.
 - Persistent bytes are versioned.
 - CLI behaviour is inspectable.
-- TODO is updated.
+- The linked GitHub issue is updated or closed.
 - No capability is overstated.

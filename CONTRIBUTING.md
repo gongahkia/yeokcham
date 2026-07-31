@@ -5,8 +5,8 @@ Paengi is a model-first research prototype. Contributions must preserve the sepa
 ## Before changing code
 
 1. Read the documents listed in `AGENTS.md` in order.
-2. Select the first eligible open task in `TODO.md` and stay within one milestone.
-3. Record the active vertical slice, types, invariants, tests, and ADR impact in `TODO.md`.
+2. Select an eligible open GitHub issue from `docs/ISSUE_TRACKING.md`, inspect its dependencies, and stay within one milestone.
+3. Record the active vertical slice, types, invariants, tests, and ADR impact in the linked issue.
 4. Open or amend an ADR before implementing an architectural or persistent-format decision.
 
 ## Implementation order
@@ -35,9 +35,9 @@ Use `make format` to apply formatting. Generated `paengi.opam` changes must be p
 
 ## Pull requests
 
-- Keep each commit limited to one model change or TODO task.
+- Keep each commit limited to one model change or linked issue.
 - Include the invariant and tests in the commit or pull-request description.
-- Update `TODO.md`; update the formal model when semantics change.
+- Update or close the linked GitHub issue; update the formal model when semantics change.
 - Add golden fixtures for persistent-format changes and retain old-format fixtures.
 - Record experiment results separately from product claims.
 - Do not use OCaml `Marshal` for persistent data.

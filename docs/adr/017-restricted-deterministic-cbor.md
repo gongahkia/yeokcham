@@ -125,7 +125,7 @@ Future changes that alter accepted values or canonical bytes require a new profi
 - 2026-07-29: source-controlled `test/golden/profile1-v1-composite.cbor.hex` covers binary bytes, valid Unicode text, signed 64-bit boundaries, arrays, ordered numeric-key maps, booleans, and null; it decodes and re-encodes byte-identically in Dune's sandboxed test run.
 - 2026-07-29: `encoding_property_test.exe` runs 500 Profile 1 value round trips and 2,000 bounded arbitrary-byte totality/canonical-byte cases from independent stable per-property states derived from printed seed `20260729`; it also verifies named valid and malformed local fixtures and explicit zero, boundary, near-limit, and malformed lengths.
 - 2026-07-29: `make ci` passes.
-- Encoder/decoder benchmarks are not yet run; they remain explicit TODO work before performance claims. Bounded deterministic properties and checked-in malformed fixtures provide repository-correctness evidence only; they are not external security analysis.
+- Encoder/decoder benchmarks are not yet run; they remain explicit deferred backlog work before performance claims. Bounded deterministic properties and checked-in malformed fixtures provide repository-correctness evidence only; they are not external security analysis.
 
 ## CLI and user impact
 

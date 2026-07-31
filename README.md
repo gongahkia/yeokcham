@@ -226,7 +226,7 @@ Paengi is a local VCS and persistent-data-model project. Its tests cover reposit
 5. `DECISIONS.md`
 6. `RESEARCH_QUESTIONS.md`
 7. `TESTING_AND_EXPERIMENTS.md`
-8. `TODO.md`
+8. `docs/ISSUE_TRACKING.md` and the linked open GitHub issue
 9. `AGENTS.md`
 10. `CODEX_PROMPT.md`
 
