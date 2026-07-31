@@ -44,6 +44,7 @@ mod segment_index;
 mod segment_reader;
 mod segment_writer;
 mod shared_object_cache;
+mod snapshot_pack_cache;
 mod sparse_prefetch;
 mod telemetry;
 mod tiny_blob_aggregation;

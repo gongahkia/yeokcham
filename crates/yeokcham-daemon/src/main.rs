@@ -126,6 +126,15 @@ impl DaemonPrefetcher {
                 GitImportLimits::initial()?,
                 &self.cache,
             )?;
+            let limits = GitImportLimits::initial()?;
+            let state = self
+                .repository
+                .resolve_ref_state(limits.ref_snapshot_limits())?
+                .ok_or_else(|| {
+                    Error::new(ErrorKind::NotFound, "current ref state is unavailable")
+                })?;
+            self.repository
+                .prewarm_snapshot_pack_cache(&state, limits)?;
             self.pending = false;
         }
         Ok(())
@@ -783,6 +792,13 @@ mod tests {
                 .is_some()
         );
         assert!(!prefetcher.pending);
+        let cache_entry = fs::read_dir(prefetcher.repository.path().join("cache/packs"))
+            .expect("pack cache directory")
+            .next()
+            .expect("pack cache entry")
+            .expect("pack cache entry result")
+            .path();
+        run_git_in(&cache_entry, &["fsck", "--full", "--strict"]);
         prefetcher.refresh().expect("unchanged refresh");
         prefetcher.cache.clear();
         thread::sleep(Duration::from_millis(10));

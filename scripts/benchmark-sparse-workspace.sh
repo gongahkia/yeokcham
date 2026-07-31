@@ -12,6 +12,7 @@ benchmark_output=${1:-"$benchmark_root/benchmarks/results/sparse-workspace-$(dat
 benchmark_repetitions=${2:-5}
 benchmark_binary_directory="$benchmark_root/target/release"
 benchmark_binary="$benchmark_binary_directory/yeokcham"
+benchmark_daemon_binary="$benchmark_binary_directory/yeokcham-daemon"
 fixture_generator="$benchmark_script_dir/generate-sparse-workspace-fixture.sh"
 
 [[ $(uname -s) == Darwin ]] || {
@@ -36,6 +37,10 @@ done
 benchmark_temp=$(mktemp -d "${TMPDIR:-/tmp}/yeokcham-sparse-benchmark.XXXXXX")
 
 cleanup() {
+  if [[ -n ${benchmark_daemon_pid:-} ]]; then
+    kill "$benchmark_daemon_pid" 2>/dev/null || true
+    wait "$benchmark_daemon_pid" 2>/dev/null || true
+  fi
   rm -rf -- "$benchmark_temp"
 }
 trap cleanup EXIT HUP INT TERM
@@ -94,6 +99,36 @@ run_sparse_workflow() {
   }
 }
 
+run_daemon_prewarm() {
+  local socket=$1
+  local output=$2
+  "$benchmark_daemon_binary" \
+    --socket "$socket" \
+    --repository "$benchmark_store" \
+    --sparse-checkout-file "$benchmark_sparse_checkout" \
+    >"$output" 2>&1 &
+  benchmark_daemon_pid=$!
+  for (( attempt = 0; attempt < 200; attempt++ )); do
+    [[ -S "$socket" ]] && return 0
+    if ! kill -0 "$benchmark_daemon_pid" 2>/dev/null; then
+      wait "$benchmark_daemon_pid" || true
+      echo "daemon prewarm did not start" >&2
+      exit 1
+    fi
+    sleep 0.05
+  done
+  echo "daemon prewarm did not bind its socket" >&2
+  exit 1
+}
+
+stop_daemon_prewarm() {
+  if [[ -n ${benchmark_daemon_pid:-} ]]; then
+    kill "$benchmark_daemon_pid" 2>/dev/null || true
+    wait "$benchmark_daemon_pid" 2>/dev/null || true
+    benchmark_daemon_pid=
+  fi
+}
+
 write_result() {
   local state=$1
   local started_at=$2
@@ -107,7 +142,9 @@ write_result() {
   local median_pack_bytes=${10}
   local median_storage=${11}
   local result_file="$benchmark_output/$state.json"
+  local cache_state=$state
   local commit git_version rust_version os_name os_version kernel architecture cpu memory storage filesystem available fixture_checksum dirty
+  [[ "$state" == daemon-prewarmed ]] && cache_state=warm
   commit=$(git -C "$benchmark_root" rev-parse HEAD)
   git_version=$(git --version)
   rust_version=$(rustc --version)
@@ -158,9 +195,9 @@ write_result() {
     "parameters": {"revisions": 2, "selected_paths": 1, "excluded_current_bytes": 4194304, "excluded_historical_bytes": 4194304}
   },
   "configuration": {
-    "cache_state": "$state",
+    "cache_state": "$cache_state",
     "backend_kind": "local_remote_helper",
-    "parameters": {"filter": "blob:none", "sparse_mode": "cone", "sparse_paths": ["app"], "cache_layer": "snapshot-pack", "transport_metric": "client .pack payload bytes"}
+    "parameters": {"filter": "blob:none", "sparse_mode": "cone", "sparse_paths": ["app"], "cache_layer": "snapshot-pack", "cache_population": "$state", "transport_metric": "client .pack payload bytes"}
   },
   "network_conditions": {
     "mode": "local",
@@ -203,17 +240,25 @@ run_state() {
   local storage_values="$benchmark_temp/$state.storage"
   local iteration target time_file real user sys rss started_at ended_at
   "$benchmark_binary" cache clear "$benchmark_store" >/dev/null
+  if [[ "$state" == daemon-prewarmed ]]; then
+    run_daemon_prewarm "$benchmark_temp/$state-warmup.sock" "$benchmark_temp/$state-warmup.daemon"
+  fi
   target="$benchmark_temp/$state-warmup"
   run_sparse_workflow "$target" "$benchmark_temp/$state-warmup.time"
+  stop_daemon_prewarm
   rm -rf -- "$target"
   started_at=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
   for (( iteration = 0; iteration < benchmark_repetitions; iteration++ )); do
     if [[ "$state" == cold ]]; then
       "$benchmark_binary" cache clear "$benchmark_store" >/dev/null
+    elif [[ "$state" == daemon-prewarmed ]]; then
+      "$benchmark_binary" cache clear "$benchmark_store" >/dev/null
+      run_daemon_prewarm "$benchmark_temp/$state-$iteration.sock" "$benchmark_temp/$state-$iteration.daemon"
     fi
     target="$benchmark_temp/$state-$iteration"
     time_file="$benchmark_temp/$state-$iteration.time"
     run_sparse_workflow "$target" "$time_file"
+    stop_daemon_prewarm
     real=$(time_metric real "$time_file")
     user=$(time_metric user "$time_file")
     sys=$(time_metric sys "$time_file")
@@ -249,12 +294,17 @@ run_state() {
 
 benchmark_fixture="$benchmark_temp/fixture"
 benchmark_store="$benchmark_temp/store"
+benchmark_sparse_checkout="$benchmark_temp/sparse-checkout"
+benchmark_daemon_pid=
 "$fixture_generator" "$benchmark_fixture" >/dev/null
-cargo build --release --locked -p yeokcham-cli
+printf '/*\n!/*/\n/app/\n' >"$benchmark_sparse_checkout"
+cargo build --release --locked -p yeokcham-cli -p yeokcham-daemon
 "$benchmark_binary" init --from-git "$benchmark_fixture/loose.git" "$benchmark_store" >/dev/null
 mkdir -p -- "$benchmark_output"
 run_state cold
 run_state warm
+run_state daemon-prewarmed
 
 echo "cold result: $benchmark_output/cold.json"
 echo "warm result: $benchmark_output/warm.json"
+echo "daemon-prewarmed result: $benchmark_output/daemon-prewarmed.json"

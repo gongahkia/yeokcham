@@ -515,9 +515,9 @@ The local helper relies on C Git-compatible filtering rather than inventing a Ye
 
 Implemented core seam and remaining progression:
 
-1. `LocalRepository::prefetch_current_sparse_paths` verifies and caches only an explicit current-`HEAD` path set; the daemon schedules explicit selections after ref metadata changes, but the helper does not yet consume that cache.
+1. `LocalRepository::prefetch_current_sparse_paths` verifies and caches only an explicit current-`HEAD` path set. The daemon schedules configured selections after ref metadata changes and prebuilds the existing disposable ref-state-keyed snapshot-pack cache; the helper consumes that verified disk cache but not the daemon's in-memory objects.
 2. Avoid reconstructing excluded records before C Git pack filtering.
-3. Add daemon-assisted current-path scheduling after measuring the native path-aware path.
+3. Measure the daemon-prebuilt snapshot path before claiming an end-user workload improvement.
 
 Do not build a virtual filesystem until benchmark results show that ordinary sparse checkout is insufficient.
 
