@@ -347,14 +347,14 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 - [x] SBOM generation. `make sbom SBOM_OUTPUT=<absent-directory>` generates one CycloneDX 1.5 JSON SBOM per workspace package outside the source tree using pinned `cargo-cyclonedx` 0.5.9, validates each output, and records SHA-256 checksums.
 - [x] Dependency audit. `make audit` uses pinned `cargo-audit` 0.22.2 to deny RustSec warnings for both the workspace and fuzz lockfiles; it fetches the advisory database by default and supports only explicit `YEOKCHAM_AUDIT_OFFLINE=1` use of an existing database.
 - [ ] Security disclosure process.
-- [ ] Continuous fuzzing.
+- [ ] Continuous fuzzing. Local `make fuzz-campaign FUZZ_SECONDS=<seconds> FUZZ_OUTPUT=<absent-directory>` now provides an isolated bounded all-target campaign with retained logs, copied corpora, and crash artifacts; a scheduled runner, retention, and response owner remain required before claiming continuous operation.
 - [ ] Full benchmark report.
-- [ ] Backup and disaster-recovery guide.
+- [x] Backup and disaster-recovery guide. `docs/backup-and-disaster-recovery.md` now specifies separated recovery material, immutable Drive snapshot rollover, source/snapshot verification, absent-destination restore/export, interrupted-operation handling, local Git export, and non-secret drill evidence.
 - [ ] Key rotation.
 - [ ] Device revocation.
 - [ ] SHA-256 Git repository plan.
 - [ ] Windows support assessment.
-- [ ] Performance regression CI.
+- [x] Performance regression CI. Provider-neutral `make performance-check BENCHMARK_BASELINE=<file> BENCHMARK_CANDIDATE=<file> MAX_REGRESSION_PERCENT=<percent>` rejects measurements that differ in fixture/configuration/stable environment or exceed the explicit operator-selected threshold for wall/CPU/RSS/network/storage metrics; `make benchmark-results` validates every committed result.
 - [ ] Restore drills on clean machines.
 
 ### Production-quality definition
