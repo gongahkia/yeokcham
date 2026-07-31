@@ -798,12 +798,12 @@ let print_workspace resolved =
        (Workspace_store.revision_id revision))
     (Workspace_store.current_generation current)
     (Store.Stored_object_id.to_hex
-       (Snapshot.Snapshot.stored_object_id (Workspace_store.revision_base revision)));
+       (Snapshot.Snapshot.stored_object_id
+          (Workspace_store.revision_base revision)));
   Workspace_store.revision_selected revision
   |> List.iteri (fun index link ->
       Printf.printf "selected[%d] capsule=%s revision=%s object=%s\n" index
-        (Paengi_id.Capsule_id.to_hex
-           (Capsule_store.revision_link_capsule link))
+        (Paengi_id.Capsule_id.to_hex (Capsule_store.revision_link_capsule link))
         (Paengi_id.Capsule_revision_id.to_hex
            (Capsule_store.revision_link_revision link))
         (Store.Stored_object_id.to_hex
@@ -848,14 +848,16 @@ let legacy_workspace_order root options =
   if enabled = [] then exit 2;
   match Store.open_repository ~root with
   | Error error -> fail Store.error_to_string error
-  | Ok store ->
+  | Ok store -> (
       let rec resolve reversed = function
         | [] -> Ok (List.rev reversed)
         | capsule :: rest -> (
             match Capsule_store.Durable.read_current store capsule with
             | Error error -> Error (Capsule_store.error_to_string error)
             | Ok resolved ->
-                let revision = Capsule_store.Durable.resolved_revision resolved in
+                let revision =
+                  Capsule_store.Durable.resolved_revision resolved
+                in
                 let selected : Workspace.selected_revision =
                   {
                     Workspace.capsule =
@@ -872,11 +874,11 @@ let legacy_workspace_order root options =
       | Ok selected -> (
           match Workspace.derive_order ~selected ~explicit_order with
           | Error error -> fail Workspace.error_to_string error
-          | Ok order -> print_workspace_order order)
+          | Ok order -> print_workspace_order order))
 
 let workspace root arguments =
   match arguments with
-  | "create" :: options ->
+  | "create" :: options -> (
       let rec parse id base name description = function
         | [] -> (
             match (id, base) with
@@ -886,13 +888,14 @@ let workspace root arguments =
             parse (Some (workspace_id value)) base name description rest
         | "--base" :: value :: rest ->
             parse id (Some (snapshot_id value)) name description rest
-        | "--name" :: value :: rest -> parse id base (Some value) description rest
+        | "--name" :: value :: rest ->
+            parse id base (Some value) description rest
         | "--description" :: value :: rest ->
             parse id base name (Some value) rest
         | _ -> exit 2
       in
       let id, base, name, description = parse None None None None options in
-      (match Store.open_repository ~root with
+      match Store.open_repository ~root with
       | Error error -> fail Store.error_to_string error
       | Ok store -> (
           Workspace_store.Durable.create ~store ~id ~base ~name ~description
@@ -904,63 +907,64 @@ let workspace root arguments =
   | [ "show"; workspace ] -> (
       match Store.open_repository ~root with
       | Error error -> fail Store.error_to_string error
-      | Ok store ->
+      | Ok store -> (
           Workspace_store.Durable.read_current store (workspace_id workspace)
           |> Result.map_error Workspace_store.error_to_string
           |> function
           | Error error -> fail Fun.id error
-          | Ok resolved -> print_workspace resolved)
-  | [ "enable"; workspace; capsule ] -> (
+          | Ok resolved -> print_workspace resolved))
+  | [ "enable"; workspace; revision ] -> (
       match Store.open_repository ~root with
       | Error error -> fail Store.error_to_string error
-      | Ok store ->
-          Workspace_store.Durable.enable_current_capsule ~store
-            ~workspace:(workspace_id workspace) ~capsule:(capsule_id capsule)
+      | Ok store -> (
+          Workspace_store.Durable.enable_revision ~store
+            ~workspace:(workspace_id workspace) ~revision:(revision_id revision)
             ~expected_generation:None ~created_at:(now ())
           |> Result.map_error Workspace_store.error_to_string
           |> function
           | Error error -> fail Fun.id error
-          | Ok resolved -> print_workspace resolved)
+          | Ok resolved -> print_workspace resolved))
   | [ "disable"; workspace; capsule ] -> (
       match Store.open_repository ~root with
       | Error error -> fail Store.error_to_string error
-      | Ok store ->
+      | Ok store -> (
           Workspace_store.Durable.disable_capsule ~store
             ~workspace:(workspace_id workspace) ~capsule:(capsule_id capsule)
             ~expected_generation:None ~created_at:(now ())
           |> Result.map_error Workspace_store.error_to_string
           |> function
           | Error error -> fail Fun.id error
-          | Ok resolved -> print_workspace resolved)
+          | Ok resolved -> print_workspace resolved))
   | [ "reorder"; workspace; "--order"; order ] -> (
       let values = String.split_on_char ',' order in
       if values = [] || List.exists String.is_empty values then exit 2;
       match Store.open_repository ~root with
       | Error error -> fail Store.error_to_string error
-      | Ok store ->
-          Workspace_store.Durable.reorder ~store ~workspace:(workspace_id workspace)
-            ~order:(List.map revision_id values) ~expected_generation:None
-            ~created_at:(now ())
+      | Ok store -> (
+          Workspace_store.Durable.reorder ~store
+            ~workspace:(workspace_id workspace)
+            ~order:(List.map revision_id values)
+            ~expected_generation:None ~created_at:(now ())
           |> Result.map_error Workspace_store.error_to_string
           |> function
           | Error error -> fail Fun.id error
-          | Ok resolved -> print_workspace resolved)
+          | Ok resolved -> print_workspace resolved))
   | [ "explain-order"; workspace ] -> (
       match Store.open_repository ~root with
       | Error error -> fail Store.error_to_string error
-      | Ok store ->
+      | Ok store -> (
           Workspace_store.Durable.explain_order store (workspace_id workspace)
           |> Result.map_error Workspace_store.error_to_string
           |> function
           | Error error -> fail Fun.id error
-          | Ok order -> print_workspace_order order)
+          | Ok order -> print_workspace_order order))
   | "explain-order" :: options -> legacy_workspace_order root options
-  | [ "materialise"; workspace ]
-  | [ "materialise"; workspace; "--dry-run" ] as values ->
+  | ([ "materialise"; workspace ] | [ "materialise"; workspace; "--dry-run" ])
+    as values -> (
       let dry_run = List.exists (String.equal "--dry-run") values in
-      (match open_scratch root with
+      match open_scratch root with
       | Error error -> fail Fun.id error
-      | Ok (store, scratch) ->
+      | Ok (store, scratch) -> (
           Workspace_store.Durable.materialise ~store ~scratch ~root
             ~workspace:(workspace_id workspace) ~observed_at:(now ())
             ~created_at:(now ()) ~dry_run ()
@@ -974,8 +978,9 @@ let workspace root arguments =
                       materialisation.Workspace_store.Durable.attempt))
                 materialisation.Workspace_store.Durable.partial
                 (List.length materialisation.Workspace_store.Durable.actions);
-              List.iter (fun action -> print_endline (render_operation action))
-                materialisation.Workspace_store.Durable.actions)
+              List.iter
+                (fun action -> print_endline (render_operation action))
+                materialisation.Workspace_store.Durable.actions))
   | _ -> exit 2
 
 let conflict root arguments =
@@ -983,7 +988,7 @@ let conflict root arguments =
   | [ "list"; workspace ] | [ "history"; workspace ] -> (
       match Store.open_repository ~root with
       | Error error -> fail Store.error_to_string error
-      | Ok store ->
+      | Ok store -> (
           Workspace_store.Durable.list_conflicts store (workspace_id workspace)
           |> Result.map_error Workspace_store.error_to_string
           |> function
@@ -991,7 +996,8 @@ let conflict root arguments =
           | Ok conflicts ->
               List.iter
                 (fun conflict ->
-                  Printf.printf "conflict=%s capsule=%s revision=%s operation=%d\n"
+                  Printf.printf
+                    "conflict=%s capsule=%s revision=%s operation=%d\n"
                     (Paengi_id.Conflict_id.to_hex
                        (Workspace_store.conflict_id conflict))
                     (Paengi_id.Capsule_id.to_hex
@@ -999,40 +1005,44 @@ let conflict root arguments =
                     (Paengi_id.Capsule_revision_id.to_hex
                        (Workspace_store.conflict_capsule_revision conflict))
                     (Workspace_store.conflict_operation_index conflict))
-                conflicts)
+                conflicts))
   | [ "show"; conflict ] -> (
       match Store.open_repository ~root with
       | Error error -> fail Store.error_to_string error
-      | Ok store ->
+      | Ok store -> (
           Workspace_store.Durable.show_conflict store (conflict_id conflict)
           |> Result.map_error Workspace_store.error_to_string
           |> function
           | Error error -> fail Fun.id error
           | Ok conflict ->
               Printf.printf "conflict=%s kind=%s paths=%s candidates=%s\n"
-                (Paengi_id.Conflict_id.to_hex (Workspace_store.conflict_id conflict))
+                (Paengi_id.Conflict_id.to_hex
+                   (Workspace_store.conflict_id conflict))
                 (match Workspace_store.conflict_kind conflict with
-                | Workspace_store.Missing_or_ambiguous_precondition -> "missing-or-ambiguous-precondition"
+                | Workspace_store.Missing_or_ambiguous_precondition ->
+                    "missing-or-ambiguous-precondition"
                 | Workspace_store.Competing_edits -> "competing-edits"
                 | Workspace_store.Delete_modify -> "delete-modify"
                 | Workspace_store.Move_modify -> "move-modify"
                 | Workspace_store.Binary_conflict -> "binary-conflict"
                 | Workspace_store.Dependency_failure -> "dependency-failure"
-                | Workspace_store.Unsupported_or_uncertain_operation -> "unsupported-or-uncertain-operation")
+                | Workspace_store.Unsupported_or_uncertain_operation ->
+                    "unsupported-or-uncertain-operation")
                 (Workspace_store.conflict_paths conflict
                 |> List.map render_path |> String.concat ",")
-                (String.concat "," (Workspace_store.conflict_candidates conflict)))
+                (String.concat ","
+                   (Workspace_store.conflict_candidates conflict))))
   | [ "resolve"; workspace; conflict; "--action"; "skip" ] -> (
       match Store.open_repository ~root with
       | Error error -> fail Store.error_to_string error
-      | Ok store ->
+      | Ok store -> (
           Workspace_store.Durable.resolve_skip ~store
             ~workspace:(workspace_id workspace) ~conflict:(conflict_id conflict)
             ~expected_generation:None ~created_at:(now ())
           |> Result.map_error Workspace_store.error_to_string
           |> function
           | Error error -> fail Fun.id error
-          | Ok resolved -> print_workspace resolved)
+          | Ok resolved -> print_workspace resolved))
   | _ -> exit 2
 
 let usage () =

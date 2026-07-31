@@ -1,5 +1,8 @@
 module Capsule = Paengi_capsule
 module Id = Paengi_id
+module Scratch = Paengi_scratch
+module Snapshot = Paengi_snapshot
+module Store = Paengi_store
 module Workspace = Paengi_workspace
 
 [@@@warning "-4"]
@@ -14,6 +17,10 @@ let revision_id seed =
   Id.Capsule_revision_id.of_bytes (raw_id seed) |> Result.get_ok
 
 let release_id seed = Id.Release_id.of_bytes (raw_id seed) |> Result.get_ok
+
+let content_id seed =
+  Store.Stored_object_id.of_raw_bytes (raw_id seed)
+  |> Option.get |> Snapshot.Content.of_stored_object_id
 
 let selection ?(dependencies = []) capsule revision =
   Workspace.{ capsule; revision; dependencies }
@@ -210,6 +217,73 @@ let duplicate_selection_rejects () =
   | Error error -> Alcotest.fail (Workspace.error_to_string error)
   | Ok _ -> Alcotest.fail "duplicate revision selection was accepted"
 
+let independent_operations_continue_after_a_conflict () =
+  let capsule_a = capsule_id 81 in
+  let capsule_c = capsule_id 82 in
+  let capsule_b = capsule_id 83 in
+  let revision_a = revision_id 81 in
+  let revision_c = revision_id 82 in
+  let revision_b = revision_id 83 in
+  let base_a = content_id 90 in
+  let changed_a = content_id 91 in
+  let base_b = content_id 92 in
+  let changed_b = content_id 93 in
+  let state =
+    Scratch.State.create
+      [
+        ([ "dir" ], Scratch.Directory);
+        ( [ "dir"; "a" ],
+          Scratch.File { mode = Snapshot.Regular; content = base_a } );
+        ( [ "dir"; "b" ],
+          Scratch.File { mode = Snapshot.Regular; content = base_b } );
+      ]
+    |> require_ok Scratch.error_to_string
+  in
+  let transition path expected replacement : Capsule.exact_file_transition =
+    {
+      Capsule.transition_path = path;
+      expected_entry =
+        Some (Scratch.File { mode = Snapshot.Regular; content = expected });
+      replacement_entry =
+        Some (Scratch.File { mode = Snapshot.Regular; content = replacement });
+    }
+  in
+  let application_revision capsule revision operations :
+      Workspace.application_revision =
+    { Workspace.selected = selection capsule revision; Workspace.operations }
+  in
+  let result =
+    Workspace.apply ~state
+      ~ordered:
+        [
+          application_revision capsule_a revision_a
+            [
+              Capsule.Exact_file_transition
+                (transition [ "dir"; "a" ] base_a changed_a);
+            ];
+          application_revision capsule_c revision_c
+            [
+              Capsule.Exact_file_transition
+                (transition [ "dir"; "a" ] base_a (content_id 94));
+            ];
+          application_revision capsule_b revision_b
+            [
+              Capsule.Exact_file_transition
+                (transition [ "dir"; "b" ] base_b changed_b);
+            ];
+        ]
+      ~resolutions:[]
+  in
+  Alcotest.(check int)
+    "one local conflict" 1
+    (List.length result.Workspace.conflicts);
+  Alcotest.(check bool)
+    "independent operation applies" true
+    (match Scratch.State.find result.Workspace.state [ "dir"; "b" ] with
+    | Some (Scratch.File file) ->
+        Snapshot.Content.equal_id file.content changed_b
+    | Some Scratch.Directory | None -> false)
+
 let () =
   Alcotest.run "workspace"
     [
@@ -225,5 +299,7 @@ let () =
             missing_requirements_and_cycles_reject;
           Alcotest.test_case "duplicate selections reject" `Quick
             duplicate_selection_rejects;
+          Alcotest.test_case "independent operations continue after conflict"
+            `Quick independent_operations_continue_after_a_conflict;
         ] );
     ]

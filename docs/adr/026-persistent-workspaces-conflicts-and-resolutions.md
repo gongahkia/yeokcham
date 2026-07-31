@@ -87,22 +87,19 @@ workspace-attempt-v1 = [
   1, workspace-attempt-id, workspace-id, workspace-revision-id,
   base-snapshot-id, [* ordered-capsule-revision-link-v1],
   starting-checkpoint-id, starting-snapshot-id, [* operation-outcome-v1],
-  resulting-snapshot-id, [* conflict-id], [* validation-evidence-v1],
-  created-at-unix-seconds
+  resulting-snapshot-id, [* conflict-id], created-at-unix-seconds
 ]
 
 conflict-v1 = [
   1, conflict-id, workspace-id, workspace-revision-id, attempt-id-or-null,
-  capsule-id, capsule-revision-id, operation-index, conflict-kind,
-  [* affected-path], base-entry-or-null, current-entry-or-null,
-  proposed-operation-v1, exact-preconditions-v1,
+  base-snapshot-id, capsule-id, capsule-revision-id, operation-index,
+  conflict-kind, [* affected-path], current-entry-or-null,
   [* candidate-resolution-description], created-at-unix-seconds
 ]
 
 resolution-v1 = [
   1, resolution-id, conflict-id, workspace-revision-id, attempt-id-or-null,
-  selected-action-v1, exact-resolution-data-v1, preconditions-v1,
-  expected-state-v1, provenance-v1, created-at-unix-seconds
+  selected-action-v1, expected-current-entry-or-null, created-at-unix-seconds
 ]
 ```
 
@@ -122,8 +119,10 @@ The only mutable workspace state is:
 workspace-current-ref-v1 = [
   1, generation, workspace-id, workspace-object-id,
   workspace-revision-id, workspace-revision-object-id,
-  latest-attempt-id-or-null, latest-attempt-object-id-or-null, checksum
+  latest-attempt-link-or-null, checksum
 ]
+
+latest-attempt-link-v1 = [workspace-attempt-id, workspace-attempt-object-id]
 ```
 
 The checksum is SHA-256 over `paengi:workspace-current-ref:v1\000` and the
@@ -150,11 +149,17 @@ The same base snapshot, selected immutable revisions, precedence, resolution
 bindings, and mandatory-feature set produce the same state, ordered outcomes,
 and conflict values.
 
-`Conflict_v1` has no mutable resolved bit. A `Resolution_v1` binds exact
-context, explicit action/data, preconditions, expected state, provenance, and
-timestamp. A resolution against stale workspace/revision/attempt context is
-rejected. It becomes active only through a new workspace revision’s immutable
-resolution binding, so unrelated conflicts remain present.
+`Conflict_v1` has no mutable resolved bit. Its immutable capsule-revision and
+operation-index pair identifies the exact stored operation and its
+preconditions; the current entry captures the failed application context. A
+`Resolution_v1` records the originating revision/attempt, explicit action, and
+its expected current entry. V1 implements only the explicit `skip-operation`
+action: it has no replacement content, mode, or path and leaves that operation
+unapplied. Workspace-revision provenance records its activation. A resolution
+rejects when its conflict is no longer an ancestor-context conflict for the
+current base and selected revision; an unchanged descendant context may resolve
+an unrelated older conflict. Activation is only through a new workspace
+revision’s immutable resolution binding, so unrelated conflicts remain present.
 
 Materialisation holds the repository writer lock; verifies workspace ref and
 scratch head; scans and safety-checkpoints the working directory; resolves the
@@ -162,14 +167,16 @@ immutable revision; computes and publishes immutable conflicts and attempt;
 plans, revalidates, materialises with the existing guarded path/symlink
 protections, and rescans; then creates/reuses the resulting scratch checkpoint,
 CAS-advances scratch head, rereads the expected workspace ref, and CAS-updates
-its latest attempt. Failure before either ref update advances neither ref.
-Immutable attempts/conflicts and a safety checkpoint may remain unreachable
-after a crash.
+its latest attempt. A guarded-apply failure does not advance the target scratch
+head or workspace ref; the prior safety checkpoint can remain as the durable
+record of pre-existing work. Immutable attempts/conflicts and a safety
+checkpoint may remain unreachable after a crash.
 
 Scratch-head and workspace-ref publication are not a transaction. If scratch
-head advances but workspace-ref attempt publication fails, recovery detects the
-attempt’s exact resulting snapshot from the supplied immutable inputs and
-permits idempotent retry; the implementation does not claim cross-ref atomicity.
+head advances but workspace-ref attempt publication fails, the exact resulting
+snapshot remains the scratch head and a retry recomputes and republishes an
+attempt; the implementation does not claim cross-ref atomicity or one shared
+attempt ID across that boundary.
 
 ## Consequences
 
@@ -200,12 +207,12 @@ or migration is introduced here.
 ## Verification
 
 - Golden fixtures and inverse decoders cover every v1 object and current ref.
-- Alcotest covers reopen, immutable revisions, stale CAS, link/type/cycle
-  rejection, conflicts, resolutions, guarded materialisation, and index loss.
+- Alcotest covers reopen, immutable revisions, stale CAS, persistent conflicts,
+  explicit resolutions, guarded materialisation, and external mutation abort.
 - Seed-17 QCheck/state-machine coverage exercises create, enable, disable,
   reorder, materialise, conflict, resolve, and rematerialise.
-- Failure tests cover stale refs, external mutation, materialisation failure,
-  restart, and the documented two-ref boundary.
+- Failure tests cover stale refs and external mutation; the two-ref boundary is
+  documented rather than transactionally hidden.
 - Existing ADR-020 through ADR-025 goldens remain unchanged.
 
 ## CLI and user impact

@@ -44,10 +44,11 @@ The supported compiler is OCaml 5.5.0. The exact constraint is recorded in `dune
 
 ## Status
 
-Milestone 5 has a format-free dependency-order resolver: it validates selected
-current revisions, dependency closure, declared incompatibilities, cycles, and
-explicit full precedence, then explains one deterministic order. Workspace
-selection/materialisation and persistent conflicts are not implemented yet.
+Milestone 5 is active. It has persistent immutable workspace selection, deterministic
+composition attempts, persistent conflicts, explicit skip-operation resolutions,
+and guarded workspace materialisation. Workspace revisions/current refs and
+attempts survive reopen; unresolved application remains explicitly partial.
+Release dependencies remain deliberately unsupported until Milestone 6.
 Milestone 4 has durable capsules: immutable Capsule and complete revision
 objects, CAS-protected current refs, exact replay validation, pinned scratch
 boundaries, and split/combine replay checks. Milestone 3 has retained-ID scratch
@@ -94,11 +95,28 @@ dune exec bin/paengi.exe -- capsule show <capsule-id>
 dune exec bin/paengi.exe -- capsule current-diff <capsule-id>
 dune exec bin/paengi.exe -- capsule history <capsule-id>
 dune exec bin/paengi.exe -- work explain-order --enable <capsule-id> --enable <capsule-id> [--order <revision-id>,<revision-id>]
+dune exec bin/paengi.exe -- work create --id <workspace-id> --base <snapshot-id> [--name <name>] [--description <description>]
+dune exec bin/paengi.exe -- work show <workspace-id>
+dune exec bin/paengi.exe -- work enable <workspace-id> <capsule-revision-id>
+dune exec bin/paengi.exe -- work disable <workspace-id> <capsule-id>
+dune exec bin/paengi.exe -- work reorder <workspace-id> --order <revision-id>,<revision-id>
+dune exec bin/paengi.exe -- work explain-order <workspace-id>
+dune exec bin/paengi.exe -- work materialise <workspace-id> [--dry-run]
+dune exec bin/paengi.exe -- conflict list <workspace-id>
+dune exec bin/paengi.exe -- conflict show <conflict-id>
+dune exec bin/paengi.exe -- conflict resolve <workspace-id> <conflict-id> --action skip
 ```
 
 `work explain-order` is read-only. It resolves each enabled capsule's current
 immutable revision, validates the selected graph, and prints canonical order
 and precedence edges. `--order` must name every enabled revision exactly once.
+
+Durable workspaces select an explicit immutable capsule revision; its verified
+physical revision object is stored in every workspace revision.
+`work materialise` applies the current workspace against its declared base,
+records a partial attempt when conflicts exist, and uses guarded scratch
+materialisation. `conflict resolve --action skip` is deliberately the only v1
+resolution action; no content, mode, or path is guessed or rewritten.
 
 `restore` creates a durable safety checkpoint for divergent work, validates its
 plan immediately before applying, and moves `scratch-head` only after exact

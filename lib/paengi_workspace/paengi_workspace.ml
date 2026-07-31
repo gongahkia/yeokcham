@@ -388,11 +388,12 @@ type operation_outcome =
       operation_index : int;
     }
 
-type resolution_action = Skip_operation of {
-  capsule : Id.Capsule_id.t;
-  revision : Id.Capsule_revision_id.t;
-  operation_index : int;
-}
+type resolution_action =
+  | Skip_operation of {
+      capsule : Id.Capsule_id.t;
+      revision : Id.Capsule_revision_id.t;
+      operation_index : int;
+    }
 
 type application = {
   state : Paengi_scratch.State.t;
@@ -416,7 +417,8 @@ let entry_equal left right =
       left.mode = right.mode
       && Paengi_snapshot.Content.equal_id left.content right.content
   | Paengi_scratch.Directory, Paengi_scratch.File _
-  | Paengi_scratch.File _, Paengi_scratch.Directory -> false
+  | Paengi_scratch.File _, Paengi_scratch.Directory ->
+      false
 
 let option_entry_equal left right = Option.equal entry_equal left right
 
@@ -446,7 +448,8 @@ let operation_already_satisfied state (operation : Capsule.operation) =
   | Capsule.Text_edit _ -> false
   | Capsule.Move { source; destination; prior } ->
       Option.is_none (Paengi_scratch.State.find state source)
-      && Option.equal entry_equal (Paengi_scratch.State.find state destination)
+      && Option.equal entry_equal
+           (Paengi_scratch.State.find state destination)
            (Some prior)
   | Capsule.Mode_change { path; replacement; _ } -> (
       match Paengi_scratch.State.find state path with
@@ -490,7 +493,8 @@ let apply_exact_transition state (transition : Capsule.exact_file_transition) =
 
 let apply_operation state (operation : Capsule.operation) =
   match operation with
-  | Capsule.Exact_file_transition transition -> apply_exact_transition state transition
+  | Capsule.Exact_file_transition transition ->
+      apply_exact_transition state transition
   | Capsule.Text_edit _ -> Error "text fallback requires an explicit resolution"
   | Capsule.Move { source; destination; prior } ->
       Paengi_scratch.State.apply state
@@ -531,13 +535,15 @@ let apply ~state ~ordered ~resolutions =
         let revision = selection.selected.revision in
         let paths = operation_paths operation in
         let state, outcome, conflicts =
-          if is_skipped resolutions ~capsule ~revision ~operation_index:index then
+          if is_skipped resolutions ~capsule ~revision ~operation_index:index
+          then
             ( state,
               Resolved_explicitly { capsule; revision; operation_index = index },
               conflicts )
           else
             match
-              List.find_opt (fun conflict -> intersects paths conflict.paths)
+              List.find_opt
+                (fun conflict -> intersects paths conflict.paths)
                 conflicts
             with
             | Some blocked_by ->
@@ -547,13 +553,15 @@ let apply ~state ~ordered ~resolutions =
                   conflicts )
             | None when operation_already_satisfied state operation ->
                 ( state,
-                  Already_satisfied { capsule; revision; operation_index = index },
+                  Already_satisfied
+                    { capsule; revision; operation_index = index },
                   conflicts )
             | None -> (
                 match apply_operation state operation with
                 | Ok next ->
                     ( next,
-                      Applied_exactly { capsule; revision; operation_index = index },
+                      Applied_exactly
+                        { capsule; revision; operation_index = index },
                       conflicts )
                 | Error _ ->
                     let conflict =
@@ -566,21 +574,19 @@ let apply ~state ~ordered ~resolutions =
                         current = operation_current state operation;
                       }
                     in
-                    (state, Persistent_conflict conflict, conflict :: conflicts))
+                    (state, Persistent_conflict conflict, conflict :: conflicts)
+                )
         in
-        apply_operations state (outcome :: outcomes) conflicts selection (index + 1)
-          rest
+        apply_operations state (outcome :: outcomes) conflicts selection
+          (index + 1) rest
   in
   let rec apply_revisions state outcomes conflicts = function
     | [] ->
-        {
-          state;
-          outcomes = List.rev outcomes;
-          conflicts = List.rev conflicts;
-        }
+        { state; outcomes = List.rev outcomes; conflicts = List.rev conflicts }
     | revision :: rest ->
         let state, outcomes, conflicts =
-          apply_operations state outcomes conflicts revision 0 revision.operations
+          apply_operations state outcomes conflicts revision 0
+            revision.operations
         in
         apply_revisions state outcomes conflicts rest
   in

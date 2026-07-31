@@ -17,17 +17,29 @@ let raw_id seed =
 
 let capsule_id seed = Id.Capsule_id.of_bytes (raw_id seed) |> Result.get_ok
 let workspace_id seed = Id.Workspace_id.of_bytes (raw_id seed) |> Result.get_ok
-let stored_id seed = Store.Stored_object_id.of_raw_bytes (raw_id seed) |> Option.get
+
+let stored_id seed =
+  Store.Stored_object_id.of_raw_bytes (raw_id seed) |> Option.get
+
 let snapshot_id seed = Snapshot.Snapshot.of_stored_object_id (stored_id seed)
-let checkpoint_id seed = Scratch.Checkpoint_id.of_stored_object_id (stored_id seed)
-let revision_id seed = Id.Capsule_revision_id.of_bytes (raw_id seed) |> Result.get_ok
-let workspace_revision_id seed = Id.Workspace_revision_id.of_bytes (raw_id seed) |> Result.get_ok
+
+let checkpoint_id seed =
+  Scratch.Checkpoint_id.of_stored_object_id (stored_id seed)
+
+let revision_id seed =
+  Id.Capsule_revision_id.of_bytes (raw_id seed) |> Result.get_ok
+
+let workspace_revision_id seed =
+  Id.Workspace_revision_id.of_bytes (raw_id seed) |> Result.get_ok
 
 let write_file path bytes =
-  Out_channel.with_open_bin path (fun channel -> Out_channel.output_string channel bytes)
+  Out_channel.with_open_bin path (fun channel ->
+      Out_channel.output_string channel bytes)
 
 let golden name =
-  let paths = [ Filename.concat "golden" name; Filename.concat "test/golden" name ] in
+  let paths =
+    [ Filename.concat "golden" name; Filename.concat "test/golden" name ]
+  in
   match List.find_opt Sys.file_exists paths with
   | Some path -> Golden.read_lower_hex_file path |> require_ok Fun.id
   | None -> Alcotest.fail ("missing golden fixture: " ^ name)
@@ -39,41 +51,55 @@ let with_store run =
   let rec remove path =
     match (Unix.lstat path).Unix.st_kind with
     | Unix.S_DIR ->
-        Sys.readdir path |> Array.iter (fun name -> remove (Filename.concat path name));
+        Sys.readdir path
+        |> Array.iter (fun name -> remove (Filename.concat path name));
         Unix.rmdir path
     | Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO
     | Unix.S_SOCK ->
         Unix.unlink path
   in
-  Fun.protect ~finally:(fun () -> remove root) (fun () ->
+  Fun.protect
+    ~finally:(fun () -> remove root)
+    (fun () ->
       let store = Store.init ~root |> require_ok Store.error_to_string in
       run root store)
 
 let checkpoint scratch snapshot time =
-  Scratch.checkpoint scratch ~snapshot ~source:Scratch.Explicit ~observed_at:time
-    ~created_at:time
+  Scratch.checkpoint scratch ~snapshot ~source:Scratch.Explicit
+    ~observed_at:time ~created_at:time
   |> require_ok Scratch.error_to_string
-  |> function Scratch.Created checkpoint | Scratch.Unchanged checkpoint -> Scratch.Checkpoint.id checkpoint
+  |> function
+  | Scratch.Created checkpoint | Scratch.Unchanged checkpoint ->
+      Scratch.Checkpoint.id checkpoint
 
 type fixture = {
   scratch : Scratch.repository;
   base : Snapshot.Snapshot.id;
   capsule_a : Id.Capsule_id.t;
   capsule_c : Id.Capsule_id.t;
+  capsule_d : Id.Capsule_id.t;
 }
 
 let make_fixture root store =
   Unix.mkdir (Filename.concat root "dir") 0o700;
   let tracked = Filename.concat root "dir/tracked" in
+  let other = Filename.concat root "dir/other" in
   write_file tracked "base";
+  write_file other "base-other";
   let scratch = Scratch.open_repository store in
-  let base, _ = Snapshot.scan ~root ~store |> require_ok Snapshot.error_to_string in
+  let base, _ =
+    Snapshot.scan ~root ~store |> require_ok Snapshot.error_to_string
+  in
   let initial =
     Scratch.create_initial scratch ~snapshot:base ~created_at:0L
-    |> require_ok Scratch.error_to_string |> Scratch.Checkpoint.id
+    |> require_ok Scratch.error_to_string
+    |> Scratch.Checkpoint.id
   in
   write_file tracked "a";
-  let snapshot_a, _ = Snapshot.scan ~root ~store |> require_ok Snapshot.error_to_string in
+  write_file other "a-other";
+  let snapshot_a, _ =
+    Snapshot.scan ~root ~store |> require_ok Snapshot.error_to_string
+  in
   let checkpoint_a = checkpoint scratch snapshot_a 1L in
   let capsule_a = capsule_id 10 in
   ignore
@@ -82,10 +108,15 @@ let make_fixture root store =
        ~from:initial ~target:checkpoint_a ~created_at:2L ~changed_at:2L ()
     |> require_ok Capsule_store.error_to_string);
   write_file tracked "base";
-  let snapshot_revert, _ = Snapshot.scan ~root ~store |> require_ok Snapshot.error_to_string in
+  write_file other "base-other";
+  let snapshot_revert, _ =
+    Snapshot.scan ~root ~store |> require_ok Snapshot.error_to_string
+  in
   ignore (checkpoint scratch snapshot_revert 3L);
   write_file tracked "c";
-  let snapshot_c, _ = Snapshot.scan ~root ~store |> require_ok Snapshot.error_to_string in
+  let snapshot_c, _ =
+    Snapshot.scan ~root ~store |> require_ok Snapshot.error_to_string
+  in
   let checkpoint_c = checkpoint scratch snapshot_c 4L in
   let capsule_c = capsule_id 20 in
   ignore
@@ -93,13 +124,31 @@ let make_fixture root store =
        ~title:"c" ~description:"competing edit" ~dependencies:[] ~evidence:[]
        ~from:initial ~target:checkpoint_c ~created_at:5L ~changed_at:5L ()
     |> require_ok Capsule_store.error_to_string);
-  { scratch; base; capsule_a; capsule_c }
+  write_file tracked "base";
+  write_file other "d-other";
+  let snapshot_d, _ =
+    Snapshot.scan ~root ~store |> require_ok Snapshot.error_to_string
+  in
+  let checkpoint_d = checkpoint scratch snapshot_d 6L in
+  let capsule_d = capsule_id 30 in
+  ignore
+    (Capsule_store.Durable.create_from_checkpoints ~store ~scratch ~id:capsule_d
+       ~title:"d" ~description:"second competing edit" ~dependencies:[]
+       ~evidence:[] ~from:initial ~target:checkpoint_d ~created_at:7L
+       ~changed_at:7L ()
+    |> require_ok Capsule_store.error_to_string);
+  { scratch; base; capsule_a; capsule_c; capsule_d }
 
 let selected_revision revision capsule =
   Workspace_store.revision_selected revision
   |> List.find (fun link ->
       Id.Capsule_id.equal capsule (Capsule_store.revision_link_capsule link))
   |> Capsule_store.revision_link_revision
+
+let current_capsule_revision store capsule =
+  Capsule_store.Durable.read_current store capsule
+  |> require_ok Capsule_store.error_to_string
+  |> Capsule_store.Durable.resolved_revision |> Capsule_store.revision_id
 
 let schema_fixture store =
   let workspace =
@@ -110,10 +159,11 @@ let schema_fixture store =
   let conflict =
     Workspace_store.create_conflict
       ~workspace:(Workspace_store.workspace_id workspace)
-      ~workspace_revision:(workspace_revision_id 101) ~attempt:None
-      ~base:(snapshot_id 102) ~capsule:(capsule_id 103)
+      ~workspace_revision:(workspace_revision_id 101)
+      ~attempt:None ~base:(snapshot_id 102) ~capsule:(capsule_id 103)
       ~capsule_revision:(revision_id 104) ~operation_index:3
-      ~kind:Workspace_store.Competing_edits ~paths:[ [ "dir"; "tracked" ] ]
+      ~kind:Workspace_store.Competing_edits
+      ~paths:[ [ "dir"; "tracked" ] ]
       ~current:
         (Some
            (Scratch.File
@@ -127,7 +177,8 @@ let schema_fixture store =
   let resolution =
     Workspace_store.create_resolution ~conflict
       ~action:Workspace_store.Skip_operation
-      ~expected_current:(Workspace_store.conflict_current conflict) ~created_at:3L
+      ~expected_current:(Workspace_store.conflict_current conflict)
+      ~created_at:3L
     |> require_ok Workspace_store.error_to_string
   in
   let resolution_object =
@@ -147,18 +198,20 @@ let schema_fixture store =
   let binding : Workspace_store.resolution_binding =
     {
       Workspace_store.binding_conflict = Workspace_store.conflict_id conflict;
-      Workspace_store.binding_resolution = Workspace_store.resolution_id resolution;
+      Workspace_store.binding_resolution =
+        Workspace_store.resolution_id resolution;
       Workspace_store.binding_object_id = resolution_object;
     }
   in
   let revision =
     Workspace_store.create_revision
       ~workspace:(Workspace_store.workspace_id workspace)
-      ~parent:(Some parent)
-      ~base:(snapshot_id 102) ~selected:[ selected ] ~precedence:[]
+      ~parent:(Some parent) ~base:(snapshot_id 102) ~selected:[ selected ]
+      ~precedence:[]
       ~resolved_order:[ revision_id 107 ]
       ~resolutions:[ binding ]
-      ~provenance:(Workspace_store.Resolved (Workspace_store.resolution_id resolution))
+      ~provenance:
+        (Workspace_store.Resolved (Workspace_store.resolution_id resolution))
       ~created_at:4L
     |> require_ok Workspace_store.error_to_string
   in
@@ -167,14 +220,16 @@ let schema_fixture store =
       ~workspace:(Workspace_store.workspace_id workspace)
       ~workspace_revision:(Workspace_store.revision_id revision)
       ~base:(snapshot_id 102) ~ordered:[ selected ]
-      ~starting_checkpoint:(checkpoint_id 111) ~starting_snapshot:(snapshot_id 112)
+      ~starting_checkpoint:(checkpoint_id 111)
+      ~starting_snapshot:(snapshot_id 112)
   in
   let attempt =
     Workspace_store.create_attempt ~id:attempt_id
       ~workspace:(Workspace_store.workspace_id workspace)
       ~workspace_revision:(Workspace_store.revision_id revision)
       ~base:(snapshot_id 102) ~ordered:[ selected ]
-      ~starting_checkpoint:(checkpoint_id 111) ~starting_snapshot:(snapshot_id 112)
+      ~starting_checkpoint:(checkpoint_id 111)
+      ~starting_snapshot:(snapshot_id 112)
       ~outcomes:
         [
           Workspace_store.Attempt_applied_exactly
@@ -187,7 +242,8 @@ let schema_fixture store =
             (Workspace_store.conflict_id conflict);
         ]
       ~resulting_snapshot:(snapshot_id 113)
-      ~conflicts:[ Workspace_store.conflict_id conflict ] ~created_at:5L
+      ~conflicts:[ Workspace_store.conflict_id conflict ]
+      ~created_at:5L
     |> require_ok Workspace_store.error_to_string
   in
   let workspace_object =
@@ -208,9 +264,12 @@ let schema_fixture store =
   in
   let current =
     Workspace_store.make_current_ref ~generation:7L
-      ~workspace:(Workspace_store.workspace_id workspace) ~workspace_object
-      ~revision:(Workspace_store.revision_id revision) ~revision_object
-      ~latest_attempt:(Some (Workspace_store.attempt_id attempt, attempt_object))
+      ~workspace:(Workspace_store.workspace_id workspace)
+      ~workspace_object
+      ~revision:(Workspace_store.revision_id revision)
+      ~revision_object
+      ~latest_attempt:
+        (Some (Workspace_store.attempt_id attempt, attempt_object))
     |> require_ok Workspace_store.error_to_string
   in
   ( workspace,
@@ -241,7 +300,8 @@ let schemas_have_canonical_goldens_and_inverse_decoders () =
         schema_fixture store
       in
       let bytes object_id =
-        Store.get store object_id |> require_ok Store.error_to_string
+        Store.get store object_id
+        |> require_ok Store.error_to_string
         |> Envelope.encode
       in
       let fixtures =
@@ -251,7 +311,8 @@ let schemas_have_canonical_goldens_and_inverse_decoders () =
           ("workspace-attempt-v1.peng.hex", bytes attempt_object);
           ("conflict-v1.peng.hex", bytes conflict_object);
           ("resolution-v1.peng.hex", bytes resolution_object);
-          ("workspace-current-v1.ref.hex", Workspace_store.encode_current_ref current);
+          ( "workspace-current-v1.ref.hex",
+            Workspace_store.encode_current_ref current );
         ]
       in
       List.iter
@@ -278,26 +339,39 @@ let schemas_have_canonical_goldens_and_inverse_decoders () =
         |> require_ok Workspace_store.error_to_string
       in
       let decoded_current =
-        Workspace_store.decode_current_ref (Workspace_store.encode_current_ref current)
+        Workspace_store.decode_current_ref
+          (Workspace_store.encode_current_ref current)
         |> require_ok Workspace_store.error_to_string
       in
-      Alcotest.(check bool) "workspace inverse" true
-        (Id.Workspace_id.equal (Workspace_store.workspace_id workspace)
+      Alcotest.(check bool)
+        "workspace inverse" true
+        (Id.Workspace_id.equal
+           (Workspace_store.workspace_id workspace)
            (Workspace_store.workspace_id loaded_workspace));
-      Alcotest.(check bool) "revision inverse" true
-        (Id.Workspace_revision_id.equal (Workspace_store.revision_id revision)
+      Alcotest.(check bool)
+        "revision inverse" true
+        (Id.Workspace_revision_id.equal
+           (Workspace_store.revision_id revision)
            (Workspace_store.revision_id loaded_revision));
-      Alcotest.(check bool) "conflict inverse" true
-        (Id.Conflict_id.equal (Workspace_store.conflict_id conflict)
+      Alcotest.(check bool)
+        "conflict inverse" true
+        (Id.Conflict_id.equal
+           (Workspace_store.conflict_id conflict)
            (Workspace_store.conflict_id loaded_conflict));
-      Alcotest.(check bool) "resolution inverse" true
-        (Id.Resolution_id.equal (Workspace_store.resolution_id resolution)
+      Alcotest.(check bool)
+        "resolution inverse" true
+        (Id.Resolution_id.equal
+           (Workspace_store.resolution_id resolution)
            (Workspace_store.resolution_id loaded_resolution));
-      Alcotest.(check bool) "attempt inverse" true
-        (Id.Workspace_attempt_id.equal (Workspace_store.attempt_id attempt)
+      Alcotest.(check bool)
+        "attempt inverse" true
+        (Id.Workspace_attempt_id.equal
+           (Workspace_store.attempt_id attempt)
            (Workspace_store.attempt_id loaded_attempt));
-      Alcotest.(check bool) "current ref inverse" true
-        (Id.Workspace_revision_id.equal (Workspace_store.current_revision current)
+      Alcotest.(check bool)
+        "current ref inverse" true
+        (Id.Workspace_revision_id.equal
+           (Workspace_store.current_revision current)
            (Workspace_store.current_revision decoded_current)))
 
 let work_create_enable_reopen_and_stale_cas () =
@@ -313,18 +387,22 @@ let work_create_enable_reopen_and_stale_cas () =
         Workspace_store.revision_id (Workspace_store.resolved_revision created)
       in
       let enabled_a =
-        Workspace_store.Durable.enable_current_capsule ~store ~workspace:identity
-          ~capsule:fixture.capsule_a ~expected_generation:(Some 0L) ~created_at:7L
+        Workspace_store.Durable.enable_current_capsule ~store
+          ~workspace:identity ~capsule:fixture.capsule_a
+          ~expected_generation:(Some 0L) ~created_at:7L
         |> require_ok Workspace_store.error_to_string
       in
       let enabled_a_revision =
-        Workspace_store.revision_id (Workspace_store.resolved_revision enabled_a)
+        Workspace_store.revision_id
+          (Workspace_store.resolved_revision enabled_a)
       in
-      Alcotest.(check bool) "enable creates an immutable revision" false
+      Alcotest.(check bool)
+        "enable creates an immutable revision" false
         (Id.Workspace_revision_id.equal initial_revision enabled_a_revision);
       let enabled =
-        Workspace_store.Durable.enable_current_capsule ~store ~workspace:identity
-          ~capsule:fixture.capsule_c ~expected_generation:(Some 1L) ~created_at:8L
+        Workspace_store.Durable.enable_current_capsule ~store
+          ~workspace:identity ~capsule:fixture.capsule_c
+          ~expected_generation:(Some 1L) ~created_at:8L
         |> require_ok Workspace_store.error_to_string
       in
       (match
@@ -349,13 +427,18 @@ let work_create_enable_reopen_and_stale_cas () =
         (Workspace_store.Durable.reorder ~store ~workspace:identity ~order
            ~expected_generation:(Some 2L) ~created_at:10L
         |> require_ok Workspace_store.error_to_string);
-      let reopened_store = Store.open_repository ~root |> require_ok Store.error_to_string in
+      let reopened_store =
+        Store.open_repository ~root |> require_ok Store.error_to_string
+      in
       let reopened =
         Workspace_store.Durable.read_current reopened_store identity
         |> require_ok Workspace_store.error_to_string
       in
-      Alcotest.(check int) "selected revisions survive reopen" 2
-        (List.length (Workspace_store.revision_selected (Workspace_store.resolved_revision reopened))))
+      Alcotest.(check int)
+        "selected revisions survive reopen" 2
+        (List.length
+           (Workspace_store.revision_selected
+              (Workspace_store.resolved_revision reopened))))
 
 let conflicts_materialise_and_resolve_immutably () =
   with_store (fun root store ->
@@ -366,12 +449,19 @@ let conflicts_materialise_and_resolve_immutably () =
            ~name:None ~description:None ~created_at:6L
         |> require_ok Workspace_store.error_to_string);
       ignore
-        (Workspace_store.Durable.enable_current_capsule ~store ~workspace:identity
-           ~capsule:fixture.capsule_a ~expected_generation:None ~created_at:7L
+        (Workspace_store.Durable.enable_revision ~store ~workspace:identity
+           ~revision:(current_capsule_revision store fixture.capsule_a)
+           ~expected_generation:None ~created_at:7L
+        |> require_ok Workspace_store.error_to_string);
+      ignore
+        (Workspace_store.Durable.enable_revision ~store ~workspace:identity
+           ~revision:(current_capsule_revision store fixture.capsule_c)
+           ~expected_generation:None ~created_at:8L
         |> require_ok Workspace_store.error_to_string);
       let enabled =
-        Workspace_store.Durable.enable_current_capsule ~store ~workspace:identity
-          ~capsule:fixture.capsule_c ~expected_generation:None ~created_at:8L
+        Workspace_store.Durable.enable_revision ~store ~workspace:identity
+          ~revision:(current_capsule_revision store fixture.capsule_d)
+          ~expected_generation:None ~created_at:9L
         |> require_ok Workspace_store.error_to_string
       in
       let revision = Workspace_store.resolved_revision enabled in
@@ -381,24 +471,30 @@ let conflicts_materialise_and_resolve_immutably () =
              [
                selected_revision revision fixture.capsule_a;
                selected_revision revision fixture.capsule_c;
+               selected_revision revision fixture.capsule_d;
              ]
-           ~expected_generation:None ~created_at:9L
+           ~expected_generation:None ~created_at:10L
         |> require_ok Workspace_store.error_to_string);
       let materialised =
-        Workspace_store.Durable.materialise ~store ~scratch:fixture.scratch ~root
-          ~workspace:identity ~observed_at:10L ~created_at:10L ~dry_run:false ()
+        Workspace_store.Durable.materialise ~store ~scratch:fixture.scratch
+          ~root ~workspace:identity ~observed_at:11L ~created_at:11L
+          ~dry_run:false ()
         |> require_ok Workspace_store.error_to_string
       in
-      Alcotest.(check bool) "materialisation reports partial application" true
+      Alcotest.(check bool)
+        "materialisation reports partial application" true
         materialised.Workspace_store.Durable.partial;
-      Alcotest.(check string) "partial result keeps first exact edit" "a"
-        (In_channel.with_open_bin (Filename.concat root "dir/tracked")
+      Alcotest.(check string)
+        "partial result keeps first exact edit" "a"
+        (In_channel.with_open_bin
+           (Filename.concat root "dir/tracked")
            In_channel.input_all);
       let conflicts =
         Workspace_store.Durable.list_conflicts store identity
         |> require_ok Workspace_store.error_to_string
       in
-      Alcotest.(check int) "persistent conflict is listable" 1 (List.length conflicts);
+      Alcotest.(check int)
+        "persistent conflicts are listable" 2 (List.length conflicts);
       let conflict = List.hd conflicts in
       let before =
         Workspace_store.Durable.read_current store identity
@@ -409,20 +505,51 @@ let conflicts_materialise_and_resolve_immutably () =
       in
       let resolved =
         Workspace_store.Durable.resolve_skip ~store ~workspace:identity
-          ~conflict:(Workspace_store.conflict_id conflict) ~expected_generation:None
-          ~created_at:11L
+          ~conflict:(Workspace_store.conflict_id conflict)
+          ~expected_generation:None ~created_at:12L
         |> require_ok Workspace_store.error_to_string
       in
-      Alcotest.(check bool) "resolution creates a new immutable workspace revision" false
+      Alcotest.(check bool)
+        "resolution creates a new immutable workspace revision" false
         (Id.Workspace_revision_id.equal before_revision
-           (Workspace_store.revision_id (Workspace_store.resolved_revision resolved)));
+           (Workspace_store.revision_id
+              (Workspace_store.resolved_revision resolved)));
+      (match
+         Workspace_store.Durable.resolve_skip ~store ~workspace:identity
+           ~conflict:(Workspace_store.conflict_id conflict)
+           ~expected_generation:None ~created_at:13L
+       with
+      | Error _ -> ()
+      | Ok _ -> Alcotest.fail "stale resolution was accepted");
       let rematerialised =
-        Workspace_store.Durable.materialise ~store ~scratch:fixture.scratch ~root
-          ~workspace:identity ~observed_at:12L ~created_at:12L ~dry_run:false ()
+        Workspace_store.Durable.materialise ~store ~scratch:fixture.scratch
+          ~root ~workspace:identity ~observed_at:14L ~created_at:14L
+          ~dry_run:false ()
         |> require_ok Workspace_store.error_to_string
       in
-      Alcotest.(check bool) "skip resolution rematerialises without conflict" false
+      Alcotest.(check bool)
+        "resolving one conflict preserves another" true
         rematerialised.Workspace_store.Durable.partial;
+      let remaining =
+        Workspace_store.Durable.list_conflicts store identity
+        |> require_ok Workspace_store.error_to_string
+      in
+      Alcotest.(check int)
+        "one unrelated conflict remains" 1 (List.length remaining);
+      ignore
+        (Workspace_store.Durable.resolve_skip ~store ~workspace:identity
+           ~conflict:(Workspace_store.conflict_id (List.hd remaining))
+           ~expected_generation:None ~created_at:15L
+        |> require_ok Workspace_store.error_to_string);
+      let complete =
+        Workspace_store.Durable.materialise ~store ~scratch:fixture.scratch
+          ~root ~workspace:identity ~observed_at:16L ~created_at:16L
+          ~dry_run:false ()
+        |> require_ok Workspace_store.error_to_string
+      in
+      Alcotest.(check bool)
+        "all explicit resolutions rematerialise exactly" false
+        complete.Workspace_store.Durable.partial;
       ignore
         (Workspace_store.Durable.show_conflict store
            (Workspace_store.conflict_id conflict)
@@ -437,8 +564,9 @@ let external_mutation_aborts_without_ref_publication () =
            ~name:None ~description:None ~created_at:6L
         |> require_ok Workspace_store.error_to_string);
       ignore
-        (Workspace_store.Durable.enable_current_capsule ~store ~workspace:identity
-           ~capsule:fixture.capsule_a ~expected_generation:None ~created_at:7L
+        (Workspace_store.Durable.enable_current_capsule ~store
+           ~workspace:identity ~capsule:fixture.capsule_a
+           ~expected_generation:None ~created_at:7L
         |> require_ok Workspace_store.error_to_string);
       let head_before =
         Scratch.head_id fixture.scratch |> require_ok Scratch.error_to_string
@@ -448,8 +576,9 @@ let external_mutation_aborts_without_ref_publication () =
         |> require_ok Workspace_store.error_to_string
       in
       let changed =
-        Workspace_store.Durable.materialise ~store ~scratch:fixture.scratch ~root
-          ~workspace:identity ~observed_at:8L ~created_at:8L ~dry_run:false
+        Workspace_store.Durable.materialise ~store ~scratch:fixture.scratch
+          ~root ~workspace:identity ~observed_at:8L ~created_at:8L
+          ~dry_run:false
           ~before_apply:(fun () ->
             write_file (Filename.concat root "dir/tracked") "external")
           ()
@@ -464,13 +593,88 @@ let external_mutation_aborts_without_ref_publication () =
         Workspace_store.Durable.read_current store identity
         |> require_ok Workspace_store.error_to_string
       in
-      Alcotest.(check bool) "external mutation leaves scratch head unchanged" true
+      Alcotest.(check bool)
+        "external mutation leaves scratch head unchanged" true
         (Option.equal Scratch.Checkpoint_id.equal head_before head_after);
-      Alcotest.(check int64) "external mutation leaves workspace ref unchanged"
+      Alcotest.(check int64)
+        "external mutation leaves workspace ref unchanged"
         (Workspace_store.current_generation
            (Workspace_store.resolved_current_ref current_before))
         (Workspace_store.current_generation
            (Workspace_store.resolved_current_ref current_after)))
+
+let materialisation_safety_checkpoint_preserves_exact_modes_and_symlinks () =
+  with_store (fun root store ->
+      let directory = Filename.concat root "dir" in
+      Unix.mkdir directory 0o700;
+      let tracked = Filename.concat directory "tracked" in
+      let link = Filename.concat directory "link" in
+      write_file tracked "base";
+      Unix.chmod tracked 0o644;
+      Unix.symlink "base-target" link;
+      let scratch = Scratch.open_repository store in
+      let base, _ =
+        Snapshot.scan ~root ~store |> require_ok Snapshot.error_to_string
+      in
+      let initial =
+        Scratch.create_initial scratch ~snapshot:base ~created_at:0L
+        |> require_ok Scratch.error_to_string
+        |> Scratch.Checkpoint.id
+      in
+      write_file tracked "target";
+      Unix.chmod tracked 0o755;
+      Unix.unlink link;
+      Unix.symlink "target-link" link;
+      let target, _ =
+        Snapshot.scan ~root ~store |> require_ok Snapshot.error_to_string
+      in
+      let target_checkpoint = checkpoint scratch target 1L in
+      let capsule = capsule_id 90 in
+      ignore
+        (Capsule_store.Durable.create_from_checkpoints ~store ~scratch
+           ~id:capsule ~title:"exact" ~description:"exact" ~dependencies:[]
+           ~evidence:[] ~from:initial ~target:target_checkpoint ~created_at:2L
+           ~changed_at:2L ()
+        |> require_ok Capsule_store.error_to_string);
+      write_file tracked "outside";
+      Unix.chmod tracked 0o644;
+      Unix.unlink link;
+      Unix.symlink "outside-link" link;
+      let outside, _ =
+        Snapshot.scan ~root ~store |> require_ok Snapshot.error_to_string
+      in
+      let workspace = workspace_id 91 in
+      ignore
+        (Workspace_store.Durable.create ~store ~id:workspace ~base ~name:None
+           ~description:None ~created_at:3L
+        |> require_ok Workspace_store.error_to_string);
+      ignore
+        (Workspace_store.Durable.enable_revision ~store ~workspace
+           ~revision:(current_capsule_revision store capsule)
+           ~expected_generation:None ~created_at:4L
+        |> require_ok Workspace_store.error_to_string);
+      let materialised =
+        Workspace_store.Durable.materialise ~store ~scratch ~root ~workspace
+          ~observed_at:5L ~created_at:5L ~dry_run:false ()
+        |> require_ok Workspace_store.error_to_string
+      in
+      Alcotest.(check bool)
+        "attempt starts from the durable safety snapshot" true
+        (Snapshot.Snapshot.equal_id outside
+           (Workspace_store.attempt_starting_snapshot
+              materialised.Workspace_store.Durable.attempt));
+      Alcotest.(check string)
+        "workspace materialises exact file bytes" "target"
+        (In_channel.with_open_bin tracked In_channel.input_all);
+      Alcotest.(check int)
+        "workspace materialises executable mode" 0o755
+        ((Unix.stat tracked).Unix.st_perm land 0o777);
+      Alcotest.(check bool)
+        "workspace materialises a symlink" true
+        ((Unix.lstat link).Unix.st_kind = Unix.S_LNK);
+      Alcotest.(check string)
+        "workspace materialises exact symlink target" "target-link"
+        (Unix.readlink link))
 
 let () =
   Alcotest.run "workspace persistence"
@@ -485,5 +689,7 @@ let () =
             schemas_have_canonical_goldens_and_inverse_decoders;
           Alcotest.test_case "external mutation aborts safely" `Quick
             external_mutation_aborts_without_ref_publication;
+          Alcotest.test_case "safety checkpoint and exact modes/symlinks" `Quick
+            materialisation_safety_checkpoint_preserves_exact_modes_and_symlinks;
         ] );
     ]

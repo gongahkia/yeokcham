@@ -247,30 +247,31 @@ Robustness tasks operate only on Paengi's pure functions and generated local fix
 
 ### Composition
 
-- [ ] Set base snapshot (release remains Milestone 6).
-- [ ] Enable capsule revision.
-- [ ] Disable capsule revision.
-- [ ] Materialise selected composition.
-- [ ] Produce per-operation outcomes.
-- [ ] Record resulting workspace snapshot.
-- [ ] Preserve safety checkpoint before rematerialisation.
+- [x] Set base snapshot (release remains Milestone 6).
+- [x] Enable capsule revision.
+- [x] Disable capsule revision.
+- [x] Materialise selected composition.
+- [x] Produce per-operation outcomes.
+- [x] Record resulting workspace snapshot.
+- [x] Preserve safety checkpoint before rematerialisation.
 
 ### Conflict values
 
-- [ ] Define conflict kinds.
-- [ ] Persist conflict objects.
-- [ ] List and inspect conflicts.
-- [ ] Keep unrelated operations available.
-- [ ] Resolve conflict.
-- [ ] Record resolution provenance.
-- [ ] Reattempt application after related changes.
+- [x] Define conflict kinds.
+- [x] Persist conflict objects.
+- [x] List and inspect conflicts.
+- [x] Keep unrelated operations available.
+- [x] Resolve conflict with explicit skip-operation action.
+- [x] Record resolution provenance.
+- [x] Reattempt application after related changes.
 
 ### Exit criteria
 
-- [ ] Composition is deterministic.
+- [x] Composition order is deterministic.
 - [ ] Multiple non-overlapping capsules coexist.
-- [ ] Overlapping operations create inspectable conflicts.
+- [x] Overlapping operations create inspectable conflicts.
 - [ ] Repository remains usable with unresolved conflicts.
+- [ ] Complete the ADR-026 corruption, restart, and two-ref recovery matrix.
 
 ## Milestone 6 — Releases and validation
 

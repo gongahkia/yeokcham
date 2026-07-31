@@ -366,20 +366,16 @@ Outputs:
 - Materialised snapshot.
 - Per-operation outcome.
 - Conflict objects.
-- Validation status.
 - Working-directory update plan.
 
 Working-directory update follows guarded scratch materialisation:
 
-1. Compute target snapshot.
-2. Create write plan.
-3. Validate paths and symlinks.
-4. Write temporary files.
-5. Atomically replace files where supported.
-6. Record pre-operation safety checkpoint.
-7. Rescan and create/reuse a resulting scratch checkpoint.
-8. CAS-advance scratch head.
-9. CAS-update the workspace ref with the immutable attempt.
+1. Lock, read the workspace ref, scan, and preserve divergent work in a safety checkpoint.
+2. Re-resolve immutable workspace inputs and compute/store the attempt and conflicts.
+3. Produce a guarded write plan and revalidate the working snapshot before writes.
+4. Validate paths/symlinks, write temporary files, and atomically replace where supported.
+5. Rescan the exact result and CAS-advance scratch head.
+6. Re-read and CAS-update the workspace ref with the immutable attempt.
 
 The final two ref publications are not cross-ref atomic. Recovery re-resolves
 immutable workspace inputs and allows an exact retry when scratch-head

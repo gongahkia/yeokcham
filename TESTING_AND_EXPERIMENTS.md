@@ -129,12 +129,17 @@ Creating a new revision does not change capsule ID.
 
 Identical workspace inputs produce identical result and conflict set.
 
-The first Milestone 5 slice checks a smaller format-free prerequisite: selected
-revisions have one canonical dependency order independent of input permutation;
-required exact revisions, unavailable releases, declared incompatibilities,
-incomplete explicit orders, and cycles reject. The `work explain-order` CLI is
-read-only over durable current revisions. Workspace materialisation and durable
-conflict persistence remain later tests.
+Milestone 5 additionally checks Workspace/Workspace_revision/Workspace_attempt,
+Conflict, Resolution, and workspace-current-ref canonical goldens with inverse
+decoders; workspace reopen; immutable enable/reorder revisions; stale workspace
+CAS; local conflict persistence/list/show; independent-operation continuation;
+guarded materialisation bytes/modes/symlink targets and safety checkpoints;
+externally mutated plan rejection; scratch/workspace ref preservation on
+guarded-apply failure; immutable skip-operation resolution/rematerialisation;
+and a bounded restart state machine for create, enable, disable, reorder,
+materialise, conflict, resolve, and rematerialise. Properties remain bounded
+and seeded; release dependencies still return the explicit unsupported resolver
+error.
 
 #### P9 — Dependency safety
 

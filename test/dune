@@ -151,7 +151,14 @@
 (test
  (name test_workspace)
  (modules test_workspace)
- (libraries alcotest paengi_capsule paengi_id paengi_workspace))
+ (libraries
+  alcotest
+  paengi_capsule
+  paengi_id
+  paengi_scratch
+  paengi_snapshot
+  paengi_store
+  paengi_workspace))
 
 (test
  (name test_workspace_store)
@@ -167,7 +174,9 @@
   paengi_testkit
   paengi_workspace
   paengi_workspace_store
-  unix))
+  unix)
+ (deps
+  (source_tree golden)))
 
 (test
  (name test_capsule_store)
@@ -243,7 +252,19 @@
 (test
  (name workspace_property_test)
  (modules workspace_property_test)
- (libraries alcotest qcheck-core qcheck-alcotest paengi_id paengi_workspace))
+ (libraries
+  alcotest
+  qcheck-core
+  qcheck-alcotest
+  paengi_capsule
+  paengi_capsule_store
+  paengi_id
+  paengi_scratch
+  paengi_snapshot
+  paengi_store
+  paengi_workspace
+  paengi_workspace_store
+  unix))
 
 (test
  (name encoding_property_test)

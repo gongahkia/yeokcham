@@ -479,9 +479,13 @@ type conflict = {
   workspace : workspace_id;
   workspace_revision : workspace_revision_id;
   workspace_attempt : workspace_attempt_id option;
+  capsule : capsule_id;
   capsule_revision : capsule_revision_id;
-  path : path option;
-  candidates : resolution_candidate list;
+  operation_index : int;
+  paths : path list;
+  current : tree_entry option;
+  candidates : string list;
+  created_at : timestamp;
 }
 ```
 
@@ -491,9 +495,8 @@ type resolution = {
   conflict : conflict_id;
   workspace_revision : workspace_revision_id;
   workspace_attempt : workspace_attempt_id option;
-  action : resolution_action;
-  preconditions : exact_precondition list;
-  expected_state : exact_state;
+  action : Skip_operation;
+  expected_current : tree_entry option;
   created_at : timestamp;
 }
 ```
@@ -501,6 +504,9 @@ type resolution = {
 Conflicts and resolutions are immutable repository objects and may outlive a
 process invocation. A resolution is active only when a later immutable workspace
 revision binds it to its conflict; Conflict itself has no mutable resolved flag.
+The conflict's immutable `(capsule_revision, operation_index)` source identifies
+the exact stored operation and its preconditions; V1 deliberately has no guessed
+content, mode, or path replacement action.
 
 ## 9. Workspace model
 

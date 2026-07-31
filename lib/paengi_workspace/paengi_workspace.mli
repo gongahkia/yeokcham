@@ -100,11 +100,12 @@ type operation_outcome =
       operation_index : int;
     }
 
-type resolution_action = Skip_operation of {
-  capsule : Paengi_id.Capsule_id.t;
-  revision : Paengi_id.Capsule_revision_id.t;
-  operation_index : int;
-}
+type resolution_action =
+  | Skip_operation of {
+      capsule : Paengi_id.Capsule_id.t;
+      revision : Paengi_id.Capsule_revision_id.t;
+      operation_index : int;
+    }
 
 type application = {
   state : Paengi_scratch.State.t;
