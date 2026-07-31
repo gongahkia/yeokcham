@@ -44,6 +44,10 @@ The supported compiler is OCaml 5.5.0. The exact constraint is recorded in `dune
 
 ## Status
 
+Milestone 5 has a format-free dependency-order resolver: it validates selected
+current revisions, dependency closure, declared incompatibilities, cycles, and
+explicit full precedence, then explains one deterministic order. Workspace
+selection/materialisation and persistent conflicts are not implemented yet.
 Milestone 4 has durable capsules: immutable Capsule and complete revision
 objects, CAS-protected current refs, exact replay validation, pinned scratch
 boundaries, and split/combine replay checks. Milestone 3 has retained-ID scratch
@@ -89,7 +93,12 @@ dune exec bin/paengi.exe -- capsule combine --id <capsule-id> --title <title> --
 dune exec bin/paengi.exe -- capsule show <capsule-id>
 dune exec bin/paengi.exe -- capsule current-diff <capsule-id>
 dune exec bin/paengi.exe -- capsule history <capsule-id>
+dune exec bin/paengi.exe -- work explain-order --enable <capsule-id> --enable <capsule-id> [--order <revision-id>,<revision-id>]
 ```
+
+`work explain-order` is read-only. It resolves each enabled capsule's current
+immutable revision, validates the selected graph, and prints canonical order
+and precedence edges. `--order` must name every enabled revision exactly once.
 
 `restore` creates a durable safety checkpoint for divergent work, validates its
 plan immediately before applying, and moves `scratch-head` only after exact

@@ -7,4 +7,5 @@
   paengi_scratch
   paengi_snapshot
   paengi_store
+  paengi_workspace
   unix))

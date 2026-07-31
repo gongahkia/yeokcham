@@ -5,15 +5,15 @@ Robustness tasks operate only on Paengi's pure functions and generated local fix
 
 ## Active vertical slice
 
-- Milestone: 4 — Change capsules.
-- Task: Milestone 4 complete — all exit criteria verified; stop before Milestone 5.
-- Modules/files: `paengi_capsule`; `paengi_capsule_store`; capsule CLI; focused plan/confirmation/cycle tests.
-- Types: immutable source/output plan values, explicit confirmation argument, and a pure logical revision-parent graph resolver; existing stable `Capsule_id`, immutable revisions, boundaries, and provenance.
+- Milestone: 5 — Workspaces and conflicts.
+- Task: dependency graph and read-only order explanation.
+- Modules/files: new `paengi_workspace`; `paengi work explain-order`; focused graph tests and property test.
+- Types: selected immutable revision, precedence edge/reason, deterministic order, and structured dependency errors.
 - Formats: no new schema, object type, ref, or golden. ADR-020 through ADR-025 remain unchanged.
-- Invariants: plans are read-only and preserve supplied operation/source ordering; execution rejects without confirmation and re-resolves/revalidates immutable inputs immediately before publication; split/combine preserve source capsules and exact replay; production history detection remains active while the pure resolver rejects synthetic cycles deterministically.
-- Tests: plan contents, unconfirmed rejection, confirmed exact replay, source preservation, synthetic parent cycles, and existing persistent wrong-ID/missing-parent/wrong-type/cross-capsule rejection. `make format`, `make check`, `make property-test PROPERTY_TEST_SEED=17`, and forced capsule state-machine seed `17` pass.
+- Invariants: one selected revision per capsule; required exact revisions are present; declared incompatibilities reject; optional declared ordering applies only to selected capsules; explicit precedence covers the exact selected set; dependency cycles reject; revision-ID tie-breaking is deterministic.
+- Tests: focused required/missing/release/conflict/cycle/precedence tests plus bounded permutation property with printed seed. `make build`, focused tests, `make format`, `make check`, and `make property-test PROPERTY_TEST_SEED=17` are required.
 - External libraries: existing Alcotest, QCheck, Profile 1 encoder, and Unix only.
-- ADR changes: no format change; ADR-025 clarifies current-working-diff creation semantics.
+- ADR changes: none; this slice is format-free.
 
 ## Milestone 0 — Project and model foundation
 
@@ -239,11 +239,11 @@ Robustness tasks operate only on Paengi's pure functions and generated local fix
 
 ### Dependency graph
 
-- [ ] Validate acyclic required dependencies.
-- [ ] Detect conflicts-with declarations.
-- [ ] Derive deterministic order.
-- [ ] Support explicit precedence.
-- [ ] Add `paengi work explain-order`.
+- [x] Validate acyclic required dependencies.
+- [x] Detect conflicts-with declarations.
+- [x] Derive deterministic order.
+- [x] Support explicit precedence.
+- [x] Add `paengi work explain-order`.
 
 ### Composition
 

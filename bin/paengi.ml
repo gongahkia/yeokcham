@@ -4,6 +4,7 @@ module Store = Paengi_store
 module Compaction = Paengi_compaction
 module Capsule = Paengi_capsule
 module Capsule_store = Paengi_capsule_store
+module Workspace = Paengi_workspace
 
 let now () = Int64.of_float (Unix.gettimeofday ())
 
@@ -18,6 +19,11 @@ let checkpoint_id value =
 
 let capsule_id value =
   match Paengi_id.Capsule_id.of_hex value with
+  | Ok identity -> identity
+  | Error error -> fail Paengi_id.parse_error_to_string error
+
+let revision_id value =
+  match Paengi_id.Capsule_revision_id.of_hex value with
   | Ok identity -> identity
   | Error error -> fail Paengi_id.parse_error_to_string error
 
@@ -766,10 +772,77 @@ let capsule root arguments =
                 revisions))
   | _ -> exit 2
 
+let workspace root arguments =
+  match arguments with
+  | "explain-order" :: options -> (
+      let parse_order value =
+        let values = String.split_on_char ',' value in
+        if values = [] || List.exists String.is_empty values then exit 2
+        else List.map revision_id values
+      in
+      let rec parse enabled explicit_order = function
+        | [] -> (List.rev enabled, explicit_order)
+        | "--enable" :: value :: rest ->
+            parse (capsule_id value :: enabled) explicit_order rest
+        | "--order" :: value :: rest ->
+            if Option.is_some explicit_order then exit 2
+            else parse enabled (Some (parse_order value)) rest
+        | _ -> exit 2
+      in
+      let enabled, explicit_order = parse [] None options in
+      if enabled = [] then exit 2;
+      match Store.open_repository ~root with
+      | Error error -> fail Store.error_to_string error
+      | Ok store -> (
+          let rec resolve reversed = function
+            | [] -> Ok (List.rev reversed)
+            | capsule :: rest -> (
+                match Capsule_store.Durable.read_current store capsule with
+                | Error error -> Error (Capsule_store.error_to_string error)
+                | Ok resolved ->
+                    let revision =
+                      Capsule_store.Durable.resolved_revision resolved
+                    in
+                    let selected : Workspace.selected_revision =
+                      {
+                        Workspace.capsule =
+                          Capsule_store.capsule_id
+                            (Capsule_store.Durable.resolved_capsule resolved);
+                        revision = Capsule_store.revision_id revision;
+                        dependencies =
+                          Capsule_store.revision_dependencies revision;
+                      }
+                    in
+                    resolve (selected :: reversed) rest)
+          in
+          match resolve [] enabled with
+          | Error error -> fail Fun.id error
+          | Ok selected -> (
+              match Workspace.derive_order ~selected ~explicit_order with
+              | Error error -> fail Workspace.error_to_string error
+              | Ok order ->
+                  Workspace.revisions order
+                  |> List.iteri (fun index selected ->
+                      Printf.printf "order[%d] capsule=%s revision=%s\n" index
+                        (Paengi_id.Capsule_id.to_hex selected.Workspace.capsule)
+                        (Paengi_id.Capsule_revision_id.to_hex
+                           selected.Workspace.revision));
+                  Workspace.edges order
+                  |> List.iter (fun edge ->
+                      Printf.printf "edge before=%s after=%s reasons=%s\n"
+                        (Paengi_id.Capsule_revision_id.to_hex
+                           edge.Workspace.before)
+                        (Paengi_id.Capsule_revision_id.to_hex
+                           edge.Workspace.after)
+                        (String.concat ","
+                           (List.map Workspace.edge_kind_to_string
+                              edge.Workspace.reasons))))))
+  | _ -> exit 2
+
 let usage () =
   prerr_endline
     "usage: paengi \
-     <init|checkpoint|timeline|restore|pin|unpin|compact|watch|capsule> \
+     <init|checkpoint|timeline|restore|pin|unpin|compact|watch|capsule|work> \
      [--root PATH] ...";
   exit 2
 
@@ -789,6 +862,7 @@ let () =
         | "compact" -> compact root arguments
         | "watch" -> watch root arguments
         | "capsule" -> capsule root arguments
+        | "work" -> workspace root arguments
         | _ -> usage ())
     | _ -> usage ()
   with Sys.Break -> print_endline "watch stopped"

@@ -509,6 +509,23 @@ Materialisation:
 4. Collect conflicts and outcomes.
 5. Produce workspace snapshot and materialisation report.
 
+### Dependency-order subset
+
+The first Milestone 5 slice resolves an in-memory selected-revision set before
+any workspace object or ref exists. A selection contains one revision for each
+capsule. `Requires_capsule` must be selected; when it names a revision, that
+exact revision must be selected. `Requires_release` is dependency-unsatisfied
+until releases exist. `Conflicts_with_capsule` rejects a selection containing
+both capsules. `Ordered_after` adds a precedence edge only when its referenced
+capsule is selected. An explicit order is a complete sequence containing every
+selected revision exactly once; adjacent entries add precedence edges. The
+resolver topologically sorts all edges, using ascending logical revision ID as
+its sole unconstrained tie-breaker, and rejects any cycle.
+
+This subset is read-only and format-free. It neither persists a workspace nor
+creates a `Conflict` object; those later Milestone 5 adapters must preserve the
+resolved order and represent application failures as durable conflict values.
+
 ### Composition invariant
 
 For identical:

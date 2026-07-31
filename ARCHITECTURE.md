@@ -352,6 +352,13 @@ Inputs:
 - Resolution records.
 - Policy.
 
+The first Milestone 5 adapter is intentionally read-only and format-free:
+`paengi_workspace` derives order from already resolved immutable revisions and
+the CLI only explains that result. It validates required selected revisions,
+declared capsule incompatibilities, optional `Ordered_after` edges, and a full
+user precedence sequence. A persistent workspace ref, materialisation shell,
+and conflict store require their own schemas and publication rules.
+
 Outputs:
 
 - Materialised snapshot.
