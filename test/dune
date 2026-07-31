@@ -179,6 +179,23 @@
   (source_tree golden)))
 
 (test
+ (name test_validation)
+ (modules test_validation)
+ (libraries
+  alcotest
+  paengi_encoding
+  paengi_envelope
+  paengi_hash
+  paengi_scratch
+  paengi_snapshot
+  paengi_store
+  paengi_testkit
+  paengi_validation
+  unix)
+ (deps
+  (source_tree golden)))
+
+(test
  (name test_capsule_store)
  (modules test_capsule_store)
  (libraries

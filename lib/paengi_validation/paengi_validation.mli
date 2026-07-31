@@ -25,14 +25,14 @@ type captured_stream = {
 }
 
 type process_result = {
-  status : status;
-  exit_code : int option;
-  signal : int option;
-  execution_error : string option;
-  duration_ms : int64;
-  stdout : captured_stream;
-  stderr : captured_stream;
-  environment_fingerprint : string option;
+  runner_status : status;
+  runner_exit_code : int option;
+  runner_signal : int option;
+  runner_execution_error : string option;
+  runner_duration_ms : int64;
+  runner_stdout : captured_stream;
+  runner_stderr : captured_stream;
+  runner_environment_fingerprint : string option;
 }
 
 module type Process_runner = sig
@@ -95,4 +95,5 @@ val run :
   command:command ->
   command_index:int ->
   observed_at:int64 ->
+  unit ->
   (evidence * Paengi_store.Stored_object_id.t, error) result
