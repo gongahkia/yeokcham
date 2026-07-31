@@ -78,6 +78,7 @@ enum Command {
         source: PathBuf,
         destination: PathBuf,
         chunked_blob_minimum_bytes: Option<usize>,
+        object_read_workers: Option<usize>,
     },
     Sync {
         source: PathBuf,
@@ -213,7 +214,13 @@ fn main() -> ExitCode {
             source,
             destination,
             chunked_blob_minimum_bytes,
-        } => init(source, destination, chunked_blob_minimum_bytes),
+            object_read_workers,
+        } => init(
+            source,
+            destination,
+            chunked_blob_minimum_bytes,
+            object_read_workers,
+        ),
         Command::Sync {
             source,
             repository,
@@ -823,41 +830,66 @@ fn parse_sync(arguments: &[OsString]) -> Result<Command> {
 }
 
 fn parse_init(arguments: &[OsString]) -> Result<Command> {
-    if arguments.len() == 4 && arguments[1].as_os_str() == OsStr::new("--from-git") {
-        return Ok(Command::Init {
-            source: PathBuf::from(&arguments[2]),
-            destination: PathBuf::from(&arguments[3]),
-            chunked_blob_minimum_bytes: None,
-        });
+    if arguments.len() < 4 || arguments[1].as_os_str() != OsStr::new("--from-git") {
+        return Err(usage_error());
     }
-    if arguments.len() == 6
-        && arguments[1].as_os_str() == OsStr::new("--from-git")
-        && arguments[4].as_os_str() == OsStr::new("--chunked-blob-minimum")
-    {
-        let minimum = arguments[5]
-            .to_str()
-            .ok_or_else(usage_error)?
-            .parse()
-            .map_err(|_| Error::new(ErrorKind::InvalidInput, "chunked-blob minimum is invalid"))?;
-        return Ok(Command::Init {
-            source: PathBuf::from(&arguments[2]),
-            destination: PathBuf::from(&arguments[3]),
-            chunked_blob_minimum_bytes: Some(minimum),
-        });
+    let mut chunked_blob_minimum_bytes = None;
+    let mut object_read_workers = None;
+    let mut options = arguments[4..].iter();
+    while let Some(option) = options.next() {
+        let value = options.next().ok_or_else(usage_error)?;
+        if option.as_os_str() == OsStr::new("--chunked-blob-minimum") {
+            let minimum = value
+                .to_str()
+                .ok_or_else(usage_error)?
+                .parse()
+                .map_err(|_| {
+                    Error::new(ErrorKind::InvalidInput, "chunked-blob minimum is invalid")
+                })?;
+            if chunked_blob_minimum_bytes.replace(minimum).is_some() {
+                return Err(usage_error());
+            }
+        } else if option.as_os_str() == OsStr::new("--object-read-workers") {
+            let workers = value
+                .to_str()
+                .ok_or_else(usage_error)?
+                .parse()
+                .map_err(|_| {
+                    Error::new(
+                        ErrorKind::InvalidInput,
+                        "object-read worker count is invalid",
+                    )
+                })?;
+            if object_read_workers.replace(workers).is_some() {
+                return Err(usage_error());
+            }
+        } else {
+            return Err(usage_error());
+        }
     }
-    Err(usage_error())
+    Ok(Command::Init {
+        source: PathBuf::from(&arguments[2]),
+        destination: PathBuf::from(&arguments[3]),
+        chunked_blob_minimum_bytes,
+        object_read_workers,
+    })
 }
 
 fn init(
     source: PathBuf,
     destination: PathBuf,
     chunked_blob_minimum_bytes: Option<usize>,
+    object_read_workers: Option<usize>,
 ) -> Result<()> {
     let source = GitRepository::open(source)?;
     let repository = LocalRepository::create(destination)?;
     let limits = GitImportLimits::initial()?;
     let limits = match chunked_blob_minimum_bytes {
         Some(minimum) => limits.with_chunked_blob_minimum_bytes(minimum)?,
+        None => limits,
+    };
+    let limits = match object_read_workers {
+        Some(workers) => limits.with_object_read_workers(workers)?,
         None => limits,
     };
     let report = repository.import_git_repository(&source, limits)?;
@@ -2970,7 +3002,7 @@ fn usage_error() -> Error {
 
 fn print_usage() {
     println!(
-        "usage:\n  yeokcham init --from-git <source-git-repo> <yeokcham-repo> [--chunked-blob-minimum <bytes>]\n  yeokcham sync --from-git <source-git-repo> <yeokcham-repo> --device <device-id>\n  yeokcham verify <yeokcham-repo>\n  yeokcham export-git <yeokcham-repo> <destination-git-repo>\n  yeokcham inspect object <yeokcham-repo> <git-object-id>\n  yeokcham inspect storage <yeokcham-repo>\n  yeokcham inspect refs <yeokcham-repo>\n  yeokcham cache inspect|verify|clear <yeokcham-repo>\n  yeokcham cache trim --max-bytes <bytes> <yeokcham-repo>\n  yeokcham github configure <yeokcham-repo> --repository <owner/repository> --direction <publish-only|pull-only|bidirectional-fast-forward|manual> [--force-update <reject|require-exact-checkpoint>] --publish <heads|tags|refs/heads/*|refs/tags/*> [--publish ...]\n  yeokcham github inspect <yeokcham-repo>\n  yeokcham github plan [--show-objects] <yeokcham-repo>\n  yeokcham github publish <yeokcham-repo> --apply [--transport <https|ssh>]\n  yeokcham github publish-pr <yeokcham-repo> --source <refs/heads/branch> --branch <remote-branch> --apply [--transport <https|ssh>]\n  yeokcham github fetch <yeokcham-repo> [--show-refs] [--transport <https|ssh>]\n  yeokcham key create-export --passphrase-stdin <yeokcham-repo> <recovery-key-export>\n  yeokcham drive auth --client-id <google-desktop-client-id> [--redirect-port <port>]\n  yeokcham drive init --client-id <google-desktop-client-id>\n  yeokcham drive backup|push --client-id <google-desktop-client-id> --folder-id <drive-folder-id> --key-export <recovery-key-export> --passphrase-stdin <yeokcham-repo>\n  yeokcham drive restore|clone --client-id <google-desktop-client-id> --folder-id <drive-folder-id> --key-export <recovery-key-export> --passphrase-stdin <destination>\n  yeokcham drive verify --client-id <google-desktop-client-id> --folder-id <drive-folder-id> --key-export <recovery-key-export> --passphrase-stdin\n  yeokcham drive journal inspect --client-id <google-desktop-client-id> --folder-id <drive-folder-id> --key-export <recovery-key-export> --root-key <root-ed25519-public-key-hex> --passphrase-stdin <yeokcham-repo>"
+        "usage:\n  yeokcham init --from-git <source-git-repo> <yeokcham-repo> [--chunked-blob-minimum <bytes>] [--object-read-workers <1..8>]\n  yeokcham sync --from-git <source-git-repo> <yeokcham-repo> --device <device-id>\n  yeokcham verify <yeokcham-repo>\n  yeokcham export-git <yeokcham-repo> <destination-git-repo>\n  yeokcham inspect object <yeokcham-repo> <git-object-id>\n  yeokcham inspect storage <yeokcham-repo>\n  yeokcham inspect refs <yeokcham-repo>\n  yeokcham cache inspect|verify|clear <yeokcham-repo>\n  yeokcham cache trim --max-bytes <bytes> <yeokcham-repo>\n  yeokcham github configure <yeokcham-repo> --repository <owner/repository> --direction <publish-only|pull-only|bidirectional-fast-forward|manual> [--force-update <reject|require-exact-checkpoint>] --publish <heads|tags|refs/heads/*|refs/tags/*> [--publish ...]\n  yeokcham github inspect <yeokcham-repo>\n  yeokcham github plan [--show-objects] <yeokcham-repo>\n  yeokcham github publish <yeokcham-repo> --apply [--transport <https|ssh>]\n  yeokcham github publish-pr <yeokcham-repo> --source <refs/heads/branch> --branch <remote-branch> --apply [--transport <https|ssh>]\n  yeokcham github fetch <yeokcham-repo> [--show-refs] [--transport <https|ssh>]\n  yeokcham key create-export --passphrase-stdin <yeokcham-repo> <recovery-key-export>\n  yeokcham drive auth --client-id <google-desktop-client-id> [--redirect-port <port>]\n  yeokcham drive init --client-id <google-desktop-client-id>\n  yeokcham drive backup|push --client-id <google-desktop-client-id> --folder-id <drive-folder-id> --key-export <recovery-key-export> --passphrase-stdin <yeokcham-repo>\n  yeokcham drive restore|clone --client-id <google-desktop-client-id> --folder-id <drive-folder-id> --key-export <recovery-key-export> --passphrase-stdin <destination>\n  yeokcham drive verify --client-id <google-desktop-client-id> --folder-id <drive-folder-id> --key-export <recovery-key-export> --passphrase-stdin\n  yeokcham drive journal inspect --client-id <google-desktop-client-id> --folder-id <drive-folder-id> --key-export <recovery-key-export> --root-key <root-ed25519-public-key-hex> --passphrase-stdin <yeokcham-repo>"
     );
 }
 
@@ -3804,6 +3836,52 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn parses_bounded_parallel_init_workers_in_any_option_order() {
+        let command = parse_command(
+            [
+                "init",
+                "--from-git",
+                "source",
+                "destination",
+                "--object-read-workers",
+                "4",
+                "--chunked-blob-minimum",
+                "8192",
+            ]
+            .map(OsString::from)
+            .to_vec(),
+        )
+        .expect("parse parallel init");
+        assert!(matches!(
+            command,
+            Command::Init {
+                source,
+                destination,
+                chunked_blob_minimum_bytes: Some(8192),
+                object_read_workers: Some(4),
+            } if source == PathBuf::from("source") && destination == PathBuf::from("destination")
+        ));
+        let error = match parse_command(
+            [
+                "init",
+                "--from-git",
+                "source",
+                "destination",
+                "--object-read-workers",
+                "4",
+                "--object-read-workers",
+                "2",
+            ]
+            .map(OsString::from)
+            .to_vec(),
+        ) {
+            Ok(_) => panic!("duplicate workers must fail"),
+            Err(error) => error,
+        };
+        assert_eq!(error.kind(), ErrorKind::InvalidInput);
     }
 
     #[test]

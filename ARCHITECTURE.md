@@ -389,8 +389,7 @@ Policies:
 Git repository
   -> enumerate refs
   -> traverse reachable objects
-  -> decode object
-  -> validate object ID
+  -> read bounded object batches and validate object IDs
   -> choose representation
   -> write records to staging segments
   -> seal segments
@@ -399,6 +398,8 @@ Git repository
   -> commit repository generation
   -> commit ref journal event
 ```
+
+Independent source objects may be read and SHA-1-verified concurrently through separate gitoxide adapter handles. An import batch contains at most eight objects and 64 MiB of declared bodies; batches below 2 MiB and singleton objects remain serial. Canonical storage, SQLite metadata, manifests, ref transitions, and final verification remain ordered and serial.
 
 ### 4.2 Fetch
 

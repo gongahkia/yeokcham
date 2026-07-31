@@ -35,6 +35,7 @@ Cover:
 - Encryption and decryption.
 - Storage policy selection.
 - In-memory decrypted-chunk and reconstructed-object cache bounds, corruption fallback, manifest/reference binding, and reuse after a valid cache fill.
+- Parallel source-object read ordering, invalid worker bounds, serial/parallel import equivalence, final repository verification, conventional export, and C Git fsck.
 
 ### Property tests
 
@@ -388,3 +389,5 @@ An explicit daemon sparse-prefetch configuration validates one Yeokcham reposito
 The committed 2026-07-31 W5 result has five clean Apple M3 samples at commit `4d31ebe`: 0.83 s median cold and 0.30 s median warm usable-workspace time, with 772 B median received helper pack payload in both states. It establishes this fixture's local cold/warm behavior only.
 
 The same harness reproduced those medians and the 772 B payload on five clean samples at commit `a740b46`; the schema-validated files are `benchmarks/results/2026-07-31-sparse-workspace-a740b46/`. This closes same-host harness reproducibility only; results across hardware, filesystems, and Git versions remain separate measurements.
+
+The import-read harness is `scripts/benchmark-parallel-import.sh`. It creates one deterministic packed single-revision 32 MiB binary fixture, compares one source-object-read worker with two, and records end-to-end local import wall/CPU/RSS/storage metrics. The immutable-record and ref-publication stages remain serial, so its result applies only to this fixture and host.

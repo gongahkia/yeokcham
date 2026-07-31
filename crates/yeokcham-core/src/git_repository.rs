@@ -65,6 +65,12 @@ impl GitRepository {
         self.work_dir().is_none()
     }
 
+    pub(crate) fn clone_for_thread(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+        }
+    }
+
     /// Returns regular Git reference names sorted by their exact bytes.
     ///
     /// Pseudo-refs such as `HEAD` are excluded. Names are validated through
@@ -278,6 +284,15 @@ impl GitRepository {
     /// bound appropriate for its memory budget; an object exceeding it is not
     /// decompressed. Pseudo-refs and object traversal are not involved.
     pub fn read_object(&self, id: GitObjectId, maximum_bytes: usize) -> Result<GitObject> {
+        self.read_object_with_expected_body_bytes(id, maximum_bytes, None)
+    }
+
+    fn read_object_with_expected_body_bytes(
+        &self,
+        id: GitObjectId,
+        maximum_bytes: usize,
+        expected_body_bytes: Option<u64>,
+    ) -> Result<GitObject> {
         let repository = self.inner.to_thread_local();
         if repository.object_hash() != gix::hash::Kind::Sha1 {
             return Err(Error::new(
@@ -294,6 +309,12 @@ impl GitRepository {
             return Err(Error::new(
                 ErrorKind::Unsupported,
                 "Git object exceeds the read limit",
+            ));
+        }
+        if expected_body_bytes.is_some_and(|expected| expected != header.size()) {
+            return Err(Error::new(
+                ErrorKind::CorruptData,
+                "Git object changed while being read",
             ));
         }
         let object = repository
@@ -315,6 +336,32 @@ impl GitRepository {
         ))
     }
 
+    /// Returns one object's decompressed body size without allocating its body.
+    ///
+    /// The size is checked against `maximum_bytes` before it is returned. This
+    /// is a point-in-time header read and does not verify the object identity.
+    pub(crate) fn object_body_bytes(&self, id: GitObjectId, maximum_bytes: usize) -> Result<u64> {
+        let repository = self.inner.to_thread_local();
+        if repository.object_hash() != gix::hash::Kind::Sha1 {
+            return Err(Error::new(
+                ErrorKind::Unsupported,
+                "Git repository uses an unsupported object hash",
+            ));
+        }
+        let object_id = gix::hash::ObjectId::from(id.into_bytes());
+        let header = repository
+            .try_find_header(object_id)
+            .map_err(|source| reference_corrupt_error("Git object could not be inspected", source))?
+            .ok_or_else(|| Error::new(ErrorKind::NotFound, "Git object does not exist"))?;
+        if header.size() > maximum_bytes as u64 {
+            return Err(Error::new(
+                ErrorKind::Unsupported,
+                "Git object exceeds the read limit",
+            ));
+        }
+        Ok(header.size())
+    }
+
     /// Reads and verifies one SHA-1 Git object within `maximum_bytes`.
     ///
     /// This is equivalent to [`read_object`](Self::read_object) followed by
@@ -322,6 +369,25 @@ impl GitRepository {
     /// verified source object, subject to later graph and persistence checks.
     pub fn read_verified_object(&self, id: GitObjectId, maximum_bytes: usize) -> Result<GitObject> {
         let object = self.read_object(id, maximum_bytes)?;
+        object.verify_id()?;
+        Ok(object)
+    }
+
+    /// Reads and verifies an object only if its current header has `expected_body_bytes`.
+    ///
+    /// This closes the gap between a caller's bounded header planning and the
+    /// worker's later allocation when a source repository changes concurrently.
+    pub(crate) fn read_verified_object_with_expected_body_bytes(
+        &self,
+        id: GitObjectId,
+        maximum_bytes: usize,
+        expected_body_bytes: u64,
+    ) -> Result<GitObject> {
+        let object = self.read_object_with_expected_body_bytes(
+            id,
+            maximum_bytes,
+            Some(expected_body_bytes),
+        )?;
         object.verify_id()?;
         Ok(object)
     }

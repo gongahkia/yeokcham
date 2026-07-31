@@ -33,7 +33,7 @@ Valid statuses are `Proposed`, `Accepted`, `Rejected`, `Deprecated`, and `Supers
 | [ADR-0025](0025-repository-format-compatibility.md) | Accepted | Version repository formats with required and optional flags |
 | [ADR-0026](0026-canonical-binary-serialization.md) | Accepted | Use fixed-width canonical binary serialization |
 | [ADR-0027](0027-local-repository-bootstrap.md) | Accepted | Store the V1 repository bootstrap as canonical binary |
-| [ADR-0028](0028-gitoxide-repository-adapter.md) | Accepted | Open Git repositories through a minimal gitoxide adapter |
+| [ADR-0028](0028-gitoxide-repository-adapter.md) | Superseded by ADR-0089 | Open Git repositories through a minimal gitoxide adapter |
 | [ADR-0029](0029-bounded-regular-ref-enumeration.md) | Accepted | Enumerate bounded regular Git refs by raw bytes |
 | [ADR-0030](0030-bounded-reachable-git-object-traversal.md) | Accepted | Traverse bounded reachable SHA-1 Git objects |
 | [ADR-0031](0031-bounded-git-object-body-reads.md) | Accepted | Read bounded Git object bodies before trust |
@@ -94,3 +94,4 @@ Valid statuses are `Proposed`, `Accepted`, `Rejected`, `Deprecated`, and `Supers
 | [ADR-0086](0086-current-sparse-path-prefetch-policy.md) | Accepted | Prefetch only current sparse paths within explicit byte budgets |
 | [ADR-0087](0087-verified-current-head-sparse-hydration.md) | Accepted | Verify and cache only current-HEAD sparse paths |
 | [ADR-0088](0088-explicit-daemon-current-sparse-prefetch.md) | Accepted | Run daemon sparse prefetch only from explicit local selections |
+| [ADR-0089](0089-bounded-parallel-git-object-reads.md) | Accepted | Read and verify bounded Git object batches in parallel |

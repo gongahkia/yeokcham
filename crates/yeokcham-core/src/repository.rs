@@ -5,6 +5,7 @@ use std::{
     io::{self, Read, Write},
     path::{Path, PathBuf},
     sync::Mutex,
+    thread,
     time::Duration,
 };
 
@@ -92,6 +93,9 @@ const INITIAL_IMPORT_MAXIMUM_CHUNKS: usize = 4_096;
 const INITIAL_IMPORT_SEGMENT_MAXIMUM_BYTES: u64 = 65 * 1024 * 1024;
 const INITIAL_IMPORT_TINY_AGGREGATION_MAXIMUM_BYTES: usize =
     INITIAL_IMPORT_TINY_BLOB_MAXIMUM_BYTES * INITIAL_IMPORT_TINY_BLOBS_PER_AGGREGATION;
+const INITIAL_IMPORT_MAXIMUM_OBJECT_READ_WORKERS: usize = 8;
+const INITIAL_IMPORT_MAXIMUM_PARALLEL_OBJECT_READ_BYTES: u64 = 64 * 1024 * 1024;
+const INITIAL_IMPORT_MINIMUM_PARALLEL_OBJECT_READ_BYTES: u64 = 2 * 1024 * 1024;
 const RESOLVER_CHUNK_CACHE_MAXIMUM_BYTES: usize = 32 * 1024 * 1024;
 const RESOLVER_CHUNK_CACHE_MAXIMUM_ENTRIES: usize = 1_024;
 const RESOLVER_OBJECT_CACHE_MAXIMUM_BYTES: usize = 32 * 1024 * 1024;
@@ -630,6 +634,7 @@ pub struct ChunkedBlobStorageLimits {
 pub struct GitImportLimits {
     maximum_objects: usize,
     maximum_object_bytes: usize,
+    object_read_workers: usize,
     tiny_blob_maximum_bytes: usize,
     tiny_blobs_per_aggregation: usize,
     chunked_blob_minimum_bytes: usize,
@@ -691,7 +696,8 @@ impl GitImportLimits {
                 PUBLISHED_REF_SNAPSHOT_MAX_BYTES,
                 PUBLISHED_REF_SNAPSHOT_MAX_REFERENCE_ENTRIES,
             )?,
-        )
+        )?
+        .with_object_read_workers(initial_import_object_read_workers())
     }
 
     /// Validates one caller-selected Git import policy.
@@ -750,6 +756,7 @@ impl GitImportLimits {
         Ok(Self {
             maximum_objects,
             maximum_object_bytes,
+            object_read_workers: 1,
             tiny_blob_maximum_bytes,
             tiny_blobs_per_aggregation,
             chunked_blob_minimum_bytes,
@@ -769,6 +776,11 @@ impl GitImportLimits {
     /// Returns the maximum decompressed body bytes accepted for one Git object.
     pub const fn maximum_object_bytes(self) -> usize {
         self.maximum_object_bytes
+    }
+
+    /// Returns the bounded count of source-object reads that may run together.
+    pub const fn object_read_workers(self) -> usize {
+        self.object_read_workers
     }
 
     /// Returns the largest blob body stored in a tiny aggregation.
@@ -803,7 +815,24 @@ impl GitImportLimits {
             self.blob_manifest_limits,
             self.metadata_object_manifest_limits,
             self.ref_snapshot_limits,
-        )
+        )?
+        .with_object_read_workers(self.object_read_workers)
+    }
+
+    /// Returns this policy with a bounded source-object verification width.
+    ///
+    /// Concurrent reads preserve source-object order during publication. They
+    /// retain at most 64 MiB of verified object bodies before storage work
+    /// resumes serially.
+    pub fn with_object_read_workers(mut self, workers: usize) -> Result<Self> {
+        if workers == 0 || workers > INITIAL_IMPORT_MAXIMUM_OBJECT_READ_WORKERS {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "Git import object-read worker count is invalid",
+            ));
+        }
+        self.object_read_workers = workers;
+        Ok(self)
     }
 
     /// Returns the deterministic CDC boundary selector.
@@ -2215,60 +2244,82 @@ impl LocalRepository {
         }
         let mut tiny_blobs = Vec::new();
         let mut report = GitImportReport::default();
-        for id in ids {
-            let object = source.read_verified_object(id, limits.maximum_object_bytes())?;
-            if let Some(existing) = self.find_published_git_object(
-                id,
-                limits.chunked_blob_storage_limits().maximum_segment_bytes(),
-                limits.chunked_blob_storage_limits().segment_read_limits(),
-                limits.blob_manifest_limits(),
-                limits.metadata_object_manifest_limits(),
+        for batch in git_object_read_batches(source, &ids, limits)? {
+            for object in read_verified_git_object_batch(
+                source,
+                &batch.objects,
+                limits.maximum_object_bytes(),
+                limits.object_read_workers(),
+                batch.bytes,
             )? {
-                if existing != object {
-                    return Err(Error::new(
-                        ErrorKind::Conflict,
-                        "published Git object conflicts with source bytes",
-                    ));
+                let id = object.id();
+                if let Some(existing) = self.find_published_git_object(
+                    id,
+                    limits.chunked_blob_storage_limits().maximum_segment_bytes(),
+                    limits.chunked_blob_storage_limits().segment_read_limits(),
+                    limits.blob_manifest_limits(),
+                    limits.metadata_object_manifest_limits(),
+                )? {
+                    if existing != object {
+                        return Err(Error::new(
+                            ErrorKind::Conflict,
+                            "published Git object conflicts with source bytes",
+                        ));
+                    }
+                    self.record_object_metadata(&object)?;
+                    continue;
                 }
                 self.record_object_metadata(&object)?;
-                continue;
-            }
-            self.record_object_metadata(&object)?;
-            match object.kind() {
-                GitObjectKind::Blob if object.data().len() <= limits.tiny_blob_maximum_bytes() => {
-                    tiny_blobs.push(object);
-                    report.tiny_blob_count =
-                        report.tiny_blob_count.checked_add(1).ok_or_else(|| {
-                            Error::new(ErrorKind::Unsupported, "Git import object count overflows")
-                        })?;
-                }
-                GitObjectKind::Blob
-                    if object.data().len() >= limits.chunked_blob_minimum_bytes() =>
-                {
-                    self.store_chunked_blob(
-                        ManifestId::generate(),
-                        &object,
-                        limits.chunker(),
-                        limits.chunked_blob_storage_limits(),
-                    )?;
-                    report.chunked_blob_count =
-                        report.chunked_blob_count.checked_add(1).ok_or_else(|| {
-                            Error::new(ErrorKind::Unsupported, "Git import object count overflows")
-                        })?;
-                }
-                GitObjectKind::Blob => {
-                    self.store_whole_blob(&object, limits)?;
-                    report.whole_blob_count =
-                        report.whole_blob_count.checked_add(1).ok_or_else(|| {
-                            Error::new(ErrorKind::Unsupported, "Git import object count overflows")
-                        })?;
-                }
-                GitObjectKind::Tree | GitObjectKind::Commit | GitObjectKind::Tag => {
-                    self.store_metadata_object(&object, limits)?;
-                    report.metadata_object_count =
-                        report.metadata_object_count.checked_add(1).ok_or_else(|| {
-                            Error::new(ErrorKind::Unsupported, "Git import object count overflows")
-                        })?;
+                match object.kind() {
+                    GitObjectKind::Blob
+                        if object.data().len() <= limits.tiny_blob_maximum_bytes() =>
+                    {
+                        tiny_blobs.push(object);
+                        report.tiny_blob_count =
+                            report.tiny_blob_count.checked_add(1).ok_or_else(|| {
+                                Error::new(
+                                    ErrorKind::Unsupported,
+                                    "Git import object count overflows",
+                                )
+                            })?;
+                    }
+                    GitObjectKind::Blob
+                        if object.data().len() >= limits.chunked_blob_minimum_bytes() =>
+                    {
+                        self.store_chunked_blob(
+                            ManifestId::generate(),
+                            &object,
+                            limits.chunker(),
+                            limits.chunked_blob_storage_limits(),
+                        )?;
+                        report.chunked_blob_count =
+                            report.chunked_blob_count.checked_add(1).ok_or_else(|| {
+                                Error::new(
+                                    ErrorKind::Unsupported,
+                                    "Git import object count overflows",
+                                )
+                            })?;
+                    }
+                    GitObjectKind::Blob => {
+                        self.store_whole_blob(&object, limits)?;
+                        report.whole_blob_count =
+                            report.whole_blob_count.checked_add(1).ok_or_else(|| {
+                                Error::new(
+                                    ErrorKind::Unsupported,
+                                    "Git import object count overflows",
+                                )
+                            })?;
+                    }
+                    GitObjectKind::Tree | GitObjectKind::Commit | GitObjectKind::Tag => {
+                        self.store_metadata_object(&object, limits)?;
+                        report.metadata_object_count =
+                            report.metadata_object_count.checked_add(1).ok_or_else(|| {
+                                Error::new(
+                                    ErrorKind::Unsupported,
+                                    "Git import object count overflows",
+                                )
+                            })?;
+                    }
                 }
             }
         }
@@ -4841,6 +4892,149 @@ impl LocalRepository {
         initialize_metadata_schema(&mut connection)?;
         Ok(connection)
     }
+}
+
+struct GitObjectReadBatch {
+    objects: Vec<GitObjectRead>,
+    bytes: u64,
+}
+
+#[derive(Clone, Copy)]
+struct GitObjectRead {
+    id: GitObjectId,
+    expected_body_bytes: Option<u64>,
+}
+
+fn initial_import_object_read_workers() -> usize {
+    thread::available_parallelism()
+        .map(|count| count.get())
+        .unwrap_or(1)
+        .min(INITIAL_IMPORT_MAXIMUM_OBJECT_READ_WORKERS)
+}
+
+fn git_object_read_batches(
+    source: &GitRepository,
+    ids: &[GitObjectId],
+    limits: GitImportLimits,
+) -> Result<Vec<GitObjectReadBatch>> {
+    if limits.object_read_workers() == 1 {
+        return Ok(ids
+            .iter()
+            .copied()
+            .map(|id| GitObjectReadBatch {
+                objects: vec![GitObjectRead {
+                    id,
+                    expected_body_bytes: None,
+                }],
+                bytes: 0,
+            })
+            .collect());
+    }
+
+    let maximum_object_bytes = u64::try_from(limits.maximum_object_bytes()).map_err(|_| {
+        Error::new(
+            ErrorKind::Unsupported,
+            "Git import object read limit exceeds this platform",
+        )
+    })?;
+    let mut batches = Vec::new();
+    let mut objects_in_batch = Vec::with_capacity(limits.object_read_workers());
+    let mut bytes_in_batch = 0_u64;
+    for id in ids.iter().copied() {
+        let object_bytes = source.object_body_bytes(id, limits.maximum_object_bytes())?;
+        if !objects_in_batch.is_empty()
+            && (objects_in_batch.len() == limits.object_read_workers()
+                || bytes_in_batch
+                    .checked_add(object_bytes)
+                    .is_none_or(|bytes| bytes > INITIAL_IMPORT_MAXIMUM_PARALLEL_OBJECT_READ_BYTES))
+        {
+            batches.push(GitObjectReadBatch {
+                objects: objects_in_batch,
+                bytes: bytes_in_batch,
+            });
+            objects_in_batch = Vec::with_capacity(limits.object_read_workers());
+            bytes_in_batch = 0;
+        }
+        if object_bytes > maximum_object_bytes {
+            return Err(Error::new(
+                ErrorKind::Unsupported,
+                "Git object exceeds the read limit",
+            ));
+        }
+        bytes_in_batch = bytes_in_batch.checked_add(object_bytes).ok_or_else(|| {
+            Error::new(
+                ErrorKind::Unsupported,
+                "Git import object-read batch exceeds the byte limit",
+            )
+        })?;
+        objects_in_batch.push(GitObjectRead {
+            id,
+            expected_body_bytes: Some(object_bytes),
+        });
+    }
+    if !objects_in_batch.is_empty() {
+        batches.push(GitObjectReadBatch {
+            objects: objects_in_batch,
+            bytes: bytes_in_batch,
+        });
+    }
+    Ok(batches)
+}
+
+fn read_verified_git_object_batch(
+    source: &GitRepository,
+    objects: &[GitObjectRead],
+    maximum_object_bytes: usize,
+    workers: usize,
+    batch_bytes: u64,
+) -> Result<Vec<GitObject>> {
+    if workers == 1
+        || objects.len() == 1
+        || batch_bytes < INITIAL_IMPORT_MINIMUM_PARALLEL_OBJECT_READ_BYTES
+    {
+        return objects
+            .iter()
+            .copied()
+            .map(|object| match object.expected_body_bytes {
+                Some(expected_body_bytes) => source.read_verified_object_with_expected_body_bytes(
+                    object.id,
+                    maximum_object_bytes,
+                    expected_body_bytes,
+                ),
+                None => source.read_verified_object(object.id, maximum_object_bytes),
+            })
+            .collect();
+    }
+    thread::scope(|scope| {
+        let handles = objects
+            .iter()
+            .copied()
+            .map(|object| {
+                let source = source.clone_for_thread();
+                scope.spawn(move || {
+                    let expected_body_bytes = object.expected_body_bytes.ok_or_else(|| {
+                        Error::new(
+                            ErrorKind::Internal,
+                            "parallel Git object read lacks a planned size",
+                        )
+                    })?;
+                    source.read_verified_object_with_expected_body_bytes(
+                        object.id,
+                        maximum_object_bytes,
+                        expected_body_bytes,
+                    )
+                })
+            })
+            .collect::<Vec<_>>();
+        let mut verified_objects = Vec::with_capacity(objects.len());
+        for handle in handles {
+            let object = handle
+                .join()
+                .map_err(|_| Error::new(ErrorKind::Internal, "Git object reader panicked"))??;
+            verified_objects.push(object);
+        }
+        Ok(verified_objects)
+    })
 }
 
 fn object_kind_code(kind: GitObjectKind) -> i64 {
@@ -8071,6 +8265,112 @@ mod tests {
             git_output_in(&source_path, &["rev-parse", "HEAD^{tree}"]),
             git_output_in(&exported_path, &["rev-parse", "HEAD^{tree}"])
         );
+    }
+
+    #[test]
+    fn parallel_object_reads_preserve_serial_import_output() {
+        let directory = TestDirectory::new();
+        let source_path = directory.path().join("source");
+        let serial_path = directory.path().join("serial");
+        let parallel_path = directory.path().join("parallel");
+        let serial_export_path = directory.path().join("serial.git");
+        let parallel_export_path = directory.path().join("parallel.git");
+        fs::create_dir(&source_path).expect("create source");
+        run_git_in(&source_path, &["init", "-b", "main"]);
+        run_git_in(&source_path, &["config", "user.name", "Yeokcham Test"]);
+        run_git_in(
+            &source_path,
+            &["config", "user.email", "yeokcham-test@example.invalid"],
+        );
+        for index in 0_u8..8 {
+            fs::write(
+                source_path.join(format!("object-{index}.bin")),
+                vec![index; 512 * 1024],
+            )
+            .expect("write source object");
+        }
+        run_git_in(&source_path, &["add", "."]);
+        run_git_in(&source_path, &["commit", "-m", "parallel fixture"]);
+        run_git_in(&source_path, &["gc", "--prune=now"]);
+
+        let source = GitRepository::open(&source_path).expect("open source");
+        let source_ids = source.reachable_object_ids().expect("source IDs");
+        let serial_limits = GitImportLimits::initial()
+            .expect("limits")
+            .with_object_read_workers(1)
+            .expect("serial workers");
+        let parallel_limits = serial_limits
+            .with_object_read_workers(4)
+            .expect("parallel workers");
+        let serial = LocalRepository::create(&serial_path).expect("create serial repository");
+        let parallel = LocalRepository::create(&parallel_path).expect("create parallel repository");
+        let serial_report = serial
+            .import_git_repository(&source, serial_limits)
+            .expect("serial import");
+        let parallel_report = parallel
+            .import_git_repository(&source, parallel_limits)
+            .expect("parallel import");
+
+        assert_eq!(parallel_report, serial_report);
+        serial
+            .verify(
+                serial_limits
+                    .verification_limits()
+                    .expect("serial verification limits"),
+            )
+            .expect("verify serial repository");
+        parallel
+            .verify(
+                parallel_limits
+                    .verification_limits()
+                    .expect("parallel verification limits"),
+            )
+            .expect("verify parallel repository");
+        serial
+            .export_loose_objects(
+                &serial_export_path,
+                serial_limits.export_limits().expect("serial export limits"),
+            )
+            .expect("export serial repository");
+        parallel
+            .export_loose_objects(
+                &parallel_export_path,
+                parallel_limits
+                    .export_limits()
+                    .expect("parallel export limits"),
+            )
+            .expect("export parallel repository");
+        git_fsck(&serial_export_path);
+        git_fsck(&parallel_export_path);
+        assert_eq!(
+            GitRepository::open(&serial_export_path)
+                .expect("open serial export")
+                .reachable_object_ids()
+                .expect("serial export IDs"),
+            source_ids
+        );
+        assert_eq!(
+            GitRepository::open(&parallel_export_path)
+                .expect("open parallel export")
+                .reachable_object_ids()
+                .expect("parallel export IDs"),
+            source_ids
+        );
+    }
+
+    #[test]
+    fn bounds_parallel_object_read_workers() {
+        let limits = GitImportLimits::initial().expect("limits");
+        assert!(
+            (1..=INITIAL_IMPORT_MAXIMUM_OBJECT_READ_WORKERS)
+                .contains(&limits.object_read_workers())
+        );
+        for workers in [0, INITIAL_IMPORT_MAXIMUM_OBJECT_READ_WORKERS + 1] {
+            let error = limits
+                .with_object_read_workers(workers)
+                .expect_err("invalid worker count");
+            assert_eq!(error.kind(), ErrorKind::InvalidInput);
+        }
     }
 
     #[test]

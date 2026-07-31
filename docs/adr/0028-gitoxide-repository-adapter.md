@@ -1,10 +1,10 @@
 # ADR-0028: Open Git repositories through a minimal gitoxide adapter
 
-- Status: Accepted
+- Status: Superseded by ADR-0089
 - Date: 2026-07-29
 - Deciders: Yeokcham maintainers
 - Supersedes: None
-- Superseded by: None
+- Superseded by: ADR-0089
 
 ## Context
 
