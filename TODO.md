@@ -300,8 +300,8 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 - [x] Add filesystem event monitoring.
 - [x] Add persistent file metadata cache.
 - [x] Add shared object cache.
-- [ ] Add cancellation and shutdown handling.
-- [ ] Default to per-user local-only access.
+- [x] Add cancellation and shutdown handling.
+- [x] Default to per-user local-only access.
 
 ### Performance
 

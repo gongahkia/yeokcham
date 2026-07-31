@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/yeokcham-cli", "crates/yeokcham-core"]
+members = ["crates/yeokcham-cli", "crates/yeokcham-core", "crates/yeokcham-daemon"]
 resolver = "3"
 
 [workspace.package]
