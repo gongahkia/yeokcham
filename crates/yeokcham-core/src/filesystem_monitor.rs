@@ -111,7 +111,7 @@ impl fmt::Debug for FilesystemChange {
 pub struct FilesystemMonitor {
     root: PathBuf,
     limits: FilesystemMonitorLimits,
-    snapshot: BTreeMap<PathBuf, EntryFingerprint>,
+    snapshot: BTreeMap<PathBuf, FileMetadata>,
 }
 
 impl FilesystemMonitor {
@@ -140,6 +140,17 @@ impl FilesystemMonitor {
     /// Returns the number of entries in the last complete snapshot.
     pub fn tracked_entry_count(&self) -> usize {
         self.snapshot.len()
+    }
+
+    /// Returns a sorted copy of the last complete metadata snapshot.
+    pub fn metadata_snapshot(&self) -> Vec<FileMetadataEntry> {
+        self.snapshot
+            .iter()
+            .map(|(path, metadata)| FileMetadataEntry {
+                path: path.clone(),
+                metadata: *metadata,
+            })
+            .collect()
     }
 
     /// Captures a complete new snapshot and returns sorted metadata changes.
@@ -186,23 +197,81 @@ impl fmt::Debug for FilesystemMonitor {
 }
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-enum EntryKind {
+/// The non-following filesystem entry type recorded in a metadata snapshot.
+pub enum FileMetadataKind {
+    /// A regular file.
     File,
+    /// A directory.
     Directory,
+    /// A symbolic link recorded without reading its target.
     Symlink,
 }
 
+/// Metadata recorded for one filesystem entry without reading its content.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-struct EntryFingerprint {
-    kind: EntryKind,
+pub struct FileMetadata {
+    kind: FileMetadataKind,
     length: u64,
     modified: SystemTime,
 }
 
-fn scan(
-    root: &Path,
-    limits: FilesystemMonitorLimits,
-) -> Result<BTreeMap<PathBuf, EntryFingerprint>> {
+impl FileMetadata {
+    pub(crate) const fn new(kind: FileMetadataKind, length: u64, modified: SystemTime) -> Self {
+        Self {
+            kind,
+            length,
+            modified,
+        }
+    }
+
+    /// Returns the filesystem entry type recorded without following links.
+    pub const fn kind(self) -> FileMetadataKind {
+        self.kind
+    }
+
+    /// Returns the metadata-reported entry length.
+    pub const fn length(self) -> u64 {
+        self.length
+    }
+
+    /// Returns the metadata-reported modification timestamp.
+    pub const fn modified(self) -> SystemTime {
+        self.modified
+    }
+}
+
+impl FileMetadataEntry {
+    pub(crate) fn new(path: PathBuf, metadata: FileMetadata) -> Self {
+        Self { path, metadata }
+    }
+}
+
+/// One metadata-only relative entry from a complete monitor snapshot.
+#[derive(Clone, Eq, Ord, PartialEq, PartialOrd)]
+pub struct FileMetadataEntry {
+    path: PathBuf,
+    metadata: FileMetadata,
+}
+
+impl FileMetadataEntry {
+    /// Returns the relative entry path below the monitored root.
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    /// Returns the captured entry metadata.
+    pub const fn metadata(&self) -> FileMetadata {
+        self.metadata
+    }
+}
+
+impl fmt::Debug for FileMetadataEntry {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("FileMetadataEntry(<redacted>)")
+    }
+}
+
+fn scan(root: &Path, limits: FilesystemMonitorLimits) -> Result<BTreeMap<PathBuf, FileMetadata>> {
     let mut pending = VecDeque::from([(root.to_path_buf(), PathBuf::new(), 0_usize)]);
     let mut directories = 0_usize;
     let mut entries = BTreeMap::new();
@@ -248,7 +317,7 @@ fn scan(
             if entries
                 .insert(
                     entry_relative.clone(),
-                    EntryFingerprint {
+                    FileMetadata {
                         kind,
                         length: metadata.len(),
                         modified,
@@ -261,7 +330,7 @@ fn scan(
                     "filesystem monitor produced duplicate paths",
                 ));
             }
-            if kind == EntryKind::Directory && depth < limits.maximum_depth {
+            if kind == FileMetadataKind::Directory && depth < limits.maximum_depth {
                 pending.push_back((path, entry_relative, depth + 1));
             }
         }
@@ -320,13 +389,13 @@ fn sorted_entries(directory: &Path, maximum_entries: usize) -> Result<Vec<PathBu
     Ok(entries)
 }
 
-fn entry_kind(metadata: &fs::Metadata) -> Result<EntryKind> {
+fn entry_kind(metadata: &fs::Metadata) -> Result<FileMetadataKind> {
     if metadata.file_type().is_symlink() {
-        Ok(EntryKind::Symlink)
+        Ok(FileMetadataKind::Symlink)
     } else if metadata.is_file() {
-        Ok(EntryKind::File)
+        Ok(FileMetadataKind::File)
     } else if metadata.is_dir() {
-        Ok(EntryKind::Directory)
+        Ok(FileMetadataKind::Directory)
     } else {
         Err(Error::new(
             ErrorKind::Unsupported,

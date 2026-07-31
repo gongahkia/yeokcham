@@ -298,7 +298,7 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 - [x] Define daemon protocol.
 - [x] Add repository discovery.
 - [x] Add filesystem event monitoring.
-- [ ] Add persistent file metadata cache.
+- [x] Add persistent file metadata cache.
 - [ ] Add shared object cache.
 - [ ] Add cancellation and shutdown handling.
 - [ ] Default to per-user local-only access.
