@@ -91,3 +91,4 @@ Valid statuses are `Proposed`, `Accepted`, `Rejected`, `Deprecated`, and `Supers
 | [ADR-0083](0083-atomic-private-file-metadata-cache.md) | Accepted | Persist disposable file metadata through an atomic private cache |
 | [ADR-0084](0084-verified-shared-object-cache.md) | Accepted | Share only verified Git objects through a bounded process cache |
 | [ADR-0085](0085-private-unix-daemon-lifecycle.md) | Accepted | Serve the daemon only through a private Unix socket |
+| [ADR-0086](0086-current-sparse-path-prefetch-policy.md) | Accepted | Prefetch only current sparse paths within explicit byte budgets |

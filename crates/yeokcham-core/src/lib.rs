@@ -44,6 +44,7 @@ mod segment_index;
 mod segment_reader;
 mod segment_writer;
 mod shared_object_cache;
+mod sparse_prefetch;
 mod telemetry;
 mod tiny_blob_aggregation;
 mod tiny_blob_group_manifest;
@@ -138,6 +139,10 @@ pub use segment_writer::{
     SealedSegment, SegmentRecord, SegmentRecordKind, SegmentWriteLimits, SegmentWriter,
 };
 pub use shared_object_cache::SharedObjectCache;
+pub use sparse_prefetch::{
+    DEFAULT_SPARSE_PREFETCH_PROCESS_BYTES, DEFAULT_SPARSE_PREFETCH_REPOSITORY_BYTES,
+    SparsePrefetchPolicy, SparsePrefetchSelection,
+};
 pub use telemetry::{Redacted, redact};
 pub use tiny_blob_aggregation::{
     MAX_TINY_BLOB_AGGREGATION_ENTRIES, TinyBlobAggregation, TinyBlobEntry,
