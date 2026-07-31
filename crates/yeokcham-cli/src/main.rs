@@ -141,6 +141,7 @@ enum Command {
     GithubFetch {
         repository: PathBuf,
         transport: GithubTransport,
+        show_refs: bool,
     },
     DriveAuth {
         client_id: String,
@@ -258,7 +259,8 @@ fn main() -> ExitCode {
         Command::GithubFetch {
             repository,
             transport,
-        } => github_fetch(repository, transport),
+            show_refs,
+        } => github_fetch(repository, transport, show_refs),
         Command::DriveAuth {
             client_id,
             redirect_port,
@@ -513,8 +515,14 @@ fn parse_github(arguments: &[OsString]) -> Result<Command> {
         let repository = PathBuf::from(&arguments[2]);
         let mut transport = GithubTransport::Https;
         let mut transport_seen = false;
+        let mut show_refs = false;
         let mut index = 3;
         while index < arguments.len() {
+            if arguments[index].as_os_str() == OsStr::new("--show-refs") && !show_refs {
+                show_refs = true;
+                index += 1;
+                continue;
+            }
             if arguments[index].as_os_str() != OsStr::new("--transport") || transport_seen {
                 return Err(usage_error());
             }
@@ -528,6 +536,7 @@ fn parse_github(arguments: &[OsString]) -> Result<Command> {
         return Ok(Command::GithubFetch {
             repository,
             transport,
+            show_refs,
         });
     }
     if arguments.len() < 9 || arguments[1].as_os_str() != OsStr::new("configure") {
@@ -1025,7 +1034,7 @@ fn github_publish_pull_request_branch(
     )
 }
 
-fn github_fetch(repository: PathBuf, transport: GithubTransport) -> Result<()> {
+fn github_fetch(repository: PathBuf, transport: GithubTransport, show_refs: bool) -> Result<()> {
     let limits = GitImportLimits::initial()?;
     let repository = LocalRepository::open(repository)?;
     let configuration = repository
@@ -1077,6 +1086,18 @@ fn github_fetch(repository: PathBuf, transport: GithubTransport) -> Result<()> {
         local_only_count,
         divergent_count,
     );
+    if show_refs {
+        for reference in &references {
+            println!(
+                "github_fetch_reference local={} remote={} local_object={} remote_object={} state={}",
+                github_reference_text(&reference.local)?,
+                github_reference_text(&reference.remote)?,
+                github_optional_object_id(reference.local_object_id),
+                github_optional_object_id(reference.remote_object_id),
+                github_ingestion_state(reference),
+            );
+        }
+    }
     Ok(())
 }
 
@@ -1085,6 +1106,20 @@ struct GithubIngestionReference {
     remote: yeokcham_core::RefName,
     local_object_id: Option<GitObjectId>,
     remote_object_id: Option<GitObjectId>,
+}
+
+fn github_optional_object_id(object_id: Option<GitObjectId>) -> String {
+    object_id.map_or_else(|| "none".to_owned(), |object_id| object_id.to_string())
+}
+
+fn github_ingestion_state(reference: &GithubIngestionReference) -> &'static str {
+    match (reference.local_object_id, reference.remote_object_id) {
+        (Some(local), Some(remote)) if local == remote => "in-sync",
+        (Some(_), Some(_)) => "divergent",
+        (None, Some(_)) => "remote-only",
+        (Some(_), None) => "local-only",
+        (None, None) => "absent",
+    }
 }
 
 fn selected_github_ingestion_references(
@@ -1631,6 +1666,12 @@ fn selected_github_publication_references(
             })
         })
         .collect::<Result<Vec<_>>>()?;
+    if references.len() > MAXIMUM_GITHUB_REMOTE_REFS {
+        return Err(Error::new(
+            ErrorKind::Unsupported,
+            "GitHub publication has too many selected refs",
+        ));
+    }
     if references.is_empty() {
         return Err(Error::new(
             ErrorKind::NotFound,
@@ -2739,7 +2780,7 @@ fn usage_error() -> Error {
 
 fn print_usage() {
     println!(
-        "usage:\n  yeokcham init --from-git <source-git-repo> <yeokcham-repo> [--chunked-blob-minimum <bytes>]\n  yeokcham sync --from-git <source-git-repo> <yeokcham-repo> --device <device-id>\n  yeokcham verify <yeokcham-repo>\n  yeokcham export-git <yeokcham-repo> <destination-git-repo>\n  yeokcham inspect object <yeokcham-repo> <git-object-id>\n  yeokcham inspect storage <yeokcham-repo>\n  yeokcham inspect refs <yeokcham-repo>\n  yeokcham cache inspect|verify|clear <yeokcham-repo>\n  yeokcham cache trim --max-bytes <bytes> <yeokcham-repo>\n  yeokcham github configure <yeokcham-repo> --repository <owner/repository> --direction <publish-only|pull-only|bidirectional-fast-forward|manual> [--force-update <reject|require-exact-checkpoint>] --publish <heads|tags|refs/heads/*|refs/tags/*> [--publish ...]\n  yeokcham github inspect <yeokcham-repo>\n  yeokcham github plan [--show-objects] <yeokcham-repo>\n  yeokcham github publish <yeokcham-repo> --apply [--transport <https|ssh>]\n  yeokcham github publish-pr <yeokcham-repo> --source <refs/heads/branch> --branch <remote-branch> --apply [--transport <https|ssh>]\n  yeokcham key create-export --passphrase-stdin <yeokcham-repo> <recovery-key-export>\n  yeokcham drive auth --client-id <google-desktop-client-id> [--redirect-port <port>]\n  yeokcham drive init --client-id <google-desktop-client-id>\n  yeokcham drive backup|push --client-id <google-desktop-client-id> --folder-id <drive-folder-id> --key-export <recovery-key-export> --passphrase-stdin <yeokcham-repo>\n  yeokcham drive restore|clone --client-id <google-desktop-client-id> --folder-id <drive-folder-id> --key-export <recovery-key-export> --passphrase-stdin <destination>\n  yeokcham drive verify --client-id <google-desktop-client-id> --folder-id <drive-folder-id> --key-export <recovery-key-export> --passphrase-stdin\n  yeokcham drive journal inspect --client-id <google-desktop-client-id> --folder-id <drive-folder-id> --key-export <recovery-key-export> --root-key <root-ed25519-public-key-hex> --passphrase-stdin <yeokcham-repo>"
+        "usage:\n  yeokcham init --from-git <source-git-repo> <yeokcham-repo> [--chunked-blob-minimum <bytes>]\n  yeokcham sync --from-git <source-git-repo> <yeokcham-repo> --device <device-id>\n  yeokcham verify <yeokcham-repo>\n  yeokcham export-git <yeokcham-repo> <destination-git-repo>\n  yeokcham inspect object <yeokcham-repo> <git-object-id>\n  yeokcham inspect storage <yeokcham-repo>\n  yeokcham inspect refs <yeokcham-repo>\n  yeokcham cache inspect|verify|clear <yeokcham-repo>\n  yeokcham cache trim --max-bytes <bytes> <yeokcham-repo>\n  yeokcham github configure <yeokcham-repo> --repository <owner/repository> --direction <publish-only|pull-only|bidirectional-fast-forward|manual> [--force-update <reject|require-exact-checkpoint>] --publish <heads|tags|refs/heads/*|refs/tags/*> [--publish ...]\n  yeokcham github inspect <yeokcham-repo>\n  yeokcham github plan [--show-objects] <yeokcham-repo>\n  yeokcham github publish <yeokcham-repo> --apply [--transport <https|ssh>]\n  yeokcham github publish-pr <yeokcham-repo> --source <refs/heads/branch> --branch <remote-branch> --apply [--transport <https|ssh>]\n  yeokcham github fetch <yeokcham-repo> [--show-refs] [--transport <https|ssh>]\n  yeokcham key create-export --passphrase-stdin <yeokcham-repo> <recovery-key-export>\n  yeokcham drive auth --client-id <google-desktop-client-id> [--redirect-port <port>]\n  yeokcham drive init --client-id <google-desktop-client-id>\n  yeokcham drive backup|push --client-id <google-desktop-client-id> --folder-id <drive-folder-id> --key-export <recovery-key-export> --passphrase-stdin <yeokcham-repo>\n  yeokcham drive restore|clone --client-id <google-desktop-client-id> --folder-id <drive-folder-id> --key-export <recovery-key-export> --passphrase-stdin <destination>\n  yeokcham drive verify --client-id <google-desktop-client-id> --folder-id <drive-folder-id> --key-export <recovery-key-export> --passphrase-stdin\n  yeokcham drive journal inspect --client-id <google-desktop-client-id> --folder-id <drive-folder-id> --key-export <recovery-key-export> --root-key <root-ed25519-public-key-hex> --passphrase-stdin <yeokcham-repo>"
     );
 }
 
@@ -3242,9 +3283,16 @@ mod tests {
                 && remote.as_bytes() == b"refs/heads/review/change"
         ));
         let fetch = parse_command(
-            ["github", "fetch", "repository", "--transport", "ssh"]
-                .map(OsString::from)
-                .to_vec(),
+            [
+                "github",
+                "fetch",
+                "repository",
+                "--show-refs",
+                "--transport",
+                "ssh",
+            ]
+            .map(OsString::from)
+            .to_vec(),
         )
         .expect("GitHub fetch");
         assert!(matches!(
@@ -3252,6 +3300,7 @@ mod tests {
             Command::GithubFetch {
                 repository,
                 transport: GithubTransport::Ssh,
+                show_refs: true,
             } if repository == PathBuf::from("repository")
         ));
         let error = match parse_command(

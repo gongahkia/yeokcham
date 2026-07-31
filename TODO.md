@@ -277,12 +277,12 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 
 ### Ingestion
 
-- [ ] Fetch GitHub refs.
-- [ ] Detect remote-only commits.
-- [ ] Import remote objects.
-- [ ] Detect divergence.
+- [x] Fetch GitHub refs.
+- [x] Detect remote-only commits.
+- [x] Import remote objects.
+- [x] Detect divergence.
 - [ ] Require explicit conflict resolution.
-- [ ] Avoid silent force updates.
+- [x] Avoid silent force updates.
 
 ### Exit criteria
 

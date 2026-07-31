@@ -150,6 +150,8 @@ An access token is renewed only by posting the stored refresh token and client I
 
 GitHub publication uses no Yeokcham credential API. `github publish --apply --transport https` delegates authentication to the operator's standard preconfigured Git credential helper; `--transport ssh` delegates to the standard SSH agent. The command never persists, prints, or traces a GitHub token. It removes inherited Git configuration, askpass, and SSH-command override variables, leaves default Git configuration and `SSH_AUTH_SOCK` available, and disables terminal prompting. A helper or agent must therefore already be configured. The canonical `mirrors/github.ykgm` record contains only selected-ref policy, target metadata, and checkpoints; it is checksummed, repository-ID-bound, bounded, atomically replaced, and included only through encrypted recovery snapshots. Local filesystem access exposes that configuration metadata. Configuration and inspection output omit target and ref names by default.
 
+`github fetch` uses the same credential boundary. It lists and fetches only bounded selected standard refs into a temporary bare Git repository, verifies fetched IDs against the preflight remote listing, imports verified immutable objects, and removes that repository. It does not print ref metadata without `--show-refs`, mutate canonical Git refs, or silently choose a divergence. The temporary bare repository contains ordinary Git objects while it exists and is not canonical or recoverable data; an interrupted process can leave it under the operating system temporary directory for operator cleanup.
+
 ## 8. Input validation
 
 Treat all external bytes as hostile.
