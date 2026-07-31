@@ -14,7 +14,6 @@ type evidence_link = {
 
 type release
 type binding
-
 type attestation
 
 module type Signer = sig
@@ -131,7 +130,9 @@ val attestation_algorithm : attestation -> string
 val attestation_signature : attestation -> string
 val attestation_signed_at : attestation -> int64
 val attestation_payload : attestation -> (Paengi_encoding.t, error) result
-val decode_attestation_payload : Paengi_encoding.t -> (attestation, error) result
+
+val decode_attestation_payload :
+  Paengi_encoding.t -> (attestation, error) result
 
 val store_attestation :
   Paengi_store.repository ->
@@ -151,6 +152,14 @@ module Parent_resolver : sig
 
   val contains :
     t ->
+    base:Paengi_id.Release_id.t ->
+    required:Paengi_id.Release_id.t ->
+    (bool, string) result
+end
+
+module Requires_release : sig
+  val satisfied :
+    Parent_resolver.t ->
     base:Paengi_id.Release_id.t ->
     required:Paengi_id.Release_id.t ->
     (bool, string) result

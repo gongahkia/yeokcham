@@ -40,7 +40,7 @@ type binding = {
 }
 
 type attestation = {
-  release : Id.Release_id.t;
+  attested_release : Id.Release_id.t;
   signer_identity : string;
   algorithm : string;
   signature : string;
@@ -691,7 +691,7 @@ let load_release store object_id =
 
 let binding_domain = "paengi:release-binding:v1\000"
 
-let binding_body binding =
+let binding_body (binding : binding) =
   let release = raw_id "release ID" Id.Release_id.to_bytes binding.release in
   match release with
   | Error error -> Error error
@@ -705,7 +705,7 @@ let binding_body binding =
 
 let binding_checksum body = hash binding_domain (Encoding.encode body)
 
-let encode_binding binding =
+let encode_binding (binding : binding) =
   let release =
     raw_id "release ID" Id.Release_id.to_bytes binding.release |> Result.get_ok
   in
@@ -746,8 +746,8 @@ let decode_binding input =
           else Ok binding
   | _ -> assert false
 
-let binding_release binding = binding.release
-let binding_object binding = binding.object_id
+let binding_release (binding : binding) = binding.release
+let binding_object (binding : binding) = binding.object_id
 let make_binding ~release ~object_id = { release; object_id }
 let binding_components release = [ "releases"; Id.Release_id.to_hex release ]
 
@@ -760,18 +760,28 @@ let validate_attestation_fields ~signer_identity ~algorithm ~signature =
     Error (Invalid_attestation "signature is empty")
   else Ok ()
 
-let create_attestation ~release ~signer_identity ~algorithm ~signature ~signed_at =
-  let* () = validate_attestation_fields ~signer_identity ~algorithm ~signature in
+let create_attestation ~release ~signer_identity ~algorithm ~signature
+    ~signed_at =
+  let* () =
+    validate_attestation_fields ~signer_identity ~algorithm ~signature
+  in
   let* _ = raw_id "attested release ID" Id.Release_id.to_bytes release in
   let* _ = text signer_identity in
   let* _ = text algorithm in
-  Ok { release; signer_identity; algorithm; signature; signed_at }
+  Ok
+    {
+      attested_release = release;
+      signer_identity;
+      algorithm;
+      signature;
+      signed_at;
+    }
 
-let attest ~signer:(module Signer) ~release ~signed_at =
+let attest ~signer:(module Signer : Signer) ~release ~signed_at =
   create_attestation ~release ~signer_identity:Signer.signer_identity
     ~algorithm:Signer.algorithm ~signature:(Signer.sign release) ~signed_at
 
-let attestation_release attestation = attestation.release
+let attestation_release attestation = attestation.attested_release
 let attestation_signer_identity attestation = attestation.signer_identity
 let attestation_algorithm attestation = attestation.algorithm
 let attestation_signature attestation = attestation.signature
@@ -783,7 +793,8 @@ let attestation_payload attestation =
       ~algorithm:attestation.algorithm ~signature:attestation.signature
   in
   let* release =
-    raw_id "attested release ID" Id.Release_id.to_bytes attestation.release
+    raw_id "attested release ID" Id.Release_id.to_bytes
+      attestation.attested_release
   in
   let* signer_identity = text attestation.signer_identity in
   let* algorithm = text attestation.algorithm in
@@ -810,9 +821,7 @@ let decode_attestation_payload value =
         let* signer_identity =
           text_field "release attestation signer identity" signer_identity
         in
-        let* algorithm =
-          text_field "release attestation algorithm" algorithm
-        in
+        let* algorithm = text_field "release attestation algorithm" algorithm in
         let* signature = bytes "release attestation signature" signature in
         let* signed_at = integer "release attestation timestamp" signed_at in
         let* attestation =
@@ -831,7 +840,8 @@ let store_attestation store attestation =
 
 let load_attestation store object_id =
   let* envelope =
-    Store.get store object_id |> Result.map_error (fun error -> Store_error error)
+    Store.get store object_id
+    |> Result.map_error (fun error -> Store_error error)
   in
   if Envelope.object_type envelope <> Envelope.Release_attestation then
     Error
@@ -875,6 +885,10 @@ module Parent_resolver = struct
         search parents
     in
     visit [] base
+end
+
+module Requires_release = struct
+  let satisfied = Parent_resolver.contains
 end
 
 let read_binding store release =
@@ -1113,12 +1127,11 @@ module Durable = struct
            | Unexpected_object_type _ | Invalid_identity_length _
            | Invalid_release _ | Logical_identity_mismatch
            | Invalid_binding_checksum | Invalid_attestation _
-           | Binding_release_mismatch
-           | Conflicting_release_id_reuse _ | Workspace_error _
-           | Validation_error _ | Snapshot_error _ | Workspace_attempt_missing _
-           | Unresolved_conflicts _ | Required_validation_failed _
-           | Release_reproduction_mismatch | Parent_error _
-           | Injected_interruption _ ->
+           | Binding_release_mismatch | Conflicting_release_id_reuse _
+           | Workspace_error _ | Validation_error _ | Snapshot_error _
+           | Workspace_attempt_missing _ | Unresolved_conflicts _
+           | Required_validation_failed _ | Release_reproduction_mismatch
+           | Parent_error _ | Injected_interruption _ ->
                Error error)
 
   let run_commands ?runner ~store ~snapshot ~commands ~observed_at () =

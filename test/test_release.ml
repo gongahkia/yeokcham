@@ -489,6 +489,77 @@ let wrong_type_evidence_link_rejects () =
       | Error _ -> ()
       | Ok _ -> Alcotest.fail "wrong-type evidence link verified")
 
+let missing_and_cross_context_links_reject () =
+  with_root (fun root ->
+      let fixture = fixture root in
+      fake_result :=
+        { !fake_result with Validation.runner_status = Validation.Passed };
+      let valid =
+        Release.Durable.create
+          ~runner:(module Fake_runner)
+          ~store:fixture.store ~workspace:fixture.workspace ~parents:[]
+          ~commands:[ command () ]
+          ~message:(Some "valid links") ~observed_at:6L ~created_at:6L ()
+        |> require_ok Release.error_to_string
+      in
+      let evidence = List.hd (Release.release_evidence valid) in
+      let forge ~workspace ~evidence_object ~message =
+        Release.create_release ~parents:[] ~workspace
+          ~workspace_revision:(Release.release_workspace_revision valid)
+          ~workspace_revision_object:
+            (Release.release_workspace_revision_object valid)
+          ~attempt:(Release.release_attempt valid)
+          ~base:(Release.release_base valid)
+          ~capsules:(Release.release_capsules valid)
+          ~resolutions:(Release.release_resolutions valid)
+          ~final_snapshot:(Release.release_final_snapshot valid)
+          ~evidence:
+            [
+              {
+                Release.evidence_id = evidence.Release.evidence_id;
+                evidence_object_id = evidence_object;
+              };
+            ]
+          ~message:(Some message) ~created_at:7L
+        |> require_ok Release.error_to_string
+      in
+      let publish release =
+        let object_id =
+          Release.store_release fixture.store release
+          |> require_ok Release.error_to_string
+        in
+        Store.Ref_file.compare_and_swap fixture.store
+          ~components:(Release.binding_components (Release.release_id release))
+          ~expected:None
+          ~replacement:
+            (Release.make_binding
+               ~release:(Release.release_id release)
+               ~object_id
+            |> Release.encode_binding)
+        |> require_ok Store.error_to_string
+      in
+      let missing =
+        forge ~workspace:fixture.workspace ~evidence_object:(stored_id 250)
+          ~message:"missing evidence object"
+      in
+      publish missing;
+      (match
+         Release.Durable.verify fixture.store (Release.release_id missing)
+       with
+      | Error _ -> ()
+      | Ok _ -> Alcotest.fail "missing evidence link verified");
+      let cross_context =
+        forge ~workspace:(workspace_id 251)
+          ~evidence_object:evidence.Release.evidence_object_id
+          ~message:"cross-context workspace link"
+      in
+      publish cross_context;
+      match
+        Release.Durable.verify fixture.store (Release.release_id cross_context)
+      with
+      | Error _ -> ()
+      | Ok _ -> Alcotest.fail "cross-context workspace link verified")
+
 let parent_resolver_closure_and_cycles () =
   let a = release_id 60 in
   let b = release_id 61 in
@@ -499,12 +570,17 @@ let parent_resolver_closure_and_cycles () =
     else Ok []
   in
   Alcotest.(check bool)
-    "verified ancestry contains ancestor" true
-    (Release.Parent_resolver.contains resolver ~base:a ~required:c
+    "exact declared base satisfies requirement" true
+    (Release.Requires_release.satisfied resolver ~base:a ~required:a
     |> require_ok Fun.id);
   Alcotest.(check bool)
-    "snapshot-unrelated release absent" false
-    (Release.Parent_resolver.contains resolver ~base:a ~required:(release_id 63)
+    "verified ancestry contains ancestor" true
+    (Release.Requires_release.satisfied resolver ~base:a ~required:c
+    |> require_ok Fun.id);
+  Alcotest.(check bool)
+    "snapshot-equality cannot satisfy absent release" false
+    (Release.Requires_release.satisfied resolver ~base:a
+       ~required:(release_id 63)
     |> require_ok Fun.id);
   let cycle id = if Id.Release_id.equal id a then Ok [ b ] else Ok [ a ] in
   match Release.Parent_resolver.verify_acyclic cycle a with
@@ -531,6 +607,8 @@ let () =
                 unresolved_conflicts_reject;
               Alcotest.test_case "wrong-type evidence link rejects" `Quick
                 wrong_type_evidence_link_rejects;
+              Alcotest.test_case "missing and cross-context links reject" `Quick
+                missing_and_cross_context_links_reject;
               Alcotest.test_case "parent resolver closure and cycle seam" `Quick
                 parent_resolver_closure_and_cycles;
             ] );

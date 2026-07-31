@@ -34,6 +34,10 @@ All persistent identities must have:
 
 `stored_object_id` is a format-specific storage identity, not a semantic snapshot, checkpoint, capsule, revision, release, or conflict identity. ADR-020 defines its Envelope-1 preimage and path layout.
 
+`release_attestation` has no logical ID in v1: its immutable physical
+`stored_object_id` identifies the complete statement and remains distinct from
+the `release_id` it names.
+
 ## 2. Canonical content model
 
 ### Encoding profile
@@ -565,8 +569,9 @@ Materialisation:
 The first Milestone 5 slice resolves an in-memory selected-revision set before
 any workspace object or ref exists. A selection contains one revision for each
 capsule. `Requires_capsule` must be selected; when it names a revision, that
-exact revision must be selected. `Requires_release` is dependency-unsatisfied
-until releases exist. `Conflicts_with_capsule` rejects a selection containing
+exact revision must be selected. `Requires_release` is satisfied only when its
+requirement is the declared base release itself or appears in that base
+release's verified transitive parent closure. `Conflicts_with_capsule` rejects a selection containing
 both capsules. `Ordered_after` adds a precedence edge only when its referenced
 capsule is selected. An explicit order is a complete sequence containing every
 selected revision exactly once; adjacent entries add precedence edges. The
@@ -583,11 +588,12 @@ visibility point and carries logical/physical workspace and revision links,
 optional latest attempt, checksum, and CAS generation.
 
 `Workspace_revision_v1` records only `base_snapshot`, not a declared base
-release. Therefore it cannot prove `Requires_release` from release ancestry:
-snapshot equality is insufficient and must not be used as a substitute. The
-current durable resolver returns `Required_release_unavailable` pending an
-additive v2 schema with a typed base-release link; ADR-027 records the required
-compatibility and migration design.
+release. Therefore it cannot call the pure `Requires_release.satisfied`
+ancestry predicate for durable selection: snapshot equality is insufficient and
+must not be used as a substitute. The current durable resolver returns
+`Required_release_unavailable` pending an additive v2 schema with a typed
+base-release link; ADR-027 records the required compatibility and migration
+design.
 
 ### Composition invariant
 
@@ -671,6 +677,22 @@ Release verification loads all links, replays the immutable workspace attempt,
 checks exact capsule/resolution agreement and final state, checks all evidence
 targets the final snapshot, and traverses ordered parent links through immutable
 bindings with cycle detection.
+
+```ocaml
+type release_attestation = {
+  release : release_id;
+  signer_identity : string;
+  algorithm : string;
+  signature : bytes;
+  signed_at : timestamp;
+}
+```
+
+`Release_attestation_v1` is Envelope type 22. It is a separate immutable object
+with only its `stored_object_id` as identity. V1 accepts a signing interface and
+a deterministic test signer whose algorithm identifier explicitly says it is
+not cryptographic; no authenticity, key management, or production signing
+format is claimed.
 
 ## 12. Validation evidence
 

@@ -20,7 +20,8 @@ Human-curated **change capsules** representing logical work such as a feature, b
 
 ### Release history
 
-Immutable, signed, reproducible snapshots assembled from approved change capsules.
+Immutable, reproducible snapshots assembled from approved change capsules, with
+separate optional attestations.
 
 ## Primary experience
 
@@ -44,11 +45,17 @@ The supported compiler is OCaml 5.5.0. The exact constraint is recorded in `dune
 
 ## Status
 
-Milestone 5 is complete. It has persistent immutable workspace selection, deterministic
+Milestone 6 is complete. It has bounded direct-argv validation against exact
+immutable snapshots; immutable evidence; create-only, reproducible releases;
+and test-only separate attestations. `Requires_release` has a pure exact
+ancestry predicate but remains unavailable to durable `Workspace_revision_v1`:
+ADR-026 stores no declared base release, so ADR-027 requires an additive v2
+schema rather than inferring ancestry from snapshot equality. Production signing
+is deferred; the included deterministic test signer is not cryptographic.
+Milestone 5 has persistent immutable workspace selection, deterministic
 composition attempts, persistent conflicts, explicit skip-operation resolutions,
 and guarded workspace materialisation. Workspace revisions/current refs and
 attempts survive reopen; unresolved application remains explicitly partial.
-Release dependencies remain deliberately unsupported until Milestone 6.
 Milestone 4 has durable capsules: immutable Capsule and complete revision
 objects, CAS-protected current refs, exact replay validation, pinned scratch
 boundaries, and split/combine replay checks. Milestone 3 has retained-ID scratch

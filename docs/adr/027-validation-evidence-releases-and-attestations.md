@@ -150,11 +150,14 @@ revisions, retained v1 readers/goldens, and order/application policy that uses
 the verified ancestry resolver. The smallest safe design is an additive v2
 whose `base` is `Snapshot_id * Release_link option`, leaving v1 unsupported.
 Milestone 6 therefore keeps ADR-026's structured `Required_release_unavailable`
-error and records this blocker rather than changing its schema.
+error and records this blocker rather than changing its schema. The pure
+`Requires_release.satisfied` seam implements exactly the stated base-or-parent
+closure rule for callers that already possess a typed base Release ID; v1
+workspace selection cannot provide that input.
 
 ### Attestations
 
-Add Envelope-1 object type `Release_attestation` v1:
+Add Envelope-1 object type `Release_attestation` (type code 22) v1:
 
 ```text
 release-attestation-v1 = [

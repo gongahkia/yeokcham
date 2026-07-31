@@ -6,7 +6,7 @@ Robustness tasks operate only on Paengi's pure functions and generated local fix
 ## Active vertical slice
 
 - Milestone: 6 — releases and validation.
-- Task: deterministic immutable-snapshot validation; immutable release evidence, creation, lookup, verification, and inspection; separated attestations; closeout.
+- Task: complete — deterministic immutable-snapshot validation; immutable release evidence, creation, lookup, verification, and inspection; separated attestations; closeout before Milestone 7.
 - Modules/files: add `paengi_validation` and `paengi_release`; narrow `validation`/`release` CLI; ADR-027 fixtures and restart/state-machine tests.
 - Types: canonical validation command, immutable validation evidence, logical release, release binding, parent resolver, and release attestation; all logical IDs remain distinct from `Stored_object_id`.
 - Formats: additive Validation_evidence, Release, Release_attestation v1 objects plus create-only `refs/releases/<release-id>`; ADR-020 through ADR-026 remain unchanged.
@@ -293,14 +293,17 @@ Robustness tasks operate only on Paengi's pure functions and generated local fix
 - [x] Record immutable validation evidence links.
 - [x] Create immutable logical Release IDs and create-only bindings.
 - [x] Verify release reproduction after reopen.
-- [ ] Add optional signing abstraction.
+- [x] Add optional signing abstraction (separate attestation interface and explicitly non-cryptographic deterministic test signer; production signing deferred).
 - [x] Add release creation, inspection, verification, and deterministic listing.
+- [x] Define exact-only `Requires_release` ancestry predicate; durable integration is blocked by ADR-026's missing typed base-release field (ADR-027 documents v2 migration).
 
 ### Exit criteria
 
 - [x] Release final snapshot is reproducible.
 - [x] Validation evidence is bound to snapshot.
 - [x] Release remains unchanged when capsules/workspaces receive later revisions.
+- [x] Release bindings are create-only/idempotent; failed validation and unresolved conflicts do not publish.
+- [x] Attestation is separate from `Release_id`; production cryptographic signing is deferred without an authenticity claim.
 
 ## Milestone 7 — TypeScript semantic sidecar
 

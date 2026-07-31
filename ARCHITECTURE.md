@@ -394,6 +394,11 @@ visibility point. A crash before it leaves unreachable immutable objects only.
 Release verification never trusts workspace-current or a rebuildable index: it
 loads the release's physical workspace revision/attempt links and replays them.
 Parent traversal is isolated behind a pure resolver seam for cycle tests.
+`Requires_release.satisfied` uses only that verified parent graph; it cannot be
+applied to `Workspace_revision_v1` because ADR-026 has no typed base-release
+link. `Release_attestation_v1` is a separate Envelope type 22 object managed by
+`paengi_release`; it has no release ref and cannot mutate a release. The v1
+deterministic signer is test-only, not a production cryptographic mechanism.
 
 Milestone 1 materialisation is intentionally narrower: it emits an inspectable dry-run plan and writes only to an existing empty destination with exclusive file creation. It preserves regular bytes, executable mode, directories, and symlink target bytes; unsafe decoded names and nonempty destinations reject. Workspace transactional replacement and safety checkpoints remain scratch/workspace work.
 

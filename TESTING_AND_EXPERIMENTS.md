@@ -156,6 +156,15 @@ later immutable capsule/workspace revisions; corruption/type/context rejection;
 and parent closure/cycle traversal through a pure resolver seam. Release
 verification reads no rebuildable index.
 
+Milestone 6 also checks the Release_attestation v1 golden and inverse decoder,
+reopen storage, and the explicit non-cryptographic deterministic test signer.
+The bounded seeded release/validation state machine executes validation,
+parent/child release creation, reopen, verification, and parent closure with
+`PROPERTY_TEST_SEED=17`. `Requires_release.satisfied` accepts only an exact
+base or verified parent closure and rejects an absent ID; its integration into
+durable workspace ordering remains blocked by ADR-026's missing base-release
+field.
+
 #### P9 — Dependency safety
 
 No materialisation silently omits an unsatisfied required dependency.
