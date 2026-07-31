@@ -377,4 +377,6 @@ The daemon harness is `scripts/benchmark-daemon.sh`. It runs a private Unix-sock
 
 The committed 2026-07-31 daemon baseline has five Apple M3 runs at commit `8439053`: 70 ms median launch-to-shutdown wall time and 5,931,008 B peak RSS. It establishes only V1 daemon control overhead on that machine.
 
+The V1 daemon is opt-in and has no repository-format or cache-file dependency. Existing local import/export, remote-helper, cache, encrypted-recovery, and fixture round trips run in CI without starting it. Snapshot-pack cache reuse is verified by exact ref-state reuse plus strict `git fsck`; sparse current-path prefetch remains deterministic and does not satisfy the separate daemon-heuristics roadmap item.
+
 The committed 2026-07-31 W5 result has five clean Apple M3 samples at commit `4d31ebe`: 0.83 s median cold and 0.30 s median warm usable-workspace time, with 772 B median received helper pack payload in both states. It establishes this fixture's local cold/warm behavior only.

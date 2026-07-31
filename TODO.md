@@ -307,7 +307,7 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 
 - [ ] Parallelise hashing where measured.
 - [ ] Parallelise compression where measured.
-- [ ] Add pack-synthesis cache.
+- [x] Add pack-synthesis cache.
 - [ ] Add prefetch heuristics.
 - [x] Measure startup overhead.
 - [x] Measure daemon memory.
@@ -317,7 +317,7 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 
 - [ ] Warm-cache benchmark suite is reproducible.
 - [ ] Daemon improves at least one target workload materially.
-- [ ] Daemon can be disabled without data-format changes.
+- [x] Daemon can be disabled without data-format changes.
 
 ## Milestone 9 — Self-hosted HTTP service
 
