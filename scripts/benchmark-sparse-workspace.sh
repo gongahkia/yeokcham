@@ -112,6 +112,7 @@ run_daemon_prewarm() {
     [[ -S "$socket" ]] && return 0
     if ! kill -0 "$benchmark_daemon_pid" 2>/dev/null; then
       wait "$benchmark_daemon_pid" || true
+      sed -n '1,40p' "$output" >&2
       echo "daemon prewarm did not start" >&2
       exit 1
     fi
@@ -241,7 +242,7 @@ run_state() {
   local iteration target time_file real user sys rss started_at ended_at
   "$benchmark_binary" cache clear "$benchmark_store" >/dev/null
   if [[ "$state" == daemon-prewarmed ]]; then
-    run_daemon_prewarm "$benchmark_temp/$state-warmup.sock" "$benchmark_temp/$state-warmup.daemon"
+    run_daemon_prewarm "$benchmark_temp/daemon.sock" "$benchmark_temp/$state-warmup.daemon"
   fi
   target="$benchmark_temp/$state-warmup"
   run_sparse_workflow "$target" "$benchmark_temp/$state-warmup.time"
@@ -253,7 +254,7 @@ run_state() {
       "$benchmark_binary" cache clear "$benchmark_store" >/dev/null
     elif [[ "$state" == daemon-prewarmed ]]; then
       "$benchmark_binary" cache clear "$benchmark_store" >/dev/null
-      run_daemon_prewarm "$benchmark_temp/$state-$iteration.sock" "$benchmark_temp/$state-$iteration.daemon"
+      run_daemon_prewarm "$benchmark_temp/daemon.sock" "$benchmark_temp/$state-$iteration.daemon"
     fi
     target="$benchmark_temp/$state-$iteration"
     time_file="$benchmark_temp/$state-$iteration.time"
