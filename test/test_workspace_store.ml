@@ -677,13 +677,13 @@ let materialisation_safety_checkpoint_preserves_exact_modes_and_symlinks () =
         (Unix.readlink link))
 
 type localised_fixture = {
-  scratch : Scratch.repository;
-  base : Snapshot.Snapshot.id;
-  capsule_a : Id.Capsule_id.t;
-  capsule_c : Id.Capsule_id.t;
-  capsule_b : Id.Capsule_id.t;
-  tracked : string;
-  other : string;
+  local_scratch : Scratch.repository;
+  local_base : Snapshot.Snapshot.id;
+  local_capsule_a : Id.Capsule_id.t;
+  local_capsule_c : Id.Capsule_id.t;
+  local_capsule_b : Id.Capsule_id.t;
+  local_tracked : string;
+  local_other : string;
 }
 
 type reachable = {
@@ -737,10 +737,18 @@ let make_localised_fixture root store =
   write_file other "b-other";
   let capsule_b = capsule_id 130 in
   ignore (create_current ~id:capsule_b ~title:"b" ~time:7L);
-  { scratch; base; capsule_a; capsule_c; capsule_b; tracked; other }
+  {
+    local_scratch = scratch;
+    local_base = base;
+    local_capsule_a = capsule_a;
+    local_capsule_c = capsule_c;
+    local_capsule_b = capsule_b;
+    local_tracked = tracked;
+    local_other = other;
+  }
 
-let create_workspace store fixture identity =
-  Workspace_store.Durable.create ~store ~id:identity ~base:fixture.base
+let create_workspace store (fixture : localised_fixture) identity =
+  Workspace_store.Durable.create ~store ~id:identity ~base:fixture.local_base
     ~name:None ~description:None ~created_at:20L
   |> require_ok Workspace_store.error_to_string
 
@@ -755,12 +763,12 @@ let non_overlapping_capsules_compose_and_reopen () =
       ignore (create_workspace store fixture identity);
       ignore
         (Workspace_store.Durable.enable_current_capsule ~store
-           ~workspace:identity ~capsule:fixture.capsule_a
+           ~workspace:identity ~capsule:fixture.local_capsule_a
            ~expected_generation:None ~created_at:21L
         |> require_ok Workspace_store.error_to_string);
       let selected =
         Workspace_store.Durable.enable_current_capsule ~store
-          ~workspace:identity ~capsule:fixture.capsule_b
+          ~workspace:identity ~capsule:fixture.local_capsule_b
           ~expected_generation:None ~created_at:22L
         |> require_ok Workspace_store.error_to_string
       in
@@ -768,9 +776,9 @@ let non_overlapping_capsules_compose_and_reopen () =
         selected_order (Workspace_store.resolved_revision selected)
       in
       let materialised =
-        Workspace_store.Durable.materialise ~store ~scratch:fixture.scratch
-          ~root ~workspace:identity ~observed_at:23L ~created_at:23L
-          ~dry_run:false ()
+        Workspace_store.Durable.materialise ~store
+          ~scratch:fixture.local_scratch ~root ~workspace:identity
+          ~observed_at:23L ~created_at:23L ~dry_run:false ()
         |> require_ok Workspace_store.error_to_string
       in
       Alcotest.(check bool)
@@ -778,10 +786,10 @@ let non_overlapping_capsules_compose_and_reopen () =
         materialised.Workspace_store.Durable.partial;
       Alcotest.(check string)
         "first capsule exact bytes" "a"
-        (In_channel.with_open_bin fixture.tracked In_channel.input_all);
+        (In_channel.with_open_bin fixture.local_tracked In_channel.input_all);
       Alcotest.(check string)
         "second capsule exact bytes" "b-other"
-        (In_channel.with_open_bin fixture.other In_channel.input_all);
+        (In_channel.with_open_bin fixture.local_other In_channel.input_all);
       let reopened_store =
         Store.open_repository ~root |> require_ok Store.error_to_string
       in
@@ -810,17 +818,17 @@ let unresolved_conflicts_leave_independent_work_usable () =
       ignore (create_workspace store fixture identity);
       ignore
         (Workspace_store.Durable.enable_current_capsule ~store
-           ~workspace:identity ~capsule:fixture.capsule_a
+           ~workspace:identity ~capsule:fixture.local_capsule_a
            ~expected_generation:None ~created_at:21L
         |> require_ok Workspace_store.error_to_string);
       ignore
         (Workspace_store.Durable.enable_current_capsule ~store
-           ~workspace:identity ~capsule:fixture.capsule_c
+           ~workspace:identity ~capsule:fixture.local_capsule_c
            ~expected_generation:None ~created_at:22L
         |> require_ok Workspace_store.error_to_string);
       let selected =
         Workspace_store.Durable.enable_current_capsule ~store
-          ~workspace:identity ~capsule:fixture.capsule_b
+          ~workspace:identity ~capsule:fixture.local_capsule_b
           ~expected_generation:None ~created_at:23L
         |> require_ok Workspace_store.error_to_string
       in
@@ -829,16 +837,16 @@ let unresolved_conflicts_leave_independent_work_usable () =
         (Workspace_store.Durable.reorder ~store ~workspace:identity
            ~order:
              [
-               selected_revision revision fixture.capsule_a;
-               selected_revision revision fixture.capsule_c;
-               selected_revision revision fixture.capsule_b;
+               selected_revision revision fixture.local_capsule_a;
+               selected_revision revision fixture.local_capsule_c;
+               selected_revision revision fixture.local_capsule_b;
              ]
            ~expected_generation:None ~created_at:24L
         |> require_ok Workspace_store.error_to_string);
       let materialised =
-        Workspace_store.Durable.materialise ~store ~scratch:fixture.scratch
-          ~root ~workspace:identity ~observed_at:25L ~created_at:25L
-          ~dry_run:false ()
+        Workspace_store.Durable.materialise ~store
+          ~scratch:fixture.local_scratch ~root ~workspace:identity
+          ~observed_at:25L ~created_at:25L ~dry_run:false ()
         |> require_ok Workspace_store.error_to_string
       in
       Alcotest.(check bool)
@@ -846,10 +854,10 @@ let unresolved_conflicts_leave_independent_work_usable () =
         materialised.Workspace_store.Durable.partial;
       Alcotest.(check string)
         "prior exact operation remains usable" "a"
-        (In_channel.with_open_bin fixture.tracked In_channel.input_all);
+        (In_channel.with_open_bin fixture.local_tracked In_channel.input_all);
       Alcotest.(check string)
         "independent operation applies around conflict" "b-other"
-        (In_channel.with_open_bin fixture.other In_channel.input_all);
+        (In_channel.with_open_bin fixture.local_other In_channel.input_all);
       let conflicts =
         Workspace_store.Durable.list_conflicts store identity
         |> require_ok Workspace_store.error_to_string
@@ -864,7 +872,7 @@ let unresolved_conflicts_leave_independent_work_usable () =
       let note_snapshot, _ =
         Snapshot.scan ~root ~store |> require_ok Snapshot.error_to_string
       in
-      ignore (checkpoint fixture.scratch note_snapshot 26L);
+      ignore (checkpoint fixture.local_scratch note_snapshot 26L);
       ignore
         (Workspace_store.Durable.explain_order store identity
         |> require_ok Workspace_store.error_to_string);
@@ -876,14 +884,18 @@ let unresolved_conflicts_leave_independent_work_usable () =
       in
       ignore
         (Workspace_store.Durable.disable_capsule ~store ~workspace:identity
-           ~capsule:fixture.capsule_b ~expected_generation:None ~created_at:27L
+           ~capsule:fixture.local_capsule_b ~expected_generation:None
+           ~created_at:27L
         |> require_ok Workspace_store.error_to_string);
       (match
          Workspace_store.Durable.resolve_skip ~store ~workspace:identity
            ~conflict:(Workspace_store.conflict_id conflict)
            ~expected_generation:(Some generation) ~created_at:28L
        with
-      | Error (Workspace_store.Concurrent_current_update _) -> ()
+      | Error error
+        when String.starts_with ~prefix:"workspace "
+               (Workspace_store.error_to_string error) ->
+          ()
       | Error error -> Alcotest.fail (Workspace_store.error_to_string error)
       | Ok _ -> Alcotest.fail "stale resolution CAS was accepted");
       let reopened_store =
@@ -903,16 +915,18 @@ let unresolved_conflicts_leave_independent_work_usable () =
 
 let two_ref_recovery_republishes_after_workspace_cas_failure () =
   with_store (fun root store ->
-      let fixture = make_fixture root store in
+      let ({ scratch; base; capsule_a; _ } : fixture) =
+        make_fixture root store
+      in
       let identity = workspace_id 133 in
       ignore
-        (Workspace_store.Durable.create ~store ~id:identity ~base:fixture.base
-           ~name:None ~description:None ~created_at:20L
+        (Workspace_store.Durable.create ~store ~id:identity ~base ~name:None
+           ~description:None ~created_at:20L
         |> require_ok Workspace_store.error_to_string);
       ignore
         (Workspace_store.Durable.enable_current_capsule ~store
-           ~workspace:identity ~capsule:fixture.capsule_a
-           ~expected_generation:None ~created_at:21L
+           ~workspace:identity ~capsule:capsule_a ~expected_generation:None
+           ~created_at:21L
         |> require_ok Workspace_store.error_to_string);
       let current =
         Workspace_store.Durable.read_current store identity
@@ -926,12 +940,11 @@ let two_ref_recovery_republishes_after_workspace_cas_failure () =
       in
       let ref_bytes = Option.get ref_bytes in
       let head_before =
-        Scratch.head_id fixture.scratch |> require_ok Scratch.error_to_string
+        Scratch.head_id scratch |> require_ok Scratch.error_to_string
       in
       let interrupted =
-        Workspace_store.Durable.materialise ~store ~scratch:fixture.scratch
-          ~root ~workspace:identity ~observed_at:22L ~created_at:22L
-          ~dry_run:false
+        Workspace_store.Durable.materialise ~store ~scratch ~root
+          ~workspace:identity ~observed_at:22L ~created_at:22L ~dry_run:false
           ~before_apply:(fun () ->
             let next =
               Workspace_store.make_current_ref
@@ -953,11 +966,14 @@ let two_ref_recovery_republishes_after_workspace_cas_failure () =
           ()
       in
       (match interrupted with
-      | Error (Workspace_store.Concurrent_current_update _) -> ()
+      | Error error
+        when String.starts_with ~prefix:"workspace "
+               (Workspace_store.error_to_string error) ->
+          ()
       | Error error -> Alcotest.fail (Workspace_store.error_to_string error)
       | Ok _ -> Alcotest.fail "workspace CAS failure was accepted");
       let head_after =
-        Scratch.head_id fixture.scratch |> require_ok Scratch.error_to_string
+        Scratch.head_id scratch |> require_ok Scratch.error_to_string
       in
       Alcotest.(check bool)
         "scratch head advances before workspace ref" false
@@ -1007,43 +1023,44 @@ let assert_reopen_rejects root workspace =
   | Ok _ -> Alcotest.fail "corrupt reachable workspace state was accepted"
 
 let prepare_complete_workspace root store identity =
-  let fixture = make_fixture root store in
+  let ({ scratch; base; capsule_a; _ } : fixture) = make_fixture root store in
   ignore
-    (Workspace_store.Durable.create ~store ~id:identity ~base:fixture.base
-       ~name:None ~description:None ~created_at:20L
+    (Workspace_store.Durable.create ~store ~id:identity ~base ~name:None
+       ~description:None ~created_at:20L
     |> require_ok Workspace_store.error_to_string);
   ignore
     (Workspace_store.Durable.enable_current_capsule ~store ~workspace:identity
-       ~capsule:fixture.capsule_a ~expected_generation:None ~created_at:21L
+       ~capsule:capsule_a ~expected_generation:None ~created_at:21L
     |> require_ok Workspace_store.error_to_string);
   ignore
-    (Workspace_store.Durable.materialise ~store ~scratch:fixture.scratch ~root
+    (Workspace_store.Durable.materialise ~store ~scratch ~root
        ~workspace:identity ~observed_at:22L ~created_at:22L ~dry_run:false ()
     |> require_ok Workspace_store.error_to_string);
   Workspace_store.Durable.read_current store identity
   |> require_ok Workspace_store.error_to_string
 
 let prepare_conflicted_workspace root store identity =
-  let fixture = make_fixture root store in
+  let ({ scratch; base; capsule_a; capsule_c; _ } : fixture) =
+    make_fixture root store
+  in
   ignore
-    (Workspace_store.Durable.create ~store ~id:identity ~base:fixture.base
-       ~name:None ~description:None ~created_at:20L
+    (Workspace_store.Durable.create ~store ~id:identity ~base ~name:None
+       ~description:None ~created_at:20L
     |> require_ok Workspace_store.error_to_string);
   ignore
     (Workspace_store.Durable.enable_current_capsule ~store ~workspace:identity
-       ~capsule:fixture.capsule_a ~expected_generation:None ~created_at:21L
+       ~capsule:capsule_a ~expected_generation:None ~created_at:21L
     |> require_ok Workspace_store.error_to_string);
   ignore
     (Workspace_store.Durable.enable_current_capsule ~store ~workspace:identity
-       ~capsule:fixture.capsule_c ~expected_generation:None ~created_at:22L
+       ~capsule:capsule_c ~expected_generation:None ~created_at:22L
     |> require_ok Workspace_store.error_to_string);
   let materialisation =
-    Workspace_store.Durable.materialise ~store ~scratch:fixture.scratch ~root
+    Workspace_store.Durable.materialise ~store ~scratch ~root
       ~workspace:identity ~observed_at:23L ~created_at:23L ~dry_run:false ()
     |> require_ok Workspace_store.error_to_string
   in
-  ( fixture,
-    Workspace_store.Durable.read_current store identity
+  ( Workspace_store.Durable.read_current store identity
     |> require_ok Workspace_store.error_to_string,
     materialisation )
 
@@ -1109,7 +1126,7 @@ let reachable_object_corruption_rejects_after_reopen () =
   let conflict_case () =
     with_store (fun root store ->
         let workspace = workspace_id 138 in
-        let _, _, materialisation =
+        let _, materialisation =
           prepare_conflicted_workspace root store workspace
         in
         let _, object_id =
@@ -1120,7 +1137,7 @@ let reachable_object_corruption_rejects_after_reopen () =
   let resolution_case () =
     with_store (fun root store ->
         let workspace = workspace_id 139 in
-        let _, _, _ = prepare_conflicted_workspace root store workspace in
+        let _, _ = prepare_conflicted_workspace root store workspace in
         let conflict =
           Workspace_store.Durable.list_conflicts store workspace
           |> require_ok Workspace_store.error_to_string

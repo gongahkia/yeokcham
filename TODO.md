@@ -5,13 +5,13 @@ Robustness tasks operate only on Paengi's pure functions and generated local fix
 
 ## Active vertical slice
 
-- Milestone: 5 — Workspaces and conflicts.
-- Task: persistent workspace selection, partial materialisation, immutable conflicts, and immutable resolutions.
+- Milestone: 5 — complete.
+- Task: persistent workspace selection, partial materialisation, immutable conflicts, immutable resolutions, and closeout verification.
 - Modules/files: extend `paengi_workspace`; add `paengi_workspace_store`; narrow `work`/`conflict` CLI; ADR-026 fixtures and restart/state-machine tests.
 - Types: stable workspace, immutable workspace revision and attempt, selected logical/physical revision link, conflict, immutable resolution, and checksummed workspace current ref.
 - Formats: additive Workspace, Workspace_revision, Workspace_attempt, Conflict, and Resolution v1 objects plus `refs/workspaces/<workspace-id>/current`; ADR-020 through ADR-025 remain unchanged.
 - Invariants: workspace IDs, workspace revision IDs, attempt IDs, conflict IDs, resolution IDs, and stored IDs are type-distinct; selected links resolve exactly; persisted order recomputes exactly; conflicts/resolutions are immutable; workspace ref uses CAS; guarded materialisation never claims cross-ref atomicity.
-- Tests: focused persistence/application/materialisation/resolution tests; canonical goldens and inverse decoders; bounded seed-17 restart/state-machine properties. `make build`, focused tests per slice, `make format`, `make check`, `make property-test PROPERTY_TEST_SEED=17`, forced workspace state machine, and `git diff --check` are required.
+- Tests: focused persistence/application/materialisation/resolution tests; canonical goldens and inverse decoders; non-overlapping composition/reopen, unresolved-conflict continuity, reachable-object corruption, and two-ref recovery; bounded seed-17 restart/state-machine properties. `make build`, focused tests per slice, `make format`, `make check`, `make property-test PROPERTY_TEST_SEED=17`, forced workspace state machine, and `git diff --check` are required.
 - External libraries: existing Alcotest, QCheck, Profile 1 encoder, and Unix only.
 - ADR changes: ADR-026 accepted before persistent formats.
 
@@ -268,10 +268,10 @@ Robustness tasks operate only on Paengi's pure functions and generated local fix
 ### Exit criteria
 
 - [x] Composition order is deterministic.
-- [ ] Multiple non-overlapping capsules coexist.
+- [x] Multiple non-overlapping capsules coexist.
 - [x] Overlapping operations create inspectable conflicts.
-- [ ] Repository remains usable with unresolved conflicts.
-- [ ] Complete the ADR-026 corruption, restart, and two-ref recovery matrix.
+- [x] Repository remains usable with unresolved conflicts.
+- [x] Complete the ADR-026 corruption, restart, and two-ref recovery matrix.
 
 ## Milestone 6 — Releases and validation
 

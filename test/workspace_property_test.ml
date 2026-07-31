@@ -121,7 +121,9 @@ let durable_workspace_state_machine_survives_reopen =
             let directory = Filename.concat root "dir" in
             Unix.mkdir directory 0o700;
             let tracked = Filename.concat directory "tracked" in
+            let other = Filename.concat directory "other" in
             write_file tracked "base";
+            write_file other "base-other";
             let scratch = Scratch.open_repository store in
             let base, _ = Snapshot.scan ~root ~store |> Result.get_ok in
             let initial =
@@ -151,26 +153,41 @@ let durable_workspace_state_machine_survives_reopen =
                  ~evidence:[] ~from:initial ~target:checkpoint_c ~created_at:5L
                  ~changed_at:5L ()
               |> Result.get_ok);
+            write_file tracked "base";
+            write_file other "b-other";
+            let snapshot_b, _ = Snapshot.scan ~root ~store |> Result.get_ok in
+            let checkpoint_b = checkpoint scratch snapshot_b 6L in
+            let capsule_b = capsule_id (700 + salt) in
+            ignore
+              (Capsule_store.Durable.create_from_checkpoints ~store ~scratch
+                 ~id:capsule_b ~title:"b" ~description:"b" ~dependencies:[]
+                 ~evidence:[] ~from:initial ~target:checkpoint_b ~created_at:7L
+                 ~changed_at:7L ()
+              |> Result.get_ok);
             let workspace = workspace_id (900 + salt) in
             ignore
               (Workspace_store.Durable.create ~store ~id:workspace ~base
-                 ~name:None ~description:None ~created_at:6L
+                 ~name:None ~description:None ~created_at:8L
               |> Result.get_ok);
             ignore
               (Workspace_store.Durable.enable_current_capsule ~store ~workspace
-                 ~capsule:capsule_a ~expected_generation:None ~created_at:7L
+                 ~capsule:capsule_a ~expected_generation:None ~created_at:9L
               |> Result.get_ok);
             ignore
               (Workspace_store.Durable.enable_current_capsule ~store ~workspace
-                 ~capsule:capsule_c ~expected_generation:None ~created_at:8L
+                 ~capsule:capsule_c ~expected_generation:None ~created_at:10L
+              |> Result.get_ok);
+            ignore
+              (Workspace_store.Durable.enable_current_capsule ~store ~workspace
+                 ~capsule:capsule_b ~expected_generation:None ~created_at:11L
               |> Result.get_ok);
             ignore
               (Workspace_store.Durable.disable_capsule ~store ~workspace
-                 ~capsule:capsule_a ~expected_generation:None ~created_at:9L
+                 ~capsule:capsule_a ~expected_generation:None ~created_at:12L
               |> Result.get_ok);
             let enabled =
               Workspace_store.Durable.enable_current_capsule ~store ~workspace
-                ~capsule:capsule_a ~expected_generation:None ~created_at:10L
+                ~capsule:capsule_a ~expected_generation:None ~created_at:13L
               |> Result.get_ok
             in
             let revision = Workspace_store.resolved_revision enabled in
@@ -180,15 +197,22 @@ let durable_workspace_state_machine_survives_reopen =
                    [
                      selected_revision revision capsule_a;
                      selected_revision revision capsule_c;
+                     selected_revision revision capsule_b;
                    ]
-                 ~expected_generation:None ~created_at:11L
+                 ~expected_generation:None ~created_at:14L
               |> Result.get_ok);
             let partial =
               Workspace_store.Durable.materialise ~store ~scratch ~root
-                ~workspace ~observed_at:12L ~created_at:12L ~dry_run:false ()
+                ~workspace ~observed_at:15L ~created_at:15L ~dry_run:false ()
               |> Result.get_ok
             in
-            if not partial.Workspace_store.Durable.partial then false
+            if
+              (not partial.Workspace_store.Durable.partial)
+              || not
+                   (String.equal
+                      (In_channel.with_open_bin other In_channel.input_all)
+                      "b-other")
+            then false
             else
               let conflicts =
                 Workspace_store.Durable.list_conflicts store workspace
@@ -199,11 +223,11 @@ let durable_workspace_state_machine_survives_reopen =
                   ignore
                     (Workspace_store.Durable.resolve_skip ~store ~workspace
                        ~conflict:(Workspace_store.conflict_id conflict)
-                       ~expected_generation:None ~created_at:13L
+                       ~expected_generation:None ~created_at:16L
                     |> Result.get_ok);
                   let complete =
                     Workspace_store.Durable.materialise ~store ~scratch ~root
-                      ~workspace ~observed_at:14L ~created_at:14L ~dry_run:false
+                      ~workspace ~observed_at:17L ~created_at:17L ~dry_run:false
                       ()
                     |> Result.get_ok
                   in

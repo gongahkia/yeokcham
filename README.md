@@ -44,7 +44,7 @@ The supported compiler is OCaml 5.5.0. The exact constraint is recorded in `dune
 
 ## Status
 
-Milestone 5 is active. It has persistent immutable workspace selection, deterministic
+Milestone 5 is complete. It has persistent immutable workspace selection, deterministic
 composition attempts, persistent conflicts, explicit skip-operation resolutions,
 and guarded workspace materialisation. Workspace revisions/current refs and
 attempts survive reopen; unresolved application remains explicitly partial.
