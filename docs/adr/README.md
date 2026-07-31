@@ -93,3 +93,4 @@ Valid statuses are `Proposed`, `Accepted`, `Rejected`, `Deprecated`, and `Supers
 | [ADR-0085](0085-private-unix-daemon-lifecycle.md) | Accepted | Serve the daemon only through a private Unix socket |
 | [ADR-0086](0086-current-sparse-path-prefetch-policy.md) | Accepted | Prefetch only current sparse paths within explicit byte budgets |
 | [ADR-0087](0087-verified-current-head-sparse-hydration.md) | Accepted | Verify and cache only current-HEAD sparse paths |
+| [ADR-0088](0088-explicit-daemon-current-sparse-prefetch.md) | Accepted | Run daemon sparse prefetch only from explicit local selections |
