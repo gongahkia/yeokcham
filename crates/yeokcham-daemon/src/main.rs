@@ -13,18 +13,19 @@ use std::{
         atomic::{AtomicBool, Ordering},
     },
     thread,
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime},
 };
 
 use yeokcham_core::{
     DEFAULT_SPARSE_PREFETCH_PROCESS_BYTES, DEFAULT_SPARSE_PREFETCH_REPOSITORY_BYTES, DaemonMessage,
     DaemonProtocolFrame, DaemonRequest, DaemonResponse, Error, ErrorKind, FilesystemMonitor,
-    FilesystemMonitorLimits, GitImportLimits, LocalRepository, MAXIMUM_DAEMON_FRAME_BYTES, Result,
-    SharedObjectCache, SparsePrefetchPolicy, SparsePrefetchSelection,
+    FilesystemMonitorLimits, GitImportLimits, LocalRepository, MAXIMUM_DAEMON_FRAME_BYTES,
+    MAXIMUM_GIT_CONE_SPARSE_CHECKOUT_BYTES, Result, SharedObjectCache, SparsePrefetchPolicy,
+    SparsePrefetchSelection,
 };
 
 const SOCKET_NAME: &str = "yeokcham-daemon.sock";
-const USAGE: &str = "usage: yeokcham-daemon [--socket <path>] [--repository <yeokcham-repo> --sparse-path <relative-path>... [--prefetch-byte-budget <bytes>]]";
+const USAGE: &str = "usage: yeokcham-daemon [--socket <path>] [--repository <yeokcham-repo> (--sparse-path <relative-path>... | --sparse-checkout-file <path>) [--prefetch-byte-budget <bytes>]]";
 const PREFETCH_POLL_INTERVAL: Duration = Duration::from_secs(1);
 const PREFETCH_MONITOR_DEPTH: usize = 2;
 const PREFETCH_MONITOR_MAXIMUM_DIRECTORIES: usize = 16;
@@ -38,12 +39,30 @@ struct DaemonOptions {
 
 struct DaemonPrefetchConfiguration {
     repository: PathBuf,
-    selection: SparsePrefetchSelection,
+    source: DaemonPrefetchSource,
+}
+
+enum DaemonPrefetchSource {
+    Explicit(SparsePrefetchSelection),
+    GitConeSparseCheckoutFile { path: PathBuf, byte_budget: u64 },
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+struct SparseCheckoutFileMetadata {
+    length: u64,
+    modified: SystemTime,
+}
+
+struct SparseCheckoutFile {
+    path: PathBuf,
+    byte_budget: u64,
+    metadata: SparseCheckoutFileMetadata,
 }
 
 struct DaemonPrefetcher {
     repository: LocalRepository,
     selection: SparsePrefetchSelection,
+    sparse_checkout_file: Option<SparseCheckoutFile>,
     cache: SharedObjectCache,
     monitors: [FilesystemMonitor; 2],
     pending: bool,
@@ -52,6 +71,13 @@ struct DaemonPrefetcher {
 impl DaemonPrefetcher {
     fn new(configuration: DaemonPrefetchConfiguration) -> Result<Self> {
         let repository = LocalRepository::open(configuration.repository)?;
+        let (selection, sparse_checkout_file) = match configuration.source {
+            DaemonPrefetchSource::Explicit(selection) => (selection, None),
+            DaemonPrefetchSource::GitConeSparseCheckoutFile { path, byte_budget } => {
+                let (file, selection) = SparseCheckoutFile::open(path, byte_budget)?;
+                (selection, Some(file))
+            }
+        };
         let limits = FilesystemMonitorLimits::new(
             PREFETCH_MONITOR_DEPTH,
             PREFETCH_MONITOR_MAXIMUM_DIRECTORIES,
@@ -72,7 +98,8 @@ impl DaemonPrefetcher {
         )?;
         let mut prefetcher = Self {
             repository,
-            selection: configuration.selection,
+            selection,
+            sparse_checkout_file,
             cache,
             monitors,
             pending: true,
@@ -82,6 +109,12 @@ impl DaemonPrefetcher {
     }
 
     fn refresh(&mut self) -> Result<()> {
+        if let Some(file) = &mut self.sparse_checkout_file {
+            if let Some(selection) = file.poll()? {
+                self.selection = selection;
+                self.pending = true;
+            }
+        }
         for monitor in &mut self.monitors {
             if !monitor.poll()?.is_empty() {
                 self.pending = true;
@@ -97,6 +130,149 @@ impl DaemonPrefetcher {
         }
         Ok(())
     }
+}
+
+impl SparseCheckoutFile {
+    fn open(path: PathBuf, byte_budget: u64) -> Result<(Self, SparsePrefetchSelection)> {
+        let (metadata, bytes) = read_sparse_checkout_file(&path)?;
+        let selection = SparsePrefetchSelection::from_git_cone_sparse_checkout(
+            &bytes,
+            byte_budget,
+            SparsePrefetchPolicy::default(),
+        )?;
+        Ok((
+            Self {
+                path,
+                byte_budget,
+                metadata,
+            },
+            selection,
+        ))
+    }
+
+    fn poll(&mut self) -> Result<Option<SparsePrefetchSelection>> {
+        if sparse_checkout_file_metadata(&self.path)? == self.metadata {
+            return Ok(None);
+        }
+        let (metadata, bytes) = read_sparse_checkout_file(&self.path)?;
+        let selection = SparsePrefetchSelection::from_git_cone_sparse_checkout(
+            &bytes,
+            self.byte_budget,
+            SparsePrefetchPolicy::default(),
+        )?;
+        self.metadata = metadata;
+        Ok(Some(selection))
+    }
+}
+
+fn read_sparse_checkout_file(path: &Path) -> Result<(SparseCheckoutFileMetadata, Vec<u8>)> {
+    let metadata = sparse_checkout_file_metadata(path)?;
+    let length = usize::try_from(metadata.length).map_err(|_| {
+        Error::new(
+            ErrorKind::Unsupported,
+            "daemon sparse-checkout file exceeds the byte limit",
+        )
+    })?;
+    let mut file = fs::File::open(path).map_err(|error| {
+        Error::with_source(
+            ErrorKind::Io,
+            "daemon sparse-checkout file could not be opened",
+            error,
+        )
+    })?;
+    let opened = file.metadata().map_err(|error| {
+        Error::with_source(
+            ErrorKind::Io,
+            "daemon sparse-checkout file could not be inspected",
+            error,
+        )
+    })?;
+    let opened_modified = opened.modified().map_err(|error| {
+        Error::with_source(
+            ErrorKind::Io,
+            "daemon sparse-checkout file could not be inspected",
+            error,
+        )
+    })?;
+    if !opened.is_file() || opened.len() != metadata.length || opened_modified != metadata.modified
+    {
+        return Err(Error::new(
+            ErrorKind::Conflict,
+            "daemon sparse-checkout file changed while being opened",
+        ));
+    }
+    let mut bytes = vec![0; length];
+    file.read_exact(&mut bytes).map_err(|error| {
+        Error::with_source(
+            ErrorKind::Io,
+            "daemon sparse-checkout file could not be read",
+            error,
+        )
+    })?;
+    let mut extra = [0; 1];
+    match file.read(&mut extra) {
+        Ok(0) => {}
+        Ok(_) => {
+            return Err(Error::new(
+                ErrorKind::Conflict,
+                "daemon sparse-checkout file changed while being read",
+            ));
+        }
+        Err(error) => {
+            return Err(Error::with_source(
+                ErrorKind::Io,
+                "daemon sparse-checkout file could not be read",
+                error,
+            ));
+        }
+    }
+    if sparse_checkout_file_metadata(path)? != metadata {
+        return Err(Error::new(
+            ErrorKind::Conflict,
+            "daemon sparse-checkout file changed while being read",
+        ));
+    }
+    Ok((metadata, bytes))
+}
+
+fn sparse_checkout_file_metadata(path: &Path) -> Result<SparseCheckoutFileMetadata> {
+    let metadata = fs::symlink_metadata(path).map_err(|error| {
+        Error::with_source(
+            ErrorKind::Io,
+            "daemon sparse-checkout file could not be inspected",
+            error,
+        )
+    })?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(Error::new(
+            ErrorKind::InvalidInput,
+            "daemon sparse-checkout file is not a regular file",
+        ));
+    }
+    if metadata.len()
+        > u64::try_from(MAXIMUM_GIT_CONE_SPARSE_CHECKOUT_BYTES).map_err(|_| {
+            Error::new(
+                ErrorKind::Unsupported,
+                "daemon sparse-checkout file exceeds the byte limit",
+            )
+        })?
+    {
+        return Err(Error::new(
+            ErrorKind::Unsupported,
+            "daemon sparse-checkout file exceeds the byte limit",
+        ));
+    }
+    let modified = metadata.modified().map_err(|error| {
+        Error::with_source(
+            ErrorKind::Io,
+            "daemon sparse-checkout file could not be inspected",
+            error,
+        )
+    })?;
+    Ok(SparseCheckoutFileMetadata {
+        length: metadata.len(),
+        modified,
+    })
 }
 
 #[derive(Clone, Debug)]
@@ -311,6 +487,7 @@ fn parse_options(arguments: &[OsString]) -> Result<DaemonOptions> {
     let mut socket = None;
     let mut repository = None;
     let mut sparse_paths = Vec::new();
+    let mut sparse_checkout_file = None;
     let mut byte_budget = DEFAULT_SPARSE_PREFETCH_REPOSITORY_BYTES;
     let mut prefetch_requested = false;
     let mut index = 0usize;
@@ -343,6 +520,14 @@ fn parse_options(arguments: &[OsString]) -> Result<DaemonOptions> {
         } else if flag == "--sparse-path" {
             prefetch_requested = true;
             sparse_paths.push(PathBuf::from(value));
+        } else if flag == "--sparse-checkout-file" {
+            prefetch_requested = true;
+            if sparse_checkout_file.replace(PathBuf::from(value)).is_some() {
+                return Err(Error::new(
+                    ErrorKind::InvalidInput,
+                    "daemon sparse-checkout file option is duplicated",
+                ));
+            }
         } else if flag == "--prefetch-byte-budget" {
             prefetch_requested = true;
             byte_budget = value
@@ -366,15 +551,19 @@ fn parse_options(arguments: &[OsString]) -> Result<DaemonOptions> {
     }
     let prefetch = if !prefetch_requested {
         None
-    } else if let (Some(repository), false) = (repository, sparse_paths.is_empty()) {
-        Some(DaemonPrefetchConfiguration {
-            repository,
-            selection: SparsePrefetchSelection::new(
+    } else if let Some(repository) = repository {
+        let source = match (sparse_paths.is_empty(), sparse_checkout_file) {
+            (false, None) => DaemonPrefetchSource::Explicit(SparsePrefetchSelection::new(
                 sparse_paths,
                 byte_budget,
                 SparsePrefetchPolicy::default(),
-            )?,
-        })
+            )?),
+            (true, Some(path)) => {
+                DaemonPrefetchSource::GitConeSparseCheckoutFile { path, byte_budget }
+            }
+            _ => return Err(Error::new(ErrorKind::InvalidInput, USAGE)),
+        };
+        Some(DaemonPrefetchConfiguration { repository, source })
     } else {
         return Err(Error::new(ErrorKind::InvalidInput, USAGE));
     };
@@ -403,12 +592,12 @@ fn main() {
 mod tests {
     use super::*;
     use std::{
-        os::unix::fs::PermissionsExt,
+        os::unix::fs::{PermissionsExt, symlink},
         process::Command,
         thread,
         time::{SystemTime, UNIX_EPOCH},
     };
-    use yeokcham_core::{GitRepository, SparsePrefetchPolicy};
+    use yeokcham_core::{GitObjectId, GitObjectKind, GitRepository};
 
     fn run_git_in(directory: &Path, arguments: &[&str]) {
         let output = Command::new("git")
@@ -422,6 +611,21 @@ mod tests {
             "Git failed: {}",
             String::from_utf8_lossy(&output.stderr)
         );
+    }
+
+    fn git_object_id(directory: &Path, revision: &str) -> GitObjectId {
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(directory)
+            .args(["rev-parse", revision])
+            .output()
+            .expect("run Git");
+        assert!(output.status.success(), "Git rev-parse failed");
+        String::from_utf8(output.stdout)
+            .expect("Git object ID UTF-8")
+            .trim()
+            .parse()
+            .expect("Git object ID")
     }
 
     #[test]
@@ -442,11 +646,59 @@ mod tests {
         let prefetch = options.prefetch.expect("prefetch configuration");
         assert_eq!(options.socket, PathBuf::from("/private/socket"));
         assert_eq!(prefetch.repository, PathBuf::from("/private/repository"));
-        assert_eq!(prefetch.selection.byte_budget(), 4096);
+        let DaemonPrefetchSource::Explicit(selection) = prefetch.source else {
+            panic!("explicit prefetch source");
+        };
+        assert_eq!(selection.byte_budget(), 4096);
         assert_eq!(
-            prefetch.selection.sparse_paths(),
+            selection.sparse_paths(),
             [PathBuf::from("app"), PathBuf::from("docs/guide")]
         );
+    }
+
+    #[test]
+    fn parses_opt_in_git_cone_sparse_checkout_file_configuration() {
+        let options = parse_options(&[
+            OsString::from("--repository"),
+            OsString::from("/private/repository"),
+            OsString::from("--sparse-checkout-file"),
+            OsString::from("/private/worktree/.git/info/sparse-checkout"),
+            OsString::from("--prefetch-byte-budget"),
+            OsString::from("4096"),
+        ])
+        .expect("options");
+        let prefetch = options.prefetch.expect("prefetch configuration");
+        let DaemonPrefetchSource::GitConeSparseCheckoutFile { path, byte_budget } = prefetch.source
+        else {
+            panic!("Git cone sparse-checkout source");
+        };
+        assert_eq!(
+            path,
+            PathBuf::from("/private/worktree/.git/info/sparse-checkout")
+        );
+        assert_eq!(byte_budget, 4096);
+    }
+
+    #[test]
+    fn rejects_a_sparse_checkout_file_symlink() {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time")
+            .as_nanos();
+        let directory = env::temp_dir().join(format!(
+            "yeokcham-daemon-sparse-checkout-file-{}-{nonce}",
+            std::process::id()
+        ));
+        fs::create_dir(&directory).expect("directory");
+        let target = directory.join("target");
+        let path = directory.join("sparse-checkout");
+        fs::write(&target, b"/*\n!/*/\n/app/\n").expect("target");
+        symlink(&target, &path).expect("symlink");
+        let error = SparseCheckoutFile::open(path, 4096)
+            .err()
+            .expect("symlink error");
+        assert_eq!(error.kind(), ErrorKind::InvalidInput);
+        let _ = fs::remove_dir_all(directory);
     }
 
     #[test]
@@ -455,8 +707,20 @@ mod tests {
             vec![OsString::from("--repository"), OsString::from("repository")],
             vec![OsString::from("--sparse-path"), OsString::from("app")],
             vec![
+                OsString::from("--sparse-checkout-file"),
+                OsString::from("sparse-checkout"),
+            ],
+            vec![
                 OsString::from("--prefetch-byte-budget"),
                 OsString::from("4096"),
+            ],
+            vec![
+                OsString::from("--repository"),
+                OsString::from("repository"),
+                OsString::from("--sparse-path"),
+                OsString::from("app"),
+                OsString::from("--sparse-checkout-file"),
+                OsString::from("sparse-checkout"),
             ],
             vec![OsString::from("--unsupported"), OsString::from("value")],
         ] {
@@ -465,7 +729,7 @@ mod tests {
     }
 
     #[test]
-    fn prefetches_an_explicit_current_sparse_selection_at_startup() {
+    fn prefetches_a_git_cone_sparse_checkout_file_at_startup_and_on_change() {
         let nonce = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("system time")
@@ -485,10 +749,15 @@ mod tests {
             &["config", "user.email", "yeokcham-test@example.invalid"],
         );
         fs::create_dir(source_path.join("app")).expect("app directory");
+        fs::create_dir(source_path.join("docs")).expect("docs directory");
         fs::write(source_path.join("app/main.rs"), b"selected\n").expect("selected blob");
-        fs::write(source_path.join("README.md"), b"excluded\n").expect("excluded blob");
+        fs::write(source_path.join("docs/guide.md"), b"other\n").expect("other blob");
+        fs::write(source_path.join("README.md"), b"root\n").expect("root blob");
         run_git_in(&source_path, &["add", "."]);
         run_git_in(&source_path, &["commit", "-m", "fixture"]);
+        let app_blob = git_object_id(&source_path, "HEAD:app/main.rs");
+        let docs_blob = git_object_id(&source_path, "HEAD:docs/guide.md");
+        run_git_in(&source_path, &["sparse-checkout", "set", "--cone", "app"]);
         let limits = GitImportLimits::initial().expect("limits");
         LocalRepository::create(&repository_path)
             .expect("repository")
@@ -497,22 +766,42 @@ mod tests {
                 limits,
             )
             .expect("import source");
-        let selection = SparsePrefetchSelection::new(
-            [PathBuf::from("app")],
-            DEFAULT_SPARSE_PREFETCH_REPOSITORY_BYTES,
-            SparsePrefetchPolicy::default(),
-        )
-        .expect("selection");
-
         let mut prefetcher = DaemonPrefetcher::new(DaemonPrefetchConfiguration {
             repository: repository_path,
-            selection,
+            source: DaemonPrefetchSource::GitConeSparseCheckoutFile {
+                path: source_path.join(".git/info/sparse-checkout"),
+                byte_budget: DEFAULT_SPARSE_PREFETCH_REPOSITORY_BYTES,
+            },
         })
         .expect("prefetcher");
 
         assert!(prefetcher.cache.object_count() >= 4);
+        assert!(
+            prefetcher
+                .cache
+                .get(prefetcher.repository.id(), app_blob, GitObjectKind::Blob)
+                .is_some()
+        );
         assert!(!prefetcher.pending);
         prefetcher.refresh().expect("unchanged refresh");
+        prefetcher.cache.clear();
+        thread::sleep(Duration::from_millis(10));
+        run_git_in(&source_path, &["sparse-checkout", "set", "--cone", "docs"]);
+        prefetcher
+            .refresh()
+            .expect("changed sparse-checkout configuration");
+        assert!(
+            prefetcher
+                .cache
+                .get(prefetcher.repository.id(), docs_blob, GitObjectKind::Blob)
+                .is_some()
+        );
+        assert_eq!(
+            prefetcher
+                .cache
+                .get(prefetcher.repository.id(), app_blob, GitObjectKind::Blob),
+            None
+        );
         let snapshot = fs::read_dir(prefetcher.repository.path().join("manifests/refs"))
             .expect("ref snapshot directory")
             .next()

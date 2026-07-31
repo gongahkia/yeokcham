@@ -141,7 +141,7 @@ pub use segment_writer::{
 pub use shared_object_cache::SharedObjectCache;
 pub use sparse_prefetch::{
     DEFAULT_SPARSE_PREFETCH_PROCESS_BYTES, DEFAULT_SPARSE_PREFETCH_REPOSITORY_BYTES,
-    SparsePrefetchPolicy, SparsePrefetchSelection,
+    MAXIMUM_GIT_CONE_SPARSE_CHECKOUT_BYTES, SparsePrefetchPolicy, SparsePrefetchSelection,
 };
 pub use telemetry::{Redacted, redact};
 pub use tiny_blob_aggregation::{

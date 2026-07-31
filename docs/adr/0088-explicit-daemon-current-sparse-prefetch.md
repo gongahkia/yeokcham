@@ -4,7 +4,7 @@
 - Date: 2026-07-31
 - Deciders: Yeokcham maintainers
 - Supersedes: None
-- Superseded by: None
+- Superseded by: ADR-0090
 
 ## Context
 
