@@ -108,6 +108,7 @@ run_daemon_prewarm() {
     --sparse-checkout-file "$benchmark_sparse_checkout" \
     >"$output" 2>&1 &
   benchmark_daemon_pid=$!
+  benchmark_daemon_socket=$socket
   for (( attempt = 0; attempt < 200; attempt++ )); do
     [[ -S "$socket" ]] && return 0
     if ! kill -0 "$benchmark_daemon_pid" 2>/dev/null; then
@@ -127,6 +128,10 @@ stop_daemon_prewarm() {
     kill "$benchmark_daemon_pid" 2>/dev/null || true
     wait "$benchmark_daemon_pid" 2>/dev/null || true
     benchmark_daemon_pid=
+  fi
+  if [[ -n ${benchmark_daemon_socket:-} ]]; then
+    rm -f -- "$benchmark_daemon_socket"
+    benchmark_daemon_socket=
   fi
   return 0
 }
@@ -298,6 +303,7 @@ benchmark_fixture="$benchmark_temp/fixture"
 benchmark_store="$benchmark_temp/store"
 benchmark_sparse_checkout="$benchmark_temp/sparse-checkout"
 benchmark_daemon_pid=
+benchmark_daemon_socket=
 "$fixture_generator" "$benchmark_fixture" >/dev/null
 printf '/*\n!/*/\n/app/\n' >"$benchmark_sparse_checkout"
 cargo build --release --locked -p yeokcham-cli -p yeokcham-daemon
