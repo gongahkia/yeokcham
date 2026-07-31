@@ -290,6 +290,8 @@ Measure:
 
 ### W7 — GitHub mirror
 
+The publication-preview integration test imports a repository with an annotated tag, asks `yeokcham github plan --show-objects` to reconstruct its selected refs, and checks that the reported object IDs and count exactly equal the selected exported Git graph without printing object bodies.
+
 Measure:
 
 - Initial publication.

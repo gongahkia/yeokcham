@@ -1,4 +1,5 @@
 use std::{
+    collections::BTreeSet,
     env,
     ffi::{OsStr, OsString},
     fs::{self, File, OpenOptions},
@@ -29,6 +30,7 @@ const MAXIMUM_KEY_EXPORT_BYTES: u64 = 8 * 1024;
 const MAXIMUM_PASSPHRASE_INPUT_BYTES: u64 = 1_025;
 const MAXIMUM_CACHE_PATHS: usize = 100_000;
 const MAXIMUM_CACHE_DEPTH: usize = 32;
+const MAXIMUM_GITHUB_GIT_OUTPUT_BYTES: usize = 64 * 1024 * 1024;
 
 type DefaultDriveBackend = EncryptedBackend<
     DriveBackend<
@@ -88,6 +90,10 @@ enum Command {
     },
     GithubInspect {
         repository: PathBuf,
+    },
+    GithubPublicationPlan {
+        repository: PathBuf,
+        show_objects: bool,
     },
     DriveAuth {
         client_id: String,
@@ -188,6 +194,10 @@ fn main() -> ExitCode {
             publication_rules,
         ),
         Command::GithubInspect { repository } => github_inspect(repository),
+        Command::GithubPublicationPlan {
+            repository,
+            show_objects,
+        } => github_publication_plan(repository, show_objects),
         Command::DriveAuth {
             client_id,
             redirect_port,
@@ -325,6 +335,21 @@ fn parse_github(arguments: &[OsString]) -> Result<Command> {
     if arguments.len() == 3 && arguments[1].as_os_str() == OsStr::new("inspect") {
         return Ok(Command::GithubInspect {
             repository: PathBuf::from(&arguments[2]),
+        });
+    }
+    if arguments.len() == 3 && arguments[1].as_os_str() == OsStr::new("plan") {
+        return Ok(Command::GithubPublicationPlan {
+            repository: PathBuf::from(&arguments[2]),
+            show_objects: false,
+        });
+    }
+    if arguments.len() == 4
+        && arguments[1].as_os_str() == OsStr::new("plan")
+        && arguments[2].as_os_str() == OsStr::new("--show-objects")
+    {
+        return Ok(Command::GithubPublicationPlan {
+            repository: PathBuf::from(&arguments[3]),
+            show_objects: true,
         });
     }
     if arguments.len() < 9 || arguments[1].as_os_str() != OsStr::new("configure") {
@@ -730,6 +755,286 @@ fn github_inspect(repository: PathBuf) -> Result<()> {
         configuration.checkpoints().len(),
     );
     Ok(())
+}
+
+struct GithubPublicationReference {
+    local: yeokcham_core::RefName,
+    remote: yeokcham_core::RefName,
+    object_id: GitObjectId,
+}
+
+struct GithubPublicationPreview {
+    references: Vec<GithubPublicationReference>,
+    object_ids: BTreeSet<GitObjectId>,
+}
+
+fn github_publication_plan(repository: PathBuf, show_objects: bool) -> Result<()> {
+    let limits = GitImportLimits::initial()?;
+    let repository = LocalRepository::open(repository)?;
+    let configuration = repository
+        .github_mirror_configuration()?
+        .ok_or_else(|| Error::new(ErrorKind::NotFound, "GitHub mirror is not configured"))?;
+    let references = selected_github_publication_references(&repository, &configuration, limits)?;
+    let export = create_temporary_github_export(&repository, limits)?;
+    let result = github_publication_object_ids(&export, &references, limits).map(|object_ids| {
+        GithubPublicationPreview {
+            references,
+            object_ids,
+        }
+    });
+    let cleanup = remove_temporary_github_export(&export);
+    let preview = match (result, cleanup) {
+        (Err(error), _) => return Err(error),
+        (Ok(_), Err(error)) => return Err(error),
+        (Ok(preview), Ok(())) => preview,
+    };
+    println!(
+        "github_publication_plan references={} objects={}",
+        preview.references.len(),
+        preview.object_ids.len(),
+    );
+    for reference in &preview.references {
+        println!(
+            "github_publication_reference local={} remote={} object={}",
+            github_reference_text(&reference.local)?,
+            github_reference_text(&reference.remote)?,
+            reference.object_id,
+        );
+    }
+    if show_objects {
+        for object_id in &preview.object_ids {
+            println!("github_publication_object={object_id}");
+        }
+    }
+    Ok(())
+}
+
+fn selected_github_publication_references(
+    repository: &LocalRepository,
+    configuration: &GithubMirrorConfiguration,
+    limits: GitImportLimits,
+) -> Result<Vec<GithubPublicationReference>> {
+    if configuration.direction() == GithubMirrorDirection::PullOnly {
+        return Err(Error::new(
+            ErrorKind::InvalidInput,
+            "GitHub mirror direction does not allow publication",
+        ));
+    }
+    let state = repository
+        .resolve_ref_state(limits.ref_snapshot_limits())?
+        .ok_or_else(|| {
+            Error::new(
+                ErrorKind::NotFound,
+                "repository has no acknowledged ref state",
+            )
+        })?;
+    let references = state
+        .regular_refs()
+        .iter()
+        .filter(|(reference, _)| configuration.selects_reference(reference))
+        .map(|(reference, object_id)| {
+            github_reference_text(reference)?;
+            Ok(GithubPublicationReference {
+                local: reference.clone(),
+                remote: reference.clone(),
+                object_id: *object_id,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    if references.is_empty() {
+        return Err(Error::new(
+            ErrorKind::NotFound,
+            "GitHub mirror has no selected acknowledged refs",
+        ));
+    }
+    Ok(references)
+}
+
+fn create_temporary_github_export(
+    repository: &LocalRepository,
+    limits: GitImportLimits,
+) -> Result<PathBuf> {
+    for _ in 0..16 {
+        let path = env::temp_dir().join(format!("yeokcham-github-export-{}", uuid::Uuid::new_v4()));
+        match repository.export_loose_objects(&path, limits.export_limits()?) {
+            Ok(_) => return Ok(path),
+            Err(error) if error.kind() == ErrorKind::Conflict => continue,
+            Err(error) => {
+                let _ = fs::remove_dir_all(&path);
+                return Err(error);
+            }
+        }
+    }
+    Err(Error::new(
+        ErrorKind::Conflict,
+        "temporary GitHub export path could not be allocated",
+    ))
+}
+
+fn remove_temporary_github_export(path: &Path) -> Result<()> {
+    fs::remove_dir_all(path).map_err(|error| {
+        Error::with_source(
+            ErrorKind::Io,
+            "temporary GitHub export could not be removed",
+            error,
+        )
+    })
+}
+
+fn github_publication_object_ids(
+    exported: &Path,
+    references: &[GithubPublicationReference],
+    limits: GitImportLimits,
+) -> Result<BTreeSet<GitObjectId>> {
+    let maximum_output_bytes = limits
+        .maximum_objects()
+        .checked_mul(64)
+        .ok_or_else(|| {
+            Error::new(
+                ErrorKind::Unsupported,
+                "GitHub publication output is too large",
+            )
+        })?
+        .min(MAXIMUM_GITHUB_GIT_OUTPUT_BYTES);
+    let mut command = github_git_command();
+    command
+        .arg("--git-dir")
+        .arg(exported)
+        .args(["rev-list", "--objects", "--no-object-names"]);
+    for reference in references {
+        command.arg(github_reference_text(&reference.local)?);
+    }
+    let output = run_bounded_git_stdout(
+        command,
+        maximum_output_bytes,
+        "GitHub publication object walk could not be completed",
+    )?;
+    let mut object_ids = BTreeSet::new();
+    for line in output
+        .split(|byte| *byte == b'\n')
+        .filter(|line| !line.is_empty())
+    {
+        let id = std::str::from_utf8(line)
+            .ok()
+            .and_then(|line| line.parse::<GitObjectId>().ok())
+            .ok_or_else(|| {
+                Error::new(
+                    ErrorKind::CorruptData,
+                    "GitHub publication object walk returned an invalid object ID",
+                )
+            })?;
+        if object_ids.len() == limits.maximum_objects() && !object_ids.contains(&id) {
+            return Err(Error::new(
+                ErrorKind::Unsupported,
+                "GitHub publication object count exceeds the limit",
+            ));
+        }
+        object_ids.insert(id);
+    }
+    for reference in references {
+        if object_ids.len() == limits.maximum_objects()
+            && !object_ids.contains(&reference.object_id)
+        {
+            return Err(Error::new(
+                ErrorKind::Unsupported,
+                "GitHub publication object count exceeds the limit",
+            ));
+        }
+        object_ids.insert(reference.object_id);
+    }
+    if object_ids.is_empty() {
+        return Err(Error::new(
+            ErrorKind::CorruptData,
+            "GitHub publication object walk returned no objects",
+        ));
+    }
+    Ok(object_ids)
+}
+
+fn github_reference_text(reference: &yeokcham_core::RefName) -> Result<&str> {
+    std::str::from_utf8(reference.as_bytes()).map_err(|_| {
+        Error::new(
+            ErrorKind::Unsupported,
+            "GitHub publication does not support a non-UTF-8 reference",
+        )
+    })
+}
+
+fn github_git_command() -> ProcessCommand {
+    let mut command = ProcessCommand::new("git");
+    for variable in [
+        "GIT_DIR",
+        "GIT_WORK_TREE",
+        "GIT_INDEX_FILE",
+        "GIT_OBJECT_DIRECTORY",
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+        "GIT_CONFIG_NOSYSTEM",
+        "GIT_CONFIG_GLOBAL",
+        "GIT_CONFIG_SYSTEM",
+        "GIT_CONFIG_COUNT",
+        "GIT_ASKPASS",
+        "SSH_ASKPASS",
+    ] {
+        command.env_remove(variable);
+    }
+    command.env("GIT_TERMINAL_PROMPT", "0");
+    command
+}
+
+fn run_bounded_git_stdout(
+    mut command: ProcessCommand,
+    maximum_bytes: usize,
+    failure_message: &'static str,
+) -> Result<Vec<u8>> {
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    let mut child = command
+        .spawn()
+        .map_err(|error| Error::with_source(ErrorKind::Io, failure_message, error))?;
+    let mut stdout = child.stdout.take().ok_or_else(|| {
+        Error::new(
+            ErrorKind::Internal,
+            "GitHub publication command has no standard output",
+        )
+    })?;
+    let mut output = Vec::new();
+    let mut buffer = [0_u8; 8 * 1024];
+    loop {
+        let capacity = maximum_bytes
+            .checked_add(1)
+            .and_then(|maximum| maximum.checked_sub(output.len()))
+            .ok_or_else(|| {
+                Error::new(
+                    ErrorKind::Unsupported,
+                    "GitHub publication command output exceeds the byte limit",
+                )
+            })?;
+        let read_length = capacity.min(buffer.len());
+        let read = stdout
+            .read(&mut buffer[..read_length])
+            .map_err(|error| Error::with_source(ErrorKind::Io, failure_message, error))?;
+        if read == 0 {
+            break;
+        }
+        output.extend_from_slice(&buffer[..read]);
+        if output.len() > maximum_bytes {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(Error::new(
+                ErrorKind::Unsupported,
+                "GitHub publication command output exceeds the byte limit",
+            ));
+        }
+    }
+    let status = child
+        .wait()
+        .map_err(|error| Error::with_source(ErrorKind::Io, failure_message, error))?;
+    if !status.success() {
+        return Err(Error::new(ErrorKind::Io, failure_message));
+    }
+    Ok(output)
 }
 
 fn cache_clear(repository: PathBuf) -> Result<()> {
@@ -1587,7 +1892,7 @@ fn usage_error() -> Error {
 
 fn print_usage() {
     println!(
-        "usage:\n  yeokcham init --from-git <source-git-repo> <yeokcham-repo> [--chunked-blob-minimum <bytes>]\n  yeokcham sync --from-git <source-git-repo> <yeokcham-repo> --device <device-id>\n  yeokcham verify <yeokcham-repo>\n  yeokcham export-git <yeokcham-repo> <destination-git-repo>\n  yeokcham inspect object <yeokcham-repo> <git-object-id>\n  yeokcham inspect storage <yeokcham-repo>\n  yeokcham inspect refs <yeokcham-repo>\n  yeokcham cache inspect|verify|clear <yeokcham-repo>\n  yeokcham cache trim --max-bytes <bytes> <yeokcham-repo>\n  yeokcham github configure <yeokcham-repo> --repository <owner/repository> --direction <publish-only|pull-only|bidirectional-fast-forward|manual> [--force-update <reject|require-exact-checkpoint>] --publish <heads|tags|refs/heads/*|refs/tags/*> [--publish ...]\n  yeokcham github inspect <yeokcham-repo>\n  yeokcham key create-export --passphrase-stdin <yeokcham-repo> <recovery-key-export>\n  yeokcham drive auth --client-id <google-desktop-client-id> [--redirect-port <port>]\n  yeokcham drive init --client-id <google-desktop-client-id>\n  yeokcham drive backup|push --client-id <google-desktop-client-id> --folder-id <drive-folder-id> --key-export <recovery-key-export> --passphrase-stdin <yeokcham-repo>\n  yeokcham drive restore|clone --client-id <google-desktop-client-id> --folder-id <drive-folder-id> --key-export <recovery-key-export> --passphrase-stdin <destination>\n  yeokcham drive verify --client-id <google-desktop-client-id> --folder-id <drive-folder-id> --key-export <recovery-key-export> --passphrase-stdin\n  yeokcham drive journal inspect --client-id <google-desktop-client-id> --folder-id <drive-folder-id> --key-export <recovery-key-export> --root-key <root-ed25519-public-key-hex> --passphrase-stdin <yeokcham-repo>"
+        "usage:\n  yeokcham init --from-git <source-git-repo> <yeokcham-repo> [--chunked-blob-minimum <bytes>]\n  yeokcham sync --from-git <source-git-repo> <yeokcham-repo> --device <device-id>\n  yeokcham verify <yeokcham-repo>\n  yeokcham export-git <yeokcham-repo> <destination-git-repo>\n  yeokcham inspect object <yeokcham-repo> <git-object-id>\n  yeokcham inspect storage <yeokcham-repo>\n  yeokcham inspect refs <yeokcham-repo>\n  yeokcham cache inspect|verify|clear <yeokcham-repo>\n  yeokcham cache trim --max-bytes <bytes> <yeokcham-repo>\n  yeokcham github configure <yeokcham-repo> --repository <owner/repository> --direction <publish-only|pull-only|bidirectional-fast-forward|manual> [--force-update <reject|require-exact-checkpoint>] --publish <heads|tags|refs/heads/*|refs/tags/*> [--publish ...]\n  yeokcham github inspect <yeokcham-repo>\n  yeokcham github plan [--show-objects] <yeokcham-repo>\n  yeokcham key create-export --passphrase-stdin <yeokcham-repo> <recovery-key-export>\n  yeokcham drive auth --client-id <google-desktop-client-id> [--redirect-port <port>]\n  yeokcham drive init --client-id <google-desktop-client-id>\n  yeokcham drive backup|push --client-id <google-desktop-client-id> --folder-id <drive-folder-id> --key-export <recovery-key-export> --passphrase-stdin <yeokcham-repo>\n  yeokcham drive restore|clone --client-id <google-desktop-client-id> --folder-id <drive-folder-id> --key-export <recovery-key-export> --passphrase-stdin <destination>\n  yeokcham drive verify --client-id <google-desktop-client-id> --folder-id <drive-folder-id> --key-export <recovery-key-export> --passphrase-stdin\n  yeokcham drive journal inspect --client-id <google-desktop-client-id> --folder-id <drive-folder-id> --key-export <recovery-key-export> --root-key <root-ed25519-public-key-hex> --passphrase-stdin <yeokcham-repo>"
     );
 }
 
@@ -1637,6 +1942,19 @@ mod tests {
         )
         .expect("GitHub inspection");
         assert!(matches!(inspect, Command::GithubInspect { .. }));
+        let plan = parse_command(
+            ["github", "plan", "--show-objects", "repository"]
+                .map(OsString::from)
+                .to_vec(),
+        )
+        .expect("GitHub publication plan");
+        assert!(matches!(
+            plan,
+            Command::GithubPublicationPlan {
+                repository,
+                show_objects: true,
+            } if repository == PathBuf::from("repository")
+        ));
         assert!(
             parse_command(
                 [

@@ -286,6 +286,90 @@ fn cli_persists_and_inspects_a_token_free_github_mirror_policy() {
 }
 
 #[test]
+fn cli_previews_the_complete_selected_github_publication_graph() {
+    let directory = TestDirectory::new();
+    let source = directory.path().join("source");
+    let repository = directory.path().join("repository");
+    fs::create_dir(&source).expect("create source repository");
+    run_git(&source, &["init", "-b", "main"]);
+    run_git(&source, &["config", "user.name", "Yeokcham Test"]);
+    run_git(
+        &source,
+        &["config", "user.email", "yeokcham-test@example.invalid"],
+    );
+    fs::write(source.join("published.txt"), b"published fixture\n").expect("write fixture");
+    run_git(&source, &["add", "published.txt"]);
+    run_git(&source, &["commit", "-m", "published fixture"]);
+    run_git(&source, &["tag", "-a", "v1.0", "-m", "version one"]);
+    let source_ids = GitRepository::open(&source)
+        .expect("open source")
+        .reachable_object_ids()
+        .expect("source object IDs");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_yeokcham"))
+        .args(["init", "--from-git"])
+        .arg(&source)
+        .arg(&repository)
+        .output()
+        .expect("import source");
+    assert!(
+        output.status.success(),
+        "import must succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let output = Command::new(env!("CARGO_BIN_EXE_yeokcham"))
+        .args(["github", "configure"])
+        .arg(&repository)
+        .args([
+            "--repository",
+            "yeokcham/example",
+            "--direction",
+            "publish-only",
+            "--publish",
+            "heads",
+            "--publish",
+            "tags",
+        ])
+        .output()
+        .expect("configure GitHub mirror");
+    assert!(
+        output.status.success(),
+        "configuration must succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let output = Command::new(env!("CARGO_BIN_EXE_yeokcham"))
+        .args(["github", "plan", "--show-objects"])
+        .arg(&repository)
+        .output()
+        .expect("preview GitHub publication");
+    assert!(
+        output.status.success(),
+        "publication preview must succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("publication output is UTF-8");
+    assert!(stdout.contains(&format!(
+        "github_publication_plan references=2 objects={}",
+        source_ids.len()
+    )));
+    assert!(stdout.contains("github_publication_reference local=refs/heads/main"));
+    assert!(stdout.contains("github_publication_reference local=refs/tags/v1.0"));
+    let planned_object_count = stdout
+        .lines()
+        .filter(|line| line.starts_with("github_publication_object="))
+        .count();
+    assert_eq!(planned_object_count, source_ids.len());
+    for id in source_ids {
+        assert!(
+            stdout.contains(&format!("github_publication_object={id}")),
+            "preview must report reachable object {id}"
+        );
+    }
+    assert!(!stdout.contains("published fixture"));
+}
+
+#[test]
 fn cli_import_verify_inspect_and_export_round_trip() {
     let directory = TestDirectory::new();
     let source = directory.path().join("source");
