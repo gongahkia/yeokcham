@@ -316,7 +316,7 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 ### Exit criteria
 
 - [x] Warm-cache benchmark suite is reproducible.
-- [ ] Daemon improves at least one target workload materially.
+- [x] Daemon improves at least one target workload materially. The [2026-07-31 W5 daemon-prebuilt checkout](benchmarks/results/2026-07-31-daemon-prewarmed/) is 57% lower at median and 46% lower at p95 than its cold helper case; startup and prewarm cost are excluded.
 - [x] Daemon can be disabled without data-format changes.
 
 ## Milestone 9 — Self-hosted HTTP service

@@ -1,0 +1,67 @@
+{
+  "schema_version": 1,
+  "result_kind": "measured",
+  "contains_sensitive_data": false,
+  "benchmark_id": "local-helper-sparse-workspace-warm",
+  "recorded_at": "2026-07-31T06:20:07Z",
+  "provenance": {
+    "yeokcham_version": "4dc5abb",
+    "yeokcham_commit": "4dc5abb03cdbd0b972f4045bed711c7e1e4bbfd7",
+    "worktree_dirty": false,
+    "git_version": "git version 2.55.0",
+    "rust_version": "rustc 1.85.0 (4d91de4e4 2025-02-17)",
+    "harness_version": "1"
+  },
+  "environment": {
+    "os_name": "Darwin",
+    "os_version": "26.5.2",
+    "kernel_version": "25.5.0",
+    "architecture": "arm64",
+    "cpu_model": "Apple M3",
+    "logical_cpu_count": 8,
+    "memory_bytes": 17179869184,
+    "storage_device": "/dev/disk3s5",
+    "filesystem": "/",
+    "available_disk_bytes": 59110055936
+  },
+  "fixture": {
+    "id": "generated-sparse-workspace",
+    "version": "1",
+    "workload": "w5_monorepo_sparse_workspace",
+    "checksum_algorithm": "sha256",
+    "checksum": "058e71b5460aaa5c10d62371c6850f56fddd6cf8605f4a71636921c590259080",
+    "parameters": {"revisions": 2, "selected_paths": 1, "excluded_current_bytes": 4194304, "excluded_historical_bytes": 4194304}
+  },
+  "configuration": {
+    "cache_state": "warm",
+    "backend_kind": "local_remote_helper",
+    "parameters": {"filter": "blob:none", "sparse_mode": "cone", "sparse_paths": ["app"], "cache_layer": "snapshot-pack", "cache_population": "warm", "transport_metric": "client .pack payload bytes"}
+  },
+  "network_conditions": {
+    "mode": "local",
+    "description": "local git-remote-yeokcham process transport; received pack payload bytes are recorded below",
+    "round_trip_latency_ms": 0,
+    "packet_loss_percent": 0,
+    "bandwidth_limit_bytes_per_second": null
+  },
+  "run": {
+    "started_at": "2026-07-31T06:20:01Z",
+    "ended_at": "2026-07-31T06:20:06Z",
+    "repetitions": 5,
+    "warmup_repetitions": 1,
+    "command": ["git", "clone --no-checkout --filter=blob:none yeokcham::<store> <target>", "git sparse-checkout set --cone app", "git checkout main"]
+  },
+  "metrics": {
+    "median_wall_time_ns": 1010000000,
+    "p95_wall_time_ns": 1160000000,
+    "p99_wall_time_ns": 1160000000,
+    "median_cpu_time_ns": 850000000,
+    "peak_rss_bytes": 32391168,
+    "io_bytes_read": null,
+    "io_bytes_written": null,
+    "network_request_count": 2,
+    "network_bytes_sent": 0,
+    "network_bytes_received": 772,
+    "final_storage_bytes": 151552
+  }
+}

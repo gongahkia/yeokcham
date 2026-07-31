@@ -37,4 +37,4 @@ Staging and final cache paths reject symlink misuse through the existing cache c
 
 ## Verification
 
-Daemon tests configure a real cone sparse-checkout file, prove selected-object hydration, and run strict Git fsck on the prebuilt helper cache. The W5 harness records cold, helper-warm, and daemon-prebuilt helper workflows from the same generated fixture.
+Daemon tests configure a real cone sparse-checkout file, prove selected-object hydration, and run strict Git fsck on the prebuilt helper cache. The W5 harness records cold, helper-warm, and daemon-prebuilt later-helper workflows from the same generated fixture; prewarm cost remains a separate measurement.
