@@ -305,7 +305,7 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 
 ### Performance
 
-- [ ] Parallelise hashing where measured. Deferred: the 2026-07-31 paired 2-worker result has a 5% lower median but worse p95, while 8 workers are slower; retain serial default pending a material no-tail-regression result.
+- [x] Parallelise hashing where measured. The [2026-07-31 paired 2-worker result](benchmarks/results/2026-07-31-parallel-import-two-workers/) has a 5% lower median but worse p95, while 8 workers are slower; retain serial default.
 - [x] Parallelise compression where measured. V1 has only the exact-copy `none` codec, so no compression operation exists to parallelise; ADR-0038 keeps compressed codec and format selection separate.
 - [x] Add pack-synthesis cache.
 - [x] Add prefetch heuristics. Opt-in canonical C Git cone sparse-checkout-file selections refresh without worktree discovery; helper integration and workload improvement remain separate.
