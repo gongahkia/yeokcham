@@ -499,6 +499,14 @@ neither links to the Compiler API nor accepts declaration, parser, symbol, type,
 or confidence evidence. Semantic persistence still requires separate format
 approval and an ADR.
 
+`paengi_semantic_retarget` is a separate pure selector over nonpersistent
+evidence facts. It emits ordered candidate reports, completeness flags, alias
+resolution status, selected stage, confidence, fallback status, and a concrete
+uncertainty reason. `paengi_semantic_fixtures` is a checked-in versioned
+40-case dataset used by both strategies; its oracle names expected bytes or a
+safe conflict. The selector has no storage, compiler process, or permanent
+identity dependency.
+
 ## 11. Conflict storage
 
 Conflicts should contain enough data to:

@@ -431,10 +431,13 @@ snapshot virtual-file boundary and unavailable outcomes for a missing helper,
 timeout, malformed response, crash, and oversized output.
 
 These are correctness checks, not performance gates. The current result is
-limited to exact-span replacement and the existing bounded declaration matcher;
-there is no published contextual textual-patch comparison or broad retargeting
-rate. `docs/experiments/semantic-sidecar-v1.md` records the only published
-false-confidence counts, and it must not be read as a general reliability claim.
+limited to exact-span replacement, the bounded declaration matcher, and a
+nonpersistent evidence selector. The deterministic shared fixture dataset has
+40 cases and drives both the byte-only contextual baseline and semantic
+selector. The versioned comparative result schema/aggregate report remains
+required before a broad retargeting-rate claim.
+`docs/experiments/semantic-sidecar-v1.md` records the published scope and must
+not be read as a general reliability claim.
 
 ## 10. Release gates
 

@@ -264,9 +264,23 @@
  (libraries alcotest paengi_semantic_retarget))
 
 (test
+ (name test_semantic_fixture_dataset)
+ (modules test_semantic_fixture_dataset)
+ (libraries
+  alcotest
+  paengi_semantic_fixtures
+  paengi_semantic_retarget
+  paengi_textual_patch))
+
+(test
  (name semantic_property_test)
  (modules semantic_property_test)
  (libraries alcotest qcheck-core qcheck-alcotest paengi_semantic))
+
+(test
+ (name semantic_retarget_property_test)
+ (modules semantic_retarget_property_test)
+ (libraries alcotest qcheck-core qcheck-alcotest paengi_semantic_retarget))
 
 (test
  (name test_capsule_store)
@@ -430,6 +444,7 @@
   (:workspace_property_test workspace_property_test.exe)
   (:release_validation_property_test release_validation_property_test.exe)
   (:semantic_property_test semantic_property_test.exe)
+  (:semantic_retarget_property_test semantic_retarget_property_test.exe)
   (source_tree fixtures/encoding))
  (action
   (progn
@@ -443,4 +458,5 @@
    (run %{capsule_durable_property_test})
    (run %{workspace_property_test})
    (run %{release_validation_property_test})
-   (run %{semantic_property_test}))))
+   (run %{semantic_property_test})
+   (run %{semantic_retarget_property_test}))))

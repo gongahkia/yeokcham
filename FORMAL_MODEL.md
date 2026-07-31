@@ -520,6 +520,27 @@ it is not an edit. This statement does not establish behavioural equivalence.
 No request, response, result, evidence, or replacement output from this
 boundary is persistently encoded in Milestone 7.
 
+### Milestone 7 evidence-stage retargeting
+
+The nonpersistent `paengi_semantic_retarget` core selects from explicit,
+deterministically ordered candidate evidence: (1) exact original declaration
+bytes, byte span, and context; (2) canonical project-relative module path plus
+exported-symbol path; (3) resolved alias or underlying-symbol text; (4)
+declaration kind, overload ordinal, signature, and type-shape evidence; (5)
+lexical or structural declaration path; (6) declaration-shape and token
+evidence; then (7) exact textual fallback. Each candidate report records every
+supporting stage and contradictory or missing stage. Candidate ordering is
+`candidate_id`, module path, then byte span.
+
+`Exact` requires the first stage's bytes, span, and context. `High` requires
+complete parser, resolution, and type-resolution evidence plus kind/shape and
+module/export or resolved-symbol evidence. Incomplete parsing or resolution,
+lexical similarity, shape/token similarity, and exact textual fallback cannot
+produce High. Equivalent surviving candidates return an ambiguity result. Low,
+medium, and unknown results are explicit uncertainty, not automatic semantic
+application. Compiler strings remain transient evidence and never become
+Paengi identities.
+
 ## 7. Application result
 
 ```ocaml

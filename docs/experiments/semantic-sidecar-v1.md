@@ -43,8 +43,8 @@ then caller-requested relaxed nearest context. Relaxation is bounded to
 applies only a unique candidate; missing or ambiguous candidates are structured
 conflicts. The result is an exact byte splice with unchanged prefix/suffix
 validation. A contextual textual match does not report semantic `exact`
-confidence. The complete shared semantic-versus-textual dataset and aggregate
-comparison remain subsequent Milestone 7 work.
+confidence. The versioned shared semantic-versus-textual aggregate comparison
+remains subsequent Milestone 7 work.
 
 The full-parser response is language-neutral. It includes project-relative
 declaration/name UTF-8 byte spans, declaration kind, lexical parent path,
@@ -54,6 +54,35 @@ TypeScript `Symbol` objects and internal IDs are run-local only;
 symbol-derived evidence is not a stable Paengi identity across arbitrary
 refactors. Parse damage or incomplete resolution cannot justify Exact or High
 semantic confidence.
+
+## Evidence-stage semantic retargeting
+
+`paengi_semantic_retarget` evaluates explicit candidate evidence in a fixed
+order: exact source bytes/span/context; module plus exported-symbol path;
+resolved alias or underlying symbol text; kind/overload/signature/type shape;
+lexical path; declaration shape/token evidence; and exact textual fallback.
+Every candidate retains supporting and contradictory evidence. Parsing,
+project-resolution, type-resolution, alias-resolution, selected stage,
+confidence, fallback use, and refusal reason are inspectable values.
+
+Compiler-derived names/locations are run-local evidence, not permanent Paengi
+semantic identities. Exact requires exact bytes, span, and context. High
+requires complete parse/resolution/type-resolution plus kind/shape and module
+or resolved-symbol evidence. Incomplete analysis, similarity-only evidence,
+and fallback cannot automatically apply as High. Equivalent evidence returns a
+structured ambiguity.
+
+## Shared fixture dataset v1
+
+`paengi_semantic_fixtures` is a checked-in, deterministic version-1 dataset of
+40 stable fixture IDs. Every case contains original/authored/retarget project
+bytes, operation ID, expected target span or safe-conflict oracle, confidence
+ceiling, parser/resolution expectations, and adversarial explanation. Both the
+semantic selector and textual baseline receive the same retarget bytes,
+operation intent, and oracle. Categories include moves, exports/aliases,
+overloads, merged declarations, namespaces, generics, decorators, TSX/JSX,
+Unicode/BOM/emoji/CRLF bytes, signature/split/merge damage, path mappings,
+ambiguity, already-satisfied changes, and binary textual-only input.
 
 ## Inputs
 
@@ -114,8 +143,8 @@ estimate a false-confidence rate.
 - The Compiler API adapter can apply only an exact-span, exact-preimage
   replace-node request. It reports `exact` only after byte, kind, shape, parse,
   lexical-context, and outside-byte checks; it does not retarget a moved node.
-- Fair same-fixture semantic/textual metrics, adversarial expanded cases, and
-  any persistent sidecar format remain undone.
+- Fair same-fixture semantic/textual aggregate metrics and any persistent
+  sidecar format remain undone.
 
 ## Reproduction
 
