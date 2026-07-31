@@ -137,3 +137,4 @@ The ADR lifecycle, numbering rules, and template are defined in [`docs/adr/READM
 - [ADR-024 — Compacted scratch generations](docs/adr/024-compacted-scratch-generations.md) — Accepted.
 - [ADR-025 — Durable capsules and revisions](docs/adr/025-durable-capsules-and-revisions.md) — Accepted.
 - [ADR-026 — Persistent workspaces, conflicts, and resolutions](docs/adr/026-persistent-workspaces-conflicts-and-resolutions.md) — Accepted.
+- [ADR-027 — Validation evidence, immutable releases, and attestations](docs/adr/027-validation-evidence-releases-and-attestations.md) — Accepted.

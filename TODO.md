@@ -5,15 +5,15 @@ Robustness tasks operate only on Paengi's pure functions and generated local fix
 
 ## Active vertical slice
 
-- Milestone: 5 — complete.
-- Task: persistent workspace selection, partial materialisation, immutable conflicts, immutable resolutions, and closeout verification.
-- Modules/files: extend `paengi_workspace`; add `paengi_workspace_store`; narrow `work`/`conflict` CLI; ADR-026 fixtures and restart/state-machine tests.
-- Types: stable workspace, immutable workspace revision and attempt, selected logical/physical revision link, conflict, immutable resolution, and checksummed workspace current ref.
-- Formats: additive Workspace, Workspace_revision, Workspace_attempt, Conflict, and Resolution v1 objects plus `refs/workspaces/<workspace-id>/current`; ADR-020 through ADR-025 remain unchanged.
-- Invariants: workspace IDs, workspace revision IDs, attempt IDs, conflict IDs, resolution IDs, and stored IDs are type-distinct; selected links resolve exactly; persisted order recomputes exactly; conflicts/resolutions are immutable; workspace ref uses CAS; guarded materialisation never claims cross-ref atomicity.
-- Tests: focused persistence/application/materialisation/resolution tests; canonical goldens and inverse decoders; non-overlapping composition/reopen, unresolved-conflict continuity, reachable-object corruption, and two-ref recovery; bounded seed-17 restart/state-machine properties. `make build`, focused tests per slice, `make format`, `make check`, `make property-test PROPERTY_TEST_SEED=17`, forced workspace state machine, and `git diff --check` are required.
+- Milestone: 6 — releases and validation.
+- Task: deterministic immutable-snapshot validation; immutable release evidence, creation, lookup, verification, and inspection; separated attestations; closeout.
+- Modules/files: add `paengi_validation` and `paengi_release`; narrow `validation`/`release` CLI; ADR-027 fixtures and restart/state-machine tests.
+- Types: canonical validation command, immutable validation evidence, logical release, release binding, parent resolver, and release attestation; all logical IDs remain distinct from `Stored_object_id`.
+- Formats: additive Validation_evidence, Release, Release_attestation v1 objects plus create-only `refs/releases/<release-id>`; ADR-020 through ADR-026 remain unchanged.
+- Invariants: validation targets an exact verified snapshot; runner output/time are bounded; evidence never advances refs; release links/reproduction/evidence bindings verify exactly; bindings are expected-absent/idempotent; attestation does not alter Release ID; Requires_release remains blocked by ADR-026's missing base-release context.
+- Tests: focused runner/persistence/release tests; canonical goldens/inverse decoders; corruption, reopen, interrupted binding, idempotency, deterministic list/show, reproduction, parent-cycle seam, and bounded seed-17 validation/release restart state machine. `make build`, focused tests per slice, `make format`, `make check`, `make property-test PROPERTY_TEST_SEED=17`, forced state machine, and `git diff --check` are required.
 - External libraries: existing Alcotest, QCheck, Profile 1 encoder, and Unix only.
-- ADR changes: ADR-026 accepted before persistent formats.
+- ADR changes: ADR-027 accepted before persistent formats.
 
 ## Milestone 0 — Project and model foundation
 
