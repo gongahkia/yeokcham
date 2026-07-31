@@ -54,7 +54,9 @@ complete file or claims behavioural equivalence.
 The OCaml boundary materialises its bounded request into a private temporary
 stdin descriptor, uses direct argv for Node, and enforces wall-clock timeout and
 stdout/stderr bounds. The helper also rejects request/response size excess and
-reports an elapsed-time overrun after a completed compiler call.
+reports an elapsed-time overrun after a completed compiler call. Protocol v1
+also rejects analysis exceeding 4096 declaration records before type checking;
+the handshake exposes this `declarationLimit` as a capability bound.
 
 Adapter declarations, paths, aliases, types, and source positions are transient
 evidence only. Neither TypeScript `Symbol` objects nor internal IDs are Paengi

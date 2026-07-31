@@ -40,6 +40,7 @@ const handshake = response({ protocolVersion: 1, operation: "handshake" });
 assert.equal(handshake.status, "ok");
 assert.equal(handshake.result.typescriptVersion, "5.9.3");
 assert.equal(handshake.result.minimumNodeVersion, "14.17.0");
+assert.equal(handshake.result.declarationLimit, 4096);
 assert.ok(handshake.result.capabilities.includes("virtual-files"));
 
 const unsupported = response({ protocolVersion: 2, operation: "handshake" });
@@ -146,13 +147,10 @@ assert.equal(unsupportedOption.status, "error");
 assert.equal(unsupportedOption.error.code, "invalid-compiler-options");
 
 const oneDeclaration = "export function f00000() {}\n";
-const repeated = oneDeclaration.repeat(18_000);
+const repeated = oneDeclaration.repeat(4_097);
 const tooLargeResponse = response(request([
   file("src/one.ts", "ts", repeated),
-  file("src/two.ts", "ts", repeated),
-  file("src/three.ts", "ts", repeated),
-  file("src/four.ts", "ts", repeated),
-], ["src/one.ts", "src/two.ts", "src/three.ts", "src/four.ts"]), { maxBuffer: 8 * 1024 * 1024 });
+], ["src/one.ts"]), { maxBuffer: 8 * 1024 * 1024 });
 assert.equal(tooLargeResponse.status, "error");
 assert.equal(tooLargeResponse.error.code, "response-too-large");
 

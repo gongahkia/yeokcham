@@ -220,6 +220,18 @@ let unsafe_paths_do_not_start_analysis () =
        ~root_files:[ "../escape.ts" ] ~files:[ source ]
        ~compiler_options:options)
 
+let declaration_limit_is_structured_unavailable () =
+  let declaration = "export function f00000() {}\n" in
+  let contents = String.concat "" (List.init 4_097 (fun _ -> declaration)) in
+  let source =
+    Adapter.Protocol.make_source_file ~path:"src/large.ts"
+      ~language:Adapter.Protocol.Ts ~contents
+  in
+  assert_unavailable_contains "adapter error response-too-large"
+    (Adapter.analyze_files configuration ~snapshot_id:(String.make 64 '4')
+       ~root_files:[ "src/large.ts" ] ~files:[ source ]
+       ~compiler_options:options)
+
 let replace_node_preserves_outside_bytes () =
   let source =
     "// prefix 😀\r\n\
@@ -341,6 +353,8 @@ let () =
             `Quick unavailable_adapter_preserves_textual_operation;
           Alcotest.test_case "unsafe virtual path is rejected" `Quick
             unsafe_paths_do_not_start_analysis;
+          Alcotest.test_case "declaration limit remains bounded" `Quick
+            declaration_limit_is_structured_unavailable;
           Alcotest.test_case "replace-node preserves exact outside bytes" `Quick
             replace_node_preserves_outside_bytes;
         ] );

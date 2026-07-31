@@ -21,7 +21,7 @@ Protocol v1 is a one-shot bounded request on stdin and JSON response on stdout;
 stderr carries process diagnostics. The OCaml-owned boundary invokes Node by
 direct argv, capability-detects the handshake, bounds request/stdout/stderr,
 and returns semantic-unavailable on absence, timeout, crash, malformed output,
-or protocol failure. It supplies a virtual file map collected only from a
+protocol failure, or the adapter's 4096-declaration response bound. It supplies a virtual file map collected only from a
 verified immutable Paengi snapshot. Ordinary Paengi read, restore,
 materialisation, export, verification, releases, and validation do not call or
 depend on it.

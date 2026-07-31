@@ -8,6 +8,7 @@ const PROTOCOL_VERSION = 1;
 const MINIMUM_NODE_VERSION = "14.17.0";
 const MAX_REQUEST_BYTES = 4 * 1024 * 1024;
 const MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
+const MAX_DECLARATIONS = 4096;
 const MAX_FILES = 128;
 const MAX_FILE_BYTES = 512 * 1024;
 const MAX_TIMEOUT_MS = 30_000;
@@ -471,60 +472,73 @@ function analyze(request) {
     },
   };
   const program = ts.createProgram({ rootNames: rootFiles, options: compiler.options, host });
-  const checker = program.getTypeChecker();
   const parserDiagnostics = program.getSyntacticDiagnostics().map((diagnostic) => diagnosticFor(diagnostic, filesByVirtualPath));
   const optionDiagnostics = program.getOptionsDiagnostics().map((diagnostic) => diagnosticFor(diagnostic, filesByVirtualPath));
-  const typeCheckerDiagnostics = program.getSemanticDiagnostics().map((diagnostic) => diagnosticFor(diagnostic, filesByVirtualPath));
-  const declarations = [];
+  const declarationNodes = [];
   for (const file of [...files].sort((left, right) => left.relativePath.localeCompare(right.relativePath))) {
     const sourceFile = program.getSourceFile(file.virtualPath);
     if (!sourceFile) continue;
-    const ordinalByScope = new Map();
+    let tooManyDeclarations = false;
     const visit = (node) => {
+      if (tooManyDeclarations) return;
       const kind = declarationKind(node);
       if (kind) {
-        const start = node.getStart(sourceFile, false);
-        const end = node.getEnd();
-        const nameNode = nameNodeFor(node);
-        const startByte = byteOffsetAtUtf16(sourceFile.text, start);
-        const endByte = byteOffsetAtUtf16(sourceFile.text, end);
-        const nameStartByte = nameNode ? byteOffsetAtUtf16(sourceFile.text, nameNode.getStart(sourceFile, false)) : undefined;
-        const nameEndByte = nameNode ? byteOffsetAtUtf16(sourceFile.text, nameNode.getEnd()) : undefined;
-        if (startByte !== undefined && endByte !== undefined) {
-          const syntacticName = syntacticNameFor(node) ?? null;
-          const parentDeclarationPath = declarationSegments(node, sourceFile);
-          const ordinalKey = `${parentDeclarationPath.join("/")}\0${kind}\0${syntacticName ?? ""}`;
-          const overloadOrdinal = ordinalByScope.get(ordinalKey) ?? 0;
-          ordinalByScope.set(ordinalKey, overloadOrdinal + 1);
-          const shape = shapeEvidence(node, sourceFile);
-          const visibility = exportStatus(node);
-          const record = {
-            path: file.relativePath,
-            declarationKind: kind,
-            declarationStartByte: startByte,
-            declarationEndByte: endByte,
-            parentDeclarationPath,
-            exported: visibility.exported,
-            default: visibility.default,
-            local: visibility.local,
-            syntacticName,
-            overloadOrdinal,
-            declarationShape: shape.evidence,
-            declarationShapeDigest: shape.digest,
-            signature: signatureEvidence(checker, node),
-            symbol: symbolEvidence(checker, node, sourceFile),
-          };
-          if (nameStartByte !== undefined && nameEndByte !== undefined) {
-            record.nameStartByte = nameStartByte;
-            record.nameEndByte = nameEndByte;
-          }
-          declarations.push(record);
+        if (declarationNodes.length >= MAX_DECLARATIONS) {
+          tooManyDeclarations = true;
+          return;
         }
+        declarationNodes.push({ file, sourceFile, node, kind });
       }
       ts.forEachChild(node, visit);
     };
     visit(sourceFile);
+    if (tooManyDeclarations) {
+      return fail("response-too-large", `analysis exceeds ${MAX_DECLARATIONS} declaration records`);
+    }
   }
+  const checker = program.getTypeChecker();
+  const typeCheckerDiagnostics = program.getSemanticDiagnostics().map((diagnostic) => diagnosticFor(diagnostic, filesByVirtualPath));
+  const ordinalByFile = new Map();
+  const declarations = declarationNodes.flatMap(({ file, sourceFile, node, kind }) => {
+    const start = node.getStart(sourceFile, false);
+    const end = node.getEnd();
+    const nameNode = nameNodeFor(node);
+    const startByte = byteOffsetAtUtf16(sourceFile.text, start);
+    const endByte = byteOffsetAtUtf16(sourceFile.text, end);
+    const nameStartByte = nameNode ? byteOffsetAtUtf16(sourceFile.text, nameNode.getStart(sourceFile, false)) : undefined;
+    const nameEndByte = nameNode ? byteOffsetAtUtf16(sourceFile.text, nameNode.getEnd()) : undefined;
+    if (startByte === undefined || endByte === undefined) return [];
+    const syntacticName = syntacticNameFor(node) ?? null;
+    const parentDeclarationPath = declarationSegments(node, sourceFile);
+    const ordinalByScope = ordinalByFile.get(file.relativePath) ?? new Map();
+    ordinalByFile.set(file.relativePath, ordinalByScope);
+    const ordinalKey = `${parentDeclarationPath.join("/")}\0${kind}\0${syntacticName ?? ""}`;
+    const overloadOrdinal = ordinalByScope.get(ordinalKey) ?? 0;
+    ordinalByScope.set(ordinalKey, overloadOrdinal + 1);
+    const shape = shapeEvidence(node, sourceFile);
+    const visibility = exportStatus(node);
+    const record = {
+      path: file.relativePath,
+      declarationKind: kind,
+      declarationStartByte: startByte,
+      declarationEndByte: endByte,
+      parentDeclarationPath,
+      exported: visibility.exported,
+      default: visibility.default,
+      local: visibility.local,
+      syntacticName,
+      overloadOrdinal,
+      declarationShape: shape.evidence,
+      declarationShapeDigest: shape.digest,
+      signature: signatureEvidence(checker, node),
+      symbol: symbolEvidence(checker, node, sourceFile),
+    };
+    if (nameStartByte !== undefined && nameEndByte !== undefined) {
+      record.nameStartByte = nameStartByte;
+      record.nameEndByte = nameEndByte;
+    }
+    return [record];
+  });
   declarations.sort((left, right) => left.path.localeCompare(right.path)
     || left.declarationStartByte - right.declarationStartByte
     || left.declarationEndByte - right.declarationEndByte
@@ -701,6 +715,7 @@ function handshake(request) {
       minimumNodeVersion: MINIMUM_NODE_VERSION,
       requestLimitBytes: MAX_REQUEST_BYTES,
       responseLimitBytes: MAX_RESPONSE_BYTES,
+      declarationLimit: MAX_DECLARATIONS,
       capabilities: ["analyze", "replace-node", "ts", "tsx", "virtual-files", "symbol-evidence"],
     },
   };
