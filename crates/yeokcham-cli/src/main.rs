@@ -32,6 +32,8 @@ const MAXIMUM_CACHE_PATHS: usize = 100_000;
 const MAXIMUM_CACHE_DEPTH: usize = 32;
 const MAXIMUM_GITHUB_GIT_OUTPUT_BYTES: usize = 64 * 1024 * 1024;
 const MAXIMUM_GITHUB_REFERENCE_BYTES: usize = 255;
+const MAXIMUM_GITHUB_REMOTE_REFS: usize = 2_048;
+const MAXIMUM_GITHUB_FETCH_REFSPEC_BYTES: usize = 512 * 1024;
 
 type DefaultDriveBackend = EncryptedBackend<
     DriveBackend<
@@ -134,6 +136,10 @@ enum Command {
         repository: PathBuf,
         source: yeokcham_core::RefName,
         remote: yeokcham_core::RefName,
+        transport: GithubTransport,
+    },
+    GithubFetch {
+        repository: PathBuf,
         transport: GithubTransport,
     },
     DriveAuth {
@@ -249,6 +255,10 @@ fn main() -> ExitCode {
             remote,
             transport,
         } => github_publish_pull_request_branch(repository, source, remote, transport),
+        Command::GithubFetch {
+            repository,
+            transport,
+        } => github_fetch(repository, transport),
         Command::DriveAuth {
             client_id,
             redirect_port,
@@ -496,6 +506,27 @@ fn parse_github(arguments: &[OsString]) -> Result<Command> {
             repository,
             source,
             remote,
+            transport,
+        });
+    }
+    if arguments.len() >= 3 && arguments[1].as_os_str() == OsStr::new("fetch") {
+        let repository = PathBuf::from(&arguments[2]);
+        let mut transport = GithubTransport::Https;
+        let mut transport_seen = false;
+        let mut index = 3;
+        while index < arguments.len() {
+            if arguments[index].as_os_str() != OsStr::new("--transport") || transport_seen {
+                return Err(usage_error());
+            }
+            let Some(value) = arguments.get(index + 1).and_then(|value| value.to_str()) else {
+                return Err(usage_error());
+            };
+            transport = value.parse()?;
+            transport_seen = true;
+            index += 2;
+        }
+        return Ok(Command::GithubFetch {
+            repository,
             transport,
         });
     }
@@ -994,6 +1025,283 @@ fn github_publish_pull_request_branch(
     )
 }
 
+fn github_fetch(repository: PathBuf, transport: GithubTransport) -> Result<()> {
+    let limits = GitImportLimits::initial()?;
+    let repository = LocalRepository::open(repository)?;
+    let configuration = repository
+        .github_mirror_configuration()?
+        .ok_or_else(|| Error::new(ErrorKind::NotFound, "GitHub mirror is not configured"))?;
+    if configuration.direction() == GithubMirrorDirection::PublishOnly {
+        return Err(Error::new(
+            ErrorKind::InvalidInput,
+            "GitHub mirror direction does not allow ingestion",
+        ));
+    }
+    let remote_url = github_remote_url(&configuration, transport);
+    let remote_refs = github_all_remote_refs(&remote_url)?;
+    let references =
+        selected_github_ingestion_references(&repository, &configuration, &remote_refs, limits)?;
+    let imported_object_count =
+        github_fetch_remote_objects(&repository, &references, &remote_url, limits)?;
+    let remote_reference_count = references
+        .iter()
+        .filter(|reference| reference.remote_object_id.is_some())
+        .count();
+    let remote_only_count = references
+        .iter()
+        .filter(|reference| {
+            reference.local_object_id.is_none() && reference.remote_object_id.is_some()
+        })
+        .count();
+    let local_only_count = references
+        .iter()
+        .filter(|reference| {
+            reference.local_object_id.is_some() && reference.remote_object_id.is_none()
+        })
+        .count();
+    let divergent_count = references
+        .iter()
+        .filter(|reference| {
+            matches!(
+                (reference.local_object_id, reference.remote_object_id),
+                (Some(local), Some(remote)) if local != remote
+            )
+        })
+        .count();
+    println!(
+        "github_fetched transport={} remote_refs={} imported_objects={} remote_only={} local_only={} divergent={}",
+        transport.as_str(),
+        remote_reference_count,
+        imported_object_count,
+        remote_only_count,
+        local_only_count,
+        divergent_count,
+    );
+    Ok(())
+}
+
+struct GithubIngestionReference {
+    local: yeokcham_core::RefName,
+    remote: yeokcham_core::RefName,
+    local_object_id: Option<GitObjectId>,
+    remote_object_id: Option<GitObjectId>,
+}
+
+fn selected_github_ingestion_references(
+    repository: &LocalRepository,
+    configuration: &GithubMirrorConfiguration,
+    remote_refs: &BTreeMap<yeokcham_core::RefName, GitObjectId>,
+    limits: GitImportLimits,
+) -> Result<Vec<GithubIngestionReference>> {
+    let state = repository
+        .resolve_ref_state(limits.ref_snapshot_limits())?
+        .ok_or_else(|| {
+            Error::new(
+                ErrorKind::NotFound,
+                "repository has no acknowledged ref state",
+            )
+        })?;
+    let mut mappings = BTreeMap::new();
+    for (local, checkpoint) in configuration.checkpoints() {
+        github_reference_text(local)?;
+        github_reference_text(checkpoint.remote_reference())?;
+        mappings.insert(local.clone(), checkpoint.remote_reference().clone());
+    }
+    for local in state
+        .regular_refs()
+        .keys()
+        .filter(|reference| configuration.selects_reference(reference))
+    {
+        github_reference_text(local)?;
+        mappings
+            .entry(local.clone())
+            .or_insert_with(|| local.clone());
+    }
+    for remote in remote_refs
+        .keys()
+        .filter(|reference| configuration.selects_reference(reference))
+    {
+        mappings
+            .entry(remote.clone())
+            .or_insert_with(|| remote.clone());
+    }
+    let mut remote_mappings = BTreeSet::new();
+    let mut references = Vec::with_capacity(mappings.len());
+    for (local, remote) in mappings {
+        if !remote_mappings.insert(remote.clone()) {
+            return Err(Error::new(
+                ErrorKind::Conflict,
+                "GitHub mirror maps multiple local refs to one remote ref",
+            ));
+        }
+        references.push(GithubIngestionReference {
+            local_object_id: state.regular_refs().get(&local).copied(),
+            remote_object_id: remote_refs.get(&remote).copied(),
+            local,
+            remote,
+        });
+    }
+    Ok(references)
+}
+
+fn github_fetch_remote_objects(
+    repository: &LocalRepository,
+    references: &[GithubIngestionReference],
+    remote_url: &str,
+    limits: GitImportLimits,
+) -> Result<usize> {
+    let fetched_references = references
+        .iter()
+        .filter(|reference| reference.remote_object_id.is_some())
+        .collect::<Vec<_>>();
+    if fetched_references.is_empty() {
+        return Ok(0);
+    }
+    let temporary = create_temporary_github_fetch()?;
+    let result = (|| {
+        fetch_github_refs(&temporary, remote_url, &fetched_references)?;
+        let fetched = GitRepository::open(&temporary)?;
+        let fetched_state = fetched.ref_state()?;
+        for (index, reference) in fetched_references.iter().enumerate() {
+            let scratch = github_fetch_scratch_reference(index)?;
+            if fetched_state.regular_refs().get(&scratch) != reference.remote_object_id.as_ref() {
+                return Err(Error::new(
+                    ErrorKind::Conflict,
+                    "GitHub ref changed during fetch",
+                ));
+            }
+        }
+        let report = repository.import_git_objects(&fetched, limits)?;
+        let observed_at_unix_seconds = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map_err(|_| Error::new(ErrorKind::Internal, "system clock is before Unix epoch"))?
+            .as_secs();
+        let checkpoints = references.iter().filter_map(|reference| {
+            Some((
+                reference.local.clone(),
+                yeokcham_core::GithubMirrorCheckpoint::new(
+                    reference.local_object_id?,
+                    reference.remote.clone(),
+                    reference.remote_object_id?,
+                    observed_at_unix_seconds,
+                ),
+            ))
+        });
+        let checkpoints = checkpoints.collect::<Vec<_>>();
+        if !checkpoints.is_empty() {
+            repository
+                .record_github_mirror_checkpoints(checkpoints, limits.ref_snapshot_limits())?;
+        }
+        Ok(report.object_count())
+    })();
+    let cleanup = remove_temporary_github_export(&temporary);
+    match (result, cleanup) {
+        (Err(error), _) => Err(error),
+        (Ok(_), Err(error)) => Err(error),
+        (Ok(object_count), Ok(())) => Ok(object_count),
+    }
+}
+
+fn create_temporary_github_fetch() -> Result<PathBuf> {
+    for _ in 0..16 {
+        let path = env::temp_dir().join(format!("yeokcham-github-fetch-{}", uuid::Uuid::new_v4()));
+        match fs::create_dir(&path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(error) => {
+                return Err(Error::with_source(
+                    ErrorKind::Io,
+                    "temporary GitHub fetch path could not be created",
+                    error,
+                ));
+            }
+        }
+        let mut command = github_git_command();
+        command.args(["init", "--bare", "--quiet"]).arg(&path);
+        match run_bounded_git_stdout(
+            command,
+            16 * 1024,
+            "temporary GitHub fetch repository could not be initialized",
+        ) {
+            Ok(_) => return Ok(path),
+            Err(error) => {
+                let _ = fs::remove_dir_all(&path);
+                return Err(error);
+            }
+        }
+    }
+    Err(Error::new(
+        ErrorKind::Conflict,
+        "temporary GitHub fetch path could not be allocated",
+    ))
+}
+
+fn fetch_github_refs(
+    temporary: &Path,
+    remote_url: &str,
+    references: &[&GithubIngestionReference],
+) -> Result<()> {
+    let mut refspecs = Vec::with_capacity(references.len());
+    let mut refspec_bytes = 0_usize;
+    for (index, reference) in references.iter().enumerate() {
+        let refspec = format!(
+            "+{}:{}",
+            github_reference_text(&reference.remote)?,
+            github_fetch_scratch_reference_text(index)?,
+        );
+        refspec_bytes = refspec_bytes.checked_add(refspec.len()).ok_or_else(|| {
+            Error::new(
+                ErrorKind::Unsupported,
+                "GitHub fetch refspecs are too large",
+            )
+        })?;
+        if refspec_bytes > MAXIMUM_GITHUB_FETCH_REFSPEC_BYTES {
+            return Err(Error::new(
+                ErrorKind::Unsupported,
+                "GitHub fetch refspecs are too large",
+            ));
+        }
+        refspecs.push(refspec);
+    }
+    let maximum_output_bytes = references
+        .len()
+        .checked_mul(512)
+        .ok_or_else(|| Error::new(ErrorKind::Unsupported, "GitHub fetch output is too large"))?;
+    let mut command = github_git_command();
+    command.arg("--git-dir").arg(temporary).args([
+        "-c",
+        "fetch.writeCommitGraph=false",
+        "fetch",
+        "--atomic",
+        "--no-tags",
+        "--no-write-fetch-head",
+        "--refmap=",
+        "--quiet",
+        remote_url,
+    ]);
+    command.args(refspecs);
+    run_bounded_git_stdout(
+        command,
+        maximum_output_bytes,
+        "GitHub fetch could not be completed",
+    )?;
+    Ok(())
+}
+
+fn github_fetch_scratch_reference(index: usize) -> Result<yeokcham_core::RefName> {
+    github_fetch_scratch_reference_text(index)?.parse()
+}
+
+fn github_fetch_scratch_reference_text(index: usize) -> Result<String> {
+    if index >= MAXIMUM_GITHUB_REMOTE_REFS {
+        return Err(Error::new(
+            ErrorKind::Unsupported,
+            "GitHub fetch ref count is too large",
+        ));
+    }
+    Ok(format!("refs/yeokcham/github/{index:04x}"))
+}
+
 fn github_publish_references(
     repository: &LocalRepository,
     configuration: &GithubMirrorConfiguration,
@@ -1139,10 +1447,40 @@ fn github_remote_refs(
         maximum_output_bytes,
         "GitHub refs could not be read",
     )?;
+    let remote_refs = parse_github_remote_refs(&output, false)?;
     let expected = references
         .iter()
         .map(|reference| reference.remote.clone())
         .collect::<BTreeSet<_>>();
+    if remote_refs
+        .keys()
+        .any(|reference| !expected.contains(reference))
+    {
+        return Err(Error::new(
+            ErrorKind::CorruptData,
+            "GitHub refs have an unexpected record",
+        ));
+    }
+    Ok(remote_refs)
+}
+
+fn github_all_remote_refs(
+    remote_url: &str,
+) -> Result<BTreeMap<yeokcham_core::RefName, GitObjectId>> {
+    let mut command = github_git_command();
+    command.args(["ls-remote", "--refs", remote_url]);
+    let output = run_bounded_git_stdout(
+        command,
+        MAXIMUM_GITHUB_GIT_OUTPUT_BYTES,
+        "GitHub refs could not be read",
+    )?;
+    parse_github_remote_refs(&output, true)
+}
+
+fn parse_github_remote_refs(
+    output: &[u8],
+    standard_only: bool,
+) -> Result<BTreeMap<yeokcham_core::RefName, GitObjectId>> {
     let mut remote_refs = BTreeMap::new();
     for line in output
         .split(|byte| *byte == b'\n')
@@ -1159,19 +1497,21 @@ fn github_remote_refs(
             .ok()
             .and_then(|id| id.parse::<GitObjectId>().ok())
             .ok_or_else(|| Error::new(ErrorKind::CorruptData, "GitHub refs have an invalid ID"))?;
-        let reference = std::str::from_utf8(reference)
-            .ok()
-            .and_then(|reference| reference.parse().ok())
-            .ok_or_else(|| {
-                Error::new(
-                    ErrorKind::CorruptData,
-                    "GitHub refs have an invalid reference",
-                )
-            })?;
-        if !expected.contains(&reference) || remote_refs.insert(reference, id).is_some() {
+        let reference = yeokcham_core::RefName::from_bytes(reference).map_err(|_| {
+            Error::new(
+                ErrorKind::CorruptData,
+                "GitHub refs have an invalid reference",
+            )
+        })?;
+        if standard_only && !is_github_standard_reference(&reference) {
+            continue;
+        }
+        if remote_refs.len() == MAXIMUM_GITHUB_REMOTE_REFS
+            || remote_refs.insert(reference, id).is_some()
+        {
             return Err(Error::new(
                 ErrorKind::CorruptData,
-                "GitHub refs have an unexpected record",
+                "GitHub refs have an invalid record set",
             ));
         }
     }
@@ -1442,22 +1782,25 @@ fn github_publication_object_ids(
 }
 
 fn github_reference_text(reference: &yeokcham_core::RefName) -> Result<&str> {
-    let bytes = reference.as_bytes();
-    if bytes.len() > MAXIMUM_GITHUB_REFERENCE_BYTES
-        || !bytes.is_ascii()
-        || (!bytes.starts_with(b"refs/heads/") && !bytes.starts_with(b"refs/tags/"))
-    {
+    if !is_github_standard_reference(reference) {
         return Err(Error::new(
             ErrorKind::Unsupported,
             "GitHub publication reference is not supported",
         ));
     }
-    std::str::from_utf8(bytes).map_err(|_| {
+    std::str::from_utf8(reference.as_bytes()).map_err(|_| {
         Error::new(
             ErrorKind::Internal,
             "GitHub publication reference is not valid UTF-8",
         )
     })
+}
+
+fn is_github_standard_reference(reference: &yeokcham_core::RefName) -> bool {
+    let bytes = reference.as_bytes();
+    bytes.len() <= MAXIMUM_GITHUB_REFERENCE_BYTES
+        && bytes.is_ascii()
+        && (bytes.starts_with(b"refs/heads/") || bytes.starts_with(b"refs/tags/"))
 }
 
 fn github_git_command() -> ProcessCommand {
@@ -2635,6 +2978,167 @@ mod tests {
     }
 
     #[test]
+    fn fetches_selected_remote_objects_without_changing_refs() {
+        let temporary = TestDirectory::new();
+        let source = temporary.path().join("source");
+        let store = temporary.path().join("store");
+        let remote = temporary.path().join("remote.git");
+        let remote_worktree = temporary.path().join("remote-worktree");
+        fs::create_dir(&source).expect("create source");
+        run_test_git(&source, &["init", "-b", "main"]);
+        run_test_git(&source, &["config", "user.name", "Yeokcham Test"]);
+        run_test_git(
+            &source,
+            &["config", "user.email", "yeokcham-test@example.invalid"],
+        );
+        fs::write(source.join("base.txt"), b"base\n").expect("write base");
+        run_test_git(&source, &["add", "base.txt"]);
+        run_test_git(&source, &["commit", "-m", "base"]);
+        let output = ProcessCommand::new("git")
+            .args(["init", "--bare"])
+            .arg(&remote)
+            .output()
+            .expect("create remote");
+        assert!(output.status.success());
+        let remote_text = remote.to_str().expect("UTF-8 remote path");
+        run_test_git(
+            &source,
+            &["push", remote_text, "refs/heads/main:refs/heads/main"],
+        );
+        let output = ProcessCommand::new("git")
+            .args(["clone", "--quiet", "--branch", "main"])
+            .arg(&remote)
+            .arg(&remote_worktree)
+            .output()
+            .expect("clone remote");
+        assert!(output.status.success());
+        run_test_git(&remote_worktree, &["config", "user.name", "Yeokcham Test"]);
+        run_test_git(
+            &remote_worktree,
+            &["config", "user.email", "yeokcham-test@example.invalid"],
+        );
+        run_test_git(&remote_worktree, &["switch", "--orphan", "rewritten"]);
+        fs::write(remote_worktree.join("rewritten.txt"), b"rewritten\n")
+            .expect("write rewritten history");
+        run_test_git(&remote_worktree, &["add", "rewritten.txt"]);
+        run_test_git(&remote_worktree, &["commit", "-m", "rewritten"]);
+        run_test_git(&remote_worktree, &["branch", "-f", "main", "rewritten"]);
+        run_test_git(&remote_worktree, &["switch", "-c", "remote-only"]);
+        fs::write(remote_worktree.join("remote-only.txt"), b"remote only\n")
+            .expect("write remote-only history");
+        run_test_git(&remote_worktree, &["add", "remote-only.txt"]);
+        run_test_git(&remote_worktree, &["commit", "-m", "remote only"]);
+        run_test_git(
+            &remote_worktree,
+            &[
+                "push",
+                "--force",
+                "origin",
+                "refs/heads/main:refs/heads/main",
+                "refs/heads/remote-only:refs/heads/remote-only",
+            ],
+        );
+
+        let limits = GitImportLimits::initial().expect("limits");
+        let repository = LocalRepository::create(&store).expect("create store");
+        repository
+            .import_git_repository(&GitRepository::open(&source).expect("open source"), limits)
+            .expect("import source");
+        let original_state = repository
+            .resolve_ref_state(limits.ref_snapshot_limits())
+            .expect("resolve source refs")
+            .expect("source refs");
+        let configuration = GithubMirrorConfiguration::new(
+            repository.id(),
+            "yeokcham/example".parse().expect("target"),
+            GithubMirrorDirection::BidirectionalFastForward,
+            GithubForceUpdatePolicy::Reject,
+            [GithubPublicationRule::Heads],
+        )
+        .expect("configuration");
+        repository
+            .configure_github_mirror(&configuration)
+            .expect("configure mirror");
+        let remote_refs = github_all_remote_refs(remote_text).expect("read remote refs");
+        let references =
+            selected_github_ingestion_references(&repository, &configuration, &remote_refs, limits)
+                .expect("select remote refs");
+        assert_eq!(references.len(), 2);
+        assert_eq!(
+            references
+                .iter()
+                .filter(|reference| {
+                    reference.local_object_id.is_none() && reference.remote_object_id.is_some()
+                })
+                .count(),
+            1
+        );
+        assert_eq!(
+            references
+                .iter()
+                .filter(|reference| {
+                    matches!(
+                        (reference.local_object_id, reference.remote_object_id),
+                        (Some(local), Some(remote)) if local != remote
+                    )
+                })
+                .count(),
+            1
+        );
+        assert!(
+            github_fetch_remote_objects(&repository, &references, remote_text, limits)
+                .expect("fetch and import remote objects")
+                > 0
+        );
+        assert_eq!(
+            repository
+                .resolve_ref_state(limits.ref_snapshot_limits())
+                .expect("resolve unchanged refs"),
+            Some(original_state.clone())
+        );
+        let remote_only = references
+            .iter()
+            .find(|reference| reference.local_object_id.is_none())
+            .expect("remote-only reference");
+        let remote_only_id = remote_only.remote_object_id.expect("remote-only object");
+        let remote_only_manifest = repository
+            .resolve_metadata_object_manifest(
+                remote_only_id,
+                limits.metadata_object_manifest_limits(),
+            )
+            .expect("resolve imported remote-only manifest")
+            .expect("remote-only manifest");
+        assert_eq!(
+            repository
+                .reconstruct_metadata_object(
+                    &remote_only_manifest,
+                    limits.chunked_blob_storage_limits().maximum_segment_bytes(),
+                    limits.chunked_blob_storage_limits().segment_read_limits(),
+                )
+                .expect("reconstruct imported remote-only object")
+                .id(),
+            remote_only_id
+        );
+        let main: yeokcham_core::RefName = "refs/heads/main".parse().expect("main ref");
+        let fetched_configuration = repository
+            .github_mirror_configuration()
+            .expect("read configuration")
+            .expect("configuration");
+        let checkpoint = fetched_configuration
+            .checkpoints()
+            .get(&main)
+            .expect("main checkpoint");
+        assert_eq!(
+            checkpoint.local_object_id(),
+            *original_state
+                .regular_refs()
+                .get(&main)
+                .expect("local main")
+        );
+        assert_ne!(checkpoint.remote_object_id(), checkpoint.local_object_id());
+    }
+
+    #[test]
     fn parses_github_mirror_configuration_and_rejects_ambiguous_policy() {
         let command = parse_command(
             [
@@ -2736,6 +3240,19 @@ mod tests {
             } if repository == PathBuf::from("repository")
                 && source.as_bytes() == b"refs/heads/main"
                 && remote.as_bytes() == b"refs/heads/review/change"
+        ));
+        let fetch = parse_command(
+            ["github", "fetch", "repository", "--transport", "ssh"]
+                .map(OsString::from)
+                .to_vec(),
+        )
+        .expect("GitHub fetch");
+        assert!(matches!(
+            fetch,
+            Command::GithubFetch {
+                repository,
+                transport: GithubTransport::Ssh,
+            } if repository == PathBuf::from("repository")
         ));
         let error = match parse_command(
             ["github", "publish", "repository"]

@@ -2104,112 +2104,26 @@ impl LocalRepository {
             ));
         }
 
-        let ids = source.reachable_object_ids()?;
-        if ids.len() > limits.maximum_objects() {
-            return Err(Error::new(
-                ErrorKind::Unsupported,
-                "Git import exceeds the object-count limit",
-            ));
-        }
         let ref_state = source.ref_state()?;
-        let mut tiny_blobs = Vec::new();
-        let mut report = GitImportReport {
-            ref_count: ref_state.regular_refs().len(),
-            ..GitImportReport::default()
-        };
-
-        for id in ids {
-            let object = source.read_verified_object(id, limits.maximum_object_bytes())?;
-            self.record_object_metadata(&object)?;
-            match object.kind() {
-                GitObjectKind::Blob if object.data().len() <= limits.tiny_blob_maximum_bytes() => {
-                    tiny_blobs.push(object);
-                    report.tiny_blob_count =
-                        report.tiny_blob_count.checked_add(1).ok_or_else(|| {
-                            Error::new(ErrorKind::Unsupported, "Git import object count overflows")
-                        })?;
-                }
-                GitObjectKind::Blob
-                    if object.data().len() >= limits.chunked_blob_minimum_bytes() =>
-                {
-                    self.store_chunked_blob(
-                        ManifestId::generate(),
-                        &object,
-                        limits.chunker(),
-                        limits.chunked_blob_storage_limits(),
-                    )?;
-                    report.chunked_blob_count =
-                        report.chunked_blob_count.checked_add(1).ok_or_else(|| {
-                            Error::new(ErrorKind::Unsupported, "Git import object count overflows")
-                        })?;
-                }
-                GitObjectKind::Blob => {
-                    self.store_whole_blob(&object, limits)?;
-                    report.whole_blob_count =
-                        report.whole_blob_count.checked_add(1).ok_or_else(|| {
-                            Error::new(ErrorKind::Unsupported, "Git import object count overflows")
-                        })?;
-                }
-                GitObjectKind::Tree | GitObjectKind::Commit | GitObjectKind::Tag => {
-                    self.store_metadata_object(&object, limits)?;
-                    report.metadata_object_count =
-                        report.metadata_object_count.checked_add(1).ok_or_else(|| {
-                            Error::new(ErrorKind::Unsupported, "Git import object count overflows")
-                        })?;
-                }
-            }
-        }
-        self.store_tiny_blobs(&tiny_blobs, limits)?;
-        self.verify(verification_limits)?;
+        let mut report = self.import_git_objects(source, limits)?;
+        report.ref_count = ref_state.regular_refs().len();
         let snapshot = RefSnapshot::new(self.id, ManifestId::generate(), ref_state)?;
         self.publish_ref_snapshot(&snapshot, limits.ref_snapshot_publication_limits()?)?;
         self.verify(verification_limits)?;
         Ok(report)
     }
 
-    /// Imports newly reachable source objects, then appends one checked local
-    /// ref-state transition for the source's current refs.
+    /// Imports every object reachable from `source` without changing refs.
     ///
-    /// This is a single-writer local maintenance operation. It preserves every
-    /// old immutable record and rejects a concurrent or divergent transition
-    /// instead of replacing refs. V1 events have integrity checks but no
-    /// signatures, so callers must use one trusted local writer identity.
-    pub fn sync_git_repository(
+    /// Existing objects must reconstruct to the exact verified source bytes.
+    /// New immutable records can remain unreachable if the process fails; no
+    /// ref snapshot or journal event is created by this operation.
+    pub fn import_git_objects(
         &self,
         source: &GitRepository,
-        device_id: DeviceId,
-        limits: GitImportLimits,
-    ) -> Result<GitImportReport> {
-        let Some(expected_state) = self.resolve_ref_state(limits.ref_snapshot_limits())? else {
-            return Err(Error::new(
-                ErrorKind::NotFound,
-                "Git sync requires an initial ref snapshot",
-            ));
-        };
-        self.sync_git_repository_from_expected_state(source, &expected_state, device_id, limits)
-    }
-
-    /// syncs only when `expected_state` remains the local ref predecessor.
-    pub fn sync_git_repository_from_expected_state(
-        &self,
-        source: &GitRepository,
-        expected_state: &GitRefState,
-        device_id: DeviceId,
         limits: GitImportLimits,
     ) -> Result<GitImportReport> {
         let verification_limits = limits.verification_limits()?;
-        let Some(current_state) = self.resolve_ref_state(limits.ref_snapshot_limits())? else {
-            return Err(Error::new(
-                ErrorKind::NotFound,
-                "Git sync requires an initial ref snapshot",
-            ));
-        };
-        if current_state != *expected_state {
-            return Err(Error::new(
-                ErrorKind::Conflict,
-                "ref state changed before the Git source could be synchronized",
-            ));
-        }
         let ids = source.reachable_object_ids()?;
         if ids.len() > limits.maximum_objects() {
             return Err(Error::new(
@@ -2217,13 +2131,8 @@ impl LocalRepository {
                 "Git import exceeds the object-count limit",
             ));
         }
-        let ref_state = source.ref_state()?;
         let mut tiny_blobs = Vec::new();
-        let mut report = GitImportReport {
-            ref_count: ref_state.regular_refs().len(),
-            ..GitImportReport::default()
-        };
-
+        let mut report = GitImportReport::default();
         for id in ids {
             let object = source.read_verified_object(id, limits.maximum_object_bytes())?;
             if let Some(existing) = self.find_published_git_object(
@@ -2283,6 +2192,55 @@ impl LocalRepository {
         }
         self.store_tiny_blobs(&tiny_blobs, limits)?;
         self.verify(verification_limits)?;
+        Ok(report)
+    }
+
+    /// Imports newly reachable source objects, then appends one checked local
+    /// ref-state transition for the source's current refs.
+    ///
+    /// This is a single-writer local maintenance operation. It preserves every
+    /// old immutable record and rejects a concurrent or divergent transition
+    /// instead of replacing refs. V1 events have integrity checks but no
+    /// signatures, so callers must use one trusted local writer identity.
+    pub fn sync_git_repository(
+        &self,
+        source: &GitRepository,
+        device_id: DeviceId,
+        limits: GitImportLimits,
+    ) -> Result<GitImportReport> {
+        let Some(expected_state) = self.resolve_ref_state(limits.ref_snapshot_limits())? else {
+            return Err(Error::new(
+                ErrorKind::NotFound,
+                "Git sync requires an initial ref snapshot",
+            ));
+        };
+        self.sync_git_repository_from_expected_state(source, &expected_state, device_id, limits)
+    }
+
+    /// syncs only when `expected_state` remains the local ref predecessor.
+    pub fn sync_git_repository_from_expected_state(
+        &self,
+        source: &GitRepository,
+        expected_state: &GitRefState,
+        device_id: DeviceId,
+        limits: GitImportLimits,
+    ) -> Result<GitImportReport> {
+        let verification_limits = limits.verification_limits()?;
+        let Some(current_state) = self.resolve_ref_state(limits.ref_snapshot_limits())? else {
+            return Err(Error::new(
+                ErrorKind::NotFound,
+                "Git sync requires an initial ref snapshot",
+            ));
+        };
+        if current_state != *expected_state {
+            return Err(Error::new(
+                ErrorKind::Conflict,
+                "ref state changed before the Git source could be synchronized",
+            ));
+        }
+        let ref_state = source.ref_state()?;
+        let mut report = self.import_git_objects(source, limits)?;
+        report.ref_count = ref_state.regular_refs().len();
         self.append_ref_state_if_current(
             ref_state,
             device_id,
@@ -7483,6 +7441,77 @@ mod tests {
         assert_eq!(
             git_output_in(&source_path, &["rev-parse", "HEAD^{tree}"]),
             git_output_in(&exported_path, &["rev-parse", "HEAD^{tree}"])
+        );
+    }
+
+    #[test]
+    fn imports_reachable_objects_without_changing_acknowledged_refs() {
+        let directory = TestDirectory::new();
+        let source_path = directory.path().join("source");
+        let repository_path = directory.path().join("repository");
+        fs::create_dir(&source_path).expect("create source path");
+        run_git_in(&source_path, &["init", "-b", "main"]);
+        run_git_in(&source_path, &["config", "user.name", "Yeokcham Test"]);
+        run_git_in(
+            &source_path,
+            &["config", "user.email", "yeokcham-test@example.invalid"],
+        );
+        fs::write(source_path.join("README.md"), b"first\n").expect("write first body");
+        run_git_in(&source_path, &["add", "README.md"]);
+        run_git_in(&source_path, &["commit", "-m", "first"]);
+
+        let limits = GitImportLimits::initial().expect("limits");
+        let repository = LocalRepository::create(&repository_path).expect("create destination");
+        repository
+            .import_git_repository(
+                &GitRepository::open(&source_path).expect("open initial source"),
+                limits,
+            )
+            .expect("initial import");
+        let initial_state = repository
+            .resolve_ref_state(limits.ref_snapshot_limits())
+            .expect("resolve initial refs")
+            .expect("initial refs");
+
+        fs::write(source_path.join("README.md"), b"second\n").expect("write second body");
+        run_git_in(&source_path, &["add", "README.md"]);
+        run_git_in(&source_path, &["commit", "-m", "second"]);
+        let updated_source = GitRepository::open(&source_path).expect("open updated source");
+        let updated_id = *updated_source
+            .ref_state()
+            .expect("updated refs")
+            .regular_refs()
+            .get(&"refs/heads/main".parse().expect("main ref"))
+            .expect("updated main");
+        let report = repository
+            .import_git_objects(&updated_source, limits)
+            .expect("import updated objects");
+        assert!(report.object_count() > 0);
+        assert_eq!(report.ref_count(), 0);
+        assert_eq!(
+            repository
+                .resolve_ref_state(limits.ref_snapshot_limits())
+                .expect("resolve unchanged refs"),
+            Some(initial_state)
+        );
+        assert!(
+            repository
+                .find_published_git_object(
+                    updated_id,
+                    limits.chunked_blob_storage_limits().maximum_segment_bytes(),
+                    limits.chunked_blob_storage_limits().segment_read_limits(),
+                    limits.blob_manifest_limits(),
+                    limits.metadata_object_manifest_limits(),
+                )
+                .expect("resolve imported commit")
+                .is_some()
+        );
+        assert_eq!(
+            repository
+                .import_git_objects(&updated_source, limits)
+                .expect("repeat import")
+                .object_count(),
+            0
         );
     }
 
