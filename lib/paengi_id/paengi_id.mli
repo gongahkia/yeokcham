@@ -23,6 +23,9 @@ module Snapshot_id : S
 module Checkpoint_id : S
 module Capsule_id : S
 module Capsule_revision_id : S
+module Workspace_id : S
+module Workspace_revision_id : S
+module Workspace_attempt_id : S
 module Release_id : S
 module Conflict_id : S
 module Operation_id : S

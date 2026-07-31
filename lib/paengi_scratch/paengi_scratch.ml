@@ -1269,6 +1269,9 @@ module Cleanup_manifest = struct
     | Envelope.Scratch_generation_segment | Envelope.Scratch_generation
     | Envelope.Scratch_cleanup_manifest ->
         false
+    | Envelope.Workspace | Envelope.Workspace_revision
+    | Envelope.Workspace_attempt ->
+        false
 
   let compare_candidate left right =
     Store.Stored_object_id.compare left.object_id right.object_id

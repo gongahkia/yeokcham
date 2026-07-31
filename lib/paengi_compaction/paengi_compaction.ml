@@ -348,7 +348,9 @@ let object_children scratch store identity envelope =
   | Envelope.Capsule | Envelope.Capsule_revision | Envelope.Release
   | Envelope.Conflict | Envelope.Validation | Envelope.Resolution
   | Envelope.Repository_config | Envelope.Scratch_generation_segment
-  | Envelope.Scratch_generation | Envelope.Scratch_cleanup_manifest ->
+  | Envelope.Scratch_generation | Envelope.Scratch_cleanup_manifest
+  | Envelope.Workspace | Envelope.Workspace_revision
+  | Envelope.Workspace_attempt ->
       Error (Reachable_object_type_unsupported (Envelope.object_type envelope))
 
 let add_size total size =

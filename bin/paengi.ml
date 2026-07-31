@@ -5,6 +5,7 @@ module Compaction = Paengi_compaction
 module Capsule = Paengi_capsule
 module Capsule_store = Paengi_capsule_store
 module Workspace = Paengi_workspace
+module Workspace_store = Paengi_workspace_store
 
 let now () = Int64.of_float (Unix.gettimeofday ())
 
@@ -24,6 +25,21 @@ let capsule_id value =
 
 let revision_id value =
   match Paengi_id.Capsule_revision_id.of_hex value with
+  | Ok identity -> identity
+  | Error error -> fail Paengi_id.parse_error_to_string error
+
+let workspace_id value =
+  match Paengi_id.Workspace_id.of_hex value with
+  | Ok identity -> identity
+  | Error error -> fail Paengi_id.parse_error_to_string error
+
+let snapshot_id value =
+  match Store.Stored_object_id.of_hex value with
+  | Ok identity -> Snapshot.Snapshot.of_stored_object_id identity
+  | Error error -> fail Store.Stored_object_id.parse_error_to_string error
+
+let conflict_id value =
+  match Paengi_id.Conflict_id.of_hex value with
   | Ok identity -> identity
   | Error error -> fail Paengi_id.parse_error_to_string error
 
@@ -772,77 +788,257 @@ let capsule root arguments =
                 revisions))
   | _ -> exit 2
 
+let print_workspace resolved =
+  let workspace = Workspace_store.resolved_workspace resolved in
+  let revision = Workspace_store.resolved_revision resolved in
+  let current = Workspace_store.resolved_current_ref resolved in
+  Printf.printf "workspace=%s revision=%s generation=%Ld base=%s\n"
+    (Paengi_id.Workspace_id.to_hex (Workspace_store.workspace_id workspace))
+    (Paengi_id.Workspace_revision_id.to_hex
+       (Workspace_store.revision_id revision))
+    (Workspace_store.current_generation current)
+    (Store.Stored_object_id.to_hex
+       (Snapshot.Snapshot.stored_object_id (Workspace_store.revision_base revision)));
+  Workspace_store.revision_selected revision
+  |> List.iteri (fun index link ->
+      Printf.printf "selected[%d] capsule=%s revision=%s object=%s\n" index
+        (Paengi_id.Capsule_id.to_hex
+           (Capsule_store.revision_link_capsule link))
+        (Paengi_id.Capsule_revision_id.to_hex
+           (Capsule_store.revision_link_revision link))
+        (Store.Stored_object_id.to_hex
+           (Capsule_store.revision_link_object link)));
+  match Workspace_store.current_latest_attempt current with
+  | None -> ()
+  | Some (attempt, object_id) ->
+      Printf.printf "latest-attempt=%s object=%s\n"
+        (Paengi_id.Workspace_attempt_id.to_hex attempt)
+        (Store.Stored_object_id.to_hex object_id)
+
+let print_workspace_order order =
+  Workspace.revisions order
+  |> List.iteri (fun index selected ->
+      Printf.printf "order[%d] capsule=%s revision=%s\n" index
+        (Paengi_id.Capsule_id.to_hex selected.Workspace.capsule)
+        (Paengi_id.Capsule_revision_id.to_hex selected.Workspace.revision));
+  Workspace.edges order
+  |> List.iter (fun edge ->
+      Printf.printf "edge before=%s after=%s reasons=%s\n"
+        (Paengi_id.Capsule_revision_id.to_hex edge.Workspace.before)
+        (Paengi_id.Capsule_revision_id.to_hex edge.Workspace.after)
+        (String.concat ","
+           (List.map Workspace.edge_kind_to_string edge.Workspace.reasons)))
+
+let legacy_workspace_order root options =
+  let parse_order value =
+    let values = String.split_on_char ',' value in
+    if values = [] || List.exists String.is_empty values then exit 2
+    else List.map revision_id values
+  in
+  let rec parse enabled explicit_order = function
+    | [] -> (List.rev enabled, explicit_order)
+    | "--enable" :: value :: rest ->
+        parse (capsule_id value :: enabled) explicit_order rest
+    | "--order" :: value :: rest ->
+        if Option.is_some explicit_order then exit 2
+        else parse enabled (Some (parse_order value)) rest
+    | _ -> exit 2
+  in
+  let enabled, explicit_order = parse [] None options in
+  if enabled = [] then exit 2;
+  match Store.open_repository ~root with
+  | Error error -> fail Store.error_to_string error
+  | Ok store ->
+      let rec resolve reversed = function
+        | [] -> Ok (List.rev reversed)
+        | capsule :: rest -> (
+            match Capsule_store.Durable.read_current store capsule with
+            | Error error -> Error (Capsule_store.error_to_string error)
+            | Ok resolved ->
+                let revision = Capsule_store.Durable.resolved_revision resolved in
+                let selected : Workspace.selected_revision =
+                  {
+                    Workspace.capsule =
+                      Capsule_store.capsule_id
+                        (Capsule_store.Durable.resolved_capsule resolved);
+                    revision = Capsule_store.revision_id revision;
+                    dependencies = Capsule_store.revision_dependencies revision;
+                  }
+                in
+                resolve (selected :: reversed) rest)
+      in
+      match resolve [] enabled with
+      | Error error -> fail Fun.id error
+      | Ok selected -> (
+          match Workspace.derive_order ~selected ~explicit_order with
+          | Error error -> fail Workspace.error_to_string error
+          | Ok order -> print_workspace_order order)
+
 let workspace root arguments =
   match arguments with
-  | "explain-order" :: options -> (
-      let parse_order value =
-        let values = String.split_on_char ',' value in
-        if values = [] || List.exists String.is_empty values then exit 2
-        else List.map revision_id values
-      in
-      let rec parse enabled explicit_order = function
-        | [] -> (List.rev enabled, explicit_order)
-        | "--enable" :: value :: rest ->
-            parse (capsule_id value :: enabled) explicit_order rest
-        | "--order" :: value :: rest ->
-            if Option.is_some explicit_order then exit 2
-            else parse enabled (Some (parse_order value)) rest
+  | "create" :: options ->
+      let rec parse id base name description = function
+        | [] -> (
+            match (id, base) with
+            | Some id, Some base -> (id, base, name, description)
+            | _ -> exit 2)
+        | "--id" :: value :: rest ->
+            parse (Some (workspace_id value)) base name description rest
+        | "--base" :: value :: rest ->
+            parse id (Some (snapshot_id value)) name description rest
+        | "--name" :: value :: rest -> parse id base (Some value) description rest
+        | "--description" :: value :: rest ->
+            parse id base name (Some value) rest
         | _ -> exit 2
       in
-      let enabled, explicit_order = parse [] None options in
-      if enabled = [] then exit 2;
-      match Store.open_repository ~root with
+      let id, base, name, description = parse None None None None options in
+      (match Store.open_repository ~root with
       | Error error -> fail Store.error_to_string error
       | Ok store -> (
-          let rec resolve reversed = function
-            | [] -> Ok (List.rev reversed)
-            | capsule :: rest -> (
-                match Capsule_store.Durable.read_current store capsule with
-                | Error error -> Error (Capsule_store.error_to_string error)
-                | Ok resolved ->
-                    let revision =
-                      Capsule_store.Durable.resolved_revision resolved
-                    in
-                    let selected : Workspace.selected_revision =
-                      {
-                        Workspace.capsule =
-                          Capsule_store.capsule_id
-                            (Capsule_store.Durable.resolved_capsule resolved);
-                        revision = Capsule_store.revision_id revision;
-                        dependencies =
-                          Capsule_store.revision_dependencies revision;
-                      }
-                    in
-                    resolve (selected :: reversed) rest)
-          in
-          match resolve [] enabled with
+          Workspace_store.Durable.create ~store ~id ~base ~name ~description
+            ~created_at:(now ())
+          |> Result.map_error Workspace_store.error_to_string
+          |> function
           | Error error -> fail Fun.id error
-          | Ok selected -> (
-              match Workspace.derive_order ~selected ~explicit_order with
-              | Error error -> fail Workspace.error_to_string error
-              | Ok order ->
-                  Workspace.revisions order
-                  |> List.iteri (fun index selected ->
-                      Printf.printf "order[%d] capsule=%s revision=%s\n" index
-                        (Paengi_id.Capsule_id.to_hex selected.Workspace.capsule)
-                        (Paengi_id.Capsule_revision_id.to_hex
-                           selected.Workspace.revision));
-                  Workspace.edges order
-                  |> List.iter (fun edge ->
-                      Printf.printf "edge before=%s after=%s reasons=%s\n"
-                        (Paengi_id.Capsule_revision_id.to_hex
-                           edge.Workspace.before)
-                        (Paengi_id.Capsule_revision_id.to_hex
-                           edge.Workspace.after)
-                        (String.concat ","
-                           (List.map Workspace.edge_kind_to_string
-                              edge.Workspace.reasons))))))
+          | Ok resolved -> print_workspace resolved))
+  | [ "show"; workspace ] -> (
+      match Store.open_repository ~root with
+      | Error error -> fail Store.error_to_string error
+      | Ok store ->
+          Workspace_store.Durable.read_current store (workspace_id workspace)
+          |> Result.map_error Workspace_store.error_to_string
+          |> function
+          | Error error -> fail Fun.id error
+          | Ok resolved -> print_workspace resolved)
+  | [ "enable"; workspace; capsule ] -> (
+      match Store.open_repository ~root with
+      | Error error -> fail Store.error_to_string error
+      | Ok store ->
+          Workspace_store.Durable.enable_current_capsule ~store
+            ~workspace:(workspace_id workspace) ~capsule:(capsule_id capsule)
+            ~expected_generation:None ~created_at:(now ())
+          |> Result.map_error Workspace_store.error_to_string
+          |> function
+          | Error error -> fail Fun.id error
+          | Ok resolved -> print_workspace resolved)
+  | [ "disable"; workspace; capsule ] -> (
+      match Store.open_repository ~root with
+      | Error error -> fail Store.error_to_string error
+      | Ok store ->
+          Workspace_store.Durable.disable_capsule ~store
+            ~workspace:(workspace_id workspace) ~capsule:(capsule_id capsule)
+            ~expected_generation:None ~created_at:(now ())
+          |> Result.map_error Workspace_store.error_to_string
+          |> function
+          | Error error -> fail Fun.id error
+          | Ok resolved -> print_workspace resolved)
+  | [ "reorder"; workspace; "--order"; order ] -> (
+      let values = String.split_on_char ',' order in
+      if values = [] || List.exists String.is_empty values then exit 2;
+      match Store.open_repository ~root with
+      | Error error -> fail Store.error_to_string error
+      | Ok store ->
+          Workspace_store.Durable.reorder ~store ~workspace:(workspace_id workspace)
+            ~order:(List.map revision_id values) ~expected_generation:None
+            ~created_at:(now ())
+          |> Result.map_error Workspace_store.error_to_string
+          |> function
+          | Error error -> fail Fun.id error
+          | Ok resolved -> print_workspace resolved)
+  | [ "explain-order"; workspace ] -> (
+      match Store.open_repository ~root with
+      | Error error -> fail Store.error_to_string error
+      | Ok store ->
+          Workspace_store.Durable.explain_order store (workspace_id workspace)
+          |> Result.map_error Workspace_store.error_to_string
+          |> function
+          | Error error -> fail Fun.id error
+          | Ok order -> print_workspace_order order)
+  | "explain-order" :: options -> legacy_workspace_order root options
+  | [ "materialise"; workspace ]
+  | [ "materialise"; workspace; "--dry-run" ] as values ->
+      let dry_run = List.exists (String.equal "--dry-run") values in
+      (match open_scratch root with
+      | Error error -> fail Fun.id error
+      | Ok (store, scratch) ->
+          Workspace_store.Durable.materialise ~store ~scratch ~root
+            ~workspace:(workspace_id workspace) ~observed_at:(now ())
+            ~created_at:(now ()) ~dry_run ()
+          |> Result.map_error Workspace_store.error_to_string
+          |> function
+          | Error error -> fail Fun.id error
+          | Ok materialisation ->
+              Printf.printf "attempt=%s partial=%b actions=%d\n"
+                (Paengi_id.Workspace_attempt_id.to_hex
+                   (Workspace_store.attempt_id
+                      materialisation.Workspace_store.Durable.attempt))
+                materialisation.Workspace_store.Durable.partial
+                (List.length materialisation.Workspace_store.Durable.actions);
+              List.iter (fun action -> print_endline (render_operation action))
+                materialisation.Workspace_store.Durable.actions)
+  | _ -> exit 2
+
+let conflict root arguments =
+  match arguments with
+  | [ "list"; workspace ] | [ "history"; workspace ] -> (
+      match Store.open_repository ~root with
+      | Error error -> fail Store.error_to_string error
+      | Ok store ->
+          Workspace_store.Durable.list_conflicts store (workspace_id workspace)
+          |> Result.map_error Workspace_store.error_to_string
+          |> function
+          | Error error -> fail Fun.id error
+          | Ok conflicts ->
+              List.iter
+                (fun conflict ->
+                  Printf.printf "conflict=%s capsule=%s revision=%s operation=%d\n"
+                    (Paengi_id.Conflict_id.to_hex
+                       (Workspace_store.conflict_id conflict))
+                    (Paengi_id.Capsule_id.to_hex
+                       (Workspace_store.conflict_capsule conflict))
+                    (Paengi_id.Capsule_revision_id.to_hex
+                       (Workspace_store.conflict_capsule_revision conflict))
+                    (Workspace_store.conflict_operation_index conflict))
+                conflicts)
+  | [ "show"; conflict ] -> (
+      match Store.open_repository ~root with
+      | Error error -> fail Store.error_to_string error
+      | Ok store ->
+          Workspace_store.Durable.show_conflict store (conflict_id conflict)
+          |> Result.map_error Workspace_store.error_to_string
+          |> function
+          | Error error -> fail Fun.id error
+          | Ok conflict ->
+              Printf.printf "conflict=%s kind=%s paths=%s candidates=%s\n"
+                (Paengi_id.Conflict_id.to_hex (Workspace_store.conflict_id conflict))
+                (match Workspace_store.conflict_kind conflict with
+                | Workspace_store.Missing_or_ambiguous_precondition -> "missing-or-ambiguous-precondition"
+                | Workspace_store.Competing_edits -> "competing-edits"
+                | Workspace_store.Delete_modify -> "delete-modify"
+                | Workspace_store.Move_modify -> "move-modify"
+                | Workspace_store.Binary_conflict -> "binary-conflict"
+                | Workspace_store.Dependency_failure -> "dependency-failure"
+                | Workspace_store.Unsupported_or_uncertain_operation -> "unsupported-or-uncertain-operation")
+                (Workspace_store.conflict_paths conflict
+                |> List.map render_path |> String.concat ",")
+                (String.concat "," (Workspace_store.conflict_candidates conflict)))
+  | [ "resolve"; workspace; conflict; "--action"; "skip" ] -> (
+      match Store.open_repository ~root with
+      | Error error -> fail Store.error_to_string error
+      | Ok store ->
+          Workspace_store.Durable.resolve_skip ~store
+            ~workspace:(workspace_id workspace) ~conflict:(conflict_id conflict)
+            ~expected_generation:None ~created_at:(now ())
+          |> Result.map_error Workspace_store.error_to_string
+          |> function
+          | Error error -> fail Fun.id error
+          | Ok resolved -> print_workspace resolved)
   | _ -> exit 2
 
 let usage () =
   prerr_endline
     "usage: paengi \
-     <init|checkpoint|timeline|restore|pin|unpin|compact|watch|capsule|work> \
+     <init|checkpoint|timeline|restore|pin|unpin|compact|watch|capsule|work|conflict> \
      [--root PATH] ...";
   exit 2
 
@@ -863,6 +1059,7 @@ let () =
         | "watch" -> watch root arguments
         | "capsule" -> capsule root arguments
         | "work" -> workspace root arguments
+        | "conflict" -> conflict root arguments
         | _ -> usage ())
     | _ -> usage ()
   with Sys.Break -> print_endline "watch stopped"

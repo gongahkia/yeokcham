@@ -14,6 +14,9 @@ type snapshot_id
 type checkpoint_id
 type capsule_id
 type capsule_revision_id
+type workspace_id
+type workspace_revision_id
+type workspace_attempt_id
 type release_id
 type conflict_id
 type operation_id
@@ -473,31 +476,73 @@ type conflict = {
   id : conflict_id;
   kind : conflict_kind;
   base_snapshot : snapshot_id;
+  workspace : workspace_id;
+  workspace_revision : workspace_revision_id;
+  workspace_attempt : workspace_attempt_id option;
   capsule_revision : capsule_revision_id;
   path : path option;
   candidates : resolution_candidate list;
-  status : conflict_status;
 }
 ```
 
 ```ocaml
-type conflict_status =
-  | Unresolved
-  | Resolved of resolution_id
-  | Superseded of conflict_id
+type resolution = {
+  id : resolution_id;
+  conflict : conflict_id;
+  workspace_revision : workspace_revision_id;
+  workspace_attempt : workspace_attempt_id option;
+  action : resolution_action;
+  preconditions : exact_precondition list;
+  expected_state : exact_state;
+  created_at : timestamp;
+}
 ```
 
-Conflicts are repository objects and may outlive a process invocation.
+Conflicts and resolutions are immutable repository objects and may outlive a
+process invocation. A resolution is active only when a later immutable workspace
+revision binds it to its conflict; Conflict itself has no mutable resolved flag.
 
 ## 9. Workspace model
 
 ```ocaml
-type workspace_spec = {
-  base_release : release_id option;
+type selected_capsule_revision = {
+  capsule : capsule_id;
+  revision : capsule_revision_id;
+  revision_object : stored_object_id;
+}
+
+type workspace = {
+  id : workspace_id;
+  created_at : timestamp;
+  initial_name : string option;
+  initial_description : string option;
+}
+
+type workspace_revision = {
+  id : workspace_revision_id;
+  workspace : workspace_id;
+  parent : workspace_revision_id option;
   base_snapshot : snapshot_id;
-  enabled_capsules : capsule_revision_id list;
-  explicit_order : capsule_revision_id list option;
-  policies : workspace_policy list;
+  selected : selected_capsule_revision list;
+  explicit_precedence : (capsule_revision_id * capsule_revision_id) list;
+  resolved_order : capsule_revision_id list;
+  resolutions : (conflict_id * resolution_id * stored_object_id) list;
+  provenance : workspace_provenance;
+  created_at : timestamp;
+}
+
+type workspace_attempt = {
+  id : workspace_attempt_id;
+  workspace : workspace_id;
+  workspace_revision : workspace_revision_id;
+  base_snapshot : snapshot_id;
+  ordered_capsules : selected_capsule_revision list;
+  starting_checkpoint : checkpoint_id;
+  starting_snapshot : snapshot_id;
+  outcomes : operation_outcome list;
+  resulting_snapshot : snapshot_id;
+  conflicts : conflict_id list;
+  created_at : timestamp;
 }
 ```
 
@@ -522,9 +567,14 @@ selected revision exactly once; adjacent entries add precedence edges. The
 resolver topologically sorts all edges, using ascending logical revision ID as
 its sole unconstrained tie-breaker, and rejects any cycle.
 
-This subset is read-only and format-free. It neither persists a workspace nor
-creates a `Conflict` object; those later Milestone 5 adapters must preserve the
-resolved order and represent application failures as durable conflict values.
+ADR-026 makes this selection durable. `Workspace_v1` contains only stable
+metadata. Each selection, base, precedence, or resolution change creates a new
+immutable `Workspace_revision_v1`; its selected links include logical capsule
+and revision identity plus verified physical revision object. The stored
+resolved order must equal recomputation. `Workspace_attempt_v1` records one
+exact application and may be partial. The current ref is the sole mutable
+visibility point and carries logical/physical workspace and revision links,
+optional latest attempt, checksum, and CAS generation.
 
 ### Composition invariant
 
@@ -538,6 +588,14 @@ For identical:
 - Tool version and mandatory format features.
 
 the resulting snapshot and conflict set must be identical.
+
+On a localized application conflict, that operation is not applied. Operations
+whose exact preconditions remain valid continue; later operations proven to
+depend on an affected failed path are recorded as blocked. The partial snapshot
+and all outcomes are exact application evidence, not a claim that every selected
+capsule applied. Guarded workspace materialisation reuses scratch safety
+checkpointing and filesystem protections. Scratch-head and workspace-ref CAS
+publication are a documented non-atomic two-ref boundary.
 
 ## 10. Revision and retargeting
 

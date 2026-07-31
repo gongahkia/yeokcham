@@ -154,6 +154,22 @@
  (libraries alcotest paengi_capsule paengi_id paengi_workspace))
 
 (test
+ (name test_workspace_store)
+ (modules test_workspace_store)
+ (libraries
+  alcotest
+  paengi_capsule
+  paengi_capsule_store
+  paengi_id
+  paengi_scratch
+  paengi_snapshot
+  paengi_store
+  paengi_testkit
+  paengi_workspace
+  paengi_workspace_store
+  unix))
+
+(test
  (name test_capsule_store)
  (modules test_capsule_store)
  (libraries

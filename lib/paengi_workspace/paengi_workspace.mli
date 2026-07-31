@@ -51,3 +51,71 @@ val derive_order :
 
 val revisions : order -> selected_revision list
 val edges : order -> edge list
+
+type application_revision = {
+  selected : selected_revision;
+  operations : Capsule.operation list;
+}
+
+type conflict_kind =
+  | Missing_or_ambiguous_precondition
+  | Competing_edits
+  | Delete_modify
+  | Move_modify
+  | Binary_conflict
+  | Dependency_failure
+  | Unsupported_or_uncertain_operation
+
+type application_conflict = {
+  conflict_capsule : Paengi_id.Capsule_id.t;
+  conflict_revision : Paengi_id.Capsule_revision_id.t;
+  operation_index : int;
+  kind : conflict_kind;
+  paths : Paengi_scratch.path list;
+  current : Paengi_scratch.entry option;
+}
+
+type operation_outcome =
+  | Applied_exactly of {
+      capsule : Paengi_id.Capsule_id.t;
+      revision : Paengi_id.Capsule_revision_id.t;
+      operation_index : int;
+    }
+  | Already_satisfied of {
+      capsule : Paengi_id.Capsule_id.t;
+      revision : Paengi_id.Capsule_revision_id.t;
+      operation_index : int;
+    }
+  | Persistent_conflict of application_conflict
+  | Blocked_dependency of {
+      capsule : Paengi_id.Capsule_id.t;
+      revision : Paengi_id.Capsule_revision_id.t;
+      operation_index : int;
+      blocked_by : application_conflict;
+    }
+  | Rejected_operation of application_conflict
+  | Resolved_explicitly of {
+      capsule : Paengi_id.Capsule_id.t;
+      revision : Paengi_id.Capsule_revision_id.t;
+      operation_index : int;
+    }
+
+type resolution_action = Skip_operation of {
+  capsule : Paengi_id.Capsule_id.t;
+  revision : Paengi_id.Capsule_revision_id.t;
+  operation_index : int;
+}
+
+type application = {
+  state : Paengi_scratch.State.t;
+  outcomes : operation_outcome list;
+  conflicts : application_conflict list;
+}
+
+val conflict_kind_to_string : conflict_kind -> string
+
+val apply :
+  state:Paengi_scratch.State.t ->
+  ordered:application_revision list ->
+  resolutions:resolution_action list ->
+  application

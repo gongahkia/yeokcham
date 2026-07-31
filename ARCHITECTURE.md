@@ -171,7 +171,8 @@ Conceptual local layout:
   refs/
     scratch-head
     scratch-generation
-    workspace
+    workspaces/
+      <workspace-id>/current
     capsules/
     releases/
   indexes/
@@ -352,12 +353,13 @@ Inputs:
 - Resolution records.
 - Policy.
 
-The first Milestone 5 adapter is intentionally read-only and format-free:
-`paengi_workspace` derives order from already resolved immutable revisions and
-the CLI only explains that result. It validates required selected revisions,
-declared capsule incompatibilities, optional `Ordered_after` edges, and a full
-user precedence sequence. A persistent workspace ref, materialisation shell,
-and conflict store require their own schemas and publication rules.
+`paengi_workspace` remains the pure resolver/application core. ADR-026 adds
+`paengi_workspace_store` as the persistence and guarded-materialisation shell:
+immutable Workspace/Workspace_revision/Workspace_attempt/Conflict/Resolution
+objects, checksummed CAS current refs at `refs/workspaces/<workspace-id>/current`,
+and validated ref-directory listing. Its selected links bind logical capsule
+revisions to exact physical objects; a stored resolved order must recompute.
+Indexes remain rebuildable.
 
 Outputs:
 
@@ -367,7 +369,7 @@ Outputs:
 - Validation status.
 - Working-directory update plan.
 
-Working-directory update should be transactional where possible:
+Working-directory update follows guarded scratch materialisation:
 
 1. Compute target snapshot.
 2. Create write plan.
@@ -375,7 +377,13 @@ Working-directory update should be transactional where possible:
 4. Write temporary files.
 5. Atomically replace files where supported.
 6. Record pre-operation safety checkpoint.
-7. Update workspace ref only after successful materialisation.
+7. Rescan and create/reuse a resulting scratch checkpoint.
+8. CAS-advance scratch head.
+9. CAS-update the workspace ref with the immutable attempt.
+
+The final two ref publications are not cross-ref atomic. Recovery re-resolves
+immutable workspace inputs and allows an exact retry when scratch-head
+publication succeeded before workspace-attempt publication.
 
 Milestone 1 materialisation is intentionally narrower: it emits an inspectable dry-run plan and writes only to an existing empty destination with exclusive file creation. It preserves regular bytes, executable mode, directories, and symlink target bytes; unsafe decoded names and nonempty destinations reject. Workspace transactional replacement and safety checkpoints remain scratch/workspace work.
 

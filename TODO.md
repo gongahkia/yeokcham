@@ -6,14 +6,14 @@ Robustness tasks operate only on Paengi's pure functions and generated local fix
 ## Active vertical slice
 
 - Milestone: 5 — Workspaces and conflicts.
-- Task: dependency graph and read-only order explanation.
-- Modules/files: new `paengi_workspace`; `paengi work explain-order`; focused graph tests and property test.
-- Types: selected immutable revision, precedence edge/reason, deterministic order, and structured dependency errors.
-- Formats: no new schema, object type, ref, or golden. ADR-020 through ADR-025 remain unchanged.
-- Invariants: one selected revision per capsule; required exact revisions are present; declared incompatibilities reject; optional declared ordering applies only to selected capsules; explicit precedence covers the exact selected set; dependency cycles reject; revision-ID tie-breaking is deterministic.
-- Tests: focused required/missing/release/conflict/cycle/precedence tests plus bounded permutation property with printed seed. `make build`, focused tests, `make format`, `make check`, and `make property-test PROPERTY_TEST_SEED=17` are required.
+- Task: persistent workspace selection, partial materialisation, immutable conflicts, and immutable resolutions.
+- Modules/files: extend `paengi_workspace`; add `paengi_workspace_store`; narrow `work`/`conflict` CLI; ADR-026 fixtures and restart/state-machine tests.
+- Types: stable workspace, immutable workspace revision and attempt, selected logical/physical revision link, conflict, immutable resolution, and checksummed workspace current ref.
+- Formats: additive Workspace, Workspace_revision, Workspace_attempt, Conflict, and Resolution v1 objects plus `refs/workspaces/<workspace-id>/current`; ADR-020 through ADR-025 remain unchanged.
+- Invariants: workspace IDs, workspace revision IDs, attempt IDs, conflict IDs, resolution IDs, and stored IDs are type-distinct; selected links resolve exactly; persisted order recomputes exactly; conflicts/resolutions are immutable; workspace ref uses CAS; guarded materialisation never claims cross-ref atomicity.
+- Tests: focused persistence/application/materialisation/resolution tests; canonical goldens and inverse decoders; bounded seed-17 restart/state-machine properties. `make build`, focused tests per slice, `make format`, `make check`, `make property-test PROPERTY_TEST_SEED=17`, forced workspace state machine, and `git diff --check` are required.
 - External libraries: existing Alcotest, QCheck, Profile 1 encoder, and Unix only.
-- ADR changes: none; this slice is format-free.
+- ADR changes: ADR-026 accepted before persistent formats.
 
 ## Milestone 0 — Project and model foundation
 
@@ -247,7 +247,7 @@ Robustness tasks operate only on Paengi's pure functions and generated local fix
 
 ### Composition
 
-- [ ] Set base snapshot or release.
+- [ ] Set base snapshot (release remains Milestone 6).
 - [ ] Enable capsule revision.
 - [ ] Disable capsule revision.
 - [ ] Materialise selected composition.

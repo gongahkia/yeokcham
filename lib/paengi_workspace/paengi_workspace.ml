@@ -339,3 +339,249 @@ let derive_order ~selected ~explicit_order =
 
 let revisions order = order.ordered_revisions
 let edges order = order.order_edges
+
+type application_revision = {
+  selected : selected_revision;
+  operations : Capsule.operation list;
+}
+
+type conflict_kind =
+  | Missing_or_ambiguous_precondition
+  | Competing_edits
+  | Delete_modify
+  | Move_modify
+  | Binary_conflict
+  | Dependency_failure
+  | Unsupported_or_uncertain_operation
+
+type application_conflict = {
+  conflict_capsule : Id.Capsule_id.t;
+  conflict_revision : Id.Capsule_revision_id.t;
+  operation_index : int;
+  kind : conflict_kind;
+  paths : Paengi_scratch.path list;
+  current : Paengi_scratch.entry option;
+}
+
+type operation_outcome =
+  | Applied_exactly of {
+      capsule : Id.Capsule_id.t;
+      revision : Id.Capsule_revision_id.t;
+      operation_index : int;
+    }
+  | Already_satisfied of {
+      capsule : Id.Capsule_id.t;
+      revision : Id.Capsule_revision_id.t;
+      operation_index : int;
+    }
+  | Persistent_conflict of application_conflict
+  | Blocked_dependency of {
+      capsule : Id.Capsule_id.t;
+      revision : Id.Capsule_revision_id.t;
+      operation_index : int;
+      blocked_by : application_conflict;
+    }
+  | Rejected_operation of application_conflict
+  | Resolved_explicitly of {
+      capsule : Id.Capsule_id.t;
+      revision : Id.Capsule_revision_id.t;
+      operation_index : int;
+    }
+
+type resolution_action = Skip_operation of {
+  capsule : Id.Capsule_id.t;
+  revision : Id.Capsule_revision_id.t;
+  operation_index : int;
+}
+
+type application = {
+  state : Paengi_scratch.State.t;
+  outcomes : operation_outcome list;
+  conflicts : application_conflict list;
+}
+
+let conflict_kind_to_string = function
+  | Missing_or_ambiguous_precondition -> "missing-or-ambiguous-precondition"
+  | Competing_edits -> "competing-edits"
+  | Delete_modify -> "delete-modify"
+  | Move_modify -> "move-modify"
+  | Binary_conflict -> "binary-conflict"
+  | Dependency_failure -> "dependency-failure"
+  | Unsupported_or_uncertain_operation -> "unsupported-or-uncertain-operation"
+
+let entry_equal left right =
+  match (left, right) with
+  | Paengi_scratch.Directory, Paengi_scratch.Directory -> true
+  | Paengi_scratch.File left, Paengi_scratch.File right ->
+      left.mode = right.mode
+      && Paengi_snapshot.Content.equal_id left.content right.content
+  | Paengi_scratch.Directory, Paengi_scratch.File _
+  | Paengi_scratch.File _, Paengi_scratch.Directory -> false
+
+let option_entry_equal left right = Option.equal entry_equal left right
+
+let operation_paths (operation : Capsule.operation) =
+  match operation with
+  | Capsule.Exact_file_transition transition ->
+      [ transition.Capsule.transition_path ]
+  | Capsule.Text_edit edit -> [ edit.Capsule.edit_path ]
+  | Capsule.Move { source; destination; _ } -> [ source; destination ]
+  | Capsule.Mode_change { path; _ } -> [ path ]
+
+let operation_current state (operation : Capsule.operation) =
+  match operation with
+  | Capsule.Exact_file_transition transition ->
+      Paengi_scratch.State.find state transition.Capsule.transition_path
+  | Capsule.Text_edit edit ->
+      Paengi_scratch.State.find state edit.Capsule.edit_path
+  | Capsule.Move { source; _ } -> Paengi_scratch.State.find state source
+  | Capsule.Mode_change { path; _ } -> Paengi_scratch.State.find state path
+
+let operation_already_satisfied state (operation : Capsule.operation) =
+  match operation with
+  | Capsule.Exact_file_transition transition ->
+      option_entry_equal
+        (Paengi_scratch.State.find state transition.Capsule.transition_path)
+        transition.Capsule.replacement_entry
+  | Capsule.Text_edit _ -> false
+  | Capsule.Move { source; destination; prior } ->
+      Option.is_none (Paengi_scratch.State.find state source)
+      && Option.equal entry_equal (Paengi_scratch.State.find state destination)
+           (Some prior)
+  | Capsule.Mode_change { path; replacement; _ } -> (
+      match Paengi_scratch.State.find state path with
+      | Some (Paengi_scratch.File file) -> file.mode = replacement
+      | Some Paengi_scratch.Directory | None -> false)
+
+let apply_exact_transition state (transition : Capsule.exact_file_transition) =
+  if
+    not
+      (option_entry_equal
+         (Paengi_scratch.State.find state transition.Capsule.transition_path)
+         transition.Capsule.expected_entry)
+  then Error "entry precondition failed"
+  else
+    let operations =
+      match
+        (transition.Capsule.expected_entry, transition.Capsule.replacement_entry)
+      with
+      | None, None -> []
+      | None, Some entry ->
+          [
+            Paengi_scratch.Create
+              { path = transition.Capsule.transition_path; entry };
+          ]
+      | Some prior, None ->
+          [
+            Paengi_scratch.Delete
+              { path = transition.Capsule.transition_path; prior };
+          ]
+      | Some prior, Some replacement when entry_equal prior replacement -> []
+      | Some prior, Some replacement ->
+          [
+            Paengi_scratch.Delete
+              { path = transition.Capsule.transition_path; prior };
+            Paengi_scratch.Create
+              { path = transition.Capsule.transition_path; entry = replacement };
+          ]
+    in
+    Paengi_scratch.State.apply state operations
+    |> Result.map_error Paengi_scratch.error_to_string
+
+let apply_operation state (operation : Capsule.operation) =
+  match operation with
+  | Capsule.Exact_file_transition transition -> apply_exact_transition state transition
+  | Capsule.Text_edit _ -> Error "text fallback requires an explicit resolution"
+  | Capsule.Move { source; destination; prior } ->
+      Paengi_scratch.State.apply state
+        [ Paengi_scratch.Move { source; destination; prior } ]
+      |> Result.map_error Paengi_scratch.error_to_string
+  | Capsule.Mode_change { path; expected; replacement } ->
+      Paengi_scratch.State.apply state
+        [ Paengi_scratch.Change_mode { path; expected; replacement } ]
+      |> Result.map_error Paengi_scratch.error_to_string
+
+let kind_of_operation (operation : Capsule.operation) =
+  match operation with
+  | Capsule.Exact_file_transition { Capsule.replacement_entry = None; _ } ->
+      Delete_modify
+  | Capsule.Exact_file_transition _ | Capsule.Mode_change _ -> Competing_edits
+  | Capsule.Move _ -> Move_modify
+  | Capsule.Text_edit _ -> Unsupported_or_uncertain_operation
+
+let path_equal = List.equal String.equal
+
+let intersects left right =
+  List.exists (fun left -> List.exists (path_equal left) right) left
+
+let is_skipped resolutions ~capsule ~revision ~operation_index =
+  List.exists
+    (function
+      | Skip_operation selected ->
+          Id.Capsule_id.equal selected.capsule capsule
+          && Id.Capsule_revision_id.equal selected.revision revision
+          && Int.equal selected.operation_index operation_index)
+    resolutions
+
+let apply ~state ~ordered ~resolutions =
+  let rec apply_operations state outcomes conflicts selection index = function
+    | [] -> (state, outcomes, conflicts)
+    | operation :: rest ->
+        let capsule = selection.selected.capsule in
+        let revision = selection.selected.revision in
+        let paths = operation_paths operation in
+        let state, outcome, conflicts =
+          if is_skipped resolutions ~capsule ~revision ~operation_index:index then
+            ( state,
+              Resolved_explicitly { capsule; revision; operation_index = index },
+              conflicts )
+          else
+            match
+              List.find_opt (fun conflict -> intersects paths conflict.paths)
+                conflicts
+            with
+            | Some blocked_by ->
+                ( state,
+                  Blocked_dependency
+                    { capsule; revision; operation_index = index; blocked_by },
+                  conflicts )
+            | None when operation_already_satisfied state operation ->
+                ( state,
+                  Already_satisfied { capsule; revision; operation_index = index },
+                  conflicts )
+            | None -> (
+                match apply_operation state operation with
+                | Ok next ->
+                    ( next,
+                      Applied_exactly { capsule; revision; operation_index = index },
+                      conflicts )
+                | Error _ ->
+                    let conflict =
+                      {
+                        conflict_capsule = capsule;
+                        conflict_revision = revision;
+                        operation_index = index;
+                        kind = kind_of_operation operation;
+                        paths;
+                        current = operation_current state operation;
+                      }
+                    in
+                    (state, Persistent_conflict conflict, conflict :: conflicts))
+        in
+        apply_operations state (outcome :: outcomes) conflicts selection (index + 1)
+          rest
+  in
+  let rec apply_revisions state outcomes conflicts = function
+    | [] ->
+        {
+          state;
+          outcomes = List.rev outcomes;
+          conflicts = List.rev conflicts;
+        }
+    | revision :: rest ->
+        let state, outcomes, conflicts =
+          apply_operations state outcomes conflicts revision 0 revision.operations
+        in
+        apply_revisions state outcomes conflicts rest
+  in
+  apply_revisions state [] [] ordered
