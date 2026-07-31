@@ -131,6 +131,7 @@ git --git-dir=<destination-git-repo> fsck --full --strict
 `github resolve --accept-remote <local-ref> --remote <remote-ref> --apply` is that workflow. It permits only a mapping selected by the configured rules or an explicit existing checkpoint, re-reads and refetches the remote ref, verifies/imports its objects, then appends one expected-state local ref event. A concurrent local ref change fails closed. After the ref event, it records a checkpoint whose local and remote IDs equal the accepted remote ID; retry if that final checkpoint write fails. It accepts neither a silent force update nor an unselected mapping.
 
 See [Google Drive setup](docs/google-drive.md) for the exact Desktop-client, scope, headless, and recovery requirements.
+See [local supply-chain checks](docs/supply-chain.md) for SBOM generation and dependency-audit commands.
 
 ## Local remote helper
 

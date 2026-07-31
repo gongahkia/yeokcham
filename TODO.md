@@ -344,8 +344,8 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 - [x] Migration framework. `yeokcham migrate <source-v1-repo> <destination-v2-repo>` performs bounded copy-on-write V1-to-V2 migration: it verifies and scans the source before target creation, preserves the V1 source for rollback, excludes disposable state, writes the V2 bootstrap last, and verifies the target; failed targets require explicit discard before retry.
 - [x] Old-format fixtures. Retained canonical `fixtures/pinned/repository-format-v1/` and `repository-format-v2/` fixtures import the pinned SHA-1 history; core coverage opens, verifies, exports, and compares both reader paths to the pinned Git graph and refs.
 - [ ] Signed release artefacts.
-- [ ] SBOM generation.
-- [ ] Dependency audit.
+- [x] SBOM generation. `make sbom SBOM_OUTPUT=<absent-directory>` generates one CycloneDX 1.5 JSON SBOM per workspace package outside the source tree using pinned `cargo-cyclonedx` 0.5.9, validates each output, and records SHA-256 checksums.
+- [x] Dependency audit. `make audit` uses pinned `cargo-audit` 0.22.2 to deny RustSec warnings for both the workspace and fuzz lockfiles; it fetches the advisory database by default and supports only explicit `YEOKCHAM_AUDIT_OFFLINE=1` use of an existing database.
 - [ ] Security disclosure process.
 - [ ] Continuous fuzzing.
 - [ ] Full benchmark report.
