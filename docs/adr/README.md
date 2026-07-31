@@ -89,3 +89,4 @@ Valid statuses are `Proposed`, `Accepted`, `Rejected`, `Deprecated`, and `Supers
 | [ADR-0081](0081-explicit-root-local-repository-discovery.md) | Accepted | Discover only validated Yeokcham stores under explicit roots |
 | [ADR-0082](0082-bounded-polling-filesystem-monitor.md) | Accepted | Monitor explicit roots through bounded polling snapshots |
 | [ADR-0083](0083-atomic-private-file-metadata-cache.md) | Accepted | Persist disposable file metadata through an atomic private cache |
+| [ADR-0084](0084-verified-shared-object-cache.md) | Accepted | Share only verified Git objects through a bounded process cache |

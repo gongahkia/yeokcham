@@ -299,7 +299,7 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 - [x] Add repository discovery.
 - [x] Add filesystem event monitoring.
 - [x] Add persistent file metadata cache.
-- [ ] Add shared object cache.
+- [x] Add shared object cache.
 - [ ] Add cancellation and shutdown handling.
 - [ ] Default to per-user local-only access.
 

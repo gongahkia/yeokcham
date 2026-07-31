@@ -43,6 +43,7 @@ mod segment_id;
 mod segment_index;
 mod segment_reader;
 mod segment_writer;
+mod shared_object_cache;
 mod telemetry;
 mod tiny_blob_aggregation;
 mod tiny_blob_group_manifest;
@@ -136,6 +137,7 @@ pub use segment_reader::{
 pub use segment_writer::{
     SealedSegment, SegmentRecord, SegmentRecordKind, SegmentWriteLimits, SegmentWriter,
 };
+pub use shared_object_cache::SharedObjectCache;
 pub use telemetry::{Redacted, redact};
 pub use tiny_blob_aggregation::{
     MAX_TINY_BLOB_AGGREGATION_ENTRIES, TinyBlobAggregation, TinyBlobEntry,

@@ -42,7 +42,7 @@ impl GitObjectKind {
 ///
 /// `data` is the decompressed Git object body. It does not include the
 /// canonical `"<type> <size>\\0"` header used to calculate `id`.
-#[derive(Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub struct GitObject {
     id: GitObjectId,
     kind: GitObjectKind,
