@@ -24,8 +24,8 @@ The default bind is the operating system-selected port on `127.0.0.1`. Startup p
 - Each read or write phase has a five-second deadline.
 - Four request workers and eight queued accepted sockets bound local resource use.
 - JSON response bodies and raw-object bodies are limited to 64 MiB.
-- Every endpoint requires exactly one `Authorization: Bearer <64-lowercase-hex>` header.
-- Absent, malformed, duplicate, or wrong credentials receive the same `401` response and `WWW-Authenticate: Bearer` header.
+- Every endpoint requires exactly one authorization header: `Authorization: Bearer <64-lowercase-hex>` for native clients, or `Authorization: Basic <base64(yeokcham:<token>)>` for a browser.
+- Absent, malformed, duplicate, or wrong credentials receive the same `401` response and both Basic and Bearer `WWW-Authenticate` headers.
 
 Every error response has `application/json` content and this envelope:
 
@@ -36,6 +36,12 @@ Every error response has `application/json` content and this envelope:
 The server deliberately does not expose repository paths, internal error detail, source bodies, or tokens in logs, or a filesystem endpoint.
 
 ## Endpoints
+
+### `GET /`
+
+Returns an authenticated static HTML repository page with the repository ID, regular ref names/object IDs, and `HEAD`. Navigate to the printed loopback address; when the browser prompts, use username `yeokcham` and the 64-character token as the password. Basic credentials are Base64-encoded, not encrypted, so do not forward, proxy, or tunnel this endpoint.
+
+Valid UTF-8 ref names are HTML-escaped. Non-UTF-8 names appear as `hex:<lowercase-hex>`. V1 deliberately has no object-body, commit, tree, write, export, recovery, script, form, cookie, or token-bearing-link page.
 
 ### `GET /v1/health`
 
@@ -84,6 +90,6 @@ The body is the exact decompressed Git object body without the canonical loose-o
 
 ## Security boundary
 
-V1 requires one bearer token and is deliberately loopback-only. Loopback prevents network peers from connecting, while authentication rejects a local process that lacks the token; neither protects a compromised account, process memory, or operating system. Treat the token file as a full read credential. Do not use a generic port forward or reverse proxy to expose V1. Non-loopback deployment, TLS termination, write operations, token reload/rotation without restart, and browser sessions are separate milestones.
+V1 requires one generated token and is deliberately loopback-only. Native clients use Bearer; normal browsers may use Basic with username `yeokcham` and that token as password. Basic is Base64 encoding, not encryption. Loopback prevents network peers from connecting, while authentication rejects a local process that lacks the token; neither protects a compromised account, process memory, or operating system. Treat the token file as a full read credential. Do not use a generic port forward or reverse proxy to expose V1. Non-loopback deployment, TLS termination, write operations, token reload/rotation without restart, and browser sessions are separate milestones.
 
 The service is read-only. Its loss or termination cannot change a Yeokcham repository; recovery remains the existing local export and encrypted recovery path. To rotate a token, create a new file, restart the server with it, and update clients; a lost token does not affect repository recovery.

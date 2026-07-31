@@ -12,6 +12,7 @@ use std::{
     time::Duration,
 };
 
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use subtle::ConstantTimeEq;
 use yeokcham_core::{
     Error, ErrorKind, GitImportLimits, GitObject, GitObjectId, GitObjectKind, HeadState,
@@ -22,6 +23,7 @@ use zeroize::Zeroizing;
 const AUTHENTICATION_TOKEN_BYTES: usize = 32;
 const AUTHENTICATION_TOKEN_HEX_BYTES: usize = AUTHENTICATION_TOKEN_BYTES * 2;
 const MAXIMUM_AUTHENTICATION_TOKEN_FILE_BYTES: usize = AUTHENTICATION_TOKEN_HEX_BYTES + 1;
+const MAXIMUM_BASIC_AUTHORIZATION_BYTES: usize = 128;
 const MAXIMUM_REQUEST_HEADER_BYTES: usize = 8 * 1024;
 const MAXIMUM_RESPONSE_BODY_BYTES: usize = 64 * 1024 * 1024;
 const MAXIMUM_CONNECTIONS: usize = 4;
@@ -111,7 +113,29 @@ impl AuthenticationToken {
         Ok(Self(token))
     }
 
-    fn matches_bearer(&self, value: &[u8]) -> bool {
+    fn matches_authorization(&self, value: &str) -> bool {
+        let value = value.trim_matches([' ', '\t']);
+        if let Some(token) = value.strip_prefix("Bearer ") {
+            return self.matches_token(token.as_bytes());
+        }
+        let Some(encoded) = value.strip_prefix("Basic ") else {
+            return false;
+        };
+        if encoded.len() > MAXIMUM_BASIC_AUTHORIZATION_BYTES {
+            return false;
+        }
+        let decoded = match BASE64_STANDARD.decode(encoded) {
+            Ok(decoded) => Zeroizing::new(decoded),
+            Err(_) => return false,
+        };
+        let mut fields = decoded.splitn(2, |byte| *byte == b':');
+        match (fields.next(), fields.next()) {
+            (Some(b"yeokcham"), Some(token)) => self.matches_token(token),
+            _ => false,
+        }
+    }
+
+    fn matches_token(&self, value: &[u8]) -> bool {
         if value.len() != AUTHENTICATION_TOKEN_HEX_BYTES
             || value
                 .iter()
@@ -317,6 +341,7 @@ impl Server {
 
 #[derive(Clone, Copy)]
 enum Request {
+    Browser,
     Health,
     Refs,
     Object(GitObjectId),
@@ -468,10 +493,7 @@ fn parse_request(
                 return Err(unauthorized_response());
             }
             authorization_seen = true;
-            authenticated = value
-                .trim_matches([' ', '\t'])
-                .strip_prefix("Bearer ")
-                .is_some_and(|token| authentication.matches_bearer(token.as_bytes()));
+            authenticated = authentication.matches_authorization(value);
         }
     }
     if !authenticated {
@@ -483,6 +505,7 @@ fn parse_request(
         return Err(response);
     }
     match target {
+        "/" => Ok(Request::Browser),
         "/v1/health" => Ok(Request::Health),
         "/v1/refs" => Ok(Request::Refs),
         _ => target
@@ -497,6 +520,9 @@ fn parse_request(
 
 fn unauthorized_response() -> Response {
     let mut response = Response::error(401, "Unauthorized", "authentication_required");
+    response
+        .headers
+        .push(("WWW-Authenticate", "Basic realm=\"Yeokcham\"".to_owned()));
     response
         .headers
         .push(("WWW-Authenticate", "Bearer".to_owned()));
@@ -526,6 +552,7 @@ fn is_header_name_byte(byte: u8) -> bool {
 
 fn route_request(repository: &LocalRepository, request: Request) -> Response {
     match request {
+        Request::Browser => browser_response(repository),
         Request::Health => Response::json(
             200,
             "OK",
@@ -534,6 +561,72 @@ fn route_request(repository: &LocalRepository, request: Request) -> Response {
         Request::Refs => refs_response(repository),
         Request::Object(id) => object_response(repository, id),
     }
+}
+
+fn browser_response(repository: &LocalRepository) -> Response {
+    let limits = match GitImportLimits::initial() {
+        Ok(limits) => limits,
+        Err(_) => return Response::error(500, "Internal Server Error", "internal"),
+    };
+    let state = match repository.resolve_ref_state(limits.ref_snapshot_limits()) {
+        Ok(Some(state)) => state,
+        Ok(None) => return Response::error(404, "Not Found", "ref_state_unavailable"),
+        Err(_) => return Response::error(500, "Internal Server Error", "repository_unavailable"),
+    };
+    let mut body = format!(
+        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>Yeokcham repository</title></head><body><main><h1>Yeokcham repository</h1><p>Repository <code>{}</code></p><h2>References</h2><ul>",
+        repository.id()
+    );
+    for (name, id) in state.regular_refs() {
+        body.push_str("<li><code>");
+        body.push_str(&html_escape_ref_name(name.as_bytes()));
+        body.push_str("</code> <code>");
+        body.push_str(&id.to_string());
+        body.push_str("</code></li>");
+        if body.len() > MAXIMUM_RESPONSE_BODY_BYTES {
+            return Response::error(500, "Internal Server Error", "response_too_large");
+        }
+    }
+    body.push_str("</ul><h2>HEAD</h2><p><code>");
+    match state.head() {
+        HeadState::Symbolic(name) => body.push_str(&html_escape_ref_name(name.as_bytes())),
+        HeadState::Detached(id) => body.push_str(&id.to_string()),
+    }
+    body.push_str("</code></p></main></body></html>");
+    if body.len() > MAXIMUM_RESPONSE_BODY_BYTES {
+        return Response::error(500, "Internal Server Error", "response_too_large");
+    }
+    Response {
+        status: 200,
+        reason: "OK",
+        content_type: "text/html; charset=utf-8",
+        headers: vec![
+            (
+                "Content-Security-Policy",
+                "default-src 'none'; base-uri 'none'; form-action 'none'".to_owned(),
+            ),
+            ("X-Content-Type-Options", "nosniff".to_owned()),
+        ],
+        body: body.into_bytes(),
+    }
+}
+
+fn html_escape_ref_name(bytes: &[u8]) -> String {
+    let Ok(name) = std::str::from_utf8(bytes) else {
+        return format!("hex:{}", hex::encode(bytes));
+    };
+    let mut escaped = String::with_capacity(name.len());
+    for character in name.chars() {
+        match character {
+            '&' => escaped.push_str("&amp;"),
+            '<' => escaped.push_str("&lt;"),
+            '>' => escaped.push_str("&gt;"),
+            '\"' => escaped.push_str("&quot;"),
+            '\'' => escaped.push_str("&#39;"),
+            _ => escaped.push(character),
+        }
+    }
+    escaped
 }
 
 fn refs_response(repository: &LocalRepository) -> Response {
@@ -673,6 +766,7 @@ mod tests {
         thread,
     };
 
+    use base64::Engine as _;
     use yeokcham_core::GitRepository;
 
     use super::*;
@@ -760,6 +854,10 @@ mod tests {
         (AuthenticationToken::load(path).expect("load token"), token)
     }
 
+    fn basic_authorization(token: &str) -> String {
+        BASE64_STANDARD.encode(format!("yeokcham:{token}"))
+    }
+
     fn serve_request(server: &Server, address: SocketAddr, request_bytes: &[u8]) -> Vec<u8> {
         thread::scope(|scope| {
             let worker = scope.spawn(|| server.serve_connection());
@@ -803,6 +901,7 @@ mod tests {
         );
         let (unauthorized_head, unauthorized_body) = split_response(&unauthorized);
         assert!(unauthorized_head.starts_with("HTTP/1.1 401 Unauthorized\r\n"));
+        assert!(unauthorized_head.contains("WWW-Authenticate: Basic realm=\"Yeokcham\""));
         assert!(unauthorized_head.contains("WWW-Authenticate: Bearer"));
         assert_eq!(
             unauthorized_body,
@@ -831,6 +930,25 @@ mod tests {
         let (health_head, health_body) = split_response(&health);
         assert!(health_head.starts_with("HTTP/1.1 200 OK\r\n"));
         assert_eq!(health_body, b"{\"version\":1,\"status\":\"ok\"}");
+
+        let browser = serve_request(
+            &server,
+            address,
+            format!(
+                "GET / HTTP/1.1\r\nAuthorization: Basic {}\r\n\r\n",
+                basic_authorization(&token)
+            )
+            .as_bytes(),
+        );
+        let (browser_head, browser_body) = split_response(&browser);
+        assert!(browser_head.starts_with("HTTP/1.1 200 OK\r\n"));
+        assert!(browser_head.contains("Content-Type: text/html; charset=utf-8"));
+        assert!(browser_head.contains("Content-Security-Policy: default-src 'none'"));
+        assert!(browser_head.contains("X-Content-Type-Options: nosniff"));
+        let browser_text = std::str::from_utf8(browser_body).expect("browser HTML");
+        assert!(browser_text.contains("<h1>Yeokcham repository</h1>"));
+        assert!(browser_text.contains("refs/heads/main"));
+        assert!(browser_text.contains(&head_id.to_string()));
 
         let refs = serve_request(
             &server,
@@ -914,7 +1032,11 @@ mod tests {
             0
         );
         let authentication = AuthenticationToken::load(&path).expect("load private token");
-        assert!(authentication.matches_bearer(token.trim_end().as_bytes()));
+        assert!(authentication.matches_authorization(&format!("Bearer {}", token.trim_end())));
+        assert!(
+            authentication
+                .matches_authorization(&format!("Basic {}", basic_authorization(token.trim_end())))
+        );
         assert!(!format!("{authentication:?}").contains(token.trim_end()));
 
         fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).expect("widen permissions");

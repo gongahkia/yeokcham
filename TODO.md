@@ -324,7 +324,7 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 - [x] Add smart HTTP or documented yeokcham-native transport. Native HTTP V1 serves bounded verified health, refs, and raw Git objects; it is not Git smart HTTP.
 - [x] Bind to loopback by default. V1 rejects every non-loopback address and defaults to ephemeral `127.0.0.1:0`.
 - [x] Add single-user authentication. Every V1 endpoint requires one private generated 256-bit bearer token loaded from a regular non-symlinked file with no group or other permission bits.
-- [ ] Add repository browser.
+- [x] Add repository browser. Authenticated `GET /` renders bounded HTML repository, regular-ref, and `HEAD` metadata with escaped or hexadecimal ref names; commit and tree views remain separate.
 - [ ] Add commit and tree viewer.
 - [ ] Add storage and backend statistics.
 - [ ] Add integrity-check UI.

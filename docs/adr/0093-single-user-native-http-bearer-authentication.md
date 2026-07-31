@@ -1,10 +1,10 @@
 # ADR-0093: Require one private bearer token for native HTTP V1
 
-- Status: Accepted
+- Status: Superseded by ADR-0094
 - Date: 2026-07-31
 - Deciders: Yeokcham maintainers
 - Supersedes: ADR-0092 only for unauthenticated endpoint access
-- Superseded by: None
+- Superseded by: ADR-0094
 
 ## Context
 
