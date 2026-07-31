@@ -49,6 +49,12 @@ Returns an authenticated static HTML storage page. It runs the same bounded comp
 
 The V1 process owns one local canonical storage provider and attaches zero remote backends. It reports those two values explicitly and never performs a backend network request or credential lookup. Google Drive backup/restore and GitHub mirrors remain separate CLI workflows; their health and state are not inferred by this page.
 
+### `GET /integrity`
+
+Returns an authenticated static HTML integrity result only when the same bounded complete local immutable-storage verification succeeds. The page records that all canonical records passed, lists verified record counts, and states that the check is read-only: it does not repair, export, contact a backend, or load credentials.
+
+A failed verification returns `500` with `integrity_check_failed`, without a partial count, failed pathname, object ID, source body, or repair action. Use the existing CLI recovery workflows after diagnosing an unavailable repository; V1 does not mutate it.
+
 ### `GET /commits/<sha1>`
 
 `<sha1>` is exactly 40 lowercase hexadecimal SHA-1 digits. The server reconstructs and verifies the object before rendering a static HTML commit overview. It requires a Git commit object and returns `422` with `object_kind_mismatch` for a different verified object type or `invalid_commit_object` for malformed commit content.

@@ -349,6 +349,7 @@ enum Request {
     Browser,
     Commit(GitObjectId),
     Health,
+    Integrity,
     Refs,
     Storage,
     Tree(GitObjectId),
@@ -514,6 +515,7 @@ fn parse_request(
     }
     match target {
         "/" => Ok(Request::Browser),
+        "/integrity" => Ok(Request::Integrity),
         "/storage" => Ok(Request::Storage),
         "/v1/health" => Ok(Request::Health),
         "/v1/refs" => Ok(Request::Refs),
@@ -573,6 +575,7 @@ fn route_request(repository: &LocalRepository, request: Request) -> Response {
             "OK",
             format!("{{\"version\":{NATIVE_HTTP_VERSION},\"status\":\"ok\"}}"),
         ),
+        Request::Integrity => integrity_response(repository),
         Request::Refs => refs_response(repository),
         Request::Storage => storage_response(repository),
         Request::Tree(id) => tree_response(repository, id),
@@ -609,7 +612,7 @@ fn browser_response(repository: &LocalRepository) -> Response {
         HeadState::Symbolic(name) => body.push_str(&html_escape_ref_name(name.as_bytes())),
         HeadState::Detached(id) => body.push_str(&id.to_string()),
     }
-    body.push_str("</code></p><p><a href=\"/storage\">Storage</a></p></main></body></html>");
+    body.push_str("</code></p><p><a href=\"/storage\">Storage</a></p><p><a href=\"/integrity\">Integrity check</a></p></main></body></html>");
     if body.len() > MAXIMUM_RESPONSE_BODY_BYTES {
         return Response::error(500, "Internal Server Error", "response_too_large");
     }
@@ -992,23 +995,38 @@ fn html_response(body: String) -> Response {
 }
 
 fn storage_response(repository: &LocalRepository) -> Response {
-    let limits = match GitImportLimits::initial() {
-        Ok(limits) => limits,
-        Err(_) => return Response::error(500, "Internal Server Error", "internal"),
-    };
-    let verification_limits = match limits.verification_limits() {
-        Ok(limits) => limits,
-        Err(_) => return Response::error(500, "Internal Server Error", "internal"),
-    };
-    let report = match repository.verify(verification_limits) {
+    let report = match verified_storage_report(repository) {
         Ok(report) => report,
-        Err(_) => return Response::error(500, "Internal Server Error", "storage_unavailable"),
+        Err(()) => return Response::error(500, "Internal Server Error", "storage_unavailable"),
     };
     let mut body = HtmlBody::new();
     if render_storage_html(&mut body, repository, report).is_err() {
         return Response::error(500, "Internal Server Error", "response_too_large");
     }
     html_response(body.into_string())
+}
+
+fn integrity_response(repository: &LocalRepository) -> Response {
+    let report = match verified_storage_report(repository) {
+        Ok(report) => report,
+        Err(()) => {
+            return Response::error(500, "Internal Server Error", "integrity_check_failed");
+        }
+    };
+    let mut body = HtmlBody::new();
+    if render_integrity_html(&mut body, repository, report).is_err() {
+        return Response::error(500, "Internal Server Error", "response_too_large");
+    }
+    html_response(body.into_string())
+}
+
+fn verified_storage_report(
+    repository: &LocalRepository,
+) -> std::result::Result<yeokcham_core::RepositoryVerificationReport, ()> {
+    let limits = GitImportLimits::initial().map_err(|_| ())?;
+    repository
+        .verify(limits.verification_limits().map_err(|_| ())?)
+        .map_err(|_| ())
 }
 
 fn render_storage_html(
@@ -1034,6 +1052,31 @@ fn render_storage_html(
     )?;
     render_storage_stat(body, "Ref snapshots", report.ref_snapshot_count())?;
     body.push("</dl><h2>Backend</h2><dl><dt>Canonical local storage providers</dt><dd>1</dd><dt>Attached remote backends</dt><dd>0</dd></dl><p>No remote backend is attached to native HTTP V1; this page performs no backend network request or credential lookup.</p></main></body></html>")
+}
+
+fn render_integrity_html(
+    body: &mut HtmlBody,
+    repository: &LocalRepository,
+    report: yeokcham_core::RepositoryVerificationReport,
+) -> std::result::Result<(), ()> {
+    body.push("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>Yeokcham integrity check</title></head><body><main><p><a href=\"/\">Repository</a></p><h1>Integrity check</h1><p>All bounded canonical records passed verification.</p><p>Repository <code>")?;
+    body.push(&repository.id().to_string())?;
+    body.push("</code></p><h2>Verified records</h2><dl>")?;
+    render_storage_stat(body, "Segments", report.segment_count())?;
+    render_storage_stat(body, "Indexes", report.index_count())?;
+    render_storage_stat(body, "Blob manifests", report.blob_manifest_count())?;
+    render_storage_stat(
+        body,
+        "Tiny-blob group manifests",
+        report.tiny_blob_group_manifest_count(),
+    )?;
+    render_storage_stat(
+        body,
+        "Metadata-object manifests",
+        report.metadata_object_manifest_count(),
+    )?;
+    render_storage_stat(body, "Ref snapshots", report.ref_snapshot_count())?;
+    body.push("</dl><p>The check is read-only and does not repair, export, contact a backend, or load credentials.</p></main></body></html>")
 }
 
 fn render_storage_stat(
@@ -1393,6 +1436,7 @@ mod tests {
         assert!(browser_text.contains("refs/heads/main"));
         assert!(browser_text.contains(&head_id.to_string()));
         assert!(browser_text.contains("href=\"/storage\""));
+        assert!(browser_text.contains("href=\"/integrity\""));
 
         let storage = serve_request(
             &server,
@@ -1406,6 +1450,18 @@ mod tests {
         assert!(storage_text.contains("<h1>Storage</h1>"));
         assert!(storage_text.contains("Verified canonical storage"));
         assert!(storage_text.contains("No remote backend is attached to native HTTP V1"));
+
+        let integrity = serve_request(
+            &server,
+            address,
+            format!("GET /integrity HTTP/1.1\r\nAuthorization: Bearer {token}\r\n\r\n").as_bytes(),
+        );
+        let (integrity_head, integrity_body) = split_response(&integrity);
+        assert!(integrity_head.starts_with("HTTP/1.1 200 OK\r\n"));
+        assert!(integrity_head.contains("Content-Type: text/html; charset=utf-8"));
+        let integrity_text = std::str::from_utf8(integrity_body).expect("integrity HTML");
+        assert!(integrity_text.contains("<h1>Integrity check</h1>"));
+        assert!(integrity_text.contains("All bounded canonical records passed verification."));
 
         let commit = serve_request(
             &server,
@@ -1513,6 +1569,18 @@ mod tests {
         assert_eq!(
             unavailable_body,
             b"{\"version\":1,\"error\":\"storage_unavailable\"}"
+        );
+
+        let failed_integrity = serve_request(
+            &server,
+            address,
+            format!("GET /integrity HTTP/1.1\r\nAuthorization: Bearer {token}\r\n\r\n").as_bytes(),
+        );
+        let (failed_integrity_head, failed_integrity_body) = split_response(&failed_integrity);
+        assert!(failed_integrity_head.starts_with("HTTP/1.1 500 Internal Server Error\r\n"));
+        assert_eq!(
+            failed_integrity_body,
+            b"{\"version\":1,\"error\":\"integrity_check_failed\"}"
         );
     }
 

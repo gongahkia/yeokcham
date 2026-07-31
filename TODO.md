@@ -327,7 +327,7 @@ This roadmap is ordered. Do not start later phases before the current phase's ex
 - [x] Add repository browser. Authenticated `GET /` renders bounded HTML repository, regular-ref, and `HEAD` metadata with escaped or hexadecimal ref names; commit and tree views remain separate.
 - [x] Add commit and tree viewer. Authenticated pages reconstruct and verify objects, render bounded escaped commit/tree metadata, link verified commit/tree navigation, and never render blobs.
 - [x] Add storage and backend statistics. Authenticated `GET /storage` reports only verified canonical-record counts plus one local provider and zero attached remote backends; it performs no provider request or credential lookup.
-- [ ] Add integrity-check UI.
+- [x] Add integrity-check UI. Authenticated `GET /integrity` reruns bounded verification, renders only a successful read-only result, and otherwise returns a generic failure without partial inventory or repair action.
 - [ ] Add mirror-state UI.
 - [ ] Add export and recovery commands.
 - [ ] Publish Docker image only after local binary is stable.

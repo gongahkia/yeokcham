@@ -102,3 +102,4 @@ Valid statuses are `Proposed`, `Accepted`, `Rejected`, `Deprecated`, and `Supers
 | [ADR-0094](0094-authenticated-native-http-repository-browser.md) | Accepted | Add a token-authenticated native HTTP repository browser |
 | [ADR-0095](0095-bounded-authenticated-commit-tree-browser.md) | Accepted | Render bounded authenticated commit and tree metadata |
 | [ADR-0096](0096-verified-local-storage-statistics.md) | Accepted | Report verified local storage and zero remote attachments |
+| [ADR-0097](0097-read-only-authenticated-integrity-check.md) | Accepted | Render a bounded read-only integrity result |
