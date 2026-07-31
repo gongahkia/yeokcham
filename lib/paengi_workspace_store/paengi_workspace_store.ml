@@ -2104,6 +2104,158 @@ let validate_revision_links store (revision : workspace_revision) =
     in
     Ok order
 
+let all_object_ids root =
+  let rec files reversed directory =
+    match Sys.readdir directory with
+    | exception Sys_error _ -> reversed
+    | names ->
+        List.fold_left
+          (fun reversed name ->
+            if String.starts_with ~prefix:"." name then reversed
+            else
+              let path = Filename.concat directory name in
+              match (Unix.lstat path).Unix.st_kind with
+              | Unix.S_DIR -> files reversed path
+              | Unix.S_REG -> path :: reversed
+              | _ -> reversed)
+          reversed (Array.to_list names)
+  in
+  let objects = Filename.concat (Filename.concat root ".paengi") "objects" in
+  files [] objects
+
+let find_conflict_object store identity =
+  let paths = all_object_ids (Store.root store) in
+  let rec loop = function
+    | [] -> Error (Conflict_missing identity)
+    | path :: rest -> (
+        let name = Filename.basename path in
+        let parent = Filename.basename (Filename.dirname path) in
+        let grandparent =
+          Filename.basename (Filename.dirname (Filename.dirname path))
+        in
+        let hex = grandparent ^ parent ^ name in
+        match Store.Stored_object_id.of_hex hex with
+        | Error _ -> loop rest
+        | Ok object_id -> (
+            match load_conflict store object_id with
+            | Ok conflict when Id.Conflict_id.equal conflict.id identity ->
+                Ok (conflict, object_id)
+            | Ok _ | Error _ -> loop rest))
+  in
+  loop paths
+
+let revision_link_equal left right =
+  Id.Capsule_id.equal
+    (Capsule_store.revision_link_capsule left)
+    (Capsule_store.revision_link_capsule right)
+  && Id.Capsule_revision_id.equal
+       (Capsule_store.revision_link_revision left)
+       (Capsule_store.revision_link_revision right)
+  && Store.Stored_object_id.equal
+       (Capsule_store.revision_link_object left)
+       (Capsule_store.revision_link_object right)
+
+let ordered_links_for_order (revision : workspace_revision) order =
+  Workspace.revisions order
+  |> List.fold_left
+       (fun result selected ->
+         let* reversed = result in
+         match
+           List.find_opt
+             (fun link ->
+               Id.Capsule_revision_id.equal selected.Workspace.revision
+                 (Capsule_store.revision_link_revision link))
+             revision.selected
+         with
+         | Some link -> Ok (link :: reversed)
+         | None ->
+             Error
+               (Selected_link_mismatch
+                  "resolved order lacks a selected revision link"))
+       (Ok [])
+  |> Result.map List.rev
+
+let entry_equal left right =
+  let* left = entry_value left in
+  let* right = entry_value right in
+  Ok (Encoding.equal left right)
+
+let validate_resolution_binding store (revision : workspace_revision)
+    (binding : resolution_binding) =
+  let* resolution = load_resolution store binding.binding_object_id in
+  if not (Id.Resolution_id.equal resolution.id binding.binding_resolution) then
+    Error
+      (Resolution_binding_mismatch
+         "resolution logical ID disagrees with binding object")
+  else if
+    not (Id.Conflict_id.equal resolution.conflict binding.binding_conflict)
+  then
+    Error
+      (Resolution_binding_mismatch "resolution conflict disagrees with binding")
+  else
+    let* conflict, _ = find_conflict_object store binding.binding_conflict in
+    if not (Id.Workspace_id.equal conflict.workspace revision.workspace) then
+      Error
+        (Resolution_binding_mismatch "conflict belongs to another workspace")
+    else if
+      not
+        (Id.Workspace_revision_id.equal resolution.workspace_revision
+           conflict.workspace_revision)
+    then
+      Error
+        (Resolution_binding_mismatch
+           "resolution workspace revision disagrees with conflict")
+    else if
+      not
+        (Option.equal Id.Workspace_attempt_id.equal resolution.attempt
+           conflict.attempt)
+    then
+      Error
+        (Resolution_binding_mismatch
+           "resolution attempt disagrees with conflict")
+    else
+      let* expected_current =
+        entry_equal resolution.expected_current conflict.current
+      in
+      if expected_current then Ok ()
+      else
+        Error
+          (Resolution_binding_mismatch
+             "resolution expected current entry disagrees with conflict")
+
+let validate_resolution_bindings store revision =
+  List.fold_left
+    (fun result binding ->
+      let* () = result in
+      validate_resolution_binding store revision binding)
+    (Ok ()) revision.resolutions
+
+let validate_attempt_context store (revision : workspace_revision) order
+    (attempt : workspace_attempt) =
+  if not (Snapshot.Snapshot.equal_id attempt.base revision.base) then
+    Error Current_ref_attempt_mismatch
+  else
+    let* ordered = ordered_links_for_order revision order in
+    if
+      List.length ordered <> List.length attempt.ordered
+      || not (List.for_all2 revision_link_equal ordered attempt.ordered)
+    then Error Current_ref_attempt_mismatch
+    else
+      List.fold_left
+        (fun result conflict_id ->
+          let* () = result in
+          let* conflict, _ = find_conflict_object store conflict_id in
+          if
+            Id.Workspace_id.equal conflict.workspace attempt.workspace
+            && Id.Workspace_revision_id.equal conflict.workspace_revision
+                 attempt.workspace_revision
+            && Option.equal Id.Workspace_attempt_id.equal conflict.attempt
+                 (Some attempt.id)
+            && Snapshot.Snapshot.equal_id conflict.base attempt.base
+          then Ok ()
+          else Error Current_ref_attempt_mismatch)
+        (Ok ()) attempt.conflicts
+
 let read_current_bytes store workspace =
   Store.Ref_file.read store ~components:(current_ref_components workspace)
   |> Result.map_error (fun error -> Store_error error)
@@ -2128,7 +2280,8 @@ let resolve_from_ref store (current : current_ref) =
     else if not (Id.Workspace_id.equal revision.workspace current.workspace)
     then Error Current_ref_revision_mismatch
     else
-      let* _ = validate_revision_links store revision in
+      let* order = validate_revision_links store revision in
+      let* () = validate_resolution_bindings store revision in
       let* () =
         match current.latest_attempt with
         | None -> Ok ()
@@ -2144,7 +2297,7 @@ let resolve_from_ref store (current : current_ref) =
                 (Id.Workspace_revision_id.equal attempt.workspace_revision
                    current.revision)
             then Error Current_ref_attempt_mismatch
-            else Ok ()
+            else validate_attempt_context store revision order attempt
       in
       Ok
         {
@@ -2251,46 +2404,6 @@ let find_conflict mapping conflict =
       then Some stored
       else None)
     mapping
-
-let all_object_ids root =
-  let rec files reversed directory =
-    match Sys.readdir directory with
-    | exception Sys_error _ -> reversed
-    | names ->
-        List.fold_left
-          (fun reversed name ->
-            if String.starts_with ~prefix:"." name then reversed
-            else
-              let path = Filename.concat directory name in
-              match (Unix.lstat path).Unix.st_kind with
-              | Unix.S_DIR -> files reversed path
-              | Unix.S_REG -> path :: reversed
-              | _ -> reversed)
-          reversed (Array.to_list names)
-  in
-  let objects = Filename.concat (Filename.concat root ".paengi") "objects" in
-  files [] objects
-
-let find_conflict_object store identity =
-  let paths = all_object_ids (Store.root store) in
-  let rec loop = function
-    | [] -> Error (Conflict_missing identity)
-    | path :: rest -> (
-        let name = Filename.basename path in
-        let parent = Filename.basename (Filename.dirname path) in
-        let grandparent =
-          Filename.basename (Filename.dirname (Filename.dirname path))
-        in
-        let hex = grandparent ^ parent ^ name in
-        match Store.Stored_object_id.of_hex hex with
-        | Error _ -> loop rest
-        | Ok object_id -> (
-            match load_conflict store object_id with
-            | Ok conflict when Id.Conflict_id.equal conflict.id identity ->
-                Ok (conflict, object_id)
-            | Ok _ | Error _ -> loop rest))
-  in
-  loop paths
 
 let find_capsule_revision_link store identity =
   let paths = all_object_ids (Store.root store) |> List.sort String.compare in
