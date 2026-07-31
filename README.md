@@ -64,6 +64,11 @@ quarantine superseded scratch records.
 `compact --prune` is irreversible. paengi remains a portfolio and research
 prototype, not a production Git replacement.
 
+Milestone 7 has a bounded, non-persistent TypeScript declaration-sidecar
+foundation: exact textual fallback, confidence/evidence, and structured safe
+non-application. It is not a full TypeScript parser, performs no persistent
+semantic replay, and does not alter canonical file bytes or prior formats.
+
 See `CONTRIBUTING.md` for development rules. Paengi is licensed under the MIT License.
 
 ## Development

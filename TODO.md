@@ -5,15 +5,15 @@ Robustness tasks operate only on Paengi's pure functions and generated local fix
 
 ## Active vertical slice
 
-- Milestone: 6 — releases and validation.
-- Task: complete — deterministic immutable-snapshot validation; immutable release evidence, creation, lookup, verification, and inspection; separated attestations; closeout before Milestone 7.
-- Modules/files: add `paengi_validation` and `paengi_release`; narrow `validation`/`release` CLI; ADR-027 fixtures and restart/state-machine tests.
-- Types: canonical validation command, immutable validation evidence, logical release, release binding, parent resolver, and release attestation; all logical IDs remain distinct from `Stored_object_id`.
-- Formats: additive Validation_evidence, Release, Release_attestation v1 objects plus create-only `refs/releases/<release-id>`; ADR-020 through ADR-026 remain unchanged.
-- Invariants: validation targets an exact verified snapshot; runner output/time are bounded; evidence never advances refs; release links/reproduction/evidence bindings verify exactly; bindings are expected-absent/idempotent; attestation does not alter Release ID; Requires_release remains blocked by ADR-026's missing base-release context.
-- Tests: focused runner/persistence/release tests; canonical goldens/inverse decoders; corruption, reopen, interrupted binding, idempotency, deterministic list/show, reproduction, parent-cycle seam, and bounded seed-17 validation/release restart state machine. `make build`, focused tests per slice, `make format`, `make check`, `make property-test PROPERTY_TEST_SEED=17`, forced state machine, and `git diff --check` are required.
-- External libraries: existing Alcotest, QCheck, Profile 1 encoder, and Unix only.
-- ADR changes: ADR-027 accepted before persistent formats.
+- Milestone: 7 — TypeScript semantic sidecar.
+- Task: bounded non-persistent foundation complete — top-level declaration parser, proposals, confidence/evidence matching, explicit exact textual fallback, and fixture evidence; stop before a full parser integration or semantic persistence.
+- Modules/files: add pure `paengi_semantic`; focused semantic unit/property tests, checked-in TypeScript fixtures, and a fixture-results report.
+- Types: parser error, declaration/structural path, semantic anchor, exact textual fallback, rename/move/replacement proposal, confidence/evidence, and structured match/application conflict.
+- Formats: none. No object schema, identity, ref, golden byte format, or capsule/workspace/release encoding changes.
+- Invariants: exact file bytes remain canonical; a proposal retains complete expected/replacement fallback bytes; parse failure makes no proposal; automatic rename requires one same-kind/name/signature declaration; structural, similarity, move, and replacement results require review; ambiguity and low confidence are structured conflicts.
+- Tests: focused parser/inference/application cases; 100 generated formatting retargets and 100 duplicate-anchor cases with reported seed. Full `make check` and `make property-test PROPERTY_TEST_SEED=17` remain required before closeout.
+- External libraries: existing Alcotest and QCheck only; no parser dependency.
+- ADR changes: none; no persistent format change.
 
 ## Milestone 0 — Project and model foundation
 
@@ -309,33 +309,36 @@ Robustness tasks operate only on Paengi's pure functions and generated local fix
 
 ### Parser adapter
 
-- [ ] Select parser integration.
+- [x] Select a Paengi-owned bounded top-level declaration adapter; no parser dependency is introduced.
 - [ ] Parse valid TypeScript.
-- [ ] Handle parse failure safely.
-- [ ] Identify declarations and structural paths.
-- [ ] Produce semantic anchors with textual fallback.
-- [ ] Detect simple rename.
-- [ ] Detect simple move.
+- [x] Handle parse failure safely for the supported adapter.
+- [x] Identify supported top-level declarations and structural paths.
+- [x] Produce semantic anchors with an exact textual fallback.
+- [x] Detect simple declaration rename.
+- [x] Detect simple declaration move.
 - [ ] Detect replace-node proposal.
+- [x] Detect bounded replacement-declaration proposal.
 
 ### Application
 
 - [ ] Match exact semantic identity.
-- [ ] Match structural path.
-- [ ] Match syntax/token similarity.
-- [ ] Fall back to text context.
-- [ ] Emit confidence.
-- [ ] Emit ambiguity conflict.
-- [ ] Never discard exact fallback.
+- [x] Match a bounded exact declaration fingerprint (kind, name, normalized signature).
+- [x] Match structural path.
+- [x] Match syntax/token similarity.
+- [x] Fall back to text context as an explicit fallback-required result.
+- [x] Emit confidence and matching evidence.
+- [x] Emit ambiguity and low-confidence conflicts.
+- [x] Never discard exact fallback.
 
 ### Experiments
 
-- [ ] Build retargeting fixture suite.
+- [x] Build bounded local retargeting fixture suite.
 - [ ] Compare with textual patch baseline.
-- [ ] Measure correct application.
-- [ ] Measure safe conflict.
-- [ ] Measure false confident application.
-- [ ] Publish failure examples.
+- [x] Compare with exact textual fallback baseline.
+- [x] Measure correct automatic application for the fixture suite.
+- [x] Measure safe conflict for the fixture suite.
+- [x] Measure observed false-confident application for the fixture suite.
+- [x] Publish failure examples and scope limits in `docs/experiments/semantic-sidecar-v1.md`.
 
 ### Exit criteria
 

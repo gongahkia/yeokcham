@@ -4,6 +4,16 @@
  (libraries alcotest qcheck-core qcheck-alcotest))
 
 (test
+ (name test_typescript_adapter)
+ (modules test_typescript_adapter)
+ (libraries alcotest paengi_snapshot paengi_store paengi_typescript_adapter unix)
+ (deps
+  (source_tree fixtures/semantic-adapter)
+  ../../tools/paengi-typescript-adapter/adapter.mjs
+  ../../tools/paengi-typescript-adapter/package-lock.json
+  ../../tools/paengi-typescript-adapter/package.json))
+
+(test
  (name test_fixture)
  (modules test_fixture)
  (libraries alcotest qcheck-core qcheck-alcotest paengi_testkit unix))
@@ -234,6 +244,18 @@
   (source_tree golden)))
 
 (test
+ (name test_semantic)
+ (modules test_semantic)
+ (libraries alcotest paengi_semantic)
+ (deps
+  (source_tree fixtures/semantic)))
+
+(test
+ (name semantic_property_test)
+ (modules semantic_property_test)
+ (libraries alcotest qcheck-core qcheck-alcotest paengi_semantic))
+
+(test
  (name test_capsule_store)
  (modules test_capsule_store)
  (libraries
@@ -394,6 +416,7 @@
   (:capsule_durable_property_test capsule_durable_property_test.exe)
   (:workspace_property_test workspace_property_test.exe)
   (:release_validation_property_test release_validation_property_test.exe)
+  (:semantic_property_test semantic_property_test.exe)
   (source_tree fixtures/encoding))
  (action
   (progn
@@ -406,4 +429,5 @@
    (run %{capsule_property_test})
    (run %{capsule_durable_property_test})
    (run %{workspace_property_test})
-   (run %{release_validation_property_test}))))
+   (run %{release_validation_property_test})
+   (run %{semantic_property_test}))))

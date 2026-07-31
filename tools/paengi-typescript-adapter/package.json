@@ -1,0 +1,15 @@
+{
+  "name": "paengi-typescript-adapter",
+  "version": "0.1.0",
+  "private": true,
+  "description": "isolated TypeScript Compiler API adapter for Paengi experiments",
+  "engines": {
+    "node": ">=14.17"
+  },
+  "scripts": {
+    "test": "node ./test_adapter.mjs"
+  },
+  "dependencies": {
+    "typescript": "5.9.3"
+  }
+}

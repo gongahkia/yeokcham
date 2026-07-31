@@ -456,6 +456,26 @@ module type LANGUAGE_ADAPTER = sig
 end
 ```
 
+### Milestone 7 bounded implementation
+
+`paengi_semantic` currently supplies a Paengi-owned, dependency-free adapter
+for supported top-level TypeScript declarations. It is a pure in-memory model,
+not a persistent adapter: it receives source bytes and returns parse results,
+proposals, matches, conflicts, or proposed result bytes. It has no object-store,
+snapshot, ref, workspace, capsule, release, or CLI dependency.
+
+Each proposal holds complete expected/replacement fallback bytes plus textual
+context. The only automatic operation is a declaration-name rewrite located by
+a unique same-kind/name/normalized-signature match. Normalized signatures retain
+literals and remove only whitespace/comments and trailing parameter commas.
+Structural and token-similarity matches report evidence but require manual
+review. Parser errors, ambiguous anchors, low confidence, and textual-context
+matches return explicit sidecar results without changing bytes.
+
+This is an experiment boundary, not a persistent semantic format or a full
+TypeScript parser integration. Any parser dependency or semantic persistence
+requires separate approval and format design.
+
 ## 11. Conflict storage
 
 Conflicts should contain enough data to:

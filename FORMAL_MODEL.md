@@ -442,6 +442,32 @@ The Milestone 4 text core retains, but does not silently apply, its exact
 fallback: application returns an explicit fallback-required conflict until a
 later text engine or user choice selects it.
 
+### Milestone 7 bounded adapter
+
+The initial TypeScript adapter is a pure, non-persistent research sidecar. Its
+proposal records retain a complete exact textual fallback:
+
+```ocaml
+type exact_textual_fallback = {
+  expected_source : bytes;
+  replacement_source : bytes;
+  textual_anchor : text_anchor;
+}
+```
+
+It parses only supported top-level declaration forms and never changes a
+snapshot, capsule revision, workspace, release, ref, or canonical encoding.
+On a parser error it returns no proposal; ordinary byte-based behaviour remains
+available. An automatic declaration-name rewrite requires exactly one target
+declaration with the same kind, name, and normalized signature, including
+literal tokens. Structural and syntax-similarity matches expose evidence but
+require manual review; ambiguous, low-confidence, and textual-context results
+are structured conflicts. Move and replacement are proposals only. The exact
+fallback applies only when the input file bytes exactly equal `expected_source`.
+
+This adapter does not claim a full TypeScript grammar, reference rename, or
+semantic correctness. It introduces no persistent semantic schema.
+
 ## 7. Application result
 
 ```ocaml
