@@ -468,6 +468,19 @@ fallback applies only when the input file bytes exactly equal `expected_source`.
 This adapter does not claim a full TypeScript grammar, reference rename, or
 semantic correctness. It introduces no persistent semantic schema.
 
+### Milestone 7 contextual textual baseline
+
+`paengi_textual_patch` is an independent pure byte-only baseline. It receives
+only an original byte span, expected preimage, replacement bytes, and before/
+after byte context; it has no parser, compiler, declaration, symbol, type, or
+semantic-confidence input. Its deterministic stages are exact original span,
+unique exact preimage, unique complete context, then explicitly requested
+bounded relaxed context (at most 64 nearest bytes per side). A stage applies
+only one candidate. Missing or multiple candidates return structured conflicts.
+The output is an exact byte splice and verifies unchanged prefix/suffix bytes.
+Its unique contextual result is not semantic `Exact` confidence. This baseline
+is non-persistent and does not alter any Paengi format or identity.
+
 ### Optional Compiler API boundary
 
 `paengi_typescript_adapter` is an ephemeral protocol-v1 boundary, not a model

@@ -29,6 +29,23 @@ depend on it.
 The exact textual fallback contains the complete expected and replacement file
 bytes. It only applies when the input exactly equals its expected source.
 
+## Contextual textual baseline
+
+`paengi_textual_patch` is an independent pure baseline for this experiment. It
+accepts arbitrary bytes: original byte span, exact expected preimage,
+replacement bytes, and before/after byte context. It has no TypeScript compiler,
+parser, declaration, symbol, type, syntax-tree, or semantic-confidence input.
+
+Its ordered deterministic stages are: exact preimage at the original span;
+unique exact preimage elsewhere; unique complete before/selected/after context;
+then caller-requested relaxed nearest context. Relaxation is bounded to
+1–64 bytes per side and must be given in strictly descending order. Each stage
+applies only a unique candidate; missing or ambiguous candidates are structured
+conflicts. The result is an exact byte splice with unchanged prefix/suffix
+validation. A contextual textual match does not report semantic `exact`
+confidence. The complete shared semantic-versus-textual dataset and aggregate
+comparison remain subsequent Milestone 7 work.
+
 The full-parser response is language-neutral. It includes project-relative
 declaration/name UTF-8 byte spans, declaration kind, lexical parent path,
 export state, syntactic name, declaration-shape and signature digests, alias
@@ -97,8 +114,8 @@ estimate a false-confidence rate.
 - The Compiler API adapter can apply only an exact-span, exact-preimage
   replace-node request. It reports `exact` only after byte, kind, shape, parse,
   lexical-context, and outside-byte checks; it does not retarget a moved node.
-- Contextual textual patching, fair same-fixture semantic/textual metrics,
-  adversarial expanded cases, and any persistent sidecar format remain undone.
+- Fair same-fixture semantic/textual metrics, adversarial expanded cases, and
+  any persistent sidecar format remain undone.
 
 ## Reproduction
 

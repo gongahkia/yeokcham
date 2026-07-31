@@ -492,8 +492,11 @@ semantic-unavailable result; exact textual fallback remains independent.
 
 Neither module creates an object, ID, ref, schema, golden format, workspace
 state, capsule revision, release, validation result, or attestation. Semantic
-matching stages beyond the bounded core and the fair contextual textual baseline
-remain Milestone 7 work. Semantic persistence still requires separate format
+matching stages beyond the bounded core and the shared fair comparison remain
+Milestone 7 work. `paengi_textual_patch` is the independent baseline: it uses
+only bytes, original spans, and bounded before/selected/after context. It
+neither links to the Compiler API nor accepts declaration, parser, symbol, type,
+or confidence evidence. Semantic persistence still requires separate format
 approval and an ADR.
 
 ## 11. Conflict storage

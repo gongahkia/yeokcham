@@ -6,12 +6,12 @@ Robustness tasks operate only on Paengi's pure functions and generated local fix
 ## Active vertical slice
 
 - Milestone: 7 — TypeScript semantic sidecar.
-- Task: bounded non-persistent foundation, isolated TypeScript Compiler API protocol v1, verified-snapshot virtual-file analysis, and exact preimage-guarded replace-node complete; contextual textual baseline and evidence-stage retargeting remain.
-- Modules/files: pure `paengi_semantic`; nonpersistent `paengi_typescript_adapter`; pinned `tools/paengi-typescript-adapter`; focused semantic/adapter tests, checked-in local fixtures, and a fixture-results report.
-- Types: parser error, declaration/structural path, semantic anchor, exact textual fallback, rename/move/replacement proposal, confidence/evidence, structured match/application conflict, protocol declaration evidence, semantic-unavailable reason, and replace-node outcome.
+- Task: Slice 1 complete: independent bounded contextual textual patch core. Slice 2 in progress: inspectable deterministic semantic evidence stages and a shared fixture dataset; Slice 3 will add versioned comparative experiment results and closeout.
+- Modules/files: pure `paengi_textual_patch` byte-only baseline; pure `paengi_semantic`; nonpersistent `paengi_typescript_adapter`; pinned `tools/paengi-typescript-adapter`; focused baseline/semantic/adapter tests, checked-in local fixtures, and a fixture-results report.
+- Types: textual patch operation/stage/outcome/conflict and byte-splice validator; parser error, declaration/structural path, semantic anchor, exact textual fallback, rename/move/replacement proposal, confidence/evidence, structured match/application conflict, protocol declaration evidence, semantic-unavailable reason, and replace-node outcome.
 - Formats: none. No object schema, identity, ref, golden byte format, or capsule/workspace/release encoding changes.
 - Invariants: exact file bytes remain canonical; a proposal retains complete expected/replacement fallback bytes; parse failure makes no proposal; automatic rename requires one same-kind/name/signature declaration; compiler evidence is nonpersistent and snapshot-bound; adapter failure is semantic-unavailable; exact replace-node verifies preimage bytes/hash, kind, shape, post-parse context, and unchanged outside bytes.
-- Tests: focused parser/inference/application cases; pinned-helper protocol/TS/TSX/snapshot/replacement failure tests; 100 generated formatting retargets and 100 duplicate-anchor cases with reported seed. Full `make check` and `make property-test PROPERTY_TEST_SEED=17` remain required before closeout.
+- Tests: textual exact/context/relaxation/conflict/byte-splice cases; focused parser/inference/application cases; pinned-helper protocol/TS/TSX/snapshot/replacement failure tests; seeded baseline and semantic properties. Full `make check` and `make property-test PROPERTY_TEST_SEED=17` remain required before closeout.
 - External libraries: existing Alcotest/QCheck plus exact-pinned local TypeScript `5.9.3`; no parser dependency beyond the approved isolated helper.
 - ADR changes: none; no persistent format change.
 

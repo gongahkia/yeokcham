@@ -254,6 +254,11 @@
   (source_tree fixtures/semantic)))
 
 (test
+ (name test_textual_patch)
+ (modules test_textual_patch)
+ (libraries alcotest paengi_textual_patch))
+
+(test
  (name semantic_property_test)
  (modules semantic_property_test)
  (libraries alcotest qcheck-core qcheck-alcotest paengi_semantic))
