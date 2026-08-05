@@ -899,10 +899,17 @@ repository identity or a source of Paengi-history semantics. Mapping refs never
 advance, rewrite, or hide scratch, capsule, workspace, conflict, or release
 refs. Target publication and mapping binding are not cross-ref atomic; a crash
 after a target becomes visible but before its mapping is bound remains an
-explicit, retryable incomplete bridge state. The accepted schema is not an
-implemented import/export adapter or a general Git compatibility claim.
+explicit, retryable incomplete bridge state. M8-01 implements only the
+`import/tree -> imported-snapshot` form through a bounded direct-argv adapter;
+it is not a commit importer, exporter, or general Git compatibility claim.
 
 ### Import
+
+M8-01 recursively reads a requested SHA-1 or SHA-256 Git tree, validates
+canonical Git tree entry order and safe names, and maps `100644`, `100755`, and
+`120000` to regular, executable, and symlink snapshot entries. It preserves raw
+blob/symlink-target bytes and publishes the resulting snapshot mapping only
+after the snapshot is stored. Gitlinks and every other mode fail closed.
 
 A Git commit maps to:
 

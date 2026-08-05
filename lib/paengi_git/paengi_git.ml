@@ -57,10 +57,7 @@ type mapping = {
   subject : mapping_subject;
 }
 
-type import_result = {
-  snapshot : Snapshot.Snapshot.id;
-  mapping : mapping;
-}
+type import_result = { snapshot : Snapshot.Snapshot.id; mapping : mapping }
 
 type configuration = {
   git : string;
@@ -131,11 +128,8 @@ type error =
   | Invalid_object_id of { format : object_format; value : string }
   | Invalid_tree of { identity : object_id; detail : string }
   | Unsupported_tree_mode of { identity : object_id; mode : string }
-  | Import_limit_exceeded of {
-      resource : string;
-      limit : int;
-      actual : int;
-    }
+  | Invalid_symlink_target of { identity : object_id }
+  | Import_limit_exceeded of { resource : string; limit : int; actual : int }
   | Snapshot_error of Snapshot.error
   | Mapping_error of string
   | Store_error of Store.error
@@ -157,12 +151,17 @@ let error_to_string = function
       Printf.sprintf "Git %s returned malformed output: %s" operation detail
   | Invalid_object_id { format; value } ->
       Printf.sprintf "invalid %s Git object ID: %S"
-        (object_format_to_string format) value
+        (object_format_to_string format)
+        value
   | Invalid_tree { identity; detail } ->
       Printf.sprintf "invalid Git tree %s: %s"
-        (object_id_to_hex identity) detail
+        (object_id_to_hex identity)
+        detail
   | Unsupported_tree_mode { identity; mode } ->
       Printf.sprintf "unsupported Git tree mode %S in %s" mode
+        (object_id_to_hex identity)
+  | Invalid_symlink_target { identity } ->
+      Printf.sprintf "Git symlink target contains NUL bytes: %s"
         (object_id_to_hex identity)
   | Import_limit_exceeded { resource; limit; actual } ->
       Printf.sprintf "Git import %s limit exceeded (%d > %d)" resource actual
@@ -217,8 +216,7 @@ let validate_configuration configuration =
   else if configuration.max_blob_bytes > Store.max_object_bytes then
     Error
       (Invalid_configuration
-         (Printf.sprintf
-         "Git blob limit exceeds Paengi object limit (%d > %d)"
+         (Printf.sprintf "Git blob limit exceeds Paengi object limit (%d > %d)"
             configuration.max_blob_bytes Store.max_object_bytes))
   else if configuration.max_total_tree_bytes < configuration.max_tree_bytes then
     Error
@@ -382,7 +380,8 @@ let hex_nibble = function
 
 let object_id_of_hex format hex =
   let expected = object_id_length format * 2 in
-  if String.length hex <> expected then Error (Invalid_object_id { format; value = hex })
+  if String.length hex <> expected then
+    Error (Invalid_object_id { format; value = hex })
   else
     let raw = Bytes.create (expected / 2) in
     let rec decode offset =
@@ -457,10 +456,10 @@ let tree_key entry =
   entry.name ^ if String.equal entry.mode "40000" then "/" else "\000"
 
 let valid_tree_name name =
-  not (String.is_empty name)
-  && not (String.equal name ".")
-  && not (String.equal name "..")
-  && not (String.contains name '/')
+  (not (String.is_empty name))
+  && (not (String.equal name "."))
+  && (not (String.equal name ".."))
+  && (not (String.contains name '/'))
   && not (String.contains name '\000')
 
 let parse_tree_entries ~max_entries identity bytes =
@@ -471,17 +470,21 @@ let parse_tree_entries ~max_entries identity bytes =
     else if count = max_entries then
       Error
         (Import_limit_exceeded
-           { resource = "tree entries"; limit = max_entries; actual = count + 1 })
+           {
+             resource = "tree entries";
+             limit = max_entries;
+             actual = count + 1;
+           })
     else
       match find_byte bytes ' ' offset with
       | None ->
           Error
             (Invalid_tree
                { identity; detail = "entry mode is not terminated by a space" })
-      | Some mode_end ->
+      | Some mode_end -> (
           let mode = String.sub bytes offset (mode_end - offset) in
           let name_start = mode_end + 1 in
-          (match find_byte bytes '\000' name_start with
+          match find_byte bytes '\000' name_start with
           | None ->
               Error
                 (Invalid_tree
@@ -491,7 +494,8 @@ let parse_tree_entries ~max_entries identity bytes =
               let object_start = name_end + 1 in
               let next = object_start + object_id_bytes in
               if String.is_empty mode then
-                Error (Invalid_tree { identity; detail = "entry mode is empty" })
+                Error
+                  (Invalid_tree { identity; detail = "entry mode is empty" })
               else if not (valid_tree_name name) then
                 Error
                   (Invalid_tree
@@ -505,7 +509,9 @@ let parse_tree_entries ~max_entries identity bytes =
                      { identity; detail = "entry object ID is truncated" })
               else
                 let raw = String.sub bytes object_start object_id_bytes in
-                let entry = { mode; name; object_id = { format = identity.format; raw } } in
+                let entry =
+                  { mode; name; object_id = { format = identity.format; raw } }
+                in
                 let key = tree_key entry in
                 let* () =
                   match previous_name with
@@ -514,7 +520,8 @@ let parse_tree_entries ~max_entries identity bytes =
                         (Invalid_tree
                            {
                              identity;
-                             detail = Printf.sprintf "duplicate entry name %S" name;
+                             detail =
+                               Printf.sprintf "duplicate entry name %S" name;
                            })
                   | _ -> Ok ()
                 in
@@ -525,12 +532,13 @@ let parse_tree_entries ~max_entries identity bytes =
                         (Invalid_tree
                            {
                              identity;
-                             detail = "entries are not in canonical Git tree order";
+                             detail =
+                               "entries are not in canonical Git tree order";
                            })
                   | _ -> Ok ()
                 in
-                parse next (count + 1) (Some name) (Some key)
-                  (entry :: reversed))
+                parse next (count + 1) (Some name) (Some key) (entry :: reversed)
+          )
   in
   parse 0 0 None None []
 
@@ -564,7 +572,8 @@ let mapping_subject_value = function
       mapping_array [ Encoding.integer 0L; snapshot ]
   | Imported_revision { capsule; revision; revision_object } ->
       let* capsule =
-        mapping_identity_value "imported capsule ID" (Id.Capsule_id.to_bytes capsule)
+        mapping_identity_value "imported capsule ID"
+          (Id.Capsule_id.to_bytes capsule)
       in
       let* revision =
         mapping_identity_value "imported revision ID"
@@ -577,7 +586,8 @@ let mapping_subject_value = function
       mapping_array [ Encoding.integer 1L; capsule; revision; revision_object ]
   | Exported_release { release; release_object; final_snapshot } ->
       let* release =
-        mapping_identity_value "exported release ID" (Id.Release_id.to_bytes release)
+        mapping_identity_value "exported release ID"
+          (Id.Release_id.to_bytes release)
       in
       let* release_object =
         mapping_identity_value "exported release object ID"
@@ -588,11 +598,12 @@ let mapping_subject_value = function
           (Snapshot.Snapshot.stored_object_id final_snapshot
           |> Store.Stored_object_id.to_raw_bytes)
       in
-      mapping_array [ Encoding.integer 2L; release; release_object; final_snapshot ]
-  | Exported_revision
-      { capsule; revision; revision_object; final_snapshot } ->
+      mapping_array
+        [ Encoding.integer 2L; release; release_object; final_snapshot ]
+  | Exported_revision { capsule; revision; revision_object; final_snapshot } ->
       let* capsule =
-        mapping_identity_value "exported capsule ID" (Id.Capsule_id.to_bytes capsule)
+        mapping_identity_value "exported capsule ID"
+          (Id.Capsule_id.to_bytes capsule)
       in
       let* revision =
         mapping_identity_value "exported revision ID"
@@ -608,7 +619,13 @@ let mapping_subject_value = function
           |> Store.Stored_object_id.to_raw_bytes)
       in
       mapping_array
-        [ Encoding.integer 3L; capsule; revision; revision_object; final_snapshot ]
+        [
+          Encoding.integer 3L;
+          capsule;
+          revision;
+          revision_object;
+          final_snapshot;
+        ]
 
 let direction_code = function Import -> 0L | Export -> 1L
 let kind_code = function Tree -> 1L | Commit -> 2L
@@ -619,10 +636,15 @@ let valid_mapping_combination direction kind subject =
   | Import, Commit, Imported_revision _ -> true
   | Export, Commit, Exported_release _ | Export, Commit, Exported_revision _ ->
       true
-  | Import, Commit, (Imported_snapshot _ | Exported_release _ | Exported_revision _)
-  | Import, Tree, (Imported_revision _ | Exported_release _ | Exported_revision _)
+  | ( Import,
+      Commit,
+      (Imported_snapshot _ | Exported_release _ | Exported_revision _) )
+  | ( Import,
+      Tree,
+      (Imported_revision _ | Exported_release _ | Exported_revision _) )
   | Export, Tree, _
-  | Export, Commit, (Imported_snapshot _ | Imported_revision _) -> false
+  | Export, Commit, (Imported_snapshot _ | Imported_revision _) ->
+      false
 
 let mapping_identity_payload ~direction ~git_object ~git_kind ~subject =
   let* git_object = mapping_object_id_value git_object in
@@ -641,8 +663,8 @@ let derive_mapping_id ~direction ~git_object ~git_kind ~subject =
     mapping_identity_payload ~direction ~git_object ~git_kind ~subject
   in
   let raw =
-    Hash.feed_string Hash.empty mapping_domain
-    |> fun context -> Hash.feed_string context (Encoding.encode identity)
+    Hash.feed_string Hash.empty mapping_domain |> fun context ->
+    Hash.feed_string context (Encoding.encode identity)
     |> Hash.get |> Hash.to_raw_string
   in
   match Id.Git_mapping_id.of_bytes raw with
@@ -662,7 +684,10 @@ let mapping_payload mapping =
       ~git_object:mapping.git_object ~git_kind:mapping.git_kind
       ~subject:mapping.subject
   in
-  let* id = mapping_identity_value "Git mapping ID" (Id.Git_mapping_id.to_bytes mapping.id) in
+  let* id =
+    mapping_identity_value "Git mapping ID"
+      (Id.Git_mapping_id.to_bytes mapping.id)
+  in
   mapping_array
     [
       Encoding.integer 1L;
@@ -693,20 +718,22 @@ let mapping_fields name length = function
   | Encoding.Array values when List.length values = length -> Ok values
   | Encoding.Array _ ->
       Error
-        (Mapping_error
-           (Printf.sprintf "%s must contain %d values" name length))
+        (Mapping_error (Printf.sprintf "%s must contain %d values" name length))
   | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _ | Encoding.Map _
-  | Encoding.Bool _ | Encoding.Null -> Error (Mapping_error (name ^ " must be an array"))
+  | Encoding.Bool _ | Encoding.Null ->
+      Error (Mapping_error (name ^ " must be an array"))
 
 let mapping_integer name = function
   | Encoding.Integer value -> Ok value
   | Encoding.Bytes _ | Encoding.Text _ | Encoding.Array _ | Encoding.Map _
-  | Encoding.Bool _ | Encoding.Null -> Error (Mapping_error (name ^ " must be an integer"))
+  | Encoding.Bool _ | Encoding.Null ->
+      Error (Mapping_error (name ^ " must be an integer"))
 
 let mapping_bytes name = function
   | Encoding.Bytes value -> Ok value
   | Encoding.Integer _ | Encoding.Text _ | Encoding.Array _ | Encoding.Map _
-  | Encoding.Bool _ | Encoding.Null -> Error (Mapping_error (name ^ " must be bytes"))
+  | Encoding.Bool _ | Encoding.Null ->
+      Error (Mapping_error (name ^ " must be bytes"))
 
 let mapping_raw_id name parser value =
   let* raw = mapping_bytes name value in
@@ -715,7 +742,10 @@ let mapping_raw_id name parser value =
       (Mapping_error
          (Printf.sprintf "%s must be exactly 32 bytes, got %d" name
             (String.length raw)))
-  else parser raw |> Result.map_error (fun error -> Mapping_error (Id.parse_error_to_string error))
+  else
+    parser raw
+    |> Result.map_error (fun error ->
+        Mapping_error (Id.parse_error_to_string error))
 
 let mapping_stored_id name value =
   let* raw = mapping_bytes name value in
@@ -730,12 +760,16 @@ let mapping_stored_id name value =
 let mapping_direction_of_code = function
   | 0L -> Ok Import
   | 1L -> Ok Export
-  | value -> Error (Mapping_error (Printf.sprintf "unknown mapping direction: %Ld" value))
+  | value ->
+      Error
+        (Mapping_error (Printf.sprintf "unknown mapping direction: %Ld" value))
 
 let object_kind_of_code = function
   | 1L -> Ok Tree
   | 2L -> Ok Commit
-  | value -> Error (Mapping_error (Printf.sprintf "unknown Git object kind: %Ld" value))
+  | value ->
+      Error
+        (Mapping_error (Printf.sprintf "unknown Git object kind: %Ld" value))
 
 let decode_object_id value =
   let* fields = mapping_fields "Git object ID" 2 value in
@@ -758,10 +792,11 @@ let decode_object_id value =
 let decode_mapping_subject value =
   let* values =
     match value with
-    | Encoding.Array values when values <> [] -> Ok values
     | Encoding.Array [] -> Error (Mapping_error "Git mapping subject is empty")
+    | Encoding.Array values -> Ok values
     | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _ | Encoding.Map _
-    | Encoding.Bool _ | Encoding.Null -> Error (Mapping_error "Git mapping subject must be an array")
+    | Encoding.Bool _ | Encoding.Null ->
+        Error (Mapping_error "Git mapping subject must be an array")
   in
   match values with
   | tag :: fields ->
@@ -770,57 +805,84 @@ let decode_mapping_subject value =
         match fields with
         | [ snapshot ] ->
             let* snapshot = mapping_stored_id "imported snapshot ID" snapshot in
-            Ok (Imported_snapshot (Snapshot.Snapshot.of_stored_object_id snapshot))
-        | _ -> Error (Mapping_error "imported snapshot subject has invalid length")
+            Ok
+              (Imported_snapshot
+                 (Snapshot.Snapshot.of_stored_object_id snapshot))
+        | _ ->
+            Error (Mapping_error "imported snapshot subject has invalid length")
       else if Int64.equal tag 1L then
         match fields with
         | [ capsule; revision; revision_object ] ->
-            let* capsule = mapping_raw_id "imported capsule ID" Id.Capsule_id.of_bytes capsule in
+            let* capsule =
+              mapping_raw_id "imported capsule ID" Id.Capsule_id.of_bytes
+                capsule
+            in
             let* revision =
-              mapping_raw_id "imported revision ID" Id.Capsule_revision_id.of_bytes
-                revision
+              mapping_raw_id "imported revision ID"
+                Id.Capsule_revision_id.of_bytes revision
             in
             let* revision_object =
               mapping_stored_id "imported revision object ID" revision_object
             in
             Ok (Imported_revision { capsule; revision; revision_object })
-        | _ -> Error (Mapping_error "imported revision subject has invalid length")
+        | _ ->
+            Error (Mapping_error "imported revision subject has invalid length")
       else if Int64.equal tag 2L then
         match fields with
         | [ release; release_object; final_snapshot ] ->
-            let* release = mapping_raw_id "exported release ID" Id.Release_id.of_bytes release in
-            let* release_object = mapping_stored_id "exported release object ID" release_object in
-            let* final_snapshot = mapping_stored_id "exported final snapshot ID" final_snapshot in
+            let* release =
+              mapping_raw_id "exported release ID" Id.Release_id.of_bytes
+                release
+            in
+            let* release_object =
+              mapping_stored_id "exported release object ID" release_object
+            in
+            let* final_snapshot =
+              mapping_stored_id "exported final snapshot ID" final_snapshot
+            in
             Ok
               (Exported_release
                  {
                    release;
                    release_object;
-                   final_snapshot = Snapshot.Snapshot.of_stored_object_id final_snapshot;
+                   final_snapshot =
+                     Snapshot.Snapshot.of_stored_object_id final_snapshot;
                  })
-        | _ -> Error (Mapping_error "exported release subject has invalid length")
+        | _ ->
+            Error (Mapping_error "exported release subject has invalid length")
       else if Int64.equal tag 3L then
         match fields with
         | [ capsule; revision; revision_object; final_snapshot ] ->
-            let* capsule = mapping_raw_id "exported capsule ID" Id.Capsule_id.of_bytes capsule in
+            let* capsule =
+              mapping_raw_id "exported capsule ID" Id.Capsule_id.of_bytes
+                capsule
+            in
             let* revision =
-              mapping_raw_id "exported revision ID" Id.Capsule_revision_id.of_bytes
-                revision
+              mapping_raw_id "exported revision ID"
+                Id.Capsule_revision_id.of_bytes revision
             in
             let* revision_object =
               mapping_stored_id "exported revision object ID" revision_object
             in
-            let* final_snapshot = mapping_stored_id "exported final snapshot ID" final_snapshot in
+            let* final_snapshot =
+              mapping_stored_id "exported final snapshot ID" final_snapshot
+            in
             Ok
               (Exported_revision
                  {
                    capsule;
                    revision;
                    revision_object;
-                   final_snapshot = Snapshot.Snapshot.of_stored_object_id final_snapshot;
+                   final_snapshot =
+                     Snapshot.Snapshot.of_stored_object_id final_snapshot;
                  })
-        | _ -> Error (Mapping_error "exported revision subject has invalid length")
-      else Error (Mapping_error (Printf.sprintf "unknown Git mapping subject tag: %Ld" tag))
+        | _ ->
+            Error (Mapping_error "exported revision subject has invalid length")
+      else
+        Error
+          (Mapping_error
+             (Printf.sprintf "unknown Git mapping subject tag: %Ld" tag))
+  | [] -> assert false
 
 let decode_mapping_payload value =
   let* fields = mapping_fields "Git mapping" 6 value in
@@ -828,21 +890,29 @@ let decode_mapping_payload value =
   | [ version; supplied_id; direction; git_kind; git_object; subject ] ->
       let* version = mapping_integer "Git mapping version" version in
       if not (Int64.equal version 1L) then
-        Error (Mapping_error (Printf.sprintf "unsupported Git mapping version: %Ld" version))
+        Error
+          (Mapping_error
+             (Printf.sprintf "unsupported Git mapping version: %Ld" version))
       else
-        let* supplied_id = mapping_raw_id "Git mapping ID" Id.Git_mapping_id.of_bytes supplied_id in
+        let* supplied_id =
+          mapping_raw_id "Git mapping ID" Id.Git_mapping_id.of_bytes supplied_id
+        in
         let* direction = mapping_integer "Git mapping direction" direction in
         let* direction = mapping_direction_of_code direction in
         let* git_kind = mapping_integer "Git object kind" git_kind in
         let* git_kind = object_kind_of_code git_kind in
         let* git_object = decode_object_id git_object in
         let* subject = decode_mapping_subject subject in
-        let* mapping = create_mapping ~direction ~git_object ~git_kind ~subject in
+        let* mapping =
+          create_mapping ~direction ~git_object ~git_kind ~subject
+        in
         if not (Id.Git_mapping_id.equal supplied_id mapping.id) then
-          Error (Mapping_error "Git mapping logical ID does not match its preimage")
+          Error
+            (Mapping_error "Git mapping logical ID does not match its preimage")
         else
           let* canonical = mapping_payload mapping in
-          if String.equal (Encoding.encode canonical) (Encoding.encode value) then Ok mapping
+          if String.equal (Encoding.encode canonical) (Encoding.encode value)
+          then Ok mapping
           else Error (Mapping_error "Git mapping payload is noncanonical")
   | _ -> assert false
 
@@ -857,8 +927,8 @@ let mapping_binding_body logical physical =
   mapping_array [ Encoding.integer 1L; logical; physical ]
 
 let mapping_binding_checksum body =
-  Hash.feed_string Hash.empty mapping_binding_domain
-  |> fun context -> Hash.feed_string context (Encoding.encode body)
+  Hash.feed_string Hash.empty mapping_binding_domain |> fun context ->
+  Hash.feed_string context (Encoding.encode body)
   |> Hash.get |> Hash.to_raw_string
 
 let encode_mapping_binding logical physical =
@@ -870,12 +940,14 @@ let encode_mapping_binding logical physical =
         Encoding.integer 1L;
         (match body with
         | Encoding.Array [ _; logical; _ ] -> logical
-        | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _ | Encoding.Map _
-        | Encoding.Bool _ | Encoding.Null | Encoding.Array _ -> assert false);
+        | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _
+        | Encoding.Map _ | Encoding.Bool _ | Encoding.Null | Encoding.Array _ ->
+            assert false);
         (match body with
         | Encoding.Array [ _; _; physical ] -> physical
-        | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _ | Encoding.Map _
-        | Encoding.Bool _ | Encoding.Null | Encoding.Array _ -> assert false);
+        | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _
+        | Encoding.Map _ | Encoding.Bool _ | Encoding.Null | Encoding.Array _ ->
+            assert false);
         checksum;
       ]
   in
@@ -884,7 +956,8 @@ let encode_mapping_binding logical physical =
 let decode_mapping_binding bytes =
   let* value =
     Encoding.decode bytes
-    |> Result.map_error (fun error -> Mapping_error (Encoding.decode_error_to_string error))
+    |> Result.map_error (fun error ->
+        Mapping_error (Encoding.decode_error_to_string error))
   in
   let* fields = mapping_fields "Git mapping binding" 4 value in
   match fields with
@@ -893,11 +966,19 @@ let decode_mapping_binding bytes =
       if not (Int64.equal version 1L) then
         Error
           (Mapping_error
-             (Printf.sprintf "unsupported Git mapping binding version: %Ld" version))
+             (Printf.sprintf "unsupported Git mapping binding version: %Ld"
+                version))
       else
-        let* logical = mapping_raw_id "Git mapping binding ID" Id.Git_mapping_id.of_bytes logical in
-        let* physical = mapping_stored_id "Git mapping binding object ID" physical in
-        let* supplied_checksum = mapping_bytes "Git mapping binding checksum" supplied_checksum in
+        let* logical =
+          mapping_raw_id "Git mapping binding ID" Id.Git_mapping_id.of_bytes
+            logical
+        in
+        let* physical =
+          mapping_stored_id "Git mapping binding object ID" physical
+        in
+        let* supplied_checksum =
+          mapping_bytes "Git mapping binding checksum" supplied_checksum
+        in
         if String.length supplied_checksum <> 32 then
           Error (Mapping_error "Git mapping binding checksum must be 32 bytes")
         else
@@ -908,7 +989,8 @@ let decode_mapping_binding bytes =
           else
             let* canonical = encode_mapping_binding logical physical in
             if String.equal canonical bytes then Ok (logical, physical)
-            else Error (Mapping_error "Git mapping binding bytes are noncanonical")
+            else
+              Error (Mapping_error "Git mapping binding bytes are noncanonical")
   | _ -> assert false
 
 let mapping_ref_components logical =
@@ -916,9 +998,13 @@ let mapping_ref_components logical =
 
 let publish_mapping store mapping =
   let* envelope = mapping_envelope mapping in
-  let* physical = Store.put store envelope |> Result.map_error (fun error -> Store_error error) in
+  let* physical =
+    Store.put store envelope
+    |> Result.map_error (fun error -> Store_error error)
+  in
   let* binding = encode_mapping_binding mapping.id physical in
-  Store.with_lock store ~name:"git-mappings" ~on_error:(fun error -> Store_error error)
+  Store.with_lock store ~name:"git-mappings"
+    ~on_error:(fun error -> Store_error error)
     (fun () ->
       let components = mapping_ref_components mapping.id in
       let* current =
@@ -962,9 +1048,13 @@ let load_mapping store logical =
   in
   let* bound_id, physical = decode_mapping_binding binding in
   if not (Id.Git_mapping_id.equal bound_id logical) then
-    Error (Mapping_error "Git mapping binding logical ID disagrees with its path")
+    Error
+      (Mapping_error "Git mapping binding logical ID disagrees with its path")
   else
-    let* envelope = Store.get store physical |> Result.map_error (fun error -> Store_error error) in
+    let* envelope =
+      Store.get store physical
+      |> Result.map_error (fun error -> Store_error error)
+    in
     if Envelope.object_type envelope <> Envelope.Git_mapping then
       Error
         (Mapping_error
@@ -973,7 +1063,8 @@ let load_mapping store logical =
     else
       let* mapping = decode_mapping_payload (Envelope.payload envelope) in
       if not (Id.Git_mapping_id.equal mapping.id logical) then
-        Error (Mapping_error "Git mapping object logical ID disagrees with binding")
+        Error
+          (Mapping_error "Git mapping object logical ID disagrees with binding")
       else
         let* () = verify_mapping_subject store mapping.subject in
         Ok mapping
@@ -990,8 +1081,8 @@ let store_file_content store bytes =
   else
     Snapshot.Manifest.store_bytes store bytes
     |> Result.map (fun manifest ->
-           Snapshot.Content.of_stored_object_id
-             (Snapshot.Manifest.stored_object_id manifest))
+        Snapshot.Content.of_stored_object_id
+          (Snapshot.Manifest.stored_object_id manifest))
 
 let import_tree ?runner configuration ~store ~repository ~tree =
   let* configuration = validate_configuration configuration in
@@ -1013,12 +1104,7 @@ let import_tree ?runner configuration ~store ~repository ~tree =
     let read_object identity kind limit =
       run_bytes ?runner configuration executable repository
         ~operation:("cat-file-" ^ kind) ~max_stdout_bytes:limit
-        [
-          "--no-replace-objects";
-          "cat-file";
-          kind;
-          object_id_to_hex identity;
-        ]
+        [ "--no-replace-objects"; "cat-file"; kind; object_id_to_hex identity ]
     in
     let rec import_directory depth identity =
       if depth > configuration.max_depth then
@@ -1042,65 +1128,87 @@ let import_tree ?runner configuration ~store ~repository ~tree =
                })
         else (
           total_tree_bytes := next_tree_total;
-        let* entries =
-          parse_tree_entries ~max_entries:configuration.max_tree_entries identity raw
-        in
-        let next_total = !total_entries + List.length entries in
-        if next_total > configuration.max_tree_entries then
-          Error
-            (Import_limit_exceeded
-               {
-                 resource = "total tree entries";
-                 limit = configuration.max_tree_entries;
-                 actual = next_total;
-               })
-        else (
-          total_entries := next_total;
-          let rec import_entries reversed = function
-            | [] -> Ok (List.rev reversed)
-            | entry :: rest ->
-                let* imported =
-                  match entry.mode with
-                  | "40000" ->
-                      let* child = import_directory (depth + 1) entry.object_id in
-                      Ok (entry.name, Snapshot.Tree.Directory child)
-                  | "100644" | "100755" | "120000" ->
-                      let* blob =
-                        read_object entry.object_id "blob" configuration.max_blob_bytes
-                      in
-                      let next_total = !total_blob_bytes + String.length blob in
-                      if next_total > configuration.max_total_blob_bytes then
-                        Error
-                          (Import_limit_exceeded
-                             {
-                               resource = "total blob bytes";
-                               limit = configuration.max_total_blob_bytes;
-                               actual = next_total;
-                             })
-                      else (
-                        total_blob_bytes := next_total;
-                        let* content =
-                          store_file_content store blob
-                          |> Result.map_error (fun error -> Snapshot_error error)
-                        in
-                        let mode =
-                          if String.equal entry.mode "100644" then Snapshot.Regular
-                          else if String.equal entry.mode "100755" then Snapshot.Executable
-                          else Snapshot.Symlink
-                        in
-                        Ok (entry.name, Snapshot.Tree.File { mode; content }))
-                  | mode -> Error (Unsupported_tree_mode { identity; mode })
-                in
-                import_entries (imported :: reversed) rest
+          let* entries =
+            parse_tree_entries ~max_entries:configuration.max_tree_entries
+              identity raw
           in
-          let* entries = import_entries [] entries in
-          let entries = List.sort (fun (left, _) (right, _) -> String.compare left right) entries in
-          Snapshot.Tree.create entries
-          |> Result.map_error (fun error -> Snapshot_error error)
-          |> Result.bind (fun tree ->
-                 Snapshot.Tree.store store tree
-                 |> Result.map_error (fun error -> Snapshot_error error)))
-        )
+          let next_total = !total_entries + List.length entries in
+          if next_total > configuration.max_tree_entries then
+            Error
+              (Import_limit_exceeded
+                 {
+                   resource = "total tree entries";
+                   limit = configuration.max_tree_entries;
+                   actual = next_total;
+                 })
+          else (
+            total_entries := next_total;
+            let rec import_entries reversed = function
+              | [] -> Ok (List.rev reversed)
+              | entry :: rest ->
+                  let* imported =
+                    match entry.mode with
+                    | "40000" ->
+                        let* child =
+                          import_directory (depth + 1) entry.object_id
+                        in
+                        Ok (entry.name, Snapshot.Tree.Directory child)
+                    | "100644" | "100755" | "120000" ->
+                        let* blob =
+                          read_object entry.object_id "blob"
+                            configuration.max_blob_bytes
+                        in
+                        if
+                          String.equal entry.mode "120000"
+                          && String.contains blob '\000'
+                        then
+                          Error
+                            (Invalid_symlink_target
+                               { identity = entry.object_id })
+                        else
+                          let next_total =
+                            !total_blob_bytes + String.length blob
+                          in
+                          if next_total > configuration.max_total_blob_bytes
+                          then
+                            Error
+                              (Import_limit_exceeded
+                                 {
+                                   resource = "total blob bytes";
+                                   limit = configuration.max_total_blob_bytes;
+                                   actual = next_total;
+                                 })
+                          else (
+                            total_blob_bytes := next_total;
+                            let* content =
+                              store_file_content store blob
+                              |> Result.map_error (fun error ->
+                                  Snapshot_error error)
+                            in
+                            let mode =
+                              if String.equal entry.mode "100644" then
+                                Snapshot.Regular
+                              else if String.equal entry.mode "100755" then
+                                Snapshot.Executable
+                              else Snapshot.Symlink
+                            in
+                            Ok (entry.name, Snapshot.Tree.File { mode; content }))
+                    | mode -> Error (Unsupported_tree_mode { identity; mode })
+                  in
+                  import_entries (imported :: reversed) rest
+            in
+            let* entries = import_entries [] entries in
+            let entries =
+              List.sort
+                (fun (left, _) (right, _) -> String.compare left right)
+                entries
+            in
+            let* tree =
+              Snapshot.Tree.create entries
+              |> Result.map_error (fun error -> Snapshot_error error)
+            in
+            Snapshot.Tree.store store tree
+            |> Result.map_error (fun error -> Snapshot_error error)))
     in
     let* root = import_directory 0 tree in
     let snapshot = Snapshot.Snapshot.create ~root in

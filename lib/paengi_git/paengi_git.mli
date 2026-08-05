@@ -1,6 +1,5 @@
 type object_format = Sha1 | Sha256
 type inspection = { bare : bool; object_format : object_format }
-
 type object_id
 type object_kind = Tree | Commit
 type mapping_direction = Import | Export
@@ -77,6 +76,7 @@ type error =
   | Invalid_object_id of { format : object_format; value : string }
   | Invalid_tree of { identity : object_id; detail : string }
   | Unsupported_tree_mode of { identity : object_id; mode : string }
+  | Invalid_symlink_target of { identity : object_id }
   | Import_limit_exceeded of { resource : string; limit : int; actual : int }
   | Snapshot_error of Paengi_snapshot.error
   | Mapping_error of string
@@ -86,7 +86,6 @@ val error_to_string : error -> string
 val object_format_to_string : object_format -> string
 val inspection_bare : inspection -> bool
 val inspection_object_format : inspection -> object_format
-
 val object_id_of_hex : object_format -> string -> (object_id, error) result
 val object_id_to_hex : object_id -> string
 val object_id_format : object_id -> object_format

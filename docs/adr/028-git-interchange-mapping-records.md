@@ -154,9 +154,9 @@ checksum = SHA-256(
 Bindings use ADR-020/ADR-023 same-directory temporary writes, fsync, checked
 compare-and-swap, and directory fsync where supported. They are create-only:
 an equal retry succeeds and a different physical object for the same logical
-mapping ID returns a structured collision/corruption error. Mapping listing
-enumerates and verifies these bindings; any lookup index is rebuildable and
-non-canonical.
+mapping ID returns a structured collision/corruption error. A future mapping
+listing must enumerate and verify these bindings; any lookup index is
+rebuildable and non-canonical.
 
 An importer or exporter may create its normal Paengi target only through that
 target's accepted publication protocol. After it verifies the target and the
@@ -233,3 +233,16 @@ subject IDs, and explicit incomplete/retryable bridge states. They must not
 promise arbitrary Git-format compatibility. Git documents tree modes `100644`,
 `100755`, and `120000` as regular, executable, and symlink entries; v1 mapping
 records do not reinterpret those modes. [git-fast-import](https://git-scm.com/docs/git-fast-import)
+
+M8-01 adds `paengi git import tree --repository <absolute-git-directory>
+--tree <full-git-tree-id>`. It prints the snapshot and mapping IDs after the
+create-only mapping binding succeeds. It does not add a commit, export, or
+mapping-list command.
+
+## Implementation verification evidence
+
+M8-01 adds a canonical `Git_mapping_v1` golden fixture plus focused local Git
+fixtures for nested files, executable mode, symlink target bytes, retry/reopen,
+unsafe names, unsupported modes, missing objects, blob bounds, and corrupt
+mapping bindings. Its seeded generated test checks exact bytes, executable mode,
+snapshot identity, and mapping identity across repeated imports.

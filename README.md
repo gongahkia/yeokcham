@@ -75,12 +75,11 @@ participate in restore, materialisation, export, or verification. Helper
 absence, invalid output, timeout, or incomplete analysis returns
 semantic-unavailable and preserves the textual operation.
 
-Milestone 8 has begun with a non-persistent bounded Git preflight adapter. It
-uses direct `git` argv only to identify a local repository's bare status and
-declared object format; it imports or exports nothing and creates no Paengi
-mapping, object, ref, or Git compatibility promise. ADR-028 accepts the
-additive mapping format required before durable bridge implementation; the
-mapping format itself has no implementation or compatibility claim yet.
+Milestone 8 has its first durable vertical slice: bounded direct-argv import
+of one Git tree into an exact Paengi snapshot. It preserves `100644`, `100755`,
+and `120000` bytes/modes, rejects unsafe names and unsupported modes, and writes
+an immutable ADR-028 mapping binding. It neither imports Git commits/topology
+nor exports Git data, and makes no general Git compatibility promise.
 
 See `CONTRIBUTING.md` for development rules. Paengi is licensed under the MIT License.
 
@@ -135,6 +134,7 @@ dune exec bin/paengi.exe -- release create --workspace <workspace-id> [--parent 
 dune exec bin/paengi.exe -- release show <release-id>
 dune exec bin/paengi.exe -- release verify <release-id>
 dune exec bin/paengi.exe -- release list
+dune exec bin/paengi.exe -- git import tree --repository <absolute-git-directory> --tree <full-git-tree-id>
 ```
 
 `work explain-order` is read-only. It resolves each enabled capsule's current
@@ -159,6 +159,11 @@ complete attempt, rejects unresolved conflicts, replays it, runs every supplied
 required validation against the resulting snapshot, then publishes an immutable
 release through a create-only binding. `release verify` replays durable inputs;
 it does not trust a workspace cache or current workspace selection.
+
+`git import tree` requires an initialized Paengi root and an absolute local Git
+repository directory. It accepts only a full SHA-1 or SHA-256 tree ID, prints
+the imported snapshot and immutable mapping IDs, and does not advance any
+scratch, capsule, workspace, or release ref.
 
 `restore` creates a durable safety checkpoint for divergent work, validates its
 plan immediately before applying, and moves `scratch-head` only after exact

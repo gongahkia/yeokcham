@@ -559,28 +559,29 @@ uses only evidence bound to the exact final snapshot.
 
 Use a mature Git library or invoke Git plumbing through a controlled adapter.
 
-Milestone 8 starts with the non-persistent `paengi_git` preflight adapter. It
-resolves the configured Git executable before use, accepts only an absolute
-existing repository directory, invokes Git by direct argv with a bounded
-process runner, and parses only bounded single-line `rev-parse` facts for bare
-status and Git's declared object format. It creates no Paengi object, ref,
-mapping, Git repository, or checkout. Git remains the owner of Git-object,
-pack, delta, and compatibility parsing; Paengi has not yet declared a
-Git-format compatibility contract.
+Milestone 8's M8-01 adapter resolves the configured Git executable before use,
+accepts only an absolute existing repository directory, invokes Git by direct
+argv with a bounded process runner, and verifies bounded `rev-parse` facts
+before reading a requested tree or blob through `cat-file`. It imports one tree
+recursively into immutable Content/Tree/Snapshot objects, maps only modes
+`100644`, `100755`, and `120000`, and creates one ADR-028 immutable mapping
+binding. Tree/blob bytes, entries, and nesting are independently bounded.
 
-ADR-028 accepts an immutable mapping schema before any Git blob, tree, commit,
-tag, parent, or metadata data enters persistent Paengi state. It is not yet
-implemented. The preflight result is process-local and must not be used as
+The adapter rejects unsafe names, unsupported modes, malformed trees, missing
+objects, and process/output-limit failures before publishing a mapping. It does
+not import a commit, parent, tag, ref, Git topology, or metadata. Git remains
+the owner of Git-object, pack, delta, and compatibility parsing; Paengi has no
+general Git-format compatibility contract. The preflight result is never a
 repository identity or persistent metadata.
 
 Import:
 
 - Commit graph.
-- Trees and blobs.
+- Trees and blobs. M8-01 implements a single tree/blob snapshot import only.
 - Author and timestamp metadata.
 - Parent relationships.
 - Tags.
-- Mapping records.
+- Mapping records. M8-01 implements tree-to-snapshot mappings only.
 
 Imported commits initially become opaque transitions. Semantic inference is optional post-processing.
 

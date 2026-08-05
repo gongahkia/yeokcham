@@ -28,7 +28,23 @@
   paengi_id
   paengi_snapshot
   paengi_store
+  paengi_testkit
   paengi_validation
+  unix)
+ (deps
+  (source_tree golden)))
+
+(test
+ (name git_property_test)
+ (modules git_property_test)
+ (libraries
+  alcotest
+  qcheck-core
+  qcheck-alcotest
+  paengi_git
+  paengi_id
+  paengi_snapshot
+  paengi_store
   unix))
 
 (test
@@ -470,6 +486,7 @@
   (:release_validation_property_test release_validation_property_test.exe)
   (:semantic_property_test semantic_property_test.exe)
   (:semantic_retarget_property_test semantic_retarget_property_test.exe)
+  (:git_property_test git_property_test.exe)
   (source_tree fixtures/encoding))
  (action
   (progn
@@ -484,4 +501,5 @@
    (run %{workspace_property_test})
    (run %{release_validation_property_test})
    (run %{semantic_property_test})
-   (run %{semantic_retarget_property_test}))))
+   (run %{semantic_retarget_property_test})
+   (run %{git_property_test}))))

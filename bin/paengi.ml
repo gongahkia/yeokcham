@@ -8,6 +8,7 @@ module Workspace = Paengi_workspace
 module Workspace_store = Paengi_workspace_store
 module Validation = Paengi_validation
 module Release = Paengi_release
+module Git = Paengi_git
 
 let now () = Int64.of_float (Unix.gettimeofday ())
 
@@ -1420,10 +1421,45 @@ let conflict root arguments =
           | Ok resolved -> print_workspace resolved))
   | _ -> exit 2
 
+let git_object_id value =
+  let format =
+    match String.length value with
+    | 40 -> Some Git.Sha1
+    | 64 -> Some Git.Sha256
+    | _ -> None
+  in
+  match format with
+  | None -> fail Fun.id "Git tree ID must be 40 or 64 hexadecimal characters"
+  | Some format -> (
+      match Git.object_id_of_hex format value with
+      | Ok identity -> identity
+      | Error error -> fail Git.error_to_string error)
+
+let git root arguments =
+  match arguments with
+  | [ "import"; "tree"; "--repository"; repository; "--tree"; tree ] -> (
+      match Store.open_repository ~root with
+      | Error error -> fail Store.error_to_string error
+      | Ok store -> (
+          match
+            Git.import_tree Git.default_configuration ~store ~repository
+              ~tree:(git_object_id tree)
+          with
+          | Error error -> fail Git.error_to_string error
+          | Ok result ->
+              Printf.printf "snapshot=%s mapping=%s git-tree=%s\n"
+                (Store.Stored_object_id.to_hex
+                   (Snapshot.Snapshot.stored_object_id result.Git.snapshot))
+                (Paengi_id.Git_mapping_id.to_hex
+                   (Git.mapping_id result.Git.mapping))
+                (Git.object_id_to_hex
+                   (Git.mapping_git_object result.Git.mapping))))
+  | _ -> exit 2
+
 let usage () =
   prerr_endline
     "usage: paengi \
-     <init|checkpoint|timeline|restore|pin|unpin|compact|watch|capsule|work|conflict|validation|release> \
+     <init|checkpoint|timeline|restore|pin|unpin|compact|watch|capsule|work|conflict|validation|release|git> \
      [--root PATH] ...";
   exit 2
 
@@ -1447,6 +1483,7 @@ let () =
         | "conflict" -> conflict root arguments
         | "validation" -> validation root arguments
         | "release" -> release root arguments
+        | "git" -> git root arguments
         | _ -> usage ())
     | _ -> usage ()
   with Sys.Break -> print_endline "watch stopped"
