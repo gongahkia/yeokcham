@@ -1875,6 +1875,12 @@ let exports_configured_release_metadata_exactly_and_idempotently () =
           "-q";
           Git.object_id_to_hex first.Git.export_commit;
         ];
+      let configured_snapshot =
+        Snapshot.Snapshot.load store (Release.release_final_snapshot release)
+        |> require_ok Snapshot.error_to_string
+      in
+      assert_snapshot_matches_directory ~ignore_git_directory:true store
+        configured_snapshot destination;
       Alcotest.(check string)
         "configured checkout bytes" "regular\000bytes"
         (read_file (Filename.concat destination "regular"));

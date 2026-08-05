@@ -1002,5 +1002,12 @@ policies.
 
 ### Bridge invariant
 
-Each exported Git commit checkout must match the Paengi snapshot named by its
-export mapping exactly.
+For every supported final bridge state, one shared oracle compares the selected
+immutable Paengi snapshot with its materialised destination: identical entry
+set, regular-file bytes, executable bit, symlink target bytes, and nested tree
+structure. For Git checkout destinations only `.git` is excluded from the
+entry set. A failure identifies the divergent path and kind, bytes, mode, or
+symlink metadata; it is a byte-representation failure, not a claim about
+semantic equivalence. The oracle applies to exported release and selected
+linear-revision commits and to snapshots produced by supported Git tree/commit
+import after the source worktree may have changed.

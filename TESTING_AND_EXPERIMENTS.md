@@ -203,6 +203,14 @@ ref collision, bounded selection, and pre-ref/between-mapping interruption.
 The bounded generated test checks two generated snapshots for exact checkout,
 sole-parent order, stable mappings/ref, retry, and `fsck`.
 
+M8-18 uses one shared final-state oracle for supported Git import, release
+export (including configured metadata), and linear revision export. It compares
+entry sets, regular bytes, executable bit, symlink target bytes, and nested
+tree structure against the immutable Paengi snapshot; only a Git checkout's
+`.git` directory is excluded. Failure labels name the divergent path and the
+relevant kind, bytes, mode, or symlink metadata. This is not a semantic
+equivalence claim.
+
 #### P9 — Dependency safety
 
 No materialisation silently omits an unsatisfied required dependency.
