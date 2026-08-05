@@ -623,14 +623,18 @@ Materialise snapshots and write:
 - Refs.
 - Mapping metadata.
 
-First export mode:
-
-- Linear sequence.
-- One Git commit per selected capsule revision.
-- Release as branch head.
-- Explicit author/message configuration.
-
-Merge topology support is later.
+M8-08 exports one verified immutable release as one root Git commit. It reads
+only Paengi objects, hashes exact regular-file and symlink-target bytes with
+filters disabled, builds trees through an isolated temporary index, and writes
+the create-only `refs/heads/paengi/release-<release-id>` ref. Author and
+committer are the fixed `Paengi Export <noreply@paengi.local>` identity at the
+release `created_at` UTC timestamp; the message is exact release bytes or the
+documented fallback. It then publishes ADR-028's `export/commit ->
+exported-release` mapping. The Git ref and Paengi mapping binding remain
+separate retryable visibility points. Nested empty directories, unsupported
+nodes, invalid timestamps, bounds, malformed output, and ref collisions reject
+explicitly. Linear histories, configurable metadata/ref policy, merge
+topology, tags, and signatures are later work.
 
 ## 14. Future synchronisation
 

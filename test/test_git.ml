@@ -1310,6 +1310,275 @@ let rejects_missing_transition_message_content () =
                (contains ~needle:"message is unavailable"
                   (Git.error_to_string error))))
 
+let export_id seed =
+  Bytes.init 32 (fun index -> Char.chr ((seed + index) land 0xff))
+  |> Bytes.unsafe_to_string
+
+let export_capsule_id seed =
+  Id.Capsule_id.of_bytes (export_id seed) |> require_ok Id.parse_error_to_string
+
+let export_workspace_id seed =
+  Id.Workspace_id.of_bytes (export_id seed)
+  |> require_ok Id.parse_error_to_string
+
+let export_checkpoint scratch snapshot time =
+  Scratch.checkpoint scratch ~snapshot ~source:Scratch.Explicit
+    ~observed_at:time ~created_at:time
+  |> require_ok Scratch.error_to_string
+  |> function
+  | Scratch.Created checkpoint | Scratch.Unchanged checkpoint ->
+      Scratch.Checkpoint.id checkpoint
+
+let release_export_fixture ?(nested_empty = false) run =
+  with_directory "paengi-git-export-" (fun root ->
+      let worktree = Filename.concat root "worktree" in
+      let destination = Filename.concat root "destination" in
+      Unix.mkdir worktree 0o700;
+      Unix.mkdir destination 0o700;
+      write_file (Filename.concat worktree "base") "base\n";
+      let store =
+        Store.init ~root:worktree |> require_ok Store.error_to_string
+      in
+      let scratch = Scratch.open_repository store in
+      let base, _ =
+        Snapshot.scan ~root:worktree ~store
+        |> require_ok Snapshot.error_to_string
+      in
+      let initial =
+        Scratch.create_initial scratch ~snapshot:base ~created_at:0L
+        |> require_ok Scratch.error_to_string
+        |> Scratch.Checkpoint.id
+      in
+      Unix.unlink (Filename.concat worktree "base");
+      write_file (Filename.concat worktree "regular") "regular\000bytes";
+      write_file (Filename.concat worktree "run") "#!/bin/sh\nprintf run\n";
+      Unix.chmod (Filename.concat worktree "run") 0o755;
+      Unix.mkdir (Filename.concat worktree "nested") 0o700;
+      write_file (Filename.concat worktree "nested/data") "nested\n";
+      if nested_empty then Unix.mkdir (Filename.concat worktree "empty") 0o700;
+      Unix.symlink "regular" (Filename.concat worktree "link");
+      let target, _ =
+        Snapshot.scan ~root:worktree ~store
+        |> require_ok Snapshot.error_to_string
+      in
+      let target_checkpoint = export_checkpoint scratch target 1L in
+      let capsule = export_capsule_id 10 in
+      ignore
+        (Capsule_store.Durable.create_from_checkpoints ~store ~scratch
+           ~id:capsule ~title:"export" ~description:"fixture" ~dependencies:[]
+           ~evidence:[] ~from:initial ~target:target_checkpoint ~created_at:2L
+           ~changed_at:2L ()
+        |> require_ok Capsule_store.error_to_string);
+      let workspace = export_workspace_id 20 in
+      ignore
+        (Workspace_store.Durable.create ~store ~id:workspace ~base ~name:None
+           ~description:None ~created_at:3L
+        |> require_ok Workspace_store.error_to_string);
+      ignore
+        (Workspace_store.Durable.enable_current_capsule ~store ~workspace
+           ~capsule ~expected_generation:None ~created_at:4L
+        |> require_ok Workspace_store.error_to_string);
+      let materialised =
+        Workspace_store.Durable.materialise ~store ~scratch ~root:worktree
+          ~workspace ~observed_at:5L ~created_at:5L ~dry_run:false ()
+        |> require_ok Workspace_store.error_to_string
+      in
+      if materialised.Workspace_store.Durable.partial then
+        Alcotest.fail "release export fixture conflicted";
+      let release =
+        Release.Durable.create ~store ~workspace ~parents:[] ~commands:[]
+          ~message:(Some "release export\n") ~observed_at:6L ~created_at:7L ()
+        |> require_ok Release.error_to_string
+      in
+      direct_process (git_path ()) [ "init"; "-q"; destination ];
+      run (git_path ()) destination store release)
+
+let exports_release_as_exact_git_commit () =
+  release_export_fixture (fun git destination store release ->
+      let first =
+        Git.export_release Git.default_configuration ~store
+          ~repository:destination
+          ~release:(Release.release_id release)
+        |> require_ok Git.error_to_string
+      in
+      let repeated =
+        Git.export_release Git.default_configuration ~store
+          ~repository:destination
+          ~release:(Release.release_id release)
+        |> require_ok Git.error_to_string
+      in
+      Alcotest.(check string)
+        "repeat has same commit"
+        (Git.object_id_to_hex first.Git.export_commit)
+        (Git.object_id_to_hex repeated.Git.export_commit);
+      Alcotest.(check string)
+        "deterministic release ref" first.Git.export_target_ref
+        repeated.Git.export_target_ref;
+      Alcotest.(check bool)
+        "repeat has same mapping" true
+        (Id.Git_mapping_id.equal
+           (Git.mapping_id first.Git.export_mapping)
+           (Git.mapping_id repeated.Git.export_mapping));
+      direct_process git [ "-C"; destination; "fsck"; "--full" ];
+      Alcotest.(check string)
+        "ref names commit"
+        (Git.object_id_to_hex first.Git.export_commit)
+        (direct_capture git
+           [ "-C"; destination; "rev-parse"; first.Git.export_target_ref ]);
+      direct_process git
+        [
+          "-C";
+          destination;
+          "checkout";
+          "-q";
+          Git.object_id_to_hex first.Git.export_commit;
+        ];
+      Alcotest.(check string)
+        "regular checkout bytes" "regular\000bytes"
+        (read_file (Filename.concat destination "regular"));
+      Alcotest.(check string)
+        "nested checkout bytes" "nested\n"
+        (read_file (Filename.concat destination "nested/data"));
+      Alcotest.(check bool)
+        "executable checkout mode" true
+        ((Unix.stat (Filename.concat destination "run")).Unix.st_perm land 0o111
+        <> 0);
+      Alcotest.(check string)
+        "symlink checkout target" "regular"
+        (Unix.readlink (Filename.concat destination "link"));
+      let commit =
+        direct_capture git
+          [
+            "-C";
+            destination;
+            "show";
+            "-s";
+            "--format=%an <%ae> %at %z%x00%cn <%ce> %ct %cz%x00%B";
+            Git.object_id_to_hex first.Git.export_commit;
+          ]
+      in
+      Alcotest.(check bool)
+        "fixed author metadata" true
+        (contains ~needle:"Paengi Export <noreply@paengi.local> 7" commit);
+      Alcotest.(check bool)
+        "release message metadata" true
+        (contains ~needle:"release export" commit);
+      let reopened =
+        Store.open_repository ~root:(Store.root store)
+        |> require_ok Store.error_to_string
+      in
+      let mapping =
+        Git.load_mapping reopened (Git.mapping_id first.Git.export_mapping)
+        |> require_ok Git.error_to_string
+      in
+      (match Git.mapping_subject mapping with
+      | Git.Exported_release { release = actual; final_snapshot; _ } ->
+          Alcotest.(check bool)
+            "mapping names release" true
+            (Id.Release_id.equal actual (Release.release_id release));
+          Alcotest.(check bool)
+            "mapping names final snapshot" true
+            (Snapshot.Snapshot.equal_id final_snapshot
+               (Release.release_final_snapshot release))
+      | Git.Imported_snapshot _ | Git.Imported_transition _ | Git.Imported_tag _
+      | Git.Imported_revision _ | Git.Exported_revision _ ->
+          Alcotest.fail "export mapping did not name the release");
+      let components =
+        [ "git-mappings"; Id.Git_mapping_id.to_hex (Git.mapping_id mapping) ]
+      in
+      let binding =
+        Store.Ref_file.read reopened ~components
+        |> require_ok Store.error_to_string
+      in
+      (match binding with
+      | Some binding ->
+          Store.Ref_file.compare_and_swap reopened ~components
+            ~expected:(Some binding) ~replacement:"corrupt"
+          |> require_ok Store.error_to_string
+      | None -> Alcotest.fail "export mapping binding was not written");
+      Git.load_mapping reopened (Git.mapping_id mapping)
+      |> Result.fold
+           ~ok:(fun _ -> Alcotest.fail "corrupt export mapping was accepted")
+           ~error:(fun error ->
+             Alcotest.(check bool)
+               "structured corrupt export mapping" true
+               (contains ~needle:"Git mapping error"
+                  (Git.error_to_string error))))
+
+let export_interruption_is_explicit_and_retryable () =
+  release_export_fixture (fun git destination store release ->
+      let release_id = Release.release_id release in
+      let target_ref =
+        "refs/heads/paengi/release-" ^ Id.Release_id.to_hex release_id
+      in
+      Git.export_release ~fail_at:Git.Before_git_ref Git.default_configuration
+        ~store ~repository:destination ~release:release_id
+      |> Result.fold
+           ~ok:(fun _ -> Alcotest.fail "pre-ref interruption succeeded")
+           ~error:(fun error ->
+             Alcotest.(check bool)
+               "structured pre-ref interruption" true
+               (contains ~needle:"injected interruption"
+                  (Git.error_to_string error)));
+      Alcotest.(check string)
+        "pre-ref interruption leaves ref absent" ""
+        (direct_capture git
+           [
+             "-C";
+             destination;
+             "for-each-ref";
+             "--format=%(refname)";
+             target_ref;
+           ]);
+      Git.export_release ~fail_at:Git.Before_mapping_binding
+        Git.default_configuration ~store ~repository:destination
+        ~release:release_id
+      |> Result.fold
+           ~ok:(fun _ -> Alcotest.fail "pre-mapping interruption succeeded")
+           ~error:(fun error ->
+             Alcotest.(check bool)
+               "structured pre-mapping interruption" true
+               (contains ~needle:"injected interruption"
+                  (Git.error_to_string error)));
+      Alcotest.(check bool)
+        "pre-mapping interruption leaves external ref" true
+        (not
+           (String.is_empty
+              (direct_capture git
+                 [ "-C"; destination; "rev-parse"; target_ref ])));
+      let retried =
+        Git.export_release Git.default_configuration ~store
+          ~repository:destination ~release:release_id
+        |> require_ok Git.error_to_string
+      in
+      Git.load_mapping store (Git.mapping_id retried.Git.export_mapping)
+      |> require_ok Git.error_to_string
+      |> ignore)
+
+let nested_empty_directory_rejects_before_export_ref () =
+  release_export_fixture ~nested_empty:true
+    (fun git destination store release ->
+      let release_id = Release.release_id release in
+      Git.export_release Git.default_configuration ~store
+        ~repository:destination ~release:release_id
+      |> Result.fold
+           ~ok:(fun _ -> Alcotest.fail "nested empty directory exported")
+           ~error:(fun error ->
+             Alcotest.(check bool)
+               "structured nested-empty rejection" true
+               (contains ~needle:"nested empty directory"
+                  (Git.error_to_string error)));
+      Alcotest.(check string)
+        "nested-empty rejection leaves ref absent" ""
+        (direct_capture git
+           [
+             "-C";
+             destination;
+             "for-each-ref";
+             "--format=%(refname)";
+             "refs/heads/paengi/release-" ^ Id.Release_id.to_hex release_id;
+           ]))
+
 let imports_exact_tree_and_restarts_idempotently () =
   import_fixture (fun repository store tree ->
       let imported =
@@ -1541,6 +1810,12 @@ let () =
             actual_git_repository_is_inspected;
           Alcotest.test_case "exact tree import survives restart" `Quick
             imports_exact_tree_and_restarts_idempotently;
+          Alcotest.test_case "release export checkout is exact" `Quick
+            exports_release_as_exact_git_commit;
+          Alcotest.test_case "release export interruption retries explicitly"
+            `Quick export_interruption_is_explicit_and_retryable;
+          Alcotest.test_case "nested empty directories reject before export"
+            `Quick nested_empty_directory_rejects_before_export_ref;
           Alcotest.test_case "merge commit import preserves parent order" `Quick
             imports_merge_commit_and_ordered_parents;
           Alcotest.test_case "commit metadata retains exact source bytes" `Quick

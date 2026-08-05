@@ -390,14 +390,18 @@ let command ?(environment = []) configuration executable repository arguments =
     max_stdout_bytes = configuration.max_stdout_bytes;
     max_stderr_bytes = configuration.max_stderr_bytes;
     environment_policy = Validation.Empty;
-    environment = List.sort (fun (left, _) (right, _) -> String.compare left right) environment;
+    environment =
+      List.sort
+        (fun (left, _) (right, _) -> String.compare left right)
+        environment;
     retain_output = false;
     format_version = 1L;
     mandatory_features = 0L;
   }
 
 let run ?(runner = (module Validation.Unix_runner : Validation.Process_runner))
-    ?(environment = []) configuration executable repository ~operation arguments =
+    ?(environment = []) configuration executable repository ~operation arguments
+    =
   let module Runner = (val runner : Validation.Process_runner) in
   let result =
     Runner.run
@@ -523,7 +527,8 @@ let run_bytes
       max_stderr_bytes = configuration.max_stderr_bytes;
       environment_policy = Validation.Empty;
       environment =
-        List.sort (fun (left, _) (right, _) -> String.compare left right)
+        List.sort
+          (fun (left, _) (right, _) -> String.compare left right)
           environment;
       retain_output = false;
       format_version = 1L;
@@ -3003,24 +3008,16 @@ let with_isolated_index run =
   | Sys_error message -> Error (Export_error message)
 
 let export_environment timestamp =
-  let date = Int64.to_string timestamp ^ " +0000" in
+  let date = "@" ^ Int64.to_string timestamp ^ " +0000" in
   [
-    ( "GIT_AUTHOR_DATE",
-      date );
-    ( "GIT_AUTHOR_EMAIL",
-      "noreply@paengi.local" );
-    ( "GIT_AUTHOR_NAME",
-      "Paengi Export" );
-    ( "GIT_ATTR_NOSYSTEM",
-      "1" );
-    ( "GIT_COMMITTER_DATE",
-      date );
-    ( "GIT_COMMITTER_EMAIL",
-      "noreply@paengi.local" );
-    ( "GIT_COMMITTER_NAME",
-      "Paengi Export" );
-    ( "GIT_CONFIG_NOSYSTEM",
-      "1" );
+    ("GIT_AUTHOR_DATE", date);
+    ("GIT_AUTHOR_EMAIL", "noreply@paengi.local");
+    ("GIT_AUTHOR_NAME", "Paengi Export");
+    ("GIT_ATTR_NOSYSTEM", "1");
+    ("GIT_COMMITTER_DATE", date);
+    ("GIT_COMMITTER_EMAIL", "noreply@paengi.local");
+    ("GIT_COMMITTER_NAME", "Paengi Export");
+    ("GIT_CONFIG_NOSYSTEM", "1");
   ]
 
 let add_environment environment pair = pair :: environment
@@ -3076,8 +3073,16 @@ let export_files configuration store snapshot =
                   let* produced =
                     match entry with
                     | Snapshot.Tree.File { mode; content } ->
-                        Ok [ { export_path = path @ [ name ]; export_mode = mode; export_content = content } ]
-                    | Snapshot.Tree.Directory child -> collect (depth + 1) (path @ [ name ]) child
+                        Ok
+                          [
+                            {
+                              export_path = path @ [ name ];
+                              export_mode = mode;
+                              export_content = content;
+                            };
+                          ]
+                    | Snapshot.Tree.Directory child ->
+                        collect (depth + 1) (path @ [ name ]) child
                   in
                   entries_result (List.rev_append produced reversed) rest)
         in
@@ -3110,17 +3115,17 @@ let build_export_tree ?runner configuration executable repository ~environment
           Error
             (Unsupported_export_representation
                ("symlink target contains NUL bytes: "
-              ^ export_path file.export_path))
+               ^ export_path file.export_path))
         else
           let next_total = !total_blob_bytes + String.length bytes in
           if next_total > configuration.max_total_blob_bytes then
-          Error
-            (Export_limit_exceeded
-               {
-                 resource = "total blob bytes";
-                 limit = configuration.max_total_blob_bytes;
-                 actual = next_total;
-               })
+            Error
+              (Export_limit_exceeded
+                 {
+                   resource = "total blob bytes";
+                   limit = configuration.max_total_blob_bytes;
+                   actual = next_total;
+                 })
           else (
             total_blob_bytes := next_total;
             let file = (file, bytes) in
@@ -3159,9 +3164,9 @@ let build_export_tree ?runner configuration executable repository ~environment
                       "update-index";
                       "--add";
                       "--cacheinfo";
-                      (export_mode file.export_mode ^ ","
-                     ^ object_id_to_hex blob ^ ","
-                     ^ export_path file.export_path);
+                      export_mode file.export_mode
+                      ^ "," ^ object_id_to_hex blob ^ ","
+                      ^ export_path file.export_path;
                     ]
                 in
                 stage rest)
@@ -3186,11 +3191,12 @@ let export_ref release =
 let verify_exported_commit ?runner configuration executable repository ~tree
     ~commit ~timestamp ~message =
   let* raw =
-    read_exact_object ?runner configuration executable repository ~identity:commit
-      ~kind:"commit" ~limit:configuration.max_commit_bytes
+    read_exact_object ?runner configuration executable repository
+      ~identity:commit ~kind:"commit" ~limit:configuration.max_commit_bytes
   in
   let* parsed =
-    parse_commit_headers ~max_parents:configuration.max_commit_parents commit raw
+    parse_commit_headers ~max_parents:configuration.max_commit_parents commit
+      raw
   in
   let identity =
     "Paengi Export <noreply@paengi.local> " ^ Int64.to_string timestamp
@@ -3209,17 +3215,32 @@ let verify_exported_commit ?runner configuration executable repository ~tree
     Error (Export_error "exported commit message disagrees with release")
   else Ok ()
 
-let publish_export_ref ?runner configuration executable repository ~commit ~target_ref =
+let publish_export_ref ?runner configuration executable repository ~commit
+    ~target_ref =
   let zero = String.make (String.length (object_id_to_hex commit)) '0' in
   match
     run ?runner configuration executable repository ~operation:"update-ref"
-      [ "--no-replace-objects"; "update-ref"; "--no-deref"; target_ref; object_id_to_hex commit; zero ]
+      [
+        "--no-replace-objects";
+        "update-ref";
+        "--no-deref";
+        target_ref;
+        object_id_to_hex commit;
+        zero;
+      ]
   with
   | Ok _ -> Ok ()
   | Error original -> (
       match
-        run ?runner configuration executable repository ~operation:"read-export-ref"
-          [ "--no-replace-objects"; "rev-parse"; "--verify"; "--quiet"; target_ref ]
+        run ?runner configuration executable repository
+          ~operation:"read-export-ref"
+          [
+            "--no-replace-objects";
+            "rev-parse";
+            "--verify";
+            "--quiet";
+            target_ref;
+          ]
       with
       | Error _ -> Error original
       | Ok output ->
@@ -3229,7 +3250,8 @@ let publish_export_ref ?runner configuration executable repository ~commit ~targ
           else
             Error
               (Export_error
-                 ("target ref already names a different commit: " ^ target_ref)))
+                 ("target ref already names a different commit: " ^ target_ref))
+      )
 
 let export_release ?runner ?fail_at configuration ~store ~repository ~release =
   let* configuration = validate_configuration configuration in
@@ -3262,7 +3284,10 @@ let export_release ?runner ?fail_at configuration ~store ~repository ~release =
         in
         let message =
           Option.value
-            ~default:("Paengi release " ^ Id.Release_id.to_hex (Release.release_id release) ^ "\n")
+            ~default:
+              ("Paengi release "
+              ^ Id.Release_id.to_hex (Release.release_id release)
+              ^ "\n")
             (Release.release_message release)
         in
         let environment = export_environment timestamp in
@@ -3319,7 +3344,8 @@ let export_release ?runner ?fail_at configuration ~store ~repository ~release =
               | Some Before_git_ref | None -> Ok ()
             in
             let* mapping =
-              create_mapping ~direction:Export ~git_object:commit ~git_kind:Commit
+              create_mapping ~direction:Export ~git_object:commit
+                ~git_kind:Commit
                 ~subject:
                   (Exported_release
                      {

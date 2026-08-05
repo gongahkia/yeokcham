@@ -75,14 +75,12 @@ participate in restore, materialisation, export, or verification. Helper
 absence, invalid output, timeout, or incomplete analysis returns
 semantic-unavailable and preserves the textual operation.
 
-Milestone 8 has two durable import slices: bounded direct-argv import of one
-Git tree into an exact Paengi snapshot, and import of one Git commit as opaque
-provenance. Tree import preserves `100644`, `100755`, and `120000` bytes/modes,
-rejects unsafe names and unsupported modes, and writes an immutable ADR-028
-mapping. Commit import preserves the requested commit ID, declared tree,
-resulting snapshot, and ordered parent IDs in ADR-029's immutable transition
-record. It imports neither Git metadata nor graph history, never fabricates a
-capsule or revision, does not export Git data, and makes no general Git
+Milestone 8 imports one Git tree/commit/tag through bounded direct argv and
+exports one Paengi release as a deterministic root Git commit. Imports preserve
+supported `100644`, `100755`, and `120000` content/modes and opaque commit/tag
+provenance without fabricating a capsule or revision. ADR-032 export uses the
+release snapshot, fixed export metadata, a create-only release ref, and an
+ADR-028 mapping; it rejects nested empty directories. It makes no general Git
 compatibility promise.
 
 See `CONTRIBUTING.md` for development rules. Paengi is licensed under the MIT License.

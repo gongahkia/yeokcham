@@ -171,6 +171,13 @@ mutate the source Git working tree after import, reopen Paengi storage, and
 prove materialisation still matches the imported tree; corrupt mappings or
 objects reject explicitly.
 
+M8-08 Git-export checks a verified release's Git checkout for exact regular
+bytes, executable mode, symlink target, and nested-tree structure; it runs
+`git fsck --full`, reopens the mapping, and proves deterministic retry.
+Generated bounded releases check checkout bytes/mode. Fixtures reject nested
+empty directories and inject pre-ref/pre-mapping interruptions, which leave an
+explicit retry path without a changed Paengi release.
+
 #### P9 — Dependency safety
 
 No materialisation silently omits an unsatisfied required dependency.

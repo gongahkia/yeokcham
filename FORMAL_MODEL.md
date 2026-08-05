@@ -953,9 +953,20 @@ tagger, message, and signature bytes have no Paengi semantic meaning and are
 not verified. Nested tag targets, missing/mismatched refs, malformed headers,
 and unsupported targets fail before the imported-tag binding.
 
+M8-08 maps one verified `Release_v1` to one root Git commit. Its tree is built
+from the release final snapshot's exact regular-file bytes, executable modes,
+symlink-target bytes, and representable nonempty nested trees. The author and
+committer are fixed exporter metadata at the release `created_at` UTC timestamp;
+the message is the release message or the documented fallback. The target ref
+is create-only and deterministic from the release ID. A nested empty directory
+is not representable and rejects before ref or mapping publication. The visible
+ADR-028 `export/commit -> exported-release` mapping names the release ID,
+release object ID, final snapshot ID, Git format, and exact commit ID; it is
+bridge evidence, not Paengi history.
+
 ### Export
 
-An ordered capsule-revision sequence maps to one of:
+Future export policy may map an ordered capsule-revision sequence to one of:
 
 - One Git commit per capsule revision.
 - Squashed release commit.
