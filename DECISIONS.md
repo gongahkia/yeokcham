@@ -139,4 +139,4 @@ The ADR lifecycle, numbering rules, and template are defined in [`docs/adr/READM
 - [ADR-026 — Persistent workspaces, conflicts, and resolutions](docs/adr/026-persistent-workspaces-conflicts-and-resolutions.md) — Accepted.
 - [ADR-027 — Validation evidence, immutable releases, and attestations](docs/adr/027-validation-evidence-releases-and-attestations.md) — Accepted.
 - [ADR-028 — Git interchange mapping records](docs/adr/028-git-interchange-mapping-records.md) — Accepted.
-- [ADR-029 — Opaque Git imported transitions](docs/adr/029-opaque-git-imported-transitions.md) — Proposed.
+- [ADR-029 — Opaque Git imported transitions](docs/adr/029-opaque-git-imported-transitions.md) — Accepted.

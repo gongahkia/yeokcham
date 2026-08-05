@@ -1,8 +1,8 @@
 # ADR-029 — Opaque Git imported transitions
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-05
-- Deciders: maintainer
+- Deciders: maintainer (approved 2026-08-05)
 - Supersedes: None
 - Superseded by: None
 
@@ -53,7 +53,7 @@ the commit representation. [git-cat-file](https://git-scm.com/docs/git-cat-file)
 
 ## Decision outcome
 
-Propose the third option.
+Select the third option.
 
 Add Envelope type `Imported_transition = 24` and a type-distinct
 `Imported_transition_id`. An `Imported_transition_v1` records provenance only:
