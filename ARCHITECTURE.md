@@ -712,6 +712,14 @@ closure, move a ref, choose a divergent head, write a sync journal, or expose a
 CLI/transport. A restart begins a new session and safely reoffers objects
 already published before interruption.
 
+M10-02 adds `paengi_ref_event` and `paengi_ref_event_store`. An immutable
+Envelope-1 `Ref_event` expresses an exact Ed25519-signed proposed CAS
+transition. Verification accepts only a caller-supplied bounded public-key map;
+an absent key is explicitly untrusted. Event storage, transfer, verification,
+replay/order evaluation, and divergence reporting never call mutable-ref CAS.
+Key discovery/lifecycle, ref application, reconciliation, device identity, and
+transport remain separate layers.
+
 Future layers require separate decisions:
 
 - Signed ref or operation events.

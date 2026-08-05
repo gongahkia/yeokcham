@@ -41,4 +41,8 @@ is the unchanged mutable-ref v1 encoding when naming a generation.
 transient exchange-v1 frames. They cover the exact u64-be framing and canonical
 CBOR schema for every v1 message kind; they are not persistent object records.
 
+`ref-event-v1.peng.hex` is ADR-039's Ref_event v1 Envelope. It retains one
+canonical Ed25519-signed immutable ref-transition proposal; it does not prove a
+trusted signer or update a mutable ref.
+
 Changing any fixture bytes requires a format decision and retained compatibility evidence; adding a new schema requires a new named fixture.

@@ -111,6 +111,12 @@ does not implement a network transport, CLI, ref transfer, reconciliation,
 identity, signing, or persistent resume; exchange leaves every mutable ref
 unchanged.
 
+M10-02 adds immutable Ed25519-signed ref-transition proposals. A proposal is
+verified only against a caller-supplied public-key map; an absent key is
+untrusted. Storage, transfer, verification, replay/order checks, and divergence
+reporting do not apply or reconcile a ref. Key lifecycle, device identity,
+transport, trust configuration, and user-facing ref application are deferred.
+
 See `CONTRIBUTING.md` for development rules. Paengi is licensed under the MIT License.
 
 ## Development

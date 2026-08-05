@@ -35,6 +35,7 @@ type object_type =
   | Git_mapping
   | Imported_transition
   | Imported_tag
+  | Ref_event
 
 let object_type_code = function
   | Content -> 1
@@ -62,6 +63,7 @@ let object_type_code = function
   | Git_mapping -> 23
   | Imported_transition -> 24
   | Imported_tag -> 25
+  | Ref_event -> 26
 
 let object_type_of_code = function
   | 1 -> Some Content
@@ -89,6 +91,7 @@ let object_type_of_code = function
   | 23 -> Some Git_mapping
   | 24 -> Some Imported_transition
   | 25 -> Some Imported_tag
+  | 26 -> Some Ref_event
   | _ -> None
 
 type creation_error =

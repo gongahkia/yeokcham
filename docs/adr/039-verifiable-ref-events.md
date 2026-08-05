@@ -168,3 +168,10 @@ M10-02. A future inspector may state that an event is verified for one explicit
 key map, untrusted, invalid, stale, replayed, or divergent. It must not state
 that a person/device is trusted or that a ref was synchronised without a later
 approved trust and reconciliation layer.
+
+## Implementation evidence
+
+M10-02 adds `Ref_event_v1`, canonical event/store adapters, retained golden
+bytes, Ed25519 verification through `mirage-crypto-ec` 2.2.0, and bounded
+two-local-repository/property coverage. Verified 2026-08-06 with `make check`
+and `make property-test PROPERTY_TEST_SEED=17`.

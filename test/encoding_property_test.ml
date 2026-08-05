@@ -104,6 +104,7 @@ let object_type_generator =
       Envelope.Git_mapping;
       Envelope.Imported_transition;
       Envelope.Imported_tag;
+      Envelope.Ref_event;
     ]
 
 let boundary_lengths =

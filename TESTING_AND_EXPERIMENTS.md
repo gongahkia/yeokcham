@@ -141,6 +141,16 @@ input, and interruption positions; retry must make every declared source object
 available while preserving the destination ref exactly. These tests exercise an
 in-process transport-neutral adapter, not networking.
 
+#### P16 — Verifiable ref-event preservation
+
+ADR-039 retains an exact Ref_event v1 fixture and verifies an independent
+Ed25519 signature only through a caller-provided key map. Focused two-local
+repository tests cover verified/untrusted/wrong-repository, malformed or bad
+signature, replay, missing predecessor, divergence, store/reload, and unchanged
+mutable refs. The seeded chain property varies signed event lengths and
+corruption/replay positions; verification and restart decoding retain exact
+event bytes and never advance a ref.
+
 Milestone 5 additionally checks Workspace/Workspace_revision/Workspace_attempt,
 Conflict, Resolution, and workspace-current-ref canonical goldens with inverse
 decoders; workspace reopen; immutable enable/reorder revisions; stale workspace

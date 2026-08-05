@@ -1099,3 +1099,32 @@ Restart discards `Session` and starts at `Await_hello`; already published
 immutable objects are rediscovered and their byte-identical `put` retry is
 idempotent. Frames and sessions are not stored objects, semantic authority, or
 persistent resume state.
+
+## 15. Verifiable ref events
+
+M10-02 adds one immutable `Ref_event_v1` proposal and pure verification:
+
+```text
+Ref_event = (event-id, repository-format-digest, ref-name, signer-key-id,
+             signer-sequence, previous-event?, observed-ref, proposed-ref,
+             algorithm, signature)
+Verification = Verified | Untrusted | structured rejection
+```
+
+`event-id` is SHA-256 over the domain-separated canonical unsigned payload.
+The Ed25519 signature covers that exact ID-bearing canonical payload under its
+own domain separator. A trusted key map is caller-supplied transient input; a
+key ID is the domain-separated SHA-256 of one 32-byte Ed25519 public key. A
+missing key produces `Untrusted`; it is not a successful authenticity result.
+
+An event names an existing ref's observed `(generation, target)` and a proposed
+generation exactly one greater. Verification and evaluation are pure: valid,
+untrusted, invalid, stale, replayed, out-of-order, and divergent events do not
+call ref CAS or alter a ref. Given a current ref and known verified events,
+evaluation returns one explicit `Ready`, replay/order, stale, or divergence
+result. Competing ready proposals are retained as a divergence set; v1 makes no
+winner selection or device/trust claim.
+
+Ref-event objects are additive immutable Envelope-1 records. Trust maps, key
+distribution/lifecycle, replay cursors, verification indexes, and applied-ref
+history are neither canonical repository state nor persistent resume state.
