@@ -421,12 +421,14 @@ For TypeScript:
 - Detect simple declaration moves and renames.
 - Avoid pretending to know semantics across dynamic behaviour.
 
-For Rust later:
+For Rust M9-01:
 
-- Parse items and modules.
-- Identify item paths.
-- Record moves and renames.
-- Preserve macro-heavy or invalid files through textual fallback.
+- Parse only bounded top-level items from a verified snapshot virtual map.
+- Return item kind, optional syntactic name, and UTF-8 byte spans.
+- Mark parser damage incomplete; preserve macro-heavy, invalid, and non-UTF-8
+  files through textual fallback.
+- Defer module paths, move/rename inference, name/type resolution, macro
+  expansion, and semantic application.
 
 ### Semantic application order
 
@@ -514,6 +516,27 @@ co-located JSON Schema by `make semantic-experiment`; `make check` validates
 the checked-in result. Timings are host-specific evidence, never a correctness
 gate. This experiment schema is documentation evidence only, not a Paengi
 persistent format.
+
+### Milestone 9 Rust syntax boundary
+
+`paengi_rust_adapter` is a separate ephemeral protocol-v1 boundary approved by
+ADR-035. It invokes a caller-configured, directly executed local helper built
+from `tools/paengi-rust-adapter/Cargo.lock`; analysis itself invokes neither
+Cargo nor `rustc`. The helper uses pinned `tree-sitter 0.26.11` and
+`tree-sitter-rust 0.24.2`, receives only sorted safe `.rs` source bytes
+materialised from a verified immutable snapshot, and returns bounded top-level
+syntax item evidence, parser diagnostics, UTF-8 byte spans, and explicit parser
+completeness.
+
+The boundary neither receives nor reads a live path, repository path, Cargo
+manifest/configuration, project dependency, host configuration, network,
+macro expansion, or project code. It rejects invalid UTF-8 rather than changing
+canonical bytes. Helper absence, malformed protocol, timeout, crash, bound
+failure, invalid input, invalid snapshot, and parser damage return structured
+unavailable/incomplete outcomes. It does not create model state or provide
+module paths, resolved symbols/types, semantic identities, rewrites, or
+behavioural claims. `paengi_typescript_adapter`, the pure sidecar experiment,
+and `paengi_textual_patch` remain independent.
 
 ## 11. Conflict storage
 

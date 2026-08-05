@@ -1,0 +1,3 @@
+(library
+ (name paengi_rust_adapter)
+ (libraries unix paengi_snapshot paengi_store))

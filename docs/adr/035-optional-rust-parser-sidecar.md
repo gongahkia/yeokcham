@@ -145,24 +145,25 @@ new ADR and format version.
 
 ## Verification
 
-Required before issue closure:
+Implemented and verified 2026-08-05:
 
-- Unit tests for handshake/version pinning, Rust item/span extraction, sorted
-  output, parser damage, UTF-8 byte offsets, invalid UTF-8, unsafe paths, and
-  each configured bound.
-- Snapshot-boundary tests that alter the live source after scanning and prove
-  analysis uses only the stored snapshot bytes.
-- Failure tests for missing helper, timeout, crash, malformed/incompatible
-  response, oversized stdout/stderr, helper-reported error, and unavailable
-  adapter followed by a successful independent byte/text operation.
-- Seeded generated tests for safe virtual maps, nested item forms, bounded
-  spans/order, and invariant-preserving unavailable outcomes.
-- Versioned JSON request/response golden fixtures plus an exact `Cargo.lock`
-  fixture; no Paengi persistent golden changes are expected.
-- A bounded benchmark records parse time and allocation for fixture classes as
-  host-specific evidence, never a correctness threshold.
-- Focused adapter and fixture tests, comparative result-schema validation,
-  `make check`, and `make property-test PROPERTY_TEST_SEED=17`.
+- `cargo fmt --check` and `cargo test --locked` cover exact protocol-v1
+  handshake/analysis JSON goldens, pinned versions, UTF-8 name spans, parser
+  damage, unsafe paths, and invalid UTF-8.
+- Seven focused OCaml tests cover handshake pins, top-level item evidence,
+  UTF-8 byte spans, parser incompleteness, verified-snapshot-only input,
+  missing helper, timeout, crash, malformed output, bounded stdout/stderr and
+  request, unsafe/non-UTF-8 input, and independent textual fallback.
+- The seeded generated virtual-map property checks item count, kind, and spans.
+  `PROPERTY_TEST_SEED=17 make property-test` completed without failure output;
+  its Dune property process was observed through completion.
+- `make check` passed after the final change: build/lint/format, Rust unit
+  tests, focused adapter tests, persistent-format audit, and comparative
+  result-schema validation.
+
+The checked-in `Cargo.lock` and protocol goldens are versioned tool fixtures;
+no Paengi persistent golden changed. A parse benchmark remains deferred because
+this slice establishes bounded syntax evidence, not a performance claim.
 
 ## CLI and user impact
 

@@ -495,6 +495,25 @@ selector. The checked-in versioned comparative report is schema-validated by
 `docs/experiments/semantic-sidecar-v1.md` records the measured scope and must
 not be read as a general reliability claim.
 
+## 9.2 Rust syntax-sidecar protocol experiment
+
+ADR-035's optional helper is pinned through
+`tools/paengi-rust-adapter/Cargo.lock` with direct dependencies
+`tree-sitter 0.26.11` and `tree-sitter-rust 0.24.2`. Build it explicitly with
+`cargo build --locked --release`; adapter analysis never invokes Cargo. The
+checked-in protocol-v1 request/response goldens are exercised by `cargo test
+--locked`.
+
+Focused OCaml coverage verifies handshake pins, top-level item kinds, UTF-8
+byte spans, parser damage, verified-snapshot-only virtual input, unsafe and
+non-UTF-8 input, request/output bounds, missing helper, timeout, crash,
+malformed response, and textual fallback after an unavailable result. A seeded
+generated test varies safe sorted virtual maps and checks parser completeness,
+item count, canonical item kind, and bounded spans. `make test` and `make
+property-test` build the helper before their relevant coverage. These checks do
+not establish semantic equivalence, module resolution, macro expansion, or
+rewrite correctness; any timing record is host-specific evidence only.
+
 ## 10. Release gates
 
 ### Model prototype gate

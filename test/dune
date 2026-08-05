@@ -18,6 +18,19 @@
   (source_tree ../tools/paengi-typescript-adapter)))
 
 (test
+ (name test_rust_adapter)
+ (modules test_rust_adapter)
+ (libraries
+  alcotest
+  paengi_rust_adapter
+  paengi_snapshot
+  paengi_store
+  paengi_textual_patch
+  unix)
+ (deps
+  (source_tree fixtures/rust-adapter)))
+
+(test
  (name test_git)
  (modules test_git)
  (libraries
@@ -332,6 +345,11 @@
  (libraries alcotest qcheck-core qcheck-alcotest paengi_semantic_retarget))
 
 (test
+ (name rust_adapter_property_test)
+ (modules rust_adapter_property_test)
+ (libraries alcotest qcheck-core qcheck-alcotest paengi_rust_adapter))
+
+(test
  (name test_capsule_store)
  (modules test_capsule_store)
  (libraries
@@ -494,6 +512,7 @@
   (:release_validation_property_test release_validation_property_test.exe)
   (:semantic_property_test semantic_property_test.exe)
   (:semantic_retarget_property_test semantic_retarget_property_test.exe)
+  (:rust_adapter_property_test rust_adapter_property_test.exe)
   (:git_property_test git_property_test.exe)
   (source_tree fixtures/encoding))
  (action
@@ -510,4 +529,5 @@
    (run %{release_validation_property_test})
    (run %{semantic_property_test})
    (run %{semantic_retarget_property_test})
+   (run %{rust_adapter_property_test})
    (run %{git_property_test}))))

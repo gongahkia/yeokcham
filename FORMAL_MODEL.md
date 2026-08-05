@@ -520,6 +520,25 @@ it is not an edit. This statement does not establish behavioural equivalence.
 No request, response, result, evidence, or replacement output from this
 boundary is persistently encoded in Milestone 7.
 
+### Milestone 9 Rust syntax boundary
+
+`paengi_rust_adapter` has transient values only: a configuration, handshake,
+source file, half-open byte span, top-level item fact, parser diagnostic,
+analysis, and structured unavailable reason. An analysis is associated with one
+verified immutable snapshot ID and a sorted map of safe project-relative `.rs`
+files with valid UTF-8 source bytes. Each returned item/diagnostic path names
+one supplied file; each half-open span lies within that file; items and
+diagnostics are canonically ordered by path, byte span, then kind/code.
+
+`parser_complete = false` is incomplete syntax evidence, not authority to
+apply an operation. Adapter absence, timeout, crash, malformed output, invalid
+input/encoding, an unsupported version, or any configured bound returns an
+unavailable value and leaves every snapshot, checkpoint, capsule, revision,
+workspace, release, ref, object, validation result, and canonical byte string
+unchanged. No Rust adapter request, response, item, diagnostic, version, or
+lockfile data is a Paengi object, identity, semantic operation, or persistent
+sidecar.
+
 ### Milestone 7 evidence-stage retargeting
 
 The nonpersistent `paengi_semantic_retarget` core selects from explicit,

@@ -5,7 +5,7 @@ OCAML_VERSION := 5.5.0
 OCAMLFORMAT_VERSION := 0.29.0
 LOCAL_SWITCH := $(CURDIR)
 
-.PHONY: setup deps build test property-test benchmark-encoding benchmark-large-content semantic-experiment semantic-experiment-verify marshal-audit lint check format workflow-lint ci
+.PHONY: setup deps build test property-test rust-adapter-build rust-adapter-test benchmark-encoding benchmark-large-content semantic-experiment semantic-experiment-verify marshal-audit lint check format workflow-lint ci
 
 setup:
 	$(OPAM) init --bare --no-setup --yes
@@ -19,13 +19,20 @@ deps:
 build:
 	$(DUNE) build @all
 
-test:
-	$(DUNE) runtest
+rust-adapter-build:
+	cd tools/paengi-rust-adapter && cargo build --locked --release
+
+rust-adapter-test:
+	cd tools/paengi-rust-adapter && cargo fmt --check
+	cd tools/paengi-rust-adapter && cargo test --locked
+
+test: rust-adapter-build rust-adapter-test
+	PAENGI_RUST_ADAPTER=$(CURDIR)/tools/paengi-rust-adapter/target/release/paengi-rust-adapter $(DUNE) runtest
 
 PROPERTY_TEST_SEED ?= 20260729
 
-property-test:
-	PROPERTY_TEST_SEED=$(PROPERTY_TEST_SEED) $(DUNE) build @property-test
+property-test: rust-adapter-build
+	PAENGI_RUST_ADAPTER=$(CURDIR)/tools/paengi-rust-adapter/target/release/paengi-rust-adapter PROPERTY_TEST_SEED=$(PROPERTY_TEST_SEED) $(DUNE) build @property-test
 
 benchmark-encoding:
 	BENCHMARK_DUNE_PROFILE=release $(DUNE) exec --profile release bench/encoding_benchmark.exe -- --output bench/results/canonical-codec-v1.json
