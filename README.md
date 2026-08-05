@@ -154,6 +154,10 @@ metadata flags reject. Configured metadata does not change the Paengi release
 or snapshot. Its Git ref is metadata-qualified, so it neither overwrites the
 default export nor a different configured export of the same release.
 
+[Git interchange contract](docs/GIT_INTERCHANGE.md) distinguishes supported
+byte preservation, opaque provenance, rejected representations, and semantics
+that Git cannot recover.
+
 Durable workspaces select an explicit immutable capsule revision; its verified
 physical revision object is stored in every workspace revision.
 `work materialise` applies the current workspace against its declared base,
