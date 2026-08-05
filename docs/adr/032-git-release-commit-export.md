@@ -1,8 +1,8 @@
 # ADR-032 — Deterministic Git release commit export
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-05
-- Deciders: maintainer
+- Deciders: maintainer (approved 2026-08-05)
 - Supersedes: None
 - Superseded by: None
 
@@ -54,7 +54,7 @@ merges, tags, signatures, remotes, Gitlinks, and export of mutable workspaces.
 
 ## Decision outcome
 
-Propose the third option.
+Select the third option.
 
 M8-08 accepts a visible, verified Paengi release and an absolute existing Git
 repository. It writes exactly one root Git commit whose tree is constructed
