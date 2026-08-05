@@ -17,6 +17,58 @@ External Git refs, commits, trees, blobs, temporary indexes, and temporary
 message files are never Paengi canonical storage. Paengi source objects and
 refs remain authoritative after every export.
 
+## Supported operational profile
+
+The bridge accepts one existing absolute local Git repository directory at a
+time and invokes a discovered `git` executable through direct argv with an
+empty inherited environment. It first verifies `rev-parse --is-bare-repository`
+and `rev-parse --show-object-format`. No minimum or maximum Git version is
+declared; a local Git implementation is supported only when these checks and
+the documented plumbing operations succeed with the structured bounds below.
+
+Only the inspected repository's `sha1` and `sha256` object formats are
+supported. Git object IDs are kept format-tagged and are never interchangeable
+with Paengi content, snapshot, stored-object, or logical-history IDs. Other
+object formats reject before import or export publication.
+
+Default limits are part of the bridge contract:
+
+| Resource | Default bound |
+| --- | ---: |
+| Process timeout | 5 seconds |
+| Retained stdout / stderr | 1 KiB / 4 KiB per command unless an object read applies its narrower operation-specific bound |
+| One tree / all tree-path bytes | 8 MiB / 64 MiB |
+| One blob / all export blob bytes | 128 MiB / 256 MiB |
+| Tree entries / depth | 100,000 / 256 |
+| Commit or tag bytes | 8 MiB each |
+| Commit parents / exported revisions | 4,096 / 4,096 |
+| Tag-name bytes | 1 KiB |
+
+The adapter rejects empty, relative, NUL-containing, non-directory, or
+over-4-KiB repository paths. It returns typed errors for missing executables,
+process status/timeout/output truncation, malformed plumbing output, invalid
+object identity or representation, limits, mapping corruption, and unsupported
+export representation. It does not invoke a shell or turn a process/parsing
+failure into a Paengi ref, release, capsule, workspace, or mapping update.
+
+## Current policies
+
+- Tree import supports Git modes `100644`, `100755`, and `120000`; commit
+  import retains ordered Git parent IDs and bounded opaque metadata; tag import
+  supports lightweight and annotated tags that directly target a commit, tree,
+  or blob.
+- Release export produces one root commit; revision export requires an explicit
+  nonempty ordered sequence and produces one root-plus-linear-parent commit
+  chain. Exported commits are verified and `git fsck --full --no-dangling` runs
+  before Paengi mapping publication.
+- Export refs are create-only: an absent ref is created, an equal existing ref
+  is an idempotent retry, and a different existing target is a structured
+  collision. Git ref and Paengi mapping publication are separately visible and
+  retryable.
+- Every supported import/export publishes an ADR-028 mapping only after its
+  typed source and Git object validate. The mapping is bridge evidence, not a
+  repository-wide import/export guarantee.
+
 ## Paengi to Git export
 
 | Category | Current contract |
@@ -62,3 +114,19 @@ No current round trip is an equivalence guarantee.
 The supported way to inspect an export is its reported Git ref, commit, and
 mapping ID. The supported way to recover Paengi semantics is the original
 Paengi repository, not a Git checkout.
+
+## Verification
+
+Run the repository gates from the project root:
+
+```text
+make format
+make check
+make property-test PROPERTY_TEST_SEED=17
+```
+
+Focused fixtures cover the local preflight, supported tree/commit/tag import,
+release and linear-revision export, mapping reopen/corruption, create-only ref
+retry/collision, interruption, `git fsck --full`, and the shared final-byte
+oracle. These checks verify the stated bridge contract only; they do not claim
+full Git compatibility.
