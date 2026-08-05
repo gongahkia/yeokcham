@@ -134,16 +134,14 @@ are external interchange artifacts, not Paengi canonical storage.
 
 ## Verification
 
-- Unit fixtures: empty/root/nested trees, regular bytes, executable files,
-  symlinks, exact/absent release messages, deterministic metadata, restart,
-  ref collision, and mapping corruption.
-- Bounded generated release snapshots: exact Git checkout oracle and export
-  retry determinism for representable trees.
-- Failure fixtures: nested empty directory, unsupported nodes, invalid
-  timestamps, malformed/limited Git output, process failures, interruption
-  before Git ref and before mapping binding, plus no Paengi release mutation.
-- Run `git fsck --full` on successful destination fixtures, `make check`, and
-  `make property-test PROPERTY_TEST_SEED=17`; record benchmarks separately.
+- Completed: empty and nested trees, regular bytes, executable files, symlinks,
+  exact/absent release messages, deterministic metadata, restart, ref collision,
+  mapping corruption, blob bounds, negative timestamps, and pre-ref/pre-mapping
+  interruptions. Successful fixtures run `git fsck --full` and the checkout
+  oracle; generated bounded releases check checkout bytes/mode and retry.
+- Verified: `make check` and `make property-test PROPERTY_TEST_SEED=17`.
+- Pending separately: SHA-256 destination fixtures, fake-runner process/output
+  fault coverage specific to export, and benchmarks. No timing claim is made.
 
 ## CLI and user impact
 

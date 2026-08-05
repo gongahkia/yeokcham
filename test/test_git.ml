@@ -1329,7 +1329,8 @@ let export_checkpoint scratch snapshot time =
   | Scratch.Created checkpoint | Scratch.Unchanged checkpoint ->
       Scratch.Checkpoint.id checkpoint
 
-let release_export_fixture ?(nested_empty = false) run =
+let release_export_fixture ?(nested_empty = false) ?(empty_root = false)
+    ?(message = Some "release export\n") ?(created_at = 7L) run =
   with_directory "paengi-git-export-" (fun root ->
       let worktree = Filename.concat root "worktree" in
       let destination = Filename.concat root "destination" in
@@ -1350,13 +1351,14 @@ let release_export_fixture ?(nested_empty = false) run =
         |> Scratch.Checkpoint.id
       in
       Unix.unlink (Filename.concat worktree "base");
-      write_file (Filename.concat worktree "regular") "regular\000bytes";
-      write_file (Filename.concat worktree "run") "#!/bin/sh\nprintf run\n";
-      Unix.chmod (Filename.concat worktree "run") 0o755;
-      Unix.mkdir (Filename.concat worktree "nested") 0o700;
-      write_file (Filename.concat worktree "nested/data") "nested\n";
-      if nested_empty then Unix.mkdir (Filename.concat worktree "empty") 0o700;
-      Unix.symlink "regular" (Filename.concat worktree "link");
+      if not empty_root then (
+        write_file (Filename.concat worktree "regular") "regular\000bytes";
+        write_file (Filename.concat worktree "run") "#!/bin/sh\nprintf run\n";
+        Unix.chmod (Filename.concat worktree "run") 0o755;
+        Unix.mkdir (Filename.concat worktree "nested") 0o700;
+        write_file (Filename.concat worktree "nested/data") "nested\n";
+        if nested_empty then Unix.mkdir (Filename.concat worktree "empty") 0o700;
+        Unix.symlink "regular" (Filename.concat worktree "link"));
       let target, _ =
         Snapshot.scan ~root:worktree ~store
         |> require_ok Snapshot.error_to_string
@@ -1387,7 +1389,7 @@ let release_export_fixture ?(nested_empty = false) run =
         Alcotest.fail "release export fixture conflicted";
       let release =
         Release.Durable.create ~store ~workspace ~parents:[] ~commands:[]
-          ~message:(Some "release export\n") ~observed_at:6L ~created_at:7L ()
+          ~message ~observed_at:6L ~created_at ()
         |> require_ok Release.error_to_string
       in
       direct_process (git_path ()) [ "init"; "-q"; destination ];
@@ -1503,6 +1505,101 @@ let exports_release_as_exact_git_commit () =
              Alcotest.(check bool)
                "structured corrupt export mapping" true
                (contains ~needle:"Git mapping error"
+                  (Git.error_to_string error))))
+
+let exports_empty_release_with_fallback_message () =
+  release_export_fixture ~empty_root:true ~message:None
+    (fun git destination store release ->
+      let result =
+        Git.export_release Git.default_configuration ~store
+          ~repository:destination
+          ~release:(Release.release_id release)
+        |> require_ok Git.error_to_string
+      in
+      direct_process git
+        [
+          "-C";
+          destination;
+          "checkout";
+          "-q";
+          Git.object_id_to_hex result.Git.export_commit;
+        ];
+      let visible =
+        Sys.readdir destination |> Array.to_list
+        |> List.filter (fun name -> not (String.equal name ".git"))
+      in
+      Alcotest.(check (list string)) "empty checkout" [] visible;
+      let message =
+        direct_capture git
+          [
+            "-C";
+            destination;
+            "show";
+            "-s";
+            "--format=%B";
+            Git.object_id_to_hex result.Git.export_commit;
+          ]
+      in
+      Alcotest.(check string)
+        "fallback message"
+        ("Paengi release " ^ Id.Release_id.to_hex (Release.release_id release))
+        message)
+
+let export_ref_collision_and_bounds_reject_explicitly () =
+  release_export_fixture (fun git destination store release ->
+      direct_process git
+        [ "-C"; destination; "config"; "user.name"; "Paengi Fixture" ];
+      direct_process git
+        [ "-C"; destination; "config"; "user.email"; "fixture@example.invalid" ];
+      direct_process git
+        [ "-C"; destination; "commit"; "--allow-empty"; "-q"; "-m"; "existing" ];
+      let existing =
+        direct_capture git [ "-C"; destination; "rev-parse"; "HEAD" ]
+      in
+      let target_ref =
+        "refs/heads/paengi/release-"
+        ^ Id.Release_id.to_hex (Release.release_id release)
+      in
+      direct_process git
+        [ "-C"; destination; "update-ref"; target_ref; existing ];
+      Git.export_release Git.default_configuration ~store
+        ~repository:destination
+        ~release:(Release.release_id release)
+      |> Result.fold
+           ~ok:(fun _ -> Alcotest.fail "ref collision exported")
+           ~error:(fun error ->
+             Alcotest.(check bool)
+               "structured ref collision" true
+               (contains ~needle:"target ref already names a different commit"
+                  (Git.error_to_string error)));
+      with_directory "paengi-git-export-bounded-" (fun bounded ->
+          direct_process git [ "init"; "-q"; bounded ];
+          let configuration =
+            Git.configuration_with ~max_blob_bytes:1 ~max_total_blob_bytes:1
+              Git.default_configuration
+          in
+          Git.export_release configuration ~store ~repository:bounded
+            ~release:(Release.release_id release)
+          |> Result.fold
+               ~ok:(fun _ -> Alcotest.fail "over-limit blob exported")
+               ~error:(fun error ->
+                 Alcotest.(check bool)
+                   "structured blob limit" true
+                   (contains ~needle:"Git export blob bytes limit exceeded"
+                      (Git.error_to_string error)))))
+
+let negative_release_timestamp_rejects_before_export () =
+  release_export_fixture ~created_at:(-1L)
+    (fun _git destination store release ->
+      Git.export_release Git.default_configuration ~store
+        ~repository:destination
+        ~release:(Release.release_id release)
+      |> Result.fold
+           ~ok:(fun _ -> Alcotest.fail "negative timestamp exported")
+           ~error:(fun error ->
+             Alcotest.(check bool)
+               "structured timestamp rejection" true
+               (contains ~needle:"timestamp must be nonnegative"
                   (Git.error_to_string error))))
 
 let export_interruption_is_explicit_and_retryable () =
@@ -1812,6 +1909,12 @@ let () =
             imports_exact_tree_and_restarts_idempotently;
           Alcotest.test_case "release export checkout is exact" `Quick
             exports_release_as_exact_git_commit;
+          Alcotest.test_case "empty release export has deterministic fallback"
+            `Quick exports_empty_release_with_fallback_message;
+          Alcotest.test_case "release export ref collision and bounds reject"
+            `Quick export_ref_collision_and_bounds_reject_explicitly;
+          Alcotest.test_case "negative release timestamp rejects" `Quick
+            negative_release_timestamp_rejects_before_export;
           Alcotest.test_case "release export interruption retries explicitly"
             `Quick export_interruption_is_explicit_and_retryable;
           Alcotest.test_case "nested empty directories reject before export"

@@ -3132,58 +3132,83 @@ let build_export_tree ?runner configuration executable repository ~environment
             Ok (file :: reversed)))
       (Ok []) files
   in
-  with_isolated_index (fun index ->
-      let environment = add_environment environment ("GIT_INDEX_FILE", index) in
-      let* _ =
-        run ?runner ~environment configuration executable repository
-          ~operation:"read-tree-empty"
-          [ "--no-replace-objects"; "read-tree"; "--empty" ]
-      in
-      let rec stage = function
-        | [] -> Ok ()
-        | (file, bytes) :: rest ->
-            with_temporary_bytes "content" bytes (fun path ->
-                let* output =
-                  run ?runner ~environment configuration executable repository
-                    ~operation:"hash-object"
-                    [
-                      "--no-replace-objects";
-                      "hash-object";
-                      "-w";
-                      "--no-filters";
-                      path;
-                    ]
-                in
-                let* output = single_line ~operation:"hash-object" output in
-                let* blob = object_id_of_hex format output in
-                let* _ =
-                  run ?runner ~environment configuration executable repository
-                    ~operation:"update-index"
-                    [
-                      "--no-replace-objects";
-                      "update-index";
-                      "--add";
-                      "--cacheinfo";
-                      export_mode file.export_mode
-                      ^ "," ^ object_id_to_hex blob ^ ","
-                      ^ export_path file.export_path;
-                    ]
-                in
-                stage rest)
-      in
-      let* () = stage (List.rev staged) in
-      let* output =
-        run ?runner ~environment configuration executable repository
-          ~operation:"write-tree"
-          [ "--no-replace-objects"; "write-tree" ]
-      in
-      let* output = single_line ~operation:"write-tree" output in
-      let* tree = object_id_of_hex format output in
-      let* () =
-        verify_exact_object_type ?runner configuration executable repository
-          ~identity:tree ~kind:"tree"
-      in
-      Ok tree)
+  if staged = [] then
+    with_temporary_bytes "empty-tree" "" (fun path ->
+        let* output =
+          run ?runner ~environment configuration executable repository
+            ~operation:"hash-empty-tree"
+            [
+              "--no-replace-objects";
+              "hash-object";
+              "-t";
+              "tree";
+              "-w";
+              "--no-filters";
+              path;
+            ]
+        in
+        let* output = single_line ~operation:"hash-empty-tree" output in
+        let* tree = object_id_of_hex format output in
+        let* () =
+          verify_exact_object_type ?runner configuration executable repository
+            ~identity:tree ~kind:"tree"
+        in
+        Ok tree)
+  else
+    with_isolated_index (fun index ->
+        let environment =
+          add_environment environment ("GIT_INDEX_FILE", index)
+        in
+        let* _ =
+          run ?runner ~environment configuration executable repository
+            ~operation:"read-tree-empty"
+            [ "--no-replace-objects"; "read-tree"; "--empty" ]
+        in
+        let rec stage = function
+          | [] -> Ok ()
+          | (file, bytes) :: rest ->
+              with_temporary_bytes "content" bytes (fun path ->
+                  let* output =
+                    run ?runner ~environment configuration executable repository
+                      ~operation:"hash-object"
+                      [
+                        "--no-replace-objects";
+                        "hash-object";
+                        "-w";
+                        "--no-filters";
+                        path;
+                      ]
+                  in
+                  let* output = single_line ~operation:"hash-object" output in
+                  let* blob = object_id_of_hex format output in
+                  let* _ =
+                    run ?runner ~environment configuration executable repository
+                      ~operation:"update-index"
+                      [
+                        "--no-replace-objects";
+                        "update-index";
+                        "--add";
+                        "--cacheinfo";
+                        export_mode file.export_mode
+                        ^ "," ^ object_id_to_hex blob ^ ","
+                        ^ export_path file.export_path;
+                      ]
+                  in
+                  stage rest)
+        in
+        let* () = stage (List.rev staged) in
+        let* output =
+          run ?runner ~environment configuration executable repository
+            ~operation:"write-tree"
+            [ "--no-replace-objects"; "write-tree" ]
+        in
+        let* output = single_line ~operation:"write-tree" output in
+        let* tree = object_id_of_hex format output in
+        let* () =
+          verify_exact_object_type ?runner configuration executable repository
+            ~identity:tree ~kind:"tree"
+        in
+        Ok tree)
 
 let export_ref release =
   "refs/heads/paengi/release-" ^ Id.Release_id.to_hex release
@@ -3316,16 +3341,6 @@ let export_release ?runner ?fail_at configuration ~store ~repository ~release =
               verify_exported_commit ?runner configuration executable repository
                 ~tree ~commit ~timestamp ~message
             in
-            let* _ =
-              run ?runner configuration executable repository ~operation:"fsck"
-                [
-                  "--no-replace-objects";
-                  "fsck";
-                  "--full";
-                  "--no-dangling";
-                  object_id_to_hex commit;
-                ]
-            in
             let target_ref = export_ref (Release.release_id release) in
             let* () =
               match fail_at with
@@ -3336,6 +3351,10 @@ let export_release ?runner ?fail_at configuration ~store ~repository ~release =
             let* () =
               publish_export_ref ?runner configuration executable repository
                 ~commit ~target_ref
+            in
+            let* _ =
+              run ?runner configuration executable repository ~operation:"fsck"
+                [ "--no-replace-objects"; "fsck"; "--full"; "--no-dangling" ]
             in
             let* () =
               match fail_at with

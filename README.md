@@ -139,6 +139,7 @@ dune exec bin/paengi.exe -- release list
 dune exec bin/paengi.exe -- git import tree --repository <absolute-git-directory> --tree <full-git-tree-id>
 dune exec bin/paengi.exe -- git import commit --repository <absolute-git-directory> --commit <full-git-commit-id>
 dune exec bin/paengi.exe -- git import tag --repository <absolute-git-directory> --tag <name>
+dune exec bin/paengi.exe -- git export release --repository <absolute-git-directory> --release <release-id>
 ```
 
 `work explain-order` is read-only. It resolves each enabled capsule's current
