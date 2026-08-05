@@ -338,6 +338,16 @@
  (modules semantic_retargeting_experiment)
  (libraries paengi_semantic_experiment))
 
+(executable
+ (name rust_typescript_retargeting_comparison)
+ (modules rust_typescript_retargeting_comparison)
+ (libraries paengi_rust_retarget_comparison))
+
+(test
+ (name test_rust_retarget_comparison)
+ (modules test_rust_retarget_comparison)
+ (libraries alcotest paengi_rust_retarget_comparison))
+
 (test
  (name test_semantic_experiment)
  (modules test_semantic_experiment)

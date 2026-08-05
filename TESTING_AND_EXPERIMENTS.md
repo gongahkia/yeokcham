@@ -525,6 +525,15 @@ are checked by focused tests; a seeded property varies bounded prefix shifts.
 This is input for a later language comparison, not a Rust rename/move engine or
 a cross-language result.
 
+M9-05 publishes that later comparison as the separate
+`rust-typescript-retargeting-comparison-v1` report and schema. It preserves the
+40-case TypeScript v1 result by reference, reports the six-case Rust textual
+and fallback workload separately, and records false-confidence/false-negative
+fields without pooling values or comparing rates. Rust semantic retargeting
+attempts are explicitly zero; a zero false-confident Rust count is therefore
+not a safety claim. `make rust-retargeting-comparison` regenerates and validates
+the documentation artifact; `make check` statically validates it.
+
 ## 10. Release gates
 
 ### Model prototype gate
