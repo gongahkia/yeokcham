@@ -147,4 +147,4 @@ The ADR lifecycle, numbering rules, and template are defined in [`docs/adr/READM
 - [ADR-034 — Configured Git release-export metadata](docs/adr/034-configured-git-release-export-metadata.md) — Accepted.
 - [ADR-035 — Optional Rust parser sidecar](docs/adr/035-optional-rust-parser-sidecar.md) — Accepted.
 - [ADR-036 — Snapshot-local Rust module paths](docs/adr/036-snapshot-local-rust-module-paths.md) — Accepted.
-- [ADR-037 — Rust macro textual fallback](docs/adr/037-rust-macro-textual-fallback.md) — Proposed.
+- [ADR-037 — Rust macro textual fallback](docs/adr/037-rust-macro-textual-fallback.md) — Accepted.
