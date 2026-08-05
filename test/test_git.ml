@@ -176,6 +176,82 @@ let write_file path bytes =
 
 let read_file path = In_channel.with_open_bin path In_channel.input_all
 
+let assert_snapshot_matches_directory ?(ignore_git_directory = false) store
+    snapshot root =
+  let display_path components =
+    match components with [] -> "." | _ -> String.concat "/" components
+  in
+  let lstat components path expected =
+    try Unix.lstat path
+    with Unix.Unix_error (error, _, _) ->
+      Alcotest.fail
+        (Printf.sprintf "%s missing at %s: %s" expected
+           (display_path components)
+           (Unix.error_message error))
+  in
+  let rec check_tree components tree_id =
+    let tree =
+      Snapshot.Tree.load store tree_id |> require_ok Snapshot.error_to_string
+    in
+    let path = List.fold_left Filename.concat root components in
+    let expected_entries = Snapshot.Tree.entries tree in
+    let expected_names = List.map fst expected_entries in
+    let actual_names =
+      Sys.readdir path |> Array.to_list
+      |> List.filter (fun name ->
+          not
+            (ignore_git_directory && components = []
+            && String.equal name ".git"))
+      |> List.sort String.compare
+    in
+    Alcotest.(check (list string))
+      ("entries at " ^ display_path components)
+      expected_names actual_names;
+    List.iter
+      (fun (name, entry) ->
+        let components = components @ [ name ] in
+        let path = Filename.concat path name in
+        match entry with
+        | Snapshot.Tree.Directory child ->
+            let status = lstat components path "expected directory" in
+            Alcotest.(check bool)
+              ("directory kind at " ^ display_path components)
+              true (status.Unix.st_kind = Unix.S_DIR);
+            check_tree components child
+        | Snapshot.Tree.File { mode; content } ->
+            let expected =
+              Snapshot.Content.load store content
+              |> require_ok Snapshot.error_to_string
+            in
+            let status =
+              lstat components path
+                (match mode with
+                | Snapshot.Symlink -> "expected symlink"
+                | Snapshot.Regular | Snapshot.Executable -> "expected file")
+            in
+            match mode with
+            | Snapshot.Symlink ->
+                Alcotest.(check bool)
+                  ("symlink kind at " ^ display_path components)
+                  true (status.Unix.st_kind = Unix.S_LNK);
+                Alcotest.(check string)
+                  ("symlink target at " ^ display_path components)
+                  expected (Unix.readlink path)
+            | Snapshot.Regular | Snapshot.Executable ->
+                Alcotest.(check bool)
+                  ("file kind at " ^ display_path components)
+                  true (status.Unix.st_kind = Unix.S_REG);
+                Alcotest.(check string)
+                  ("file bytes at " ^ display_path components)
+                  expected (read_file path);
+                Alcotest.(check bool)
+                  ("executable mode at " ^ display_path components)
+                  (mode = Snapshot.Executable)
+                  (status.Unix.st_perm land 0o111 <> 0))
+      expected_entries
+  in
+  check_tree [] (Snapshot.Snapshot.root snapshot)
+
 let mapping_envelope_bytes store mapping =
   let components = [ "git-mappings"; Id.Git_mapping_id.to_hex mapping ] in
   let binding =
@@ -554,6 +630,7 @@ let imports_merge_commit_and_ordered_parents () =
       with_directory "paengi-git-commit-materialized-" (fun destination ->
           Snapshot.Materialize.write ~destination reopened snapshot
           |> require_ok Snapshot.Materialize.error_to_string;
+          assert_snapshot_matches_directory reopened snapshot destination;
           Alcotest.(check string)
             "base bytes" "base\n"
             (read_file (Filename.concat destination "base"));
@@ -712,6 +789,7 @@ let imports_complete_existing_repository () =
         (fun destination ->
           Snapshot.Materialize.write ~destination reopened snapshot
           |> require_ok Snapshot.Materialize.error_to_string;
+          assert_snapshot_matches_directory reopened snapshot destination;
           Alcotest.(check string)
             "complete import regular bytes" "base\n"
             (read_file (Filename.concat destination "base"));
@@ -1625,6 +1703,12 @@ let exports_release_as_exact_git_commit () =
           "-q";
           Git.object_id_to_hex first.Git.export_commit;
         ];
+      let exported_snapshot =
+        Snapshot.Snapshot.load store (Release.release_final_snapshot release)
+        |> require_ok Snapshot.error_to_string
+      in
+      assert_snapshot_matches_directory ~ignore_git_directory:true store
+        exported_snapshot destination;
       Alcotest.(check string)
         "regular checkout bytes" "regular\000bytes"
         (read_file (Filename.concat destination "regular"));
@@ -2051,6 +2135,12 @@ let exports_revisions_as_exact_linear_git_commits () =
           "-q";
           Git.object_id_to_hex first.Git.revision_export_commit;
         ];
+      let first_snapshot =
+        Snapshot.Snapshot.load store (List.hd snapshots)
+        |> require_ok Snapshot.error_to_string
+      in
+      assert_snapshot_matches_directory ~ignore_git_directory:true store
+        first_snapshot destination;
       Alcotest.(check string)
         "first checkout bytes" "first\000bytes"
         (read_file (Filename.concat destination "first"));
@@ -2075,6 +2165,12 @@ let exports_revisions_as_exact_linear_git_commits () =
           "-q";
           Git.object_id_to_hex second.Git.revision_export_commit;
         ];
+      let second_snapshot =
+        Snapshot.Snapshot.load store (List.nth snapshots 1)
+        |> require_ok Snapshot.error_to_string
+      in
+      assert_snapshot_matches_directory ~ignore_git_directory:true store
+        second_snapshot destination;
       Alcotest.(check string)
         "second checkout bytes" "second\n"
         (read_file (Filename.concat destination "second"));
@@ -2565,6 +2661,7 @@ let imports_exact_tree_and_restarts_idempotently () =
       with_directory "paengi-git-materialized-" (fun destination ->
           Snapshot.Materialize.write ~destination reopened snapshot
           |> require_ok Snapshot.Materialize.error_to_string;
+          assert_snapshot_matches_directory reopened snapshot destination;
           Alcotest.(check string)
             "regular bytes" "regular\000bytes"
             (read_file (Filename.concat destination "regular"));
