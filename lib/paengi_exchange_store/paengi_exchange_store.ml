@@ -100,13 +100,12 @@ let strictly_sorted_ids ids =
   loop ids
 
 let destination_missing destination object_id =
-  match Store.get destination object_id with
-  | Ok _ -> Ok false
-  | Error error -> (
-      match error with
-      | Store.Io_error _ | Store.Object_integrity_error _
-      | Store.Collision_or_corruption _ -> Error (Destination_store_error error)
-      | _ -> Ok true)
+  let path = Store.object_path destination object_id in
+  if not (Sys.file_exists path) then Ok true
+  else
+    Store.get destination object_id
+    |> Result.map (fun _ -> false)
+    |> Result.map_error (fun error -> Destination_store_error error)
 
 let check_want ~session_id ~sequence expected = function
   | Exchange.Want { session_id = actual; sequence = actual_sequence; object_ids; _ }
@@ -122,7 +121,7 @@ let check_want ~session_id ~sequence expected = function
       Error (Invalid_transfer_input "expected Want after inventory")
 
 let transfer ?interrupt_after ?(object_byte_budget = Exchange.max_total_object_bytes)
-    ~source ~destination ~session_id ~object_ids =
+    ~source ~destination ~session_id ~object_ids () =
   if not (strictly_sorted_ids object_ids) then
     Error (Invalid_transfer_input "object IDs must be strictly ascending")
   else if List.length object_ids > Exchange.max_session_object_ids then
@@ -212,7 +211,7 @@ let transfer ?interrupt_after ?(object_byte_budget = Exchange.max_total_object_b
                   let* receiver, published =
                     receive_object destination receiver object_message
                   in
-                  transfer_wants receiver Int64.(succ object_sequence)
+                  transfer_wants receiver Int64.(add object_sequence 1L)
                     (published :: transferred) ids
           in
           let* receiver, object_sequence, transferred =

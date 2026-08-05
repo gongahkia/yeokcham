@@ -371,6 +371,15 @@ let parse_fields name count = function
   | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _ | Encoding.Map _ | Encoding.Bool _ | Encoding.Null ->
       Error (Invalid_message (name ^ " must be an array"))
 
+let parse_at_least_fields name count = function
+  | Encoding.Array fields when List.length fields >= count -> Ok fields
+  | Encoding.Array _ ->
+      Error
+        (Invalid_message
+           (Printf.sprintf "%s must contain at least %d fields" name count))
+  | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _ | Encoding.Map _ | Encoding.Bool _ | Encoding.Null ->
+      Error (Invalid_message (name ^ " must be an array"))
+
 let parse_session value =
   let* bytes = parse_bytes "session ID" value in
   session_id_of_bytes bytes
@@ -418,15 +427,7 @@ let parse_payload payload =
   in
   if not (String.equal payload (Encoding.encode value)) then Error Noncanonical_cbor
   else
-    let* fields = parse_fields "exchange message" 0 value |> fun result ->
-      match result with
-      | Ok _ -> result
-      | Error _ -> (
-          match value with
-          | Encoding.Array fields when List.length fields >= 3 -> Ok fields
-          | Encoding.Array _ -> Error (Invalid_message "exchange message has fewer than 3 fields")
-          | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _ | Encoding.Map _ | Encoding.Bool _ | Encoding.Null ->
-              Error (Invalid_message "exchange message must be an array"))
+    let* fields = parse_at_least_fields "exchange message" 3 value in
     in
     match fields with
     | version :: kind :: required_features :: rest ->
@@ -485,10 +486,8 @@ let parse_payload payload =
                 Ok (End { session_id; status; required_features })
             | 5L, [ session_id; code; detail ] ->
                 let* session_id =
-                  match session_id with
-                  | Encoding.Null -> Ok None
-                  | value -> parse_session value |> Result.map Option.some
-                  | _ -> Error (Invalid_message "error session is invalid")
+                  if Encoding.equal session_id Encoding.null then Ok None
+                  else parse_session session_id |> Result.map Option.some
                 in
                 let* code = parse_text "error code" code in
                 let* detail = parse_text "error detail" detail in
@@ -633,26 +632,26 @@ let register_want receiver ~sequence object_ids =
     Error
       (Requested_object_limit_exceeded { count; limit = max_session_object_ids })
   else
-    let session_id =
-      match receiver.session with Some value -> value | None -> assert false
-    in
-    let message =
-      Want
-        {
-          session_id;
-          sequence;
-          object_ids;
-          required_features = supported_required_features;
-        }
-    in
-    let* receiver = add_control receiver message in
-    Ok
-      ( {
-          receiver with
-          requested = object_ids @ receiver.requested;
-          requested_count = count;
-        },
-        message )
+    match receiver.session with
+    | None -> Error (Invalid_message "inventory did not establish a session")
+    | Some session_id ->
+        let message =
+          Want
+            {
+              session_id;
+              sequence;
+              object_ids;
+              required_features = supported_required_features;
+            }
+        in
+        let* receiver = add_control receiver message in
+        Ok
+          ( {
+              receiver with
+              requested = object_ids @ receiver.requested;
+              requested_count = count;
+            },
+            message )
 
 let accept_object receiver message =
   let* () = require_open receiver in

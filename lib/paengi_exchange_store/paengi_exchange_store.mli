@@ -38,4 +38,5 @@ val transfer :
   destination:Paengi_store.repository ->
   session_id:Paengi_exchange.session_id ->
   object_ids:Object_id.t list ->
+  unit ->
   (outcome, error) result
