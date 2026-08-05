@@ -881,6 +881,27 @@ paengi records evidence. It does not claim that passing tests proves correctness
 
 ## 13. Git bridge model
 
+### Mapping records
+
+ADR-028 defines the first durable Git-interchange association. It introduces
+distinct typed `git_object_format`, `git_object_id`, `git_object_kind`, and
+`git_mapping_id` values; none is a Paengi stored-object, snapshot, capsule,
+workspace, conflict, or release identity. V1 accepts only `Git_sha1` IDs of
+exactly 20 raw bytes and `Git_sha256` IDs of exactly 32 raw bytes, plus tree and
+commit object kinds. It stores one immutable direction, Git object reference,
+and a typed Paengi subject in `Git_mapping_v1`; logical mapping identity is
+domain-separated from its physical Envelope-1 object identity. The only
+canonical mapping visibility point is a create-only, checksummed binding under
+`refs/git-mappings/`.
+
+A mapping verifies exact typed Paengi links but is bridge evidence, not a
+repository identity or a source of Paengi-history semantics. Mapping refs never
+advance, rewrite, or hide scratch, capsule, workspace, conflict, or release
+refs. Target publication and mapping binding are not cross-ref atomic; a crash
+after a target becomes visible but before its mapping is bound remains an
+explicit, retryable incomplete bridge state. The accepted schema is not an
+implemented import/export adapter or a general Git compatibility claim.
+
 ### Import
 
 A Git commit maps to:

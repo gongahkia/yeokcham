@@ -78,7 +78,9 @@ semantic-unavailable and preserves the textual operation.
 Milestone 8 has begun with a non-persistent bounded Git preflight adapter. It
 uses direct `git` argv only to identify a local repository's bare status and
 declared object format; it imports or exports nothing and creates no Paengi
-mapping, object, ref, or Git compatibility promise.
+mapping, object, ref, or Git compatibility promise. ADR-028 accepts the
+additive mapping format required before durable bridge implementation; the
+mapping format itself has no implementation or compatibility claim yet.
 
 See `CONTRIBUTING.md` for development rules. Paengi is licensed under the MIT License.
 

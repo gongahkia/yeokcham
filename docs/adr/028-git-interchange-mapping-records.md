@@ -1,8 +1,8 @@
 # ADR-028 — Git interchange mapping records
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-05
-- Deciders: maintainer approval required
+- Deciders: maintainer (approved 2026-08-05)
 - Supersedes: None
 - Superseded by: None
 

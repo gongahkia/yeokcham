@@ -568,10 +568,10 @@ mapping, Git repository, or checkout. Git remains the owner of Git-object,
 pack, delta, and compatibility parsing; Paengi has not yet declared a
 Git-format compatibility contract.
 
-The next import slice requires an approved immutable mapping schema before any
-Git blob, tree, commit, tag, parent, or metadata data enters persistent Paengi
-state. The preflight result is process-local and must not be used as repository
-identity or persistent metadata.
+ADR-028 accepts an immutable mapping schema before any Git blob, tree, commit,
+tag, parent, or metadata data enters persistent Paengi state. It is not yet
+implemented. The preflight result is process-local and must not be used as
+repository identity or persistent metadata.
 
 Import:
 
