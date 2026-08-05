@@ -107,6 +107,52 @@ let direct_capture executable arguments =
   | Unix.WSIGNALED signal | Unix.WSTOPPED signal ->
       Alcotest.fail (Printf.sprintf "Git fixture command received %d" signal)
 
+let direct_capture_with_environment executable environment arguments =
+  let reader, writer = Unix.pipe () in
+  let child =
+    Unix.create_process_env executable
+      (Array.of_list (executable :: arguments))
+      environment Unix.stdin writer Unix.stderr
+  in
+  Unix.close writer;
+  let channel = Unix.in_channel_of_descr reader in
+  let output = In_channel.input_all channel in
+  In_channel.close channel;
+  match Unix.waitpid [] child with
+  | _, Unix.WEXITED 0 -> String.trim output
+  | _, Unix.WEXITED code ->
+      Alcotest.fail (Printf.sprintf "Git fixture command exited %d" code)
+  | _, Unix.WSIGNALED signal | _, Unix.WSTOPPED signal ->
+      Alcotest.fail (Printf.sprintf "Git fixture command received %d" signal)
+
+let golden_commit_environment =
+  let overridden =
+    [
+      "GIT_AUTHOR_NAME=";
+      "GIT_AUTHOR_EMAIL=";
+      "GIT_AUTHOR_DATE=";
+      "GIT_COMMITTER_NAME=";
+      "GIT_COMMITTER_EMAIL=";
+      "GIT_COMMITTER_DATE=";
+    ]
+  in
+  Unix.environment () |> Array.to_list
+  |> List.filter (fun value ->
+      not
+        (List.exists
+           (fun prefix -> String.starts_with ~prefix value)
+           overridden))
+  |> List.rev_append
+       [
+         "GIT_AUTHOR_NAME=Paengi Golden";
+         "GIT_AUTHOR_EMAIL=golden@example.invalid";
+         "GIT_AUTHOR_DATE=1700000000 +0000";
+         "GIT_COMMITTER_NAME=Paengi Golden";
+         "GIT_COMMITTER_EMAIL=golden@example.invalid";
+         "GIT_COMMITTER_DATE=1700000000 +0000";
+       ]
+  |> Array.of_list
+
 let write_file path bytes =
   Out_channel.with_open_bin path (fun channel ->
       Out_channel.output_string channel bytes)
@@ -137,6 +183,32 @@ let mapping_envelope_bytes store mapping =
           | Encoding.Array _ | Encoding.Map _ | Encoding.Bool _ | Encoding.Null
             ->
               Alcotest.fail "Git mapping binding does not decode"))
+
+let binding_bytes store components =
+  Store.Ref_file.read store ~components |> require_ok Store.error_to_string
+  |> function
+  | Some bytes -> bytes
+  | None -> Alcotest.fail "expected immutable binding was not written"
+
+let imported_transition_envelope_bytes store transition =
+  let components =
+    [ "imported-transitions"; Id.Imported_transition_id.to_hex transition ]
+  in
+  let binding = binding_bytes store components in
+  match Encoding.decode binding with
+  | Error _ -> Alcotest.fail "imported transition binding does not decode"
+  | Ok (Encoding.Array [ _; _; Encoding.Bytes physical; _ ]) -> (
+      match Store.Stored_object_id.of_raw_bytes physical with
+      | Some physical ->
+          Store.get store physical
+          |> require_ok Store.error_to_string
+          |> Envelope.encode
+      | None -> Alcotest.fail "imported transition binding object ID is invalid"
+      )
+  | Ok
+      ( Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _
+      | Encoding.Array _ | Encoding.Map _ | Encoding.Bool _ | Encoding.Null ) ->
+      Alcotest.fail "imported transition binding does not decode"
 
 let git_path () =
   let candidates =
@@ -286,8 +358,10 @@ let commit_fixture run =
       Unix.mkdir store_root 0o700;
       let git = git_path () in
       direct_process git [ "init"; "-q"; repository ];
-      direct_process git [ "-C"; repository; "config"; "user.name"; "Paengi Test" ];
-      direct_process git [ "-C"; repository; "config"; "user.email"; "test@example.invalid" ];
+      direct_process git
+        [ "-C"; repository; "config"; "user.name"; "Paengi Test" ];
+      direct_process git
+        [ "-C"; repository; "config"; "user.email"; "test@example.invalid" ];
       write_file (Filename.concat repository "base") "base\n";
       direct_process git [ "-C"; repository; "add"; "--all" ];
       direct_process git [ "-C"; repository; "commit"; "-q"; "-m"; "base" ];
@@ -295,7 +369,8 @@ let commit_fixture run =
       let branch =
         direct_capture git [ "-C"; repository; "branch"; "--show-current" ]
       in
-      direct_process git [ "-C"; repository; "checkout"; "-q"; "-b"; "side"; base ];
+      direct_process git
+        [ "-C"; repository; "checkout"; "-q"; "-b"; "side"; base ];
       write_file (Filename.concat repository "side") "side\n";
       direct_process git [ "-C"; repository; "add"; "--all" ];
       direct_process git [ "-C"; repository; "commit"; "-q"; "-m"; "side" ];
@@ -305,17 +380,25 @@ let commit_fixture run =
       direct_process git [ "-C"; repository; "add"; "--all" ];
       direct_process git [ "-C"; repository; "commit"; "-q"; "-m"; "main" ];
       let main = direct_capture git [ "-C"; repository; "rev-parse"; "HEAD" ] in
-      direct_process git [ "-C"; repository; "merge"; "--no-ff"; "-q"; "-m"; "merge"; "side" ];
-      let merge = direct_capture git [ "-C"; repository; "rev-parse"; "HEAD" ] in
+      direct_process git
+        [ "-C"; repository; "merge"; "--no-ff"; "-q"; "-m"; "merge"; "side" ];
+      let merge =
+        direct_capture git [ "-C"; repository; "rev-parse"; "HEAD" ]
+      in
       let parents =
-        direct_capture git [ "-C"; repository; "show"; "-s"; "--format=%P"; merge ]
+        direct_capture git
+          [ "-C"; repository; "show"; "-s"; "--format=%P"; merge ]
         |> String.split_on_char ' '
       in
-      Alcotest.(check (list string)) "merge parent order fixture" [ main; side ] parents;
-      let store = Store.init ~root:store_root |> require_ok Store.error_to_string in
+      Alcotest.(check (list string))
+        "merge parent order fixture" [ main; side ] parents;
+      let store =
+        Store.init ~root:store_root |> require_ok Store.error_to_string
+      in
       let format =
         Git.inspect Git.default_configuration ~repository
-        |> require_ok Git.error_to_string |> Git.inspection_object_format
+        |> require_ok Git.error_to_string
+        |> Git.inspection_object_format
       in
       let commit =
         Git.object_id_of_hex format merge |> require_ok Git.error_to_string
@@ -352,11 +435,11 @@ let imports_merge_commit_and_ordered_parents () =
         |> require_ok Git.error_to_string
       in
       Alcotest.(check string)
-        "commit identity" (Git.object_id_to_hex commit)
+        "commit identity"
+        (Git.object_id_to_hex commit)
         (Git.imported_transition_commit transition |> Git.object_id_to_hex);
       Alcotest.(check (list string))
-        "parent order"
-        expected_parents
+        "parent order" expected_parents
         (Git.imported_transition_parents transition
         |> List.map Git.object_id_to_hex);
       let mapping =
@@ -369,28 +452,85 @@ let imports_merge_commit_and_ordered_parents () =
             "mapping names transition" true
             (Id.Imported_transition_id.equal identity
                (Git.imported_transition_id transition))
-      | Git.Imported_snapshot _ | Git.Imported_revision _ | Git.Exported_release _
-      | Git.Exported_revision _ ->
+      | Git.Imported_snapshot _ | Git.Imported_revision _
+      | Git.Exported_release _ | Git.Exported_revision _ ->
           Alcotest.fail "commit import did not map to an opaque transition");
       let snapshot =
-        Snapshot.Snapshot.load reopened (Git.imported_transition_snapshot transition)
+        Snapshot.Snapshot.load reopened
+          (Git.imported_transition_snapshot transition)
         |> require_ok Snapshot.error_to_string
       in
       with_directory "paengi-git-commit-materialized-" (fun destination ->
           Snapshot.Materialize.write ~destination reopened snapshot
           |> require_ok Snapshot.Materialize.error_to_string;
-          Alcotest.(check string) "base bytes" "base\n"
+          Alcotest.(check string)
+            "base bytes" "base\n"
             (read_file (Filename.concat destination "base"));
-          Alcotest.(check string) "main bytes" "main\n"
+          Alcotest.(check string)
+            "main bytes" "main\n"
             (read_file (Filename.concat destination "main"));
-          Alcotest.(check string) "side bytes" "side\n"
+          Alcotest.(check string)
+            "side bytes" "side\n"
             (read_file (Filename.concat destination "side"))))
+
+let imported_transition_persistence_goldens_are_stable () =
+  with_directory "paengi-git-transition-golden-" (fun root ->
+      let repository = Filename.concat root "repository" in
+      let store_root = Filename.concat root "store" in
+      Unix.mkdir repository 0o700;
+      Unix.mkdir store_root 0o700;
+      let git = git_path () in
+      direct_process git [ "init"; "--object-format=sha1"; "-q"; repository ];
+      write_file (Filename.concat repository "golden") "golden\000bytes";
+      direct_process git [ "-C"; repository; "add"; "--all" ];
+      let tree = direct_capture git [ "-C"; repository; "write-tree" ] in
+      let commit =
+        direct_capture_with_environment git golden_commit_environment
+          [ "-C"; repository; "commit-tree"; tree; "-m"; "golden" ]
+      in
+      let store =
+        Store.init ~root:store_root |> require_ok Store.error_to_string
+      in
+      let identity =
+        Git.object_id_of_hex Git.Sha1 commit |> require_ok Git.error_to_string
+      in
+      let imported =
+        Git.import_commit Git.default_configuration ~store ~repository
+          ~commit:identity
+        |> require_ok Git.error_to_string
+      in
+      let transition = imported.Git.imported_transition in
+      let transition_id = Git.imported_transition_id transition in
+      let mapping_id = Git.mapping_id imported.Git.commit_mapping in
+      Alcotest.(check string)
+        "canonical imported transition envelope"
+        (golden "git-imported-transition-v1.peng.hex")
+        (imported_transition_envelope_bytes store transition_id);
+      Alcotest.(check string)
+        "canonical imported transition binding"
+        (golden "git-imported-transition-v1.ref.hex")
+        (binding_bytes store
+           [
+             "imported-transitions";
+             Id.Imported_transition_id.to_hex transition_id;
+           ]);
+      Alcotest.(check string)
+        "canonical Git mapping v2 envelope"
+        (golden "git-mapping-v2.peng.hex")
+        (mapping_envelope_bytes store mapping_id);
+      Alcotest.(check string)
+        "canonical Git mapping v2 binding"
+        (golden "git-mapping-v2.ref.hex")
+        (binding_bytes store
+           [ "git-mappings"; Id.Git_mapping_id.to_hex mapping_id ]))
 
 let rejects_malformed_commit_data () =
   with_directory "paengi-git-commit-errors-" (fun repository ->
       let store_root = Filename.concat repository "store" in
       Unix.mkdir store_root 0o700;
-      let store = Store.init ~root:store_root |> require_ok Store.error_to_string in
+      let store =
+        Store.init ~root:store_root |> require_ok Store.error_to_string
+      in
       let commit =
         Git.object_id_of_hex Git.Sha1 (String.make 40 '4')
         |> require_ok Git.error_to_string
@@ -404,8 +544,9 @@ let rejects_malformed_commit_data () =
           process_result ~stdout:(stream "commit\n") ();
           process_result ~stdout:(stream malformed) ();
         ];
-      Git.import_commit ~runner:(module Fake_runner) fake_configuration ~store
-        ~repository ~commit
+      Git.import_commit
+        ~runner:(module Fake_runner)
+        fake_configuration ~store ~repository ~commit
       |> Result.fold
            ~ok:(fun _ -> Alcotest.fail "malformed Git commit was accepted")
            ~error:(fun error ->
@@ -423,10 +564,12 @@ let rejects_malformed_commit_data () =
           process_result ~stdout:(stream "commit\n") ();
           process_result ~stdout:(stream missing_parent) ();
           process_result ~status:Validation.Failed ~exit_code:(Some 128)
-            ~stderr:(stream "fatal: missing\n") ();
+            ~stderr:(stream "fatal: missing\n")
+            ();
         ];
-      Git.import_commit ~runner:(module Fake_runner) fake_configuration ~store
-        ~repository ~commit
+      Git.import_commit
+        ~runner:(module Fake_runner)
+        fake_configuration ~store ~repository ~commit
       |> Result.fold
            ~ok:(fun _ -> Alcotest.fail "missing parent was accepted")
            ~error:(fun error ->
@@ -441,8 +584,9 @@ let rejects_malformed_commit_data () =
           process_result ~stdout:(stream "sha1\n") ();
           process_result ~stdout:(stream "blob\n") ();
         ];
-      Git.import_commit ~runner:(module Fake_runner) fake_configuration ~store
-        ~repository ~commit
+      Git.import_commit
+        ~runner:(module Fake_runner)
+        fake_configuration ~store ~repository ~commit
       |> Result.fold
            ~ok:(fun _ -> Alcotest.fail "wrong-type commit was accepted")
            ~error:(fun error ->
@@ -451,8 +595,8 @@ let rejects_malformed_commit_data () =
                (contains ~needle:"has type blob, expected commit"
                   (Git.error_to_string error)));
       let too_many =
-        "tree " ^ tree ^ "\nparent " ^ parent ^ "\nparent "
-        ^ String.make 40 '7' ^ "\n\n"
+        "tree " ^ tree ^ "\nparent " ^ parent ^ "\nparent " ^ String.make 40 '7'
+        ^ "\n\n"
       in
       let limited =
         Git.configuration_with ~max_commit_parents:1 fake_configuration
@@ -465,8 +609,9 @@ let rejects_malformed_commit_data () =
           process_result ~stdout:(stream "commit\n") ();
           process_result ~stdout:(stream too_many) ();
         ];
-      Git.import_commit ~runner:(module Fake_runner) limited ~store ~repository
-        ~commit
+      Git.import_commit
+        ~runner:(module Fake_runner)
+        limited ~store ~repository ~commit
       |> Result.fold
            ~ok:(fun _ -> Alcotest.fail "parent limit was accepted")
            ~error:(fun error ->
@@ -474,7 +619,9 @@ let rejects_malformed_commit_data () =
                "structured parent bound" true
                (contains ~needle:"commit parents limit exceeded"
                   (Git.error_to_string error)));
-      let self_parent = "tree " ^ tree ^ "\nparent " ^ String.make 40 '4' ^ "\n\n" in
+      let self_parent =
+        "tree " ^ tree ^ "\nparent " ^ String.make 40 '4' ^ "\n\n"
+      in
       recorded_commands := [];
       queued_results :=
         [
@@ -483,8 +630,9 @@ let rejects_malformed_commit_data () =
           process_result ~stdout:(stream "commit\n") ();
           process_result ~stdout:(stream self_parent) ();
         ];
-      Git.import_commit ~runner:(module Fake_runner) fake_configuration ~store
-        ~repository ~commit
+      Git.import_commit
+        ~runner:(module Fake_runner)
+        fake_configuration ~store ~repository ~commit
       |> Result.fold
            ~ok:(fun _ -> Alcotest.fail "self-parent Git commit was accepted")
            ~error:(fun error ->
@@ -499,22 +647,26 @@ let rejects_corrupt_transition_binding () =
         Git.import_commit Git.default_configuration ~store ~repository ~commit
         |> require_ok Git.error_to_string
       in
-      let transition = Git.imported_transition_id imported.Git.imported_transition in
+      let transition =
+        Git.imported_transition_id imported.Git.imported_transition
+      in
       let components =
         [ "imported-transitions"; Id.Imported_transition_id.to_hex transition ]
       in
       let existing =
-        Store.Ref_file.read store ~components |> require_ok Store.error_to_string
+        Store.Ref_file.read store ~components
+        |> require_ok Store.error_to_string
       in
       (match existing with
       | Some bytes ->
-          Store.Ref_file.compare_and_swap store ~components ~expected:(Some bytes)
-            ~replacement:"corrupt"
+          Store.Ref_file.compare_and_swap store ~components
+            ~expected:(Some bytes) ~replacement:"corrupt"
           |> require_ok Store.error_to_string
       | None -> Alcotest.fail "imported transition binding was not written");
       Git.load_imported_transition store transition
       |> Result.fold
-           ~ok:(fun _ -> Alcotest.fail "corrupt transition binding was accepted")
+           ~ok:(fun _ ->
+             Alcotest.fail "corrupt transition binding was accepted")
            ~error:(fun error ->
              Alcotest.(check bool)
                "structured corrupt transition binding" true
@@ -559,8 +711,8 @@ let imports_exact_tree_and_restarts_idempotently () =
           Alcotest.(check bool)
             "mapping points to imported snapshot" true
             (Snapshot.Snapshot.equal_id snapshot imported.Git.snapshot)
-      | Git.Imported_transition _ | Git.Imported_revision _ | Git.Exported_release _
-      | Git.Exported_revision _ ->
+      | Git.Imported_transition _ | Git.Imported_revision _
+      | Git.Exported_release _ | Git.Exported_revision _ ->
           Alcotest.fail "tree import did not map to a snapshot");
       let snapshot =
         Snapshot.Snapshot.load reopened imported.Git.snapshot
@@ -749,6 +901,8 @@ let () =
             imports_exact_tree_and_restarts_idempotently;
           Alcotest.test_case "merge commit import preserves parent order" `Quick
             imports_merge_commit_and_ordered_parents;
+          Alcotest.test_case "imported transition schemas have stable goldens"
+            `Quick imported_transition_persistence_goldens_are_stable;
           Alcotest.test_case "malformed commit data rejects" `Quick
             rejects_malformed_commit_data;
           Alcotest.test_case "corrupt transition binding rejects" `Quick

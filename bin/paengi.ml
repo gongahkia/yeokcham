@@ -1465,7 +1465,8 @@ let git root arguments =
           | Error error -> fail Git.error_to_string error
           | Ok result ->
               let transition = result.Git.imported_transition in
-              Printf.printf "transition=%s snapshot=%s mapping=%s git-commit=%s parents=%s\n"
+              Printf.printf
+                "transition=%s snapshot=%s mapping=%s git-commit=%s parents=%s\n"
                 (Paengi_id.Imported_transition_id.to_hex
                    (Git.imported_transition_id transition))
                 (Store.Stored_object_id.to_hex
@@ -1473,9 +1474,11 @@ let git root arguments =
                       (Git.imported_transition_snapshot transition)))
                 (Paengi_id.Git_mapping_id.to_hex
                    (Git.mapping_id result.Git.commit_mapping))
-                (Git.object_id_to_hex (Git.imported_transition_commit transition))
+                (Git.object_id_to_hex
+                   (Git.imported_transition_commit transition))
                 (Git.imported_transition_parents transition
-                |> List.map Git.object_id_to_hex |> String.concat ",")))
+                |> List.map Git.object_id_to_hex
+                |> String.concat ",")))
   | _ -> exit 2
 
 let usage () =

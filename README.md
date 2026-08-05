@@ -75,11 +75,15 @@ participate in restore, materialisation, export, or verification. Helper
 absence, invalid output, timeout, or incomplete analysis returns
 semantic-unavailable and preserves the textual operation.
 
-Milestone 8 has its first durable vertical slice: bounded direct-argv import
-of one Git tree into an exact Paengi snapshot. It preserves `100644`, `100755`,
-and `120000` bytes/modes, rejects unsafe names and unsupported modes, and writes
-an immutable ADR-028 mapping binding. It neither imports Git commits/topology
-nor exports Git data, and makes no general Git compatibility promise.
+Milestone 8 has two durable import slices: bounded direct-argv import of one
+Git tree into an exact Paengi snapshot, and import of one Git commit as opaque
+provenance. Tree import preserves `100644`, `100755`, and `120000` bytes/modes,
+rejects unsafe names and unsupported modes, and writes an immutable ADR-028
+mapping. Commit import preserves the requested commit ID, declared tree,
+resulting snapshot, and ordered parent IDs in ADR-029's immutable transition
+record. It imports neither Git metadata nor graph history, never fabricates a
+capsule or revision, does not export Git data, and makes no general Git
+compatibility promise.
 
 See `CONTRIBUTING.md` for development rules. Paengi is licensed under the MIT License.
 
@@ -135,6 +139,7 @@ dune exec bin/paengi.exe -- release show <release-id>
 dune exec bin/paengi.exe -- release verify <release-id>
 dune exec bin/paengi.exe -- release list
 dune exec bin/paengi.exe -- git import tree --repository <absolute-git-directory> --tree <full-git-tree-id>
+dune exec bin/paengi.exe -- git import commit --repository <absolute-git-directory> --commit <full-git-commit-id>
 ```
 
 `work explain-order` is read-only. It resolves each enabled capsule's current
@@ -164,6 +169,12 @@ it does not trust a workspace cache or current workspace selection.
 repository directory. It accepts only a full SHA-1 or SHA-256 tree ID, prints
 the imported snapshot and immutable mapping IDs, and does not advance any
 scratch, capsule, workspace, or release ref.
+
+`git import commit` has the same root and repository requirements. It accepts a
+full SHA-1 or SHA-256 commit ID, verifies the exact declared tree and direct
+parent object types, and prints an opaque transition, snapshot, mapping, commit,
+and ordered parent IDs. It does not import commit metadata, recursively import
+parents, or advance any Paengi history ref.
 
 `restore` creates a durable safety checkpoint for divergent work, validates its
 plan immediately before applying, and moves `scratch-head` only after exact

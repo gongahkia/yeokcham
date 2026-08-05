@@ -149,14 +149,15 @@ have no imported-transition bindings. No object or ref is rewritten in place.
 
 ## Verification
 
-- Golden/inverse-decoder tests for SHA-1 and SHA-256 transition and mapping v2
-  records/bindings, plus retained ADR-028 v1 goldens.
+- Golden tests for deterministic SHA-1 transition and mapping v2 records/bindings,
+  plus retained ADR-028 v1 goldens. SHA-256 fixture coverage remains pending.
 - Fixtures for root, linear, and merge commits; exact tree snapshot bytes;
   ordered parents; reopen; and equal retry.
-- Generated bounded parent lists prove identity determinism, parent order, and
-  rejection of duplicate/self/malformed IDs.
-- Failure tests cover malformed headers, missing/wrong-type objects, size and
-  parent limits, corrupt records/bindings, and interruption before each binding.
+- Generated single-parent imports prove snapshot replay, parent identity, and
+  retry identity determinism.
+- Failure tests cover malformed headers, missing/wrong-type objects, parent
+  limits, self-parent input, and corrupt bindings. Binding-interruption coverage
+  remains pending.
 - `make check` and `make property-test PROPERTY_TEST_SEED=17` pass. Benchmark
   commit import separately; no timing result is a correctness claim.
 
@@ -167,3 +168,15 @@ After acceptance and implementation, `paengi git import commit --repository
 snapshot, and mapping IDs plus the ordered parent Git IDs. It must explicitly
 state that the record is opaque provenance, not a Paengi capsule or complete
 Git history import.
+
+## Implementation evidence
+
+M8-02 implements the accepted format and command. Focused fixtures cover root,
+linear, and merge commits; ordered parent preservation; retry/reopen; malformed
+headers; missing/wrong-type parents; parent limits; self-parent rejection; and
+corrupt transition bindings. Deterministic SHA-1 fixtures lock transition and
+mapping-v2 Envelope/binding bytes; ADR-028's v1 golden remains unchanged.
+Generated single-parent commit imports verify snapshot byte/mode materialisation,
+direct-parent identity, and retry identity determinism. `make check`
+and `make property-test PROPERTY_TEST_SEED=17` pass. SHA-256 fixture coverage
+is not yet implemented.

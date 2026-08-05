@@ -191,8 +191,7 @@ let import_replays_generated_commit (bytes, executable) =
               write_file (Filename.concat repository "generated") bytes;
               if executable then
                 Unix.chmod (Filename.concat repository "generated") 0o755;
-              if
-                not (direct_process git [ "-C"; repository; "add"; "--all" ])
+              if not (direct_process git [ "-C"; repository; "add"; "--all" ])
               then false
               else if
                 not
@@ -228,7 +227,9 @@ let import_replays_generated_commit (bytes, executable) =
                                   ~store ~repository ~commit )
                             with
                             | Ok first, Ok second -> (
-                                let transition = first.Git.imported_transition in
+                                let transition =
+                                  first.Git.imported_transition
+                                in
                                 match
                                   Snapshot.Snapshot.load store
                                     (Git.imported_transition_snapshot transition)
@@ -261,9 +262,10 @@ let import_replays_generated_commit (bytes, executable) =
                                              (Git.imported_transition_id
                                                 second.Git.imported_transition)
                                         && Id.Git_mapping_id.equal
-                                             (Git.mapping_id first.Git.commit_mapping)
-                                             (Git.mapping_id second.Git.commit_mapping)
-                                    ))
+                                             (Git.mapping_id
+                                                first.Git.commit_mapping)
+                                             (Git.mapping_id
+                                                second.Git.commit_mapping)))
                             | Error _, _ | _, Error _ -> false)))
                 | _ -> false)))
 

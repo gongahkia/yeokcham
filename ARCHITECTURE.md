@@ -559,29 +559,37 @@ uses only evidence bound to the exact final snapshot.
 
 Use a mature Git library or invoke Git plumbing through a controlled adapter.
 
-Milestone 8's M8-01 adapter resolves the configured Git executable before use,
+Milestone 8's adapter resolves the configured Git executable before use,
 accepts only an absolute existing repository directory, invokes Git by direct
 argv with a bounded process runner, and verifies bounded `rev-parse` facts
-before reading a requested tree or blob through `cat-file`. It imports one tree
-recursively into immutable Content/Tree/Snapshot objects, maps only modes
-`100644`, `100755`, and `120000`, and creates one ADR-028 immutable mapping
-binding. Tree/blob bytes, entries, and nesting are independently bounded.
+before reading objects through `cat-file`. M8-01 imports one tree recursively
+into immutable Content/Tree/Snapshot objects, maps only modes `100644`,
+`100755`, and `120000`, and creates one ADR-028 immutable mapping binding.
+Tree/blob bytes, entries, and nesting are independently bounded.
 
-The adapter rejects unsafe names, unsupported modes, malformed trees, missing
-objects, and process/output-limit failures before publishing a mapping. It does
-not import a commit, parent, tag, ref, Git topology, or metadata. Git remains
-the owner of Git-object, pack, delta, and compatibility parsing; Paengi has no
-general Git-format compatibility contract. The preflight result is never a
-repository identity or persistent metadata.
+M8-02 reads one requested commit's raw header block after exact type
+verification. It requires one tree header, retains ordered direct parent IDs,
+verifies each declared parent is a commit object, imports the declared tree, and
+publishes ADR-029's immutable opaque transition plus a Git-mapping v2 binding.
+It rejects unsafe names, unsupported modes, malformed trees/headers, missing or
+wrong-type objects, duplicate/self parents, and process/output-limit failures
+before the applicable immutable binding. It neither stores author, committer,
+message, tag, ref, branch, remote, or raw commit bytes nor recursively imports
+the parent graph. Git remains the owner of Git-object, pack, delta, and
+compatibility parsing; Paengi has no general Git-format compatibility contract.
+The preflight result is never a repository identity or persistent metadata.
 
 Import:
 
-- Commit graph.
-- Trees and blobs. M8-01 implements a single tree/blob snapshot import only.
+- Commit graph. M8-02 records direct ordered parent identities for one commit;
+  it does not recursively import a graph.
+- Trees and blobs. M8-01 implements a single tree/blob snapshot import, reused
+  by M8-02 for the commit's declared tree.
 - Author and timestamp metadata.
-- Parent relationships.
+- Parent relationships. M8-02 stores direct ordered Git parent IDs only.
 - Tags.
-- Mapping records. M8-01 implements tree-to-snapshot mappings only.
+- Mapping records. M8-01 implements tree-to-snapshot mappings; M8-02 adds
+  commit-to-opaque-transition mappings in v2.
 
 Imported commits initially become opaque transitions. Semantic inference is optional post-processing.
 

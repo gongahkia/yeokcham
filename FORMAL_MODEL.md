@@ -894,14 +894,25 @@ domain-separated from its physical Envelope-1 object identity. The only
 canonical mapping visibility point is a create-only, checksummed binding under
 `refs/git-mappings/`.
 
+ADR-029 adds `Imported_transition_v1` in Envelope type 24 and `Git_mapping_v2`.
+An imported transition records one same-format Git commit ID, declared tree ID,
+resulting snapshot ID, and zero or more unique ordered direct parent commit IDs.
+Its SHA-256 logical identity excludes itself and is domain-separated from its
+physical Envelope object; visibility is a create-only checksummed binding under
+`refs/imported-transitions/`. Mapping v2 retains v1 forms and additionally
+maps `import/commit` to the transition ID plus its verified physical object ID.
+V1 payloads, identities, bindings, and goldens remain unchanged.
+
 A mapping verifies exact typed Paengi links but is bridge evidence, not a
 repository identity or a source of Paengi-history semantics. Mapping refs never
 advance, rewrite, or hide scratch, capsule, workspace, conflict, or release
 refs. Target publication and mapping binding are not cross-ref atomic; a crash
 after a target becomes visible but before its mapping is bound remains an
-explicit, retryable incomplete bridge state. M8-01 implements only the
-`import/tree -> imported-snapshot` form through a bounded direct-argv adapter;
-it is not a commit importer, exporter, or general Git compatibility claim.
+explicit, retryable incomplete bridge state. M8-01 implements
+`import/tree -> imported-snapshot`; M8-02 implements
+`import/commit -> imported-transition` through the same bounded direct-argv
+adapter. The latter is opaque provenance, not a capsule or revision; neither
+slice is an exporter or general Git compatibility claim.
 
 ### Import
 
@@ -911,12 +922,13 @@ canonical Git tree entry order and safe names, and maps `100644`, `100755`, and
 blob/symlink-target bytes and publishes the resulting snapshot mapping only
 after the snapshot is stored. Gitlinks and every other mode fail closed.
 
-A Git commit maps to:
-
-- Imported snapshot.
-- Imported opaque capsule revision or snapshot transition.
-- Git commit ID mapping.
-- Optional later semantic inference.
+M8-02 reads only the requested raw commit header block. It requires exactly one
+tree header, preserves direct parent header order, verifies the named tree and
+each direct parent object type, and uses M8-01 to produce the snapshot. It
+publishes the resulting opaque imported transition and its v2 commit mapping.
+It rejects missing, duplicate, malformed, self, wrong-format, missing-object,
+or wrong-type links; it does not store metadata, raw commit bytes, refs, tags,
+or recursive graph topology.
 
 ### Export
 

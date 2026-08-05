@@ -203,7 +203,8 @@ let error_to_string = function
         (object_id_to_hex identity)
   | Unexpected_object_type { identity; expected; actual } ->
       Printf.sprintf "Git object %s has type %s, expected %s"
-        (object_id_to_hex identity) actual expected
+        (object_id_to_hex identity)
+        actual expected
   | Import_limit_exceeded { resource; limit; actual } ->
       Printf.sprintf "Git import %s limit exceeded (%d > %d)" resource actual
         limit
@@ -506,10 +507,10 @@ let read_exact_object ?runner configuration executable repository ~identity
     verify_exact_object_type ?runner configuration executable repository
       ~identity ~kind
   in
-  
-    run_bytes ?runner configuration executable repository
-      ~operation:(("cat-file-") ^ kind) ~max_stdout_bytes:limit
-      [ "--no-replace-objects"; "cat-file"; kind; object_id_to_hex identity ]
+
+  run_bytes ?runner configuration executable repository
+    ~operation:("cat-file-" ^ kind) ~max_stdout_bytes:limit
+    [ "--no-replace-objects"; "cat-file"; kind; object_id_to_hex identity ]
 
 type tree_entry = { mode : string; name : string; object_id : object_id }
 
@@ -728,26 +729,25 @@ let valid_mapping_combination_v1 direction kind subject =
       ( Imported_transition _ | Imported_revision _ | Exported_release _
       | Exported_revision _ ) )
   | Export, Tree, _
-  | Export, Commit,
-    (Imported_snapshot _ | Imported_transition _ | Imported_revision _) ->
+  | ( Export,
+      Commit,
+      (Imported_snapshot _ | Imported_transition _ | Imported_revision _) ) ->
       false
 
 let valid_mapping_combination version direction kind subject =
   (Int.equal version 1 && valid_mapping_combination_v1 direction kind subject)
-  ||
-  (Int.equal version 2
-  &&
-  (valid_mapping_combination_v1 direction kind subject
-  ||
-  (direction = Import
-  && kind = Commit
-  &&
-  match subject with
-  | Imported_transition _ -> true
-  | Imported_snapshot _ | Imported_revision _ | Exported_release _
-  | Exported_revision _ -> false)))
+  || Int.equal version 2
+     && (valid_mapping_combination_v1 direction kind subject
+        || direction = Import && kind = Commit
+           &&
+           match subject with
+           | Imported_transition _ -> true
+           | Imported_snapshot _ | Imported_revision _ | Exported_release _
+           | Exported_revision _ ->
+               false)
 
-let mapping_identity_payload ~version ~direction ~git_object ~git_kind ~subject =
+let mapping_identity_payload ~version ~direction ~git_object ~git_kind ~subject
+    =
   let* git_object = mapping_object_id_value git_object in
   let* subject = mapping_subject_value subject in
   mapping_array
@@ -772,7 +772,8 @@ let derive_mapping_id ~version ~direction ~git_object ~git_kind ~subject =
   | Ok identity -> Ok identity
   | Error error -> Error (Mapping_error (Id.parse_error_to_string error))
 
-let create_mapping_with_version version ~direction ~git_object ~git_kind ~subject =
+let create_mapping_with_version version ~direction ~git_object ~git_kind
+    ~subject =
   if not (valid_mapping_combination version direction git_kind subject) then
     Error (Mapping_error "invalid mapping direction, Git kind, and subject")
   else
@@ -786,9 +787,9 @@ let create_mapping ~direction ~git_object ~git_kind ~subject =
 
 let mapping_payload mapping =
   let* identity =
-    mapping_identity_payload ~version:mapping.version ~direction:mapping.direction
-      ~git_object:mapping.git_object ~git_kind:mapping.git_kind
-      ~subject:mapping.subject
+    mapping_identity_payload ~version:mapping.version
+      ~direction:mapping.direction ~git_object:mapping.git_object
+      ~git_kind:mapping.git_kind ~subject:mapping.subject
   in
   let* id =
     mapping_identity_value "Git mapping ID"
@@ -924,7 +925,8 @@ let decode_mapping_subject value =
                 Id.Imported_transition_id.of_bytes transition
             in
             let* transition_object =
-              mapping_stored_id "imported transition object ID" transition_object
+              mapping_stored_id "imported transition object ID"
+                transition_object
             in
             Ok (Imported_transition { transition; transition_object })
         | _ ->
@@ -1195,8 +1197,7 @@ let transition_identity_payload ~commit ~tree ~snapshot ~parents =
   let* tree = transition_object_id_value tree in
   let* snapshot = transition_snapshot_value snapshot in
   let* parents = transition_parent_values parents in
-  transition_array
-    [ Encoding.integer 1L; commit; tree; snapshot; parents ]
+  transition_array [ Encoding.integer 1L; commit; tree; snapshot; parents ]
 
 let object_id_equal left right =
   left.format = right.format && String.equal left.raw right.raw
@@ -1213,14 +1214,15 @@ let valid_transition_parents commit parents =
           Error
             (Imported_transition_error "commit cannot name itself as a parent")
         else if List.exists (object_id_equal parent) seen then
-          Error
-            (Imported_transition_error "commit parent IDs must be unique")
+          Error (Imported_transition_error "commit parent IDs must be unique")
         else loop (parent :: seen) rest
   in
   loop [] parents
 
 let derive_transition_id ~commit ~tree ~snapshot ~parents =
-  let* identity = transition_identity_payload ~commit ~tree ~snapshot ~parents in
+  let* identity =
+    transition_identity_payload ~commit ~tree ~snapshot ~parents
+  in
   let raw =
     Hash.feed_string Hash.empty transition_domain |> fun context ->
     Hash.feed_string context (Encoding.encode identity)
@@ -1259,9 +1261,11 @@ let transition_payload transition =
   in
   match identity with
   | Encoding.Array [ _; commit; tree; snapshot; parents ] ->
-      transition_array [ Encoding.integer 1L; id; commit; tree; snapshot; parents ]
+      transition_array
+        [ Encoding.integer 1L; id; commit; tree; snapshot; parents ]
   | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _ | Encoding.Map _
-  | Encoding.Bool _ | Encoding.Null | Encoding.Array _ -> assert false
+  | Encoding.Bool _ | Encoding.Null | Encoding.Array _ ->
+      assert false
 
 let transition_envelope transition =
   let* payload = transition_payload transition in
@@ -1350,16 +1354,19 @@ let decode_transition_payload value =
         in
         let* commit = transition_object_id_of_value commit in
         let* tree = transition_object_id_of_value tree in
-        let* snapshot = transition_stored_id "imported transition snapshot ID" snapshot in
+        let* snapshot =
+          transition_stored_id "imported transition snapshot ID" snapshot
+        in
         let snapshot = Snapshot.Snapshot.of_stored_object_id snapshot in
         let* parents = decode_transition_parents commit parents in
         let* transition =
           create_imported_transition ~commit ~tree ~snapshot ~parents
         in
-      if
-        not
-          (Id.Imported_transition_id.equal supplied_id transition.transition_id)
-      then
+        if
+          not
+            (Id.Imported_transition_id.equal supplied_id
+               transition.transition_id)
+        then
           Error
             (Imported_transition_error
                "imported transition logical ID does not match its preimage")
@@ -1399,7 +1406,8 @@ let encode_transition_binding logical physical =
       in
       Ok (Encoding.encode encoded)
   | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _ | Encoding.Map _
-  | Encoding.Bool _ | Encoding.Null | Encoding.Array _ -> assert false
+  | Encoding.Bool _ | Encoding.Null | Encoding.Array _ ->
+      assert false
 
 let decode_transition_binding bytes =
   let* value =
@@ -1427,7 +1435,8 @@ let decode_transition_binding bytes =
           transition_stored_id "imported transition binding object ID" physical
         in
         let* supplied_checksum =
-          transition_bytes "imported transition binding checksum" supplied_checksum
+          transition_bytes "imported transition binding checksum"
+            supplied_checksum
         in
         if String.length supplied_checksum <> 32 then
           Error
@@ -1481,7 +1490,8 @@ let publish_transition store transition =
           else
             Error
               (Imported_transition_error
-                 "imported transition ID already has a different immutable binding"))
+                 "imported transition ID already has a different immutable \
+                  binding"))
   |> Result.map (fun () -> (transition, physical))
 
 let load_transition_binding store logical =
@@ -1493,7 +1503,9 @@ let load_transition_binding store logical =
   let* binding =
     match binding with
     | Some binding -> Ok binding
-    | None -> Error (Imported_transition_error "imported transition binding is absent")
+    | None ->
+        Error
+          (Imported_transition_error "imported transition binding is absent")
   in
   let* bound_id, physical = decode_transition_binding binding in
   if not (Id.Imported_transition_id.equal bound_id logical) then
@@ -1512,9 +1524,7 @@ let load_transition_binding store logical =
               (Envelope.object_type_code (Envelope.object_type envelope))))
     else
       let* transition = decode_transition_payload (Envelope.payload envelope) in
-      if
-        not
-          (Id.Imported_transition_id.equal transition.transition_id logical)
+      if not (Id.Imported_transition_id.equal transition.transition_id logical)
       then
         Error
           (Imported_transition_error
@@ -1760,8 +1770,9 @@ let commit_object_id identity label value =
       Invalid_commit
         {
           identity;
-          detail = Printf.sprintf "%s is not a full %s object ID" label
-                     (object_format_to_string identity.format);
+          detail =
+            Printf.sprintf "%s is not a full %s object ID" label
+              (object_format_to_string identity.format);
         })
 
 let parse_commit_headers ~max_parents identity raw =
@@ -1771,7 +1782,10 @@ let parse_commit_headers ~max_parents identity raw =
     | None ->
         Error
           (Invalid_commit
-             { identity; detail = "header block is not terminated by a blank line" })
+             {
+               identity;
+               detail = "header block is not terminated by a blank line";
+             })
   in
   let header = String.sub raw 0 header_end in
   let lines = String.split_on_char '\n' header in
@@ -1779,22 +1793,31 @@ let parse_commit_headers ~max_parents identity raw =
     | [] -> (
         match tree with
         | Some tree -> Ok (tree, List.rev parents)
-        | None -> Error (Invalid_commit { identity; detail = "tree header is absent" }))
-    | line :: rest ->
+        | None ->
+            Error
+              (Invalid_commit { identity; detail = "tree header is absent" }))
+    | line :: rest -> (
         if String.is_empty line then
-          Error (Invalid_commit { identity; detail = "empty commit header line" })
+          Error
+            (Invalid_commit { identity; detail = "empty commit header line" })
         else if Char.equal line.[0] ' ' then
           if previous_header then parse tree parents true rest
           else
             Error
               (Invalid_commit
-                 { identity; detail = "header continuation has no prior header" })
+                 {
+                   identity;
+                   detail = "header continuation has no prior header";
+                 })
         else
           match String.index_opt line ' ' with
           | None ->
               Error
                 (Invalid_commit
-                   { identity; detail = "commit header lacks a key/value separator" })
+                   {
+                     identity;
+                     detail = "commit header lacks a key/value separator";
+                   })
           | Some separator ->
               let key = String.sub line 0 separator in
               let value =
@@ -1802,13 +1825,18 @@ let parse_commit_headers ~max_parents identity raw =
                   (String.length line - separator - 1)
               in
               if String.is_empty key then
-                Error (Invalid_commit { identity; detail = "commit header key is empty" })
+                Error
+                  (Invalid_commit
+                     { identity; detail = "commit header key is empty" })
               else if String.equal key "tree" then
                 match tree with
                 | Some _ ->
                     Error
                       (Invalid_commit
-                         { identity; detail = "tree header occurs more than once" })
+                         {
+                           identity;
+                           detail = "tree header occurs more than once";
+                         })
                 | None ->
                     let* tree = commit_object_id identity "tree header" value in
                     parse (Some tree) parents true rest
@@ -1822,9 +1850,11 @@ let parse_commit_headers ~max_parents identity raw =
                          actual = max_parents + 1;
                        })
                 else
-                  let* parent = commit_object_id identity "parent header" value in
+                  let* parent =
+                    commit_object_id identity "parent header" value
+                  in
                   parse tree (parent :: parents) true rest
-              else parse tree parents true rest
+              else parse tree parents true rest)
   in
   let* tree, parents = parse None [] false lines in
   let rec valid_parents seen = function
@@ -1832,7 +1862,8 @@ let parse_commit_headers ~max_parents identity raw =
     | parent :: rest ->
         if object_id_equal parent identity then
           Error
-            (Invalid_commit { identity; detail = "commit names itself as a parent" })
+            (Invalid_commit
+               { identity; detail = "commit names itself as a parent" })
         else if List.exists (object_id_equal parent) seen then
           Error
             (Invalid_commit
@@ -1857,11 +1888,12 @@ let import_commit ?runner configuration ~store ~repository ~commit =
          { format = inspection.object_format; value = object_id_to_hex commit })
   else
     let* raw =
-      read_exact_object ?runner configuration executable repository ~identity:commit
-        ~kind:"commit" ~limit:configuration.max_commit_bytes
+      read_exact_object ?runner configuration executable repository
+        ~identity:commit ~kind:"commit" ~limit:configuration.max_commit_bytes
     in
     let* tree, parents =
-      parse_commit_headers ~max_parents:configuration.max_commit_parents commit raw
+      parse_commit_headers ~max_parents:configuration.max_commit_parents commit
+        raw
     in
     let rec verify_parents = function
       | [] -> Ok ()
@@ -1886,10 +1918,7 @@ let import_commit ?runner configuration ~store ~repository ~commit =
         ~git_kind:Commit
         ~subject:
           (Imported_transition
-             {
-               transition = transition.transition_id;
-               transition_object;
-             })
+             { transition = transition.transition_id; transition_object })
     in
     let* mapping = publish_mapping store mapping in
     Ok { imported_transition = transition; commit_mapping = mapping }
