@@ -1,0 +1,180 @@
+# ADR-030 — Opaque Git tag imports
+
+- Status: Proposed
+- Date: 2026-08-05
+- Deciders: maintainer
+- Supersedes: None
+- Superseded by: None
+
+## Context and problem statement
+
+M8-03 must import Git tag references without allowing Git labels to redefine
+Paengi releases, capsules, or histories. Git distinguishes a lightweight tag,
+which is a reference directly naming an object, from an annotated tag object
+with a target, a tagger, a message, and possibly a signature. [git-tag](https://git-scm.com/docs/git-tag)
+
+ADR-028 deliberately supports only tree and commit mapping kinds. ADR-029 adds
+opaque commit provenance but intentionally defers tags. A tag import must retain
+the exact reference name and target identity, preserve annotated tag bytes
+without parsing metadata into Paengi intent, and keep v1/v2 mappings unchanged.
+
+## Decision drivers
+
+- Preserve lightweight and annotated tag provenance without creating a Paengi
+  release or inferring authorial intent.
+- Retain annotated tagger/message/signature bytes exactly and boundedly.
+- Keep tag names and Git IDs type-distinct from Paengi identifiers and local
+  paths.
+- Reject malformed refs, malformed tag headers, unsupported target kinds, and
+  process/size failures before canonical visibility.
+- Preserve ADR-028 v1 and ADR-029 v2 payloads, identities, bindings, and
+  goldens byte-for-byte.
+
+## Considered options
+
+### Reuse Paengi release or capsule records
+
+- Makes a familiar user-visible label available immediately.
+- Fabricates Paengi release/capsule meaning from a Git label and violates
+  ADR-009.
+
+### Store only a Git mapping to the resolved target
+
+- Requires no new persistent record.
+- Loses the tag name and cannot preserve annotated wrapper bytes or distinguish
+  a lightweight ref from an annotated tag object.
+
+### Add opaque imported-tag records and Git-mapping v3
+
+- Preserves a tag reference, its exact object provenance, and annotated bytes
+  while remaining outside Paengi histories and releases.
+- Adds a typed record, binding, mapping kind/subject, v3 decoder, and retained
+  compatibility coverage.
+
+## Decision outcome
+
+Select the third option.
+
+Add Envelope type `Imported_tag = 25`, a type-distinct `Imported_tag_id`, and
+`Git_tag` object kind code `3` for mappings. An `Imported_tag_v1` records a
+byte-exact tag name, the object directly named by `refs/tags/<name>`, and one
+of these representations:
+
+```text
+imported-tag-v1 = [
+  1, imported-tag-id, tag-name-bytes, ref-object-id, tag-representation
+]
+
+lightweight-tag-v1 = [0, target-kind]
+annotated-tag-v1 = [1, tagged-object-id, target-kind, annotation-content-id]
+target-kind = 1 / 2 / 3                 ; commit / tree / blob
+```
+
+For a lightweight tag, `ref-object-id` is its target and `target-kind` is the
+exact verified Git object type. For an annotated tag, `ref-object-id` is the
+Git tag-object ID, `tagged-object-id` and `target-kind` come from exactly one
+raw `object` and `type` header, and `annotation-content-id` references the
+exact raw `cat-file tag` bytes through `Snapshot.Content`. The raw bytes retain
+the `tag` header, tagger, message, and any signature without claiming their
+meaning or validity. The raw `tag` header must occur exactly once and equal the
+imported tag-name bytes. Signed tags are retained but never signature-verified
+by this slice.
+
+Only direct commit, tree, and blob targets are supported. Nested annotated tags,
+lightweight refs to tag objects, tag deletion/rewrites, symbolic refs, and
+signature verification reject or remain future work. Git permits annotated and
+lightweight tags to name general objects; this restriction is deliberate. [git-tag](https://git-scm.com/docs/git-tag)
+
+The logical identity is:
+
+```text
+SHA-256("paengi:imported-tag:v1\\000" ||
+        encode([1, tag-name-bytes, ref-object-id, tag-representation]))
+```
+
+The record excludes itself and observation data. Its physical
+`Stored_object_id` remains ADR-020's Envelope identity. Its sole visibility
+point is a create-only, checksummed binding:
+
+```text
+.paengi/refs/imported-tags/<lowercase-imported-tag-id-hex>
+imported-tag-binding-v1 =
+  [1, imported-tag-id, imported-tag-object-id, checksum]
+checksum = SHA-256("paengi:imported-tag-binding:v1\\000" ||
+                 encode([1, imported-tag-id, imported-tag-object-id]))
+```
+
+Add `Git_mapping_v3` in Envelope type 23. It retains every v1/v2 subject and
+adds only:
+
+```text
+imported-tag-v1-subject = [5, imported-tag-id, imported-tag-object-id]
+import/tag -> imported-tag-v1-subject
+```
+
+`Git_mapping_id` v3 uses domain separator `"paengi:git-mapping:v3\\000"`; its
+versioned binding uses a v3 checksum domain. A v1 decoder accepts only v1
+records, a v2 decoder accepts only v2 records, and a v3 decoder accepts only
+the v3 forms. No pre-v3 record, identity, binding, or golden byte changes.
+
+M8-03 resolves exactly one `refs/tags/<name>` through bounded direct-argv Git
+plumbing, compares the returned ref name byte-for-byte, and verifies every
+referenced object type with `cat-file -t`. Annotated tag raw bytes are bounded
+by `max_tag_bytes` before `Snapshot.Content.store` and publication. The command
+is `paengi git import tag --repository <absolute-git-directory> --tag <name>`.
+
+## Consequences
+
+- Imported tags are inspectable opaque provenance, not releases, capsules,
+  branches, or mutable Paengi refs.
+- A tag target can be recorded before an associated tree or commit is imported.
+- Annotated metadata and signatures are retained as raw bytes but are not parsed
+  as canonical Paengi fields and carry no authenticity claim.
+- A tag ref can change in Git; each distinct observed imported-tag record stays
+  immutable and visible by its own ID rather than rewriting a prior record.
+- Importing raw annotation content, publishing the tag record, and publishing
+  the mapping are separate immutable visibility points; retry verifies/reuses
+  exact objects or reports a structured mismatch.
+
+## Model and invariant impact
+
+- `imported_tag_id`, Git IDs, content IDs, stored-object IDs, and Paengi history
+  IDs remain incompatible types.
+- A visible tag record has one valid raw tag name, one direct ref Git ID, and a
+  representation consistent with its exact object types.
+- Lightweight targets and annotated tagged targets are commit, tree, or blob
+  IDs in the same Git hash format as the direct ref object.
+- Annotated raw bytes load exactly from `annotation-content-id`; their header
+  target, type, and name agree with the record and requested ref.
+- No imported tag can advance, substitute for, or redefine a checkpoint,
+  capsule, revision, workspace, conflict, release, or release attestation.
+
+## Persistent-format and migration impact
+
+This is additive: Envelope type 25, `Imported_tag_v1`, one binding namespace,
+`Git_tag` mapping kind, and `Git_mapping_v3` are new. Existing Envelope types
+1–24, mapping v1/v2 records, bindings, and goldens remain byte-identical.
+Existing repositories have no imported-tag bindings. No object or ref is
+rewritten in place. Unknown mandatory features remain rejected.
+
+## Verification
+
+- Unit/golden tests for lightweight and annotated SHA-1 records/bindings and
+  mapping v3, plus retained v1/v2 goldens; add SHA-256 fixtures where the local
+  Git supports the object format.
+- Local fixtures for commit/tree/blob targets, raw message/signature-like bytes,
+  nested-name tags, reopen, and equal retry.
+- Generated bounded tag names/messages prove raw-byte retention and identity
+  determinism without treating metadata as intent.
+- Failure tests cover missing refs, ref-name mismatch, malformed/duplicate tag
+  headers, target/type disagreement, tag-size limits, unsupported nested tags,
+  corrupt content/record/binding, and interruption before every binding.
+- Run `make check` and `make property-test PROPERTY_TEST_SEED=17`. No timing
+  result or retained signature implies correctness or authenticity.
+
+## CLI and user impact
+
+`paengi git import tag --repository <absolute-git-directory> --tag <name>`
+reports imported-tag, mapping, direct Git object, and representation IDs. For
+annotated tags it reports that raw annotation bytes were retained but the tag is
+not a Paengi release and its signature was not verified.
