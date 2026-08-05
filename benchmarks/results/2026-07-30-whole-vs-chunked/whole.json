@@ -1,0 +1,67 @@
+{
+  "schema_version": 1,
+  "result_kind": "measured",
+  "contains_sensitive_data": false,
+  "benchmark_id": "whole-vs-chunked-storage-whole",
+  "recorded_at": "2026-07-30T01:58:21Z",
+  "provenance": {
+    "yeokcham_version": "09acff3-dirty",
+    "yeokcham_commit": "09acff346c0d82068d7401440eaf9e2cf104fd15",
+    "worktree_dirty": true,
+    "git_version": "git version 2.55.0",
+    "rust_version": "rustc 1.85.0 (4d91de4e4 2025-02-17)",
+    "harness_version": "1"
+  },
+  "environment": {
+    "os_name": "Darwin",
+    "os_version": "26.5.2",
+    "kernel_version": "25.5.0",
+    "architecture": "arm64",
+    "cpu_model": "Apple M3",
+    "logical_cpu_count": 8,
+    "memory_bytes": 17179869184,
+    "storage_device": "/dev/disk3s5",
+    "filesystem": "/",
+    "available_disk_bytes": 66540691456
+  },
+  "fixture": {
+    "id": "pinned-sha1-history",
+    "version": "1",
+    "workload": "w3_large_changing_binary",
+    "checksum_algorithm": "sha256",
+    "checksum": "78cddc575fad4d9194cbc3c234d5a10b9f23cc181e8fc4071094ab26e9a00fbf",
+    "parameters": {"revisions": 2, "localized_change_lines": 1}
+  },
+  "configuration": {
+    "cache_state": "cold",
+    "backend_kind": "local_filesystem",
+    "parameters": {"storage_policy": "whole", "chunked_blob_minimum_bytes": 67108864}
+  },
+  "network_conditions": {
+    "mode": "local",
+    "description": "local filesystem only",
+    "round_trip_latency_ms": 0,
+    "packet_loss_percent": 0,
+    "bandwidth_limit_bytes_per_second": null
+  },
+  "run": {
+    "started_at": "2026-07-30T01:58:22Z",
+    "ended_at": "2026-07-30T01:58:22Z",
+    "repetitions": 5,
+    "warmup_repetitions": 1,
+    "command": ["yeokcham", "init", "--from-git", "pinned-sha1-history-v1", "--chunked-blob-minimum", "67108864"]
+  },
+  "metrics": {
+    "median_wall_time_ns": 380000000,
+    "p95_wall_time_ns": 380000000,
+    "p99_wall_time_ns": 380000000,
+    "median_cpu_time_ns": 70000000,
+    "peak_rss_bytes": 6160384,
+    "io_bytes_read": null,
+    "io_bytes_written": null,
+    "network_request_count": 0,
+    "network_bytes_sent": 0,
+    "network_bytes_received": 0,
+    "final_storage_bytes": 372736
+  }
+}

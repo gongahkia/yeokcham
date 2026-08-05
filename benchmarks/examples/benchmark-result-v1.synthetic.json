@@ -1,0 +1,67 @@
+{
+  "schema_version": 1,
+  "result_kind": "synthetic_validation",
+  "contains_sensitive_data": false,
+  "benchmark_id": "schema-validation-smoke",
+  "recorded_at": "2000-01-01T00:00:00Z",
+  "provenance": {
+    "yeokcham_version": "0.0.0-schema",
+    "yeokcham_commit": "0000000000000000000000000000000000000000",
+    "worktree_dirty": false,
+    "git_version": "git version synthetic",
+    "rust_version": "rustc synthetic",
+    "harness_version": "1"
+  },
+  "environment": {
+    "os_name": "synthetic",
+    "os_version": "synthetic",
+    "kernel_version": "synthetic",
+    "architecture": "synthetic",
+    "cpu_model": "synthetic",
+    "logical_cpu_count": 1,
+    "memory_bytes": 1,
+    "storage_device": "synthetic",
+    "filesystem": "synthetic",
+    "available_disk_bytes": 0
+  },
+  "fixture": {
+    "id": "schema-smoke",
+    "version": "1",
+    "workload": "custom",
+    "checksum_algorithm": "sha256",
+    "checksum": "0000000000000000000000000000000000000000000000000000000000000000",
+    "parameters": {}
+  },
+  "configuration": {
+    "cache_state": "not_applicable",
+    "backend_kind": "synthetic",
+    "parameters": {}
+  },
+  "network_conditions": {
+    "mode": "local",
+    "description": "synthetic schema validation only",
+    "round_trip_latency_ms": 0,
+    "packet_loss_percent": 0,
+    "bandwidth_limit_bytes_per_second": null
+  },
+  "run": {
+    "started_at": "2000-01-01T00:00:00Z",
+    "ended_at": "2000-01-01T00:00:00Z",
+    "repetitions": 1,
+    "warmup_repetitions": 0,
+    "command": ["schema-validation-only"]
+  },
+  "metrics": {
+    "median_wall_time_ns": 0,
+    "p95_wall_time_ns": 0,
+    "p99_wall_time_ns": 0,
+    "median_cpu_time_ns": 0,
+    "peak_rss_bytes": 0,
+    "io_bytes_read": 0,
+    "io_bytes_written": 0,
+    "network_request_count": 0,
+    "network_bytes_sent": 0,
+    "network_bytes_received": 0,
+    "final_storage_bytes": 0
+  }
+}

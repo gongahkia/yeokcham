@@ -1,0 +1,4 @@
+5993e62c12dfaeb50db82428d907579ce166da1c	refs/heads/main
+56f16e8db29248b7f73e66f65329a05317aed0a7	refs/heads/release
+c76a1dbed3ebe6aba004308376818e617573c5e7	refs/tags/fixture-v2
+5993e62c12dfaeb50db82428d907579ce166da1c	refs/tags/fixture-v2^{}
