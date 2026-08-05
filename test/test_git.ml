@@ -278,6 +278,249 @@ let import_fixture run =
       in
       run repository store tree)
 
+let commit_fixture run =
+  with_directory "paengi-git-commit-" (fun root ->
+      let repository = Filename.concat root "repository" in
+      let store_root = Filename.concat root "store" in
+      Unix.mkdir repository 0o700;
+      Unix.mkdir store_root 0o700;
+      let git = git_path () in
+      direct_process git [ "init"; "-q"; repository ];
+      direct_process git [ "-C"; repository; "config"; "user.name"; "Paengi Test" ];
+      direct_process git [ "-C"; repository; "config"; "user.email"; "test@example.invalid" ];
+      write_file (Filename.concat repository "base") "base\n";
+      direct_process git [ "-C"; repository; "add"; "--all" ];
+      direct_process git [ "-C"; repository; "commit"; "-q"; "-m"; "base" ];
+      let base = direct_capture git [ "-C"; repository; "rev-parse"; "HEAD" ] in
+      let branch =
+        direct_capture git [ "-C"; repository; "branch"; "--show-current" ]
+      in
+      direct_process git [ "-C"; repository; "checkout"; "-q"; "-b"; "side"; base ];
+      write_file (Filename.concat repository "side") "side\n";
+      direct_process git [ "-C"; repository; "add"; "--all" ];
+      direct_process git [ "-C"; repository; "commit"; "-q"; "-m"; "side" ];
+      let side = direct_capture git [ "-C"; repository; "rev-parse"; "HEAD" ] in
+      direct_process git [ "-C"; repository; "checkout"; "-q"; branch ];
+      write_file (Filename.concat repository "main") "main\n";
+      direct_process git [ "-C"; repository; "add"; "--all" ];
+      direct_process git [ "-C"; repository; "commit"; "-q"; "-m"; "main" ];
+      let main = direct_capture git [ "-C"; repository; "rev-parse"; "HEAD" ] in
+      direct_process git [ "-C"; repository; "merge"; "--no-ff"; "-q"; "-m"; "merge"; "side" ];
+      let merge = direct_capture git [ "-C"; repository; "rev-parse"; "HEAD" ] in
+      let parents =
+        direct_capture git [ "-C"; repository; "show"; "-s"; "--format=%P"; merge ]
+        |> String.split_on_char ' '
+      in
+      Alcotest.(check (list string)) "merge parent order fixture" [ main; side ] parents;
+      let store = Store.init ~root:store_root |> require_ok Store.error_to_string in
+      let format =
+        Git.inspect Git.default_configuration ~repository
+        |> require_ok Git.error_to_string |> Git.inspection_object_format
+      in
+      let commit =
+        Git.object_id_of_hex format merge |> require_ok Git.error_to_string
+      in
+      run repository store format commit parents)
+
+let imports_merge_commit_and_ordered_parents () =
+  commit_fixture (fun repository store _format commit expected_parents ->
+      let imported =
+        Git.import_commit Git.default_configuration ~store ~repository ~commit
+        |> require_ok Git.error_to_string
+      in
+      let repeated =
+        Git.import_commit Git.default_configuration ~store ~repository ~commit
+        |> require_ok Git.error_to_string
+      in
+      Alcotest.(check bool)
+        "equal retry has one transition ID" true
+        (Id.Imported_transition_id.equal
+           (Git.imported_transition_id imported.Git.imported_transition)
+           (Git.imported_transition_id repeated.Git.imported_transition));
+      Alcotest.(check bool)
+        "equal retry has one mapping ID" true
+        (Id.Git_mapping_id.equal
+           (Git.mapping_id imported.Git.commit_mapping)
+           (Git.mapping_id repeated.Git.commit_mapping));
+      let reopened =
+        Store.open_repository ~root:(Store.root store)
+        |> require_ok Store.error_to_string
+      in
+      let transition =
+        Git.load_imported_transition reopened
+          (Git.imported_transition_id imported.Git.imported_transition)
+        |> require_ok Git.error_to_string
+      in
+      Alcotest.(check string)
+        "commit identity" (Git.object_id_to_hex commit)
+        (Git.imported_transition_commit transition |> Git.object_id_to_hex);
+      Alcotest.(check (list string))
+        "parent order"
+        expected_parents
+        (Git.imported_transition_parents transition
+        |> List.map Git.object_id_to_hex);
+      let mapping =
+        Git.load_mapping reopened (Git.mapping_id imported.Git.commit_mapping)
+        |> require_ok Git.error_to_string
+      in
+      (match Git.mapping_subject mapping with
+      | Git.Imported_transition { transition = identity; _ } ->
+          Alcotest.(check bool)
+            "mapping names transition" true
+            (Id.Imported_transition_id.equal identity
+               (Git.imported_transition_id transition))
+      | Git.Imported_snapshot _ | Git.Imported_revision _ | Git.Exported_release _
+      | Git.Exported_revision _ ->
+          Alcotest.fail "commit import did not map to an opaque transition");
+      let snapshot =
+        Snapshot.Snapshot.load reopened (Git.imported_transition_snapshot transition)
+        |> require_ok Snapshot.error_to_string
+      in
+      with_directory "paengi-git-commit-materialized-" (fun destination ->
+          Snapshot.Materialize.write ~destination reopened snapshot
+          |> require_ok Snapshot.Materialize.error_to_string;
+          Alcotest.(check string) "base bytes" "base\n"
+            (read_file (Filename.concat destination "base"));
+          Alcotest.(check string) "main bytes" "main\n"
+            (read_file (Filename.concat destination "main"));
+          Alcotest.(check string) "side bytes" "side\n"
+            (read_file (Filename.concat destination "side"))))
+
+let rejects_malformed_commit_data () =
+  with_directory "paengi-git-commit-errors-" (fun repository ->
+      let store_root = Filename.concat repository "store" in
+      Unix.mkdir store_root 0o700;
+      let store = Store.init ~root:store_root |> require_ok Store.error_to_string in
+      let commit =
+        Git.object_id_of_hex Git.Sha1 (String.make 40 '4')
+        |> require_ok Git.error_to_string
+      in
+      let malformed = "tree " ^ String.make 40 '0' in
+      recorded_commands := [];
+      queued_results :=
+        [
+          process_result ~stdout:(stream "false\n") ();
+          process_result ~stdout:(stream "sha1\n") ();
+          process_result ~stdout:(stream "commit\n") ();
+          process_result ~stdout:(stream malformed) ();
+        ];
+      Git.import_commit ~runner:(module Fake_runner) fake_configuration ~store
+        ~repository ~commit
+      |> Result.fold
+           ~ok:(fun _ -> Alcotest.fail "malformed Git commit was accepted")
+           ~error:(fun error ->
+             Alcotest.(check bool)
+               "structured malformed commit" true
+               (contains ~needle:"header block" (Git.error_to_string error)));
+      let tree = String.make 40 '5' in
+      let parent = String.make 40 '6' in
+      let missing_parent = "tree " ^ tree ^ "\nparent " ^ parent ^ "\n\n" in
+      recorded_commands := [];
+      queued_results :=
+        [
+          process_result ~stdout:(stream "false\n") ();
+          process_result ~stdout:(stream "sha1\n") ();
+          process_result ~stdout:(stream "commit\n") ();
+          process_result ~stdout:(stream missing_parent) ();
+          process_result ~status:Validation.Failed ~exit_code:(Some 128)
+            ~stderr:(stream "fatal: missing\n") ();
+        ];
+      Git.import_commit ~runner:(module Fake_runner) fake_configuration ~store
+        ~repository ~commit
+      |> Result.fold
+           ~ok:(fun _ -> Alcotest.fail "missing parent was accepted")
+           ~error:(fun error ->
+             Alcotest.(check bool)
+               "structured missing parent" true
+               (contains ~needle:"cat-file-type failed"
+                  (Git.error_to_string error)));
+      recorded_commands := [];
+      queued_results :=
+        [
+          process_result ~stdout:(stream "false\n") ();
+          process_result ~stdout:(stream "sha1\n") ();
+          process_result ~stdout:(stream "blob\n") ();
+        ];
+      Git.import_commit ~runner:(module Fake_runner) fake_configuration ~store
+        ~repository ~commit
+      |> Result.fold
+           ~ok:(fun _ -> Alcotest.fail "wrong-type commit was accepted")
+           ~error:(fun error ->
+             Alcotest.(check bool)
+               "structured wrong object type" true
+               (contains ~needle:"has type blob, expected commit"
+                  (Git.error_to_string error)));
+      let too_many =
+        "tree " ^ tree ^ "\nparent " ^ parent ^ "\nparent "
+        ^ String.make 40 '7' ^ "\n\n"
+      in
+      let limited =
+        Git.configuration_with ~max_commit_parents:1 fake_configuration
+      in
+      recorded_commands := [];
+      queued_results :=
+        [
+          process_result ~stdout:(stream "false\n") ();
+          process_result ~stdout:(stream "sha1\n") ();
+          process_result ~stdout:(stream "commit\n") ();
+          process_result ~stdout:(stream too_many) ();
+        ];
+      Git.import_commit ~runner:(module Fake_runner) limited ~store ~repository
+        ~commit
+      |> Result.fold
+           ~ok:(fun _ -> Alcotest.fail "parent limit was accepted")
+           ~error:(fun error ->
+             Alcotest.(check bool)
+               "structured parent bound" true
+               (contains ~needle:"commit parents limit exceeded"
+                  (Git.error_to_string error)));
+      let self_parent = "tree " ^ tree ^ "\nparent " ^ String.make 40 '4' ^ "\n\n" in
+      recorded_commands := [];
+      queued_results :=
+        [
+          process_result ~stdout:(stream "false\n") ();
+          process_result ~stdout:(stream "sha1\n") ();
+          process_result ~stdout:(stream "commit\n") ();
+          process_result ~stdout:(stream self_parent) ();
+        ];
+      Git.import_commit ~runner:(module Fake_runner) fake_configuration ~store
+        ~repository ~commit
+      |> Result.fold
+           ~ok:(fun _ -> Alcotest.fail "self-parent Git commit was accepted")
+           ~error:(fun error ->
+             Alcotest.(check bool)
+               "structured self parent" true
+               (contains ~needle:"names itself as a parent"
+                  (Git.error_to_string error))))
+
+let rejects_corrupt_transition_binding () =
+  commit_fixture (fun repository store _format commit _parents ->
+      let imported =
+        Git.import_commit Git.default_configuration ~store ~repository ~commit
+        |> require_ok Git.error_to_string
+      in
+      let transition = Git.imported_transition_id imported.Git.imported_transition in
+      let components =
+        [ "imported-transitions"; Id.Imported_transition_id.to_hex transition ]
+      in
+      let existing =
+        Store.Ref_file.read store ~components |> require_ok Store.error_to_string
+      in
+      (match existing with
+      | Some bytes ->
+          Store.Ref_file.compare_and_swap store ~components ~expected:(Some bytes)
+            ~replacement:"corrupt"
+          |> require_ok Store.error_to_string
+      | None -> Alcotest.fail "imported transition binding was not written");
+      Git.load_imported_transition store transition
+      |> Result.fold
+           ~ok:(fun _ -> Alcotest.fail "corrupt transition binding was accepted")
+           ~error:(fun error ->
+             Alcotest.(check bool)
+               "structured corrupt transition binding" true
+               (contains ~needle:"imported transition error"
+                  (Git.error_to_string error))))
+
 let imports_exact_tree_and_restarts_idempotently () =
   import_fixture (fun repository store tree ->
       let imported =
@@ -316,7 +559,7 @@ let imports_exact_tree_and_restarts_idempotently () =
           Alcotest.(check bool)
             "mapping points to imported snapshot" true
             (Snapshot.Snapshot.equal_id snapshot imported.Git.snapshot)
-      | Git.Imported_revision _ | Git.Exported_release _
+      | Git.Imported_transition _ | Git.Imported_revision _ | Git.Exported_release _
       | Git.Exported_revision _ ->
           Alcotest.fail "tree import did not map to a snapshot");
       let snapshot =
@@ -358,6 +601,7 @@ let rejects_unsafe_tree_entry_before_blob_read () =
         [
           process_result ~stdout:(stream "false\n") ();
           process_result ~stdout:(stream "sha1\n") ();
+          process_result ~stdout:(stream "tree\n") ();
           process_result ~stdout:(stream raw_tree) ();
         ];
       Git.import_tree
@@ -371,7 +615,7 @@ let rejects_unsafe_tree_entry_before_blob_read () =
                (contains ~needle:"unsafe entry name"
                   (Git.error_to_string error)));
       Alcotest.(check int)
-        "unsafe tree never reads a blob" 3
+        "unsafe tree never reads a blob" 4
         (List.length !recorded_commands))
 
 let rejects_unsupported_mode_and_missing_object () =
@@ -391,6 +635,7 @@ let rejects_unsupported_mode_and_missing_object () =
         [
           process_result ~stdout:(stream "false\n") ();
           process_result ~stdout:(stream "sha1\n") ();
+          process_result ~stdout:(stream "tree\n") ();
           process_result ~stdout:(stream unsupported) ();
         ];
       Git.import_tree
@@ -420,7 +665,7 @@ let rejects_unsupported_mode_and_missing_object () =
            ~error:(fun error ->
              Alcotest.(check bool)
                "structured missing object" true
-               (contains ~needle:"cat-file-tree failed"
+               (contains ~needle:"cat-file-type failed"
                   (Git.error_to_string error)));
       let symlink = "120000 link\000" ^ String.make 20 '\003' in
       recorded_commands := [];
@@ -428,7 +673,9 @@ let rejects_unsupported_mode_and_missing_object () =
         [
           process_result ~stdout:(stream "false\n") ();
           process_result ~stdout:(stream "sha1\n") ();
+          process_result ~stdout:(stream "tree\n") ();
           process_result ~stdout:(stream symlink) ();
+          process_result ~stdout:(stream "blob\n") ();
           process_result ~stdout:(stream "target\000") ();
         ];
       Git.import_tree
@@ -500,6 +747,12 @@ let () =
             actual_git_repository_is_inspected;
           Alcotest.test_case "exact tree import survives restart" `Quick
             imports_exact_tree_and_restarts_idempotently;
+          Alcotest.test_case "merge commit import preserves parent order" `Quick
+            imports_merge_commit_and_ordered_parents;
+          Alcotest.test_case "malformed commit data rejects" `Quick
+            rejects_malformed_commit_data;
+          Alcotest.test_case "corrupt transition binding rejects" `Quick
+            rejects_corrupt_transition_binding;
           Alcotest.test_case "unsafe tree entry rejects before blob read" `Quick
             rejects_unsafe_tree_entry_before_blob_read;
           Alcotest.test_case "unsupported mode and missing object reject" `Quick

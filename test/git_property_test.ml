@@ -148,6 +148,131 @@ let generated_files =
     QCheck2.Gen.(pair (string_size (int_range 0 4096)) bool)
     import_replays_generated_file
 
+let option_of_result = function Ok value -> Some value | Error _ -> None
+
+let import_replays_generated_commit (bytes, executable) =
+  match git_path () with
+  | None -> false
+  | Some git ->
+      with_directory "paengi-git-commit-property-" (fun root ->
+          let repository = Filename.concat root "repository" in
+          let store_root = Filename.concat root "store" in
+          let destination = Filename.concat root "destination" in
+          Unix.mkdir repository 0o700;
+          Unix.mkdir store_root 0o700;
+          Unix.mkdir destination 0o700;
+          if not (direct_process git [ "init"; "-q"; repository ]) then false
+          else if
+            not
+              (direct_process git
+                 [ "-C"; repository; "config"; "user.name"; "Paengi Test" ])
+          then false
+          else if
+            not
+              (direct_process git
+                 [
+                   "-C";
+                   repository;
+                   "config";
+                   "user.email";
+                   "test@example.invalid";
+                 ])
+          then false
+          else (
+            write_file (Filename.concat repository "base") "base\n";
+            if not (direct_process git [ "-C"; repository; "add"; "--all" ])
+            then false
+            else if
+              not
+                (direct_process git
+                   [ "-C"; repository; "commit"; "-q"; "-m"; "base" ])
+            then false
+            else (
+              write_file (Filename.concat repository "generated") bytes;
+              if executable then
+                Unix.chmod (Filename.concat repository "generated") 0o755;
+              if
+                not (direct_process git [ "-C"; repository; "add"; "--all" ])
+              then false
+              else if
+                not
+                  (direct_process git
+                     [ "-C"; repository; "commit"; "-q"; "-m"; "generated" ])
+              then false
+              else
+                match
+                  ( direct_capture git [ "-C"; repository; "rev-parse"; "HEAD" ],
+                    direct_capture git
+                      [ "-C"; repository; "rev-parse"; "HEAD^" ],
+                    Store.init ~root:store_root |> option_of_result )
+                with
+                | Some commit_hex, Some parent_hex, Some store -> (
+                    match
+                      Git.inspect Git.default_configuration ~repository
+                      |> option_of_result
+                    with
+                    | None -> false
+                    | Some inspection -> (
+                        match
+                          Git.object_id_of_hex
+                            (Git.inspection_object_format inspection)
+                            commit_hex
+                          |> option_of_result
+                        with
+                        | None -> false
+                        | Some commit -> (
+                            match
+                              ( Git.import_commit Git.default_configuration
+                                  ~store ~repository ~commit,
+                                Git.import_commit Git.default_configuration
+                                  ~store ~repository ~commit )
+                            with
+                            | Ok first, Ok second -> (
+                                let transition = first.Git.imported_transition in
+                                match
+                                  Snapshot.Snapshot.load store
+                                    (Git.imported_transition_snapshot transition)
+                                with
+                                | Error _ -> false
+                                | Ok snapshot -> (
+                                    match
+                                      Snapshot.Materialize.write ~destination
+                                        store snapshot
+                                    with
+                                    | Error _ -> false
+                                    | Ok () ->
+                                        String.equal bytes
+                                          (read_file
+                                             (Filename.concat destination
+                                                "generated"))
+                                        && Bool.equal executable
+                                             ((Unix.stat
+                                                 (Filename.concat destination
+                                                    "generated"))
+                                                .Unix.st_perm land 0o111
+                                             <> 0)
+                                        && List.map Git.object_id_to_hex
+                                             (Git.imported_transition_parents
+                                                transition)
+                                           = [ parent_hex ]
+                                        && Id.Imported_transition_id.equal
+                                             (Git.imported_transition_id
+                                                first.Git.imported_transition)
+                                             (Git.imported_transition_id
+                                                second.Git.imported_transition)
+                                        && Id.Git_mapping_id.equal
+                                             (Git.mapping_id first.Git.commit_mapping)
+                                             (Git.mapping_id second.Git.commit_mapping)
+                                    ))
+                            | Error _, _ | _, Error _ -> false)))
+                | _ -> false)))
+
+let generated_commits =
+  QCheck2.Test.make ~count:15
+    ~name:"Git commit import preserves generated snapshot and ordered parent"
+    QCheck2.Gen.(pair (string_size (int_range 0 4096)) bool)
+    import_replays_generated_commit
+
 let () =
   Alcotest.run "Git properties"
     [
@@ -156,5 +281,8 @@ let () =
           QCheck_alcotest.to_alcotest ~speed_level:`Quick
             ~rand:(state_for "generated-files")
             generated_files;
+          QCheck_alcotest.to_alcotest ~speed_level:`Quick
+            ~rand:(state_for "generated-commits")
+            generated_commits;
         ] );
     ]

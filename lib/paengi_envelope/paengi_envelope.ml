@@ -33,6 +33,7 @@ type object_type =
   | Workspace_attempt
   | Release_attestation
   | Git_mapping
+  | Imported_transition
 
 let object_type_code = function
   | Content -> 1
@@ -58,6 +59,7 @@ let object_type_code = function
   | Workspace_attempt -> 21
   | Release_attestation -> 22
   | Git_mapping -> 23
+  | Imported_transition -> 24
 
 let object_type_of_code = function
   | 1 -> Some Content
@@ -83,6 +85,7 @@ let object_type_of_code = function
   | 21 -> Some Workspace_attempt
   | 22 -> Some Release_attestation
   | 23 -> Some Git_mapping
+  | 24 -> Some Imported_transition
   | _ -> None
 
 type creation_error =

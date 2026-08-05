@@ -1429,7 +1429,7 @@ let git_object_id value =
     | _ -> None
   in
   match format with
-  | None -> fail Fun.id "Git tree ID must be 40 or 64 hexadecimal characters"
+  | None -> fail Fun.id "Git object ID must be 40 or 64 hexadecimal characters"
   | Some format -> (
       match Git.object_id_of_hex format value with
       | Ok identity -> identity
@@ -1454,6 +1454,28 @@ let git root arguments =
                    (Git.mapping_id result.Git.mapping))
                 (Git.object_id_to_hex
                    (Git.mapping_git_object result.Git.mapping))))
+  | [ "import"; "commit"; "--repository"; repository; "--commit"; commit ] -> (
+      match Store.open_repository ~root with
+      | Error error -> fail Store.error_to_string error
+      | Ok store -> (
+          match
+            Git.import_commit Git.default_configuration ~store ~repository
+              ~commit:(git_object_id commit)
+          with
+          | Error error -> fail Git.error_to_string error
+          | Ok result ->
+              let transition = result.Git.imported_transition in
+              Printf.printf "transition=%s snapshot=%s mapping=%s git-commit=%s parents=%s\n"
+                (Paengi_id.Imported_transition_id.to_hex
+                   (Git.imported_transition_id transition))
+                (Store.Stored_object_id.to_hex
+                   (Snapshot.Snapshot.stored_object_id
+                      (Git.imported_transition_snapshot transition)))
+                (Paengi_id.Git_mapping_id.to_hex
+                   (Git.mapping_id result.Git.commit_mapping))
+                (Git.object_id_to_hex (Git.imported_transition_commit transition))
+                (Git.imported_transition_parents transition
+                |> List.map Git.object_id_to_hex |> String.concat ",")))
   | _ -> exit 2
 
 let usage () =

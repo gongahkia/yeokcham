@@ -6,6 +6,10 @@ type mapping_direction = Import | Export
 
 type mapping_subject =
   | Imported_snapshot of Paengi_snapshot.Snapshot.id
+  | Imported_transition of {
+      transition : Paengi_id.Imported_transition_id.t;
+      transition_object : Paengi_store.Stored_object_id.t;
+    }
   | Imported_revision of {
       capsule : Paengi_id.Capsule_id.t;
       revision : Paengi_id.Capsule_revision_id.t;
@@ -24,10 +28,16 @@ type mapping_subject =
     }
 
 type mapping
+type imported_transition
 
 type import_result = {
   snapshot : Paengi_snapshot.Snapshot.id;
   mapping : mapping;
+}
+
+type commit_import_result = {
+  imported_transition : imported_transition;
+  commit_mapping : mapping;
 }
 
 type configuration = {
@@ -41,6 +51,8 @@ type configuration = {
   max_total_blob_bytes : int;
   max_tree_entries : int;
   max_depth : int;
+  max_commit_bytes : int;
+  max_commit_parents : int;
 }
 
 val default_configuration : configuration
@@ -56,6 +68,8 @@ val configuration_with :
   ?max_total_blob_bytes:int ->
   ?max_tree_entries:int ->
   ?max_depth:int ->
+  ?max_commit_bytes:int ->
+  ?max_commit_parents:int ->
   configuration ->
   configuration
 
@@ -75,11 +89,18 @@ type error =
   | Malformed_output of { operation : string; detail : string }
   | Invalid_object_id of { format : object_format; value : string }
   | Invalid_tree of { identity : object_id; detail : string }
+  | Invalid_commit of { identity : object_id; detail : string }
   | Unsupported_tree_mode of { identity : object_id; mode : string }
   | Invalid_symlink_target of { identity : object_id }
+  | Unexpected_object_type of {
+      identity : object_id;
+      expected : string;
+      actual : string;
+    }
   | Import_limit_exceeded of { resource : string; limit : int; actual : int }
   | Snapshot_error of Paengi_snapshot.error
   | Mapping_error of string
+  | Imported_transition_error of string
   | Store_error of Paengi_store.error
 
 val error_to_string : error -> string
@@ -105,11 +126,35 @@ val import_tree :
   tree:object_id ->
   (import_result, error) result
 
+val import_commit :
+  ?runner:(module Paengi_validation.Process_runner) ->
+  configuration ->
+  store:Paengi_store.repository ->
+  repository:string ->
+  commit:object_id ->
+  (commit_import_result, error) result
+
 val mapping_id : mapping -> Paengi_id.Git_mapping_id.t
 val mapping_direction : mapping -> mapping_direction
 val mapping_git_object : mapping -> object_id
 val mapping_kind : mapping -> object_kind
 val mapping_subject : mapping -> mapping_subject
+
+val imported_transition_id :
+  imported_transition -> Paengi_id.Imported_transition_id.t
+
+val imported_transition_commit : imported_transition -> object_id
+val imported_transition_tree : imported_transition -> object_id
+
+val imported_transition_snapshot :
+  imported_transition -> Paengi_snapshot.Snapshot.id
+
+val imported_transition_parents : imported_transition -> object_id list
+
+val load_imported_transition :
+  Paengi_store.repository ->
+  Paengi_id.Imported_transition_id.t ->
+  (imported_transition, error) result
 
 val load_mapping :
   Paengi_store.repository ->
