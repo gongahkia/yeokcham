@@ -186,8 +186,7 @@ let assert_snapshot_matches_directory ?(ignore_git_directory = false) store
     with Unix.Unix_error (error, _, _) ->
       Alcotest.fail
         (Printf.sprintf "%s missing at %s: %s" expected
-           (display_path components)
-           (Unix.error_message error))
+           (display_path components) (Unix.error_message error))
   in
   let rec check_tree components tree_id =
     let tree =
@@ -200,8 +199,7 @@ let assert_snapshot_matches_directory ?(ignore_git_directory = false) store
       Sys.readdir path |> Array.to_list
       |> List.filter (fun name ->
           not
-            (ignore_git_directory && components = []
-            && String.equal name ".git"))
+            (ignore_git_directory && components = [] && String.equal name ".git"))
       |> List.sort String.compare
     in
     Alcotest.(check (list string))
@@ -216,9 +214,10 @@ let assert_snapshot_matches_directory ?(ignore_git_directory = false) store
             let status = lstat components path "expected directory" in
             Alcotest.(check bool)
               ("directory kind at " ^ display_path components)
-              true (status.Unix.st_kind = Unix.S_DIR);
+              true
+              (status.Unix.st_kind = Unix.S_DIR);
             check_tree components child
-        | Snapshot.Tree.File { mode; content } ->
+        | Snapshot.Tree.File { mode; content } -> (
             let expected =
               Snapshot.Content.load store content
               |> require_ok Snapshot.error_to_string
@@ -233,21 +232,23 @@ let assert_snapshot_matches_directory ?(ignore_git_directory = false) store
             | Snapshot.Symlink ->
                 Alcotest.(check bool)
                   ("symlink kind at " ^ display_path components)
-                  true (status.Unix.st_kind = Unix.S_LNK);
+                  true
+                  (status.Unix.st_kind = Unix.S_LNK);
                 Alcotest.(check string)
                   ("symlink target at " ^ display_path components)
                   expected (Unix.readlink path)
             | Snapshot.Regular | Snapshot.Executable ->
                 Alcotest.(check bool)
                   ("file kind at " ^ display_path components)
-                  true (status.Unix.st_kind = Unix.S_REG);
+                  true
+                  (status.Unix.st_kind = Unix.S_REG);
                 Alcotest.(check string)
                   ("file bytes at " ^ display_path components)
                   expected (read_file path);
                 Alcotest.(check bool)
                   ("executable mode at " ^ display_path components)
                   (mode = Snapshot.Executable)
-                  (status.Unix.st_perm land 0o111 <> 0))
+                  (status.Unix.st_perm land 0o111 <> 0)))
       expected_entries
   in
   check_tree [] (Snapshot.Snapshot.root snapshot)
