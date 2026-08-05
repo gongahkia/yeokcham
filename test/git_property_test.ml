@@ -56,6 +56,21 @@ let direct_capture executable arguments =
   | Unix.WEXITED 0 -> Some (String.trim output)
   | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> None
 
+let direct_capture_with_environment executable environment arguments =
+  let reader, writer = Unix.pipe () in
+  let child =
+    Unix.create_process_env executable
+      (Array.of_list (executable :: arguments))
+      environment Unix.stdin writer Unix.stderr
+  in
+  Unix.close writer;
+  let channel = Unix.in_channel_of_descr reader in
+  let output = In_channel.input_all channel in
+  In_channel.close channel;
+  match Unix.waitpid [] child with
+  | _, Unix.WEXITED 0 -> Some (String.trim output)
+  | _, Unix.WEXITED _ | _, Unix.WSIGNALED _ | _, Unix.WSTOPPED _ -> None
+
 let git_path () =
   [ "/opt/homebrew/bin/git"; "/usr/local/bin/git"; "/usr/bin/git" ]
   |> List.find_opt (fun candidate ->
@@ -275,6 +290,147 @@ let generated_commits =
     QCheck2.Gen.(pair (string_size (int_range 0 4096)) bool)
     import_replays_generated_commit
 
+let generated_metadata_text =
+  QCheck2.Gen.(
+    list_size (int_range 1 96)
+      (oneof_list
+         [
+           'a';
+           'b';
+           'c';
+           'd';
+           'e';
+           'f';
+           'g';
+           'h';
+           'i';
+           'j';
+           '0';
+           '1';
+           '2';
+           '3';
+           '-';
+           '_';
+         ])
+    |> map (fun characters -> String.of_seq (List.to_seq characters)))
+
+let metadata_environment author committer =
+  let overridden =
+    [
+      "GIT_AUTHOR_NAME=";
+      "GIT_AUTHOR_EMAIL=";
+      "GIT_AUTHOR_DATE=";
+      "GIT_COMMITTER_NAME=";
+      "GIT_COMMITTER_EMAIL=";
+      "GIT_COMMITTER_DATE=";
+    ]
+  in
+  Unix.environment () |> Array.to_list
+  |> List.filter (fun value ->
+      not
+        (List.exists
+           (fun prefix -> String.starts_with ~prefix value)
+           overridden))
+  |> List.rev_append
+       [
+         "GIT_AUTHOR_NAME=" ^ author;
+         "GIT_AUTHOR_EMAIL=author@example.invalid";
+         "GIT_AUTHOR_DATE=1700000000 +0530";
+         "GIT_COMMITTER_NAME=" ^ committer;
+         "GIT_COMMITTER_EMAIL=committer@example.invalid";
+         "GIT_COMMITTER_DATE=1700000123 -0700";
+       ]
+  |> Array.of_list
+
+let import_replays_generated_metadata
+    (author_suffix, (committer_suffix, message)) =
+  match git_path () with
+  | None -> false
+  | Some git ->
+      with_directory "paengi-git-metadata-property-" (fun root ->
+          let repository = Filename.concat root "repository" in
+          let store_root = Filename.concat root "store" in
+          Unix.mkdir repository 0o700;
+          Unix.mkdir store_root 0o700;
+          let author = "Generated Author " ^ author_suffix in
+          let committer = "Generated Committer " ^ committer_suffix in
+          if not (direct_process git [ "init"; "-q"; repository ]) then false
+          else (
+            write_file (Filename.concat repository "metadata") "metadata\n";
+            if not (direct_process git [ "-C"; repository; "add"; "--all" ])
+            then false
+            else
+              match
+                ( direct_capture git [ "-C"; repository; "write-tree" ],
+                  Store.init ~root:store_root |> option_of_result )
+              with
+              | Some tree, Some store -> (
+                  match
+                    direct_capture_with_environment git
+                      (metadata_environment author committer)
+                      [ "-C"; repository; "commit-tree"; tree; "-m"; message ]
+                  with
+                  | None -> false
+                  | Some commit_hex -> (
+                      match
+                        Git.object_id_of_hex Git.Sha1 commit_hex
+                        |> option_of_result
+                      with
+                      | None -> false
+                      | Some commit -> (
+                          match
+                            ( Git.import_commit Git.default_configuration ~store
+                                ~repository ~commit,
+                              Git.import_commit Git.default_configuration ~store
+                                ~repository ~commit )
+                          with
+                          | Ok first, Ok second -> (
+                              let transition = first.Git.imported_transition in
+                              let expected_author =
+                                author
+                                ^ " <author@example.invalid> 1700000000 +0530"
+                              in
+                              let expected_committer =
+                                committer
+                                ^ " <committer@example.invalid> 1700000123 \
+                                   -0700"
+                              in
+                              match
+                                ( Git.imported_transition_author transition,
+                                  Git.imported_transition_committer transition,
+                                  Git.imported_transition_message transition )
+                              with
+                              | ( Some actual_author,
+                                  Some actual_committer,
+                                  Some content ) ->
+                                  let message_matches =
+                                    match
+                                      Snapshot.Content.load store content
+                                    with
+                                    | Error _ -> false
+                                    | Ok actual ->
+                                        String.equal (message ^ "\n") actual
+                                  in
+                                  String.equal expected_author actual_author
+                                  && String.equal expected_committer
+                                       actual_committer
+                                  && message_matches
+                                  && Id.Imported_transition_id.equal
+                                       (Git.imported_transition_id transition)
+                                       (Git.imported_transition_id
+                                          second.Git.imported_transition)
+                              | None, _, _ | _, None, _ | _, _, None -> false)
+                          | Error _, _ | _, Error _ -> false)))
+              | _ -> false))
+
+let generated_metadata =
+  QCheck2.Test.make ~count:10
+    ~name:"Git commit metadata retains generated bounded raw provenance"
+    QCheck2.Gen.(
+      pair generated_metadata_text
+        (pair generated_metadata_text generated_metadata_text))
+    import_replays_generated_metadata
+
 let generated_tag_name =
   QCheck2.Gen.(
     list_size (int_range 1 32)
@@ -398,6 +554,9 @@ let () =
           QCheck_alcotest.to_alcotest ~speed_level:`Quick
             ~rand:(state_for "generated-commits")
             generated_commits;
+          QCheck_alcotest.to_alcotest ~speed_level:`Quick
+            ~rand:(state_for "generated-metadata")
+            generated_metadata;
           QCheck_alcotest.to_alcotest ~speed_level:`Quick
             ~rand:(state_for "generated-tags")
             generated_tags;

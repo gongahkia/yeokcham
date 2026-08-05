@@ -1465,8 +1465,26 @@ let git root arguments =
           | Error error -> fail Git.error_to_string error
           | Ok result ->
               let transition = result.Git.imported_transition in
+              let author =
+                match Git.imported_transition_author transition with
+                | Some author -> Git.bytes_to_hex author
+                | None -> "none"
+              in
+              let committer =
+                match Git.imported_transition_committer transition with
+                | Some committer -> Git.bytes_to_hex committer
+                | None -> "none"
+              in
+              let message =
+                match Git.imported_transition_message transition with
+                | Some content ->
+                    Snapshot.Content.stored_object_id content
+                    |> Store.Stored_object_id.to_hex
+                | None -> "none"
+              in
               Printf.printf
-                "transition=%s snapshot=%s mapping=%s git-commit=%s parents=%s\n"
+                "transition=%s snapshot=%s mapping=%s git-commit=%s parents=%s \
+                 author-hex=%s committer-hex=%s message=%s\n"
                 (Paengi_id.Imported_transition_id.to_hex
                    (Git.imported_transition_id transition))
                 (Store.Stored_object_id.to_hex
@@ -1478,7 +1496,8 @@ let git root arguments =
                    (Git.imported_transition_commit transition))
                 (Git.imported_transition_parents transition
                 |> List.map Git.object_id_to_hex
-                |> String.concat ",")))
+                |> String.concat ",")
+                author committer message))
   | [ "import"; "tag"; "--repository"; repository; "--tag"; tag ] -> (
       match Store.open_repository ~root with
       | Error error -> fail Store.error_to_string error

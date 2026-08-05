@@ -142,16 +142,22 @@ record or ref is rewritten in place. Unknown transition versions reject.
 
 ## Verification
 
-- Unit/golden fixtures for deterministic v2 SHA-1 payload/binding and retained
-  v1 transition plus mapping v1–v3 goldens.
-- Local fixtures for differing author/committer time zones, multiline/empty
-  messages, invalid UTF-8 message bytes, reopen, and equal retry.
-- Generated bounded raw identity/message bytes prove byte retention, v2 identity
-  determinism, and snapshot identity independence from metadata.
-- Failure tests cover missing/duplicate/empty/NUL metadata headers, content and
-  transition/binding corruption, size limits, and interruption before bindings.
-- Run `make check` and `make property-test PROPERTY_TEST_SEED=17`; benchmark
-  separately. No retained identity/timestamp implies authenticity.
+- Completed: deterministic SHA-1 v2 transition/binding and commit-mapping-v3
+  goldens; retained v1 transition and mapping-v2 decoder fixtures; time-zone,
+  multiline/empty, invalid-UTF-8, reopen, retry, and snapshot-independence
+  fixtures; generated bounded identity/message retention; missing/duplicate/
+  empty/NUL header, corrupt binding, and unavailable message-content failures.
+- Pending separately: SHA-256 fixtures, explicit commit-size-limit and
+  interruption coverage, and benchmarks.
+- Run `make check` and `make property-test PROPERTY_TEST_SEED=17`. No retained
+  identity/timestamp implies authenticity.
+
+## Implementation evidence
+
+M8-04 imports `Imported_transition_v2` and publishes the existing v3 commit
+mapping. It exposes raw identity bytes only through hex-safe CLI output and the
+message through its immutable Content ID; it does not assign source metadata
+Paengi semantic meaning.
 
 ## CLI and user impact
 

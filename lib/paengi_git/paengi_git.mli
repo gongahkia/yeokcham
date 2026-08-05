@@ -123,6 +123,7 @@ val inspection_bare : inspection -> bool
 val inspection_object_format : inspection -> object_format
 val object_id_of_hex : object_format -> string -> (object_id, error) result
 val object_id_to_hex : object_id -> string
+val bytes_to_hex : string -> string
 val object_id_format : object_id -> object_format
 val object_id_raw : object_id -> string
 
@@ -172,6 +173,12 @@ val imported_transition_snapshot :
   imported_transition -> Paengi_snapshot.Snapshot.id
 
 val imported_transition_parents : imported_transition -> object_id list
+val imported_transition_author : imported_transition -> string option
+val imported_transition_committer : imported_transition -> string option
+
+val imported_transition_message :
+  imported_transition -> Paengi_snapshot.Content.id option
+
 val imported_tag_id : imported_tag -> Paengi_id.Imported_tag_id.t
 val imported_tag_name : imported_tag -> string
 val imported_tag_ref_object : imported_tag -> object_id

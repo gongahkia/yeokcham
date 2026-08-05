@@ -903,6 +903,13 @@ physical Envelope object; visibility is a create-only checksummed binding under
 maps `import/commit` to the transition ID plus its verified physical object ID.
 V1 payloads, identities, bindings, and goldens remain unchanged.
 
+ADR-031 adds `Imported_transition_v2` in the same Envelope type. It retains
+exact raw author and committer header values, including source timestamp/time-
+zone bytes, and a Content ID for exact message bytes. Its logical identity uses
+a v2 domain and includes those provenance fields; v1 transitions remain readable
+without synthetic metadata. Current commit imports publish v2 transitions and
+reuse the existing `import/commit -> imported-transition` Git-mapping v3 form.
+
 A mapping verifies exact typed Paengi links but is bridge evidence, not a
 repository identity or a source of Paengi-history semantics. Mapping refs never
 advance, rewrite, or hide scratch, capsule, workspace, conflict, or release
@@ -926,10 +933,16 @@ after the snapshot is stored. Gitlinks and every other mode fail closed.
 M8-02 reads only the requested raw commit header block. It requires exactly one
 tree header, preserves direct parent header order, verifies the named tree and
 each direct parent object type, and uses M8-01 to produce the snapshot. It
-publishes the resulting opaque imported transition and its v2 commit mapping.
-It rejects missing, duplicate, malformed, self, wrong-format, missing-object,
-or wrong-type links; it does not store metadata, raw commit bytes, refs, tags,
-or recursive graph topology.
+establishes the v1 transition/v2-mapping compatibility form. It rejects missing,
+duplicate, malformed, self, wrong-format, missing-object, or wrong-type links;
+it does not recursively import graph topology.
+
+M8-04 requires one nonempty raw `author` and `committer` header, rejects
+duplicates and NUL bytes, and retains their exact byte values plus the exact
+post-header message bytes in `Imported_transition_v2`. It does not parse or
+normalize author, email, timestamp, time zone, or message encoding. The message
+Content may be visible before transition/mapping bindings; retry remains
+explicit and immutable.
 
 M8-03 resolves exactly one requested `refs/tags/<name>` ref and records one
 `Imported_tag_v1` plus a Git-mapping v3. A direct commit/tree/blob ref is a

@@ -570,14 +570,23 @@ Tree/blob bytes, entries, and nesting are independently bounded.
 M8-02 reads one requested commit's raw header block after exact type
 verification. It requires one tree header, retains ordered direct parent IDs,
 verifies each declared parent is a commit object, imports the declared tree, and
-publishes ADR-029's immutable opaque transition plus a Git-mapping v2 binding.
-It rejects unsafe names, unsupported modes, malformed trees/headers, missing or
-wrong-type objects, duplicate/self parents, and process/output-limit failures
-before the applicable immutable binding. It neither stores author, committer,
-message, tag, ref, branch, remote, or raw commit bytes nor recursively imports
-the parent graph. Git remains the owner of Git-object, pack, delta, and
-compatibility parsing; Paengi has no general Git-format compatibility contract.
-The preflight result is never a repository identity or persistent metadata.
+establishes ADR-029's v1 opaque transition and Git-mapping v2 compatibility
+forms. It rejects unsafe names, unsupported modes, malformed trees/headers,
+missing or wrong-type objects, duplicate/self parents, and process/output-limit
+failures before the applicable immutable binding. It neither recursively imports
+the parent graph nor assigns metadata Paengi semantics. Git remains the owner of
+Git-object, pack, delta, and compatibility parsing; Paengi has no general
+Git-format compatibility contract. The preflight result is never a repository
+identity or persistent metadata.
+
+M8-04 imports a new `Imported_transition_v2` for each current commit import.
+It requires exactly one nonempty raw `author` and `committer` header, retains
+their byte values (including source timestamp/time-zone bytes), and stores the
+exact message bytes as `Snapshot.Content`. It rejects duplicate, empty,
+NUL-containing, or missing metadata headers before transition visibility, uses
+Git-mapping v3 without changing mapping payload shapes, and prints only
+hex-safe identity bytes plus the message Content ID. No author, timestamp,
+message, or encoding interpretation is a Paengi semantic field.
 
 M8-03 resolves one exact `refs/tags/<name>` ref with bounded direct-argv
 plumbing. A direct commit/tree/blob ref becomes an opaque lightweight imported
@@ -593,13 +602,14 @@ Import:
   it does not recursively import a graph.
 - Trees and blobs. M8-01 implements a single tree/blob snapshot import, reused
   by M8-02 for the commit's declared tree.
-- Author and timestamp metadata.
+- Author/committer/timestamp/message metadata. M8-04 retains exact source bytes
+  in an opaque imported transition; it does not normalize or interpret them.
 - Parent relationships. M8-02 stores direct ordered Git parent IDs only.
 - Tags. M8-03 imports one lightweight or annotated tag pointing directly to a
   commit, tree, or blob; nested tag targets fail closed.
 - Mapping records. M8-01 implements tree-to-snapshot mappings; M8-02 adds
   commit-to-opaque-transition mappings in v2; M8-03 adds tag-to-opaque-tag
-  mappings in v3.
+  mappings in v3; M8-04 reuses the v3 commit mapping form for transition v2.
 
 Imported commits initially become opaque transitions. Semantic inference is optional post-processing.
 

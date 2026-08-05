@@ -174,8 +174,9 @@ scratch, capsule, workspace, or release ref.
 `git import commit` has the same root and repository requirements. It accepts a
 full SHA-1 or SHA-256 commit ID, verifies the exact declared tree and direct
 parent object types, and prints an opaque transition, snapshot, mapping, commit,
-and ordered parent IDs. It does not import commit metadata, recursively import
-parents, or advance any Paengi history ref.
+ordered parent IDs, hex-safe author/committer bytes, and a message Content ID.
+It retains source metadata as opaque bytes, does not normalize identity or time,
+recursively import parents, or advance any Paengi history ref.
 
 `git import tag` has the same root and repository requirements. It resolves one
 bounded `refs/tags/<name>` ref, retains a lightweight target or raw annotated

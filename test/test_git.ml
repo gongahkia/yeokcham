@@ -29,6 +29,12 @@ let golden name =
   | Some path -> Golden.read_lower_hex_file path |> require_ok Fun.id
   | None -> Alcotest.fail ("missing golden fixture: " ^ name)
 
+let store_golden_envelope store name =
+  let envelope =
+    Envelope.decode (golden name) |> require_ok Envelope.decode_error_to_string
+  in
+  Store.put store envelope |> require_ok Store.error_to_string
+
 let stream ?(limit = max_int) value =
   {
     Validation.digest = String.make 32 '\000';
@@ -125,7 +131,8 @@ let direct_capture_with_environment executable environment arguments =
   | _, Unix.WSIGNALED signal | _, Unix.WSTOPPED signal ->
       Alcotest.fail (Printf.sprintf "Git fixture command received %d" signal)
 
-let golden_commit_environment =
+let commit_environment ~author_name ~author_email ~author_date ~committer_name
+    ~committer_email ~committer_date =
   let overridden =
     [
       "GIT_AUTHOR_NAME=";
@@ -144,14 +151,20 @@ let golden_commit_environment =
            overridden))
   |> List.rev_append
        [
-         "GIT_AUTHOR_NAME=Paengi Golden";
-         "GIT_AUTHOR_EMAIL=golden@example.invalid";
-         "GIT_AUTHOR_DATE=1700000000 +0000";
-         "GIT_COMMITTER_NAME=Paengi Golden";
-         "GIT_COMMITTER_EMAIL=golden@example.invalid";
-         "GIT_COMMITTER_DATE=1700000000 +0000";
+         "GIT_AUTHOR_NAME=" ^ author_name;
+         "GIT_AUTHOR_EMAIL=" ^ author_email;
+         "GIT_AUTHOR_DATE=" ^ author_date;
+         "GIT_COMMITTER_NAME=" ^ committer_name;
+         "GIT_COMMITTER_EMAIL=" ^ committer_email;
+         "GIT_COMMITTER_DATE=" ^ committer_date;
        ]
   |> Array.of_list
+
+let golden_commit_environment =
+  commit_environment ~author_name:"Paengi Golden"
+    ~author_email:"golden@example.invalid" ~author_date:"1700000000 +0000"
+    ~committer_name:"Paengi Golden" ~committer_email:"golden@example.invalid"
+    ~committer_date:"1700000000 +0000"
 
 let write_file path bytes =
   Out_channel.with_open_bin path (fun channel ->
@@ -542,6 +555,141 @@ let imports_merge_commit_and_ordered_parents () =
             "side bytes" "side\n"
             (read_file (Filename.concat destination "side"))))
 
+let imports_commit_metadata_as_exact_bytes () =
+  with_directory "paengi-git-commit-metadata-" (fun root ->
+      let repository = Filename.concat root "repository" in
+      let store_root = Filename.concat root "store" in
+      Unix.mkdir repository 0o700;
+      Unix.mkdir store_root 0o700;
+      let git = git_path () in
+      direct_process git [ "init"; "--object-format=sha1"; "-q"; repository ];
+      write_file (Filename.concat repository "metadata") "same snapshot\n";
+      direct_process git [ "-C"; repository; "add"; "--all" ];
+      let tree = direct_capture git [ "-C"; repository; "write-tree" ] in
+      let author = "Alice Metadata <alice@example.invalid> 1700000000 +0530" in
+      let committer = "Bob Metadata <bob@example.invalid> 1700000123 -0700" in
+      let message = "subject\n\nmultiline body\nsecond line\n" in
+      let commit =
+        direct_capture_with_environment git
+          (commit_environment ~author_name:"Alice Metadata"
+             ~author_email:"alice@example.invalid"
+             ~author_date:"1700000000 +0530" ~committer_name:"Bob Metadata"
+             ~committer_email:"bob@example.invalid"
+             ~committer_date:"1700000123 -0700")
+          [
+            "-C";
+            repository;
+            "commit-tree";
+            tree;
+            "-m";
+            "subject\n\nmultiline body\nsecond line";
+          ]
+      in
+      let raw_commit =
+        "tree " ^ tree ^ "\n"
+        ^ "author Raw Bytes <raw@example.invalid> 1700000456 +1245\n"
+        ^ "committer Raw Bytes <raw@example.invalid> 1700000789 -0330\n"
+        ^ "encoding ISO-8859-1\n\n\255raw-message\n"
+      in
+      let raw_path = Filename.concat root "raw-commit" in
+      write_file raw_path raw_commit;
+      let invalid_utf8_commit =
+        direct_capture git
+          [ "-C"; repository; "hash-object"; "-t"; "commit"; "-w"; raw_path ]
+      in
+      let empty_raw =
+        "tree " ^ tree ^ "\n"
+        ^ "author Empty <empty@example.invalid> 1700000000 +0000\n"
+        ^ "committer Empty <empty@example.invalid> 1700000000 +0000\n\n"
+      in
+      let empty_path = Filename.concat root "empty-commit" in
+      write_file empty_path empty_raw;
+      let empty_commit =
+        direct_capture git
+          [ "-C"; repository; "hash-object"; "-t"; "commit"; "-w"; empty_path ]
+      in
+      let store =
+        Store.init ~root:store_root |> require_ok Store.error_to_string
+      in
+      let import hex =
+        let identity =
+          Git.object_id_of_hex Git.Sha1 hex |> require_ok Git.error_to_string
+        in
+        Git.import_commit Git.default_configuration ~store ~repository
+          ~commit:identity
+        |> require_ok Git.error_to_string
+      in
+      let imported = import commit in
+      let repeated = import commit in
+      let invalid_utf8 = import invalid_utf8_commit in
+      let empty = import empty_commit in
+      let transition = imported.Git.imported_transition in
+      Alcotest.(check (option string))
+        "author bytes retain source timezone" (Some author)
+        (Git.imported_transition_author transition);
+      Alcotest.(check (option string))
+        "committer bytes retain source timezone" (Some committer)
+        (Git.imported_transition_committer transition);
+      let message_id =
+        match Git.imported_transition_message transition with
+        | Some message -> message
+        | None -> Alcotest.fail "metadata message is absent"
+      in
+      Alcotest.(check string)
+        "multiline message bytes" message
+        (Snapshot.Content.load store message_id
+        |> require_ok Snapshot.error_to_string);
+      Alcotest.(check bool)
+        "retry transition identity" true
+        (Id.Imported_transition_id.equal
+           (Git.imported_transition_id transition)
+           (Git.imported_transition_id repeated.Git.imported_transition));
+      Alcotest.(check bool)
+        "same tree has one snapshot identity" true
+        (Store.Stored_object_id.equal
+           (Snapshot.Snapshot.stored_object_id
+              (Git.imported_transition_snapshot transition))
+           (Snapshot.Snapshot.stored_object_id
+              (Git.imported_transition_snapshot
+                 invalid_utf8.Git.imported_transition)));
+      Alcotest.(check bool)
+        "metadata changes transition identity" false
+        (Id.Imported_transition_id.equal
+           (Git.imported_transition_id transition)
+           (Git.imported_transition_id invalid_utf8.Git.imported_transition));
+      let invalid_message =
+        match
+          Git.imported_transition_message invalid_utf8.Git.imported_transition
+        with
+        | Some message -> message
+        | None -> Alcotest.fail "invalid UTF-8 message is absent"
+      in
+      Alcotest.(check string)
+        "invalid UTF-8 message bytes" "\255raw-message\n"
+        (Snapshot.Content.load store invalid_message
+        |> require_ok Snapshot.error_to_string);
+      let empty_message =
+        match Git.imported_transition_message empty.Git.imported_transition with
+        | Some message -> message
+        | None -> Alcotest.fail "empty message is absent"
+      in
+      Alcotest.(check string)
+        "empty message bytes" ""
+        (Snapshot.Content.load store empty_message
+        |> require_ok Snapshot.error_to_string);
+      let reopened =
+        Store.open_repository ~root:store_root
+        |> require_ok Store.error_to_string
+      in
+      let reopened_transition =
+        Git.load_imported_transition reopened
+          (Git.imported_transition_id transition)
+        |> require_ok Git.error_to_string
+      in
+      Alcotest.(check (option string))
+        "reopened author bytes" (Some author)
+        (Git.imported_transition_author reopened_transition))
+
 let imports_lightweight_and_annotated_tags () =
   tag_fixture (fun repository store commit annotation_bytes ->
       let lightweight =
@@ -757,27 +905,114 @@ let imported_transition_persistence_goldens_are_stable () =
       let transition = imported.Git.imported_transition in
       let transition_id = Git.imported_transition_id transition in
       let mapping_id = Git.mapping_id imported.Git.commit_mapping in
+      let expected_identity =
+        "Paengi Golden <golden@example.invalid> 1700000000 +0000"
+      in
+      Alcotest.(check (option string))
+        "raw author identity" (Some expected_identity)
+        (Git.imported_transition_author transition);
+      Alcotest.(check (option string))
+        "raw committer identity" (Some expected_identity)
+        (Git.imported_transition_committer transition);
+      let message =
+        match Git.imported_transition_message transition with
+        | Some message -> message
+        | None -> Alcotest.fail "v2 transition did not retain a message"
+      in
+      Alcotest.(check string)
+        "exact message bytes" "golden\n"
+        (Snapshot.Content.load store message
+        |> require_ok Snapshot.error_to_string);
       Alcotest.(check string)
         "canonical imported transition envelope"
-        (golden "git-imported-transition-v1.peng.hex")
+        (golden "git-imported-transition-v2.peng.hex")
         (imported_transition_envelope_bytes store transition_id);
       Alcotest.(check string)
         "canonical imported transition binding"
-        (golden "git-imported-transition-v1.ref.hex")
+        (golden "git-imported-transition-v2.ref.hex")
         (binding_bytes store
            [
              "imported-transitions";
              Id.Imported_transition_id.to_hex transition_id;
            ]);
       Alcotest.(check string)
-        "canonical Git mapping v2 envelope"
-        (golden "git-mapping-v2.peng.hex")
+        "canonical Git commit mapping v3 envelope"
+        (golden "git-commit-mapping-v3.peng.hex")
         (mapping_envelope_bytes store mapping_id);
       Alcotest.(check string)
-        "canonical Git mapping v2 binding"
-        (golden "git-mapping-v2.ref.hex")
+        "canonical Git commit mapping v3 binding"
+        (golden "git-commit-mapping-v3.ref.hex")
         (binding_bytes store
-           [ "git-mappings"; Id.Git_mapping_id.to_hex mapping_id ]))
+           [ "git-mappings"; Id.Git_mapping_id.to_hex mapping_id ]);
+      let legacy_transition_binding =
+        golden "git-imported-transition-v1.ref.hex"
+      in
+      let legacy_transition =
+        match Encoding.decode legacy_transition_binding with
+        | Ok
+            (Encoding.Array [ _; Encoding.Bytes identity; Encoding.Bytes _; _ ])
+          ->
+            Id.Imported_transition_id.of_bytes identity
+            |> require_ok Id.parse_error_to_string
+        | Ok
+            ( Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _
+            | Encoding.Array _ | Encoding.Map _ | Encoding.Bool _
+            | Encoding.Null )
+        | Error _ ->
+            Alcotest.fail "legacy transition binding is malformed"
+      in
+      ignore (store_golden_envelope store "git-imported-transition-v1.peng.hex");
+      Store.Ref_file.compare_and_swap store
+        ~components:
+          [
+            "imported-transitions";
+            Id.Imported_transition_id.to_hex legacy_transition;
+          ]
+        ~expected:None ~replacement:legacy_transition_binding
+      |> require_ok Store.error_to_string;
+      let loaded_legacy =
+        Git.load_imported_transition store legacy_transition
+        |> require_ok Git.error_to_string
+      in
+      Alcotest.(check (option string))
+        "v1 transition has no synthetic author" None
+        (Git.imported_transition_author loaded_legacy);
+      Alcotest.(check bool)
+        "v1 transition has no synthetic message" true
+        (Option.is_none (Git.imported_transition_message loaded_legacy));
+      let legacy_mapping_binding = golden "git-mapping-v2.ref.hex" in
+      let legacy_mapping =
+        match Encoding.decode legacy_mapping_binding with
+        | Ok
+            (Encoding.Array [ _; Encoding.Bytes identity; Encoding.Bytes _; _ ])
+          ->
+            Id.Git_mapping_id.of_bytes identity
+            |> require_ok Id.parse_error_to_string
+        | Ok
+            ( Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _
+            | Encoding.Array _ | Encoding.Map _ | Encoding.Bool _
+            | Encoding.Null )
+        | Error _ ->
+            Alcotest.fail "legacy mapping binding is malformed"
+      in
+      ignore (store_golden_envelope store "git-mapping-v2.peng.hex");
+      Store.Ref_file.compare_and_swap store
+        ~components:[ "git-mappings"; Id.Git_mapping_id.to_hex legacy_mapping ]
+        ~expected:None ~replacement:legacy_mapping_binding
+      |> require_ok Store.error_to_string;
+      match
+        Git.load_mapping store legacy_mapping |> require_ok Git.error_to_string
+      with
+      | mapping ->
+          Alcotest.(check bool)
+            "legacy mapping retains transition subject" true
+            (match Git.mapping_subject mapping with
+            | Git.Imported_transition { transition; _ } ->
+                Id.Imported_transition_id.equal transition legacy_transition
+            | Git.Imported_snapshot _ | Git.Imported_tag _
+            | Git.Imported_revision _ | Git.Exported_release _
+            | Git.Exported_revision _ ->
+                false))
 
 let imported_tag_persistence_goldens_are_stable () =
   with_directory "paengi-git-tag-golden-" (fun root ->
@@ -867,7 +1102,13 @@ let rejects_malformed_commit_data () =
                (contains ~needle:"header block" (Git.error_to_string error)));
       let tree = String.make 40 '5' in
       let parent = String.make 40 '6' in
-      let missing_parent = "tree " ^ tree ^ "\nparent " ^ parent ^ "\n\n" in
+      let metadata_headers =
+        "author Test <test@example.invalid> 1700000000 +0000\n"
+        ^ "committer Test <test@example.invalid> 1700000000 +0000\n"
+      in
+      let missing_parent =
+        "tree " ^ tree ^ "\nparent " ^ parent ^ "\n" ^ metadata_headers ^ "\n"
+      in
       recorded_commands := [];
       queued_results :=
         [
@@ -908,7 +1149,7 @@ let rejects_malformed_commit_data () =
                   (Git.error_to_string error)));
       let too_many =
         "tree " ^ tree ^ "\nparent " ^ parent ^ "\nparent " ^ String.make 40 '7'
-        ^ "\n\n"
+        ^ "\n" ^ metadata_headers ^ "\n"
       in
       let limited =
         Git.configuration_with ~max_commit_parents:1 fake_configuration
@@ -932,7 +1173,8 @@ let rejects_malformed_commit_data () =
                (contains ~needle:"commit parents limit exceeded"
                   (Git.error_to_string error)));
       let self_parent =
-        "tree " ^ tree ^ "\nparent " ^ String.make 40 '4' ^ "\n\n"
+        "tree " ^ tree ^ "\nparent " ^ String.make 40 '4' ^ "\n"
+        ^ metadata_headers ^ "\n"
       in
       recorded_commands := [];
       queued_results :=
@@ -951,7 +1193,62 @@ let rejects_malformed_commit_data () =
              Alcotest.(check bool)
                "structured self parent" true
                (contains ~needle:"names itself as a parent"
-                  (Git.error_to_string error))))
+                  (Git.error_to_string error)));
+      let missing_author =
+        "tree " ^ tree
+        ^ "\ncommitter Test <test@example.invalid> 1700000000 +0000\n\n"
+      in
+      recorded_commands := [];
+      queued_results :=
+        [
+          process_result ~stdout:(stream "false\n") ();
+          process_result ~stdout:(stream "sha1\n") ();
+          process_result ~stdout:(stream "commit\n") ();
+          process_result ~stdout:(stream missing_author) ();
+        ];
+      Git.import_commit
+        ~runner:(module Fake_runner)
+        fake_configuration ~store ~repository ~commit
+      |> Result.fold
+           ~ok:(fun _ -> Alcotest.fail "missing author was accepted")
+           ~error:(fun error ->
+             Alcotest.(check bool)
+               "structured missing author" true
+               (contains ~needle:"author header is absent"
+                  (Git.error_to_string error)));
+      let rejects_metadata raw expected =
+        recorded_commands := [];
+        queued_results :=
+          [
+            process_result ~stdout:(stream "false\n") ();
+            process_result ~stdout:(stream "sha1\n") ();
+            process_result ~stdout:(stream "commit\n") ();
+            process_result ~stdout:(stream raw) ();
+          ];
+        Git.import_commit
+          ~runner:(module Fake_runner)
+          fake_configuration ~store ~repository ~commit
+        |> Result.fold
+             ~ok:(fun _ -> Alcotest.fail "malformed metadata was accepted")
+             ~error:(fun error ->
+               Alcotest.(check bool)
+                 ("structured metadata error: " ^ expected)
+                 true
+                 (contains ~needle:expected (Git.error_to_string error)))
+      in
+      rejects_metadata
+        ("tree " ^ tree ^ "\nauthor \n" ^ metadata_headers ^ "\n")
+        "author header is empty";
+      rejects_metadata
+        ("tree " ^ tree
+       ^ "\nauthor First <first@example.invalid> 1700000000 +0000\n"
+       ^ metadata_headers ^ "\n")
+        "author header occurs more than once";
+      rejects_metadata
+        ("tree " ^ tree
+       ^ "\nauthor NUL\000 <nul@example.invalid> 1700000000 +0000\n"
+       ^ metadata_headers ^ "\n")
+        "author header contains a NUL byte")
 
 let rejects_corrupt_transition_binding () =
   commit_fixture (fun repository store _format commit _parents ->
@@ -983,6 +1280,30 @@ let rejects_corrupt_transition_binding () =
              Alcotest.(check bool)
                "structured corrupt transition binding" true
                (contains ~needle:"imported transition error"
+                  (Git.error_to_string error))))
+
+let rejects_missing_transition_message_content () =
+  commit_fixture (fun repository store _format commit _parents ->
+      let imported =
+        Git.import_commit Git.default_configuration ~store ~repository ~commit
+        |> require_ok Git.error_to_string
+      in
+      let transition = imported.Git.imported_transition in
+      let message =
+        match Git.imported_transition_message transition with
+        | Some message -> message
+        | None -> Alcotest.fail "imported v2 transition message is absent"
+      in
+      Unix.unlink
+        (Store.object_path store (Snapshot.Content.stored_object_id message));
+      Git.load_imported_transition store (Git.imported_transition_id transition)
+      |> Result.fold
+           ~ok:(fun _ ->
+             Alcotest.fail "missing transition message was accepted")
+           ~error:(fun error ->
+             Alcotest.(check bool)
+               "structured missing transition message" true
+               (contains ~needle:"message is unavailable"
                   (Git.error_to_string error))))
 
 let imports_exact_tree_and_restarts_idempotently () =
@@ -1213,6 +1534,8 @@ let () =
             imports_exact_tree_and_restarts_idempotently;
           Alcotest.test_case "merge commit import preserves parent order" `Quick
             imports_merge_commit_and_ordered_parents;
+          Alcotest.test_case "commit metadata retains exact source bytes" `Quick
+            imports_commit_metadata_as_exact_bytes;
           Alcotest.test_case "lightweight and annotated tags retain provenance"
             `Quick imports_lightweight_and_annotated_tags;
           Alcotest.test_case "imported transition schemas have stable goldens"
@@ -1225,6 +1548,8 @@ let () =
             rejects_malformed_commit_data;
           Alcotest.test_case "corrupt transition binding rejects" `Quick
             rejects_corrupt_transition_binding;
+          Alcotest.test_case "missing transition message rejects" `Quick
+            rejects_missing_transition_message_content;
           Alcotest.test_case "corrupt tag binding rejects" `Quick
             rejects_corrupt_tag_binding;
           Alcotest.test_case "unsafe tree entry rejects before blob read" `Quick

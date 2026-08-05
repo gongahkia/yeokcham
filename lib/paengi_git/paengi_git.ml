@@ -30,6 +30,7 @@ let raw_to_hex raw =
   Bytes.unsafe_to_string encoded
 
 let object_id_to_hex identity = raw_to_hex identity.raw
+let bytes_to_hex = raw_to_hex
 
 type mapping_subject =
   | Imported_snapshot of Snapshot.Snapshot.id
@@ -69,12 +70,19 @@ type mapping = {
 
 type import_result = { snapshot : Snapshot.Snapshot.id; mapping : mapping }
 
+type transition_metadata = {
+  author : string;
+  committer : string;
+  message : Snapshot.Content.id;
+}
+
 type imported_transition = {
   transition_id : Id.Imported_transition_id.t;
   transition_commit : object_id;
   transition_tree : object_id;
   transition_snapshot : Snapshot.Snapshot.id;
   transition_parents : object_id list;
+  transition_metadata : transition_metadata option;
 }
 
 type commit_import_result = {
@@ -1232,7 +1240,8 @@ let publish_mapping store mapping =
                  "Git mapping ID already has a different immutable binding"))
   |> Result.map (fun () -> mapping)
 
-let transition_domain = "paengi:imported-transition:v1\000"
+let transition_v1_domain = "paengi:imported-transition:v1\000"
+let transition_v2_domain = "paengi:imported-transition:v2\000"
 let transition_binding_domain = "paengi:imported-transition-binding:v1\000"
 
 let transition_array values =
@@ -1275,6 +1284,43 @@ let transition_identity_payload ~commit ~tree ~snapshot ~parents =
   let* parents = transition_parent_values parents in
   transition_array [ Encoding.integer 1L; commit; tree; snapshot; parents ]
 
+let transition_metadata_value label value =
+  if String.is_empty value then
+    Error (Imported_transition_error (label ^ " must not be empty"))
+  else if String.contains value '\000' || String.contains value '\n' then
+    Error
+      (Imported_transition_error
+         (label ^ " must not contain NUL or newline bytes"))
+  else Ok (Encoding.bytes value)
+
+let transition_message_value message =
+  transition_identity_value "imported transition message content ID"
+    (Snapshot.Content.stored_object_id message
+    |> Store.Stored_object_id.to_raw_bytes)
+
+let transition_v2_identity_payload ~commit ~tree ~snapshot ~parents ~author
+    ~committer ~message =
+  let* commit = transition_object_id_value commit in
+  let* tree = transition_object_id_value tree in
+  let* snapshot = transition_snapshot_value snapshot in
+  let* parents = transition_parent_values parents in
+  let* author = transition_metadata_value "imported transition author" author in
+  let* committer =
+    transition_metadata_value "imported transition committer" committer
+  in
+  let* message = transition_message_value message in
+  transition_array
+    [
+      Encoding.integer 2L;
+      commit;
+      tree;
+      snapshot;
+      parents;
+      author;
+      committer;
+      message;
+    ]
+
 let object_id_equal left right =
   left.format = right.format && String.equal left.raw right.raw
 
@@ -1300,7 +1346,22 @@ let derive_transition_id ~commit ~tree ~snapshot ~parents =
     transition_identity_payload ~commit ~tree ~snapshot ~parents
   in
   let raw =
-    Hash.feed_string Hash.empty transition_domain |> fun context ->
+    Hash.feed_string Hash.empty transition_v1_domain |> fun context ->
+    Hash.feed_string context (Encoding.encode identity)
+    |> Hash.get |> Hash.to_raw_string
+  in
+  Id.Imported_transition_id.of_bytes raw
+  |> Result.map_error (fun error ->
+      Imported_transition_error (Id.parse_error_to_string error))
+
+let derive_transition_v2_id ~commit ~tree ~snapshot ~parents ~author ~committer
+    ~message =
+  let* identity =
+    transition_v2_identity_payload ~commit ~tree ~snapshot ~parents ~author
+      ~committer ~message
+  in
+  let raw =
+    Hash.feed_string Hash.empty transition_v2_domain |> fun context ->
     Hash.feed_string context (Encoding.encode identity)
     |> Hash.get |> Hash.to_raw_string
   in
@@ -1323,25 +1384,76 @@ let create_imported_transition ~commit ~tree ~snapshot ~parents =
         transition_tree = tree;
         transition_snapshot = snapshot;
         transition_parents = parents;
+        transition_metadata = None;
+      }
+
+let create_imported_transition_v2 ~commit ~tree ~snapshot ~parents ~author
+    ~committer ~message =
+  if tree.format <> commit.format then
+    Error
+      (Imported_transition_error
+         "tree Git object format differs from commit format")
+  else
+    let* () = valid_transition_parents commit parents in
+    let* id =
+      derive_transition_v2_id ~commit ~tree ~snapshot ~parents ~author
+        ~committer ~message
+    in
+    Ok
+      {
+        transition_id = id;
+        transition_commit = commit;
+        transition_tree = tree;
+        transition_snapshot = snapshot;
+        transition_parents = parents;
+        transition_metadata = Some { author; committer; message };
       }
 
 let transition_payload transition =
-  let* identity =
-    transition_identity_payload ~commit:transition.transition_commit
-      ~tree:transition.transition_tree ~snapshot:transition.transition_snapshot
-      ~parents:transition.transition_parents
-  in
   let* id =
     transition_identity_value "imported transition ID"
       (Id.Imported_transition_id.to_bytes transition.transition_id)
   in
-  match identity with
-  | Encoding.Array [ _; commit; tree; snapshot; parents ] ->
-      transition_array
-        [ Encoding.integer 1L; id; commit; tree; snapshot; parents ]
-  | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _ | Encoding.Map _
-  | Encoding.Bool _ | Encoding.Null | Encoding.Array _ ->
-      assert false
+  match transition.transition_metadata with
+  | None -> (
+      let* identity =
+        transition_identity_payload ~commit:transition.transition_commit
+          ~tree:transition.transition_tree
+          ~snapshot:transition.transition_snapshot
+          ~parents:transition.transition_parents
+      in
+      match identity with
+      | Encoding.Array [ _; commit; tree; snapshot; parents ] ->
+          transition_array
+            [ Encoding.integer 1L; id; commit; tree; snapshot; parents ]
+      | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _ | Encoding.Map _
+      | Encoding.Bool _ | Encoding.Null | Encoding.Array _ ->
+          assert false)
+  | Some { author; committer; message } -> (
+      let* identity =
+        transition_v2_identity_payload ~commit:transition.transition_commit
+          ~tree:transition.transition_tree
+          ~snapshot:transition.transition_snapshot
+          ~parents:transition.transition_parents ~author ~committer ~message
+      in
+      match identity with
+      | Encoding.Array
+          [ _; commit; tree; snapshot; parents; author; committer; message ] ->
+          transition_array
+            [
+              Encoding.integer 2L;
+              id;
+              commit;
+              tree;
+              snapshot;
+              parents;
+              author;
+              committer;
+              message;
+            ]
+      | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _ | Encoding.Map _
+      | Encoding.Bool _ | Encoding.Null | Encoding.Array _ ->
+          assert false)
 
 let transition_envelope transition =
   let* payload = transition_payload transition in
@@ -1413,48 +1525,102 @@ let decode_transition_parents commit value =
   let* () = valid_transition_parents commit parents in
   Ok parents
 
-let decode_transition_payload value =
-  let* fields = transition_fields "imported transition" 6 value in
+let decoded_transition_id value =
+  transition_raw_id "imported transition ID" Id.Imported_transition_id.of_bytes
+    value
+
+let decoded_transition_snapshot value =
+  let* snapshot =
+    transition_stored_id "imported transition snapshot ID" value
+  in
+  Ok (Snapshot.Snapshot.of_stored_object_id snapshot)
+
+let verify_decoded_transition value supplied_id transition =
+  if not (Id.Imported_transition_id.equal supplied_id transition.transition_id)
+  then
+    Error
+      (Imported_transition_error
+         "imported transition logical ID does not match its preimage")
+  else
+    let* canonical = transition_payload transition in
+    if String.equal (Encoding.encode canonical) (Encoding.encode value) then
+      Ok transition
+    else
+      Error
+        (Imported_transition_error "imported transition payload is noncanonical")
+
+let decode_transition_v1 value =
+  let* fields = transition_fields "imported transition v1" 6 value in
   match fields with
   | [ version; supplied_id; commit; tree; snapshot; parents ] ->
       let* version = transition_integer "imported transition version" version in
-      if not (Int64.equal version 1L) then
-        Error
-          (Imported_transition_error
-             (Printf.sprintf "unsupported imported transition version: %Ld"
-                version))
+      if not (Int64.equal version 1L) then assert false
       else
-        let* supplied_id =
-          transition_raw_id "imported transition ID"
-            Id.Imported_transition_id.of_bytes supplied_id
-        in
+        let* supplied_id = decoded_transition_id supplied_id in
         let* commit = transition_object_id_of_value commit in
         let* tree = transition_object_id_of_value tree in
-        let* snapshot =
-          transition_stored_id "imported transition snapshot ID" snapshot
-        in
-        let snapshot = Snapshot.Snapshot.of_stored_object_id snapshot in
+        let* snapshot = decoded_transition_snapshot snapshot in
         let* parents = decode_transition_parents commit parents in
         let* transition =
           create_imported_transition ~commit ~tree ~snapshot ~parents
         in
-        if
-          not
-            (Id.Imported_transition_id.equal supplied_id
-               transition.transition_id)
-        then
-          Error
-            (Imported_transition_error
-               "imported transition logical ID does not match its preimage")
-        else
-          let* canonical = transition_payload transition in
-          if String.equal (Encoding.encode canonical) (Encoding.encode value)
-          then Ok transition
-          else
-            Error
-              (Imported_transition_error
-                 "imported transition payload is noncanonical")
+        verify_decoded_transition value supplied_id transition
   | _ -> assert false
+
+let decode_transition_v2 value =
+  let* fields = transition_fields "imported transition v2" 9 value in
+  match fields with
+  | [
+   version;
+   supplied_id;
+   commit;
+   tree;
+   snapshot;
+   parents;
+   author;
+   committer;
+   message;
+  ] ->
+      let* version = transition_integer "imported transition version" version in
+      if not (Int64.equal version 2L) then assert false
+      else
+        let* supplied_id = decoded_transition_id supplied_id in
+        let* commit = transition_object_id_of_value commit in
+        let* tree = transition_object_id_of_value tree in
+        let* snapshot = decoded_transition_snapshot snapshot in
+        let* parents = decode_transition_parents commit parents in
+        let* author = transition_bytes "imported transition author" author in
+        let* committer =
+          transition_bytes "imported transition committer" committer
+        in
+        let* message =
+          transition_stored_id "imported transition message content ID" message
+        in
+        let message = Snapshot.Content.of_stored_object_id message in
+        let* transition =
+          create_imported_transition_v2 ~commit ~tree ~snapshot ~parents ~author
+            ~committer ~message
+        in
+        verify_decoded_transition value supplied_id transition
+  | _ -> assert false
+
+let decode_transition_payload value =
+  match value with
+  | Encoding.Array (version :: _) ->
+      let* version = transition_integer "imported transition version" version in
+      if Int64.equal version 1L then decode_transition_v1 value
+      else if Int64.equal version 2L then decode_transition_v2 value
+      else
+        Error
+          (Imported_transition_error
+             (Printf.sprintf "unsupported imported transition version: %Ld"
+                version))
+  | Encoding.Array []
+  | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _ | Encoding.Map _
+  | Encoding.Bool _ | Encoding.Null ->
+      Error
+        (Imported_transition_error
+           "imported transition must be a nonempty array")
 
 let transition_binding_body logical physical =
   let* logical =
@@ -1607,12 +1773,27 @@ let load_transition_binding store logical =
              "imported transition logical ID disagrees with binding")
       else Ok (transition, physical)
 
-let load_imported_transition store logical =
-  let* transition, _ = load_transition_binding store logical in
+let verify_transition_references store transition =
   let* _ =
     Snapshot.Snapshot.load store transition.transition_snapshot
     |> Result.map_error (fun error -> Snapshot_error error)
   in
+  let* () =
+    match transition.transition_metadata with
+    | None -> Ok ()
+    | Some { message; _ } ->
+        Snapshot.Content.load store message
+        |> Result.map_error (fun error ->
+            Imported_transition_error
+              ("imported transition message is unavailable: "
+              ^ Snapshot.error_to_string error))
+        |> Result.map (fun _ -> ())
+  in
+  Ok ()
+
+let load_imported_transition store logical =
+  let* transition, _ = load_transition_binding store logical in
+  let* () = verify_transition_references store transition in
   Ok transition
 
 let tag_domain = "paengi:imported-tag:v1\000"
@@ -2044,6 +2225,15 @@ let imported_transition_tree transition = transition.transition_tree
 let imported_transition_snapshot transition = transition.transition_snapshot
 let imported_transition_parents transition = transition.transition_parents
 
+let imported_transition_author transition =
+  Option.map (fun metadata -> metadata.author) transition.transition_metadata
+
+let imported_transition_committer transition =
+  Option.map (fun metadata -> metadata.committer) transition.transition_metadata
+
+let imported_transition_message transition =
+  Option.map (fun metadata -> metadata.message) transition.transition_metadata
+
 let verify_mapping_subject store = function
   | Imported_snapshot snapshot ->
       Snapshot.Snapshot.load store snapshot
@@ -2055,12 +2245,7 @@ let verify_mapping_subject store = function
         Error
           (Mapping_error
              "imported transition mapping object disagrees with its binding")
-      else
-        let* _ =
-          Snapshot.Snapshot.load store loaded.transition_snapshot
-          |> Result.map_error (fun error -> Snapshot_error error)
-        in
-        Ok ()
+      else verify_transition_references store loaded
   | Imported_tag { tag; tag_object } ->
       let* loaded, physical = load_tag_binding store tag in
       if not (Store.Stored_object_id.equal physical tag_object) then
@@ -2293,6 +2478,29 @@ let commit_object_id identity label value =
               (object_format_to_string identity.format);
         })
 
+type parsed_commit_metadata = {
+  parsed_author : string;
+  parsed_committer : string;
+  parsed_message : string;
+}
+
+type parsed_commit_headers = {
+  parsed_tree : object_id;
+  parsed_parents : object_id list;
+  parsed_metadata : parsed_commit_metadata;
+}
+
+type preceding_header = Metadata_header | Other_header
+
+let valid_parsed_identity identity label value =
+  if String.is_empty value then
+    Error (Invalid_commit { identity; detail = label ^ " header is empty" })
+  else if String.contains value '\000' then
+    Error
+      (Invalid_commit
+         { identity; detail = label ^ " header contains a NUL byte" })
+  else Ok value
+
 let parse_commit_headers ~max_parents identity raw =
   let* header_end =
     match commit_header_end raw with
@@ -2306,27 +2514,57 @@ let parse_commit_headers ~max_parents identity raw =
              })
   in
   let header = String.sub raw 0 header_end in
+  let message =
+    String.sub raw (header_end + 2) (String.length raw - header_end - 2)
+  in
   let lines = String.split_on_char '\n' header in
-  let rec parse tree parents previous_header = function
+  let rec parse tree parents author committer preceding = function
     | [] -> (
-        match tree with
-        | Some tree -> Ok (tree, List.rev parents)
-        | None ->
+        match (tree, author, committer) with
+        | Some tree, Some author, Some committer ->
+            Ok
+              {
+                parsed_tree = tree;
+                parsed_parents = List.rev parents;
+                parsed_metadata =
+                  {
+                    parsed_author = author;
+                    parsed_committer = committer;
+                    parsed_message = message;
+                  };
+              }
+        | None, _, _ ->
             Error
-              (Invalid_commit { identity; detail = "tree header is absent" }))
+              (Invalid_commit { identity; detail = "tree header is absent" })
+        | Some _, None, _ ->
+            Error
+              (Invalid_commit { identity; detail = "author header is absent" })
+        | Some _, Some _, None ->
+            Error
+              (Invalid_commit
+                 { identity; detail = "committer header is absent" }))
     | line :: rest -> (
         if String.is_empty line then
           Error
             (Invalid_commit { identity; detail = "empty commit header line" })
         else if Char.equal line.[0] ' ' then
-          if previous_header then parse tree parents true rest
-          else
-            Error
-              (Invalid_commit
-                 {
-                   identity;
-                   detail = "header continuation has no prior header";
-                 })
+          match preceding with
+          | None ->
+              Error
+                (Invalid_commit
+                   {
+                     identity;
+                     detail = "header continuation has no prior header";
+                   })
+          | Some Metadata_header ->
+              Error
+                (Invalid_commit
+                   {
+                     identity;
+                     detail = "author or committer header has a continuation";
+                   })
+          | Some Other_header ->
+              parse tree parents author committer (Some Other_header) rest
         else
           match String.index_opt line ' ' with
           | None ->
@@ -2357,7 +2595,8 @@ let parse_commit_headers ~max_parents identity raw =
                          })
                 | None ->
                     let* tree = commit_object_id identity "tree header" value in
-                    parse (Some tree) parents true rest
+                    parse (Some tree) parents author committer
+                      (Some Other_header) rest
               else if String.equal key "parent" then
                 if List.length parents = max_parents then
                   Error
@@ -2371,10 +2610,41 @@ let parse_commit_headers ~max_parents identity raw =
                   let* parent =
                     commit_object_id identity "parent header" value
                   in
-                  parse tree (parent :: parents) true rest
-              else parse tree parents true rest)
+                  parse tree (parent :: parents) author committer
+                    (Some Other_header) rest
+              else if String.equal key "author" then
+                match author with
+                | Some _ ->
+                    Error
+                      (Invalid_commit
+                         {
+                           identity;
+                           detail = "author header occurs more than once";
+                         })
+                | None ->
+                    let* author =
+                      valid_parsed_identity identity "author" value
+                    in
+                    parse tree parents (Some author) committer
+                      (Some Metadata_header) rest
+              else if String.equal key "committer" then
+                match committer with
+                | Some _ ->
+                    Error
+                      (Invalid_commit
+                         {
+                           identity;
+                           detail = "committer header occurs more than once";
+                         })
+                | None ->
+                    let* committer =
+                      valid_parsed_identity identity "committer" value
+                    in
+                    parse tree parents author (Some committer)
+                      (Some Metadata_header) rest
+              else parse tree parents author committer (Some Other_header) rest)
   in
-  let* tree, parents = parse None [] false lines in
+  let* parsed = parse None [] None None None lines in
   let rec valid_parents seen = function
     | [] -> Ok ()
     | parent :: rest ->
@@ -2388,8 +2658,8 @@ let parse_commit_headers ~max_parents identity raw =
                { identity; detail = "commit names a parent more than once" })
         else valid_parents (parent :: seen) rest
   in
-  let* () = valid_parents [] parents in
-  Ok (tree, parents)
+  let* () = valid_parents [] parsed.parsed_parents in
+  Ok parsed
 
 let import_commit ?runner configuration ~store ~repository ~commit =
   let* configuration = validate_configuration configuration in
@@ -2409,10 +2679,12 @@ let import_commit ?runner configuration ~store ~repository ~commit =
       read_exact_object ?runner configuration executable repository
         ~identity:commit ~kind:"commit" ~limit:configuration.max_commit_bytes
     in
-    let* tree, parents =
+    let* parsed =
       parse_commit_headers ~max_parents:configuration.max_commit_parents commit
         raw
     in
+    let tree = parsed.parsed_tree in
+    let parents = parsed.parsed_parents in
     let rec verify_parents = function
       | [] -> Ok ()
       | parent :: rest ->
@@ -2426,13 +2698,18 @@ let import_commit ?runner configuration ~store ~repository ~commit =
     let* tree_import =
       import_tree ?runner configuration ~store ~repository ~tree
     in
+    let* message =
+      Snapshot.Content.store store parsed.parsed_metadata.parsed_message
+      |> Result.map_error (fun error -> Snapshot_error error)
+    in
     let* transition =
-      create_imported_transition ~commit ~tree ~snapshot:tree_import.snapshot
-        ~parents
+      create_imported_transition_v2 ~commit ~tree ~snapshot:tree_import.snapshot
+        ~parents ~author:parsed.parsed_metadata.parsed_author
+        ~committer:parsed.parsed_metadata.parsed_committer ~message
     in
     let* transition, transition_object = publish_transition store transition in
     let* mapping =
-      create_mapping_with_version 2 ~direction:Import ~git_object:commit
+      create_mapping_with_version 3 ~direction:Import ~git_object:commit
         ~git_kind:Commit
         ~subject:
           (Imported_transition
