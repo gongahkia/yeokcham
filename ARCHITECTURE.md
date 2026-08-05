@@ -421,14 +421,18 @@ For TypeScript:
 - Detect simple declaration moves and renames.
 - Avoid pretending to know semantics across dynamic behaviour.
 
-For Rust M9-01:
+For Rust M9-01/M9-02:
 
 - Parse only bounded top-level items from a verified snapshot virtual map.
 - Return item kind, optional syntactic name, and UTF-8 byte spans.
+- Resolve only caller-selected virtual roots, standard `foo.rs`/`foo/mod.rs`
+  candidates, and inline modules from that map.
+- Return root-scoped transient module/item path facts or explicit incomplete
+  statuses; never infer a Cargo root.
 - Mark parser damage incomplete; preserve macro-heavy, invalid, and non-UTF-8
   files through textual fallback.
-- Defer module paths, move/rename inference, name/type resolution, macro
-  expansion, and semantic application.
+- Defer move/rename inference, name/type resolution, macro expansion,
+  attributed/conditional modules, and semantic application.
 
 ### Semantic application order
 
@@ -520,13 +524,15 @@ persistent format.
 ### Milestone 9 Rust syntax boundary
 
 `paengi_rust_adapter` is a separate ephemeral protocol-v1 boundary approved by
-ADR-035. It invokes a caller-configured, directly executed local helper built
+ADR-035 and ADR-036. It invokes a caller-configured, directly executed local helper built
 from `tools/paengi-rust-adapter/Cargo.lock`; analysis itself invokes neither
 Cargo nor `rustc`. The helper uses pinned `tree-sitter 0.26.11` and
 `tree-sitter-rust 0.24.2`, receives only sorted safe `.rs` source bytes
 materialised from a verified immutable snapshot, and returns bounded top-level
 syntax item evidence, parser diagnostics, UTF-8 byte spans, and explicit parser
-completeness.
+completeness. M9-02 additionally accepts caller-selected safe virtual roots and
+returns bounded root-scoped standard-module/item-path evidence or structured
+incompleteness.
 
 The boundary neither receives nor reads a live path, repository path, Cargo
 manifest/configuration, project dependency, host configuration, network,
@@ -534,8 +540,9 @@ macro expansion, or project code. It rejects invalid UTF-8 rather than changing
 canonical bytes. Helper absence, malformed protocol, timeout, crash, bound
 failure, invalid input, invalid snapshot, and parser damage return structured
 unavailable/incomplete outcomes. It does not create model state or provide
-module paths, resolved symbols/types, semantic identities, rewrites, or
-behavioural claims. `paengi_typescript_adapter`, the pure sidecar experiment,
+Cargo/workspace roots, module attributes/configuration, imports, resolved
+symbols/types, semantic identities, rewrites, or behavioural claims.
+`paengi_typescript_adapter`, the pure sidecar experiment,
 and `paengi_textual_patch` remain independent.
 
 ## 11. Conflict storage

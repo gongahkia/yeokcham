@@ -41,11 +41,27 @@ bytes; the helper rejects invalid UTF-8 rather than transforming it.
 
 Results contain only transient top-level Tree-sitter item kinds, optional
 syntactic names, UTF-8 byte spans, parser completeness, and parser diagnostics.
-They do not contain module paths, resolved names/types, macro expansion,
-semantic identity, rewrite authority, or a behavioural-equivalence claim.
+
+`resolve-module-paths` adds a sorted, unique, nonempty `rootFiles` selection.
+Each root must be an exact supplied source path; it names an anonymous virtual
+root, never a Cargo crate/package. The helper resolves only inline modules and
+an un-attributed external `mod name;` with the standard snapshot-map candidates
+`<child-base>/name.rs` and `<child-base>/name/mod.rs`.
+
+```json
+{"protocolVersion":1,"operation":"resolve-module-paths","snapshotId":"<64 lowercase hex chars>","rootFiles":["src/lib.rs"],"files":[{"path":"src/lib.rs","contentsHex":"..."}]}
+```
+
+Its transient result contains `moduleFacts`, `itemPathFacts`,
+`unreachableSources`, `parserComplete`, and `modulePathsComplete`. Attributes
+including `path`, `cfg`, `cfg_attr`, macro attributes, ambiguous/missing
+candidates, parser damage, macro definitions/invocations, `impl`, and `use` receive explicit
+statuses; no incomplete fact grants operation authority. It does not infer
+roots, resolve names/types/imports, expand macros, persist evidence, provide
+rewrite authority, or claim behavioural equivalence.
 
 Hard limits: 4 MiB request/response and source file, 64 KiB stderr, 5 s parent
-wall-clock, 4,096 files/items/diagnostics, 4 KiB safe paths and names. Invalid
+wall-clock, 4,096 files/items/diagnostics/module facts, depth 256, 4 KiB safe paths and names. Invalid
 input, bounds, unavailable executable, timeout, crash, malformed response, and
 parser damage are structured outcomes at the OCaml boundary; exact byte/text
 operations remain independent.

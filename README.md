@@ -75,14 +75,18 @@ participate in restore, materialisation, export, or verification. Helper
 absence, invalid output, timeout, or incomplete analysis returns
 semantic-unavailable and preserves the textual operation.
 
-M9-01 adds a separate optional Rust syntax sidecar. Its locally built,
+M9-01/M9-02 add a separate optional Rust syntax sidecar. Its locally built,
 lockfile-pinned Tree-sitter helper receives only verified-snapshot virtual
-`.rs` files and returns bounded top-level syntax evidence with UTF-8 byte spans.
-It does not read a live source tree, run Cargo/rustc/macro expansion, persist
-results, identify modules/symbols/types, or enable rewrites. Helper absence,
-invalid UTF-8, parser damage, or process failure remains a structured
-semantic-unavailable/incomplete result; byte/text operations stay available.
-See [ADR-035](docs/adr/035-optional-rust-parser-sidecar.md) and the
+`.rs` files and returns bounded syntax evidence with UTF-8 byte spans. M9-02
+can also resolve caller-selected virtual roots through standard `foo.rs` and
+`foo/mod.rs` candidates, with explicit incomplete results for ambiguity,
+attributes, damage, and unreachability. It does not read a live source tree,
+infer Cargo roots, run Cargo/rustc/macro expansion, persist results, resolve
+symbols/types, or enable rewrites. Helper absence, invalid UTF-8, parser
+damage, or process failure remains a structured semantic-unavailable/incomplete
+result; byte/text operations stay available. See
+[ADR-035](docs/adr/035-optional-rust-parser-sidecar.md),
+[ADR-036](docs/adr/036-snapshot-local-rust-module-paths.md), and the
 [helper contract](tools/paengi-rust-adapter/README.md).
 
 Milestone 8 imports one Git tree/commit/tag through bounded direct argv and

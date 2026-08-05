@@ -7,6 +7,8 @@ module Protocol = struct
   let maximum_source_files = 4_096
   let maximum_source_bytes = 4 * 1024 * 1024
   let maximum_item_records = 4_096
+  let maximum_module_facts = 4_096
+  let maximum_module_depth = 256
 
   type source_file = { path : string; contents : string }
   type span = { start_byte : int; end_byte : int }
@@ -31,6 +33,43 @@ module Protocol = struct
     parser_diagnostics : diagnostic list;
   }
 
+  type module_fact = {
+    root_file : string;
+    parent_source_path : string option;
+    source_path : string option;
+    module_path : string list;
+    declaration_span : span;
+    module_kind : string;
+    status : string;
+  }
+
+  type item_path_fact = {
+    root_file : string;
+    source_path : string;
+    module_path : string list;
+    item_path_segments : string list option;
+    item_kind : string;
+    item_span : span;
+    name_span : span option;
+    syntactic_name : string option;
+    parser_complete : bool;
+    status : string;
+  }
+
+  type unreachable_source = { source_path : string; status : string }
+
+  type module_path_analysis = {
+    snapshot_id : string;
+    adapter_version : string;
+    tree_sitter_version : string;
+    rust_grammar_version : string;
+    parser_complete : bool;
+    module_paths_complete : bool;
+    module_facts : module_fact list;
+    item_path_facts : item_path_fact list;
+    unreachable_sources : unreachable_source list;
+  }
+
   let make_source_file ~path ~contents = { path; contents }
   let make_span ~start_byte ~end_byte = { start_byte; end_byte }
 
@@ -38,6 +77,37 @@ module Protocol = struct
     { path; item_kind; item_span; name_span; syntactic_name }
 
   let make_diagnostic ~path ~code ~span : diagnostic = { path; code; span }
+
+  let make_module_fact ~root_file ~parent_source_path ~source_path ~module_path
+      ~declaration_span ~module_kind ~status : module_fact =
+    {
+      root_file;
+      parent_source_path;
+      source_path;
+      module_path;
+      declaration_span;
+      module_kind;
+      status;
+    }
+
+  let make_item_path_fact ~root_file ~source_path ~module_path
+      ~item_path_segments ~item_kind ~item_span ~name_span ~syntactic_name
+      ~parser_complete ~status : item_path_fact =
+    {
+      root_file;
+      source_path;
+      module_path;
+      item_path_segments;
+      item_kind;
+      item_span;
+      name_span;
+      syntactic_name;
+      parser_complete;
+      status;
+    }
+
+  let make_unreachable_source ~source_path ~status : unreachable_source =
+    { source_path; status }
 
   let make_analysis ~snapshot_id ~adapter_version ~tree_sitter_version
       ~rust_grammar_version ~parser_complete ~items ~parser_diagnostics :
@@ -50,6 +120,22 @@ module Protocol = struct
       parser_complete;
       items;
       parser_diagnostics;
+    }
+
+  let make_module_path_analysis ~snapshot_id ~adapter_version
+      ~tree_sitter_version ~rust_grammar_version ~parser_complete
+      ~module_paths_complete ~module_facts ~item_path_facts ~unreachable_sources
+      : module_path_analysis =
+    {
+      snapshot_id;
+      adapter_version;
+      tree_sitter_version;
+      rust_grammar_version;
+      parser_complete;
+      module_paths_complete;
+      module_facts;
+      item_path_facts;
+      unreachable_sources;
     }
 
   let source_file_path (source_file : source_file) = source_file.path
@@ -76,6 +162,53 @@ module Protocol = struct
 
   let analysis_parser_diagnostics (analysis : analysis) =
     analysis.parser_diagnostics
+
+  let module_fact_root_file (fact : module_fact) = fact.root_file
+
+  let module_fact_parent_source_path (fact : module_fact) =
+    fact.parent_source_path
+
+  let module_fact_source_path (fact : module_fact) = fact.source_path
+  let module_fact_module_path (fact : module_fact) = fact.module_path
+  let module_fact_declaration_span (fact : module_fact) = fact.declaration_span
+  let module_fact_kind (fact : module_fact) = fact.module_kind
+  let module_fact_status (fact : module_fact) = fact.status
+  let item_path_fact_root_file (fact : item_path_fact) = fact.root_file
+  let item_path_fact_source_path (fact : item_path_fact) = fact.source_path
+  let item_path_fact_module_path (fact : item_path_fact) = fact.module_path
+  let item_path_fact_segments (fact : item_path_fact) = fact.item_path_segments
+  let item_path_fact_kind (fact : item_path_fact) = fact.item_kind
+  let item_path_fact_span (fact : item_path_fact) = fact.item_span
+  let item_path_fact_name_span (fact : item_path_fact) = fact.name_span
+
+  let item_path_fact_syntactic_name (fact : item_path_fact) =
+    fact.syntactic_name
+
+  let item_path_fact_parser_complete (fact : item_path_fact) =
+    fact.parser_complete
+
+  let item_path_fact_status (fact : item_path_fact) = fact.status
+  let unreachable_source_path (source : unreachable_source) = source.source_path
+  let unreachable_source_status (source : unreachable_source) = source.status
+
+  let module_path_analysis_snapshot_id (analysis : module_path_analysis) =
+    analysis.snapshot_id
+
+  let module_path_analysis_parser_complete (analysis : module_path_analysis) =
+    analysis.parser_complete
+
+  let module_path_analysis_complete (analysis : module_path_analysis) =
+    analysis.module_paths_complete
+
+  let module_path_analysis_module_facts (analysis : module_path_analysis) =
+    analysis.module_facts
+
+  let module_path_analysis_item_path_facts (analysis : module_path_analysis) =
+    analysis.item_path_facts
+
+  let module_path_analysis_unreachable_sources (analysis : module_path_analysis)
+      =
+    analysis.unreachable_sources
 
   let span_start_byte (span : span) = span.start_byte
   let span_end_byte (span : span) = span.end_byte
@@ -414,6 +547,32 @@ let request_for_analysis ~snapshot_id files =
   request_json ~operation:"analyze"
     [ ("snapshotId", Json.quote snapshot_id); ("files", "[" ^ files ^ "]") ]
 
+let request_for_module_paths ~snapshot_id ~root_files files =
+  let roots =
+    root_files |> List.map Json.quote |> String.concat "," |> fun roots ->
+    "[" ^ roots ^ "]"
+  in
+  let files =
+    files
+    |> List.map (fun (file : Protocol.source_file) ->
+        "{"
+        ^ String.concat ","
+            [
+              Json.quote "path" ^ ":"
+              ^ Json.quote (Protocol.source_file_path file);
+              Json.quote "contentsHex" ^ ":"
+              ^ Json.quote (hex (Protocol.source_file_contents file));
+            ]
+        ^ "}")
+    |> String.concat ","
+  in
+  request_json ~operation:"resolve-module-paths"
+    [
+      ("snapshotId", Json.quote snapshot_id);
+      ("rootFiles", roots);
+      ("files", "[" ^ files ^ "]");
+    ]
+
 let executable path =
   try
     Unix.access path [ Unix.X_OK ];
@@ -667,6 +826,116 @@ let decode_analysis value =
     (Protocol.make_analysis ~snapshot_id ~adapter_version ~tree_sitter_version
        ~rust_grammar_version ~parser_complete ~items ~parser_diagnostics)
 
+let nullable_string_field name value =
+  let* field = object_field name value in
+  match field with
+  | Json.Null -> Ok None
+  | Json.String string -> Ok (Some string)
+  | Json.Bool _ | Json.Number _ | Json.Array _ | Json.Object _ ->
+      Error ("response field " ^ name ^ " is not a nullable string")
+
+let string_list_field name value =
+  list_field name
+    (fun item ->
+      match Json.string item with
+      | Some string -> Ok string
+      | None -> Error ("response field " ^ name ^ " contains a non-string"))
+    value
+
+let nullable_string_list_field name value =
+  let* field = object_field name value in
+  match field with
+  | Json.Null -> Ok None
+  | Json.Array values ->
+      List.fold_right
+        (fun value accumulated ->
+          let* string =
+            match Json.string value with
+            | Some string -> Ok string
+            | None -> Error ("response field " ^ name ^ " contains a non-string")
+          in
+          let* values = accumulated in
+          Ok (string :: values))
+        values (Ok [])
+      |> Result.map Option.some
+  | Json.Bool _ | Json.Number _ | Json.String _ | Json.Object _ ->
+      Error ("response field " ^ name ^ " is not a nullable array")
+
+let nullable_span_field start_name end_name value =
+  let* start_field = object_field start_name value in
+  let* end_field = object_field end_name value in
+  match (start_field, end_field) with
+  | Json.Null, Json.Null -> Ok None
+  | ( ( Json.Bool _ | Json.Number _ | Json.String _ | Json.Array _
+      | Json.Object _ ),
+      ( Json.Bool _ | Json.Number _ | Json.String _ | Json.Array _
+      | Json.Object _ ) ) ->
+      decode_span start_name end_name value |> Result.map Option.some
+  | ( Json.Null,
+      ( Json.Bool _ | Json.Number _ | Json.String _ | Json.Array _
+      | Json.Object _ ) )
+  | ( ( Json.Bool _ | Json.Number _ | Json.String _ | Json.Array _
+      | Json.Object _ ),
+      Json.Null ) ->
+      Error ("incomplete nullable span " ^ start_name)
+
+let decode_module_fact value =
+  let* root_file = string_field "rootFile" value in
+  let* parent_source_path = nullable_string_field "parentSourcePath" value in
+  let* source_path = nullable_string_field "sourcePath" value in
+  let* module_path = string_list_field "modulePath" value in
+  let* declaration_span =
+    decode_span "declarationStartByte" "declarationEndByte" value
+  in
+  let* module_kind = string_field "moduleKind" value in
+  let* status = string_field "status" value in
+  Ok
+    (Protocol.make_module_fact ~root_file ~parent_source_path ~source_path
+       ~module_path ~declaration_span ~module_kind ~status)
+
+let decode_item_path_fact value =
+  let* root_file = string_field "rootFile" value in
+  let* source_path = string_field "sourcePath" value in
+  let* module_path = string_list_field "modulePath" value in
+  let* item_path_segments =
+    nullable_string_list_field "itemPathSegments" value
+  in
+  let* item_kind = string_field "itemKind" value in
+  let* item_span = decode_span "startByte" "endByte" value in
+  let* name_span = nullable_span_field "nameStartByte" "nameEndByte" value in
+  let* syntactic_name = nullable_string_field "syntacticName" value in
+  let* parser_complete = bool_field "parserComplete" value in
+  let* status = string_field "status" value in
+  Ok
+    (Protocol.make_item_path_fact ~root_file ~source_path ~module_path
+       ~item_path_segments ~item_kind ~item_span ~name_span ~syntactic_name
+       ~parser_complete ~status)
+
+let decode_unreachable_source value =
+  let* source_path = string_field "sourcePath" value in
+  let* status = string_field "status" value in
+  Ok (Protocol.make_unreachable_source ~source_path ~status)
+
+let decode_module_path_analysis value =
+  let* snapshot_id = string_field "snapshotId" value in
+  let* adapter_version = string_field "adapterVersion" value in
+  let* tree_sitter_version = string_field "treeSitterVersion" value in
+  let* rust_grammar_version = string_field "rustGrammarVersion" value in
+  let* parser_complete = bool_field "parserComplete" value in
+  let* module_paths_complete = bool_field "modulePathsComplete" value in
+  let* module_facts = list_field "moduleFacts" decode_module_fact value in
+  let* item_path_facts =
+    list_field "itemPathFacts" decode_item_path_fact value
+  in
+  let* unreachable_sources =
+    list_field "unreachableSources" decode_unreachable_source value
+  in
+  Ok
+    (Protocol.make_module_path_analysis ~snapshot_id ~adapter_version
+       ~tree_sitter_version ~rust_grammar_version ~parser_complete
+       ~module_paths_complete ~module_facts ~item_path_facts
+       ~unreachable_sources)
+
 let decode_handshake value =
   let* adapter_version = string_field "adapterVersion" value in
   let* tree_sitter_version = string_field "treeSitterVersion" value in
@@ -869,6 +1138,346 @@ let validate_analysis ~snapshot_id ~files (analysis : Protocol.analysis) =
     then Ok analysis
     else Error "analysis contains an invalid path, span, or syntactic name"
 
+let valid_path_segment segment =
+  String.length segment > 0
+  && String.length segment <= 4 * 1024
+  && (not (String.contains segment '\000'))
+  && (not (String.contains segment '/'))
+  && not (String.contains segment '\\')
+
+let valid_path_segments segments =
+  List.length segments <= Protocol.maximum_module_depth
+  && List.for_all valid_path_segment segments
+
+let valid_module_fact_path_segments status segments =
+  (List.length segments <= Protocol.maximum_module_depth
+  || String.equal status "module-depth-limit"
+     && List.length segments = Protocol.maximum_module_depth + 1)
+  && List.for_all valid_path_segment segments
+
+let compare_string_lists left right =
+  let rec compare = function
+    | [], [] -> 0
+    | [], _ -> -1
+    | _, [] -> 1
+    | left :: left_rest, right :: right_rest ->
+        let result = String.compare left right in
+        if result = 0 then compare (left_rest, right_rest) else result
+  in
+  compare (left, right)
+
+let compare_optional_string left right =
+  match (left, right) with
+  | None, None -> 0
+  | None, Some _ -> -1
+  | Some _, None -> 1
+  | Some left, Some right -> String.compare left right
+
+let compare_module_fact (left : Protocol.module_fact)
+    (right : Protocol.module_fact) =
+  let compare =
+    String.compare
+      (Protocol.module_fact_root_file left)
+      (Protocol.module_fact_root_file right)
+  in
+  if compare <> 0 then compare
+  else
+    let compare =
+      compare_string_lists
+        (Protocol.module_fact_module_path left)
+        (Protocol.module_fact_module_path right)
+    in
+    if compare <> 0 then compare
+    else
+      let compare =
+        compare_optional_string
+          (Protocol.module_fact_source_path left)
+          (Protocol.module_fact_source_path right)
+      in
+      if compare <> 0 then compare
+      else
+        let compare =
+          Int.compare
+            (Protocol.span_start_byte
+               (Protocol.module_fact_declaration_span left))
+            (Protocol.span_start_byte
+               (Protocol.module_fact_declaration_span right))
+        in
+        if compare <> 0 then compare
+        else
+          let compare =
+            Int.compare
+              (Protocol.span_end_byte
+                 (Protocol.module_fact_declaration_span left))
+              (Protocol.span_end_byte
+                 (Protocol.module_fact_declaration_span right))
+          in
+          if compare <> 0 then compare
+          else
+            let compare =
+              String.compare
+                (Protocol.module_fact_kind left)
+                (Protocol.module_fact_kind right)
+            in
+            if compare <> 0 then compare
+            else
+              String.compare
+                (Protocol.module_fact_status left)
+                (Protocol.module_fact_status right)
+
+let compare_item_path_fact (left : Protocol.item_path_fact)
+    (right : Protocol.item_path_fact) =
+  let compare =
+    String.compare
+      (Protocol.item_path_fact_root_file left)
+      (Protocol.item_path_fact_root_file right)
+  in
+  if compare <> 0 then compare
+  else
+    let compare =
+      compare_string_lists
+        (Protocol.item_path_fact_module_path left)
+        (Protocol.item_path_fact_module_path right)
+    in
+    if compare <> 0 then compare
+    else
+      let compare =
+        String.compare
+          (Protocol.item_path_fact_source_path left)
+          (Protocol.item_path_fact_source_path right)
+      in
+      if compare <> 0 then compare
+      else
+        let compare =
+          Int.compare
+            (Protocol.span_start_byte (Protocol.item_path_fact_span left))
+            (Protocol.span_start_byte (Protocol.item_path_fact_span right))
+        in
+        if compare <> 0 then compare
+        else
+          let compare =
+            Int.compare
+              (Protocol.span_end_byte (Protocol.item_path_fact_span left))
+              (Protocol.span_end_byte (Protocol.item_path_fact_span right))
+          in
+          if compare <> 0 then compare
+          else
+            let compare =
+              String.compare
+                (Protocol.item_path_fact_kind left)
+                (Protocol.item_path_fact_kind right)
+            in
+            if compare <> 0 then compare
+            else
+              String.compare
+                (Protocol.item_path_fact_status left)
+                (Protocol.item_path_fact_status right)
+
+let module_status status =
+  List.mem status
+    [
+      "resolved";
+      "parser-incomplete";
+      "duplicate-module";
+      "module-depth-limit";
+      "conditional-module";
+      "unsupported-module-attribute";
+      "missing-module";
+      "ambiguous-module";
+      "module-cycle";
+    ]
+
+let item_status status =
+  module_status status
+  || List.mem status
+       [
+         "macro-item-deferred";
+         "unnamed-item";
+         "conditional-item";
+         "unsupported-item-attribute";
+       ]
+
+let valid_name source item_span name_span syntactic_name =
+  match (name_span, syntactic_name) with
+  | None, None -> true
+  | Some span, Some name ->
+      valid_span source span
+      && Protocol.span_start_byte item_span <= Protocol.span_start_byte span
+      && Protocol.span_end_byte span <= Protocol.span_end_byte item_span
+      && String.equal name
+           (String.sub source
+              (Protocol.span_start_byte span)
+              (Protocol.span_end_byte span - Protocol.span_start_byte span))
+  | None, Some _ | Some _, None -> false
+
+let validate_module_path_analysis ~snapshot_id ~root_files ~files
+    (analysis : Protocol.module_path_analysis) =
+  let root_member path = List.mem path root_files in
+  let file_member path =
+    safe_relative_rust_path path && Option.is_some (source_for_path files path)
+  in
+  let valid_source_path path =
+    match source_for_path files path with
+    | None -> false
+    | Some _ -> safe_relative_rust_path path
+  in
+  let valid_module_fact (fact : Protocol.module_fact) =
+    let declaration_source =
+      Option.value
+        ~default:(Protocol.module_fact_root_file fact)
+        (Protocol.module_fact_parent_source_path fact)
+    in
+    let source_path_valid =
+      Option.fold ~none:true ~some:valid_source_path
+        (Protocol.module_fact_source_path fact)
+    in
+    let shape_valid =
+      match
+        ( Protocol.module_fact_kind fact,
+          Protocol.module_fact_parent_source_path fact,
+          Protocol.module_fact_source_path fact,
+          Protocol.module_fact_status fact,
+          Protocol.module_fact_module_path fact )
+      with
+      | "root", None, Some source_path, ("resolved" | "parser-incomplete"), []
+        ->
+          String.equal source_path (Protocol.module_fact_root_file fact)
+      | "inline", Some parent_path, Some source_path, "resolved", _ :: _ ->
+          String.equal parent_path source_path
+      | "inline", Some _, None, status, _ :: _ ->
+          not (String.equal status "resolved")
+      | "external", Some _, Some _, ("resolved" | "parser-incomplete"), _ :: _
+        ->
+          true
+      | "external", Some _, None, status, _ :: _ ->
+          not
+            (String.equal status "resolved"
+            || String.equal status "parser-incomplete")
+      | _ -> false
+    in
+    match source_for_path files declaration_source with
+    | None -> false
+    | Some source ->
+        root_member (Protocol.module_fact_root_file fact)
+        && valid_source_path declaration_source
+        && Option.fold ~none:true ~some:valid_source_path
+             (Protocol.module_fact_parent_source_path fact)
+        && source_path_valid
+        && valid_module_fact_path_segments
+             (Protocol.module_fact_status fact)
+             (Protocol.module_fact_module_path fact)
+        && valid_span source (Protocol.module_fact_declaration_span fact)
+        && List.mem
+             (Protocol.module_fact_kind fact)
+             [ "root"; "inline"; "external" ]
+        && module_status (Protocol.module_fact_status fact)
+        && shape_valid
+  in
+  let valid_item_fact (fact : Protocol.item_path_fact) =
+    match source_for_path files (Protocol.item_path_fact_source_path fact) with
+    | None -> false
+    | Some source ->
+        let segments = Protocol.item_path_fact_segments fact in
+        root_member (Protocol.item_path_fact_root_file fact)
+        && valid_source_path (Protocol.item_path_fact_source_path fact)
+        && valid_path_segments (Protocol.item_path_fact_module_path fact)
+        && Option.fold ~none:true ~some:valid_path_segments segments
+        && valid_span source (Protocol.item_path_fact_span fact)
+        && valid_name source
+             (Protocol.item_path_fact_span fact)
+             (Protocol.item_path_fact_name_span fact)
+             (Protocol.item_path_fact_syntactic_name fact)
+        && item_status (Protocol.item_path_fact_status fact)
+        && (Protocol.item_path_fact_parser_complete fact
+           || String.equal
+                (Protocol.item_path_fact_status fact)
+                "parser-incomplete")
+        &&
+        if String.equal (Protocol.item_path_fact_status fact) "resolved" then
+          Option.is_some segments
+        else Option.is_none segments
+  in
+  let valid_unreachable (source : Protocol.unreachable_source) =
+    String.equal
+      (Protocol.unreachable_source_status source)
+      "unreachable-source"
+    && file_member (Protocol.unreachable_source_path source)
+    && not (root_member (Protocol.unreachable_source_path source))
+  in
+  let root_fact_count root =
+    List.length
+      (List.filter
+         (fun fact ->
+           String.equal root (Protocol.module_fact_root_file fact)
+           && String.equal "root" (Protocol.module_fact_kind fact))
+         (Protocol.module_path_analysis_module_facts analysis))
+  in
+  let unreachable_paths =
+    Protocol.module_path_analysis_unreachable_sources analysis
+    |> List.map Protocol.unreachable_source_path
+  in
+  let reachable_path path = not (List.mem path unreachable_paths) in
+  if
+    not
+      (String.equal snapshot_id
+         (Protocol.module_path_analysis_snapshot_id analysis))
+  then Error "module path snapshot ID differs from request"
+  else if
+    List.length (Protocol.module_path_analysis_module_facts analysis)
+    > Protocol.maximum_module_facts
+    || List.length (Protocol.module_path_analysis_item_path_facts analysis)
+       > Protocol.maximum_item_records
+  then Error "module path analysis exceeds configured fact limit"
+  else if
+    not
+      (strictly_sorted compare_module_fact
+         (Protocol.module_path_analysis_module_facts analysis))
+  then Error "module facts are not canonically ordered"
+  else if
+    not
+      (strictly_sorted compare_item_path_fact
+         (Protocol.module_path_analysis_item_path_facts analysis))
+  then Error "item path facts are not canonically ordered"
+  else if
+    not
+      (strictly_sorted
+         (fun left right ->
+           String.compare
+             (Protocol.unreachable_source_path left)
+             (Protocol.unreachable_source_path right))
+         (Protocol.module_path_analysis_unreachable_sources analysis))
+  then Error "unreachable sources are not canonically ordered"
+  else if not (List.for_all (fun root -> root_fact_count root = 1) root_files)
+  then Error "module path analysis is missing or duplicates a root fact"
+  else if
+    Protocol.module_path_analysis_complete analysis
+    && ((not (Protocol.module_path_analysis_parser_complete analysis))
+       || Protocol.module_path_analysis_unreachable_sources analysis <> []
+       || List.exists
+            (fun fact ->
+              not (String.equal (Protocol.module_fact_status fact) "resolved"))
+            (Protocol.module_path_analysis_module_facts analysis))
+  then Error "module path analysis claims unsupported completeness"
+  else if
+    List.for_all valid_module_fact
+      (Protocol.module_path_analysis_module_facts analysis)
+    && List.for_all valid_item_fact
+         (Protocol.module_path_analysis_item_path_facts analysis)
+    && List.for_all valid_unreachable
+         (Protocol.module_path_analysis_unreachable_sources analysis)
+    && List.for_all
+         (fun fact ->
+           Option.fold ~none:true ~some:reachable_path
+             (Protocol.module_fact_source_path fact)
+           && Option.fold ~none:true ~some:reachable_path
+                (Protocol.module_fact_parent_source_path fact))
+         (Protocol.module_path_analysis_module_facts analysis)
+    && List.for_all
+         (fun fact -> reachable_path (Protocol.item_path_fact_source_path fact))
+         (Protocol.module_path_analysis_item_path_facts analysis)
+  then Ok analysis
+  else Error "module path analysis contains an invalid fact"
+
 let normalized_files files =
   if List.length files > Protocol.maximum_source_files then
     Error "source file limit exceeded"
@@ -902,6 +1511,29 @@ let normalized_files files =
     if no_duplicate_paths files then Ok files
     else Error "semantic input contains duplicate Rust paths"
 
+let normalized_roots ~files roots =
+  if roots = [] then Error "module path input contains no explicit roots"
+  else if List.length roots > Protocol.maximum_source_files then
+    Error "module path input exceeds explicit root limit"
+  else if not (List.for_all safe_relative_rust_path roots) then
+    Error "module path input contains an unsafe root path"
+  else
+    let roots = List.sort String.compare roots in
+    let rec no_duplicate_roots = function
+      | [] | [ _ ] -> true
+      | left :: (right :: _ as rest) ->
+          (not (String.equal left right)) && no_duplicate_roots rest
+    in
+    if not (no_duplicate_roots roots) then
+      Error "module path input contains duplicate root paths"
+    else if
+      not
+        (List.for_all
+           (fun root -> Option.is_some (source_for_path files root))
+           roots)
+    then Error "module path input names a root absent from the source map"
+    else Ok roots
+
 let handshake configuration =
   let request = request_json ~operation:"handshake" [] in
   run configuration request (decode_response decode_handshake)
@@ -928,7 +1560,42 @@ let analyze_files configuration ~snapshot_id ~files =
             | Error message -> Unavailable (Malformed_adapter_response message))
         | Unavailable _ as result -> result)
 
-let analyze_snapshot configuration ~store ~snapshot =
+let resolve_module_paths_files configuration ~snapshot_id ~root_files ~files =
+  if not (valid_snapshot_id snapshot_id) then
+    Unavailable
+      (Adapter_error
+         {
+           code = "invalid-snapshot-id";
+           message =
+             "semantic input snapshot ID is not 64 lowercase hex characters";
+         })
+  else
+    match normalized_files files with
+    | Error message ->
+        Unavailable (Adapter_error { code = "invalid-input"; message })
+    | Ok files -> (
+        match normalized_roots ~files root_files with
+        | Error message ->
+            Unavailable (Adapter_error { code = "invalid-input"; message })
+        | Ok root_files -> (
+            let request =
+              request_for_module_paths ~snapshot_id ~root_files files
+            in
+            match
+              run configuration request
+                (decode_response decode_module_path_analysis)
+            with
+            | Available analysis -> (
+                match
+                  validate_module_path_analysis ~snapshot_id ~root_files ~files
+                    analysis
+                with
+                | Ok analysis -> Available analysis
+                | Error message ->
+                    Unavailable (Malformed_adapter_response message))
+            | Unavailable _ as result -> result))
+
+let collect_snapshot_rust_files store root =
   let rec collect path tree_id =
     let* tree = Paengi_snapshot.Tree.load store tree_id in
     Paengi_snapshot.Tree.entries tree
@@ -955,10 +1622,16 @@ let analyze_snapshot configuration ~store ~snapshot =
                  Ok (Protocol.make_source_file ~path ~contents :: collected))
          (Ok [])
   in
+  collect [] root
+
+let analyze_snapshot configuration ~store ~snapshot =
   match Paengi_snapshot.Snapshot.load store snapshot with
   | Error error -> Unavailable (Snapshot_error error)
   | Ok snapshot_model -> (
-      match collect [] (Paengi_snapshot.Snapshot.root snapshot_model) with
+      match
+        collect_snapshot_rust_files store
+          (Paengi_snapshot.Snapshot.root snapshot_model)
+      with
       | Error error -> Unavailable (Snapshot_error error)
       | Ok files ->
           let files =
@@ -982,3 +1655,36 @@ let analyze_snapshot configuration ~store ~snapshot =
               |> Paengi_store.Stored_object_id.to_hex
             in
             analyze_files configuration ~snapshot_id ~files)
+
+let resolve_module_paths_snapshot configuration ~store ~snapshot ~root_files =
+  match Paengi_snapshot.Snapshot.load store snapshot with
+  | Error error -> Unavailable (Snapshot_error error)
+  | Ok snapshot_model -> (
+      match
+        collect_snapshot_rust_files store
+          (Paengi_snapshot.Snapshot.root snapshot_model)
+      with
+      | Error error -> Unavailable (Snapshot_error error)
+      | Ok files ->
+          let files =
+            List.sort
+              (fun (left : Protocol.source_file) right ->
+                String.compare
+                  (Protocol.source_file_path left)
+                  (Protocol.source_file_path right))
+              files
+          in
+          if files = [] then
+            Unavailable
+              (Adapter_error
+                 {
+                   code = "no-rust-files";
+                   message = "verified snapshot contains no Rust source files";
+                 })
+          else
+            let snapshot_id =
+              Paengi_snapshot.Snapshot.stored_object_id snapshot
+              |> Paengi_store.Stored_object_id.to_hex
+            in
+            resolve_module_paths_files configuration ~snapshot_id ~root_files
+              ~files)

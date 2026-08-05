@@ -5,6 +5,8 @@ module Protocol : sig
   val maximum_source_files : int
   val maximum_source_bytes : int
   val maximum_item_records : int
+  val maximum_module_facts : int
+  val maximum_module_depth : int
 
   type source_file = { path : string; contents : string }
   type span = { start_byte : int; end_byte : int }
@@ -29,8 +31,72 @@ module Protocol : sig
     parser_diagnostics : diagnostic list;
   }
 
+  type module_fact = {
+    root_file : string;
+    parent_source_path : string option;
+    source_path : string option;
+    module_path : string list;
+    declaration_span : span;
+    module_kind : string;
+    status : string;
+  }
+
+  type item_path_fact = {
+    root_file : string;
+    source_path : string;
+    module_path : string list;
+    item_path_segments : string list option;
+    item_kind : string;
+    item_span : span;
+    name_span : span option;
+    syntactic_name : string option;
+    parser_complete : bool;
+    status : string;
+  }
+
+  type unreachable_source = { source_path : string; status : string }
+
+  type module_path_analysis = {
+    snapshot_id : string;
+    adapter_version : string;
+    tree_sitter_version : string;
+    rust_grammar_version : string;
+    parser_complete : bool;
+    module_paths_complete : bool;
+    module_facts : module_fact list;
+    item_path_facts : item_path_fact list;
+    unreachable_sources : unreachable_source list;
+  }
+
   val make_source_file : path:string -> contents:string -> source_file
   val make_span : start_byte:int -> end_byte:int -> span
+
+  val make_module_fact :
+    root_file:string ->
+    parent_source_path:string option ->
+    source_path:string option ->
+    module_path:string list ->
+    declaration_span:span ->
+    module_kind:string ->
+    status:string ->
+    module_fact
+
+  val make_item_path_fact :
+    root_file:string ->
+    source_path:string ->
+    module_path:string list ->
+    item_path_segments:string list option ->
+    item_kind:string ->
+    item_span:span ->
+    name_span:span option ->
+    syntactic_name:string option ->
+    parser_complete:bool ->
+    status:string ->
+    item_path_fact
+
+  val make_unreachable_source :
+    source_path:string -> status:string -> unreachable_source
+
   val source_file_path : source_file -> string
   val source_file_contents : source_file -> string
   val item_path : item -> string
@@ -48,6 +114,38 @@ module Protocol : sig
   val analysis_parser_complete : analysis -> bool
   val analysis_items : analysis -> item list
   val analysis_parser_diagnostics : analysis -> diagnostic list
+  val module_fact_root_file : module_fact -> string
+  val module_fact_parent_source_path : module_fact -> string option
+  val module_fact_source_path : module_fact -> string option
+  val module_fact_module_path : module_fact -> string list
+  val module_fact_declaration_span : module_fact -> span
+  val module_fact_kind : module_fact -> string
+  val module_fact_status : module_fact -> string
+  val item_path_fact_root_file : item_path_fact -> string
+  val item_path_fact_source_path : item_path_fact -> string
+  val item_path_fact_module_path : item_path_fact -> string list
+  val item_path_fact_segments : item_path_fact -> string list option
+  val item_path_fact_kind : item_path_fact -> string
+  val item_path_fact_span : item_path_fact -> span
+  val item_path_fact_name_span : item_path_fact -> span option
+  val item_path_fact_syntactic_name : item_path_fact -> string option
+  val item_path_fact_parser_complete : item_path_fact -> bool
+  val item_path_fact_status : item_path_fact -> string
+  val unreachable_source_path : unreachable_source -> string
+  val unreachable_source_status : unreachable_source -> string
+  val module_path_analysis_snapshot_id : module_path_analysis -> string
+  val module_path_analysis_parser_complete : module_path_analysis -> bool
+  val module_path_analysis_complete : module_path_analysis -> bool
+
+  val module_path_analysis_module_facts :
+    module_path_analysis -> module_fact list
+
+  val module_path_analysis_item_path_facts :
+    module_path_analysis -> item_path_fact list
+
+  val module_path_analysis_unreachable_sources :
+    module_path_analysis -> unreachable_source list
+
   val span_start_byte : span -> int
   val span_end_byte : span -> int
 end
@@ -117,3 +215,17 @@ val analyze_snapshot :
   store:Paengi_store.repository ->
   snapshot:Paengi_snapshot.Snapshot.id ->
   Protocol.analysis result
+
+val resolve_module_paths_files :
+  configuration ->
+  snapshot_id:string ->
+  root_files:string list ->
+  files:Protocol.source_file list ->
+  Protocol.module_path_analysis result
+
+val resolve_module_paths_snapshot :
+  configuration ->
+  store:Paengi_store.repository ->
+  snapshot:Paengi_snapshot.Snapshot.id ->
+  root_files:string list ->
+  Protocol.module_path_analysis result

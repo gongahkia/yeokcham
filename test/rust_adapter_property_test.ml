@@ -44,6 +44,73 @@ let generated_files_are_canonical =
                       (Adapter.Protocol.item_kind item))
                (Adapter.Protocol.analysis_items analysis))
 
+let module_source_path index =
+  let names = List.init (index + 1) (fun item -> Printf.sprintf "m%04d" item) in
+  match List.rev names with
+  | [] -> assert false
+  | name :: parents ->
+      let directory = "src" :: List.rev parents in
+      String.concat "/" (directory @ [ name ^ ".rs" ])
+
+let generated_module_maps_are_snapshot_local =
+  QCheck2.Test.make ~count:40
+    ~name:"generated nested module maps retain canonical parent evidence"
+    QCheck2.Gen.(int_range 1 24)
+    (fun count ->
+      let root =
+        Adapter.Protocol.make_source_file ~path:"src/lib.rs"
+          ~contents:"mod m0000;\n"
+      in
+      let files =
+        root
+        :: List.init count (fun index ->
+            let next =
+              if index + 1 = count then ""
+              else Printf.sprintf "mod m%04d;\n" (index + 1)
+            in
+            Adapter.Protocol.make_source_file ~path:(module_source_path index)
+              ~contents:(Printf.sprintf "pub fn item_%04d() {}\n%s" index next))
+      in
+      match
+        Adapter.resolve_module_paths_files configuration ~snapshot_id
+          ~root_files:[ "src/lib.rs" ] ~files
+      with
+      | Adapter.Unavailable _ -> false
+      | Adapter.Available analysis ->
+          let modules =
+            Adapter.Protocol.module_path_analysis_module_facts analysis
+          in
+          let external_sources =
+            modules
+            |> List.filter (fun fact ->
+                String.equal "external" (Adapter.Protocol.module_fact_kind fact)
+                && String.equal "resolved"
+                     (Adapter.Protocol.module_fact_status fact))
+            |> List.filter_map Adapter.Protocol.module_fact_source_path
+            |> List.sort String.compare
+          in
+          Adapter.Protocol.module_path_analysis_parser_complete analysis
+          && Adapter.Protocol.module_path_analysis_complete analysis
+          && Adapter.Protocol.module_path_analysis_unreachable_sources analysis
+             = []
+          && List.length modules = count + 1
+          && external_sources
+             = (List.init count module_source_path |> List.sort String.compare)
+          && List.for_all
+               (fun fact ->
+                 String.equal "src/lib.rs"
+                   (Adapter.Protocol.module_fact_root_file fact)
+                 && String.equal "resolved"
+                      (Adapter.Protocol.module_fact_status fact))
+               modules
+          && List.for_all
+               (fun fact ->
+                 String.equal "resolved"
+                   (Adapter.Protocol.item_path_fact_status fact)
+                 && Option.is_some
+                      (Adapter.Protocol.item_path_fact_segments fact))
+               (Adapter.Protocol.module_path_analysis_item_path_facts analysis))
+
 let () =
   Printf.printf "Rust adapter property base seed: %d\n%!" base_seed;
   Alcotest.run "Rust adapter properties"
@@ -53,5 +120,8 @@ let () =
           QCheck_alcotest.to_alcotest ~speed_level:`Quick
             ~rand:(Random.State.make [| base_seed |])
             generated_files_are_canonical;
+          QCheck_alcotest.to_alcotest ~speed_level:`Quick
+            ~rand:(Random.State.make [| base_seed + 1 |])
+            generated_module_maps_are_snapshot_local;
         ] );
     ]
