@@ -31,6 +31,18 @@ let revision_id value =
   | Ok identity -> identity
   | Error error -> fail Paengi_id.parse_error_to_string error
 
+let revision_link value =
+  match String.split_on_char ':' value with
+  | [ capsule; revision; object_id ] -> (
+      match Store.Stored_object_id.of_hex object_id with
+      | Ok object_id ->
+          Capsule_store.make_revision_link ~capsule:(capsule_id capsule)
+            ~revision:(revision_id revision) ~object_id
+      | Error error -> fail Store.Stored_object_id.parse_error_to_string error)
+  | _ ->
+      fail Fun.id
+        "revision link must be capsule-id:revision-id:stored-object-id"
+
 let workspace_id value =
   match Paengi_id.Workspace_id.of_hex value with
   | Ok identity -> identity
@@ -1554,6 +1566,51 @@ let git root arguments =
                 result.Git.export_target_ref
                 (Paengi_id.Git_mapping_id.to_hex
                    (Git.mapping_id result.Git.export_mapping))))
+  | "export" :: "revisions" :: options -> (
+      let rec parse repository revisions = function
+        | [] -> (
+            match (repository, List.rev revisions) with
+            | Some repository, (_ :: _ as revisions) -> (repository, revisions)
+            | _ -> exit 2)
+        | "--repository" :: repository :: rest ->
+            parse (Some repository) revisions rest
+        | "--revision" :: source :: rest ->
+            parse repository (revision_link source :: revisions) rest
+        | _ -> exit 2
+      in
+      let repository, revisions = parse None [] options in
+      match Store.open_repository ~root with
+      | Error error -> fail Store.error_to_string error
+      | Ok store -> (
+          match
+            Git.export_revisions Git.default_configuration ~store ~repository
+              ~revisions
+          with
+          | Error error -> fail Git.error_to_string error
+          | Ok result ->
+              List.iter
+                (fun exported ->
+                  let source = exported.Git.revision_export_source in
+                  Printf.printf
+                    "capsule=%s revision=%s revision-object=%s snapshot=%s \
+                     git-tree=%s git-commit=%s mapping=%s\n"
+                    (Paengi_id.Capsule_id.to_hex
+                       (Capsule_store.revision_link_capsule source))
+                    (Paengi_id.Capsule_revision_id.to_hex
+                       (Capsule_store.revision_link_revision source))
+                    (Store.Stored_object_id.to_hex
+                       (Capsule_store.revision_link_object source))
+                    (Store.Stored_object_id.to_hex
+                       (Snapshot.Snapshot.stored_object_id
+                          exported.Git.revision_export_snapshot))
+                    (Git.object_id_to_hex exported.Git.revision_export_tree)
+                    (Git.object_id_to_hex exported.Git.revision_export_commit)
+                    (Paengi_id.Git_mapping_id.to_hex
+                       (Git.mapping_id exported.Git.revision_export_mapping)))
+                result.Git.revision_exports;
+              Printf.printf
+                "ref=%s metadata=paengi-export-revision-created-at-utc\n"
+                result.Git.revision_export_target_ref))
   | _ -> exit 2
 
 let usage () =

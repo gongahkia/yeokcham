@@ -1334,6 +1334,22 @@ module Durable = struct
             current;
           }
 
+  let verify_link store (link : revision_link) =
+    let* revision = load_revision store link.object_id in
+    if not (Id.Capsule_id.equal link.capsule (revision_capsule revision)) then
+      Error
+        (Parent_link_mismatch
+           "revision link capsule ID does not match its stored object")
+    else if
+      not (Id.Capsule_revision_id.equal link.revision (revision_id revision))
+    then
+      Error
+        (Parent_link_mismatch
+           "revision link logical ID does not match its stored object")
+    else
+      let* () = validate_revision store ~capsule:link.capsule revision in
+      Ok revision
+
   let read_current store capsule =
     let* current = read_ref store capsule in
     match current with

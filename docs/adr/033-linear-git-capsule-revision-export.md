@@ -157,17 +157,22 @@ storage.
 
 ## Verification
 
-After acceptance, implementation must add focused fixtures for empty/root and
-nested trees, regular bytes, executable files, symlinks, no-op revisions,
-non-adjacent base/result mismatches, malformed/mismatched links, duplicate
-links, chain length bounds, deterministic metadata/ref/retry, ref collision,
-partial mapping restart, mapping corruption, and injected pre-ref/between-
-mapping interruption. Successful fixtures must run `git fsck --full` and check
-out each commit against its revision result snapshot. Bounded generated chains
-must prove exactly one commit per selected link, tree equivalence, sole-parent
-linearity, and deterministic retry. `make format`, `make check`, and a seeded
-property run are required before issue closure. Persistent bytes do not change,
-so existing mapping/revision goldens must remain valid.
+- Completed: focused fixtures cover root/sole-parent commits, empty roots,
+  nested-empty rejection, regular bytes, executable files, symlinks, malformed
+  links, duplicate selection, chain mismatch, bounds, deterministic
+  metadata/ref/retry, ref collision, partial-mapping retry, mapping source
+  corruption, and injected pre-ref/between-mapping interruptions. Successful
+  cases run `git fsck --full` and check out each commit against its result.
+- Completed: the bounded generated two-revision property checks exact bytes and
+  mode, one commit per selected link, sole-parent linearity, deterministic ref
+  and mappings on retry, and `git fsck --full`.
+- Verified: `dune build @all`, `dune exec ./test/test_git.exe`, and
+  `PROPERTY_TEST_SEED=17 dune exec ./test/git_property_test.exe`.
+- Pending gate: `make format`, `make check`, and
+  `make property-test PROPERTY_TEST_SEED=17` before issue closure.
+
+Persistent bytes do not change, so existing mapping/revision goldens remain
+valid.
 
 ## CLI and user impact
 

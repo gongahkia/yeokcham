@@ -964,16 +964,29 @@ ADR-028 `export/commit -> exported-release` mapping names the release ID,
 release object ID, final snapshot ID, Git format, and exact commit ID; it is
 bridge evidence, not Paengi history.
 
+M8-09 maps a nonempty explicit ordered list of immutable revision links to one
+Git commit per link. A link `(c, r, o)` is accepted only when `o` decodes to a
+valid replayable revision with capsule ID `c` and revision ID `r`. For adjacent
+selected revisions `a`, `b`, `a.expected_result = b.declared_base` is required
+before any Git ref or mapping publication. The first commit is a root whose tree
+exactly represents the first result snapshot; commit `i > 0` has exactly the
+preceding exported commit as its sole parent and exactly represents result
+snapshot `i`. Fixed exporter metadata uses each revision's `created_at`; fixed
+messages identify only the exported capsule and revision IDs. The deterministic
+create-only ref derives from a domain-separated SHA-256 of the ordered link
+triples. Each visible ADR-028 `Exported_revision` mapping validates the exact
+revision object and result snapshot it names. This exported parent sequence is
+not capsule topology, dependency order, provenance, workspace state, conflict
+state, resolution, or release history.
+
 ### Export
 
-Future export policy may map an ordered capsule-revision sequence to one of:
-
-- One Git commit per capsule revision.
-- Squashed release commit.
-- Explicit merge topology.
-
-The export policy must be recorded.
+M8-08 implements a squashed release root commit and M8-09 implements one Git
+commit per caller-selected capsule revision. Configurable metadata/ref policy,
+automatic revision ordering, and explicit Git merge topology remain future
+recorded export policies.
 
 ### Bridge invariant
 
-The final Git checkout for an exported release must match the paengi release snapshot exactly.
+Each exported Git commit checkout must match the Paengi snapshot named by its
+export mapping exactly.

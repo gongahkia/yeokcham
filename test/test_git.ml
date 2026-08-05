@@ -1507,6 +1507,425 @@ let exports_release_as_exact_git_commit () =
                (contains ~needle:"Git mapping error"
                   (Git.error_to_string error))))
 
+let revision_export_fixture ?(empty_first = false) ?(nested_empty = false) run =
+  with_directory "paengi-git-revision-export-" (fun root ->
+      let worktree = Filename.concat root "worktree" in
+      let destination = Filename.concat root "destination" in
+      Unix.mkdir worktree 0o700;
+      Unix.mkdir destination 0o700;
+      write_file (Filename.concat worktree "base") "base\n";
+      let store =
+        Store.init ~root:worktree |> require_ok Store.error_to_string
+      in
+      let scratch = Scratch.open_repository store in
+      let base, _ =
+        Snapshot.scan ~root:worktree ~store
+        |> require_ok Snapshot.error_to_string
+      in
+      let initial =
+        Scratch.create_initial scratch ~snapshot:base ~created_at:0L
+        |> require_ok Scratch.error_to_string
+        |> Scratch.Checkpoint.id
+      in
+      Unix.unlink (Filename.concat worktree "base");
+      if not empty_first then (
+        write_file (Filename.concat worktree "first") "first\000bytes";
+        write_file (Filename.concat worktree "run") "#!/bin/sh\nprintf first\n";
+        Unix.chmod (Filename.concat worktree "run") 0o755;
+        Unix.symlink "first" (Filename.concat worktree "link"));
+      if nested_empty then Unix.mkdir (Filename.concat worktree "empty") 0o700;
+      let first_snapshot, _ =
+        Snapshot.scan ~root:worktree ~store
+        |> require_ok Snapshot.error_to_string
+      in
+      let first_checkpoint = export_checkpoint scratch first_snapshot 1L in
+      let first_capsule = export_capsule_id 40 in
+      let first =
+        Capsule_store.Durable.create_from_checkpoints ~store ~scratch
+          ~id:first_capsule ~title:"first" ~description:"first revision"
+          ~dependencies:[] ~evidence:[] ~from:initial ~target:first_checkpoint
+          ~created_at:2L ~changed_at:2L ()
+        |> require_ok Capsule_store.error_to_string
+      in
+      write_file (Filename.concat worktree "second") "second\n";
+      let second_snapshot, _ =
+        Snapshot.scan ~root:worktree ~store
+        |> require_ok Snapshot.error_to_string
+      in
+      let second_checkpoint = export_checkpoint scratch second_snapshot 3L in
+      let second_capsule = export_capsule_id 41 in
+      let second =
+        Capsule_store.Durable.create_from_checkpoints ~store ~scratch
+          ~id:second_capsule ~title:"second" ~description:"second revision"
+          ~dependencies:[] ~evidence:[] ~from:first_checkpoint
+          ~target:second_checkpoint ~created_at:4L ~changed_at:4L ()
+        |> require_ok Capsule_store.error_to_string
+      in
+      let source resolved =
+        let revision = Capsule_store.Durable.resolved_revision resolved in
+        Capsule_store.make_revision_link
+          ~capsule:(Capsule_store.revision_capsule revision)
+          ~revision:(Capsule_store.revision_id revision)
+          ~object_id:(Capsule_store.Durable.resolved_revision_object resolved)
+      in
+      direct_process (git_path ()) [ "init"; "-q"; destination ];
+      run (git_path ()) destination store
+        [ source first; source second ]
+        [ first_snapshot; second_snapshot ])
+
+let exports_revisions_as_exact_linear_git_commits () =
+  revision_export_fixture (fun git destination store sources snapshots ->
+      let exported =
+        Git.export_revisions Git.default_configuration ~store
+          ~repository:destination ~revisions:sources
+        |> require_ok Git.error_to_string
+      in
+      let first, second =
+        match exported.Git.revision_exports with
+        | [ first; second ] -> (first, second)
+        | _ -> Alcotest.fail "revision export did not return two commits"
+      in
+      Alcotest.(check bool)
+        "first export keeps source link" true
+        (Id.Capsule_revision_id.equal
+           (Capsule_store.revision_link_revision
+              first.Git.revision_export_source)
+           (Capsule_store.revision_link_revision (List.hd sources)));
+      Alcotest.(check bool)
+        "first export keeps result snapshot" true
+        (Snapshot.Snapshot.equal_id first.Git.revision_export_snapshot
+           (List.hd snapshots));
+      direct_process git [ "-C"; destination; "fsck"; "--full" ];
+      Alcotest.(check string)
+        "target ref names tip"
+        (Git.object_id_to_hex second.Git.revision_export_commit)
+        (direct_capture git
+           [
+             "-C";
+             destination;
+             "rev-parse";
+             exported.Git.revision_export_target_ref;
+           ]);
+      Alcotest.(check string)
+        "first commit has no parent" ""
+        (direct_capture git
+           [
+             "-C";
+             destination;
+             "show";
+             "-s";
+             "--format=%P";
+             Git.object_id_to_hex first.Git.revision_export_commit;
+           ]);
+      Alcotest.(check string)
+        "second commit has first as its only parent"
+        (Git.object_id_to_hex first.Git.revision_export_commit)
+        (direct_capture git
+           [
+             "-C";
+             destination;
+             "show";
+             "-s";
+             "--format=%P";
+             Git.object_id_to_hex second.Git.revision_export_commit;
+           ]);
+      direct_process git
+        [
+          "-C";
+          destination;
+          "checkout";
+          "-q";
+          Git.object_id_to_hex first.Git.revision_export_commit;
+        ];
+      Alcotest.(check string)
+        "first checkout bytes" "first\000bytes"
+        (read_file (Filename.concat destination "first"));
+      Alcotest.(check bool)
+        "first checkout executable mode" true
+        ((Unix.stat (Filename.concat destination "run")).Unix.st_perm land 0o111
+        <> 0);
+      Alcotest.(check string)
+        "first checkout symlink target" "first"
+        (Unix.readlink (Filename.concat destination "link"));
+      Alcotest.(check bool)
+        "first checkout excludes second" true
+        (not (Sys.file_exists (Filename.concat destination "second")));
+      direct_process git
+        [
+          "-C";
+          destination;
+          "checkout";
+          "-q";
+          Git.object_id_to_hex second.Git.revision_export_commit;
+        ];
+      Alcotest.(check string)
+        "second checkout bytes" "second\n"
+        (read_file (Filename.concat destination "second"));
+      let metadata =
+        direct_capture git
+          [
+            "-C";
+            destination;
+            "show";
+            "-s";
+            "--format=%an <%ae> %at %z%x00%B";
+            Git.object_id_to_hex second.Git.revision_export_commit;
+          ]
+      in
+      Alcotest.(check bool)
+        "fixed revision metadata" true
+        (contains ~needle:"Paengi Export <noreply@paengi.local> 4" metadata);
+      Alcotest.(check bool)
+        "fixed revision message" true
+        (contains
+           ~needle:
+             ("Paengi capsule "
+             ^ Id.Capsule_id.to_hex
+                 (Capsule_store.revision_link_capsule
+                    (List.hd (List.rev sources)))
+             ^ " revision ")
+           metadata);
+      let reopened =
+        Store.open_repository ~root:(Store.root store)
+        |> require_ok Store.error_to_string
+      in
+      List.iter2
+        (fun source current ->
+          let mapping =
+            Git.load_mapping reopened
+              (Git.mapping_id current.Git.revision_export_mapping)
+            |> require_ok Git.error_to_string
+          in
+          match Git.mapping_subject mapping with
+          | Git.Exported_revision
+              { capsule; revision; revision_object; final_snapshot } ->
+              Alcotest.(check bool)
+                "mapping keeps capsule" true
+                (Id.Capsule_id.equal capsule
+                   (Capsule_store.revision_link_capsule source));
+              Alcotest.(check bool)
+                "mapping keeps revision" true
+                (Id.Capsule_revision_id.equal revision
+                   (Capsule_store.revision_link_revision source));
+              Alcotest.(check bool)
+                "mapping keeps revision object" true
+                (Store.Stored_object_id.equal revision_object
+                   (Capsule_store.revision_link_object source));
+              Alcotest.(check bool)
+                "mapping keeps final snapshot" true
+                (Snapshot.Snapshot.equal_id final_snapshot
+                   current.Git.revision_export_snapshot)
+          | Git.Imported_snapshot _ | Git.Imported_transition _
+          | Git.Imported_tag _ | Git.Imported_revision _
+          | Git.Exported_release _ ->
+              Alcotest.fail "revision export mapping has the wrong subject")
+        sources exported.Git.revision_exports;
+      let repeated =
+        Git.export_revisions Git.default_configuration ~store
+          ~repository:destination ~revisions:sources
+        |> require_ok Git.error_to_string
+      in
+      Alcotest.(check string)
+        "restart keeps target ref" exported.Git.revision_export_target_ref
+        repeated.Git.revision_export_target_ref;
+      Alcotest.(check (list string))
+        "restart keeps commits"
+        (List.map
+           (fun current ->
+             Git.object_id_to_hex current.Git.revision_export_commit)
+           exported.Git.revision_exports)
+        (List.map
+           (fun current ->
+             Git.object_id_to_hex current.Git.revision_export_commit)
+           repeated.Git.revision_exports))
+
+let revision_export_rejects_invalid_selection_and_recovers_partial_mapping () =
+  revision_export_fixture (fun git destination store sources _snapshots ->
+      let first, second =
+        match sources with
+        | [ first; second ] -> (first, second)
+        | _ -> Alcotest.fail "revision export fixture has invalid sources"
+      in
+      let reject label revisions configuration needle =
+        Git.export_revisions configuration ~store ~repository:destination
+          ~revisions
+        |> Result.fold
+             ~ok:(fun _ -> Alcotest.fail (label ^ " exported"))
+             ~error:(fun error ->
+               Alcotest.(check bool)
+                 label true
+                 (contains ~needle (Git.error_to_string error)))
+      in
+      reject "empty selection" [] Git.default_configuration
+        "requires one or more";
+      reject "duplicate selection" [ first; first ] Git.default_configuration
+        "repeats a capsule/revision";
+      reject "reversed chain" [ second; first ] Git.default_configuration
+        "do not form";
+      let mismatched =
+        Capsule_store.make_revision_link
+          ~capsule:(Capsule_store.revision_link_capsule first)
+          ~revision:(Capsule_store.revision_link_revision second)
+          ~object_id:(Capsule_store.revision_link_object second)
+      in
+      reject "mismatched source" [ mismatched ] Git.default_configuration
+        "revision link";
+      let bounded =
+        Git.configuration_with ~max_export_commits:1 Git.default_configuration
+      in
+      reject "commit bound" sources bounded "revision export commits limit";
+      Git.export_revisions ~fail_at:Git.Before_git_ref Git.default_configuration
+        ~store ~repository:destination ~revisions:sources
+      |> Result.fold
+           ~ok:(fun _ -> Alcotest.fail "pre-ref interruption exported")
+           ~error:(fun error ->
+             Alcotest.(check bool)
+               "structured pre-ref interruption" true
+               (contains ~needle:"injected interruption"
+                  (Git.error_to_string error)));
+      Alcotest.(check string)
+        "pre-ref interruption leaves no export ref" ""
+        (direct_capture git
+           [
+             "-C";
+             destination;
+             "for-each-ref";
+             "--format=%(refname)";
+             "refs/heads/paengi/capsule-linear-";
+           ]);
+      Git.export_revisions ~fail_at:(Git.Before_revision_mapping_binding 1)
+        Git.default_configuration ~store ~repository:destination
+        ~revisions:sources
+      |> Result.fold
+           ~ok:(fun _ -> Alcotest.fail "partial mapping interruption exported")
+           ~error:(fun error ->
+             Alcotest.(check bool)
+               "structured partial mapping interruption" true
+               (contains ~needle:"injected interruption"
+                  (Git.error_to_string error)));
+      let retried =
+        Git.export_revisions Git.default_configuration ~store
+          ~repository:destination ~revisions:sources
+        |> require_ok Git.error_to_string
+      in
+      let first_export = List.hd retried.Git.revision_exports in
+      let first_revision =
+        Capsule_store.Durable.verify_link store first
+        |> require_ok Capsule_store.error_to_string
+      in
+      Unix.unlink
+        (Store.object_path store (Capsule_store.revision_link_object first));
+      Git.load_mapping store
+        (Git.mapping_id first_export.Git.revision_export_mapping)
+      |> Result.fold
+           ~ok:(fun _ -> Alcotest.fail "mapping accepted a missing revision")
+           ~error:(fun error ->
+             Alcotest.(check bool)
+               "mapping verifies its source revision" true
+               (contains ~needle:"exported revision mapping source is invalid"
+                  (Git.error_to_string error)));
+      Capsule_store.store_revision store first_revision
+      |> require_ok Capsule_store.error_to_string
+      |> ignore;
+      Git.load_mapping store
+        (Git.mapping_id first_export.Git.revision_export_mapping)
+      |> require_ok Git.error_to_string
+      |> ignore;
+      direct_process git
+        [ "-C"; destination; "config"; "user.name"; "Paengi Fixture" ];
+      direct_process git
+        [ "-C"; destination; "config"; "user.email"; "fixture@example.invalid" ];
+      direct_process git
+        [ "-C"; destination; "commit"; "--allow-empty"; "-q"; "-m"; "other" ];
+      let other =
+        direct_capture git [ "-C"; destination; "rev-parse"; "HEAD" ]
+      in
+      direct_process git
+        [
+          "-C";
+          destination;
+          "update-ref";
+          retried.Git.revision_export_target_ref;
+          other;
+        ];
+      reject "target ref collision" sources Git.default_configuration
+        "target ref already names a different commit")
+
+let exports_empty_root_revision_and_rejects_nested_empty_revision () =
+  revision_export_fixture ~empty_first:true
+    (fun git destination store sources snapshots ->
+      let exported =
+        Git.export_revisions Git.default_configuration ~store
+          ~repository:destination ~revisions:sources
+        |> require_ok Git.error_to_string
+      in
+      let first = List.hd exported.Git.revision_exports in
+      direct_process git
+        [
+          "-C";
+          destination;
+          "checkout";
+          "-q";
+          Git.object_id_to_hex first.Git.revision_export_commit;
+        ];
+      let visible =
+        Sys.readdir destination |> Array.to_list
+        |> List.filter (fun name -> not (String.equal name ".git"))
+      in
+      Alcotest.(check (list string)) "empty revision checkout" [] visible;
+      let snapshot = List.hd snapshots in
+      let capsule =
+        Capsule_store.create_capsule ~id:(export_capsule_id 42) ~title:"no-op"
+          ~description:"no-op revision" ~created_at:5L
+        |> require_ok Capsule_store.error_to_string
+      in
+      let revision =
+        Capsule_store.create_revision ~capsule ~parent:None
+          ~declared_base:snapshot ~expected_result:snapshot ~operations:[]
+          ~dependencies:[] ~evidence:[] ~boundaries:[]
+          ~provenance:Capsule_store.Created ~created_at:5L
+        |> require_ok Capsule_store.error_to_string
+      in
+      let source =
+        Capsule_store.make_revision_link
+          ~capsule:(Capsule_store.capsule_id capsule)
+          ~revision:(Capsule_store.revision_id revision)
+          ~object_id:
+            (Capsule_store.store_revision store revision
+            |> require_ok Capsule_store.error_to_string)
+      in
+      let no_op =
+        Git.export_revisions Git.default_configuration ~store
+          ~repository:destination ~revisions:[ source ]
+        |> require_ok Git.error_to_string
+      in
+      Alcotest.(check int)
+        "no-op revision still has one commit" 1
+        (List.length no_op.Git.revision_exports);
+      direct_process git [ "-C"; destination; "fsck"; "--full" ];
+      ());
+  revision_export_fixture ~nested_empty:true
+    (fun git destination store sources _snapshots ->
+      Git.export_revisions Git.default_configuration ~store
+        ~repository:destination ~revisions:sources
+      |> Result.fold
+           ~ok:(fun _ -> Alcotest.fail "nested empty revision exported")
+           ~error:(fun error ->
+             Alcotest.(check bool)
+               "structured nested empty revision rejection" true
+               (contains ~needle:"nested empty directory"
+                  (Git.error_to_string error)));
+      Alcotest.(check string)
+        "nested empty revision leaves no export ref" ""
+        (direct_capture git
+           [
+             "-C";
+             destination;
+             "for-each-ref";
+             "--format=%(refname)";
+             "refs/heads/paengi/capsule-linear-";
+           ]))
+
 let exports_empty_release_with_fallback_message () =
   release_export_fixture ~empty_root:true ~message:None
     (fun git destination store release ->
@@ -1909,6 +2328,15 @@ let () =
             imports_exact_tree_and_restarts_idempotently;
           Alcotest.test_case "release export checkout is exact" `Quick
             exports_release_as_exact_git_commit;
+          Alcotest.test_case "revision export is an exact linear chain" `Quick
+            exports_revisions_as_exact_linear_git_commits;
+          Alcotest.test_case "revision export rejects and retries explicitly"
+            `Quick
+            revision_export_rejects_invalid_selection_and_recovers_partial_mapping;
+          Alcotest.test_case
+            "revision export handles empty roots and rejects nested empty \
+             directories"
+            `Quick exports_empty_root_revision_and_rejects_nested_empty_revision;
           Alcotest.test_case "empty release export has deterministic fallback"
             `Quick exports_empty_release_with_fallback_message;
           Alcotest.test_case "release export ref collision and bounds reject"

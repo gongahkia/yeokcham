@@ -255,6 +255,9 @@ module Durable : sig
     Paengi_id.Capsule_id.t ->
     (resolved, error) result
 
+  val verify_link :
+    Paengi_store.repository -> revision_link -> (revision, error) result
+
   val show :
     Paengi_store.repository ->
     Paengi_id.Capsule_id.t ->

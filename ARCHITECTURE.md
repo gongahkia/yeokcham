@@ -636,6 +636,21 @@ nodes, invalid timestamps, bounds, malformed output, and ref collisions reject
 explicitly. Linear histories, configurable metadata/ref policy, merge
 topology, tags, and signatures are later work.
 
+M8-09 exports a nonempty caller-declared ordered list of immutable revision
+links. It replays and verifies each link before Git publication, requires every
+adjacent expected-result/declared-base snapshot pair to match, and writes the
+first result as a root commit then each later result with exactly one parent:
+the preceding exported commit. Its create-only target ref is a SHA-256
+domain-separated digest of the ordered capsule ID, revision ID, and revision
+object ID triples. Each commit has fixed `Paengi Export` metadata at that
+revision's `created_at` UTC timestamp, a fixed identity message, and an
+ADR-028 `export/commit -> exported-revision` mapping. The Git line does not
+encode capsule parents, dependencies, provenance, workspaces, conflicts,
+resolutions, or releases. Ref and per-commit mapping visibility remains
+separately retryable; malformed links, duplicate selections, chain mismatch,
+bounds, nested empty directories, ref collision, and source corruption reject
+explicitly.
+
 ## 14. Future synchronisation
 
 Do not implement before the local model is stable.

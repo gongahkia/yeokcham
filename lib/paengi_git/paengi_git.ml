@@ -1,4 +1,5 @@
 module Validation = Paengi_validation
+module Capsule_store = Paengi_capsule_store
 module Encoding = Paengi_encoding
 module Envelope = Paengi_envelope
 module Hash = Paengi_hash.Sha256
@@ -112,7 +113,23 @@ type release_export_result = {
   export_mapping : mapping;
 }
 
-type export_failure_point = Before_git_ref | Before_mapping_binding
+type revision_export_result = {
+  revision_export_source : Capsule_store.revision_link;
+  revision_export_snapshot : Snapshot.Snapshot.id;
+  revision_export_tree : object_id;
+  revision_export_commit : object_id;
+  revision_export_mapping : mapping;
+}
+
+type revision_sequence_export_result = {
+  revision_exports : revision_export_result list;
+  revision_export_target_ref : string;
+}
+
+type export_failure_point =
+  | Before_git_ref
+  | Before_mapping_binding
+  | Before_revision_mapping_binding of int
 
 type configuration = {
   git : string;
@@ -129,6 +146,7 @@ type configuration = {
   max_commit_parents : int;
   max_tag_bytes : int;
   max_tag_name_bytes : int;
+  max_export_commits : int;
 }
 
 let default_configuration =
@@ -147,12 +165,13 @@ let default_configuration =
     max_commit_parents = 4_096;
     max_tag_bytes = 8 * 1024 * 1024;
     max_tag_name_bytes = 1_024;
+    max_export_commits = 4_096;
   }
 
 let configuration_with ?git ?timeout_ms ?max_stdout_bytes ?max_stderr_bytes
     ?max_tree_bytes ?max_total_tree_bytes ?max_blob_bytes ?max_total_blob_bytes
     ?max_tree_entries ?max_depth ?max_commit_bytes ?max_commit_parents
-    ?max_tag_bytes ?max_tag_name_bytes configuration =
+    ?max_tag_bytes ?max_tag_name_bytes ?max_export_commits configuration =
   {
     git = Option.value ~default:configuration.git git;
     timeout_ms = Option.value ~default:configuration.timeout_ms timeout_ms;
@@ -181,6 +200,8 @@ let configuration_with ?git ?timeout_ms ?max_stdout_bytes ?max_stderr_bytes
       Option.value ~default:configuration.max_tag_bytes max_tag_bytes;
     max_tag_name_bytes =
       Option.value ~default:configuration.max_tag_name_bytes max_tag_name_bytes;
+    max_export_commits =
+      Option.value ~default:configuration.max_export_commits max_export_commits;
   }
 
 type error =
@@ -212,6 +233,7 @@ type error =
   | Export_limit_exceeded of { resource : string; limit : int; actual : int }
   | Unsupported_export_representation of string
   | Export_error of string
+  | Capsule_error of Capsule_store.error
   | Release_error of Release.error
   | Injected_interruption of string
   | Snapshot_error of Snapshot.error
@@ -267,6 +289,7 @@ let error_to_string = function
   | Unsupported_export_representation detail ->
       "unsupported Git export representation: " ^ detail
   | Export_error detail -> "Git export error: " ^ detail
+  | Capsule_error error -> Capsule_store.error_to_string error
   | Release_error error -> Release.error_to_string error
   | Injected_interruption point -> "injected interruption: " ^ point
   | Snapshot_error error -> Snapshot.error_to_string error
@@ -321,6 +344,7 @@ let validate_configuration configuration =
     || configuration.max_commit_parents <= 0
     || configuration.max_tag_bytes <= 0
     || configuration.max_tag_name_bytes <= 0
+    || configuration.max_export_commits <= 0
   then Error (Invalid_configuration "Git import limits must be positive")
   else if configuration.max_blob_bytes > Store.max_object_bytes then
     Error
@@ -2319,7 +2343,31 @@ let verify_mapping_subject store = function
         Snapshot.Snapshot.load store final_snapshot
         |> Result.map_error (fun error -> Snapshot_error error)
         |> Result.map (fun _ -> ())
-  | Imported_revision _ | Exported_revision _ -> Ok ()
+  | Imported_revision _ -> Ok ()
+  | Exported_revision { capsule; revision; revision_object; final_snapshot } ->
+      let source =
+        Capsule_store.make_revision_link ~capsule ~revision
+          ~object_id:revision_object
+      in
+      let* loaded =
+        Capsule_store.Durable.verify_link store source
+        |> Result.map_error (fun error ->
+            Mapping_error
+              ("exported revision mapping source is invalid: "
+              ^ Capsule_store.error_to_string error))
+      in
+      if
+        not
+          (Snapshot.Snapshot.equal_id final_snapshot
+             (Capsule_store.revision_expected_result loaded))
+      then
+        Error
+          (Mapping_error
+             "exported revision mapping snapshot disagrees with its revision")
+      else
+        Snapshot.Snapshot.load store final_snapshot
+        |> Result.map_error (fun error -> Snapshot_error error)
+        |> Result.map (fun _ -> ())
 
 let load_mapping store logical =
   let components = mapping_ref_components logical in
@@ -3213,8 +3261,12 @@ let build_export_tree ?runner configuration executable repository ~environment
 let export_ref release =
   "refs/heads/paengi/release-" ^ Id.Release_id.to_hex release
 
+let object_id_list_equal left right =
+  List.length left = List.length right
+  && List.for_all2 object_id_equal left right
+
 let verify_exported_commit ?runner configuration executable repository ~tree
-    ~commit ~timestamp ~message =
+    ~commit ~timestamp ~message ~parents =
   let* raw =
     read_exact_object ?runner configuration executable repository
       ~identity:commit ~kind:"commit" ~limit:configuration.max_commit_bytes
@@ -3229,16 +3281,44 @@ let verify_exported_commit ?runner configuration executable repository ~tree
   in
   if not (object_id_equal tree parsed.parsed_tree) then
     Error (Export_error "exported commit tree disagrees with constructed tree")
-  else if parsed.parsed_parents <> [] then
-    Error (Export_error "exported release commit must be a root commit")
+  else if not (object_id_list_equal parents parsed.parsed_parents) then
+    Error (Export_error "exported commit parents disagree with policy")
   else if
     not
       (String.equal identity parsed.parsed_metadata.parsed_author
       && String.equal identity parsed.parsed_metadata.parsed_committer)
   then Error (Export_error "exported commit metadata disagrees with policy")
   else if not (String.equal message parsed.parsed_metadata.parsed_message) then
-    Error (Export_error "exported commit message disagrees with release")
+    Error (Export_error "exported commit message disagrees with policy")
   else Ok ()
+
+let create_export_commit ?runner configuration executable repository
+    ~environment ~format ~tree ~timestamp ~message ~parents =
+  with_temporary_bytes "message" message (fun message_path ->
+      let parent_arguments =
+        List.concat_map
+          (fun parent -> [ "-p"; object_id_to_hex parent ])
+          parents
+      in
+      let* output =
+        run ?runner ~environment configuration executable repository
+          ~operation:"commit-tree"
+          ([
+             "-c";
+             "commit.gpgSign=false";
+             "--no-replace-objects";
+             "commit-tree";
+             object_id_to_hex tree;
+           ]
+          @ parent_arguments @ [ "-F"; message_path ])
+      in
+      let* output = single_line ~operation:"commit-tree" output in
+      let* commit = object_id_of_hex format output in
+      let* () =
+        verify_exported_commit ?runner configuration executable repository ~tree
+          ~commit ~timestamp ~message ~parents
+      in
+      Ok commit)
 
 let publish_export_ref ?runner configuration executable repository ~commit
     ~target_ref =
@@ -3321,67 +3401,317 @@ let export_release ?runner ?fail_at configuration ~store ~repository ~release =
           build_export_tree ?runner configuration executable repository
             ~environment ~format:inspection.object_format store files
         in
-        with_temporary_bytes "message" message (fun message_path ->
-            let* output =
-              run ?runner ~environment configuration executable repository
-                ~operation:"commit-tree"
-                [
-                  "-c";
-                  "commit.gpgSign=false";
-                  "--no-replace-objects";
-                  "commit-tree";
-                  object_id_to_hex tree;
-                  "-F";
-                  message_path;
-                ]
+        let* commit =
+          create_export_commit ?runner configuration executable repository
+            ~environment ~format:inspection.object_format ~tree ~timestamp
+            ~message ~parents:[]
+        in
+        let target_ref = export_ref (Release.release_id release) in
+        let* () =
+          match fail_at with
+          | Some Before_git_ref ->
+              Error (Injected_interruption "before Git ref publication")
+          | Some Before_mapping_binding
+          | Some (Before_revision_mapping_binding _)
+          | None ->
+              Ok ()
+        in
+        let* () =
+          publish_export_ref ?runner configuration executable repository ~commit
+            ~target_ref
+        in
+        let* _ =
+          run ?runner configuration executable repository ~operation:"fsck"
+            [ "--no-replace-objects"; "fsck"; "--full"; "--no-dangling" ]
+        in
+        let* () =
+          match fail_at with
+          | Some Before_mapping_binding ->
+              Error (Injected_interruption "before Git mapping publication")
+          | Some Before_git_ref
+          | Some (Before_revision_mapping_binding _)
+          | None ->
+              Ok ()
+        in
+        let* mapping =
+          create_mapping ~direction:Export ~git_object:commit ~git_kind:Commit
+            ~subject:
+              (Exported_release
+                 {
+                   release = Release.release_id release;
+                   release_object;
+                   final_snapshot = snapshot_id;
+                 })
+        in
+        let* mapping = publish_mapping store mapping in
+        let* mapping = load_mapping store mapping.id in
+        Ok
+          {
+            export_release = Release.release_id release;
+            export_release_object = release_object;
+            export_snapshot = snapshot_id;
+            export_tree = tree;
+            export_commit = commit;
+            export_target_ref = target_ref;
+            export_mapping = mapping;
+          })
+
+type prepared_revision_export = {
+  prepared_source : Capsule_store.revision_link;
+  prepared_revision : Capsule_store.revision;
+  prepared_snapshot : Snapshot.Snapshot.id;
+  prepared_timestamp : int64;
+  prepared_message : string;
+}
+
+type emitted_revision_export = {
+  emitted_source : Capsule_store.revision_link;
+  emitted_snapshot : Snapshot.Snapshot.id;
+  emitted_tree : object_id;
+  emitted_commit : object_id;
+}
+
+let revision_sources_equal left right =
+  Id.Capsule_id.equal
+    (Capsule_store.revision_link_capsule left)
+    (Capsule_store.revision_link_capsule right)
+  && Id.Capsule_revision_id.equal
+       (Capsule_store.revision_link_revision left)
+       (Capsule_store.revision_link_revision right)
+
+let validate_revision_sources configuration revisions =
+  let actual = List.length revisions in
+  if actual = 0 then
+    Error (Export_error "revision export requires one or more links")
+  else if actual > configuration.max_export_commits then
+    Error
+      (Export_limit_exceeded
+         {
+           resource = "revision export commits";
+           limit = configuration.max_export_commits;
+           actual;
+         })
+  else
+    let rec distinct seen = function
+      | [] -> Ok ()
+      | source :: rest ->
+          if List.exists (revision_sources_equal source) seen then
+            Error
+              (Export_error
+                 "revision export selection repeats a capsule/revision identity")
+          else distinct (source :: seen) rest
+    in
+    distinct [] revisions
+
+let add_u32 buffer value =
+  List.iter
+    (fun shift ->
+      Buffer.add_char buffer (Char.chr ((value lsr shift) land 0xff)))
+    [ 24; 16; 8; 0 ]
+
+let add_sequence_component buffer value =
+  add_u32 buffer (String.length value);
+  Buffer.add_string buffer value
+
+let revision_export_ref revisions =
+  let bytes = Buffer.create (32 + (List.length revisions * 96)) in
+  Buffer.add_string bytes "paengi:git-capsule-linear:v1\000";
+  List.iter
+    (fun source ->
+      add_sequence_component bytes
+        (Id.Capsule_id.to_bytes (Capsule_store.revision_link_capsule source));
+      add_sequence_component bytes
+        (Id.Capsule_revision_id.to_bytes
+           (Capsule_store.revision_link_revision source));
+      add_sequence_component bytes
+        (Store.Stored_object_id.to_raw_bytes
+           (Capsule_store.revision_link_object source)))
+    revisions;
+  let digest =
+    Hash.digest_string (Buffer.contents bytes) |> Hash.to_raw_string
+  in
+  "refs/heads/paengi/capsule-linear-" ^ bytes_to_hex digest
+
+let revision_export_message source =
+  "Paengi capsule "
+  ^ Id.Capsule_id.to_hex (Capsule_store.revision_link_capsule source)
+  ^ " revision "
+  ^ Id.Capsule_revision_id.to_hex (Capsule_store.revision_link_revision source)
+  ^ "\n"
+
+let prepare_revision_export store source =
+  let* revision =
+    Capsule_store.Durable.verify_link store source
+    |> Result.map_error (fun error -> Capsule_error error)
+  in
+  let timestamp = Capsule_store.revision_created_at revision in
+  if Int64.compare timestamp 0L < 0 then
+    Error (Export_error "revision creation timestamp must be nonnegative")
+  else
+    let snapshot = Capsule_store.revision_expected_result revision in
+    let* _ =
+      Snapshot.Snapshot.load store snapshot
+      |> Result.map_error (fun error -> Snapshot_error error)
+    in
+    Ok
+      {
+        prepared_source = source;
+        prepared_revision = revision;
+        prepared_snapshot = snapshot;
+        prepared_timestamp = timestamp;
+        prepared_message = revision_export_message source;
+      }
+
+let validate_revision_export_chain revisions =
+  let rec loop = function
+    | [] | [ _ ] -> Ok ()
+    | current :: (next :: _ as rest) ->
+        if
+          Snapshot.Snapshot.equal_id current.prepared_snapshot
+            (Capsule_store.revision_declared_base next.prepared_revision)
+        then loop rest
+        else
+          Error
+            (Export_error
+               "selected revisions do not form an \
+                expected-result/declared-base chain")
+  in
+  loop revisions
+
+let fail_before_revision_mapping fail_at index =
+  match fail_at with
+  | Some Before_mapping_binding when Int.equal index 0 ->
+      Error (Injected_interruption "before Git revision mapping publication")
+  | Some (Before_revision_mapping_binding target) when Int.equal target index ->
+      Error
+        (Injected_interruption
+           ("before Git revision mapping publication at index "
+          ^ string_of_int index))
+  | Some Before_git_ref
+  | Some Before_mapping_binding
+  | Some (Before_revision_mapping_binding _)
+  | None ->
+      Ok ()
+
+let export_revisions ?runner ?fail_at configuration ~store ~repository
+    ~revisions =
+  let* configuration = validate_configuration configuration in
+  let* repository = validate_repository_path repository in
+  let* () = validate_revision_sources configuration revisions in
+  let* () =
+    match fail_at with
+    | Some (Before_revision_mapping_binding index)
+      when index < 0 || index >= List.length revisions ->
+        Error (Export_error "injected revision mapping index is out of range")
+    | Some Before_git_ref
+    | Some Before_mapping_binding
+    | Some (Before_revision_mapping_binding _)
+    | None ->
+        Ok ()
+  in
+  let* executable =
+    match executable_path configuration.git with
+    | Some executable -> Ok executable
+    | None -> Error (Git_missing configuration.git)
+  in
+  let* inspection = inspect ?runner configuration ~repository in
+  Store.with_lock store ~name:"git-export"
+    ~on_error:(fun error -> Store_error error)
+    (fun () ->
+      let* prepared =
+        List.fold_left
+          (fun result source ->
+            let* reversed = result in
+            let* prepared = prepare_revision_export store source in
+            Ok (prepared :: reversed))
+          (Ok []) revisions
+        |> Result.map List.rev
+      in
+      let* () = validate_revision_export_chain prepared in
+      let rec emit previous reversed = function
+        | [] -> Ok (List.rev reversed)
+        | current :: rest ->
+            let environment = export_environment current.prepared_timestamp in
+            let* snapshot =
+              Snapshot.Snapshot.load store current.prepared_snapshot
+              |> Result.map_error (fun error -> Snapshot_error error)
             in
-            let* output = single_line ~operation:"commit-tree" output in
-            let* commit = object_id_of_hex inspection.object_format output in
-            let* () =
-              verify_exported_commit ?runner configuration executable repository
-                ~tree ~commit ~timestamp ~message
+            let* files = export_files configuration store snapshot in
+            let* tree =
+              build_export_tree ?runner configuration executable repository
+                ~environment ~format:inspection.object_format store files
             in
-            let target_ref = export_ref (Release.release_id release) in
-            let* () =
-              match fail_at with
-              | Some Before_git_ref ->
-                  Error (Injected_interruption "before Git ref publication")
-              | Some Before_mapping_binding | None -> Ok ()
+            let parents = Option.to_list previous in
+            let* commit =
+              create_export_commit ?runner configuration executable repository
+                ~environment ~format:inspection.object_format ~tree
+                ~timestamp:current.prepared_timestamp
+                ~message:current.prepared_message ~parents
             in
-            let* () =
-              publish_export_ref ?runner configuration executable repository
-                ~commit ~target_ref
-            in
-            let* _ =
-              run ?runner configuration executable repository ~operation:"fsck"
-                [ "--no-replace-objects"; "fsck"; "--full"; "--no-dangling" ]
-            in
-            let* () =
-              match fail_at with
-              | Some Before_mapping_binding ->
-                  Error (Injected_interruption "before Git mapping publication")
-              | Some Before_git_ref | None -> Ok ()
-            in
+            emit (Some commit)
+              ({
+                 emitted_source = current.prepared_source;
+                 emitted_snapshot = current.prepared_snapshot;
+                 emitted_tree = tree;
+                 emitted_commit = commit;
+               }
+              :: reversed)
+              rest
+      in
+      let* emitted = emit None [] prepared in
+      let target_ref = revision_export_ref revisions in
+      let tip = (List.hd (List.rev emitted)).emitted_commit in
+      let* () =
+        match fail_at with
+        | Some Before_git_ref ->
+            Error (Injected_interruption "before Git ref publication")
+        | Some Before_mapping_binding
+        | Some (Before_revision_mapping_binding _)
+        | None ->
+            Ok ()
+      in
+      let* () =
+        publish_export_ref ?runner configuration executable repository
+          ~commit:tip ~target_ref
+      in
+      let* _ =
+        run ?runner configuration executable repository ~operation:"fsck"
+          [ "--no-replace-objects"; "fsck"; "--full"; "--no-dangling" ]
+      in
+      let rec publish index reversed = function
+        | [] -> Ok (List.rev reversed)
+        | current :: rest ->
+            let* () = fail_before_revision_mapping fail_at index in
             let* mapping =
-              create_mapping ~direction:Export ~git_object:commit
-                ~git_kind:Commit
+              create_mapping ~direction:Export
+                ~git_object:current.emitted_commit ~git_kind:Commit
                 ~subject:
-                  (Exported_release
+                  (Exported_revision
                      {
-                       release = Release.release_id release;
-                       release_object;
-                       final_snapshot = snapshot_id;
+                       capsule =
+                         Capsule_store.revision_link_capsule
+                           current.emitted_source;
+                       revision =
+                         Capsule_store.revision_link_revision
+                           current.emitted_source;
+                       revision_object =
+                         Capsule_store.revision_link_object
+                           current.emitted_source;
+                       final_snapshot = current.emitted_snapshot;
                      })
             in
             let* mapping = publish_mapping store mapping in
             let* mapping = load_mapping store mapping.id in
-            Ok
-              {
-                export_release = Release.release_id release;
-                export_release_object = release_object;
-                export_snapshot = snapshot_id;
-                export_tree = tree;
-                export_commit = commit;
-                export_target_ref = target_ref;
-                export_mapping = mapping;
-              }))
+            publish (index + 1)
+              ({
+                 revision_export_source = current.emitted_source;
+                 revision_export_snapshot = current.emitted_snapshot;
+                 revision_export_tree = current.emitted_tree;
+                 revision_export_commit = current.emitted_commit;
+                 revision_export_mapping = mapping;
+               }
+              :: reversed)
+              rest
+      in
+      let* exports = publish 0 [] emitted in
+      Ok { revision_exports = exports; revision_export_target_ref = target_ref })

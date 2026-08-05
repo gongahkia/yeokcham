@@ -178,6 +178,14 @@ Generated bounded releases check checkout bytes/mode. Fixtures reject nested
 empty directories and inject pre-ref/pre-mapping interruptions, which leave an
 explicit retry path without a changed Paengi release.
 
+M8-09 Git-export checks explicit revision links by replaying each source,
+checking exact result/base chaining, root/sole-parent linearity, exact regular
+bytes, executable mode, symlink target, empty-root handling, nested-empty
+rejection, mapping source verification, `git fsck --full`, deterministic retry,
+ref collision, bounded selection, and pre-ref/between-mapping interruption.
+The bounded generated test checks two generated snapshots for exact checkout,
+sole-parent order, stable mappings/ref, retry, and `fsck`.
+
 #### P9 — Dependency safety
 
 No materialisation silently omits an unsatisfied required dependency.

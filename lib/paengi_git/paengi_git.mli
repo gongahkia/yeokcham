@@ -58,7 +58,23 @@ type release_export_result = {
   export_mapping : mapping;
 }
 
-type export_failure_point = Before_git_ref | Before_mapping_binding
+type revision_export_result = {
+  revision_export_source : Paengi_capsule_store.revision_link;
+  revision_export_snapshot : Paengi_snapshot.Snapshot.id;
+  revision_export_tree : object_id;
+  revision_export_commit : object_id;
+  revision_export_mapping : mapping;
+}
+
+type revision_sequence_export_result = {
+  revision_exports : revision_export_result list;
+  revision_export_target_ref : string;
+}
+
+type export_failure_point =
+  | Before_git_ref
+  | Before_mapping_binding
+  | Before_revision_mapping_binding of int
 
 type configuration = {
   git : string;
@@ -75,6 +91,7 @@ type configuration = {
   max_commit_parents : int;
   max_tag_bytes : int;
   max_tag_name_bytes : int;
+  max_export_commits : int;
 }
 
 val default_configuration : configuration
@@ -94,6 +111,7 @@ val configuration_with :
   ?max_commit_parents:int ->
   ?max_tag_bytes:int ->
   ?max_tag_name_bytes:int ->
+  ?max_export_commits:int ->
   configuration ->
   configuration
 
@@ -126,6 +144,7 @@ type error =
   | Export_limit_exceeded of { resource : string; limit : int; actual : int }
   | Unsupported_export_representation of string
   | Export_error of string
+  | Capsule_error of Paengi_capsule_store.error
   | Release_error of Paengi_release.error
   | Injected_interruption of string
   | Snapshot_error of Paengi_snapshot.error
@@ -182,6 +201,15 @@ val export_release :
   repository:string ->
   release:Paengi_id.Release_id.t ->
   (release_export_result, error) result
+
+val export_revisions :
+  ?runner:(module Paengi_validation.Process_runner) ->
+  ?fail_at:export_failure_point ->
+  configuration ->
+  store:Paengi_store.repository ->
+  repository:string ->
+  revisions:Paengi_capsule_store.revision_link list ->
+  (revision_sequence_export_result, error) result
 
 val mapping_id : mapping -> Paengi_id.Git_mapping_id.t
 val mapping_direction : mapping -> mapping_direction

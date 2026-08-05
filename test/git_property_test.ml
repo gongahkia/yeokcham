@@ -335,6 +335,217 @@ let generated_release_exports =
     QCheck2.Gen.(pair (string_size (int_range 0 4096)) bool)
     export_replays_generated_release
 
+let export_replays_generated_revision_sequence
+    ((first_bytes, second_bytes), executable) =
+  match git_path () with
+  | None -> false
+  | Some git ->
+      with_directory "paengi-git-revision-export-property-" (fun root ->
+          let worktree = Filename.concat root "worktree" in
+          let destination = Filename.concat root "destination" in
+          Unix.mkdir worktree 0o700;
+          Unix.mkdir destination 0o700;
+          write_file (Filename.concat worktree "base") "base\n";
+          match Store.init ~root:worktree with
+          | Error _ -> false
+          | Ok store -> (
+              let scratch = Scratch.open_repository store in
+              match Snapshot.scan ~root:worktree ~store with
+              | Error _ -> false
+              | Ok (base, _) -> (
+                  match
+                    Scratch.create_initial scratch ~snapshot:base ~created_at:0L
+                  with
+                  | Error _ -> false
+                  | Ok initial -> (
+                      Unix.unlink (Filename.concat worktree "base");
+                      write_file (Filename.concat worktree "first") first_bytes;
+                      if executable then
+                        Unix.chmod (Filename.concat worktree "first") 0o755;
+                      match Snapshot.scan ~root:worktree ~store with
+                      | Error _ -> false
+                      | Ok (first_snapshot, _) -> (
+                          let initial = Scratch.Checkpoint.id initial in
+                          let first_checkpoint =
+                            export_checkpoint scratch first_snapshot 1L
+                          in
+                          let first_capsule = export_capsule_id 140 in
+                          match
+                            Capsule_store.Durable.create_from_checkpoints ~store
+                              ~scratch ~id:first_capsule ~title:"first"
+                              ~description:"property" ~dependencies:[]
+                              ~evidence:[] ~from:initial
+                              ~target:first_checkpoint ~created_at:2L
+                              ~changed_at:2L ()
+                          with
+                          | Error _ -> false
+                          | Ok first -> (
+                              write_file
+                                (Filename.concat worktree "second")
+                                second_bytes;
+                              match Snapshot.scan ~root:worktree ~store with
+                              | Error _ -> false
+                              | Ok (second_snapshot, _) -> (
+                                  let second_checkpoint =
+                                    export_checkpoint scratch second_snapshot 3L
+                                  in
+                                  let second_capsule = export_capsule_id 141 in
+                                  match
+                                    Capsule_store.Durable
+                                    .create_from_checkpoints ~store ~scratch
+                                      ~id:second_capsule ~title:"second"
+                                      ~description:"property" ~dependencies:[]
+                                      ~evidence:[] ~from:first_checkpoint
+                                      ~target:second_checkpoint ~created_at:4L
+                                      ~changed_at:4L ()
+                                  with
+                                  | Error _ -> false
+                                  | Ok second -> (
+                                      let source resolved =
+                                        let revision =
+                                          Capsule_store.Durable
+                                          .resolved_revision resolved
+                                        in
+                                        Capsule_store.make_revision_link
+                                          ~capsule:
+                                            (Capsule_store.revision_capsule
+                                               revision)
+                                          ~revision:
+                                            (Capsule_store.revision_id revision)
+                                          ~object_id:
+                                            (Capsule_store.Durable
+                                             .resolved_revision_object resolved)
+                                      in
+                                      let revisions =
+                                        [ source first; source second ]
+                                      in
+                                      if
+                                        not
+                                          (direct_process git
+                                             [ "init"; "-q"; destination ])
+                                      then false
+                                      else
+                                        match
+                                          ( Git.export_revisions
+                                              Git.default_configuration ~store
+                                              ~repository:destination ~revisions,
+                                            Git.export_revisions
+                                              Git.default_configuration ~store
+                                              ~repository:destination ~revisions
+                                          )
+                                        with
+                                        | Ok once, Ok repeated -> (
+                                            match
+                                              ( once.Git.revision_exports,
+                                                repeated.Git.revision_exports )
+                                            with
+                                            | ( [ first_export; second_export ],
+                                                [
+                                                  repeated_first;
+                                                  repeated_second;
+                                                ] ) ->
+                                                let first_commit =
+                                                  Git.object_id_to_hex
+                                                    first_export
+                                                      .Git
+                                                       .revision_export_commit
+                                                in
+                                                let second_commit =
+                                                  Git.object_id_to_hex
+                                                    second_export
+                                                      .Git
+                                                       .revision_export_commit
+                                                in
+                                                direct_process git
+                                                  [
+                                                    "-C";
+                                                    destination;
+                                                    "checkout";
+                                                    "-q";
+                                                    first_commit;
+                                                  ]
+                                                && String.equal first_bytes
+                                                     (read_file
+                                                        (Filename.concat
+                                                           destination "first"))
+                                                && Bool.equal executable
+                                                     ((Unix.stat
+                                                         (Filename.concat
+                                                            destination "first"))
+                                                        .Unix.st_perm land 0o111
+                                                     <> 0)
+                                                && (not
+                                                      (Sys.file_exists
+                                                         (Filename.concat
+                                                            destination "second")))
+                                                && direct_process git
+                                                     [
+                                                       "-C";
+                                                       destination;
+                                                       "checkout";
+                                                       "-q";
+                                                       second_commit;
+                                                     ]
+                                                && String.equal second_bytes
+                                                     (read_file
+                                                        (Filename.concat
+                                                           destination "second"))
+                                                && Option.equal String.equal
+                                                     (Some first_commit)
+                                                     (direct_capture git
+                                                        [
+                                                          "-C";
+                                                          destination;
+                                                          "show";
+                                                          "-s";
+                                                          "--format=%P";
+                                                          second_commit;
+                                                        ])
+                                                && String.equal
+                                                     once
+                                                       .Git
+                                                        .revision_export_target_ref
+                                                     repeated
+                                                       .Git
+                                                        .revision_export_target_ref
+                                                && Id.Git_mapping_id.equal
+                                                     (Git.mapping_id
+                                                        first_export
+                                                          .Git
+                                                           .revision_export_mapping)
+                                                     (Git.mapping_id
+                                                        repeated_first
+                                                          .Git
+                                                           .revision_export_mapping)
+                                                && Id.Git_mapping_id.equal
+                                                     (Git.mapping_id
+                                                        second_export
+                                                          .Git
+                                                           .revision_export_mapping)
+                                                     (Git.mapping_id
+                                                        repeated_second
+                                                          .Git
+                                                           .revision_export_mapping)
+                                                && direct_process git
+                                                     [
+                                                       "-C";
+                                                       destination;
+                                                       "fsck";
+                                                       "--full";
+                                                     ]
+                                            | _ -> false)
+                                        | Error _, _ | _, Error _ -> false))))))
+              ))
+
+let generated_revision_exports =
+  QCheck2.Test.make ~count:10
+    ~name:"Git revision export preserves generated linear checkout and retry"
+    QCheck2.Gen.(
+      pair
+        (pair (string_size (int_range 0 2048)) (string_size (int_range 0 2048)))
+        bool)
+    export_replays_generated_revision_sequence
+
 let option_of_result = function Ok value -> Some value | Error _ -> None
 
 let import_replays_generated_commit (bytes, executable) =
@@ -726,6 +937,9 @@ let () =
           QCheck_alcotest.to_alcotest ~speed_level:`Quick
             ~rand:(state_for "generated-release-exports")
             generated_release_exports;
+          QCheck_alcotest.to_alcotest ~speed_level:`Quick
+            ~rand:(state_for "generated-revision-exports")
+            generated_revision_exports;
           QCheck_alcotest.to_alcotest ~speed_level:`Quick
             ~rand:(state_for "generated-commits")
             generated_commits;
