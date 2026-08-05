@@ -38,7 +38,7 @@ Each migrated issue has an immutable hidden marker, `<!-- paengi-todo-id: ID -->
 | M9-04 | [#114](https://github.com/gongahkia/paengi/issues/114) | M9 Rust Semantic Sidecar | implemented; verified by bounded Rust fixture oracles and focused/property coverage |
 | M9-05 | [#116](https://github.com/gongahkia/paengi/issues/116) | M9 Rust Semantic Sidecar | implemented; verified by language-separated schema report and focused/property coverage |
 | M9-06 | [#118](https://github.com/gongahkia/paengi/issues/118) | M9 Rust Semantic Sidecar | implemented; verified by focused Rust adapter/fixture coverage and checked comparison schemas |
-| M10-01 | [#1](https://github.com/gongahkia/paengi/issues/1) | M10 Local Synchronisation | ADR-038 proposed; awaiting approval |
+| M10-01 | [#1](https://github.com/gongahkia/paengi/issues/1) | M10 Local Synchronisation | ADR-038 accepted; implementation in progress |
 | M10-02 | [#2](https://github.com/gongahkia/paengi/issues/2) | M10 Local Synchronisation | created |
 | M10-03 | [#3](https://github.com/gongahkia/paengi/issues/3) | M10 Local Synchronisation | created |
 | M10-04 | [#4](https://github.com/gongahkia/paengi/issues/4) | M10 Local Synchronisation | created |
