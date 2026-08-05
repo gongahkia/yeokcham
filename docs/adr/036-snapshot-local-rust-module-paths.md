@@ -1,8 +1,8 @@
 # ADR-036 — Snapshot-local Rust module paths
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-05
-- Deciders: maintainer (approval pending)
+- Deciders: maintainer (approved 2026-08-05)
 - Supersedes: None
 - Superseded by: None
 
