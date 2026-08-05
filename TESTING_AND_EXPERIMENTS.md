@@ -171,6 +171,15 @@ mutate the source Git working tree after import, reopen Paengi storage, and
 prove materialisation still matches the imported tree; corrupt mappings or
 objects reject explicitly.
 
+M8-16 additionally imports one complete supported local Git repository into a
+fresh Paengi store: its merge commit, ordered parents, tree, regular/executable
+and symlink blobs, lightweight and annotated tags, opaque author/committer and
+annotation provenance, and every bridge mapping. The fixture reopens all
+durable evidence, mutates the source Git worktree, then materialises the stored
+import into a separate destination to prove the byte/mode/symlink oracle does
+not depend on live Git files. Unsupported interchange is documented in
+`docs/GIT_INTERCHANGE.md`.
+
 M8-08 Git-export checks a verified release's Git checkout for exact regular
 bytes, executable mode, symlink target, and nested-tree structure; it runs
 `git fsck --full`, reopens the mapping, and proves deterministic retry.

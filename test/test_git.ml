@@ -397,6 +397,11 @@ let commit_fixture run =
       direct_process git
         [ "-C"; repository; "config"; "user.email"; "test@example.invalid" ];
       write_file (Filename.concat repository "base") "base\n";
+      write_file (Filename.concat repository "run") "#!/bin/sh\nprintf base\n";
+      Unix.chmod (Filename.concat repository "run") 0o755;
+      Unix.mkdir (Filename.concat repository "nested") 0o700;
+      write_file (Filename.concat repository "nested/data") "nested\n";
+      Unix.symlink "base" (Filename.concat repository "link");
       direct_process git [ "-C"; repository; "add"; "--all" ];
       direct_process git [ "-C"; repository; "commit"; "-q"; "-m"; "base" ];
       let base = direct_capture git [ "-C"; repository; "rev-parse"; "HEAD" ] in
@@ -557,6 +562,175 @@ let imports_merge_commit_and_ordered_parents () =
             (read_file (Filename.concat destination "main"));
           Alcotest.(check string)
             "side bytes" "side\n"
+            (read_file (Filename.concat destination "side"))))
+
+let imports_complete_existing_repository () =
+  commit_fixture (fun repository store format commit expected_parents ->
+      let git = git_path () in
+      let commit_hex = Git.object_id_to_hex commit in
+      direct_process git [ "-C"; repository; "tag"; "lightweight"; commit_hex ];
+      direct_process git
+        [
+          "-C";
+          repository;
+          "tag";
+          "-a";
+          "annotated";
+          "-m";
+          "complete import annotation";
+          commit_hex;
+        ];
+      let tree =
+        direct_capture git
+          [ "-C"; repository; "show"; "-s"; "--format=%T"; commit_hex ]
+        |> Git.object_id_of_hex format
+        |> require_ok Git.error_to_string
+      in
+      let imported_tree =
+        Git.import_tree Git.default_configuration ~store ~repository ~tree
+        |> require_ok Git.error_to_string
+      in
+      let imported_commit =
+        Git.import_commit Git.default_configuration ~store ~repository ~commit
+        |> require_ok Git.error_to_string
+      in
+      let repeated_commit =
+        Git.import_commit Git.default_configuration ~store ~repository ~commit
+        |> require_ok Git.error_to_string
+      in
+      let lightweight =
+        Git.import_tag Git.default_configuration ~store ~repository
+          ~tag:"lightweight"
+        |> require_ok Git.error_to_string
+      in
+      let annotated =
+        Git.import_tag Git.default_configuration ~store ~repository
+          ~tag:"annotated"
+        |> require_ok Git.error_to_string
+      in
+      let transition = imported_commit.Git.imported_transition in
+      Alcotest.(check bool)
+        "commit and tree import share snapshot" true
+        (Snapshot.Snapshot.equal_id imported_tree.Git.snapshot
+           (Git.imported_transition_snapshot transition));
+      Alcotest.(check (list string))
+        "complete import preserves ordered parents" expected_parents
+        (Git.imported_transition_parents transition
+        |> List.map Git.object_id_to_hex);
+      Alcotest.(check bool)
+        "complete import retains author provenance" true
+        (Option.is_some (Git.imported_transition_author transition));
+      Alcotest.(check bool)
+        "complete import retains committer provenance" true
+        (Option.is_some (Git.imported_transition_committer transition));
+      Alcotest.(check bool)
+        "complete import retry is stable" true
+        (Id.Imported_transition_id.equal
+           (Git.imported_transition_id transition)
+           (Git.imported_transition_id repeated_commit.Git.imported_transition));
+      let expect_mapping label mapping predicate =
+        Git.load_mapping store (Git.mapping_id mapping)
+        |> require_ok Git.error_to_string
+        |> Git.mapping_subject |> predicate
+        |> Alcotest.(check bool) label true
+      in
+      expect_mapping "tree mapping names snapshot" imported_tree.Git.mapping
+        (function
+        | Git.Imported_snapshot snapshot ->
+            Snapshot.Snapshot.equal_id snapshot imported_tree.Git.snapshot
+        | Git.Imported_transition _ | Git.Imported_tag _
+        | Git.Imported_revision _ | Git.Exported_release _
+        | Git.Exported_revision _ ->
+            false);
+      expect_mapping "commit mapping names opaque transition"
+        imported_commit.Git.commit_mapping (function
+        | Git.Imported_transition { transition = identity; _ } ->
+            Id.Imported_transition_id.equal identity
+              (Git.imported_transition_id transition)
+        | Git.Imported_snapshot _ | Git.Imported_tag _ | Git.Imported_revision _
+        | Git.Exported_release _ | Git.Exported_revision _ ->
+            false);
+      expect_mapping "lightweight tag mapping names opaque tag"
+        lightweight.Git.tag_mapping (function
+        | Git.Imported_tag { tag; _ } ->
+            Id.Imported_tag_id.equal tag
+              (Git.imported_tag_id lightweight.Git.imported_tag)
+        | Git.Imported_snapshot _ | Git.Imported_transition _
+        | Git.Imported_revision _ | Git.Exported_release _
+        | Git.Exported_revision _ ->
+            false);
+      expect_mapping "annotated tag mapping names opaque tag"
+        annotated.Git.tag_mapping (function
+        | Git.Imported_tag { tag; _ } ->
+            Id.Imported_tag_id.equal tag
+              (Git.imported_tag_id annotated.Git.imported_tag)
+        | Git.Imported_snapshot _ | Git.Imported_transition _
+        | Git.Imported_revision _ | Git.Exported_release _
+        | Git.Exported_revision _ ->
+            false);
+      let reopened =
+        Store.open_repository ~root:(Store.root store)
+        |> require_ok Store.error_to_string
+      in
+      let reopened_transition =
+        Git.load_imported_transition reopened
+          (Git.imported_transition_id transition)
+        |> require_ok Git.error_to_string
+      in
+      Alcotest.(check string)
+        "reopened transition names source commit" commit_hex
+        (Git.imported_transition_commit reopened_transition
+        |> Git.object_id_to_hex);
+      let reopened_annotated =
+        Git.load_imported_tag reopened
+          (Git.imported_tag_id annotated.Git.imported_tag)
+        |> require_ok Git.error_to_string
+      in
+      Alcotest.(check string)
+        "reopened annotated tag names source commit" commit_hex
+        (Git.imported_tag_target reopened_annotated |> Git.object_id_to_hex);
+      let annotation =
+        match Git.imported_tag_annotation reopened_annotated with
+        | Some annotation -> annotation
+        | None -> Alcotest.fail "annotated tag lost opaque bytes"
+      in
+      Alcotest.(check bool)
+        "annotated tag retains raw provenance" true
+        (contains ~needle:"complete import annotation"
+           (Snapshot.Content.load reopened annotation
+           |> require_ok Snapshot.error_to_string));
+      write_file (Filename.concat repository "base") "changed\n";
+      Unix.chmod (Filename.concat repository "run") 0o644;
+      Unix.unlink (Filename.concat repository "link");
+      Unix.symlink "nested/data" (Filename.concat repository "link");
+      let snapshot =
+        Snapshot.Snapshot.load reopened
+          (Git.imported_transition_snapshot reopened_transition)
+        |> require_ok Snapshot.error_to_string
+      in
+      with_directory "paengi-git-complete-import-materialized-"
+        (fun destination ->
+          Snapshot.Materialize.write ~destination reopened snapshot
+          |> require_ok Snapshot.Materialize.error_to_string;
+          Alcotest.(check string)
+            "complete import regular bytes" "base\n"
+            (read_file (Filename.concat destination "base"));
+          Alcotest.(check string)
+            "complete import nested bytes" "nested\n"
+            (read_file (Filename.concat destination "nested/data"));
+          Alcotest.(check bool)
+            "complete import executable mode" true
+            ((Unix.stat (Filename.concat destination "run")).Unix.st_perm
+             land 0o111
+            <> 0);
+          Alcotest.(check string)
+            "complete import symlink target" "base"
+            (Unix.readlink (Filename.concat destination "link"));
+          Alcotest.(check string)
+            "complete import main branch bytes" "main\n"
+            (read_file (Filename.concat destination "main"));
+          Alcotest.(check string)
+            "complete import side branch bytes" "side\n"
             (read_file (Filename.concat destination "side"))))
 
 let imports_commit_metadata_as_exact_bytes () =
@@ -2598,6 +2772,9 @@ let () =
             `Quick nested_empty_directory_rejects_before_export_ref;
           Alcotest.test_case "merge commit import preserves parent order" `Quick
             imports_merge_commit_and_ordered_parents;
+          Alcotest.test_case
+            "complete repository import retains bridge evidence" `Quick
+            imports_complete_existing_repository;
           Alcotest.test_case "commit metadata retains exact source bytes" `Quick
             imports_commit_metadata_as_exact_bytes;
           Alcotest.test_case "lightweight and annotated tags retain provenance"
