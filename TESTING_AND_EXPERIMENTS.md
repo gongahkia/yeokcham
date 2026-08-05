@@ -514,6 +514,17 @@ property-test` build the helper before their relevant coverage. These checks do
 not establish semantic equivalence, module resolution, macro expansion, or
 rewrite correctness; any timing record is host-specific evidence only.
 
+M9-04 adds `paengi_rust_fixtures`, a deterministic version-1 dataset of six
+bounded virtual Rust source-map workloads: rename after insertion, within-file
+move, cross-module move, duplicate ambiguity, macro-heavy fallback, and parser
+damage fallback. Every supported case has an exact `paengi_textual_patch` byte
+oracle; ambiguity remains a structured conflict. Fallback cases verify the
+same independent textual oracle while the Rust adapter reports no semantic
+authority. Fixture maps, paths, spans, fallback kinds, and module observations
+are checked by focused tests; a seeded property varies bounded prefix shifts.
+This is input for a later language comparison, not a Rust rename/move engine or
+a cross-language result.
+
 ## 10. Release gates
 
 ### Model prototype gate

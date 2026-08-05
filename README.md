@@ -91,7 +91,10 @@ result; byte/text operations stay available. See
 snapshot-local fallback assessment: macro definitions/invocations, outer
 attributes, and parser damage return bounded canonical
 `textual-fallback-required` facts only; no fact expands code or authorizes a
-semantic operation. See the [helper contract](tools/paengi-rust-adapter/README.md).
+semantic operation. M9-04 adds bounded Rust rename/move fixture maps with
+exact textual byte oracles and explicit ambiguity/macro/parser fallback cases;
+they do not implement Rust rename or move inference. See the
+[helper contract](tools/paengi-rust-adapter/README.md).
 
 Milestone 8 imports one Git tree/commit/tag through bounded direct argv and
 exports one Paengi release as a deterministic root Git commit. Imports preserve

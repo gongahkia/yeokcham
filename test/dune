@@ -31,6 +31,15 @@
   (source_tree fixtures/rust-adapter)))
 
 (test
+ (name test_rust_retarget_fixtures)
+ (modules test_rust_retarget_fixtures)
+ (libraries
+  alcotest
+  paengi_rust_adapter
+  paengi_rust_fixtures
+  paengi_textual_patch))
+
+(test
  (name test_git)
  (modules test_git)
  (libraries
@@ -350,6 +359,17 @@
  (libraries alcotest qcheck-core qcheck-alcotest paengi_rust_adapter))
 
 (test
+ (name rust_retarget_fixture_property_test)
+ (modules rust_retarget_fixture_property_test)
+ (libraries
+  alcotest
+  qcheck-core
+  qcheck-alcotest
+  paengi_rust_adapter
+  paengi_rust_fixtures
+  paengi_textual_patch))
+
+(test
  (name test_capsule_store)
  (modules test_capsule_store)
  (libraries
@@ -513,6 +533,8 @@
   (:semantic_property_test semantic_property_test.exe)
   (:semantic_retarget_property_test semantic_retarget_property_test.exe)
   (:rust_adapter_property_test rust_adapter_property_test.exe)
+  (:rust_retarget_fixture_property_test
+   rust_retarget_fixture_property_test.exe)
   (:git_property_test git_property_test.exe)
   (source_tree fixtures/encoding))
  (action
@@ -530,4 +552,5 @@
    (run %{semantic_property_test})
    (run %{semantic_retarget_property_test})
    (run %{rust_adapter_property_test})
+   (run %{rust_retarget_fixture_property_test})
    (run %{git_property_test}))))
