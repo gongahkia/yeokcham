@@ -178,6 +178,14 @@ Generated bounded releases check checkout bytes/mode. Fixtures reject nested
 empty directories and inject pre-ref/pre-mapping interruptions, which leave an
 explicit retry path without a changed Paengi release.
 
+M8-10 Git-export checks optional configured author, committer, timestamp, and
+message output exactly; verifies default/configured and distinct configured
+commits do not collide; checks metadata-qualified ref and mapping retry,
+checkout, restart, and `git fsck --full`; and rejects invalid identities,
+over-limit metadata, interrupted publication, and changed-ref collision before
+any silent overwrite. The seeded generated property varies bounded valid
+metadata and proves exact headers/message, exact checkout, and stable retry.
+
 M8-09 Git-export checks explicit revision links by replaying each source,
 checking exact result/base chaining, root/sole-parent linearity, exact regular
 bytes, executable mode, symlink target, empty-root handling, nested-empty

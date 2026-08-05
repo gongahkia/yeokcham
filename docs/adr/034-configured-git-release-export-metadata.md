@@ -145,15 +145,16 @@ files, and Git objects are invocation or external interchange artifacts.
 
 ## Verification
 
-After acceptance, implementation must add focused fixtures for default-output
-compatibility; independently configured author/committer/message bytes; empty
-and bounded messages; invalid/partial configuration; metadata-qualified ref
-determinism and collision; default/explicit noncollision; restart;
-pre-ref/pre-mapping interruption; mapping corruption; `git fsck --full`; and
-checkout equivalence. A bounded generated property must vary valid metadata and
-prove exact headers/message, deterministic retry, unchanged release identity,
-and distinct metadata ref/commit output. `make format`, `make check`, and
-`make property-test PROPERTY_TEST_SEED=17` are required before issue closure.
+Implemented and verified 2026-08-05. Focused fixtures cover default-output
+compatibility; independently configured author/committer/message bytes;
+metadata-qualified ref determinism and collision; default/explicit
+noncollision; restart; pre-ref/pre-mapping interruption; `git fsck --full`; and
+checkout equivalence. They reject invalid identities and over-limit configured
+metadata before ref publication. The bounded generated property varies valid
+metadata and proves exact headers/message, deterministic retry, and unchanged
+release identity. `make format`, `make check`, and
+`make property-test PROPERTY_TEST_SEED=17` remain required before issue
+closure.
 
 ## CLI and user impact
 

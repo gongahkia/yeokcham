@@ -1543,20 +1543,94 @@ let git root arguments =
                 (Git.object_id_to_hex (Git.imported_tag_ref_object imported))
                 (Git.object_id_to_hex (Git.imported_tag_target imported))
                 target_kind annotation))
-  | [ "export"; "release"; "--repository"; repository; "--release"; release ]
-    -> (
+  | "export" :: "release" :: options -> (
+      let set_once value next =
+        match value with None -> Some next | Some _ -> exit 2
+      in
+      let rec parse repository release author_name author_email committer_name
+          committer_email message = function
+        | [] -> (
+            match (repository, release) with
+            | Some repository, Some release ->
+                let metadata =
+                  match
+                    ( author_name,
+                      author_email,
+                      committer_name,
+                      committer_email,
+                      message )
+                  with
+                  | None, None, None, None, None -> None
+                  | ( Some author_name,
+                      Some author_email,
+                      Some committer_name,
+                      Some committer_email,
+                      Some message ) ->
+                      Some
+                        {
+                          Git.release_export_author =
+                            {
+                              Git.git_identity_name = author_name;
+                              git_identity_email = author_email;
+                            };
+                          release_export_committer =
+                            {
+                              Git.git_identity_name = committer_name;
+                              git_identity_email = committer_email;
+                            };
+                          release_export_message = message;
+                        }
+                  | _ -> exit 2
+                in
+                (repository, release, metadata)
+            | _ -> exit 2)
+        | "--repository" :: value :: rest ->
+            parse
+              (set_once repository value)
+              release author_name author_email committer_name committer_email
+              message rest
+        | "--release" :: value :: rest ->
+            parse repository (set_once release value) author_name author_email
+              committer_name committer_email message rest
+        | "--author-name" :: value :: rest ->
+            parse repository release
+              (set_once author_name value)
+              author_email committer_name committer_email message rest
+        | "--author-email" :: value :: rest ->
+            parse repository release author_name
+              (set_once author_email value)
+              committer_name committer_email message rest
+        | "--committer-name" :: value :: rest ->
+            parse repository release author_name author_email
+              (set_once committer_name value)
+              committer_email message rest
+        | "--committer-email" :: value :: rest ->
+            parse repository release author_name author_email committer_name
+              (set_once committer_email value)
+              message rest
+        | "--message" :: value :: rest ->
+            parse repository release author_name author_email committer_name
+              committer_email (set_once message value) rest
+        | _ -> exit 2
+      in
+      let repository, release, metadata =
+        parse None None None None None None None options
+      in
       match Store.open_repository ~root with
       | Error error -> fail Store.error_to_string error
       | Ok store -> (
           match
-            Git.export_release Git.default_configuration ~store ~repository
-              ~release:(release_id release)
+            Git.export_release ?metadata Git.default_configuration ~store
+              ~repository ~release:(release_id release)
           with
           | Error error -> fail Git.error_to_string error
           | Ok result ->
+              let policy =
+                match metadata with None -> "default" | Some _ -> "configured"
+              in
               Printf.printf
                 "release=%s snapshot=%s git-tree=%s git-commit=%s ref=%s \
-                 mapping=%s metadata=paengi-export-created-at-utc\n"
+                 mapping=%s metadata=%s\n"
                 (Paengi_id.Release_id.to_hex result.Git.export_release)
                 (Store.Stored_object_id.to_hex
                    (Snapshot.Snapshot.stored_object_id
@@ -1565,7 +1639,8 @@ let git root arguments =
                 (Git.object_id_to_hex result.Git.export_commit)
                 result.Git.export_target_ref
                 (Paengi_id.Git_mapping_id.to_hex
-                   (Git.mapping_id result.Git.export_mapping))))
+                   (Git.mapping_id result.Git.export_mapping))
+                policy))
   | "export" :: "revisions" :: options -> (
       let rec parse repository revisions = function
         | [] -> (

@@ -633,8 +633,21 @@ documented fallback. It then publishes ADR-028's `export/commit ->
 exported-release` mapping. The Git ref and Paengi mapping binding remain
 separate retryable visibility points. Nested empty directories, unsupported
 nodes, invalid timestamps, bounds, malformed output, and ref collisions reject
-explicitly. Linear histories, configurable metadata/ref policy, merge
-topology, tags, and signatures are later work.
+explicitly.
+
+M8-10 adds an optional complete release-export metadata value: distinct
+configured author and committer name/email pairs plus exact non-NUL message
+bytes. It validates this value before Git publication, uses the release
+`created_at` UTC timestamp for both headers, rereads the commit to verify all
+three fields, and retains the M8-08 path byte-for-byte when metadata is absent.
+Configured metadata remains invocation input rather than Paengi state: it does
+not alter the release, release object, final snapshot, or mapping payload. Its
+create-only external ref is `refs/heads/paengi/release-<release-id>-metadata-<sha256>`
+where the SHA-256 is a domain-separated length-delimited encoding of all five
+configured byte strings. Thus different metadata has a distinct Git commit,
+ref, and mapping ID, while identical retry is idempotent. M8-09 revision export
+retains its fixed metadata policy; merge topology, tags, signatures, and
+configured revision metadata are later work.
 
 M8-09 exports a nonempty caller-declared ordered list of immutable revision
 links. It replays and verifies each link before Git publication, requires every

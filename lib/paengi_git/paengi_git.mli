@@ -47,6 +47,13 @@ type commit_import_result = {
 }
 
 type tag_import_result = { imported_tag : imported_tag; tag_mapping : mapping }
+type git_identity = { git_identity_name : string; git_identity_email : string }
+
+type release_export_metadata = {
+  release_export_author : git_identity;
+  release_export_committer : git_identity;
+  release_export_message : string;
+}
 
 type release_export_result = {
   export_release : Paengi_id.Release_id.t;
@@ -194,6 +201,7 @@ val import_tag :
   (tag_import_result, error) result
 
 val export_release :
+  ?metadata:release_export_metadata ->
   ?runner:(module Paengi_validation.Process_runner) ->
   ?fail_at:export_failure_point ->
   configuration ->

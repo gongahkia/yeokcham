@@ -102,6 +102,13 @@ type imported_tag = {
 }
 
 type tag_import_result = { imported_tag : imported_tag; tag_mapping : mapping }
+type git_identity = { git_identity_name : string; git_identity_email : string }
+
+type release_export_metadata = {
+  release_export_author : git_identity;
+  release_export_committer : git_identity;
+  release_export_message : string;
+}
 
 type release_export_result = {
   export_release : Id.Release_id.t;
@@ -3055,16 +3062,26 @@ let with_isolated_index run =
            (Unix.error_message error ^ ": " ^ operation ^ " " ^ argument))
   | Sys_error message -> Error (Export_error message)
 
-let export_environment timestamp =
+let default_export_identity =
+  {
+    git_identity_name = "Paengi Export";
+    git_identity_email = "noreply@paengi.local";
+  }
+
+let export_identity_header identity timestamp =
+  identity.git_identity_name ^ " <" ^ identity.git_identity_email ^ "> "
+  ^ Int64.to_string timestamp ^ " +0000"
+
+let export_environment ~timestamp ~author ~committer =
   let date = "@" ^ Int64.to_string timestamp ^ " +0000" in
   [
     ("GIT_AUTHOR_DATE", date);
-    ("GIT_AUTHOR_EMAIL", "noreply@paengi.local");
-    ("GIT_AUTHOR_NAME", "Paengi Export");
+    ("GIT_AUTHOR_EMAIL", author.git_identity_email);
+    ("GIT_AUTHOR_NAME", author.git_identity_name);
     ("GIT_ATTR_NOSYSTEM", "1");
     ("GIT_COMMITTER_DATE", date);
-    ("GIT_COMMITTER_EMAIL", "noreply@paengi.local");
-    ("GIT_COMMITTER_NAME", "Paengi Export");
+    ("GIT_COMMITTER_EMAIL", committer.git_identity_email);
+    ("GIT_COMMITTER_NAME", committer.git_identity_name);
     ("GIT_CONFIG_NOSYSTEM", "1");
   ]
 
@@ -3261,12 +3278,102 @@ let build_export_tree ?runner configuration executable repository ~environment
 let export_ref release =
   "refs/heads/paengi/release-" ^ Id.Release_id.to_hex release
 
+let add_u32 buffer value =
+  List.iter
+    (fun shift ->
+      Buffer.add_char buffer (Char.chr ((value lsr shift) land 0xff)))
+    [ 24; 16; 8; 0 ]
+
+let add_export_metadata_component buffer value =
+  add_u32 buffer (String.length value);
+  Buffer.add_string buffer value
+
+let export_metadata_ref release metadata =
+  let bytes = Buffer.create 512 in
+  Buffer.add_string bytes "paengi:git-release-metadata:v1\000";
+  List.iter
+    (add_export_metadata_component bytes)
+    [
+      metadata.release_export_author.git_identity_name;
+      metadata.release_export_author.git_identity_email;
+      metadata.release_export_committer.git_identity_name;
+      metadata.release_export_committer.git_identity_email;
+      metadata.release_export_message;
+    ];
+  let digest =
+    Hash.digest_string (Buffer.contents bytes) |> Hash.to_raw_string
+  in
+  export_ref release ^ "-metadata-" ^ bytes_to_hex digest
+
+let maximum_export_identity_bytes = 255
+
+let invalid_identity_character = function
+  | '\000' | '\n' | '\r' | '<' | '>' -> true
+  | _ -> false
+
+let validate_export_identity label identity =
+  let name = identity.git_identity_name in
+  let email = identity.git_identity_email in
+  if String.is_empty name || String.length name > maximum_export_identity_bytes
+  then Error (Export_error (label ^ " name is empty or exceeds 255 bytes"))
+  else if String.exists invalid_identity_character name then
+    Error (Export_error (label ^ " name contains a forbidden character"))
+  else if
+    String.is_empty email || String.length email > maximum_export_identity_bytes
+  then Error (Export_error (label ^ " email is empty or exceeds 255 bytes"))
+  else if
+    String.exists
+      (fun character ->
+        invalid_identity_character character
+        || Char.equal character ' ' || Char.equal character '\t')
+      email
+  then Error (Export_error (label ^ " email contains a forbidden character"))
+  else
+    match String.index_opt email '@' with
+    | Some at
+      when at > 0
+           && at + 1 < String.length email
+           && Option.is_none (String.index_from_opt email (at + 1) '@') ->
+        Ok ()
+    | Some _ | None -> Error (Export_error (label ^ " email has invalid shape"))
+
+let validate_release_export_metadata configuration metadata ~timestamp =
+  let* () =
+    validate_export_identity "configured Git author"
+      metadata.release_export_author
+  in
+  let* () =
+    validate_export_identity "configured Git committer"
+      metadata.release_export_committer
+  in
+  if String.contains metadata.release_export_message '\000' then
+    Error (Export_error "configured Git message contains NUL bytes")
+  else
+    let header_bytes =
+      70
+      + String.length
+          (export_identity_header metadata.release_export_author timestamp)
+      + String.length
+          (export_identity_header metadata.release_export_committer timestamp)
+      + 20
+    in
+    let actual = header_bytes + String.length metadata.release_export_message in
+    if actual > configuration.max_commit_bytes then
+      Error
+        (Export_limit_exceeded
+           {
+             resource = "configured release commit bytes";
+             limit = configuration.max_commit_bytes;
+             actual;
+           })
+    else Ok ()
+
 let object_id_list_equal left right =
   List.length left = List.length right
   && List.for_all2 object_id_equal left right
 
 let verify_exported_commit ?runner configuration executable repository ~tree
-    ~commit ~timestamp ~message ~parents =
+    ~commit ~timestamp ~author ~committer ~message ~parents =
   let* raw =
     read_exact_object ?runner configuration executable repository
       ~identity:commit ~kind:"commit" ~limit:configuration.max_commit_bytes
@@ -3275,25 +3382,24 @@ let verify_exported_commit ?runner configuration executable repository ~tree
     parse_commit_headers ~max_parents:configuration.max_commit_parents commit
       raw
   in
-  let identity =
-    "Paengi Export <noreply@paengi.local> " ^ Int64.to_string timestamp
-    ^ " +0000"
-  in
+  let author = export_identity_header author timestamp in
+  let committer = export_identity_header committer timestamp in
   if not (object_id_equal tree parsed.parsed_tree) then
     Error (Export_error "exported commit tree disagrees with constructed tree")
   else if not (object_id_list_equal parents parsed.parsed_parents) then
     Error (Export_error "exported commit parents disagree with policy")
   else if
     not
-      (String.equal identity parsed.parsed_metadata.parsed_author
-      && String.equal identity parsed.parsed_metadata.parsed_committer)
+      (String.equal author parsed.parsed_metadata.parsed_author
+      && String.equal committer parsed.parsed_metadata.parsed_committer)
   then Error (Export_error "exported commit metadata disagrees with policy")
   else if not (String.equal message parsed.parsed_metadata.parsed_message) then
     Error (Export_error "exported commit message disagrees with policy")
   else Ok ()
 
 let create_export_commit ?runner configuration executable repository
-    ~environment ~format ~tree ~timestamp ~message ~parents =
+    ~environment ~format ~tree ~timestamp ~author ~committer ~message ~parents
+    ~configured_metadata =
   with_temporary_bytes "message" message (fun message_path ->
       let parent_arguments =
         List.concat_map
@@ -3303,20 +3409,22 @@ let create_export_commit ?runner configuration executable repository
       let* output =
         run ?runner ~environment configuration executable repository
           ~operation:"commit-tree"
-          ([
-             "-c";
-             "commit.gpgSign=false";
-             "--no-replace-objects";
-             "commit-tree";
-             object_id_to_hex tree;
-           ]
+          ((if configured_metadata then [ "-c"; "i18n.commitEncoding=UTF-8" ]
+            else [])
+          @ [
+              "-c";
+              "commit.gpgSign=false";
+              "--no-replace-objects";
+              "commit-tree";
+              object_id_to_hex tree;
+            ]
           @ parent_arguments @ [ "-F"; message_path ])
       in
       let* output = single_line ~operation:"commit-tree" output in
       let* commit = object_id_of_hex format output in
       let* () =
         verify_exported_commit ?runner configuration executable repository ~tree
-          ~commit ~timestamp ~message ~parents
+          ~commit ~timestamp ~author ~committer ~message ~parents
       in
       Ok commit)
 
@@ -3358,7 +3466,8 @@ let publish_export_ref ?runner configuration executable repository ~commit
                  ("target ref already names a different commit: " ^ target_ref))
       )
 
-let export_release ?runner ?fail_at configuration ~store ~repository ~release =
+let export_release ?metadata ?runner ?fail_at configuration ~store ~repository
+    ~release =
   let* configuration = validate_configuration configuration in
   let* repository = validate_repository_path repository in
   let* executable =
@@ -3378,6 +3487,12 @@ let export_release ?runner ?fail_at configuration ~store ~repository ~release =
       if Int64.compare timestamp 0L < 0 then
         Error (Export_error "release creation timestamp must be nonnegative")
       else
+        let* () =
+          match metadata with
+          | None -> Ok ()
+          | Some metadata ->
+              validate_release_export_metadata configuration metadata ~timestamp
+        in
         let* release_object =
           Release.store_release store release
           |> Result.map_error (fun error -> Release_error error)
@@ -3387,15 +3502,25 @@ let export_release ?runner ?fail_at configuration ~store ~repository ~release =
           Snapshot.Snapshot.load store snapshot_id
           |> Result.map_error (fun error -> Snapshot_error error)
         in
-        let message =
-          Option.value
-            ~default:
-              ("Paengi release "
-              ^ Id.Release_id.to_hex (Release.release_id release)
-              ^ "\n")
-            (Release.release_message release)
+        let author, committer, message, configured_metadata =
+          match metadata with
+          | Some metadata ->
+              ( metadata.release_export_author,
+                metadata.release_export_committer,
+                metadata.release_export_message,
+                true )
+          | None ->
+              ( default_export_identity,
+                default_export_identity,
+                Option.value
+                  ~default:
+                    ("Paengi release "
+                    ^ Id.Release_id.to_hex (Release.release_id release)
+                    ^ "\n")
+                  (Release.release_message release),
+                false )
         in
-        let environment = export_environment timestamp in
+        let environment = export_environment ~timestamp ~author ~committer in
         let* files = export_files configuration store snapshot in
         let* tree =
           build_export_tree ?runner configuration executable repository
@@ -3404,9 +3529,14 @@ let export_release ?runner ?fail_at configuration ~store ~repository ~release =
         let* commit =
           create_export_commit ?runner configuration executable repository
             ~environment ~format:inspection.object_format ~tree ~timestamp
-            ~message ~parents:[]
+            ~author ~committer ~message ~parents:[] ~configured_metadata
         in
-        let target_ref = export_ref (Release.release_id release) in
+        let target_ref =
+          match metadata with
+          | None -> export_ref (Release.release_id release)
+          | Some metadata ->
+              export_metadata_ref (Release.release_id release) metadata
+        in
         let* () =
           match fail_at with
           | Some Before_git_ref ->
@@ -3502,12 +3632,6 @@ let validate_revision_sources configuration revisions =
           else distinct (source :: seen) rest
     in
     distinct [] revisions
-
-let add_u32 buffer value =
-  List.iter
-    (fun shift ->
-      Buffer.add_char buffer (Char.chr ((value lsr shift) land 0xff)))
-    [ 24; 16; 8; 0 ]
 
 let add_sequence_component buffer value =
   add_u32 buffer (String.length value);
@@ -3631,7 +3755,11 @@ let export_revisions ?runner ?fail_at configuration ~store ~repository
       let rec emit previous reversed = function
         | [] -> Ok (List.rev reversed)
         | current :: rest ->
-            let environment = export_environment current.prepared_timestamp in
+            let environment =
+              export_environment ~timestamp:current.prepared_timestamp
+                ~author:default_export_identity
+                ~committer:default_export_identity
+            in
             let* snapshot =
               Snapshot.Snapshot.load store current.prepared_snapshot
               |> Result.map_error (fun error -> Snapshot_error error)
@@ -3646,7 +3774,10 @@ let export_revisions ?runner ?fail_at configuration ~store ~repository
               create_export_commit ?runner configuration executable repository
                 ~environment ~format:inspection.object_format ~tree
                 ~timestamp:current.prepared_timestamp
+                ~author:default_export_identity
+                ~committer:default_export_identity
                 ~message:current.prepared_message ~parents
+                ~configured_metadata:false
             in
             emit (Some commit)
               ({

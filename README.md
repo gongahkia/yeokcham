@@ -139,13 +139,20 @@ dune exec bin/paengi.exe -- release list
 dune exec bin/paengi.exe -- git import tree --repository <absolute-git-directory> --tree <full-git-tree-id>
 dune exec bin/paengi.exe -- git import commit --repository <absolute-git-directory> --commit <full-git-commit-id>
 dune exec bin/paengi.exe -- git import tag --repository <absolute-git-directory> --tag <name>
-dune exec bin/paengi.exe -- git export release --repository <absolute-git-directory> --release <release-id>
+dune exec bin/paengi.exe -- git export release --repository <absolute-git-directory> --release <release-id> [--author-name <name> --author-email <email> --committer-name <name> --committer-email <email> --message <message>]
 dune exec bin/paengi.exe -- git export revisions --repository <absolute-git-directory> --revision <capsule-id>:<revision-id>:<stored-object-id> [--revision <capsule-id>:<revision-id>:<stored-object-id> ...]
 ```
 
 `work explain-order` is read-only. It resolves each enabled capsule's current
 immutable revision, validates the selected graph, and prints canonical order
 and precedence edges. `--order` must name every enabled revision exactly once.
+
+`git export release` uses the fixed M8-08 Git identity and release message by
+default. Supplying all five metadata flags selects exact caller-provided Git
+author, committer, and message bytes for that export only; partial or duplicate
+metadata flags reject. Configured metadata does not change the Paengi release
+or snapshot. Its Git ref is metadata-qualified, so it neither overwrites the
+default export nor a different configured export of the same release.
 
 Durable workspaces select an explicit immutable capsule revision; its verified
 physical revision object is stored in every workspace revision.

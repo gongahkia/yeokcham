@@ -1395,6 +1395,22 @@ let release_export_fixture ?(nested_empty = false) ?(empty_root = false)
       direct_process (git_path ()) [ "init"; "-q"; destination ];
       run (git_path ()) destination store release)
 
+let configured_release_export_metadata ?(author_name = "Configured Author")
+    ?(author_email = "author@example.invalid")
+    ?(committer_name = "Configured Committer")
+    ?(committer_email = "committer@example.invalid")
+    ?(message = "configured release\nmessage") () =
+  {
+    Git.release_export_author =
+      { Git.git_identity_name = author_name; git_identity_email = author_email };
+    release_export_committer =
+      {
+        Git.git_identity_name = committer_name;
+        git_identity_email = committer_email;
+      };
+    release_export_message = message;
+  }
+
 let exports_release_as_exact_git_commit () =
   release_export_fixture (fun git destination store release ->
       let first =
@@ -1455,7 +1471,7 @@ let exports_release_as_exact_git_commit () =
             destination;
             "show";
             "-s";
-            "--format=%an <%ae> %at %z%x00%cn <%ce> %ct %cz%x00%B";
+            "--format=%an <%ae> %at %aI%x00%cn <%ce> %ct %cI%x00%B";
             Git.object_id_to_hex first.Git.export_commit;
           ]
       in
@@ -1506,6 +1522,228 @@ let exports_release_as_exact_git_commit () =
                "structured corrupt export mapping" true
                (contains ~needle:"Git mapping error"
                   (Git.error_to_string error))))
+
+let exports_configured_release_metadata_exactly_and_idempotently () =
+  release_export_fixture (fun git destination store release ->
+      let release_id = Release.release_id release in
+      let metadata = configured_release_export_metadata () in
+      let default =
+        Git.export_release Git.default_configuration ~store
+          ~repository:destination ~release:release_id
+        |> require_ok Git.error_to_string
+      in
+      let first =
+        Git.export_release ~metadata Git.default_configuration ~store
+          ~repository:destination ~release:release_id
+        |> require_ok Git.error_to_string
+      in
+      let repeated =
+        Git.export_release ~metadata Git.default_configuration ~store
+          ~repository:destination ~release:release_id
+        |> require_ok Git.error_to_string
+      in
+      let alternate_metadata =
+        configured_release_export_metadata ~message:"alternate release message"
+          ()
+      in
+      let alternate =
+        Git.export_release ~metadata:alternate_metadata
+          Git.default_configuration ~store ~repository:destination
+          ~release:release_id
+        |> require_ok Git.error_to_string
+      in
+      Alcotest.(check string)
+        "configured retry has same commit"
+        (Git.object_id_to_hex first.Git.export_commit)
+        (Git.object_id_to_hex repeated.Git.export_commit);
+      Alcotest.(check bool)
+        "configured output differs from default" false
+        (String.equal
+           (Git.object_id_to_hex default.Git.export_commit)
+           (Git.object_id_to_hex first.Git.export_commit));
+      Alcotest.(check bool)
+        "different metadata differs" false
+        (String.equal
+           (Git.object_id_to_hex first.Git.export_commit)
+           (Git.object_id_to_hex alternate.Git.export_commit));
+      Alcotest.(check bool)
+        "configured ref is metadata scoped" true
+        (contains
+           ~needle:
+             ("refs/heads/paengi/release-"
+             ^ Id.Release_id.to_hex release_id
+             ^ "-metadata-")
+           first.Git.export_target_ref);
+      Alcotest.(check string)
+        "configured retry has same ref" first.Git.export_target_ref
+        repeated.Git.export_target_ref;
+      Alcotest.(check bool)
+        "configured retry has same mapping" true
+        (Id.Git_mapping_id.equal
+           (Git.mapping_id first.Git.export_mapping)
+           (Git.mapping_id repeated.Git.export_mapping));
+      Alcotest.(check bool)
+        "configured metadata does not change release identity" true
+        (Id.Release_id.equal release_id first.Git.export_release);
+      Alcotest.(check string)
+        "configured metadata does not change tree"
+        (Git.object_id_to_hex default.Git.export_tree)
+        (Git.object_id_to_hex first.Git.export_tree);
+      let commit =
+        direct_capture git
+          [
+            "-C";
+            destination;
+            "show";
+            "-s";
+            "--format=%an <%ae> %at %aI%x00%cn <%ce> %ct %cI%x00%B";
+            Git.object_id_to_hex first.Git.export_commit;
+          ]
+      in
+      Alcotest.(check string)
+        "configured author, committer, and message"
+        "Configured Author <author@example.invalid> 7 \
+         1970-01-01T00:00:07Z\000Configured Committer \
+         <committer@example.invalid> 7 1970-01-01T00:00:07Z\000configured \
+         release\n\
+         message"
+        commit;
+      direct_process git [ "-C"; destination; "fsck"; "--full" ];
+      direct_process git
+        [
+          "-C";
+          destination;
+          "checkout";
+          "-q";
+          Git.object_id_to_hex first.Git.export_commit;
+        ];
+      Alcotest.(check string)
+        "configured checkout bytes" "regular\000bytes"
+        (read_file (Filename.concat destination "regular"));
+      let reopened =
+        Store.open_repository ~root:(Store.root store)
+        |> require_ok Store.error_to_string
+      in
+      Git.load_mapping reopened (Git.mapping_id first.Git.export_mapping)
+      |> require_ok Git.error_to_string
+      |> ignore)
+
+let configured_release_metadata_rejects_and_retries_explicitly () =
+  release_export_fixture (fun git destination store release ->
+      let release_id = Release.release_id release in
+      let metadata = configured_release_export_metadata () in
+      let ref_prefix =
+        "refs/heads/paengi/release-"
+        ^ Id.Release_id.to_hex release_id
+        ^ "-metadata-"
+      in
+      let assert_no_ref label =
+        Alcotest.(check string)
+          label ""
+          (direct_capture git
+             [
+               "-C";
+               destination;
+               "for-each-ref";
+               "--format=%(refname)";
+               ref_prefix;
+             ])
+      in
+      let invalid =
+        configured_release_export_metadata ~author_name:"bad\nauthor" ()
+      in
+      Git.export_release ~metadata:invalid Git.default_configuration ~store
+        ~repository:destination ~release:release_id
+      |> Result.fold
+           ~ok:(fun _ -> Alcotest.fail "invalid configured metadata exported")
+           ~error:(fun error ->
+             Alcotest.(check bool)
+               "structured configured identity rejection" true
+               (contains ~needle:"configured Git author name"
+                  (Git.error_to_string error)));
+      assert_no_ref "invalid configured metadata leaves no ref";
+      let bounded =
+        Git.configuration_with ~max_commit_bytes:1 Git.default_configuration
+      in
+      Git.export_release ~metadata bounded ~store ~repository:destination
+        ~release:release_id
+      |> Result.fold
+           ~ok:(fun _ -> Alcotest.fail "bounded configured metadata exported")
+           ~error:(fun error ->
+             Alcotest.(check bool)
+               "structured configured metadata bound" true
+               (contains ~needle:"configured release commit bytes"
+                  (Git.error_to_string error)));
+      assert_no_ref "over-bound configured metadata leaves no ref";
+      Git.export_release ~metadata ~fail_at:Git.Before_git_ref
+        Git.default_configuration ~store ~repository:destination
+        ~release:release_id
+      |> Result.fold
+           ~ok:(fun _ ->
+             Alcotest.fail "configured pre-ref interruption succeeded")
+           ~error:(fun error ->
+             Alcotest.(check bool)
+               "structured configured pre-ref interruption" true
+               (contains ~needle:"injected interruption"
+                  (Git.error_to_string error)));
+      assert_no_ref "configured pre-ref interruption leaves no ref";
+      Git.export_release ~metadata ~fail_at:Git.Before_mapping_binding
+        Git.default_configuration ~store ~repository:destination
+        ~release:release_id
+      |> Result.fold
+           ~ok:(fun _ ->
+             Alcotest.fail "configured pre-mapping interruption succeeded")
+           ~error:(fun error ->
+             Alcotest.(check bool)
+               "structured configured pre-mapping interruption" true
+               (contains ~needle:"injected interruption"
+                  (Git.error_to_string error)));
+      Alcotest.(check bool)
+        "configured pre-mapping interruption writes ref" true
+        (contains ~needle:ref_prefix
+           (direct_capture git
+              [
+                "-C";
+                destination;
+                "for-each-ref";
+                "--format=%(refname)";
+                "refs/heads/paengi";
+              ]));
+      let retried =
+        Git.export_release ~metadata Git.default_configuration ~store
+          ~repository:destination ~release:release_id
+        |> require_ok Git.error_to_string
+      in
+      let reopened =
+        Store.open_repository ~root:(Store.root store)
+        |> require_ok Store.error_to_string
+      in
+      Git.load_mapping reopened (Git.mapping_id retried.Git.export_mapping)
+      |> require_ok Git.error_to_string
+      |> ignore;
+      direct_process git
+        [ "-C"; destination; "config"; "user.name"; "Paengi Fixture" ];
+      direct_process git
+        [ "-C"; destination; "config"; "user.email"; "fixture@example.invalid" ];
+      direct_process git
+        [ "-C"; destination; "commit"; "--allow-empty"; "-q"; "-m"; "other" ];
+      let other =
+        direct_capture git [ "-C"; destination; "rev-parse"; "HEAD" ]
+      in
+      direct_process git
+        [
+          "-C"; destination; "update-ref"; retried.Git.export_target_ref; other;
+        ];
+      Git.export_release ~metadata Git.default_configuration ~store
+        ~repository:destination ~release:release_id
+      |> Result.fold
+           ~ok:(fun _ -> Alcotest.fail "configured ref collision exported")
+           ~error:(fun error ->
+             Alcotest.(check bool)
+               "structured configured ref collision" true
+               (contains ~needle:"target ref already names a different commit"
+                  (Git.error_to_string error)));
+      direct_process git [ "-C"; destination; "fsck"; "--full" ])
 
 let revision_export_fixture ?(empty_first = false) ?(nested_empty = false) run =
   with_directory "paengi-git-revision-export-" (fun root ->
@@ -2333,6 +2571,12 @@ let () =
             imports_exact_tree_and_restarts_idempotently;
           Alcotest.test_case "release export checkout is exact" `Quick
             exports_release_as_exact_git_commit;
+          Alcotest.test_case
+            "configured release export metadata is exact and idempotent" `Quick
+            exports_configured_release_metadata_exactly_and_idempotently;
+          Alcotest.test_case
+            "configured release metadata rejects and retries explicitly" `Quick
+            configured_release_metadata_rejects_and_retries_explicitly;
           Alcotest.test_case "revision export is an exact linear chain" `Quick
             exports_revisions_as_exact_linear_git_commits;
           Alcotest.test_case "revision export rejects and retries explicitly"

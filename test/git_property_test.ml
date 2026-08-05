@@ -185,7 +185,7 @@ let generated_files =
     QCheck2.Gen.(pair (string_size (int_range 0 4096)) bool)
     import_replays_generated_file
 
-let export_replays_generated_release (bytes, executable) =
+let export_replays_generated_release ?metadata (bytes, executable) =
   match git_path () with
   | None -> false
   | Some git ->
@@ -276,14 +276,14 @@ let export_replays_generated_release (bytes, executable) =
                                               then false
                                               else
                                                 match
-                                                  ( Git.export_release
+                                                  ( Git.export_release ?metadata
                                                       Git.default_configuration
                                                       ~store
                                                       ~repository:destination
                                                       ~release:
                                                         (Release.release_id
                                                            release),
-                                                    Git.export_release
+                                                    Git.export_release ?metadata
                                                       Git.default_configuration
                                                       ~store
                                                       ~repository:destination
@@ -291,7 +291,7 @@ let export_replays_generated_release (bytes, executable) =
                                                         (Release.release_id
                                                            release) )
                                                 with
-                                                | Ok first, Ok second ->
+                                                | Ok first, Ok second -> (
                                                     let commit =
                                                       Git.object_id_to_hex
                                                         first.Git.export_commit
@@ -326,6 +326,63 @@ let export_replays_generated_release (bytes, executable) =
                                                             second
                                                               .Git
                                                                .export_mapping)
+                                                    &&
+                                                    match metadata with
+                                                    | None -> true
+                                                    | Some metadata -> (
+                                                        match
+                                                          direct_capture git
+                                                            [
+                                                              "-C";
+                                                              destination;
+                                                              "show";
+                                                              "-s";
+                                                              "--format=%an \
+                                                               <%ae> %at \
+                                                               %aI%x00%cn \
+                                                               <%ce> %ct \
+                                                               %cI%x00%B";
+                                                              commit;
+                                                            ]
+                                                        with
+                                                        | Some actual ->
+                                                            String.equal actual
+                                                              (metadata
+                                                                 .Git
+                                                                  .release_export_author
+                                                                 .Git
+                                                                  .git_identity_name
+                                                             ^ " <"
+                                                             ^ metadata
+                                                                 .Git
+                                                                  .release_export_author
+                                                                 .Git
+                                                                  .git_identity_email
+                                                             ^ "> 7 \
+                                                                1970-01-01T00:00:07Z\000"
+                                                             ^ metadata
+                                                                 .Git
+                                                                  .release_export_committer
+                                                                 .Git
+                                                                  .git_identity_name
+                                                             ^ " <"
+                                                             ^ metadata
+                                                                 .Git
+                                                                  .release_export_committer
+                                                                 .Git
+                                                                  .git_identity_email
+                                                             ^ "> 7 \
+                                                                1970-01-01T00:00:07Z\000"
+                                                             ^ metadata
+                                                                 .Git
+                                                                  .release_export_message
+                                                              )
+                                                            && String.contains
+                                                                 first
+                                                                   .Git
+                                                                    .export_target_ref
+                                                                 '-'
+                                                        | None -> false))
                                                 | Error _, _ | _, Error _ ->
                                                     false))))))))))
 
@@ -333,7 +390,7 @@ let generated_release_exports =
   QCheck2.Test.make ~count:10
     ~name:"Git release export checkout matches generated bytes and mode"
     QCheck2.Gen.(pair (string_size (int_range 0 4096)) bool)
-    export_replays_generated_release
+    (fun input -> export_replays_generated_release input)
 
 let export_replays_generated_revision_sequence
     ((first_bytes, second_bytes), executable) =
@@ -814,6 +871,35 @@ let generated_metadata =
         (pair generated_metadata_text generated_metadata_text))
     import_replays_generated_metadata
 
+let export_replays_generated_release_metadata
+    ((bytes, executable), (author_suffix, (committer_suffix, message))) =
+  let metadata =
+    {
+      Git.release_export_author =
+        {
+          Git.git_identity_name = "Generated Author " ^ author_suffix;
+          git_identity_email = author_suffix ^ "@author.invalid";
+        };
+      release_export_committer =
+        {
+          Git.git_identity_name = "Generated Committer " ^ committer_suffix;
+          git_identity_email = committer_suffix ^ "@committer.invalid";
+        };
+      release_export_message = message;
+    }
+  in
+  export_replays_generated_release ~metadata (bytes, executable)
+
+let generated_release_export_metadata =
+  QCheck2.Test.make ~count:10
+    ~name:"Git release export preserves generated configured metadata"
+    QCheck2.Gen.(
+      pair
+        (pair (string_size (int_range 0 4096)) bool)
+        (pair generated_metadata_text
+           (pair generated_metadata_text generated_metadata_text)))
+    export_replays_generated_release_metadata
+
 let generated_tag_name =
   QCheck2.Gen.(
     list_size (int_range 1 32)
@@ -937,6 +1023,9 @@ let () =
           QCheck_alcotest.to_alcotest ~speed_level:`Quick
             ~rand:(state_for "generated-release-exports")
             generated_release_exports;
+          QCheck_alcotest.to_alcotest ~speed_level:`Quick
+            ~rand:(state_for "generated-release-export-metadata")
+            generated_release_export_metadata;
           QCheck_alcotest.to_alcotest ~speed_level:`Quick
             ~rand:(state_for "generated-revision-exports")
             generated_revision_exports;

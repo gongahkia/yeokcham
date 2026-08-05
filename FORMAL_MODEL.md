@@ -964,6 +964,19 @@ ADR-028 `export/commit -> exported-release` mapping names the release ID,
 release object ID, final snapshot ID, Git format, and exact commit ID; it is
 bridge evidence, not Paengi history.
 
+M8-10 permits an optional complete invocation value
+`(author-name, author-email, committer-name, committer-email, message)` for
+that release export. Each identity is bounded, nonempty, structurally safe for
+a Git header, and the message is exact bounded non-NUL bytes. With this value,
+the root commit has exactly the configured author and committer headers at the
+unchanged release `created_at` UTC timestamp and exactly the configured message.
+Its create-only ref is the release ref plus a domain-separated,
+length-delimited SHA-256 metadata suffix. Absent the value, M8-08 output is
+unchanged. Present metadata may change only the Git commit, external ref, and
+mapping ID; Paengi release identity, release object, final snapshot, and
+mapping payload remain unchanged. A producer verifies the emitted tree, zero
+parents, headers, and message before ref/mapping publication.
+
 M8-09 maps a nonempty explicit ordered list of immutable revision links to one
 Git commit per link. A link `(c, r, o)` is accepted only when `o` decodes to a
 valid replayable revision with capsule ID `c` and revision ID `r`. For adjacent
@@ -981,10 +994,11 @@ state, resolution, or release history.
 
 ### Export
 
-M8-08 implements a squashed release root commit and M8-09 implements one Git
-commit per caller-selected capsule revision. Configurable metadata/ref policy,
-automatic revision ordering, and explicit Git merge topology remain future
-recorded export policies.
+M8-08 implements a squashed release root commit, M8-10 adds optional explicit
+release presentation metadata, and M8-09 implements one Git commit per
+caller-selected capsule revision. Automatic revision ordering, explicit Git
+merge topology, and configured revision metadata remain future recorded export
+policies.
 
 ### Bridge invariant
 
