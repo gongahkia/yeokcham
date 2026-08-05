@@ -698,13 +698,22 @@ separately retryable; malformed links, duplicate selections, chain mismatch,
 bounds, nested empty directories, ref collision, and source corruption reject
 explicitly.
 
-## 14. Future synchronisation
+## 14. Local synchronisation
 
-Do not implement before the local model is stable.
+M10-01 implements ADR-038's transport-neutral immutable-object exchange core
+and in-process local-store adapter. `paengi_exchange` validates exact
+length-delimited canonical CBOR frames, Hello compatibility, page ordering,
+session/sequence/request membership, and every protocol budget before returning
+a receipt candidate. `paengi_exchange_store` validates the exact Envelope-1
+bytes and ADR-020 ID, then delegates publication to `Paengi_store.put`.
 
-Possible model:
+The adapter transfers caller-declared object IDs only. It does not infer graph
+closure, move a ref, choose a divergent head, write a sync journal, or expose a
+CLI/transport. A restart begins a new session and safely reoffers objects
+already published before interruption.
 
-- Immutable object exchange by content ID.
+Future layers require separate decisions:
+
 - Signed ref or operation events.
 - Explicit device identities.
 - Conflict-preserving ref reconciliation.

@@ -129,6 +129,18 @@ Creating a new revision does not change capsule ID.
 
 Identical workspace inputs produce identical result and conflict set.
 
+#### P15 — Immutable exchange preservation
+
+ADR-038 tests retain exact frame goldens for every message kind and reject bad
+lengths, noncanonical CBOR, unknown required features, ordering, page/session,
+sequence, membership, budget, Envelope, identity, and collision states before
+mutable state changes. Two local repositories cover empty/equal/divergent
+object sets, repeated transfer, interruption/restart, idempotent publication,
+and unchanged refs. The seeded property test varies object sets, duplicate
+input, and interruption positions; retry must make every declared source object
+available while preserving the destination ref exactly. These tests exercise an
+in-process transport-neutral adapter, not networking.
+
 Milestone 5 additionally checks Workspace/Workspace_revision/Workspace_attempt,
 Conflict, Resolution, and workspace-current-ref canonical goldens with inverse
 decoders; workspace reopen; immutable enable/reorder revisions; stale workspace

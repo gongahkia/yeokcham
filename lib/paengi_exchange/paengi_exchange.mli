@@ -1,7 +1,6 @@
 module Object_id = Paengi_store.Stored_object_id
 
 type session_id
-
 type end_status = Complete | Incomplete
 
 type message =
@@ -83,7 +82,6 @@ val max_ids_per_page : int
 val max_session_control_bytes : int
 val max_session_object_ids : int
 val max_total_object_bytes : int
-
 val error_to_string : error -> string
 val session_id_of_bytes : string -> (session_id, error) result
 val session_id_to_bytes : session_id -> string
@@ -96,7 +94,10 @@ val accept_inventory :
   receiver -> message -> (receiver * Object_id.t list, error) result
 
 val register_want :
-  receiver -> sequence:int64 -> Object_id.t list -> (receiver * message, error) result
+  receiver ->
+  sequence:int64 ->
+  Object_id.t list ->
+  (receiver * message, error) result
 
 val accept_object :
   receiver -> message -> (receiver * received_object, error) result

@@ -1060,3 +1060,42 @@ symlink metadata; it is a byte-representation failure, not a claim about
 semantic equivalence. The oracle applies to exported release and selected
 linear-revision commits and to snapshots produced by supported Git tree/commit
 import after the source worktree may have changed.
+
+## 14. Immutable object exchange
+
+M10-01 adds transient exchange values only:
+
+```text
+Session = Await_hello | Open(session-id, offered, requested, budgets) | Closed
+Frame = u64-be(payload-length) || canonical-profile-1-cbor-message
+Message = Hello | Inventory | Want | Object | End | Error
+```
+
+`Hello` must be accepted before every other message. It requires byte-identical
+repository-format bytes, protocol version `1`, and no unsupported mandatory
+feature. `Inventory` and `Want` carry strictly ascending unique 32-byte
+`Stored_object_id` values. A receiver associates one transient 16-byte session
+ID with its first inventory, accepts increasing inventory/object sequences, and
+accepts an object only when its ID was explicitly requested from an offered
+page.
+
+For an accepted `Object(session, sequence, id, bytes)`, the local adapter
+requires `bytes` to be one exact canonical valid Envelope-1 encoding and
+requires `id = stored_object_id(bytes)`. Only then it applies the existing
+create-only transition:
+
+```text
+receive(repo, object) = Paengi_store.put(repo, decoded-envelope)
+```
+
+The receiver bounds each control message, page, session control bytes,
+requested/transferred IDs, object bytes, and caller object-byte budget as
+ADR-038 specifies. Any decode, ordering, membership, sequence, feature,
+budget, Envelope, identity, or publication failure is a structured incomplete
+exchange result. No exchange transition reads, creates, updates, reconciles,
+or deletes a mutable ref.
+
+Restart discards `Session` and starts at `Await_hello`; already published
+immutable objects are rediscovered and their byte-identical `put` retry is
+idempotent. Frames and sessions are not stored objects, semantic authority, or
+persistent resume state.

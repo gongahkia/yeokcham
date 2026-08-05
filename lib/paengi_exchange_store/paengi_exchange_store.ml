@@ -22,12 +22,15 @@ type outcome = {
 let error_to_string = function
   | Protocol_error error -> Exchange.error_to_string error
   | Source_store_error error -> "source store: " ^ Store.error_to_string error
-  | Destination_store_error error -> "destination store: " ^ Store.error_to_string error
-  | Envelope_error error -> "received envelope: " ^ Envelope.decode_error_to_string error
+  | Destination_store_error error ->
+      "destination store: " ^ Store.error_to_string error
+  | Envelope_error error ->
+      "received envelope: " ^ Envelope.decode_error_to_string error
   | Noncanonical_envelope_bytes -> "received envelope bytes are not canonical"
   | Object_identity_mismatch { expected; actual } ->
       Printf.sprintf "received object ID mismatch: expected %s, got %s"
-        (Object_id.to_hex expected) (Object_id.to_hex actual)
+        (Object_id.to_hex expected)
+        (Object_id.to_hex actual)
   | Interrupted_after count ->
       Printf.sprintf "local exchange interrupted after %d publications" count
   | Invalid_transfer_input message -> "invalid local exchange input: " ^ message
@@ -35,11 +38,17 @@ let error_to_string = function
 let ( let* ) = Result.bind
 
 let round_trip message =
-  let* frame = Exchange.encode message |> Result.map_error (fun error -> Protocol_error error) in
+  let* frame =
+    Exchange.encode message
+    |> Result.map_error (fun error -> Protocol_error error)
+  in
   Exchange.decode frame |> Result.map_error (fun error -> Protocol_error error)
 
 let object_message repository ~session_id ~sequence object_id =
-  let* envelope = Store.get repository object_id |> Result.map_error (fun error -> Source_store_error error) in
+  let* envelope =
+    Store.get repository object_id
+    |> Result.map_error (fun error -> Source_store_error error)
+  in
   let envelope_bytes = Envelope.encode envelope in
   let actual = Store.id_of_envelope envelope in
   if not (Object_id.equal object_id actual) then
@@ -62,7 +71,10 @@ let receive_object repository receiver message =
   in
   let expected = Exchange.received_object_id receipt in
   let envelope_bytes = Exchange.received_object_bytes receipt in
-  let* envelope = Envelope.decode envelope_bytes |> Result.map_error (fun error -> Envelope_error error) in
+  let* envelope =
+    Envelope.decode envelope_bytes
+    |> Result.map_error (fun error -> Envelope_error error)
+  in
   if not (String.equal envelope_bytes (Envelope.encode envelope)) then
     Error Noncanonical_envelope_bytes
   else
@@ -82,10 +94,10 @@ let rec chunks size values =
   if values = [] then []
   else
     let rec take count accumulator rest =
-      if count = 0 then List.rev accumulator, rest
+      if count = 0 then (List.rev accumulator, rest)
       else
         match rest with
-        | [] -> List.rev accumulator, []
+        | [] -> (List.rev accumulator, [])
         | value :: rest -> take (count - 1) (value :: accumulator) rest
     in
     let page, rest = take size [] values in
@@ -108,8 +120,10 @@ let destination_missing destination object_id =
     |> Result.map_error (fun error -> Destination_store_error error)
 
 let check_want ~session_id ~sequence expected = function
-  | Exchange.Want { session_id = actual; sequence = actual_sequence; object_ids; _ }
-    when String.equal (Exchange.session_id_to_bytes actual)
+  | Exchange.Want
+      { session_id = actual; sequence = actual_sequence; object_ids; _ }
+    when String.equal
+           (Exchange.session_id_to_bytes actual)
            (Exchange.session_id_to_bytes session_id)
          && Int64.equal actual_sequence sequence
          && List.length object_ids = List.length expected
@@ -120,8 +134,9 @@ let check_want ~session_id ~sequence expected = function
   | Exchange.Error_message _ ->
       Error (Invalid_transfer_input "expected Want after inventory")
 
-let transfer ?interrupt_after ?(object_byte_budget = Exchange.max_total_object_bytes)
-    ~source ~destination ~session_id ~object_ids () =
+let transfer ?interrupt_after
+    ?(object_byte_budget = Exchange.max_total_object_bytes) ~source ~destination
+    ~session_id ~object_ids () =
   if not (strictly_sorted_ids object_ids) then
     Error (Invalid_transfer_input "object IDs must be strictly ascending")
   else if List.length object_ids > Exchange.max_session_object_ids then
@@ -144,7 +159,8 @@ let transfer ?interrupt_after ?(object_byte_budget = Exchange.max_total_object_b
       Exchange.accept_hello receiver hello
       |> Result.map_error (fun error -> Protocol_error error)
     in
-    let rec transfer_pages receiver object_sequence requested transferred page_index = function
+    let rec transfer_pages receiver object_sequence requested transferred
+        page_index = function
       | [] ->
           let end_message =
             Exchange.End
@@ -186,15 +202,21 @@ let transfer ?interrupt_after ?(object_byte_budget = Exchange.max_total_object_b
             | [] -> Ok (List.rev accumulator)
             | object_id :: ids ->
                 let* missing = destination_missing destination object_id in
-                select_missing (if missing then object_id :: accumulator else accumulator) ids
+                select_missing
+                  (if missing then object_id :: accumulator else accumulator)
+                  ids
           in
           let* wants = select_missing [] offered in
           let* receiver, want =
-            Exchange.register_want receiver ~sequence:(Int64.of_int page_index) wants
+            Exchange.register_want receiver ~sequence:(Int64.of_int page_index)
+              wants
             |> Result.map_error (fun error -> Protocol_error error)
           in
           let* decoded_want = round_trip want in
-          let* () = check_want ~session_id ~sequence:(Int64.of_int page_index) wants decoded_want in
+          let* () =
+            check_want ~session_id ~sequence:(Int64.of_int page_index) wants
+              decoded_want
+          in
           let rec transfer_wants receiver object_sequence transferred = function
             | [] -> Ok (receiver, object_sequence, transferred)
             | object_id :: ids ->
@@ -205,13 +227,15 @@ let transfer ?interrupt_after ?(object_byte_budget = Exchange.max_total_object_b
                 then Error (Interrupted_after (List.length transferred))
                 else
                   let* object_message =
-                    object_message source ~session_id ~sequence:object_sequence object_id
+                    object_message source ~session_id ~sequence:object_sequence
+                      object_id
                   in
                   let* object_message = round_trip object_message in
                   let* receiver, published =
                     receive_object destination receiver object_message
                   in
-                  transfer_wants receiver Int64.(add object_sequence 1L)
+                  transfer_wants receiver
+                    Int64.(add object_sequence 1L)
                     (published :: transferred) ids
           in
           let* receiver, object_sequence, transferred =
@@ -221,4 +245,5 @@ let transfer ?interrupt_after ?(object_byte_budget = Exchange.max_total_object_b
             (requested + List.length wants)
             transferred (page_index + 1) rest
     in
-    transfer_pages receiver 0L 0 [] 0 (chunks Exchange.max_ids_per_page object_ids)
+    transfer_pages receiver 0L 0 [] 0
+      (chunks Exchange.max_ids_per_page object_ids)

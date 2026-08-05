@@ -189,3 +189,9 @@ No CLI or transport implementation is introduced in M10-01. Future inspection
 may report peer compatibility, requested/transferred IDs, budgets, verified
 objects, and structured incomplete-session reasons. It must not claim that a
 peer is trusted, a ref was synchronised, or divergent histories were merged.
+
+## Implementation evidence
+
+M10-01 implements `paengi_exchange` and `paengi_exchange_store` with retained
+exact frame fixtures and two-local-repository coverage. Verification passed on
+2026-08-05: `make check` and `make property-test PROPERTY_TEST_SEED=17`.

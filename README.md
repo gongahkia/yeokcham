@@ -104,6 +104,13 @@ release snapshot, fixed export metadata, a create-only release ref, and an
 ADR-028 mapping; it rejects nested empty directories. It makes no general Git
 compatibility promise.
 
+M10-01 provides a bounded, transport-neutral local immutable-object exchange
+core. It verifies canonical frames, compatible repository formats, budgets,
+Envelope-1 bytes, and ADR-020 object IDs before create-only publication. It
+does not implement a network transport, CLI, ref transfer, reconciliation,
+identity, signing, or persistent resume; exchange leaves every mutable ref
+unchanged.
+
 See `CONTRIBUTING.md` for development rules. Paengi is licensed under the MIT License.
 
 ## Development

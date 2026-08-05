@@ -35,4 +35,10 @@ and `scratch-v1-generation.peng.hex` are ADR-024's canonical immutable cleanup,
 bounded alias-segment, and generation-root objects. `scratch-v1-generation.ref.hex`
 is the unchanged mutable-ref v1 encoding when naming a generation.
 
+`exchange-v1-hello.frame.hex`, `exchange-v1-inventory.frame.hex`,
+`exchange-v1-want.frame.hex`, `exchange-v1-object.frame.hex`,
+`exchange-v1-end.frame.hex`, and `exchange-v1-error.frame.hex` are ADR-038
+transient exchange-v1 frames. They cover the exact u64-be framing and canonical
+CBOR schema for every v1 message kind; they are not persistent object records.
+
 Changing any fixture bytes requires a format decision and retained compatibility evidence; adding a new schema requires a new named fixture.

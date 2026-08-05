@@ -2,7 +2,6 @@ module Encoding = Paengi_encoding
 module Object_id = Paengi_store.Stored_object_id
 
 type session_id = string
-
 type end_status = Complete | Incomplete
 
 type message =
@@ -103,11 +102,13 @@ let max_total_object_bytes = 1024 * 1024 * 1024
 let error_to_string = function
   | Invalid_session_id size ->
       Printf.sprintf "exchange session ID must contain 16 bytes, got %d" size
-  | Truncated_frame size -> Printf.sprintf "exchange frame is truncated at %d" size
+  | Truncated_frame size ->
+      Printf.sprintf "exchange frame is truncated at %d" size
   | Frame_length_mismatch { declared; actual } ->
       Printf.sprintf "exchange frame length mismatch: declared %Ld, actual %d"
         declared actual
-  | Frame_too_large size -> Printf.sprintf "exchange frame is too large: %Ld" size
+  | Frame_too_large size ->
+      Printf.sprintf "exchange frame is too large: %Ld" size
   | Invalid_cbor message -> "invalid exchange CBOR: " ^ message
   | Noncanonical_cbor -> "exchange CBOR is not canonical"
   | Invalid_message message -> "invalid exchange message: " ^ message
@@ -116,26 +117,31 @@ let error_to_string = function
   | Unsupported_features features ->
       Printf.sprintf "unsupported exchange required features: %Ld" features
   | Message_too_large { size; limit } ->
-      Printf.sprintf "exchange control message is %d bytes; limit is %d" size limit
+      Printf.sprintf "exchange control message is %d bytes; limit is %d" size
+        limit
   | Object_too_large { size; limit } ->
       Printf.sprintf "exchange object is %d bytes; limit is %d" size limit
   | Hello_required -> "exchange Hello must precede this message"
   | Duplicate_hello -> "exchange Hello was already accepted"
   | Incompatible_repository_format -> "exchange repository formats differ"
-  | No_compatible_version -> "exchange peers have no compatible protocol version"
+  | No_compatible_version ->
+      "exchange peers have no compatible protocol version"
   | Session_mismatch -> "exchange session ID does not match"
   | Session_closed -> "exchange session is closed"
   | Out_of_order_sequence { previous; current } ->
-      Printf.sprintf "exchange sequence %Ld does not follow %Ld" current previous
+      Printf.sprintf "exchange sequence %Ld does not follow %Ld" current
+        previous
   | Inventory_closed -> "exchange inventory was already final"
   | Unknown_inventory_sequence sequence ->
       Printf.sprintf "exchange inventory sequence %Ld is unavailable" sequence
   | Unoffered_object id ->
       Printf.sprintf "exchange object was not offered: %s" (Object_id.to_hex id)
   | Unrequested_object id ->
-      Printf.sprintf "exchange object was not requested: %s" (Object_id.to_hex id)
+      Printf.sprintf "exchange object was not requested: %s"
+        (Object_id.to_hex id)
   | Duplicate_request id ->
-      Printf.sprintf "exchange object was already requested: %s" (Object_id.to_hex id)
+      Printf.sprintf "exchange object was already requested: %s"
+        (Object_id.to_hex id)
   | Requested_object_limit_exceeded { count; limit } ->
       Printf.sprintf "exchange requested %d objects; limit is %d" count limit
   | Transferred_object_limit_exceeded { count; limit } ->
@@ -159,7 +165,7 @@ let ( let* ) = Result.bind
 let array values =
   Encoding.array values
   |> Result.map_error (fun error ->
-         Invalid_message (Encoding.construction_error_to_string error))
+      Invalid_message (Encoding.construction_error_to_string error))
 
 let int value = Encoding.integer value
 let bytes value = Encoding.bytes value
@@ -167,7 +173,7 @@ let bytes value = Encoding.bytes value
 let text value =
   Encoding.text value
   |> Result.map_error (fun error ->
-         Invalid_message (Encoding.construction_error_to_string error))
+      Invalid_message (Encoding.construction_error_to_string error))
 
 let encode_ids ids =
   List.map (fun id -> bytes (Object_id.to_raw_bytes id)) ids |> array
@@ -201,11 +207,22 @@ let encode_payload message =
   let* values =
     match message with
     | Hello { repository_format; supported_versions; required_features } ->
-        let versions = List.map (fun version -> int (Int64.of_int version)) supported_versions in
+        let versions =
+          List.map
+            (fun version -> int (Int64.of_int version))
+            supported_versions
+        in
         let* versions = array versions in
         array
-          [ int 1L; int 0L; int required_features; bytes repository_format; versions ]
-    | Inventory { session_id; sequence; final; object_ids; required_features } ->
+          [
+            int 1L;
+            int 0L;
+            int required_features;
+            bytes repository_format;
+            versions;
+          ]
+    | Inventory { session_id; sequence; final; object_ids; required_features }
+      ->
         let* ids = encode_ids object_ids in
         array
           [
@@ -229,13 +246,8 @@ let encode_payload message =
             ids;
           ]
     | Object
-        {
-          session_id;
-          sequence;
-          object_id;
-          envelope_bytes;
-          required_features;
-        } ->
+        { session_id; sequence; object_id; envelope_bytes; required_features }
+      ->
         array
           [
             int 1L;
@@ -249,10 +261,14 @@ let encode_payload message =
     | End { session_id; status; required_features } ->
         let status = match status with Complete -> 0L | Incomplete -> 1L in
         array
-          [ int 1L; int 4L; int required_features; bytes session_id; int status ]
+          [
+            int 1L; int 4L; int required_features; bytes session_id; int status;
+          ]
     | Error_message { session_id; code; detail; required_features } ->
         let session =
-          match session_id with None -> Ok Encoding.null | Some value -> Ok (bytes value)
+          match session_id with
+          | None -> Ok Encoding.null
+          | Some value -> Ok (bytes value)
         in
         let* session = session in
         let* code = text code in
@@ -270,7 +286,9 @@ let validate_message = function
         Error (Invalid_message "supported versions are empty")
       else if List.exists (fun version -> version < 0) supported_versions then
         Error (Invalid_message "supported version is negative")
-      else if List.sort_uniq Int.compare supported_versions <> supported_versions then
+      else if
+        List.sort_uniq Int.compare supported_versions <> supported_versions
+      then
         Error (Invalid_message "supported versions are not strictly ascending")
       else Ok ()
   | Inventory { session_id; sequence; object_ids; required_features; _ } ->
@@ -284,20 +302,18 @@ let validate_message = function
       let* () = check_sequence sequence in
       check_ids "want" object_ids
   | Object
-      {
-        session_id;
-        sequence;
-        object_id = _;
-        envelope_bytes;
-        required_features;
-      } ->
+      { session_id; sequence; object_id = _; envelope_bytes; required_features }
+    ->
       let* () = check_features required_features in
       let* () = session_id_of_bytes session_id |> Result.map (fun _ -> ()) in
       let* () = check_sequence sequence in
       if String.length envelope_bytes > Paengi_store.max_object_bytes then
         Error
           (Object_too_large
-             { size = String.length envelope_bytes; limit = Paengi_store.max_object_bytes })
+             {
+               size = String.length envelope_bytes;
+               limit = Paengi_store.max_object_bytes;
+             })
       else Ok ()
   | End { session_id; required_features; _ } ->
       let* () = check_features required_features in
@@ -309,18 +325,22 @@ let validate_message = function
         | None -> Ok ()
         | Some value -> session_id_of_bytes value |> Result.map (fun _ -> ())
       in
-      if String.length code = 0 then Error (Invalid_message "error code is empty")
+      if String.length code = 0 then
+        Error (Invalid_message "error code is empty")
       else Ok ()
 
 let control_size message payload =
   match message with
-  | Object { envelope_bytes; _ } -> String.length payload - String.length envelope_bytes
-  | Hello _ | Inventory _ | Want _ | End _ | Error_message _ -> String.length payload
+  | Object { envelope_bytes; _ } ->
+      String.length payload - String.length envelope_bytes
+  | Hello _ | Inventory _ | Want _ | End _ | Error_message _ ->
+      String.length payload
 
 let check_message_size message payload =
   let control = control_size message payload in
   if control > max_control_message_bytes then
-    Error (Message_too_large { size = control; limit = max_control_message_bytes })
+    Error
+      (Message_too_large { size = control; limit = max_control_message_bytes })
   else Ok ()
 
 let frame payload =
@@ -329,9 +349,7 @@ let frame payload =
   let value = Int64.of_int length in
   for index = 0 to 7 do
     let shift = (7 - index) * 8 in
-    let byte =
-      Int64.(to_int (logand (shift_right_logical value shift) 255L))
-    in
+    let byte = Int64.(to_int (logand (shift_right_logical value shift) 255L)) in
     Bytes.set output index (Char.chr byte)
   done;
   Bytes.blit_string payload 0 output 8 length;
@@ -345,31 +363,29 @@ let encode message =
 
 let parse_uint name = function
   | Encoding.Integer value when Int64.compare value 0L >= 0 -> Ok value
-  | Encoding.Integer _ -> Error (Invalid_message (name ^ " must be non-negative"))
-  | Encoding.Bytes _ | Encoding.Text _ | Encoding.Array _ | Encoding.Map _ | Encoding.Bool _ | Encoding.Null ->
+  | Encoding.Integer _ ->
+      Error (Invalid_message (name ^ " must be non-negative"))
+  | Encoding.Bytes _ | Encoding.Text _ | Encoding.Array _ | Encoding.Map _
+  | Encoding.Bool _ | Encoding.Null ->
       Error (Invalid_message (name ^ " must be an integer"))
 
 let parse_bytes name = function
   | Encoding.Bytes value -> Ok value
-  | Encoding.Integer _ | Encoding.Text _ | Encoding.Array _ | Encoding.Map _ | Encoding.Bool _ | Encoding.Null ->
+  | Encoding.Integer _ | Encoding.Text _ | Encoding.Array _ | Encoding.Map _
+  | Encoding.Bool _ | Encoding.Null ->
       Error (Invalid_message (name ^ " must be bytes"))
 
 let parse_text name = function
   | Encoding.Text value -> Ok value
-  | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Array _ | Encoding.Map _ | Encoding.Bool _ | Encoding.Null ->
+  | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Array _ | Encoding.Map _
+  | Encoding.Bool _ | Encoding.Null ->
       Error (Invalid_message (name ^ " must be text"))
 
 let parse_bool name = function
   | Encoding.Bool value -> Ok value
-  | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _ | Encoding.Array _ | Encoding.Map _ | Encoding.Null ->
+  | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _ | Encoding.Array _
+  | Encoding.Map _ | Encoding.Null ->
       Error (Invalid_message (name ^ " must be a boolean"))
-
-let parse_fields name count = function
-  | Encoding.Array fields when List.length fields = count -> Ok fields
-  | Encoding.Array _ ->
-      Error (Invalid_message (Printf.sprintf "%s has the wrong field count" name))
-  | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _ | Encoding.Map _ | Encoding.Bool _ | Encoding.Null ->
-      Error (Invalid_message (name ^ " must be an array"))
 
 let parse_at_least_fields name count = function
   | Encoding.Array fields when List.length fields >= count -> Ok fields
@@ -377,7 +393,8 @@ let parse_at_least_fields name count = function
       Error
         (Invalid_message
            (Printf.sprintf "%s must contain at least %d fields" name count))
-  | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _ | Encoding.Map _ | Encoding.Bool _ | Encoding.Null ->
+  | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _ | Encoding.Map _
+  | Encoding.Bool _ | Encoding.Null ->
       Error (Invalid_message (name ^ " must be an array"))
 
 let parse_session value =
@@ -402,7 +419,8 @@ let parse_ids value =
       let* ids = loop [] values in
       let* () = check_ids "object ID page" ids in
       Ok ids
-  | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _ | Encoding.Map _ | Encoding.Bool _ | Encoding.Null ->
+  | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _ | Encoding.Map _
+  | Encoding.Bool _ | Encoding.Null ->
       Error (Invalid_message "object ID page must be an array")
 
 let parse_versions value =
@@ -417,18 +435,20 @@ let parse_versions value =
             else loop (Int64.to_int version :: accumulator) rest
       in
       loop [] values
-  | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _ | Encoding.Map _ | Encoding.Bool _ | Encoding.Null ->
+  | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _ | Encoding.Map _
+  | Encoding.Bool _ | Encoding.Null ->
       Error (Invalid_message "supported versions must be an array")
 
 let parse_payload payload =
   let* value =
     Encoding.decode payload
-    |> Result.map_error (fun error -> Invalid_cbor (Encoding.decode_error_to_string error))
+    |> Result.map_error (fun error ->
+        Invalid_cbor (Encoding.decode_error_to_string error))
   in
-  if not (String.equal payload (Encoding.encode value)) then Error Noncanonical_cbor
+  if not (String.equal payload (Encoding.encode value)) then
+    Error Noncanonical_cbor
   else
     let* fields = parse_at_least_fields "exchange message" 3 value in
-    in
     match fields with
     | version :: kind :: required_features :: rest ->
         let* version = parse_uint "protocol version" version in
@@ -437,34 +457,54 @@ let parse_payload payload =
           let required_features =
             match required_features with
             | Encoding.Integer value -> Ok value
-            | Encoding.Bytes _ | Encoding.Text _ | Encoding.Array _ | Encoding.Map _ | Encoding.Bool _ | Encoding.Null ->
+            | Encoding.Bytes _ | Encoding.Text _ | Encoding.Array _
+            | Encoding.Map _ | Encoding.Bool _ | Encoding.Null ->
                 Error (Invalid_message "required features must be an integer")
           in
           let* required_features = required_features in
           let* () = check_features required_features in
           let* kind = parse_uint "message kind" kind in
           let message =
-            match kind, rest with
+            match (kind, rest) with
             | 0L, [ repository_format; versions ] ->
-                let* repository_format = parse_bytes "repository format" repository_format in
+                let* repository_format =
+                  parse_bytes "repository format" repository_format
+                in
                 let* supported_versions = parse_versions versions in
-                Ok (Hello { repository_format; supported_versions; required_features })
+                Ok
+                  (Hello
+                     {
+                       repository_format;
+                       supported_versions;
+                       required_features;
+                     })
             | 1L, [ session_id; sequence; final; object_ids ] ->
                 let* session_id = parse_session session_id in
                 let* sequence = parse_uint "inventory sequence" sequence in
                 let* final = parse_bool "inventory final" final in
                 let* object_ids = parse_ids object_ids in
-                Ok (Inventory { session_id; sequence; final; object_ids; required_features })
+                Ok
+                  (Inventory
+                     {
+                       session_id;
+                       sequence;
+                       final;
+                       object_ids;
+                       required_features;
+                     })
             | 2L, [ session_id; sequence; object_ids ] ->
                 let* session_id = parse_session session_id in
                 let* sequence = parse_uint "want sequence" sequence in
                 let* object_ids = parse_ids object_ids in
-                Ok (Want { session_id; sequence; object_ids; required_features })
+                Ok
+                  (Want { session_id; sequence; object_ids; required_features })
             | 3L, [ session_id; sequence; object_id; envelope_bytes ] ->
                 let* session_id = parse_session session_id in
                 let* sequence = parse_uint "object sequence" sequence in
                 let* object_id = parse_id object_id in
-                let* envelope_bytes = parse_bytes "object envelope bytes" envelope_bytes in
+                let* envelope_bytes =
+                  parse_bytes "object envelope bytes" envelope_bytes
+                in
                 Ok
                   (Object
                      {
@@ -491,8 +531,10 @@ let parse_payload payload =
                 in
                 let* code = parse_text "error code" code in
                 let* detail = parse_text "error detail" detail in
-                Ok (Error_message { session_id; code; detail; required_features })
-            | _ -> Error (Invalid_message "message kind or fields are unsupported")
+                Ok
+                  (Error_message { session_id; code; detail; required_features })
+            | _ ->
+                Error (Invalid_message "message kind or fields are unsupported")
           in
           let* message = message in
           let* () = validate_message message in
@@ -506,7 +548,8 @@ let decode_length input =
     let value = ref 0L in
     for index = 0 to 7 do
       value :=
-        Int64.logor (Int64.shift_left !value 8)
+        Int64.logor
+          (Int64.shift_left !value 8)
           (Int64.of_int (Char.code input.[index]))
     done;
     if Int64.compare !value 0L < 0 then Error (Frame_too_large !value)
@@ -517,8 +560,11 @@ let decode input =
   let actual = String.length input - 8 in
   if not (Int64.equal declared (Int64.of_int actual)) then
     Error (Frame_length_mismatch { declared; actual })
-  else if Int64.compare declared (Int64.of_int (Paengi_store.max_object_bytes + max_control_message_bytes)) > 0 then
-    Error (Frame_too_large declared)
+  else if
+    Int64.compare declared
+      (Int64.of_int (Paengi_store.max_object_bytes + max_control_message_bytes))
+    > 0
+  then Error (Frame_too_large declared)
   else parse_payload (String.sub input 8 actual)
 
 let initial_receiver ~object_byte_budget =
@@ -552,26 +598,30 @@ let add_control receiver message =
   let* size = message_control_size message in
   let used = receiver.control_bytes + size in
   if used > max_session_control_bytes then
-    Error
-      (Control_budget_exceeded { used; limit = max_session_control_bytes })
+    Error (Control_budget_exceeded { used; limit = max_session_control_bytes })
   else Ok { receiver with control_bytes = used }
 
-let require_open receiver = if receiver.closed then Error Session_closed else Ok ()
-let require_hello receiver = if receiver.hello_seen then Ok () else Error Hello_required
+let require_open receiver =
+  if receiver.closed then Error Session_closed else Ok ()
+
+let require_hello receiver =
+  if receiver.hello_seen then Ok () else Error Hello_required
 
 let accept_hello receiver message =
   let* () = require_open receiver in
   match message with
   | Hello { repository_format; supported_versions; _ } ->
       if receiver.hello_seen then Error Duplicate_hello
-      else if not (String.equal repository_format Paengi_store.repository_format) then
-        Error Incompatible_repository_format
+      else if
+        not (String.equal repository_format Paengi_store.repository_format)
+      then Error Incompatible_repository_format
       else if not (List.mem protocol_version supported_versions) then
         Error No_compatible_version
       else
         let* receiver = add_control receiver message in
         Ok { receiver with hello_seen = true }
-  | Inventory _ | Want _ | Object _ | End _ | Error_message _ -> Error Hello_required
+  | Inventory _ | Want _ | Object _ | End _ | Error_message _ ->
+      Error Hello_required
 
 let check_session receiver session_id =
   match receiver.session with
@@ -607,7 +657,8 @@ let accept_inventory receiver message =
   | Hello _ | Want _ | Object _ | End _ | Error_message _ ->
       Error (Invalid_message "expected inventory")
 
-let contains ids id = List.exists (fun candidate -> Object_id.equal candidate id) ids
+let contains ids id =
+  List.exists (fun candidate -> Object_id.equal candidate id) ids
 
 let find_inventory receiver sequence =
   match List.assoc_opt sequence receiver.inventories with
@@ -660,7 +711,8 @@ let accept_object receiver message =
   | Object { session_id; sequence; object_id; envelope_bytes; _ } ->
       let* () = check_session receiver session_id in
       let* () = follows receiver.last_object_sequence sequence in
-      if not (contains receiver.requested object_id) then Error (Unrequested_object object_id)
+      if not (contains receiver.requested object_id) then
+        Error (Unrequested_object object_id)
       else
         let count = receiver.transferred_count + 1 in
         if count > max_session_object_ids then
@@ -668,7 +720,9 @@ let accept_object receiver message =
             (Transferred_object_limit_exceeded
                { count; limit = max_session_object_ids })
         else
-          let object_bytes = receiver.object_bytes + String.length envelope_bytes in
+          let object_bytes =
+            receiver.object_bytes + String.length envelope_bytes
+          in
           if object_bytes > receiver.object_byte_budget then
             Error
               (Object_budget_exceeded
@@ -680,7 +734,8 @@ let accept_object receiver message =
                   receiver with
                   requested =
                     List.filter
-                      (fun requested -> not (Object_id.equal requested object_id))
+                      (fun requested ->
+                        not (Object_id.equal requested object_id))
                       receiver.requested;
                   transferred_count = count;
                   object_bytes;
@@ -709,7 +764,7 @@ let accept_error receiver message =
   match message with
   | Error_message { session_id; code; detail; _ } ->
       let* () =
-        match session_id, receiver.session with
+        match (session_id, receiver.session) with
         | None, _ | Some _, None -> Ok ()
         | Some actual, Some expected when String.equal actual expected -> Ok ()
         | Some _, Some _ -> Error Session_mismatch
