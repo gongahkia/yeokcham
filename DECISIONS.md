@@ -144,3 +144,4 @@ The ADR lifecycle, numbering rules, and template are defined in [`docs/adr/READM
 - [ADR-031 — Opaque Git commit metadata imports](docs/adr/031-opaque-git-commit-metadata.md) — Accepted.
 - [ADR-032 — Deterministic Git release commit export](docs/adr/032-git-release-commit-export.md) — Accepted.
 - [ADR-033 — Deterministic linear Git capsule-revision export](docs/adr/033-linear-git-capsule-revision-export.md) — Accepted.
+- [ADR-034 — Configured Git release-export metadata](docs/adr/034-configured-git-release-export-metadata.md) — Proposed.
