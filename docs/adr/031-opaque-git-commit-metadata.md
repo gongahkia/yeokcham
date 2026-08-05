@@ -149,8 +149,9 @@ record or ref is rewritten in place. Unknown transition versions reject.
   empty/NUL header, corrupt binding, and unavailable message-content failures.
 - Pending separately: SHA-256 fixtures, explicit commit-size-limit and
   interruption coverage, and benchmarks.
-- Run `make check` and `make property-test PROPERTY_TEST_SEED=17`. No retained
-  identity/timestamp implies authenticity.
+- Verified: `make check`, `make property-test PROPERTY_TEST_SEED=17`, and
+  `PROPERTY_TEST_SEED=17 opam exec -- dune exec ./test/git_property_test.exe`.
+  No retained identity/timestamp implies authenticity.
 
 ## Implementation evidence
 
