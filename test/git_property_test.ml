@@ -275,6 +275,118 @@ let generated_commits =
     QCheck2.Gen.(pair (string_size (int_range 0 4096)) bool)
     import_replays_generated_commit
 
+let generated_tag_name =
+  QCheck2.Gen.(
+    list_size (int_range 1 32)
+      (oneof_list
+         [
+           'a';
+           'b';
+           'c';
+           'd';
+           'e';
+           'f';
+           'g';
+           'h';
+           'i';
+           'j';
+           '0';
+           '1';
+           '2';
+           '3';
+           '-';
+         ])
+    |> map (fun suffix -> "tag-" ^ String.of_seq (List.to_seq suffix)))
+
+let import_replays_generated_tag (name, annotated) =
+  match git_path () with
+  | None -> false
+  | Some git ->
+      with_directory "paengi-git-tag-property-" (fun root ->
+          let repository = Filename.concat root "repository" in
+          let store_root = Filename.concat root "store" in
+          Unix.mkdir repository 0o700;
+          Unix.mkdir store_root 0o700;
+          if not (direct_process git [ "init"; "-q"; repository ]) then false
+          else if
+            not
+              (direct_process git
+                 [ "-C"; repository; "config"; "user.name"; "Paengi Test" ])
+          then false
+          else if
+            not
+              (direct_process git
+                 [
+                   "-C";
+                   repository;
+                   "config";
+                   "user.email";
+                   "test@example.invalid";
+                 ])
+          then false
+          else (
+            write_file
+              (Filename.concat repository "generated")
+              "tagged\000bytes";
+            if not (direct_process git [ "-C"; repository; "add"; "--all" ])
+            then false
+            else if
+              not
+                (direct_process git
+                   [ "-C"; repository; "commit"; "-q"; "-m"; "tagged" ])
+            then false
+            else
+              let imported =
+                match
+                  ( direct_capture git [ "-C"; repository; "rev-parse"; "HEAD" ],
+                    Store.init ~root:store_root |> option_of_result )
+                with
+                | Some commit_hex, Some store ->
+                    let tag_command =
+                      if annotated then
+                        [
+                          "-C";
+                          repository;
+                          "tag";
+                          "-a";
+                          name;
+                          "-m";
+                          "generated annotation";
+                          commit_hex;
+                        ]
+                      else [ "-C"; repository; "tag"; name; commit_hex ]
+                    in
+                    if not (direct_process git tag_command) then None
+                    else
+                      Some
+                        ( commit_hex,
+                          Git.import_tag Git.default_configuration ~store
+                            ~repository ~tag:name,
+                          Git.import_tag Git.default_configuration ~store
+                            ~repository ~tag:name )
+                | _ -> None
+              in
+              match imported with
+              | Some (commit_hex, Ok first, Ok second) ->
+                  let tag = first.Git.imported_tag in
+                  String.equal name (Git.imported_tag_name tag)
+                  && String.equal commit_hex
+                       (Git.imported_tag_target tag |> Git.object_id_to_hex)
+                  && Bool.equal annotated
+                       (Option.is_some (Git.imported_tag_annotation tag))
+                  && Id.Imported_tag_id.equal (Git.imported_tag_id tag)
+                       (Git.imported_tag_id second.Git.imported_tag)
+                  && Id.Git_mapping_id.equal
+                       (Git.mapping_id first.Git.tag_mapping)
+                       (Git.mapping_id second.Git.tag_mapping)
+              | Some (_, Error _, _) | Some (_, _, Error _) | None -> false))
+
+let generated_tags =
+  QCheck2.Test.make ~count:15
+    ~name:"Git tag import preserves generated opaque provenance"
+    QCheck2.Gen.(pair generated_tag_name bool)
+    import_replays_generated_tag
+
 let () =
   Alcotest.run "Git properties"
     [
@@ -286,5 +398,8 @@ let () =
           QCheck_alcotest.to_alcotest ~speed_level:`Quick
             ~rand:(state_for "generated-commits")
             generated_commits;
+          QCheck_alcotest.to_alcotest ~speed_level:`Quick
+            ~rand:(state_for "generated-tags")
+            generated_tags;
         ] );
     ]

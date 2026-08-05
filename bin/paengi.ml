@@ -1479,6 +1479,39 @@ let git root arguments =
                 (Git.imported_transition_parents transition
                 |> List.map Git.object_id_to_hex
                 |> String.concat ",")))
+  | [ "import"; "tag"; "--repository"; repository; "--tag"; tag ] -> (
+      match Store.open_repository ~root with
+      | Error error -> fail Store.error_to_string error
+      | Ok store -> (
+          match
+            Git.import_tag Git.default_configuration ~store ~repository ~tag
+          with
+          | Error error -> fail Git.error_to_string error
+          | Ok result ->
+              let imported = result.Git.imported_tag in
+              let target_kind =
+                match Git.imported_tag_target_kind imported with
+                | Git.Tag_commit -> "commit"
+                | Git.Tag_tree -> "tree"
+                | Git.Tag_blob -> "blob"
+              in
+              let annotation =
+                match Git.imported_tag_annotation imported with
+                | None -> "none"
+                | Some content ->
+                    Snapshot.Content.stored_object_id content
+                    |> Store.Stored_object_id.to_hex
+              in
+              Printf.printf
+                "tag=%s mapping=%s git-object=%s target=%s target-kind=%s \
+                 annotation=%s\n"
+                (Paengi_id.Imported_tag_id.to_hex
+                   (Git.imported_tag_id imported))
+                (Paengi_id.Git_mapping_id.to_hex
+                   (Git.mapping_id result.Git.tag_mapping))
+                (Git.object_id_to_hex (Git.imported_tag_ref_object imported))
+                (Git.object_id_to_hex (Git.imported_tag_target imported))
+                target_kind annotation))
   | _ -> exit 2
 
 let usage () =

@@ -46,10 +46,7 @@ type commit_import_result = {
   commit_mapping : mapping;
 }
 
-type tag_import_result = {
-  imported_tag : imported_tag;
-  tag_mapping : mapping;
-}
+type tag_import_result = { imported_tag : imported_tag; tag_mapping : mapping }
 
 type configuration = {
   git : string;
@@ -175,15 +172,12 @@ val imported_transition_snapshot :
   imported_transition -> Paengi_snapshot.Snapshot.id
 
 val imported_transition_parents : imported_transition -> object_id list
-
 val imported_tag_id : imported_tag -> Paengi_id.Imported_tag_id.t
 val imported_tag_name : imported_tag -> string
 val imported_tag_ref_object : imported_tag -> object_id
 val imported_tag_target : imported_tag -> object_id
 val imported_tag_target_kind : imported_tag -> tag_target_kind
-
-val imported_tag_annotation :
-  imported_tag -> Paengi_snapshot.Content.id option
+val imported_tag_annotation : imported_tag -> Paengi_snapshot.Content.id option
 
 val load_imported_transition :
   Paengi_store.repository ->

@@ -140,6 +140,7 @@ dune exec bin/paengi.exe -- release verify <release-id>
 dune exec bin/paengi.exe -- release list
 dune exec bin/paengi.exe -- git import tree --repository <absolute-git-directory> --tree <full-git-tree-id>
 dune exec bin/paengi.exe -- git import commit --repository <absolute-git-directory> --commit <full-git-commit-id>
+dune exec bin/paengi.exe -- git import tag --repository <absolute-git-directory> --tag <name>
 ```
 
 `work explain-order` is read-only. It resolves each enabled capsule's current
@@ -175,6 +176,12 @@ full SHA-1 or SHA-256 commit ID, verifies the exact declared tree and direct
 parent object types, and prints an opaque transition, snapshot, mapping, commit,
 and ordered parent IDs. It does not import commit metadata, recursively import
 parents, or advance any Paengi history ref.
+
+`git import tag` has the same root and repository requirements. It resolves one
+bounded `refs/tags/<name>` ref, retains a lightweight target or raw annotated
+tag bytes as opaque provenance, and prints the imported-tag and mapping IDs. It
+does not create a Paengi release, capsule, or history ref, and does not verify
+tag signatures.
 
 `restore` creates a durable safety checkpoint for divergent work, validates its
 plan immediately before applying, and moves `scratch-head` only after exact

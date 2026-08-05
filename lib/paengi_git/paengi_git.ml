@@ -91,10 +91,7 @@ type imported_tag = {
   tag_annotation : Snapshot.Content.id option;
 }
 
-type tag_import_result = {
-  imported_tag : imported_tag;
-  tag_mapping : mapping;
-}
+type tag_import_result = { imported_tag : imported_tag; tag_mapping : mapping }
 
 type configuration = {
   git : string;
@@ -134,8 +131,7 @@ let default_configuration =
 let configuration_with ?git ?timeout_ms ?max_stdout_bytes ?max_stderr_bytes
     ?max_tree_bytes ?max_total_tree_bytes ?max_blob_bytes ?max_total_blob_bytes
     ?max_tree_entries ?max_depth ?max_commit_bytes ?max_commit_parents
-    ?max_tag_bytes ?max_tag_name_bytes
-    configuration =
+    ?max_tag_bytes ?max_tag_name_bytes configuration =
   {
     git = Option.value ~default:configuration.git git;
     timeout_ms = Option.value ~default:configuration.timeout_ms timeout_ms;
@@ -646,11 +642,13 @@ let parse_tree_entries ~max_entries identity bytes =
 let mapping_domain = function
   | 1 -> "paengi:git-mapping:v1\000"
   | 2 -> "paengi:git-mapping:v2\000"
+  | 3 -> "paengi:git-mapping:v3\000"
   | _ -> assert false
 
 let mapping_binding_domain = function
   | 1 -> "paengi:git-mapping-binding:v1\000"
   | 2 -> "paengi:git-mapping-binding:v2\000"
+  | 3 -> "paengi:git-mapping-binding:v3\000"
   | _ -> assert false
 
 let mapping_array values =
@@ -688,6 +686,16 @@ let mapping_subject_value = function
           (Store.Stored_object_id.to_raw_bytes transition_object)
       in
       mapping_array [ Encoding.integer 4L; transition; transition_object ]
+  | Imported_tag { tag; tag_object } ->
+      let* tag =
+        mapping_identity_value "imported tag ID"
+          (Id.Imported_tag_id.to_bytes tag)
+      in
+      let* tag_object =
+        mapping_identity_value "imported tag object ID"
+          (Store.Stored_object_id.to_raw_bytes tag_object)
+      in
+      mapping_array [ Encoding.integer 5L; tag; tag_object ]
   | Imported_revision { capsule; revision; revision_object } ->
       let* capsule =
         mapping_identity_value "imported capsule ID"
@@ -746,7 +754,7 @@ let mapping_subject_value = function
         ]
 
 let direction_code = function Import -> 0L | Export -> 1L
-let kind_code = function Tree -> 1L | Commit -> 2L
+let kind_code = function Tree -> 1L | Commit -> 2L | Tag -> 3L
 
 let valid_mapping_combination_v1 direction kind subject =
   match (direction, kind, subject) with
@@ -756,28 +764,42 @@ let valid_mapping_combination_v1 direction kind subject =
       true
   | ( Import,
       Commit,
-      ( Imported_snapshot _ | Imported_transition _ | Exported_release _
-      | Exported_revision _ ) )
+      ( Imported_snapshot _ | Imported_transition _ | Imported_tag _
+      | Exported_release _ | Exported_revision _ ) )
   | ( Import,
       Tree,
-      ( Imported_transition _ | Imported_revision _ | Exported_release _
-      | Exported_revision _ ) )
-  | Export, Tree, _
+      ( Imported_transition _ | Imported_tag _ | Imported_revision _
+      | Exported_release _ | Exported_revision _ ) )
+  | Export, (Tree | Tag), _
   | ( Export,
       Commit,
-      (Imported_snapshot _ | Imported_transition _ | Imported_revision _) ) ->
+      ( Imported_snapshot _ | Imported_transition _ | Imported_tag _
+      | Imported_revision _ ) )
+  | Import, Tag, _ ->
       false
 
 let valid_mapping_combination version direction kind subject =
-  (Int.equal version 1 && valid_mapping_combination_v1 direction kind subject)
-  || Int.equal version 2
-     && (valid_mapping_combination_v1 direction kind subject
-        || direction = Import && kind = Commit
+  let v1 = valid_mapping_combination_v1 direction kind subject in
+  let v2 =
+    v1
+    || direction = Import && kind = Commit
+       &&
+       match subject with
+       | Imported_transition _ -> true
+       | Imported_snapshot _ | Imported_tag _ | Imported_revision _
+       | Exported_release _ | Exported_revision _ ->
+           false
+  in
+  (Int.equal version 1 && v1)
+  || (Int.equal version 2 && v2)
+  || Int.equal version 3
+     && (v2
+        || direction = Import && kind = Tag
            &&
            match subject with
-           | Imported_transition _ -> true
-           | Imported_snapshot _ | Imported_revision _ | Exported_release _
-           | Exported_revision _ ->
+           | Imported_tag _ -> true
+           | Imported_snapshot _ | Imported_transition _ | Imported_revision _
+           | Exported_release _ | Exported_revision _ ->
                false)
 
 let mapping_identity_payload ~version ~direction ~git_object ~git_kind ~subject
@@ -908,6 +930,7 @@ let mapping_direction_of_code = function
 let object_kind_of_code = function
   | 1L -> Ok Tree
   | 2L -> Ok Commit
+  | 3L -> Ok Tag
   | value ->
       Error
         (Mapping_error (Printf.sprintf "unknown Git object kind: %Ld" value))
@@ -966,6 +989,17 @@ let decode_mapping_subject value =
         | _ ->
             Error
               (Mapping_error "imported transition subject has invalid length")
+      else if Int64.equal tag 5L then
+        match fields with
+        | [ tag; tag_object ] ->
+            let* tag =
+              mapping_raw_id "imported tag ID" Id.Imported_tag_id.of_bytes tag
+            in
+            let* tag_object =
+              mapping_stored_id "imported tag object ID" tag_object
+            in
+            Ok (Imported_tag { tag; tag_object })
+        | _ -> Error (Mapping_error "imported tag subject has invalid length")
       else if Int64.equal tag 1L then
         match fields with
         | [ capsule; revision; revision_object ] ->
@@ -1045,7 +1079,11 @@ let decode_mapping_payload value =
   match fields with
   | [ version; supplied_id; direction; git_kind; git_object; subject ] ->
       let* version = mapping_integer "Git mapping version" version in
-      if not (Int64.equal version 1L || Int64.equal version 2L) then
+      if
+        not
+          (Int64.equal version 1L || Int64.equal version 2L
+         || Int64.equal version 3L)
+      then
         Error
           (Mapping_error
              (Printf.sprintf "unsupported Git mapping version: %Ld" version))
@@ -1121,7 +1159,11 @@ let decode_mapping_binding bytes =
   match fields with
   | [ version; logical; physical; supplied_checksum ] ->
       let* version = mapping_integer "Git mapping binding version" version in
-      if not (Int64.equal version 1L || Int64.equal version 2L) then
+      if
+        not
+          (Int64.equal version 1L || Int64.equal version 2L
+         || Int64.equal version 3L)
+      then
         Error
           (Mapping_error
              (Printf.sprintf "unsupported Git mapping binding version: %Ld"
@@ -1573,6 +1615,429 @@ let load_imported_transition store logical =
   in
   Ok transition
 
+let tag_domain = "paengi:imported-tag:v1\000"
+let tag_binding_domain = "paengi:imported-tag-binding:v1\000"
+
+let tag_array values =
+  Encoding.array values
+  |> Result.map_error (fun error ->
+      Imported_tag_error (Encoding.construction_error_to_string error))
+
+let tag_bytes name = function
+  | Encoding.Bytes value -> Ok value
+  | Encoding.Integer _ | Encoding.Text _ | Encoding.Array _ | Encoding.Map _
+  | Encoding.Bool _ | Encoding.Null ->
+      Error (Imported_tag_error (name ^ " must be bytes"))
+
+let tag_integer name = function
+  | Encoding.Integer value -> Ok value
+  | Encoding.Bytes _ | Encoding.Text _ | Encoding.Array _ | Encoding.Map _
+  | Encoding.Bool _ | Encoding.Null ->
+      Error (Imported_tag_error (name ^ " must be an integer"))
+
+let tag_id_value name raw =
+  if String.length raw = 32 then Ok (Encoding.bytes raw)
+  else
+    Error
+      (Imported_tag_error
+         (Printf.sprintf "%s must be exactly 32 bytes, got %d" name
+            (String.length raw)))
+
+let tag_object_id_value identity =
+  let format = match identity.format with Sha1 -> 1L | Sha256 -> 2L in
+  tag_array [ Encoding.integer format; Encoding.bytes identity.raw ]
+
+let tag_object_id_of_value value =
+  decode_object_id value
+  |> Result.map_error (fun error -> Imported_tag_error (error_to_string error))
+
+let tag_target_kind_code = function
+  | Tag_commit -> 1L
+  | Tag_tree -> 2L
+  | Tag_blob -> 3L
+
+let tag_target_kind_of_code = function
+  | 1L -> Ok Tag_commit
+  | 2L -> Ok Tag_tree
+  | 3L -> Ok Tag_blob
+  | value ->
+      Error
+        (Imported_tag_error
+           (Printf.sprintf "unknown imported tag target kind: %Ld" value))
+
+let tag_target_kind_name = function
+  | Tag_commit -> "commit"
+  | Tag_tree -> "tree"
+  | Tag_blob -> "blob"
+
+let tag_target_kind_of_name = function
+  | "commit" -> Ok Tag_commit
+  | "tree" -> Ok Tag_tree
+  | "blob" -> Ok Tag_blob
+  | value -> Error (Invalid_tag ("unsupported target type: " ^ value))
+
+let valid_imported_tag_name name =
+  let components = String.split_on_char '/' name in
+  if String.is_empty name then Error (Imported_tag_error "tag name is empty")
+  else if String.contains name '\000' then
+    Error (Imported_tag_error "tag name contains NUL")
+  else if
+    List.exists
+      (fun part ->
+        String.is_empty part || String.equal part "." || String.equal part "..")
+      components
+  then Error (Imported_tag_error "tag name has an unsafe component")
+  else Ok ()
+
+let tag_representation_value ~target ~target_kind ~annotation =
+  match annotation with
+  | None ->
+      tag_array
+        [
+          Encoding.integer 0L;
+          Encoding.integer (tag_target_kind_code target_kind);
+        ]
+  | Some annotation ->
+      let* target = tag_object_id_value target in
+      let* annotation =
+        tag_id_value "imported tag annotation content ID"
+          (Snapshot.Content.stored_object_id annotation
+          |> Store.Stored_object_id.to_raw_bytes)
+      in
+      tag_array
+        [
+          Encoding.integer 1L;
+          target;
+          Encoding.integer (tag_target_kind_code target_kind);
+          annotation;
+        ]
+
+let tag_identity_payload ~name ~ref_object ~target ~target_kind ~annotation =
+  let* name = tag_bytes "imported tag name" (Encoding.bytes name) in
+  let* ref_object = tag_object_id_value ref_object in
+  let* representation =
+    tag_representation_value ~target ~target_kind ~annotation
+  in
+  tag_array
+    [ Encoding.integer 1L; Encoding.bytes name; ref_object; representation ]
+
+let derive_tag_id ~name ~ref_object ~target ~target_kind ~annotation =
+  let* identity =
+    tag_identity_payload ~name ~ref_object ~target ~target_kind ~annotation
+  in
+  let raw =
+    Hash.feed_string Hash.empty tag_domain |> fun context ->
+    Hash.feed_string context (Encoding.encode identity)
+    |> Hash.get |> Hash.to_raw_string
+  in
+  Id.Imported_tag_id.of_bytes raw
+  |> Result.map_error (fun error ->
+      Imported_tag_error (Id.parse_error_to_string error))
+
+let create_imported_tag ~name ~ref_object ~target ~target_kind ~annotation =
+  let* () = valid_imported_tag_name name in
+  if ref_object.format <> target.format then
+    Error
+      (Imported_tag_error
+         "tag ref object and target have different Git object formats")
+  else if annotation = None && not (object_id_equal ref_object target) then
+    Error
+      (Imported_tag_error "lightweight tag target disagrees with ref object")
+  else if annotation <> None && object_id_equal ref_object target then
+    Error (Imported_tag_error "annotated tag cannot name itself as its target")
+  else
+    let* tag_id =
+      derive_tag_id ~name ~ref_object ~target ~target_kind ~annotation
+    in
+    Ok
+      {
+        tag_id;
+        tag_name = name;
+        tag_ref_object = ref_object;
+        tag_target = target;
+        tag_target_kind = target_kind;
+        tag_annotation = annotation;
+      }
+
+let tag_payload tag =
+  let* identity =
+    tag_identity_payload ~name:tag.tag_name ~ref_object:tag.tag_ref_object
+      ~target:tag.tag_target ~target_kind:tag.tag_target_kind
+      ~annotation:tag.tag_annotation
+  in
+  let* id =
+    tag_id_value "imported tag ID" (Id.Imported_tag_id.to_bytes tag.tag_id)
+  in
+  match identity with
+  | Encoding.Array [ _; name; ref_object; representation ] ->
+      tag_array [ Encoding.integer 1L; id; name; ref_object; representation ]
+  | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _ | Encoding.Map _
+  | Encoding.Bool _ | Encoding.Null | Encoding.Array _ ->
+      assert false
+
+let tag_envelope tag =
+  let* payload = tag_payload tag in
+  Envelope.create ~object_type:Envelope.Imported_tag
+    ~object_format_version:Envelope.current_object_format_version
+    ~mandatory_features:Envelope.supported_mandatory_features ~payload ()
+  |> Result.map_error (fun error ->
+      Imported_tag_error (Envelope.creation_error_to_string error))
+
+let tag_fields name length = function
+  | Encoding.Array values when List.length values = length -> Ok values
+  | Encoding.Array _ ->
+      Error
+        (Imported_tag_error
+           (Printf.sprintf "%s must contain %d values" name length))
+  | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _ | Encoding.Map _
+  | Encoding.Bool _ | Encoding.Null ->
+      Error (Imported_tag_error (name ^ " must be an array"))
+
+let tag_raw_id name parser value =
+  let* raw = tag_bytes name value in
+  if String.length raw <> 32 then
+    Error
+      (Imported_tag_error
+         (Printf.sprintf "%s must be exactly 32 bytes, got %d" name
+            (String.length raw)))
+  else
+    parser raw
+    |> Result.map_error (fun error ->
+        Imported_tag_error (Id.parse_error_to_string error))
+
+let tag_stored_id name value =
+  let* raw = tag_bytes name value in
+  match Store.Stored_object_id.of_raw_bytes raw with
+  | Some identity -> Ok identity
+  | None ->
+      Error
+        (Imported_tag_error
+           (Printf.sprintf "%s must be exactly 32 bytes, got %d" name
+              (String.length raw)))
+
+let decode_tag_representation name ref_object value =
+  let* values =
+    match value with
+    | Encoding.Array values -> Ok values
+    | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _ | Encoding.Map _
+    | Encoding.Bool _ | Encoding.Null ->
+        Error (Imported_tag_error "tag representation must be an array")
+  in
+  match values with
+  | [ tag; target_kind ] ->
+      let* tag = tag_integer "tag representation kind" tag in
+      if not (Int64.equal tag 0L) then
+        Error (Imported_tag_error "lightweight tag has an invalid kind")
+      else
+        let* target_kind =
+          tag_integer "lightweight tag target kind" target_kind
+        in
+        let* target_kind = tag_target_kind_of_code target_kind in
+        create_imported_tag ~name ~ref_object ~target:ref_object ~target_kind
+          ~annotation:None
+  | [ tag; target; target_kind; annotation ] ->
+      let* tag = tag_integer "tag representation kind" tag in
+      if not (Int64.equal tag 1L) then
+        Error (Imported_tag_error "annotated tag has an invalid kind")
+      else
+        let* target = tag_object_id_of_value target in
+        let* target_kind =
+          tag_integer "annotated tag target kind" target_kind
+        in
+        let* target_kind = tag_target_kind_of_code target_kind in
+        let* annotation = tag_stored_id "annotated tag content ID" annotation in
+        create_imported_tag ~name ~ref_object ~target ~target_kind
+          ~annotation:(Some (Snapshot.Content.of_stored_object_id annotation))
+  | _ -> Error (Imported_tag_error "tag representation has an invalid length")
+
+let decode_tag_payload value =
+  let* fields = tag_fields "imported tag" 5 value in
+  match fields with
+  | [ version; supplied_id; name; ref_object; representation ] ->
+      let* version = tag_integer "imported tag version" version in
+      if not (Int64.equal version 1L) then
+        Error
+          (Imported_tag_error
+             (Printf.sprintf "unsupported imported tag version: %Ld" version))
+      else
+        let* supplied_id =
+          tag_raw_id "imported tag ID" Id.Imported_tag_id.of_bytes supplied_id
+        in
+        let* name = tag_bytes "imported tag name" name in
+        let* ref_object = tag_object_id_of_value ref_object in
+        let* tag = decode_tag_representation name ref_object representation in
+        if not (Id.Imported_tag_id.equal supplied_id tag.tag_id) then
+          Error
+            (Imported_tag_error
+               "imported tag logical ID does not match its preimage")
+        else
+          let* canonical = tag_payload tag in
+          if String.equal (Encoding.encode canonical) (Encoding.encode value)
+          then Ok tag
+          else Error (Imported_tag_error "imported tag payload is noncanonical")
+  | _ -> assert false
+
+let tag_binding_body logical physical =
+  let* logical =
+    tag_id_value "imported tag ID" (Id.Imported_tag_id.to_bytes logical)
+  in
+  let* physical =
+    tag_id_value "imported tag object ID"
+      (Store.Stored_object_id.to_raw_bytes physical)
+  in
+  tag_array [ Encoding.integer 1L; logical; physical ]
+
+let tag_binding_checksum body =
+  Hash.feed_string Hash.empty tag_binding_domain |> fun context ->
+  Hash.feed_string context (Encoding.encode body)
+  |> Hash.get |> Hash.to_raw_string
+
+let encode_tag_binding logical physical =
+  let* body = tag_binding_body logical physical in
+  let checksum = Encoding.bytes (tag_binding_checksum body) in
+  match body with
+  | Encoding.Array [ _; logical; physical ] ->
+      let* encoded =
+        tag_array [ Encoding.integer 1L; logical; physical; checksum ]
+      in
+      Ok (Encoding.encode encoded)
+  | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _ | Encoding.Map _
+  | Encoding.Bool _ | Encoding.Null | Encoding.Array _ ->
+      assert false
+
+let decode_tag_binding bytes =
+  let* value =
+    Encoding.decode bytes
+    |> Result.map_error (fun error ->
+        Imported_tag_error (Encoding.decode_error_to_string error))
+  in
+  let* fields = tag_fields "imported tag binding" 4 value in
+  match fields with
+  | [ version; logical; physical; supplied_checksum ] ->
+      let* version = tag_integer "imported tag binding version" version in
+      if not (Int64.equal version 1L) then
+        Error
+          (Imported_tag_error
+             (Printf.sprintf "unsupported imported tag binding version: %Ld"
+                version))
+      else
+        let* logical =
+          tag_raw_id "imported tag binding ID" Id.Imported_tag_id.of_bytes
+            logical
+        in
+        let* physical =
+          tag_stored_id "imported tag binding object ID" physical
+        in
+        let* supplied_checksum =
+          tag_bytes "imported tag binding checksum" supplied_checksum
+        in
+        if String.length supplied_checksum <> 32 then
+          Error
+            (Imported_tag_error
+               "imported tag binding checksum must be exactly 32 bytes")
+        else
+          let* body = tag_binding_body logical physical in
+          if not (String.equal supplied_checksum (tag_binding_checksum body))
+          then
+            Error (Imported_tag_error "imported tag binding checksum mismatch")
+          else
+            let* canonical = encode_tag_binding logical physical in
+            if String.equal canonical bytes then Ok (logical, physical)
+            else
+              Error
+                (Imported_tag_error
+                   "imported tag binding bytes are noncanonical")
+  | _ -> assert false
+
+let tag_ref_components logical =
+  [ "imported-tags"; Id.Imported_tag_id.to_hex logical ]
+
+let publish_tag store tag =
+  let* envelope = tag_envelope tag in
+  let* physical =
+    Store.put store envelope
+    |> Result.map_error (fun error -> Store_error error)
+  in
+  let* binding = encode_tag_binding tag.tag_id physical in
+  Store.with_lock store ~name:"imported-tags"
+    ~on_error:(fun error -> Store_error error)
+    (fun () ->
+      let components = tag_ref_components tag.tag_id in
+      let* current =
+        Store.Ref_file.read store ~components
+        |> Result.map_error (fun error -> Store_error error)
+      in
+      match current with
+      | None ->
+          Store.Ref_file.compare_and_swap store ~components ~expected:None
+            ~replacement:binding
+          |> Result.map_error (fun error -> Store_error error)
+      | Some current ->
+          let* current_id, current_object = decode_tag_binding current in
+          if
+            Id.Imported_tag_id.equal current_id tag.tag_id
+            && Store.Stored_object_id.equal current_object physical
+          then Ok ()
+          else
+            Error
+              (Imported_tag_error
+                 "imported tag ID already has a different immutable binding"))
+  |> Result.map (fun () -> (tag, physical))
+
+let load_tag_binding store logical =
+  let components = tag_ref_components logical in
+  let* binding =
+    Store.Ref_file.read store ~components
+    |> Result.map_error (fun error -> Store_error error)
+  in
+  let* binding =
+    match binding with
+    | Some binding -> Ok binding
+    | None -> Error (Imported_tag_error "imported tag binding is absent")
+  in
+  let* bound_id, physical = decode_tag_binding binding in
+  if not (Id.Imported_tag_id.equal bound_id logical) then
+    Error
+      (Imported_tag_error
+         "imported tag binding logical ID disagrees with its path")
+  else
+    let* envelope =
+      Store.get store physical
+      |> Result.map_error (fun error -> Store_error error)
+    in
+    if Envelope.object_type envelope <> Envelope.Imported_tag then
+      Error
+        (Imported_tag_error
+           (Printf.sprintf "expected imported tag object type 25, got %d"
+              (Envelope.object_type_code (Envelope.object_type envelope))))
+    else
+      let* tag = decode_tag_payload (Envelope.payload envelope) in
+      if not (Id.Imported_tag_id.equal tag.tag_id logical) then
+        Error
+          (Imported_tag_error "imported tag logical ID disagrees with binding")
+      else Ok (tag, physical)
+
+let load_imported_tag store logical =
+  let* tag, _ = load_tag_binding store logical in
+  let* () =
+    match tag.tag_annotation with
+    | None -> Ok ()
+    | Some annotation ->
+        Snapshot.Content.load store annotation
+        |> Result.map_error (fun error ->
+            Imported_tag_error
+              ("annotated tag content is unavailable: "
+              ^ Snapshot.error_to_string error))
+        |> Result.map (fun _ -> ())
+  in
+  Ok tag
+
+let imported_tag_id tag = tag.tag_id
+let imported_tag_name tag = tag.tag_name
+let imported_tag_ref_object tag = tag.tag_ref_object
+let imported_tag_target tag = tag.tag_target
+let imported_tag_target_kind tag = tag.tag_target_kind
+let imported_tag_annotation tag = tag.tag_annotation
 let imported_transition_id transition = transition.transition_id
 let imported_transition_commit transition = transition.transition_commit
 let imported_transition_tree transition = transition.transition_tree
@@ -1594,6 +2059,25 @@ let verify_mapping_subject store = function
         let* _ =
           Snapshot.Snapshot.load store loaded.transition_snapshot
           |> Result.map_error (fun error -> Snapshot_error error)
+        in
+        Ok ()
+  | Imported_tag { tag; tag_object } ->
+      let* loaded, physical = load_tag_binding store tag in
+      if not (Store.Stored_object_id.equal physical tag_object) then
+        Error
+          (Mapping_error
+             "imported tag mapping object disagrees with its binding")
+      else
+        let* () =
+          match loaded.tag_annotation with
+          | None -> Ok ()
+          | Some annotation ->
+              Snapshot.Content.load store annotation
+              |> Result.map_error (fun error ->
+                  Mapping_error
+                    ("imported tag annotation is unavailable: "
+                    ^ Snapshot.error_to_string error))
+              |> Result.map (fun _ -> ())
         in
         Ok ()
   | Imported_revision _ | Exported_release _ | Exported_revision _ -> Ok ()
@@ -1956,3 +2440,185 @@ let import_commit ?runner configuration ~store ~repository ~commit =
     in
     let* mapping = publish_mapping store mapping in
     Ok { imported_transition = transition; commit_mapping = mapping }
+
+let valid_requested_tag configuration tag =
+  if String.length tag > configuration.max_tag_name_bytes then
+    Error
+      (Invalid_tag
+         (Printf.sprintf "tag name exceeds %d bytes"
+            configuration.max_tag_name_bytes))
+  else if String.starts_with ~prefix:"refs/" tag then
+    Error (Invalid_tag "tag name must not include refs/ prefix")
+  else
+    valid_imported_tag_name tag
+    |> Result.map_error (fun error -> Invalid_tag (error_to_string error))
+
+let tag_ref_output_limit configuration format =
+  let object_hex = object_id_length format * 2 in
+  configuration.max_tag_name_bytes + object_hex + 32
+
+let parse_tag_ref format requested output =
+  let length = String.length output in
+  let output =
+    if length > 0 && Char.equal output.[length - 1] '\n' then
+      String.sub output 0 (length - 1)
+    else output
+  in
+  if
+    String.is_empty output
+    || String.contains output '\n'
+    || String.contains output '\r'
+  then Error (Invalid_tag "tag ref is absent or has multiple records")
+  else
+    match String.split_on_char '\000' output with
+    | [ ref_name; object_hex; object_type ] ->
+        if not (String.equal ref_name ("refs/tags/" ^ requested)) then
+          Error (Invalid_tag "resolved ref name disagrees with requested tag")
+        else
+          let* object_ = object_id_of_hex format object_hex in
+          if String.is_empty object_type || String.contains object_type '\000'
+          then Error (Invalid_tag "tag ref object type is empty")
+          else Ok (object_, object_type)
+    | _ -> Error (Invalid_tag "tag ref output has an invalid field count")
+
+let parse_annotated_tag_headers ~name identity raw =
+  let header_end =
+    match find_byte raw '\n' 0 with
+    | None -> None
+    | Some _ ->
+        let rec find_blank offset =
+          if offset + 1 >= String.length raw then None
+          else if
+            Char.equal raw.[offset] '\n' && Char.equal raw.[offset + 1] '\n'
+          then Some offset
+          else find_blank (offset + 1)
+        in
+        find_blank 0
+  in
+  let* header_end =
+    match header_end with
+    | Some offset -> Ok offset
+    | None ->
+        Error (Invalid_tag "annotated tag header lacks a blank-line terminator")
+  in
+  let lines = String.sub raw 0 header_end |> String.split_on_char '\n' in
+  let field line =
+    match String.index_opt line ' ' with
+    | Some separator when separator > 0 ->
+        Ok
+          ( String.sub line 0 separator,
+            String.sub line (separator + 1) (String.length line - separator - 1)
+          )
+    | _ ->
+        Error (Invalid_tag "annotated tag header lacks a key/value separator")
+  in
+  let rec parse target target_kind tag_name tagger = function
+    | [] -> (
+        match (target, target_kind, tag_name, tagger) with
+        | Some target, Some target_kind, Some tag_name, Some _ ->
+            if not (String.equal tag_name name) then
+              Error (Invalid_tag "annotated tag header name disagrees with ref")
+            else Ok (target, target_kind)
+        | _ -> Error (Invalid_tag "annotated tag misses a required header"))
+    | line :: rest ->
+        let* key, value = field line in
+        if String.equal key "object" then
+          match target with
+          | Some _ ->
+              Error
+                (Invalid_tag "annotated tag object header occurs more than once")
+          | None ->
+              let* target = object_id_of_hex identity.format value in
+              parse (Some target) target_kind tag_name tagger rest
+        else if String.equal key "type" then
+          match target_kind with
+          | Some _ ->
+              Error
+                (Invalid_tag "annotated tag type header occurs more than once")
+          | None ->
+              let* target_kind = tag_target_kind_of_name value in
+              parse target (Some target_kind) tag_name tagger rest
+        else if String.equal key "tag" then
+          match tag_name with
+          | Some _ ->
+              Error
+                (Invalid_tag "annotated tag name header occurs more than once")
+          | None ->
+              if String.is_empty value then
+                Error (Invalid_tag "annotated tag name is empty")
+              else parse target target_kind (Some value) tagger rest
+        else if String.equal key "tagger" then
+          match tagger with
+          | Some _ ->
+              Error
+                (Invalid_tag "annotated tag tagger header occurs more than once")
+          | None ->
+              if String.is_empty value then
+                Error (Invalid_tag "annotated tag tagger is empty")
+              else parse target target_kind tag_name (Some value) rest
+        else parse target target_kind tag_name tagger rest
+  in
+  parse None None None None lines
+
+let import_tag ?runner configuration ~store ~repository ~tag =
+  let* configuration = validate_configuration configuration in
+  let* repository = validate_repository_path repository in
+  let* () = valid_requested_tag configuration tag in
+  let* executable =
+    match executable_path configuration.git with
+    | Some executable -> Ok executable
+    | None -> Error (Git_missing configuration.git)
+  in
+  let* inspection = inspect ?runner configuration ~repository in
+  let* ref_output =
+    run_bytes ?runner configuration executable repository ~operation:"tag-ref"
+      ~max_stdout_bytes:
+        (tag_ref_output_limit configuration inspection.object_format)
+      [
+        "--no-replace-objects";
+        "for-each-ref";
+        "--format=%(refname)%00%(objectname)%00%(objecttype)";
+        "--";
+        "refs/tags/" ^ tag;
+      ]
+  in
+  let* ref_object, ref_type =
+    parse_tag_ref inspection.object_format tag ref_output
+  in
+  let* imported_tag =
+    if String.equal ref_type "tag" then
+      let* raw =
+        read_exact_object ?runner configuration executable repository
+          ~identity:ref_object ~kind:"tag" ~limit:configuration.max_tag_bytes
+      in
+      let* target, target_kind =
+        parse_annotated_tag_headers ~name:tag ref_object raw
+      in
+      let* () =
+        verify_exact_object_type ?runner configuration executable repository
+          ~identity:target
+          ~kind:(tag_target_kind_name target_kind)
+      in
+      let* annotation =
+        Snapshot.Content.store store raw
+        |> Result.map_error (fun error -> Snapshot_error error)
+      in
+      create_imported_tag ~name:tag ~ref_object ~target ~target_kind
+        ~annotation:(Some annotation)
+    else
+      let* target_kind = tag_target_kind_of_name ref_type in
+      let* () =
+        verify_exact_object_type ?runner configuration executable repository
+          ~identity:ref_object ~kind:ref_type
+      in
+      create_imported_tag ~name:tag ~ref_object ~target:ref_object ~target_kind
+        ~annotation:None
+  in
+  let* imported_tag, tag_object = publish_tag store imported_tag in
+  let* mapping =
+    create_mapping_with_version 3 ~direction:Import ~git_object:ref_object
+      ~git_kind:Tag
+      ~subject:(Imported_tag { tag = imported_tag.tag_id; tag_object })
+  in
+  let* tag_mapping = publish_mapping store mapping in
+  Ok { imported_tag; tag_mapping }

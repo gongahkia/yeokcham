@@ -210,6 +210,23 @@ let imported_transition_envelope_bytes store transition =
       | Encoding.Array _ | Encoding.Map _ | Encoding.Bool _ | Encoding.Null ) ->
       Alcotest.fail "imported transition binding does not decode"
 
+let imported_tag_envelope_bytes store tag =
+  let components = [ "imported-tags"; Id.Imported_tag_id.to_hex tag ] in
+  let binding = binding_bytes store components in
+  match Encoding.decode binding with
+  | Error _ -> Alcotest.fail "imported tag binding does not decode"
+  | Ok (Encoding.Array [ _; _; Encoding.Bytes physical; _ ]) -> (
+      match Store.Stored_object_id.of_raw_bytes physical with
+      | Some physical ->
+          Store.get store physical
+          |> require_ok Store.error_to_string
+          |> Envelope.encode
+      | None -> Alcotest.fail "imported tag binding object ID is invalid")
+  | Ok
+      ( Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _
+      | Encoding.Array _ | Encoding.Map _ | Encoding.Bool _ | Encoding.Null ) ->
+      Alcotest.fail "imported tag binding does not decode"
+
 let git_path () =
   let candidates =
     [ "/opt/homebrew/bin/git"; "/usr/local/bin/git"; "/usr/bin/git" ]
@@ -405,6 +422,58 @@ let commit_fixture run =
       in
       run repository store format commit parents)
 
+let tag_fixture run =
+  with_directory "paengi-git-tag-" (fun root ->
+      let repository = Filename.concat root "repository" in
+      let store_root = Filename.concat root "store" in
+      Unix.mkdir repository 0o700;
+      Unix.mkdir store_root 0o700;
+      let git = git_path () in
+      direct_process git [ "init"; "-q"; repository ];
+      direct_process git
+        [ "-C"; repository; "config"; "user.name"; "Paengi Test" ];
+      direct_process git
+        [ "-C"; repository; "config"; "user.email"; "test@example.invalid" ];
+      write_file (Filename.concat repository "tagged") "tagged\000bytes";
+      direct_process git [ "-C"; repository; "add"; "--all" ];
+      direct_process git [ "-C"; repository; "commit"; "-q"; "-m"; "tagged" ];
+      let commit =
+        direct_capture git [ "-C"; repository; "rev-parse"; "HEAD" ]
+      in
+      direct_process git [ "-C"; repository; "tag"; "lightweight"; commit ];
+      direct_process git
+        [
+          "-C";
+          repository;
+          "tag";
+          "-a";
+          "annotated";
+          "-m";
+          "exact annotation\nwith second line";
+          commit;
+        ];
+      let annotated_object =
+        direct_capture git
+          [ "-C"; repository; "rev-parse"; "refs/tags/annotated" ]
+      in
+      let annotation_bytes =
+        direct_capture git
+          [ "-C"; repository; "cat-file"; "tag"; annotated_object ]
+        ^ "\n"
+      in
+      let store =
+        Store.init ~root:store_root |> require_ok Store.error_to_string
+      in
+      let format =
+        Git.inspect Git.default_configuration ~repository
+        |> require_ok Git.error_to_string
+        |> Git.inspection_object_format
+      in
+      let commit =
+        Git.object_id_of_hex format commit |> require_ok Git.error_to_string
+      in
+      run repository store commit annotation_bytes)
+
 let imports_merge_commit_and_ordered_parents () =
   commit_fixture (fun repository store _format commit expected_parents ->
       let imported =
@@ -452,7 +521,7 @@ let imports_merge_commit_and_ordered_parents () =
             "mapping names transition" true
             (Id.Imported_transition_id.equal identity
                (Git.imported_transition_id transition))
-      | Git.Imported_snapshot _ | Git.Imported_revision _
+      | Git.Imported_snapshot _ | Git.Imported_tag _ | Git.Imported_revision _
       | Git.Exported_release _ | Git.Exported_revision _ ->
           Alcotest.fail "commit import did not map to an opaque transition");
       let snapshot =
@@ -472,6 +541,192 @@ let imports_merge_commit_and_ordered_parents () =
           Alcotest.(check string)
             "side bytes" "side\n"
             (read_file (Filename.concat destination "side"))))
+
+let imports_lightweight_and_annotated_tags () =
+  tag_fixture (fun repository store commit annotation_bytes ->
+      let lightweight =
+        Git.import_tag Git.default_configuration ~store ~repository
+          ~tag:"lightweight"
+        |> require_ok Git.error_to_string
+      in
+      let lightweight_retry =
+        Git.import_tag Git.default_configuration ~store ~repository
+          ~tag:"lightweight"
+        |> require_ok Git.error_to_string
+      in
+      Alcotest.(check bool)
+        "lightweight retry has one tag ID" true
+        (Id.Imported_tag_id.equal
+           (Git.imported_tag_id lightweight.Git.imported_tag)
+           (Git.imported_tag_id lightweight_retry.Git.imported_tag));
+      let lightweight_mapping = Git.mapping_id lightweight.Git.tag_mapping in
+      let annotated =
+        Git.import_tag Git.default_configuration ~store ~repository
+          ~tag:"annotated"
+        |> require_ok Git.error_to_string
+      in
+      let reopened =
+        Store.open_repository ~root:(Store.root store)
+        |> require_ok Store.error_to_string
+      in
+      let lightweight =
+        Git.load_imported_tag reopened
+          (Git.imported_tag_id lightweight.Git.imported_tag)
+        |> require_ok Git.error_to_string
+      in
+      Alcotest.(check string)
+        "lightweight name" "lightweight"
+        (Git.imported_tag_name lightweight);
+      Alcotest.(check string)
+        "lightweight target"
+        (Git.object_id_to_hex commit)
+        (Git.imported_tag_target lightweight |> Git.object_id_to_hex);
+      Alcotest.(check bool)
+        "lightweight target equals direct object" true
+        (String.equal
+           (Git.imported_tag_target lightweight |> Git.object_id_to_hex)
+           (Git.imported_tag_ref_object lightweight |> Git.object_id_to_hex));
+      Alcotest.(check bool)
+        "lightweight has no annotation" true
+        (Option.is_none (Git.imported_tag_annotation lightweight));
+      let annotated =
+        Git.load_imported_tag reopened
+          (Git.imported_tag_id annotated.Git.imported_tag)
+        |> require_ok Git.error_to_string
+      in
+      Alcotest.(check string)
+        "annotated name" "annotated"
+        (Git.imported_tag_name annotated);
+      Alcotest.(check string)
+        "annotated target"
+        (Git.object_id_to_hex commit)
+        (Git.imported_tag_target annotated |> Git.object_id_to_hex);
+      (match
+         Envelope.decode
+           (imported_tag_envelope_bytes reopened
+              (Git.imported_tag_id annotated))
+       with
+      | Ok envelope ->
+          Alcotest.(check int)
+            "annotated tag envelope type" 25
+            (Envelope.object_type_code (Envelope.object_type envelope))
+      | Error error ->
+          Alcotest.fail
+            ("annotated tag envelope failed to decode: "
+            ^ Envelope.decode_error_to_string error));
+      Alcotest.(check bool)
+        "annotated direct object differs from target" false
+        (String.equal
+           (Git.imported_tag_target annotated |> Git.object_id_to_hex)
+           (Git.imported_tag_ref_object annotated |> Git.object_id_to_hex));
+      (match Git.imported_tag_target_kind annotated with
+      | Git.Tag_commit -> ()
+      | Git.Tag_tree | Git.Tag_blob ->
+          Alcotest.fail "annotated commit tag has the wrong target kind");
+      let annotation =
+        match Git.imported_tag_annotation annotated with
+        | Some annotation -> annotation
+        | None -> Alcotest.fail "annotated tag lost raw bytes"
+      in
+      Alcotest.(check string)
+        "annotated raw bytes" annotation_bytes
+        (Snapshot.Content.load reopened annotation
+        |> require_ok Snapshot.error_to_string);
+      let mapping =
+        Git.load_mapping reopened lightweight_mapping
+        |> require_ok Git.error_to_string
+      in
+      match Git.mapping_subject mapping with
+      | Git.Imported_tag { tag; _ } ->
+          Alcotest.(check bool)
+            "mapping names imported tag" true
+            (Id.Imported_tag_id.equal tag (Git.imported_tag_id lightweight))
+      | Git.Imported_snapshot _ | Git.Imported_transition _
+      | Git.Imported_revision _ | Git.Exported_release _
+      | Git.Exported_revision _ ->
+          Alcotest.fail "tag mapping did not name an imported tag")
+
+let rejects_malformed_tag_data () =
+  with_directory "paengi-git-tag-errors-" (fun repository ->
+      let store_root = Filename.concat repository "store" in
+      Unix.mkdir store_root 0o700;
+      let store =
+        Store.init ~root:store_root |> require_ok Store.error_to_string
+      in
+      let tag_object = String.make 40 '8' in
+      let malformed =
+        "object " ^ String.make 40 '9'
+        ^ "\n\
+           type commit\n\
+           tag wrong\n\
+           tagger Test <test@example.invalid> 0 +0000\n\n\
+           body\n"
+      in
+      recorded_commands := [];
+      queued_results :=
+        [
+          process_result ~stdout:(stream "false\n") ();
+          process_result ~stdout:(stream "sha1\n") ();
+          process_result
+            ~stdout:(stream ("refs/tags/broken\000" ^ tag_object ^ "\000tag\n"))
+            ();
+          process_result ~stdout:(stream "tag\n") ();
+          process_result ~stdout:(stream malformed) ();
+        ];
+      Git.import_tag
+        ~runner:(module Fake_runner)
+        fake_configuration ~store ~repository ~tag:"broken"
+      |> Result.fold
+           ~ok:(fun _ -> Alcotest.fail "malformed annotated tag was accepted")
+           ~error:(fun error ->
+             Alcotest.(check bool)
+               "structured malformed tag" true
+               (contains ~needle:"invalid Git tag" (Git.error_to_string error)));
+      recorded_commands := [];
+      queued_results :=
+        [
+          process_result ~stdout:(stream "false\n") ();
+          process_result ~stdout:(stream "sha1\n") ();
+          process_result ~stdout:(stream "") ();
+        ];
+      Git.import_tag
+        ~runner:(module Fake_runner)
+        fake_configuration ~store ~repository ~tag:"missing"
+      |> Result.fold
+           ~ok:(fun _ -> Alcotest.fail "missing tag was accepted")
+           ~error:(fun error ->
+             Alcotest.(check bool)
+               "structured missing tag" true
+               (contains ~needle:"tag ref is absent"
+                  (Git.error_to_string error))))
+
+let rejects_corrupt_tag_binding () =
+  tag_fixture (fun repository store _commit _annotation_bytes ->
+      let imported =
+        Git.import_tag Git.default_configuration ~store ~repository
+          ~tag:"annotated"
+        |> require_ok Git.error_to_string
+      in
+      let tag = Git.imported_tag_id imported.Git.imported_tag in
+      let components = [ "imported-tags"; Id.Imported_tag_id.to_hex tag ] in
+      let existing =
+        Store.Ref_file.read store ~components
+        |> require_ok Store.error_to_string
+      in
+      (match existing with
+      | Some bytes ->
+          Store.Ref_file.compare_and_swap store ~components
+            ~expected:(Some bytes) ~replacement:"corrupt"
+          |> require_ok Store.error_to_string
+      | None -> Alcotest.fail "imported tag binding was not written");
+      Git.load_imported_tag store tag
+      |> Result.fold
+           ~ok:(fun _ -> Alcotest.fail "corrupt tag binding was accepted")
+           ~error:(fun error ->
+             Alcotest.(check bool)
+               "structured corrupt tag binding" true
+               (contains ~needle:"imported tag error"
+                  (Git.error_to_string error))))
 
 let imported_transition_persistence_goldens_are_stable () =
   with_directory "paengi-git-transition-golden-" (fun root ->
@@ -521,6 +776,63 @@ let imported_transition_persistence_goldens_are_stable () =
       Alcotest.(check string)
         "canonical Git mapping v2 binding"
         (golden "git-mapping-v2.ref.hex")
+        (binding_bytes store
+           [ "git-mappings"; Id.Git_mapping_id.to_hex mapping_id ]))
+
+let imported_tag_persistence_goldens_are_stable () =
+  with_directory "paengi-git-tag-golden-" (fun root ->
+      let repository = Filename.concat root "repository" in
+      let store_root = Filename.concat root "store" in
+      Unix.mkdir repository 0o700;
+      Unix.mkdir store_root 0o700;
+      let git = git_path () in
+      direct_process git [ "init"; "--object-format=sha1"; "-q"; repository ];
+      write_file (Filename.concat repository "golden") "golden tag\000bytes";
+      direct_process git [ "-C"; repository; "add"; "--all" ];
+      let tree = direct_capture git [ "-C"; repository; "write-tree" ] in
+      let commit =
+        direct_capture_with_environment git golden_commit_environment
+          [ "-C"; repository; "commit-tree"; tree; "-m"; "golden" ]
+      in
+      ignore
+        (direct_capture_with_environment git golden_commit_environment
+           [
+             "-C";
+             repository;
+             "tag";
+             "-a";
+             "golden-tag";
+             "-m";
+             "golden annotation";
+             commit;
+           ]);
+      let store =
+        Store.init ~root:store_root |> require_ok Store.error_to_string
+      in
+      let imported =
+        Git.import_tag Git.default_configuration ~store ~repository
+          ~tag:"golden-tag"
+        |> require_ok Git.error_to_string
+      in
+      let tag = imported.Git.imported_tag in
+      let tag_id = Git.imported_tag_id tag in
+      let mapping_id = Git.mapping_id imported.Git.tag_mapping in
+      Alcotest.(check string)
+        "canonical imported tag envelope"
+        (golden "git-imported-tag-v1.peng.hex")
+        (imported_tag_envelope_bytes store tag_id);
+      Alcotest.(check string)
+        "canonical imported tag binding"
+        (golden "git-imported-tag-v1.ref.hex")
+        (binding_bytes store
+           [ "imported-tags"; Id.Imported_tag_id.to_hex tag_id ]);
+      Alcotest.(check string)
+        "canonical Git mapping v3 envelope"
+        (golden "git-mapping-v3.peng.hex")
+        (mapping_envelope_bytes store mapping_id);
+      Alcotest.(check string)
+        "canonical Git mapping v3 binding"
+        (golden "git-mapping-v3.ref.hex")
         (binding_bytes store
            [ "git-mappings"; Id.Git_mapping_id.to_hex mapping_id ]))
 
@@ -711,7 +1023,7 @@ let imports_exact_tree_and_restarts_idempotently () =
           Alcotest.(check bool)
             "mapping points to imported snapshot" true
             (Snapshot.Snapshot.equal_id snapshot imported.Git.snapshot)
-      | Git.Imported_transition _ | Git.Imported_revision _
+      | Git.Imported_transition _ | Git.Imported_tag _ | Git.Imported_revision _
       | Git.Exported_release _ | Git.Exported_revision _ ->
           Alcotest.fail "tree import did not map to a snapshot");
       let snapshot =
@@ -901,12 +1213,20 @@ let () =
             imports_exact_tree_and_restarts_idempotently;
           Alcotest.test_case "merge commit import preserves parent order" `Quick
             imports_merge_commit_and_ordered_parents;
+          Alcotest.test_case "lightweight and annotated tags retain provenance"
+            `Quick imports_lightweight_and_annotated_tags;
           Alcotest.test_case "imported transition schemas have stable goldens"
             `Quick imported_transition_persistence_goldens_are_stable;
+          Alcotest.test_case "imported tag schemas have stable goldens" `Quick
+            imported_tag_persistence_goldens_are_stable;
+          Alcotest.test_case "malformed tag data rejects" `Quick
+            rejects_malformed_tag_data;
           Alcotest.test_case "malformed commit data rejects" `Quick
             rejects_malformed_commit_data;
           Alcotest.test_case "corrupt transition binding rejects" `Quick
             rejects_corrupt_transition_binding;
+          Alcotest.test_case "corrupt tag binding rejects" `Quick
+            rejects_corrupt_tag_binding;
           Alcotest.test_case "unsafe tree entry rejects before blob read" `Quick
             rejects_unsafe_tree_entry_before_blob_read;
           Alcotest.test_case "unsupported mode and missing object reject" `Quick

@@ -579,6 +579,14 @@ the parent graph. Git remains the owner of Git-object, pack, delta, and
 compatibility parsing; Paengi has no general Git-format compatibility contract.
 The preflight result is never a repository identity or persistent metadata.
 
+M8-03 resolves one exact `refs/tags/<name>` ref with bounded direct-argv
+plumbing. A direct commit/tree/blob ref becomes an opaque lightweight imported
+tag. A ref resolving to a tag object retains the exact bounded raw tag-object
+bytes in `Snapshot.Content`; exactly one matching `tag` header, target, and
+target type are required. Imported tags and Git-mapping v3 bindings are
+immutable provenance only: no tag becomes a Paengi release, capsule, or history
+ref, and no signature is verified.
+
 Import:
 
 - Commit graph. M8-02 records direct ordered parent identities for one commit;
@@ -587,9 +595,11 @@ Import:
   by M8-02 for the commit's declared tree.
 - Author and timestamp metadata.
 - Parent relationships. M8-02 stores direct ordered Git parent IDs only.
-- Tags.
+- Tags. M8-03 imports one lightweight or annotated tag pointing directly to a
+  commit, tree, or blob; nested tag targets fail closed.
 - Mapping records. M8-01 implements tree-to-snapshot mappings; M8-02 adds
-  commit-to-opaque-transition mappings in v2.
+  commit-to-opaque-transition mappings in v2; M8-03 adds tag-to-opaque-tag
+  mappings in v3.
 
 Imported commits initially become opaque transitions. Semantic inference is optional post-processing.
 

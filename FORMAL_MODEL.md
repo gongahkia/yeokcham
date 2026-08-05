@@ -911,8 +911,9 @@ after a target becomes visible but before its mapping is bound remains an
 explicit, retryable incomplete bridge state. M8-01 implements
 `import/tree -> imported-snapshot`; M8-02 implements
 `import/commit -> imported-transition` through the same bounded direct-argv
-adapter. The latter is opaque provenance, not a capsule or revision; neither
-slice is an exporter or general Git compatibility claim.
+adapter; M8-03 implements `import/tag -> imported-tag`. The latter two are
+opaque provenance, not capsules, revisions, or releases; none of these slices
+is an exporter or general Git compatibility claim.
 
 ### Import
 
@@ -929,6 +930,15 @@ publishes the resulting opaque imported transition and its v2 commit mapping.
 It rejects missing, duplicate, malformed, self, wrong-format, missing-object,
 or wrong-type links; it does not store metadata, raw commit bytes, refs, tags,
 or recursive graph topology.
+
+M8-03 resolves exactly one requested `refs/tags/<name>` ref and records one
+`Imported_tag_v1` plus a Git-mapping v3. A direct commit/tree/blob ref is a
+lightweight tag. A ref resolving to a tag object must have exactly one matching
+raw `tag` header, one `object` header, and one supported `type` header; its
+exact bounded raw object bytes are retained through `Snapshot.Content`. Its
+tagger, message, and signature bytes have no Paengi semantic meaning and are
+not verified. Nested tag targets, missing/mismatched refs, malformed headers,
+and unsupported targets fail before the imported-tag binding.
 
 ### Export
 

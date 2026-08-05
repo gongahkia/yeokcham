@@ -80,10 +80,12 @@ meaning or validity. The raw `tag` header must occur exactly once and equal the
 imported tag-name bytes. Signed tags are retained but never signature-verified
 by this slice.
 
-Only direct commit, tree, and blob targets are supported. Nested annotated tags,
-lightweight refs to tag objects, tag deletion/rewrites, symbolic refs, and
-signature verification reject or remain future work. Git permits annotated and
-lightweight tags to name general objects; this restriction is deliberate. [git-tag](https://git-scm.com/docs/git-tag)
+Only direct commit, tree, and blob targets are supported. A ref resolving to a
+tag object is imported as its annotated-tag object representation, so a
+requested ref name differing from the raw `tag` header rejects. Nested annotated
+targets, tag deletion/rewrites, symbolic refs, and signature verification reject
+or remain future work. Git permits annotated and lightweight tags to name general
+objects; this restriction is deliberate. [git-tag](https://git-scm.com/docs/git-tag)
 
 The logical identity is:
 
@@ -159,18 +161,16 @@ rewritten in place. Unknown mandatory features remain rejected.
 
 ## Verification
 
-- Unit/golden tests for lightweight and annotated SHA-1 records/bindings and
-  mapping v3, plus retained v1/v2 goldens; add SHA-256 fixtures where the local
-  Git supports the object format.
-- Local fixtures for commit/tree/blob targets, raw message/signature-like bytes,
-  nested-name tags, reopen, and equal retry.
-- Generated bounded tag names/messages prove raw-byte retention and identity
-  determinism without treating metadata as intent.
-- Failure tests cover missing refs, ref-name mismatch, malformed/duplicate tag
-  headers, target/type disagreement, tag-size limits, unsupported nested tags,
-  corrupt content/record/binding, and interruption before every binding.
-- Run `make check` and `make property-test PROPERTY_TEST_SEED=17`. No timing
-  result or retained signature implies correctness or authenticity.
+- Completed: lightweight and annotated SHA-1 unit/reopen/retry tests, raw
+  annotation-byte retention, imported-tag and mapping-v3 golden fixtures,
+  malformed tag-data rejection, corrupt binding rejection, and generated
+  lightweight/annotated tag retries with bounded names.
+- Completed: `make check`, `make property-test PROPERTY_TEST_SEED=17`, and the
+  tag-focused generated property suite with seed 17.
+- Pending separately: SHA-256 fixtures, commit/tree/blob target coverage,
+  signature-like/nested-name fixtures, duplicate headers, target/type mismatch,
+  size limits, corrupt content/record, and interruption coverage. No retained
+  signature implies correctness or authenticity.
 
 ## CLI and user impact
 
