@@ -103,6 +103,7 @@ let object_type_generator =
       Envelope.Release_attestation;
       Envelope.Git_mapping;
       Envelope.Imported_transition;
+      Envelope.Imported_tag;
     ]
 
 let boundary_lengths =

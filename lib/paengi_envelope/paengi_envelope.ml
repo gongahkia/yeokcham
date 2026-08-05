@@ -34,6 +34,7 @@ type object_type =
   | Release_attestation
   | Git_mapping
   | Imported_transition
+  | Imported_tag
 
 let object_type_code = function
   | Content -> 1
@@ -60,6 +61,7 @@ let object_type_code = function
   | Release_attestation -> 22
   | Git_mapping -> 23
   | Imported_transition -> 24
+  | Imported_tag -> 25
 
 let object_type_of_code = function
   | 1 -> Some Content
@@ -86,6 +88,7 @@ let object_type_of_code = function
   | 22 -> Some Release_attestation
   | 23 -> Some Git_mapping
   | 24 -> Some Imported_transition
+  | 25 -> Some Imported_tag
   | _ -> None
 
 type creation_error =

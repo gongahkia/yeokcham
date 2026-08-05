@@ -111,6 +111,7 @@ let object_type_codes () =
       (Envelope.Release_attestation, 22);
       (Envelope.Git_mapping, 23);
       (Envelope.Imported_transition, 24);
+      (Envelope.Imported_tag, 25);
     ]
   in
   List.iter

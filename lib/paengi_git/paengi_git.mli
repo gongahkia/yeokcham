@@ -1,14 +1,19 @@
 type object_format = Sha1 | Sha256
 type inspection = { bare : bool; object_format : object_format }
 type object_id
-type object_kind = Tree | Commit
+type object_kind = Tree | Commit | Tag
 type mapping_direction = Import | Export
+type tag_target_kind = Tag_commit | Tag_tree | Tag_blob
 
 type mapping_subject =
   | Imported_snapshot of Paengi_snapshot.Snapshot.id
   | Imported_transition of {
       transition : Paengi_id.Imported_transition_id.t;
       transition_object : Paengi_store.Stored_object_id.t;
+    }
+  | Imported_tag of {
+      tag : Paengi_id.Imported_tag_id.t;
+      tag_object : Paengi_store.Stored_object_id.t;
     }
   | Imported_revision of {
       capsule : Paengi_id.Capsule_id.t;
@@ -29,6 +34,7 @@ type mapping_subject =
 
 type mapping
 type imported_transition
+type imported_tag
 
 type import_result = {
   snapshot : Paengi_snapshot.Snapshot.id;
@@ -38,6 +44,11 @@ type import_result = {
 type commit_import_result = {
   imported_transition : imported_transition;
   commit_mapping : mapping;
+}
+
+type tag_import_result = {
+  imported_tag : imported_tag;
+  tag_mapping : mapping;
 }
 
 type configuration = {
@@ -53,6 +64,8 @@ type configuration = {
   max_depth : int;
   max_commit_bytes : int;
   max_commit_parents : int;
+  max_tag_bytes : int;
+  max_tag_name_bytes : int;
 }
 
 val default_configuration : configuration
@@ -70,6 +83,8 @@ val configuration_with :
   ?max_depth:int ->
   ?max_commit_bytes:int ->
   ?max_commit_parents:int ->
+  ?max_tag_bytes:int ->
+  ?max_tag_name_bytes:int ->
   configuration ->
   configuration
 
@@ -90,6 +105,7 @@ type error =
   | Invalid_object_id of { format : object_format; value : string }
   | Invalid_tree of { identity : object_id; detail : string }
   | Invalid_commit of { identity : object_id; detail : string }
+  | Invalid_tag of string
   | Unsupported_tree_mode of { identity : object_id; mode : string }
   | Invalid_symlink_target of { identity : object_id }
   | Unexpected_object_type of {
@@ -101,6 +117,7 @@ type error =
   | Snapshot_error of Paengi_snapshot.error
   | Mapping_error of string
   | Imported_transition_error of string
+  | Imported_tag_error of string
   | Store_error of Paengi_store.error
 
 val error_to_string : error -> string
@@ -134,6 +151,14 @@ val import_commit :
   commit:object_id ->
   (commit_import_result, error) result
 
+val import_tag :
+  ?runner:(module Paengi_validation.Process_runner) ->
+  configuration ->
+  store:Paengi_store.repository ->
+  repository:string ->
+  tag:string ->
+  (tag_import_result, error) result
+
 val mapping_id : mapping -> Paengi_id.Git_mapping_id.t
 val mapping_direction : mapping -> mapping_direction
 val mapping_git_object : mapping -> object_id
@@ -151,10 +176,24 @@ val imported_transition_snapshot :
 
 val imported_transition_parents : imported_transition -> object_id list
 
+val imported_tag_id : imported_tag -> Paengi_id.Imported_tag_id.t
+val imported_tag_name : imported_tag -> string
+val imported_tag_ref_object : imported_tag -> object_id
+val imported_tag_target : imported_tag -> object_id
+val imported_tag_target_kind : imported_tag -> tag_target_kind
+
+val imported_tag_annotation :
+  imported_tag -> Paengi_snapshot.Content.id option
+
 val load_imported_transition :
   Paengi_store.repository ->
   Paengi_id.Imported_transition_id.t ->
   (imported_transition, error) result
+
+val load_imported_tag :
+  Paengi_store.repository ->
+  Paengi_id.Imported_tag_id.t ->
+  (imported_tag, error) result
 
 val load_mapping :
   Paengi_store.repository ->

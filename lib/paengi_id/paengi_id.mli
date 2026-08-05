@@ -34,3 +34,4 @@ module Validation_id : S
 module Resolution_id : S
 module Git_mapping_id : S
 module Imported_transition_id : S
+module Imported_tag_id : S

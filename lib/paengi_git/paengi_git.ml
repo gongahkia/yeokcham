@@ -14,8 +14,9 @@ type inspection = { bare : bool; object_format : object_format }
 let object_format_to_string = function Sha1 -> "sha1" | Sha256 -> "sha256"
 
 type object_id = { format : object_format; raw : string }
-type object_kind = Tree | Commit
+type object_kind = Tree | Commit | Tag
 type mapping_direction = Import | Export
+type tag_target_kind = Tag_commit | Tag_tree | Tag_blob
 
 let raw_to_hex raw =
   let digits = "0123456789abcdef" in
@@ -35,6 +36,10 @@ type mapping_subject =
   | Imported_transition of {
       transition : Id.Imported_transition_id.t;
       transition_object : Store.Stored_object_id.t;
+    }
+  | Imported_tag of {
+      tag : Id.Imported_tag_id.t;
+      tag_object : Store.Stored_object_id.t;
     }
   | Imported_revision of {
       capsule : Id.Capsule_id.t;
@@ -77,6 +82,20 @@ type commit_import_result = {
   commit_mapping : mapping;
 }
 
+type imported_tag = {
+  tag_id : Id.Imported_tag_id.t;
+  tag_name : string;
+  tag_ref_object : object_id;
+  tag_target : object_id;
+  tag_target_kind : tag_target_kind;
+  tag_annotation : Snapshot.Content.id option;
+}
+
+type tag_import_result = {
+  imported_tag : imported_tag;
+  tag_mapping : mapping;
+}
+
 type configuration = {
   git : string;
   timeout_ms : int64;
@@ -90,6 +109,8 @@ type configuration = {
   max_depth : int;
   max_commit_bytes : int;
   max_commit_parents : int;
+  max_tag_bytes : int;
+  max_tag_name_bytes : int;
 }
 
 let default_configuration =
@@ -106,11 +127,14 @@ let default_configuration =
     max_depth = 256;
     max_commit_bytes = 8 * 1024 * 1024;
     max_commit_parents = 4_096;
+    max_tag_bytes = 8 * 1024 * 1024;
+    max_tag_name_bytes = 1_024;
   }
 
 let configuration_with ?git ?timeout_ms ?max_stdout_bytes ?max_stderr_bytes
     ?max_tree_bytes ?max_total_tree_bytes ?max_blob_bytes ?max_total_blob_bytes
     ?max_tree_entries ?max_depth ?max_commit_bytes ?max_commit_parents
+    ?max_tag_bytes ?max_tag_name_bytes
     configuration =
   {
     git = Option.value ~default:configuration.git git;
@@ -136,6 +160,10 @@ let configuration_with ?git ?timeout_ms ?max_stdout_bytes ?max_stderr_bytes
       Option.value ~default:configuration.max_commit_bytes max_commit_bytes;
     max_commit_parents =
       Option.value ~default:configuration.max_commit_parents max_commit_parents;
+    max_tag_bytes =
+      Option.value ~default:configuration.max_tag_bytes max_tag_bytes;
+    max_tag_name_bytes =
+      Option.value ~default:configuration.max_tag_name_bytes max_tag_name_bytes;
   }
 
 type error =
@@ -155,6 +183,7 @@ type error =
   | Invalid_object_id of { format : object_format; value : string }
   | Invalid_tree of { identity : object_id; detail : string }
   | Invalid_commit of { identity : object_id; detail : string }
+  | Invalid_tag of string
   | Unsupported_tree_mode of { identity : object_id; mode : string }
   | Invalid_symlink_target of { identity : object_id }
   | Unexpected_object_type of {
@@ -166,6 +195,7 @@ type error =
   | Snapshot_error of Snapshot.error
   | Mapping_error of string
   | Imported_transition_error of string
+  | Imported_tag_error of string
   | Store_error of Store.error
 
 let error_to_string = function
@@ -195,6 +225,7 @@ let error_to_string = function
       Printf.sprintf "invalid Git commit %s: %s"
         (object_id_to_hex identity)
         detail
+  | Invalid_tag detail -> "invalid Git tag: " ^ detail
   | Unsupported_tree_mode { identity; mode } ->
       Printf.sprintf "unsupported Git tree mode %S in %s" mode
         (object_id_to_hex identity)
@@ -211,6 +242,7 @@ let error_to_string = function
   | Snapshot_error error -> Snapshot.error_to_string error
   | Mapping_error detail -> "Git mapping error: " ^ detail
   | Imported_transition_error detail -> "imported transition error: " ^ detail
+  | Imported_tag_error detail -> "imported tag error: " ^ detail
   | Store_error error -> Store.error_to_string error
 
 let inspection_bare inspection = inspection.bare
@@ -257,6 +289,8 @@ let validate_configuration configuration =
     || configuration.max_depth <= 0
     || configuration.max_commit_bytes <= 0
     || configuration.max_commit_parents <= 0
+    || configuration.max_tag_bytes <= 0
+    || configuration.max_tag_name_bytes <= 0
   then Error (Invalid_configuration "Git import limits must be positive")
   else if configuration.max_blob_bytes > Store.max_object_bytes then
     Error
