@@ -525,7 +525,8 @@ boundary is persistently encoded in Milestone 7.
 `paengi_rust_adapter` has transient values only: a configuration, handshake,
 source file, half-open byte span, top-level item fact, parser diagnostic,
 analysis, explicit virtual-root selection, module fact, item-path fact,
-unreachable-source fact, and structured unavailable reason. An analysis is
+unreachable-source fact, fallback assessment/fact, and structured unavailable
+reason. An analysis is
 associated with one verified immutable snapshot ID and a sorted map of safe
 project-relative `.rs` files with valid UTF-8 source bytes. Each returned
 item/diagnostic path names one supplied file; each half-open span lies within
@@ -549,14 +550,24 @@ types, macro output, conditional configuration, or `#[path]` modules. It
 consults no host path. Module/item paths are transient evidence, not a Paengi
 or compiler identity, persistent sidecar, semantic operation, or rewrite.
 
+M9-03 fallback assessment requires the same sorted virtual source map and
+requested snapshot ID. Every fact has one supplied path, a valid half-open byte
+span, one of `macro-definition`, `macro-invocation`, `outer-attribute`, or
+`parser-damage`, and fixed `textual-fallback-required` status. Facts are unique
+and canonically ordered by path, span, then kind, with at most 4,096 facts.
+`textual_fallback_required = (facts <> [] || not parser_complete)`. A fallback
+fact reports only why an independent exact byte/text operation may be needed;
+it neither supplies a replacement nor grants macro, item, module, name, type,
+or rewrite authority.
+
 `parser_complete = false` is incomplete syntax evidence, not authority to
 apply an operation. Adapter absence, timeout, crash, malformed output, invalid
 input/encoding, an unsupported version, or any configured bound returns an
 unavailable value and leaves every snapshot, checkpoint, capsule, revision,
 workspace, release, ref, object, validation result, and canonical byte string
 unchanged. No Rust adapter request, response, item, diagnostic, module/item
-path, version, or lockfile data is a Paengi object, identity, semantic
-operation, or persistent sidecar.
+path, fallback fact, version, or lockfile data is a Paengi object, identity,
+semantic operation, or persistent sidecar.
 
 ### Milestone 7 evidence-stage retargeting
 

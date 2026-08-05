@@ -421,7 +421,7 @@ For TypeScript:
 - Detect simple declaration moves and renames.
 - Avoid pretending to know semantics across dynamic behaviour.
 
-For Rust M9-01/M9-02:
+For Rust M9-01/M9-02/M9-03:
 
 - Parse only bounded top-level items from a verified snapshot virtual map.
 - Return item kind, optional syntactic name, and UTF-8 byte spans.
@@ -429,6 +429,8 @@ For Rust M9-01/M9-02:
   candidates, and inline modules from that map.
 - Return root-scoped transient module/item path facts or explicit incomplete
   statuses; never infer a Cargo root.
+- Return bounded canonical textual-fallback-required facts for macro
+  definitions/invocations, outer attributes, and parser damage.
 - Mark parser damage incomplete; preserve macro-heavy, invalid, and non-UTF-8
   files through textual fallback.
 - Defer move/rename inference, name/type resolution, macro expansion,
@@ -524,7 +526,7 @@ persistent format.
 ### Milestone 9 Rust syntax boundary
 
 `paengi_rust_adapter` is a separate ephemeral protocol-v1 boundary approved by
-ADR-035 and ADR-036. It invokes a caller-configured, directly executed local
+ADR-035, ADR-036, and ADR-037. It invokes a caller-configured, directly executed local
 helper built from `tools/paengi-rust-adapter/Cargo.lock`; analysis itself invokes neither
 Cargo nor `rustc`. The helper uses pinned `tree-sitter 0.26.11` and
 `tree-sitter-rust 0.24.2`, receives only sorted safe `.rs` source bytes
@@ -532,7 +534,9 @@ materialised from a verified immutable snapshot, and returns bounded top-level
 syntax item evidence, parser diagnostics, UTF-8 byte spans, and explicit parser
 completeness. M9-02 additionally accepts caller-selected safe virtual roots and
 returns bounded root-scoped standard-module/item-path evidence or structured
-incompleteness.
+incompleteness. M9-03 separately returns bounded canonical fallback facts for
+macro-sensitive syntax, outer attributes, and parser damage; they only require
+an independent exact textual path and do not expand or rewrite source.
 
 The boundary neither receives nor reads a live path, repository path, Cargo
 manifest/configuration, project dependency, host configuration, network,

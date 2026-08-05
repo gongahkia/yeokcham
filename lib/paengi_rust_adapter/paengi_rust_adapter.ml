@@ -8,6 +8,7 @@ module Protocol = struct
   let maximum_source_bytes = 4 * 1024 * 1024
   let maximum_item_records = 4_096
   let maximum_module_facts = 4_096
+  let maximum_fallback_facts = 4_096
   let maximum_module_depth = 256
 
   type source_file = { path : string; contents : string }
@@ -70,6 +71,23 @@ module Protocol = struct
     unreachable_sources : unreachable_source list;
   }
 
+  type fallback_fact = {
+    path : string;
+    fallback_span : span;
+    syntax_kind : string;
+    status : string;
+  }
+
+  type fallback_assessment = {
+    snapshot_id : string;
+    adapter_version : string;
+    tree_sitter_version : string;
+    rust_grammar_version : string;
+    parser_complete : bool;
+    textual_fallback_required : bool;
+    fallback_facts : fallback_fact list;
+  }
+
   let make_source_file ~path ~contents = { path; contents }
   let make_span ~start_byte ~end_byte = { start_byte; end_byte }
 
@@ -109,6 +127,10 @@ module Protocol = struct
   let make_unreachable_source ~source_path ~status : unreachable_source =
     { source_path; status }
 
+  let make_fallback_fact ~path ~fallback_span ~syntax_kind ~status :
+      fallback_fact =
+    { path; fallback_span; syntax_kind; status }
+
   let make_analysis ~snapshot_id ~adapter_version ~tree_sitter_version
       ~rust_grammar_version ~parser_complete ~items ~parser_diagnostics :
       analysis =
@@ -136,6 +158,19 @@ module Protocol = struct
       module_facts;
       item_path_facts;
       unreachable_sources;
+    }
+
+  let make_fallback_assessment ~snapshot_id ~adapter_version
+      ~tree_sitter_version ~rust_grammar_version ~parser_complete
+      ~textual_fallback_required ~fallback_facts : fallback_assessment =
+    {
+      snapshot_id;
+      adapter_version;
+      tree_sitter_version;
+      rust_grammar_version;
+      parser_complete;
+      textual_fallback_required;
+      fallback_facts;
     }
 
   let source_file_path (source_file : source_file) = source_file.path
@@ -190,6 +225,23 @@ module Protocol = struct
   let item_path_fact_status (fact : item_path_fact) = fact.status
   let unreachable_source_path (source : unreachable_source) = source.source_path
   let unreachable_source_status (source : unreachable_source) = source.status
+  let fallback_fact_path (fact : fallback_fact) = fact.path
+  let fallback_fact_span (fact : fallback_fact) = fact.fallback_span
+  let fallback_fact_syntax_kind (fact : fallback_fact) = fact.syntax_kind
+  let fallback_fact_status (fact : fallback_fact) = fact.status
+
+  let fallback_assessment_snapshot_id (assessment : fallback_assessment) =
+    assessment.snapshot_id
+
+  let fallback_assessment_parser_complete (assessment : fallback_assessment) =
+    assessment.parser_complete
+
+  let fallback_assessment_textual_fallback_required
+      (assessment : fallback_assessment) =
+    assessment.textual_fallback_required
+
+  let fallback_assessment_facts (assessment : fallback_assessment) =
+    assessment.fallback_facts
 
   let module_path_analysis_snapshot_id (analysis : module_path_analysis) =
     analysis.snapshot_id
@@ -573,6 +625,24 @@ let request_for_module_paths ~snapshot_id ~root_files files =
       ("files", "[" ^ files ^ "]");
     ]
 
+let request_for_fallback ~snapshot_id files =
+  let files =
+    files
+    |> List.map (fun (file : Protocol.source_file) ->
+        "{"
+        ^ String.concat ","
+            [
+              Json.quote "path" ^ ":"
+              ^ Json.quote (Protocol.source_file_path file);
+              Json.quote "contentsHex" ^ ":"
+              ^ Json.quote (hex (Protocol.source_file_contents file));
+            ]
+        ^ "}")
+    |> String.concat ","
+  in
+  request_json ~operation:"inspect-fallback"
+    [ ("snapshotId", Json.quote snapshot_id); ("files", "[" ^ files ^ "]") ]
+
 let executable path =
   try
     Unix.access path [ Unix.X_OK ];
@@ -936,6 +1006,26 @@ let decode_module_path_analysis value =
        ~module_paths_complete ~module_facts ~item_path_facts
        ~unreachable_sources)
 
+let decode_fallback_fact value =
+  let* path = string_field "path" value in
+  let* fallback_span = decode_span "startByte" "endByte" value in
+  let* syntax_kind = string_field "syntaxKind" value in
+  let* status = string_field "status" value in
+  Ok (Protocol.make_fallback_fact ~path ~fallback_span ~syntax_kind ~status)
+
+let decode_fallback_assessment value =
+  let* snapshot_id = string_field "snapshotId" value in
+  let* adapter_version = string_field "adapterVersion" value in
+  let* tree_sitter_version = string_field "treeSitterVersion" value in
+  let* rust_grammar_version = string_field "rustGrammarVersion" value in
+  let* parser_complete = bool_field "parserComplete" value in
+  let* textual_fallback_required = bool_field "textualFallbackRequired" value in
+  let* fallback_facts = list_field "fallbackFacts" decode_fallback_fact value in
+  Ok
+    (Protocol.make_fallback_assessment ~snapshot_id ~adapter_version
+       ~tree_sitter_version ~rust_grammar_version ~parser_complete
+       ~textual_fallback_required ~fallback_facts)
+
 let decode_handshake value =
   let* adapter_version = string_field "adapterVersion" value in
   let* tree_sitter_version = string_field "treeSitterVersion" value in
@@ -1273,6 +1363,72 @@ let compare_item_path_fact (left : Protocol.item_path_fact)
                 (Protocol.item_path_fact_status left)
                 (Protocol.item_path_fact_status right)
 
+let compare_fallback_fact (left : Protocol.fallback_fact)
+    (right : Protocol.fallback_fact) =
+  let compare =
+    String.compare
+      (Protocol.fallback_fact_path left)
+      (Protocol.fallback_fact_path right)
+  in
+  if compare <> 0 then compare
+  else
+    let compare =
+      Int.compare
+        (Protocol.span_start_byte (Protocol.fallback_fact_span left))
+        (Protocol.span_start_byte (Protocol.fallback_fact_span right))
+    in
+    if compare <> 0 then compare
+    else
+      let compare =
+        Int.compare
+          (Protocol.span_end_byte (Protocol.fallback_fact_span left))
+          (Protocol.span_end_byte (Protocol.fallback_fact_span right))
+      in
+      if compare <> 0 then compare
+      else
+        String.compare
+          (Protocol.fallback_fact_syntax_kind left)
+          (Protocol.fallback_fact_syntax_kind right)
+
+let fallback_syntax_kind syntax_kind =
+  List.mem syntax_kind
+    [
+      "macro-definition"; "macro-invocation"; "outer-attribute"; "parser-damage";
+    ]
+
+let validate_fallback_assessment ~snapshot_id ~files
+    (assessment : Protocol.fallback_assessment) =
+  let facts = Protocol.fallback_assessment_facts assessment in
+  let valid_fact (fact : Protocol.fallback_fact) =
+    match source_for_path files (Protocol.fallback_fact_path fact) with
+    | None -> false
+    | Some source ->
+        safe_relative_rust_path (Protocol.fallback_fact_path fact)
+        && valid_span source (Protocol.fallback_fact_span fact)
+        && fallback_syntax_kind (Protocol.fallback_fact_syntax_kind fact)
+        && String.equal "textual-fallback-required"
+             (Protocol.fallback_fact_status fact)
+  in
+  let expected_required =
+    facts <> [] || not (Protocol.fallback_assessment_parser_complete assessment)
+  in
+  if
+    not
+      (String.equal snapshot_id
+         (Protocol.fallback_assessment_snapshot_id assessment))
+  then Error "fallback snapshot ID differs from request"
+  else if List.length facts > Protocol.maximum_fallback_facts then
+    Error "fallback assessment exceeds configured fact limit"
+  else if not (strictly_sorted compare_fallback_fact facts) then
+    Error "fallback facts are not canonically ordered"
+  else if
+    not
+      (Bool.equal expected_required
+         (Protocol.fallback_assessment_textual_fallback_required assessment))
+  then Error "fallback assessment has inconsistent required status"
+  else if List.for_all valid_fact facts then Ok assessment
+  else Error "fallback assessment contains an invalid fact"
+
 let module_status status =
   List.mem status
     [
@@ -1560,6 +1716,32 @@ let analyze_files configuration ~snapshot_id ~files =
             | Error message -> Unavailable (Malformed_adapter_response message))
         | Unavailable _ as result -> result)
 
+let inspect_fallback_files configuration ~snapshot_id ~files =
+  if not (valid_snapshot_id snapshot_id) then
+    Unavailable
+      (Adapter_error
+         {
+           code = "invalid-snapshot-id";
+           message =
+             "semantic input snapshot ID is not 64 lowercase hex characters";
+         })
+  else
+    match normalized_files files with
+    | Error message ->
+        Unavailable (Adapter_error { code = "invalid-input"; message })
+    | Ok files -> (
+        let request = request_for_fallback ~snapshot_id files in
+        match
+          run configuration request (decode_response decode_fallback_assessment)
+        with
+        | Available assessment -> (
+            match
+              validate_fallback_assessment ~snapshot_id ~files assessment
+            with
+            | Ok assessment -> Available assessment
+            | Error message -> Unavailable (Malformed_adapter_response message))
+        | Unavailable _ as result -> result)
+
 let resolve_module_paths_files configuration ~snapshot_id ~root_files ~files =
   if not (valid_snapshot_id snapshot_id) then
     Unavailable
@@ -1655,6 +1837,38 @@ let analyze_snapshot configuration ~store ~snapshot =
               |> Paengi_store.Stored_object_id.to_hex
             in
             analyze_files configuration ~snapshot_id ~files)
+
+let inspect_fallback_snapshot configuration ~store ~snapshot =
+  match Paengi_snapshot.Snapshot.load store snapshot with
+  | Error error -> Unavailable (Snapshot_error error)
+  | Ok snapshot_model -> (
+      match
+        collect_snapshot_rust_files store
+          (Paengi_snapshot.Snapshot.root snapshot_model)
+      with
+      | Error error -> Unavailable (Snapshot_error error)
+      | Ok files ->
+          let files =
+            List.sort
+              (fun (left : Protocol.source_file) right ->
+                String.compare
+                  (Protocol.source_file_path left)
+                  (Protocol.source_file_path right))
+              files
+          in
+          if files = [] then
+            Unavailable
+              (Adapter_error
+                 {
+                   code = "no-rust-files";
+                   message = "verified snapshot contains no Rust source files";
+                 })
+          else
+            let snapshot_id =
+              Paengi_snapshot.Snapshot.stored_object_id snapshot
+              |> Paengi_store.Stored_object_id.to_hex
+            in
+            inspect_fallback_files configuration ~snapshot_id ~files)
 
 let resolve_module_paths_snapshot configuration ~store ~snapshot ~root_files =
   match Paengi_snapshot.Snapshot.load store snapshot with

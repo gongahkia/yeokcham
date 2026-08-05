@@ -13,6 +13,7 @@ const MAX_FILES: usize = 4_096;
 const MAX_SOURCE_BYTES: usize = 4 * 1024 * 1024;
 const MAX_ITEMS: usize = 4_096;
 const MAX_MODULE_FACTS: usize = 4_096;
+const MAX_FALLBACK_FACTS: usize = 4_096;
 const MAX_MODULE_DEPTH: usize = 256;
 const MAX_DIAGNOSTICS: usize = 4_096;
 const MAX_PATH_BYTES: usize = 4 * 1024;
@@ -611,6 +612,50 @@ fn collect_diagnostics(
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         collect_diagnostics(child, path, output)?;
+    }
+    Ok(())
+}
+
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+struct FallbackFact {
+    path: String,
+    start_byte: usize,
+    end_byte: usize,
+    syntax_kind: &'static str,
+}
+
+fn collect_fallback_facts(
+    node: Node<'_>,
+    path: &str,
+    facts: &mut BTreeSet<FallbackFact>,
+) -> Result<(), AdapterError> {
+    let syntax_kind = if node.is_error() || node.is_missing() {
+        Some("parser-damage")
+    } else {
+        match node.kind() {
+            "macro_definition" => Some("macro-definition"),
+            "macro_invocation" => Some("macro-invocation"),
+            "attribute_item" => Some("outer-attribute"),
+            _ => None,
+        }
+    };
+    if let Some(syntax_kind) = syntax_kind {
+        let inserted = facts.insert(FallbackFact {
+            path: path.to_owned(),
+            start_byte: node.start_byte(),
+            end_byte: node.end_byte(),
+            syntax_kind,
+        });
+        if inserted && facts.len() > MAX_FALLBACK_FACTS {
+            return Err(AdapterError::new(
+                "fallback-fact-limit",
+                "fallback facts exceed configured limit",
+            ));
+        }
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        collect_fallback_facts(child, path, facts)?;
     }
     Ok(())
 }
@@ -1359,9 +1404,19 @@ fn unreachable_source_json(path: &str) -> String {
     )
 }
 
+fn fallback_fact_json(fact: &FallbackFact) -> String {
+    format!(
+        "{{\"path\":{},\"startByte\":{},\"endByte\":{},\"syntaxKind\":{},\"status\":\"textual-fallback-required\"}}",
+        quote(&fact.path),
+        fact.start_byte,
+        fact.end_byte,
+        quote(fact.syntax_kind),
+    )
+}
+
 fn handshake_json() -> String {
     format!(
-        "{{\"adapterVersion\":{},\"treeSitterVersion\":{},\"rustGrammarVersion\":{},\"requestLimitBytes\":{MAX_REQUEST_BYTES},\"responseLimitBytes\":{MAX_RESPONSE_BYTES},\"capabilities\":[\"virtual-files\",\"rust-syntax\",\"top-level-items\",\"utf8-byte-spans\",\"explicit-roots\",\"module-paths-v1\"]}}",
+        "{{\"adapterVersion\":{},\"treeSitterVersion\":{},\"rustGrammarVersion\":{},\"requestLimitBytes\":{MAX_REQUEST_BYTES},\"responseLimitBytes\":{MAX_RESPONSE_BYTES},\"capabilities\":[\"virtual-files\",\"rust-syntax\",\"top-level-items\",\"utf8-byte-spans\",\"explicit-roots\",\"module-paths-v1\",\"textual-fallback-v1\"]}}",
         quote(ADAPTER_VERSION),
         quote(TREE_SITTER_VERSION),
         quote(RUST_GRAMMAR_VERSION),
@@ -1449,6 +1504,35 @@ fn resolve_module_paths_json(request: &Json) -> Result<String, AdapterError> {
     ))
 }
 
+fn inspect_fallback_json(request: &Json) -> Result<String, AdapterError> {
+    let snapshot_id = string_field(request, "snapshotId")?;
+    if !valid_snapshot_id(&snapshot_id) {
+        return Err(AdapterError::new(
+            "invalid-snapshot-id",
+            "snapshotId is not 64 lowercase hex characters",
+        ));
+    }
+    let sources = decode_sources(request)?;
+    let parsed_sources = parse_path_sources(&sources)?;
+    let mut parser_complete = true;
+    let mut facts = BTreeSet::new();
+    for source in &parsed_sources {
+        parser_complete &= source.parser_complete;
+        collect_fallback_facts(source.tree.root_node(), &source.source.path, &mut facts)?;
+    }
+    let facts = facts.into_iter().collect::<Vec<_>>();
+    Ok(format!(
+        "{{\"snapshotId\":{},\"adapterVersion\":{},\"treeSitterVersion\":{},\"rustGrammarVersion\":{},\"parserComplete\":{},\"textualFallbackRequired\":{},\"fallbackFacts\":[{}]}}",
+        quote(&snapshot_id),
+        quote(ADAPTER_VERSION),
+        quote(TREE_SITTER_VERSION),
+        quote(RUST_GRAMMAR_VERSION),
+        if parser_complete { "true" } else { "false" },
+        if !facts.is_empty() || !parser_complete { "true" } else { "false" },
+        facts.iter().map(fallback_fact_json).collect::<Vec<_>>().join(","),
+    ))
+}
+
 fn run(request: &Json) -> Result<String, AdapterError> {
     if number_field(request, "protocolVersion")? != PROTOCOL_VERSION {
         return Err(AdapterError::new(
@@ -1460,6 +1544,7 @@ fn run(request: &Json) -> Result<String, AdapterError> {
         "handshake" => Ok(handshake_json()),
         "analyze" => analyze_json(request),
         "resolve-module-paths" => resolve_module_paths_json(request),
+        "inspect-fallback" => inspect_fallback_json(request),
         _ => Err(AdapterError::new(
             "invalid-request",
             "operation is unsupported",
@@ -1509,6 +1594,20 @@ mod tests {
             "analysis-response" => include_str!("../testdata/analysis-v1-response.json"),
             "module-paths-request" => include_str!("../testdata/module-paths-v1-request.json"),
             "module-paths-response" => include_str!("../testdata/module-paths-v1-response.json"),
+            "fallback-request" => include_str!("../testdata/fallback-v1-request.json"),
+            "fallback-response" => include_str!("../testdata/fallback-v1-response.json"),
+            "fallback-clean-request" => {
+                include_str!("../testdata/fallback-clean-v1-request.json")
+            }
+            "fallback-clean-response" => {
+                include_str!("../testdata/fallback-clean-v1-response.json")
+            }
+            "fallback-damaged-request" => {
+                include_str!("../testdata/fallback-damaged-v1-request.json")
+            }
+            "fallback-damaged-response" => {
+                include_str!("../testdata/fallback-damaged-v1-response.json")
+            }
             _ => panic!("unknown golden fixture"),
         }
     }
@@ -1519,6 +1618,9 @@ mod tests {
             ("handshake-request", "handshake-response"),
             ("analysis-request", "analysis-response"),
             ("module-paths-request", "module-paths-response"),
+            ("fallback-request", "fallback-response"),
+            ("fallback-clean-request", "fallback-clean-response"),
+            ("fallback-damaged-request", "fallback-damaged-response"),
         ] {
             let request = JsonParser::parse(golden(request_name).trim()).expect("valid request");
             let result = run(&request).expect("available result");
@@ -1567,5 +1669,30 @@ mod tests {
             run(&non_utf8_request).expect_err("non-UTF-8 source").code,
             "unsupported-encoding"
         );
+    }
+
+    #[test]
+    fn fallback_is_empty_only_for_complete_macro_free_source() {
+        let source = [SourceFile {
+            path: "src/lib.rs".to_owned(),
+            contents: "pub fn clean() {}\n".to_owned(),
+        }];
+        let parsed = parse_path_sources(&source).expect("parse result");
+        let mut facts = BTreeSet::new();
+        collect_fallback_facts(parsed[0].tree.root_node(), "src/lib.rs", &mut facts)
+            .expect("bounded fallback facts");
+        assert!(parsed[0].parser_complete);
+        assert!(facts.is_empty());
+
+        let damaged = [SourceFile {
+            path: "src/damaged.rs".to_owned(),
+            contents: "pub fn {".to_owned(),
+        }];
+        let parsed = parse_path_sources(&damaged).expect("damaged parse result");
+        let mut facts = BTreeSet::new();
+        collect_fallback_facts(parsed[0].tree.root_node(), "src/damaged.rs", &mut facts)
+            .expect("bounded fallback facts");
+        assert!(!parsed[0].parser_complete);
+        assert!(facts.iter().any(|fact| fact.syntax_kind == "parser-damage"));
     }
 }

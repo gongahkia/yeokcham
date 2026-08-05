@@ -34,7 +34,7 @@ Each migrated issue has an immutable hidden marker, `<!-- paengi-todo-id: ID -->
 | M8-19 | [#94](https://github.com/gongahkia/paengi/issues/94) | M8 Git Bridge | implemented; verified |
 | M9-01 | [#108](https://github.com/gongahkia/paengi/issues/108) | M9 Rust Semantic Sidecar | implemented; verified by ADR-035 and focused/property coverage |
 | M9-02 | [#110](https://github.com/gongahkia/paengi/issues/110) | M9 Rust Semantic Sidecar | implemented; verified by ADR-036 module-path goldens and focused/property coverage |
-| M9-03 | [#112](https://github.com/gongahkia/paengi/issues/112) | M9 Rust Semantic Sidecar | ADR-037 accepted; implementation in progress |
+| M9-03 | [#112](https://github.com/gongahkia/paengi/issues/112) | M9 Rust Semantic Sidecar | implemented; verified by ADR-037 fallback goldens and focused/property coverage |
 | M9-04 | [#114](https://github.com/gongahkia/paengi/issues/114) | M9 Rust Semantic Sidecar | created |
 | M9-05 | [#116](https://github.com/gongahkia/paengi/issues/116) | M9 Rust Semantic Sidecar | created |
 | M9-06 | [#118](https://github.com/gongahkia/paengi/issues/118) | M9 Rust Semantic Sidecar | created |

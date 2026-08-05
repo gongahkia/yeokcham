@@ -6,6 +6,7 @@ module Protocol : sig
   val maximum_source_bytes : int
   val maximum_item_records : int
   val maximum_module_facts : int
+  val maximum_fallback_facts : int
   val maximum_module_depth : int
 
   type source_file = { path : string; contents : string }
@@ -68,6 +69,23 @@ module Protocol : sig
     unreachable_sources : unreachable_source list;
   }
 
+  type fallback_fact = {
+    path : string;
+    fallback_span : span;
+    syntax_kind : string;
+    status : string;
+  }
+
+  type fallback_assessment = {
+    snapshot_id : string;
+    adapter_version : string;
+    tree_sitter_version : string;
+    rust_grammar_version : string;
+    parser_complete : bool;
+    textual_fallback_required : bool;
+    fallback_facts : fallback_fact list;
+  }
+
   val make_source_file : path:string -> contents:string -> source_file
   val make_span : start_byte:int -> end_byte:int -> span
 
@@ -96,6 +114,13 @@ module Protocol : sig
 
   val make_unreachable_source :
     source_path:string -> status:string -> unreachable_source
+
+  val make_fallback_fact :
+    path:string ->
+    fallback_span:span ->
+    syntax_kind:string ->
+    status:string ->
+    fallback_fact
 
   val source_file_path : source_file -> string
   val source_file_contents : source_file -> string
@@ -133,6 +158,17 @@ module Protocol : sig
   val item_path_fact_status : item_path_fact -> string
   val unreachable_source_path : unreachable_source -> string
   val unreachable_source_status : unreachable_source -> string
+  val fallback_fact_path : fallback_fact -> string
+  val fallback_fact_span : fallback_fact -> span
+  val fallback_fact_syntax_kind : fallback_fact -> string
+  val fallback_fact_status : fallback_fact -> string
+  val fallback_assessment_snapshot_id : fallback_assessment -> string
+  val fallback_assessment_parser_complete : fallback_assessment -> bool
+
+  val fallback_assessment_textual_fallback_required :
+    fallback_assessment -> bool
+
+  val fallback_assessment_facts : fallback_assessment -> fallback_fact list
   val module_path_analysis_snapshot_id : module_path_analysis -> string
   val module_path_analysis_parser_complete : module_path_analysis -> bool
   val module_path_analysis_complete : module_path_analysis -> bool
@@ -229,3 +265,15 @@ val resolve_module_paths_snapshot :
   snapshot:Paengi_snapshot.Snapshot.id ->
   root_files:string list ->
   Protocol.module_path_analysis result
+
+val inspect_fallback_files :
+  configuration ->
+  snapshot_id:string ->
+  files:Protocol.source_file list ->
+  Protocol.fallback_assessment result
+
+val inspect_fallback_snapshot :
+  configuration ->
+  store:Paengi_store.repository ->
+  snapshot:Paengi_snapshot.Snapshot.id ->
+  Protocol.fallback_assessment result

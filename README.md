@@ -75,7 +75,7 @@ participate in restore, materialisation, export, or verification. Helper
 absence, invalid output, timeout, or incomplete analysis returns
 semantic-unavailable and preserves the textual operation.
 
-M9-01/M9-02 add a separate optional Rust syntax sidecar. Its locally built,
+M9-01/M9-02/M9-03 add a separate optional Rust syntax sidecar. Its locally built,
 lockfile-pinned Tree-sitter helper receives only verified-snapshot virtual
 `.rs` files and returns bounded syntax evidence with UTF-8 byte spans. M9-02
 can also resolve caller-selected virtual roots through standard `foo.rs` and
@@ -87,7 +87,11 @@ damage, or process failure remains a structured semantic-unavailable/incomplete
 result; byte/text operations stay available. See
 [ADR-035](docs/adr/035-optional-rust-parser-sidecar.md),
 [ADR-036](docs/adr/036-snapshot-local-rust-module-paths.md), and the
-[helper contract](tools/paengi-rust-adapter/README.md).
+[ADR-037](docs/adr/037-rust-macro-textual-fallback.md). M9-03 adds a separate
+snapshot-local fallback assessment: macro definitions/invocations, outer
+attributes, and parser damage return bounded canonical
+`textual-fallback-required` facts only; no fact expands code or authorizes a
+semantic operation. See the [helper contract](tools/paengi-rust-adapter/README.md).
 
 Milestone 8 imports one Git tree/commit/tag through bounded direct argv and
 exports one Paengi release as a deterministic root Git commit. Imports preserve

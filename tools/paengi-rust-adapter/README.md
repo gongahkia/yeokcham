@@ -60,8 +60,23 @@ receive explicit statuses; no incomplete fact grants operation authority. It doe
 roots, resolve names/types/imports, expand macros, persist evidence, provide
 rewrite authority, or claim behavioural equivalence.
 
+`inspect-fallback` accepts the same snapshot ID and sorted virtual source map
+as `analyze`.
+
+```json
+{"protocolVersion":1,"operation":"inspect-fallback","snapshotId":"<64 lowercase hex chars>","files":[{"path":"src/lib.rs","contentsHex":"..."}]}
+```
+
+Its transient assessment contains `parserComplete`,
+`textualFallbackRequired`, and canonically ordered `fallbackFacts`. Each fact
+contains an exact source path, half-open UTF-8 byte span, syntax kind, and the
+fixed `textual-fallback-required` status. The helper reports macro definitions,
+macro invocations at any syntax location, outer attributes, and parser damage.
+It does not expand macros, resolve attributes/names/types, generate items or
+modules, mutate source bytes, persist evidence, or authorize a semantic rewrite.
+
 Hard limits: 4 MiB request/response and source file, 64 KiB stderr, 5 s parent
-wall-clock, 4,096 files/items/diagnostics/module facts, depth 256, 4 KiB safe
+wall-clock, 4,096 files/items/diagnostics/module facts/fallback facts, depth 256, 4 KiB safe
 paths and names. Invalid
 input, bounds, unavailable executable, timeout, crash, malformed response, and
 parser damage are structured outcomes at the OCaml boundary; exact byte/text

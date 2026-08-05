@@ -94,7 +94,11 @@ let handshake_reports_pinned_parser () =
         (List.mem "virtual-files" (Adapter.handshake_capabilities handshake));
       Alcotest.(check bool)
         "module path capability" true
-        (List.mem "module-paths-v1" (Adapter.handshake_capabilities handshake))
+        (List.mem "module-paths-v1" (Adapter.handshake_capabilities handshake));
+      Alcotest.(check bool)
+        "textual fallback capability" true
+        (List.mem "textual-fallback-v1"
+           (Adapter.handshake_capabilities handshake))
   | Adapter.Unavailable reason ->
       Alcotest.fail (Adapter.unavailable_reason_to_string reason)
 
@@ -159,6 +163,136 @@ let parser_damage_is_explicit () =
       Alcotest.(check bool)
         "syntax diagnostic is explicit" true
         (Adapter.Protocol.analysis_parser_diagnostics analysis <> [])
+
+let macro_sensitive_syntax_requires_textual_fallback () =
+  let source =
+    "#[derive(Clone)]\n\
+     struct Café;\n\
+     macro_rules! build { ($x:expr) => { nested!({ $x }) } }\n\
+     build!();\n\
+     fn f(value: Option<u8>) -> build!(u8) {\n\
+     let build!(pattern) = value;\n\
+     let _ = build!(1);\n\
+     build!(2)\n\
+     }\n"
+  in
+  let compare left right =
+    let path =
+      String.compare
+        (Adapter.Protocol.fallback_fact_path left)
+        (Adapter.Protocol.fallback_fact_path right)
+    in
+    if path <> 0 then path
+    else
+      let start =
+        Int.compare
+          (Adapter.Protocol.span_start_byte
+             (Adapter.Protocol.fallback_fact_span left))
+          (Adapter.Protocol.span_start_byte
+             (Adapter.Protocol.fallback_fact_span right))
+      in
+      if start <> 0 then start
+      else
+        let finish =
+          Int.compare
+            (Adapter.Protocol.span_end_byte
+               (Adapter.Protocol.fallback_fact_span left))
+            (Adapter.Protocol.span_end_byte
+               (Adapter.Protocol.fallback_fact_span right))
+        in
+        if finish <> 0 then finish
+        else
+          String.compare
+            (Adapter.Protocol.fallback_fact_syntax_kind left)
+            (Adapter.Protocol.fallback_fact_syntax_kind right)
+  in
+  match
+    Adapter.inspect_fallback_files configuration ~snapshot_id
+      ~files:[ file ~path:"src/lib.rs" ~contents:source ]
+  with
+  | Adapter.Unavailable reason ->
+      Alcotest.fail (Adapter.unavailable_reason_to_string reason)
+  | Adapter.Available assessment ->
+      Alcotest.(check bool)
+        "macro syntax remains parser complete" true
+        (Adapter.Protocol.fallback_assessment_parser_complete assessment);
+      Alcotest.(check bool)
+        "macro syntax requires independent textual fallback" true
+        (Adapter.Protocol.fallback_assessment_textual_fallback_required
+           assessment);
+      let facts = Adapter.Protocol.fallback_assessment_facts assessment in
+      Alcotest.(check bool)
+        "facts are strictly canonical" true
+        (facts = List.sort compare facts
+        && List.length facts = List.length (List.sort_uniq compare facts));
+      Alcotest.(check (list string))
+        "all conservative syntax kinds are explicit"
+        [ "macro-definition"; "macro-invocation"; "outer-attribute" ]
+        (facts
+        |> List.map Adapter.Protocol.fallback_fact_syntax_kind
+        |> List.sort_uniq String.compare);
+      Alcotest.(check bool)
+        "all facts have exact source spans and fixed refusal status" true
+        (List.for_all
+           (fun fact ->
+             let span = Adapter.Protocol.fallback_fact_span fact in
+             String.equal "src/lib.rs"
+               (Adapter.Protocol.fallback_fact_path fact)
+             && Adapter.Protocol.span_start_byte span >= 0
+             && Adapter.Protocol.span_end_byte span
+                >= Adapter.Protocol.span_start_byte span
+             && Adapter.Protocol.span_end_byte span <= String.length source
+             && String.equal "textual-fallback-required"
+                  (Adapter.Protocol.fallback_fact_status fact))
+           facts)
+
+let complete_macro_free_source_needs_no_fallback () =
+  match
+    Adapter.inspect_fallback_files configuration ~snapshot_id
+      ~files:[ file ~path:"src/clean.rs" ~contents:"pub fn clean() {}\n" ]
+  with
+  | Adapter.Unavailable reason ->
+      Alcotest.fail (Adapter.unavailable_reason_to_string reason)
+  | Adapter.Available assessment -> (
+      Alcotest.(check bool)
+        "macro-free source is complete" true
+        (Adapter.Protocol.fallback_assessment_parser_complete assessment);
+      Alcotest.(check bool)
+        "macro-free source has no fallback requirement" false
+        (Adapter.Protocol.fallback_assessment_textual_fallback_required
+           assessment);
+      Alcotest.(check int)
+        "macro-free source has no facts" 0
+        (List.length (Adapter.Protocol.fallback_assessment_facts assessment));
+      match
+        Adapter.inspect_fallback_files configuration ~snapshot_id
+          ~files:[ file ~path:"src/damaged.rs" ~contents:"pub fn {" ]
+      with
+      | Adapter.Unavailable reason ->
+          Alcotest.fail (Adapter.unavailable_reason_to_string reason)
+      | Adapter.Available damaged ->
+          Alcotest.(check bool)
+            "damaged source is incomplete" false
+            (Adapter.Protocol.fallback_assessment_parser_complete damaged);
+          Alcotest.(check bool)
+            "damaged source requires textual fallback" true
+            (Adapter.Protocol.fallback_assessment_textual_fallback_required
+               damaged);
+          Alcotest.(check bool)
+            "parser damage has a fallback fact" true
+            (List.exists
+               (fun fact ->
+                 String.equal "parser-damage"
+                   (Adapter.Protocol.fallback_fact_syntax_kind fact))
+               (Adapter.Protocol.fallback_assessment_facts damaged)))
+
+let fallback_fact_limit_is_structured () =
+  let source = String.concat "" (List.init 4_097 (fun _ -> "build!();\n")) in
+  assert_unavailable_contains "fallback facts exceed"
+    (Adapter.inspect_fallback_files
+       (Adapter.configuration_with ~timeout_ms:20_000 configuration)
+       ~snapshot_id
+       ~files:[ file ~path:"src/lib.rs" ~contents:source ])
 
 let module_paths_are_root_scoped_and_incomplete_when_unreachable () =
   let files =
@@ -439,61 +573,95 @@ let verified_snapshot_is_the_only_module_path_input () =
             "live module source is not read" false
             (List.mem "changed_after_scan" names))
 
+let verified_snapshot_is_the_only_fallback_input () =
+  with_directory "paengi-rust-fallback-" (fun root ->
+      Unix.mkdir (Filename.concat root "src") 0o700;
+      let source_path = Filename.concat root "src/lib.rs" in
+      write_file source_path "macro_rules! stored { () => {} }\nstored!();\n";
+      let store = Store.init ~root |> require_ok Store.error_to_string in
+      let snapshot, _ =
+        Snapshot.scan ~root ~store |> require_ok Snapshot.error_to_string
+      in
+      write_file source_path "pub fn changed_after_scan() {}\n";
+      match
+        Adapter.inspect_fallback_snapshot configuration ~store ~snapshot
+      with
+      | Adapter.Unavailable reason ->
+          Alcotest.fail (Adapter.unavailable_reason_to_string reason)
+      | Adapter.Available assessment ->
+          Alcotest.(check bool)
+            "stored macro source requires fallback" true
+            (Adapter.Protocol.fallback_assessment_textual_fallback_required
+               assessment);
+          Alcotest.(check bool)
+            "stored macro facts remain available" true
+            (Adapter.Protocol.fallback_assessment_facts assessment <> []))
+
 let failures_are_semantic_unavailable () =
   let request = file ~path:"src/a.rs" ~contents:"pub const VALUE: u8 = 1;\n" in
-  let resolve configuration =
-    Adapter.resolve_module_paths_files configuration ~snapshot_id
-      ~root_files:[ "src/a.rs" ] ~files:[ request ]
+  let inspect configuration =
+    Adapter.inspect_fallback_files configuration ~snapshot_id ~files:[ request ]
   in
   assert_unavailable_contains "adapter is missing"
-    (resolve
+    (inspect
        (Adapter.configuration_with ~adapter_path:"missing-rust-adapter"
           Adapter.default_configuration));
   assert_unavailable_contains "timed out"
-    (resolve
+    (inspect
        (Adapter.configuration_with ~adapter_path:(fixture_path "slow.sh")
           ~timeout_ms:25 Adapter.default_configuration));
   assert_unavailable_contains "malformed adapter response"
-    (resolve
+    (inspect
        (Adapter.configuration_with
           ~adapter_path:(fixture_path "malformed.sh")
           Adapter.default_configuration));
   assert_unavailable_contains "adapter crashed"
-    (resolve
+    (inspect
        (Adapter.configuration_with ~adapter_path:(fixture_path "crash.sh")
           Adapter.default_configuration));
   assert_unavailable_contains "adapter output exceeded"
-    (resolve
+    (inspect
        (Adapter.configuration_with
           ~adapter_path:(fixture_path "large-output.sh")
           ~max_response_bytes:128 Adapter.default_configuration));
   assert_unavailable_contains "adapter output exceeded"
-    (resolve
+    (inspect
        (Adapter.configuration_with
           ~adapter_path:(fixture_path "large-stderr.sh")
           ~max_stderr_bytes:128 Adapter.default_configuration));
   assert_unavailable_contains "request exceeded"
-    (resolve
+    (inspect
        (Adapter.configuration_with ~adapter_path:(adapter_path ())
           ~max_request_bytes:32 Adapter.default_configuration))
 
+let invalid_fallback_evidence_is_rejected () =
+  let request = file ~path:"src/a.rs" ~contents:"pub fn a() {}\n" in
+  let inspect fixture =
+    Adapter.inspect_fallback_files
+      (Adapter.configuration_with ~adapter_path:(fixture_path fixture)
+         Adapter.default_configuration)
+      ~snapshot_id ~files:[ request ]
+  in
+  assert_unavailable_contains "invalid fact"
+    (inspect "invalid-fallback-path.sh");
+  assert_unavailable_contains "invalid fact"
+    (inspect "invalid-fallback-span.sh")
+
 let unsafe_and_non_utf8_input_are_structured () =
   assert_unavailable_contains "invalid-input"
-    (Adapter.resolve_module_paths_files configuration ~snapshot_id
-       ~root_files:[ "../escape.rs" ]
+    (Adapter.inspect_fallback_files configuration ~snapshot_id
        ~files:[ file ~path:"../escape.rs" ~contents:"pub fn escape() {}" ]);
   assert_unavailable_contains "unsupported-encoding"
-    (Adapter.resolve_module_paths_files configuration ~snapshot_id
-       ~root_files:[ "src/bytes.rs" ]
+    (Adapter.inspect_fallback_files configuration ~snapshot_id
        ~files:[ file ~path:"src/bytes.rs" ~contents:"\255" ])
 
 let unavailable_adapter_preserves_textual_operation () =
   let source = "// independent edit\npub const VALUE: u8 = 1;\n" in
   let semantic =
-    Adapter.resolve_module_paths_files
+    Adapter.inspect_fallback_files
       (Adapter.configuration_with ~adapter_path:"missing-rust-adapter"
          Adapter.default_configuration)
-      ~snapshot_id ~root_files:[ "src/a.rs" ]
+      ~snapshot_id
       ~files:[ file ~path:"src/a.rs" ~contents:source ]
   in
   assert_unavailable_contains "adapter is missing" semantic;
@@ -525,12 +693,20 @@ let () =
             rust_items_use_utf8_byte_spans;
           Alcotest.test_case "parser damage is incomplete" `Quick
             parser_damage_is_explicit;
+          Alcotest.test_case "macro syntax requires textual fallback" `Quick
+            macro_sensitive_syntax_requires_textual_fallback;
+          Alcotest.test_case "macro-free source needs no fallback" `Quick
+            complete_macro_free_source_needs_no_fallback;
+          Alcotest.test_case "fallback fact limit is structured" `Quick
+            fallback_fact_limit_is_structured;
           Alcotest.test_case "module paths are root-scoped" `Quick
             module_paths_are_root_scoped_and_incomplete_when_unreachable;
           Alcotest.test_case "module path failures are structured" `Quick
             module_path_failures_are_structured;
           Alcotest.test_case "adapter failures remain unavailable" `Quick
             failures_are_semantic_unavailable;
+          Alcotest.test_case "invalid fallback evidence is rejected" `Quick
+            invalid_fallback_evidence_is_rejected;
           Alcotest.test_case "unsafe and non-UTF-8 input is structured" `Quick
             unsafe_and_non_utf8_input_are_structured;
           Alcotest.test_case "unavailable adapter preserves textual operation"
@@ -542,5 +718,7 @@ let () =
             verified_snapshot_is_the_only_analysis_input;
           Alcotest.test_case "verified snapshot module paths" `Quick
             verified_snapshot_is_the_only_module_path_input;
+          Alcotest.test_case "verified snapshot fallback" `Quick
+            verified_snapshot_is_the_only_fallback_input;
         ] );
     ]
