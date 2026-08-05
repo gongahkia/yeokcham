@@ -1,8 +1,8 @@
 # ADR-039 — Verifiable ref events without implicit trust
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-05
-- Deciders: maintainer
+- Deciders: maintainer (approved 2026-08-06)
 - Supersedes: None
 - Superseded by: None
 
