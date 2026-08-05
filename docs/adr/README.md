@@ -21,7 +21,7 @@ Accepted and rejected ADRs are immutable except for status links, factual correc
 - ADR-001 through ADR-015 are accepted legacy records in `DECISIONS.md`.
 - File-backed ADRs begin at ADR-016.
 - `DECISIONS.md` is the canonical index and must link every file-backed ADR.
-- The current highest file-backed ADR is ADR-032; its accepted schema is listed
+- The current highest file-backed ADR is ADR-033; its proposed policy is listed
   in `DECISIONS.md`.
 
 ## Required analysis
