@@ -20,7 +20,16 @@
 (test
  (name test_git)
  (modules test_git)
- (libraries alcotest paengi_git paengi_validation unix))
+ (libraries
+  alcotest
+  paengi_encoding
+  paengi_envelope
+  paengi_git
+  paengi_id
+  paengi_snapshot
+  paengi_store
+  paengi_validation
+  unix))
 
 (test
  (name test_fixture)

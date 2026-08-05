@@ -32,3 +32,4 @@ module Operation_id : S
 module Device_id : S
 module Validation_id : S
 module Resolution_id : S
+module Git_mapping_id : S

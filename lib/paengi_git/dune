@@ -1,3 +1,11 @@
 (library
  (name paengi_git)
- (libraries paengi_validation unix))
+ (libraries
+  paengi_encoding
+  paengi_envelope
+  paengi_hash
+  paengi_id
+  paengi_snapshot
+  paengi_store
+  paengi_validation
+  unix))

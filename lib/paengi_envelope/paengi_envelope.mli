@@ -27,6 +27,7 @@ type object_type =
   | Workspace_revision
   | Workspace_attempt
   | Release_attestation
+  | Git_mapping
 
 val object_type_code : object_type -> int
 val object_type_of_code : int -> object_type option

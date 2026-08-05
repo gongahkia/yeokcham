@@ -101,6 +101,7 @@ let object_type_generator =
       Envelope.Workspace_revision;
       Envelope.Workspace_attempt;
       Envelope.Release_attestation;
+      Envelope.Git_mapping;
     ]
 
 let boundary_lengths =

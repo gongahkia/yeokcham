@@ -81,7 +81,6 @@ type git_mapping = {
   git_object : git_object_format * git_object_id;
   git_kind : git_object_kind;
   subject : git_mapping_subject;
-  created_at : timestamp;
 }
 ```
 
@@ -110,7 +109,7 @@ git-mapping-subject-v1 = imported-snapshot-v1 / imported-revision-v1 /
 
 git-mapping-v1 = [
   1, git-mapping-id, git-mapping-direction, git-object-kind,
-  git-object-id-v1, git-mapping-subject-v1, created-at-unix-seconds
+  git-object-id-v1, git-mapping-subject-v1
 ]
 ```
 
@@ -133,8 +132,9 @@ git-mapping-identity-v1 = [
 ]
 ```
 
-It excludes its own ID and `created-at`; the physical `Stored_object_id`
-continues to be ADR-020's identity over the complete Envelope-1 bytes. A
+It excludes its own ID; mappings carry no timestamp or other observational
+field, so an equal retry has identical complete Envelope-1 bytes. The physical
+`Stored_object_id` continues to be ADR-020's identity over those bytes. A
 mapping resolver verifies the logical preimage, Envelope type/version/features,
 Git ID length, subject combination, referenced object type, and logical/physical
 agreement before returning a record.

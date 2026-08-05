@@ -109,6 +109,7 @@ let object_type_codes () =
       (Envelope.Workspace_revision, 20);
       (Envelope.Workspace_attempt, 21);
       (Envelope.Release_attestation, 22);
+      (Envelope.Git_mapping, 23);
     ]
   in
   List.iter
