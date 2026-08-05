@@ -55,13 +55,14 @@ an un-attributed external `mod name;` with the standard snapshot-map candidates
 Its transient result contains `moduleFacts`, `itemPathFacts`,
 `unreachableSources`, `parserComplete`, and `modulePathsComplete`. Attributes
 including `path`, `cfg`, `cfg_attr`, macro attributes, ambiguous/missing
-candidates, parser damage, macro definitions/invocations, `impl`, and `use` receive explicit
-statuses; no incomplete fact grants operation authority. It does not infer
+candidates, parser damage, macro definitions/invocations, `impl`, and `use`
+receive explicit statuses; no incomplete fact grants operation authority. It does not infer
 roots, resolve names/types/imports, expand macros, persist evidence, provide
 rewrite authority, or claim behavioural equivalence.
 
 Hard limits: 4 MiB request/response and source file, 64 KiB stderr, 5 s parent
-wall-clock, 4,096 files/items/diagnostics/module facts, depth 256, 4 KiB safe paths and names. Invalid
+wall-clock, 4,096 files/items/diagnostics/module facts, depth 256, 4 KiB safe
+paths and names. Invalid
 input, bounds, unavailable executable, timeout, crash, malformed response, and
 parser damage are structured outcomes at the OCaml boundary; exact byte/text
 operations remain independent.

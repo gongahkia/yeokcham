@@ -524,8 +524,8 @@ persistent format.
 ### Milestone 9 Rust syntax boundary
 
 `paengi_rust_adapter` is a separate ephemeral protocol-v1 boundary approved by
-ADR-035 and ADR-036. It invokes a caller-configured, directly executed local helper built
-from `tools/paengi-rust-adapter/Cargo.lock`; analysis itself invokes neither
+ADR-035 and ADR-036. It invokes a caller-configured, directly executed local
+helper built from `tools/paengi-rust-adapter/Cargo.lock`; analysis itself invokes neither
 Cargo nor `rustc`. The helper uses pinned `tree-sitter 0.26.11` and
 `tree-sitter-rust 0.24.2`, receives only sorted safe `.rs` source bytes
 materialised from a verified immutable snapshot, and returns bounded top-level

@@ -89,6 +89,27 @@ let generated_module_maps_are_snapshot_local =
             |> List.filter_map Adapter.Protocol.module_fact_source_path
             |> List.sort String.compare
           in
+          let expected_external_parents =
+            List.init count (fun index ->
+                ( module_source_path index,
+                  if index = 0 then "src/lib.rs"
+                  else module_source_path (index - 1) ))
+            |> List.sort (fun (left, _) (right, _) -> String.compare left right)
+          in
+          let actual_external_parents =
+            modules
+            |> List.filter (fun fact ->
+                String.equal "external" (Adapter.Protocol.module_fact_kind fact)
+                && String.equal "resolved"
+                     (Adapter.Protocol.module_fact_status fact))
+            |> List.filter_map (fun fact ->
+                Option.bind (Adapter.Protocol.module_fact_source_path fact)
+                  (fun source_path ->
+                    Option.map
+                      (fun parent_path -> (source_path, parent_path))
+                      (Adapter.Protocol.module_fact_parent_source_path fact)))
+            |> List.sort (fun (left, _) (right, _) -> String.compare left right)
+          in
           Adapter.Protocol.module_path_analysis_parser_complete analysis
           && Adapter.Protocol.module_path_analysis_complete analysis
           && Adapter.Protocol.module_path_analysis_unreachable_sources analysis
@@ -96,6 +117,7 @@ let generated_module_maps_are_snapshot_local =
           && List.length modules = count + 1
           && external_sources
              = (List.init count module_source_path |> List.sort String.compare)
+          && actual_external_parents = expected_external_parents
           && List.for_all
                (fun fact ->
                  String.equal "src/lib.rs"
