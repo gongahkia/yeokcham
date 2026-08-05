@@ -48,6 +48,18 @@ type commit_import_result = {
 
 type tag_import_result = { imported_tag : imported_tag; tag_mapping : mapping }
 
+type release_export_result = {
+  export_release : Paengi_id.Release_id.t;
+  export_release_object : Paengi_store.Stored_object_id.t;
+  export_snapshot : Paengi_snapshot.Snapshot.id;
+  export_tree : object_id;
+  export_commit : object_id;
+  export_target_ref : string;
+  export_mapping : mapping;
+}
+
+type export_failure_point = Before_git_ref | Before_mapping_binding
+
 type configuration = {
   git : string;
   timeout_ms : int64;
@@ -111,6 +123,11 @@ type error =
       actual : string;
     }
   | Import_limit_exceeded of { resource : string; limit : int; actual : int }
+  | Export_limit_exceeded of { resource : string; limit : int; actual : int }
+  | Unsupported_export_representation of string
+  | Export_error of string
+  | Release_error of Paengi_release.error
+  | Injected_interruption of string
   | Snapshot_error of Paengi_snapshot.error
   | Mapping_error of string
   | Imported_transition_error of string
@@ -156,6 +173,15 @@ val import_tag :
   repository:string ->
   tag:string ->
   (tag_import_result, error) result
+
+val export_release :
+  ?runner:(module Paengi_validation.Process_runner) ->
+  ?fail_at:export_failure_point ->
+  configuration ->
+  store:Paengi_store.repository ->
+  repository:string ->
+  release:Paengi_id.Release_id.t ->
+  (release_export_result, error) result
 
 val mapping_id : mapping -> Paengi_id.Git_mapping_id.t
 val mapping_direction : mapping -> mapping_direction

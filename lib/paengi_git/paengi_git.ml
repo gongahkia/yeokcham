@@ -3,6 +3,7 @@ module Encoding = Paengi_encoding
 module Envelope = Paengi_envelope
 module Hash = Paengi_hash.Sha256
 module Id = Paengi_id
+module Release = Paengi_release
 module Snapshot = Paengi_snapshot
 module Store = Paengi_store
 
@@ -101,6 +102,18 @@ type imported_tag = {
 
 type tag_import_result = { imported_tag : imported_tag; tag_mapping : mapping }
 
+type release_export_result = {
+  export_release : Id.Release_id.t;
+  export_release_object : Store.Stored_object_id.t;
+  export_snapshot : Snapshot.Snapshot.id;
+  export_tree : object_id;
+  export_commit : object_id;
+  export_target_ref : string;
+  export_mapping : mapping;
+}
+
+type export_failure_point = Before_git_ref | Before_mapping_binding
+
 type configuration = {
   git : string;
   timeout_ms : int64;
@@ -196,6 +209,11 @@ type error =
       actual : string;
     }
   | Import_limit_exceeded of { resource : string; limit : int; actual : int }
+  | Export_limit_exceeded of { resource : string; limit : int; actual : int }
+  | Unsupported_export_representation of string
+  | Export_error of string
+  | Release_error of Release.error
+  | Injected_interruption of string
   | Snapshot_error of Snapshot.error
   | Mapping_error of string
   | Imported_transition_error of string
@@ -243,6 +261,14 @@ let error_to_string = function
   | Import_limit_exceeded { resource; limit; actual } ->
       Printf.sprintf "Git import %s limit exceeded (%d > %d)" resource actual
         limit
+  | Export_limit_exceeded { resource; limit; actual } ->
+      Printf.sprintf "Git export %s limit exceeded (%d > %d)" resource actual
+        limit
+  | Unsupported_export_representation detail ->
+      "unsupported Git export representation: " ^ detail
+  | Export_error detail -> "Git export error: " ^ detail
+  | Release_error error -> Release.error_to_string error
+  | Injected_interruption point -> "injected interruption: " ^ point
   | Snapshot_error error -> Snapshot.error_to_string error
   | Mapping_error detail -> "Git mapping error: " ^ detail
   | Imported_transition_error detail -> "imported transition error: " ^ detail
@@ -355,7 +381,7 @@ let single_line ~operation output =
   then Error (Malformed_output { operation; detail = "expected one text line" })
   else Ok line
 
-let command configuration executable repository arguments =
+let command ?(environment = []) configuration executable repository arguments =
   {
     Validation.executable;
     arguments = "-C" :: repository :: arguments;
@@ -364,18 +390,18 @@ let command configuration executable repository arguments =
     max_stdout_bytes = configuration.max_stdout_bytes;
     max_stderr_bytes = configuration.max_stderr_bytes;
     environment_policy = Validation.Empty;
-    environment = [];
+    environment = List.sort (fun (left, _) (right, _) -> String.compare left right) environment;
     retain_output = false;
     format_version = 1L;
     mandatory_features = 0L;
   }
 
 let run ?(runner = (module Validation.Unix_runner : Validation.Process_runner))
-    configuration executable repository ~operation arguments =
+    ?(environment = []) configuration executable repository ~operation arguments =
   let module Runner = (val runner : Validation.Process_runner) in
   let result =
     Runner.run
-      (command configuration executable repository arguments)
+      (command ~environment configuration executable repository arguments)
       ~working_directory:"/"
   in
   if result.Validation.runner_stdout.Validation.truncated then
@@ -484,7 +510,8 @@ let object_id_raw identity = identity.raw
 
 let run_bytes
     ?(runner = (module Validation.Unix_runner : Validation.Process_runner))
-    configuration executable repository ~operation ~max_stdout_bytes arguments =
+    ?(environment = []) configuration executable repository ~operation
+    ~max_stdout_bytes arguments =
   let module Runner = (val runner : Validation.Process_runner) in
   let command =
     {
@@ -495,7 +522,9 @@ let run_bytes
       max_stdout_bytes;
       max_stderr_bytes = configuration.max_stderr_bytes;
       environment_policy = Validation.Empty;
-      environment = [];
+      environment =
+        List.sort (fun (left, _) (right, _) -> String.compare left right)
+          environment;
       retain_output = false;
       format_version = 1L;
       mandatory_features = 0L;
@@ -2265,7 +2294,27 @@ let verify_mapping_subject store = function
               |> Result.map (fun _ -> ())
         in
         Ok ()
-  | Imported_revision _ | Exported_release _ | Exported_revision _ -> Ok ()
+  | Exported_release { release; release_object; final_snapshot } ->
+      let* loaded =
+        Release.load_release store release_object
+        |> Result.map_error (fun error -> Release_error error)
+      in
+      if not (Id.Release_id.equal release (Release.release_id loaded)) then
+        Error
+          (Mapping_error "exported release mapping object disagrees with its ID")
+      else if
+        not
+          (Snapshot.Snapshot.equal_id final_snapshot
+             (Release.release_final_snapshot loaded))
+      then
+        Error
+          (Mapping_error
+             "exported release mapping snapshot disagrees with its release")
+      else
+        Snapshot.Snapshot.load store final_snapshot
+        |> Result.map_error (fun error -> Snapshot_error error)
+        |> Result.map (fun _ -> ())
+  | Imported_revision _ | Exported_revision _ -> Ok ()
 
 let load_mapping store logical =
   let components = mapping_ref_components logical in
@@ -2899,3 +2948,395 @@ let import_tag ?runner configuration ~store ~repository ~tag =
   in
   let* tag_mapping = publish_mapping store mapping in
   Ok { imported_tag; tag_mapping }
+
+type export_file = {
+  export_path : string list;
+  export_mode : Snapshot.file_mode;
+  export_content : Snapshot.Content.id;
+}
+
+let export_mode = function
+  | Snapshot.Regular -> "100644"
+  | Snapshot.Executable -> "100755"
+  | Snapshot.Symlink -> "120000"
+
+let export_path path = String.concat "/" path
+
+let with_temporary_bytes label bytes run =
+  try
+    let path = Filename.temp_file ("paengi-git-" ^ label ^ "-") ".tmp" in
+    Fun.protect
+      ~finally:(fun () ->
+        try Unix.unlink path with Unix.Unix_error (Unix.ENOENT, _, _) -> ())
+      (fun () ->
+        try
+          Out_channel.with_open_bin path (fun channel ->
+              Out_channel.output_string channel bytes);
+          run path
+        with
+        | Unix.Unix_error (error, operation, argument) ->
+            Error
+              (Export_error
+                 (Unix.error_message error ^ ": " ^ operation ^ " " ^ argument))
+        | Sys_error message -> Error (Export_error message))
+  with Sys_error message -> Error (Export_error message)
+
+let with_isolated_index run =
+  try
+    let path = Filename.temp_file "paengi-git-index-" ".tmp" in
+    Unix.unlink path;
+    Fun.protect
+      ~finally:(fun () ->
+        try Unix.unlink path with Unix.Unix_error (Unix.ENOENT, _, _) -> ())
+      (fun () ->
+        try run path with
+        | Unix.Unix_error (error, operation, argument) ->
+            Error
+              (Export_error
+                 (Unix.error_message error ^ ": " ^ operation ^ " " ^ argument))
+        | Sys_error message -> Error (Export_error message))
+  with
+  | Unix.Unix_error (error, operation, argument) ->
+      Error
+        (Export_error
+           (Unix.error_message error ^ ": " ^ operation ^ " " ^ argument))
+  | Sys_error message -> Error (Export_error message)
+
+let export_environment timestamp =
+  let date = Int64.to_string timestamp ^ " +0000" in
+  [
+    ( "GIT_AUTHOR_DATE",
+      date );
+    ( "GIT_AUTHOR_EMAIL",
+      "noreply@paengi.local" );
+    ( "GIT_AUTHOR_NAME",
+      "Paengi Export" );
+    ( "GIT_ATTR_NOSYSTEM",
+      "1" );
+    ( "GIT_COMMITTER_DATE",
+      date );
+    ( "GIT_COMMITTER_EMAIL",
+      "noreply@paengi.local" );
+    ( "GIT_COMMITTER_NAME",
+      "Paengi Export" );
+    ( "GIT_CONFIG_NOSYSTEM",
+      "1" );
+  ]
+
+let add_environment environment pair = pair :: environment
+
+let export_files configuration store snapshot =
+  let total_entries = ref 0 in
+  let total_path_bytes = ref 0 in
+  let rec collect depth path tree =
+    if depth > configuration.max_depth then
+      Error
+        (Export_limit_exceeded
+           {
+             resource = "tree depth";
+             limit = configuration.max_depth;
+             actual = depth;
+           })
+    else
+      let* tree =
+        Snapshot.Tree.load store tree
+        |> Result.map_error (fun error -> Snapshot_error error)
+      in
+      let entries = Snapshot.Tree.entries tree in
+      if path <> [] && entries = [] then
+        Error
+          (Unsupported_export_representation
+             ("nested empty directory: " ^ export_path path))
+      else
+        let rec entries_result reversed = function
+          | [] -> Ok (List.rev reversed)
+          | (name, entry) :: rest ->
+              let next_entries = !total_entries + 1 in
+              if next_entries > configuration.max_tree_entries then
+                Error
+                  (Export_limit_exceeded
+                     {
+                       resource = "total tree entries";
+                       limit = configuration.max_tree_entries;
+                       actual = next_entries;
+                     })
+              else
+                let next_path_bytes = !total_path_bytes + String.length name in
+                if next_path_bytes > configuration.max_total_tree_bytes then
+                  Error
+                    (Export_limit_exceeded
+                       {
+                         resource = "total tree path bytes";
+                         limit = configuration.max_total_tree_bytes;
+                         actual = next_path_bytes;
+                       })
+                else (
+                  total_entries := next_entries;
+                  total_path_bytes := next_path_bytes;
+                  let* produced =
+                    match entry with
+                    | Snapshot.Tree.File { mode; content } ->
+                        Ok [ { export_path = path @ [ name ]; export_mode = mode; export_content = content } ]
+                    | Snapshot.Tree.Directory child -> collect (depth + 1) (path @ [ name ]) child
+                  in
+                  entries_result (List.rev_append produced reversed) rest)
+        in
+        entries_result [] entries
+  in
+  collect 0 [] (Snapshot.Snapshot.root snapshot)
+
+let build_export_tree ?runner configuration executable repository ~environment
+    ~format store files =
+  let total_blob_bytes = ref 0 in
+  let* staged =
+    List.fold_left
+      (fun result file ->
+        let* reversed = result in
+        let* bytes =
+          Snapshot.Content.load store file.export_content
+          |> Result.map_error (fun error -> Snapshot_error error)
+        in
+        if String.length bytes > configuration.max_blob_bytes then
+          Error
+            (Export_limit_exceeded
+               {
+                 resource = "blob bytes";
+                 limit = configuration.max_blob_bytes;
+                 actual = String.length bytes;
+               })
+        else if
+          file.export_mode = Snapshot.Symlink && String.contains bytes '\000'
+        then
+          Error
+            (Unsupported_export_representation
+               ("symlink target contains NUL bytes: "
+              ^ export_path file.export_path))
+        else
+          let next_total = !total_blob_bytes + String.length bytes in
+          if next_total > configuration.max_total_blob_bytes then
+          Error
+            (Export_limit_exceeded
+               {
+                 resource = "total blob bytes";
+                 limit = configuration.max_total_blob_bytes;
+                 actual = next_total;
+               })
+          else (
+            total_blob_bytes := next_total;
+            let file = (file, bytes) in
+            Ok (file :: reversed)))
+      (Ok []) files
+  in
+  with_isolated_index (fun index ->
+      let environment = add_environment environment ("GIT_INDEX_FILE", index) in
+      let* _ =
+        run ?runner ~environment configuration executable repository
+          ~operation:"read-tree-empty"
+          [ "--no-replace-objects"; "read-tree"; "--empty" ]
+      in
+      let rec stage = function
+        | [] -> Ok ()
+        | (file, bytes) :: rest ->
+            with_temporary_bytes "content" bytes (fun path ->
+                let* output =
+                  run ?runner ~environment configuration executable repository
+                    ~operation:"hash-object"
+                    [
+                      "--no-replace-objects";
+                      "hash-object";
+                      "-w";
+                      "--no-filters";
+                      path;
+                    ]
+                in
+                let* output = single_line ~operation:"hash-object" output in
+                let* blob = object_id_of_hex format output in
+                let* _ =
+                  run ?runner ~environment configuration executable repository
+                    ~operation:"update-index"
+                    [
+                      "--no-replace-objects";
+                      "update-index";
+                      "--add";
+                      "--cacheinfo";
+                      (export_mode file.export_mode ^ ","
+                     ^ object_id_to_hex blob ^ ","
+                     ^ export_path file.export_path);
+                    ]
+                in
+                stage rest)
+      in
+      let* () = stage (List.rev staged) in
+      let* output =
+        run ?runner ~environment configuration executable repository
+          ~operation:"write-tree"
+          [ "--no-replace-objects"; "write-tree" ]
+      in
+      let* output = single_line ~operation:"write-tree" output in
+      let* tree = object_id_of_hex format output in
+      let* () =
+        verify_exact_object_type ?runner configuration executable repository
+          ~identity:tree ~kind:"tree"
+      in
+      Ok tree)
+
+let export_ref release =
+  "refs/heads/paengi/release-" ^ Id.Release_id.to_hex release
+
+let verify_exported_commit ?runner configuration executable repository ~tree
+    ~commit ~timestamp ~message =
+  let* raw =
+    read_exact_object ?runner configuration executable repository ~identity:commit
+      ~kind:"commit" ~limit:configuration.max_commit_bytes
+  in
+  let* parsed =
+    parse_commit_headers ~max_parents:configuration.max_commit_parents commit raw
+  in
+  let identity =
+    "Paengi Export <noreply@paengi.local> " ^ Int64.to_string timestamp
+    ^ " +0000"
+  in
+  if not (object_id_equal tree parsed.parsed_tree) then
+    Error (Export_error "exported commit tree disagrees with constructed tree")
+  else if parsed.parsed_parents <> [] then
+    Error (Export_error "exported release commit must be a root commit")
+  else if
+    not
+      (String.equal identity parsed.parsed_metadata.parsed_author
+      && String.equal identity parsed.parsed_metadata.parsed_committer)
+  then Error (Export_error "exported commit metadata disagrees with policy")
+  else if not (String.equal message parsed.parsed_metadata.parsed_message) then
+    Error (Export_error "exported commit message disagrees with release")
+  else Ok ()
+
+let publish_export_ref ?runner configuration executable repository ~commit ~target_ref =
+  let zero = String.make (String.length (object_id_to_hex commit)) '0' in
+  match
+    run ?runner configuration executable repository ~operation:"update-ref"
+      [ "--no-replace-objects"; "update-ref"; "--no-deref"; target_ref; object_id_to_hex commit; zero ]
+  with
+  | Ok _ -> Ok ()
+  | Error original -> (
+      match
+        run ?runner configuration executable repository ~operation:"read-export-ref"
+          [ "--no-replace-objects"; "rev-parse"; "--verify"; "--quiet"; target_ref ]
+      with
+      | Error _ -> Error original
+      | Ok output ->
+          let* output = single_line ~operation:"read-export-ref" output in
+          let* existing = object_id_of_hex commit.format output in
+          if object_id_equal existing commit then Ok ()
+          else
+            Error
+              (Export_error
+                 ("target ref already names a different commit: " ^ target_ref)))
+
+let export_release ?runner ?fail_at configuration ~store ~repository ~release =
+  let* configuration = validate_configuration configuration in
+  let* repository = validate_repository_path repository in
+  let* executable =
+    match executable_path configuration.git with
+    | Some executable -> Ok executable
+    | None -> Error (Git_missing configuration.git)
+  in
+  let* inspection = inspect ?runner configuration ~repository in
+  Store.with_lock store ~name:"git-export"
+    ~on_error:(fun error -> Store_error error)
+    (fun () ->
+      let* release =
+        Release.Durable.verify store release
+        |> Result.map_error (fun error -> Release_error error)
+      in
+      let timestamp = Release.release_created_at release in
+      if Int64.compare timestamp 0L < 0 then
+        Error (Export_error "release creation timestamp must be nonnegative")
+      else
+        let* release_object =
+          Release.store_release store release
+          |> Result.map_error (fun error -> Release_error error)
+        in
+        let snapshot_id = Release.release_final_snapshot release in
+        let* snapshot =
+          Snapshot.Snapshot.load store snapshot_id
+          |> Result.map_error (fun error -> Snapshot_error error)
+        in
+        let message =
+          Option.value
+            ~default:("Paengi release " ^ Id.Release_id.to_hex (Release.release_id release) ^ "\n")
+            (Release.release_message release)
+        in
+        let environment = export_environment timestamp in
+        let* files = export_files configuration store snapshot in
+        let* tree =
+          build_export_tree ?runner configuration executable repository
+            ~environment ~format:inspection.object_format store files
+        in
+        with_temporary_bytes "message" message (fun message_path ->
+            let* output =
+              run ?runner ~environment configuration executable repository
+                ~operation:"commit-tree"
+                [
+                  "-c";
+                  "commit.gpgSign=false";
+                  "--no-replace-objects";
+                  "commit-tree";
+                  object_id_to_hex tree;
+                  "-F";
+                  message_path;
+                ]
+            in
+            let* output = single_line ~operation:"commit-tree" output in
+            let* commit = object_id_of_hex inspection.object_format output in
+            let* () =
+              verify_exported_commit ?runner configuration executable repository
+                ~tree ~commit ~timestamp ~message
+            in
+            let* _ =
+              run ?runner configuration executable repository ~operation:"fsck"
+                [
+                  "--no-replace-objects";
+                  "fsck";
+                  "--full";
+                  "--no-dangling";
+                  object_id_to_hex commit;
+                ]
+            in
+            let target_ref = export_ref (Release.release_id release) in
+            let* () =
+              match fail_at with
+              | Some Before_git_ref ->
+                  Error (Injected_interruption "before Git ref publication")
+              | Some Before_mapping_binding | None -> Ok ()
+            in
+            let* () =
+              publish_export_ref ?runner configuration executable repository
+                ~commit ~target_ref
+            in
+            let* () =
+              match fail_at with
+              | Some Before_mapping_binding ->
+                  Error (Injected_interruption "before Git mapping publication")
+              | Some Before_git_ref | None -> Ok ()
+            in
+            let* mapping =
+              create_mapping ~direction:Export ~git_object:commit ~git_kind:Commit
+                ~subject:
+                  (Exported_release
+                     {
+                       release = Release.release_id release;
+                       release_object;
+                       final_snapshot = snapshot_id;
+                     })
+            in
+            let* mapping = publish_mapping store mapping in
+            let* mapping = load_mapping store mapping.id in
+            Ok
+              {
+                export_release = Release.release_id release;
+                export_release_object = release_object;
+                export_snapshot = snapshot_id;
+                export_tree = tree;
+                export_commit = commit;
+                export_target_ref = target_ref;
+                export_mapping = mapping;
+              }))

@@ -1,11 +1,15 @@
 module Git = Paengi_git
+module Capsule_store = Paengi_capsule_store
 module Encoding = Paengi_encoding
 module Envelope = Paengi_envelope
 module Golden = Paengi_testkit.Golden_fixture
 module Id = Paengi_id
+module Release = Paengi_release
+module Scratch = Paengi_scratch
 module Snapshot = Paengi_snapshot
 module Store = Paengi_store
 module Validation = Paengi_validation
+module Workspace_store = Paengi_workspace_store
 
 let require_ok render = function
   | Ok value -> value

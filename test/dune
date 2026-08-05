@@ -22,14 +22,18 @@
  (modules test_git)
  (libraries
   alcotest
+  paengi_capsule_store
   paengi_encoding
   paengi_envelope
   paengi_git
   paengi_id
+  paengi_release
+  paengi_scratch
   paengi_snapshot
   paengi_store
   paengi_testkit
   paengi_validation
+  paengi_workspace_store
   unix)
  (deps
   (source_tree golden)))
@@ -41,10 +45,14 @@
   alcotest
   qcheck-core
   qcheck-alcotest
+  paengi_capsule_store
   paengi_git
   paengi_id
+  paengi_release
+  paengi_scratch
   paengi_snapshot
   paengi_store
+  paengi_workspace_store
   unix))
 
 (test

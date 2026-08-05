@@ -1531,6 +1531,27 @@ let git root arguments =
                 (Git.object_id_to_hex (Git.imported_tag_ref_object imported))
                 (Git.object_id_to_hex (Git.imported_tag_target imported))
                 target_kind annotation))
+  | [ "export"; "release"; "--repository"; repository; "--release"; release ] -> (
+      match Store.open_repository ~root with
+      | Error error -> fail Store.error_to_string error
+      | Ok store -> (
+          match
+            Git.export_release Git.default_configuration ~store ~repository
+              ~release:(release_id release)
+          with
+          | Error error -> fail Git.error_to_string error
+          | Ok result ->
+              Printf.printf
+                "release=%s snapshot=%s git-tree=%s git-commit=%s ref=%s mapping=%s \
+                 metadata=paengi-export-created-at-utc\n"
+                (Paengi_id.Release_id.to_hex result.Git.export_release)
+                (Store.Stored_object_id.to_hex
+                   (Snapshot.Snapshot.stored_object_id result.Git.export_snapshot))
+                (Git.object_id_to_hex result.Git.export_tree)
+                (Git.object_id_to_hex result.Git.export_commit)
+                result.Git.export_target_ref
+                (Paengi_id.Git_mapping_id.to_hex
+                   (Git.mapping_id result.Git.export_mapping))))
   | _ -> exit 2
 
 let usage () =
