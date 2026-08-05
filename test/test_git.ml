@@ -1532,7 +1532,9 @@ let revision_export_fixture ?(empty_first = false) ?(nested_empty = false) run =
         write_file (Filename.concat worktree "first") "first\000bytes";
         write_file (Filename.concat worktree "run") "#!/bin/sh\nprintf first\n";
         Unix.chmod (Filename.concat worktree "run") 0o755;
-        Unix.symlink "first" (Filename.concat worktree "link"));
+        Unix.symlink "first" (Filename.concat worktree "link");
+        Unix.mkdir (Filename.concat worktree "nested") 0o700;
+        write_file (Filename.concat worktree "nested/data") "nested\n");
       if nested_empty then Unix.mkdir (Filename.concat worktree "empty") 0o700;
       let first_snapshot, _ =
         Snapshot.scan ~root:worktree ~store
@@ -1647,6 +1649,9 @@ let exports_revisions_as_exact_linear_git_commits () =
       Alcotest.(check string)
         "first checkout symlink target" "first"
         (Unix.readlink (Filename.concat destination "link"));
+      Alcotest.(check string)
+        "first checkout nested bytes" "nested\n"
+        (read_file (Filename.concat destination "nested/data"));
       Alcotest.(check bool)
         "first checkout excludes second" true
         (not (Sys.file_exists (Filename.concat destination "second")));

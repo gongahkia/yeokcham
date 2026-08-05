@@ -159,7 +159,7 @@ storage.
 
 - Completed: focused fixtures cover root/sole-parent commits, empty roots,
   nested-empty rejection, regular bytes, executable files, symlinks, malformed
-  links, duplicate selection, chain mismatch, bounds, deterministic
+  links, no-op revisions, duplicate selection, chain mismatch, bounds, deterministic
   metadata/ref/retry, ref collision, partial-mapping retry, mapping source
   corruption, and injected pre-ref/between-mapping interruptions. Successful
   cases run `git fsck --full` and check out each commit against its result.
@@ -167,9 +167,8 @@ storage.
   mode, one commit per selected link, sole-parent linearity, deterministic ref
   and mappings on retry, and `git fsck --full`.
 - Verified: `dune build @all`, `dune exec ./test/test_git.exe`, and
-  `PROPERTY_TEST_SEED=17 dune exec ./test/git_property_test.exe`.
-- Pending gate: `make format`, `make check`, and
-  `make property-test PROPERTY_TEST_SEED=17` before issue closure.
+  `PROPERTY_TEST_SEED=17 dune exec ./test/git_property_test.exe`; `make format`,
+  `make check`, and `make property-test PROPERTY_TEST_SEED=17` also pass.
 
 Persistent bytes do not change, so existing mapping/revision goldens remain
 valid.
