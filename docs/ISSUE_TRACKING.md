@@ -24,7 +24,7 @@ Each migrated issue has an immutable hidden marker, `<!-- paengi-todo-id: ID -->
 | M8-09 | [#65](https://github.com/gongahkia/paengi/issues/65) | M8 Git Bridge | implemented; verified |
 | M8-10 | [#67](https://github.com/gongahkia/paengi/issues/67) | M8 Git Bridge | implemented; verified |
 | M8-11 | [#70](https://github.com/gongahkia/paengi/issues/70) | M8 Git Bridge | implemented; verified by ADR-032–ADR-034 export ref policy |
-| M8-12 | [#73](https://github.com/gongahkia/paengi/issues/73) | M8 Git Bridge | created |
+| M8-12 | [#73](https://github.com/gongahkia/paengi/issues/73) | M8 Git Bridge | implemented; verified by ADR-028 export mappings |
 | M8-13 | [#76](https://github.com/gongahkia/paengi/issues/76) | M8 Git Bridge | created |
 | M8-14 | [#79](https://github.com/gongahkia/paengi/issues/79) | M8 Git Bridge | created |
 | M8-15 | [#82](https://github.com/gongahkia/paengi/issues/82) | M8 Git Bridge | created |
