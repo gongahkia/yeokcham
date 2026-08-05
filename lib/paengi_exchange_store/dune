@@ -1,0 +1,3 @@
+(library
+ (name paengi_exchange_store)
+ (libraries paengi_envelope paengi_exchange paengi_store))
