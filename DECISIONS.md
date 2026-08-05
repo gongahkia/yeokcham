@@ -141,4 +141,4 @@ The ADR lifecycle, numbering rules, and template are defined in [`docs/adr/READM
 - [ADR-028 — Git interchange mapping records](docs/adr/028-git-interchange-mapping-records.md) — Accepted.
 - [ADR-029 — Opaque Git imported transitions](docs/adr/029-opaque-git-imported-transitions.md) — Accepted.
 - [ADR-030 — Opaque Git tag imports](docs/adr/030-opaque-git-tag-imports.md) — Accepted.
-- [ADR-031 — Opaque Git commit metadata imports](docs/adr/031-opaque-git-commit-metadata.md) — Proposed.
+- [ADR-031 — Opaque Git commit metadata imports](docs/adr/031-opaque-git-commit-metadata.md) — Accepted.
