@@ -1324,6 +1324,11 @@ let imports_exact_tree_and_restarts_idempotently () =
         (Id.Git_mapping_id.equal
            (Git.mapping_id imported.Git.mapping)
            (Git.mapping_id repeated.Git.mapping));
+      write_file (Filename.concat repository "regular") "changed\n";
+      write_file (Filename.concat repository "nested/data") "changed nested\n";
+      Unix.chmod (Filename.concat repository "run") 0o644;
+      Unix.unlink (Filename.concat repository "link");
+      Unix.symlink "nested/data" (Filename.concat repository "link");
       let reopened =
         Store.open_repository ~root:(Store.root store)
         |> require_ok Store.error_to_string

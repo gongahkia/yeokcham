@@ -165,6 +165,12 @@ base or verified parent closure and rejects an absent ID; its integration into
 durable workspace ordering remains blocked by ADR-026's missing base-release
 field.
 
+Milestone 8 Git-import checks materialise imported snapshots with exact regular
+file bytes, executable mode, symlink target, and nested-tree structure. They
+mutate the source Git working tree after import, reopen Paengi storage, and
+prove materialisation still matches the imported tree; corrupt mappings or
+objects reject explicitly.
+
 #### P9 — Dependency safety
 
 No materialisation silently omits an unsatisfied required dependency.
