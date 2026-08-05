@@ -85,3 +85,7 @@ operations remain independent.
 The checked-in `testdata/*-v1-*.json` files are exact protocol golden fixtures.
 Run `cargo test --locked`; project `make test` and `make property-test` build
 the optional helper explicitly before their adapter coverage.
+
+For the complete supported-syntax, macro, fallback, failure, rename/move, and
+cross-language comparison boundary, see
+[`rust-semantic-sidecar-limitations-v1.md`](../../docs/experiments/rust-semantic-sidecar-limitations-v1.md).

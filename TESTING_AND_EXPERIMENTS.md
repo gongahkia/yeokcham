@@ -534,6 +534,13 @@ attempts are explicitly zero; a zero false-confident Rust count is therefore
 not a safety claim. `make rust-retargeting-comparison` regenerates and validates
 the documentation artifact; `make check` statically validates it.
 
+M9-06 records the complete Rust support/failure boundary in
+`docs/experiments/rust-semantic-sidecar-limitations-v1.md`. It names the
+syntax-only scope, unsupported macros/attributes/configuration, fallback-only
+behaviour, structured unavailable/incomplete outcomes, fixture limits, and the
+non-comparable TypeScript boundary without changing TypeScript evidence or
+claiming Rust semantic retargeting.
+
 ## 10. Release gates
 
 ### Model prototype gate
