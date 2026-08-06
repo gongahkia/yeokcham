@@ -152,4 +152,4 @@ The ADR lifecycle, numbering rules, and template are defined in [`docs/adr/READM
 - [ADR-039 — Verifiable ref events without implicit trust](docs/adr/039-verifiable-ref-events.md) — Accepted.
 - [ADR-040 — Local device identities without implicit authority](docs/adr/040-local-device-identities.md) — Accepted.
 - [ADR-041 — Immutable divergent ref-head sets](docs/adr/041-divergent-ref-head-sets.md) — Accepted.
-- [ADR-042 — Encrypted offline object bundles](docs/adr/042-encrypted-offline-object-bundles.md) — Proposed.
+- [ADR-042 — Encrypted offline object bundles](docs/adr/042-encrypted-offline-object-bundles.md) — Accepted.
