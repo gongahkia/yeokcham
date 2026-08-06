@@ -36,6 +36,7 @@ type object_type =
   | Imported_transition
   | Imported_tag
   | Ref_event
+  | Device_identity
 
 let object_type_code = function
   | Content -> 1
@@ -64,6 +65,7 @@ let object_type_code = function
   | Imported_transition -> 24
   | Imported_tag -> 25
   | Ref_event -> 26
+  | Device_identity -> 27
 
 let object_type_of_code = function
   | 1 -> Some Content
@@ -92,6 +94,7 @@ let object_type_of_code = function
   | 24 -> Some Imported_transition
   | 25 -> Some Imported_tag
   | 26 -> Some Ref_event
+  | 27 -> Some Device_identity
   | _ -> None
 
 type creation_error =

@@ -45,4 +45,8 @@ CBOR schema for every v1 message kind; they are not persistent object records.
 canonical Ed25519-signed immutable ref-transition proposal; it does not prove a
 trusted signer or update a mutable ref.
 
+`device-identity-v1.peng.hex` is ADR-040's Device_identity v1 Envelope. It
+retains one opaque random device ID and Ed25519 public-key binding; it contains
+no private key, host metadata, trust map, or mutable ref.
+
 Changing any fixture bytes requires a format decision and retained compatibility evidence; adding a new schema requires a new named fixture.

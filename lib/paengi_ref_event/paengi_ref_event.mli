@@ -5,6 +5,7 @@ type signer_key_id
 type ref_state
 type unsigned
 type t
+type verified
 type trusted_key = { key_id : signer_key_id; public_key : string }
 type verification = Verified | Untrusted
 
@@ -94,6 +95,14 @@ val verify :
   trusted_keys:trusted_key list ->
   t ->
   (verification, error) result
+
+val verify_for_device :
+  repository_format:string ->
+  trusted_keys:trusted_key list ->
+  t ->
+  (verified option, error) result
+
+val verified_event : verified -> t
 
 val evaluate_verified :
   current:ref_state -> known:t list -> t -> (evaluation, error) result

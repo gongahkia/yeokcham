@@ -16,6 +16,7 @@
   (dune (>= 3.23))
   (digestif (= 1.3.1))
   (mirage-crypto-ec (= 2.2.0))
+  (mirage-crypto-rng (= 2.2.0))
   (alcotest (and (= 1.9.1) :with-test))
   (qcheck-core (and (= 0.91) :with-test))
   (qcheck-alcotest (and (= 0.91) :with-test))))

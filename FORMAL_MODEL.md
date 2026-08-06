@@ -1128,3 +1128,26 @@ winner selection or device/trust claim.
 Ref-event objects are additive immutable Envelope-1 records. Trust maps, key
 distribution/lifecycle, replay cursors, verification indexes, and applied-ref
 history are neither canonical repository state nor persistent resume state.
+
+## 16. Local device identities
+
+M10-03 adds one immutable public `Device_identity_v1` declaration:
+
+```text
+Device_identity = (device-id, signer-key-id, algorithm, public-key, features)
+Device_resolution = Resolved | Unmapped | Ambiguous
+```
+
+`device-id` is an opaque 32-byte CSPRNG value, distinct from every signer-key,
+event, and stored-object ID. The declaration binds it to exactly one Ed25519
+public key and ADR-039 signer-key ID; its public canonical bytes contain no
+private key, hostname, user/account, address, timestamp, label, or transport
+metadata. The private capability returned during generation is caller-owned and
+is never a Paengi object or durable repository value.
+
+A bounded caller-supplied registry consists of exact stored public declarations.
+After, and only after, ADR-039 verification, pure lookup yields one explicit
+resolved, unmapped, or ambiguous device result. Registry lookup does not make a
+key trusted, change an event result, advance a ref, select a divergence, rotate
+or revoke a key, or persist a registry. Device declarations use additive
+Envelope type 27; no existing event, ref, object, or repository format changes.

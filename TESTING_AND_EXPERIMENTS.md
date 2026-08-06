@@ -151,6 +151,17 @@ mutable refs. The seeded chain property varies signed event lengths and
 corruption/replay positions; verification and restart decoding retain exact
 event bytes and never advance a ref.
 
+#### P17 — Local device identity preservation
+
+ADR-040 retains an exact public Device_identity v1 Envelope fixture and rejects
+malformed records, unsupported algorithms, mismatched object IDs, oversized
+registries, absent mappings, and ambiguous signer rows structurally. Two local
+repositories transfer/reopen one declaration, resolve only an independently
+verified event through an explicit registry, and preserve the destination ref.
+The seeded restart property varies bounded public declarations, repeated
+create-only publication, reload, registry resolution, and corrupt payloads; no
+test treats a public declaration as trust or persists private key bytes.
+
 Milestone 5 additionally checks Workspace/Workspace_revision/Workspace_attempt,
 Conflict, Resolution, and workspace-current-ref canonical goldens with inverse
 decoders; workspace reopen; immutable enable/reorder revisions; stale workspace

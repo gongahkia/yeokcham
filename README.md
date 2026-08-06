@@ -117,6 +117,12 @@ untrusted. Storage, transfer, verification, replay/order checks, and divergence
 reporting do not apply or reconcile a ref. Key lifecycle, device identity,
 transport, trust configuration, and user-facing ref application are deferred.
 
+M10-03 adds immutable public device declarations. Each binds a random opaque
+device ID to one Ed25519 public key; generated private capability remains
+caller-owned and is never stored. An explicit bounded registry may resolve an
+already verified event to one declaration, unmapped, or ambiguous; it does not
+make a key trusted, update a ref, rotate/revoke a key, or identify a person.
+
 See `CONTRIBUTING.md` for development rules. Paengi is licensed under the MIT License.
 
 ## Development

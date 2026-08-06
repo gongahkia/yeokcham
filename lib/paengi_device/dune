@@ -1,0 +1,10 @@
+(library
+ (name paengi_device)
+ (libraries
+  mirage-crypto-ec
+  mirage-crypto-rng.unix
+  paengi_encoding
+  paengi_envelope
+  paengi_id
+  paengi_ref_event
+  paengi_store))

@@ -720,10 +720,20 @@ replay/order evaluation, and divergence reporting never call mutable-ref CAS.
 Key discovery/lifecycle, ref application, reconciliation, device identity, and
 transport remain separate layers.
 
+M10-03 adds `paengi_device` and `paengi_device_store`. A Device_identity v1 is
+an immutable public Envelope-1 object binding one random opaque 32-byte device
+ID to an Ed25519 public key and ADR-039 signer-key ID. Generation returns an
+in-memory caller-owned private capability; the object store serialises public
+declaration bytes only. A bounded caller-supplied registry resolves an already
+verified ref-event signer to one device, unmapped, or ambiguous result. Device
+resolution does not trust a key, modify an event/ref, choose divergence, or
+persist registry state. Private-key storage, discovery, rotation, revocation,
+and transport remain separate layers.
+
 Future layers require separate decisions:
 
 - Signed ref or operation events.
-- Explicit device identities.
+- Device key lifecycle.
 - Conflict-preserving ref reconciliation.
 - Encrypted bundles for dumb storage.
 - Local HTTP peer transfer.

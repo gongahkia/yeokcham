@@ -200,4 +200,8 @@ or synchronised.
 
 ## Implementation evidence
 
-None; implementation is blocked pending ADR acceptance.
+M10-03 adds `Device_identity_v1`, its canonical store adapter, an opaque
+verified-event bridge, retained public-record goldens, and bounded two-local
+device/restart/corruption coverage. Private Ed25519 capability remains caller
+owned and is not serialised. Verified 2026-08-06 with `make check` and `make
+property-test PROPERTY_TEST_SEED=17`.

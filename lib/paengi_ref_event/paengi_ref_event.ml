@@ -19,6 +19,7 @@ type unsigned = {
 }
 
 type t = { unsigned : unsigned; algorithm : string; signature : string }
+type verified = t
 type trusted_key = { key_id : signer_key_id; public_key : string }
 type verification = Verified | Untrusted
 
@@ -492,6 +493,12 @@ let verify ~repository_format ~trusted_keys event =
                 else Error Signature_verification_failed
               with Mirage_crypto_ec.Message_too_long ->
                 Error (Cryptographic_failure "signed preimage is too long")))
+
+let verify_for_device ~repository_format ~trusted_keys event =
+  let* verification = verify ~repository_format ~trusted_keys event in
+  match verification with Verified -> Ok (Some event) | Untrusted -> Ok None
+
+let verified_event verified = verified
 
 let same_event left right =
   Event_id.equal

@@ -1,0 +1,3 @@
+(library
+ (name paengi_device_store)
+ (libraries paengi_device paengi_envelope paengi_store))

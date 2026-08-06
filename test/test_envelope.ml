@@ -113,6 +113,7 @@ let object_type_codes () =
       (Envelope.Imported_transition, 24);
       (Envelope.Imported_tag, 25);
       (Envelope.Ref_event, 26);
+      (Envelope.Device_identity, 27);
     ]
   in
   List.iter
@@ -129,7 +130,7 @@ let object_type_codes () =
     (Option.is_none (Envelope.object_type_of_code 0));
   Alcotest.(check bool)
     "unassigned type is rejected" true
-    (Option.is_none (Envelope.object_type_of_code 27))
+    (Option.is_none (Envelope.object_type_of_code 28))
 
 let golden_envelope () =
   let expected = require_golden "envelope-v1-snapshot.peng.hex" in
