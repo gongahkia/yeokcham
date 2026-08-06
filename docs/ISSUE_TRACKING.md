@@ -50,7 +50,7 @@ Each migrated issue has an immutable hidden marker, `<!-- paengi-todo-id: ID -->
 | M10-10 | [#10](https://github.com/gongahkia/paengi/issues/10) | M10 Local Synchronisation | implemented; verified by workspace/release divergence fixtures |
 | M10-11 | [#11](https://github.com/gongahkia/paengi/issues/11) | M10 Local Synchronisation | implemented; verified by self-contained two-repository direct/offline fixture and seeded restart/corruption properties |
 | M11-01 | [#12](https://github.com/gongahkia/paengi/issues/12) | M11 Demonstration and Reporting | implemented; verified by guarded scripted fixture and focused creation/failure/cleanup coverage |
-| M11-02 | [#13](https://github.com/gongahkia/paengi/issues/13) | M11 Demonstration and Reporting | created |
+| M11-02 | [#13](https://github.com/gongahkia/paengi/issues/13) | M11 Demonstration and Reporting | implemented; verified by exact restore/safety-checkpoint fixture coverage |
 | M11-03 | [#14](https://github.com/gongahkia/paengi/issues/14) | M11 Demonstration and Reporting | created |
 | M11-04 | [#20](https://github.com/gongahkia/paengi/issues/20) | M11 Demonstration and Reporting | created |
 | M11-05 | [#23](https://github.com/gongahkia/paengi/issues/23) | M11 Demonstration and Reporting | created |
