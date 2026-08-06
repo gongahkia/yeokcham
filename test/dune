@@ -245,6 +245,18 @@
   (source_tree golden)))
 
 (test
+ (name test_missing_object_exchange)
+ (modules test_missing_object_exchange)
+ (libraries
+  alcotest
+  paengi_encoding
+  paengi_envelope
+  paengi_exchange
+  paengi_exchange_store
+  paengi_store
+  unix))
+
+(test
  (name test_two_device_sync)
  (modules test_two_device_sync)
  (libraries

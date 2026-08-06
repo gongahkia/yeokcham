@@ -223,6 +223,15 @@ final delivery, and import retry/reopen; rejected files publish no source object
 and valid retries preserve the destination ref. The tests do not claim repair of
 an interrupted export stream or filesystem permission enforcement.
 
+#### P23 — Missing-object exchange preservation
+
+M10-09 retains a deterministic two-repository fixture with one byte-identical
+already-present object and one missing object. It checks exact object identity,
+one missing-only request/transfer, inode-stable already-present bytes, reopen
+retry with zero requests/transfers, corruption rejection before destination
+publication, and unchanged refs. The existing seeded ADR-038 exchange property
+varies bounded missing object sets, duplicate input, interruption, and retry.
+
 Milestone 5 additionally checks Workspace/Workspace_revision/Workspace_attempt,
 Conflict, Resolution, and workspace-current-ref canonical goldens with inverse
 decoders; workspace reopen; immutable enable/reorder revisions; stale workspace
