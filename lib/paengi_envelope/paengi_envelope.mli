@@ -32,6 +32,7 @@ type object_type =
   | Imported_tag
   | Ref_event
   | Device_identity
+  | Divergent_ref_set
 
 val object_type_code : object_type -> int
 val object_type_of_code : int -> object_type option

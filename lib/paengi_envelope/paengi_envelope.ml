@@ -37,6 +37,7 @@ type object_type =
   | Imported_tag
   | Ref_event
   | Device_identity
+  | Divergent_ref_set
 
 let object_type_code = function
   | Content -> 1
@@ -66,6 +67,7 @@ let object_type_code = function
   | Imported_tag -> 25
   | Ref_event -> 26
   | Device_identity -> 27
+  | Divergent_ref_set -> 28
 
 let object_type_of_code = function
   | 1 -> Some Content
@@ -95,6 +97,7 @@ let object_type_of_code = function
   | 25 -> Some Imported_tag
   | 26 -> Some Ref_event
   | 27 -> Some Device_identity
+  | 28 -> Some Divergent_ref_set
   | _ -> None
 
 type creation_error =

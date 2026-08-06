@@ -72,6 +72,7 @@ val make_unsigned :
   (unsigned, error) result
 
 val unsigned_event_id : unsigned -> Event_id.t
+val unsigned_repository_format_digest : unsigned -> string
 val unsigned_ref_name : unsigned -> string
 val unsigned_signer_key_id : unsigned -> signer_key_id
 val unsigned_signer_sequence : unsigned -> int64
