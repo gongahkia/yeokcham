@@ -188,4 +188,14 @@ known peer, is replay-safe, repaired, or synchronised a ref.
 
 ## Implementation evidence
 
-None; implementation is blocked pending ADR acceptance.
+M10-08 implements `paengi_bundle_directory`, an external directory adapter over
+ADR-042 bytes. It adds retained v1 filename ordering, focused
+export/list/inspect/import/retry and rejection coverage, and the seeded
+`bundle_directory_property_test`.
+
+Verified on 2026-08-06:
+
+```text
+make check
+make property-test PROPERTY_TEST_SEED=17
+```
