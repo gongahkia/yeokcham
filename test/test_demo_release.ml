@@ -47,7 +47,7 @@ let environment entries =
     (List.map (fun (key, value) -> key ^ "=" ^ value) entries @ inherited)
 
 let run ~environment program arguments =
-  let output = Filename.temp_file "paengi-demo-release-output-" "" in
+  let output = Filename.temp_file "yeokcham-demo-release-output-" "" in
   Fun.protect
     ~finally:(fun () -> remove_tree output)
     (fun () ->
@@ -86,7 +86,7 @@ let release_identity output =
   |> String.split_on_char ' ' |> List.hd
 
 let immutable_release_retains_its_evidence_and_snapshot () =
-  let parent = Filename.temp_file "paengi-demo-release-" "" in
+  let parent = Filename.temp_file "yeokcham-demo-release-" "" in
   Unix.unlink parent;
   Unix.mkdir parent 0o700;
   let root = Filename.concat parent "fixture" in
@@ -96,9 +96,9 @@ let immutable_release_retains_its_evidence_and_snapshot () =
       let environment =
         environment
           [
-            ("PAENGI_BIN", binary "paengi.exe");
-            ("PAENGI_WORKSPACE_BASE_BIN", binary "workspace_base_v1.exe");
-            ("PAENGI_RELEASE_EVIDENCE_BIN", binary "release_evidence_v1.exe");
+            ("YEOKCHAM_BIN", binary "yeokcham.exe");
+            ("YEOKCHAM_WORKSPACE_BASE_BIN", binary "workspace_base_v1.exe");
+            ("YEOKCHAM_RELEASE_EVIDENCE_BIN", binary "release_evidence_v1.exe");
           ]
       in
       require
@@ -112,13 +112,13 @@ let immutable_release_retains_its_evidence_and_snapshot () =
         |> exited)
         "release demo failed";
       let creation =
-        read (Filename.concat root ".paengi/demo-v1-release-create")
+        read (Filename.concat root ".yeokcham/demo-v1-release-create")
       in
       let release = release_identity creation in
       Alcotest.(check int) "release ID length" 64 (String.length release);
       require (contains creation "evidence=1") "release has no evidence";
       let materialise =
-        read (Filename.concat root ".paengi/demo-v1-release-materialise")
+        read (Filename.concat root ".yeokcham/demo-v1-release-materialise")
       in
       require
         (contains materialise "partial=false")
@@ -126,20 +126,20 @@ let immutable_release_retains_its_evidence_and_snapshot () =
       Alcotest.(check string)
         "release show is immutable across scratch edits"
         (read
-           (Filename.concat root ".paengi/demo-v1-release-show-before-change"))
+           (Filename.concat root ".yeokcham/demo-v1-release-show-before-change"))
         (read
-           (Filename.concat root ".paengi/demo-v1-release-show-after-change"));
+           (Filename.concat root ".yeokcham/demo-v1-release-show-after-change"));
       Alcotest.(check string)
         "release verification is immutable across scratch edits"
         (read
-           (Filename.concat root ".paengi/demo-v1-release-verify-before-change"))
+           (Filename.concat root ".yeokcham/demo-v1-release-verify-before-change"))
         (read
-           (Filename.concat root ".paengi/demo-v1-release-verify-after-change"));
+           (Filename.concat root ".yeokcham/demo-v1-release-verify-after-change"));
       let evidence =
-        read (Filename.concat root ".paengi/demo-v1-release-evidence")
+        read (Filename.concat root ".yeokcham/demo-v1-release-evidence")
       in
       let standalone =
-        read (Filename.concat root ".paengi/demo-v1-release-validation")
+        read (Filename.concat root ".yeokcham/demo-v1-release-validation")
       in
       require
         (contains evidence ("release=" ^ release ^ " evidence="))
@@ -150,22 +150,22 @@ let immutable_release_retains_its_evidence_and_snapshot () =
       let before =
         read
           (Filename.concat root
-             ".paengi/demo-v1-release-list-before-unsupported")
+             ".yeokcham/demo-v1-release-list-before-unsupported")
       in
       Alcotest.(check string)
         "missing parent leaves visible releases unchanged" before
         (read
            (Filename.concat root
-              ".paengi/demo-v1-release-list-after-unsupported"));
+              ".yeokcham/demo-v1-release-list-after-unsupported"));
       require
         (contains
            (read
-              (Filename.concat root ".paengi/demo-v1-release-unsupported-parent"))
+              (Filename.concat root ".yeokcham/demo-v1-release-unsupported-parent"))
            "release parent graph is invalid")
         "missing parent error is not structured")
 
 let unowned_root_rejects () =
-  let parent = Filename.temp_file "paengi-demo-release-unowned-" "" in
+  let parent = Filename.temp_file "yeokcham-demo-release-unowned-" "" in
   Unix.unlink parent;
   Unix.mkdir parent 0o700;
   let root = Filename.concat parent "unowned" in

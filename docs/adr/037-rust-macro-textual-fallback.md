@@ -34,7 +34,7 @@ to the completed TypeScript/textual experiment.
 - Every outcome must be reproducible from one request's immutable snapshot
   bytes, with no host source/configuration read.
 - Fallback evidence must be bounded, canonical, inspectable, and separate from
-  Paengi IDs and persistent state.
+  Yeokcham IDs and persistent state.
 - Existing `analyze` and `resolve-module-paths` protocol-v1 results must retain
   their established meaning.
 
@@ -84,7 +84,7 @@ configuration remain unavailable.
 
 `textual_fallback_required` is true when at least one fact exists or parsing is
 incomplete. The original verified snapshot source bytes remain the only source
-for any independent `paengi_textual_patch` call; a fallback fact neither
+for any independent `yeokcham_textual_patch` call; a fallback fact neither
 creates a text operation nor authorizes one. A macro-free, parser-complete
 assessment has no fallback facts and is still not semantic application
 authority.
@@ -133,7 +133,7 @@ types.
 
 ## Persistent-format and migration impact
 
-No Paengi object, ref, schema, envelope, mapping, migration, or persistent
+No Yeokcham object, ref, schema, envelope, mapping, migration, or persistent
 golden changes. Protocol-v1 fallback requests/results and exact JSON fixtures
 are transient adapter artifacts. Any persistence of macro/fallback evidence or
 its use in a canonical operation requires a separate ADR and format version.

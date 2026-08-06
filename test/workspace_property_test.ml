@@ -1,10 +1,10 @@
-module Capsule_store = Paengi_capsule_store
-module Id = Paengi_id
-module Scratch = Paengi_scratch
-module Snapshot = Paengi_snapshot
-module Store = Paengi_store
-module Workspace = Paengi_workspace
-module Workspace_store = Paengi_workspace_store
+module Capsule_store = Yeokcham_capsule_store
+module Id = Yeokcham_id
+module Scratch = Yeokcham_scratch
+module Snapshot = Yeokcham_snapshot
+module Store = Yeokcham_store
+module Workspace = Yeokcham_workspace
+module Workspace_store = Yeokcham_workspace_store
 
 let default_seed = 20_260_801
 
@@ -48,7 +48,7 @@ let rec remove_tree path =
   with Unix.Unix_error (Unix.ENOENT, _, _) -> ()
 
 let with_repository check =
-  let root = Filename.temp_file "paengi-workspace-property-" "" in
+  let root = Filename.temp_file "yeokcham-workspace-property-" "" in
   Unix.unlink root;
   Unix.mkdir root 0o700;
   Fun.protect

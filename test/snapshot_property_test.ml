@@ -1,5 +1,5 @@
-module Snapshot_store = Paengi_snapshot
-module Store = Paengi_store
+module Snapshot_store = Yeokcham_snapshot
+module Store = Yeokcham_store
 
 let default_seed = 20_260_729
 
@@ -35,7 +35,7 @@ let rec remove_tree path =
   with Unix.Unix_error (Unix.ENOENT, _, _) -> ()
 
 let with_directory check =
-  let root = Filename.temp_file "paengi-snapshot-property-" "" in
+  let root = Filename.temp_file "yeokcham-snapshot-property-" "" in
   Unix.unlink root;
   Unix.mkdir root 0o700;
   Fun.protect ~finally:(fun () -> remove_tree root) (fun () -> check root)

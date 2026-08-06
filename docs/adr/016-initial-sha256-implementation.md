@@ -8,7 +8,7 @@
 
 ## Context and problem statement
 
-ADR-013 permits SHA-256 behind an abstraction. Paengi now needs one maintained OCaml implementation that satisfies `Paengi_hash.S`, hashes exact bytes incrementally, supports OCaml 5.5.0, and does not couple model types to a library API.
+ADR-013 permits SHA-256 behind an abstraction. Yeokcham now needs one maintained OCaml implementation that satisfies `Yeokcham_hash.S`, hashes exact bytes incrementally, supports OCaml 5.5.0, and does not couple model types to a library API.
 
 ## Decision drivers
 
@@ -44,18 +44,18 @@ ADR-013 permits SHA-256 behind an abstraction. Paengi now needs one maintained O
 
 ## Decision outcome
 
-Use SHA-256 through an adapter over Digestif 1.3.1 and explicitly link `digestif.ocaml`. Keep Digestif types private to `paengi_hash`. Use Digestif's constant-time equality and non-constant-time ordering; Paengi object IDs are public values, not secrets.
+Use SHA-256 through an adapter over Digestif 1.3.1 and explicitly link `digestif.ocaml`. Keep Digestif types private to `yeokcham_hash`. Use Digestif's constant-time equality and non-constant-time ordering; Yeokcham object IDs are public values, not secrets.
 
 ## Consequences
 
 - Development and CI gain exact dependencies on Digestif 1.3.1 and its transitive packages.
 - The initial implementation has no C backend dependency.
 - Hash throughput may be lower than `digestif.c`; benchmark before changing backends.
-- A future backend or algorithm change remains isolated behind `Paengi_hash.S`.
+- A future backend or algorithm change remains isolated behind `Yeokcham_hash.S`.
 
 ## Model and invariant impact
 
-No algebraic model type changes. `Paengi_hash.Sha256` must expose algorithm name `sha256`, digest size 32, persistent streaming contexts, exact raw digest bytes, equality, and lexical ordering.
+No algebraic model type changes. `Yeokcham_hash.Sha256` must expose algorithm name `sha256`, digest size 32, persistent streaming contexts, exact raw digest bytes, equality, and lexical ordering.
 
 ## Persistent-format and migration impact
 

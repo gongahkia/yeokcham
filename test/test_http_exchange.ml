@@ -1,8 +1,8 @@
-module Encoding = Paengi_encoding
-module Envelope = Paengi_envelope
-module Exchange = Paengi_exchange
-module Http = Paengi_http_exchange
-module Store = Paengi_store
+module Encoding = Yeokcham_encoding
+module Envelope = Yeokcham_envelope
+module Exchange = Yeokcham_exchange
+module Http = Yeokcham_http_exchange
+module Store = Yeokcham_store
 
 let require format = function
   | Ok value -> value
@@ -36,7 +36,7 @@ let rec remove_tree path =
   with Unix.Unix_error (Unix.ENOENT, _, _) -> ()
 
 let with_repositories run =
-  let root = Filename.temp_file "paengi-http-exchange-" "" in
+  let root = Filename.temp_file "yeokcham-http-exchange-" "" in
   Unix.unlink root;
   Unix.mkdir root 0o700;
   let source_root = Filename.concat root "source" in

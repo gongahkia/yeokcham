@@ -1,10 +1,10 @@
-module Bundle = Paengi_bundle
-module Directory = Paengi_bundle_directory
-module Encoding = Paengi_encoding
-module Envelope = Paengi_envelope
-module Exchange = Paengi_exchange
-module Exchange_store = Paengi_exchange_store
-module Store = Paengi_store
+module Bundle = Yeokcham_bundle
+module Directory = Yeokcham_bundle_directory
+module Encoding = Yeokcham_encoding
+module Envelope = Yeokcham_envelope
+module Exchange = Yeokcham_exchange
+module Exchange_store = Yeokcham_exchange_store
+module Store = Yeokcham_store
 
 let require format = function
   | Ok value -> value
@@ -44,7 +44,7 @@ let rec remove_tree path =
   with Unix.Unix_error (Unix.ENOENT, _, _) -> ()
 
 let with_repositories run =
-  let root = Filename.temp_file "paengi-decentralised-sync-" "" in
+  let root = Filename.temp_file "yeokcham-decentralised-sync-" "" in
   Unix.unlink root;
   Unix.mkdir root 0o700;
   let source_root = Filename.concat root "source" in

@@ -20,19 +20,19 @@ build:
 	$(DUNE) build @all
 
 rust-adapter-build:
-	cd tools/paengi-rust-adapter && cargo build --locked --release
+	cd tools/yeokcham-rust-adapter && cargo build --locked --release
 
 rust-adapter-test:
-	cd tools/paengi-rust-adapter && cargo fmt --check
-	cd tools/paengi-rust-adapter && cargo test --locked
+	cd tools/yeokcham-rust-adapter && cargo fmt --check
+	cd tools/yeokcham-rust-adapter && cargo test --locked
 
 test: rust-adapter-build rust-adapter-test
-	PAENGI_RUST_ADAPTER=$(CURDIR)/tools/paengi-rust-adapter/target/release/paengi-rust-adapter $(DUNE) runtest
+	YEOKCHAM_RUST_ADAPTER=$(CURDIR)/tools/yeokcham-rust-adapter/target/release/yeokcham-rust-adapter $(DUNE) runtest
 
 PROPERTY_TEST_SEED ?= 20260729
 
 property-test: rust-adapter-build
-	PAENGI_RUST_ADAPTER=$(CURDIR)/tools/paengi-rust-adapter/target/release/paengi-rust-adapter PROPERTY_TEST_SEED=$(PROPERTY_TEST_SEED) $(DUNE) build @property-test
+	YEOKCHAM_RUST_ADAPTER=$(CURDIR)/tools/yeokcham-rust-adapter/target/release/yeokcham-rust-adapter PROPERTY_TEST_SEED=$(PROPERTY_TEST_SEED) $(DUNE) build @property-test
 
 benchmark-encoding:
 	BENCHMARK_DUNE_PROFILE=release $(DUNE) exec --profile release bench/encoding_benchmark.exe -- --output bench/results/canonical-codec-v1.json
@@ -66,7 +66,7 @@ marshal-audit:
 
 lint:
 	$(DUNE) build @opam @fmt @lint @all
-	$(OPAM) lint paengi.opam
+	$(OPAM) lint yeokcham.opam
 
 check: lint test marshal-audit compaction-retention-benchmark-verify semantic-experiment-verify rust-retargeting-comparison-verify
 

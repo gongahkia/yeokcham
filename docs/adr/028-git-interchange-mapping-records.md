@@ -9,22 +9,22 @@
 ## Context and problem statement
 
 Milestone 8 has a non-persistent, bounded Git preflight adapter only. It has
-no durable association from a verified Git object to an imported Paengi result,
-or from an exported Paengi result to the Git object Git created. ADR-009 makes
+no durable association from a verified Git object to an imported Yeokcham result,
+or from an exported Yeokcham result to the Git object Git created. ADR-009 makes
 Git an interchange format, while ADR-020 through ADR-027 require immutable,
 typed, versioned objects and create-only visibility. The mapping must support
 SHA-1 and SHA-256 Git repositories without treating a Git object ID as a
-Paengi identity, repository identity, or compatibility guarantee.
+Yeokcham identity, repository identity, or compatibility guarantee.
 
 ## Decision drivers
 
-- Bind every durable bridge result to a typed Git object ID and exact Paengi
+- Bind every durable bridge result to a typed Git object ID and exact Yeokcham
   target without changing scratch, capsule, workspace, or release semantics.
 - Preserve Git hash algorithm identity and reject malformed or mismatched IDs.
 - Make mapping publication immutable, restart-safe, and independently
   inspectable.
 - Keep Git-object parsing in bounded direct-argv adapters; no Git object bytes,
-  packs, refs, or topology become canonical Paengi state merely by mapping.
+  packs, refs, or topology become canonical Yeokcham state merely by mapping.
 - Add no mutable mapping index, overwrite path, or implicit deduplication.
 
 ## Considered options
@@ -35,13 +35,13 @@ Paengi identity, repository identity, or compatibility guarantee.
 - Loses bridge evidence on index loss and cannot satisfy immutable-format
   requirements.
 
-### Reuse Paengi stored-object IDs for Git IDs
+### Reuse Yeokcham stored-object IDs for Git IDs
 
 - Avoids a separate Git ID type.
 - Conflates Git's algorithm and object namespace with ADR-020's
   domain-separated Envelope identity.
 
-### Store raw Git objects in Paengi object envelopes
+### Store raw Git objects in Yeokcham object envelopes
 
 - Keeps an archival copy beside the mapping.
 - Declares unbounded Git-format compatibility and duplicates the later import
@@ -50,14 +50,14 @@ Paengi identity, repository identity, or compatibility guarantee.
 ### Add immutable typed mapping objects and create-only bindings
 
 - Retains precise, independently verifiable bridge evidence while keeping Git
-  parsing and Paengi canonical objects separate.
+  parsing and Yeokcham canonical objects separate.
 - Requires an additive object type, canonical ref codec, goldens, and restart
   coverage in each importing/exporting vertical slice.
 
 ## Decision outcome
 
 Add one additive Envelope-1 object type, `Git_mapping = 23`. It records a
-single verified direction, exact Git object reference, and typed Paengi bridge
+single verified direction, exact Git object reference, and typed Yeokcham bridge
 subject. It does not store a raw Git object, Git ref name, remote URL, working
 tree path, pack data, or repository identity.
 
@@ -113,7 +113,7 @@ git-mapping-v1 = [
 ]
 ```
 
-Every Paengi logical and physical ID in a subject is exactly 32 raw bytes. A
+Every Yeokcham logical and physical ID in a subject is exactly 32 raw bytes. A
 decoder rejects direction/subject combinations not listed below:
 
 ```text
@@ -125,7 +125,7 @@ export/commit -> exported-release / exported-revision
 `Git_mapping_id` is exactly:
 
 ```text
-SHA-256("paengi:git-mapping:v1\\000" || encode(git-mapping-identity-v1))
+SHA-256("yeokcham:git-mapping:v1\\000" || encode(git-mapping-identity-v1))
 
 git-mapping-identity-v1 = [
   1, direction, git-object-kind, git-object-id-v1, git-mapping-subject-v1
@@ -142,11 +142,11 @@ agreement before returning a record.
 The sole canonical mapping visibility point is an expected-absent binding:
 
 ```text
-.paengi/refs/git-mappings/<lowercase-git-mapping-id-hex>
+.yeokcham/refs/git-mappings/<lowercase-git-mapping-id-hex>
 
 git-mapping-binding-v1 = [1, git-mapping-id, git-mapping-object-id, checksum]
 checksum = SHA-256(
-  "paengi:git-mapping-binding:v1\\000" ||
+  "yeokcham:git-mapping-binding:v1\\000" ||
   encode([1, git-mapping-id, git-mapping-object-id])
 )
 ```
@@ -158,21 +158,21 @@ mapping ID returns a structured collision/corruption error. A future mapping
 listing must enumerate and verify these bindings; any lookup index is
 rebuildable and non-canonical.
 
-An importer or exporter may create its normal Paengi target only through that
+An importer or exporter may create its normal Yeokcham target only through that
 target's accepted publication protocol. After it verifies the target and the
 exact Git input/output object, it writes the immutable mapping and then creates
 the mapping binding. The target visibility point and mapping binding are not a
 cross-ref transaction. An interruption after target visibility but before the
-mapping binding leaves a valid Paengi target plus an incomplete bridge record;
+mapping binding leaves a valid Yeokcham target plus an incomplete bridge record;
 retrying the same request must verify and publish the same mapping or return a
 structured mismatch. An interruption before the binding leaves only
 unreferenced immutable data. No mapping ref may advance, rewrite, hide, or
-otherwise change a Paengi history ref.
+otherwise change a Yeokcham history ref.
 
 ## Consequences
 
-- Git and Paengi IDs remain type- and algorithm-distinct.
-- The mapping can prove an exact bridge association, not that Paengi preserves
+- Git and Yeokcham IDs remain type- and algorithm-distinct.
+- The mapping can prove an exact bridge association, not that Yeokcham preserves
   all Git semantics or that a Git repository is globally identified.
 - Git tree/commit import and commit export can share one auditable mapping
   contract, while tags and gitlinks fail closed until separately designed.
@@ -185,11 +185,11 @@ otherwise change a Paengi history ref.
 
 - A mapping's Git ID length exactly matches its declared Git hash algorithm.
 - A mapping subject has the declared direction/kind combination and resolves to
-  the exact typed Paengi object(s) it names.
+  the exact typed Yeokcham object(s) it names.
 - A Git mapping cannot stand in for a scratch checkpoint, capsule, workspace,
   conflict, release, or stored-object identity.
 - Mapping creation is idempotent only for identical canonical mapping semantics.
-- A visible mapping never mutates Paengi histories; missing mappings after an
+- A visible mapping never mutates Yeokcham histories; missing mappings after an
   interrupted bridge operation remain explicit rather than inferred.
 
 ## Persistent-format and migration impact
@@ -234,7 +234,7 @@ promise arbitrary Git-format compatibility. Git documents tree modes `100644`,
 `100755`, and `120000` as regular, executable, and symlink entries; v1 mapping
 records do not reinterpret those modes. [git-fast-import](https://git-scm.com/docs/git-fast-import)
 
-M8-01 adds `paengi git import tree --repository <absolute-git-directory>
+M8-01 adds `yeokcham git import tree --repository <absolute-git-directory>
 --tree <full-git-tree-id>`. It prints the snapshot and mapping IDs after the
 create-only mapping binding succeeds. It does not add a commit, export, or
 mapping-list command.

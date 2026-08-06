@@ -54,7 +54,7 @@ Use a scoped object-format version plus a fail-closed mandatory-feature registry
 - A future assignment requires an ADR that states the bit number, name, object-type scope, payload semantics, reader and writer support, migration, test fixtures, and whether old readers must reject. Assigned bits are never reused.
 - A future incompatible payload schema increments that object type's object-format version. A future header interpretation increments envelope version. A feature bit is only for independently additive required semantics within an otherwise understood `(object type, object-format version)` schema.
 
-This is the narrowest compatible boundary: Git's repository and bundle formats fail closed when a required unknown extension or capability is present, while its index demonstrates independent format fields. The sources support fail-closed compatibility and independent versioning; they do not prescribe Paengi's bit assignments or scope, which are project decisions.
+This is the narrowest compatible boundary: Git's repository and bundle formats fail closed when a required unknown extension or capability is present, while its index demonstrates independent format fields. The sources support fail-closed compatibility and independent versioning; they do not prescribe Yeokcham's bit assignments or scope, which are project decisions.
 
 ## Consequences
 

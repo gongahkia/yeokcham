@@ -1,11 +1,11 @@
-module Capsule_store = Paengi_capsule_store
-module Envelope = Paengi_envelope
-module Golden = Paengi_testkit.Golden_fixture
-module Id = Paengi_id
-module Scratch = Paengi_scratch
-module Snapshot = Paengi_snapshot
-module Store = Paengi_store
-module Workspace_store = Paengi_workspace_store
+module Capsule_store = Yeokcham_capsule_store
+module Envelope = Yeokcham_envelope
+module Golden = Yeokcham_testkit.Golden_fixture
+module Id = Yeokcham_id
+module Scratch = Yeokcham_scratch
+module Snapshot = Yeokcham_snapshot
+module Store = Yeokcham_store
+module Workspace_store = Yeokcham_workspace_store
 
 let require_ok render = function
   | Ok value -> value
@@ -45,7 +45,7 @@ let golden name =
   | None -> Alcotest.fail ("missing golden fixture: " ^ name)
 
 let with_store run =
-  let root = Filename.temp_file "paengi-workspace-store-test-" "" in
+  let root = Filename.temp_file "yeokcham-workspace-store-test-" "" in
   Unix.unlink root;
   Unix.mkdir root 0o700;
   let rec remove path =
@@ -306,11 +306,11 @@ let schemas_have_canonical_goldens_and_inverse_decoders () =
       in
       let fixtures =
         [
-          ("workspace-v1.peng.hex", bytes workspace_object);
-          ("workspace-revision-v1.peng.hex", bytes revision_object);
-          ("workspace-attempt-v1.peng.hex", bytes attempt_object);
-          ("conflict-v1.peng.hex", bytes conflict_object);
-          ("resolution-v1.peng.hex", bytes resolution_object);
+          ("workspace-v1.yeok.hex", bytes workspace_object);
+          ("workspace-revision-v1.yeok.hex", bytes revision_object);
+          ("workspace-attempt-v1.yeok.hex", bytes attempt_object);
+          ("conflict-v1.yeok.hex", bytes conflict_object);
+          ("resolution-v1.yeok.hex", bytes resolution_object);
           ( "workspace-current-v1.ref.hex",
             Workspace_store.encode_current_ref current );
         ]

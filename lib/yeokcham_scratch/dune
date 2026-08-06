@@ -1,0 +1,8 @@
+(library
+ (name yeokcham_scratch)
+ (libraries
+  yeokcham_encoding
+  yeokcham_envelope
+  yeokcham_id
+  yeokcham_snapshot
+  yeokcham_store))

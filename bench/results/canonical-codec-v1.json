@@ -19,7 +19,7 @@
   "metadata": {
     "ocaml_version": "5.5.0",
     "dune_profile": "release",
-    "paengi_revision": "767ec45e7d20678253b4f94dafc84d13f25998bd",
+    "yeokcham_revision": "767ec45e7d20678253b4f94dafc84d13f25998bd",
     "working_tree_state": "clean"
   }
 }

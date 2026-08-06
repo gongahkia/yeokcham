@@ -1,3 +1,0 @@
-(library
- (name paengi_exchange)
- (libraries paengi_encoding paengi_store))

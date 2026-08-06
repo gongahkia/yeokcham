@@ -1,0 +1,10 @@
+[package]
+name = "yeokcham-rust-adapter"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "isolated Tree-sitter Rust syntax adapter for Yeokcham experiments"
+
+[dependencies]
+tree-sitter = "=0.26.11"
+tree-sitter-rust = "=0.24.2"

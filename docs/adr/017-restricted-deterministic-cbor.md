@@ -8,14 +8,14 @@
 
 ## Context and problem statement
 
-ADR-012 requires a versioned portable encoding whose bytes are deterministic and testable outside OCaml. Those bytes will feed content identities, so accepting multiple byte representations for one value would make object identity representation-dependent. Paengi also needs exact arbitrary bytes for paths and content metadata, forward-compatible record schemas, and bounded handling of malformed repository data.
+ADR-012 requires a versioned portable encoding whose bytes are deterministic and testable outside OCaml. Those bytes will feed content identities, so accepting multiple byte representations for one value would make object identity representation-dependent. Yeokcham also needs exact arbitrary bytes for paths and content metadata, forward-compatible record schemas, and bounded handling of malformed repository data.
 
 RFC 8949 defines core deterministic CBOR requirements: preferred shortest serialization, definite-length items, and bytewise lexical ordering of deterministically encoded map keys. It leaves duplicate-key handling, accepted data types, UTF-8 validation, and resource limits to the application profile.
 
 The available OCaml packages do not implement the required profile as a strict boundary:
 
 - `cbor` 0.5 targets RFC 7049, represents integers with architecture-sized OCaml `int`, emits maps in caller order, always emits 64-bit floats, accepts indefinite-length items, and does not enforce duplicate or deterministic map keys.
-- `cborl` 0.1.0 targets RFC 8949 and supports large integers, but emits maps in caller order, exposes indefinite-length forms, does not enforce this profile, and is AGPL-3.0-or-later while Paengi is MIT.
+- `cborl` 0.1.0 targets RFC 8949 and supports large integers, but emits maps in caller order, exposes indefinite-length forms, does not enforce this profile, and is AGPL-3.0-or-later while Yeokcham is MIT.
 - `data-encoding` 1.0.1 provides mature binary combinators under MIT, but its binary layout is library-specific rather than an independently specified CBOR profile and adds a materially broader dependency graph.
 
 ## Decision drivers
@@ -32,7 +32,7 @@ The available OCaml packages do not implement the required profile as a strict b
 
 ### Local restricted RFC 8949 deterministic profile
 
-- Uses a published standard and official vectors while exposing only Paengi's required subset.
+- Uses a published standard and official vectors while exposing only Yeokcham's required subset.
 - Can reject unsupported forms before allocating from input-declared lengths.
 - Adds strict parser code that requires malformed-input fixtures, bounded deterministic generated-input properties, and independent interoperability evidence.
 
@@ -51,14 +51,14 @@ The available OCaml packages do not implement the required profile as a strict b
 - Provides typed combinators, binary readers and writers, tests, and an MIT license.
 - Its binary format is coupled to library-specific combinator semantics, has a broader dependency surface, and provides less independent format interoperability than restricted CBOR plus CDDL schemas.
 
-### Deterministic JSON or a new Paengi TLV format
+### Deterministic JSON or a new Yeokcham TLV format
 
 - JSON has broad tooling; a custom TLV could be very small.
 - JSON needs an additional canonicalization profile and base encoding for arbitrary bytes. A new TLV would require a new wire specification, independent tooling, and original test vectors without gaining CBOR's existing data model.
 
 ## Decision outcome
 
-Define Paengi CBOR Profile 1 as a local implementation of RFC 8949 core deterministic encoding with this restricted data model:
+Define Yeokcham CBOR Profile 1 as a local implementation of RFC 8949 core deterministic encoding with this restricted data model:
 
 - Signed integers in the OCaml `int64` range, encoded with CBOR major types 0 and 1.
 - Exact byte strings, valid UTF-8 text strings, definite-length arrays, maps, booleans, and null.
@@ -69,19 +69,19 @@ Define Paengi CBOR Profile 1 as a local implementation of RFC 8949 core determin
 
 The encoder uses minimal integer and length heads and sorts map entries by bytewise lexical order of each encoded key. The decoder accepts exactly one complete Profile 1 item and rejects non-minimal heads, unsupported forms, invalid UTF-8 text, duplicate or non-increasing map keys, truncation, trailing bytes, arithmetic overflow, lengths exceeding remaining input, and nesting deeper than 64 items. It must check bounds before allocation and use an explicit work budget derived from the bounded input length.
 
-Implement the profile inside Paengi rather than depending on a generic CBOR runtime. Document each persistent record in CDDL plus the profile's additional semantic constraints. The following object-envelope and feature-version ADRs will define payload boundaries, object tags, format negotiation, and checksums; this ADR does not define them.
+Implement the profile inside Yeokcham rather than depending on a generic CBOR runtime. Document each persistent record in CDDL plus the profile's additional semantic constraints. The following object-envelope and feature-version ADRs will define payload boundaries, object tags, format negotiation, and checksums; this ADR does not define them.
 
 ## Consequences
 
 - Canonical payload bytes follow a public standard and can be inspected by generic CBOR tools that support the subset.
 - Numeric field keys keep records compact and leave explicit key space for compatible extensions.
 - The accepted data model cannot represent floats, arbitrary CBOR tags, integers outside `int64`, or invalid UTF-8 as text; exact byte strings remain available.
-- Paengi owns a small parser and its correctness maintenance.
+- Yeokcham owns a small parser and its correctness maintenance.
 - A generic CBOR library may be adopted later only if a new ADR demonstrates byte-for-byte Profile 1 compatibility and equivalent strict-decoder behavior.
 
 ## Trade-off summary
 
-The local profile removes reliance on a permissive generic decoder and keeps the accepted wire surface small, but transfers parser correctness, resource-bound enforcement, interoperability testing, and future parser maintenance to Paengi. Restricting values and map keys makes exhaustive boundary testing practical, but unsupported CBOR values require a future profile and migration rather than an in-place extension. The implementation must therefore remain isolated, pure, bounded, and independently testable; adoption of Profile 1 does not establish the absence of decoder defects.
+The local profile removes reliance on a permissive generic decoder and keeps the accepted wire surface small, but transfers parser correctness, resource-bound enforcement, interoperability testing, and future parser maintenance to Yeokcham. Restricting values and map keys makes exhaustive boundary testing practical, but unsupported CBOR values require a future profile and migration rather than an in-place extension. The implementation must therefore remain isolated, pure, bounded, and independently testable; adoption of Profile 1 does not establish the absence of decoder defects.
 
 ## Model and invariant impact
 
@@ -108,7 +108,7 @@ Future changes that alter accepted values or canonical bytes require a new profi
 ## Verification
 
 - Unit tests from RFC 8949 Appendix A for supported value types and reachable head-width boundaries.
-- Golden fixtures for each Paengi record schema, retained after later format versions are added.
+- Golden fixtures for each Yeokcham record schema, retained after later format versions are added.
 - Generated encode/decode round trips, re-encoding stability, map permutation invariance, integer boundaries, arbitrary bytes, and valid UTF-8.
 - Failure tests for every unsupported major or simple type, non-minimal head, indefinite form, invalid UTF-8, duplicate or unsorted map key, truncation point, trailing byte, overflow, impossible length, exhausted work budget, and depth 65.
 - Differential fixture checks with an independent RFC 8949 implementation, recording its name and version.

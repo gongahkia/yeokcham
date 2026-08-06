@@ -3,13 +3,13 @@
 ## Scope
 
 This is a bounded deterministic correctness experiment, not a TypeScript parser
-benchmark or a general semantic-replay claim. `paengi_semantic` is a pure,
+benchmark or a general semantic-replay claim. `yeokcham_semantic` is a pure,
 non-persistent adapter for top-level ASCII-identifier declarations: `function`,
 `class`, `interface`, `type`, `const`, `let`, and `var`. It has no parser
 dependency and does not read or write repository objects, refs, snapshots, or
 working directories.
 
-The separately optional `paengi_typescript_adapter` uses the official
+The separately optional `yeokcham_typescript_adapter` uses the official
 TypeScript Compiler API `5.9.3`, exactly pinned in its checked-in
 `package-lock.json`. It requires Node `>=14.17.0`. Setup is one documented,
 local `npm ci --ignore-scripts --no-audit --no-fund`; the adapter never invokes
@@ -22,7 +22,7 @@ stderr carries process diagnostics. The OCaml-owned boundary invokes Node by
 direct argv, capability-detects the handshake, bounds request/stdout/stderr,
 and returns semantic-unavailable on absence, timeout, crash, malformed output,
 protocol failure, or the adapter's 4096-declaration response bound. It supplies a virtual file map collected only from a
-verified immutable Paengi snapshot. Ordinary Paengi read, restore,
+verified immutable Yeokcham snapshot. Ordinary Yeokcham read, restore,
 materialisation, export, verification, releases, and validation do not call or
 depend on it.
 
@@ -31,7 +31,7 @@ bytes. It only applies when the input exactly equals its expected source.
 
 ## Contextual textual baseline
 
-`paengi_textual_patch` is an independent pure baseline for this experiment. It
+`yeokcham_textual_patch` is an independent pure baseline for this experiment. It
 accepts arbitrary bytes: original byte span, exact expected preimage,
 replacement bytes, and before/after byte context. It has no TypeScript compiler,
 parser, declaration, symbol, type, syntax-tree, or semantic-confidence input.
@@ -50,13 +50,13 @@ declaration/name UTF-8 byte spans, declaration kind, lexical parent path,
 export state, syntactic name, declaration-shape and signature digests, alias
 evidence where available, diagnostics, and parser/resolution completeness.
 TypeScript `Symbol` objects and internal IDs are run-local only;
-symbol-derived evidence is not a stable Paengi identity across arbitrary
+symbol-derived evidence is not a stable Yeokcham identity across arbitrary
 refactors. Parse damage or incomplete resolution cannot justify Exact or High
 semantic confidence.
 
 ## Evidence-stage semantic retargeting
 
-`paengi_semantic_retarget` evaluates explicit candidate evidence in a fixed
+`yeokcham_semantic_retarget` evaluates explicit candidate evidence in a fixed
 order: exact source bytes/span/context; module plus exported-symbol path;
 resolved alias or underlying symbol text; kind/overload/signature/type shape;
 lexical path; declaration shape/token evidence; and exact textual fallback.
@@ -64,7 +64,7 @@ Every candidate retains supporting and contradictory evidence. Parsing,
 project-resolution, type-resolution, alias-resolution, selected stage,
 confidence, fallback use, and refusal reason are inspectable values.
 
-Compiler-derived names/locations are run-local evidence, not permanent Paengi
+Compiler-derived names/locations are run-local evidence, not permanent Yeokcham
 semantic identities. Exact requires exact bytes, span, and context. High
 requires complete parse/resolution/type-resolution plus kind/shape and module
 or resolved-symbol evidence. Incomplete analysis, similarity-only evidence,
@@ -73,7 +73,7 @@ structured ambiguity.
 
 ## Shared fixture dataset v1
 
-`paengi_semantic_fixtures` is a checked-in, deterministic version-1 dataset of
+`yeokcham_semantic_fixtures` is a checked-in, deterministic version-1 dataset of
 40 stable fixture IDs. Every case contains original/authored/retarget project
 bytes, operation ID, expected target span or safe-conflict oracle, confidence
 ceiling, parser/resolution expectations, and adversarial explanation. Both the
@@ -181,7 +181,7 @@ opam exec -- dune exec test/test_textual_patch.exe
 opam exec -- dune exec test/test_semantic_retarget.exe
 opam exec -- dune exec test/test_semantic_fixture_dataset.exe
 opam exec -- dune exec test/test_semantic_experiment.exe
-cd tools/paengi-typescript-adapter && npm ci --ignore-scripts --no-audit --no-fund && npm test
+cd tools/yeokcham-typescript-adapter && npm ci --ignore-scripts --no-audit --no-fund && npm test
 opam exec -- dune exec test/test_typescript_adapter.exe
 make semantic-experiment
 ```

@@ -9,21 +9,21 @@
 ## Context and problem statement
 
 M8-03 must import Git tag references without allowing Git labels to redefine
-Paengi releases, capsules, or histories. Git distinguishes a lightweight tag,
+Yeokcham releases, capsules, or histories. Git distinguishes a lightweight tag,
 which is a reference directly naming an object, from an annotated tag object
 with a target, a tagger, a message, and possibly a signature. [git-tag](https://git-scm.com/docs/git-tag)
 
 ADR-028 deliberately supports only tree and commit mapping kinds. ADR-029 adds
 opaque commit provenance but intentionally defers tags. A tag import must retain
 the exact reference name and target identity, preserve annotated tag bytes
-without parsing metadata into Paengi intent, and keep v1/v2 mappings unchanged.
+without parsing metadata into Yeokcham intent, and keep v1/v2 mappings unchanged.
 
 ## Decision drivers
 
-- Preserve lightweight and annotated tag provenance without creating a Paengi
+- Preserve lightweight and annotated tag provenance without creating a Yeokcham
   release or inferring authorial intent.
 - Retain annotated tagger/message/signature bytes exactly and boundedly.
-- Keep tag names and Git IDs type-distinct from Paengi identifiers and local
+- Keep tag names and Git IDs type-distinct from Yeokcham identifiers and local
   paths.
 - Reject malformed refs, malformed tag headers, unsupported target kinds, and
   process/size failures before canonical visibility.
@@ -32,10 +32,10 @@ without parsing metadata into Paengi intent, and keep v1/v2 mappings unchanged.
 
 ## Considered options
 
-### Reuse Paengi release or capsule records
+### Reuse Yeokcham release or capsule records
 
 - Makes a familiar user-visible label available immediately.
-- Fabricates Paengi release/capsule meaning from a Git label and violates
+- Fabricates Yeokcham release/capsule meaning from a Git label and violates
   ADR-009.
 
 ### Store only a Git mapping to the resolved target
@@ -47,7 +47,7 @@ without parsing metadata into Paengi intent, and keep v1/v2 mappings unchanged.
 ### Add opaque imported-tag records and Git-mapping v3
 
 - Preserves a tag reference, its exact object provenance, and annotated bytes
-  while remaining outside Paengi histories and releases.
+  while remaining outside Yeokcham histories and releases.
 - Adds a typed record, binding, mapping kind/subject, v3 decoder, and retained
   compatibility coverage.
 
@@ -90,7 +90,7 @@ objects; this restriction is deliberate. [git-tag](https://git-scm.com/docs/git-
 The logical identity is:
 
 ```text
-SHA-256("paengi:imported-tag:v1\\000" ||
+SHA-256("yeokcham:imported-tag:v1\\000" ||
         encode([1, tag-name-bytes, ref-object-id, tag-representation]))
 ```
 
@@ -99,10 +99,10 @@ The record excludes itself and observation data. Its physical
 point is a create-only, checksummed binding:
 
 ```text
-.paengi/refs/imported-tags/<lowercase-imported-tag-id-hex>
+.yeokcham/refs/imported-tags/<lowercase-imported-tag-id-hex>
 imported-tag-binding-v1 =
   [1, imported-tag-id, imported-tag-object-id, checksum]
-checksum = SHA-256("paengi:imported-tag-binding:v1\\000" ||
+checksum = SHA-256("yeokcham:imported-tag-binding:v1\\000" ||
                  encode([1, imported-tag-id, imported-tag-object-id]))
 ```
 
@@ -114,7 +114,7 @@ imported-tag-v1-subject = [5, imported-tag-id, imported-tag-object-id]
 import/tag -> imported-tag-v1-subject
 ```
 
-`Git_mapping_id` v3 uses domain separator `"paengi:git-mapping:v3\\000"`; its
+`Git_mapping_id` v3 uses domain separator `"yeokcham:git-mapping:v3\\000"`; its
 versioned binding uses a v3 checksum domain. A v1 decoder accepts only v1
 records, a v2 decoder accepts only v2 records, and a v3 decoder accepts only
 the v3 forms. No pre-v3 record, identity, binding, or golden byte changes.
@@ -123,15 +123,15 @@ M8-03 resolves exactly one `refs/tags/<name>` through bounded direct-argv Git
 plumbing, compares the returned ref name byte-for-byte, and verifies every
 referenced object type with `cat-file -t`. Annotated tag raw bytes are bounded
 by `max_tag_bytes` before `Snapshot.Content.store` and publication. The command
-is `paengi git import tag --repository <absolute-git-directory> --tag <name>`.
+is `yeokcham git import tag --repository <absolute-git-directory> --tag <name>`.
 
 ## Consequences
 
 - Imported tags are inspectable opaque provenance, not releases, capsules,
-  branches, or mutable Paengi refs.
+  branches, or mutable Yeokcham refs.
 - A tag target can be recorded before an associated tree or commit is imported.
 - Annotated metadata and signatures are retained as raw bytes but are not parsed
-  as canonical Paengi fields and carry no authenticity claim.
+  as canonical Yeokcham fields and carry no authenticity claim.
 - A tag ref can change in Git; each distinct observed imported-tag record stays
   immutable and visible by its own ID rather than rewriting a prior record.
 - Importing raw annotation content, publishing the tag record, and publishing
@@ -140,7 +140,7 @@ is `paengi git import tag --repository <absolute-git-directory> --tag <name>`.
 
 ## Model and invariant impact
 
-- `imported_tag_id`, Git IDs, content IDs, stored-object IDs, and Paengi history
+- `imported_tag_id`, Git IDs, content IDs, stored-object IDs, and Yeokcham history
   IDs remain incompatible types.
 - A visible tag record has one valid raw tag name, one direct ref Git ID, and a
   representation consistent with its exact object types.
@@ -174,7 +174,7 @@ rewritten in place. Unknown mandatory features remain rejected.
 
 ## CLI and user impact
 
-`paengi git import tag --repository <absolute-git-directory> --tag <name>`
+`yeokcham git import tag --repository <absolute-git-directory> --tag <name>`
 reports imported-tag, mapping, direct Git object, and representation IDs. For
 annotated tags it reports that raw annotation bytes were retained but the tag is
-not a Paengi release and its signature was not verified.
+not a Yeokcham release and its signature was not verified.

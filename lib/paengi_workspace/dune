@@ -1,3 +1,0 @@
-(library
- (name paengi_workspace)
- (libraries paengi_capsule paengi_id paengi_scratch paengi_snapshot))

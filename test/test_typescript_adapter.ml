@@ -1,7 +1,7 @@
-module Adapter = Paengi_typescript_adapter
-module Patch = Paengi_textual_patch
-module Snapshot = Paengi_snapshot
-module Store = Paengi_store
+module Adapter = Yeokcham_typescript_adapter
+module Patch = Yeokcham_textual_patch
+module Snapshot = Yeokcham_snapshot
+module Store = Yeokcham_store
 
 let require_ok render = function
   | Ok value -> value
@@ -41,8 +41,8 @@ let fixture_path name =
 
 let adapter_path () =
   [
-    "tools/paengi-typescript-adapter/adapter.mjs";
-    "../tools/paengi-typescript-adapter/adapter.mjs";
+    "tools/yeokcham-typescript-adapter/adapter.mjs";
+    "../tools/yeokcham-typescript-adapter/adapter.mjs";
   ]
   |> List.find_opt Sys.file_exists
   |> function
@@ -89,7 +89,7 @@ let handshake_reports_pinned_local_compiler () =
       Alcotest.fail (Adapter.unavailable_reason_to_string reason)
 
 let verified_snapshot_is_the_only_analysis_input () =
-  with_directory "paengi-typescript-adapter-" (fun root ->
+  with_directory "yeokcham-typescript-adapter-" (fun root ->
       let source =
         "\239\187\191// 😀\r\n\
          export function café(value: string): string { return value; }\r\n"

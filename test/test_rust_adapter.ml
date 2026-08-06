@@ -1,7 +1,7 @@
-module Adapter = Paengi_rust_adapter
-module Patch = Paengi_textual_patch
-module Snapshot = Paengi_snapshot
-module Store = Paengi_store
+module Adapter = Yeokcham_rust_adapter
+module Patch = Yeokcham_textual_patch
+module Snapshot = Yeokcham_snapshot
+module Store = Yeokcham_store
 
 let require_ok render = function
   | Ok value -> value
@@ -40,12 +40,12 @@ let fixture_path name =
   | None -> Alcotest.fail ("missing Rust adapter fixture " ^ name)
 
 let adapter_path () =
-  match Sys.getenv_opt "PAENGI_RUST_ADAPTER" with
+  match Sys.getenv_opt "YEOKCHAM_RUST_ADAPTER" with
   | Some path when Sys.file_exists path -> path
   | Some _ | None -> (
       [
-        "tools/paengi-rust-adapter/target/release/paengi-rust-adapter";
-        "../tools/paengi-rust-adapter/target/release/paengi-rust-adapter";
+        "tools/yeokcham-rust-adapter/target/release/yeokcham-rust-adapter";
+        "../tools/yeokcham-rust-adapter/target/release/yeokcham-rust-adapter";
       ]
       |> List.find_opt Sys.file_exists
       |> function
@@ -518,7 +518,7 @@ let module_path_failures_are_structured () =
            ~files:[ file ~path:"src/lib.rs" ~contents:(many_modules 4_097) ])
 
 let verified_snapshot_is_the_only_analysis_input () =
-  with_directory "paengi-rust-adapter-" (fun root ->
+  with_directory "yeokcham-rust-adapter-" (fun root ->
       Unix.mkdir (Filename.concat root "src") 0o700;
       let source_path = Filename.concat root "src/lib.rs" in
       write_file source_path "pub fn stable() {}\n";
@@ -543,7 +543,7 @@ let verified_snapshot_is_the_only_analysis_input () =
             (List.mem "changed_after_scan" names))
 
 let verified_snapshot_is_the_only_module_path_input () =
-  with_directory "paengi-rust-module-paths-" (fun root ->
+  with_directory "yeokcham-rust-module-paths-" (fun root ->
       Unix.mkdir (Filename.concat root "src") 0o700;
       let lib_path = Filename.concat root "src/lib.rs" in
       let module_path = Filename.concat root "src/stable.rs" in
@@ -574,7 +574,7 @@ let verified_snapshot_is_the_only_module_path_input () =
             (List.mem "changed_after_scan" names))
 
 let verified_snapshot_is_the_only_fallback_input () =
-  with_directory "paengi-rust-fallback-" (fun root ->
+  with_directory "yeokcham-rust-fallback-" (fun root ->
       Unix.mkdir (Filename.concat root "src") 0o700;
       let source_path = Filename.concat root "src/lib.rs" in
       write_file source_path "macro_rules! stored { () => {} }\nstored!();\n";

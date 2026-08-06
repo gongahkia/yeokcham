@@ -42,12 +42,12 @@ let maps_contracts_and_boundaries () =
     (fun module_name ->
       require (contains text module_name) ("missing module map: " ^ module_name))
     [
-      "paengi_snapshot";
-      "paengi_capsule";
-      "paengi_workspace";
-      "paengi_release";
-      "paengi_store";
-      "paengi_git";
+      "yeokcham_snapshot";
+      "yeokcham_capsule";
+      "yeokcham_workspace";
+      "yeokcham_release";
+      "yeokcham_store";
+      "yeokcham_git";
     ];
   require
     (contains text

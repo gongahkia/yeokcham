@@ -18,12 +18,12 @@ let () =
       Arg.usage options usage;
       exit 2
   | Some destination -> (
-      let fixture = Paengi_testkit.Fixture_spec.generate ~seed:!seed in
-      match Paengi_testkit.Fixture_materializer.write ~destination fixture with
+      let fixture = Yeokcham_testkit.Fixture_spec.generate ~seed:!seed in
+      match Yeokcham_testkit.Fixture_materializer.write ~destination fixture with
       | Error message ->
           prerr_endline message;
           exit 1
       | Ok () ->
           Printf.printf "generated %d entries at %s\n"
-            (Paengi_testkit.Fixture_spec.entry_count fixture)
+            (Yeokcham_testkit.Fixture_spec.entry_count fixture)
             destination)

@@ -2,7 +2,7 @@
 
 ## 1. System overview
 
-Paengi consists of a pure model core surrounded by storage, filesystem, parser, and CLI adapters.
+Yeokcham consists of a pure model core surrounded by storage, filesystem, parser, and CLI adapters.
 
 ```text
 CLI / future UI
@@ -45,26 +45,26 @@ Changed bytes
 ## 2. Proposed OCaml workspace
 
 ```text
-paengi/
+yeokcham/
   dune-project
   bin/
-    paengi.ml
+    yeokcham.ml
   lib/
-    paengi_id/
-    paengi_model/
-    paengi_transition/
-    paengi_store/
-    paengi_snapshot/
-    paengi_scratch/
-    paengi_compaction/
-    paengi_capsule/
-    paengi_workspace/
-    paengi_conflict/
-    paengi_release/
-    paengi_semantic/
-    paengi_git/
-    paengi_cli/
-    paengi_testkit/
+    yeokcham_id/
+    yeokcham_model/
+    yeokcham_transition/
+    yeokcham_store/
+    yeokcham_snapshot/
+    yeokcham_scratch/
+    yeokcham_compaction/
+    yeokcham_capsule/
+    yeokcham_workspace/
+    yeokcham_conflict/
+    yeokcham_release/
+    yeokcham_semantic/
+    yeokcham_git/
+    yeokcham_cli/
+    yeokcham_testkit/
   test/
   bench/
   fixtures/
@@ -142,13 +142,13 @@ Persistent encodings must be:
 
 Recommended prototype approach:
 
-- Paengi CBOR Profile 1: restricted deterministic CBOR for records, defined by [ADR-017](docs/adr/017-restricted-deterministic-cbor.md).
+- Yeokcham CBOR Profile 1: restricted deterministic CBOR for records, defined by [ADR-017](docs/adr/017-restricted-deterministic-cbor.md).
 - Fixed Object Envelope 1 with object type, format version, payload length, and checksum, defined by [ADR-018](docs/adr/018-fixed-object-envelope.md); its object-format version and mandatory-feature rules are defined by [ADR-019](docs/adr/019-object-format-versions-and-mandatory-features.md).
 - No `Marshal` for persistent repository data.
 
 Object-store identity and storage-publication rules remain separate decisions.
 
-ADR-020 resolves the initial store rule: a `Stored_object_id` is SHA-256 of the `paengi:object:v1\000` domain prefix followed by the exact Envelope-1 bytes. It is rendered as 64 lowercase hexadecimal characters at `.paengi/objects/<hex[0:2]>/<hex[2:4]>/<hex[4:64]>`. Writers use same-shard temporary files, file fsync, hard-link no-replace publication, and directory fsync; an existing final path is verified byte-identically or reported as collision/corruption. No overwriting rename fallback is permitted. Directory fsync unsupported by a filesystem weakens crash-durability guarantees and is documented rather than hidden.
+ADR-020 resolves the initial store rule: a `Stored_object_id` is SHA-256 of the `yeokcham:object:v1\000` domain prefix followed by the exact Envelope-1 bytes. It is rendered as 64 lowercase hexadecimal characters at `.yeokcham/objects/<hex[0:2]>/<hex[2:4]>/<hex[4:64]>`. Writers use same-shard temporary files, file fsync, hard-link no-replace publication, and directory fsync; an existing final path is verified byte-identically or reported as collision/corruption. No overwriting rename fallback is permitted. Directory fsync unsupported by a filesystem weakens crash-durability guarantees and is documented rather than hidden.
 
 ### 4.3 Content IDs
 
@@ -163,7 +163,7 @@ The model must not expose hash-algorithm assumptions everywhere.
 Conceptual local layout:
 
 ```text
-.paengi/
+.yeokcham/
   format
   config
   objects/
@@ -198,7 +198,7 @@ SQLite may be used for rebuildable indexes and queries. Canonical objects must r
 The snapshot engine:
 
 - Scans the working directory.
-- Excludes `.paengi`.
+- Excludes `.yeokcham`.
 - Applies ignore rules.
 - Identifies changed paths.
 - Hashes content.
@@ -207,7 +207,7 @@ The snapshot engine:
 - Produces a snapshot ID.
 - Reuses unchanged object identities.
 
-The initial scanner implements exact-path `.paengiignore` entries, excludes the root `.paengi`, stores Content/Tree/Snapshot schemas from ADR-021, and stores Chunk/File_manifest schemas from ADR-022. It keeps files at or below 64 KiB as Content v1 and streams larger files through deterministic Buzhash-64-v1 chunks (64-byte window; 16/64/128 KiB min/average/max). It supports regular files, executable mode, and symlinks without following them. Sockets, FIFOs, character devices, block devices, and other unsupported kinds return structured path/category errors before a snapshot is published.
+The initial scanner implements exact-path `.yeokchamignore` entries, excludes the root `.yeokcham`, stores Content/Tree/Snapshot schemas from ADR-021, and stores Chunk/File_manifest schemas from ADR-022. It keeps files at or below 64 KiB as Content v1 and streams larger files through deterministic Buzhash-64-v1 chunks (64-byte window; 16/64/128 KiB min/average/max). It supports regular files, executable mode, and symlinks without following them. Sockets, FIFOs, character devices, block devices, and other unsupported kinds return structured path/category errors before a snapshot is published.
 
 Initial implementation should use full or metadata-assisted scans. Filesystem watching is a later optimisation.
 
@@ -313,8 +313,8 @@ A capsule service supports:
 
 The first capsule representation should use exact file transitions and textual edits. Semantic operations come later.
 
-The Milestone 4 capsule service combines the pure `paengi_capsule` transition
-core with `paengi_capsule_store`. ADR-025 adds immutable `Capsule_v1` and
+The Milestone 4 capsule service combines the pure `yeokcham_capsule` transition
+core with `yeokcham_capsule_store`. ADR-025 adds immutable `Capsule_v1` and
 complete `Capsule_revision_v1` Envelope-1 objects, and a checksummed
 generation-CAS current ref at `refs/capsules/<capsule-id>/current`. Durable
 creation/folding holds the repository writer lock, publishes immutable objects
@@ -347,7 +347,7 @@ bytes without writing objects, then exposes output revisions, bases/results,
 provenance, ordering, and required pins to the CLI. The publisher requires an
 explicit confirmation, obtains the writer lock, and rebuilds the plan from the
 current verified immutable inputs immediately before publication. A narrow
-`paengi_capsule.Parent_resolver` accepts synthetic logical parent graphs for
+`yeokcham_capsule.Parent_resolver` accepts synthetic logical parent graphs for
 cycle tests; it supplements rather than bypasses the production durable
 resolver's type/ID/parent checks.
 
@@ -362,8 +362,8 @@ Inputs:
 - Resolution records.
 - Policy.
 
-`paengi_workspace` remains the pure resolver/application core. ADR-026 adds
-`paengi_workspace_store` as the persistence and guarded-materialisation shell:
+`yeokcham_workspace` remains the pure resolver/application core. ADR-026 adds
+`yeokcham_workspace_store` as the persistence and guarded-materialisation shell:
 immutable Workspace/Workspace_revision/Workspace_attempt/Conflict/Resolution
 objects, checksummed CAS current refs at `refs/workspaces/<workspace-id>/current`,
 and validated ref-directory listing. Its selected links bind logical capsule
@@ -392,10 +392,10 @@ publication succeeded before workspace-attempt publication.
 
 ## 9.1 Release service
 
-`paengi_release` is a read-mostly durable adapter over verified immutable
+`yeokcham_release` is a read-mostly durable adapter over verified immutable
 workspace revisions and attempts. Release creation holds the existing
 repository writer lock, rejects unresolved attempts, replays the exact attempt,
-runs required validation through `paengi_validation`, writes immutable evidence
+runs required validation through `yeokcham_validation`, writes immutable evidence
 and a `Release_v1`, verifies reproduction, then creates the release binding.
 The binding at `refs/releases/<release-id>` is expected-absent and is the only
 visibility point. A crash before it leaves unreachable immutable objects only.
@@ -406,7 +406,7 @@ Parent traversal is isolated behind a pure resolver seam for cycle tests.
 `Requires_release.satisfied` uses only that verified parent graph; it cannot be
 applied to `Workspace_revision_v1` because ADR-026 has no typed base-release
 link. `Release_attestation_v1` is a separate Envelope type 22 object managed by
-`paengi_release`; it has no release ref and cannot mutate a release. The v1
+`yeokcham_release`; it has no release ref and cannot mutate a release. The v1
 deterministic signer is test-only, not a production cryptographic mechanism.
 
 Milestone 1 materialisation is intentionally narrower: it emits an inspectable dry-run plan and writes only to an existing empty destination with exclusive file creation. It preserves regular bytes, executable mode, directories, and symlink target bytes; unsafe decoded names and nonempty destinations reject. Workspace transactional replacement and safety checkpoints remain scratch/workspace work.
@@ -415,7 +415,7 @@ Milestone 2 restore is a guarded, but not crash-atomic, populated-directory
 operation.  It scans and durably checkpoints differing current work, binds a
 dry-run plan to that scan, rescans before applying, validates each safe path,
 then rescans the result before target-head publication.  On an I/O failure the
-safety checkpoint provides recovery; Paengi reports rather than conceals any
+safety checkpoint provides recovery; Yeokcham reports rather than conceals any
 possible partial filesystem application.
 
 ## 10. Semantic sidecar architecture
@@ -475,7 +475,7 @@ end
 
 ### Milestone 7 bounded implementation
 
-`paengi_semantic` currently supplies a Paengi-owned, dependency-free adapter
+`yeokcham_semantic` currently supplies a Yeokcham-owned, dependency-free adapter
 for supported top-level TypeScript declarations. It is a pure in-memory model,
 not a persistent adapter: it receives source bytes and returns parse results,
 proposals, matches, conflicts, or proposed result bytes. It has no object-store,
@@ -490,7 +490,7 @@ review. Parser errors, ambiguous anchors, low confidence, and textual-context
 matches return explicit sidecar results without changing bytes.
 
 This is an experiment boundary, not a persistent semantic format or a full
-TypeScript parser integration. `paengi_typescript_adapter` is the separately
+TypeScript parser integration. `yeokcham_typescript_adapter` is the separately
 approved optional full-parser boundary: it invokes the locally pinned
 TypeScript `5.9.3` Compiler API through protocol v1 with direct Node argv,
 bounded stdin/stdout/stderr, and a timeout. It builds an in-memory virtual file
@@ -500,7 +500,7 @@ configuration/plugins outside that map.
 
 The adapter returns language-neutral declaration evidence, diagnostics, UTF-8
 byte spans, and parser/resolution completeness. Compiler symbols and internal
-IDs never enter Paengi types or storage. A guarded `replace-node` request
+IDs never enter Yeokcham types or storage. A guarded `replace-node` request
 checks exact preimage bytes and SHA-256, node kind and shape digest, splices the
 selected byte range, reparses, verifies the structural context, and proves the
 prefix/suffix unchanged. Adapter absence, timeout, malformed output, crash,
@@ -509,34 +509,34 @@ semantic-unavailable result; exact textual fallback remains independent.
 
 Neither module creates an object, ID, ref, schema, golden format, workspace
 state, capsule revision, release, validation result, or attestation.
-`paengi_textual_patch` is the independent baseline: it uses
+`yeokcham_textual_patch` is the independent baseline: it uses
 only bytes, original spans, and bounded before/selected/after context. It
 neither links to the Compiler API nor accepts declaration, parser, symbol, type,
 or confidence evidence. Semantic persistence still requires separate format
 approval and an ADR.
 
-`paengi_semantic_retarget` is a separate pure selector over nonpersistent
+`yeokcham_semantic_retarget` is a separate pure selector over nonpersistent
 evidence facts. It emits ordered candidate reports, completeness flags, alias
 resolution status, selected stage, confidence, fallback status, and a concrete
-uncertainty reason. `paengi_semantic_fixtures` is a checked-in versioned
+uncertainty reason. `yeokcham_semantic_fixtures` is a checked-in versioned
 40-case dataset used by both strategies; its oracle names expected bytes or a
 safe conflict. The selector has no storage, compiler process, or permanent
 identity dependency.
 
-`paengi_semantic_experiment` runs both strategies with identical fixture bytes,
+`yeokcham_semantic_experiment` runs both strategies with identical fixture bytes,
 operation intent, oracle, splice validation, and classification rules. It emits
 the checked-in version-1 report at
 `docs/experiments/results/semantic-retargeting-v1.json`, checked against the
 co-located JSON Schema by `make semantic-experiment`; `make check` validates
 the checked-in result. Timings are host-specific evidence, never a correctness
-gate. This experiment schema is documentation evidence only, not a Paengi
+gate. This experiment schema is documentation evidence only, not a Yeokcham
 persistent format.
 
 ### Milestone 9 Rust syntax boundary
 
-`paengi_rust_adapter` is a separate ephemeral protocol-v1 boundary approved by
+`yeokcham_rust_adapter` is a separate ephemeral protocol-v1 boundary approved by
 ADR-035, ADR-036, and ADR-037. It invokes a caller-configured, directly executed local
-helper built from `tools/paengi-rust-adapter/Cargo.lock`; analysis itself invokes neither
+helper built from `tools/yeokcham-rust-adapter/Cargo.lock`; analysis itself invokes neither
 Cargo nor `rustc`. The helper uses pinned `tree-sitter 0.26.11` and
 `tree-sitter-rust 0.24.2`, receives only sorted safe `.rs` source bytes
 materialised from a verified immutable snapshot, and returns bounded top-level
@@ -555,8 +555,8 @@ failure, invalid input, invalid snapshot, and parser damage return structured
 unavailable/incomplete outcomes. It does not create model state or provide
 Cargo/workspace roots, module attributes/configuration, imports, resolved
 symbols/types, semantic identities, rewrites, or behavioural claims.
-`paengi_typescript_adapter`, the pure sidecar experiment,
-and `paengi_textual_patch` remain independent.
+`yeokcham_typescript_adapter`, the pure sidecar experiment,
+and `yeokcham_textual_patch` remain independent.
 
 ## 11. Conflict storage
 
@@ -588,7 +588,7 @@ The runner should:
 - Capture exit status, signal, timeout, duration, full-stream hashes, and bounded prefixes.
 - Optionally persist only bounded output prefixes as Content objects.
 - Record an environment fingerprint optionally.
-- Enforce time and output limits through a Paengi-owned runner interface.
+- Enforce time and output limits through a Yeokcham-owned runner interface.
 - Clean temporary materialisation where possible; process-group termination is best effort by host.
 - Never equate success with proof of correctness.
 
@@ -624,8 +624,8 @@ establishes ADR-029's v1 opaque transition and Git-mapping v2 compatibility
 forms. It rejects unsafe names, unsupported modes, malformed trees/headers,
 missing or wrong-type objects, duplicate/self parents, and process/output-limit
 failures before the applicable immutable binding. It neither recursively imports
-the parent graph nor assigns metadata Paengi semantics. Git remains the owner of
-Git-object, pack, delta, and compatibility parsing; Paengi has no general
+the parent graph nor assigns metadata Yeokcham semantics. Git remains the owner of
+Git-object, pack, delta, and compatibility parsing; Yeokcham has no general
 Git-format compatibility contract. The preflight result is never a repository
 identity or persistent metadata.
 
@@ -636,14 +636,14 @@ exact message bytes as `Snapshot.Content`. It rejects duplicate, empty,
 NUL-containing, or missing metadata headers before transition visibility, uses
 Git-mapping v3 without changing mapping payload shapes, and prints only
 hex-safe identity bytes plus the message Content ID. No author, timestamp,
-message, or encoding interpretation is a Paengi semantic field.
+message, or encoding interpretation is a Yeokcham semantic field.
 
 M8-03 resolves one exact `refs/tags/<name>` ref with bounded direct-argv
 plumbing. A direct commit/tree/blob ref becomes an opaque lightweight imported
 tag. A ref resolving to a tag object retains the exact bounded raw tag-object
 bytes in `Snapshot.Content`; exactly one matching `tag` header, target, and
 target type are required. Imported tags and Git-mapping v3 bindings are
-immutable provenance only: no tag becomes a Paengi release, capsule, or history
+immutable provenance only: no tag becomes a Yeokcham release, capsule, or history
 ref, and no signature is verified.
 
 Import:
@@ -674,13 +674,13 @@ Materialise snapshots and write:
 - Mapping metadata.
 
 M8-08 exports one verified immutable release as one root Git commit. It reads
-only Paengi objects, hashes exact regular-file and symlink-target bytes with
+only Yeokcham objects, hashes exact regular-file and symlink-target bytes with
 filters disabled, builds trees through an isolated temporary index, and writes
-the create-only `refs/heads/paengi/release-<release-id>` ref. Author and
-committer are the fixed `Paengi Export <noreply@paengi.local>` identity at the
+the create-only `refs/heads/yeokcham/release-<release-id>` ref. Author and
+committer are the fixed `Yeokcham Export <noreply@yeokcham.local>` identity at the
 release `created_at` UTC timestamp; the message is exact release bytes or the
 documented fallback. It then publishes ADR-028's `export/commit ->
-exported-release` mapping. The Git ref and Paengi mapping binding remain
+exported-release` mapping. The Git ref and Yeokcham mapping binding remain
 separate retryable visibility points. Nested empty directories, unsupported
 nodes, invalid timestamps, bounds, malformed output, and ref collisions reject
 explicitly.
@@ -690,9 +690,9 @@ configured author and committer name/email pairs plus exact non-NUL message
 bytes. It validates this value before Git publication, uses the release
 `created_at` UTC timestamp for both headers, rereads the commit to verify all
 three fields, and retains the M8-08 path byte-for-byte when metadata is absent.
-Configured metadata remains invocation input rather than Paengi state: it does
+Configured metadata remains invocation input rather than Yeokcham state: it does
 not alter the release, release object, final snapshot, or mapping payload. Its
-create-only external ref is `refs/heads/paengi/release-<release-id>-metadata-<sha256>`
+create-only external ref is `refs/heads/yeokcham/release-<release-id>-metadata-<sha256>`
 where the SHA-256 is a domain-separated length-delimited encoding of all five
 configured byte strings. Thus different metadata has a distinct Git commit,
 ref, and mapping ID, while identical retry is idempotent. M8-09 revision export
@@ -705,7 +705,7 @@ adjacent expected-result/declared-base snapshot pair to match, and writes the
 first result as a root commit then each later result with exactly one parent:
 the preceding exported commit. Its create-only target ref is a SHA-256
 domain-separated digest of the ordered capsule ID, revision ID, and revision
-object ID triples. Each commit has fixed `Paengi Export` metadata at that
+object ID triples. Each commit has fixed `Yeokcham Export` metadata at that
 revision's `created_at` UTC timestamp, a fixed identity message, and an
 ADR-028 `export/commit -> exported-revision` mapping. The Git line does not
 encode capsule parents, dependencies, provenance, workspaces, conflicts,
@@ -717,18 +717,18 @@ explicitly.
 ## 14. Local synchronisation
 
 M10-01 implements ADR-038's transport-neutral immutable-object exchange core
-and in-process local-store adapter. `paengi_exchange` validates exact
+and in-process local-store adapter. `yeokcham_exchange` validates exact
 length-delimited canonical CBOR frames, Hello compatibility, page ordering,
 session/sequence/request membership, and every protocol budget before returning
-a receipt candidate. `paengi_exchange_store` validates the exact Envelope-1
-bytes and ADR-020 ID, then delegates publication to `Paengi_store.put`.
+a receipt candidate. `yeokcham_exchange_store` validates the exact Envelope-1
+bytes and ADR-020 ID, then delegates publication to `Yeokcham_store.put`.
 
 The adapter transfers caller-declared object IDs only. It does not infer graph
 closure, move a ref, choose a divergent head, write a sync journal, or expose a
 CLI/transport. A restart begins a new session and safely reoffers objects
 already published before interruption.
 
-M10-02 adds `paengi_ref_event` and `paengi_ref_event_store`. An immutable
+M10-02 adds `yeokcham_ref_event` and `yeokcham_ref_event_store`. An immutable
 Envelope-1 `Ref_event` expresses an exact Ed25519-signed proposed CAS
 transition. Verification accepts only a caller-supplied bounded public-key map;
 an absent key is explicitly untrusted. Event storage, transfer, verification,
@@ -736,7 +736,7 @@ replay/order evaluation, and divergence reporting never call mutable-ref CAS.
 Key discovery/lifecycle, ref application, reconciliation, device identity, and
 transport remain separate layers.
 
-M10-03 adds `paengi_device` and `paengi_device_store`. A Device_identity v1 is
+M10-03 adds `yeokcham_device` and `yeokcham_device_store`. A Device_identity v1 is
 an immutable public Envelope-1 object binding one random opaque 32-byte device
 ID to an Ed25519 public key and ADR-039 signer-key ID. Generation returns an
 in-memory caller-owned private capability; the object store serialises public
@@ -746,7 +746,7 @@ resolution does not trust a key, modify an event/ref, choose divergence, or
 persist registry state. Private-key storage, discovery, rotation, revocation,
 and transport remain separate layers.
 
-M10-04 adds `paengi_http_exchange`, a local HTTP/1.1 adapter over unchanged
+M10-04 adds `yeokcham_http_exchange`, a local HTTP/1.1 adapter over unchanged
 ADR-038 frames. One `POST /v1/exchange` carries one bounded frame; destination
 transient state accepts Hello, returns Want for Inventory, publishes each
 verified Object through the existing adapter, and clears on End. The socket
@@ -755,7 +755,7 @@ immutable IDs. HTTP parsing, response status/body, frame, budget, store, and
 interruption failures are structured. It has no CLI, authentication, persistent
 session, ref operation, reconciliation, or divergence selection.
 
-M10-05 adds `paengi_divergence` and `paengi_divergence_store`. The functional
+M10-05 adds `yeokcham_divergence` and `yeokcham_divergence_store`. The functional
 core canonically encodes an Envelope type-28 `Divergent_ref_set_v1`: one
 repository digest, safe ref name, observed ref state, and 2–4,096 sorted exact
 `Ref_event` links. It accepts only caller-held ADR-039 verified events and
@@ -768,20 +768,20 @@ uses its bounded CAS retry path, and never replaces a corrupt binding. It does
 not read or write application refs, select a candidate, reconcile targets,
 persist trust/device state, or add CLI mutation.
 
-M10-06 adds `paengi_bundle` and `paengi_bundle_store`. The pure core canonically
+M10-06 adds `yeokcham_bundle` and `yeokcham_bundle_store`. The pure core canonically
 encodes and validates ADR-042's external `encrypted-bundle-v1` header and
 plaintext, verifies each exact Envelope-1 byte string against its stored-object
 ID, and opens ChaCha20-Poly1305 only with the full canonical header as AAD. The
 adapter reads only caller-declared immutable objects, obtains one 12-byte nonce
 from the OS CSPRNG, and exports bytes without repository mutation. Import
-completely decodes and validates before its first create-only `Paengi_store.put`;
+completely decodes and validates before its first create-only `Yeokcham_store.put`;
 a later publication failure leaves only a valid retryable immutable prefix. It
 does not read or write a mutable ref, divergence binding, trust/device record,
 or key record, and adds no CLI or key-source convention.
 
-M10-08 adds `paengi_bundle_directory`, an external local-directory adapter over
+M10-08 adds `yeokcham_bundle_directory`, an external local-directory adapter over
 unchanged ADR-042 encrypted bytes. It creates an exclusive `.partial` file,
-fsyncs it, links one no-replace `.peng` final file, and fsyncs the directory;
+fsyncs it, links one no-replace `.yeok` final file, and fsyncs the directory;
 listing returns only sorted recognised regular final/partial descriptors. A
 caller selects an abstract final descriptor for inspection or import. Inspection
 fully authenticates/decrypts without publication; import reuses ADR-042's
@@ -801,20 +801,20 @@ Future layers require separate decisions:
 - Device key lifecycle.
 - Conflict-preserving ref reconciliation.
 
-Paengi does not require consensus for single-user multi-device use. It requires preserving divergent heads and letting the user reconcile them.
+Yeokcham does not require consensus for single-user multi-device use. It requires preserving divergent heads and letting the user reconcile them.
 
 ## 15. Observability
 
 CLI inspection should make the model understandable:
 
 ```text
-paengi timeline --graph
-paengi capsule show --operations
-paengi work explain-order
-paengi conflict show
-paengi compact --dry-run --explain
-paengi release verify --explain
-paengi storage stats --by-history
+yeokcham timeline --graph
+yeokcham capsule show --operations
+yeokcham work explain-order
+yeokcham conflict show
+yeokcham compact --dry-run --explain
+yeokcham release verify --explain
+yeokcham storage stats --by-history
 ```
 
 Machine-readable JSON output should exist for experiments and future UI work.

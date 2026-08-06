@@ -1,7 +1,7 @@
-module Encoding = Paengi_encoding
-module Envelope = Paengi_envelope
-module Snapshot_store = Paengi_snapshot
-module Store = Paengi_store
+module Encoding = Yeokcham_encoding
+module Envelope = Yeokcham_envelope
+module Snapshot_store = Yeokcham_snapshot
+module Store = Yeokcham_store
 
 let require_ok error_to_string = function
   | Ok value -> value
@@ -42,14 +42,14 @@ let deterministic_bytes length =
   Bytes.unsafe_to_string bytes
 
 let scanned_fixture run =
-  with_directory "paengi-materialize-source-" (fun source ->
-      with_directory "paengi-materialize-store-" (fun store_root ->
-          with_directory "paengi-materialize-destination-" (fun destination ->
+  with_directory "yeokcham-materialize-source-" (fun source ->
+      with_directory "yeokcham-materialize-store-" (fun store_root ->
+          with_directory "yeokcham-materialize-destination-" (fun destination ->
               Unix.mkdir (Filename.concat source "nested") 0o700;
               write_file (Filename.concat source "binary") "\000\255bytes";
               write_file
                 (Filename.concat source "run")
-                "#!/bin/sh\necho paengi\n";
+                "#!/bin/sh\necho yeokcham\n";
               Unix.chmod (Filename.concat source "run") 0o755;
               write_file
                 (Filename.concat (Filename.concat source "nested") "guide")
@@ -107,8 +107,8 @@ let nonempty_destination_is_unchanged () =
       | Ok () -> Alcotest.fail "nonempty destination was materialised")
 
 let unsafe_tree_name_cannot_materialise () =
-  with_directory "paengi-materialize-unsafe-store-" (fun store_root ->
-      with_directory "paengi-materialize-unsafe-destination-"
+  with_directory "yeokcham-materialize-unsafe-store-" (fun store_root ->
+      with_directory "yeokcham-materialize-unsafe-destination-"
         (fun destination ->
           let store =
             Store.init ~root:store_root |> require_ok Store.error_to_string
@@ -166,9 +166,9 @@ let unsafe_tree_name_cannot_materialise () =
           | Ok () -> Alcotest.fail "unsafe tree name was materialised"))
 
 let manifest_backed_file_materialises_exactly () =
-  with_directory "paengi-large-materialize-source-" (fun source ->
-      with_directory "paengi-large-materialize-store-" (fun store_root ->
-          with_directory "paengi-large-materialize-destination-"
+  with_directory "yeokcham-large-materialize-source-" (fun source ->
+      with_directory "yeokcham-large-materialize-store-" (fun store_root ->
+          with_directory "yeokcham-large-materialize-destination-"
             (fun destination ->
               let contents = deterministic_bytes ((3 * 131_072) + 17) in
               write_file (Filename.concat source "large.bin") contents;

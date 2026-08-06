@@ -1,6 +1,6 @@
-module Spec = Paengi_testkit.Fixture_spec
-module Materializer = Paengi_testkit.Fixture_materializer
-module Golden = Paengi_testkit.Golden_fixture
+module Spec = Yeokcham_testkit.Fixture_spec
+module Materializer = Yeokcham_testkit.Fixture_materializer
+module Golden = Yeokcham_testkit.Golden_fixture
 open! Spec
 
 let is_executable = function Regular -> false | Executable -> true
@@ -42,7 +42,7 @@ let golden_hex_parser () =
     (Golden.decode_lower_hex "0F")
 
 let with_temporary_file contents check =
-  let path = Filename.temp_file "paengi-golden-" ".hex" in
+  let path = Filename.temp_file "yeokcham-golden-" ".hex" in
   Fun.protect
     ~finally:(fun () -> try Sys.remove path with Sys_error _ -> ())
     (fun () ->
@@ -135,13 +135,13 @@ let rec remove_tree path =
   with Unix.Unix_error (Unix.ENOENT, _, _) -> ()
 
 let materialises_without_overwrite () =
-  let destination = Filename.temp_file "paengi-fixture-" "" in
+  let destination = Filename.temp_file "yeokcham-fixture-" "" in
   Unix.unlink destination;
   Fun.protect
     ~finally:(fun () ->
       remove_tree destination;
       remove_tree
-        (Printf.sprintf "%s.paengi-fixture-%d" destination (Unix.getpid ())))
+        (Printf.sprintf "%s.yeokcham-fixture-%d" destination (Unix.getpid ())))
     (fun () ->
       let fixture = Spec.generate ~seed:19 in
       (match Materializer.write ~destination fixture with

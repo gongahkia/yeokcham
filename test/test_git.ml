@@ -1,15 +1,15 @@
-module Git = Paengi_git
-module Capsule_store = Paengi_capsule_store
-module Encoding = Paengi_encoding
-module Envelope = Paengi_envelope
-module Golden = Paengi_testkit.Golden_fixture
-module Id = Paengi_id
-module Release = Paengi_release
-module Scratch = Paengi_scratch
-module Snapshot = Paengi_snapshot
-module Store = Paengi_store
-module Validation = Paengi_validation
-module Workspace_store = Paengi_workspace_store
+module Git = Yeokcham_git
+module Capsule_store = Yeokcham_capsule_store
+module Encoding = Yeokcham_encoding
+module Envelope = Yeokcham_envelope
+module Golden = Yeokcham_testkit.Golden_fixture
+module Id = Yeokcham_id
+module Release = Yeokcham_release
+module Scratch = Yeokcham_scratch
+module Snapshot = Yeokcham_snapshot
+module Store = Yeokcham_store
+module Validation = Yeokcham_validation
+module Workspace_store = Yeokcham_workspace_store
 
 let require_ok render = function
   | Ok value -> value
@@ -165,9 +165,9 @@ let commit_environment ~author_name ~author_email ~author_date ~committer_name
   |> Array.of_list
 
 let golden_commit_environment =
-  commit_environment ~author_name:"Paengi Golden"
+  commit_environment ~author_name:"Yeokcham Golden"
     ~author_email:"golden@example.invalid" ~author_date:"1700000000 +0000"
-    ~committer_name:"Paengi Golden" ~committer_email:"golden@example.invalid"
+    ~committer_name:"Yeokcham Golden" ~committer_email:"golden@example.invalid"
     ~committer_date:"1700000000 +0000"
 
 let write_file path bytes =
@@ -338,7 +338,7 @@ let git_path () =
   | None -> Alcotest.fail "Git executable is unavailable for local fixture"
 
 let preflight_uses_bounded_direct_argv () =
-  with_directory "paengi-git-fake-" (fun repository ->
+  with_directory "yeokcham-git-fake-" (fun repository ->
       recorded_commands := [];
       queued_results :=
         [
@@ -392,7 +392,7 @@ let rejects_untrusted_path_before_execution () =
     (List.length !recorded_commands)
 
 let malformed_or_truncated_output_rejects () =
-  with_directory "paengi-git-output-" (fun repository ->
+  with_directory "yeokcham-git-output-" (fun repository ->
       recorded_commands := [];
       queued_results := [ process_result ~stdout:(stream "false\ntrue\n") () ];
       Git.inspect ~runner:(module Fake_runner) fake_configuration ~repository
@@ -415,7 +415,7 @@ let malformed_or_truncated_output_rejects () =
                (contains ~needle:"stdout exceeded" (Git.error_to_string error))))
 
 let actual_git_repository_is_inspected () =
-  with_directory "paengi-git-fixture-" (fun repository ->
+  with_directory "yeokcham-git-fixture-" (fun repository ->
       direct_process (git_path ()) [ "init"; "-q"; repository ];
       let inspection =
         Git.inspect Git.default_configuration ~repository
@@ -433,7 +433,7 @@ let actual_git_repository_is_inspected () =
          String.equal format "sha1" || String.equal format "sha256"))
 
 let import_fixture run =
-  with_directory "paengi-git-import-" (fun root ->
+  with_directory "yeokcham-git-import-" (fun root ->
       let repository = Filename.concat root "repository" in
       let store_root = Filename.concat root "store" in
       Unix.mkdir repository 0o700;
@@ -462,7 +462,7 @@ let import_fixture run =
       run repository store tree)
 
 let commit_fixture run =
-  with_directory "paengi-git-commit-" (fun root ->
+  with_directory "yeokcham-git-commit-" (fun root ->
       let repository = Filename.concat root "repository" in
       let store_root = Filename.concat root "store" in
       Unix.mkdir repository 0o700;
@@ -470,7 +470,7 @@ let commit_fixture run =
       let git = git_path () in
       direct_process git [ "init"; "-q"; repository ];
       direct_process git
-        [ "-C"; repository; "config"; "user.name"; "Paengi Test" ];
+        [ "-C"; repository; "config"; "user.name"; "Yeokcham Test" ];
       direct_process git
         [ "-C"; repository; "config"; "user.email"; "test@example.invalid" ];
       write_file (Filename.concat repository "base") "base\n";
@@ -522,7 +522,7 @@ let commit_fixture run =
       run repository store format commit parents)
 
 let tag_fixture run =
-  with_directory "paengi-git-tag-" (fun root ->
+  with_directory "yeokcham-git-tag-" (fun root ->
       let repository = Filename.concat root "repository" in
       let store_root = Filename.concat root "store" in
       Unix.mkdir repository 0o700;
@@ -530,7 +530,7 @@ let tag_fixture run =
       let git = git_path () in
       direct_process git [ "init"; "-q"; repository ];
       direct_process git
-        [ "-C"; repository; "config"; "user.name"; "Paengi Test" ];
+        [ "-C"; repository; "config"; "user.name"; "Yeokcham Test" ];
       direct_process git
         [ "-C"; repository; "config"; "user.email"; "test@example.invalid" ];
       write_file (Filename.concat repository "tagged") "tagged\000bytes";
@@ -628,7 +628,7 @@ let imports_merge_commit_and_ordered_parents () =
           (Git.imported_transition_snapshot transition)
         |> require_ok Snapshot.error_to_string
       in
-      with_directory "paengi-git-commit-materialized-" (fun destination ->
+      with_directory "yeokcham-git-commit-materialized-" (fun destination ->
           Snapshot.Materialize.write ~destination reopened snapshot
           |> require_ok Snapshot.Materialize.error_to_string;
           assert_snapshot_matches_directory reopened snapshot destination;
@@ -786,7 +786,7 @@ let imports_complete_existing_repository () =
           (Git.imported_transition_snapshot reopened_transition)
         |> require_ok Snapshot.error_to_string
       in
-      with_directory "paengi-git-complete-import-materialized-"
+      with_directory "yeokcham-git-complete-import-materialized-"
         (fun destination ->
           Snapshot.Materialize.write ~destination reopened snapshot
           |> require_ok Snapshot.Materialize.error_to_string;
@@ -813,7 +813,7 @@ let imports_complete_existing_repository () =
             (read_file (Filename.concat destination "side"))))
 
 let imports_commit_metadata_as_exact_bytes () =
-  with_directory "paengi-git-commit-metadata-" (fun root ->
+  with_directory "yeokcham-git-commit-metadata-" (fun root ->
       let repository = Filename.concat root "repository" in
       let store_root = Filename.concat root "store" in
       Unix.mkdir repository 0o700;
@@ -1052,7 +1052,7 @@ let imports_lightweight_and_annotated_tags () =
           Alcotest.fail "tag mapping did not name an imported tag")
 
 let rejects_malformed_tag_data () =
-  with_directory "paengi-git-tag-errors-" (fun repository ->
+  with_directory "yeokcham-git-tag-errors-" (fun repository ->
       let store_root = Filename.concat repository "store" in
       Unix.mkdir store_root 0o700;
       let store =
@@ -1134,7 +1134,7 @@ let rejects_corrupt_tag_binding () =
                   (Git.error_to_string error))))
 
 let imported_transition_persistence_goldens_are_stable () =
-  with_directory "paengi-git-transition-golden-" (fun root ->
+  with_directory "yeokcham-git-transition-golden-" (fun root ->
       let repository = Filename.concat root "repository" in
       let store_root = Filename.concat root "store" in
       Unix.mkdir repository 0o700;
@@ -1163,7 +1163,7 @@ let imported_transition_persistence_goldens_are_stable () =
       let transition_id = Git.imported_transition_id transition in
       let mapping_id = Git.mapping_id imported.Git.commit_mapping in
       let expected_identity =
-        "Paengi Golden <golden@example.invalid> 1700000000 +0000"
+        "Yeokcham Golden <golden@example.invalid> 1700000000 +0000"
       in
       Alcotest.(check (option string))
         "raw author identity" (Some expected_identity)
@@ -1182,7 +1182,7 @@ let imported_transition_persistence_goldens_are_stable () =
         |> require_ok Snapshot.error_to_string);
       Alcotest.(check string)
         "canonical imported transition envelope"
-        (golden "git-imported-transition-v2.peng.hex")
+        (golden "git-imported-transition-v2.yeok.hex")
         (imported_transition_envelope_bytes store transition_id);
       Alcotest.(check string)
         "canonical imported transition binding"
@@ -1194,7 +1194,7 @@ let imported_transition_persistence_goldens_are_stable () =
            ]);
       Alcotest.(check string)
         "canonical Git commit mapping v3 envelope"
-        (golden "git-commit-mapping-v3.peng.hex")
+        (golden "git-commit-mapping-v3.yeok.hex")
         (mapping_envelope_bytes store mapping_id);
       Alcotest.(check string)
         "canonical Git commit mapping v3 binding"
@@ -1218,7 +1218,7 @@ let imported_transition_persistence_goldens_are_stable () =
         | Error _ ->
             Alcotest.fail "legacy transition binding is malformed"
       in
-      ignore (store_golden_envelope store "git-imported-transition-v1.peng.hex");
+      ignore (store_golden_envelope store "git-imported-transition-v1.yeok.hex");
       Store.Ref_file.compare_and_swap store
         ~components:
           [
@@ -1252,7 +1252,7 @@ let imported_transition_persistence_goldens_are_stable () =
         | Error _ ->
             Alcotest.fail "legacy mapping binding is malformed"
       in
-      ignore (store_golden_envelope store "git-mapping-v2.peng.hex");
+      ignore (store_golden_envelope store "git-mapping-v2.yeok.hex");
       Store.Ref_file.compare_and_swap store
         ~components:[ "git-mappings"; Id.Git_mapping_id.to_hex legacy_mapping ]
         ~expected:None ~replacement:legacy_mapping_binding
@@ -1272,7 +1272,7 @@ let imported_transition_persistence_goldens_are_stable () =
                 false))
 
 let imported_tag_persistence_goldens_are_stable () =
-  with_directory "paengi-git-tag-golden-" (fun root ->
+  with_directory "yeokcham-git-tag-golden-" (fun root ->
       let repository = Filename.concat root "repository" in
       let store_root = Filename.concat root "store" in
       Unix.mkdir repository 0o700;
@@ -1311,7 +1311,7 @@ let imported_tag_persistence_goldens_are_stable () =
       let mapping_id = Git.mapping_id imported.Git.tag_mapping in
       Alcotest.(check string)
         "canonical imported tag envelope"
-        (golden "git-imported-tag-v1.peng.hex")
+        (golden "git-imported-tag-v1.yeok.hex")
         (imported_tag_envelope_bytes store tag_id);
       Alcotest.(check string)
         "canonical imported tag binding"
@@ -1320,7 +1320,7 @@ let imported_tag_persistence_goldens_are_stable () =
            [ "imported-tags"; Id.Imported_tag_id.to_hex tag_id ]);
       Alcotest.(check string)
         "canonical Git mapping v3 envelope"
-        (golden "git-mapping-v3.peng.hex")
+        (golden "git-mapping-v3.yeok.hex")
         (mapping_envelope_bytes store mapping_id);
       Alcotest.(check string)
         "canonical Git mapping v3 binding"
@@ -1329,7 +1329,7 @@ let imported_tag_persistence_goldens_are_stable () =
            [ "git-mappings"; Id.Git_mapping_id.to_hex mapping_id ]))
 
 let rejects_malformed_commit_data () =
-  with_directory "paengi-git-commit-errors-" (fun repository ->
+  with_directory "yeokcham-git-commit-errors-" (fun repository ->
       let store_root = Filename.concat repository "store" in
       Unix.mkdir store_root 0o700;
       let store =
@@ -1584,7 +1584,7 @@ let export_checkpoint scratch snapshot time =
 
 let release_export_fixture ?(nested_empty = false) ?(empty_root = false)
     ?(message = Some "release export\n") ?(created_at = 7L) run =
-  with_directory "paengi-git-export-" (fun root ->
+  with_directory "yeokcham-git-export-" (fun root ->
       let worktree = Filename.concat root "worktree" in
       let destination = Filename.concat root "destination" in
       Unix.mkdir worktree 0o700;
@@ -1736,7 +1736,7 @@ let exports_release_as_exact_git_commit () =
       in
       Alcotest.(check bool)
         "fixed author metadata" true
-        (contains ~needle:"Paengi Export <noreply@paengi.local> 7" commit);
+        (contains ~needle:"Yeokcham Export <noreply@yeokcham.local> 7" commit);
       Alcotest.(check bool)
         "release message metadata" true
         (contains ~needle:"release export" commit);
@@ -1829,7 +1829,7 @@ let exports_configured_release_metadata_exactly_and_idempotently () =
         "configured ref is metadata scoped" true
         (contains
            ~needle:
-             ("refs/heads/paengi/release-"
+             ("refs/heads/yeokcham/release-"
              ^ Id.Release_id.to_hex release_id
              ^ "-metadata-")
            first.Git.export_target_ref);
@@ -1898,7 +1898,7 @@ let configured_release_metadata_rejects_and_retries_explicitly () =
       let release_id = Release.release_id release in
       let metadata = configured_release_export_metadata () in
       let ref_prefix =
-        "refs/heads/paengi/release-"
+        "refs/heads/yeokcham/release-"
         ^ Id.Release_id.to_hex release_id
         ^ "-metadata-"
       in
@@ -1972,7 +1972,7 @@ let configured_release_metadata_rejects_and_retries_explicitly () =
                 destination;
                 "for-each-ref";
                 "--format=%(refname)";
-                "refs/heads/paengi";
+                "refs/heads/yeokcham";
               ]));
       let retried =
         Git.export_release ~metadata Git.default_configuration ~store
@@ -1987,7 +1987,7 @@ let configured_release_metadata_rejects_and_retries_explicitly () =
       |> require_ok Git.error_to_string
       |> ignore;
       direct_process git
-        [ "-C"; destination; "config"; "user.name"; "Paengi Fixture" ];
+        [ "-C"; destination; "config"; "user.name"; "Yeokcham Fixture" ];
       direct_process git
         [ "-C"; destination; "config"; "user.email"; "fixture@example.invalid" ];
       direct_process git
@@ -2011,7 +2011,7 @@ let configured_release_metadata_rejects_and_retries_explicitly () =
       direct_process git [ "-C"; destination; "fsck"; "--full" ])
 
 let revision_export_fixture ?(empty_first = false) ?(nested_empty = false) run =
-  with_directory "paengi-git-revision-export-" (fun root ->
+  with_directory "yeokcham-git-revision-export-" (fun root ->
       let worktree = Filename.concat root "worktree" in
       let destination = Filename.concat root "destination" in
       Unix.mkdir worktree 0o700;
@@ -2194,12 +2194,12 @@ let exports_revisions_as_exact_linear_git_commits () =
       in
       Alcotest.(check bool)
         "fixed revision metadata" true
-        (contains ~needle:"Paengi Export <noreply@paengi.local> 4" metadata);
+        (contains ~needle:"Yeokcham Export <noreply@yeokcham.local> 4" metadata);
       Alcotest.(check bool)
         "fixed revision message" true
         (contains
            ~needle:
-             ("Paengi capsule "
+             ("Yeokcham capsule "
              ^ Id.Capsule_id.to_hex
                  (Capsule_store.revision_link_capsule
                     (List.hd (List.rev sources)))
@@ -2311,7 +2311,7 @@ let revision_export_rejects_invalid_selection_and_recovers_partial_mapping () =
              destination;
              "for-each-ref";
              "--format=%(refname)";
-             "refs/heads/paengi/capsule-linear-";
+             "refs/heads/yeokcham/capsule-linear-";
            ]);
       Git.export_revisions ~fail_at:(Git.Before_revision_mapping_binding 1)
         Git.default_configuration ~store ~repository:destination
@@ -2352,7 +2352,7 @@ let revision_export_rejects_invalid_selection_and_recovers_partial_mapping () =
       |> require_ok Git.error_to_string
       |> ignore;
       direct_process git
-        [ "-C"; destination; "config"; "user.name"; "Paengi Fixture" ];
+        [ "-C"; destination; "config"; "user.name"; "Yeokcham Fixture" ];
       direct_process git
         [ "-C"; destination; "config"; "user.email"; "fixture@example.invalid" ];
       direct_process git
@@ -2443,7 +2443,7 @@ let exports_empty_root_revision_and_rejects_nested_empty_revision () =
              destination;
              "for-each-ref";
              "--format=%(refname)";
-             "refs/heads/paengi/capsule-linear-";
+             "refs/heads/yeokcham/capsule-linear-";
            ]))
 
 let exports_empty_release_with_fallback_message () =
@@ -2481,13 +2481,13 @@ let exports_empty_release_with_fallback_message () =
       in
       Alcotest.(check string)
         "fallback message"
-        ("Paengi release " ^ Id.Release_id.to_hex (Release.release_id release))
+        ("Yeokcham release " ^ Id.Release_id.to_hex (Release.release_id release))
         message)
 
 let export_ref_collision_and_bounds_reject_explicitly () =
   release_export_fixture (fun git destination store release ->
       direct_process git
-        [ "-C"; destination; "config"; "user.name"; "Paengi Fixture" ];
+        [ "-C"; destination; "config"; "user.name"; "Yeokcham Fixture" ];
       direct_process git
         [ "-C"; destination; "config"; "user.email"; "fixture@example.invalid" ];
       direct_process git
@@ -2496,7 +2496,7 @@ let export_ref_collision_and_bounds_reject_explicitly () =
         direct_capture git [ "-C"; destination; "rev-parse"; "HEAD" ]
       in
       let target_ref =
-        "refs/heads/paengi/release-"
+        "refs/heads/yeokcham/release-"
         ^ Id.Release_id.to_hex (Release.release_id release)
       in
       direct_process git
@@ -2511,7 +2511,7 @@ let export_ref_collision_and_bounds_reject_explicitly () =
                "structured ref collision" true
                (contains ~needle:"target ref already names a different commit"
                   (Git.error_to_string error)));
-      with_directory "paengi-git-export-bounded-" (fun bounded ->
+      with_directory "yeokcham-git-export-bounded-" (fun bounded ->
           direct_process git [ "init"; "-q"; bounded ];
           let configuration =
             Git.configuration_with ~max_blob_bytes:1 ~max_total_blob_bytes:1
@@ -2545,7 +2545,7 @@ let export_interruption_is_explicit_and_retryable () =
   release_export_fixture (fun git destination store release ->
       let release_id = Release.release_id release in
       let target_ref =
-        "refs/heads/paengi/release-" ^ Id.Release_id.to_hex release_id
+        "refs/heads/yeokcham/release-" ^ Id.Release_id.to_hex release_id
       in
       Git.export_release ~fail_at:Git.Before_git_ref Git.default_configuration
         ~store ~repository:destination ~release:release_id
@@ -2612,7 +2612,7 @@ let nested_empty_directory_rejects_before_export_ref () =
              destination;
              "for-each-ref";
              "--format=%(refname)";
-             "refs/heads/paengi/release-" ^ Id.Release_id.to_hex release_id;
+             "refs/heads/yeokcham/release-" ^ Id.Release_id.to_hex release_id;
            ]))
 
 let imports_exact_tree_and_restarts_idempotently () =
@@ -2651,7 +2651,7 @@ let imports_exact_tree_and_restarts_idempotently () =
       in
       Alcotest.(check string)
         "canonical Git mapping envelope"
-        (golden "git-mapping-v1.peng.hex")
+        (golden "git-mapping-v1.yeok.hex")
         mapping_bytes;
       (match Git.mapping_subject mapping with
       | Git.Imported_snapshot snapshot ->
@@ -2665,7 +2665,7 @@ let imports_exact_tree_and_restarts_idempotently () =
         Snapshot.Snapshot.load reopened imported.Git.snapshot
         |> require_ok Snapshot.error_to_string
       in
-      with_directory "paengi-git-materialized-" (fun destination ->
+      with_directory "yeokcham-git-materialized-" (fun destination ->
           Snapshot.Materialize.write ~destination reopened snapshot
           |> require_ok Snapshot.Materialize.error_to_string;
           assert_snapshot_matches_directory reopened snapshot destination;
@@ -2685,7 +2685,7 @@ let imports_exact_tree_and_restarts_idempotently () =
             (Unix.readlink (Filename.concat destination "link"))))
 
 let rejects_unsafe_tree_entry_before_blob_read () =
-  with_directory "paengi-git-unsafe-tree-" (fun repository ->
+  with_directory "yeokcham-git-unsafe-tree-" (fun repository ->
       let store_root = Filename.concat repository "store" in
       Unix.mkdir store_root 0o700;
       let store =
@@ -2719,7 +2719,7 @@ let rejects_unsafe_tree_entry_before_blob_read () =
         (List.length !recorded_commands))
 
 let rejects_unsupported_mode_and_missing_object () =
-  with_directory "paengi-git-unsupported-tree-" (fun repository ->
+  with_directory "yeokcham-git-unsupported-tree-" (fun repository ->
       let store_root = Filename.concat repository "store" in
       Unix.mkdir store_root 0o700;
       let store =
@@ -2833,7 +2833,7 @@ let rejects_corrupt_mapping_binding () =
                   (Git.error_to_string error))))
 
 let () =
-  Alcotest.run "paengi_git"
+  Alcotest.run "yeokcham_git"
     [
       ( "preflight",
         [

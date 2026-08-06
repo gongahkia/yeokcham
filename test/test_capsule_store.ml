@@ -1,11 +1,11 @@
-module Capsule = Paengi_capsule
-module Capsule_store = Paengi_capsule_store
-module Envelope = Paengi_envelope
-module Golden = Paengi_testkit.Golden_fixture
-module Id = Paengi_id
-module Scratch = Paengi_scratch
-module Snapshot = Paengi_snapshot
-module Store = Paengi_store
+module Capsule = Yeokcham_capsule
+module Capsule_store = Yeokcham_capsule_store
+module Envelope = Yeokcham_envelope
+module Golden = Yeokcham_testkit.Golden_fixture
+module Id = Yeokcham_id
+module Scratch = Yeokcham_scratch
+module Snapshot = Yeokcham_snapshot
+module Store = Yeokcham_store
 
 [@@@warning "-4-42"]
 
@@ -96,7 +96,7 @@ let golden name =
   | None -> Alcotest.fail ("missing golden fixture: " ^ name)
 
 let with_store run =
-  let root = Filename.temp_file "paengi-capsule-store-test-" "" in
+  let root = Filename.temp_file "yeokcham-capsule-store-test-" "" in
   Unix.unlink root;
   Unix.mkdir root 0o700;
   let rec remove path =
@@ -200,11 +200,11 @@ let schemas_have_canonical_goldens_and_inverse_decoders () =
       in
       Alcotest.(check string)
         "capsule golden"
-        (golden "capsule-v1.peng.hex")
+        (golden "capsule-v1.yeok.hex")
         (envelope capsule_object);
       Alcotest.(check string)
         "revision golden"
-        (golden "capsule-revision-v1.peng.hex")
+        (golden "capsule-revision-v1.yeok.hex")
         (envelope revision_object);
       Alcotest.(check string)
         "current ref golden"

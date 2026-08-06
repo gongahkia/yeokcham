@@ -1,0 +1,14 @@
+(library
+ (name yeokcham_workspace_store)
+ (libraries
+  yeokcham_capsule
+  yeokcham_capsule_store
+  yeokcham_encoding
+  yeokcham_envelope
+  yeokcham_hash
+  yeokcham_id
+  yeokcham_scratch
+  yeokcham_snapshot
+  yeokcham_store
+  yeokcham_workspace
+  unix))

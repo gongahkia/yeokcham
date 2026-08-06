@@ -1,0 +1,10 @@
+(library
+ (name yeokcham_validation)
+ (libraries
+  yeokcham_encoding
+  yeokcham_envelope
+  yeokcham_hash
+  yeokcham_id
+  yeokcham_snapshot
+  yeokcham_store
+  unix))

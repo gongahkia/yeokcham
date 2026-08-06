@@ -1,0 +1,3 @@
+(library
+ (name yeokcham_capsule)
+ (libraries yeokcham_encoding yeokcham_id yeokcham_scratch yeokcham_snapshot))

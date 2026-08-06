@@ -1,8 +1,8 @@
-module Envelope = Paengi_envelope
-module Golden = Paengi_testkit.Golden_fixture
-module Scratch = Paengi_scratch
-module Snapshot = Paengi_snapshot
-module Store = Paengi_store
+module Envelope = Yeokcham_envelope
+module Golden = Yeokcham_testkit.Golden_fixture
+module Scratch = Yeokcham_scratch
+module Snapshot = Yeokcham_snapshot
+module Store = Yeokcham_store
 
 let require_ok render = function
   | Ok value -> value
@@ -15,7 +15,7 @@ let raw value =
   |> Option.get
 
 let with_store run =
-  let root = Filename.temp_file "paengi-generation-test-" "" in
+  let root = Filename.temp_file "yeokcham-generation-test-" "" in
   Unix.unlink root;
   Unix.mkdir root 0o700;
   Fun.protect
@@ -84,7 +84,7 @@ let schemas_have_canonical_goldens_and_inverse_decoders () =
       in
       Alcotest.(check string)
         "cleanup manifest golden"
-        (golden "scratch-v1-cleanup-manifest.peng.hex")
+        (golden "scratch-v1-cleanup-manifest.yeok.hex")
         (bytes (Scratch.Cleanup_manifest_id.stored_object_id manifest_id));
       let loaded =
         Scratch.Generation.load store generation
@@ -93,11 +93,11 @@ let schemas_have_canonical_goldens_and_inverse_decoders () =
       let segment = List.hd (Scratch.Generation.segment_ids loaded) in
       Alcotest.(check string)
         "generation segment golden"
-        (golden "scratch-v1-generation-segment.peng.hex")
+        (golden "scratch-v1-generation-segment.yeok.hex")
         (bytes (Scratch.Generation_id.stored_object_id segment));
       Alcotest.(check string)
         "generation golden"
-        (golden "scratch-v1-generation.peng.hex")
+        (golden "scratch-v1-generation.yeok.hex")
         (bytes (Scratch.Generation_id.stored_object_id generation));
       let entry = List.hd (Scratch.Generation.entries loaded) in
       Alcotest.(check bool)
@@ -112,7 +112,7 @@ let schemas_have_canonical_goldens_and_inverse_decoders () =
            ~expected:None
            ~target:(Some (Scratch.Generation_id.stored_object_id generation))
         |> require_ok Store.error_to_string);
-      let ref_path = Filename.concat root ".paengi/refs/scratch-generation" in
+      let ref_path = Filename.concat root ".yeokcham/refs/scratch-generation" in
       Alcotest.(check string)
         "generation ref golden"
         (golden "scratch-v1-generation.ref.hex")

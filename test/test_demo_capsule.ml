@@ -27,11 +27,11 @@ let script name =
 
 let binary () =
   let cwd = Sys.getcwd () in
-  find "paengi"
+  find "yeokcham"
     [
-      Filename.concat cwd "_build/default/bin/paengi.exe";
-      Filename.concat cwd "../bin/paengi.exe";
-      Filename.concat cwd "../_build/default/bin/paengi.exe";
+      Filename.concat cwd "_build/default/bin/yeokcham.exe";
+      Filename.concat cwd "../bin/yeokcham.exe";
+      Filename.concat cwd "../_build/default/bin/yeokcham.exe";
     ]
 
 let environment key value =
@@ -41,7 +41,7 @@ let environment key value =
   |> fun entries -> Array.of_list ((key ^ "=" ^ value) :: entries)
 
 let run ~environment program arguments =
-  let output = Filename.temp_file "paengi-demo-capsule-output-" "" in
+  let output = Filename.temp_file "yeokcham-demo-capsule-output-" "" in
   Fun.protect
     ~finally:(fun () -> remove_tree output)
     (fun () ->
@@ -73,14 +73,14 @@ let contains text needle =
   loop 0
 
 let capsule_creation_and_fold_are_visible () =
-  let parent = Filename.temp_file "paengi-demo-capsule-" "" in
+  let parent = Filename.temp_file "yeokcham-demo-capsule-" "" in
   Unix.unlink parent;
   Unix.mkdir parent 0o700;
   let root = Filename.concat parent "fixture" in
   Fun.protect
     ~finally:(fun () -> remove_tree parent)
     (fun () ->
-      let environment = environment "PAENGI_BIN" (binary ()) in
+      let environment = environment "YEOKCHAM_BIN" (binary ()) in
       require
         (run ~environment "sh"
            [ script "create-repository-v1.sh"; "--root"; root ]
@@ -92,7 +92,7 @@ let capsule_creation_and_fold_are_visible () =
         |> exited)
         "capsule demo failed";
       let history =
-        read (Filename.concat root ".paengi/demo-v1-capsule-history")
+        read (Filename.concat root ".yeokcham/demo-v1-capsule-history")
         |> String.split_on_char '\n'
         |> List.filter (fun line -> line <> "")
       in
@@ -104,7 +104,7 @@ let capsule_creation_and_fold_are_visible () =
         "folded bytes" "folded capsule bytes\n"
         (read (Filename.concat root "debug-note.txt"));
       let show =
-        read (Filename.concat root ".paengi/demo-v1-capsule-show-second")
+        read (Filename.concat root ".yeokcham/demo-v1-capsule-show-second")
       in
       require
         (String.starts_with
@@ -114,7 +114,7 @@ let capsule_creation_and_fold_are_visible () =
            show)
         "show does not identify the stable capsule";
       let split =
-        read (Filename.concat root ".paengi/demo-v1-capsule-split-plan")
+        read (Filename.concat root ".yeokcham/demo-v1-capsule-split-plan")
       in
       require (contains split "plan split") "split plan is absent";
       require
@@ -122,7 +122,7 @@ let capsule_creation_and_fold_are_visible () =
         "split is not visibly unconfirmed")
 
 let unowned_root_rejects () =
-  let parent = Filename.temp_file "paengi-demo-capsule-unowned-" "" in
+  let parent = Filename.temp_file "yeokcham-demo-capsule-unowned-" "" in
   Unix.unlink parent;
   Unix.mkdir parent 0o700;
   let root = Filename.concat parent "unowned" in

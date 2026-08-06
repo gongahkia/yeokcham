@@ -1,3 +1,0 @@
-(library
- (name paengi_capsule)
- (libraries paengi_encoding paengi_id paengi_scratch paengi_snapshot))

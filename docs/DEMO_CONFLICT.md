@@ -17,32 +17,32 @@ resolution-bound workspace revision.
 
 `skip` does not synthesize replacement bytes or resolve semantics. It binds an
 immutable resolution to the exact failed `(capsule revision, operation index)`;
-the original conflict remains inspectable by ID. This is Paengi workspace state,
+the original conflict remains inspectable by ID. This is Yeokcham workspace state,
 not a Git branch, merge, or conflict-marker file.
 
 ## Run and inspect
 
 ```sh
 demo_parent=$(mktemp -d)
-demo_root="$demo_parent/paengi-demo"
+demo_root="$demo_parent/yeokcham-demo"
 sh tools/demo/create-repository-v1.sh --root "$demo_root"
 sh tools/demo/demonstrate-conflict-v1.sh --root "$demo_root"
 ```
 
-Before skip, `.paengi/demo-v1-conflict-partial` reports `partial=true`,
+Before skip, `.yeokcham/demo-v1-conflict-partial` reports `partial=true`,
 `docs/todo.txt` retains `first conflicting bytes`, and
 `conflict-unrelated.txt` contains its exact independent bytes. The conflict
 files show its stable ID before and after skip; the active list is empty only
 after a later immutable workspace revision binds the explicit resolution.
-`.paengi/demo-v1-conflict-complete` then reports `partial=false`.
+`.yeokcham/demo-v1-conflict-complete` then reports `partial=false`.
 
 Bad roots, unowned fixtures, invalid initial checkpoint IDs, repeated runs,
 malformed command results, failed transitions, or an accepted unsupported
 resolution action reject nonzero. The unsupported action's pre/post workspace
 records are byte-identical. The script changes only an owned fixture and keeps
-all command evidence under its `.paengi/` directory.
+all command evidence under its `.yeokcham/` directory.
 
-No model type, persistent format, ADR, `paengi` CLI behavior, semantic
+No model type, persistent format, ADR, `yeokcham` CLI behavior, semantic
 resolution, materialisation guarantee, release, Git export, sync state, or
 performance claim is added.
 

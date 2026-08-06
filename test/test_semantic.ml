@@ -1,4 +1,4 @@
-module Semantic = Paengi_semantic
+module Semantic = Yeokcham_semantic
 
 let require_ok render = function
   | Ok value -> value

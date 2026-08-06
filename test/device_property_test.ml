@@ -1,8 +1,8 @@
-module Device = Paengi_device
-module Device_store = Paengi_device_store
-module Encoding = Paengi_encoding
-module Event = Paengi_ref_event
-module Store = Paengi_store
+module Device = Yeokcham_device
+module Device_store = Yeokcham_device_store
+module Encoding = Yeokcham_encoding
+module Event = Yeokcham_ref_event
+module Store = Yeokcham_store
 
 type signer = {
   identity : Device.t;
@@ -100,7 +100,7 @@ let rec remove_tree path =
   with Unix.Unix_error (Unix.ENOENT, _, _) -> ()
 
 let with_repository run =
-  let root = Filename.temp_file "paengi-device-property-" "" in
+  let root = Filename.temp_file "yeokcham-device-property-" "" in
   Unix.unlink root;
   Unix.mkdir root 0o700;
   Fun.protect

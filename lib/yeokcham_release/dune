@@ -1,0 +1,13 @@
+(library
+ (name yeokcham_release)
+ (libraries
+  yeokcham_capsule_store
+  yeokcham_encoding
+  yeokcham_envelope
+  yeokcham_hash
+  yeokcham_id
+  yeokcham_snapshot
+  yeokcham_store
+  yeokcham_validation
+  yeokcham_workspace
+  yeokcham_workspace_store))

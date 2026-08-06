@@ -1,4 +1,4 @@
-module Benchmark = Paengi_compaction_benchmark
+module Benchmark = Yeokcham_compaction_benchmark
 
 let default_seed = 20_260_806
 

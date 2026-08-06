@@ -1,9 +1,9 @@
-module Scratch = Paengi_scratch
-module Snapshot = Paengi_snapshot
-module Store = Paengi_store
-module Golden = Paengi_testkit.Golden_fixture
-module Encoding = Paengi_encoding
-module Envelope = Paengi_envelope
+module Scratch = Yeokcham_scratch
+module Snapshot = Yeokcham_snapshot
+module Store = Yeokcham_store
+module Golden = Yeokcham_testkit.Golden_fixture
+module Encoding = Yeokcham_encoding
+module Envelope = Yeokcham_envelope
 
 let require_ok render = function
   | Ok value -> value
@@ -32,8 +32,8 @@ let write_file path bytes =
       Out_channel.output_string channel bytes)
 
 let with_history run =
-  with_directory "paengi-scratch-source-" (fun source ->
-      with_directory "paengi-scratch-store-" (fun store_root ->
+  with_directory "yeokcham-scratch-source-" (fun source ->
+      with_directory "yeokcham-scratch-store-" (fun store_root ->
           write_file (Filename.concat source "file") "base\000bytes";
           Unix.mkdir (Filename.concat source "nested") 0o700;
           write_file
@@ -277,7 +277,7 @@ let corrupt_or_missing_records_are_rejected () =
   with_history (fun _source store_root store scratch _ changed ->
       write_file
         (Filename.concat
-           (Filename.concat (Filename.concat store_root ".paengi") "refs")
+           (Filename.concat (Filename.concat store_root ".yeokcham") "refs")
            "scratch-head")
         "corrupt";
       (match Scratch.head scratch with
@@ -304,7 +304,7 @@ let corrupt_or_missing_records_are_rejected () =
 let disposable_indexes_do_not_affect_recovery () =
   with_history (fun _source store_root store scratch _ changed ->
       let index_directory =
-        Filename.concat (Filename.concat store_root ".paengi") "indexes"
+        Filename.concat (Filename.concat store_root ".yeokcham") "indexes"
       in
       Unix.mkdir index_directory 0o700;
       let stale_index = Filename.concat index_directory "scratch.cache" in
@@ -391,7 +391,7 @@ let v1_golden_bytes_are_stable () =
       let envelope identity =
         Store.get store identity
         |> require_ok Store.error_to_string
-        |> Paengi_envelope.encode
+        |> Yeokcham_envelope.encode
       in
       let golden name =
         Golden.read_lower_hex_file (Filename.concat "golden" name)
@@ -399,11 +399,11 @@ let v1_golden_bytes_are_stable () =
       in
       Alcotest.(check string)
         "scratch event v1"
-        (golden "scratch-v1-event.peng.hex")
+        (golden "scratch-v1-event.yeok.hex")
         (envelope (Scratch.Event_id.stored_object_id event));
       Alcotest.(check string)
         "scratch checkpoint v1"
-        (golden "scratch-v1-checkpoint.peng.hex")
+        (golden "scratch-v1-checkpoint.yeok.hex")
         (envelope
            (Scratch.Checkpoint_id.stored_object_id
               (Scratch.Checkpoint.id changed)));
@@ -414,14 +414,14 @@ let v1_golden_bytes_are_stable () =
       in
       Alcotest.(check string)
         "retention change v1"
-        (golden "scratch-v1-retention-change.peng.hex")
+        (golden "scratch-v1-retention-change.yeok.hex")
         (envelope retention);
       Alcotest.(check string)
         "scratch-head ref v1"
         (golden "scratch-v1-head.ref.hex")
         (In_channel.with_open_bin
            (Filename.concat
-              (Filename.concat (Filename.concat store_root ".paengi") "refs")
+              (Filename.concat (Filename.concat store_root ".yeokcham") "refs")
               "scratch-head")
            In_channel.input_all))
 

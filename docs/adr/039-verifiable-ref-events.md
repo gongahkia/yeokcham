@@ -64,18 +64,18 @@ ref-event-v1-unsigned = [
   proposed-generation, proposed-target-or-null,
   mandatory-features
 ]
-event-id = SHA-256("paengi:ref-event:v1\000" || encode(unsigned-without-event-id))
+event-id = SHA-256("yeokcham:ref-event:v1\000" || encode(unsigned-without-event-id))
 ```
 
 The stored payload appends `algorithm-text` and `signature-bytes`. The signed
 preimage is exactly:
 
 ```text
-"paengi:ref-event-signature:v1\000" || encode(ref-event-v1-unsigned)
+"yeokcham:ref-event-signature:v1\000" || encode(ref-event-v1-unsigned)
 ```
 
 V1 accepts only `algorithm-text = "ed25519"`, a 32-byte public key, a 32-byte
-`signer-key-id = SHA-256("paengi:ref-key:v1\000" || public-key)`, and a
+`signer-key-id = SHA-256("yeokcham:ref-key:v1\000" || public-key)`, and a
 64-byte signature. The event contains only the key ID; a verifier receives an
 explicit caller-supplied bounded map from key ID to public key. It recomputes
 the key ID, event ID, canonical payload, repository-format digest, and Ed25519
@@ -86,7 +86,7 @@ rejections. The existing deterministic release test signer is invalid for this
 algorithm and cannot produce `Verified` ref events.
 
 `repository-format-sha256` is the SHA-256 digest of the exact current
-`Paengi_store.repository_format` bytes. `ref-name` uses the existing safe
+`Yeokcham_store.repository_format` bytes. `ref-name` uses the existing safe
 single-component mutable-ref namespace. `observed` is the source ref's complete
 `(generation, target)` pair. `proposed-generation` is exactly
 `observed-generation + 1`, and the proposed target may be absent. The event

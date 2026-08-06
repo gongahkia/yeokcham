@@ -11,7 +11,7 @@
 M8-02 persists only a commit ID, declared tree, imported snapshot, and ordered
 parent IDs in `Imported_transition_v1`. M8-04 must retain the source commit's
 author identity, committer identity, timestamps/time zones contained in those
-identities, and message without turning Git metadata into Paengi capsule,
+identities, and message without turning Git metadata into Yeokcham capsule,
 revision, release, or authorial-intent semantics. Git commit objects include
 parent IDs, author/committer identities with dates, and a log message; Git core
 does not require commit messages to be UTF-8. [git-commit-tree](https://git-scm.com/docs/git-commit-tree)
@@ -26,7 +26,7 @@ remain bounded against malformed byte input.
 - Preserve source metadata byte-exactly without a lossy text conversion or an
   unsupported identity/date parser.
 - Make author, committer, time-zone/timestamp bytes, and message explicit
-  provenance without treating them as Paengi meaning.
+  provenance without treating them as Yeokcham meaning.
 - Keep transition identity, content identity, physical object identity, and
   observational time distinct.
 - Reuse durable publication only where existing binding semantics remain exact;
@@ -45,7 +45,7 @@ remain bounded against malformed byte input.
 ### Parse identities/dates into normalized author fields
 
 - Provides convenient query fields.
-- Risks lossy handling of non-UTF-8 bytes and makes Paengi interpretation the
+- Risks lossy handling of non-UTF-8 bytes and makes Yeokcham interpretation the
   canonical source instead of Git's raw representation.
 
 ### Add `Imported_transition_v2` with raw identity bytes and message Content
@@ -74,7 +74,7 @@ imported-transition-v2 = [
 
 `author-identity-bytes` and `committer-identity-bytes` are the exact bytes
 after raw `author ` and `committer ` prefixes. They remain bytes, not UTF-8
-text. They include source timestamp/time-zone bytes; Paengi does not validate,
+text. They include source timestamp/time-zone bytes; Yeokcham does not validate,
 normalize, calculate with, or otherwise interpret those fields.
 `message-content-id` addresses the exact bytes after the first commit-header
 blank line through `Snapshot.Content`, including an empty message or invalid
@@ -91,7 +91,7 @@ identities and message.
 The v2 logical identity is:
 
 ```text
-SHA-256("paengi:imported-transition:v2\\000" ||
+SHA-256("yeokcham:imported-transition:v2\\000" ||
         encode([2, git-commit-id, git-tree-id, snapshot-id,
                 [* parent-git-commit-id], author-identity-bytes,
                 committer-identity-bytes, message-content-id]))
@@ -105,7 +105,7 @@ payload change is required: Git-mapping v3 already permits
 verified physical object. New imports use mapping v3; v1/v2/v3 payloads,
 identities, bindings, and goldens remain unchanged.
 
-`paengi git import commit` continues to import one commit and declared tree. It
+`yeokcham git import commit` continues to import one commit and declared tree. It
 reports transition, snapshot, mapping, commit, parents, and metadata
 content/byte identifiers in escaped or hex-safe form; it never prints untrusted
 raw bytes directly. A future display command may define presentation policy.
@@ -158,10 +158,10 @@ record or ref is rewritten in place. Unknown transition versions reject.
 M8-04 imports `Imported_transition_v2` and publishes the existing v3 commit
 mapping. It exposes raw identity bytes only through hex-safe CLI output and the
 message through its immutable Content ID; it does not assign source metadata
-Paengi semantic meaning.
+Yeokcham semantic meaning.
 
 ## CLI and user impact
 
 The existing commit-import command gains safe inspectable metadata identifiers.
-Users receive opaque Git provenance, not a Paengi author, release, capsule, or
+Users receive opaque Git provenance, not a Yeokcham author, release, capsule, or
 claim that an identity/timestamp/message is trustworthy.

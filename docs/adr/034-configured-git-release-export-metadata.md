@@ -9,24 +9,24 @@
 ## Context and problem statement
 
 M8-10 must let a caller configure author, committer, and message metadata for
-one exported immutable Paengi release. ADR-009 keeps Git as interchange;
+one exported immutable Yeokcham release. ADR-009 keeps Git as interchange;
 ADR-028 supplies immutable export mappings; and ADR-032 deliberately fixed
 release-export metadata and ref naming to preserve deterministic retry. Allowing
 metadata that changes a Git commit requires a new policy for validation,
 metadata identity, target refs, retry, and the boundary between Git presentation
-and Paengi identity.
+and Yeokcham identity.
 
 Current milestone: M8 Git Bridge. Vertical slice: one verified release, one
 existing absolute Git repository, one optional explicit complete metadata
 triple, one Git root commit, one deterministic metadata-qualified Git ref, and
 one existing ADR-028 `Exported_release` mapping. It excludes configured
-capsule-revision export, metadata persistence in Paengi, source author
+capsule-revision export, metadata persistence in Yeokcham, source author
 inference, signatures, tags, remotes, and arbitrary Git configuration.
 
 ## Decision drivers
 
 - Configured fields must become exact Git commit fields or fail structurally.
-- A metadata choice must not change a Paengi release ID, stored object, final
+- A metadata choice must not change a Yeokcham release ID, stored object, final
   snapshot, current ref, or release semantics.
 - Different metadata choices must not collide on ADR-032's release-only ref.
 - Retry with the same release and metadata must reproduce the same commit,
@@ -43,7 +43,7 @@ inference, signatures, tags, remotes, and arbitrary Git configuration.
 - A new configured commit collides with an existing default or differently
   configured export of the same release and makes legitimate retry ambiguous.
 
-### Persist a Paengi export-policy object
+### Persist a Yeokcham export-policy object
 
 - Makes a presentation policy durable and shareable.
 - Adds new canonical storage and lifecycle semantics before the first explicit
@@ -52,7 +52,7 @@ inference, signatures, tags, remotes, and arbitrary Git configuration.
 ### Use explicit invocation metadata and a metadata-qualified external ref
 
 - Preserves deterministic repeatability for an exact invocation without making
-  Git presentation input Paengi state.
+  Git presentation input Yeokcham state.
 - Requires callers to repeat the same metadata on retry and defers shared or
   named policies to a later ADR.
 
@@ -88,15 +88,15 @@ author and committer pairs and the release's existing nonnegative `created_at`
 timestamp. The Git message is exactly the supplied message bytes. The exporter
 uses direct argv and explicit environment only, reads the produced commit back,
 and verifies tree, zero parents, both metadata headers, and message bytes
-before publication. The headers are Git presentation metadata, not Paengi
+before publication. The headers are Git presentation metadata, not Yeokcham
 authorship, intent, signature, or validation evidence.
 
 The existing default target ref remains
-`refs/heads/paengi/release-<release-id>`. An explicit metadata invocation uses
-`refs/heads/paengi/release-<release-id>-metadata-<sha256-hex>`. The suffix is
+`refs/heads/yeokcham/release-<release-id>`. An explicit metadata invocation uses
+`refs/heads/yeokcham/release-<release-id>-metadata-<sha256-hex>`. The suffix is
 SHA-256 of a domain-separated, length-delimited canonical concatenation of
 author name/email, committer name/email, and message bytes. It is an external
-ref selector only, not a Paengi ID, object, ref, or assertion. Both ref forms
+ref selector only, not a Yeokcham ID, object, ref, or assertion. Both ref forms
 are create-only unless they already name the exact computed commit. Therefore
 the same release can have distinct inspectable Git exports for distinct
 metadata, while an identical retry is idempotent.
@@ -117,8 +117,8 @@ a separate ordered metadata policy and decision.
   exact invocation.
 - Default M8-08 export output and ref naming remain compatible.
 - Retry with changed metadata is a distinct external export, not a mutation of
-  a previous export or a Paengi release.
-- Paengi cannot later reconstruct caller-selected metadata from canonical
+  a previous export or a Yeokcham release.
+- Yeokcham cannot later reconstruct caller-selected metadata from canonical
   storage alone; Git commit/mapping inspection remains the evidence.
 - Sharing, naming, or defaulting an export policy is deferred.
 
@@ -131,14 +131,14 @@ selected by `metadata : release_export_metadata option`.
   remain type-distinct.
 - Absent metadata reproduces ADR-032's metadata, commit, ref, and mapping.
 - Present metadata affects only Git commit presentation, external ref selection,
-  and the resulting mapping's Git object; it cannot alter Paengi data.
+  and the resulting mapping's Git object; it cannot alter Yeokcham data.
 - A visible configured export commit has no parents, the exact final snapshot
   tree, the exact configured headers/message, and the metadata-qualified ref.
-- Retry cannot overwrite a Git ref, a mapping, or a Paengi release.
+- Retry cannot overwrite a Git ref, a mapping, or a Yeokcham release.
 
 ## Persistent-format and migration impact
 
-No Paengi persistent object, ref, schema, or mapping payload is added. ADR-027
+No Yeokcham persistent object, ref, schema, or mapping payload is added. ADR-027
 release v1, ADR-028 mapping v1-v3, binding encodings, and all current goldens
 stay byte-identical. Metadata input, its ref suffix, temporary message/index
 files, and Git objects are invocation or external interchange artifacts.
@@ -161,7 +161,7 @@ closure.
 After acceptance:
 
 ```text
-paengi git export release --repository <absolute-git-directory> \
+yeokcham git export release --repository <absolute-git-directory> \
   --release <release-id> \
   --author-name <name> --author-email <email> \
   --committer-name <name> --committer-email <email> \

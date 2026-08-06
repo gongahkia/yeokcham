@@ -57,9 +57,9 @@ TypeScript or textual experiments.
 
 Select the local Tree-sitter Rust helper.
 
-M9-01 will add `tools/paengi-rust-adapter` as a separately built Rust binary
+M9-01 will add `tools/yeokcham-rust-adapter` as a separately built Rust binary
 and an OCaml boundary analogous to, but independent from,
-`paengi_typescript_adapter`. The helper receives exactly one JSON protocol-v1
+`yeokcham_typescript_adapter`. The helper receives exactly one JSON protocol-v1
 request on stdin and writes exactly one JSON response on stdout. It is invoked
 by direct argv; stdout is protocol-only and bounded stderr is diagnostic-only.
 The helper never invokes Cargo at analysis time.
@@ -71,13 +71,13 @@ transitive/build dependencies remain visible in the committed `Cargo.lock`.
 The implementation must use that lockfile with `cargo build --locked`; the
 checked-in project does not ship `target/` output. Rust, Cargo, and a C compiler
 are explicit setup requirements to build the optional helper, not runtime
-requirements for Paengi's byte/text core. The dependency choice is based on
+requirements for Yeokcham's byte/text core. The dependency choice is based on
 the published [Tree-sitter Parser API](https://docs.rs/tree-sitter/0.26.11/tree_sitter/struct.Parser.html)
 and [Rust grammar API](https://docs.rs/tree-sitter-rust/0.24.2/tree_sitter_rust/).
 
 Protocol v1 accepts only a 64-lowercase-hex snapshot ID and a sorted virtual
 map of safe project-relative POSIX `.rs` paths to hex-encoded, valid UTF-8
-bytes. The map is materialised only from a verified immutable Paengi snapshot;
+bytes. The map is materialised only from a verified immutable Yeokcham snapshot;
 the helper receives no directory, repository, Cargo manifest, environment
 configuration, or dependency path. Invalid UTF-8 is a structured
 `unsupported-encoding` result, not a conversion or mutation of source bytes.
@@ -137,9 +137,9 @@ from the TypeScript adapter's types and from every canonical model type.
 
 ## Persistent-format and migration impact
 
-No Paengi object, ref, envelope, schema, mapping, golden persistent bytes, or
+No Yeokcham object, ref, envelope, schema, mapping, golden persistent bytes, or
 migration changes. The versioned helper protocol and committed `Cargo.lock`
-are tool artifacts, not Paengi persistent formats. Existing persistent-format
+are tool artifacts, not Yeokcham persistent formats. Existing persistent-format
 goldens must remain byte-identical. A later persistence proposal requires a
 new ADR and format version.
 
@@ -162,7 +162,7 @@ Implemented and verified 2026-08-05:
   result-schema validation.
 
 The checked-in `Cargo.lock` and protocol goldens are versioned tool fixtures;
-no Paengi persistent golden changed. A parse benchmark remains deferred because
+no Yeokcham persistent golden changed. A parse benchmark remains deferred because
 this slice establishes bounded syntax evidence, not a performance claim.
 
 ## CLI and user impact

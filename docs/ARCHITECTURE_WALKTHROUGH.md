@@ -1,4 +1,4 @@
-# Paengi architecture walkthrough
+# Yeokcham architecture walkthrough
 
 ## M11-12 scope
 
@@ -29,9 +29,9 @@ The arrows do not collapse the identities:
 
 | History | Purpose | Implemented boundary |
 | --- | --- | --- |
-| Scratch | frequent local recovery | `paengi_snapshot`, `paengi_chunking`, `paengi_scratch`, and `paengi_compaction` record exact snapshots, checkpoints, retention, and compacted generations. A checkpoint is not a capsule. |
-| Intent | human-curated change selection and composition | `paengi_capsule`/`paengi_capsule_store` and `paengi_workspace`/`paengi_workspace_store` retain immutable revisions, selected physical links, ordered attempts, conflicts, and explicit resolutions. A capsule or workspace is not a release. |
-| Release | immutable reproducible final state | `paengi_validation` and `paengi_release` bind evidence to a verified final snapshot. Export creates a mapping to Git; it does not make Git canonical Paengi history. |
+| Scratch | frequent local recovery | `yeokcham_snapshot`, `yeokcham_chunking`, `yeokcham_scratch`, and `yeokcham_compaction` record exact snapshots, checkpoints, retention, and compacted generations. A checkpoint is not a capsule. |
+| Intent | human-curated change selection and composition | `yeokcham_capsule`/`yeokcham_capsule_store` and `yeokcham_workspace`/`yeokcham_workspace_store` retain immutable revisions, selected physical links, ordered attempts, conflicts, and explicit resolutions. A capsule or workspace is not a release. |
+| Release | immutable reproducible final state | `yeokcham_validation` and `yeokcham_release` bind evidence to a verified final snapshot. Export creates a mapping to Git; it does not make Git canonical Yeokcham history. |
 
 The M11 demonstrations exercise the same sequence: [repository](DEMO_REPOSITORY.md),
 [recovery](DEMO_RECOVERY.md), [compaction](DEMO_COMPACTION.md),
@@ -41,8 +41,8 @@ The M11 demonstrations exercise the same sequence: [repository](DEMO_REPOSITORY.
 
 ## Storage contract
 
-`paengi_encoding`, `paengi_envelope`, `paengi_id`, `paengi_hash`, and
-`paengi_store` form the persistent boundary. Canonical, versioned Envelope-1
+`yeokcham_encoding`, `yeokcham_envelope`, `yeokcham_id`, `yeokcham_hash`, and
+`yeokcham_store` form the persistent boundary. Canonical, versioned Envelope-1
 objects receive typed content identities. A visible ref names exact logical and
 physical objects only after validation; writers do not mutate an immutable
 object in place. Rebuildable indexes are not required to recover canonical
@@ -83,16 +83,16 @@ Two deliberate limits matter:
 
 ## Optional analysis and external protocols
 
-`paengi_textual_patch` remains the byte-only fallback. The TypeScript and Rust
-sidecars (`paengi_semantic*`, `paengi_typescript_adapter`, and
-`paengi_rust_adapter`) receive verified snapshot bytes and return bounded
+`yeokcham_textual_patch` remains the byte-only fallback. The TypeScript and Rust
+sidecars (`yeokcham_semantic*`, `yeokcham_typescript_adapter`, and
+`yeokcham_rust_adapter`) receive verified snapshot bytes and return bounded
 evidence, ambiguity, or unavailable/incomplete results. They do not persist
 semantic facts, read a live source tree, or authorise ambiguous rewrites.
 
-`paengi_git` is an explicit import/export adapter: it invokes local Git through
+`yeokcham_git` is an explicit import/export adapter: it invokes local Git through
 bounded direct argv and preserves only the documented interchange subset.
-`paengi_exchange*`, `paengi_ref_event*`, `paengi_device*`,
-`paengi_divergence*`, `paengi_bundle*`, and `paengi_http_exchange` exchange or
+`yeokcham_exchange*`, `yeokcham_ref_event*`, `yeokcham_device*`,
+`yeokcham_divergence*`, `yeokcham_bundle*`, and `yeokcham_http_exchange` exchange or
 inspect immutable objects. They do not choose a divergent ref head, reconcile
 it, or establish identity/trust policy. [Git interchange](GIT_INTERCHANGE.md)
 and [the comparative report](COMPARATIVE_WORKFLOW_ANALYSIS.md) describe the

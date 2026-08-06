@@ -1,4 +1,4 @@
-module Comparison = Paengi_rust_retarget_comparison
+module Comparison = Yeokcham_rust_retarget_comparison
 
 let contains ~needle value =
   let needle_length = String.length needle in

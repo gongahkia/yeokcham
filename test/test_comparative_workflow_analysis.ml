@@ -29,7 +29,7 @@ let preserves_evidence_boundaries () =
     (fun marker ->
       require (contains text marker) ("missing evidence marker: " ^ marker))
     [
-      "[Implemented Paengi fact]";
+      "[Implemented Yeokcham fact]";
       "[Documented tool fact]";
       "[Inference]";
       "[Unverified]";

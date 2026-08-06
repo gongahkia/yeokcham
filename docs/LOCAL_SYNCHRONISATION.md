@@ -17,7 +17,7 @@ the test completes. It needs neither a network endpoint nor a daemon.
 
 The exercised values are existing transient `Exchange.session_id`, caller-held
 `Bundle.key`, `Bundle_directory.complete`, exact immutable object IDs, and
-mutable-ref observations. No new Paengi model type, persistent object, ref,
+mutable-ref observations. No new Yeokcham model type, persistent object, ref,
 binding, schema, or CLI command is introduced by M10-11.
 
 The fixture verifies these invariants:
@@ -67,6 +67,6 @@ convention.
 ## External context
 
 Git's documented bundle mechanism is an offline object transfer mechanism;
-Paengi deliberately keeps its bundle narrower by transferring caller-declared
+Yeokcham deliberately keeps its bundle narrower by transferring caller-declared
 immutable objects without refs or ref-selection semantics. See the official
 [git-bundle documentation](https://git-scm.com/docs/git-bundle.html).

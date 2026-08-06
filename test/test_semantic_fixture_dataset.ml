@@ -1,6 +1,6 @@
-module Dataset = Paengi_semantic_fixtures
-module Patch = Paengi_textual_patch
-module Retarget = Paengi_semantic_retarget
+module Dataset = Yeokcham_semantic_fixtures
+module Patch = Yeokcham_textual_patch
+module Retarget = Yeokcham_semantic_retarget
 
 let required_categories =
   [

@@ -1,6 +1,6 @@
 [@@@warning "-41-42"]
 
-module Retarget = Paengi_semantic_retarget
+module Retarget = Yeokcham_semantic_retarget
 
 let span start_byte end_byte = Retarget.{ start_byte; end_byte }
 

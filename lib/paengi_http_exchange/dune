@@ -1,8 +1,0 @@
-(library
- (name paengi_http_exchange)
- (libraries
-  paengi_envelope
-  paengi_exchange
-  paengi_exchange_store
-  paengi_store
-  unix))

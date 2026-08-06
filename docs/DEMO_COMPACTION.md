@@ -10,7 +10,7 @@ the intermediate fixture checkpoint expired while retaining the head; it is
 not a performance measurement or timing-based correctness claim.
 
 The script records the existing `compact --dry-run --explain`, activation,
-`--resume`, and retained-ID restore-plan outputs under `.paengi/`. The active
+`--resume`, and retained-ID restore-plan outputs under `.yeokcham/`. The active
 generation preserves logical checkpoint IDs while it may replace their physical
 event/checkpoint representation. No model type, persistent schema, ADR, CLI
 command, semantic sidecar, network state, or benchmark claim is added.
@@ -19,7 +19,7 @@ command, semantic sidecar, network state, or benchmark claim is added.
 
 ```sh
 demo_parent=$(mktemp -d)
-demo_root="$demo_parent/paengi-demo"
+demo_root="$demo_parent/yeokcham-demo"
 sh tools/demo/create-repository-v1.sh --root "$demo_root"
 sh tools/demo/demonstrate-compaction-v1.sh --root "$demo_root"
 ```
@@ -36,7 +36,7 @@ exact. It does not claim that unretained logical checkpoints remain resolvable.
 ## Quarantine and prune
 
 The default command never prunes. It leaves superseded scratch records beneath
-`.paengi/trash/<generation-id>/`, where they remain a local recovery artifact
+`.yeokcham/trash/<generation-id>/`, where they remain a local recovery artifact
 outside normal retained-ID resolution. Pass `--prune` only for a disposable
 fixture root after inspecting activation and quarantine output:
 

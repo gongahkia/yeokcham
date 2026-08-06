@@ -2,11 +2,11 @@
 
 ## 1. Testing philosophy
 
-paengi's strongest portfolio value comes from making its model falsifiable.
+yeokcham's strongest portfolio value comes from making its model falsifiable.
 
 Each core claim should map to an invariant, generated test, benchmark, or comparative experiment.
 
-Paengi is a local VCS and persistent-data-model project. Testing is limited to repository correctness and checked-in local fixtures; external security analysis is outside scope. Bounds checks, corruption detection, atomic writes, and malformed-input handling remain required storage-system behavior.
+Yeokcham is a local VCS and persistent-data-model project. Testing is limited to repository correctness and checked-in local fixtures; external security analysis is outside scope. Bounds checks, corruption detection, atomic writes, and malformed-input handling remain required storage-system behavior.
 
 ## 2. Test layers
 
@@ -275,12 +275,12 @@ field.
 
 Milestone 8 Git-import checks materialise imported snapshots with exact regular
 file bytes, executable mode, symlink target, and nested-tree structure. They
-mutate the source Git working tree after import, reopen Paengi storage, and
+mutate the source Git working tree after import, reopen Yeokcham storage, and
 prove materialisation still matches the imported tree; corrupt mappings or
 objects reject explicitly.
 
 M8-16 additionally imports one complete supported local Git repository into a
-fresh Paengi store: its merge commit, ordered parents, tree, regular/executable
+fresh Yeokcham store: its merge commit, ordered parents, tree, regular/executable
 and symlink blobs, lightweight and annotated tags, opaque author/committer and
 annotation provenance, and every bridge mapping. The fixture reopens all
 durable evidence, mutates the source Git worktree, then materialises the stored
@@ -293,7 +293,7 @@ bytes, executable mode, symlink target, and nested-tree structure; it runs
 `git fsck --full`, reopens the mapping, and proves deterministic retry.
 Generated bounded releases check checkout bytes/mode. Fixtures reject nested
 empty directories and inject pre-ref/pre-mapping interruptions, which leave an
-explicit retry path without a changed Paengi release.
+explicit retry path without a changed Yeokcham release.
 
 M8-10 Git-export checks optional configured author, committer, timestamp, and
 message output exactly; verifies default/configured and distinct configured
@@ -314,7 +314,7 @@ sole-parent order, stable mappings/ref, retry, and `fsck`.
 M8-18 uses one shared final-state oracle for supported Git import, release
 export (including configured metadata), and linear revision export. It compares
 entry sets, regular bytes, executable bit, symlink target bytes, and nested
-tree structure against the immutable Paengi snapshot; only a Git checkout's
+tree structure against the immutable Yeokcham snapshot; only a Git checkout's
 `.git` directory is excluded. Failure labels name the divergent path and the
 relevant kind, bytes, mode, or symlink metadata. This is not a semantic
 equivalence claim.
@@ -333,7 +333,7 @@ Rebuilding a release yields the recorded final snapshot ID.
 
 #### P12 — Git export bytes
 
-Exported Git branch checkout matches the paengi release snapshot.
+Exported Git branch checkout matches the yeokcham release snapshot.
 
 ### State-machine tests
 
@@ -553,7 +553,7 @@ host-specific evidence, not a gate.
 
 Record:
 
-- paengi commit.
+- yeokcham commit.
 - OCaml version.
 - Compiler mode.
 - OS and hardware.
@@ -588,7 +588,7 @@ For a small reproducible repository, document the equivalent workflow in:
 
 - Git.
 - Jujutsu.
-- paengi.
+- yeokcham.
 
 Where practical, also show:
 
@@ -601,7 +601,7 @@ The comparison should acknowledge features those tools already provide.
 ## 9.1 TypeScript sidecar protocol experiment
 
 The optional Compiler API helper is pinned to TypeScript `5.9.3` in
-`tools/paengi-typescript-adapter/package-lock.json`; its minimum Node version
+`tools/yeokcham-typescript-adapter/package-lock.json`; its minimum Node version
 is `14.17.0`. Setup is one explicit local
 `npm ci --ignore-scripts --no-audit --no-fund`; tests do not download packages
 or use a global TypeScript installation.
@@ -626,7 +626,7 @@ not be read as a general reliability claim.
 ## 9.2 Rust syntax-sidecar protocol experiment
 
 ADR-035's optional helper is pinned through
-`tools/paengi-rust-adapter/Cargo.lock` with direct dependencies
+`tools/yeokcham-rust-adapter/Cargo.lock` with direct dependencies
 `tree-sitter 0.26.11` and `tree-sitter-rust 0.24.2`. Build it explicitly with
 `cargo build --locked --release`; adapter analysis never invokes Cargo. The
 checked-in protocol-v1 request/response goldens are exercised by `cargo test
@@ -642,10 +642,10 @@ property-test` build the helper before their relevant coverage. These checks do
 not establish semantic equivalence, module resolution, macro expansion, or
 rewrite correctness; any timing record is host-specific evidence only.
 
-M9-04 adds `paengi_rust_fixtures`, a deterministic version-1 dataset of six
+M9-04 adds `yeokcham_rust_fixtures`, a deterministic version-1 dataset of six
 bounded virtual Rust source-map workloads: rename after insertion, within-file
 move, cross-module move, duplicate ambiguity, macro-heavy fallback, and parser
-damage fallback. Every supported case has an exact `paengi_textual_patch` byte
+damage fallback. Every supported case has an exact `yeokcham_textual_patch` byte
 oracle; ambiguity remains a structured conflict. Fallback cases verify the
 same independent textual oracle while the Rust adapter reports no semantic
 authority. Fixture maps, paths, spans, fallback kinds, and module observations

@@ -1,0 +1,3 @@
+(library
+ (name yeokcham_bundle_store)
+ (libraries mirage-crypto-rng.unix yeokcham_bundle yeokcham_store))

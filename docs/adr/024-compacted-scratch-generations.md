@@ -125,7 +125,7 @@ checkpoints, and retention changes strictly older than the retained cutoff.
 Content, Tree, Snapshot, Chunk, and File_manifest objects are never candidates
 until a complete cross-domain root mark exists.  Candidates are rechecked
 against the active generation, manifest, expected type, and keep set before an
-atomic same-filesystem move to `.paengi/trash/<generation-id>/`.  Quarantine is
+atomic same-filesystem move to `.yeokcham/trash/<generation-id>/`.  Quarantine is
 idempotently resumable.  Explicit prune permanently removes quarantined files;
 previous history is not recoverable after prune.
 
@@ -168,7 +168,7 @@ manually before explicit prune; permanent prune has no rollback guarantee.
 
 ## CLI and user impact
 
-`paengi compact --dry-run`, `paengi compact`, `paengi compact --resume`, and
-`paengi compact --prune` expose planning, activation, quarantine, resume, and
+`yeokcham compact --dry-run`, `yeokcham compact`, `yeokcham compact --resume`, and
+`yeokcham compact --prune` expose planning, activation, quarantine, resume, and
 irreversible pruning.  Timeline, restore, retention, and checkpoint creation
 continue to display and accept logical checkpoint IDs.

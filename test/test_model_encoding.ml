@@ -1,7 +1,7 @@
-module Encoding = Paengi_encoding
-module Envelope = Paengi_envelope
-module Golden = Paengi_testkit.Golden_fixture
-module Model = Paengi_model
+module Encoding = Yeokcham_encoding
+module Envelope = Yeokcham_envelope
+module Golden = Yeokcham_testkit.Golden_fixture
+module Model = Yeokcham_model
 open Model
 
 let require_path components =
@@ -60,7 +60,7 @@ let nested_snapshot () =
       Directory_path guides;
       File_path
         ( require_path [ "bin"; "run" ],
-          file ~mode:Executable "#!/bin/sh\necho paengi\n" );
+          file ~mode:Executable "#!/bin/sh\necho yeokcham\n" );
       Directory_path docs;
       Directory_path bin;
     ]
@@ -141,7 +141,7 @@ let empty_snapshot_golden () =
   let snapshot = Snapshot.empty in
   let payload = Snapshot.canonical_bytes snapshot in
   let decoded_payload =
-    check_golden_bytes "model-v1-snapshot-empty.peng.hex" Envelope.Snapshot
+    check_golden_bytes "model-v1-snapshot-empty.yeok.hex" Envelope.Snapshot
       payload
   in
   let decoded =
@@ -157,7 +157,7 @@ let nested_snapshot_golden () =
   let snapshot = nested_snapshot () in
   let payload = Snapshot.canonical_bytes snapshot in
   let decoded_payload =
-    check_golden_bytes "model-v1-snapshot-nested.peng.hex" Envelope.Snapshot
+    check_golden_bytes "model-v1-snapshot-nested.yeok.hex" Envelope.Snapshot
       payload
   in
   let decoded =
@@ -176,7 +176,7 @@ let scratch_event_golden () =
   let event, _ = scratch_history () in
   let payload = Scratch_event.canonical_bytes event in
   let decoded_payload =
-    check_golden_bytes "model-v1-scratch-event.peng.hex" Envelope.Scratch_event
+    check_golden_bytes "model-v1-scratch-event.yeok.hex" Envelope.Scratch_event
       payload
   in
   let decoded =
@@ -190,7 +190,7 @@ let checkpoint_golden () =
   let _, checkpoint = scratch_history () in
   let payload = Checkpoint.canonical_bytes checkpoint in
   let decoded_payload =
-    check_golden_bytes "model-v1-checkpoint.peng.hex" Envelope.Checkpoint
+    check_golden_bytes "model-v1-checkpoint.yeok.hex" Envelope.Checkpoint
       payload
   in
   let decoded =

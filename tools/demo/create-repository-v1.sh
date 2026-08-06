@@ -49,8 +49,8 @@ cleanup_failure() {
   status=$?
   trap - 0 HUP INT TERM
   if [ "$status" -ne 0 ] && [ "$created" -eq 1 ] \
-    && [ -f "$root/.paengi-demo-owned-v1" ] \
-    && [ "$(cat "$root/.paengi-demo-owned-v1")" = 'paengi-demo-owned-v1' ]; then
+    && [ -f "$root/.yeokcham-demo-owned-v1" ] \
+    && [ "$(cat "$root/.yeokcham-demo-owned-v1")" = 'yeokcham-demo-owned-v1' ]; then
     rm -rf -- "$root"
   fi
   [ -z "$initial_log" ] || rm -f -- "$initial_log"
@@ -59,14 +59,14 @@ cleanup_failure() {
 
 trap cleanup_failure 0 HUP INT TERM
 
-run_paengi() {
-  if [ -n "${PAENGI_BIN:-}" ]; then
-    [ -x "$PAENGI_BIN" ] || fail 'PAENGI_BIN must name an executable'
-    "$PAENGI_BIN" "$@" --root "$root"
+run_yeokcham() {
+  if [ -n "${YEOKCHAM_BIN:-}" ]; then
+    [ -x "$YEOKCHAM_BIN" ] || fail 'YEOKCHAM_BIN must name an executable'
+    "$YEOKCHAM_BIN" "$@" --root "$root"
   else
     (
       cd "$project_root"
-      opam exec -- dune exec bin/paengi.exe -- "$@" --root "$root"
+      opam exec -- dune exec bin/yeokcham.exe -- "$@" --root "$root"
     )
   fi
 }
@@ -74,26 +74,26 @@ run_paengi() {
 mkdir -m 700 "$root"
 created=1
 mkdir "$root/bin" "$root/docs"
-printf '%s\n' 'paengi-demo-owned-v1' > "$root/.paengi-demo-owned-v1"
+printf '%s\n' 'yeokcham-demo-owned-v1' > "$root/.yeokcham-demo-owned-v1"
 printf '%s\n' '# Demo repository' '' 'Initial local-only fixture state.' > "$root/README.md"
 printf '%s\n' 'keep exact bytes' > "$root/docs/todo.txt"
 printf '%s\n' '#!/bin/sh' 'printf "%s\\n" "demo"' > "$root/bin/run-demo"
 chmod 755 "$root/bin/run-demo"
 ln -s docs/todo.txt "$root/current-note"
 
-initial_log=$(mktemp "$parent/.paengi-demo-v1-initial.XXXXXX")
-run_paengi init > "$initial_log"
-mv "$initial_log" "$root/.paengi/demo-v1-initial-checkpoint"
+initial_log=$(mktemp "$parent/.yeokcham-demo-v1-initial.XXXXXX")
+run_yeokcham init > "$initial_log"
+mv "$initial_log" "$root/.yeokcham/demo-v1-initial-checkpoint"
 initial_log=''
 mv "$root/README.md" "$root/CHANGELOG.md"
 printf '%s\n' 'keep exact bytes, revised' > "$root/docs/todo.txt"
 printf '%s\n' 'created after the initial checkpoint' > "$root/notes.txt"
 chmod 644 "$root/bin/run-demo"
-run_paengi checkpoint > "$root/.paengi/demo-v1-change-checkpoint"
-run_paengi timeline --limit 8 > "$root/.paengi/demo-v1-timeline"
+run_yeokcham checkpoint > "$root/.yeokcham/demo-v1-change-checkpoint"
+run_yeokcham timeline --limit 8 > "$root/.yeokcham/demo-v1-timeline"
 
 printf 'root=%s\n' "$root"
 printf 'initial-checkpoint=%s\n' \
-  "$(cat "$root/.paengi/demo-v1-initial-checkpoint")"
+  "$(cat "$root/.yeokcham/demo-v1-initial-checkpoint")"
 printf 'change-checkpoint=%s\n' \
-  "$(cat "$root/.paengi/demo-v1-change-checkpoint")"
+  "$(cat "$root/.yeokcham/demo-v1-change-checkpoint")"

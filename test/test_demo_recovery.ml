@@ -25,13 +25,13 @@ let script name =
       Filename.concat cwd ("../tools/demo/" ^ name);
     ]
 
-let paengi_binary () =
+let yeokcham_binary () =
   let cwd = Sys.getcwd () in
-  find_file "paengi executable"
+  find_file "yeokcham executable"
     [
-      Filename.concat cwd "_build/default/bin/paengi.exe";
-      Filename.concat cwd "../bin/paengi.exe";
-      Filename.concat cwd "../_build/default/bin/paengi.exe";
+      Filename.concat cwd "_build/default/bin/yeokcham.exe";
+      Filename.concat cwd "../bin/yeokcham.exe";
+      Filename.concat cwd "../_build/default/bin/yeokcham.exe";
     ]
 
 let environment key value =
@@ -41,7 +41,7 @@ let environment key value =
   |> fun entries -> Array.of_list ((key ^ "=" ^ value) :: entries)
 
 let run ~environment program arguments =
-  let output = Filename.temp_file "paengi-demo-recovery-output-" "" in
+  let output = Filename.temp_file "yeokcham-demo-recovery-output-" "" in
   Fun.protect
     ~finally:(fun () -> remove_tree output)
     (fun () ->
@@ -72,14 +72,14 @@ let read_file path =
       really_input_string input length)
 
 let safety_checkpoint_is_retained_after_exact_restore () =
-  let parent = Filename.temp_file "paengi-demo-recovery-" "" in
+  let parent = Filename.temp_file "yeokcham-demo-recovery-" "" in
   Unix.unlink parent;
   Unix.mkdir parent 0o700;
   let root = Filename.concat parent "fixture" in
   Fun.protect
     ~finally:(fun () -> remove_tree parent)
     (fun () ->
-      let environment = environment "PAENGI_BIN" (paengi_binary ()) in
+      let environment = environment "YEOKCHAM_BIN" (yeokcham_binary ()) in
       let created =
         run ~environment "sh"
           [ script "create-repository-v1.sh"; "--root"; root ]
@@ -114,20 +114,20 @@ let safety_checkpoint_is_retained_after_exact_restore () =
         "restored symlink target" "docs/todo.txt"
         (Unix.readlink (Filename.concat root "current-note"));
       let recovery =
-        read_file (Filename.concat root ".paengi/demo-v1-recovery")
+        read_file (Filename.concat root ".yeokcham/demo-v1-recovery")
         |> String.trim
       in
       require (String.length recovery = 80) "recovery output is malformed";
       let safety = String.sub recovery 16 64 in
       let safety_plan =
-        run ~environment (paengi_binary ())
+        run ~environment (yeokcham_binary ())
           [ "restore"; "--dry-run"; safety; "--root"; root ]
       in
       Alcotest.(check bool)
         "safety checkpoint remains restorable" true (exited safety_plan 0))
 
 let unowned_roots_reject_before_recovery () =
-  let parent = Filename.temp_file "paengi-demo-unowned-" "" in
+  let parent = Filename.temp_file "yeokcham-demo-unowned-" "" in
   Unix.unlink parent;
   Unix.mkdir parent 0o700;
   let root = Filename.concat parent "unowned" in

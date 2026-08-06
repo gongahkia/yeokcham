@@ -1,11 +1,11 @@
-module Git = Paengi_git
-module Capsule_store = Paengi_capsule_store
-module Id = Paengi_id
-module Release = Paengi_release
-module Scratch = Paengi_scratch
-module Snapshot = Paengi_snapshot
-module Store = Paengi_store
-module Workspace_store = Paengi_workspace_store
+module Git = Yeokcham_git
+module Capsule_store = Yeokcham_capsule_store
+module Id = Yeokcham_id
+module Release = Yeokcham_release
+module Scratch = Yeokcham_scratch
+module Snapshot = Yeokcham_snapshot
+module Store = Yeokcham_store
+module Workspace_store = Yeokcham_workspace_store
 
 let default_seed = 20_260_805
 
@@ -111,7 +111,7 @@ let import_replays_generated_file (bytes, executable) =
   match git_path () with
   | None -> false
   | Some git ->
-      with_directory "paengi-git-property-" (fun root ->
+      with_directory "yeokcham-git-property-" (fun root ->
           let repository = Filename.concat root "repository" in
           let store_root = Filename.concat root "store" in
           let destination = Filename.concat root "destination" in
@@ -189,7 +189,7 @@ let export_replays_generated_release ?metadata (bytes, executable) =
   match git_path () with
   | None -> false
   | Some git ->
-      with_directory "paengi-git-export-property-" (fun root ->
+      with_directory "yeokcham-git-export-property-" (fun root ->
           let worktree = Filename.concat root "worktree" in
           let destination = Filename.concat root "destination" in
           Unix.mkdir worktree 0o700;
@@ -397,7 +397,7 @@ let export_replays_generated_revision_sequence
   match git_path () with
   | None -> false
   | Some git ->
-      with_directory "paengi-git-revision-export-property-" (fun root ->
+      with_directory "yeokcham-git-revision-export-property-" (fun root ->
           let worktree = Filename.concat root "worktree" in
           let destination = Filename.concat root "destination" in
           Unix.mkdir worktree 0o700;
@@ -609,7 +609,7 @@ let import_replays_generated_commit (bytes, executable) =
   match git_path () with
   | None -> false
   | Some git ->
-      with_directory "paengi-git-commit-property-" (fun root ->
+      with_directory "yeokcham-git-commit-property-" (fun root ->
           let repository = Filename.concat root "repository" in
           let store_root = Filename.concat root "store" in
           let destination = Filename.concat root "destination" in
@@ -620,7 +620,7 @@ let import_replays_generated_commit (bytes, executable) =
           else if
             not
               (direct_process git
-                 [ "-C"; repository; "config"; "user.name"; "Paengi Test" ])
+                 [ "-C"; repository; "config"; "user.name"; "Yeokcham Test" ])
           then false
           else if
             not
@@ -787,7 +787,7 @@ let import_replays_generated_metadata
   match git_path () with
   | None -> false
   | Some git ->
-      with_directory "paengi-git-metadata-property-" (fun root ->
+      with_directory "yeokcham-git-metadata-property-" (fun root ->
           let repository = Filename.concat root "repository" in
           let store_root = Filename.concat root "store" in
           Unix.mkdir repository 0o700;
@@ -927,7 +927,7 @@ let import_replays_generated_tag (name, annotated) =
   match git_path () with
   | None -> false
   | Some git ->
-      with_directory "paengi-git-tag-property-" (fun root ->
+      with_directory "yeokcham-git-tag-property-" (fun root ->
           let repository = Filename.concat root "repository" in
           let store_root = Filename.concat root "store" in
           Unix.mkdir repository 0o700;
@@ -936,7 +936,7 @@ let import_replays_generated_tag (name, annotated) =
           else if
             not
               (direct_process git
-                 [ "-C"; repository; "config"; "user.name"; "Paengi Test" ])
+                 [ "-C"; repository; "config"; "user.name"; "Yeokcham Test" ])
           then false
           else if
             not

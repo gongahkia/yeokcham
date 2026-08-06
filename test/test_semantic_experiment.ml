@@ -1,6 +1,6 @@
 [@@@warning "-40-42"]
 
-module Experiment = Paengi_semantic_experiment
+module Experiment = Yeokcham_semantic_experiment
 
 let deterministic_classifications_and_metrics () =
   let first = Experiment.run () in

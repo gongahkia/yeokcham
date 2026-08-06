@@ -1,9 +1,9 @@
-module Bundle = Paengi_bundle
-module Directory = Paengi_bundle_directory
-module Divergence_store = Paengi_divergence_store
-module Encoding = Paengi_encoding
-module Envelope = Paengi_envelope
-module Store = Paengi_store
+module Bundle = Yeokcham_bundle
+module Directory = Yeokcham_bundle_directory
+module Divergence_store = Yeokcham_divergence_store
+module Encoding = Yeokcham_encoding
+module Envelope = Yeokcham_envelope
+module Store = Yeokcham_store
 
 let require format = function
   | Ok value -> value
@@ -38,7 +38,7 @@ let rec remove_tree path =
   with Unix.Unix_error (Unix.ENOENT, _, _) -> ()
 
 let with_repositories run =
-  let root = Filename.temp_file "paengi-bundle-directory-" "" in
+  let root = Filename.temp_file "yeokcham-bundle-directory-" "" in
   Unix.unlink root;
   Unix.mkdir root 0o700;
   let source_root = Filename.concat root "source" in
@@ -154,9 +154,9 @@ let export_list_inspect_import_preserves_refs () =
 let retained_partials_are_visible_but_not_importable () =
   with_repositories (fun _ _ shared ->
       let partial =
-        ".paengi-bundle-v1-00000000000000000000000000000000.partial"
+        ".yeokcham-bundle-v1-00000000000000000000000000000000.partial"
       in
-      let complete = "paengi-bundle-v1-ffffffffffffffffffffffffffffffff.peng" in
+      let complete = "yeokcham-bundle-v1-ffffffffffffffffffffffffffffffff.yeok" in
       write_file (Filename.concat shared partial) "partial";
       write_file (Filename.concat shared complete) "complete";
       let expected =
@@ -206,7 +206,7 @@ let corruption_and_unsafe_entries_reject_before_import () =
       Unix.unlink (Directory.complete_path complete);
       let symlink =
         Filename.concat shared
-          "paengi-bundle-v1-11111111111111111111111111111111.peng"
+          "yeokcham-bundle-v1-11111111111111111111111111111111.yeok"
       in
       Unix.symlink "missing-target" symlink;
       Alcotest.(check bool)

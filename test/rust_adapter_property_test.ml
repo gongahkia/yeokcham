@@ -1,4 +1,4 @@
-module Adapter = Paengi_rust_adapter
+module Adapter = Yeokcham_rust_adapter
 
 let default_seed = 20_260_805
 
@@ -8,10 +8,10 @@ let base_seed =
   | None -> default_seed
 
 let adapter_path () =
-  match Sys.getenv_opt "PAENGI_RUST_ADAPTER" with
+  match Sys.getenv_opt "YEOKCHAM_RUST_ADAPTER" with
   | Some path when Sys.file_exists path -> path
   | Some _ | None ->
-      "tools/paengi-rust-adapter/target/release/paengi-rust-adapter"
+      "tools/yeokcham-rust-adapter/target/release/yeokcham-rust-adapter"
 
 let configuration =
   Adapter.configuration_with ~adapter_path:(adapter_path ())

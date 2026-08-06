@@ -13,8 +13,8 @@ semantic evidence outcomes and three independent textual-baseline outcomes:
 - duplicate byte preimages become an inspectable `ambiguous-match`; and
 - an invalid textual operation is a returned `rejected` error.
 
-The helper imports only the pure `paengi_semantic_retarget` and
-`paengi_textual_patch` boundaries. It opens no repository, executes no parser
+The helper imports only the pure `yeokcham_semantic_retarget` and
+`yeokcham_textual_patch` boundaries. It opens no repository, executes no parser
 or compiler process, reads no project source, and writes no object, ref,
 snapshot, capsule, workspace, release, or semantic sidecar state.
 
@@ -34,7 +34,7 @@ Malformed script arguments and an invalid helper path reject nonzero. The
 demonstrated invalid patch is a returned error value; the duplicate candidate
 case is a returned conflict value. Neither creates repository state.
 
-No model type, persistent format, ADR, `paengi` CLI behavior, semantic sidecar
+No model type, persistent format, ADR, `yeokcham` CLI behavior, semantic sidecar
 storage, source rewrite, materialisation, release, Git export, sync state, or
 performance claim is added.
 

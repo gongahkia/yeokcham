@@ -1,0 +1,3 @@
+(library
+ (name yeokcham_rust_fixtures)
+ (libraries yeokcham_textual_patch))

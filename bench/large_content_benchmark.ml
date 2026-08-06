@@ -1,12 +1,12 @@
-module Chunking = Paengi_chunking
-module Encoding = Paengi_encoding
-module Envelope = Paengi_envelope
-module Hash = Paengi_hash.Sha256
+module Chunking = Yeokcham_chunking
+module Encoding = Yeokcham_encoding
+module Envelope = Yeokcham_envelope
+module Hash = Yeokcham_hash.Sha256
 
 let repetitions = 5
 let inline_candidates = [ 8 * 1024; 64 * 1024; 256 * 1024 ]
-let object_domain = "paengi:object:v1\000"
-let content_domain = "paengi:content:v1\000"
+let object_domain = "yeokcham:object:v1\000"
+let content_domain = "yeokcham:content:v1\000"
 
 type configuration = {
   name : string;
@@ -276,7 +276,7 @@ let insert_at_start prefix bytes = prefix ^ bytes
 
 let fixtures () =
   let medium = deterministic_bytes 17 (512 * 1024) in
-  let large = repeated "paengi-large-content\000" (2 * 1024 * 1024) in
+  let large = repeated "yeokcham-large-content\000" (2 * 1024 * 1024) in
   let high_entropy = deterministic_bytes 29 (2 * 1024 * 1024) in
   let gzip_like =
     "\031\139\008\000\000\000\000\000\000\003"
@@ -297,7 +297,7 @@ let fixtures () =
         ])
       inline_candidates
   in
-  [ ("empty", ""); ("tiny", "paengi\000tiny\255") ]
+  [ ("empty", ""); ("tiny", "yeokcham\000tiny\255") ]
   @ boundary_fixtures
   @ [
       ("medium", medium);

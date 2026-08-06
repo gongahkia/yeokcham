@@ -1,8 +1,8 @@
-module Capsule = Paengi_capsule
-module Id = Paengi_id
-module Scratch = Paengi_scratch
-module Snapshot = Paengi_snapshot
-module Store = Paengi_store
+module Capsule = Yeokcham_capsule
+module Id = Yeokcham_id
+module Scratch = Yeokcham_scratch
+module Snapshot = Yeokcham_snapshot
+module Store = Yeokcham_store
 
 let default_seed = 20_260_730
 

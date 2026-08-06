@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/gongahkia/paengi/blob/main/docs/experiments/schema/rust-typescript-retargeting-comparison-v1.schema.json",
-  "title": "Paengi Rust TypeScript retargeting comparison v1",
+  "$id": "https://github.com/gongahkia/yeokcham/blob/main/docs/experiments/schema/rust-typescript-retargeting-comparison-v1.schema.json",
+  "title": "Yeokcham Rust TypeScript retargeting comparison v1",
   "type": "object",
   "additionalProperties": false,
   "required": ["schema_version", "experiment_id", "timing_note", "comparison_boundary", "typescript_baseline", "rust_workload", "limitations"],

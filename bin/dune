@@ -1,32 +1,32 @@
 (executable
- (name paengi)
- (modules paengi)
+ (name yeokcham)
+ (modules yeokcham)
  (libraries
-  paengi_capsule
-  paengi_capsule_store
-  paengi_compaction
-  paengi_git
-  paengi_release
-  paengi_scratch
-  paengi_snapshot
-  paengi_store
-  paengi_validation
-  paengi_validation_retention
-  paengi_workspace
-  paengi_workspace_store
+  yeokcham_capsule
+  yeokcham_capsule_store
+  yeokcham_compaction
+  yeokcham_git
+  yeokcham_release
+  yeokcham_scratch
+  yeokcham_snapshot
+  yeokcham_store
+  yeokcham_validation
+  yeokcham_validation_retention
+  yeokcham_workspace
+  yeokcham_workspace_store
   unix))
 
 (executable
  (name workspace_base_v1)
  (modules workspace_base_v1)
- (libraries paengi_scratch paengi_snapshot paengi_store))
+ (libraries yeokcham_scratch yeokcham_snapshot yeokcham_store))
 
 (executable
  (name retargeting_demo_v1)
  (modules retargeting_demo_v1)
- (libraries paengi_semantic_retarget paengi_textual_patch))
+ (libraries yeokcham_semantic_retarget yeokcham_textual_patch))
 
 (executable
  (name release_evidence_v1)
  (modules release_evidence_v1)
- (libraries paengi_release paengi_store))
+ (libraries yeokcham_release yeokcham_store))

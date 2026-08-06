@@ -1,15 +1,15 @@
-module Capsule_store = Paengi_capsule_store
-module Encoding = Paengi_encoding
-module Envelope = Paengi_envelope
-module Golden = Paengi_testkit.Golden_fixture
-module Hash = Paengi_hash.Sha256
-module Id = Paengi_id
-module Release = Paengi_release
-module Scratch = Paengi_scratch
-module Snapshot = Paengi_snapshot
-module Store = Paengi_store
-module Validation = Paengi_validation
-module Workspace_store = Paengi_workspace_store
+module Capsule_store = Yeokcham_capsule_store
+module Encoding = Yeokcham_encoding
+module Envelope = Yeokcham_envelope
+module Golden = Yeokcham_testkit.Golden_fixture
+module Hash = Yeokcham_hash.Sha256
+module Id = Yeokcham_id
+module Release = Yeokcham_release
+module Scratch = Yeokcham_scratch
+module Snapshot = Yeokcham_snapshot
+module Store = Yeokcham_store
+module Validation = Yeokcham_validation
+module Workspace_store = Yeokcham_workspace_store
 
 let require_ok render = function
   | Ok value -> value
@@ -82,7 +82,7 @@ let write_file path bytes =
       Out_channel.output_string channel bytes)
 
 let with_root run =
-  let root = Filename.temp_file "paengi-release-test-" "" in
+  let root = Filename.temp_file "yeokcham-release-test-" "" in
   Unix.unlink root;
   Unix.mkdir root 0o700;
   let rec remove path =
@@ -233,7 +233,7 @@ let canonical_goldens_and_inverse_decoders () =
   let object_bytes, binding = release_fixture () in
   Alcotest.(check string)
     "release golden"
-    (golden "release-v1.peng.hex")
+    (golden "release-v1.yeok.hex")
     object_bytes;
   Alcotest.(check string)
     "release binding golden"
@@ -681,12 +681,12 @@ let parent_resolver_closure_and_cycles () =
   | Ok () -> Alcotest.fail "parent cycle accepted"
 
 let () =
-  match Sys.getenv_opt "PAENGI_PRINT_RELEASE_GOLDENS" with
+  match Sys.getenv_opt "YEOKCHAM_PRINT_RELEASE_GOLDENS" with
   | Some "1" ->
       let object_bytes, binding = release_fixture () in
       Printf.printf "%s\n%s\n" (hex object_bytes) (hex binding)
   | None | Some _ ->
-      Alcotest.run "paengi_release"
+      Alcotest.run "yeokcham_release"
         [
           ( "release",
             [

@@ -1,11 +1,11 @@
-module Encoding = Paengi_encoding
-module Envelope = Paengi_envelope
-module Event = Paengi_ref_event
-module Event_store = Paengi_ref_event_store
-module Exchange = Paengi_exchange
-module Exchange_store = Paengi_exchange_store
-module Golden = Paengi_testkit.Golden_fixture
-module Store = Paengi_store
+module Encoding = Yeokcham_encoding
+module Envelope = Yeokcham_envelope
+module Event = Yeokcham_ref_event
+module Event_store = Yeokcham_ref_event_store
+module Exchange = Yeokcham_exchange
+module Exchange_store = Yeokcham_exchange_store
+module Golden = Yeokcham_testkit.Golden_fixture
+module Store = Yeokcham_store
 
 type signer = {
   private_key : Mirage_crypto_ec.Ed25519.priv;
@@ -97,7 +97,7 @@ let trusted signer =
   [ { Event.key_id = signer.key_id; public_key = signer.public_key } ]
 
 let canonical_event_golden () =
-  let expected = require_golden "ref-event-v1.peng.hex" in
+  let expected = require_golden "ref-event-v1.yeok.hex" in
   let actual = Envelope.encode (envelope sample) in
   Alcotest.(check string) "event envelope golden" expected actual;
   let decoded_envelope =
@@ -163,7 +163,7 @@ let verification_rejects_bad_inputs () =
     (Result.is_error
        (Event.make
           ~unsigned:(Event.event_unsigned sample)
-          ~algorithm:"paengi-test-only-not-cryptographic-v1"
+          ~algorithm:"yeokcham-test-only-not-cryptographic-v1"
           ~signature:(Event.event_signature sample)));
   Alcotest.(check bool)
     "malformed payload rejects" true
@@ -222,7 +222,7 @@ let rec remove_tree path =
   with Unix.Unix_error (Unix.ENOENT, _, _) -> ()
 
 let with_repositories run =
-  let root = Filename.temp_file "paengi-ref-event-" "" in
+  let root = Filename.temp_file "yeokcham-ref-event-" "" in
   Unix.unlink root;
   Unix.mkdir root 0o700;
   let source_root = Filename.concat root "source" in

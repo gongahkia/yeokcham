@@ -14,7 +14,7 @@ removal:
 - reciprocal content or mode changes at one path; and
 - a move immediately followed by the same-entry reverse move.
 
-Before writing a generated replacement event, Paengi applies both the original
+Before writing a generated replacement event, Yeokcham applies both the original
 composed sequence and the reduced sequence to the prior retained snapshot. Each
 must reproduce the next retained snapshot byte-for-byte. A failed source or
 reduced replay is a structured compaction error with no generation publication.
@@ -23,7 +23,7 @@ Unmatched operations remain in their original order.
 ## Inspect and verify
 
 ```text
-opam exec -- dune exec bin/paengi.exe -- compact --dry-run --explain
+opam exec -- dune exec bin/yeokcham.exe -- compact --dry-run --explain
 opam exec -- dune runtest test/test_compaction.exe
 opam exec -- dune runtest test/compaction_property_test.exe
 make property-test PROPERTY_TEST_SEED=17

@@ -2,8 +2,8 @@
 
 ## M3-D01 scope
 
-`paengi compact --storage-budget-bytes N` bounds deterministic retention
-selection. It does not enforce a total `.paengi/` directory size or delete
+`yeokcham compact --storage-budget-bytes N` bounds deterministic retention
+selection. It does not enforce a total `.yeokcham/` directory size or delete
 shared snapshot/content objects; M3 lacks the complete cross-domain root mark
 needed to make that safe.
 
@@ -30,7 +30,7 @@ repository bytes fit `N`.
 ## Inspect and verify
 
 ```text
-opam exec -- dune exec bin/paengi.exe -- compact --dry-run --explain \
+opam exec -- dune exec bin/yeokcham.exe -- compact --dry-run --explain \
   --storage-budget-bytes 1048576
 opam exec -- dune runtest test/test_compaction.exe
 opam exec -- dune runtest test/compaction_property_test.exe

@@ -1,4 +1,4 @@
-module Id = Paengi_id
+module Id = Yeokcham_id
 
 let kinds : (string * (module Id.S)) list =
   [
@@ -21,7 +21,7 @@ let require_ok error_to_string = function
   | Error error -> Alcotest.fail (error_to_string error)
 
 let check_kind (name, (module Kind : Id.S)) =
-  let raw = "\000\001\127\128\254\255paengi" in
+  let raw = "\000\001\127\128\254\255yeokcham" in
   let identity = require_ok Id.parse_error_to_string (Kind.of_bytes raw) in
   Alcotest.(check string)
     (name ^ " byte round trip")

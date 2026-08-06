@@ -1,0 +1,9 @@
+(library
+ (name yeokcham_compaction_benchmark)
+ (libraries
+  yeokcham_compaction
+  yeokcham_hash
+  yeokcham_scratch
+  yeokcham_snapshot
+  yeokcham_store
+  unix))

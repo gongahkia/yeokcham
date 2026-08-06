@@ -8,24 +8,24 @@
  (modules test_typescript_adapter)
  (libraries
   alcotest
-  paengi_snapshot
-  paengi_store
-  paengi_textual_patch
-  paengi_typescript_adapter
+  yeokcham_snapshot
+  yeokcham_store
+  yeokcham_textual_patch
+  yeokcham_typescript_adapter
   unix)
  (deps
   (source_tree fixtures/semantic-adapter)
-  (source_tree ../tools/paengi-typescript-adapter)))
+  (source_tree ../tools/yeokcham-typescript-adapter)))
 
 (test
  (name test_rust_adapter)
  (modules test_rust_adapter)
  (libraries
   alcotest
-  paengi_rust_adapter
-  paengi_snapshot
-  paengi_store
-  paengi_textual_patch
+  yeokcham_rust_adapter
+  yeokcham_snapshot
+  yeokcham_store
+  yeokcham_textual_patch
   unix)
  (deps
   (source_tree fixtures/rust-adapter)))
@@ -35,27 +35,27 @@
  (modules test_rust_retarget_fixtures)
  (libraries
   alcotest
-  paengi_rust_adapter
-  paengi_rust_fixtures
-  paengi_textual_patch))
+  yeokcham_rust_adapter
+  yeokcham_rust_fixtures
+  yeokcham_textual_patch))
 
 (test
  (name test_git)
  (modules test_git)
  (libraries
   alcotest
-  paengi_capsule_store
-  paengi_encoding
-  paengi_envelope
-  paengi_git
-  paengi_id
-  paengi_release
-  paengi_scratch
-  paengi_snapshot
-  paengi_store
-  paengi_testkit
-  paengi_validation
-  paengi_workspace_store
+  yeokcham_capsule_store
+  yeokcham_encoding
+  yeokcham_envelope
+  yeokcham_git
+  yeokcham_id
+  yeokcham_release
+  yeokcham_scratch
+  yeokcham_snapshot
+  yeokcham_store
+  yeokcham_testkit
+  yeokcham_validation
+  yeokcham_workspace_store
   unix)
  (deps
   (source_tree golden)))
@@ -67,35 +67,35 @@
   alcotest
   qcheck-core
   qcheck-alcotest
-  paengi_capsule_store
-  paengi_git
-  paengi_id
-  paengi_release
-  paengi_scratch
-  paengi_snapshot
-  paengi_store
-  paengi_workspace_store
+  yeokcham_capsule_store
+  yeokcham_git
+  yeokcham_id
+  yeokcham_release
+  yeokcham_scratch
+  yeokcham_snapshot
+  yeokcham_store
+  yeokcham_workspace_store
   unix))
 
 (test
  (name test_fixture)
  (modules test_fixture)
- (libraries alcotest qcheck-core qcheck-alcotest paengi_testkit unix))
+ (libraries alcotest qcheck-core qcheck-alcotest yeokcham_testkit unix))
 
 (test
  (name test_id)
  (modules test_id)
- (libraries alcotest qcheck-core qcheck-alcotest paengi_id))
+ (libraries alcotest qcheck-core qcheck-alcotest yeokcham_id))
 
 (test
  (name test_hash)
  (modules test_hash)
- (libraries alcotest qcheck-core qcheck-alcotest paengi_hash))
+ (libraries alcotest qcheck-core qcheck-alcotest yeokcham_hash))
 
 (test
  (name test_sha256)
  (modules test_sha256)
- (libraries alcotest qcheck-core qcheck-alcotest paengi_hash))
+ (libraries alcotest qcheck-core qcheck-alcotest yeokcham_hash))
 
 (test
  (name test_encoding)
@@ -104,8 +104,8 @@
   alcotest
   qcheck-core
   qcheck-alcotest
-  paengi_encoding
-  paengi_testkit)
+  yeokcham_encoding
+  yeokcham_testkit)
  (deps
   (source_tree golden)))
 
@@ -116,10 +116,10 @@
   alcotest
   qcheck-core
   qcheck-alcotest
-  paengi_encoding
-  paengi_envelope
-  paengi_hash
-  paengi_testkit)
+  yeokcham_encoding
+  yeokcham_envelope
+  yeokcham_hash
+  yeokcham_testkit)
  (deps
   (source_tree golden)))
 
@@ -128,29 +128,29 @@
  (modules test_model_encoding)
  (libraries
   alcotest
-  paengi_encoding
-  paengi_envelope
-  paengi_model
-  paengi_testkit)
+  yeokcham_encoding
+  yeokcham_envelope
+  yeokcham_model
+  yeokcham_testkit)
  (deps
   (source_tree golden)))
 
 (test
  (name test_store)
  (modules test_store)
- (libraries alcotest paengi_encoding paengi_envelope paengi_store unix))
+ (libraries alcotest yeokcham_encoding yeokcham_envelope yeokcham_store unix))
 
 (test
  (name test_exchange)
  (modules test_exchange)
  (libraries
   alcotest
-  paengi_encoding
-  paengi_envelope
-  paengi_exchange
-  paengi_exchange_store
-  paengi_store
-  paengi_testkit
+  yeokcham_encoding
+  yeokcham_envelope
+  yeokcham_exchange
+  yeokcham_exchange_store
+  yeokcham_store
+  yeokcham_testkit
   unix)
  (deps
   (source_tree golden)))
@@ -161,14 +161,14 @@
  (libraries
   alcotest
   mirage-crypto-ec
-  paengi_encoding
-  paengi_envelope
-  paengi_exchange
-  paengi_exchange_store
-  paengi_ref_event
-  paengi_ref_event_store
-  paengi_store
-  paengi_testkit
+  yeokcham_encoding
+  yeokcham_envelope
+  yeokcham_exchange
+  yeokcham_exchange_store
+  yeokcham_ref_event
+  yeokcham_ref_event_store
+  yeokcham_store
+  yeokcham_testkit
   unix)
  (deps
   (source_tree golden)))
@@ -179,15 +179,15 @@
  (libraries
   alcotest
   mirage-crypto-ec
-  paengi_device
-  paengi_device_store
-  paengi_encoding
-  paengi_envelope
-  paengi_exchange
-  paengi_exchange_store
-  paengi_ref_event
-  paengi_store
-  paengi_testkit
+  yeokcham_device
+  yeokcham_device_store
+  yeokcham_encoding
+  yeokcham_envelope
+  yeokcham_exchange
+  yeokcham_exchange_store
+  yeokcham_ref_event
+  yeokcham_store
+  yeokcham_testkit
   unix)
  (deps
   (source_tree golden)))
@@ -198,16 +198,16 @@
  (libraries
   alcotest
   mirage-crypto-ec
-  paengi_divergence
-  paengi_divergence_store
-  paengi_encoding
-  paengi_envelope
-  paengi_exchange
-  paengi_exchange_store
-  paengi_ref_event
-  paengi_ref_event_store
-  paengi_store
-  paengi_testkit
+  yeokcham_divergence
+  yeokcham_divergence_store
+  yeokcham_encoding
+  yeokcham_envelope
+  yeokcham_exchange
+  yeokcham_exchange_store
+  yeokcham_ref_event
+  yeokcham_ref_event_store
+  yeokcham_store
+  yeokcham_testkit
   unix)
  (deps
   (source_tree golden)))
@@ -218,13 +218,13 @@
  (libraries
   alcotest
   mirage-crypto
-  paengi_bundle
-  paengi_bundle_store
-  paengi_divergence_store
-  paengi_encoding
-  paengi_envelope
-  paengi_store
-  paengi_testkit
+  yeokcham_bundle
+  yeokcham_bundle_store
+  yeokcham_divergence_store
+  yeokcham_encoding
+  yeokcham_envelope
+  yeokcham_store
+  yeokcham_testkit
   unix)
  (deps
   (source_tree golden)))
@@ -234,12 +234,12 @@
  (modules test_bundle_directory)
  (libraries
   alcotest
-  paengi_bundle
-  paengi_bundle_directory
-  paengi_divergence_store
-  paengi_encoding
-  paengi_envelope
-  paengi_store
+  yeokcham_bundle
+  yeokcham_bundle_directory
+  yeokcham_divergence_store
+  yeokcham_encoding
+  yeokcham_envelope
+  yeokcham_store
   unix)
  (deps
   (source_tree golden)))
@@ -249,13 +249,13 @@
  (modules test_decentralised_sync)
  (libraries
   alcotest
-  paengi_bundle
-  paengi_bundle_directory
-  paengi_encoding
-  paengi_envelope
-  paengi_exchange
-  paengi_exchange_store
-  paengi_store
+  yeokcham_bundle
+  yeokcham_bundle_directory
+  yeokcham_encoding
+  yeokcham_envelope
+  yeokcham_exchange
+  yeokcham_exchange_store
+  yeokcham_store
   unix))
 
 (test
@@ -263,7 +263,7 @@
  (modules test_demo_fixture)
  (libraries alcotest unix)
  (deps
-  ../bin/paengi.exe
+  ../bin/yeokcham.exe
   (source_tree ../tools/demo)))
 
 (test
@@ -271,7 +271,7 @@
  (modules test_demo_recovery)
  (libraries alcotest unix)
  (deps
-  ../bin/paengi.exe
+  ../bin/yeokcham.exe
   (source_tree ../tools/demo)))
 
 (test
@@ -279,7 +279,7 @@
  (modules test_demo_compaction)
  (libraries alcotest unix)
  (deps
-  ../bin/paengi.exe
+  ../bin/yeokcham.exe
   (source_tree ../tools/demo)))
 
 (test
@@ -287,7 +287,7 @@
  (modules test_demo_capsule)
  (libraries alcotest unix)
  (deps
-  ../bin/paengi.exe
+  ../bin/yeokcham.exe
   (source_tree ../tools/demo)))
 
 (test
@@ -295,7 +295,7 @@
  (modules test_demo_workspace)
  (libraries alcotest unix)
  (deps
-  ../bin/paengi.exe
+  ../bin/yeokcham.exe
   ../bin/workspace_base_v1.exe
   (source_tree ../tools/demo)))
 
@@ -304,7 +304,7 @@
  (modules test_demo_conflict)
  (libraries alcotest unix)
  (deps
-  ../bin/paengi.exe
+  ../bin/yeokcham.exe
   ../bin/workspace_base_v1.exe
   (source_tree ../tools/demo)))
 
@@ -321,7 +321,7 @@
  (modules test_demo_release)
  (libraries alcotest unix)
  (deps
-  ../bin/paengi.exe
+  ../bin/yeokcham.exe
   ../bin/release_evidence_v1.exe
   ../bin/workspace_base_v1.exe
   (source_tree ../tools/demo)))
@@ -331,7 +331,7 @@
  (modules test_demo_git_export)
  (libraries alcotest unix)
  (deps
-  ../bin/paengi.exe
+  ../bin/yeokcham.exe
   ../bin/release_evidence_v1.exe
   ../bin/workspace_base_v1.exe
   (source_tree ../tools/demo)))
@@ -341,11 +341,11 @@
  (modules test_missing_object_exchange)
  (libraries
   alcotest
-  paengi_encoding
-  paengi_envelope
-  paengi_exchange
-  paengi_exchange_store
-  paengi_store
+  yeokcham_encoding
+  yeokcham_envelope
+  yeokcham_exchange
+  yeokcham_exchange_store
+  yeokcham_store
   unix))
 
 (test
@@ -354,15 +354,15 @@
  (libraries
   alcotest
   mirage-crypto-ec
-  paengi_divergence
-  paengi_divergence_store
-  paengi_encoding
-  paengi_envelope
-  paengi_exchange
-  paengi_exchange_store
-  paengi_ref_event
-  paengi_ref_event_store
-  paengi_store
+  yeokcham_divergence
+  yeokcham_divergence_store
+  yeokcham_encoding
+  yeokcham_envelope
+  yeokcham_exchange
+  yeokcham_exchange_store
+  yeokcham_ref_event
+  yeokcham_ref_event_store
+  yeokcham_store
   unix))
 
 (test
@@ -371,17 +371,17 @@
  (libraries
   alcotest
   mirage-crypto-ec
-  paengi_device
-  paengi_device_store
-  paengi_divergence
-  paengi_divergence_store
-  paengi_encoding
-  paengi_envelope
-  paengi_exchange
-  paengi_exchange_store
-  paengi_ref_event
-  paengi_ref_event_store
-  paengi_store
+  yeokcham_device
+  yeokcham_device_store
+  yeokcham_divergence
+  yeokcham_divergence_store
+  yeokcham_encoding
+  yeokcham_envelope
+  yeokcham_exchange
+  yeokcham_exchange_store
+  yeokcham_ref_event
+  yeokcham_ref_event_store
+  yeokcham_store
   unix))
 
 (test
@@ -389,11 +389,11 @@
  (modules test_http_exchange)
  (libraries
   alcotest
-  paengi_encoding
-  paengi_envelope
-  paengi_exchange
-  paengi_http_exchange
-  paengi_store
+  yeokcham_encoding
+  yeokcham_envelope
+  yeokcham_exchange
+  yeokcham_http_exchange
+  yeokcham_store
   unix))
 
 (test
@@ -401,12 +401,12 @@
  (modules test_persisted_snapshot)
  (libraries
   alcotest
-  paengi_encoding
-  paengi_envelope
-  paengi_chunking
-  paengi_snapshot
-  paengi_store
-  paengi_testkit
+  yeokcham_encoding
+  yeokcham_envelope
+  yeokcham_chunking
+  yeokcham_snapshot
+  yeokcham_store
+  yeokcham_testkit
   unix)
  (deps
   (source_tree golden)))
@@ -416,10 +416,10 @@
  (modules test_materialize)
  (libraries
   alcotest
-  paengi_encoding
-  paengi_envelope
-  paengi_snapshot
-  paengi_store
+  yeokcham_encoding
+  yeokcham_envelope
+  yeokcham_snapshot
+  yeokcham_store
   unix))
 
 (test
@@ -427,12 +427,12 @@
  (modules test_scratch)
  (libraries
   alcotest
-  paengi_encoding
-  paengi_envelope
-  paengi_scratch
-  paengi_snapshot
-  paengi_store
-  paengi_testkit
+  yeokcham_encoding
+  yeokcham_envelope
+  yeokcham_scratch
+  yeokcham_snapshot
+  yeokcham_store
+  yeokcham_testkit
   unix)
  (deps
   (source_tree golden)))
@@ -440,28 +440,28 @@
 (test
  (name test_restore)
  (modules test_restore)
- (libraries alcotest paengi_scratch paengi_snapshot paengi_store unix))
+ (libraries alcotest yeokcham_scratch yeokcham_snapshot yeokcham_store unix))
 
 (test
  (name test_compaction)
  (modules test_compaction)
  (libraries
   alcotest
-  paengi_compaction
-  paengi_scratch
-  paengi_snapshot
-  paengi_store
+  yeokcham_compaction
+  yeokcham_scratch
+  yeokcham_snapshot
+  yeokcham_store
   unix))
 
 (executable
  (name compaction_retention_benchmark)
  (modules compaction_retention_benchmark)
- (libraries paengi_compaction_benchmark))
+ (libraries yeokcham_compaction_benchmark))
 
 (test
  (name test_compaction_retention_benchmark)
  (modules test_compaction_retention_benchmark)
- (libraries alcotest paengi_compaction_benchmark))
+ (libraries alcotest yeokcham_compaction_benchmark))
 
 (test
  (name test_compaction_retention_results)
@@ -478,18 +478,18 @@
 (test
  (name compaction_retention_benchmark_property_test)
  (modules compaction_retention_benchmark_property_test)
- (libraries alcotest qcheck-core qcheck-alcotest paengi_compaction_benchmark))
+ (libraries alcotest qcheck-core qcheck-alcotest yeokcham_compaction_benchmark))
 
 (test
  (name test_generation)
  (modules test_generation)
  (libraries
   alcotest
-  paengi_envelope
-  paengi_scratch
-  paengi_snapshot
-  paengi_store
-  paengi_testkit
+  yeokcham_envelope
+  yeokcham_scratch
+  yeokcham_snapshot
+  yeokcham_store
+  yeokcham_testkit
   unix)
  (deps
   (source_tree golden)))
@@ -499,38 +499,38 @@
  (modules test_capsule)
  (libraries
   alcotest
-  paengi_capsule
-  paengi_id
-  paengi_scratch
-  paengi_snapshot
-  paengi_store))
+  yeokcham_capsule
+  yeokcham_id
+  yeokcham_scratch
+  yeokcham_snapshot
+  yeokcham_store))
 
 (test
  (name test_workspace)
  (modules test_workspace)
  (libraries
   alcotest
-  paengi_capsule
-  paengi_id
-  paengi_scratch
-  paengi_snapshot
-  paengi_store
-  paengi_workspace))
+  yeokcham_capsule
+  yeokcham_id
+  yeokcham_scratch
+  yeokcham_snapshot
+  yeokcham_store
+  yeokcham_workspace))
 
 (test
  (name test_workspace_store)
  (modules test_workspace_store)
  (libraries
   alcotest
-  paengi_capsule
-  paengi_capsule_store
-  paengi_id
-  paengi_scratch
-  paengi_snapshot
-  paengi_store
-  paengi_testkit
-  paengi_workspace
-  paengi_workspace_store
+  yeokcham_capsule
+  yeokcham_capsule_store
+  yeokcham_id
+  yeokcham_scratch
+  yeokcham_snapshot
+  yeokcham_store
+  yeokcham_testkit
+  yeokcham_workspace
+  yeokcham_workspace_store
   unix)
  (deps
   (source_tree golden)))
@@ -540,14 +540,14 @@
  (modules test_validation)
  (libraries
   alcotest
-  paengi_encoding
-  paengi_envelope
-  paengi_hash
-  paengi_scratch
-  paengi_snapshot
-  paengi_store
-  paengi_testkit
-  paengi_validation
+  yeokcham_encoding
+  yeokcham_envelope
+  yeokcham_hash
+  yeokcham_scratch
+  yeokcham_snapshot
+  yeokcham_store
+  yeokcham_testkit
+  yeokcham_validation
   unix)
  (deps
   (source_tree golden)))
@@ -557,12 +557,12 @@
  (modules test_validation_retention)
  (libraries
   alcotest
-  paengi_compaction
-  paengi_scratch
-  paengi_snapshot
-  paengi_store
-  paengi_validation
-  paengi_validation_retention
+  yeokcham_compaction
+  yeokcham_scratch
+  yeokcham_snapshot
+  yeokcham_store
+  yeokcham_validation
+  yeokcham_validation_retention
   unix))
 
 (test
@@ -572,31 +572,31 @@
   alcotest
   qcheck-core
   qcheck-alcotest
-  paengi_scratch
-  paengi_snapshot
-  paengi_store
-  paengi_validation
-  paengi_validation_retention))
+  yeokcham_scratch
+  yeokcham_snapshot
+  yeokcham_store
+  yeokcham_validation
+  yeokcham_validation_retention))
 
 (test
  (name test_release)
  (modules test_release)
  (libraries
   alcotest
-  paengi_capsule
-  paengi_capsule_store
-  paengi_encoding
-  paengi_envelope
-  paengi_hash
-  paengi_id
-  paengi_release
-  paengi_scratch
-  paengi_snapshot
-  paengi_store
-  paengi_testkit
-  paengi_validation
-  paengi_workspace
-  paengi_workspace_store
+  yeokcham_capsule
+  yeokcham_capsule_store
+  yeokcham_encoding
+  yeokcham_envelope
+  yeokcham_hash
+  yeokcham_id
+  yeokcham_release
+  yeokcham_scratch
+  yeokcham_snapshot
+  yeokcham_store
+  yeokcham_testkit
+  yeokcham_validation
+  yeokcham_workspace
+  yeokcham_workspace_store
   unix)
  (deps
   (source_tree golden)))
@@ -606,12 +606,12 @@
  (modules test_attestation)
  (libraries
   alcotest
-  paengi_encoding
-  paengi_envelope
-  paengi_id
-  paengi_release
-  paengi_store
-  paengi_testkit
+  yeokcham_encoding
+  yeokcham_envelope
+  yeokcham_id
+  yeokcham_release
+  yeokcham_store
+  yeokcham_testkit
   unix)
  (deps
   (source_tree golden)))
@@ -619,63 +619,63 @@
 (test
  (name test_semantic)
  (modules test_semantic)
- (libraries alcotest paengi_semantic)
+ (libraries alcotest yeokcham_semantic)
  (deps
   (source_tree fixtures/semantic)))
 
 (test
  (name test_textual_patch)
  (modules test_textual_patch)
- (libraries alcotest paengi_textual_patch))
+ (libraries alcotest yeokcham_textual_patch))
 
 (test
  (name test_semantic_retarget)
  (modules test_semantic_retarget)
- (libraries alcotest paengi_semantic_retarget))
+ (libraries alcotest yeokcham_semantic_retarget))
 
 (test
  (name test_semantic_fixture_dataset)
  (modules test_semantic_fixture_dataset)
  (libraries
   alcotest
-  paengi_semantic_fixtures
-  paengi_semantic_retarget
-  paengi_textual_patch))
+  yeokcham_semantic_fixtures
+  yeokcham_semantic_retarget
+  yeokcham_textual_patch))
 
 (executable
  (name semantic_retargeting_experiment)
  (modules semantic_retargeting_experiment)
- (libraries paengi_semantic_experiment))
+ (libraries yeokcham_semantic_experiment))
 
 (executable
  (name rust_typescript_retargeting_comparison)
  (modules rust_typescript_retargeting_comparison)
- (libraries paengi_rust_retarget_comparison))
+ (libraries yeokcham_rust_retarget_comparison))
 
 (test
  (name test_rust_retarget_comparison)
  (modules test_rust_retarget_comparison)
- (libraries alcotest paengi_rust_retarget_comparison))
+ (libraries alcotest yeokcham_rust_retarget_comparison))
 
 (test
  (name test_semantic_experiment)
  (modules test_semantic_experiment)
- (libraries alcotest paengi_semantic_experiment))
+ (libraries alcotest yeokcham_semantic_experiment))
 
 (test
  (name semantic_property_test)
  (modules semantic_property_test)
- (libraries alcotest qcheck-core qcheck-alcotest paengi_semantic))
+ (libraries alcotest qcheck-core qcheck-alcotest yeokcham_semantic))
 
 (test
  (name semantic_retarget_property_test)
  (modules semantic_retarget_property_test)
- (libraries alcotest qcheck-core qcheck-alcotest paengi_semantic_retarget))
+ (libraries alcotest qcheck-core qcheck-alcotest yeokcham_semantic_retarget))
 
 (test
  (name rust_adapter_property_test)
  (modules rust_adapter_property_test)
- (libraries alcotest qcheck-core qcheck-alcotest paengi_rust_adapter))
+ (libraries alcotest qcheck-core qcheck-alcotest yeokcham_rust_adapter))
 
 (test
  (name rust_retarget_fixture_property_test)
@@ -684,24 +684,24 @@
   alcotest
   qcheck-core
   qcheck-alcotest
-  paengi_rust_adapter
-  paengi_rust_fixtures
-  paengi_textual_patch))
+  yeokcham_rust_adapter
+  yeokcham_rust_fixtures
+  yeokcham_textual_patch))
 
 (test
  (name test_capsule_store)
  (modules test_capsule_store)
  (libraries
   alcotest
-  paengi_capsule
-  paengi_capsule_store
-  paengi_encoding
-  paengi_envelope
-  paengi_id
-  paengi_scratch
-  paengi_snapshot
-  paengi_store
-  paengi_testkit
+  yeokcham_capsule
+  yeokcham_capsule_store
+  yeokcham_encoding
+  yeokcham_envelope
+  yeokcham_id
+  yeokcham_scratch
+  yeokcham_snapshot
+  yeokcham_store
+  yeokcham_testkit
   unix)
  (deps
   (source_tree golden)))
@@ -713,9 +713,9 @@
   alcotest
   qcheck-core
   qcheck-alcotest
-  paengi_scratch
-  paengi_snapshot
-  paengi_store
+  yeokcham_scratch
+  yeokcham_snapshot
+  yeokcham_store
   unix))
 
 (test
@@ -725,10 +725,10 @@
   alcotest
   qcheck-core
   qcheck-alcotest
-  paengi_compaction
-  paengi_scratch
-  paengi_snapshot
-  paengi_store
+  yeokcham_compaction
+  yeokcham_scratch
+  yeokcham_snapshot
+  yeokcham_store
   unix))
 
 (test
@@ -738,11 +738,11 @@
   alcotest
   qcheck-core
   qcheck-alcotest
-  paengi_capsule
-  paengi_id
-  paengi_scratch
-  paengi_snapshot
-  paengi_store))
+  yeokcham_capsule
+  yeokcham_id
+  yeokcham_scratch
+  yeokcham_snapshot
+  yeokcham_store))
 
 (test
  (name capsule_durable_property_test)
@@ -751,12 +751,12 @@
   alcotest
   qcheck-core
   qcheck-alcotest
-  paengi_capsule
-  paengi_capsule_store
-  paengi_id
-  paengi_scratch
-  paengi_snapshot
-  paengi_store
+  yeokcham_capsule
+  yeokcham_capsule_store
+  yeokcham_id
+  yeokcham_scratch
+  yeokcham_snapshot
+  yeokcham_store
   unix))
 
 (test
@@ -766,14 +766,14 @@
   alcotest
   qcheck-core
   qcheck-alcotest
-  paengi_capsule
-  paengi_capsule_store
-  paengi_id
-  paengi_scratch
-  paengi_snapshot
-  paengi_store
-  paengi_workspace
-  paengi_workspace_store
+  yeokcham_capsule
+  yeokcham_capsule_store
+  yeokcham_id
+  yeokcham_scratch
+  yeokcham_snapshot
+  yeokcham_store
+  yeokcham_workspace
+  yeokcham_workspace_store
   unix))
 
 (test
@@ -783,17 +783,17 @@
   alcotest
   qcheck-core
   qcheck-alcotest
-  paengi_capsule
-  paengi_capsule_store
-  paengi_hash
-  paengi_id
-  paengi_release
-  paengi_scratch
-  paengi_snapshot
-  paengi_store
-  paengi_validation
-  paengi_workspace
-  paengi_workspace_store
+  yeokcham_capsule
+  yeokcham_capsule_store
+  yeokcham_hash
+  yeokcham_id
+  yeokcham_release
+  yeokcham_scratch
+  yeokcham_snapshot
+  yeokcham_store
+  yeokcham_validation
+  yeokcham_workspace
+  yeokcham_workspace_store
   unix))
 
 (test
@@ -803,15 +803,15 @@
   alcotest
   qcheck-core
   qcheck-alcotest
-  paengi_encoding
-  paengi_envelope)
+  yeokcham_encoding
+  yeokcham_envelope)
  (deps
   (source_tree fixtures/encoding)))
 
 (test
  (name model_property_test)
  (modules model_property_test)
- (libraries alcotest qcheck-core qcheck-alcotest paengi_id paengi_model))
+ (libraries alcotest qcheck-core qcheck-alcotest yeokcham_id yeokcham_model))
 
 (test
  (name store_property_test)
@@ -820,9 +820,9 @@
   alcotest
   qcheck-core
   qcheck-alcotest
-  paengi_encoding
-  paengi_envelope
-  paengi_store
+  yeokcham_encoding
+  yeokcham_envelope
+  yeokcham_store
   unix))
 
 (test
@@ -832,11 +832,11 @@
   alcotest
   qcheck-core
   qcheck-alcotest
-  paengi_encoding
-  paengi_envelope
-  paengi_exchange
-  paengi_exchange_store
-  paengi_store
+  yeokcham_encoding
+  yeokcham_envelope
+  yeokcham_exchange
+  yeokcham_exchange_store
+  yeokcham_store
   unix))
 
 (test
@@ -847,10 +847,10 @@
   mirage-crypto-ec
   qcheck-core
   qcheck-alcotest
-  paengi_encoding
-  paengi_envelope
-  paengi_ref_event
-  paengi_store))
+  yeokcham_encoding
+  yeokcham_envelope
+  yeokcham_ref_event
+  yeokcham_store))
 
 (test
  (name device_property_test)
@@ -860,11 +860,11 @@
   mirage-crypto-ec
   qcheck-core
   qcheck-alcotest
-  paengi_device
-  paengi_device_store
-  paengi_encoding
-  paengi_ref_event
-  paengi_store
+  yeokcham_device
+  yeokcham_device_store
+  yeokcham_encoding
+  yeokcham_ref_event
+  yeokcham_store
   unix))
 
 (test
@@ -875,13 +875,13 @@
   mirage-crypto-ec
   qcheck-core
   qcheck-alcotest
-  paengi_divergence
-  paengi_divergence_store
-  paengi_encoding
-  paengi_envelope
-  paengi_ref_event
-  paengi_ref_event_store
-  paengi_store
+  yeokcham_divergence
+  yeokcham_divergence_store
+  yeokcham_encoding
+  yeokcham_envelope
+  yeokcham_ref_event
+  yeokcham_ref_event_store
+  yeokcham_store
   unix))
 
 (test
@@ -891,11 +891,11 @@
   alcotest
   qcheck-core
   qcheck-alcotest
-  paengi_bundle
-  paengi_bundle_store
-  paengi_encoding
-  paengi_envelope
-  paengi_store
+  yeokcham_bundle
+  yeokcham_bundle_store
+  yeokcham_encoding
+  yeokcham_envelope
+  yeokcham_store
   unix))
 
 (test
@@ -917,11 +917,11 @@
   alcotest
   qcheck-core
   qcheck-alcotest
-  paengi_bundle
-  paengi_bundle_directory
-  paengi_encoding
-  paengi_envelope
-  paengi_store
+  yeokcham_bundle
+  yeokcham_bundle_directory
+  yeokcham_encoding
+  yeokcham_envelope
+  yeokcham_store
   unix))
 
 (test
@@ -931,11 +931,11 @@
   alcotest
   qcheck-core
   qcheck-alcotest
-  paengi_encoding
-  paengi_envelope
-  paengi_exchange
-  paengi_exchange_store
-  paengi_store
+  yeokcham_encoding
+  yeokcham_envelope
+  yeokcham_exchange
+  yeokcham_exchange_store
+  yeokcham_store
   unix))
 
 (test
@@ -945,11 +945,11 @@
   alcotest
   qcheck-core
   qcheck-alcotest
-  paengi_encoding
-  paengi_envelope
-  paengi_exchange
-  paengi_http_exchange
-  paengi_store
+  yeokcham_encoding
+  yeokcham_envelope
+  yeokcham_exchange
+  yeokcham_http_exchange
+  yeokcham_store
   unix))
 
 (test
@@ -959,8 +959,8 @@
   alcotest
   qcheck-core
   qcheck-alcotest
-  paengi_snapshot
-  paengi_store
+  yeokcham_snapshot
+  yeokcham_store
   unix))
 
 (rule

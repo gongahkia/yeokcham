@@ -4,7 +4,7 @@
 
 This is a language-separated research report. It preserves the checked
 `semantic-retargeting-v1` TypeScript baseline by reference and reports the
-independent six-case `paengi_rust_fixtures` workload. The workloads have
+independent six-case `yeokcham_rust_fixtures` workload. The workloads have
 different languages, datasets, adapters, and capabilities. They are not a
 benchmark, a success-rate comparison, or a cross-language generalisation.
 
@@ -20,7 +20,7 @@ combined with Rust data here.
 ## Rust workload
 
 The Rust dataset has six bounded virtual-source-map fixtures. Five produce the
-checked exact result through `paengi_textual_patch`; one duplicate declaration
+checked exact result through `yeokcham_textual_patch`; one duplicate declaration
 returns a safe structured conflict. Two of the five exact textual cases require
 Rust fallback evidence: one macro-heavy map and one parser-damaged map.
 
@@ -39,5 +39,5 @@ python3 -m jsonschema \
   docs/experiments/schema/rust-typescript-retargeting-comparison-v1.schema.json
 ```
 
-The JSON result is a versioned documentation artifact. It is not a Paengi
+The JSON result is a versioned documentation artifact. It is not a Yeokcham
 object, persistent semantic sidecar, model result, or correctness gate.

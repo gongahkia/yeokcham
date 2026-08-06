@@ -1,8 +1,0 @@
-(library
- (name paengi_bundle)
- (libraries
-  mirage-crypto
-  paengi_encoding
-  paengi_envelope
-  paengi_hash
-  paengi_store))

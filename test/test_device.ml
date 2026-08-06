@@ -1,12 +1,12 @@
-module Device = Paengi_device
-module Device_store = Paengi_device_store
-module Encoding = Paengi_encoding
-module Envelope = Paengi_envelope
-module Event = Paengi_ref_event
-module Exchange = Paengi_exchange
-module Exchange_store = Paengi_exchange_store
-module Golden = Paengi_testkit.Golden_fixture
-module Store = Paengi_store
+module Device = Yeokcham_device
+module Device_store = Yeokcham_device_store
+module Encoding = Yeokcham_encoding
+module Envelope = Yeokcham_envelope
+module Event = Yeokcham_ref_event
+module Exchange = Yeokcham_exchange
+module Exchange_store = Yeokcham_exchange_store
+module Golden = Yeokcham_testkit.Golden_fixture
+module Store = Yeokcham_store
 
 type signer = {
   identity : Device.t;
@@ -90,7 +90,7 @@ let require_golden name =
   Golden.read_lower_hex_file (Filename.concat "golden" name) |> require Fun.id
 
 let canonical_identity_golden () =
-  let expected = require_golden "device-identity-v1.peng.hex" in
+  let expected = require_golden "device-identity-v1.yeok.hex" in
   let envelope = Device.identity_envelope signer_a.identity |> require_device in
   let actual = Envelope.encode envelope in
   Alcotest.(check string) "identity envelope golden" expected actual;
@@ -235,7 +235,7 @@ let rec remove_tree path =
   with Unix.Unix_error (Unix.ENOENT, _, _) -> ()
 
 let with_repositories run =
-  let root = Filename.temp_file "paengi-device-" "" in
+  let root = Filename.temp_file "yeokcham-device-" "" in
   Unix.unlink root;
   Unix.mkdir root 0o700;
   let source_root = Filename.concat root "source" in

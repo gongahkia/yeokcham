@@ -1,0 +1,3 @@
+(library
+ (name yeokcham_hash)
+ (libraries digestif.ocaml digestif))

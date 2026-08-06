@@ -1,0 +1,8 @@
+(library
+ (name yeokcham_http_exchange)
+ (libraries
+  yeokcham_envelope
+  yeokcham_exchange
+  yeokcham_exchange_store
+  yeokcham_store
+  unix))

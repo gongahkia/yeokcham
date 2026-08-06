@@ -1,5 +1,5 @@
-module Encoding = Paengi_encoding
-module Golden = Paengi_testkit.Golden_fixture
+module Encoding = Yeokcham_encoding
+module Golden = Yeokcham_testkit.Golden_fixture
 
 let raw_of_hex encoded =
   let nibble = function

@@ -47,7 +47,7 @@ let environment entries =
     (List.map (fun (key, value) -> key ^ "=" ^ value) entries @ inherited)
 
 let run ~environment program arguments =
-  let output = Filename.temp_file "paengi-demo-git-export-output-" "" in
+  let output = Filename.temp_file "yeokcham-demo-git-export-output-" "" in
   Fun.protect
     ~finally:(fun () -> remove_tree output)
     (fun () ->
@@ -79,7 +79,7 @@ let contains text needle =
   loop 0
 
 let exported_release_is_fsck_clean_and_byte_exact () =
-  let parent = Filename.temp_file "paengi-demo-git-export-" "" in
+  let parent = Filename.temp_file "yeokcham-demo-git-export-" "" in
   Unix.unlink parent;
   Unix.mkdir parent 0o700;
   let root = Filename.concat parent "fixture" in
@@ -89,9 +89,9 @@ let exported_release_is_fsck_clean_and_byte_exact () =
       let environment =
         environment
           [
-            ("PAENGI_BIN", binary "paengi.exe");
-            ("PAENGI_WORKSPACE_BASE_BIN", binary "workspace_base_v1.exe");
-            ("PAENGI_RELEASE_EVIDENCE_BIN", binary "release_evidence_v1.exe");
+            ("YEOKCHAM_BIN", binary "yeokcham.exe");
+            ("YEOKCHAM_WORKSPACE_BASE_BIN", binary "workspace_base_v1.exe");
+            ("YEOKCHAM_RELEASE_EVIDENCE_BIN", binary "release_evidence_v1.exe");
           ]
       in
       require
@@ -130,19 +130,19 @@ let exported_release_is_fsck_clean_and_byte_exact () =
         (Unix.readlink (Filename.concat repository "current-note"));
       Alcotest.(check string)
         "no remote configured" ""
-        (read (Filename.concat root ".paengi/demo-v1-git-export-remotes"));
-      let exported = read (Filename.concat root ".paengi/demo-v1-git-export") in
+        (read (Filename.concat root ".yeokcham/demo-v1-git-export-remotes"));
+      let exported = read (Filename.concat root ".yeokcham/demo-v1-git-export") in
       require (contains exported "metadata=default") "export policy is unclear";
       require
         (contains
            (read
               (Filename.concat root
-                 ".paengi/demo-v1-git-export-invalid-repository"))
+                 ".yeokcham/demo-v1-git-export-invalid-repository"))
            "Git repository")
         "invalid repository error is not structured")
 
 let unowned_root_rejects () =
-  let parent = Filename.temp_file "paengi-demo-git-export-unowned-" "" in
+  let parent = Filename.temp_file "yeokcham-demo-git-export-unowned-" "" in
   Unix.unlink parent;
   Unix.mkdir parent 0o700;
   let root = Filename.concat parent "unowned" in

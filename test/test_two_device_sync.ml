@@ -1,14 +1,14 @@
-module Device = Paengi_device
-module Device_store = Paengi_device_store
-module Divergence = Paengi_divergence
-module Divergence_store = Paengi_divergence_store
-module Encoding = Paengi_encoding
-module Envelope = Paengi_envelope
-module Event = Paengi_ref_event
-module Event_store = Paengi_ref_event_store
-module Exchange = Paengi_exchange
-module Exchange_store = Paengi_exchange_store
-module Store = Paengi_store
+module Device = Yeokcham_device
+module Device_store = Yeokcham_device_store
+module Divergence = Yeokcham_divergence
+module Divergence_store = Yeokcham_divergence_store
+module Encoding = Yeokcham_encoding
+module Envelope = Yeokcham_envelope
+module Event = Yeokcham_ref_event
+module Event_store = Yeokcham_ref_event_store
+module Exchange = Yeokcham_exchange
+module Exchange_store = Yeokcham_exchange_store
+module Store = Yeokcham_store
 
 type participant = {
   identity : Device.t;
@@ -109,7 +109,7 @@ let rec remove_tree path =
   with Unix.Unix_error (Unix.ENOENT, _, _) -> ()
 
 let with_repositories run =
-  let root = Filename.temp_file "paengi-two-device-" "" in
+  let root = Filename.temp_file "yeokcham-two-device-" "" in
   Unix.unlink root;
   Unix.mkdir root 0o700;
   let left_root = Filename.concat root "left" in
@@ -265,7 +265,7 @@ let restart_and_corruption_are_local_and_structured () =
       Fun.protect
         ~finally:(fun () -> close_out_noerr output)
         (fun () -> output_string output "corrupt");
-      let fresh_root = Filename.temp_file "paengi-two-device-corrupt-" "" in
+      let fresh_root = Filename.temp_file "yeokcham-two-device-corrupt-" "" in
       Unix.unlink fresh_root;
       Unix.mkdir fresh_root 0o700;
       Fun.protect

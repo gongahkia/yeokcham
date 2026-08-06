@@ -1,8 +1,8 @@
-module Retention = Paengi_validation_retention
-module Scratch = Paengi_scratch
-module Snapshot = Paengi_snapshot
-module Store = Paengi_store
-module Validation = Paengi_validation
+module Retention = Yeokcham_validation_retention
+module Scratch = Yeokcham_scratch
+module Snapshot = Yeokcham_snapshot
+module Store = Yeokcham_store
+module Validation = Yeokcham_validation
 
 let default_seed = 20_260_806
 
@@ -43,7 +43,7 @@ let passed_evidence target =
   let empty =
     {
       Validation.digest =
-        Paengi_hash.Sha256.digest_string "" |> Paengi_hash.Sha256.to_raw_string;
+        Yeokcham_hash.Sha256.digest_string "" |> Yeokcham_hash.Sha256.to_raw_string;
       retained = "";
       truncated = false;
     }

@@ -1,3 +1,3 @@
 (executable
  (name generate_fixture)
- (libraries paengi_testkit))
+ (libraries yeokcham_testkit))

@@ -1,8 +1,8 @@
-module Encoding = Paengi_encoding
-module Envelope = Paengi_envelope
-module Golden = Paengi_testkit.Golden_fixture
-module Snapshot_store = Paengi_snapshot
-module Store = Paengi_store
+module Encoding = Yeokcham_encoding
+module Envelope = Yeokcham_envelope
+module Golden = Yeokcham_testkit.Golden_fixture
+module Snapshot_store = Yeokcham_snapshot
+module Store = Yeokcham_store
 open Snapshot_store
 
 let require_envelope = function
@@ -32,7 +32,7 @@ let with_directory prefix run =
   Fun.protect ~finally:(fun () -> remove_tree path) (fun () -> run path)
 
 let with_store run =
-  with_directory "paengi-snapshot-store-" (fun root ->
+  with_directory "yeokcham-snapshot-store-" (fun root ->
       let store = Store.init ~root |> require_ok Store.error_to_string in
       run root store)
 
@@ -96,11 +96,11 @@ let canonical_tree_order_and_reference_types () =
           Alcotest.fail "stored tree entry changed")
 
 let scanner_preserves_bytes_modes_symlinks_and_ignores () =
-  with_directory "paengi-scan-" (fun root ->
+  with_directory "yeokcham-scan-" (fun root ->
       make_directory (Filename.concat root "nested");
       make_directory (Filename.concat root "ignored-directory");
       write_file (Filename.concat root "binary") "\000\255bytes";
-      write_file (Filename.concat root "run") "#!/bin/sh\necho paengi\n";
+      write_file (Filename.concat root "run") "#!/bin/sh\necho yeokcham\n";
       Unix.chmod (Filename.concat root "run") 0o755;
       write_file
         (Filename.concat (Filename.concat root "nested") "guide")
@@ -111,7 +111,7 @@ let scanner_preserves_bytes_modes_symlinks_and_ignores () =
         (Filename.concat (Filename.concat root "ignored-directory") "skip")
         "skip";
       write_file
-        (Filename.concat root ".paengiignore")
+        (Filename.concat root ".yeokchamignore")
         "ignored\nignored-directory\n";
       let store = Store.init ~root |> require_ok Store.error_to_string in
       let identity, snapshot =
@@ -140,7 +140,7 @@ let scanner_preserves_bytes_modes_symlinks_and_ignores () =
       in
       Alcotest.(check (list string))
         "root entries"
-        [ ".paengiignore"; "binary"; "guide-link"; "nested"; "run" ]
+        [ ".yeokchamignore"; "binary"; "guide-link"; "nested"; "run" ]
         (entry_names root_tree);
       (match find_entry "binary" root_tree with
       | Snapshot_store.Tree.File { mode = Regular; content } ->
@@ -154,7 +154,7 @@ let scanner_preserves_bytes_modes_symlinks_and_ignores () =
       (match find_entry "run" root_tree with
       | Snapshot_store.Tree.File { mode = Executable; content } ->
           Alcotest.(check string)
-            "executable bytes" "#!/bin/sh\necho paengi\n"
+            "executable bytes" "#!/bin/sh\necho yeokcham\n"
             (Snapshot_store.Content.load store content
             |> require_ok Snapshot_store.error_to_string)
       | Snapshot_store.Tree.File { mode = Regular | Symlink; _ }
@@ -171,7 +171,7 @@ let scanner_preserves_bytes_modes_symlinks_and_ignores () =
           Alcotest.fail "symlink mode changed")
 
 let duplicate_content_is_reused () =
-  with_directory "paengi-content-reuse-" (fun root ->
+  with_directory "yeokcham-content-reuse-" (fun root ->
       write_file (Filename.concat root "left") "same";
       write_file (Filename.concat root "right") "same";
       let store = Store.init ~root |> require_ok Store.error_to_string in
@@ -242,14 +242,14 @@ let malformed_tree_and_ignore_are_rejected () =
             (String.starts_with ~prefix:"tree names are not strictly ordered: "
                (Snapshot_store.error_to_string error))
       | Ok _ -> Alcotest.fail "unordered tree was accepted");
-  with_directory "paengi-invalid-ignore-" (fun root ->
-      write_file (Filename.concat root ".paengiignore") "../outside\n";
+  with_directory "yeokcham-invalid-ignore-" (fun root ->
+      write_file (Filename.concat root ".yeokchamignore") "../outside\n";
       let store = Store.init ~root |> require_ok Store.error_to_string in
       match Snapshot_store.scan ~root ~store with
       | Error error ->
           Alcotest.(check string)
             "unsafe ignore rejection"
-            "invalid .paengiignore path on line 1: \"../outside\""
+            "invalid .yeokchamignore path on line 1: \"../outside\""
             (Snapshot_store.error_to_string error)
       | Ok _ -> Alcotest.fail "unsafe ignore path was accepted")
 
@@ -275,16 +275,16 @@ let persisted_object_goldens () =
       in
       Alcotest.(check string)
         "content golden"
-        (require_golden "store-v1-content.peng.hex")
+        (require_golden "store-v1-content.yeok.hex")
         (stored_envelope store
            (Snapshot_store.Content.stored_object_id content));
       Alcotest.(check string)
         "tree golden"
-        (require_golden "store-v1-tree.peng.hex")
+        (require_golden "store-v1-tree.yeok.hex")
         (stored_envelope store (Snapshot_store.Tree.stored_object_id tree_id));
       Alcotest.(check string)
         "snapshot golden"
-        (require_golden "store-v1-snapshot.peng.hex")
+        (require_golden "store-v1-snapshot.yeok.hex")
         (stored_envelope store
            (Snapshot_store.Snapshot.stored_object_id snapshot_id)))
 
@@ -301,11 +301,11 @@ let large_content_goldens () =
       in
       Alcotest.(check string)
         "chunk golden"
-        (require_golden "store-v1-chunk.peng.hex")
+        (require_golden "store-v1-chunk.yeok.hex")
         (stored_envelope store (Snapshot_store.Chunk.stored_object_id chunk));
       Alcotest.(check string)
         "file manifest golden"
-        (require_golden "store-v1-file-manifest.peng.hex")
+        (require_golden "store-v1-file-manifest.yeok.hex")
         (stored_envelope store
            (Snapshot_store.Content.stored_object_id manifest)))
 
@@ -361,8 +361,8 @@ let inline_and_manifest_content_round_trip () =
       let inline = deterministic_bytes Snapshot_store.inline_file_limit in
       let manifest = deterministic_bytes ((3 * 131_072) + 17) in
       let split =
-        Paengi_chunking.split Paengi_chunking.default manifest
-        |> require_ok Paengi_chunking.error_to_string
+        Yeokcham_chunking.split Yeokcham_chunking.default manifest
+        |> require_ok Yeokcham_chunking.error_to_string
       in
       Alcotest.(check int)
         "chunker retains all input bytes" (String.length manifest)
@@ -535,7 +535,7 @@ let manifest_failures_are_structured () =
       | Ok _ -> Alcotest.fail "corrupt manifest was accepted")
 
 let unsupported_fifo_does_not_publish_a_snapshot () =
-  with_directory "paengi-unsupported-node-" (fun root ->
+  with_directory "yeokcham-unsupported-node-" (fun root ->
       let regular = Filename.concat root "regular" in
       write_file regular "valid";
       let store = Store.init ~root |> require_ok Store.error_to_string in

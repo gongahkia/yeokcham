@@ -1,4 +1,4 @@
-module Semantic = Paengi_semantic
+module Semantic = Yeokcham_semantic
 
 let default_seed = 20_260_731
 

@@ -1,11 +1,11 @@
-module Capsule_store = Paengi_capsule_store
-module Id = Paengi_id
-module Release = Paengi_release
-module Scratch = Paengi_scratch
-module Snapshot = Paengi_snapshot
-module Store = Paengi_store
-module Validation = Paengi_validation
-module Workspace_store = Paengi_workspace_store
+module Capsule_store = Yeokcham_capsule_store
+module Id = Yeokcham_id
+module Release = Yeokcham_release
+module Scratch = Yeokcham_scratch
+module Snapshot = Yeokcham_snapshot
+module Store = Yeokcham_store
+module Validation = Yeokcham_validation
+module Workspace_store = Yeokcham_workspace_store
 
 let default_seed = 20_260_731
 
@@ -45,7 +45,7 @@ let rec remove path =
   with Unix.Unix_error (Unix.ENOENT, _, _) -> ()
 
 let with_repository run =
-  let root = Filename.temp_file "paengi-release-validation-property-" "" in
+  let root = Filename.temp_file "yeokcham-release-validation-property-" "" in
   Unix.unlink root;
   Unix.mkdir root 0o700;
   Fun.protect ~finally:(fun () -> remove root) (fun () -> run root)
@@ -67,8 +67,8 @@ module Passing_runner : Validation.Process_runner = struct
     let empty =
       {
         Validation.digest =
-          Paengi_hash.Sha256.digest_string ""
-          |> Paengi_hash.Sha256.to_raw_string;
+          Yeokcham_hash.Sha256.digest_string ""
+          |> Yeokcham_hash.Sha256.to_raw_string;
         retained = "";
         truncated = false;
       }

@@ -1,0 +1,3 @@
+(library
+ (name yeokcham_workspace)
+ (libraries yeokcham_capsule yeokcham_id yeokcham_scratch yeokcham_snapshot))

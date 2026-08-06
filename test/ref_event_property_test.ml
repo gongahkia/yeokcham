@@ -1,5 +1,5 @@
-module Event = Paengi_ref_event
-module Store = Paengi_store
+module Event = Yeokcham_ref_event
+module Store = Yeokcham_store
 
 type signer = {
   private_key : Mirage_crypto_ec.Ed25519.priv;

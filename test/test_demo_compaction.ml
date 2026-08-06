@@ -25,13 +25,13 @@ let script name =
       Filename.concat cwd ("../tools/demo/" ^ name);
     ]
 
-let paengi_binary () =
+let yeokcham_binary () =
   let cwd = Sys.getcwd () in
-  find_file "paengi executable"
+  find_file "yeokcham executable"
     [
-      Filename.concat cwd "_build/default/bin/paengi.exe";
-      Filename.concat cwd "../bin/paengi.exe";
-      Filename.concat cwd "../_build/default/bin/paengi.exe";
+      Filename.concat cwd "_build/default/bin/yeokcham.exe";
+      Filename.concat cwd "../bin/yeokcham.exe";
+      Filename.concat cwd "../_build/default/bin/yeokcham.exe";
     ]
 
 let environment key value =
@@ -41,7 +41,7 @@ let environment key value =
   |> fun entries -> Array.of_list ((key ^ "=" ^ value) :: entries)
 
 let run ~environment program arguments =
-  let output = Filename.temp_file "paengi-demo-compaction-output-" "" in
+  let output = Filename.temp_file "yeokcham-demo-compaction-output-" "" in
   Fun.protect
     ~finally:(fun () -> remove_tree output)
     (fun () ->
@@ -84,14 +84,14 @@ let report_count name report =
       |> int_of_string_opt
 
 let run_fixture ?(prune = false) verify =
-  let parent = Filename.temp_file "paengi-demo-compaction-" "" in
+  let parent = Filename.temp_file "yeokcham-demo-compaction-" "" in
   Unix.unlink parent;
   Unix.mkdir parent 0o700;
   let root = Filename.concat parent "fixture" in
   Fun.protect
     ~finally:(fun () -> remove_tree parent)
     (fun () ->
-      let environment = environment "PAENGI_BIN" (paengi_binary ()) in
+      let environment = environment "YEOKCHAM_BIN" (yeokcham_binary ()) in
       let created =
         run ~environment "sh"
           [ script "create-repository-v1.sh"; "--root"; root ]
@@ -109,16 +109,16 @@ let run_fixture ?(prune = false) verify =
 let retained_logical_ids_restore_exactly () =
   run_fixture (fun environment root ->
       let initial =
-        read_file (Filename.concat root ".paengi/demo-v1-initial-checkpoint")
+        read_file (Filename.concat root ".yeokcham/demo-v1-initial-checkpoint")
         |> String.trim
       in
       let head =
-        read_file (Filename.concat root ".paengi/demo-v1-compaction-head")
+        read_file (Filename.concat root ".yeokcham/demo-v1-compaction-head")
         |> String.trim
       in
       let restore checkpoint =
         let result =
-          run ~environment (paengi_binary ())
+          run ~environment (yeokcham_binary ())
             [ "restore"; checkpoint; "--root"; root ]
         in
         require (exited result 0) "retained logical checkpoint did not restore"
@@ -140,10 +140,10 @@ let retained_logical_ids_restore_exactly () =
         "head bytes survive compaction" "compaction head bytes\n"
         (read_file (Filename.concat root "notes.txt"));
       let dry_run =
-        read_file (Filename.concat root ".paengi/demo-v1-compaction-dry-run")
+        read_file (Filename.concat root ".yeokcham/demo-v1-compaction-dry-run")
       in
       let resumed =
-        read_file (Filename.concat root ".paengi/demo-v1-compaction-resume")
+        read_file (Filename.concat root ".yeokcham/demo-v1-compaction-resume")
       in
       require
         (String.starts_with ~prefix:"policy recent-window-seconds=1" dry_run)
@@ -154,13 +154,13 @@ let retained_logical_ids_restore_exactly () =
       require
         (not
            (Sys.file_exists
-              (Filename.concat root ".paengi/demo-v1-compaction-prune")))
+              (Filename.concat root ".yeokcham/demo-v1-compaction-prune")))
         "default demonstration does not prune")
 
 let explicit_prune_is_limited_to_the_disposable_fixture () =
   run_fixture ~prune:true (fun environment root ->
       let prune =
-        read_file (Filename.concat root ".paengi/demo-v1-compaction-prune")
+        read_file (Filename.concat root ".yeokcham/demo-v1-compaction-prune")
       in
       require
         (String.starts_with ~prefix:"generation=" prune)
@@ -169,11 +169,11 @@ let explicit_prune_is_limited_to_the_disposable_fixture () =
         (Option.value (report_count "pruned-objects" prune) ~default:0 > 0)
         "prune report contains a nonzero irreversible action";
       let initial =
-        read_file (Filename.concat root ".paengi/demo-v1-initial-checkpoint")
+        read_file (Filename.concat root ".yeokcham/demo-v1-initial-checkpoint")
         |> String.trim
       in
       let result =
-        run ~environment (paengi_binary ())
+        run ~environment (yeokcham_binary ())
           [ "restore"; "--dry-run"; initial; "--root"; root ]
       in
       require (exited result 0) "pinned retained checkpoint survives prune")

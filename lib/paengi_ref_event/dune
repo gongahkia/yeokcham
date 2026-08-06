@@ -1,8 +1,0 @@
-(library
- (name paengi_ref_event)
- (libraries
-  mirage-crypto-ec
-  paengi_encoding
-  paengi_hash
-  paengi_id
-  paengi_store))

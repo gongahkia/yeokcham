@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/gongahkia/paengi/blob/main/bench/schema/benchmark-result.schema.json",
-  "title": "Paengi benchmark result",
-  "description": "Versioned result envelope for Paengi performance experiments.",
+  "$id": "https://github.com/gongahkia/yeokcham/blob/main/bench/schema/benchmark-result.schema.json",
+  "title": "Yeokcham benchmark result",
+  "description": "Versioned result envelope for Yeokcham performance experiments.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -10,7 +10,7 @@
     "benchmark_id",
     "benchmark_kind",
     "recorded_at",
-    "paengi",
+    "yeokcham",
     "toolchain",
     "host",
     "fixture",
@@ -47,8 +47,8 @@
       "type": "string",
       "format": "date-time"
     },
-    "paengi": {
-      "$ref": "#/$defs/paengi"
+    "yeokcham": {
+      "$ref": "#/$defs/yeokcham"
     },
     "toolchain": {
       "$ref": "#/$defs/toolchain"
@@ -138,7 +138,7 @@
       ],
       "minimum": 0
     },
-    "paengi": {
+    "yeokcham": {
       "type": "object",
       "additionalProperties": false,
       "required": [

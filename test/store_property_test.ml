@@ -1,6 +1,6 @@
-module Encoding = Paengi_encoding
-module Envelope = Paengi_envelope
-module Store = Paengi_store
+module Encoding = Yeokcham_encoding
+module Envelope = Yeokcham_envelope
+module Store = Yeokcham_store
 
 let default_seed = 20_260_729
 
@@ -47,7 +47,7 @@ let rec remove_tree path =
   with Unix.Unix_error (Unix.ENOENT, _, _) -> ()
 
 let with_repository check =
-  let root = Filename.temp_file "paengi-store-property-" "" in
+  let root = Filename.temp_file "yeokcham-store-property-" "" in
   Unix.unlink root;
   Unix.mkdir root 0o700;
   Fun.protect

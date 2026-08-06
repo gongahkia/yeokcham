@@ -1,0 +1,9 @@
+(library
+ (name yeokcham_snapshot)
+ (libraries
+  unix
+  yeokcham_chunking
+  yeokcham_encoding
+  yeokcham_envelope
+  yeokcham_hash
+  yeokcham_store))

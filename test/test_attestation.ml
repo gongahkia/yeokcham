@@ -1,9 +1,9 @@
-module Encoding = Paengi_encoding
-module Envelope = Paengi_envelope
-module Golden = Paengi_testkit.Golden_fixture
-module Id = Paengi_id
-module Release = Paengi_release
-module Store = Paengi_store
+module Encoding = Yeokcham_encoding
+module Envelope = Yeokcham_envelope
+module Golden = Yeokcham_testkit.Golden_fixture
+module Id = Yeokcham_id
+module Release = Yeokcham_release
+module Store = Yeokcham_store
 
 let require_ok render = function
   | Ok value -> value
@@ -16,7 +16,7 @@ let raw_id seed =
 let release_id seed = Id.Release_id.of_bytes (raw_id seed) |> Result.get_ok
 
 let with_root run =
-  let root = Filename.temp_file "paengi-attestation-test-" "" in
+  let root = Filename.temp_file "yeokcham-attestation-test-" "" in
   Unix.unlink root;
   Unix.mkdir root 0o700;
   let rec remove path =
@@ -70,7 +70,7 @@ let canonical_golden_and_inverse_decoder () =
   in
   Alcotest.(check string)
     "attestation golden"
-    (golden "release-attestation-v1.peng.hex")
+    (golden "release-attestation-v1.yeok.hex")
     bytes;
   let envelope =
     Envelope.decode bytes |> require_ok Envelope.decode_error_to_string
@@ -112,11 +112,11 @@ let storage_reopen_and_test_signer () =
         (Id.Release_id.equal release (Release.attestation_release loaded));
       Alcotest.(check string)
         "test signer is explicitly non-cryptographic"
-        "paengi-test-only-not-cryptographic-v1"
+        "yeokcham-test-only-not-cryptographic-v1"
         (Release.attestation_algorithm loaded))
 
 let () =
-  match Sys.getenv_opt "PAENGI_PRINT_ATTESTATION_GOLDEN" with
+  match Sys.getenv_opt "YEOKCHAM_PRINT_ATTESTATION_GOLDEN" with
   | Some "1" ->
       let payload =
         Release.attestation_payload (fixture ())
@@ -127,7 +127,7 @@ let () =
       |> require_ok Envelope.creation_error_to_string
       |> Envelope.encode |> hex |> print_endline
   | None | Some _ ->
-      Alcotest.run "paengi_attestation"
+      Alcotest.run "yeokcham_attestation"
         [
           ( "attestation",
             [

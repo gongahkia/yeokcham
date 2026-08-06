@@ -31,7 +31,7 @@ accepted.
 - Bound message bytes, object bytes, object IDs, pages, and session work.
 - Make interruption and retry safe without a mutable transfer journal.
 - Preserve divergent mutable refs for a later explicit reconciliation decision.
-- Keep wire/schema evolution explicit without creating a Paengi persistent
+- Keep wire/schema evolution explicit without creating a Yeokcham persistent
   object format.
 
 ## Considered options
@@ -66,7 +66,7 @@ message kind, required-feature bits, and that kind's fields. Unknown mandatory
 features, unsupported version, noncanonical CBOR, trailing bytes, malformed
 length, or unsupported message kind are structured rejection before repository
 state changes. This framing is a transient protocol schema, not an Envelope or
-Paengi object.
+Yeokcham object.
 
 The v1 logical messages are:
 
@@ -88,7 +88,7 @@ does not assert repository reachability or synchronised refs.
 
 V1 limits are: 1 MiB message payload excluding an Object's Envelope bytes,
 4,096 IDs per Inventory/Want page, 128 MiB Envelope bytes per Object (the
-current `Paengi_store.max_object_bytes`), 16 MiB total control-plane bytes per
+current `Yeokcham_store.max_object_bytes`), 16 MiB total control-plane bytes per
 session, 65,536 requested/transferred object IDs per session, and a caller-set
 total object-byte budget not exceeding 1 GiB. A limit breach stops the session
 with a structured error; objects already individually verified and published
@@ -97,7 +97,7 @@ remain valid immutable objects, while no ref is changed.
 For every Object, the receiver checks the session/sequence/request membership,
 size, typed 32-byte ID, domain-separated ADR-020 stored-object hash, Envelope
 decode/checksum, object-format version, and mandatory features before calling
-the existing local `Paengi_store.put`. `put` retains ADR-020 behaviour: a
+the existing local `Yeokcham_store.put`. `put` retains ADR-020 behaviour: a
 byte-identical existing final object is idempotent; different bytes at the same
 ID are collision/corruption; no final object is overwritten or repaired.
 Object bytes are never decompressed, transformed, re-encoded, or partially
@@ -192,6 +192,6 @@ peer is trusted, a ref was synchronised, or divergent histories were merged.
 
 ## Implementation evidence
 
-M10-01 implements `paengi_exchange` and `paengi_exchange_store` with retained
+M10-01 implements `yeokcham_exchange` and `yeokcham_exchange_store` with retained
 exact frame fixtures and two-local-repository coverage. Verification passed on
 2026-08-05: `make check` and `make property-test PROPERTY_TEST_SEED=17`.

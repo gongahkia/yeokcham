@@ -8,7 +8,7 @@
 
 ## Context and problem statement
 
-M8-09 must export an explicitly selected, ordered sequence of immutable Paengi
+M8-09 must export an explicitly selected, ordered sequence of immutable Yeokcham
 capsule revisions as Git commits. ADR-009 keeps Git as interchange only;
 ADR-025 keeps capsule revision topology separate from releases; ADR-028 already
 defines the immutable `export/commit -> exported-revision` mapping; and ADR-032
@@ -28,11 +28,11 @@ ordering, merges, tags, signatures, remotes, Gitlinks, and release creation.
 - Each selected revision must retain its distinct immutable capsule ID, revision
   ID, stored-object ID, declared base, and expected-result snapshot.
 - Adjacent selections must prove an exact snapshot chain before any Git ref or
-  Paengi mapping is published.
+  Yeokcham mapping is published.
 - The Git commit chain must be reproducible from the selected links and Git
   object format, with no ambient identity, clock, filters, hooks, or branch.
 - Retry must either verify and complete the same external bridge state or fail
-  explicitly; it must not update a capsule, workspace, release, or Paengi ref.
+  explicitly; it must not update a capsule, workspace, release, or Yeokcham ref.
 - Existing revision, mapping v1-v3, binding, and golden bytes must remain
   unchanged.
 
@@ -46,14 +46,14 @@ ordering, merges, tags, signatures, remotes, Gitlinks, and release creation.
 
 ### Derive Git parents from capsule parents or dependencies
 
-- Reuses existing Paengi relationships.
+- Reuses existing Yeokcham relationships.
 - Misrepresents non-linear intent/dependency topology as Git history and cannot
   express a caller-declared composition order faithfully.
 
 ### Require ordered immutable revision links and emit a fresh linear chain
 
 - Lets the caller choose exact historical objects and a visible order while
-  preserving every other Paengi relation outside the Git parent graph.
+  preserving every other Yeokcham relation outside the Git parent graph.
 - Requires link validation, chain validation, and a deterministic sequence ref.
 
 ## Decision outcome
@@ -82,17 +82,17 @@ workspaces, conflicts, resolutions, releases, or source-operation semantics.
 Each tree uses ADR-032's exact snapshot exporter: byte-exact regular files,
 executable modes, symlink targets, and tree structure; root emptiness is
 supported and nested empty directories fail before publication. All commit
-metadata is fixed: author and committer are `Paengi Export
-<noreply@paengi.local>`; both timestamps are that revision's nonnegative
-`created_at`, rendered in UTC; and the exact UTF-8 message is `Paengi capsule
+metadata is fixed: author and committer are `Yeokcham Export
+<noreply@yeokcham.local>`; both timestamps are that revision's nonnegative
+`created_at`, rendered in UTC; and the exact UTF-8 message is `Yeokcham capsule
 <lowercase-capsule-id-hex> revision <lowercase-revision-id-hex>\n`. This is
-interchange metadata, not Paengi authorship or capsule intent text.
+interchange metadata, not Yeokcham authorship or capsule intent text.
 
 The deterministic target ref is
-`refs/heads/paengi/capsule-linear-<sequence-sha256-hex>`, where the suffix is
+`refs/heads/yeokcham/capsule-linear-<sequence-sha256-hex>`, where the suffix is
 SHA-256 of the domain-separated canonical concatenation of each ordered raw
 capsule ID, revision ID, and stored-object ID, including fixed-width lengths.
-The sequence digest is external ref naming only; it is not a Paengi object,
+The sequence digest is external ref naming only; it is not a Yeokcham object,
 identity, ref, schema, or assertion. The ref is create-only unless it already
 names the exact computed tip. A different existing tip fails explicitly.
 
@@ -104,7 +104,7 @@ commit ID. The ref and mappings are separate visibility points. An interruption
 after ref creation or between mappings leaves an explicit retryable incomplete
 bridge state; retry must verify every pre-existing commit/ref/mapping and only
 publish missing exact mappings, otherwise fail. Unreferenced Git objects after a
-pre-ref failure are external artifacts, never Paengi state.
+pre-ref failure are external artifacts, never Yeokcham state.
 
 ## Consequences
 
@@ -114,7 +114,7 @@ pre-ref failure are external artifacts, never Paengi state.
   are not consulted to choose historical content.
 - A destination ref cannot be overwritten by a different sequence tip.
 - An exported Git line is inspectable Git interchange, not a replacement for
-  capsule/revision history or a source of Paengi truth.
+  capsule/revision history or a source of Yeokcham truth.
 - Nested empty directories remain unrepresentable in this slice.
 
 ## Model and invariant impact
@@ -143,16 +143,16 @@ type revision_sequence_export = {
 - Export `i` has exactly one Git parent when `i > 0`, namely export `i - 1`;
   export zero has none; each commit tree exactly names that export's result.
 - A visible mapping validates the exact exported revision object and result
-  snapshot it names; no mapping changes a Paengi current ref or release.
+  snapshot it names; no mapping changes a Yeokcham current ref or release.
 - Retry cannot mutate a selected revision, Git mapping, or target ref.
 
 ## Persistent-format and migration impact
 
-No new Paengi persistent object, ref, schema, or mapping payload is added.
+No new Yeokcham persistent object, ref, schema, or mapping payload is added.
 M8-09 reuses ADR-025 revision objects and ADR-028 v1 `Exported_revision`
 subjects. Mapping v1-v3 decoders and all current goldens stay byte-identical.
 The selection list, sequence digest, temporary Git index/message files, and Git
-objects are invocation or external interchange artifacts, not canonical Paengi
+objects are invocation or external interchange artifacts, not canonical Yeokcham
 storage.
 
 ## Verification
@@ -175,7 +175,7 @@ valid.
 
 ## CLI and user impact
 
-After acceptance, `paengi git export revisions --repository
+After acceptance, `yeokcham git export revisions --repository
 <absolute-git-directory> --revision <capsule-id>:<revision-id>:<stored-object-id>
 ...` reports each immutable source link, result snapshot, Git tree/commit,
 target ref, and mapping IDs. It reports the fixed metadata policy and explicit

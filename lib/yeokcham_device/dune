@@ -1,0 +1,10 @@
+(library
+ (name yeokcham_device)
+ (libraries
+  mirage-crypto-ec
+  mirage-crypto-rng.unix
+  yeokcham_encoding
+  yeokcham_envelope
+  yeokcham_id
+  yeokcham_ref_event
+  yeokcham_store))

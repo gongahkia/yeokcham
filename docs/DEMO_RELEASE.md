@@ -25,13 +25,13 @@ claim, or general test/quality guarantee.
 
 ```sh
 demo_parent=$(mktemp -d)
-demo_root="$demo_parent/paengi-demo"
+demo_root="$demo_parent/yeokcham-demo"
 sh tools/demo/create-repository-v1.sh --root "$demo_root"
 sh tools/demo/demonstrate-release-v1.sh --root "$demo_root"
 ```
 
 The script invokes the M11-05 workspace demonstration itself. Its evidence is
-kept under `.paengi/`: `demo-v1-release-create`,
+kept under `.yeokcham/`: `demo-v1-release-create`,
 `demo-v1-release-evidence`, `demo-v1-release-validation`, and the before/after
 show and verify records. The later `release-after.txt` is deliberately outside
 the release; the release remains tied to its recorded final snapshot.
@@ -41,7 +41,7 @@ malformed IDs, failed validation, a missing parent accepted as valid, or a
 visible release-list change after the rejected parent all reject nonzero. The
 missing parent is a structured release error and does not publish a release.
 
-No model type, persistent format, ADR, `paengi` CLI behavior, signing,
+No model type, persistent format, ADR, `yeokcham` CLI behavior, signing,
 attestation policy, materialisation guarantee, release parent policy, Git
 export, sync state, or performance claim is added.
 

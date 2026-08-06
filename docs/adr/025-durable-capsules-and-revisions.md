@@ -59,7 +59,7 @@ future UI must obtain a fresh value outside the canonical model.
 `Capsule_revision_id` is exactly:
 
 ```text
-SHA-256("paengi:capsule-revision:v1\000" || encode(revision-identity-v1))
+SHA-256("yeokcham:capsule-revision:v1\000" || encode(revision-identity-v1))
 ```
 
 where `encode` is Profile 1 and `revision-identity-v1` contains the capsule ID,
@@ -120,7 +120,7 @@ and direct expected result.
 The only mutable capsule state is:
 
 ```text
-.paengi/refs/capsules/<lowercase-capsule-id-hex>/current
+.yeokcham/refs/capsules/<lowercase-capsule-id-hex>/current
 
 capsule-current-ref-v1 = [
   1,
@@ -133,7 +133,7 @@ capsule-current-ref-v1 = [
 ]
 
 checksum = SHA-256(
-  "paengi:capsule-current-ref:v1\000" ||
+  "yeokcham:capsule-current-ref:v1\000" ||
   encode([1, generation, capsule-id, capsule-object, revision-id, revision-object])
 )
 ```

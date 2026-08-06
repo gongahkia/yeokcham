@@ -1,0 +1,8 @@
+(library
+ (name yeokcham_divergence)
+ (libraries
+  yeokcham_encoding
+  yeokcham_envelope
+  yeokcham_hash
+  yeokcham_ref_event
+  yeokcham_store))

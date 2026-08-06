@@ -6,7 +6,7 @@ The ADR lifecycle, numbering rules, and template are defined in [`docs/adr/READM
 
 ## ADR-001 — Three distinct histories
 
-**Decision:** Paengi models scratch, intent, and release histories separately.
+**Decision:** Yeokcham models scratch, intent, and release histories separately.
 
 **Reason:** Recovery, collaboration, and release auditing have different retention and usability requirements.
 
@@ -14,7 +14,7 @@ The ADR lifecycle, numbering rules, and template are defined in [`docs/adr/READM
 
 ## ADR-002 — OCaml implementation
 
-**Decision:** Implement Paengi in OCaml.
+**Decision:** Implement Yeokcham in OCaml.
 
 **Reason:** The core project is an algebraic model of immutable state transitions, composition, conflicts, and compaction.
 
@@ -58,7 +58,7 @@ The ADR lifecycle, numbering rules, and template are defined in [`docs/adr/READM
 
 **Reason:** Hidden or environment-dependent ordering makes capsules unpredictable.
 
-**Consequence:** Paengi must explain composition order.
+**Consequence:** Yeokcham must explain composition order.
 
 ## ADR-008 — Semantic replay exposes uncertainty
 
@@ -70,7 +70,7 @@ The ADR lifecycle, numbering rules, and template are defined in [`docs/adr/READM
 
 ## ADR-009 — Git is an interchange layer
 
-**Decision:** Git import/export does not define Paengi's internal model.
+**Decision:** Git import/export does not define Yeokcham's internal model.
 
 **Reason:** Recreating Git concepts would undermine the experimental purpose.
 

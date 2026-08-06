@@ -1,10 +1,10 @@
-module Bundle = Paengi_bundle
-module Bundle_store = Paengi_bundle_store
-module Divergence_store = Paengi_divergence_store
-module Encoding = Paengi_encoding
-module Envelope = Paengi_envelope
-module Golden = Paengi_testkit.Golden_fixture
-module Store = Paengi_store
+module Bundle = Yeokcham_bundle
+module Bundle_store = Yeokcham_bundle_store
+module Divergence_store = Yeokcham_divergence_store
+module Encoding = Yeokcham_encoding
+module Envelope = Yeokcham_envelope
+module Golden = Yeokcham_testkit.Golden_fixture
+module Store = Yeokcham_store
 
 let require format = function
   | Ok value -> value
@@ -111,7 +111,7 @@ let rec remove_tree path =
   with Unix.Unix_error (Unix.ENOENT, _, _) -> ()
 
 let with_repositories run =
-  let root = Filename.temp_file "paengi-bundle-" "" in
+  let root = Filename.temp_file "yeokcham-bundle-" "" in
   Unix.unlink root;
   Unix.mkdir root 0o700;
   let source_root = Filename.concat root "source" in
@@ -142,7 +142,7 @@ let canonical_fixtures_and_inverses () =
   let bundle = sample_bundle () in
   Alcotest.(check string)
     "plaintext fixture"
-    (require_golden "encrypted-bundle-plaintext-v1.peng.hex")
+    (require_golden "encrypted-bundle-plaintext-v1.yeok.hex")
     (Bundle.plaintext_bytes plaintext);
   Alcotest.(check string)
     "header fixture"
@@ -230,7 +230,7 @@ let rejection_paths () =
   Alcotest.(check bool)
     "wrong repository rejects" true
     (Result.is_error
-       (Bundle.open_bundle ~repository_format:"paengi-test-format" ~key bundle));
+       (Bundle.open_bundle ~repository_format:"yeokcham-test-format" ~key bundle));
   let altered_nonce =
     replace_bundle_field (Bundle.encode bundle) 3
       (Encoding.bytes (String.make 12 '\255'))

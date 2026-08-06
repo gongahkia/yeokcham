@@ -1,6 +1,6 @@
-module Scratch = Paengi_scratch
-module Snapshot = Paengi_snapshot
-module Store = Paengi_store
+module Scratch = Yeokcham_scratch
+module Snapshot = Yeokcham_snapshot
+module Store = Yeokcham_store
 
 let require_ok render = function
   | Ok value -> value
@@ -31,7 +31,7 @@ let write_file path bytes =
 let read_file path = In_channel.with_open_bin path In_channel.input_all
 
 let target_history run =
-  with_directory "paengi-restore-" (fun root ->
+  with_directory "yeokcham-restore-" (fun root ->
       write_file (Filename.concat root "file") "base";
       let store = Store.init ~root |> require_ok Store.error_to_string in
       let scratch = Scratch.open_repository store in
@@ -107,7 +107,7 @@ let successful_restore_is_exact_and_saves_safety () =
                (Scratch.Checkpoint.id checkpoint)
                (Scratch.Checkpoint.id target))
       | None -> Alcotest.fail "restore removed scratch head");
-      with_directory "paengi-restore-safety-materialized-" (fun destination ->
+      with_directory "yeokcham-restore-safety-materialized-" (fun destination ->
           let checkpoint =
             Scratch.timeline scratch ~start:safety ~limit:1 ()
             |> require_ok Scratch.error_to_string

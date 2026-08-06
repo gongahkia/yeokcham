@@ -47,7 +47,7 @@ begins before this ADR is accepted.
 
 - Can distribute one bundle to several recipients.
 - Requires recipient discovery, key lifecycle, sender authentication, and a
-  wrapping format before Paengi has those authority decisions.
+  wrapping format before Yeokcham has those authority decisions.
 
 ### Caller-held symmetric key and authenticated encrypted container
 
@@ -61,8 +61,8 @@ begins before this ADR is accepted.
 Select caller-held 32-byte symmetric keys and an authenticated encrypted bundle
 container.
 
-`encrypted-bundle-v1` is not a Paengi Envelope and is never stored as an
-immutable Paengi object. Its canonical Profile-1 outer container is:
+`encrypted-bundle-v1` is not a Yeokcham Envelope and is never stored as an
+immutable Yeokcham object. Its canonical Profile-1 outer container is:
 
 ```text
 encrypted-bundle-v1 = [
@@ -109,7 +109,7 @@ repository digest against the local exact format bytes; validates key/nonce
 sizes; and authenticates/decrypts using the full canonical header as associated
 data. It then bounds and canonically decodes all plaintext entries and verifies
 every ID, Envelope, version, feature bit, checksum, and duplicate/order rule
-before the first call to `Paengi_store.put`. Only after complete validation does
+before the first call to `Yeokcham_store.put`. Only after complete validation does
 it publish each object through ADR-020's existing create-only path. A later I/O
 failure can leave a valid immutable prefix; retry with the same bundle is
 idempotent. Import never creates, reads, updates, reconciles, or deletes a
@@ -141,7 +141,7 @@ synchronised.
   encrypted file when they already have a 32-byte out-of-band key.
 - Corruption and unauthenticated data fail before publication; valid immutable
   objects published before a later storage failure remain safely retryable.
-- Files cannot be content-addressed as canonical Paengi objects because a fresh
+- Files cannot be content-addressed as canonical Yeokcham objects because a fresh
   random nonce changes ciphertext; object identities inside remain unchanged.
 - Password UX, recipient wrapping, signing, and key lifecycle remain explicit
   future decisions.
@@ -210,8 +210,8 @@ or synchronised a ref.
 
 ## Implementation evidence
 
-M10-06 implements `paengi_bundle` as the pure canonical bundle/AEAD core and
-`paengi_bundle_store` as the create-only store adapter. The implementation adds
+M10-06 implements `yeokcham_bundle` as the pure canonical bundle/AEAD core and
+`yeokcham_bundle_store` as the create-only store adapter. The implementation adds
 fixed plaintext/header/outer bundle fixtures, RFC 8439 AEAD coverage, focused
 two-repository export/import/reopen/retry/rejection tests, and the seeded
 `bundle_property_test`.

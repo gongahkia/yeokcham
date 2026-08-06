@@ -2,7 +2,7 @@
 
 ## Mission
 
-Implement Paengi as a model-first, local-first experimental VCS.
+Implement Yeokcham as a model-first, local-first experimental VCS.
 
 The primary contribution is not a new command spelling or a faster Git clone. It is the separation of scratch, intent, and release history.
 
@@ -55,7 +55,7 @@ before exact snapshots, scratch restore, and compaction work.
 
 ### 4. Avoid fake intelligence
 
-Paengi may propose capsule grouping or semantic operations, but it must not claim to know user intent automatically.
+Yeokcham may propose capsule grouping or semantic operations, but it must not claim to know user intent automatically.
 
 Ambiguity becomes:
 
@@ -117,14 +117,14 @@ Do not mix model changes with unrelated CLI redesign.
 ## Suggested initial commands
 
 ```bash
-paengi init
-paengi scan
-paengi timeline
-paengi restore <checkpoint>
-paengi pin <checkpoint>
-paengi compact --dry-run --explain
-paengi verify
-paengi storage stats
+yeokcham init
+yeokcham scan
+yeokcham timeline
+yeokcham restore <checkpoint>
+yeokcham pin <checkpoint>
+yeokcham compact --dry-run --explain
+yeokcham verify
+yeokcham storage stats
 ```
 
 Capsule commands come after scratch compaction is correct.

@@ -1,6 +1,6 @@
 # Project Context
 
-## Why paengi exists
+## Why yeokcham exists
 
 Git combines several different human needs into a commit graph:
 
@@ -24,7 +24,7 @@ Modern tools have improved parts of this experience:
 - Unison demonstrates how content-addressed semantic code can change programming workflows.
 - Irmin demonstrates branchable and mergeable persistent data structures in OCaml.
 
-paengi must not claim that stable change identities, operation logs, virtual branches, graph-based changes, or content-addressing are individually new.
+yeokcham must not claim that stable change identities, operation logs, virtual branches, graph-based changes, or content-addressing are individually new.
 
 Its differentiated thesis is the deliberate separation of:
 
@@ -48,7 +48,7 @@ The VCS should:
 
 ## Product thesis
 
-paengi is:
+yeokcham is:
 
 > A local-first VCS where automatic scratch checkpoints are compactable, change capsules represent human intent, workspaces are compositions of capsules, and releases are immutable snapshots.
 
@@ -98,7 +98,7 @@ Structured metadata that helps replay or inspect a change while exact bytes rema
 
 ### Exact bytes remain authoritative
 
-paengi may understand syntax and symbols, but must preserve arbitrary files, comments, formatting, generated output, invalid intermediate source, and unknown formats.
+yeokcham may understand syntax and symbols, but must preserve arbitrary files, comments, formatting, generated output, invalid intermediate source, and unknown formats.
 
 ### Automatic history is bounded
 
@@ -122,17 +122,17 @@ A release records exactly which capsule revisions and content snapshot produced 
 
 ### Uncertainty must be visible
 
-Semantic replay may be wrong. paengi should expose confidence and require validation rather than silently claiming correctness.
+Semantic replay may be wrong. yeokcham should expose confidence and require validation rather than silently claiming correctness.
 
 ### Git is an interchange format
 
-Git import and export are valuable, but paengi should not redesign itself around Git's internal graph.
+Git import and export are valuable, but yeokcham should not redesign itself around Git's internal graph.
 
 ## Project relationship to Relay
 
 Relay is the Git-compatible, production-oriented project.
 
-paengi is the experimental model.
+yeokcham is the experimental model.
 
 They may eventually share:
 
@@ -144,5 +144,5 @@ They may eventually share:
 They should not share a codebase initially because:
 
 - Relay is Rust and compatibility constrained.
-- paengi is OCaml and model constrained.
+- yeokcham is OCaml and model constrained.
 - Premature shared formats would weaken both projects.

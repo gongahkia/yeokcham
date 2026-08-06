@@ -1,0 +1,3 @@
+(library
+ (name yeokcham_rust_retarget_comparison)
+ (libraries yeokcham_rust_fixtures yeokcham_textual_patch))

@@ -1,6 +1,6 @@
 # Research Questions
 
-Paengi should produce measured answers, not only software.
+Yeokcham should produce measured answers, not only software.
 
 ## 1. Scratch retention
 
@@ -186,7 +186,7 @@ Benchmark them separately rather than forcing one representation.
 
 ### Q11
 
-What information is inevitably lost when mapping between Paengi and Git?
+What information is inevitably lost when mapping between Yeokcham and Git?
 
 Likely losses:
 

@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/gongahkia/paengi/blob/main/bench/schema/large-content-benchmark-result.schema.json",
-  "title": "Paengi large-content benchmark result",
+  "$id": "https://github.com/gongahkia/yeokcham/blob/main/bench/schema/large-content-benchmark-result.schema.json",
+  "title": "Yeokcham large-content benchmark result",
   "type": "object",
   "additionalProperties": false,
   "required": [

@@ -1,3 +1,0 @@
-(library
- (name paengi_rust_retarget_comparison)
- (libraries paengi_rust_fixtures paengi_textual_patch))

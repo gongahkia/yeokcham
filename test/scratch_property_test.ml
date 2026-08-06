@@ -1,6 +1,6 @@
-module Scratch = Paengi_scratch
-module Snapshot = Paengi_snapshot
-module Store = Paengi_store
+module Scratch = Yeokcham_scratch
+module Snapshot = Yeokcham_snapshot
+module Store = Yeokcham_store
 
 let default_seed = 20_260_730
 
@@ -33,7 +33,7 @@ let rec remove_tree path =
   with Unix.Unix_error (Unix.ENOENT, _, _) -> ()
 
 let with_store run =
-  let root = Filename.temp_file "paengi-scratch-property-" "" in
+  let root = Filename.temp_file "yeokcham-scratch-property-" "" in
   Unix.unlink root;
   Unix.mkdir root 0o700;
   Fun.protect ~finally:(fun () -> remove_tree root) (fun () -> run root)

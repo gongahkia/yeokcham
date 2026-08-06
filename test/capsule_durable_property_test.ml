@@ -1,8 +1,8 @@
-module Capsule_store = Paengi_capsule_store
-module Id = Paengi_id
-module Scratch = Paengi_scratch
-module Snapshot = Paengi_snapshot
-module Store = Paengi_store
+module Capsule_store = Yeokcham_capsule_store
+module Id = Yeokcham_id
+module Scratch = Yeokcham_scratch
+module Snapshot = Yeokcham_snapshot
+module Store = Yeokcham_store
 
 [@@@warning "-42"]
 
@@ -43,7 +43,7 @@ let rec remove_tree path =
   with Unix.Unix_error (Unix.ENOENT, _, _) -> ()
 
 let with_repository check =
-  let root = Filename.temp_file "paengi-durable-capsule-property-" "" in
+  let root = Filename.temp_file "yeokcham-durable-capsule-property-" "" in
   Unix.unlink root;
   Unix.mkdir root 0o700;
   Fun.protect

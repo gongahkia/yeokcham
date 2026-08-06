@@ -47,7 +47,7 @@ let environment entries =
     (List.map (fun (key, value) -> key ^ "=" ^ value) entries @ inherited)
 
 let run ~environment program arguments =
-  let output = Filename.temp_file "paengi-demo-conflict-output-" "" in
+  let output = Filename.temp_file "yeokcham-demo-conflict-output-" "" in
   Fun.protect
     ~finally:(fun () -> remove_tree output)
     (fun () ->
@@ -86,7 +86,7 @@ let conflict_id output =
   |> String.split_on_char ' ' |> List.hd
 
 let persistent_conflict_is_local_and_explicit () =
-  let parent = Filename.temp_file "paengi-demo-conflict-" "" in
+  let parent = Filename.temp_file "yeokcham-demo-conflict-" "" in
   Unix.unlink parent;
   Unix.mkdir parent 0o700;
   let root = Filename.concat parent "fixture" in
@@ -96,8 +96,8 @@ let persistent_conflict_is_local_and_explicit () =
       let environment =
         environment
           [
-            ("PAENGI_BIN", binary "paengi.exe");
-            ("PAENGI_WORKSPACE_BASE_BIN", binary "workspace_base_v1.exe");
+            ("YEOKCHAM_BIN", binary "yeokcham.exe");
+            ("YEOKCHAM_WORKSPACE_BASE_BIN", binary "workspace_base_v1.exe");
           ]
       in
       require
@@ -118,18 +118,18 @@ let persistent_conflict_is_local_and_explicit () =
         "first exact write survives skip" "first conflicting bytes\n"
         (read (Filename.concat root "docs/todo.txt"));
       let partial =
-        read (Filename.concat root ".paengi/demo-v1-conflict-partial")
+        read (Filename.concat root ".yeokcham/demo-v1-conflict-partial")
       in
       require
         (contains partial "partial=true")
         "initial application is not partial";
       let listed =
-        read (Filename.concat root ".paengi/demo-v1-conflict-list")
+        read (Filename.concat root ".yeokcham/demo-v1-conflict-list")
       in
       let conflict = conflict_id listed in
       Alcotest.(check int) "conflict ID length" 64 (String.length conflict);
       let before =
-        read (Filename.concat root ".paengi/demo-v1-conflict-show-before-skip")
+        read (Filename.concat root ".yeokcham/demo-v1-conflict-show-before-skip")
       in
       require
         (contains before ("conflict=" ^ conflict ^ " kind=competing-edits"))
@@ -139,27 +139,27 @@ let persistent_conflict_is_local_and_explicit () =
         "conflict candidates are not structured";
       Alcotest.(check string)
         "conflict remains immutable after skip" before
-        (read (Filename.concat root ".paengi/demo-v1-conflict-show-after-skip"));
+        (read (Filename.concat root ".yeokcham/demo-v1-conflict-show-after-skip"));
       Alcotest.(check string)
         "unsupported action leaves workspace unchanged"
         (read
            (Filename.concat root
-              ".paengi/demo-v1-conflict-workspace-before-unsupported"))
+              ".yeokcham/demo-v1-conflict-workspace-before-unsupported"))
         (read
            (Filename.concat root
-              ".paengi/demo-v1-conflict-workspace-after-unsupported"));
+              ".yeokcham/demo-v1-conflict-workspace-after-unsupported"));
       Alcotest.(check string)
         "resolved conflict is inactive" ""
-        (read (Filename.concat root ".paengi/demo-v1-conflict-list-after-skip"));
+        (read (Filename.concat root ".yeokcham/demo-v1-conflict-list-after-skip"));
       let complete =
-        read (Filename.concat root ".paengi/demo-v1-conflict-complete")
+        read (Filename.concat root ".yeokcham/demo-v1-conflict-complete")
       in
       require
         (contains complete "partial=false")
         "skip did not complete application")
 
 let unowned_root_rejects () =
-  let parent = Filename.temp_file "paengi-demo-conflict-unowned-" "" in
+  let parent = Filename.temp_file "yeokcham-demo-conflict-unowned-" "" in
   Unix.unlink parent;
   Unix.mkdir parent 0o700;
   let root = Filename.concat parent "unowned" in

@@ -4,7 +4,7 @@
 
 The Rust helper is a bounded syntax sidecar, not a Rust semantic engine. Exact
 snapshot source bytes remain canonical. Every response is transient evidence;
-it is not a Paengi object, identity, persistent sidecar, semantic operation,
+it is not a Yeokcham object, identity, persistent sidecar, semantic operation,
 rewrite authority, or behavioural-equivalence claim.
 
 The helper reads only one sorted virtual `.rs` map materialised from a verified
@@ -46,7 +46,7 @@ it cannot select, create, or authorize that path.
 Unsafe paths, missing/invalid helpers, timeout, crash, malformed protocol,
 unsupported encoding, bounds, parser damage, and unsupported syntax become
 structured unavailable or incomplete outcomes. They do not become repository
-state and do not block `paengi_textual_patch` from operating independently on
+state and do not block `yeokcham_textual_patch` from operating independently on
 the same exact bytes. There is no source mutation, persistence, or in-place
 replacement in the sidecar.
 

@@ -1,0 +1,3 @@
+(library
+ (name yeokcham_compaction)
+ (libraries yeokcham_envelope yeokcham_scratch yeokcham_snapshot yeokcham_store))

@@ -18,17 +18,17 @@ persistent-format/ADR change.
 
 ```sh
 demo_parent=$(mktemp -d)
-demo_root="$demo_parent/paengi-demo"
+demo_root="$demo_parent/yeokcham-demo"
 sh tools/demo/create-repository-v1.sh --root "$demo_root"
 sh tools/demo/demonstrate-capsule-v1.sh --root "$demo_root"
 ```
 
-The script keeps its command evidence under `.paengi/` and prints capsule plus
+The script keeps its command evidence under `.yeokcham/` and prints capsule plus
 both revision IDs. The capsule ID stays fixed; a fold produces a new immutable
 revision. Inspect the replay-validated current object with:
 
 ```sh
-opam exec -- dune exec bin/paengi.exe -- capsule show \
+opam exec -- dune exec bin/yeokcham.exe -- capsule show \
   1111111111111111111111111111111111111111111111111111111111111111 --root "$demo_root"
 ```
 

@@ -36,7 +36,7 @@ Milestone 0's in-memory snapshot payload intentionally embeds file bytes and rem
 
 ## Decision outcome
 
-All records below are Paengi CBOR Profile 1 arrays inside an Envelope 1 with object-format version `1` and mandatory-feature mask `0`.
+All records below are Yeokcham CBOR Profile 1 arrays inside an Envelope 1 with object-format version `1` and mandatory-feature mask `0`.
 
 ```text
 content-v1  = [1, bytes]
@@ -50,7 +50,7 @@ snapshot-v1 = [1, root-tree-object-id]
 
 `name-bytes` is one nonempty path component; it rejects `/`, NUL, `.`, and `..`. Tree entries are strictly ascending bytewise lexical `name-bytes` and unique. `mode` is `0` regular, `1` executable, or `2` symlink. Every referenced stored-object ID is exactly 32 raw bytes in the payload and maps to the abstract `Stored_object_id` type. Content, tree, and snapshot wrapper IDs remain type-distinct in the OCaml API even though all resolve through the generic immutable store.
 
-The scanner stores a symlink target as content bytes and does not follow the link. It excludes the root `.paengi` directory. The initial `.paengiignore` syntax is deliberately narrow: each non-empty, non-comment line is one exact safe relative path; it ignores that path and descendants, supports no globbing, and rejects unsafe paths.
+The scanner stores a symlink target as content bytes and does not follow the link. It excludes the root `.yeokcham` directory. The initial `.yeokchamignore` syntax is deliberately narrow: each non-empty, non-comment line is one exact safe relative path; it ignores that path and descendants, supports no globbing, and rejects unsafe paths.
 
 ## Consequences
 
@@ -73,7 +73,7 @@ This adds new Envelope-1 object payload schemas at object-format version `1`; no
 ## Verification
 
 - Golden Envelope-1 fixtures for content, tree, and snapshot objects.
-- Unit tests for canonical order, exact bytes/modes/symlink targets, ignored paths, `.paengi` exclusion, and object-type rejection.
+- Unit tests for canonical order, exact bytes/modes/symlink targets, ignored paths, `.yeokcham` exclusion, and object-type rejection.
 - Bounded deterministic properties for scan determinism and content/tree reuse.
 - Failure tests for malformed schema payloads, invalid ignore entries, unreadable/unsupported nodes, and invalid reference IDs.
 - Materialisation round-trip tests are required in the following vertical slice.

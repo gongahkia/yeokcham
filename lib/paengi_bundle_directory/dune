@@ -1,8 +1,0 @@
-(library
- (name paengi_bundle_directory)
- (libraries
-  mirage-crypto-rng.unix
-  paengi_bundle
-  paengi_bundle_store
-  paengi_store
-  unix))

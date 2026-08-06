@@ -1,8 +1,0 @@
-(library
- (name paengi_scratch)
- (libraries
-  paengi_encoding
-  paengi_envelope
-  paengi_id
-  paengi_snapshot
-  paengi_store))

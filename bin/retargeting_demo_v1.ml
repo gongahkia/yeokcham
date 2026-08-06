@@ -1,7 +1,7 @@
 [@@@warning "-41-42"]
 
-module Retarget = Paengi_semantic_retarget
-module Patch = Paengi_textual_patch
+module Retarget = Yeokcham_semantic_retarget
+module Patch = Yeokcham_textual_patch
 
 let span start_byte end_byte = Retarget.{ start_byte; end_byte }
 

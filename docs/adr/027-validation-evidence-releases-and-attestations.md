@@ -75,14 +75,14 @@ the physical `Stored_object_id` remains ADR-020's identity of the complete
 Envelope-1 object. Repeated runs can therefore retain separate physical
 observations without making timing a correctness input.
 
-The process runner is an injectable Paengi-owned interface. The Unix adapter
+The process runner is an injectable Yeokcham-owned interface. The Unix adapter
 materialises the verified snapshot into a fresh empty temporary directory,
 directly executes the vector, drains both streams with configured bounds,
 terminates the spawned process group on timeout where the host permits it, and
 removes the temporary directory where possible. Process-tree termination is
 best effort on hosts where descendants escape their process group; this is a
 documented portability limitation. Command non-zero exit, signal, timeout, and
-spawn error are evidence, not Paengi failures. Validation does not alter
+spawn error are evidence, not Yeokcham failures. Validation does not alter
 scratch, workspace, or release refs.
 
 M6-D01 adds an opt-in retention policy at the CLI boundary only:
@@ -124,9 +124,9 @@ required commands must pass before publication.
 The canonical visibility binding is create-only:
 
 ```text
-.paengi/refs/releases/<validated-lowercase-release-id-hex>
+.yeokcham/refs/releases/<validated-lowercase-release-id-hex>
 release-binding-v1 = [1, release-id, release-object-id, checksum]
-checksum = SHA-256("paengi:release-binding:v1\\000" || encode([1, release-id, release-object-id]))
+checksum = SHA-256("yeokcham:release-binding:v1\\000" || encode([1, release-id, release-object-id]))
 ```
 
 Publication holds the repository writer lock, verifies workspace/current

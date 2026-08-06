@@ -1,9 +1,9 @@
-module Compaction = Paengi_compaction
-module Retention = Paengi_validation_retention
-module Scratch = Paengi_scratch
-module Snapshot = Paengi_snapshot
-module Store = Paengi_store
-module Validation = Paengi_validation
+module Compaction = Yeokcham_compaction
+module Retention = Yeokcham_validation_retention
+module Scratch = Yeokcham_scratch
+module Snapshot = Yeokcham_snapshot
+module Store = Yeokcham_store
+module Validation = Yeokcham_validation
 
 let require_ok render = function
   | Ok value -> value
@@ -22,7 +22,7 @@ let rec remove path =
   with Unix.Unix_error (Unix.ENOENT, _, _) -> ()
 
 let with_repository run =
-  let root = Filename.temp_file "paengi-validation-retention-" "" in
+  let root = Filename.temp_file "yeokcham-validation-retention-" "" in
   Unix.unlink root;
   Unix.mkdir root 0o700;
   Fun.protect ~finally:(fun () -> remove root) (fun () -> run root)
@@ -32,7 +32,7 @@ let write path contents =
       Out_channel.output_string channel contents)
 
 let digest value =
-  Paengi_hash.Sha256.digest_string value |> Paengi_hash.Sha256.to_raw_string
+  Yeokcham_hash.Sha256.digest_string value |> Yeokcham_hash.Sha256.to_raw_string
 
 let stream = { Validation.digest = digest ""; retained = ""; truncated = false }
 
@@ -91,7 +91,7 @@ let has_validation entry evidence =
   List.exists
     (function
       | Scratch.Validation_passed existing ->
-          Paengi_id.Validation_id.equal existing evidence
+          Yeokcham_id.Validation_id.equal existing evidence
       | Scratch.User_pinned | Scratch.Capsule_boundary _
       | Scratch.Release_boundary _ | Scratch.Periodic_retention
       | Scratch.Recent_window | Scratch.Conflict_reference _ ->

@@ -1,0 +1,3 @@
+(library
+ (name yeokcham_exchange)
+ (libraries yeokcham_encoding yeokcham_store))

@@ -1,6 +1,6 @@
-module Encoding = Paengi_encoding
-module Envelope = Paengi_envelope
-module Model = Paengi_model
+module Encoding = Yeokcham_encoding
+module Envelope = Yeokcham_envelope
+module Model = Yeokcham_model
 open Model
 
 let iterations = 10_000
@@ -29,7 +29,7 @@ let fixture_snapshot () =
       Directory_path guides;
       File_path
         ( require_path [ "bin"; "run" ],
-          file ~mode:Executable "#!/bin/sh\necho paengi\n" );
+          file ~mode:Executable "#!/bin/sh\necho yeokcham\n" );
       Directory_path docs;
       Directory_path bin;
     ]
@@ -92,7 +92,7 @@ let command_output command =
     | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> None
   with Unix.Unix_error _ -> None
 
-let paengi_revision () =
+let yeokcham_revision () =
   match command_output "git rev-parse HEAD" with
   | Some revision ->
       if String.is_empty revision then "unavailable" else revision
@@ -133,7 +133,7 @@ let write_result ~output ~fixture_checksum ~encoded_size ~elapsed_ns =
       \  \"metadata\": {\n\
       \    \"ocaml_version\": %s,\n\
       \    \"dune_profile\": %s,\n\
-      \    \"paengi_revision\": %s,\n\
+      \    \"yeokcham_revision\": %s,\n\
       \    \"working_tree_state\": %s\n\
       \  }\n\
        }\n"
@@ -144,7 +144,7 @@ let write_result ~output ~fixture_checksum ~encoded_size ~elapsed_ns =
       encoded_size elapsed_ns
       (json_string Sys.ocaml_version)
       (json_string (dune_profile ()))
-      (json_string (paengi_revision ()))
+      (json_string (yeokcham_revision ()))
       (json_string (working_tree_state ()))
   in
   Out_channel.with_open_bin output (fun channel -> output_string channel result)
@@ -164,8 +164,8 @@ let () =
   let snapshot = fixture_snapshot () in
   let initial_bytes = encoded_object snapshot in
   let fixture_checksum =
-    Paengi_hash.Sha256.digest_string initial_bytes
-    |> Paengi_hash.Sha256.to_raw_string |> hex_of_bytes
+    Yeokcham_hash.Sha256.digest_string initial_bytes
+    |> Yeokcham_hash.Sha256.to_raw_string |> hex_of_bytes
   in
   let started_at = Unix.gettimeofday () in
   for _ = 1 to iterations do

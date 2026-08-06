@@ -10,7 +10,7 @@ stored initial checkpoint.
 The existing restore core first creates a durable safety checkpoint for the
 divergent working directory, then applies the target plan and rescans it. The
 script records the dry-run, restore output, and post-restore timeline under
-`.paengi/`, then reports both the restored target and safety checkpoint ID.
+`.yeokcham/`, then reports both the restored target and safety checkpoint ID.
 
 No model type, persistent format, ref schema, ADR, CLI command, or automatic
 watcher is introduced. This is a deterministic demonstration of existing
@@ -22,7 +22,7 @@ Create a fixture first, then run recovery against that exact root:
 
 ```sh
 demo_parent=$(mktemp -d)
-demo_root="$demo_parent/paengi-demo"
+demo_root="$demo_parent/yeokcham-demo"
 sh tools/demo/create-repository-v1.sh --root "$demo_root"
 sh tools/demo/demonstrate-recovery-v1.sh --root "$demo_root"
 ```
@@ -42,7 +42,7 @@ missing fixture state, and invalid IDs reject nonzero before recovery changes.
 ## Safety limitation
 
 Restore is guarded, not crash-atomic for a populated working directory. A
-reported I/O failure can leave a partially applied target; Paengi retains the
+reported I/O failure can leave a partially applied target; Yeokcham retains the
 reported safety checkpoint so the user can inspect and restore it explicitly.
 This successful demo does not simulate a filesystem I/O failure and does not
 claim that restore cannot partially apply during a process or host failure.

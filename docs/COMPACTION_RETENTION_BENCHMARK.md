@@ -17,7 +17,7 @@ The four compared policies are:
 
 Each isolated temporary repository is compacted, quarantined records are
 pruned, and the pinned target is restored with the ordinary guarded restore.
-The record contains the bytes of active `.paengi/objects` after that prune, the
+The record contains the bytes of active `.yeokcham/objects` after that prune, the
 maximum generated physical event-chain depth, and one guarded-restore timing
 per repetition. Quarantine bytes are intentionally excluded from the storage
 metric. Timings include safety-checkpoint handling and are host-specific
@@ -40,6 +40,6 @@ make property-test PROPERTY_TEST_SEED=17
 The checked-in [result](experiments/results/scratch-retention-benchmark-v1.json)
 uses five repetitions on its recorded host. Its
 [schema](experiments/schema/scratch-retention-benchmark-v1.schema.json) is
-documentation evidence, not a Paengi persistent format. The published
+documentation evidence, not a Yeokcham persistent format. The published
 [measurement report](COMPACTION_RETENTION_RESULTS.md) preserves the same
 host-specific and unsupported-case limits.

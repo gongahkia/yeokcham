@@ -20,7 +20,7 @@ repetition builds an isolated 25-checkpoint single-file trace, pins checkpoint
 8, compacts, prunes temporary quarantine records, and invokes guarded restore
 to that pin.
 
-`active_object_store_bytes` counts only active `.paengi/objects` bytes after
+`active_object_store_bytes` counts only active `.yeokcham/objects` bytes after
 that temporary-repository prune. It excludes quarantined records and does not
 claim a full cross-domain repository size. `max_physical_event_depth` is the
 largest number of generated physical events from the oldest retained entry;

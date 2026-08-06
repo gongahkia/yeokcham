@@ -29,7 +29,7 @@ let environment key value =
   |> fun inherited -> Array.of_list ((key ^ "=" ^ value) :: inherited)
 
 let run ~environment program arguments =
-  let output = Filename.temp_file "paengi-demo-retargeting-output-" "" in
+  let output = Filename.temp_file "yeokcham-demo-retargeting-output-" "" in
   Fun.protect
     ~finally:(fun () -> Unix.unlink output)
     (fun () ->
@@ -63,7 +63,7 @@ let contains text needle =
 
 let retargeting_outcomes_remain_nonpersistent_and_explicit () =
   let environment =
-    environment "PAENGI_RETARGETING_DEMO_BIN" (binary "retargeting_demo_v1.exe")
+    environment "YEOKCHAM_RETARGETING_DEMO_BIN" (binary "retargeting_demo_v1.exe")
   in
   let status, output =
     run ~environment "sh" [ script "demonstrate-retargeting-v1.sh" ]

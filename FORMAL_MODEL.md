@@ -42,7 +42,7 @@ the `release_id` it names.
 
 ### Encoding profile
 
-Paengi CBOR Profile 1, defined by [ADR-017](docs/adr/017-restricted-deterministic-cbor.md), is the canonical payload encoding. It represents signed 64-bit integers, byte strings, valid UTF-8 text, arrays, non-negative integer-key maps, booleans, and null. It rejects all other CBOR forms, non-minimal heads, indefinite lengths, duplicate or unordered map keys, invalid UTF-8 text, and trailing bytes. Filesystem bytes and path components are byte strings.
+Yeokcham CBOR Profile 1, defined by [ADR-017](docs/adr/017-restricted-deterministic-cbor.md), is the canonical payload encoding. It represents signed 64-bit integers, byte strings, valid UTF-8 text, arrays, non-negative integer-key maps, booleans, and null. It rejects all other CBOR forms, non-minimal heads, indefinite lengths, duplicate or unordered map keys, invalid UTF-8 text, and trailing bytes. Filesystem bytes and path components are byte strings.
 
 The profile is a pure payload rule. Fixed Object Envelope 1, defined by [ADR-018](docs/adr/018-fixed-object-envelope.md), frames each payload with a 57-byte big-endian header containing object type, object-format version, mandatory-feature mask, SHA-256 algorithm code, payload length, and checksum. [ADR-019](docs/adr/019-object-format-versions-and-mandatory-features.md) constrains Envelope 1 to object-format version `1` and mandatory-feature mask `0`; a reader rejects other values after checksum validation and before it passes payload bytes to Profile 1.
 
@@ -117,7 +117,7 @@ directory-entry-v1 = [1, name-bytes, tree-stored-object-id]
 snapshot-v1 = [1, root-tree-stored-object-id]
 ```
 
-Every stored-object reference and `full-content-id` is exactly 32 raw bytes. A Tree v1 file reference resolves to Content v1 or File_manifest v1. Content v1 is canonical for file lengths `<= 65536`; empty and exactly-boundary-sized files are inline. File_manifest v1 is canonical above that limit and currently accepts only Buzhash-64-v1 (`algorithm=1`, window `64`, minimum `16384`, average `65536`, maximum `131072`). Its full-content ID is `SHA-256("paengi:content:v1\000" || complete plaintext)`. Tree names are nonempty safe path components and are strictly bytewise ascending. Mode codes are regular `0`, executable `1`, and symlink `2`. A scanner stores a symlink target as authoritative content bytes without following it; `.paengi` is excluded and `.paengiignore` uses exact safe relative paths only.
+Every stored-object reference and `full-content-id` is exactly 32 raw bytes. A Tree v1 file reference resolves to Content v1 or File_manifest v1. Content v1 is canonical for file lengths `<= 65536`; empty and exactly-boundary-sized files are inline. File_manifest v1 is canonical above that limit and currently accepts only Buzhash-64-v1 (`algorithm=1`, window `64`, minimum `16384`, average `65536`, maximum `131072`). Its full-content ID is `SHA-256("yeokcham:content:v1\000" || complete plaintext)`. Tree names are nonempty safe path components and are strictly bytewise ascending. Mode codes are regular `0`, executable `1`, and symlink `2`. A scanner stores a symlink target as authoritative content bytes without following it; `.yeokcham` is excluded and `.yeokchamignore` uses exact safe relative paths only.
 
 Manifest invariant: every referenced object is a verified Chunk v1; declared chunk lengths sum to total plaintext length; chunk order is significant and matches canonical Buzhash boundaries; and the reconstructed bytes match `full-content-id`. Missing, malformed, corrupt, incorrectly typed, reordered, or noncanonical chunk sequences reject.
 
@@ -503,7 +503,7 @@ semantic correctness. It introduces no persistent semantic schema.
 
 ### Milestone 7 contextual textual baseline
 
-`paengi_textual_patch` is an independent pure byte-only baseline. It receives
+`yeokcham_textual_patch` is an independent pure byte-only baseline. It receives
 only an original byte span, expected preimage, replacement bytes, and before/
 after byte context; it has no parser, compiler, declaration, symbol, type, or
 semantic-confidence input. Its deterministic stages are exact original span,
@@ -512,11 +512,11 @@ bounded relaxed context (at most 64 nearest bytes per side). A stage applies
 only one candidate. Missing or multiple candidates return structured conflicts.
 The output is an exact byte splice and verifies unchanged prefix/suffix bytes.
 Its unique contextual result is not semantic `Exact` confidence. This baseline
-is non-persistent and does not alter any Paengi format or identity.
+is non-persistent and does not alter any Yeokcham format or identity.
 
 ### Optional Compiler API boundary
 
-`paengi_typescript_adapter` is an ephemeral protocol-v1 boundary, not a model
+`yeokcham_typescript_adapter` is an ephemeral protocol-v1 boundary, not a model
 object. It sends exact UTF-8 source bytes from a verified immutable snapshot to
 the locally pinned TypeScript `5.9.3` Compiler API and receives only
 language-neutral values: project-relative paths, declaration kind, byte spans,
@@ -531,7 +531,7 @@ byte_offset(s, u16_position) = utf8_length(s[0:u16_position])
 Only a boundary without a parser diagnostic may report parser completeness.
 Unresolved virtual modules or type diagnostics independently reduce resolution
 and type-resolution completeness. No compiler symbol, compiler internal ID, or
-derived evidence is a Paengi identity. The boundary is optional: missing Node or
+derived evidence is a Yeokcham identity. The boundary is optional: missing Node or
 adapter, timeout, malformed response, unsupported version, compiler crash,
 invalid source, unresolved module, or configured bound failure produces
 semantic-unavailable and leaves byte-based operations and exact fallback intact.
@@ -555,7 +555,7 @@ boundary is persistently encoded in Milestone 7.
 
 ### Milestone 9 Rust syntax boundary
 
-`paengi_rust_adapter` has transient values only: a configuration, handshake,
+`yeokcham_rust_adapter` has transient values only: a configuration, handshake,
 source file, half-open byte span, top-level item fact, parser diagnostic,
 analysis, explicit virtual-root selection, module fact, item-path fact,
 unreachable-source fact, fallback assessment/fact, and structured unavailable
@@ -580,7 +580,7 @@ span. A non-`resolved` fact grants no operation authority.
 
 This analysis does not infer roots, Cargo crates/packages, imports, names,
 types, macro output, conditional configuration, or `#[path]` modules. It
-consults no host path. Module/item paths are transient evidence, not a Paengi
+consults no host path. Module/item paths are transient evidence, not a Yeokcham
 or compiler identity, persistent sidecar, semantic operation, or rewrite.
 
 M9-03 fallback assessment requires the same sorted virtual source map and
@@ -599,12 +599,12 @@ input/encoding, an unsupported version, or any configured bound returns an
 unavailable value and leaves every snapshot, checkpoint, capsule, revision,
 workspace, release, ref, object, validation result, and canonical byte string
 unchanged. No Rust adapter request, response, item, diagnostic, module/item
-path, fallback fact, version, or lockfile data is a Paengi object, identity,
+path, fallback fact, version, or lockfile data is a Yeokcham object, identity,
 semantic operation, or persistent sidecar.
 
 ### Milestone 7 evidence-stage retargeting
 
-The nonpersistent `paengi_semantic_retarget` core selects from explicit,
+The nonpersistent `yeokcham_semantic_retarget` core selects from explicit,
 deterministically ordered candidate evidence: (1) exact original declaration
 bytes, byte span, and context; (2) canonical project-relative module path plus
 exported-symbol path; (3) resolved alias or underlying-symbol text; (4)
@@ -621,11 +621,11 @@ lexical similarity, shape/token similarity, and exact textual fallback cannot
 produce High. Equivalent surviving candidates return an ambiguity result. Low,
 medium, and unknown results are explicit uncertainty, not automatic semantic
 application. Compiler strings remain transient evidence and never become
-Paengi identities.
+Yeokcham identities.
 
 ### Milestone 7 comparative result
 
-The experiment report is a versioned documentation artifact, not a Paengi
+The experiment report is a versioned documentation artifact, not a Yeokcham
 object or model value. For each shared fixture and strategy it records selected
 path/span, oracle correctness, confidence/stage, completeness, fallback,
 candidate count, byte-splice validation, and host-specific elapsed time. Let
@@ -646,7 +646,7 @@ false_negative = oracle_has_unique_target and outcome in {missing, ambiguous, re
 
 Safe conflicts do not count as applications. A report with any known
 `false_confident` semantic application cannot satisfy the Milestone 7 safety
-gate. Schema/report bytes and metric aggregation remain outside all Paengi
+gate. Schema/report bytes and metric aggregation remain outside all Yeokcham
 persistent contracts.
 
 ## 7. Application result
@@ -959,7 +959,7 @@ excluding its own ID, duration, and observation timestamp. A stored evidence
 object includes its own logical identity and complete observations, so logical,
 physical, and snapshot identities remain type-distinct.
 
-paengi records evidence. It does not claim that passing tests proves correctness.
+yeokcham records evidence. It does not claim that passing tests proves correctness.
 
 ### Passing-validation scratch retention policy
 
@@ -992,11 +992,11 @@ typed validation ID, so this policy adds no persistent schema field.
 
 ADR-028 defines the first durable Git-interchange association. It introduces
 distinct typed `git_object_format`, `git_object_id`, `git_object_kind`, and
-`git_mapping_id` values; none is a Paengi stored-object, snapshot, capsule,
+`git_mapping_id` values; none is a Yeokcham stored-object, snapshot, capsule,
 workspace, conflict, or release identity. V1 accepts only `Git_sha1` IDs of
 exactly 20 raw bytes and `Git_sha256` IDs of exactly 32 raw bytes, plus tree and
 commit object kinds. It stores one immutable direction, Git object reference,
-and a typed Paengi subject in `Git_mapping_v1`; logical mapping identity is
+and a typed Yeokcham subject in `Git_mapping_v1`; logical mapping identity is
 domain-separated from its physical Envelope-1 object identity. The only
 canonical mapping visibility point is a create-only, checksummed binding under
 `refs/git-mappings/`.
@@ -1017,8 +1017,8 @@ a v2 domain and includes those provenance fields; v1 transitions remain readable
 without synthetic metadata. Current commit imports publish v2 transitions and
 reuse the existing `import/commit -> imported-transition` Git-mapping v3 form.
 
-A mapping verifies exact typed Paengi links but is bridge evidence, not a
-repository identity or a source of Paengi-history semantics. Mapping refs never
+A mapping verifies exact typed Yeokcham links but is bridge evidence, not a
+repository identity or a source of Yeokcham-history semantics. Mapping refs never
 advance, rewrite, or hide scratch, capsule, workspace, conflict, or release
 refs. Target publication and mapping binding are not cross-ref atomic; a crash
 after a target becomes visible but before its mapping is bound remains an
@@ -1056,7 +1056,7 @@ M8-03 resolves exactly one requested `refs/tags/<name>` ref and records one
 lightweight tag. A ref resolving to a tag object must have exactly one matching
 raw `tag` header, one `object` header, and one supported `type` header; its
 exact bounded raw object bytes are retained through `Snapshot.Content`. Its
-tagger, message, and signature bytes have no Paengi semantic meaning and are
+tagger, message, and signature bytes have no Yeokcham semantic meaning and are
 not verified. Nested tag targets, missing/mismatched refs, malformed headers,
 and unsupported targets fail before the imported-tag binding.
 
@@ -1069,7 +1069,7 @@ is create-only and deterministic from the release ID. A nested empty directory
 is not representable and rejects before ref or mapping publication. The visible
 ADR-028 `export/commit -> exported-release` mapping names the release ID,
 release object ID, final snapshot ID, Git format, and exact commit ID; it is
-bridge evidence, not Paengi history.
+bridge evidence, not Yeokcham history.
 
 M8-10 permits an optional complete invocation value
 `(author-name, author-email, committer-name, committer-email, message)` for
@@ -1080,7 +1080,7 @@ unchanged release `created_at` UTC timestamp and exactly the configured message.
 Its create-only ref is the release ref plus a domain-separated,
 length-delimited SHA-256 metadata suffix. Absent the value, M8-08 output is
 unchanged. Present metadata may change only the Git commit, external ref, and
-mapping ID; Paengi release identity, release object, final snapshot, and
+mapping ID; Yeokcham release identity, release object, final snapshot, and
 mapping payload remain unchanged. A producer verifies the emitted tree, zero
 parents, headers, and message before ref/mapping publication.
 
@@ -1110,7 +1110,7 @@ policies.
 ### Bridge invariant
 
 For every supported final bridge state, one shared oracle compares the selected
-immutable Paengi snapshot with its materialised destination: identical entry
+immutable Yeokcham snapshot with its materialised destination: identical entry
 set, regular-file bytes, executable bit, symlink target bytes, and nested tree
 structure. For Git checkout destinations only `.git` is excluded from the
 entry set. A failure identifies the divergent path and kind, bytes, mode, or
@@ -1143,7 +1143,7 @@ requires `id = stored_object_id(bytes)`. Only then it applies the existing
 create-only transition:
 
 ```text
-receive(repo, object) = Paengi_store.put(repo, decoded-envelope)
+receive(repo, object) = Yeokcham_store.put(repo, decoded-envelope)
 ```
 
 The receiver bounds each control message, page, session control bytes,
@@ -1201,7 +1201,7 @@ event, and stored-object ID. The declaration binds it to exactly one Ed25519
 public key and ADR-039 signer-key ID; its public canonical bytes contain no
 private key, hostname, user/account, address, timestamp, label, or transport
 metadata. The private capability returned during generation is caller-owned and
-is never a Paengi object or durable repository value.
+is never a Yeokcham object or durable repository value.
 
 A bounded caller-supplied registry consists of exact stored public declarations.
 After, and only after, ADR-039 verification, pure lookup yields one explicit
@@ -1213,7 +1213,7 @@ Envelope type 27; no existing event, ref, object, or repository format changes.
 ## 17. Bounded local HTTP exchange
 
 M10-04 maps exactly one ADR-038 frame to one HTTP/1.1 `POST /v1/exchange`
-request with a length-delimited `application/vnd.paengi.exchange-v1` body. The
+request with a length-delimited `application/vnd.yeokcham.exchange-v1` body. The
 destination retains only one bounded in-memory receiver state for the active
 HTTP session. `Hello` yields an empty response, `Inventory` yields one exact
 `Want` frame, each `Object` yields an empty response after ADR-020 publication,
@@ -1300,8 +1300,8 @@ Complete_descriptor = (safe-v1-name, observed-byte-length)
 Inspection = ordered stored-object-id list
 ```
 
-`partial-v1` names `.paengi-bundle-v1-<32-lowercase-hex>.partial` and
-`complete-v1` names `paengi-bundle-v1-<32-lowercase-hex>.peng`. The opaque
+`partial-v1` names `.yeokcham-bundle-v1-<32-lowercase-hex>.partial` and
+`complete-v1` names `yeokcham-bundle-v1-<32-lowercase-hex>.yeok`. The opaque
 name token is not authenticated metadata, a bundle/object ID, a nonce, a key
 ID, or authority. A complete file contains exactly ADR-042 encrypted-bundle
 bytes; a partial is never decrypted or imported. Listing is a sorted immediate

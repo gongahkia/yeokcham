@@ -1,5 +1,5 @@
-module Model = Paengi_model
-module Id = Paengi_id
+module Model = Yeokcham_model
+module Id = Yeokcham_id
 open Model
 
 let default_seed = 20_260_729
@@ -220,8 +220,8 @@ let snapshot_identity_is_canonical () =
     (Snapshot.canonical_bytes right);
   Alcotest.(check string)
     "snapshot identity"
-    (Paengi_id.Snapshot_id.to_hex (Snapshot.id left))
-    (Paengi_id.Snapshot_id.to_hex (Snapshot.id right))
+    (Yeokcham_id.Snapshot_id.to_hex (Snapshot.id left))
+    (Yeokcham_id.Snapshot_id.to_hex (Snapshot.id right))
 
 type reference_file = { path : Path.t; entry : Model.file_entry }
 
@@ -394,7 +394,7 @@ let event_replay_property =
       | Error _ -> false
       | Ok (checkpoint, _) ->
           Snapshot.equal (Checkpoint.snapshot checkpoint) expected
-          && Paengi_id.Snapshot_id.equal
+          && Yeokcham_id.Snapshot_id.equal
                (Snapshot.id (Checkpoint.snapshot checkpoint))
                (Snapshot.id expected))
 
@@ -490,10 +490,10 @@ let metadata_does_not_change_snapshot_id_property =
             late )
       with
       | Ok early_checkpoint, Ok late_checkpoint ->
-          Paengi_id.Snapshot_id.equal
+          Yeokcham_id.Snapshot_id.equal
             (Snapshot.id (Checkpoint.snapshot early_checkpoint))
             (Snapshot.id (Checkpoint.snapshot late_checkpoint))
-          && Paengi_id.Snapshot_id.equal
+          && Yeokcham_id.Snapshot_id.equal
                (Snapshot.id (Checkpoint.snapshot early_checkpoint))
                (Snapshot.id expected)
       | Error _, _ | _, Error _ -> false)

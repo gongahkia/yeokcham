@@ -1,4 +1,4 @@
-module Hash = Paengi_hash.Sha256
+module Hash = Yeokcham_hash.Sha256
 
 let nibble = function
   | '0' .. '9' as character -> Char.code character - Char.code '0'
@@ -40,7 +40,7 @@ let published_vectors () =
 let metadata_and_raw_conversion () =
   Alcotest.(check string) "algorithm" "sha256" Hash.algorithm;
   Alcotest.(check int) "digest size" 32 Hash.digest_size;
-  let digest = Hash.digest_string "paengi" in
+  let digest = Hash.digest_string "yeokcham" in
   let raw = Hash.to_raw_string digest in
   Alcotest.(check int) "raw size" Hash.digest_size (String.length raw);
   Alcotest.(check bool)

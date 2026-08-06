@@ -1,6 +1,6 @@
-module Encoding = Paengi_encoding
-module Envelope = Paengi_envelope
-module Store = Paengi_store
+module Encoding = Yeokcham_encoding
+module Envelope = Yeokcham_envelope
+module Store = Yeokcham_store
 
 let require_envelope = function
   | Ok envelope -> envelope
@@ -32,7 +32,7 @@ let rec remove_tree path =
   with Unix.Unix_error (Unix.ENOENT, _, _) -> ()
 
 let with_repository run =
-  let root = Filename.temp_file "paengi-store-" "" in
+  let root = Filename.temp_file "yeokcham-store-" "" in
   Unix.unlink root;
   Unix.mkdir root 0o700;
   Fun.protect
@@ -72,7 +72,7 @@ let init_writes_exact_format () =
   with_repository (fun root _ ->
       Alcotest.(check string)
         "repository format" Store.repository_format
-        (read_file (Filename.concat (Filename.concat root ".paengi") "format")))
+        (read_file (Filename.concat (Filename.concat root ".yeokcham") "format")))
 
 let round_trip_is_idempotent_and_restart_safe () =
   with_repository (fun root repository ->
@@ -97,7 +97,7 @@ let round_trip_is_idempotent_and_restart_safe () =
         "typed object path"
         (Filename.concat
            (Filename.concat
-              (Filename.concat (Filename.concat root ".paengi") "objects")
+              (Filename.concat (Filename.concat root ".yeokcham") "objects")
               (String.sub hex 0 2))
            (Filename.concat (String.sub hex 2 2) (String.sub hex 4 60)))
         path;
@@ -164,21 +164,21 @@ let corruption_and_divergence_are_explicit () =
       | Ok _ -> Alcotest.fail "divergent object was accepted")
 
 let init_rejects_non_directory_metadata () =
-  let root = Filename.temp_file "paengi-store-invalid-" "" in
+  let root = Filename.temp_file "yeokcham-store-invalid-" "" in
   Unix.unlink root;
   Unix.mkdir root 0o700;
   Fun.protect
     ~finally:(fun () -> remove_tree root)
     (fun () ->
-      write_file (Filename.concat root ".paengi") "not a directory";
+      write_file (Filename.concat root ".yeokcham") "not a directory";
       match Store.init ~root with
       | Error error ->
           Alcotest.(check string)
             "file metadata rejection"
             (Printf.sprintf "repository root is not a directory: %s"
-               (Filename.concat root ".paengi"))
+               (Filename.concat root ".yeokcham"))
             (Store.error_to_string error)
-      | Ok _ -> Alcotest.fail "file .paengi was accepted")
+      | Ok _ -> Alcotest.fail "file .yeokcham was accepted")
 
 let () =
   Alcotest.run "immutable object store"

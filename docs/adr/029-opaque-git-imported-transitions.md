@@ -8,7 +8,7 @@
 
 ## Context and problem statement
 
-M8-01 imports an exact Git tree to a Paengi snapshot and persists an ADR-028
+M8-01 imports an exact Git tree to a Yeokcham snapshot and persists an ADR-028
 `import/tree -> imported-snapshot` mapping. M8-02 must additionally import a
 Git commit and ordered parent identities without treating a Git commit as a
 human-authored capsule or revision. ADR-028 v1 only permits
@@ -24,7 +24,7 @@ the commit representation. [git-cat-file](https://git-scm.com/docs/git-cat-file)
 
 - Preserve an imported commit ID, tree ID, exact snapshot, and ordered parent
   IDs without source-intent semantics.
-- Keep Git and Paengi identities type-distinct and reject malformed input
+- Keep Git and Yeokcham identities type-distinct and reject malformed input
   before canonical visibility.
 - Retain ADR-028 v1 decoding and golden fixtures unchanged.
 - Make one-commit import retryable and bounded without importing a repository
@@ -75,7 +75,7 @@ commit bytes.
 The logical identity is:
 
 ```text
-SHA-256("paengi:imported-transition:v1\\000" ||
+SHA-256("yeokcham:imported-transition:v1\\000" ||
         encode([1, git-commit-id, git-tree-id, snapshot-id, [* parent-git-commit-id]]))
 ```
 
@@ -83,10 +83,10 @@ The ID excludes itself and observations. Its physical `Stored_object_id`
 remains ADR-020's Envelope identity. Visibility is one create-only binding:
 
 ```text
-.paengi/refs/imported-transitions/<lowercase-imported-transition-id-hex>
+.yeokcham/refs/imported-transitions/<lowercase-imported-transition-id-hex>
 imported-transition-binding-v1 =
   [1, imported-transition-id, imported-transition-object-id, checksum]
-checksum = SHA-256("paengi:imported-transition-binding:v1\\000" ||
+checksum = SHA-256("yeokcham:imported-transition-binding:v1\\000" ||
                  encode([1, imported-transition-id, imported-transition-object-id]))
 ```
 
@@ -101,7 +101,7 @@ import/commit -> imported-transition-v1-subject
 ```
 
 `Git_mapping_id` v2 uses a new domain separator
-`"paengi:git-mapping:v2\\000"`; its create-only binding uses the existing
+`"yeokcham:git-mapping:v2\\000"`; its create-only binding uses the existing
 versioned binding envelope with a v2 checksum domain. A v1 decoder accepts only
 v1 records; a v2 decoder accepts only the stated v2 forms. No v1 record,
 identity, binding, or golden byte changes.
@@ -163,10 +163,10 @@ have no imported-transition bindings. No object or ref is rewritten in place.
 
 ## CLI and user impact
 
-After acceptance and implementation, `paengi git import commit --repository
+After acceptance and implementation, `yeokcham git import commit --repository
 <absolute-git-directory> --commit <full-git-commit-id>` reports transition,
 snapshot, and mapping IDs plus the ordered parent Git IDs. It must explicitly
-state that the record is opaque provenance, not a Paengi capsule or complete
+state that the record is opaque provenance, not a Yeokcham capsule or complete
 Git history import.
 
 ## Implementation evidence

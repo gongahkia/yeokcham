@@ -1,12 +1,12 @@
-# paengi
+# yeokcham
 
-paengi is an experimental, intent-first version-control system.
+yeokcham is an experimental, intent-first version-control system.
 
 Its central thesis is:
 
 > Recovery history, collaborative intent history, and release history serve different purposes and should not be forced into one commit graph.
 
-paengi deliberately explores a new model rather than preserving Git's internal concepts.
+yeokcham deliberately explores a new model rather than preserving Git's internal concepts.
 
 ## The three histories
 
@@ -39,7 +39,7 @@ A user should be able to:
 
 OCaml.
 
-OCaml is selected because paengi's core is an algebraic model of immutable state, operations, conflicts, composition, and compaction. The project should make extensive use of algebraic data types, pure transition functions, property testing, and explicit state-machine modelling.
+OCaml is selected because yeokcham's core is an algebraic model of immutable state, operations, conflicts, composition, and compaction. The project should make extensive use of algebraic data types, pure transition functions, property testing, and explicit state-machine modelling.
 
 The supported compiler is OCaml 5.5.0. The exact constraint is recorded in `dune-project`.
 
@@ -66,7 +66,7 @@ the implemented retention policies; its companion
 `docs/COMPACTION_RETENTION_RESULTS.md` publishes those measurements without a
 performance claim. `docs/RESEARCH_AND_BENCHMARK_REPORT.md` indexes all checked
 benchmark/experiment evidence and its recorded negative outcomes.
-`compact --prune` is irreversible. paengi remains a portfolio and research
+`compact --prune` is irreversible. yeokcham remains a portfolio and research
 prototype, not a production Git replacement.
 
 Milestone 7 is complete as a bounded, non-persistent TypeScript-sidecar
@@ -99,10 +99,10 @@ attributes, and parser damage return bounded canonical
 semantic operation. M9-04 adds bounded Rust rename/move fixture maps with
 exact textual byte oracles and explicit ambiguity/macro/parser fallback cases;
 they do not implement Rust rename or move inference. See the
-[helper contract](tools/paengi-rust-adapter/README.md).
+[helper contract](tools/yeokcham-rust-adapter/README.md).
 
 Milestone 8 imports one Git tree/commit/tag through bounded direct argv and
-exports one Paengi release as a deterministic root Git commit. Imports preserve
+exports one Yeokcham release as a deterministic root Git commit. Imports preserve
 supported `100644`, `100755`, and `120000` content/modes and opaque commit/tag
 provenance without fabricating a capsule or revision. ADR-032 export uses the
 release snapshot, fixed export metadata, a create-only release ref, and an
@@ -147,7 +147,7 @@ Malformed, untrusted, missing, wrong-type, stale-context, and corrupt binding
 inputs reject explicitly. The binding records candidates only: it neither reads
 nor changes the application ref, selects a head, or reconciles a target.
 
-See `CONTRIBUTING.md` for development rules. Paengi is licensed under the MIT License.
+See `CONTRIBUTING.md` for development rules. Yeokcham is licensed under the MIT License.
 
 ## Development
 
@@ -164,47 +164,47 @@ make ci
 ## Current local CLI
 
 ```bash
-dune exec bin/paengi.exe -- init
-dune exec bin/paengi.exe -- checkpoint
-dune exec bin/paengi.exe -- timeline --limit 32
-dune exec bin/paengi.exe -- restore --dry-run <checkpoint>
-dune exec bin/paengi.exe -- restore <checkpoint>
-dune exec bin/paengi.exe -- pin <checkpoint>
-dune exec bin/paengi.exe -- unpin <checkpoint>
-dune exec bin/paengi.exe -- compact --dry-run --explain
-dune exec bin/paengi.exe -- compact --explain
-dune exec bin/paengi.exe -- compact --resume
-dune exec bin/paengi.exe -- compact --prune
-dune exec bin/paengi.exe -- watch --interval-ms 500 --debounce-ms 500
-dune exec bin/paengi.exe -- capsule create --current --id <capsule-id> --title <title> --description <description>
-dune exec bin/paengi.exe -- capsule edit <capsule-id>
-dune exec bin/paengi.exe -- capsule fold <capsule-id> --from <editing-anchor> --to <checkpoint>
-dune exec bin/paengi.exe -- capsule split <capsule-id> --left-id <capsule-id> --left-title <title> --left-description <description> --right-id <capsule-id> --right-title <title> --right-description <description> --left-indices <indices> --confirm
-dune exec bin/paengi.exe -- capsule combine --id <capsule-id> --title <title> --description <description> --source <capsule-id> --source <capsule-id> --confirm
-dune exec bin/paengi.exe -- capsule show <capsule-id>
-dune exec bin/paengi.exe -- capsule current-diff <capsule-id>
-dune exec bin/paengi.exe -- capsule history <capsule-id>
-dune exec bin/paengi.exe -- work explain-order --enable <capsule-id> --enable <capsule-id> [--order <revision-id>,<revision-id>]
-dune exec bin/paengi.exe -- work create --id <workspace-id> --base <snapshot-id> [--name <name>] [--description <description>]
-dune exec bin/paengi.exe -- work show <workspace-id>
-dune exec bin/paengi.exe -- work enable <workspace-id> <capsule-revision-id>
-dune exec bin/paengi.exe -- work disable <workspace-id> <capsule-id>
-dune exec bin/paengi.exe -- work reorder <workspace-id> --order <revision-id>,<revision-id>
-dune exec bin/paengi.exe -- work explain-order <workspace-id>
-dune exec bin/paengi.exe -- work materialise <workspace-id> [--dry-run]
-dune exec bin/paengi.exe -- conflict list <workspace-id>
-dune exec bin/paengi.exe -- conflict show <conflict-id>
-dune exec bin/paengi.exe -- conflict resolve <workspace-id> <conflict-id> --action skip
-dune exec bin/paengi.exe -- validation run --snapshot <snapshot-id> --exec <program> [--arg <argument>] [--cwd <relative-path>] [--timeout-ms <milliseconds>] [--max-stdout-bytes <bytes>] [--max-stderr-bytes <bytes>] [--env <name=value>] [--inherit-env] [--retain-output] [--retain-passing-checkpoints]
-dune exec bin/paengi.exe -- release create --workspace <workspace-id> [--parent <release-id>] [--message <text>] [--validation-exec <program> [--validation-arg <argument>] [--validation-cwd <relative-path>] [--validation-timeout-ms <milliseconds>] [--validation-max-stdout-bytes <bytes>] [--validation-max-stderr-bytes <bytes>] [--validation-env <name=value>] [--validation-inherit-env] [--validation-retain-output]]
-dune exec bin/paengi.exe -- release show <release-id>
-dune exec bin/paengi.exe -- release verify <release-id>
-dune exec bin/paengi.exe -- release list
-dune exec bin/paengi.exe -- git import tree --repository <absolute-git-directory> --tree <full-git-tree-id>
-dune exec bin/paengi.exe -- git import commit --repository <absolute-git-directory> --commit <full-git-commit-id>
-dune exec bin/paengi.exe -- git import tag --repository <absolute-git-directory> --tag <name>
-dune exec bin/paengi.exe -- git export release --repository <absolute-git-directory> --release <release-id> [--author-name <name> --author-email <email> --committer-name <name> --committer-email <email> --message <message>]
-dune exec bin/paengi.exe -- git export revisions --repository <absolute-git-directory> --revision <capsule-id>:<revision-id>:<stored-object-id> [--revision <capsule-id>:<revision-id>:<stored-object-id> ...]
+dune exec bin/yeokcham.exe -- init
+dune exec bin/yeokcham.exe -- checkpoint
+dune exec bin/yeokcham.exe -- timeline --limit 32
+dune exec bin/yeokcham.exe -- restore --dry-run <checkpoint>
+dune exec bin/yeokcham.exe -- restore <checkpoint>
+dune exec bin/yeokcham.exe -- pin <checkpoint>
+dune exec bin/yeokcham.exe -- unpin <checkpoint>
+dune exec bin/yeokcham.exe -- compact --dry-run --explain
+dune exec bin/yeokcham.exe -- compact --explain
+dune exec bin/yeokcham.exe -- compact --resume
+dune exec bin/yeokcham.exe -- compact --prune
+dune exec bin/yeokcham.exe -- watch --interval-ms 500 --debounce-ms 500
+dune exec bin/yeokcham.exe -- capsule create --current --id <capsule-id> --title <title> --description <description>
+dune exec bin/yeokcham.exe -- capsule edit <capsule-id>
+dune exec bin/yeokcham.exe -- capsule fold <capsule-id> --from <editing-anchor> --to <checkpoint>
+dune exec bin/yeokcham.exe -- capsule split <capsule-id> --left-id <capsule-id> --left-title <title> --left-description <description> --right-id <capsule-id> --right-title <title> --right-description <description> --left-indices <indices> --confirm
+dune exec bin/yeokcham.exe -- capsule combine --id <capsule-id> --title <title> --description <description> --source <capsule-id> --source <capsule-id> --confirm
+dune exec bin/yeokcham.exe -- capsule show <capsule-id>
+dune exec bin/yeokcham.exe -- capsule current-diff <capsule-id>
+dune exec bin/yeokcham.exe -- capsule history <capsule-id>
+dune exec bin/yeokcham.exe -- work explain-order --enable <capsule-id> --enable <capsule-id> [--order <revision-id>,<revision-id>]
+dune exec bin/yeokcham.exe -- work create --id <workspace-id> --base <snapshot-id> [--name <name>] [--description <description>]
+dune exec bin/yeokcham.exe -- work show <workspace-id>
+dune exec bin/yeokcham.exe -- work enable <workspace-id> <capsule-revision-id>
+dune exec bin/yeokcham.exe -- work disable <workspace-id> <capsule-id>
+dune exec bin/yeokcham.exe -- work reorder <workspace-id> --order <revision-id>,<revision-id>
+dune exec bin/yeokcham.exe -- work explain-order <workspace-id>
+dune exec bin/yeokcham.exe -- work materialise <workspace-id> [--dry-run]
+dune exec bin/yeokcham.exe -- conflict list <workspace-id>
+dune exec bin/yeokcham.exe -- conflict show <conflict-id>
+dune exec bin/yeokcham.exe -- conflict resolve <workspace-id> <conflict-id> --action skip
+dune exec bin/yeokcham.exe -- validation run --snapshot <snapshot-id> --exec <program> [--arg <argument>] [--cwd <relative-path>] [--timeout-ms <milliseconds>] [--max-stdout-bytes <bytes>] [--max-stderr-bytes <bytes>] [--env <name=value>] [--inherit-env] [--retain-output] [--retain-passing-checkpoints]
+dune exec bin/yeokcham.exe -- release create --workspace <workspace-id> [--parent <release-id>] [--message <text>] [--validation-exec <program> [--validation-arg <argument>] [--validation-cwd <relative-path>] [--validation-timeout-ms <milliseconds>] [--validation-max-stdout-bytes <bytes>] [--validation-max-stderr-bytes <bytes>] [--validation-env <name=value>] [--validation-inherit-env] [--validation-retain-output]]
+dune exec bin/yeokcham.exe -- release show <release-id>
+dune exec bin/yeokcham.exe -- release verify <release-id>
+dune exec bin/yeokcham.exe -- release list
+dune exec bin/yeokcham.exe -- git import tree --repository <absolute-git-directory> --tree <full-git-tree-id>
+dune exec bin/yeokcham.exe -- git import commit --repository <absolute-git-directory> --commit <full-git-commit-id>
+dune exec bin/yeokcham.exe -- git import tag --repository <absolute-git-directory> --tag <name>
+dune exec bin/yeokcham.exe -- git export release --repository <absolute-git-directory> --release <release-id> [--author-name <name> --author-email <email> --committer-name <name> --committer-email <email> --message <message>]
+dune exec bin/yeokcham.exe -- git export revisions --repository <absolute-git-directory> --revision <capsule-id>:<revision-id>:<stored-object-id> [--revision <capsule-id>:<revision-id>:<stored-object-id> ...]
 ```
 
 `work explain-order` is read-only. It resolves each enabled capsule's current
@@ -214,7 +214,7 @@ and precedence edges. `--order` must name every enabled revision exactly once.
 `git export release` uses the fixed M8-08 Git identity and release message by
 default. Supplying all five metadata flags selects exact caller-provided Git
 author, committer, and message bytes for that export only; partial or duplicate
-metadata flags reject. Configured metadata does not change the Paengi release
+metadata flags reject. Configured metadata does not change the Yeokcham release
 or snapshot. Its Git ref is metadata-qualified, so it neither overwrites the
 default export nor a different configured export of the same release.
 
@@ -247,7 +247,7 @@ required validation against the resulting snapshot, then publishes an immutable
 release through a create-only binding. `release verify` replays durable inputs;
 it does not trust a workspace cache or current workspace selection.
 
-`git import tree` requires an initialized Paengi root and an absolute local Git
+`git import tree` requires an initialized Yeokcham root and an absolute local Git
 repository directory. It accepts only a full SHA-1 or SHA-256 tree ID, prints
 the imported snapshot and immutable mapping IDs, and does not advance any
 scratch, capsule, workspace, or release ref.
@@ -257,12 +257,12 @@ full SHA-1 or SHA-256 commit ID, verifies the exact declared tree and direct
 parent object types, and prints an opaque transition, snapshot, mapping, commit,
 ordered parent IDs, hex-safe author/committer bytes, and a message Content ID.
 It retains source metadata as opaque bytes, does not normalize identity or time,
-recursively import parents, or advance any Paengi history ref.
+recursively import parents, or advance any Yeokcham history ref.
 
 `git import tag` has the same root and repository requirements. It resolves one
 bounded `refs/tags/<name>` ref, retains a lightweight target or raw annotated
 tag bytes as opaque provenance, and prints the imported-tag and mapping IDs. It
-does not create a Paengi release, capsule, or history ref, and does not verify
+does not create a Yeokcham release, capsule, or history ref, and does not verify
 tag signatures.
 
 `restore` creates a durable safety checkpoint for divergent work, validates its
@@ -272,7 +272,7 @@ on a reported partial failure, restore the reported safety checkpoint.
 
 Compaction keeps CLI checkpoint IDs logical. An activated generation resolves
 retained logical IDs to verified physical checkpoints; unretained IDs become
-unavailable only after their objects move to `.paengi/trash/<generation-id>/`.
+unavailable only after their objects move to `.yeokcham/trash/<generation-id>/`.
 Quarantine can be inspected or resumed. Permanent prune cannot restore the
 previous generation's quarantined history. `compact --dry-run --explain`
 reports the exact canonical cleanup IDs, expected types, count, and stored
@@ -323,7 +323,7 @@ publishes any output.
 
 ## Testing scope
 
-Paengi is a local VCS and persistent-data-model project. Its tests cover repository correctness, deterministic generated inputs, and checked-in local fixtures. External security analysis is outside scope. Bounds checks, corruption detection, atomic writes, and malformed-input handling remain required storage-system behavior.
+Yeokcham is a local VCS and persistent-data-model project. Its tests cover repository correctness, deterministic generated inputs, and checked-in local fixtures. External security analysis is outside scope. Bounds checks, corruption detection, atomic writes, and malformed-input handling remain required storage-system behavior.
 
 ## Non-goals for the initial prototype
 

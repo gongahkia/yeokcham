@@ -29,7 +29,7 @@ before this ADR is accepted.
   key IDs and verification semantics.
 - Keep a long-lived device identifier distinct from a signing key, event ID,
   stored-object ID, mutable ref, and person/account identity.
-- Keep private key bytes outside Paengi's object store until a dedicated local
+- Keep private key bytes outside Yeokcham's object store until a dedicated local
   secret-storage decision exists.
 - Make registry ambiguity, corrupt declarations, absent mappings, and entropy
   failure explicit before any repository state changes.
@@ -84,14 +84,14 @@ Ed25519 key values, so generated tests can inject deterministic bytes without
 making them production identity material.
 
 V1 accepts only `signing-algorithm = "ed25519"`, a 32-byte public key, and the
-existing ADR-039 32-byte `signer-key-id = SHA-256("paengi:ref-key:v1\000" ||
+existing ADR-039 32-byte `signer-key-id = SHA-256("yeokcham:ref-key:v1\000" ||
 public-key)`. `mandatory-features` uses ADR-019 canonical ordering and unknown
 mandatory features reject. A declaration is public and has no self-signature:
 it is a precise key-to-random-device association, not proof of authority,
 ownership, personhood, or trust.
 
 The generation adapter returns the private Ed25519 capability only to its
-caller. Paengi serialises neither that capability nor its seed, bytes, key
+caller. Yeokcham serialises neither that capability nor its seed, bytes, key
 locator, recovery phrase, passphrase, or operating-system keychain reference.
 The persistent store accepts only the public declaration through ADR-020
 create-only publication. Restart can reload and validate public declarations,

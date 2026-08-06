@@ -1,7 +1,7 @@
 {
   "$schema":"https://json-schema.org/draft/2020-12/schema",
-  "$id":"https://github.com/gongahkia/paengi/blob/main/docs/experiments/schema/scratch-retention-benchmark-v1.schema.json",
-  "title":"Paengi scratch retention benchmark v1",
+  "$id":"https://github.com/gongahkia/yeokcham/blob/main/docs/experiments/schema/scratch-retention-benchmark-v1.schema.json",
+  "title":"Yeokcham scratch retention benchmark v1",
   "type":"object",
   "additionalProperties":false,
   "required":["schema_version","benchmark_id","purpose","recorded_at_utc","fixture","execution","environment","policies","notes"],

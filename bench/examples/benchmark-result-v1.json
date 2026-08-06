@@ -3,7 +3,7 @@
   "benchmark_id": "example-initial-scan",
   "benchmark_kind": "initial_scan",
   "recorded_at": "2026-07-29T00:00:00Z",
-  "paengi": {
+  "yeokcham": {
     "commit": "0000000000000000000000000000000000000000",
     "dirty": false,
     "version": "dev"
@@ -45,7 +45,7 @@
     "runner": "example",
     "runner_version": "1",
     "command": [
-      "paengi",
+      "yeokcham",
       "scan"
     ],
     "environment": {},

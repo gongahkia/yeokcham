@@ -1,7 +1,7 @@
-module Compaction = Paengi_compaction
-module Scratch = Paengi_scratch
-module Snapshot = Paengi_snapshot
-module Store = Paengi_store
+module Compaction = Yeokcham_compaction
+module Scratch = Yeokcham_scratch
+module Snapshot = Yeokcham_snapshot
+module Store = Yeokcham_store
 
 let require_ok render = function
   | Ok value -> value
@@ -354,7 +354,7 @@ let invalid_policy_values_are_rejected () =
   | Ok _ -> Alcotest.fail "negative storage budget was accepted"
 
 let with_history run =
-  with_directory "paengi-compaction-" (fun root ->
+  with_directory "yeokcham-compaction-" (fun root ->
       write_file (Filename.concat root "file") "zero";
       let store = Store.init ~root |> require_ok Store.error_to_string in
       let scratch = Scratch.open_repository store in
@@ -431,7 +431,7 @@ let metric_ids_are_unique metrics =
 
 let generation_trash root generation =
   Filename.concat
-    (Filename.concat root ".paengi/trash")
+    (Filename.concat root ".yeokcham/trash")
     (Store.Stored_object_id.to_hex
        (Scratch.Generation_id.stored_object_id generation))
 
@@ -594,7 +594,7 @@ let assert_pruned store root generation planned =
 
 let planner_is_read_only_and_explains_exact_cleanup () =
   with_history (fun root store scratch initial middle head ->
-      let head_path = Filename.concat root ".paengi/refs/scratch-head" in
+      let head_path = Filename.concat root ".yeokcham/refs/scratch-head" in
       let before = In_channel.with_open_bin head_path In_channel.input_all in
       let plan =
         Compaction.analyze ~store scratch
@@ -1002,7 +1002,7 @@ let cleanup_rejects_invalid_resume_states () =
         (Store.object_path store metric.Compaction.metric_object_id)
         bytes);
   expect_error (fun root store _scratch execution metric ->
-      let trash_root = Filename.concat root ".paengi/trash" in
+      let trash_root = Filename.concat root ".yeokcham/trash" in
       Unix.mkdir trash_root 0o700;
       let other = Filename.concat trash_root "other-generation" in
       Unix.mkdir other 0o700;

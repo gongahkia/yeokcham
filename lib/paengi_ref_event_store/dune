@@ -1,3 +1,0 @@
-(library
- (name paengi_ref_event_store)
- (libraries paengi_envelope paengi_ref_event paengi_store))

@@ -119,22 +119,22 @@ or validation feature is implemented.  Effective retention folds the intrinsic
 checkpoint reasons with the verified retention-change chain.  Pinning and
 unpinning therefore never replace a checkpoint object or checkpoint ID.
 
-`.paengi/refs/scratch-head` is a mutable, non-content-addressed ref.  Its
+`.yeokcham/refs/scratch-head` is a mutable, non-content-addressed ref.  Its
 canonical Profile-1 record is:
 
 ```text
 mutable-ref-v1 = [1, generation, target-object-id-or-null, checksum]
-checksum = SHA-256("paengi:mutable-ref:v1\\000" || encode([1, generation, target]))
+checksum = SHA-256("yeokcham:mutable-ref:v1\\000" || encode([1, generation, target]))
 ```
 
-`scratch-head` requires a non-null Checkpoint target.  `.paengi/refs/retention-head`
+`scratch-head` requires a non-null Checkpoint target.  `.yeokcham/refs/retention-head`
 uses the same record and may have a null Retention_change target.  The checksum
 is integrity verification, not an object identity.  Ref targets are typed by
 the named-ref API; raw 32-byte payloads are not interchangeable at call sites.
 
 Ref publication is compare-and-swap:
 
-1. Exclusively create `.paengi/locks/<ref>.lock` as the repository-local
+1. Exclusively create `.yeokcham/locks/<ref>.lock` as the repository-local
    single-writer lock.
 2. Read and verify the existing ref, then compare its exact expected record.
 3. Write the next generation to a uniquely named same-directory temporary file,
@@ -145,7 +145,7 @@ Ref publication is compare-and-swap:
 
 A mismatch returns a structured concurrent-update error.  Immutable objects
 continue to use ADR-020 hard-link no-replace publication; rename-over is used
-only for mutable refs.  A crash can leave a stale lock.  Paengi does not remove
+only for mutable refs.  A crash can leave a stale lock.  Yeokcham does not remove
 it automatically because ownership cannot be proved safely; operators inspect
 the ref and process state, then remove only the stale lock.  Directory-fsync
 unsupported filesystems have the same documented weaker durability guarantee as

@@ -1,4 +1,4 @@
-module Comparison = Paengi_rust_retarget_comparison
+module Comparison = Yeokcham_rust_retarget_comparison
 
 let usage () =
   invalid_arg

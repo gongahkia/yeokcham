@@ -39,8 +39,8 @@ esac
 parent=$(cd "$parent" && pwd -P)
 root=$parent/$name
 [ -d "$root" ] || fail 'demo root must be a directory'
-[ -f "$root/.paengi-demo-owned-v1" ] || fail 'demo ownership marker is missing'
-[ "$(cat "$root/.paengi-demo-owned-v1")" = 'paengi-demo-owned-v1' ] \
+[ -f "$root/.yeokcham-demo-owned-v1" ] || fail 'demo ownership marker is missing'
+[ "$(cat "$root/.yeokcham-demo-owned-v1")" = 'yeokcham-demo-owned-v1' ] \
   || fail 'demo ownership marker is invalid'
 
 rm -rf -- "$root"

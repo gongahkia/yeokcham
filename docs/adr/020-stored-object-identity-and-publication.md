@@ -45,15 +45,15 @@ ADR-018 deliberately leaves stored-object identity and publication unspecified. 
 `Stored_object_id` is:
 
 ```text
-SHA-256("paengi:object:v1\\000" || exact canonical Envelope-1 bytes)
+SHA-256("yeokcham:object:v1\\000" || exact canonical Envelope-1 bytes)
 ```
 
-It is a 32-byte abstract type, rendered as exactly 64 lowercase hexadecimal characters. It is not interchangeable with Paengi semantic IDs.
+It is a 32-byte abstract type, rendered as exactly 64 lowercase hexadecimal characters. It is not interchangeable with Yeokcham semantic IDs.
 
 The path is built only from a validated typed ID:
 
 ```text
-.paengi/objects/<hex[0:2]>/<hex[2:4]>/<hex[4:64]>
+.yeokcham/objects/<hex[0:2]>/<hex[2:4]>/<hex[4:64]>
 ```
 
 The repository `format` record is exact, versioned text recording repository format `1`, `sha256`, Envelope version `1`, and object-format version `1`. Readers fail closed on a different record.
@@ -104,4 +104,4 @@ An Envelope version or stored-object preimage change deliberately produces diffe
 
 ## CLI and user impact
 
-No CLI command is introduced. Future `paengi verify` and storage inspection report stored-object IDs separately from semantic identities and return structured format, integrity, collision, and unsupported-publication errors.
+No CLI command is introduced. Future `yeokcham verify` and storage inspection report stored-object IDs separately from semantic identities and return structured format, integrity, collision, and unsupported-publication errors.

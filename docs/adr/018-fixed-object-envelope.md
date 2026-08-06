@@ -51,7 +51,7 @@ Use Fixed Object Envelope 1. It is exactly 57 bytes followed by the payload:
 
 | Offset | Size | Field | Rule |
 | --- | --- | --- | --- |
-| 0 | 4 | magic | ASCII `PENG` |
+| 0 | 4 | magic | ASCII `YEOK` |
 | 4 | 1 | envelope version | `1` |
 | 5 | 1 | object type | unsigned code |
 | 6 | 2 | object-format version | unsigned big-endian code |
@@ -59,7 +59,7 @@ Use Fixed Object Envelope 1. It is exactly 57 bytes followed by the payload:
 | 16 | 1 | checksum algorithm | `1` means SHA-256 |
 | 17 | 8 | payload length | unsigned big-endian byte count |
 | 25 | 32 | checksum | SHA-256 digest |
-| 57 | variable | payload | exact Paengi CBOR Profile 1 bytes |
+| 57 | variable | payload | exact Yeokcham CBOR Profile 1 bytes |
 
 The checksum is SHA-256 over bytes 0 through 24 followed immediately by the payload; it excludes only the checksum field itself. A reader must validate magic, known envelope version, known object type, known checksum algorithm, length arithmetic, exact end-of-input, and checksum before decoding the payload. It must reject unknown mandatory feature bits after ADR-019 defines their registry and before interpreting the payload.
 
@@ -67,7 +67,7 @@ Object type `0` and all unassigned codes are invalid. Version 1 assigns: `1` con
 
 Object-format-version values, object-type codes, and mandatory-feature-bit assignments are constrained by this layout but are defined in the following format-version and feature-flags decision. This ADR defines `1` as the persistent code for SHA-256. It does not define object IDs; a later object-store decision must state the content-ID preimage explicitly and may not silently equate it with this checksum.
 
-Git's object model independently demonstrates hashing typed, length-delimited object preimages, while OCI descriptors independently require consumers to verify typed content against its declared size and digest. Paengi does not copy either format: their relevance is the separation of type, length, and integrity from application payload parsing.
+Git's object model independently demonstrates hashing typed, length-delimited object preimages, while OCI descriptors independently require consumers to verify typed content against its declared size and digest. Yeokcham does not copy either format: their relevance is the separation of type, length, and integrity from application payload parsing.
 
 ## Consequences
 
@@ -110,7 +110,7 @@ No persistent objects exist, so v1 introduces no migration. Existing object file
 ## Verification evidence
 
 - 2026-07-29: the 57-byte golden `Snapshot` envelope, including its SHA-256 checksum, passes; its checksum was independently matched by `shasum -a 256` and `openssl dgst -sha256` over the defined preimage.
-- 2026-07-29: the retained `test/golden/envelope-v1-snapshot.peng.hex` fixture is loaded as source-controlled data, verifies, decodes, and re-encodes byte-identically in Dune's sandboxed test run.
+- 2026-07-29: the retained `test/golden/envelope-v1-snapshot.yeok.hex` fixture is loaded as source-controlled data, verifies, decodes, and re-encodes byte-identically in Dune's sandboxed test run.
 - 2026-07-29: all registered object-type codes round-trip; code `0` and unassigned code `13` reject.
 - 2026-07-29: tests reject every truncated prefix, invalid magic/version/algorithm/type/features, high-bit length, length mismatch, trailing bytes, covered-header corruption, checksum corruption, and payload corruption.
 - 2026-07-29: an instrumented payload callback is not invoked for a checksum-invalid envelope and is invoked only after checksum verification on a checksum-valid malformed payload.

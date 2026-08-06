@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/gongahkia/paengi/blob/main/bench/schema/canonical-codec-benchmark-result.schema.json",
-  "title": "Paengi canonical codec benchmark result",
+  "$id": "https://github.com/gongahkia/yeokcham/blob/main/bench/schema/canonical-codec-benchmark-result.schema.json",
+  "title": "Yeokcham canonical codec benchmark result",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -48,11 +48,11 @@
     "metadata": {
       "type": "object",
       "additionalProperties": false,
-      "required": [ "ocaml_version", "dune_profile", "paengi_revision", "working_tree_state" ],
+      "required": [ "ocaml_version", "dune_profile", "yeokcham_revision", "working_tree_state" ],
       "properties": {
         "ocaml_version": { "type": "string", "minLength": 1 },
         "dune_profile": { "type": "string", "minLength": 1 },
-        "paengi_revision": { "type": "string", "minLength": 1 },
+        "yeokcham_revision": { "type": "string", "minLength": 1 },
         "working_tree_state": { "enum": [ "clean", "dirty", "unavailable" ] }
       }
     }

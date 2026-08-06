@@ -114,7 +114,7 @@ incompatibilities, cycles, stored-order recomputation, and that
 The only mutable workspace state is:
 
 ```text
-.paengi/refs/workspaces/<lowercase-workspace-id-hex>/current
+.yeokcham/refs/workspaces/<lowercase-workspace-id-hex>/current
 
 workspace-current-ref-v1 = [
   1, generation, workspace-id, workspace-object-id,
@@ -125,7 +125,7 @@ workspace-current-ref-v1 = [
 latest-attempt-link-v1 = [workspace-attempt-id, workspace-attempt-object-id]
 ```
 
-The checksum is SHA-256 over `paengi:workspace-current-ref:v1\000` and the
+The checksum is SHA-256 over `yeokcham:workspace-current-ref:v1\000` and the
 same array without checksum. Generation is non-negative and strictly advances.
 The ref uses the established repository writer lock, verified expected raw
 bytes, same-directory temporary write, file fsync, rename-over, directory

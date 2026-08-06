@@ -133,7 +133,7 @@ merged, or synchronised; no CLI mutation is added.
 
 ## Implementation evidence
 
-Implemented by `paengi_divergence` and `paengi_divergence_store` with Envelope
+Implemented by `yeokcham_divergence` and `yeokcham_divergence_store` with Envelope
 type 28 and checksummed `sync-divergence` bindings. Focused golden, inverse,
 two-device merge/reopen, rejection, and unchanged-ref coverage is in
 `test/test_divergence.ml`; the seeded delivery/duplicate/restart/corruption

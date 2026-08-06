@@ -66,8 +66,8 @@ directory token from the OS CSPRNG and uses lowercase hex in exactly these
 filenames:
 
 ```text
-partial-v1 = .paengi-bundle-v1-<32-lowercase-hex>.partial
-complete-v1 = paengi-bundle-v1-<32-lowercase-hex>.peng
+partial-v1 = .yeokcham-bundle-v1-<32-lowercase-hex>.partial
+complete-v1 = yeokcham-bundle-v1-<32-lowercase-hex>.yeok
 ```
 
 The token is a non-secret collision-avoidance name component; it is not a key
@@ -98,7 +98,7 @@ are not inspectable as bundles and always reject.
 `import` accepts one caller-selected complete descriptor and direct key, reads
 the exact bounded regular file, then delegates to ADR-042 import. Thus outer
 decode, repository compatibility, AEAD authentication, every plaintext entry,
-and Envelope/ID verification complete before the first `Paengi_store.put`.
+and Envelope/ID verification complete before the first `Yeokcham_store.put`.
 An interrupted or I/O-failed import can leave only a valid immutable prefix;
 retrying the same complete file is the only M10-08 resume operation and is
 idempotent. The adapter never creates, reads, updates, reconciles, or deletes a
@@ -150,7 +150,7 @@ trust map, and repository state.
 
 ## Persistent-format and migration impact
 
-This adds no Paengi object, Envelope, ref, binding, repository, exchange-frame,
+This adds no Yeokcham object, Envelope, ref, binding, repository, exchange-frame,
 or encrypted-bundle byte format. It adds an external directory naming protocol
 for v1 complete/partial file classes; old repositories require no migration.
 Retained ADR-042 bundle fixtures remain the complete-file bytes fixture.
@@ -188,7 +188,7 @@ known peer, is replay-safe, repaired, or synchronised a ref.
 
 ## Implementation evidence
 
-M10-08 implements `paengi_bundle_directory`, an external directory adapter over
+M10-08 implements `yeokcham_bundle_directory`, an external directory adapter over
 ADR-042 bytes. It adds retained v1 filename ordering, focused
 export/list/inspect/import/retry and rejection coverage, and the seeded
 `bundle_directory_property_test`.

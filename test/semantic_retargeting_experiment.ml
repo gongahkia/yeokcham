@@ -1,4 +1,4 @@
-module Experiment = Paengi_semantic_experiment
+module Experiment = Yeokcham_semantic_experiment
 
 let usage () =
   invalid_arg

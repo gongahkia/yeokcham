@@ -1,8 +1,8 @@
-module Capsule = Paengi_capsule
-module Id = Paengi_id
-module Scratch = Paengi_scratch
-module Snapshot = Paengi_snapshot
-module Store = Paengi_store
+module Capsule = Yeokcham_capsule
+module Id = Yeokcham_id
+module Scratch = Yeokcham_scratch
+module Snapshot = Yeokcham_snapshot
+module Store = Yeokcham_store
 
 [@@@warning "-4"]
 
@@ -258,7 +258,7 @@ let construction_rejects_nonpersistable_identities () =
   then Alcotest.fail "empty title was accepted"
 
 let draft_from_checkpoints_replays_and_pins_boundaries () =
-  with_directory "paengi-capsule-draft-" (fun root ->
+  with_directory "yeokcham-capsule-draft-" (fun root ->
       let file = Filename.concat root "file" in
       write_file file "before";
       let store = Store.init ~root |> require_ok Store.error_to_string in
@@ -350,7 +350,7 @@ let draft_from_checkpoints_replays_and_pins_boundaries () =
         [ Scratch.Checkpoint.id initial; Scratch.Checkpoint.id target ])
 
 let draft_rejects_missing_checkpoint () =
-  with_directory "paengi-capsule-missing-" (fun root ->
+  with_directory "yeokcham-capsule-missing-" (fun root ->
       write_file (Filename.concat root "file") "content";
       let store = Store.init ~root |> require_ok Store.error_to_string in
       let scratch = Scratch.open_repository store in

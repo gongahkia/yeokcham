@@ -1,9 +1,9 @@
 (executable
  (name encoding_benchmark)
  (modules encoding_benchmark)
- (libraries unix paengi_encoding paengi_envelope paengi_hash paengi_model))
+ (libraries unix yeokcham_encoding yeokcham_envelope yeokcham_hash yeokcham_model))
 
 (executable
  (name large_content_benchmark)
  (modules large_content_benchmark)
- (libraries unix paengi_chunking paengi_encoding paengi_envelope paengi_hash))
+ (libraries unix yeokcham_chunking yeokcham_encoding yeokcham_envelope yeokcham_hash))

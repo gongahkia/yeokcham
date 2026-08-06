@@ -1,11 +1,11 @@
-module Envelope = Paengi_envelope
-module Encoding = Paengi_encoding
-module Golden = Paengi_testkit.Golden_fixture
-module Hash = Paengi_hash.Sha256
-module Scratch = Paengi_scratch
-module Snapshot = Paengi_snapshot
-module Store = Paengi_store
-module Validation = Paengi_validation
+module Envelope = Yeokcham_envelope
+module Encoding = Yeokcham_encoding
+module Golden = Yeokcham_testkit.Golden_fixture
+module Hash = Yeokcham_hash.Sha256
+module Scratch = Yeokcham_scratch
+module Snapshot = Yeokcham_snapshot
+module Store = Yeokcham_store
+module Validation = Yeokcham_validation
 
 let require_ok render = function
   | Ok value -> value
@@ -68,7 +68,7 @@ let command ?(timeout_ms = 1000L) ?(max_stdout_bytes = 1024)
   }
 
 let with_store run =
-  let root = Filename.temp_file "paengi-validation-test-" "" in
+  let root = Filename.temp_file "yeokcham-validation-test-" "" in
   Unix.unlink root;
   Unix.mkdir root 0o700;
   let rec remove path =
@@ -129,7 +129,7 @@ let canonical_golden_and_inverse_decoder () =
   let bytes = evidence_fixture () in
   Alcotest.(check string)
     "validation evidence golden"
-    (golden "validation-evidence-v1.peng.hex")
+    (golden "validation-evidence-v1.yeok.hex")
     bytes;
   let envelope =
     Envelope.decode bytes |> require_ok Envelope.decode_error_to_string
@@ -313,10 +313,10 @@ let unix_runner_timeout_and_direct_execution () =
         | Validation.Execution_error -> "execution-error"))
 
 let () =
-  match Sys.getenv_opt "PAENGI_PRINT_GOLDEN" with
+  match Sys.getenv_opt "YEOKCHAM_PRINT_GOLDEN" with
   | Some "1" -> print_endline (hex (evidence_fixture ()))
   | None | Some _ ->
-      Alcotest.run "paengi_validation"
+      Alcotest.run "yeokcham_validation"
         [
           ( "validation",
             [

@@ -47,7 +47,7 @@ let environment entries =
     (List.map (fun (key, value) -> key ^ "=" ^ value) entries @ inherited)
 
 let run ~environment program arguments =
-  let output = Filename.temp_file "paengi-demo-workspace-output-" "" in
+  let output = Filename.temp_file "yeokcham-demo-workspace-output-" "" in
   Fun.protect
     (fun () ->
       let descriptor =
@@ -98,7 +98,7 @@ let count_lines prefix output =
   |> List.length
 
 let workspace_selection_is_deterministic_and_independent () =
-  let parent = Filename.temp_file "paengi-demo-workspace-" "" in
+  let parent = Filename.temp_file "yeokcham-demo-workspace-" "" in
   Unix.unlink parent;
   Unix.mkdir parent 0o700;
   let root = Filename.concat parent "fixture" in
@@ -108,8 +108,8 @@ let workspace_selection_is_deterministic_and_independent () =
       let environment =
         environment
           [
-            ("PAENGI_BIN", binary "paengi.exe");
-            ("PAENGI_WORKSPACE_BASE_BIN", binary "workspace_base_v1.exe");
+            ("YEOKCHAM_BIN", binary "yeokcham.exe");
+            ("YEOKCHAM_WORKSPACE_BASE_BIN", binary "workspace_base_v1.exe");
           ]
       in
       require
@@ -118,11 +118,11 @@ let workspace_selection_is_deterministic_and_independent () =
         |> fst |> exited)
         "fixture creation failed";
       let checkpoint =
-        read (Filename.concat root ".paengi/demo-v1-change-checkpoint")
+        read (Filename.concat root ".yeokcham/demo-v1-change-checkpoint")
         |> String.trim
       in
-      let paengi_directory = Filename.concat root ".paengi" in
-      let before_helper = entries paengi_directory in
+      let yeokcham_directory = Filename.concat root ".yeokcham" in
+      let before_helper = entries yeokcham_directory in
       let helper_status, snapshot =
         run ~environment
           (binary "workspace_base_v1.exe")
@@ -134,7 +134,7 @@ let workspace_selection_is_deterministic_and_independent () =
         (String.length (String.trim snapshot));
       Alcotest.(check (list string))
         "checkpoint helper is read-only" before_helper
-        (entries paengi_directory);
+        (entries yeokcham_directory);
       require
         (run ~environment "sh"
            [ script "demonstrate-workspace-v1.sh"; "--root"; root ]
@@ -147,18 +147,18 @@ let workspace_selection_is_deterministic_and_independent () =
         "5555555555555555555555555555555555555555555555555555555555555555"
       in
       let first_revision =
-        read (Filename.concat root ".paengi/demo-v1-workspace-capsule-first")
+        read (Filename.concat root ".yeokcham/demo-v1-workspace-capsule-first")
         |> capsule_revision ~capsule:first_capsule
       in
       let second_revision =
-        read (Filename.concat root ".paengi/demo-v1-workspace-capsule-second")
+        read (Filename.concat root ".yeokcham/demo-v1-workspace-capsule-second")
         |> capsule_revision ~capsule:second_capsule
       in
       let disabled =
-        read (Filename.concat root ".paengi/demo-v1-workspace-disabled")
+        read (Filename.concat root ".yeokcham/demo-v1-workspace-disabled")
       in
       let final_order =
-        read (Filename.concat root ".paengi/demo-v1-workspace-order-final")
+        read (Filename.concat root ".yeokcham/demo-v1-workspace-order-final")
       in
       require
         (count_lines "selected[" disabled = 1)

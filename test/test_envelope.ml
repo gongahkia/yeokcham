@@ -1,7 +1,7 @@
-module Encoding = Paengi_encoding
-module Envelope = Paengi_envelope
-module Hash = Paengi_hash.Sha256
-module Golden = Paengi_testkit.Golden_fixture
+module Encoding = Yeokcham_encoding
+module Envelope = Yeokcham_envelope
+module Hash = Yeokcham_hash.Sha256
+module Golden = Yeokcham_testkit.Golden_fixture
 
 let require_encoding = function
   | Ok value -> value
@@ -134,7 +134,7 @@ let object_type_codes () =
     (Option.is_none (Envelope.object_type_of_code 29))
 
 let golden_envelope () =
-  let expected = require_golden "envelope-v1-snapshot.peng.hex" in
+  let expected = require_golden "envelope-v1-snapshot.yeok.hex" in
   Alcotest.(check int) "header size" 57 Envelope.header_size;
   Alcotest.(check int) "envelope version" 1 Envelope.envelope_version;
   Alcotest.(check int)
@@ -177,8 +177,8 @@ let retained_unknown_mandatory_feature_fixtures () =
             "unknown mandatory feature stops before payload" false !invoked
       | Ok _ -> Alcotest.fail "unknown mandatory feature fixture accepted")
     [
-      ("envelope-v1-snapshot-feature-bit-0.peng.hex", 1L);
-      ("envelope-v1-snapshot-feature-bit-63.peng.hex", Int64.min_int);
+      ("envelope-v1-snapshot-feature-bit-0.yeok.hex", 1L);
+      ("envelope-v1-snapshot-feature-bit-63.yeok.hex", Int64.min_int);
     ]
 
 let construction_boundaries () =

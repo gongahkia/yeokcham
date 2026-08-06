@@ -32,7 +32,7 @@ semantic operations, rewrites, and CLI changes.
 - Standard `foo.rs` and `foo/mod.rs` alternatives must not silently select an
   ambiguous target.
 - Unsupported Rust mechanisms must retain syntax facts and byte/text fallback.
-- Module/item paths must remain evidence, never Paengi or compiler identity.
+- Module/item paths must remain evidence, never Yeokcham or compiler identity.
 
 ## Considered options
 
@@ -64,7 +64,7 @@ analysis request. Every root must be an exact safe `.rs` path in the supplied
 verified snapshot virtual map. A root identifies an anonymous virtual crate
 root by its source-file path, not by Cargo package/crate metadata. Multiple
 roots remain distinct even when their textual module segments match. A root
-list is invocation input only: it creates no Paengi object, ref, workspace
+list is invocation input only: it creates no Yeokcham object, ref, workspace
 state, or persistent configuration.
 
 For a supported external `mod name;` in a reachable module file, the helper
@@ -96,7 +96,7 @@ A resolved item fact contains: the exact root-file path; a module segment list
 whose empty list denotes that root's anonymous module; the item kind; optional
 syntactic item name; and a candidate item segment list only where syntax
 declares a supported name. The complete `(snapshot ID, root-file path, module
-segments, item segments)` tuple is transient evidence, not a Paengi ID,
+segments, item segments)` tuple is transient evidence, not a Yeokcham ID,
 compiler canonical path, resolved symbol, type, alias, intent, or claim of
 behavioural equivalence. Returned facts are canonically ordered by root path,
 module segments, source path, and byte span. `module_paths_complete` is false
@@ -133,7 +133,7 @@ workspace, release, and conflict types.
 
 ## Persistent-format and migration impact
 
-No Paengi object, ref, schema, envelope, mapping, migration, or persistent
+No Yeokcham object, ref, schema, envelope, mapping, migration, or persistent
 golden changes. Root choices, protocol-v1 module/item facts, and helper lockfile
 bytes are transient tool artifacts. Any semantic-path persistence or use in a
 canonical operation requires a separate ADR and format version.

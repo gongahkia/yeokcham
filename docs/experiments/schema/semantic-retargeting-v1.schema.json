@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/gongahkia/paengi/blob/main/docs/experiments/schema/semantic-retargeting-v1.schema.json",
-  "title": "Paengi semantic retargeting v1 experiment",
+  "$id": "https://github.com/gongahkia/yeokcham/blob/main/docs/experiments/schema/semantic-retargeting-v1.schema.json",
+  "title": "Yeokcham semantic retargeting v1 experiment",
   "description": "Versioned deterministic semantic-versus-textual retargeting result.",
   "type": "object",
   "additionalProperties": false,
@@ -40,7 +40,7 @@
       "additionalProperties": false,
       "required": [ "tool", "typescript", "node_minimum", "adapter_protocol" ],
       "properties": {
-        "tool": { "const": "paengi-semantic-experiment-v1" },
+        "tool": { "const": "yeokcham-semantic-experiment-v1" },
         "typescript": { "const": "5.9.3" },
         "node_minimum": { "const": "14.17.0" },
         "adapter_protocol": { "const": 1 }

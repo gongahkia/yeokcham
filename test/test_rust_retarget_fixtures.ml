@@ -1,14 +1,14 @@
-module Adapter = Paengi_rust_adapter
-module Dataset = Paengi_rust_fixtures
-module Patch = Paengi_textual_patch
+module Adapter = Yeokcham_rust_adapter
+module Dataset = Yeokcham_rust_fixtures
+module Patch = Yeokcham_textual_patch
 
 let adapter_path () =
-  match Sys.getenv_opt "PAENGI_RUST_ADAPTER" with
+  match Sys.getenv_opt "YEOKCHAM_RUST_ADAPTER" with
   | Some path when Sys.file_exists path -> path
   | Some _ | None -> (
       [
-        "tools/paengi-rust-adapter/target/release/paengi-rust-adapter";
-        "../tools/paengi-rust-adapter/target/release/paengi-rust-adapter";
+        "tools/yeokcham-rust-adapter/target/release/yeokcham-rust-adapter";
+        "../tools/yeokcham-rust-adapter/target/release/yeokcham-rust-adapter";
       ]
       |> List.find_opt Sys.file_exists
       |> function

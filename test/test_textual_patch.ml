@@ -1,4 +1,4 @@
-module Patch = Paengi_textual_patch
+module Patch = Yeokcham_textual_patch
 
 let require_ok = function
   | Ok value -> value

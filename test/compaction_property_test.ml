@@ -1,7 +1,7 @@
-module Compaction = Paengi_compaction
-module Scratch = Paengi_scratch
-module Snapshot = Paengi_snapshot
-module Store = Paengi_store
+module Compaction = Yeokcham_compaction
+module Scratch = Yeokcham_scratch
+module Snapshot = Yeokcham_snapshot
+module Store = Yeokcham_store
 
 let default_seed = 20_260_730
 
@@ -195,7 +195,7 @@ let compacted_logical_checkpoints_preserve_snapshots =
     ~name:"compacted retained logical checkpoints preserve snapshots"
     QCheck2.Gen.(int_range 1 6)
     (fun count ->
-      let root = Filename.temp_file "paengi-compaction-property-" "" in
+      let root = Filename.temp_file "yeokcham-compaction-property-" "" in
       Unix.unlink root;
       Unix.mkdir root 0o700;
       Fun.protect
@@ -270,7 +270,7 @@ let metrics_equal left right =
        left right
 
 let with_cleanup_fixture count run =
-  let root = Filename.temp_file "paengi-compaction-cleanup-property-" "" in
+  let root = Filename.temp_file "yeokcham-compaction-cleanup-property-" "" in
   Unix.unlink root;
   Unix.mkdir root 0o700;
   Fun.protect
@@ -317,7 +317,7 @@ let active_generation_id scratch =
 let all_candidates_in_quarantine store root generation planned =
   let trash =
     Filename.concat
-      (Filename.concat root ".paengi/trash")
+      (Filename.concat root ".yeokcham/trash")
       (Store.Stored_object_id.to_hex
          (Scratch.Generation_id.stored_object_id generation))
   in
@@ -335,7 +335,7 @@ let all_candidates_in_quarantine store root generation planned =
 let all_candidates_pruned store root generation planned =
   let trash =
     Filename.concat
-      (Filename.concat root ".paengi/trash")
+      (Filename.concat root ".yeokcham/trash")
       (Store.Stored_object_id.to_hex
          (Scratch.Generation_id.stored_object_id generation))
   in

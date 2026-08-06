@@ -1,7 +1,0 @@
-(library
- (name paengi_semantic_experiment)
- (libraries
-  paengi_semantic_fixtures
-  paengi_semantic_retarget
-  paengi_textual_patch
-  unix))

@@ -25,13 +25,13 @@ let script name =
       Filename.concat cwd ("../tools/demo/" ^ name);
     ]
 
-let paengi_binary () =
+let yeokcham_binary () =
   let cwd = Sys.getcwd () in
-  find_file "paengi executable"
+  find_file "yeokcham executable"
     [
-      Filename.concat cwd "_build/default/bin/paengi.exe";
-      Filename.concat cwd "../bin/paengi.exe";
-      Filename.concat cwd "../_build/default/bin/paengi.exe";
+      Filename.concat cwd "_build/default/bin/yeokcham.exe";
+      Filename.concat cwd "../bin/yeokcham.exe";
+      Filename.concat cwd "../_build/default/bin/yeokcham.exe";
     ]
 
 let environment key value =
@@ -41,7 +41,7 @@ let environment key value =
   |> fun entries -> Array.of_list ((key ^ "=" ^ value) :: entries)
 
 let run ~environment program arguments =
-  let output = Filename.temp_file "paengi-demo-test-output-" "" in
+  let output = Filename.temp_file "yeokcham-demo-test-output-" "" in
   Fun.protect
     ~finally:(fun () -> remove_tree output)
     (fun () ->
@@ -72,22 +72,22 @@ let read_file path =
       really_input_string input length)
 
 let created_fixture_has_the_documented_oracle () =
-  let parent = Filename.temp_file "paengi-demo-fixture-" "" in
+  let parent = Filename.temp_file "yeokcham-demo-fixture-" "" in
   Unix.unlink parent;
   Unix.mkdir parent 0o700;
   let root = Filename.concat parent "fixture" in
   Fun.protect
     ~finally:(fun () -> remove_tree parent)
     (fun () ->
-      let environment = environment "PAENGI_BIN" (paengi_binary ()) in
+      let environment = environment "YEOKCHAM_BIN" (yeokcham_binary ()) in
       let created =
         run ~environment "sh"
           [ script "create-repository-v1.sh"; "--root"; root ]
       in
       Alcotest.(check bool) "fixture creation succeeds" true (exited created 0);
       require
-        (Sys.file_exists (Filename.concat root ".paengi"))
-        "initialisation creates a Paengi repository";
+        (Sys.file_exists (Filename.concat root ".yeokcham"))
+        "initialisation creates a Yeokcham repository";
       require
         (not (Sys.file_exists (Filename.concat root "README.md")))
         "the unchanged file is renamed";
@@ -105,7 +105,7 @@ let created_fixture_has_the_documented_oracle () =
         "symlink target" "docs/todo.txt"
         (Unix.readlink (Filename.concat root "current-note"));
       let timeline =
-        read_file (Filename.concat root ".paengi/demo-v1-timeline")
+        read_file (Filename.concat root ".yeokcham/demo-v1-timeline")
       in
       require
         (List.length (String.split_on_char '\n' timeline) >= 2)
@@ -118,7 +118,7 @@ let created_fixture_has_the_documented_oracle () =
       require (not (Sys.file_exists root)) "cleanup removes the fixture root")
 
 let existing_roots_are_rejected_without_initialisation () =
-  let parent = Filename.temp_file "paengi-demo-existing-" "" in
+  let parent = Filename.temp_file "yeokcham-demo-existing-" "" in
   Unix.unlink parent;
   Unix.mkdir parent 0o700;
   let root = Filename.concat parent "existing" in
@@ -132,11 +132,11 @@ let existing_roots_are_rejected_without_initialisation () =
       in
       Alcotest.(check bool) "existing target rejects" true (exited result 2);
       require
-        (not (Sys.file_exists (Filename.concat root ".paengi")))
-        "rejected root has no Paengi state")
+        (not (Sys.file_exists (Filename.concat root ".yeokcham")))
+        "rejected root has no Yeokcham state")
 
 let failed_creation_removes_the_owned_root () =
-  let parent = Filename.temp_file "paengi-demo-failed-" "" in
+  let parent = Filename.temp_file "yeokcham-demo-failed-" "" in
   Unix.unlink parent;
   Unix.mkdir parent 0o700;
   let root = Filename.concat parent "fixture" in
@@ -145,7 +145,7 @@ let failed_creation_removes_the_owned_root () =
     (fun () ->
       let failed =
         run
-          ~environment:(environment "PAENGI_BIN" "/nonexistent/paengi")
+          ~environment:(environment "YEOKCHAM_BIN" "/nonexistent/yeokcham")
           "sh"
           [ script "create-repository-v1.sh"; "--root"; root ]
       in

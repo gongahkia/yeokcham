@@ -46,10 +46,10 @@ file-manifest-v1 = [
 ]
 
 chunk-ref-v1 = [chunk-stored-object-id, plaintext-chunk-length]
-full-content-id = SHA-256("paengi:content:v1\\000" || complete-plaintext-bytes)
+full-content-id = SHA-256("yeokcham:content:v1\\000" || complete-plaintext-bytes)
 ```
 
-All stored-object IDs and `full-content-id` values are exactly 32 raw bytes. Algorithm code `1` is Buzhash-64-v1: a 64-byte rolling window, a fixed algorithm table, a cut at the first matching lower 16 hash bits after 16 KiB, and a forced cut at 128 KiB. The table and all parameters are normative in `paengi_chunking`; a decoder accepts only this exact v1 parameter tuple.
+All stored-object IDs and `full-content-id` values are exactly 32 raw bytes. Algorithm code `1` is Buzhash-64-v1: a 64-byte rolling window, a fixed algorithm table, a cut at the first matching lower 16 hash bits after 16 KiB, and a forced cut at 128 KiB. The table and all parameters are normative in `yeokcham_chunking`; a decoder accepts only this exact v1 parameter tuple.
 
 `Tree` v1 and `Snapshot` v1 payloads are unchanged. A Tree v1 file content reference may resolve to either existing `Content` or new `File_manifest`; this explicit extension is limited to the already opaque 32-byte reference field and does not reinterpret old Content objects.
 

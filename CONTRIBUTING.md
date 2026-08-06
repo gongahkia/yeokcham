@@ -1,6 +1,6 @@
 # Contributing
 
-Paengi is a model-first research prototype. Contributions must preserve the separation of scratch, intent, and release history.
+Yeokcham is a model-first research prototype. Contributions must preserve the separation of scratch, intent, and release history.
 
 ## Before changing code
 
@@ -31,7 +31,7 @@ make setup
 make check
 ```
 
-Use `make format` to apply formatting. Generated `paengi.opam` changes must be produced from `dune-project` and applied with `dune promote`.
+Use `make format` to apply formatting. Generated `yeokcham.opam` changes must be produced from `dune-project` and applied with `dune promote`.
 
 ## Pull requests
 

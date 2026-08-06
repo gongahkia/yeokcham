@@ -1,5 +1,5 @@
-module Encoding = Paengi_encoding
-module Envelope = Paengi_envelope
+module Encoding = Yeokcham_encoding
+module Envelope = Yeokcham_envelope
 
 let default_seed = 20_260_729
 

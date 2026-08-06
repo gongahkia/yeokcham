@@ -1,4 +1,4 @@
-module Fake_hash : Paengi_hash.S = struct
+module Fake_hash : Yeokcham_hash.S = struct
   let algorithm = "test-fnv1a64"
   let digest_size = 8
 
@@ -49,7 +49,7 @@ module Fake_hash : Paengi_hash.S = struct
   let compare = String.compare
 end
 
-module Consumer (Hash : Paengi_hash.S) = struct
+module Consumer (Hash : Yeokcham_hash.S) = struct
   let digest_chunks chunks =
     List.fold_left
       (fun context chunk -> Hash.feed_string context chunk)
@@ -63,7 +63,7 @@ let metadata_and_conversion () =
   Alcotest.(check bool)
     "algorithm non-empty" false
     (String.is_empty Fake_hash.algorithm);
-  let digest = Fake_hash.digest_string "paengi" in
+  let digest = Fake_hash.digest_string "yeokcham" in
   let raw = Fake_hash.to_raw_string digest in
   Alcotest.(check int) "digest size" Fake_hash.digest_size (String.length raw);
   let decoded = Fake_hash.of_raw_string raw in
