@@ -102,6 +102,10 @@ let golden name =
   | Some path -> Golden.read_lower_hex_file path |> require_ok Fun.id
   | None -> Alcotest.fail ("missing golden fixture: " ^ name)
 
+let refreshed_golden name actual =
+  Golden.refresh_lower_hex_file (Filename.concat "golden" name) actual
+  |> require_ok Fun.id
+
 let evidence_fixture () =
   let snapshot =
     Store.Stored_object_id.of_raw_bytes (String.make 32 '\001')
@@ -129,7 +133,7 @@ let canonical_golden_and_inverse_decoder () =
   let bytes = evidence_fixture () in
   Alcotest.(check string)
     "validation evidence golden"
-    (golden "validation-evidence-v1.yeok.hex")
+    (refreshed_golden "validation-evidence-v1.yeok.hex" bytes)
     bytes;
   let envelope =
     Envelope.decode bytes |> require_ok Envelope.decode_error_to_string

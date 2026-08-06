@@ -165,9 +165,8 @@ let unsupported_feature_fixture features =
   let prefix = String.sub encoded 0 25 in
   let payload = String.sub encoded Envelope.header_size 3 in
   let checksum =
-    Hash.feed_string Hash.empty prefix
-    |> fun context -> Hash.feed_string context payload
-    |> Hash.get |> Hash.to_raw_string
+    Hash.feed_string Hash.empty prefix |> fun context ->
+    Hash.feed_string context payload |> Hash.get |> Hash.to_raw_string
   in
   let output = Bytes.of_string encoded in
   Bytes.blit_string checksum 0 output 25 (String.length checksum);
@@ -177,9 +176,7 @@ let retained_unknown_mandatory_feature_fixtures () =
   List.iter
     (fun (name, features) ->
       let actual = unsupported_feature_fixture features in
-      let input =
-        require_refreshed (Filename.concat "golden" name) actual
-      in
+      let input = require_refreshed (Filename.concat "golden" name) actual in
       let invoked = ref false in
       let result =
         Envelope.decode_with input ~payload_decoder:(fun _ ->

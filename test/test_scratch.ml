@@ -397,33 +397,45 @@ let v1_golden_bytes_are_stable () =
         Golden.read_lower_hex_file (Filename.concat "golden" name)
         |> require_ok Fun.id
       in
+      let refreshed_golden name actual =
+        Golden.refresh_lower_hex_file (Filename.concat "golden" name) actual
+        |> require_ok Fun.id
+      in
+      let event_bytes = envelope (Scratch.Event_id.stored_object_id event) in
+      let checkpoint_bytes =
+        envelope
+          (Scratch.Checkpoint_id.stored_object_id
+             (Scratch.Checkpoint.id changed))
+      in
       Alcotest.(check string)
         "scratch event v1"
-        (golden "scratch-v1-event.yeok.hex")
-        (envelope (Scratch.Event_id.stored_object_id event));
+        (refreshed_golden "scratch-v1-event.yeok.hex" event_bytes)
+        event_bytes;
       Alcotest.(check string)
         "scratch checkpoint v1"
-        (golden "scratch-v1-checkpoint.yeok.hex")
-        (envelope
-           (Scratch.Checkpoint_id.stored_object_id
-              (Scratch.Checkpoint.id changed)));
+        (refreshed_golden "scratch-v1-checkpoint.yeok.hex" checkpoint_bytes)
+        checkpoint_bytes;
       let retention =
         Store.read_ref store ~name:"retention-head"
         |> require_ok Store.error_to_string
         |> Option.get |> Store.Mutable_ref.target |> Option.get
       in
+      let retention_bytes = envelope retention in
       Alcotest.(check string)
         "retention change v1"
-        (golden "scratch-v1-retention-change.yeok.hex")
-        (envelope retention);
+        (refreshed_golden "scratch-v1-retention-change.yeok.hex" retention_bytes)
+        retention_bytes;
+      let head_bytes =
+        In_channel.with_open_bin
+          (Filename.concat
+             (Filename.concat (Filename.concat store_root ".yeokcham") "refs")
+             "scratch-head")
+          In_channel.input_all
+      in
       Alcotest.(check string)
         "scratch-head ref v1"
-        (golden "scratch-v1-head.ref.hex")
-        (In_channel.with_open_bin
-           (Filename.concat
-              (Filename.concat (Filename.concat store_root ".yeokcham") "refs")
-              "scratch-head")
-           In_channel.input_all))
+        (refreshed_golden "scratch-v1-head.ref.hex" head_bytes)
+        head_bytes)
 
 let () =
   Alcotest.run "scratch records"

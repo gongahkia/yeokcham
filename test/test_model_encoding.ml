@@ -124,14 +124,14 @@ let scratch_history () =
 let check_golden_bytes name object_type payload =
   let actual = enveloped object_type payload in
   let expected =
-    match Golden.refresh_lower_hex_file (Filename.concat "golden" name) actual with
+    match
+      Golden.refresh_lower_hex_file (Filename.concat "golden" name) actual
+    with
     | Ok bytes -> bytes
     | Error error -> Alcotest.fail error
   in
   Alcotest.(check string) name expected actual;
-  let decoded =
-    require_decoded_envelope (Envelope.decode expected)
-  in
+  let decoded = require_decoded_envelope (Envelope.decode expected) in
   Alcotest.(check bool)
     (name ^ " type") true
     (Envelope.object_type decoded = object_type);

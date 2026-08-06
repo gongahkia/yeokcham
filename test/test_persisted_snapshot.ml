@@ -51,6 +51,10 @@ let require_golden name =
   Golden.read_lower_hex_file (Filename.concat "golden" name)
   |> require_ok Fun.id
 
+let refreshed_golden name actual =
+  Golden.refresh_lower_hex_file (Filename.concat "golden" name) actual
+  |> require_ok Fun.id
+
 let find_entry name tree =
   match List.assoc_opt name (Snapshot_store.Tree.entries tree) with
   | Some entry -> entry
@@ -273,20 +277,28 @@ let persisted_object_goldens () =
         Snapshot_store.Snapshot.store store snapshot
         |> require_ok Snapshot_store.error_to_string
       in
+      let content_bytes =
+        stored_envelope store (Snapshot_store.Content.stored_object_id content)
+      in
+      let tree_bytes =
+        stored_envelope store (Snapshot_store.Tree.stored_object_id tree_id)
+      in
+      let snapshot_bytes =
+        stored_envelope store
+          (Snapshot_store.Snapshot.stored_object_id snapshot_id)
+      in
       Alcotest.(check string)
         "content golden"
-        (require_golden "store-v1-content.yeok.hex")
-        (stored_envelope store
-           (Snapshot_store.Content.stored_object_id content));
+        (refreshed_golden "store-v1-content.yeok.hex" content_bytes)
+        content_bytes;
       Alcotest.(check string)
         "tree golden"
-        (require_golden "store-v1-tree.yeok.hex")
-        (stored_envelope store (Snapshot_store.Tree.stored_object_id tree_id));
+        (refreshed_golden "store-v1-tree.yeok.hex" tree_bytes)
+        tree_bytes;
       Alcotest.(check string)
         "snapshot golden"
-        (require_golden "store-v1-snapshot.yeok.hex")
-        (stored_envelope store
-           (Snapshot_store.Snapshot.stored_object_id snapshot_id)))
+        (refreshed_golden "store-v1-snapshot.yeok.hex" snapshot_bytes)
+        snapshot_bytes)
 
 let large_content_goldens () =
   with_store (fun _ store ->
@@ -299,15 +311,20 @@ let large_content_goldens () =
         Snapshot_store.Content.store store contents
         |> require_ok Snapshot_store.error_to_string
       in
+      let chunk_bytes =
+        stored_envelope store (Snapshot_store.Chunk.stored_object_id chunk)
+      in
+      let manifest_bytes =
+        stored_envelope store (Snapshot_store.Content.stored_object_id manifest)
+      in
       Alcotest.(check string)
         "chunk golden"
-        (require_golden "store-v1-chunk.yeok.hex")
-        (stored_envelope store (Snapshot_store.Chunk.stored_object_id chunk));
+        (refreshed_golden "store-v1-chunk.yeok.hex" chunk_bytes)
+        chunk_bytes;
       Alcotest.(check string)
         "file manifest golden"
-        (require_golden "store-v1-file-manifest.yeok.hex")
-        (stored_envelope store
-           (Snapshot_store.Content.stored_object_id manifest)))
+        (refreshed_golden "store-v1-file-manifest.yeok.hex" manifest_bytes)
+        manifest_bytes)
 
 let deterministic_bytes length =
   let state = ref 0x243f6a8885a308d3L in

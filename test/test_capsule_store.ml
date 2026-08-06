@@ -95,6 +95,10 @@ let golden name =
   | Some path -> Golden.read_lower_hex_file path |> require_ok Fun.id
   | None -> Alcotest.fail ("missing golden fixture: " ^ name)
 
+let refreshed_golden name actual =
+  Golden.refresh_lower_hex_file (Filename.concat "golden" name) actual
+  |> require_ok Fun.id
+
 let with_store run =
   let root = Filename.temp_file "yeokcham-capsule-store-test-" "" in
   Unix.unlink root;
@@ -198,18 +202,21 @@ let schemas_have_canonical_goldens_and_inverse_decoders () =
         |> require_ok Store.error_to_string
         |> Envelope.encode
       in
+      let capsule_bytes = envelope capsule_object in
+      let revision_bytes = envelope revision_object in
+      let current_bytes = Capsule_store.encode_current_ref current in
       Alcotest.(check string)
         "capsule golden"
-        (golden "capsule-v1.yeok.hex")
-        (envelope capsule_object);
+        (refreshed_golden "capsule-v1.yeok.hex" capsule_bytes)
+        capsule_bytes;
       Alcotest.(check string)
         "revision golden"
-        (golden "capsule-revision-v1.yeok.hex")
-        (envelope revision_object);
+        (refreshed_golden "capsule-revision-v1.yeok.hex" revision_bytes)
+        revision_bytes;
       Alcotest.(check string)
         "current ref golden"
-        (golden "capsule-current-v1.ref.hex")
-        (Capsule_store.encode_current_ref current);
+        (refreshed_golden "capsule-current-v1.ref.hex" current_bytes)
+        current_bytes;
       let loaded_capsule =
         Capsule_store.load_capsule store capsule_object
         |> require_ok Capsule_store.error_to_string

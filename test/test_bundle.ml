@@ -31,6 +31,10 @@ let raw_of_hex encoded =
 let require_golden name =
   Golden.read_lower_hex_file (Filename.concat "golden" name) |> require Fun.id
 
+let refreshed_golden name actual =
+  Golden.refresh_lower_hex_file (Filename.concat "golden" name) actual
+  |> require Fun.id
+
 let key =
   Bundle.key_of_bytes (String.init 32 (fun index -> Char.chr index))
   |> require_bundle
@@ -140,18 +144,21 @@ let assert_ref_unchanged repository reference =
 let canonical_fixtures_and_inverses () =
   let plaintext = sample_plaintext () in
   let bundle = sample_bundle () in
+  let plaintext_bytes = Bundle.plaintext_bytes plaintext in
+  let header_bytes = Bundle.header_bytes bundle in
+  let bundle_bytes = Bundle.encode bundle in
   Alcotest.(check string)
     "plaintext fixture"
-    (require_golden "encrypted-bundle-plaintext-v1.yeok.hex")
-    (Bundle.plaintext_bytes plaintext);
+    (refreshed_golden "encrypted-bundle-plaintext-v1.yeok.hex" plaintext_bytes)
+    plaintext_bytes;
   Alcotest.(check string)
     "header fixture"
-    (require_golden "encrypted-bundle-header-v1.cbor.hex")
-    (Bundle.header_bytes bundle);
+    (refreshed_golden "encrypted-bundle-header-v1.cbor.hex" header_bytes)
+    header_bytes;
   Alcotest.(check string)
     "outer fixture"
-    (require_golden "encrypted-bundle-v1.cbor.hex")
-    (Bundle.encode bundle);
+    (refreshed_golden "encrypted-bundle-v1.cbor.hex" bundle_bytes)
+    bundle_bytes;
   let decoded_plaintext =
     Bundle.decode_plaintext (Bundle.plaintext_bytes plaintext) |> require_bundle
   in

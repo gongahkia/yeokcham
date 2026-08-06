@@ -44,6 +44,10 @@ let golden name =
   | Some path -> Golden.read_lower_hex_file path |> require_ok Fun.id
   | None -> Alcotest.fail ("missing golden fixture: " ^ name)
 
+let refreshed_golden name actual =
+  Golden.refresh_lower_hex_file (Filename.concat "golden" name) actual
+  |> require_ok Fun.id
+
 let with_store run =
   let root = Filename.temp_file "yeokcham-workspace-store-test-" "" in
   Unix.unlink root;
@@ -316,7 +320,8 @@ let schemas_have_canonical_goldens_and_inverse_decoders () =
         ]
       in
       List.iter
-        (fun (name, bytes) -> Alcotest.(check string) name (golden name) bytes)
+        (fun (name, bytes) ->
+          Alcotest.(check string) name (refreshed_golden name bytes) bytes)
         fixtures;
       let loaded_workspace =
         Workspace_store.load_workspace store workspace_object

@@ -89,10 +89,14 @@ let verified_event signer =
 let require_golden name =
   Golden.read_lower_hex_file (Filename.concat "golden" name) |> require Fun.id
 
+let refreshed_golden name actual =
+  Golden.refresh_lower_hex_file (Filename.concat "golden" name) actual
+  |> require Fun.id
+
 let canonical_identity_golden () =
-  let expected = require_golden "device-identity-v1.yeok.hex" in
   let envelope = Device.identity_envelope signer_a.identity |> require_device in
   let actual = Envelope.encode envelope in
+  let expected = refreshed_golden "device-identity-v1.yeok.hex" actual in
   Alcotest.(check string) "identity envelope golden" expected actual;
   let decoded_envelope =
     Envelope.decode expected |> require Envelope.decode_error_to_string

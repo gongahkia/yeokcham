@@ -41,6 +41,10 @@ let golden name =
   | Some path -> Golden.read_lower_hex_file path |> require_ok Fun.id
   | None -> Alcotest.fail ("missing golden fixture: " ^ name)
 
+let refreshed_golden name actual =
+  Golden.refresh_lower_hex_file (Filename.concat "golden" name) actual
+  |> require_ok Fun.id
+
 let fixture store =
   let logical = Scratch.Checkpoint_id.of_stored_object_id (raw 1) in
   let physical = Scratch.Checkpoint_id.of_stored_object_id (raw 2) in
@@ -82,23 +86,32 @@ let schemas_have_canonical_goldens_and_inverse_decoders () =
         |> require_ok Store.error_to_string
         |> Envelope.encode
       in
+      let manifest_bytes =
+        bytes (Scratch.Cleanup_manifest_id.stored_object_id manifest_id)
+      in
       Alcotest.(check string)
         "cleanup manifest golden"
-        (golden "scratch-v1-cleanup-manifest.yeok.hex")
-        (bytes (Scratch.Cleanup_manifest_id.stored_object_id manifest_id));
+        (refreshed_golden "scratch-v1-cleanup-manifest.yeok.hex" manifest_bytes)
+        manifest_bytes;
       let loaded =
         Scratch.Generation.load store generation
         |> require_ok Scratch.error_to_string
       in
       let segment = List.hd (Scratch.Generation.segment_ids loaded) in
+      let segment_bytes =
+        bytes (Scratch.Generation_id.stored_object_id segment)
+      in
+      let generation_bytes =
+        bytes (Scratch.Generation_id.stored_object_id generation)
+      in
       Alcotest.(check string)
         "generation segment golden"
-        (golden "scratch-v1-generation-segment.yeok.hex")
-        (bytes (Scratch.Generation_id.stored_object_id segment));
+        (refreshed_golden "scratch-v1-generation-segment.yeok.hex" segment_bytes)
+        segment_bytes;
       Alcotest.(check string)
         "generation golden"
-        (golden "scratch-v1-generation.yeok.hex")
-        (bytes (Scratch.Generation_id.stored_object_id generation));
+        (refreshed_golden "scratch-v1-generation.yeok.hex" generation_bytes)
+        generation_bytes;
       let entry = List.hd (Scratch.Generation.entries loaded) in
       Alcotest.(check bool)
         "inverse logical ID" true
@@ -113,10 +126,11 @@ let schemas_have_canonical_goldens_and_inverse_decoders () =
            ~target:(Some (Scratch.Generation_id.stored_object_id generation))
         |> require_ok Store.error_to_string);
       let ref_path = Filename.concat root ".yeokcham/refs/scratch-generation" in
+      let ref_bytes = In_channel.with_open_bin ref_path In_channel.input_all in
       Alcotest.(check string)
         "generation ref golden"
-        (golden "scratch-v1-generation.ref.hex")
-        (In_channel.with_open_bin ref_path In_channel.input_all);
+        (refreshed_golden "scratch-v1-generation.ref.hex" ref_bytes)
+        ref_bytes;
       match
         Scratch.Generation.load store
           (Scratch.Generation_id.of_stored_object_id

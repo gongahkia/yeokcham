@@ -113,16 +113,22 @@ let sample_set =
 let require_golden name =
   Golden.read_lower_hex_file (Filename.concat "golden" name) |> require Fun.id
 
+let refreshed_golden name actual =
+  Golden.refresh_lower_hex_file (Filename.concat "golden" name) actual
+  |> require Fun.id
+
 let core_is_canonical () =
   let envelope = Divergence.envelope sample_set |> require_divergence in
+  let envelope_bytes = Envelope.encode envelope in
+  let binding_bytes = Divergence_store.encode_binding (object_id '\099') in
   Alcotest.(check string)
     "set envelope golden"
-    (require_golden "divergent-ref-set-v1.yeok.hex")
-    (Envelope.encode envelope);
+    (refreshed_golden "divergent-ref-set-v1.yeok.hex" envelope_bytes)
+    envelope_bytes;
   Alcotest.(check string)
     "binding golden"
-    (require_golden "sync-divergence-v1.ref.hex")
-    (Divergence_store.encode_binding (object_id '\099'));
+    (refreshed_golden "sync-divergence-v1.ref.hex" binding_bytes)
+    binding_bytes;
   let decoded_envelope =
     Envelope.decode (Envelope.encode envelope)
     |> require Envelope.decode_error_to_string

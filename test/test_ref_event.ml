@@ -79,6 +79,10 @@ let sample =
 let require_golden name =
   Golden.read_lower_hex_file (Filename.concat "golden" name) |> require Fun.id
 
+let refreshed_golden name actual =
+  Golden.refresh_lower_hex_file (Filename.concat "golden" name) actual
+  |> require Fun.id
+
 let check_verification name expected result =
   match result with
   | Ok actual ->
@@ -97,8 +101,8 @@ let trusted signer =
   [ { Event.key_id = signer.key_id; public_key = signer.public_key } ]
 
 let canonical_event_golden () =
-  let expected = require_golden "ref-event-v1.yeok.hex" in
   let actual = Envelope.encode (envelope sample) in
+  let expected = refreshed_golden "ref-event-v1.yeok.hex" actual in
   Alcotest.(check string) "event envelope golden" expected actual;
   let decoded_envelope =
     Envelope.decode expected |> require Envelope.decode_error_to_string

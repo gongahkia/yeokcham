@@ -172,6 +172,10 @@ let golden name =
   | Some path -> Golden.read_lower_hex_file path |> require_ok Fun.id
   | None -> Alcotest.fail ("missing golden fixture: " ^ name)
 
+let refreshed_golden name actual =
+  Golden.refresh_lower_hex_file (Filename.concat "golden" name) actual
+  |> require_ok Fun.id
+
 let hex bytes =
   let alphabet = "0123456789abcdef" in
   let output = Bytes.create (String.length bytes * 2) in
@@ -233,11 +237,11 @@ let canonical_goldens_and_inverse_decoders () =
   let object_bytes, binding = release_fixture () in
   Alcotest.(check string)
     "release golden"
-    (golden "release-v1.yeok.hex")
+    (refreshed_golden "release-v1.yeok.hex" object_bytes)
     object_bytes;
   Alcotest.(check string)
     "release binding golden"
-    (golden "release-v1.ref.hex")
+    (refreshed_golden "release-v1.ref.hex" binding)
     binding;
   let envelope =
     Envelope.decode object_bytes |> require_ok Envelope.decode_error_to_string
