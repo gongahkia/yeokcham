@@ -76,8 +76,13 @@ val init : root:string -> (repository, error) result
 val open_repository : root:string -> (repository, error) result
 val object_path : repository -> Stored_object_id.t -> string
 val id_of_envelope : Yeokcham_envelope.t -> Stored_object_id.t
-val put : repository -> Yeokcham_envelope.t -> (Stored_object_id.t, error) result
-val get : repository -> Stored_object_id.t -> (Yeokcham_envelope.t, error) result
+
+val put :
+  repository -> Yeokcham_envelope.t -> (Stored_object_id.t, error) result
+
+val get :
+  repository -> Stored_object_id.t -> (Yeokcham_envelope.t, error) result
+
 val read_ref : repository -> name:string -> (Mutable_ref.t option, error) result
 
 val compare_and_swap_ref :

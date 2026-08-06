@@ -246,7 +246,9 @@ val imported_tag_name : imported_tag -> string
 val imported_tag_ref_object : imported_tag -> object_id
 val imported_tag_target : imported_tag -> object_id
 val imported_tag_target_kind : imported_tag -> tag_target_kind
-val imported_tag_annotation : imported_tag -> Yeokcham_snapshot.Content.id option
+
+val imported_tag_annotation :
+  imported_tag -> Yeokcham_snapshot.Content.id option
 
 val load_imported_transition :
   Yeokcham_store.repository ->

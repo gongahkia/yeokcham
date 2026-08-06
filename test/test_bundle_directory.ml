@@ -156,7 +156,9 @@ let retained_partials_are_visible_but_not_importable () =
       let partial =
         ".yeokcham-bundle-v1-00000000000000000000000000000000.partial"
       in
-      let complete = "yeokcham-bundle-v1-ffffffffffffffffffffffffffffffff.yeok" in
+      let complete =
+        "yeokcham-bundle-v1-ffffffffffffffffffffffffffffffff.yeok"
+      in
       write_file (Filename.concat shared partial) "partial";
       write_file (Filename.concat shared complete) "complete";
       let expected =

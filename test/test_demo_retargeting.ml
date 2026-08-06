@@ -63,7 +63,8 @@ let contains text needle =
 
 let retargeting_outcomes_remain_nonpersistent_and_explicit () =
   let environment =
-    environment "YEOKCHAM_RETARGETING_DEMO_BIN" (binary "retargeting_demo_v1.exe")
+    environment "YEOKCHAM_RETARGETING_DEMO_BIN"
+      (binary "retargeting_demo_v1.exe")
   in
   let status, output =
     run ~environment "sh" [ script "demonstrate-retargeting-v1.sh" ]

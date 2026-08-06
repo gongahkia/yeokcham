@@ -19,7 +19,9 @@ let () =
       exit 2
   | Some destination -> (
       let fixture = Yeokcham_testkit.Fixture_spec.generate ~seed:!seed in
-      match Yeokcham_testkit.Fixture_materializer.write ~destination fixture with
+      match
+        Yeokcham_testkit.Fixture_materializer.write ~destination fixture
+      with
       | Error message ->
           prerr_endline message;
           exit 1

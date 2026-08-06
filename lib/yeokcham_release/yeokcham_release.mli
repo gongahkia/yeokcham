@@ -109,7 +109,9 @@ val make_binding :
 val encode_binding : binding -> string
 val decode_binding : string -> (binding, error) result
 val binding_components : Yeokcham_id.Release_id.t -> string list
-val publish_binding : Yeokcham_store.repository -> binding -> (unit, error) result
+
+val publish_binding :
+  Yeokcham_store.repository -> binding -> (unit, error) result
 
 val create_attestation :
   release:Yeokcham_id.Release_id.t ->
@@ -170,12 +172,16 @@ module Durable : sig
   type failure_point = Before_release_binding
 
   val read :
-    Yeokcham_store.repository -> Yeokcham_id.Release_id.t -> (release, error) result
+    Yeokcham_store.repository ->
+    Yeokcham_id.Release_id.t ->
+    (release, error) result
 
   val list : Yeokcham_store.repository -> (release list, error) result
 
   val verify :
-    Yeokcham_store.repository -> Yeokcham_id.Release_id.t -> (release, error) result
+    Yeokcham_store.repository ->
+    Yeokcham_id.Release_id.t ->
+    (release, error) result
 
   val create :
     ?runner:(module Validation.Process_runner) ->

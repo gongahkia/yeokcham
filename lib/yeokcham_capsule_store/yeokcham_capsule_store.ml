@@ -873,7 +873,8 @@ let revision_identity_payload (revision : revision) =
     ]
 
 let revision_id_of_identity value =
-  Hash.feed_string Hash.empty "yeokcham:capsule-revision:v1\000" |> fun context ->
+  Hash.feed_string Hash.empty "yeokcham:capsule-revision:v1\000"
+  |> fun context ->
   Hash.feed_string context (Encoding.encode value)
   |> Hash.get |> Hash.to_raw_string |> Id.Capsule_revision_id.of_bytes
   |> Result.get_ok
@@ -1800,7 +1801,9 @@ module Durable = struct
   let list store =
     let directory =
       Filename.concat
-        (Filename.concat (Filename.concat (Store.root store) ".yeokcham") "refs")
+        (Filename.concat
+           (Filename.concat (Store.root store) ".yeokcham")
+           "refs")
         "capsules"
     in
     match Sys.readdir directory with

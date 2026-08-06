@@ -125,7 +125,8 @@ val revision_payload : workspace_revision -> (Yeokcham_encoding.t, error) result
 val decode_revision_payload :
   Yeokcham_encoding.t -> (workspace_revision, error) result
 
-val derive_revision_id : workspace_revision -> Yeokcham_id.Workspace_revision_id.t
+val derive_revision_id :
+  workspace_revision -> Yeokcham_id.Workspace_revision_id.t
 
 val store_revision :
   Yeokcham_store.repository ->
@@ -154,7 +155,10 @@ val create_conflict :
 
 val conflict_id : conflict -> Yeokcham_id.Conflict_id.t
 val conflict_workspace : conflict -> Yeokcham_id.Workspace_id.t
-val conflict_workspace_revision : conflict -> Yeokcham_id.Workspace_revision_id.t
+
+val conflict_workspace_revision :
+  conflict -> Yeokcham_id.Workspace_revision_id.t
+
 val conflict_attempt : conflict -> Yeokcham_id.Workspace_attempt_id.t option
 val conflict_capsule : conflict -> Yeokcham_id.Capsule_id.t
 val conflict_capsule_revision : conflict -> Yeokcham_id.Capsule_revision_id.t
@@ -192,7 +196,9 @@ val resolution_workspace_revision :
 val resolution_action : resolution -> resolution_action
 val resolution_expected_current : resolution -> Yeokcham_scratch.entry option
 val resolution_payload : resolution -> (Yeokcham_encoding.t, error) result
-val decode_resolution_payload : Yeokcham_encoding.t -> (resolution, error) result
+
+val decode_resolution_payload :
+  Yeokcham_encoding.t -> (resolution, error) result
 
 val store_resolution :
   Yeokcham_store.repository ->
@@ -239,7 +245,9 @@ val attempt_ordered : workspace_attempt -> Capsule_store.revision_link list
 val attempt_starting_checkpoint :
   workspace_attempt -> Yeokcham_scratch.Checkpoint_id.t
 
-val attempt_starting_snapshot : workspace_attempt -> Yeokcham_snapshot.Snapshot.id
+val attempt_starting_snapshot :
+  workspace_attempt -> Yeokcham_snapshot.Snapshot.id
+
 val attempt_outcomes : workspace_attempt -> attempt_outcome list
 
 val attempt_resulting_snapshot :
@@ -268,7 +276,8 @@ val make_current_ref :
   revision:Yeokcham_id.Workspace_revision_id.t ->
   revision_object:Yeokcham_store.Stored_object_id.t ->
   latest_attempt:
-    (Yeokcham_id.Workspace_attempt_id.t * Yeokcham_store.Stored_object_id.t) option ->
+    (Yeokcham_id.Workspace_attempt_id.t * Yeokcham_store.Stored_object_id.t)
+    option ->
   (current_ref, error) result
 
 val current_generation : current_ref -> int64
@@ -279,7 +288,8 @@ val current_revision_object : current_ref -> Yeokcham_store.Stored_object_id.t
 
 val current_latest_attempt :
   current_ref ->
-  (Yeokcham_id.Workspace_attempt_id.t * Yeokcham_store.Stored_object_id.t) option
+  (Yeokcham_id.Workspace_attempt_id.t * Yeokcham_store.Stored_object_id.t)
+  option
 
 val encode_current_ref : current_ref -> string
 val decode_current_ref : string -> (current_ref, error) result

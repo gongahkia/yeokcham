@@ -57,8 +57,13 @@ val evidence_stdout_digest : evidence -> string
 val evidence_stderr_digest : evidence -> string
 val evidence_stdout_truncated : evidence -> bool
 val evidence_stderr_truncated : evidence -> bool
-val evidence_stdout_output : evidence -> Yeokcham_store.Stored_object_id.t option
-val evidence_stderr_output : evidence -> Yeokcham_store.Stored_object_id.t option
+
+val evidence_stdout_output :
+  evidence -> Yeokcham_store.Stored_object_id.t option
+
+val evidence_stderr_output :
+  evidence -> Yeokcham_store.Stored_object_id.t option
+
 val evidence_environment_fingerprint : evidence -> string option
 val evidence_runner_format_version : evidence -> int64
 val evidence_observed_at : evidence -> int64

@@ -129,7 +129,8 @@ let persistent_conflict_is_local_and_explicit () =
       let conflict = conflict_id listed in
       Alcotest.(check int) "conflict ID length" 64 (String.length conflict);
       let before =
-        read (Filename.concat root ".yeokcham/demo-v1-conflict-show-before-skip")
+        read
+          (Filename.concat root ".yeokcham/demo-v1-conflict-show-before-skip")
       in
       require
         (contains before ("conflict=" ^ conflict ^ " kind=competing-edits"))
@@ -139,7 +140,8 @@ let persistent_conflict_is_local_and_explicit () =
         "conflict candidates are not structured";
       Alcotest.(check string)
         "conflict remains immutable after skip" before
-        (read (Filename.concat root ".yeokcham/demo-v1-conflict-show-after-skip"));
+        (read
+           (Filename.concat root ".yeokcham/demo-v1-conflict-show-after-skip"));
       Alcotest.(check string)
         "unsupported action leaves workspace unchanged"
         (read
@@ -150,7 +152,8 @@ let persistent_conflict_is_local_and_explicit () =
               ".yeokcham/demo-v1-conflict-workspace-after-unsupported"));
       Alcotest.(check string)
         "resolved conflict is inactive" ""
-        (read (Filename.concat root ".yeokcham/demo-v1-conflict-list-after-skip"));
+        (read
+           (Filename.concat root ".yeokcham/demo-v1-conflict-list-after-skip"));
       let complete =
         read (Filename.concat root ".yeokcham/demo-v1-conflict-complete")
       in

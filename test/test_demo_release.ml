@@ -132,7 +132,8 @@ let immutable_release_retains_its_evidence_and_snapshot () =
       Alcotest.(check string)
         "release verification is immutable across scratch edits"
         (read
-           (Filename.concat root ".yeokcham/demo-v1-release-verify-before-change"))
+           (Filename.concat root
+              ".yeokcham/demo-v1-release-verify-before-change"))
         (read
            (Filename.concat root ".yeokcham/demo-v1-release-verify-after-change"));
       let evidence =
@@ -160,7 +161,8 @@ let immutable_release_retains_its_evidence_and_snapshot () =
       require
         (contains
            (read
-              (Filename.concat root ".yeokcham/demo-v1-release-unsupported-parent"))
+              (Filename.concat root
+                 ".yeokcham/demo-v1-release-unsupported-parent"))
            "release parent graph is invalid")
         "missing parent error is not structured")
 

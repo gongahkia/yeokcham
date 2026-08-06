@@ -437,7 +437,8 @@ module Manifest = struct
         (Manifest_length_mismatch
            { declared = manifest.total_length; actual = actual_length })
     else if
-      not (Yeokcham_chunking.chunks_are_canonical Yeokcham_chunking.default chunks)
+      not
+        (Yeokcham_chunking.chunks_are_canonical Yeokcham_chunking.default chunks)
     then Error Noncanonical_chunk_boundaries
     else
       let contents = String.concat "" chunks in

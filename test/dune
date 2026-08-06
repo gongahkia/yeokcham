@@ -478,7 +478,11 @@
 (test
  (name compaction_retention_benchmark_property_test)
  (modules compaction_retention_benchmark_property_test)
- (libraries alcotest qcheck-core qcheck-alcotest yeokcham_compaction_benchmark))
+ (libraries
+  alcotest
+  qcheck-core
+  qcheck-alcotest
+  yeokcham_compaction_benchmark))
 
 (test
  (name test_generation)

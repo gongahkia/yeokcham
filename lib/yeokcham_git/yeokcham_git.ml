@@ -356,7 +356,8 @@ let validate_configuration configuration =
   else if configuration.max_blob_bytes > Store.max_object_bytes then
     Error
       (Invalid_configuration
-         (Printf.sprintf "Git blob limit exceeds Yeokcham object limit (%d > %d)"
+         (Printf.sprintf
+            "Git blob limit exceeds Yeokcham object limit (%d > %d)"
             configuration.max_blob_bytes Store.max_object_bytes))
   else if configuration.max_total_tree_bytes < configuration.max_tree_bytes then
     Error

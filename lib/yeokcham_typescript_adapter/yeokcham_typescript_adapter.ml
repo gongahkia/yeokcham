@@ -1244,7 +1244,9 @@ let analyze_snapshot configuration ~store ~snapshot ~compiler_options =
                match language_for_path (String.concat "/" path) with
                | None -> Ok collected
                | Some language ->
-                   let* contents = Yeokcham_snapshot.Content.load store content in
+                   let* contents =
+                     Yeokcham_snapshot.Content.load store content
+                   in
                    Ok
                      (Protocol.make_source_file ~path:(String.concat "/" path)
                         ~language ~contents

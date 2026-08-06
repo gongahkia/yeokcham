@@ -1,3 +1,7 @@
 (library
  (name yeokcham_validation_retention)
- (libraries yeokcham_scratch yeokcham_snapshot yeokcham_store yeokcham_validation))
+ (libraries
+  yeokcham_scratch
+  yeokcham_snapshot
+  yeokcham_store
+  yeokcham_validation))

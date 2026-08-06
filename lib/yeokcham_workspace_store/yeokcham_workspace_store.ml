@@ -2518,7 +2518,9 @@ module Durable = struct
   let list store =
     let directory =
       Filename.concat
-        (Filename.concat (Filename.concat (Store.root store) ".yeokcham") "refs")
+        (Filename.concat
+           (Filename.concat (Store.root store) ".yeokcham")
+           "refs")
         "workspaces"
     in
     match Sys.readdir directory with

@@ -61,8 +61,8 @@ let conflict_id value =
 
 let release_id value =
   match Yeokcham_id.Release_id.of_hex value with
-  | Ok identity when String.length (Yeokcham_id.Release_id.to_bytes identity) = 32
-    ->
+  | Ok identity
+    when String.length (Yeokcham_id.Release_id.to_bytes identity) = 32 ->
       identity
   | Ok _ -> fail Fun.id "release ID must be 32 bytes"
   | Error error -> fail Yeokcham_id.parse_error_to_string error
@@ -815,7 +815,8 @@ let print_plan_output (capsule, revision) =
     "output capsule=%s revision=%s base=%s expected=%s operations=%d \
      dependencies=%d provenance=%s\n"
     (Yeokcham_id.Capsule_id.to_hex (Capsule_store.capsule_id capsule))
-    (Yeokcham_id.Capsule_revision_id.to_hex (Capsule_store.revision_id revision))
+    (Yeokcham_id.Capsule_revision_id.to_hex
+       (Capsule_store.revision_id revision))
     (Store.Stored_object_id.to_hex
        (Snapshot.Snapshot.stored_object_id
           (Capsule_store.revision_declared_base revision)))
@@ -1176,7 +1177,8 @@ let capsule root arguments =
               let revision = Capsule_store.Durable.resolved_revision resolved in
               Printf.printf
                 "capsule %s\nrevision %s\ntitle %s\ndescription %s\n"
-                (Yeokcham_id.Capsule_id.to_hex (Capsule_store.capsule_id capsule))
+                (Yeokcham_id.Capsule_id.to_hex
+                   (Capsule_store.capsule_id capsule))
                 (Yeokcham_id.Capsule_revision_id.to_hex
                    (Capsule_store.revision_id revision))
                 (Capsule_store.capsule_title capsule)
@@ -1226,7 +1228,8 @@ let print_workspace resolved =
   Workspace_store.revision_selected revision
   |> List.iteri (fun index link ->
       Printf.printf "selected[%d] capsule=%s revision=%s object=%s\n" index
-        (Yeokcham_id.Capsule_id.to_hex (Capsule_store.revision_link_capsule link))
+        (Yeokcham_id.Capsule_id.to_hex
+           (Capsule_store.revision_link_capsule link))
         (Yeokcham_id.Capsule_revision_id.to_hex
            (Capsule_store.revision_link_revision link))
         (Store.Stored_object_id.to_hex

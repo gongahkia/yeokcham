@@ -750,7 +750,8 @@ let decode_evidence_payload value =
               ~stdout_output ~stderr_output
           in
           let derived =
-            hash "yeokcham:validation-evidence:v1\000" (Encoding.encode identity)
+            hash "yeokcham:validation-evidence:v1\000"
+              (Encoding.encode identity)
             |> id_from_digest
           in
           if not (Id.Validation_id.equal supplied_id derived) then

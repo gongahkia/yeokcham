@@ -86,7 +86,9 @@ module State : sig
   val equal : t -> t -> bool
 
   val of_snapshot :
-    Yeokcham_store.repository -> Yeokcham_snapshot.Snapshot.t -> (t, error) result
+    Yeokcham_store.repository ->
+    Yeokcham_snapshot.Snapshot.t ->
+    (t, error) result
 
   val apply : t -> operation list -> (t, error) result
   val diff : from:t -> to_:t -> operation list

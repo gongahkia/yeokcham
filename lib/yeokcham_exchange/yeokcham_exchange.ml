@@ -562,7 +562,8 @@ let decode input =
     Error (Frame_length_mismatch { declared; actual })
   else if
     Int64.compare declared
-      (Int64.of_int (Yeokcham_store.max_object_bytes + max_control_message_bytes))
+      (Int64.of_int
+         (Yeokcham_store.max_object_bytes + max_control_message_bytes))
     > 0
   then Error (Frame_too_large declared)
   else parse_payload (String.sub input 8 actual)

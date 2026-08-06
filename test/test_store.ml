@@ -72,7 +72,8 @@ let init_writes_exact_format () =
   with_repository (fun root _ ->
       Alcotest.(check string)
         "repository format" Store.repository_format
-        (read_file (Filename.concat (Filename.concat root ".yeokcham") "format")))
+        (read_file
+           (Filename.concat (Filename.concat root ".yeokcham") "format")))
 
 let round_trip_is_idempotent_and_restart_safe () =
   with_repository (fun root repository ->

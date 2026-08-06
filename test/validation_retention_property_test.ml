@@ -43,7 +43,8 @@ let passed_evidence target =
   let empty =
     {
       Validation.digest =
-        Yeokcham_hash.Sha256.digest_string "" |> Yeokcham_hash.Sha256.to_raw_string;
+        Yeokcham_hash.Sha256.digest_string ""
+        |> Yeokcham_hash.Sha256.to_raw_string;
       retained = "";
       truncated = false;
     }

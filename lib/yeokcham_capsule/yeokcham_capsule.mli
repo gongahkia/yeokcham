@@ -139,7 +139,9 @@ val apply :
   application_result
 
 val apply_text_fallback :
-  Yeokcham_scratch.State.t -> text_edit -> (Yeokcham_scratch.State.t, string) result
+  Yeokcham_scratch.State.t ->
+  text_edit ->
+  (Yeokcham_scratch.State.t, string) result
 
 module Draft : sig
   type error

@@ -131,7 +131,9 @@ let exported_release_is_fsck_clean_and_byte_exact () =
       Alcotest.(check string)
         "no remote configured" ""
         (read (Filename.concat root ".yeokcham/demo-v1-git-export-remotes"));
-      let exported = read (Filename.concat root ".yeokcham/demo-v1-git-export") in
+      let exported =
+        read (Filename.concat root ".yeokcham/demo-v1-git-export")
+      in
       require (contains exported "metadata=default") "export policy is unclear";
       require
         (contains

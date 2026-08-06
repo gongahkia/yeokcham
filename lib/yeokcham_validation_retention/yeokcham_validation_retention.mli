@@ -19,7 +19,8 @@ val error_to_string : error -> string
 val decide :
   policy ->
   evidence:Yeokcham_validation.evidence ->
-  candidates:(Yeokcham_scratch.Checkpoint_id.t * Yeokcham_snapshot.Snapshot.id) list ->
+  candidates:
+    (Yeokcham_scratch.Checkpoint_id.t * Yeokcham_snapshot.Snapshot.id) list ->
   decision
 
 val apply :

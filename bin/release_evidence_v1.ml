@@ -25,7 +25,8 @@ let () =
               |> List.iter (fun evidence ->
                   Printf.printf "release=%s evidence=%s object=%s\n"
                     (Yeokcham_id.Release_id.to_hex (Release.release_id release))
-                    (Yeokcham_id.Validation_id.to_hex evidence.Release.evidence_id)
+                    (Yeokcham_id.Validation_id.to_hex
+                       evidence.Release.evidence_id)
                     (Store.Stored_object_id.to_hex
                        evidence.Release.evidence_object_id))))
   | _ ->
