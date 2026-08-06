@@ -76,9 +76,6 @@ let sample =
   signed_event signer_a ~previous:None ~sequence:0L ~observed:(state 0L None)
     ~proposed:(state 1L (Some (object_id '\001')))
 
-let require_golden name =
-  Golden.read_lower_hex_file (Filename.concat "golden" name) |> require Fun.id
-
 let refreshed_golden name actual =
   Golden.refresh_lower_hex_file (Filename.concat "golden" name) actual
   |> require Fun.id

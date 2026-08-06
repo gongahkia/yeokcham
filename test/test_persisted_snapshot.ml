@@ -47,10 +47,6 @@ let stored_envelope store identity =
   |> require_ok Store.error_to_string
   |> Envelope.encode
 
-let require_golden name =
-  Golden.read_lower_hex_file (Filename.concat "golden" name)
-  |> require_ok Fun.id
-
 let refreshed_golden name actual =
   Golden.refresh_lower_hex_file (Filename.concat "golden" name) actual
   |> require_ok Fun.id

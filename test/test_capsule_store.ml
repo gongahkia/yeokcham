@@ -87,14 +87,6 @@ let fixture () =
   in
   (capsule, revision, current)
 
-let golden name =
-  let candidates =
-    [ Filename.concat "golden" name; Filename.concat "test/golden" name ]
-  in
-  match List.find_opt Sys.file_exists candidates with
-  | Some path -> Golden.read_lower_hex_file path |> require_ok Fun.id
-  | None -> Alcotest.fail ("missing golden fixture: " ^ name)
-
 let refreshed_golden name actual =
   Golden.refresh_lower_hex_file (Filename.concat "golden" name) actual
   |> require_ok Fun.id

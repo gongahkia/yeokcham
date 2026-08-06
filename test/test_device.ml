@@ -86,9 +86,6 @@ let verified_event signer =
   | Some verified -> verified
   | None -> Alcotest.fail "expected trusted event"
 
-let require_golden name =
-  Golden.read_lower_hex_file (Filename.concat "golden" name) |> require Fun.id
-
 let refreshed_golden name actual =
   Golden.refresh_lower_hex_file (Filename.concat "golden" name) actual
   |> require Fun.id

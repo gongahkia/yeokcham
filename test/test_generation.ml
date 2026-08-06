@@ -33,14 +33,6 @@ let with_store run =
       remove root)
     (fun () -> run root (Store.init ~root |> require_ok Store.error_to_string))
 
-let golden name =
-  let paths =
-    [ Filename.concat "golden" name; Filename.concat "test/golden" name ]
-  in
-  match List.find_opt Sys.file_exists paths with
-  | Some path -> Golden.read_lower_hex_file path |> require_ok Fun.id
-  | None -> Alcotest.fail ("missing golden fixture: " ^ name)
-
 let refreshed_golden name actual =
   Golden.refresh_lower_hex_file (Filename.concat "golden" name) actual
   |> require_ok Fun.id

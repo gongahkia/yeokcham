@@ -28,9 +28,6 @@ let raw_of_hex encoded =
       let offset = index * 2 in
       Char.chr ((nibble encoded.[offset] lsl 4) lor nibble encoded.[offset + 1]))
 
-let require_golden name =
-  Golden.read_lower_hex_file (Filename.concat "golden" name) |> require Fun.id
-
 let refreshed_golden name actual =
   Golden.refresh_lower_hex_file (Filename.concat "golden" name) actual
   |> require Fun.id

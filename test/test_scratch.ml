@@ -393,10 +393,6 @@ let v1_golden_bytes_are_stable () =
         |> require_ok Store.error_to_string
         |> Yeokcham_envelope.encode
       in
-      let golden name =
-        Golden.read_lower_hex_file (Filename.concat "golden" name)
-        |> require_ok Fun.id
-      in
       let refreshed_golden name actual =
         Golden.refresh_lower_hex_file (Filename.concat "golden" name) actual
         |> require_ok Fun.id

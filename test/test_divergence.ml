@@ -84,6 +84,8 @@ let trusted signers =
     (fun signer ->
       { Event.key_id = signer.key_id; public_key = signer.public_key })
     signers
+  |> List.sort (fun left right ->
+      Event.signer_key_id_compare left.Event.key_id right.Event.key_id)
 
 let verify signer event =
   match
@@ -109,9 +111,6 @@ let core_b = core_entry signer_b '\002'
 let sample_set =
   Divergence.make ~repository_format:Store.repository_format [ core_b; core_a ]
   |> require_divergence
-
-let require_golden name =
-  Golden.read_lower_hex_file (Filename.concat "golden" name) |> require Fun.id
 
 let refreshed_golden name actual =
   Golden.refresh_lower_hex_file (Filename.concat "golden" name) actual
