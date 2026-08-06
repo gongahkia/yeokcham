@@ -1,5 +1,6 @@
 (executable
  (name paengi)
+ (modules paengi)
  (libraries
   paengi_capsule
   paengi_capsule_store
@@ -13,3 +14,8 @@
   paengi_workspace
   paengi_workspace_store
   unix))
+
+(executable
+ (name workspace_base_v1)
+ (modules workspace_base_v1)
+ (libraries paengi_scratch paengi_snapshot paengi_store))
