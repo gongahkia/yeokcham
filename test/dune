@@ -553,6 +553,32 @@
   (source_tree golden)))
 
 (test
+ (name test_validation_retention)
+ (modules test_validation_retention)
+ (libraries
+  alcotest
+  paengi_compaction
+  paengi_scratch
+  paengi_snapshot
+  paengi_store
+  paengi_validation
+  paengi_validation_retention
+  unix))
+
+(test
+ (name validation_retention_property_test)
+ (modules validation_retention_property_test)
+ (libraries
+  alcotest
+  qcheck-core
+  qcheck-alcotest
+  paengi_scratch
+  paengi_snapshot
+  paengi_store
+  paengi_validation
+  paengi_validation_retention))
+
+(test
  (name test_release)
  (modules test_release)
  (libraries
@@ -960,6 +986,7 @@
   (:capsule_durable_property_test capsule_durable_property_test.exe)
   (:workspace_property_test workspace_property_test.exe)
   (:release_validation_property_test release_validation_property_test.exe)
+  (:validation_retention_property_test validation_retention_property_test.exe)
   (:semantic_property_test semantic_property_test.exe)
   (:semantic_retarget_property_test semantic_retarget_property_test.exe)
   (:rust_adapter_property_test rust_adapter_property_test.exe)
@@ -988,6 +1015,7 @@
    (run %{capsule_durable_property_test})
    (run %{workspace_property_test})
    (run %{release_validation_property_test})
+   (run %{validation_retention_property_test})
    (run %{semantic_property_test})
    (run %{semantic_retarget_property_test})
    (run %{rust_adapter_property_test})

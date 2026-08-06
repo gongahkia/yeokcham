@@ -11,6 +11,7 @@
   paengi_snapshot
   paengi_store
   paengi_validation
+  paengi_validation_retention
   paengi_workspace
   paengi_workspace_store
   unix))

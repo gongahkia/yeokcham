@@ -2351,6 +2351,24 @@ let unpin repository checkpoint ~changed_at =
   change_retention repository checkpoint ~action:Remove ~reason:User_pinned
     ~changed_at
 
+let retain_validation_passed repository checkpoint ~validation ~changed_at =
+  let* entries = timeline repository ~start:checkpoint ~limit:1 () in
+  match entries with
+  | [ entry ] ->
+      let reason = Validation_passed validation in
+      if
+        List.exists
+          (fun existing -> compare_retention existing reason = 0)
+          entry.effective_retention
+      then Ok false
+      else
+        let* () =
+          change_retention repository checkpoint ~action:Add ~reason ~changed_at
+        in
+        Ok true
+  | [] -> Error (Checkpoint_not_retained checkpoint)
+  | _ -> assert false
+
 let has_capsule_boundary repository checkpoint ~capsule =
   let* entries = timeline repository ~start:checkpoint ~limit:1 () in
   match entries with

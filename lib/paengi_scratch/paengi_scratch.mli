@@ -302,6 +302,13 @@ val pin :
 val unpin :
   repository -> Checkpoint_id.t -> changed_at:int64 -> (unit, error) result
 
+val retain_validation_passed :
+  repository ->
+  Checkpoint_id.t ->
+  validation:Paengi_id.Validation_id.t ->
+  changed_at:int64 ->
+  (bool, error) result
+
 val pin_capsule_boundary :
   repository ->
   Checkpoint_id.t ->

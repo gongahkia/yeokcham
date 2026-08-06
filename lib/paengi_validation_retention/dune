@@ -1,0 +1,3 @@
+(library
+ (name paengi_validation_retention)
+ (libraries paengi_scratch paengi_snapshot paengi_store paengi_validation))
