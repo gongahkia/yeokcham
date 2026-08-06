@@ -153,4 +153,4 @@ The ADR lifecycle, numbering rules, and template are defined in [`docs/adr/READM
 - [ADR-040 — Local device identities without implicit authority](docs/adr/040-local-device-identities.md) — Accepted.
 - [ADR-041 — Immutable divergent ref-head sets](docs/adr/041-divergent-ref-head-sets.md) — Accepted.
 - [ADR-042 — Encrypted offline object bundles](docs/adr/042-encrypted-offline-object-bundles.md) — Accepted.
-- [ADR-043 — Shared-directory encrypted bundle workflow](docs/adr/043-shared-directory-encrypted-bundle-workflow.md) — Proposed.
+- [ADR-043 — Shared-directory encrypted bundle workflow](docs/adr/043-shared-directory-encrypted-bundle-workflow.md) — Accepted.
