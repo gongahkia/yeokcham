@@ -1,8 +1,8 @@
 # ADR-040 — Local device identities without implicit authority
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-06
-- Deciders: maintainer
+- Deciders: maintainer (approved 2026-08-06)
 - Supersedes: None
 - Superseded by: None
 
