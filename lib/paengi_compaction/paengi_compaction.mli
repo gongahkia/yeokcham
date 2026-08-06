@@ -48,6 +48,10 @@ module Policy : sig
   val retained : selection -> bool
 end
 
+val eliminate_exact_inverse_pairs :
+  Paengi_scratch.operation list ->
+  Paengi_scratch.operation list * int
+
 type error
 
 val error_to_string : error -> string
@@ -100,6 +104,7 @@ val estimated_before_bytes : plan -> int64
 val estimated_after_bytes : plan -> int64
 val budget_retained_checkpoint_bytes : plan -> int64
 val budget_protected_checkpoint_bytes : plan -> int64
+val inverse_pairs_eliminated : plan -> int
 val removable_checkpoints : plan -> Paengi_scratch.Checkpoint_id.t list
 val removable_events : plan -> Paengi_scratch.Event_id.t list
 val removable_objects : plan -> Paengi_store.Stored_object_id.t list

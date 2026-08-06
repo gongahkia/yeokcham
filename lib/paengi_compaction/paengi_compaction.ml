@@ -548,6 +548,7 @@ type plan = {
   estimated_after_bytes : int64;
   budget_retained_checkpoint_bytes : int64;
   budget_protected_checkpoint_bytes : int64;
+  inverse_pairs_eliminated : int;
   removable_checkpoints : Scratch.Checkpoint_id.t list;
   removable_events : Scratch.Event_id.t list;
   removable_objects : Store.Stored_object_id.t list;
@@ -567,6 +568,8 @@ let budget_retained_checkpoint_bytes plan =
 
 let budget_protected_checkpoint_bytes plan =
   plan.budget_protected_checkpoint_bytes
+
+let inverse_pairs_eliminated plan = plan.inverse_pairs_eliminated
 
 let removable_checkpoints plan = plan.removable_checkpoints
 let removable_events plan = plan.removable_events
@@ -667,6 +670,7 @@ let analyze_reachable ~store scratch ~policy ~now ~required =
       estimated_after_bytes;
       budget_retained_checkpoint_bytes;
       budget_protected_checkpoint_bytes;
+      inverse_pairs_eliminated = 0;
       removable_checkpoints = [];
       removable_events = [];
       removable_objects = [];
@@ -710,6 +714,8 @@ let render_explain plan =
         (budget_retained_checkpoint_bytes plan);
       Printf.sprintf "budget-protected-checkpoint-bytes=%Ld"
         (budget_protected_checkpoint_bytes plan);
+      Printf.sprintf "inverse-pairs-eliminated=%d"
+        (inverse_pairs_eliminated plan);
       Printf.sprintf "removable-checkpoints=%d"
         (List.length (removable_checkpoints plan));
       Printf.sprintf "removable-events=%d" (List.length (removable_events plan));
@@ -904,16 +910,96 @@ let source_event_metadata store checkpoint =
       Scratch.Event.load store event
       |> Result.map_error (fun error -> Scratch_error error)
 
+let exact_inverse left right =
+  match (left, right) with
+  | ( Scratch.Create { path = left_path; entry = left_entry },
+      Scratch.Delete { path = right_path; prior = right_entry } )
+  | ( Scratch.Delete { path = left_path; prior = left_entry },
+      Scratch.Create { path = right_path; entry = right_entry } ) ->
+      left_path = right_path && left_entry = right_entry
+  | ( Scratch.Modify_content
+        {
+          path = left_path;
+          expected = left_expected;
+          replacement = left_replacement;
+        },
+      Scratch.Modify_content
+        {
+          path = right_path;
+          expected = right_expected;
+          replacement = right_replacement;
+        } ) ->
+      left_path = right_path
+      && Snapshot.Content.equal_id left_expected right_replacement
+      && Snapshot.Content.equal_id left_replacement right_expected
+  | ( Scratch.Change_mode
+        {
+          path = left_path;
+          expected = left_expected;
+          replacement = left_replacement;
+        },
+      Scratch.Change_mode
+        {
+          path = right_path;
+          expected = right_expected;
+          replacement = right_replacement;
+        } ) ->
+      left_path = right_path && left_expected = right_replacement
+      && left_replacement = right_expected
+  | ( Scratch.Move
+        {
+          source = left_source;
+          destination = left_destination;
+          prior = left_prior;
+        },
+      Scratch.Move
+        {
+          source = right_source;
+          destination = right_destination;
+          prior = right_prior;
+        } ) ->
+      left_source = right_destination && left_destination = right_source
+      && left_prior = right_prior
+  | ( Scratch.Create _ | Scratch.Delete _ | Scratch.Modify_content _
+    | Scratch.Change_mode _ | Scratch.Move _ ),
+    ( Scratch.Create _ | Scratch.Delete _ | Scratch.Modify_content _
+    | Scratch.Change_mode _ | Scratch.Move _ ) ->
+      false
+
+let eliminate_exact_inverse_pairs operations =
+  let reduced, eliminated_pairs =
+    List.fold_left
+      (fun (reversed, eliminated_pairs) operation ->
+        match reversed with
+        | previous :: earlier when exact_inverse previous operation ->
+            (earlier, eliminated_pairs + 1)
+        | _ -> (operation :: reversed, eliminated_pairs))
+      ([], 0) operations
+  in
+  (List.rev reduced, eliminated_pairs)
+
 type generated_checkpoint = {
   entry : Scratch.Generation.entry;
   checkpoint : Scratch.Checkpoint.t;
   event : Scratch.Event.t option;
+  generated_inverse_pairs_eliminated : int;
 }
 
-let build_physical_chain store retained =
-  let rec build reversed previous = function
-    | [] -> Ok (List.rev reversed)
-    | (entry, _) :: rest ->
+let build_physical_chain store ~timeline ~retained =
+  let retained identity =
+    List.exists
+      (fun (entry, _) ->
+        Scratch.Checkpoint_id.equal entry.Scratch.logical_id identity)
+      retained
+  in
+  let rec build reversed previous pending_reversed = function
+    | [] ->
+        if pending_reversed = [] then Ok (List.rev reversed)
+        else
+          Error
+            (Cleanup_manifest_error
+               "source scratch head is absent from retained compaction chain")
+    | entry :: rest ->
         let source = entry.Scratch.checkpoint in
         let logical = entry.Scratch.logical_id in
         let snapshot = Scratch.Checkpoint.snapshot source in
@@ -921,56 +1007,90 @@ let build_physical_chain store retained =
         let intrinsic_retention =
           Scratch.Checkpoint.intrinsic_retention source
         in
-        let* checkpoint, event, previous_logical =
-          match previous with
-          | None ->
+        match previous with
+        | None ->
+            if retained logical then
               let checkpoint =
                 Scratch.Checkpoint.create_initial_with_retention ~snapshot
                   ~created_at ~intrinsic_retention
               in
-              Ok (checkpoint, None, None)
-          | Some (prior_logical, prior_checkpoint) ->
+              let generated_entry =
+                Scratch.Generation.entry ~logical
+                  ~physical:(Scratch.Checkpoint.id checkpoint)
+                  ~snapshot ~previous_logical:None
+                  ~effective_retention:entry.Scratch.effective_retention
+              in
+              build
+                ({
+                   entry = generated_entry;
+                   checkpoint;
+                   event = None;
+                   generated_inverse_pairs_eliminated = 0;
+                 }
+                :: reversed)
+                (Some (logical, checkpoint)) [] rest
+            else build reversed None [] rest
+        | Some (prior_logical, prior_checkpoint) ->
+            let* metadata = source_event_metadata store source in
+            let pending_reversed =
+              List.rev_append (Scratch.Event.operations metadata) pending_reversed
+            in
+            if not (retained logical) then
+              build reversed previous pending_reversed rest
+            else
+              let operations = List.rev pending_reversed in
               let* base_state = checkpoint_state store prior_checkpoint in
               let* target_state = checkpoint_state store source in
-              let operations =
-                Scratch.State.diff ~from:base_state ~to_:target_state
-              in
-              let* replayed =
+              let* source_replayed =
                 Scratch.State.apply base_state operations
                 |> Result.map_error (fun error -> Scratch_error error)
               in
-              if not (Scratch.State.equal replayed target_state) then
+              if not (Scratch.State.equal source_replayed target_state) then
                 Error
                   (Cleanup_manifest_error
-                     "generated compacted replay mismatches")
+                     "source operations between retained checkpoints mismatch")
               else
-                let* metadata = source_event_metadata store source in
-                let event =
-                  Scratch.Event.create ~parent:prior_logical
-                    ~base:(Scratch.Checkpoint.snapshot prior_checkpoint)
-                    ~resulting:snapshot ~operations
-                    ~source:(Scratch.Event.source metadata)
-                    ~observed_at:(Scratch.Event.observed_at metadata)
+                let operations, inverse_pairs_eliminated =
+                  eliminate_exact_inverse_pairs operations
                 in
-                let checkpoint =
-                  Scratch.Checkpoint.create_with_retention ~parent:prior_logical
-                    ~event:(Scratch.Event.id event) ~snapshot ~created_at
-                    ~intrinsic_retention
+                let* replayed =
+                  Scratch.State.apply base_state operations
+                  |> Result.map_error (fun error -> Scratch_error error)
                 in
-                Ok (checkpoint, Some event, Some prior_logical)
-        in
-        let generated_entry =
-          Scratch.Generation.entry ~logical
-            ~physical:(Scratch.Checkpoint.id checkpoint)
-            ~snapshot ~previous_logical
-            ~effective_retention:entry.Scratch.effective_retention
-        in
-        build
-          ({ entry = generated_entry; checkpoint; event } :: reversed)
-          (Some (logical, checkpoint))
-          rest
+                if not (Scratch.State.equal replayed target_state) then
+                  Error
+                    (Cleanup_manifest_error
+                       "exact inverse reduction changes retained snapshot")
+                else
+                  let event =
+                    Scratch.Event.create ~parent:prior_logical
+                      ~base:(Scratch.Checkpoint.snapshot prior_checkpoint)
+                      ~resulting:snapshot ~operations
+                      ~source:(Scratch.Event.source metadata)
+                      ~observed_at:(Scratch.Event.observed_at metadata)
+                  in
+                  let checkpoint =
+                    Scratch.Checkpoint.create_with_retention
+                      ~parent:prior_logical ~event:(Scratch.Event.id event)
+                      ~snapshot ~created_at ~intrinsic_retention
+                  in
+                  let generated_entry =
+                    Scratch.Generation.entry ~logical
+                      ~physical:(Scratch.Checkpoint.id checkpoint)
+                      ~snapshot ~previous_logical:(Some prior_logical)
+                      ~effective_retention:entry.Scratch.effective_retention
+                  in
+                  build
+                    ({
+                       entry = generated_entry;
+                       checkpoint;
+                       event = Some event;
+                       generated_inverse_pairs_eliminated = inverse_pairs_eliminated;
+                     }
+                    :: reversed)
+                    (Some (logical, checkpoint)) [] rest
   in
-  build [] None retained
+  build [] None [] timeline
 
 let persist_physical_chain store generated =
   let rec persist reversed = function
@@ -1006,13 +1126,18 @@ let persist_physical_chain store generated =
   in
   persist [] generated
 
-let construct_physical_chain store retained =
-  let* generated = build_physical_chain store retained in
+let construct_physical_chain store ~timeline ~retained =
+  let* generated = build_physical_chain store ~timeline ~retained in
   let* _ = persist_physical_chain store generated in
   Ok generated
 
 let generated_entries generated =
   List.map (fun generated -> generated.entry) generated
+
+let generated_inverse_pairs generated =
+  List.fold_left
+    (fun total generated -> total + generated.generated_inverse_pairs_eliminated)
+    0 generated
 
 let object_id_of_checkpoint checkpoint =
   Scratch.Checkpoint_id.stored_object_id checkpoint
@@ -1202,7 +1327,9 @@ let analyze ~store scratch ~policy ~now =
   in
   if not head_retained then Error (Source_head_not_retained source.scratch_head)
   else
-    let* generated = build_physical_chain store retained in
+    let* generated =
+      build_physical_chain store ~timeline:(List.rev timeline) ~retained
+    in
     let* candidates =
       cleanup_candidates store ~previous_generation:source.previous_generation
         ~timeline ~generated ~cutoff:source.retention_head
@@ -1228,6 +1355,7 @@ let analyze ~store scratch ~policy ~now =
     Ok
       {
         baseline with
+        inverse_pairs_eliminated = generated_inverse_pairs generated;
         removable_checkpoints;
         removable_events;
         removable_objects =
@@ -1713,7 +1841,18 @@ let activate ?(cleanup = true) ?cleanup_fault ?before_publish ~store scratch
       if not head_retained then
         Error (Source_head_not_retained source.scratch_head)
       else
-        let* generated = construct_physical_chain store retained in
+        let* generated =
+          construct_physical_chain store ~timeline:(List.rev timeline) ~retained
+        in
+        let* () =
+          if
+            inverse_pairs_eliminated plan = generated_inverse_pairs generated
+          then Ok ()
+          else
+            Error
+              (Cleanup_manifest_error
+                 "dry-run inverse eliminations disagree with activation")
+        in
         let* candidates =
           cleanup_candidates store
             ~previous_generation:source.previous_generation ~timeline ~generated

@@ -35,6 +35,12 @@ let checkpoint_id value =
   Store.Stored_object_id.of_raw_bytes (Bytes.unsafe_to_string raw)
   |> Option.get |> Scratch.Checkpoint_id.of_stored_object_id
 
+let content_id value =
+  let raw = Bytes.make 32 '\000' in
+  Bytes.set raw 0 (Char.chr value);
+  Store.Stored_object_id.of_raw_bytes (Bytes.unsafe_to_string raw)
+  |> Option.get |> Snapshot.Content.of_stored_object_id
+
 let checkpoint ?(storage_bytes = 0L) value created_at effective_retention =
   {
     Compaction.Policy.id = checkpoint_id value;
@@ -190,6 +196,56 @@ let budget_selection_keeps_required_and_trims_deterministically () =
       newer.Compaction.Policy.id;
       periodic.Compaction.Policy.id;
     ]
+
+let exact_inverse_reducer_preserves_unmatched_operations () =
+  let first = content_id 11 in
+  let second = content_id 12 in
+  let third = content_id 13 in
+  let entry = Scratch.File { mode = Snapshot.Regular; content = first } in
+  let create_delete =
+    [
+      Scratch.Create { path = [ "temporary" ]; entry };
+      Scratch.Delete { path = [ "temporary" ]; prior = entry };
+    ]
+  in
+  let modify_inverse =
+    [
+      Scratch.Modify_content
+        {
+          path = [ "file" ];
+          expected = first;
+          replacement = second;
+        };
+      Scratch.Modify_content
+        {
+          path = [ "file" ];
+          expected = second;
+          replacement = first;
+        };
+    ]
+  in
+  let unmatched =
+    Scratch.Modify_content
+      { path = [ "other" ]; expected = first; replacement = third }
+  in
+  let reduced, eliminated =
+    Compaction.eliminate_exact_inverse_pairs
+      (create_delete @ modify_inverse @ [ unmatched ])
+  in
+  Alcotest.(check int) "exact adjacent pairs are removed" 2 eliminated;
+  Alcotest.(check int) "unmatched operation remains" 1 (List.length reduced);
+  match reduced with
+  | [ Scratch.Modify_content { path; expected; replacement } ] ->
+      Alcotest.(check (list string)) "unmatched path" [ "other" ] path;
+      Alcotest.(check bool)
+        "unmatched precondition is unchanged" true
+        (Snapshot.Content.equal_id expected first);
+      Alcotest.(check bool)
+        "unmatched replacement is unchanged" true
+        (Snapshot.Content.equal_id replacement third)
+  | [ Scratch.Create _ | Scratch.Delete _ | Scratch.Change_mode _ | Scratch.Move _ ]
+  | [] | _ :: _ :: _ ->
+      Alcotest.fail "inverse reducer changed an unmatched operation"
 
 let budget_plan_preserves_required_history_with with_history assert_retained ()
     =
@@ -432,6 +488,79 @@ let assert_retained_resolution_and_restore root scratch initial head =
 let budget_plan_preserves_required_history () =
   budget_plan_preserves_required_history_with with_history
     assert_retained_resolution_and_restore ()
+
+let compaction_eliminates_exact_inverse_gap () =
+  with_history (fun root store scratch initial middle _head ->
+      write_file (Filename.concat root "file") "one";
+      let snapshot, _ =
+        Snapshot.scan ~root ~store |> require_ok Snapshot.error_to_string
+      in
+      let head =
+        Scratch.checkpoint scratch ~snapshot ~source:Scratch.Explicit
+          ~observed_at:30L ~created_at:30L
+        |> require_ok Scratch.error_to_string
+      in
+      let head =
+        match head with
+        | Scratch.Created checkpoint -> checkpoint
+        | Scratch.Unchanged _ -> Alcotest.fail "inverse head was unchanged"
+      in
+      let policy = policy ~recent:0L ~periodic:0L in
+      let plan =
+        Compaction.analyze ~store scratch ~policy ~now:40L
+        |> require_ok Compaction.error_to_string
+      in
+      Alcotest.(check int)
+        "one adjacent inverse pair is proven" 1
+        (Compaction.inverse_pairs_eliminated plan);
+      Alcotest.(check bool)
+        "dry-run explains inverse reduction" true
+        (List.mem "inverse-pairs-eliminated=1"
+           (Compaction.render_explain plan));
+      let execution =
+        Compaction.activate ~store scratch ~policy ~now:40L
+        |> require_ok Compaction.error_to_string
+      in
+      let generation =
+        Scratch.active_generation scratch |> require_ok Scratch.error_to_string
+        |> Option.get
+      in
+      let physical_head =
+        Scratch.Generation.entries generation |> List.rev |> List.hd
+        |> Scratch.Generation.physical
+      in
+      let checkpoint =
+        Scratch.Checkpoint.load store physical_head
+        |> require_ok Scratch.error_to_string
+      in
+      let event =
+        Scratch.Checkpoint.event checkpoint |> Option.get
+        |> Scratch.Event.load store |> require_ok Scratch.error_to_string
+      in
+      Alcotest.(check int)
+        "generated event keeps only the unreversed edit" 1
+        (List.length (Scratch.Event.operations event));
+      (match Scratch.resolve_checkpoint scratch (Scratch.Checkpoint.id middle) with
+      | Error _ -> ()
+      | Ok _ -> Alcotest.fail "unretained intermediate checkpoint resolves");
+      Scratch.Restore.restore scratch ~root ~target:(Scratch.Checkpoint.id initial)
+        ~observed_at:41L ~created_at:41L
+      |> require_ok Scratch.error_to_string
+      |> ignore;
+      Alcotest.(check string) "initial snapshot remains exact" "zero"
+        (In_channel.with_open_bin (Filename.concat root "file")
+           In_channel.input_all);
+      Scratch.Restore.restore scratch ~root ~target:(Scratch.Checkpoint.id head)
+        ~observed_at:42L ~created_at:42L
+      |> require_ok Scratch.error_to_string
+      |> ignore;
+      Alcotest.(check string) "reduced head snapshot remains exact" "one"
+        (In_channel.with_open_bin (Filename.concat root "file")
+           In_channel.input_all);
+      Alcotest.(check int)
+        "activation reports the dry-run inverse count" 1
+        (Compaction.execution_plan execution
+        |> Compaction.inverse_pairs_eliminated))
 
 let assert_quarantined store root generation planned =
   let trash = generation_trash root generation in
@@ -1158,8 +1287,14 @@ let () =
           Alcotest.test_case
             "budget selection keeps required checkpoints deterministically"
             `Quick budget_selection_keeps_required_and_trims_deterministically;
+          Alcotest.test_case
+            "exact inverse reducer preserves unmatched operations"
+            `Quick exact_inverse_reducer_preserves_unmatched_operations;
           Alcotest.test_case "budget plan preserves required history" `Quick
             budget_plan_preserves_required_history;
+          Alcotest.test_case
+            "compaction eliminates one exact inverse retained gap"
+            `Quick compaction_eliminates_exact_inverse_gap;
           Alcotest.test_case "invalid policy values reject" `Quick
             invalid_policy_values_are_rejected;
           Alcotest.test_case "planner is read-only and explains exact cleanup"
