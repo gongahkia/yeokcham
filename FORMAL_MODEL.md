@@ -1230,3 +1230,31 @@ prefix that a retry can publish idempotently. Export obtains a 12-byte nonce
 from the OS CSPRNG and accepts a caller-held key only at its direct API boundary.
 Neither transition reads, creates, updates, reconciles, or deletes application
 refs, divergence bindings, trust/device state, or key state.
+
+## 20. Shared-directory encrypted bundle workflow
+
+M10-08 adds an external directory adapter over ADR-042:
+
+```text
+Directory_token = opaque random 16 bytes
+Partial_descriptor = (safe-v1-name, observed-byte-length)
+Complete_descriptor = (safe-v1-name, observed-byte-length)
+Inspection = ordered stored-object-id list
+```
+
+`partial-v1` names `.paengi-bundle-v1-<32-lowercase-hex>.partial` and
+`complete-v1` names `paengi-bundle-v1-<32-lowercase-hex>.peng`. The opaque
+name token is not authenticated metadata, a bundle/object ID, a nonce, a key
+ID, or authority. A complete file contains exactly ADR-042 encrypted-bundle
+bytes; a partial is never decrypted or imported. Listing is a sorted immediate
+directory observation of recognised regular files only and changes no file or
+repository state.
+
+Export writes and fsyncs one exclusive partial, create-only links its complete
+name, fsyncs the directory, then removes its own partial. Import and inspection
+revalidate the chosen complete regular file, including byte identity/size across
+the read. Inspection fully opens ADR-042 but publishes nothing. Import delegates
+to ADR-042's complete validation-before-publication transition, so retry after
+an I/O interruption has only the existing valid immutable-prefix semantics.
+The adapter has no shared cursor, repair, cleanup, auto-import, ref operation,
+binding operation, trust/device operation, or key state.

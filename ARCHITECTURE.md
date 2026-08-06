@@ -763,6 +763,16 @@ a later publication failure leaves only a valid retryable immutable prefix. It
 does not read or write a mutable ref, divergence binding, trust/device record,
 or key record, and adds no CLI or key-source convention.
 
+M10-08 adds `paengi_bundle_directory`, an external local-directory adapter over
+unchanged ADR-042 encrypted bytes. It creates an exclusive `.partial` file,
+fsyncs it, links one no-replace `.peng` final file, and fsyncs the directory;
+listing returns only sorted recognised regular final/partial descriptors. A
+caller selects an abstract final descriptor for inspection or import. Inspection
+fully authenticates/decrypts without publication; import reuses ADR-042's
+complete validation and ADR-020 create-only publication. It has no directory
+cursor, repair, deletion, watcher, service, ref/binding/trust/device mutation,
+CLI, or key-source convention.
+
 Future layers require separate decisions:
 
 - Signed ref or operation events.

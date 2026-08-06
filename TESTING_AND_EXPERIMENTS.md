@@ -211,6 +211,18 @@ missing-object sets, interruption points, duplicate input, and corruption;
 retries must make valid objects available while every destination ref stays
 unchanged.
 
+#### P22 — Shared-directory encrypted bundle preservation
+
+ADR-043 retains v1 partial/final filename ordering as a fixture and reuses the
+ADR-042 exact encrypted-bundle fixtures. Focused local source/destination/shared
+directory tests cover export/list/inspect/import/reopen retry, retained partial
+visibility with explicit non-importability, corrupt final bytes, unexpected
+entries, symlinks, exact object bytes, and unchanged destination refs/bindings.
+The seeded property varies bounded object sets, duplicate export input, corrupt
+final delivery, and import retry/reopen; rejected files publish no source object
+and valid retries preserve the destination ref. The tests do not claim repair of
+an interrupted export stream or filesystem permission enforcement.
+
 Milestone 5 additionally checks Workspace/Workspace_revision/Workspace_attempt,
 Conflict, Resolution, and workspace-current-ref canonical goldens with inverse
 decoders; workspace reopen; immutable enable/reorder revisions; stale workspace
