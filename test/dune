@@ -846,6 +846,12 @@
   unix))
 
 (test
+ (name test_comparative_workflow_analysis)
+ (modules test_comparative_workflow_analysis)
+ (libraries alcotest)
+ (deps ../docs/COMPARATIVE_WORKFLOW_ANALYSIS.md))
+
+(test
  (name bundle_directory_property_test)
  (modules bundle_directory_property_test)
  (libraries
