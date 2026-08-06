@@ -453,6 +453,21 @@
   paengi_store
   unix))
 
+(executable
+ (name compaction_retention_benchmark)
+ (modules compaction_retention_benchmark)
+ (libraries paengi_compaction_benchmark))
+
+(test
+ (name test_compaction_retention_benchmark)
+ (modules test_compaction_retention_benchmark)
+ (libraries alcotest paengi_compaction_benchmark))
+
+(test
+ (name compaction_retention_benchmark_property_test)
+ (modules compaction_retention_benchmark_property_test)
+ (libraries alcotest qcheck-core qcheck-alcotest paengi_compaction_benchmark))
+
 (test
  (name test_generation)
  (modules test_generation)
@@ -927,6 +942,8 @@
   (:snapshot_property_test snapshot_property_test.exe)
   (:scratch_property_test scratch_property_test.exe)
   (:compaction_property_test compaction_property_test.exe)
+  (:compaction_retention_benchmark_property_test
+   compaction_retention_benchmark_property_test.exe)
   (:capsule_property_test capsule_property_test.exe)
   (:capsule_durable_property_test capsule_durable_property_test.exe)
   (:workspace_property_test workspace_property_test.exe)
@@ -954,6 +971,7 @@
    (run %{snapshot_property_test})
    (run %{scratch_property_test})
    (run %{compaction_property_test})
+   (run %{compaction_retention_benchmark_property_test})
    (run %{capsule_property_test})
    (run %{capsule_durable_property_test})
    (run %{workspace_property_test})
