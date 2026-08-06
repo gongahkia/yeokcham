@@ -162,6 +162,16 @@ The seeded restart property varies bounded public declarations, repeated
 create-only publication, reload, registry resolution, and corrupt payloads; no
 test treats a public declaration as trust or persists private key bytes.
 
+#### P18 — Bounded local HTTP exchange preservation
+
+M10-04 drives exact ADR-038 frames through bounded HTTP request/response
+parsing. Focused tests cover malformed HTTP, destination-side Want selection,
+loopback TCP transfer, explicit interruption/restart, store reload, and an
+unchanged destination ref. The seeded state machine varies bounded object sets,
+interruption points, restart/reoffer, idempotent immutable publication, and
+corrupt HTTP input. No test asserts peer identity, transport authentication, or
+ref reconciliation.
+
 Milestone 5 additionally checks Workspace/Workspace_revision/Workspace_attempt,
 Conflict, Resolution, and workspace-current-ref canonical goldens with inverse
 decoders; workspace reopen; immutable enable/reorder revisions; stale workspace

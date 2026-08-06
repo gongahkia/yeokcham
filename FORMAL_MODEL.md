@@ -1151,3 +1151,21 @@ resolved, unmapped, or ambiguous device result. Registry lookup does not make a
 key trusted, change an event result, advance a ref, select a divergence, rotate
 or revoke a key, or persist a registry. Device declarations use additive
 Envelope type 27; no existing event, ref, object, or repository format changes.
+
+## 17. Bounded local HTTP exchange
+
+M10-04 maps exactly one ADR-038 frame to one HTTP/1.1 `POST /v1/exchange`
+request with a length-delimited `application/vnd.paengi.exchange-v1` body. The
+destination retains only one bounded in-memory receiver state for the active
+HTTP session. `Hello` yields an empty response, `Inventory` yields one exact
+`Want` frame, each `Object` yields an empty response after ADR-020 publication,
+and `End` clears transient state. HTTP headers and bodies, exchange frames,
+object bytes, store publication, and every response shape are bounded and
+checked before publication; the adapter does not read or change a mutable ref.
+
+An interrupted HTTP session has no durable cursor. Restart creates a new Hello
+and reoffers caller-declared sorted IDs; existing byte-identical immutable
+objects yield an empty Want set, while absent objects are requested again. HTTP
+transport does not authenticate a peer, discover identity, transfer/reconcile a
+ref, choose a divergence, persist an exchange session, or alter device/trust
+results.

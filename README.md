@@ -123,6 +123,12 @@ caller-owned and is never stored. An explicit bounded registry may resolve an
 already verified event to one declaration, unmapped, or ambiguous; it does not
 make a key trusted, update a ref, rotate/revoke a key, or identify a person.
 
+M10-04 adds bounded local HTTP/1.1 transfer for ADR-038 frames. It validates
+one exact frame per POST, reoffers immutable IDs after interruption, and
+publishes only verified objects; HTTP transfer leaves refs, trust, device
+resolution, and divergence unchanged. It has no CLI, authentication, or
+persistent session state.
+
 See `CONTRIBUTING.md` for development rules. Paengi is licensed under the MIT License.
 
 ## Development

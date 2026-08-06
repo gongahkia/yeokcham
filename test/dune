@@ -193,6 +193,18 @@
   (source_tree golden)))
 
 (test
+ (name test_http_exchange)
+ (modules test_http_exchange)
+ (libraries
+  alcotest
+  paengi_encoding
+  paengi_envelope
+  paengi_exchange
+  paengi_http_exchange
+  paengi_store
+  unix))
+
+(test
  (name test_persisted_snapshot)
  (modules test_persisted_snapshot)
  (libraries
@@ -611,6 +623,20 @@
   unix))
 
 (test
+ (name http_exchange_property_test)
+ (modules http_exchange_property_test)
+ (libraries
+  alcotest
+  qcheck-core
+  qcheck-alcotest
+  paengi_encoding
+  paengi_envelope
+  paengi_exchange
+  paengi_http_exchange
+  paengi_store
+  unix))
+
+(test
  (name snapshot_property_test)
  (modules snapshot_property_test)
  (libraries
@@ -630,6 +656,7 @@
   (:exchange_property_test exchange_property_test.exe)
   (:ref_event_property_test ref_event_property_test.exe)
   (:device_property_test device_property_test.exe)
+  (:http_exchange_property_test http_exchange_property_test.exe)
   (:snapshot_property_test snapshot_property_test.exe)
   (:scratch_property_test scratch_property_test.exe)
   (:compaction_property_test compaction_property_test.exe)
@@ -652,6 +679,7 @@
    (run %{exchange_property_test})
    (run %{ref_event_property_test})
    (run %{device_property_test})
+   (run %{http_exchange_property_test})
    (run %{snapshot_property_test})
    (run %{scratch_property_test})
    (run %{compaction_property_test})

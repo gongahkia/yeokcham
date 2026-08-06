@@ -730,13 +730,21 @@ resolution does not trust a key, modify an event/ref, choose divergence, or
 persist registry state. Private-key storage, discovery, rotation, revocation,
 and transport remain separate layers.
 
+M10-04 adds `paengi_http_exchange`, a local HTTP/1.1 adapter over unchanged
+ADR-038 frames. One `POST /v1/exchange` carries one bounded frame; destination
+transient state accepts Hello, returns Want for Inventory, publishes each
+verified Object through the existing adapter, and clears on End. The socket
+adapter closes each request connection and restart reoffers caller-declared
+immutable IDs. HTTP parsing, response status/body, frame, budget, store, and
+interruption failures are structured. It has no CLI, authentication, persistent
+session, ref operation, reconciliation, or divergence selection.
+
 Future layers require separate decisions:
 
 - Signed ref or operation events.
 - Device key lifecycle.
 - Conflict-preserving ref reconciliation.
 - Encrypted bundles for dumb storage.
-- Local HTTP peer transfer.
 
 Paengi does not require consensus for single-user multi-device use. It requires preserving divergent heads and letting the user reconcile them.
 
