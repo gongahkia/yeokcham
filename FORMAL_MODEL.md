@@ -1200,3 +1200,33 @@ publish(B, incoming) = CAS(B, B ∪ incoming)
 No transition reads or writes the application ref, chooses a candidate,
 advances a generation, merges a target, or changes trust. Missing bindings are
 initialised; corrupt bindings and sets reject without replacement.
+
+## 19. Encrypted offline object bundles
+
+M10-06 adds an external, non-object encrypted bundle value:
+
+```text
+Bundle_key = opaque 32 bytes
+Encrypted_bundle = (schema, algorithm, repository-format-digest, nonce,
+                    ciphertext-with-tag, mandatory-features)
+Bundle_plaintext = (schema, ordered (stored-object-id, Envelope-1-bytes),
+                    mandatory-features)
+```
+
+The canonical outer header and plaintext use Profile 1. `Encrypted_bundle` is
+not an Envelope, stored object, ref, binding, key record, or repository state.
+The header contains schema `1`, algorithm `chacha20-poly1305`, a 32-byte
+repository-format digest, a 12-byte nonce, ciphertext plus a 16-byte tag, and
+mandatory features `0`; its exact canonical encoding is AEAD associated data.
+The plaintext has at most 4,096 strictly raw-ID-ascending entries and at most
+128 MiB of encoded bytes. Every entry's exact canonical Envelope-1 bytes must
+recompute to its stated stored-object ID.
+
+`import` first fully decodes, bounds, checks the repository digest, authenticates,
+and validates the complete plaintext. Only then does it call create-only
+immutable publication for each entry. Thus a rejected bundle has no publication
+transition, while a later store I/O failure may leave only a valid immutable
+prefix that a retry can publish idempotently. Export obtains a 12-byte nonce
+from the OS CSPRNG and accepts a caller-held key only at its direct API boundary.
+Neither transition reads, creates, updates, reconciles, or deletes application
+refs, divergence bindings, trust/device state, or key state.

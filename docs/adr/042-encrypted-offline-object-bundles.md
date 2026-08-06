@@ -210,4 +210,15 @@ or synchronised a ref.
 
 ## Implementation evidence
 
-None; implementation is blocked pending ADR acceptance.
+M10-06 implements `paengi_bundle` as the pure canonical bundle/AEAD core and
+`paengi_bundle_store` as the create-only store adapter. The implementation adds
+fixed plaintext/header/outer bundle fixtures, RFC 8439 AEAD coverage, focused
+two-repository export/import/reopen/retry/rejection tests, and the seeded
+`bundle_property_test`.
+
+Verified on 2026-08-06:
+
+```text
+make check
+make property-test PROPERTY_TEST_SEED=17
+```

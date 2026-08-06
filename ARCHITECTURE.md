@@ -752,12 +752,22 @@ uses its bounded CAS retry path, and never replaces a corrupt binding. It does
 not read or write application refs, select a candidate, reconcile targets,
 persist trust/device state, or add CLI mutation.
 
+M10-06 adds `paengi_bundle` and `paengi_bundle_store`. The pure core canonically
+encodes and validates ADR-042's external `encrypted-bundle-v1` header and
+plaintext, verifies each exact Envelope-1 byte string against its stored-object
+ID, and opens ChaCha20-Poly1305 only with the full canonical header as AAD. The
+adapter reads only caller-declared immutable objects, obtains one 12-byte nonce
+from the OS CSPRNG, and exports bytes without repository mutation. Import
+completely decodes and validates before its first create-only `Paengi_store.put`;
+a later publication failure leaves only a valid retryable immutable prefix. It
+does not read or write a mutable ref, divergence binding, trust/device record,
+or key record, and adds no CLI or key-source convention.
+
 Future layers require separate decisions:
 
 - Signed ref or operation events.
 - Device key lifecycle.
 - Conflict-preserving ref reconciliation.
-- Encrypted bundles for dumb storage.
 
 Paengi does not require consensus for single-user multi-device use. It requires preserving divergent heads and letting the user reconcile them.
 

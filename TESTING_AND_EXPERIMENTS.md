@@ -183,6 +183,20 @@ order, duplicates, restart points, union, and corrupt binding decoding; it
 checks the retained candidate cardinality and never treats a candidate as an
 applied ref, selected head, or reconciliation result.
 
+#### P20 — Encrypted offline bundle preservation
+
+ADR-042 retains exact canonical plaintext, authenticated-header, and fixed
+ciphertext fixtures, plus the RFC 8439 ChaCha20-Poly1305 AEAD vector. Focused
+two-local-repository tests cover empty, equal/retried, and divergent explicit
+object sets; reopen; repeated create-only import; fresh exporter output; and
+unchanged application-ref and divergence-binding bytes. Wrong keys, altered
+authenticated nonce/ciphertext/tag, wrong repository, malformed or
+noncanonical bytes, unsupported outer fields, duplicate entries, and bounds
+reject structurally before publication. The seeded property varies bounded
+object sets, reversed/duplicate exporter input, corrupted delivery, and restart;
+it checks that rejected deliveries publish no source object and that successful
+retries preserve the destination ref.
+
 Milestone 5 additionally checks Workspace/Workspace_revision/Workspace_attempt,
 Conflict, Resolution, and workspace-current-ref canonical goldens with inverse
 decoders; workspace reopen; immutable enable/reorder revisions; stale workspace
