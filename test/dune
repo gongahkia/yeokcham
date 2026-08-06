@@ -464,6 +464,12 @@
  (libraries alcotest paengi_compaction_benchmark))
 
 (test
+ (name test_compaction_retention_results)
+ (modules test_compaction_retention_results)
+ (libraries alcotest)
+ (deps ../docs/COMPACTION_RETENTION_RESULTS.md))
+
+(test
  (name compaction_retention_benchmark_property_test)
  (modules compaction_retention_benchmark_property_test)
  (libraries alcotest qcheck-core qcheck-alcotest paengi_compaction_benchmark))

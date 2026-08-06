@@ -40,4 +40,6 @@ make property-test PROPERTY_TEST_SEED=17
 The checked-in [result](experiments/results/scratch-retention-benchmark-v1.json)
 uses five repetitions on its recorded host. Its
 [schema](experiments/schema/scratch-retention-benchmark-v1.schema.json) is
-documentation evidence, not a Paengi persistent format.
+documentation evidence, not a Paengi persistent format. The published
+[measurement report](COMPACTION_RETENTION_RESULTS.md) preserves the same
+host-specific and unsupported-case limits.
