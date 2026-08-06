@@ -259,6 +259,14 @@
   unix))
 
 (test
+ (name test_demo_fixture)
+ (modules test_demo_fixture)
+ (libraries alcotest unix)
+ (deps
+  ../bin/paengi.exe
+  (source_tree ../tools/demo)))
+
+(test
  (name test_missing_object_exchange)
  (modules test_missing_object_exchange)
  (libraries
