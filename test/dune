@@ -245,6 +245,20 @@
   (source_tree golden)))
 
 (test
+ (name test_decentralised_sync)
+ (modules test_decentralised_sync)
+ (libraries
+  alcotest
+  paengi_bundle
+  paengi_bundle_directory
+  paengi_encoding
+  paengi_envelope
+  paengi_exchange
+  paengi_exchange_store
+  paengi_store
+  unix))
+
+(test
  (name test_missing_object_exchange)
  (modules test_missing_object_exchange)
  (libraries
