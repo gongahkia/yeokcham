@@ -94,6 +94,16 @@ The generation stores effective retained reasons and the source
 only immutable changes newer than the cutoff.  New pin/unpin operations retain
 the ADR-023 `Retention_change_v1` log and CAS ref.
 
+M3-D01 makes the already-encoded optional storage budget effective during
+planning without changing `retention-policy-v1`. The budget charges only the
+exact source-object file lengths of each selected Checkpoint and direct
+Scratch_event; shared snapshot/content-domain objects remain outside the scope
+until a complete cross-domain root mark exists. Pins and the logical
+scratch-head requirement are never evicted. Optional recent checkpoints, then
+periodic checkpoints, are considered newest-first with object-ID ties; a
+nonfitting candidate is reported as `budget-excluded`. A protected-only
+overrun remains visible rather than making a recovery state unavailable.
+
 Publication obtains the repository compaction lock, reads source refs and the
 active generation, publishes all immutable generation objects, verifies them,
 rereads sources, then CAS-publishes `scratch-generation`.  It does not advance

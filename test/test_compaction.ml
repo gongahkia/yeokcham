@@ -35,16 +35,22 @@ let checkpoint_id value =
   Store.Stored_object_id.of_raw_bytes (Bytes.unsafe_to_string raw)
   |> Option.get |> Scratch.Checkpoint_id.of_stored_object_id
 
-let checkpoint value created_at effective_retention =
+let checkpoint ?(storage_bytes = 0L) value created_at effective_retention =
   {
     Compaction.Policy.id = checkpoint_id value;
     created_at;
     effective_retention;
+    storage_bytes;
   }
 
 let policy ~recent ~periodic =
   Compaction.Policy.create ~recent_window_seconds:recent
     ~periodic_interval_seconds:periodic ~storage_budget_bytes:None
+  |> require_ok Compaction.Policy.error_to_string
+
+let policy_with_budget ~budget ~recent ~periodic =
+  Compaction.Policy.create ~recent_window_seconds:recent
+    ~periodic_interval_seconds:periodic ~storage_budget_bytes:(Some budget)
   |> require_ok Compaction.Policy.error_to_string
 
 let selection_for identity selections =
@@ -72,6 +78,7 @@ let policy_retain_recent_periodic_and_pinned () =
    with
   | Compaction.Policy.Recent_window -> ()
   | Compaction.Policy.Protected_by _ | Compaction.Policy.Periodic_bucket _
+  | Compaction.Policy.Required_for_replay | Compaction.Policy.Budget_excluded
   | Compaction.Policy.Expired ->
       Alcotest.fail "recent checkpoint expired");
   (match
@@ -83,6 +90,7 @@ let policy_retain_recent_periodic_and_pinned () =
         "pin reason" "user pinned"
         (Scratch.retention_reason_to_string reason)
   | Compaction.Policy.Recent_window | Compaction.Policy.Periodic_bucket _
+  | Compaction.Policy.Required_for_replay | Compaction.Policy.Budget_excluded
   | Compaction.Policy.Expired ->
       Alcotest.fail "pin did not override expiry");
   (match
@@ -91,7 +99,8 @@ let policy_retain_recent_periodic_and_pinned () =
    with
   | Compaction.Policy.Periodic_bucket 8L -> ()
   | Compaction.Policy.Protected_by _ | Compaction.Policy.Recent_window
-  | Compaction.Policy.Periodic_bucket _ | Compaction.Policy.Expired ->
+  | Compaction.Policy.Periodic_bucket _ | Compaction.Policy.Required_for_replay
+  | Compaction.Policy.Budget_excluded | Compaction.Policy.Expired ->
       Alcotest.fail "newest checkpoint was not selected for periodic bucket");
   (match
      Compaction.Policy.decision
@@ -99,7 +108,8 @@ let policy_retain_recent_periodic_and_pinned () =
    with
   | Compaction.Policy.Expired -> ()
   | Compaction.Policy.Protected_by _ | Compaction.Policy.Recent_window
-  | Compaction.Policy.Periodic_bucket _ ->
+  | Compaction.Policy.Periodic_bucket _ | Compaction.Policy.Required_for_replay
+  | Compaction.Policy.Budget_excluded ->
       Alcotest.fail "older checkpoint survived periodic thinning");
   match
     Compaction.Policy.decision
@@ -107,8 +117,164 @@ let policy_retain_recent_periodic_and_pinned () =
   with
   | Compaction.Policy.Periodic_bucket 7L -> ()
   | Compaction.Policy.Protected_by _ | Compaction.Policy.Recent_window
-  | Compaction.Policy.Periodic_bucket _ | Compaction.Policy.Expired ->
+  | Compaction.Policy.Periodic_bucket _ | Compaction.Policy.Required_for_replay
+  | Compaction.Policy.Budget_excluded | Compaction.Policy.Expired ->
       Alcotest.fail "periodic checkpoint expired"
+
+let budget_selection_keeps_required_and_trims_deterministically () =
+  let pinned = checkpoint ~storage_bytes:70L 1 1L [ Scratch.User_pinned ] in
+  let head = checkpoint ~storage_bytes:40L 2 95L [] in
+  let newer = checkpoint ~storage_bytes:30L 3 90L [] in
+  let periodic = checkpoint ~storage_bytes:10L 4 10L [] in
+  let policy = policy_with_budget ~budget:120L ~recent:20L ~periodic:10L in
+  let select checkpoints =
+    Compaction.Policy.select
+      ~required:[ head.Compaction.Policy.id ]
+      policy ~now:100L checkpoints
+  in
+  let selections = select [ pinned; head; newer; periodic ] in
+  let reordered = select [ periodic; newer; head; pinned ] in
+  let decision identity values =
+    Compaction.Policy.decision (selection_for identity values)
+  in
+  (match decision pinned.Compaction.Policy.id selections with
+  | Compaction.Policy.Protected_by reason
+    when String.equal (Scratch.retention_reason_to_string reason) "user pinned"
+    ->
+      ()
+  | Compaction.Policy.Protected_by _ | Compaction.Policy.Recent_window
+  | Compaction.Policy.Periodic_bucket _ | Compaction.Policy.Required_for_replay
+  | Compaction.Policy.Budget_excluded | Compaction.Policy.Expired ->
+      Alcotest.fail "pinned checkpoint was budget-evicted");
+  (match decision head.Compaction.Policy.id selections with
+  | Compaction.Policy.Recent_window -> ()
+  | Compaction.Policy.Protected_by _ | Compaction.Policy.Periodic_bucket _
+  | Compaction.Policy.Required_for_replay | Compaction.Policy.Budget_excluded
+  | Compaction.Policy.Expired ->
+      Alcotest.fail "required head was not retained");
+  (match decision newer.Compaction.Policy.id selections with
+  | Compaction.Policy.Budget_excluded -> ()
+  | Compaction.Policy.Protected_by _ | Compaction.Policy.Recent_window
+  | Compaction.Policy.Periodic_bucket _ | Compaction.Policy.Required_for_replay
+  | Compaction.Policy.Expired ->
+      Alcotest.fail "newer optional checkpoint survived the budget");
+  (match decision periodic.Compaction.Policy.id selections with
+  | Compaction.Policy.Periodic_bucket _ -> ()
+  | Compaction.Policy.Protected_by _ | Compaction.Policy.Recent_window
+  | Compaction.Policy.Required_for_replay | Compaction.Policy.Budget_excluded
+  | Compaction.Policy.Expired ->
+      Alcotest.fail "periodic checkpoint did not use remaining budget");
+  List.iter
+    (fun checkpoint ->
+      Alcotest.(check string)
+        "permutation keeps budget decision"
+        (match decision checkpoint selections with
+        | Compaction.Policy.Protected_by reason ->
+            "protected=" ^ Scratch.retention_reason_to_string reason
+        | Compaction.Policy.Recent_window -> "recent"
+        | Compaction.Policy.Periodic_bucket bucket -> Int64.to_string bucket
+        | Compaction.Policy.Required_for_replay -> "required"
+        | Compaction.Policy.Budget_excluded -> "budget-excluded"
+        | Compaction.Policy.Expired -> "expired")
+        (match decision checkpoint reordered with
+        | Compaction.Policy.Protected_by reason ->
+            "protected=" ^ Scratch.retention_reason_to_string reason
+        | Compaction.Policy.Recent_window -> "recent"
+        | Compaction.Policy.Periodic_bucket bucket -> Int64.to_string bucket
+        | Compaction.Policy.Required_for_replay -> "required"
+        | Compaction.Policy.Budget_excluded -> "budget-excluded"
+        | Compaction.Policy.Expired -> "expired"))
+    [
+      pinned.Compaction.Policy.id;
+      head.Compaction.Policy.id;
+      newer.Compaction.Policy.id;
+      periodic.Compaction.Policy.id;
+    ]
+
+let budget_plan_preserves_required_history_with with_history assert_retained ()
+    =
+  with_history (fun root store scratch initial middle head ->
+      let baseline =
+        Compaction.analyze ~store scratch
+          ~policy:(policy ~recent:30L ~periodic:0L)
+          ~now:25L
+        |> require_ok Compaction.error_to_string
+      in
+      let selected_bytes identity =
+        Compaction.selections baseline
+        |> selection_for identity |> Compaction.Policy.checkpoint
+        |> fun checkpoint -> checkpoint.Compaction.Policy.storage_bytes
+      in
+      let budget =
+        Int64.add
+          (selected_bytes (Scratch.Checkpoint.id initial))
+          (selected_bytes (Scratch.Checkpoint.id head))
+      in
+      let policy = policy_with_budget ~budget ~recent:30L ~periodic:0L in
+      let plan =
+        Compaction.analyze ~store scratch ~policy ~now:25L
+        |> require_ok Compaction.error_to_string
+      in
+      (match
+         Compaction.Policy.decision
+           (selection_for
+              (Scratch.Checkpoint.id initial)
+              (Compaction.selections plan))
+       with
+      | Compaction.Policy.Protected_by reason
+        when String.equal
+               (Scratch.retention_reason_to_string reason)
+               "user pinned" ->
+          ()
+      | Compaction.Policy.Protected_by _ | Compaction.Policy.Recent_window
+      | Compaction.Policy.Periodic_bucket _
+      | Compaction.Policy.Required_for_replay
+      | Compaction.Policy.Budget_excluded | Compaction.Policy.Expired ->
+          Alcotest.fail "pin was not retained by budget plan");
+      (match
+         Compaction.Policy.decision
+           (selection_for
+              (Scratch.Checkpoint.id head)
+              (Compaction.selections plan))
+       with
+      | Compaction.Policy.Recent_window -> ()
+      | Compaction.Policy.Protected_by _ | Compaction.Policy.Periodic_bucket _
+      | Compaction.Policy.Required_for_replay
+      | Compaction.Policy.Budget_excluded | Compaction.Policy.Expired ->
+          Alcotest.fail "scratch head was not retained by budget plan");
+      (match
+         Compaction.Policy.decision
+           (selection_for
+              (Scratch.Checkpoint.id middle)
+              (Compaction.selections plan))
+       with
+      | Compaction.Policy.Budget_excluded -> ()
+      | Compaction.Policy.Protected_by _ | Compaction.Policy.Recent_window
+      | Compaction.Policy.Periodic_bucket _
+      | Compaction.Policy.Required_for_replay | Compaction.Policy.Expired ->
+          Alcotest.fail "optional checkpoint was not budget-evicted");
+      Alcotest.(check int64)
+        "retained checkpoint bytes meet the budget" budget
+        (Compaction.budget_retained_checkpoint_bytes plan);
+      Alcotest.(check int64)
+        "mandatory checkpoint bytes meet the budget" budget
+        (Compaction.budget_protected_checkpoint_bytes plan);
+      Alcotest.(check (option int64))
+        "budget has no mandatory overrun" None
+        (Compaction.budget_exceeded_by plan);
+      Alcotest.(check bool)
+        "dry-run explains budget exclusion" true
+        (List.mem "budget-excluded-checkpoints=1"
+           (Compaction.render_explain plan));
+      ignore
+        (Compaction.activate ~store scratch ~policy ~now:25L
+        |> require_ok Compaction.error_to_string);
+      (match
+         Scratch.resolve_checkpoint scratch (Scratch.Checkpoint.id middle)
+       with
+      | Error _ -> ()
+      | Ok _ -> Alcotest.fail "budget-evicted checkpoint still resolves");
+      assert_retained root scratch initial head)
 
 let invalid_policy_values_are_rejected () =
   (match
@@ -263,6 +429,10 @@ let assert_retained_resolution_and_restore root scratch initial head =
        (Filename.concat root "file")
        In_channel.input_all)
 
+let budget_plan_preserves_required_history () =
+  budget_plan_preserves_required_history_with with_history
+    assert_retained_resolution_and_restore ()
+
 let assert_quarantined store root generation planned =
   let trash = generation_trash root generation in
   List.iter
@@ -331,7 +501,8 @@ let planner_is_read_only_and_explains_exact_cleanup () =
             "pinned checkpoint reason" "user pinned"
             (Scratch.retention_reason_to_string reason)
       | Compaction.Policy.Recent_window | Compaction.Policy.Periodic_bucket _
-      | Compaction.Policy.Expired ->
+      | Compaction.Policy.Required_for_replay
+      | Compaction.Policy.Budget_excluded | Compaction.Policy.Expired ->
           Alcotest.fail "pinned checkpoint was not protected");
       (match
          Compaction.Policy.decision
@@ -339,7 +510,9 @@ let planner_is_read_only_and_explains_exact_cleanup () =
        with
       | Compaction.Policy.Expired -> ()
       | Compaction.Policy.Protected_by _ | Compaction.Policy.Recent_window
-      | Compaction.Policy.Periodic_bucket _ ->
+      | Compaction.Policy.Periodic_bucket _
+      | Compaction.Policy.Required_for_replay
+      | Compaction.Policy.Budget_excluded ->
           Alcotest.fail "expired checkpoint was retained");
       (match
          Compaction.Policy.decision
@@ -347,7 +520,8 @@ let planner_is_read_only_and_explains_exact_cleanup () =
        with
       | Compaction.Policy.Recent_window -> ()
       | Compaction.Policy.Protected_by _ | Compaction.Policy.Periodic_bucket _
-      | Compaction.Policy.Expired ->
+      | Compaction.Policy.Required_for_replay
+      | Compaction.Policy.Budget_excluded | Compaction.Policy.Expired ->
           Alcotest.fail "head was not retained");
       let explanation = Compaction.render_explain plan in
       Alcotest.(check bool)
@@ -981,6 +1155,11 @@ let () =
         [
           Alcotest.test_case "policy retains recent periodic and pinned" `Quick
             policy_retain_recent_periodic_and_pinned;
+          Alcotest.test_case
+            "budget selection keeps required checkpoints deterministically"
+            `Quick budget_selection_keeps_required_and_trims_deterministically;
+          Alcotest.test_case "budget plan preserves required history" `Quick
+            budget_plan_preserves_required_history;
           Alcotest.test_case "invalid policy values reject" `Quick
             invalid_policy_values_are_rejected;
           Alcotest.test_case "planner is read-only and explains exact cleanup"

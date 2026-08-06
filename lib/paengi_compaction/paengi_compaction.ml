@@ -27,12 +27,15 @@ module Policy = struct
     | Protected_by of Scratch.retention_reason
     | Recent_window
     | Periodic_bucket of int64
+    | Required_for_replay
+    | Budget_excluded
     | Expired
 
   type checkpoint = {
     id : Scratch.Checkpoint_id.t;
     created_at : int64;
     effective_retention : Scratch.retention_reason list;
+    storage_bytes : int64;
   }
 
   type selection = { checkpoint : checkpoint; decision : decision }
@@ -104,7 +107,33 @@ module Policy = struct
     let timestamp = Int64.compare left.created_at right.created_at in
     timestamp > 0 || (timestamp = 0 && id_compare left.id right.id > 0)
 
-  let select policy ~now checkpoints =
+  let is_required required checkpoint =
+    List.exists (Scratch.Checkpoint_id.equal checkpoint.id) required
+
+  let saturating_add left right =
+    if Int64.compare right 0L <= 0 then left
+    else if Int64.compare left (Int64.sub Int64.max_int right) > 0 then
+      Int64.max_int
+    else Int64.add left right
+
+  let candidate_compare left right =
+    let priority = function
+      | { decision = Recent_window; _ } -> 0
+      | { decision = Periodic_bucket _; _ } -> 1
+      | {
+          decision =
+            Protected_by _ | Required_for_replay | Budget_excluded | Expired;
+          _;
+        } ->
+          2
+    in
+    let priority = Int.compare (priority left) (priority right) in
+    if priority <> 0 then priority
+    else if newer left.checkpoint right.checkpoint then -1
+    else if newer right.checkpoint left.checkpoint then 1
+    else 0
+
+  let select ?(required = []) policy ~now checkpoints =
     let preliminary checkpoint =
       match protected_reason checkpoint.effective_retention with
       | Some reason -> Protected_by reason
@@ -117,7 +146,9 @@ module Policy = struct
         List.fold_left
           (fun buckets checkpoint ->
             match preliminary checkpoint with
-            | Protected_by _ | Recent_window -> buckets
+            | Protected_by _ | Recent_window | Required_for_replay
+            | Budget_excluded ->
+                buckets
             | Expired | Periodic_bucket _ -> (
                 let bucket =
                   Int64.div checkpoint.created_at
@@ -130,34 +161,98 @@ module Policy = struct
                 | Some _ -> buckets))
           Int64_map.empty checkpoints
     in
-    List.map
-      (fun checkpoint ->
-        let decision =
-          match preliminary checkpoint with
-          | (Protected_by _ | Recent_window) as decision -> decision
-          | Expired | Periodic_bucket _ -> (
-              if Int64.equal policy.periodic_interval_seconds 0L then Expired
-              else
-                let bucket =
-                  Int64.div checkpoint.created_at
-                    policy.periodic_interval_seconds
-                in
-                match Int64_map.find_opt bucket buckets with
-                | Some selected
-                  when Scratch.Checkpoint_id.equal selected.id checkpoint.id ->
-                    Periodic_bucket bucket
-                | None | Some _ -> Expired)
+    let selected =
+      List.map
+        (fun checkpoint ->
+          let decision =
+            match preliminary checkpoint with
+            | ( Protected_by _ | Recent_window | Required_for_replay
+              | Budget_excluded ) as decision ->
+                decision
+            | Expired | Periodic_bucket _ -> (
+                if Int64.equal policy.periodic_interval_seconds 0L then Expired
+                else
+                  let bucket =
+                    Int64.div checkpoint.created_at
+                      policy.periodic_interval_seconds
+                  in
+                  match Int64_map.find_opt bucket buckets with
+                  | Some selected
+                    when Scratch.Checkpoint_id.equal selected.id checkpoint.id
+                    ->
+                      Periodic_bucket bucket
+                  | None | Some _ -> Expired)
+          in
+          let decision =
+            if is_required required checkpoint && decision = Expired then
+              Required_for_replay
+            else decision
+          in
+          { checkpoint; decision })
+        checkpoints
+    in
+    match storage_budget_bytes policy with
+    | None -> selected
+    | Some budget ->
+        let protected_bytes =
+          List.fold_left
+            (fun total selection ->
+              let checkpoint = selection.checkpoint in
+              match selection.decision with
+              | Protected_by _ | Required_for_replay ->
+                  saturating_add total checkpoint.storage_bytes
+              | Recent_window | Periodic_bucket _ | Budget_excluded | Expired ->
+                  if is_required required checkpoint then
+                    saturating_add total checkpoint.storage_bytes
+                  else total)
+            0L selected
         in
-        { checkpoint; decision })
-      checkpoints
+        let candidates =
+          List.filter
+            (fun selection ->
+              let checkpoint = selection.checkpoint in
+              (not (is_required required checkpoint))
+              &&
+              match selection.decision with
+              | Recent_window | Periodic_bucket _ -> true
+              | Protected_by _ | Required_for_replay | Budget_excluded | Expired
+                ->
+                  false)
+            selected
+          |> List.sort candidate_compare
+        in
+        let used = ref protected_bytes in
+        let excluded = ref [] in
+        List.iter
+          (fun selection ->
+            let bytes = selection.checkpoint.storage_bytes in
+            let fits =
+              Int64.compare !used budget <= 0
+              && Int64.compare bytes 0L >= 0
+              && Int64.compare bytes (Int64.sub budget !used) <= 0
+            in
+            if fits then used := Int64.add !used bytes
+            else excluded := selection.checkpoint.id :: !excluded)
+          candidates;
+        List.map
+          (fun selection ->
+            if
+              List.exists
+                (Scratch.Checkpoint_id.equal selection.checkpoint.id)
+                !excluded
+            then { selection with decision = Budget_excluded }
+            else selection)
+          selected
 
   let checkpoint selection = selection.checkpoint
   let decision selection = selection.decision
 
   let retained selection =
     match selection.decision with
-    | Expired -> false
-    | Protected_by _ | Recent_window | Periodic_bucket _ -> true
+    | Expired | Budget_excluded -> false
+    | Protected_by _ | Recent_window | Periodic_bucket _ | Required_for_replay
+      ->
+        true
 end
 
 module Fault = struct
@@ -375,6 +470,43 @@ let stored_file_length store identity =
          ^ Store.Stored_object_id.to_hex identity
          ^ ": " ^ Unix.error_message error))
 
+let checkpoint_storage_bytes store checkpoint =
+  let* checkpoint_bytes =
+    stored_file_length store
+      (object_id_of_checkpoint (Scratch.Checkpoint.id checkpoint))
+  in
+  match Scratch.Checkpoint.event checkpoint with
+  | None -> Ok checkpoint_bytes
+  | Some event ->
+      let* event_bytes = stored_file_length store (object_id_of_event event) in
+      add_size checkpoint_bytes event_bytes
+
+let selected_checkpoint_bytes selections =
+  List.fold_left
+    (fun result selection ->
+      let* total = result in
+      if Policy.retained selection then
+        add_size total (Policy.checkpoint selection).Policy.storage_bytes
+      else Ok total)
+    (Ok 0L) selections
+
+let protected_checkpoint_bytes ~required selections =
+  List.fold_left
+    (fun result selection ->
+      let* total = result in
+      let checkpoint = Policy.checkpoint selection in
+      let is_required =
+        List.exists (Scratch.Checkpoint_id.equal checkpoint.Policy.id) required
+      in
+      match Policy.decision selection with
+      | Policy.Protected_by _ | Policy.Required_for_replay ->
+          add_size total checkpoint.Policy.storage_bytes
+      | Policy.Recent_window | Policy.Periodic_bucket _ | Policy.Budget_excluded
+      | Policy.Expired ->
+          if is_required then add_size total checkpoint.Policy.storage_bytes
+          else Ok total)
+    (Ok 0L) selections
+
 let reachable scratch store roots =
   let rec visit visited total = function
     | [] -> Ok (visited, total)
@@ -414,6 +546,8 @@ type plan = {
   reachable_object_count : int;
   estimated_before_bytes : int64;
   estimated_after_bytes : int64;
+  budget_retained_checkpoint_bytes : int64;
+  budget_protected_checkpoint_bytes : int64;
   removable_checkpoints : Scratch.Checkpoint_id.t list;
   removable_events : Scratch.Event_id.t list;
   removable_objects : Store.Stored_object_id.t list;
@@ -427,6 +561,13 @@ let selections plan = plan.selections
 let reachable_object_count plan = plan.reachable_object_count
 let estimated_before_bytes plan = plan.estimated_before_bytes
 let estimated_after_bytes plan = plan.estimated_after_bytes
+
+let budget_retained_checkpoint_bytes plan =
+  plan.budget_retained_checkpoint_bytes
+
+let budget_protected_checkpoint_bytes plan =
+  plan.budget_protected_checkpoint_bytes
+
 let removable_checkpoints plan = plan.removable_checkpoints
 let removable_events plan = plan.removable_events
 let removable_objects plan = plan.removable_objects
@@ -448,7 +589,7 @@ let retention_head_root store =
   in
   Ok (Option.bind reference Store.Mutable_ref.target)
 
-let analyze_reachable ~store scratch ~policy ~now =
+let analyze_reachable ~store scratch ~policy ~now ~required =
   let* timeline =
     Scratch.timeline scratch ~limit:max_int ()
     |> Result.map_error (fun error -> Scratch_error error)
@@ -461,16 +602,29 @@ let analyze_reachable ~store scratch ~policy ~now =
     | Some checkpoint -> Ok checkpoint
     | None -> Error Scratch_head_missing
   in
-  let selections =
-    Policy.select policy ~now
-      (List.map
-         (fun entry ->
-           {
+  let rec checkpoints = function
+    | [] -> Ok []
+    | entry :: rest ->
+        let* storage_bytes =
+          checkpoint_storage_bytes store entry.Scratch.checkpoint
+        in
+        let* rest = checkpoints rest in
+        Ok
+          ({
              Policy.id = entry.Scratch.logical_id;
              created_at = Scratch.Checkpoint.created_at entry.Scratch.checkpoint;
              effective_retention = entry.Scratch.effective_retention;
-           })
-         timeline)
+             storage_bytes;
+           }
+          :: rest)
+  in
+  let* checkpoints = checkpoints timeline in
+  let selections = Policy.select ~required policy ~now checkpoints in
+  let* budget_retained_checkpoint_bytes =
+    selected_checkpoint_bytes selections
+  in
+  let* budget_protected_checkpoint_bytes =
+    protected_checkpoint_bytes ~required selections
   in
   let* retention_head = retention_head_root store in
   let roots =
@@ -499,8 +653,10 @@ let analyze_reachable ~store scratch ~policy ~now =
   let budget_exceeded_by =
     match Policy.storage_budget_bytes policy with
     | None -> None
-    | Some budget when Int64.compare estimated_after_bytes budget <= 0 -> None
-    | Some budget -> Some (Int64.sub estimated_after_bytes budget)
+    | Some budget
+      when Int64.compare budget_protected_checkpoint_bytes budget <= 0 ->
+        None
+    | Some budget -> Some (Int64.sub budget_protected_checkpoint_bytes budget)
   in
   Ok
     {
@@ -509,6 +665,8 @@ let analyze_reachable ~store scratch ~policy ~now =
       reachable_object_count = Object_set.cardinal current_objects;
       estimated_before_bytes;
       estimated_after_bytes;
+      budget_retained_checkpoint_bytes;
+      budget_protected_checkpoint_bytes;
       removable_checkpoints = [];
       removable_events = [];
       removable_objects = [];
@@ -526,6 +684,8 @@ let decision_to_string = function
       "protected=" ^ Scratch.retention_reason_to_string reason
   | Policy.Recent_window -> "recent-window"
   | Policy.Periodic_bucket bucket -> Printf.sprintf "periodic-bucket=%Ld" bucket
+  | Policy.Required_for_replay -> "required-for-replay"
+  | Policy.Budget_excluded -> "budget-excluded"
   | Policy.Expired -> "expired"
 
 let render_explain plan =
@@ -546,6 +706,10 @@ let render_explain plan =
       Printf.sprintf "reachable-objects=%d" (reachable_object_count plan);
       Printf.sprintf "estimated-before-bytes=%Ld" (estimated_before_bytes plan);
       Printf.sprintf "estimated-after-bytes=%Ld" (estimated_after_bytes plan);
+      Printf.sprintf "budget-retained-checkpoint-bytes=%Ld"
+        (budget_retained_checkpoint_bytes plan);
+      Printf.sprintf "budget-protected-checkpoint-bytes=%Ld"
+        (budget_protected_checkpoint_bytes plan);
       Printf.sprintf "removable-checkpoints=%d"
         (List.length (removable_checkpoints plan));
       Printf.sprintf "removable-events=%d" (List.length (removable_events plan));
@@ -555,7 +719,7 @@ let render_explain plan =
       Printf.sprintf "planned-cleanup-bytes=%Ld" (planned_cleanup_bytes plan);
     ]
   in
-  let selections =
+  let selection_lines =
     List.map
       (fun selection ->
         Printf.sprintf "checkpoint %s %s"
@@ -607,7 +771,15 @@ let render_explain plan =
           metric.stored_bytes)
       (planned_cleanup plan)
   in
-  lines @ cleanup_types @ cleanup_objects @ selections @ blocked @ budget
+  let budget_excluded =
+    selections plan
+    |> List.filter (fun selection ->
+        Policy.decision selection = Policy.Budget_excluded)
+    |> List.length
+  in
+  lines @ cleanup_types @ cleanup_objects @ selection_lines @ blocked
+  @ [ Printf.sprintf "budget-excluded-checkpoints=%d" budget_excluded ]
+  @ budget
 
 type source_refs = {
   scratch_ref : Store.Mutable_ref.t;
@@ -1004,7 +1176,18 @@ let cleanup_metrics_equal left right =
        left right
 
 let analyze ~store scratch ~policy ~now =
-  let* baseline = analyze_reachable ~store scratch ~policy ~now in
+  let* required_head =
+    Scratch.head_id scratch
+    |> Result.map_error (fun error -> Scratch_error error)
+  in
+  let* required_head =
+    match required_head with
+    | Some identity -> Ok identity
+    | None -> Error Scratch_head_missing
+  in
+  let* baseline =
+    analyze_reachable ~store scratch ~policy ~now ~required:[ required_head ]
+  in
   let* source = read_source_refs store in
   let* timeline =
     Scratch.timeline scratch ~limit:max_int ()

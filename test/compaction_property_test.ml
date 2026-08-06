@@ -27,11 +27,12 @@ let checkpoint_id value =
   Store.Stored_object_id.of_raw_bytes (Bytes.unsafe_to_string raw)
   |> Option.get |> Scratch.Checkpoint_id.of_stored_object_id
 
-let checkpoint value created_at pinned =
+let checkpoint ?(storage_bytes = 0L) value created_at pinned =
   {
     Compaction.Policy.id = checkpoint_id value;
     created_at = Int64.of_int created_at;
     effective_retention = (if pinned then [ Scratch.User_pinned ] else []);
+    storage_bytes;
   }
 
 let policy =
@@ -49,19 +50,38 @@ let decision_equal left right =
   | ( Compaction.Policy.Periodic_bucket left,
       Compaction.Policy.Periodic_bucket right ) ->
       Int64.equal left right
+  | Compaction.Policy.Required_for_replay, Compaction.Policy.Required_for_replay
+  | Compaction.Policy.Budget_excluded, Compaction.Policy.Budget_excluded ->
+      true
   | Compaction.Policy.Expired, Compaction.Policy.Expired -> true
   | ( Compaction.Policy.Protected_by _,
       ( Compaction.Policy.Recent_window | Compaction.Policy.Periodic_bucket _
-      | Compaction.Policy.Expired ) )
+      | Compaction.Policy.Required_for_replay
+      | Compaction.Policy.Budget_excluded | Compaction.Policy.Expired ) )
   | ( ( Compaction.Policy.Recent_window | Compaction.Policy.Periodic_bucket _
-      | Compaction.Policy.Expired ),
+      | Compaction.Policy.Required_for_replay
+      | Compaction.Policy.Budget_excluded | Compaction.Policy.Expired ),
       Compaction.Policy.Protected_by _ )
   | ( Compaction.Policy.Recent_window,
-      (Compaction.Policy.Periodic_bucket _ | Compaction.Policy.Expired) )
-  | ( (Compaction.Policy.Periodic_bucket _ | Compaction.Policy.Expired),
+      ( Compaction.Policy.Periodic_bucket _
+      | Compaction.Policy.Required_for_replay
+      | Compaction.Policy.Budget_excluded | Compaction.Policy.Expired ) )
+  | ( ( Compaction.Policy.Periodic_bucket _
+      | Compaction.Policy.Required_for_replay
+      | Compaction.Policy.Budget_excluded | Compaction.Policy.Expired ),
       Compaction.Policy.Recent_window )
-  | Compaction.Policy.Periodic_bucket _, Compaction.Policy.Expired
-  | Compaction.Policy.Expired, Compaction.Policy.Periodic_bucket _ ->
+  | ( Compaction.Policy.Periodic_bucket _,
+      ( Compaction.Policy.Required_for_replay
+      | Compaction.Policy.Budget_excluded | Compaction.Policy.Expired ) )
+  | ( ( Compaction.Policy.Required_for_replay
+      | Compaction.Policy.Budget_excluded | Compaction.Policy.Expired ),
+      Compaction.Policy.Periodic_bucket _ )
+  | ( Compaction.Policy.Required_for_replay,
+      (Compaction.Policy.Budget_excluded | Compaction.Policy.Expired) )
+  | ( (Compaction.Policy.Budget_excluded | Compaction.Policy.Expired),
+      Compaction.Policy.Required_for_replay )
+  | Compaction.Policy.Budget_excluded, Compaction.Policy.Expired
+  | Compaction.Policy.Expired, Compaction.Policy.Budget_excluded ->
       false
 
 let permutation_does_not_change_selection =
@@ -93,6 +113,48 @@ let permutation_does_not_change_selection =
             (Compaction.Policy.decision (lookup reversed)))
         checkpoints)
 
+let budget_permutation_does_not_change_selection =
+  QCheck2.Test.make ~count:100
+    ~name:"budget retention selection is independent of timeline input order"
+    QCheck2.Gen.(
+      list_size (int_range 1 24)
+        (triple (int_range 0 150) bool (int_range 0 80)))
+    (fun values ->
+      let checkpoints =
+        List.mapi
+          (fun index (created_at, pinned, bytes) ->
+            checkpoint ~storage_bytes:(Int64.of_int bytes) index created_at
+              pinned)
+          values
+      in
+      let required = [ (List.hd checkpoints).Compaction.Policy.id ] in
+      let policy =
+        Compaction.Policy.create ~recent_window_seconds:25L
+          ~periodic_interval_seconds:30L ~storage_budget_bytes:(Some 100L)
+        |> Result.get_ok
+      in
+      let selected =
+        Compaction.Policy.select ~required policy ~now:100L checkpoints
+      in
+      let reversed =
+        Compaction.Policy.select ~required policy ~now:100L
+          (List.rev checkpoints)
+      in
+      List.for_all
+        (fun checkpoint ->
+          let lookup selections =
+            List.find
+              (fun selection ->
+                Scratch.Checkpoint_id.equal
+                  (Compaction.Policy.checkpoint selection).Compaction.Policy.id
+                  checkpoint.Compaction.Policy.id)
+              selections
+          in
+          decision_equal
+            (Compaction.Policy.decision (lookup selected))
+            (Compaction.Policy.decision (lookup reversed)))
+        checkpoints)
+
 let pinned_checkpoints_never_expire =
   QCheck2.Test.make ~count:100
     ~name:"user-pinned checkpoints override every expiry policy"
@@ -106,7 +168,8 @@ let pinned_checkpoints_never_expire =
       | Compaction.Policy.Protected_by reason ->
           String.equal (Scratch.retention_reason_to_string reason) "user pinned"
       | Compaction.Policy.Recent_window | Compaction.Policy.Periodic_bucket _
-      | Compaction.Policy.Expired ->
+      | Compaction.Policy.Required_for_replay
+      | Compaction.Policy.Budget_excluded | Compaction.Policy.Expired ->
           false)
 
 let rec remove_tree path =
@@ -444,6 +507,9 @@ let () =
           QCheck_alcotest.to_alcotest ~speed_level:`Quick
             ~rand:(state_for "permutation")
             permutation_does_not_change_selection;
+          QCheck_alcotest.to_alcotest ~speed_level:`Quick
+            ~rand:(state_for "budget-permutation")
+            budget_permutation_does_not_change_selection;
           QCheck_alcotest.to_alcotest ~speed_level:`Quick
             ~rand:(state_for "pins") pinned_checkpoints_never_expire;
           QCheck_alcotest.to_alcotest ~speed_level:`Quick

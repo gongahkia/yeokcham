@@ -256,7 +256,12 @@ Strategies should be pluggable and independently benchmarked.
 
 Milestone 3 provides a deterministic planner over the verified ancestry. It
 applies explicit recent-window/periodic/storage-budget policy and reports
-reachable-object accounting before generation construction. Immutable
+reachable-object accounting before generation construction. The storage budget
+is charged only to each selected source Checkpoint/Event pair, not shared
+snapshot-content objects: protected retention and the logical scratch head are
+mandatory, then optional recent and periodic checkpoints are selected in a
+documented deterministic order. A protected-only overrun is reported rather
+than silently removing recovery state. Immutable
 Checkpoint v1 parent/event links still require a generation layer rather than
 record rewriting.
 

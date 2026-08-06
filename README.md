@@ -268,6 +268,13 @@ reports the exact canonical cleanup IDs, expected types, count, and stored
 object-file bytes; these exclude payload-only and filesystem-allocation
 estimates and are checked again during activation.
 
+`--storage-budget-bytes` is a deterministic selection bound over source
+Checkpoint/Event object-file bytes, not a total repository quota. Pins and the
+logical scratch head remain retained; `--explain` reports retained/protected
+budget bytes, `budget-excluded` checkpoints, and any protected-only overrun.
+Shared snapshot/content objects remain outside this M3 budget until a complete
+cross-domain root mark exists.
+
 Capsule read commands report logical capsule and revision IDs. They resolve the
 checksummed current ref, exact immutable object types, logical/physical links,
 parent chain, and direct replay before displaying data; corrupt or stale state

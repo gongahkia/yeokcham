@@ -413,6 +413,11 @@ Compare:
 - Capsule-boundary pinning.
 - Storage-budget retention.
 
+Budget selection tests must retain pinned and current logical-head checkpoints,
+be invariant under timeline input order, label nonfitting optional candidates,
+and preserve every selected snapshot after activation/reopen. A protected-only
+overrun is a structured plan result, not a correctness or timing failure.
+
 Measure:
 
 - Storage.

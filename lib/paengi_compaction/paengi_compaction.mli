@@ -10,12 +10,15 @@ module Policy : sig
     | Protected_by of Paengi_scratch.retention_reason
     | Recent_window
     | Periodic_bucket of int64
+    | Required_for_replay
+    | Budget_excluded
     | Expired
 
   type checkpoint = {
     id : Paengi_scratch.Checkpoint_id.t;
     created_at : int64;
     effective_retention : Paengi_scratch.retention_reason list;
+    storage_bytes : int64;
   }
 
   type selection = { checkpoint : checkpoint; decision : decision }
@@ -32,7 +35,14 @@ module Policy : sig
   val recent_window_seconds : t -> int64
   val periodic_interval_seconds : t -> int64
   val storage_budget_bytes : t -> int64 option
-  val select : t -> now:int64 -> checkpoint list -> selection list
+
+  val select :
+    ?required:Paengi_scratch.Checkpoint_id.t list ->
+    t ->
+    now:int64 ->
+    checkpoint list ->
+    selection list
+
   val checkpoint : selection -> checkpoint
   val decision : selection -> decision
   val retained : selection -> bool
@@ -88,6 +98,8 @@ val selections : plan -> Policy.selection list
 val reachable_object_count : plan -> int
 val estimated_before_bytes : plan -> int64
 val estimated_after_bytes : plan -> int64
+val budget_retained_checkpoint_bytes : plan -> int64
+val budget_protected_checkpoint_bytes : plan -> int64
 val removable_checkpoints : plan -> Paengi_scratch.Checkpoint_id.t list
 val removable_events : plan -> Paengi_scratch.Event_id.t list
 val removable_objects : plan -> Paengi_store.Stored_object_id.t list

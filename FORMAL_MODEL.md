@@ -224,6 +224,9 @@ type compaction_plan = {
   retained_checkpoints : checkpoint_id list;
   estimated_before : int64;
   estimated_after : int64;
+  budget_retained_checkpoint_bytes : int64;
+  budget_protected_checkpoint_bytes : int64;
+  budget_exceeded_by : int64 option;
 }
 ```
 
@@ -249,6 +252,21 @@ checkpoints, a positive periodic interval retains one checkpoint per
 the greatest checkpoint object ID on ties. An interval of zero retains no
 periodic checkpoint. The planner reports a budget overrun but cannot override a
 protected checkpoint.
+
+The budget is a deterministic retention-selection bound, not a total repository
+or filesystem quota. Its per-checkpoint cost is the exact current stored-file
+length of that checkpoint's source object plus its direct `Scratch_event`, if
+any; `Snapshot`, `Tree`, `Content`, `Chunk`, and `File_manifest` objects remain
+outside it because M3 has no complete cross-domain root mark. The logical
+scratch head is required even when ordinary time/periodic selection would
+expire it. Protected and required checkpoint costs are charged first and always
+retained. The remaining recent candidates, then periodic candidates, are
+considered newest-first with checkpoint object-ID tie-breaks; a candidate that
+does not fit becomes `budget-excluded`, while later lower-priority candidates
+may still fit. If protected/required cost alone exceeds the configured budget,
+the plan retains those states and reports the exact overrun. No budget outcome
+changes a pin, a retained required state, a logical ID, or any persistent
+policy encoding.
 
 ADR-024 adds immutable compacted generations without changing v1 checkpoint,
 event, retention, or head records. A generation maps every retained logical
@@ -288,6 +306,7 @@ already-pruned result.
 6. A failed compaction leaves the old valid generation available.
 7. A retained logical ID resolves to the generation-declared exact snapshot.
 8. An active alias is direct; alias-to-alias traversal is invalid.
+9. A budget-excluded checkpoint is never a protected or required checkpoint.
 
 Implemented transformation: replace retained boundaries with exact direct
 snapshot deltas. Inverse-pair elimination and shared-content collection remain
