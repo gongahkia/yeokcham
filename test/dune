@@ -852,6 +852,12 @@
  (deps ../docs/COMPARATIVE_WORKFLOW_ANALYSIS.md))
 
 (test
+ (name test_architecture_walkthrough)
+ (modules test_architecture_walkthrough)
+ (libraries alcotest)
+ (deps ../docs/ARCHITECTURE_WALKTHROUGH.md))
+
+(test
  (name bundle_directory_property_test)
  (modules bundle_directory_property_test)
  (libraries
