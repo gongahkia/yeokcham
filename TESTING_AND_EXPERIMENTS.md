@@ -689,6 +689,11 @@ claiming Rust semantic retargeting.
 - Comparative workflow report published.
 - Repository format documented.
 
+M11-10 indexes versioned benchmark/experiment inputs, host/fixture metadata,
+negative outcomes, and demonstration limits in
+`docs/RESEARCH_AND_BENCHMARK_REPORT.md`. The index does not pool workloads or
+turn timing into a correctness gate.
+
 ## 11. Suggested tooling
 
 - Dune.

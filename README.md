@@ -64,7 +64,8 @@ quarantine superseded scratch records.
 `docs/COMPACTION_RETENTION_BENCHMARK.md` records host-specific evidence for
 the implemented retention policies; its companion
 `docs/COMPACTION_RETENTION_RESULTS.md` publishes those measurements without a
-performance claim.
+performance claim. `docs/RESEARCH_AND_BENCHMARK_REPORT.md` indexes all checked
+benchmark/experiment evidence and its recorded negative outcomes.
 `compact --prune` is irreversible. paengi remains a portfolio and research
 prototype, not a production Git replacement.
 
