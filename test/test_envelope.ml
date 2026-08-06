@@ -160,15 +160,23 @@ let golden_envelope () =
     (Encoding.equal payload (Envelope.payload decoded));
   Alcotest.(check string) "re-encode" expected (Envelope.encode decoded)
 
+let unsupported_feature_fixture features =
+  let encoded = with_uint64 (Envelope.encode sample) 8 features in
+  let prefix = String.sub encoded 0 25 in
+  let payload = String.sub encoded Envelope.header_size 3 in
+  let checksum =
+    Hash.feed_string Hash.empty prefix
+    |> fun context -> Hash.feed_string context payload
+    |> Hash.get |> Hash.to_raw_string
+  in
+  let output = Bytes.of_string encoded in
+  Bytes.blit_string checksum 0 output 25 (String.length checksum);
+  Bytes.unsafe_to_string output
+
 let retained_unknown_mandatory_feature_fixtures () =
   List.iter
     (fun (name, features) ->
-      let actual =
-        Envelope.create ~object_type:Envelope.Snapshot
-          ~object_format_version:Envelope.current_object_format_version
-          ~mandatory_features:features ~payload ()
-        |> require_envelope |> Envelope.encode
-      in
+      let actual = unsupported_feature_fixture features in
       let input =
         require_refreshed (Filename.concat "golden" name) actual
       in
