@@ -28,7 +28,7 @@ let check_kind (name, (module Kind : Id.S)) =
     raw (Kind.to_bytes identity);
   let encoded = Kind.to_hex identity in
   Alcotest.(check string)
-    (name ^ " canonical hex") "00017f80feff7061656e6769" encoded;
+    (name ^ " canonical hex") "00017f80feff79656f6b6368616d" encoded;
   let decoded = require_ok Id.parse_error_to_string (Kind.of_hex encoded) in
   Alcotest.(check bool)
     (name ^ " hex round trip") true
