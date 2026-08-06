@@ -24,3 +24,8 @@
  (name retargeting_demo_v1)
  (modules retargeting_demo_v1)
  (libraries paengi_semantic_retarget paengi_textual_patch))
+
+(executable
+ (name release_evidence_v1)
+ (modules release_evidence_v1)
+ (libraries paengi_release paengi_store))

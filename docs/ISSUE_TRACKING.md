@@ -56,7 +56,7 @@ Each migrated issue has an immutable hidden marker, `<!-- paengi-todo-id: ID -->
 | M11-05 | [#23](https://github.com/gongahkia/paengi/issues/23) | M11 Demonstration and Reporting | implemented; verified by deterministic order, independent selection, and read-only base-resolution fixture coverage |
 | M11-06 | [#25](https://github.com/gongahkia/paengi/issues/25) | M11 Demonstration and Reporting | implemented; verified by persistent-conflict, independent-continuation, explicit-skip, and unsupported-action fixture coverage |
 | M11-07 | [#27](https://github.com/gongahkia/paengi/issues/27) | M11 Demonstration and Reporting | implemented; verified by nonpersistent uncertainty, fallback, ambiguity, textual-result, and structured-error fixture coverage |
-| M11-08 | [#30](https://github.com/gongahkia/paengi/issues/30) | M11 Demonstration and Reporting | created |
+| M11-08 | [#30](https://github.com/gongahkia/paengi/issues/30) | M11 Demonstration and Reporting | implemented; verified by immutable release, logical evidence identity, invalid-parent, and post-release scratch fixture coverage |
 | M11-09 | [#97](https://github.com/gongahkia/paengi/issues/97) | M11 Demonstration and Reporting | created |
 | M11-10 | [#117](https://github.com/gongahkia/paengi/issues/117) | M11 Demonstration and Reporting | created |
 | M11-11 | [#100](https://github.com/gongahkia/paengi/issues/100) | M11 Demonstration and Reporting | created |

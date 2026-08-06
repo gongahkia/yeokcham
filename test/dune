@@ -317,6 +317,16 @@
   (source_tree ../tools/demo)))
 
 (test
+ (name test_demo_release)
+ (modules test_demo_release)
+ (libraries alcotest unix)
+ (deps
+  ../bin/paengi.exe
+  ../bin/release_evidence_v1.exe
+  ../bin/workspace_base_v1.exe
+  (source_tree ../tools/demo)))
+
+(test
  (name test_missing_object_exchange)
  (modules test_missing_object_exchange)
  (libraries
