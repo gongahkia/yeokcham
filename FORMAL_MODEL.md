@@ -1169,3 +1169,34 @@ objects yield an empty Want set, while absent objects are requested again. HTTP
 transport does not authenticate a peer, discover identity, transfer/reconcile a
 ref, choose a divergence, persist an exchange session, or alter device/trust
 results.
+
+## 18. Durable divergent ref-head sets
+
+M10-05 adds a candidate-only immutable value and one merge-only binding:
+
+```text
+Divergence_set = (repository-digest, ref-name, observed-ref,
+                  ordered (event-id, ref-event-object-id){2..4096})
+Binding(ref-name) = divergence-set-object-id
+```
+
+Each linked object must decode as `Ref_event_v1`, recompute to its stored event
+ID, verify as `Verified` against the caller's explicit bounded key map, and
+have exactly the set's repository digest, ref name, and observed ref state.
+The canonical entry order is strictly ascending by raw event ID. A candidate
+set containing a duplicate ID, wrong object type, missing link, untrusted
+event, or mismatched context is rejected.
+
+For valid sets with the same context, `union` is the sorted unique union of
+exact `(event-id, object-id)` links; the same event ID paired with a different
+object ID is rejected. Publication reads and validates the checksummed binding,
+stores the canonical union create-only, then CASes the binding; contention is
+bounded to 16 retries. Thus a successful transition only adds candidate links:
+
+```text
+publish(B, incoming) = CAS(B, B ∪ incoming)
+```
+
+No transition reads or writes the application ref, chooses a candidate,
+advances a generation, merges a target, or changes trust. Missing bindings are
+initialised; corrupt bindings and sets reject without replacement.

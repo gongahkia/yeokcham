@@ -129,6 +129,13 @@ publishes only verified objects; HTTP transfer leaves refs, trust, device
 resolution, and divergence unchanged. It has no CLI, authentication, or
 persistent session state.
 
+M10-05 adds immutable divergent ref-head sets. A set holds 2–4,096 exact,
+verified `Ref_event` object links for one ref and observed state; publication
+unions candidates through a checksummed `refs/sync-divergence/<ref>` binding.
+Malformed, untrusted, missing, wrong-type, stale-context, and corrupt binding
+inputs reject explicitly. The binding records candidates only: it neither reads
+nor changes the application ref, selects a head, or reconciles a target.
+
 See `CONTRIBUTING.md` for development rules. Paengi is licensed under the MIT License.
 
 ## Development

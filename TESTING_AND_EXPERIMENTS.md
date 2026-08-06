@@ -172,6 +172,17 @@ interruption points, restart/reoffer, idempotent immutable publication, and
 corrupt HTTP input. No test asserts peer identity, transport authentication, or
 ref reconciliation.
 
+#### P19 — Durable divergent ref-head preservation
+
+ADR-041 retains exact type-28 set-envelope and checksummed binding goldens with
+inverse decode coverage. Focused storage tests cover two-device candidate
+union, duplicate delivery, reopen, stale observed state, untrusted event,
+missing link, wrong object type, corrupt binding, stored-context mismatch, and
+unchanged application refs. The seeded state machine varies candidate delivery
+order, duplicates, restart points, union, and corrupt binding decoding; it
+checks the retained candidate cardinality and never treats a candidate as an
+applied ref, selected head, or reconciliation result.
+
 Milestone 5 additionally checks Workspace/Workspace_revision/Workspace_attempt,
 Conflict, Resolution, and workspace-current-ref canonical goldens with inverse
 decoders; workspace reopen; immutable enable/reorder revisions; stale workspace

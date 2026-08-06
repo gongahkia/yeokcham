@@ -193,6 +193,26 @@
   (source_tree golden)))
 
 (test
+ (name test_divergence)
+ (modules test_divergence)
+ (libraries
+  alcotest
+  mirage-crypto-ec
+  paengi_divergence
+  paengi_divergence_store
+  paengi_encoding
+  paengi_envelope
+  paengi_exchange
+  paengi_exchange_store
+  paengi_ref_event
+  paengi_ref_event_store
+  paengi_store
+  paengi_testkit
+  unix)
+ (deps
+  (source_tree golden)))
+
+(test
  (name test_http_exchange)
  (modules test_http_exchange)
  (libraries
@@ -623,6 +643,23 @@
   unix))
 
 (test
+ (name divergence_property_test)
+ (modules divergence_property_test)
+ (libraries
+  alcotest
+  mirage-crypto-ec
+  qcheck-core
+  qcheck-alcotest
+  paengi_divergence
+  paengi_divergence_store
+  paengi_encoding
+  paengi_envelope
+  paengi_ref_event
+  paengi_ref_event_store
+  paengi_store
+  unix))
+
+(test
  (name http_exchange_property_test)
  (modules http_exchange_property_test)
  (libraries
@@ -656,6 +693,7 @@
   (:exchange_property_test exchange_property_test.exe)
   (:ref_event_property_test ref_event_property_test.exe)
   (:device_property_test device_property_test.exe)
+  (:divergence_property_test divergence_property_test.exe)
   (:http_exchange_property_test http_exchange_property_test.exe)
   (:snapshot_property_test snapshot_property_test.exe)
   (:scratch_property_test scratch_property_test.exe)
@@ -679,6 +717,7 @@
    (run %{exchange_property_test})
    (run %{ref_event_property_test})
    (run %{device_property_test})
+   (run %{divergence_property_test})
    (run %{http_exchange_property_test})
    (run %{snapshot_property_test})
    (run %{scratch_property_test})

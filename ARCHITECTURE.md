@@ -739,6 +739,19 @@ immutable IDs. HTTP parsing, response status/body, frame, budget, store, and
 interruption failures are structured. It has no CLI, authentication, persistent
 session, ref operation, reconciliation, or divergence selection.
 
+M10-05 adds `paengi_divergence` and `paengi_divergence_store`. The functional
+core canonically encodes an Envelope type-28 `Divergent_ref_set_v1`: one
+repository digest, safe ref name, observed ref state, and 2–4,096 sorted exact
+`Ref_event` links. It accepts only caller-held ADR-039 verified events and
+rejects duplicate IDs or a context mismatch. The store adapter reloads every
+linked type-26 object, recomputes its event ID, verifies it against the bounded
+explicit key map, and compares it to the stored set before use. A checksummed
+`refs/sync-divergence/<ref>` binding points to one immutable canonical set;
+publication serialises the binding namespace, unions only validated candidates,
+uses its bounded CAS retry path, and never replaces a corrupt binding. It does
+not read or write application refs, select a candidate, reconcile targets,
+persist trust/device state, or add CLI mutation.
+
 Future layers require separate decisions:
 
 - Signed ref or operation events.

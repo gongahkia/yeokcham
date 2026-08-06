@@ -42,7 +42,7 @@ Each migrated issue has an immutable hidden marker, `<!-- paengi-todo-id: ID -->
 | M10-02 | [#2](https://github.com/gongahkia/paengi/issues/2) | M10 Local Synchronisation | implemented; verified by ADR-039 Ed25519 fixtures, unchanged-ref local-store coverage, and seeded chain properties |
 | M10-03 | [#3](https://github.com/gongahkia/paengi/issues/3) | M10 Local Synchronisation | implemented; verified by ADR-040 public-record fixtures, unchanged-ref local-device coverage, and seeded restart properties |
 | M10-04 | [#4](https://github.com/gongahkia/paengi/issues/4) | M10 Local Synchronisation | implemented; verified by bounded HTTP frame/TCP restart coverage and seeded state-machine properties |
-| M10-05 | [#5](https://github.com/gongahkia/paengi/issues/5) | M10 Local Synchronisation | ADR-041 accepted; implementation in progress |
+| M10-05 | [#5](https://github.com/gongahkia/paengi/issues/5) | M10 Local Synchronisation | implemented; verified by ADR-041 set/binding goldens, local merge/reopen rejections, and seeded delivery properties |
 | M10-06 | [#6](https://github.com/gongahkia/paengi/issues/6) | M10 Local Synchronisation | created |
 | M10-07 | [#7](https://github.com/gongahkia/paengi/issues/7) | M10 Local Synchronisation | created |
 | M10-08 | [#8](https://github.com/gongahkia/paengi/issues/8) | M10 Local Synchronisation | created |

@@ -133,4 +133,9 @@ merged, or synchronised; no CLI mutation is added.
 
 ## Implementation evidence
 
-None; implementation is blocked pending ADR acceptance.
+Implemented by `paengi_divergence` and `paengi_divergence_store` with Envelope
+type 28 and checksummed `sync-divergence` bindings. Focused golden, inverse,
+two-device merge/reopen, rejection, and unchanged-ref coverage is in
+`test/test_divergence.ml`; the seeded delivery/duplicate/restart/corruption
+property is `test/divergence_property_test.ml`. Verified with `make check` and
+`make property-test PROPERTY_TEST_SEED=17`.
