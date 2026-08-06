@@ -3847,3 +3847,17 @@ let export_revisions ?runner ?fail_at configuration ~store ~repository
       in
       let* exports = publish 0 [] emitted in
       Ok { revision_exports = exports; revision_export_target_ref = target_ref })
+
+module Legacy_format = struct
+  let create_imported_transition_v1 = create_imported_transition
+  let transition_envelope = transition_envelope
+  let encode_transition_binding = encode_transition_binding
+
+  let create_mapping_v2 ~direction ~git_object ~git_kind ~subject =
+    create_mapping_with_version 2 ~direction ~git_object ~git_kind ~subject
+
+  let mapping_envelope = mapping_envelope
+
+  let encode_mapping_binding logical physical =
+    encode_mapping_binding 2 logical physical
+end

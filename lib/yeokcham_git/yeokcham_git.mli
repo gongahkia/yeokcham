@@ -241,6 +241,37 @@ val imported_transition_committer : imported_transition -> string option
 val imported_transition_message :
   imported_transition -> Yeokcham_snapshot.Content.id option
 
+module Legacy_format : sig
+  val create_imported_transition_v1 :
+    commit:object_id ->
+    tree:object_id ->
+    snapshot:Yeokcham_snapshot.Snapshot.id ->
+    parents:object_id list ->
+    (imported_transition, error) result
+
+  val transition_envelope :
+    imported_transition -> (Yeokcham_envelope.t, error) result
+
+  val encode_transition_binding :
+    Yeokcham_id.Imported_transition_id.t ->
+    Yeokcham_store.Stored_object_id.t ->
+    (string, error) result
+
+  val create_mapping_v2 :
+    direction:mapping_direction ->
+    git_object:object_id ->
+    git_kind:object_kind ->
+    subject:mapping_subject ->
+    (mapping, error) result
+
+  val mapping_envelope : mapping -> (Yeokcham_envelope.t, error) result
+
+  val encode_mapping_binding :
+    Yeokcham_id.Git_mapping_id.t ->
+    Yeokcham_store.Stored_object_id.t ->
+    (string, error) result
+end
+
 val imported_tag_id : imported_tag -> Yeokcham_id.Imported_tag_id.t
 val imported_tag_name : imported_tag -> string
 val imported_tag_ref_object : imported_tag -> object_id

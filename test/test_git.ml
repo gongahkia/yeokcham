@@ -25,19 +25,9 @@ let contains ~needle value =
   in
   loop 0
 
-let golden name =
-  let paths =
-    [ Filename.concat "golden" name; Filename.concat "test/golden" name ]
-  in
-  match List.find_opt Sys.file_exists paths with
-  | Some path -> Golden.read_lower_hex_file path |> require_ok Fun.id
-  | None -> Alcotest.fail ("missing golden fixture: " ^ name)
-
-let store_golden_envelope store name =
-  let envelope =
-    Envelope.decode (golden name) |> require_ok Envelope.decode_error_to_string
-  in
-  Store.put store envelope |> require_ok Store.error_to_string
+let refreshed_golden name actual =
+  Golden.refresh_lower_hex_file (Filename.concat "golden" name) actual
+  |> require_ok Fun.id
 
 let stream ?(limit = max_int) value =
   {
@@ -1182,11 +1172,17 @@ let imported_transition_persistence_goldens_are_stable () =
         |> require_ok Snapshot.error_to_string);
       Alcotest.(check string)
         "canonical imported transition envelope"
-        (golden "git-imported-transition-v2.yeok.hex")
+        (refreshed_golden "git-imported-transition-v2.yeok.hex"
+           (imported_transition_envelope_bytes store transition_id))
         (imported_transition_envelope_bytes store transition_id);
       Alcotest.(check string)
         "canonical imported transition binding"
-        (golden "git-imported-transition-v2.ref.hex")
+        (refreshed_golden "git-imported-transition-v2.ref.hex"
+           (binding_bytes store
+              [
+                "imported-transitions";
+                Id.Imported_transition_id.to_hex transition_id;
+              ]))
         (binding_bytes store
            [
              "imported-transitions";
@@ -1194,41 +1190,56 @@ let imported_transition_persistence_goldens_are_stable () =
            ]);
       Alcotest.(check string)
         "canonical Git commit mapping v3 envelope"
-        (golden "git-commit-mapping-v3.yeok.hex")
+        (refreshed_golden "git-commit-mapping-v3.yeok.hex"
+           (mapping_envelope_bytes store mapping_id))
         (mapping_envelope_bytes store mapping_id);
       Alcotest.(check string)
         "canonical Git commit mapping v3 binding"
-        (golden "git-commit-mapping-v3.ref.hex")
+        (refreshed_golden "git-commit-mapping-v3.ref.hex"
+           (binding_bytes store
+              [ "git-mappings"; Id.Git_mapping_id.to_hex mapping_id ]))
         (binding_bytes store
            [ "git-mappings"; Id.Git_mapping_id.to_hex mapping_id ]);
-      let legacy_transition_binding =
-        golden "git-imported-transition-v1.ref.hex"
-      in
       let legacy_transition =
-        match Encoding.decode legacy_transition_binding with
-        | Ok
-            (Encoding.Array [ _; Encoding.Bytes identity; Encoding.Bytes _; _ ])
-          ->
-            Id.Imported_transition_id.of_bytes identity
-            |> require_ok Id.parse_error_to_string
-        | Ok
-            ( Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _
-            | Encoding.Array _ | Encoding.Map _ | Encoding.Bool _
-            | Encoding.Null )
-        | Error _ ->
-            Alcotest.fail "legacy transition binding is malformed"
+        Git.Legacy_format.create_imported_transition_v1
+          ~commit:(Git.imported_transition_commit transition)
+          ~tree:(Git.imported_transition_tree transition)
+          ~snapshot:(Git.imported_transition_snapshot transition)
+          ~parents:(Git.imported_transition_parents transition)
+        |> require_ok Git.error_to_string
       in
-      ignore (store_golden_envelope store "git-imported-transition-v1.yeok.hex");
+      let legacy_transition_object =
+        Git.Legacy_format.transition_envelope legacy_transition
+        |> require_ok Git.error_to_string
+        |> Store.put store
+        |> require_ok Store.error_to_string
+      in
+      let legacy_transition_binding =
+        Git.Legacy_format.encode_transition_binding
+          (Git.imported_transition_id legacy_transition)
+          legacy_transition_object
+        |> require_ok Git.error_to_string
+      in
+      ignore
+        (refreshed_golden "git-imported-transition-v1.yeok.hex"
+           (Store.get store legacy_transition_object
+           |> require_ok Store.error_to_string
+           |> Envelope.encode));
+      ignore
+        (refreshed_golden "git-imported-transition-v1.ref.hex"
+           legacy_transition_binding);
       Store.Ref_file.compare_and_swap store
         ~components:
           [
             "imported-transitions";
-            Id.Imported_transition_id.to_hex legacy_transition;
+            Id.Imported_transition_id.to_hex
+              (Git.imported_transition_id legacy_transition);
           ]
         ~expected:None ~replacement:legacy_transition_binding
       |> require_ok Store.error_to_string;
       let loaded_legacy =
-        Git.load_imported_transition store legacy_transition
+        Git.load_imported_transition store
+          (Git.imported_transition_id legacy_transition)
         |> require_ok Git.error_to_string
       in
       Alcotest.(check (option string))
@@ -1237,35 +1248,55 @@ let imported_transition_persistence_goldens_are_stable () =
       Alcotest.(check bool)
         "v1 transition has no synthetic message" true
         (Option.is_none (Git.imported_transition_message loaded_legacy));
-      let legacy_mapping_binding = golden "git-mapping-v2.ref.hex" in
       let legacy_mapping =
-        match Encoding.decode legacy_mapping_binding with
-        | Ok
-            (Encoding.Array [ _; Encoding.Bytes identity; Encoding.Bytes _; _ ])
-          ->
-            Id.Git_mapping_id.of_bytes identity
-            |> require_ok Id.parse_error_to_string
-        | Ok
-            ( Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _
-            | Encoding.Array _ | Encoding.Map _ | Encoding.Bool _
-            | Encoding.Null )
-        | Error _ ->
-            Alcotest.fail "legacy mapping binding is malformed"
+        Git.Legacy_format.create_mapping_v2 ~direction:Git.Import
+          ~git_object:(Git.mapping_git_object imported.Git.commit_mapping)
+          ~git_kind:Git.Commit
+          ~subject:
+            (Git.Imported_transition
+               {
+                 transition = Git.imported_transition_id legacy_transition;
+                 transition_object = legacy_transition_object;
+               })
+        |> require_ok Git.error_to_string
       in
-      ignore (store_golden_envelope store "git-mapping-v2.yeok.hex");
+      let legacy_mapping_object =
+        Git.Legacy_format.mapping_envelope legacy_mapping
+        |> require_ok Git.error_to_string
+        |> Store.put store
+        |> require_ok Store.error_to_string
+      in
+      let legacy_mapping_binding =
+        Git.Legacy_format.encode_mapping_binding
+          (Git.mapping_id legacy_mapping)
+          legacy_mapping_object
+        |> require_ok Git.error_to_string
+      in
+      ignore
+        (refreshed_golden "git-mapping-v2.yeok.hex"
+           (Store.get store legacy_mapping_object
+           |> require_ok Store.error_to_string
+           |> Envelope.encode));
+      ignore (refreshed_golden "git-mapping-v2.ref.hex" legacy_mapping_binding);
       Store.Ref_file.compare_and_swap store
-        ~components:[ "git-mappings"; Id.Git_mapping_id.to_hex legacy_mapping ]
+        ~components:
+          [
+            "git-mappings";
+            Id.Git_mapping_id.to_hex (Git.mapping_id legacy_mapping);
+          ]
         ~expected:None ~replacement:legacy_mapping_binding
       |> require_ok Store.error_to_string;
       match
-        Git.load_mapping store legacy_mapping |> require_ok Git.error_to_string
+        Git.load_mapping store (Git.mapping_id legacy_mapping)
+        |> require_ok Git.error_to_string
       with
       | mapping ->
           Alcotest.(check bool)
             "legacy mapping retains transition subject" true
             (match Git.mapping_subject mapping with
             | Git.Imported_transition { transition; _ } ->
-                Id.Imported_transition_id.equal transition legacy_transition
+                Id.Imported_transition_id.equal transition
+                  (Git.imported_transition_id legacy_transition)
             | Git.Imported_snapshot _ | Git.Imported_tag _
             | Git.Imported_revision _ | Git.Exported_release _
             | Git.Exported_revision _ ->
@@ -1311,20 +1342,26 @@ let imported_tag_persistence_goldens_are_stable () =
       let mapping_id = Git.mapping_id imported.Git.tag_mapping in
       Alcotest.(check string)
         "canonical imported tag envelope"
-        (golden "git-imported-tag-v1.yeok.hex")
+        (refreshed_golden "git-imported-tag-v1.yeok.hex"
+           (imported_tag_envelope_bytes store tag_id))
         (imported_tag_envelope_bytes store tag_id);
       Alcotest.(check string)
         "canonical imported tag binding"
-        (golden "git-imported-tag-v1.ref.hex")
+        (refreshed_golden "git-imported-tag-v1.ref.hex"
+           (binding_bytes store
+              [ "imported-tags"; Id.Imported_tag_id.to_hex tag_id ]))
         (binding_bytes store
            [ "imported-tags"; Id.Imported_tag_id.to_hex tag_id ]);
       Alcotest.(check string)
         "canonical Git mapping v3 envelope"
-        (golden "git-mapping-v3.yeok.hex")
+        (refreshed_golden "git-mapping-v3.yeok.hex"
+           (mapping_envelope_bytes store mapping_id))
         (mapping_envelope_bytes store mapping_id);
       Alcotest.(check string)
         "canonical Git mapping v3 binding"
-        (golden "git-mapping-v3.ref.hex")
+        (refreshed_golden "git-mapping-v3.ref.hex"
+           (binding_bytes store
+              [ "git-mappings"; Id.Git_mapping_id.to_hex mapping_id ]))
         (binding_bytes store
            [ "git-mappings"; Id.Git_mapping_id.to_hex mapping_id ]))
 
@@ -2651,7 +2688,7 @@ let imports_exact_tree_and_restarts_idempotently () =
       in
       Alcotest.(check string)
         "canonical Git mapping envelope"
-        (golden "git-mapping-v1.yeok.hex")
+        (refreshed_golden "git-mapping-v1.yeok.hex" mapping_bytes)
         mapping_bytes;
       (match Git.mapping_subject mapping with
       | Git.Imported_snapshot snapshot ->
