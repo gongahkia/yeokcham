@@ -87,7 +87,7 @@ evidence_object=${evidence_output##* object=}
 valid_id "$evidence" && valid_id "$evidence_object" || fail 'release evidence identity is invalid'
 run_yeokcham validation run --snapshot "$final" --exec /usr/bin/true > "$root/.yeokcham/demo-v1-release-validation"
 validation_output=$(cat "$root/.yeokcham/demo-v1-release-validation")
-case "$validation_output" in evidence=*' object='*' status=passed') ;; *) fail 'validation evidence output is invalid' ;; esac
+case "$validation_output" in evidence=*' object='*' status=passed'*) ;; *) fail 'validation evidence output is invalid' ;; esac
 validation_evidence=${validation_output#evidence=}
 validation_evidence=${validation_evidence%% *}
 validation_object=${validation_output#* object=}

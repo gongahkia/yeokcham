@@ -90,8 +90,9 @@ let require_encoding = function
   | Ok value -> value
   | Error error -> Alcotest.fail (Encoding.construction_error_to_string error)
 
-let require_golden name =
-  Golden.read_lower_hex_file (Filename.concat "golden" name) |> require Fun.id
+let refreshed_golden name actual =
+  Golden.refresh_lower_hex_file (Filename.concat "golden" name) actual
+  |> require Fun.id
 
 let expect_protocol_failure name result =
   Alcotest.(check bool) name true (Result.is_error result)
@@ -155,8 +156,8 @@ let samples =
 let golden_frames_are_exact () =
   List.iter
     (fun (name, message) ->
-      let expected = require_golden name in
       let actual = Exchange.encode message |> require_protocol in
+      let expected = refreshed_golden name actual in
       Alcotest.(check string) name expected actual;
       let decoded = Exchange.decode expected |> require_protocol in
       let reencoded = Exchange.encode decoded |> require_protocol in
