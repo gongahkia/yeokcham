@@ -197,6 +197,20 @@ object sets, reversed/duplicate exporter input, corrupted delivery, and restart;
 it checks that rejected deliveries publish no source object and that successful
 retries preserve the destination ref.
 
+#### P21 — Two-device synchronisation preservation
+
+M10-07 composes the existing local exchange, public-device, signed-ref-event,
+and divergence adapters without a central service. Focused two-repository
+fixtures transfer initially missing device identities, target objects, and
+signed competing events in both directions; resolve the remote event through a
+caller-held registry; retain one matching two-entry divergence set on each
+device; and preserve both application refs. Separate focused coverage injects
+an interrupted transfer, reopens and reoffers objects, then corrupts a source
+object and proves that it is not published. The seeded property varies bounded
+missing-object sets, interruption points, duplicate input, and corruption;
+retries must make valid objects available while every destination ref stays
+unchanged.
+
 Milestone 5 additionally checks Workspace/Workspace_revision/Workspace_attempt,
 Conflict, Resolution, and workspace-current-ref canonical goldens with inverse
 decoders; workspace reopen; immutable enable/reorder revisions; stale workspace

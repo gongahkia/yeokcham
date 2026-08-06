@@ -230,6 +230,25 @@
   (source_tree golden)))
 
 (test
+ (name test_two_device_sync)
+ (modules test_two_device_sync)
+ (libraries
+  alcotest
+  mirage-crypto-ec
+  paengi_device
+  paengi_device_store
+  paengi_divergence
+  paengi_divergence_store
+  paengi_encoding
+  paengi_envelope
+  paengi_exchange
+  paengi_exchange_store
+  paengi_ref_event
+  paengi_ref_event_store
+  paengi_store
+  unix))
+
+(test
  (name test_http_exchange)
  (modules test_http_exchange)
  (libraries
@@ -691,6 +710,20 @@
   unix))
 
 (test
+ (name two_device_sync_property_test)
+ (modules two_device_sync_property_test)
+ (libraries
+  alcotest
+  qcheck-core
+  qcheck-alcotest
+  paengi_encoding
+  paengi_envelope
+  paengi_exchange
+  paengi_exchange_store
+  paengi_store
+  unix))
+
+(test
  (name http_exchange_property_test)
  (modules http_exchange_property_test)
  (libraries
@@ -726,6 +759,7 @@
   (:device_property_test device_property_test.exe)
   (:divergence_property_test divergence_property_test.exe)
   (:bundle_property_test bundle_property_test.exe)
+  (:two_device_sync_property_test two_device_sync_property_test.exe)
   (:http_exchange_property_test http_exchange_property_test.exe)
   (:snapshot_property_test snapshot_property_test.exe)
   (:scratch_property_test scratch_property_test.exe)
@@ -751,6 +785,7 @@
    (run %{device_property_test})
    (run %{divergence_property_test})
    (run %{bundle_property_test})
+   (run %{two_device_sync_property_test})
    (run %{http_exchange_property_test})
    (run %{snapshot_property_test})
    (run %{scratch_property_test})
