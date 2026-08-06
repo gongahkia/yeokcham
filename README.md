@@ -275,6 +275,12 @@ budget bytes, `budget-excluded` checkpoints, and any protected-only overrun.
 Shared snapshot/content objects remain outside this M3 budget until a complete
 cross-domain root mark exists.
 
+Compaction also composes source-event operations between retained checkpoints
+and removes only proven adjacent inverse pairs. Both original and reduced
+chains must replay to the same retained snapshot; `--explain` reports
+`inverse-pairs-eliminated`. This does not remove a retained logical checkpoint
+or infer semantic intent.
+
 Capsule read commands report logical capsule and revision IDs. They resolve the
 checksummed current ref, exact immutable object types, logical/physical links,
 parent chain, and direct replay before displaying data; corrupt or stale state

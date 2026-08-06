@@ -418,6 +418,12 @@ be invariant under timeline input order, label nonfitting optional candidates,
 and preserve every selected snapshot after activation/reopen. A protected-only
 overrun is a structured plan result, not a correctness or timing failure.
 
+Inverse-pair coverage composes an unretained scratch gap, checks exact
+structural-pair reduction and unmatched-operation preservation, and verifies
+that both the original/reduced chains and post-activation retained restores
+reach the identical snapshots. Generated pairs may become adjacent only after
+an earlier exact elimination; every other operation remains intact.
+
 Measure:
 
 - Storage.

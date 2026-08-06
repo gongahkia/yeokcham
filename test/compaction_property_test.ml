@@ -27,6 +27,12 @@ let checkpoint_id value =
   Store.Stored_object_id.of_raw_bytes (Bytes.unsafe_to_string raw)
   |> Option.get |> Scratch.Checkpoint_id.of_stored_object_id
 
+let content_id value =
+  let raw = Bytes.make 32 '\000' in
+  Bytes.set raw 0 (Char.chr (value land 0xff));
+  Store.Stored_object_id.of_raw_bytes (Bytes.unsafe_to_string raw)
+  |> Option.get |> Snapshot.Content.of_stored_object_id
+
 let checkpoint ?(storage_bytes = 0L) value created_at pinned =
   {
     Compaction.Policy.id = checkpoint_id value;
@@ -499,6 +505,28 @@ let prune_resume_is_independent_of_interruption =
                        (Scratch.Checkpoint.snapshot head))))
       with Exit | Failure _ | Invalid_argument _ -> false)
 
+let exact_inverse_content_pairs_reduce_to_empty =
+  QCheck2.Test.make ~count:100
+    ~name:
+      "exact inverse content pairs reduce without changing the pair boundary"
+    QCheck2.Gen.(pair (int_range 0 255) (int_range 0 255))
+    (fun (left, right) ->
+      let expected = content_id left in
+      let replacement = content_id right in
+      let reduced, eliminated =
+        Compaction.eliminate_exact_inverse_pairs
+          [
+            Scratch.Modify_content { path = [ "file" ]; expected; replacement };
+            Scratch.Modify_content
+              {
+                path = [ "file" ];
+                expected = replacement;
+                replacement = expected;
+              };
+          ]
+      in
+      eliminated = 1 && reduced = [])
+
 let () =
   Alcotest.run "compaction properties"
     [
@@ -510,6 +538,9 @@ let () =
           QCheck_alcotest.to_alcotest ~speed_level:`Quick
             ~rand:(state_for "budget-permutation")
             budget_permutation_does_not_change_selection;
+          QCheck_alcotest.to_alcotest ~speed_level:`Quick
+            ~rand:(state_for "exact-inverse-pairs")
+            exact_inverse_content_pairs_reduce_to_empty;
           QCheck_alcotest.to_alcotest ~speed_level:`Quick
             ~rand:(state_for "pins") pinned_checkpoints_never_expire;
           QCheck_alcotest.to_alcotest ~speed_level:`Quick

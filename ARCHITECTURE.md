@@ -288,7 +288,8 @@ Initial strategies:
 1. Delete expired unpinned checkpoint records while preserving referenced snapshots.
 2. Content garbage collection.
 3. Collapse event chains between retained snapshots.
-4. Remove exact inverse edit pairs when proof is straightforward.
+4. Remove exact adjacent inverse edit pairs only after source and reduced
+   replay both reach the retained target snapshot.
 5. Keep periodic full snapshots to bound replay depth.
 
 Never make semantic guesses during scratch compaction.

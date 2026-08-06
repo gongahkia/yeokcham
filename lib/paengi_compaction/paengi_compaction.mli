@@ -49,8 +49,7 @@ module Policy : sig
 end
 
 val eliminate_exact_inverse_pairs :
-  Paengi_scratch.operation list ->
-  Paengi_scratch.operation list * int
+  Paengi_scratch.operation list -> Paengi_scratch.operation list * int
 
 type error
 

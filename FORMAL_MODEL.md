@@ -268,6 +268,18 @@ the plan retains those states and reports the exact overrun. No budget outcome
 changes a pin, a retained required state, a logical ID, or any persistent
 policy encoding.
 
+For each gap between consecutive retained checkpoints, compaction concatenates
+the exact stored source-event operations in order. It then removes only an
+adjacent inverse pair (including pairs made adjacent by an earlier removal):
+identical create/delete or delete/create entry pairs; same-path content or mode
+swaps with reciprocal preconditions; or a move immediately followed by the
+same-entry reverse move. Before a replacement event is stored, both the source
+chain and the reduced chain must replay from the prior retained snapshot to the
+next retained snapshot exactly. A mismatch is a structured planning failure;
+unmatched operations stay intact. `inverse_pairs_eliminated` is dry-run/plan
+evidence, not a new persistent record field or a reason to remove a retained
+logical checkpoint.
+
 ADR-024 adds immutable compacted generations without changing v1 checkpoint,
 event, retention, or head records. A generation maps every retained logical
 checkpoint ID directly to a verified physical Checkpoint v1 object. Its ordered
@@ -307,6 +319,8 @@ already-pruned result.
 7. A retained logical ID resolves to the generation-declared exact snapshot.
 8. An active alias is direct; alias-to-alias traversal is invalid.
 9. A budget-excluded checkpoint is never a protected or required checkpoint.
+10. An inverse reduction preserves the exact snapshot of both endpoints of its
+    retained gap.
 
 Implemented transformation: replace retained boundaries with exact direct
 snapshot deltas. Inverse-pair elimination and shared-content collection remain

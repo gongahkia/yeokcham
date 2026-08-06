@@ -104,6 +104,16 @@ periodic checkpoints, are considered newest-first with object-ID ties; a
 nonfitting candidate is reported as `budget-excluded`. A protected-only
 overrun remains visible rather than making a recovery state unavailable.
 
+M3-D02 adds no schema field. For each retained gap, construction composes the
+exact source-event operations and removes only structural adjacent inverses:
+same-entry create/delete or delete/create, reciprocal same-path content/mode
+changes, and a same-entry move followed by its reverse. The source sequence and
+the reduced sequence must each replay from the prior retained snapshot to the
+next one before the replacement event can be stored. The plan reports the
+eliminated pair count; unmatched or non-replaying operations fail structurally
+or remain unchanged. This changes only generated immutable event bytes, never
+logical checkpoint IDs or a retained-state requirement.
+
 Publication obtains the repository compaction lock, reads source refs and the
 active generation, publishes all immutable generation objects, verifies them,
 rereads sources, then CAS-publishes `scratch-generation`.  It does not advance

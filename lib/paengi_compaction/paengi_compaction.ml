@@ -570,7 +570,6 @@ let budget_protected_checkpoint_bytes plan =
   plan.budget_protected_checkpoint_bytes
 
 let inverse_pairs_eliminated plan = plan.inverse_pairs_eliminated
-
 let removable_checkpoints plan = plan.removable_checkpoints
 let removable_events plan = plan.removable_events
 let removable_objects plan = plan.removable_objects
@@ -944,7 +943,8 @@ let exact_inverse left right =
           expected = right_expected;
           replacement = right_replacement;
         } ) ->
-      left_path = right_path && left_expected = right_replacement
+      left_path = right_path
+      && left_expected = right_replacement
       && left_replacement = right_expected
   | ( Scratch.Move
         {
@@ -958,12 +958,13 @@ let exact_inverse left right =
           destination = right_destination;
           prior = right_prior;
         } ) ->
-      left_source = right_destination && left_destination = right_source
+      left_source = right_destination
+      && left_destination = right_source
       && left_prior = right_prior
-  | ( Scratch.Create _ | Scratch.Delete _ | Scratch.Modify_content _
-    | Scratch.Change_mode _ | Scratch.Move _ ),
-    ( Scratch.Create _ | Scratch.Delete _ | Scratch.Modify_content _
-    | Scratch.Change_mode _ | Scratch.Move _ ) ->
+  | ( ( Scratch.Create _ | Scratch.Delete _ | Scratch.Modify_content _
+      | Scratch.Change_mode _ | Scratch.Move _ ),
+      ( Scratch.Create _ | Scratch.Delete _ | Scratch.Modify_content _
+      | Scratch.Change_mode _ | Scratch.Move _ ) ) ->
       false
 
 let eliminate_exact_inverse_pairs operations =
@@ -999,7 +1000,7 @@ let build_physical_chain store ~timeline ~retained =
           Error
             (Cleanup_manifest_error
                "source scratch head is absent from retained compaction chain")
-    | entry :: rest ->
+    | entry :: rest -> (
         let source = entry.Scratch.checkpoint in
         let logical = entry.Scratch.logical_id in
         let snapshot = Scratch.Checkpoint.snapshot source in
@@ -1028,12 +1029,15 @@ let build_physical_chain store ~timeline ~retained =
                    generated_inverse_pairs_eliminated = 0;
                  }
                 :: reversed)
-                (Some (logical, checkpoint)) [] rest
+                (Some (logical, checkpoint))
+                [] rest
             else build reversed None [] rest
         | Some (prior_logical, prior_checkpoint) ->
             let* metadata = source_event_metadata store source in
             let pending_reversed =
-              List.rev_append (Scratch.Event.operations metadata) pending_reversed
+              List.rev_append
+                (Scratch.Event.operations metadata)
+                pending_reversed
             in
             if not (retained logical) then
               build reversed previous pending_reversed rest
@@ -1085,10 +1089,12 @@ let build_physical_chain store ~timeline ~retained =
                        entry = generated_entry;
                        checkpoint;
                        event = Some event;
-                       generated_inverse_pairs_eliminated = inverse_pairs_eliminated;
+                       generated_inverse_pairs_eliminated =
+                         inverse_pairs_eliminated;
                      }
                     :: reversed)
-                    (Some (logical, checkpoint)) [] rest
+                    (Some (logical, checkpoint))
+                    [] rest)
   in
   build [] None [] timeline
 
@@ -1136,7 +1142,8 @@ let generated_entries generated =
 
 let generated_inverse_pairs generated =
   List.fold_left
-    (fun total generated -> total + generated.generated_inverse_pairs_eliminated)
+    (fun total generated ->
+      total + generated.generated_inverse_pairs_eliminated)
     0 generated
 
 let object_id_of_checkpoint checkpoint =
@@ -1845,8 +1852,7 @@ let activate ?(cleanup = true) ?cleanup_fault ?before_publish ~store scratch
           construct_physical_chain store ~timeline:(List.rev timeline) ~retained
         in
         let* () =
-          if
-            inverse_pairs_eliminated plan = generated_inverse_pairs generated
+          if inverse_pairs_eliminated plan = generated_inverse_pairs generated
           then Ok ()
           else
             Error
