@@ -42,7 +42,8 @@ let command =
 let passed_evidence target =
   let empty =
     {
-      Validation.digest = Paengi_hash.Sha256.digest_string "" |> Paengi_hash.Sha256.to_raw_string;
+      Validation.digest =
+        Paengi_hash.Sha256.digest_string "" |> Paengi_hash.Sha256.to_raw_string;
       retained = "";
       truncated = false;
     }
@@ -68,12 +69,14 @@ let compare_checkpoint left right =
     (Scratch.Checkpoint_id.stored_object_id right)
 
 let exact_snapshot_candidates_are_selected_once =
-  QCheck.Test.make ~count:100 QCheck.(list bool) (fun matches ->
+  QCheck.Test.make ~count:100
+    QCheck.(list bool)
+    (fun matches ->
       let target = snapshot 1 in
       let candidates =
         matches
         |> List.mapi (fun index matches ->
-               (checkpoint (index + 2), if matches then target else snapshot 2))
+            (checkpoint (index + 2), if matches then target else snapshot 2))
       in
       let decision =
         Retention.decide Retention.Pin_all_exact_snapshot_checkpoints
@@ -86,9 +89,9 @@ let exact_snapshot_candidates_are_selected_once =
           let expected =
             candidates
             |> List.filter_map (fun (checkpoint, candidate) ->
-                   if Snapshot.Snapshot.equal_id candidate target then
-                     Some checkpoint
-                   else None)
+                if Snapshot.Snapshot.equal_id candidate target then
+                  Some checkpoint
+                else None)
             |> List.sort_uniq compare_checkpoint
           in
           List.length checkpoints = List.length expected

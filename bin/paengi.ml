@@ -124,14 +124,16 @@ let validation root arguments =
             | None -> exit 2
             | Some working_directory ->
                 parse snapshot executable arguments working_directory timeout_ms
-                max_stdout_bytes max_stderr_bytes environment
-                  environment_policy retain_output retain_passing_checkpoints rest)
+                  max_stdout_bytes max_stderr_bytes environment
+                  environment_policy retain_output retain_passing_checkpoints
+                  rest)
         | "--timeout-ms" :: value :: rest -> (
             match try Some (Int64.of_string value) with Failure _ -> None with
             | Some value ->
                 parse snapshot executable arguments working_directory value
                   max_stdout_bytes max_stderr_bytes environment
-                  environment_policy retain_output retain_passing_checkpoints rest
+                  environment_policy retain_output retain_passing_checkpoints
+                  rest
             | None -> exit 2)
         | "--max-stdout-bytes" :: value :: rest -> (
             match int_of_string_opt value with
@@ -153,7 +155,8 @@ let validation root arguments =
             | Some entry ->
                 parse snapshot executable arguments working_directory timeout_ms
                   max_stdout_bytes max_stderr_bytes (entry :: environment)
-                  environment_policy retain_output retain_passing_checkpoints rest)
+                  environment_policy retain_output retain_passing_checkpoints
+                  rest)
         | "--inherit-env" :: rest ->
             parse snapshot executable arguments working_directory timeout_ms
               max_stdout_bytes max_stderr_bytes environment Validation.Inherit
@@ -201,11 +204,12 @@ let validation root arguments =
       | Error error -> fail Store.error_to_string error
       | Ok store -> (
           let observed_at = now () in
-          Validation.run ~store ~snapshot ~command ~command_index:0 ~observed_at ()
+          Validation.run ~store ~snapshot ~command ~command_index:0 ~observed_at
+            ()
           |> Result.map_error Validation.error_to_string
           |> function
           | Error error -> fail Fun.id error
-          | Ok (evidence, object_id) ->
+          | Ok (evidence, object_id) -> (
               let status =
                 match Validation.evidence_status evidence with
                 | Validation.Passed -> "passed"
@@ -219,11 +223,12 @@ let validation root arguments =
                   let scratch = Scratch.open_repository store in
                   Validation_retention.apply
                     Validation_retention.Pin_all_exact_snapshot_checkpoints
-                    ~store ~scratch ~evidence_object:object_id ~changed_at:observed_at
+                    ~store ~scratch ~evidence_object:object_id
+                    ~changed_at:observed_at
                   |> Result.map_error Validation_retention.error_to_string
                   |> Result.map Option.some
               in
-              (match retention with
+              match retention with
               | Error error -> fail Fun.id error
               | Ok retention ->
                   let retained, already_retained =
@@ -234,10 +239,11 @@ let validation root arguments =
                           outcome.Validation_retention.already_retained )
                   in
                   Printf.printf
-                    "evidence=%s object=%s status=%s retained-checkpoints=%d already-retained=%d\n"
-                (Paengi_id.Validation_id.to_hex
-                   (Validation.evidence_id evidence))
-                (Store.Stored_object_id.to_hex object_id)
+                    "evidence=%s object=%s status=%s retained-checkpoints=%d \
+                     already-retained=%d\n"
+                    (Paengi_id.Validation_id.to_hex
+                       (Validation.evidence_id evidence))
+                    (Store.Stored_object_id.to_hex object_id)
                     status retained already_retained)))
   | _ -> exit 2
 

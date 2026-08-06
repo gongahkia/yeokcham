@@ -961,6 +961,31 @@ physical, and snapshot identities remain type-distinct.
 
 paengi records evidence. It does not claim that passing tests proves correctness.
 
+### Passing-validation scratch retention policy
+
+```ocaml
+type validation_retention_policy = Pin_all_exact_snapshot_checkpoints
+
+type validation_retention_decision =
+  | Evidence_not_passed
+  | No_matching_checkpoint
+  | Retain of checkpoint_id list
+```
+
+The policy is invoked only by explicit `validation run
+--retain-passing-checkpoints`; ordinary validation and release-created evidence
+do not invoke it. It loads the stored immutable evidence, requires `Passed`,
+and selects every scratch checkpoint whose snapshot ID exactly equals the
+evidence snapshot ID. It writes one idempotent `Validation_passed evidence_id`
+retention reason per selected logical checkpoint. A failed/timed-out/execution
+error result or absent exact checkpoint produces no retention change.
+
+Selection is over snapshot IDs, never approximate bytes, timestamps, release
+ancestry, or inferred user intent. The retention update can advance only
+`retention-head`; it cannot advance `scratch-head`, workspace current refs, or
+release bindings. The existing retention-reason encoding already carries the
+typed validation ID, so this policy adds no persistent schema field.
+
 ## 13. Git bridge model
 
 ### Mapping records

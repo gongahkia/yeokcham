@@ -85,6 +85,17 @@ documented portability limitation. Command non-zero exit, signal, timeout, and
 spawn error are evidence, not Paengi failures. Validation does not alter
 scratch, workspace, or release refs.
 
+M6-D01 adds an opt-in retention policy at the CLI boundary only:
+`validation run --retain-passing-checkpoints`. After immutable evidence is
+stored, the policy loads that evidence, requires `Passed`, and appends the
+already-defined `Validation_passed validation-id` retention reason to every
+scratch checkpoint with the exact evidence snapshot ID. It writes only the
+ADR-023 `retention-head` log/ref; it does not advance scratch, workspace, or
+release refs. Failed, timed-out, execution-error, and no-exact-checkpoint cases
+append nothing. The existing retention reason tag `3` is reused, so no envelope
+or schema migration is required. Reapplying the same evidence/checkpoint pair
+is idempotent.
+
 ### Releases and release bindings
 
 Add Envelope-1 object type `Release` v1:

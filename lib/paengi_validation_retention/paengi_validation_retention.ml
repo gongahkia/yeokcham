@@ -39,8 +39,8 @@ let decide Pin_all_exact_snapshot_checkpoints ~evidence ~candidates =
     let matching =
       candidates
       |> List.filter_map (fun (checkpoint, snapshot) ->
-             if Snapshot.Snapshot.equal_id target snapshot then Some checkpoint
-             else None)
+          if Snapshot.Snapshot.equal_id target snapshot then Some checkpoint
+          else None)
       |> List.sort_uniq compare_checkpoint
     in
     match matching with [] -> No_matching_checkpoint | _ -> Retain matching
@@ -71,13 +71,15 @@ let apply policy ~store ~scratch ~evidence_object ~changed_at =
             let* newly_retained, already_retained = result in
             let* added =
               Scratch.retain_validation_passed scratch checkpoint
-                ~validation:(Validation.evidence_id evidence) ~changed_at
+                ~validation:(Validation.evidence_id evidence)
+                ~changed_at
               |> Result.map_error (fun error -> Scratch_error error)
             in
             Ok
-              ( if added then (newly_retained + 1, already_retained)
-                else (newly_retained, already_retained + 1) ))
-          (Ok (0, 0)) checkpoints
+              (if added then (newly_retained + 1, already_retained)
+               else (newly_retained, already_retained + 1)))
+          (Ok (0, 0))
+          checkpoints
   in
   Ok
     {

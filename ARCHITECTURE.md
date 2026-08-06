@@ -596,6 +596,13 @@ Milestone 6 adds immutable `Validation_evidence_v1`; it is not a mutable
 workspace/scratch annotation and cannot advance canonical refs. Release creation
 uses only evidence bound to the exact final snapshot.
 
+`validation run --retain-passing-checkpoints` is the explicit M6-D01 exception
+to a no-retention side effect: after evidence storage, it may append a
+`Validation_passed` reason to every exact snapshot-matching scratch checkpoint.
+It advances only `retention-head`; ordinary validation and release validation
+continue to leave scratch/workspace/release refs unchanged. Failed or unmatched
+evidence is an inspectable no-op, not an inferred checkpoint choice.
+
 ## 13. Git bridge
 
 ### Import architecture

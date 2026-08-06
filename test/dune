@@ -986,7 +986,8 @@
   (:capsule_durable_property_test capsule_durable_property_test.exe)
   (:workspace_property_test workspace_property_test.exe)
   (:release_validation_property_test release_validation_property_test.exe)
-  (:validation_retention_property_test validation_retention_property_test.exe)
+  (:validation_retention_property_test
+   validation_retention_property_test.exe)
   (:semantic_property_test semantic_property_test.exe)
   (:semantic_retarget_property_test semantic_retarget_property_test.exe)
   (:rust_adapter_property_test rust_adapter_property_test.exe)

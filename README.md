@@ -195,7 +195,7 @@ dune exec bin/paengi.exe -- work materialise <workspace-id> [--dry-run]
 dune exec bin/paengi.exe -- conflict list <workspace-id>
 dune exec bin/paengi.exe -- conflict show <conflict-id>
 dune exec bin/paengi.exe -- conflict resolve <workspace-id> <conflict-id> --action skip
-dune exec bin/paengi.exe -- validation run --snapshot <snapshot-id> --exec <program> [--arg <argument>] [--cwd <relative-path>] [--timeout-ms <milliseconds>] [--max-stdout-bytes <bytes>] [--max-stderr-bytes <bytes>] [--env <name=value>] [--inherit-env] [--retain-output]
+dune exec bin/paengi.exe -- validation run --snapshot <snapshot-id> --exec <program> [--arg <argument>] [--cwd <relative-path>] [--timeout-ms <milliseconds>] [--max-stdout-bytes <bytes>] [--max-stderr-bytes <bytes>] [--env <name=value>] [--inherit-env] [--retain-output] [--retain-passing-checkpoints]
 dune exec bin/paengi.exe -- release create --workspace <workspace-id> [--parent <release-id>] [--message <text>] [--validation-exec <program> [--validation-arg <argument>] [--validation-cwd <relative-path>] [--validation-timeout-ms <milliseconds>] [--validation-max-stdout-bytes <bytes>] [--validation-max-stderr-bytes <bytes>] [--validation-env <name=value>] [--validation-inherit-env] [--validation-retain-output]]
 dune exec bin/paengi.exe -- release show <release-id>
 dune exec bin/paengi.exe -- release verify <release-id>
@@ -234,6 +234,12 @@ to a fresh temporary directory before direct argv execution. It never validates
 the live working directory or moves any canonical ref. Output capture is
 bounded; full-stream digests, truncation, outcome, and optional bounded Content
 objects are immutable evidence.
+
+`--retain-passing-checkpoints` is opt-in. After storing passing immutable
+evidence, it adds the evidence's typed retention reason to every scratch
+checkpoint with that exact snapshot ID. It changes only `retention-head`; failed
+or unmatched evidence changes no retention, and the command never advances
+scratch/workspace/release refs.
 
 `release create` reads the current immutable workspace revision and its verified
 complete attempt, rejects unresolved conflicts, replays it, runs every supplied

@@ -250,6 +250,11 @@ and execution-error observations; bounded stdout/stderr retention and hashes;
 reopen; malformed command rejection; and the invariant that validation cannot
 move scratch, workspace, or release refs. Runner tests inject deterministic
 process outcomes and use direct local argv fixtures for the Unix timeout path.
+M6-D01 additionally checks the pure passed-exact-snapshot selector, idempotent
+stored-evidence retention after reopen, no retention for failed evidence, and
+compaction planning/activation of a validation-retained checkpoint. The seeded
+property varies matching checkpoint candidates and requires each selected ID to
+occur exactly once.
 
 Milestone 6 release checks canonical Release/binding goldens and inverse
 decoders; create/reopen/show/list/verify; exact workspace-attempt replay;
