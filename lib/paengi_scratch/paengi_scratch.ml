@@ -1272,7 +1272,8 @@ module Cleanup_manifest = struct
     | Envelope.Workspace | Envelope.Workspace_revision
     | Envelope.Workspace_attempt | Envelope.Release_attestation
     | Envelope.Git_mapping | Envelope.Imported_transition
-    | Envelope.Imported_tag | Envelope.Ref_event | Envelope.Device_identity ->
+    | Envelope.Imported_tag | Envelope.Ref_event | Envelope.Device_identity
+    | Envelope.Divergent_ref_set ->
         false
 
   let compare_candidate left right =

@@ -21,14 +21,19 @@ val max_cas_retries : int
 val binding_components : ref_name:string -> string list
 val encode_binding : Object_id.t -> string
 val decode_binding : string -> (Object_id.t, error) result
-val store_set : Paengi_store.repository -> Divergence.t -> (Object_id.t, error) result
+
+val store_set :
+  Paengi_store.repository -> Divergence.t -> (Object_id.t, error) result
+
 val load_set :
   Paengi_store.repository -> Object_id.t -> (Divergence.t, error) result
+
 val load_published :
   Paengi_store.repository ->
   trusted_keys:Event.trusted_key list ->
   ref_name:string ->
   (Divergence.t option, error) result
+
 val publish :
   Paengi_store.repository ->
   trusted_keys:Event.trusted_key list ->

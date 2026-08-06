@@ -35,14 +35,18 @@ let ( let* ) = Result.bind
 
 let error_to_string = function
   | Invalid_repository_format -> "divergence repository format is empty"
-  | Invalid_ref_name name -> Printf.sprintf "invalid divergence ref name: %S" name
+  | Invalid_ref_name name ->
+      Printf.sprintf "invalid divergence ref name: %S" name
   | Invalid_repository_digest length ->
-      Printf.sprintf "divergence repository digest must contain 32 bytes, got %d" length
+      Printf.sprintf
+        "divergence repository digest must contain 32 bytes, got %d" length
   | Invalid_entry_count count ->
-      Printf.sprintf "divergence set has %d entries; expected 2..%d" count max_entries
+      Printf.sprintf "divergence set has %d entries; expected 2..%d" count
+        max_entries
   | Duplicate_event_id event_id ->
       "duplicate divergence event ID: " ^ Event.Event_id.to_hex event_id
-  | Event_context_mismatch detail -> "divergence event context mismatch: " ^ detail
+  | Event_context_mismatch detail ->
+      "divergence event context mismatch: " ^ detail
   | Invalid_payload detail -> "invalid divergence payload: " ^ detail
   | Unsupported_schema_version version ->
       Printf.sprintf "unsupported divergence schema version: %Ld" version
@@ -57,41 +61,48 @@ let error_to_string = function
 
 let valid_ref_name name =
   let length = String.length name in
-  length > 0 && length <= 255 && not (String.equal name ".")
-  && not (String.equal name "..")
-  && not (String.contains name '/') && not (String.contains name '\000')
+  length > 0 && length <= 255
+  && (not (String.equal name "."))
+  && (not (String.equal name ".."))
+  && (not (String.contains name '/'))
+  && not (String.contains name '\000')
 
 let array values =
   Encoding.array values
   |> Result.map_error (fun error ->
-         Invalid_payload (Encoding.construction_error_to_string error))
+      Invalid_payload (Encoding.construction_error_to_string error))
 
 let text value =
   Encoding.text value
   |> Result.map_error (fun error ->
-         Invalid_payload (Encoding.construction_error_to_string error))
+      Invalid_payload (Encoding.construction_error_to_string error))
 
 let fields name expected = function
   | Encoding.Array values when List.length values = expected -> Ok values
   | Encoding.Array _ ->
-      Error (Invalid_payload (Printf.sprintf "%s has the wrong field count" name))
+      Error
+        (Invalid_payload (Printf.sprintf "%s has the wrong field count" name))
   | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _ | Encoding.Map _
-  | Encoding.Bool _ | Encoding.Null -> Error (Invalid_payload (name ^ " must be an array"))
+  | Encoding.Bool _ | Encoding.Null ->
+      Error (Invalid_payload (name ^ " must be an array"))
 
 let integer name = function
   | Encoding.Integer value -> Ok value
   | Encoding.Bytes _ | Encoding.Text _ | Encoding.Array _ | Encoding.Map _
-  | Encoding.Bool _ | Encoding.Null -> Error (Invalid_payload (name ^ " must be an integer"))
+  | Encoding.Bool _ | Encoding.Null ->
+      Error (Invalid_payload (name ^ " must be an integer"))
 
 let bytes name = function
   | Encoding.Bytes value -> Ok value
   | Encoding.Integer _ | Encoding.Text _ | Encoding.Array _ | Encoding.Map _
-  | Encoding.Bool _ | Encoding.Null -> Error (Invalid_payload (name ^ " must be bytes"))
+  | Encoding.Bool _ | Encoding.Null ->
+      Error (Invalid_payload (name ^ " must be bytes"))
 
 let text_field name = function
   | Encoding.Text value -> Ok value
   | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Array _ | Encoding.Map _
-  | Encoding.Bool _ | Encoding.Null -> Error (Invalid_payload (name ^ " must be text"))
+  | Encoding.Bool _ | Encoding.Null ->
+      Error (Invalid_payload (name ^ " must be text"))
 
 let nonnegative_integer name value =
   let* value = integer name value in
@@ -104,30 +115,15 @@ let object_id name = function
   | Encoding.Bytes bytes -> (
       match Object_id.of_raw_bytes bytes with
       | Some object_id -> Ok (Some object_id)
-      | None -> Error (Invalid_payload (name ^ " must contain a 32-byte object ID")))
+      | None ->
+          Error (Invalid_payload (name ^ " must contain a 32-byte object ID")))
   | Encoding.Integer _ | Encoding.Text _ | Encoding.Array _ | Encoding.Map _
-  | Encoding.Bool _ -> Error (Invalid_payload (name ^ " must be object ID bytes or null"))
+  | Encoding.Bool _ ->
+      Error (Invalid_payload (name ^ " must be object ID bytes or null"))
 
 let object_id_value = function
   | None -> Encoding.null
   | Some object_id -> Encoding.bytes (Object_id.to_raw_bytes object_id)
-
-let observed_value observed =
-  array
-    [
-      Encoding.integer (Event.ref_state_generation observed);
-      object_id_value (Event.ref_state_target observed);
-    ]
-
-let decode_observed value =
-  let* values = fields "divergence observed state" 2 value in
-  match values with
-  | [ generation; target ] ->
-      let* generation = nonnegative_integer "divergence observed generation" generation in
-      let* target = object_id "divergence observed target" target in
-      Event.make_ref_state ~generation ~target
-      |> Result.map_error (fun error -> Event_error error)
-  | _ -> assert false
 
 let repository_digest repository_format =
   Hash.digest_string repository_format |> Hash.to_raw_string
@@ -135,7 +131,11 @@ let repository_digest repository_format =
 let entry_of_verified ~object_id verified =
   let event = Event.verified_event verified in
   {
-    link = { event_id = Event.unsigned_event_id (Event.event_unsigned event); object_id };
+    link =
+      {
+        event_id = Event.unsigned_event_id (Event.event_unsigned event);
+        object_id;
+      };
     verified;
   }
 
@@ -148,11 +148,13 @@ let ref_name set = set.ref_name
 let observed set = set.observed
 let entries set = set.entries
 
-let compare_link left right = Event.Event_id.compare left.event_id right.event_id
+let compare_link left right =
+  Event.Event_id.compare left.event_id right.event_id
 
 let check_count entries =
   let count = List.length entries in
-  if count < 2 || count > max_entries then Error (Invalid_entry_count count) else Ok ()
+  if count < 2 || count > max_entries then Error (Invalid_entry_count count)
+  else Ok ()
 
 let check_strictly_ascending entries =
   let rec loop previous = function
@@ -175,15 +177,18 @@ let check_entry_context ~repository_digest ~ref_name ~observed entry =
   let unsigned = Event.event_unsigned event in
   let event_id = Event.unsigned_event_id unsigned in
   if not (Event.Event_id.equal entry.link.event_id event_id) then
-    Error (Event_context_mismatch "entry event ID does not match verified event")
+    Error
+      (Event_context_mismatch "entry event ID does not match verified event")
   else if
     not
-      (String.equal (Event.unsigned_repository_format_digest unsigned)
+      (String.equal
+         (Event.unsigned_repository_format_digest unsigned)
          repository_digest)
   then Error (Event_context_mismatch "repository format digest")
   else if not (String.equal (Event.unsigned_ref_name unsigned) ref_name) then
     Error (Event_context_mismatch "ref name")
-  else if not (Event.ref_state_equal (Event.unsigned_observed unsigned) observed)
+  else if
+    not (Event.ref_state_equal (Event.unsigned_observed unsigned) observed)
   then Error (Event_context_mismatch "observed state")
   else Ok ()
 
@@ -192,11 +197,11 @@ let check_size set =
     let entries =
       set.entries
       |> List.map (fun entry ->
-             array
-               [
-                 Encoding.bytes (Event.event_id_to_bytes entry.event_id);
-                 Encoding.bytes (Object_id.to_raw_bytes entry.object_id);
-               ])
+          array
+            [
+              Encoding.bytes (Event.event_id_to_bytes entry.event_id);
+              Encoding.bytes (Object_id.to_raw_bytes entry.object_id);
+            ])
     in
     let rec collect values = function
       | [] -> Ok (List.rev values)
@@ -206,19 +211,14 @@ let check_size set =
     in
     let* entries = collect [] entries in
     let* ref_name = text set.ref_name in
-    let* observed = observed_value set.observed in
     let* entries = array entries in
     array
       [
         Encoding.integer 1L;
         Encoding.bytes set.repository_digest;
         ref_name;
-        (match observed with
-        | Encoding.Array [ generation; _ ] -> generation
-        | _ -> assert false);
-        (match observed with
-        | Encoding.Array [ _; target ] -> target
-        | _ -> assert false);
+        Encoding.integer (Event.ref_state_generation set.observed);
+        object_id_value (Event.ref_state_target set.observed);
         entries;
         Encoding.integer 0L;
       ]
@@ -247,7 +247,14 @@ let make ~repository_format entries =
                 check_entry_context ~repository_digest ~ref_name ~observed entry)
               (Ok ()) entries
           in
-          let set = { repository_digest; ref_name; observed; entries = links_of_entries entries } in
+          let set =
+            {
+              repository_digest;
+              ref_name;
+              observed;
+              entries = links_of_entries entries;
+            }
+          in
           let* () = check_strictly_ascending set.entries in
           let* () = check_size set in
           Ok set
@@ -257,7 +264,8 @@ let payload set =
   let* () = check_strictly_ascending set.entries in
   if String.length set.repository_digest <> Hash.digest_size then
     Error (Invalid_repository_digest (String.length set.repository_digest))
-  else if not (valid_ref_name set.ref_name) then Error (Invalid_ref_name set.ref_name)
+  else if not (valid_ref_name set.ref_name) then
+    Error (Invalid_ref_name set.ref_name)
   else
     let* entry_values =
       let rec loop values = function
@@ -294,35 +302,54 @@ let payload set =
 let decode_link value =
   let* values = fields "divergence entry" 2 value in
   match values with
-  | [ event_id; object_id_value ] ->
+  | [ event_id; object_id_value ] -> (
       let* event_id = bytes "divergence event ID" event_id in
       let* event_id =
-        Event.event_id_of_bytes event_id |> Result.map_error (fun error -> Event_error error)
+        Event.event_id_of_bytes event_id
+        |> Result.map_error (fun error -> Event_error error)
       in
       let* object_id = bytes "divergence event object ID" object_id_value in
-      (match Object_id.of_raw_bytes object_id with
+      match Object_id.of_raw_bytes object_id with
       | Some object_id -> Ok { event_id; object_id }
-      | None -> Error (Invalid_payload "divergence event object ID must contain 32 bytes"))
+      | None ->
+          Error
+            (Invalid_payload "divergence event object ID must contain 32 bytes")
+      )
   | _ -> assert false
 
 let decode_payload value =
   let* values = fields "divergence set" 7 value in
   match values with
-  | [ version; repository_digest; ref_name; generation; target; raw_entries; features ] ->
+  | [
+   version;
+   repository_digest;
+   ref_name;
+   generation;
+   target;
+   raw_entries;
+   features;
+  ] ->
       let* version = integer "divergence schema version" version in
-      if not (Int64.equal version 1L) then Error (Unsupported_schema_version version)
+      if not (Int64.equal version 1L) then
+        Error (Unsupported_schema_version version)
       else
         let* features = integer "divergence mandatory features" features in
-        if not (Int64.equal features 0L) then Error (Unsupported_mandatory_features features)
+        if not (Int64.equal features 0L) then
+          Error (Unsupported_mandatory_features features)
         else
-          let* repository_digest = bytes "divergence repository digest" repository_digest in
+          let* repository_digest =
+            bytes "divergence repository digest" repository_digest
+          in
           if String.length repository_digest <> Hash.digest_size then
             Error (Invalid_repository_digest (String.length repository_digest))
           else
             let* ref_name = text_field "divergence ref name" ref_name in
-            if not (valid_ref_name ref_name) then Error (Invalid_ref_name ref_name)
+            if not (valid_ref_name ref_name) then
+              Error (Invalid_ref_name ref_name)
             else
-              let* generation = nonnegative_integer "divergence observed generation" generation in
+              let* generation =
+                nonnegative_integer "divergence observed generation" generation
+              in
               let* target = object_id "divergence observed target" target in
               let* observed =
                 Event.make_ref_state ~generation ~target
@@ -331,9 +358,10 @@ let decode_payload value =
               let* raw_entries =
                 match raw_entries with
                 | Encoding.Array entries -> Ok entries
-                | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _ | Encoding.Map _
-                | Encoding.Bool _ | Encoding.Null ->
-                    Error (Invalid_payload "divergence entries must be an array")
+                | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _
+                | Encoding.Map _ | Encoding.Bool _ | Encoding.Null ->
+                    Error
+                      (Invalid_payload "divergence entries must be an array")
               in
               let rec decode_entries values = function
                 | [] -> Ok (List.rev values)
@@ -346,8 +374,11 @@ let decode_payload value =
               let* () = check_count entries in
               let* () = check_strictly_ascending entries in
               let* canonical = payload set in
-              if String.equal (Encoding.encode canonical) (Encoding.encode value) then Ok set
-              else Error (Invalid_payload "divergence set payload is noncanonical")
+              if
+                String.equal (Encoding.encode canonical) (Encoding.encode value)
+              then Ok set
+              else
+                Error (Invalid_payload "divergence set payload is noncanonical")
   | _ -> assert false
 
 let envelope set =
@@ -359,8 +390,8 @@ let envelope set =
 
 let union left right =
   if
-    not (String.equal left.repository_digest right.repository_digest)
-    || not (String.equal left.ref_name right.ref_name)
+    (not (String.equal left.repository_digest right.repository_digest))
+    || (not (String.equal left.ref_name right.ref_name))
     || not (Event.ref_state_equal left.observed right.observed)
   then Error Incompatible_sets
   else
@@ -373,7 +404,8 @@ let union left right =
             if Object_id.equal left_entry.object_id right_entry.object_id then
               merge (left_entry :: values) left_rest right_rest
             else Error (Duplicate_event_id left_entry.event_id)
-          else if comparison < 0 then merge (left_entry :: values) left_rest right
+          else if comparison < 0 then
+            merge (left_entry :: values) left_rest right
           else merge (right_entry :: values) left right_rest
     in
     let* entries = merge [] left.entries right.entries in

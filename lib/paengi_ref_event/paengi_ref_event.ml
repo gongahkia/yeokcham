@@ -278,7 +278,10 @@ let make_unsigned ~repository_format ~ref_name ~signer_key_id ~signer_sequence
       }
 
 let unsigned_event_id unsigned = unsigned.event_id
-let unsigned_repository_format_digest unsigned = unsigned.repository_format_digest
+
+let unsigned_repository_format_digest unsigned =
+  unsigned.repository_format_digest
+
 let unsigned_ref_name unsigned = unsigned.ref_name
 let unsigned_signer_key_id unsigned = unsigned.signer_key_id
 let unsigned_signer_sequence unsigned = unsigned.signer_sequence

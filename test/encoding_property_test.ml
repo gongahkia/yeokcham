@@ -106,6 +106,7 @@ let object_type_generator =
       Envelope.Imported_tag;
       Envelope.Ref_event;
       Envelope.Device_identity;
+      Envelope.Divergent_ref_set;
     ]
 
 let boundary_lengths =
