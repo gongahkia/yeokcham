@@ -45,3 +45,35 @@ let read_lower_hex_file path =
         |> Result.map_error (fun message ->
             Printf.sprintf "%s: %s" path message)
   with Sys_error message -> Error message
+
+let lower_hex bytes =
+  let hex = "0123456789abcdef" in
+  let encoded = Bytes.create (String.length bytes * 2) in
+  String.iteri
+    (fun index character ->
+      let value = Char.code character in
+      Bytes.set encoded (index * 2) hex.[value lsr 4];
+      Bytes.set encoded ((index * 2) + 1) hex.[value land 0x0f])
+    bytes;
+  Bytes.unsafe_to_string encoded
+
+let source_path path =
+  match Sys.getenv_opt "YEOKCHAM_GOLDEN_ROOT" with
+  | Some root -> Filename.concat root (Filename.concat "test" path)
+  | None ->
+      if Sys.file_exists path then path
+      else
+        let from_root = Filename.concat "test" path in
+        if Sys.file_exists from_root then from_root else path
+
+let refresh_lower_hex_file path actual =
+  let path = source_path path in
+  match Sys.getenv_opt "YEOKCHAM_REFRESH_GOLDENS" with
+  | Some "1" -> (
+      try
+        Out_channel.with_open_bin path (fun channel ->
+            Out_channel.output_string channel (lower_hex actual);
+            Out_channel.output_char channel '\n');
+        Ok actual
+      with Sys_error message -> Error message)
+  | Some _ | None -> read_lower_hex_file path

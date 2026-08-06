@@ -30,11 +30,6 @@ let require_decoded_envelope = function
   | Ok envelope -> envelope
   | Error error -> Alcotest.fail (Envelope.decode_error_to_string error)
 
-let require_golden name =
-  match Golden.read_lower_hex_file (Filename.concat "golden" name) with
-  | Ok bytes -> bytes
-  | Error error -> Alcotest.fail error
-
 let file ?(mode = Regular) content = { mode; content }
 
 let enveloped object_type payload =
@@ -128,9 +123,14 @@ let scratch_history () =
 
 let check_golden_bytes name object_type payload =
   let actual = enveloped object_type payload in
-  Alcotest.(check string) name (require_golden name) actual;
+  let expected =
+    match Golden.refresh_lower_hex_file (Filename.concat "golden" name) actual with
+    | Ok bytes -> bytes
+    | Error error -> Alcotest.fail error
+  in
+  Alcotest.(check string) name expected actual;
   let decoded =
-    require_decoded_envelope (Envelope.decode (require_golden name))
+    require_decoded_envelope (Envelope.decode expected)
   in
   Alcotest.(check bool)
     (name ^ " type") true

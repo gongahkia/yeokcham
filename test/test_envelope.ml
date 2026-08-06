@@ -21,8 +21,8 @@ let require_error input =
   | Error error -> error
   | Ok _ -> Alcotest.fail "envelope decoder unexpectedly accepted input"
 
-let require_golden name =
-  match Golden.read_lower_hex_file (Filename.concat "golden" name) with
+let require_refreshed path actual =
+  match Golden.refresh_lower_hex_file path actual with
   | Ok bytes -> bytes
   | Error message -> Alcotest.fail message
 
@@ -134,7 +134,10 @@ let object_type_codes () =
     (Option.is_none (Envelope.object_type_of_code 29))
 
 let golden_envelope () =
-  let expected = require_golden "envelope-v1-snapshot.yeok.hex" in
+  let actual = Envelope.encode sample in
+  let expected =
+    require_refreshed "golden/envelope-v1-snapshot.yeok.hex" actual
+  in
   Alcotest.(check int) "header size" 57 Envelope.header_size;
   Alcotest.(check int) "envelope version" 1 Envelope.envelope_version;
   Alcotest.(check int)
@@ -143,7 +146,7 @@ let golden_envelope () =
     "supported mandatory features" 0L Envelope.supported_mandatory_features;
   Alcotest.(check int)
     "checksum algorithm code" 1 Envelope.checksum_algorithm_code;
-  Alcotest.(check string) "golden bytes" expected (Envelope.encode sample);
+  Alcotest.(check string) "golden bytes" expected actual;
   let decoded = require_decoded expected in
   Alcotest.(check bool)
     "object type" true
@@ -160,9 +163,18 @@ let golden_envelope () =
 let retained_unknown_mandatory_feature_fixtures () =
   List.iter
     (fun (name, features) ->
+      let actual =
+        Envelope.create ~object_type:Envelope.Snapshot
+          ~object_format_version:Envelope.current_object_format_version
+          ~mandatory_features:features ~payload ()
+        |> require_envelope |> Envelope.encode
+      in
+      let input =
+        require_refreshed (Filename.concat "golden" name) actual
+      in
       let invoked = ref false in
       let result =
-        Envelope.decode_with (require_golden name) ~payload_decoder:(fun _ ->
+        Envelope.decode_with input ~payload_decoder:(fun _ ->
             invoked := true;
             Ok ())
       in
