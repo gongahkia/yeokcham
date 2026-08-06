@@ -431,6 +431,15 @@ Measure:
 - Event replay length.
 - Retained meaningful states.
 
+M3-D03 records the implemented subset in
+`docs/experiments/results/scratch-retention-benchmark-v1.json`: keep-all,
+recent-window, periodic, and storage-budget policy runs over a deterministic
+25-checkpoint trace with a pinned restore target. The schema requires fixture
+checksum, environment, repetitions, active-object-store bytes after temporary
+benchmark prune, generated physical event-chain depth, and every guarded
+restore timing sample. This is host-specific evidence, not a threshold or a
+claim about unsupported exponential/test/capsule-boundary policies.
+
 ### E2 — Compaction strategies
 
 Compare:

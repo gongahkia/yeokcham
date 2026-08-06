@@ -2,13 +2,15 @@ module Benchmark = Paengi_compaction_benchmark
 
 let usage () =
   invalid_arg
-    "usage: compaction_retention_benchmark (--stdout | --output PATH) [--repetitions N]"
+    "usage: compaction_retention_benchmark (--stdout | --output PATH) \
+     [--repetitions N]"
 
 let parse arguments =
   let rec loop output repetitions = function
     | [] -> (output, repetitions)
     | "--stdout" :: rest -> loop (`Stdout :: output) repetitions rest
-    | "--output" :: path :: rest -> loop (`Output path :: output) repetitions rest
+    | "--output" :: path :: rest ->
+        loop (`Output path :: output) repetitions rest
     | "--repetitions" :: value :: rest -> (
         match int_of_string_opt value with
         | Some repetitions -> loop output repetitions rest

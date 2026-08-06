@@ -252,7 +252,10 @@ analyse scratch graph
   -> retain old generation during grace period
 ```
 
-Strategies should be pluggable and independently benchmarked.
+Strategies should be pluggable and independently benchmarked. M3's checked-in
+`scratch-retention-policies-v1` evidence exercises only the implemented
+recent-window, periodic, and storage-budget selectors against a deterministic
+pinned trace; it is not a general workload or performance claim.
 
 Milestone 3 provides a deterministic planner over the verified ancestry. It
 applies explicit recent-window/periodic/storage-budget policy and reports

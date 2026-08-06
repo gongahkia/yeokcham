@@ -61,6 +61,8 @@ objects, CAS-protected current refs, exact replay validation, pinned scratch
 boundaries, and split/combine replay checks. Milestone 3 has retained-ID scratch
 compaction: immutable compacted generations shorten retained replay chains and
 quarantine superseded scratch records.
+`docs/COMPACTION_RETENTION_BENCHMARK.md` records host-specific evidence for
+the implemented retention policies; it is not a performance claim.
 `compact --prune` is irreversible. paengi remains a portfolio and research
 prototype, not a production Git replacement.
 

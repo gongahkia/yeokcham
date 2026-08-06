@@ -26,7 +26,11 @@ type sample = {
   restored_pinned_target : bool;
 }
 
-type policy_result = { policy : policy; samples : sample list; restore : timing }
+type policy_result = {
+  policy : policy;
+  samples : sample list;
+  restore : timing;
+}
 
 type environment = {
   os : string;
@@ -58,6 +62,7 @@ type error =
   | Scratch_error of Scratch.error
   | Policy_error of Compaction.Policy.error
   | Compaction_error of Compaction.error
+  | Generation_missing
   | Pinned_target_not_retained
   | Restore_mismatch
 
@@ -73,12 +78,12 @@ let error_to_string = function
   | Scratch_error error -> Scratch.error_to_string error
   | Policy_error error -> Compaction.Policy.error_to_string error
   | Compaction_error error -> Compaction.error_to_string error
+  | Generation_missing -> "compaction did not publish an active generation"
   | Pinned_target_not_retained ->
       "benchmark pinned target was not retained by the configured policy"
   | Restore_mismatch -> "restore did not reproduce the pinned fixture bytes"
 
 let ( let* ) = Result.bind
-
 let checkpoint_count = 25
 let pinned_checkpoint_index = 8
 let now = 30L
@@ -98,8 +103,8 @@ let hex_of_raw raw =
   |> List.of_seq |> String.concat ""
 
 let fixture_checksum () =
-  fixture_descriptor () |> Hash.Sha256.digest_string |> Hash.Sha256.to_raw_string
-  |> hex_of_raw
+  fixture_descriptor () |> Hash.Sha256.digest_string
+  |> Hash.Sha256.to_raw_string |> hex_of_raw
 
 let policies =
   [
@@ -166,8 +171,7 @@ let with_temporary_directory run =
   | Unix.Unix_error (error, operation, path) ->
       Error
         (Io_error
-           (Printf.sprintf "%s %s: %s" operation path
-              (Unix.error_message error)))
+           (Printf.sprintf "%s %s: %s" operation path (Unix.error_message error)))
   | Sys_error message -> Error (Io_error message)
 
 let write_file path contents =
@@ -184,12 +188,15 @@ let created_checkpoint = function
 let scan_checkpoint store scratch root ~contents ~timestamp =
   let* () = write_file (Filename.concat root "trace.txt") contents in
   let* snapshot, _ =
-    Snapshot.scan ~root ~store |> Result.map_error (fun error -> Snapshot_error error)
+    Snapshot.scan ~root ~store
+    |> Result.map_error (fun error -> Snapshot_error error)
   in
-  Scratch.checkpoint scratch ~snapshot ~source:Scratch.Explicit
-    ~observed_at:timestamp ~created_at:timestamp
-  |> Result.map_error (fun error -> Scratch_error error)
-  |> Result.bind created_checkpoint
+  let* result =
+    Scratch.checkpoint scratch ~snapshot ~source:Scratch.Explicit
+      ~observed_at:timestamp ~created_at:timestamp
+    |> Result.map_error (fun error -> Scratch_error error)
+  in
+  created_checkpoint result
 
 type fixture = {
   store : Store.repository;
@@ -199,11 +206,16 @@ type fixture = {
 }
 
 let create_fixture root =
-  let* () = write_file (Filename.concat root "trace.txt") (List.hd fixture_contents) in
-  let* store = Store.init ~root |> Result.map_error (fun error -> Store_error error) in
+  let* () =
+    write_file (Filename.concat root "trace.txt") (List.hd fixture_contents)
+  in
+  let* store =
+    Store.init ~root |> Result.map_error (fun error -> Store_error error)
+  in
   let scratch = Scratch.open_repository store in
   let* initial_snapshot, _ =
-    Snapshot.scan ~root ~store |> Result.map_error (fun error -> Snapshot_error error)
+    Snapshot.scan ~root ~store
+    |> Result.map_error (fun error -> Snapshot_error error)
   in
   let* initial =
     Scratch.create_initial scratch ~snapshot:initial_snapshot ~created_at:0L
@@ -238,8 +250,7 @@ let rec regular_file_bytes path =
   try
     match (Unix.lstat path).Unix.st_kind with
     | Unix.S_DIR ->
-        Sys.readdir path
-        |> Array.to_list
+        Sys.readdir path |> Array.to_list
         |> List.fold_left
              (fun total name ->
                let* total = total in
@@ -258,7 +269,8 @@ let rec regular_file_bytes path =
 
 let selected_count plan =
   Compaction.selections plan
-  |> List.filter Compaction.Policy.retained |> List.length
+  |> List.filter Compaction.Policy.retained
+  |> List.length
 
 let generation_depth scratch =
   let* generation =
@@ -266,15 +278,16 @@ let generation_depth scratch =
     |> Result.map_error (fun error -> Scratch_error error)
   in
   match generation with
-  | None -> Error (Compaction_error Compaction.Active_generation_missing)
-  | Some generation -> Ok (max 0 (List.length (Scratch.Generation.entries generation) - 1))
+  | None -> Error Generation_missing
+  | Some generation ->
+      Ok (max 0 (List.length (Scratch.Generation.entries generation) - 1))
 
 let target_is_retained plan target =
   Compaction.selections plan
   |> List.exists (fun selection ->
-         Compaction.Policy.retained selection
-         && Scratch.Checkpoint_id.equal
-              (Compaction.Policy.checkpoint selection).Compaction.Policy.id target)
+      Compaction.Policy.retained selection
+      && Scratch.Checkpoint_id.equal
+           (Compaction.Policy.checkpoint selection).Compaction.Policy.id target)
 
 let run_sample policy =
   with_temporary_directory (fun root ->
@@ -321,12 +334,14 @@ let run_sample policy =
         in
         let* restored =
           try
-            In_channel.with_open_bin (Filename.concat root "trace.txt")
+            In_channel.with_open_bin
+              (Filename.concat root "trace.txt")
               In_channel.input_all
             |> Result.ok
           with Sys_error message -> Error (Io_error message)
         in
-        if not (String.equal restored fixture.pinned_contents) then Error Restore_mismatch
+        if not (String.equal restored fixture.pinned_contents) then
+          Error Restore_mismatch
         else
           Ok
             {
@@ -343,14 +358,17 @@ let environment () =
     word_size_bits = Sys.word_size;
     ocaml_version = Sys.ocaml_version;
     dune_profile =
-      Option.value (Sys.getenv_opt "BENCHMARK_DUNE_PROFILE") ~default:"unspecified";
+      Option.value
+        (Sys.getenv_opt "BENCHMARK_DUNE_PROFILE")
+        ~default:"unspecified";
     filesystem_scope = "temporary local directory";
   }
 
 let utc_timestamp () =
   let timestamp = Unix.gmtime (Unix.gettimeofday ()) in
   Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
-    (timestamp.Unix.tm_year + 1900) (timestamp.Unix.tm_mon + 1)
+    (timestamp.Unix.tm_year + 1900)
+    (timestamp.Unix.tm_mon + 1)
     timestamp.Unix.tm_mday timestamp.Unix.tm_hour timestamp.Unix.tm_min
     timestamp.Unix.tm_sec
 
@@ -366,7 +384,9 @@ let run ~repetitions =
       in
       let* samples = collect [] repetitions in
       let* restore =
-        samples |> List.map (fun sample -> sample.restore_ns) |> timing_of_samples
+        samples
+        |> List.map (fun sample -> sample.restore_ns)
+        |> timing_of_samples
       in
       Ok { policy; samples; restore }
     in
@@ -410,20 +430,25 @@ let json_string value =
   Buffer.contents escaped
 
 let json_int64 value = Int64.to_string value
-let json_option_int64 = function None -> "null" | Some value -> json_int64 value
+
+let json_option_int64 = function
+  | None -> "null"
+  | Some value -> json_int64 value
 
 let json_sample sample =
   Printf.sprintf
     "{\"restore_ns\":%s,\"active_object_store_bytes\":%s,\"retained_checkpoint_count\":%d,\"max_physical_event_depth\":%d,\"restored_pinned_target\":%b}"
-    (json_int64 sample.restore_ns) (json_int64 sample.active_object_store_bytes)
+    (json_int64 sample.restore_ns)
+    (json_int64 sample.active_object_store_bytes)
     sample.retained_checkpoint_count sample.max_physical_event_depth
     sample.restored_pinned_target
 
 let json_timing timing =
   let samples = timing.samples_ns |> List.map json_int64 |> String.concat "," in
   Printf.sprintf
-    "{\"samples_ns\":[%s],\"min_ns\":%s,\"median_ns\":%s,\"max_ns\":%s}"
-    samples (json_int64 timing.min_ns) (json_int64 timing.median_ns)
+    "{\"samples_ns\":[%s],\"min_ns\":%s,\"median_ns\":%s,\"max_ns\":%s}" samples
+    (json_int64 timing.min_ns)
+    (json_int64 timing.median_ns)
     (json_int64 timing.max_ns)
 
 let json_result result =
@@ -431,22 +456,47 @@ let json_result result =
   let samples = result.samples |> List.map json_sample |> String.concat "," in
   Printf.sprintf
     "{\"name\":%s,\"policy\":{\"recent_window_seconds\":%s,\"periodic_interval_seconds\":%s,\"storage_budget_bytes\":%s},\"samples\":[%s],\"restore_latency\":%s}"
-    (json_string policy.name) (json_int64 policy.recent_window_seconds)
+    (json_string policy.name)
+    (json_int64 policy.recent_window_seconds)
     (json_int64 policy.periodic_interval_seconds)
     (json_option_int64 policy.storage_budget_bytes)
-    samples (json_timing result.restore)
+    samples
+    (json_timing result.restore)
 
 let report_to_json report =
   let environment = report.environment in
-  let results = report.results |> List.map json_result |> String.concat ",\n    " in
+  let results =
+    report.results |> List.map json_result |> String.concat ",\n    "
+  in
   Printf.sprintf
-    "{\n\"schema_version\":%d,\n\"benchmark_id\":%s,\n\"purpose\":\"host_specific_retention_policy_evidence_not_performance_claim\",\n\"recorded_at_utc\":%s,\n\"fixture\":{\"name\":%s,\"checkpoint_count\":%d,\"checksum\":{\"algorithm\":\"sha256\",\"value\":%s}},\n\"execution\":{\"repetitions\":%d,\"warmup_runs\":0,\"concurrency\":1,\"cache_state\":\"mixed\"},\n\"environment\":{\"os\":%s,\"word_size_bits\":%d,\"ocaml_version\":%s,\"dune_profile\":%s,\"filesystem_scope\":%s},\n\"policies\":[\n    %s\n],\n\"notes\":\"active_object_store_bytes excludes temporary quarantine after prune; restore timings include guarded safety-checkpoint handling and are host-specific evidence only.\"\n}\n"
-    report.schema_version (json_string report.benchmark_id)
-    (json_string report.recorded_at_utc) (json_string report.fixture_name)
-    report.fixture_checkpoint_count (json_string report.fixture_checksum)
-    report.repetitions (json_string environment.os) environment.word_size_bits
-    (json_string environment.ocaml_version) (json_string environment.dune_profile)
-    (json_string environment.filesystem_scope) results
+    "{\n\
+     \"schema_version\":%d,\n\
+     \"benchmark_id\":%s,\n\
+     \"purpose\":\"host_specific_retention_policy_evidence_not_performance_claim\",\n\
+     \"recorded_at_utc\":%s,\n\
+     \"fixture\":{\"name\":%s,\"checkpoint_count\":%d,\"checksum\":{\"algorithm\":\"sha256\",\"value\":%s}},\n\
+     \"execution\":{\"repetitions\":%d,\"warmup_runs\":0,\"concurrency\":1,\"cache_state\":\"mixed\"},\n\
+     \"environment\":{\"os\":%s,\"word_size_bits\":%d,\"ocaml_version\":%s,\"dune_profile\":%s,\"filesystem_scope\":%s},\n\
+     \"policies\":[\n\
+    \    %s\n\
+     ],\n\
+     \"notes\":\"active_object_store_bytes excludes temporary quarantine after \
+     prune; restore timings include guarded safety-checkpoint handling and are \
+     host-specific evidence only.\"\n\
+     }\n"
+    report.schema_version
+    (json_string report.benchmark_id)
+    (json_string report.recorded_at_utc)
+    (json_string report.fixture_name)
+    report.fixture_checkpoint_count
+    (json_string report.fixture_checksum)
+    report.repetitions
+    (json_string environment.os)
+    environment.word_size_bits
+    (json_string environment.ocaml_version)
+    (json_string environment.dune_profile)
+    (json_string environment.filesystem_scope)
+    results
 
 let write ~path report =
   try

@@ -15,8 +15,10 @@ let ordered_summary =
       | Error _ -> values = []
       | Ok timing ->
           List.length timing.Benchmark.samples_ns = List.length values
-          && Int64.compare timing.min_ns timing.median_ns <= 0
-          && Int64.compare timing.median_ns timing.max_ns <= 0)
+          && Int64.compare timing.Benchmark.min_ns timing.Benchmark.median_ns
+             <= 0
+          && Int64.compare timing.Benchmark.median_ns timing.Benchmark.max_ns
+             <= 0)
 
 let () =
   Printf.printf "compaction benchmark property base seed: %d\n%!" base_seed;
@@ -25,6 +27,7 @@ let () =
       ( "property",
         [
           QCheck_alcotest.to_alcotest ~speed_level:`Quick
-            ~rand:(Random.State.make [| base_seed |]) ordered_summary;
+            ~rand:(Random.State.make [| base_seed |])
+            ordered_summary;
         ] );
     ]

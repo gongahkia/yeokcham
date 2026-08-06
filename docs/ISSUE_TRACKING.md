@@ -10,7 +10,7 @@ Each migrated issue has an immutable hidden marker, `<!-- paengi-todo-id: ID -->
 | --- | --- | --- | --- |
 | M3-D01 | [#32](https://github.com/gongahkia/paengi/issues/32) | M3 Deferred | implemented; verified by deterministic budget selection, retained restore, and seeded compaction properties |
 | M3-D02 | [#33](https://github.com/gongahkia/paengi/issues/33) | M3 Deferred | implemented; verified by retained-gap replay, exact inverse reduction, and seeded compaction properties |
-| M3-D03 | [#35](https://github.com/gongahkia/paengi/issues/35) | M3 Deferred | created |
+| M3-D03 | [#35](https://github.com/gongahkia/paengi/issues/35) | M3 Deferred | implemented; verified by versioned host evidence, guarded restores, and seeded benchmark properties |
 | M3-D04 | [#37](https://github.com/gongahkia/paengi/issues/37) | M3 Deferred | created |
 | M6-D01 | [#39](https://github.com/gongahkia/paengi/issues/39) | M6 Deferred | created |
 | M8-01 | [#44](https://github.com/gongahkia/paengi/issues/44) | M8 Git Bridge | created |

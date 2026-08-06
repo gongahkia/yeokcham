@@ -20,7 +20,11 @@ type sample = {
   restored_pinned_target : bool;
 }
 
-type policy_result = { policy : policy; samples : sample list; restore : timing }
+type policy_result = {
+  policy : policy;
+  samples : sample list;
+  restore : timing;
+}
 
 type environment = {
   os : string;
