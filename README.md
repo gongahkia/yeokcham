@@ -123,6 +123,12 @@ caller-owned and is never stored. An explicit bounded registry may resolve an
 already verified event to one declaration, unmapped, or ambiguous; it does not
 make a key trusted, update a ref, rotate/revoke a key, or identify a person.
 
+M10 local synchronisation requires no central service: two local repositories
+can exchange caller-declared immutable objects directly, or carry caller-keyed
+ADR-042 bundles through a local shared directory. These paths do not establish
+peer identity, availability, authorisation, key recovery, ref synchronisation,
+or replay protection; callers retain explicit trust and reconciliation choices.
+
 M10-04 adds bounded local HTTP/1.1 transfer for ADR-038 frames. It validates
 one exact frame per POST, reoffers immutable IDs after interruption, and
 publishes only verified objects; HTTP transfer leaves refs, trust, device

@@ -47,8 +47,8 @@ Each migrated issue has an immutable hidden marker, `<!-- paengi-todo-id: ID -->
 | M10-07 | [#7](https://github.com/gongahkia/paengi/issues/7) | M10 Local Synchronisation | implemented; verified by two-device integration and seeded restart properties |
 | M10-08 | [#8](https://github.com/gongahkia/paengi/issues/8) | M10 Local Synchronisation | implemented; verified by ADR-043 directory fixtures and seeded properties |
 | M10-09 | [#9](https://github.com/gongahkia/paengi/issues/9) | M10 Local Synchronisation | implemented; verified by deterministic missing-only exchange and seeded properties |
-| M10-10 | [#10](https://github.com/gongahkia/paengi/issues/10) | M10 Local Synchronisation | created |
-| M10-11 | [#11](https://github.com/gongahkia/paengi/issues/11) | M10 Local Synchronisation | created |
+| M10-10 | [#10](https://github.com/gongahkia/paengi/issues/10) | M10 Local Synchronisation | implemented; verified by workspace/release divergence fixtures |
+| M10-11 | [#11](https://github.com/gongahkia/paengi/issues/11) | M10 Local Synchronisation | implementation in progress |
 | M11-01 | [#12](https://github.com/gongahkia/paengi/issues/12) | M11 Demonstration and Reporting | created |
 | M11-02 | [#13](https://github.com/gongahkia/paengi/issues/13) | M11 Demonstration and Reporting | created |
 | M11-03 | [#14](https://github.com/gongahkia/paengi/issues/14) | M11 Demonstration and Reporting | created |

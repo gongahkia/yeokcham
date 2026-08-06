@@ -773,6 +773,12 @@ complete validation and ADR-020 create-only publication. It has no directory
 cursor, repair, deletion, watcher, service, ref/binding/trust/device mutation,
 CLI, or key-source convention.
 
+M10-11 documents the supported decentralised boundary: local in-process/TCP
+exchange and caller-selected shared-directory bundles run with two repositories
+and no central service. Neither path supplies peer identity, availability,
+authorisation, key recovery, replay protection, ref synchronisation, or
+automatic reconciliation; those remain caller-held or future decisions.
+
 Future layers require separate decisions:
 
 - Signed ref or operation events.
