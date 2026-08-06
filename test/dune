@@ -257,6 +257,23 @@
   unix))
 
 (test
+ (name test_workspace_release_divergence)
+ (modules test_workspace_release_divergence)
+ (libraries
+  alcotest
+  mirage-crypto-ec
+  paengi_divergence
+  paengi_divergence_store
+  paengi_encoding
+  paengi_envelope
+  paengi_exchange
+  paengi_exchange_store
+  paengi_ref_event
+  paengi_ref_event_store
+  paengi_store
+  unix))
+
+(test
  (name test_two_device_sync)
  (modules test_two_device_sync)
  (libraries
