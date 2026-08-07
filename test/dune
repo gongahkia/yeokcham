@@ -138,7 +138,47 @@
 (test
  (name test_store)
  (modules test_store)
- (libraries alcotest yeokcham_encoding yeokcham_envelope yeokcham_store unix))
+ (libraries alcotest yeokcham_encoding yeokcham_envelope yeokcham_store unix)
+ (deps
+  (source_tree golden)))
+
+(test
+ (name v2_root_property_test)
+ (modules v2_root_property_test)
+ (libraries alcotest qcheck-core qcheck-alcotest yeokcham_store unix))
+
+(test
+ (name v2_model_test)
+ (modules v2_model_test)
+ (libraries alcotest qcheck-core qcheck-alcotest yeokcham_v2_model))
+
+(test
+ (name test_v2_envelope)
+ (modules test_v2_envelope)
+ (libraries
+  alcotest
+  mirage-crypto
+  qcheck-core
+  qcheck-alcotest
+  yeokcham_encoding
+  yeokcham_testkit
+  yeokcham_v2_envelope)
+ (deps
+  (source_tree golden)))
+
+(test
+ (name test_v2_address)
+ (modules test_v2_address)
+ (libraries
+  alcotest
+  qcheck-core
+  qcheck-alcotest
+  yeokcham_testkit
+  yeokcham_v2_address
+  yeokcham_v2_envelope
+  yeokcham_v2_model)
+ (deps
+  (source_tree golden)))
 
 (test
  (name test_exchange)
@@ -993,6 +1033,10 @@
   (:encoding_property_test encoding_property_test.exe)
   (:model_property_test model_property_test.exe)
   (:store_property_test store_property_test.exe)
+  (:v2_root_property_test v2_root_property_test.exe)
+  (:v2_model_test v2_model_test.exe)
+  (:test_v2_envelope test_v2_envelope.exe)
+  (:test_v2_address test_v2_address.exe)
   (:exchange_property_test exchange_property_test.exe)
   (:ref_event_property_test ref_event_property_test.exe)
   (:device_property_test device_property_test.exe)

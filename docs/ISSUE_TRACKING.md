@@ -19,6 +19,18 @@ criteria and verification evidence are complete. Architecture and
 `needs-decision` blockers require approval before dependent implementation
 begins.
 
+## V2 programme
+
+The approved V2 programme is represented by the 110 atomic issues
+[#123](https://github.com/gongahkia/yeokcham/issues/123) through
+[#232](https://github.com/gongahkia/yeokcham/issues/232), distributed across
+the V2-00 through V2-09 milestones. Every one has a unique
+`<!-- yeokcham-todo-id: V2-NNN -->` marker. This document does not duplicate
+their live status, dependencies, or acceptance evidence; use GitHub for those
+fields. Issue [#122](https://github.com/gongahkia/yeokcham/issues/122) remains
+the separate hosted-CI recovery gate and must remain open until its stated
+successful `main` workflow evidence exists.
+
 ## Migration map
 
 | Former TODO ID | GitHub issue | Milestone | Disposition |

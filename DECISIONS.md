@@ -155,3 +155,5 @@ The ADR lifecycle, numbering rules, and template are defined in [`docs/adr/READM
 - [ADR-042 — Encrypted offline object bundles](docs/adr/042-encrypted-offline-object-bundles.md) — Accepted.
 - [ADR-043 — Shared-directory encrypted bundle workflow](docs/adr/043-shared-directory-encrypted-bundle-workflow.md) — Accepted.
 - [ADR-044 — Inspectable repository operations and exact durable retargeting](docs/adr/044-inspection-and-exact-durable-retargeting.md) — Accepted.
+- [ADR-045 — V2 canonical encrypted-object envelope](docs/adr/045-v2-canonical-encrypted-object-envelope.md) — Accepted.
+- [ADR-046 — V2 keyed opaque object addresses](docs/adr/046-v2-keyed-opaque-object-addresses.md) — Accepted.

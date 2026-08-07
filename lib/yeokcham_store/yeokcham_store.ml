@@ -179,6 +179,7 @@ type repository = {
   objects : string;
   refs : string;
   locks : string;
+  journal : string;
 }
 
 type object_info = {
@@ -190,6 +191,7 @@ type object_info = {
 type error =
   | Root_not_directory of string
   | Repository_not_initialized of string
+  | Repository_incomplete of { path : string; required : string }
   | Incompatible_repository_format of string
   | Not_regular_file of string
   | Object_too_large of { path : string; size : int; limit : int }
@@ -224,6 +226,8 @@ let error_to_string = function
       Printf.sprintf "repository root is not a directory: %s" path
   | Repository_not_initialized path ->
       Printf.sprintf "repository is not initialized: %s" path
+  | Repository_incomplete { path; required } ->
+      Printf.sprintf "repository is incomplete: %s requires %s" path required
   | Incompatible_repository_format path ->
       Printf.sprintf "repository format is unsupported or corrupt: %s" path
   | Not_regular_file path -> Printf.sprintf "expected regular file: %s" path
@@ -280,6 +284,11 @@ let repository_format =
   ^ "stored-object-preimage envelope-1-domain-v1\n" ^ "envelope-version 1\n"
   ^ "object-format-version 1\n"
 
+let root_format =
+  "yeokcham-repository-root 2\n" ^ "root-layout-version 2\n"
+  ^ "required-directory objects\n" ^ "required-directory refs\n"
+  ^ "required-directory locks\n" ^ "required-directory journal\n"
+
 let max_object_bytes = 128 * 1024 * 1024
 let root repository = repository.root
 let object_domain = "yeokcham:object:v1\000"
@@ -288,6 +297,7 @@ let yeokcham_name = ".yeokcham"
 let objects_name = "objects"
 let refs_name = "refs"
 let locks_name = "locks"
+let journal_name = "journal"
 let ( let* ) = Result.bind
 
 let io_error operation path error =
@@ -434,24 +444,21 @@ let stored_object_id bytes =
 
 let stored_object_id_of_bytes bytes = stored_object_id bytes
 
-let repository_paths root =
-  let yeokcham = Filename.concat root yeokcham_name in
+let repository_paths_with_metadata ~root ~yeokcham =
   {
     root;
     yeokcham;
     objects = Filename.concat yeokcham objects_name;
     refs = Filename.concat yeokcham refs_name;
     locks = Filename.concat yeokcham locks_name;
+    journal = Filename.concat yeokcham journal_name;
   }
 
-let format_path repository = Filename.concat repository.yeokcham format_name
+let repository_paths root =
+  repository_paths_with_metadata ~root
+    ~yeokcham:(Filename.concat root yeokcham_name)
 
-let ensure_layout repository =
-  let* () = ensure_existing_directory repository.root in
-  let* () = ensure_directory repository.yeokcham in
-  let* () = ensure_directory repository.objects in
-  let* () = ensure_directory repository.refs in
-  ensure_directory repository.locks
+let format_path repository = Filename.concat repository.yeokcham format_name
 
 let temporary_path directory final_name attempt =
   Filename.concat directory
@@ -504,53 +511,161 @@ let finish_temporary ~directory temporary =
   let* () = unlink_if_present temporary in
   fsync_directory directory
 
-let ensure_repository_format repository =
+let write_repository_format repository =
+  let path = format_path repository in
+  let* temporary =
+    create_temporary repository.yeokcham format_name
+      (Bytes.of_string root_format)
+  in
+  let cleanup () =
+    match finish_temporary ~directory:repository.yeokcham temporary with
+    | Ok () | Error _ -> ()
+  in
+  match link_without_replace ~temporary ~final:path with
+  | Error error ->
+      cleanup ();
+      Error error
+  | Ok Already_exists ->
+      cleanup ();
+      Error (Incompatible_repository_format path)
+  | Ok Published -> (
+      match fsync_directory repository.yeokcham with
+      | Error error ->
+          cleanup ();
+          Error error
+      | Ok () -> finish_temporary ~directory:repository.yeokcham temporary)
+
+let require_directory ~missing path =
+  match lstat_or_missing path with
+  | Ok (Some stat) when stat.Unix.st_kind = Unix.S_DIR -> Ok ()
+  | Ok (Some _) -> Error (Root_not_directory path)
+  | Ok None -> Error missing
+  | Error error -> Error error
+
+let validate_repository_layout repository =
+  let* () = ensure_existing_directory repository.root in
+  let* () =
+    require_directory ~missing:(Repository_not_initialized repository.root)
+      repository.yeokcham
+  in
+  let* () =
+    require_directory
+      ~missing:
+        (Repository_incomplete
+           { path = repository.yeokcham; required = objects_name })
+      repository.objects
+  in
+  let* () =
+    require_directory
+      ~missing:
+        (Repository_incomplete
+           { path = repository.yeokcham; required = refs_name })
+      repository.refs
+  in
+  let* () =
+    require_directory
+      ~missing:
+        (Repository_incomplete
+           { path = repository.yeokcham; required = locks_name })
+      repository.locks
+  in
+  require_directory
+    ~missing:
+      (Repository_incomplete
+         { path = repository.yeokcham; required = journal_name })
+    repository.journal
+
+let validate_repository_format repository =
   let path = format_path repository in
   match lstat_or_missing path with
+  | Ok None ->
+      Error
+        (Repository_incomplete
+           { path = repository.yeokcham; required = format_name })
   | Ok (Some _) ->
       let* bytes = read_regular_file path in
-      if String.equal bytes repository_format then Ok ()
+      if String.equal bytes root_format then Ok ()
       else Error (Incompatible_repository_format path)
-  | Ok None -> (
-      let* temporary =
-        create_temporary repository.yeokcham format_name
-          (Bytes.of_string repository_format)
-      in
-      let result = link_without_replace ~temporary ~final:path in
-      match result with
-      | Error error -> Error error
-      | Ok Published ->
-          let* () = fsync_directory repository.yeokcham in
-          finish_temporary ~directory:repository.yeokcham temporary
-      | Ok Already_exists ->
-          let* () = finish_temporary ~directory:repository.yeokcham temporary in
-          let* bytes = read_regular_file path in
-          if String.equal bytes repository_format then Ok ()
-          else Error (Incompatible_repository_format path))
   | Error error -> Error error
+
+let staging_path root attempt =
+  Filename.concat root
+    (Printf.sprintf ".yeokcham-v2-init-%d-%d" (Unix.getpid ()) attempt)
+
+let create_staging_root root =
+  let rec attempt number =
+    if number = 128 then Error (Temporary_name_exhausted root)
+    else
+      let path = staging_path root number in
+      try
+        Unix.mkdir path 0o700;
+        Ok path
+      with
+      | Unix.Unix_error (Unix.EEXIST, _, _) -> attempt (number + 1)
+      | Unix.Unix_error (error, _, _) -> Error (io_error "mkdir" path error)
+  in
+  attempt 0
+
+let remove_staging_root repository =
+  ignore (unlink_if_present (format_path repository));
+  List.iter
+    (fun path -> try Unix.rmdir path with Unix.Unix_error _ -> ())
+    [
+      repository.objects; repository.refs; repository.locks; repository.journal;
+    ];
+  try Unix.rmdir repository.yeokcham with Unix.Unix_error _ -> ()
+
+let create_staged_layout repository =
+  let* () = ensure_directory repository.objects in
+  let* () = ensure_directory repository.refs in
+  let* () = ensure_directory repository.locks in
+  let* () = ensure_directory repository.journal in
+  let* () = write_repository_format repository in
+  let* () = fsync_directory repository.objects in
+  let* () = fsync_directory repository.refs in
+  let* () = fsync_directory repository.locks in
+  let* () = fsync_directory repository.journal in
+  fsync_directory repository.yeokcham
+
+let publish_staged_root ~repository ~staging =
+  match lstat_or_missing repository.yeokcham with
+  | Error error -> Error error
+  | Ok (Some _) -> Error (Repository_not_initialized repository.root)
+  | Ok None -> (
+      try
+        Unix.rename staging.yeokcham repository.yeokcham;
+        fsync_directory repository.root
+      with Unix.Unix_error (error, _, _) ->
+        Error (io_error "publish repository root" repository.yeokcham error))
 
 let init ~root =
   let repository = repository_paths root in
-  let* () = ensure_layout repository in
-  let* () = ensure_repository_format repository in
-  Ok repository
+  let* () = ensure_existing_directory root in
+  match lstat_or_missing repository.yeokcham with
+  | Error error -> Error error
+  | Ok (Some _) ->
+      let* () = validate_repository_layout repository in
+      let* () = validate_repository_format repository in
+      Ok repository
+  | Ok None -> (
+      let* staging_path = create_staging_root root in
+      let staging =
+        repository_paths_with_metadata ~root ~yeokcham:staging_path
+      in
+      let result =
+        let* () = create_staged_layout staging in
+        publish_staged_root ~repository ~staging
+      in
+      match result with
+      | Ok () -> Ok repository
+      | Error error ->
+          remove_staging_root staging;
+          Error error)
 
 let open_repository ~root =
   let repository = repository_paths root in
-  let* () = ensure_existing_directory repository.root in
-  let* () =
-    match lstat_or_missing repository.yeokcham with
-    | Ok (Some stat) when stat.Unix.st_kind = Unix.S_DIR -> Ok ()
-    | Ok (Some _) | Ok None | Error _ -> Error (Repository_not_initialized root)
-  in
-  let* () =
-    match lstat_or_missing repository.objects with
-    | Ok (Some stat) when stat.Unix.st_kind = Unix.S_DIR -> Ok ()
-    | Ok (Some _) | Ok None | Error _ -> Error (Repository_not_initialized root)
-  in
-  let* () = ensure_directory repository.refs in
-  let* () = ensure_directory repository.locks in
-  let* () = ensure_repository_format repository in
+  let* () = validate_repository_layout repository in
+  let* () = validate_repository_format repository in
   Ok repository
 
 let object_path repository id =

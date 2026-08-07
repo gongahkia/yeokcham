@@ -33,6 +33,7 @@ type object_info = {
 type error =
   | Root_not_directory of string
   | Repository_not_initialized of string
+  | Repository_incomplete of { path : string; required : string }
   | Incompatible_repository_format of string
   | Not_regular_file of string
   | Object_too_large of { path : string; size : int; limit : int }
@@ -76,6 +77,7 @@ end
 
 val error_to_string : error -> string
 val repository_format : string
+val root_format : string
 val max_object_bytes : int
 val root : repository -> string
 val init : root:string -> (repository, error) result

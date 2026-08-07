@@ -42,6 +42,26 @@ let with_repository run =
       | Ok repository -> run root repository
       | Error error -> Alcotest.fail (Store.error_to_string error))
 
+let with_empty_root run =
+  let root = Filename.temp_file "yeokcham-store-empty-" "" in
+  Unix.unlink root;
+  Unix.mkdir root 0o700;
+  Fun.protect ~finally:(fun () -> remove_tree root) (fun () -> run root)
+
+let metadata_path root = Filename.concat root ".yeokcham"
+
+let write_v2_layout root ~format ~directories =
+  let metadata = metadata_path root in
+  Unix.mkdir metadata 0o700;
+  List.iter
+    (fun name -> Unix.mkdir (Filename.concat metadata name) 0o700)
+    directories;
+  write_file (Filename.concat metadata "format") format
+
+let require_store_error description = function
+  | Ok _ -> Alcotest.fail (description ^ " was accepted")
+  | Error error -> error
+
 let typed_ids_are_canonical () =
   let lower = String.make 64 'a' in
   let id =
@@ -68,12 +88,90 @@ let typed_ids_are_canonical () =
         (Store.Stored_object_id.parse_error_to_string error)
   | Ok _ -> Alcotest.fail "uppercase ID was accepted"
 
-let init_writes_exact_format () =
+let init_writes_complete_v2_root () =
   with_repository (fun root _ ->
       Alcotest.(check string)
-        "repository format" Store.repository_format
-        (read_file
-           (Filename.concat (Filename.concat root ".yeokcham") "format")))
+        "v2 root golden format"
+        (read_file "golden/repository-root-v2.format")
+        (read_file (Filename.concat (metadata_path root) "format"));
+      List.iter
+        (fun name ->
+          Alcotest.(check bool)
+            ("required root entry exists: " ^ name)
+            true
+            (Sys.file_exists (Filename.concat (metadata_path root) name)))
+        [ "objects"; "refs"; "locks"; "journal" ];
+      Alcotest.(check bool)
+        "staging root is not left behind" false
+        (Sys.readdir root
+        |> Array.exists (String.starts_with ~prefix:".yeokcham-v2-init-")))
+
+let missing_malformed_and_unknown_roots_are_rejected () =
+  with_empty_root (fun root ->
+      let missing =
+        require_store_error "missing metadata root"
+          (Store.open_repository ~root)
+      in
+      ((match missing with
+      | Store.Repository_not_initialized path ->
+          Alcotest.(check string) "missing metadata root" root path
+      | _ ->
+          Alcotest.fail
+            ("wrong missing-root error: " ^ Store.error_to_string missing))
+      [@warning "-4"]);
+      write_v2_layout root ~format:"yeokcham-repository-root 2\n"
+        ~directories:[ "objects"; "refs"; "locks"; "journal" ];
+      let malformed =
+        require_store_error "malformed v2 format" (Store.open_repository ~root)
+      in
+      (match malformed with
+      | Store.Incompatible_repository_format _ -> ()
+      | _ ->
+          Alcotest.fail
+            ("wrong malformed-format error: " ^ Store.error_to_string malformed))
+      [@warning "-4"]);
+  with_empty_root (fun root ->
+      write_v2_layout root
+        ~format:
+          (String.map
+             (fun character -> if character = '2' then '3' else character)
+             Store.root_format)
+        ~directories:[ "objects"; "refs"; "locks"; "journal" ];
+      let unknown =
+        require_store_error "unknown root format version"
+          (Store.open_repository ~root)
+      in
+      (match unknown with
+      | Store.Incompatible_repository_format _ -> ()
+      | _ ->
+          Alcotest.fail
+            ("wrong unknown-version error: " ^ Store.error_to_string unknown))
+      [@warning "-4"])
+
+let incomplete_root_is_rejected_without_repair () =
+  with_empty_root (fun root ->
+      write_v2_layout root ~format:Store.root_format
+        ~directories:[ "objects"; "refs"; "locks" ];
+      let expect_incomplete result =
+        let error = require_store_error "incomplete root" result in
+        (match error with
+        | Store.Repository_incomplete { path; required } ->
+            Alcotest.(check string)
+              "incomplete root path" (metadata_path root) path;
+            Alcotest.(check string) "missing required entry" "journal" required
+        | _ ->
+            Alcotest.fail
+              ("wrong incomplete-root error: " ^ Store.error_to_string error))
+        [@warning "-4"]
+      in
+      expect_incomplete (Store.open_repository ~root);
+      Alcotest.(check bool)
+        "open does not repair missing journal" false
+        (Sys.file_exists (Filename.concat (metadata_path root) "journal"));
+      expect_incomplete (Store.init ~root);
+      Alcotest.(check bool)
+        "init does not repair missing journal" false
+        (Sys.file_exists (Filename.concat (metadata_path root) "journal")))
 
 let round_trip_is_idempotent_and_restart_safe () =
   with_repository (fun root repository ->
@@ -195,8 +293,12 @@ let () =
         [
           Alcotest.test_case "typed IDs are canonical" `Quick
             typed_ids_are_canonical;
-          Alcotest.test_case "init writes exact repository format" `Quick
-            init_writes_exact_format;
+          Alcotest.test_case "init writes a complete v2 root" `Quick
+            init_writes_complete_v2_root;
+          Alcotest.test_case "missing, malformed, and unknown roots reject"
+            `Quick missing_malformed_and_unknown_roots_are_rejected;
+          Alcotest.test_case "incomplete root rejects without repair" `Quick
+            incomplete_root_is_rejected_without_repair;
           Alcotest.test_case "put is idempotent and survives reopen" `Quick
             round_trip_is_idempotent_and_restart_safe;
           Alcotest.test_case "stale temporary is ignored on reopen" `Quick

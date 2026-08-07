@@ -1064,6 +1064,7 @@ let publish_binding store (binding : binding) =
           | Store.Concurrent_ref_file_update _ ->
               Conflicting_release_id_reuse binding.release
           | Store.Root_not_directory _ | Store.Repository_not_initialized _
+          | Store.Repository_incomplete _
           | Store.Incompatible_repository_format _ | Store.Not_regular_file _
           | Store.Object_too_large _ | Store.File_size_changed _
           | Store.Io_error _ | Store.Object_identity_mismatch _
