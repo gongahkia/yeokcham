@@ -724,6 +724,12 @@
   yeokcham_store
   unix))
 
+(rule
+ (alias runtest)
+ (deps ../bin/yeokcham.exe)
+ (action
+  (run %{exe:../bin/yeokcham.exe} --help)))
+
 (test
  (name scratch_property_test)
  (modules scratch_property_test)

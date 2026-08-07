@@ -88,7 +88,9 @@ A persistent object representing an application ambiguity or incompatibility.
 
 ### Release
 
-An immutable, signed, reproducible snapshot with a declared capsule composition.
+An immutable, reproducible snapshot with a declared capsule composition.
+Production release signing is deferred; the current deterministic attestation is
+test-only and does not authenticate a release.
 
 ### Semantic sidecar
 

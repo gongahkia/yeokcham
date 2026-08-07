@@ -374,14 +374,15 @@ Yeokcham is a local VCS and persistent-data-model project. Its tests cover repos
 5. `DECISIONS.md`
 6. `RESEARCH_QUESTIONS.md`
 7. `TESTING_AND_EXPERIMENTS.md`
-8. `docs/ISSUE_TRACKING.md` and the linked open GitHub issue
+8. `docs/ISSUE_TRACKING.md` and any GitHub issue selected for the task
 9. `AGENTS.md`
-10. `CODEX_PROMPT.md`
 
-## First implementation target
+## Historical foundation
 
-The first end-to-end milestone is:
+The original end-to-end foundation, now complete, was:
 
 > Observe a directory, create automatic scratch checkpoints, restore any checkpoint exactly, compact an unpinned checkpoint sequence without changing retained states, and prove those properties with generated tests.
 
-Do not start with semantic merging, Git import, distributed sync, a graphical UI, or multiple languages.
+It established the ordering constraint that protected the model before later
+semantic, Git, synchronisation, UI, and language-adapter work. Consult the
+current GitHub issue tracker and the Status section above for current scope.

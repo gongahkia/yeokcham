@@ -1887,17 +1887,20 @@ let git root arguments =
                 result.Git.revision_export_target_ref))
   | _ -> exit 2
 
-let usage () =
-  prerr_endline
+let usage ?(status = 2) () =
+  let message =
     "usage: yeokcham \
      <init|status|checkpoint|timeline|restore|pin|unpin|compact|watch|capsule|work|conflict|validation|release|storage|verify|git> \
-     [--root PATH] ...";
-  exit 2
+     [--root PATH] ..."
+  in
+  if status = 0 then print_endline message else prerr_endline message;
+  exit status
 
 let () =
   Sys.catch_break true;
   try
     match Array.to_list Sys.argv with
+    | [ _; ("--help" | "-h" | "help") ] -> usage ~status:0 ()
     | _ :: command :: arguments -> (
         let root, arguments = parse_root arguments in
         match command with

@@ -1,8 +1,23 @@
 # GitHub issue tracking
 
-GitHub Issues is Yeokcham’s authoritative backlog: [open issues](https://github.com/gongahkia/yeokcham/issues). To inspect it locally, run `gh issue list --repo gongahkia/yeokcham --state open`.
+GitHub Issues is Yeokcham’s authoritative historical migration record and future
+backlog. Live state is intentionally not duplicated here: inspect it with
+`gh issue list --repo gongahkia/yeokcham --state open` or the
+[issue tracker](https://github.com/gongahkia/yeokcham/issues). At the 2026-08-07
+audit baseline, all 120 then-existing issues were closed; later work may create
+new issues, so that count is evidence rather than a standing claim.
 
-Each migrated issue has an immutable hidden marker, `<!-- yeokcham-todo-id: ID -->`, linking it to the former backlog entry. Do not reuse a marker. Implementation agents must select an open issue only after inspecting its body, labels, milestone, and GitHub blocking relationships. Close or update that issue only when its acceptance criteria and verification evidence are complete. Architecture and `needs-decision` blockers require approval before dependent implementation begins.
+Historical migrated issues retain their immutable hidden
+`<!-- paengi-todo-id: ID -->` marker, including [#44](https://github.com/gongahkia/yeokcham/issues/44).
+Native Yeokcham follow-up issues use `<!-- yeokcham-todo-id: ID -->`; [#120](https://github.com/gongahkia/yeokcham/issues/120)
+is the first such record. Issue [#119](https://github.com/gongahkia/yeokcham/issues/119)
+predates that convention and has no marker. Do not rewrite, reuse, or infer a
+marker; inspect the issue body when a precise linkage matters. Implementation
+agents must inspect an issue’s body, labels, milestone, and GitHub blocking
+relationships before selecting it. Close or update it only after its acceptance
+criteria and verification evidence are complete. Architecture and
+`needs-decision` blockers require approval before dependent implementation
+begins.
 
 ## Migration map
 
@@ -13,11 +28,11 @@ Each migrated issue has an immutable hidden marker, `<!-- yeokcham-todo-id: ID -
 | M3-D03 | [#35](https://github.com/gongahkia/yeokcham/issues/35) | M3 Deferred | implemented; verified by versioned host evidence, guarded restores, and seeded benchmark properties |
 | M3-D04 | [#37](https://github.com/gongahkia/yeokcham/issues/37) | M3 Deferred | implemented; verified by linked versioned evidence, retained-pin restores, and seeded benchmark properties |
 | M6-D01 | [#39](https://github.com/gongahkia/yeokcham/issues/39) | M6 Deferred | implemented; verified by passed-evidence restart/compaction coverage, structured failure cases, and seeded policy properties |
-| M8-01 | [#44](https://github.com/gongahkia/yeokcham/issues/44) | M8 Git Bridge | created |
+| M8-01 | [#44](https://github.com/gongahkia/yeokcham/issues/44) | M8 Git Bridge | closed; consult the issue for its historical acceptance evidence |
 | M8-02 | [#47](https://github.com/gongahkia/yeokcham/issues/47) | M8 Git Bridge | implemented; verified |
 | M8-03 | [#49](https://github.com/gongahkia/yeokcham/issues/49) | M8 Git Bridge | implemented; verified |
 | M8-04 | [#51](https://github.com/gongahkia/yeokcham/issues/51) | M8 Git Bridge | implemented; verified |
-| M8-05 | [#42](https://github.com/gongahkia/yeokcham/issues/42) | M8 Git Bridge | created |
+| M8-05 | [#42](https://github.com/gongahkia/yeokcham/issues/42) | M8 Git Bridge | closed; consult the issue for its historical acceptance evidence |
 | M8-06 | [#55](https://github.com/gongahkia/yeokcham/issues/55) | M8 Git Bridge | implemented; verified |
 | M8-07 | [#58](https://github.com/gongahkia/yeokcham/issues/58) | M8 Git Bridge | implemented; verified |
 | M8-08 | [#62](https://github.com/gongahkia/yeokcham/issues/62) | M8 Git Bridge | implemented; verified |
@@ -62,7 +77,14 @@ Each migrated issue has an immutable hidden marker, `<!-- yeokcham-todo-id: ID -
 | M11-11 | [#100](https://github.com/gongahkia/yeokcham/issues/100) | M11 Demonstration and Reporting | implemented; verified by source-labelled comparative-report and Git-export fixture coverage |
 | M11-12 | [#103](https://github.com/gongahkia/yeokcham/issues/103) | M11 Demonstration and Reporting | implemented; verified by architecture-boundary report and Git-export fixture coverage |
 | M12-01 | [#120](https://github.com/gongahkia/yeokcham/issues/120) | M12 Inspectable CLI and durable capsule operations | implemented; verified by read-only inspection, durable-retarget conflict/reopen, stale-publication inventory, seeded state-machine, and full repository checks |
+| M12-02 | [#121](https://github.com/gongahkia/yeokcham/issues/121) | M12 Maintenance and documentation reconciliation | implemented; verified by live GitHub reconciliation, CLI help exit checks, project checks, and workflow lint |
 
 ## Migration verification
 
-The former `TODO.md` had 53 unchecked actionable items: all map one-to-one to the 53 open primary issues above. No source item was stale, deduplicated, or split. During remote migration, 65 duplicate issue artifacts caused by interrupted replay were marked GitHub duplicates of their canonical issue and closed; they are not backlog items. This is the documented deviation from 53 total created issue records.
+The former `TODO.md` had 53 unchecked actionable items: all map one-to-one to
+the 53 primary issues above. The table records migration linkage and disposition,
+not live issue state; consult GitHub for the latter. No source item was stale,
+deduplicated, or split. During remote migration, 65 duplicate issue artifacts
+caused by interrupted replay were marked GitHub duplicates of their canonical
+issue and closed; they are not backlog items. This is the documented deviation
+from 53 total created issue records.

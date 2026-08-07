@@ -103,7 +103,9 @@ Acceptance condition: no ambiguous transformation is silently treated as certain
 3. Yeokcham materialises the exact snapshot.
 4. Configured validation commands run.
 5. Yeokcham records test evidence.
-6. Yeokcham creates an immutable signed release.
+6. Yeokcham creates an immutable reproducible release. Production release
+   signing remains a later FR-021 capability; the current deterministic
+   test-only attestation does not sign a release.
 
 Acceptance condition: release snapshot is reproducible from stored objects and declared composition.
 
