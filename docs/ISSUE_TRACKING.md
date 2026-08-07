@@ -78,6 +78,7 @@ begins.
 | M11-12 | [#103](https://github.com/gongahkia/yeokcham/issues/103) | M11 Demonstration and Reporting | implemented; verified by architecture-boundary report and Git-export fixture coverage |
 | M12-01 | [#120](https://github.com/gongahkia/yeokcham/issues/120) | M12 Inspectable CLI and durable capsule operations | implemented; verified by read-only inspection, durable-retarget conflict/reopen, stale-publication inventory, seeded state-machine, and full repository checks |
 | M12-02 | [#121](https://github.com/gongahkia/yeokcham/issues/121) | M12 Maintenance and documentation reconciliation | implemented; verified by live GitHub reconciliation, CLI help exit checks, project checks, and workflow lint |
+| M12-03 | [#122](https://github.com/gongahkia/yeokcham/issues/122) | M12 Hosted CI recovery gate | open; closes only after a new successful GitHub Actions CI run on `main` is recorded |
 
 ## Migration verification
 
