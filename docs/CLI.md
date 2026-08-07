@@ -1,0 +1,192 @@
+# Yeokcham CLI reference
+
+This document describes the implemented local command surface. It is a guide to
+the current prototype, not a compatibility promise or a replacement for the
+model and persistence contracts.
+
+Run commands from the repository root or pass `--root PATH` where the command
+accepts it:
+
+```sh
+dune exec bin/yeokcham.exe -- --help
+```
+
+The top-level help output is the authoritative list of command groups. All
+commands either publish a checked immutable result through their documented
+boundary or return a structured failure; they do not silently fabricate history.
+
+## Complete command forms
+
+The following forms cover the current local command surface. Square brackets
+are optional arguments; placeholders are supplied by the caller.
+
+```text
+init
+status
+checkpoint
+timeline --limit <count>
+restore [--dry-run] <checkpoint-id>
+pin <checkpoint-id>
+unpin <checkpoint-id>
+compact [--dry-run] [--explain] [--resume] [--prune]
+watch --interval-ms <milliseconds> --debounce-ms <milliseconds>
+
+capsule create --current --id <capsule-id> --title <title> --description <description> [--requires-capsule <capsule-id>] [--requires-revision <capsule-id>:<revision-id>] [--requires-release <release-id>] [--conflicts-with <capsule-id>] [--ordered-after <capsule-id>]
+capsule list
+capsule edit <capsule-id>
+capsule fold <capsule-id> --from <editing-anchor> --to <checkpoint-id>
+capsule retarget <capsule-id> --onto <snapshot-id>
+capsule split <capsule-id> --left-id <capsule-id> --left-title <title> --left-description <description> --right-id <capsule-id> --right-title <title> --right-description <description> --left-indices <indices> --confirm
+capsule combine --id <capsule-id> --title <title> --description <description> --source <capsule-id> --source <capsule-id> --confirm
+capsule show <capsule-id>
+capsule current-diff <capsule-id>
+capsule history <capsule-id>
+
+work explain-order --enable <capsule-id> --enable <capsule-id> [--order <revision-id>,<revision-id>]
+work create --id <workspace-id> --base <snapshot-id> [--name <name>] [--description <description>]
+work show <workspace-id>
+work enable <workspace-id> <capsule-revision-id>
+work disable <workspace-id> <capsule-id>
+work reorder <workspace-id> --order <revision-id>,<revision-id>
+work explain-order <workspace-id>
+work materialise <workspace-id> [--dry-run]
+conflict list <workspace-id>
+conflict show <conflict-id>
+conflict resolve <workspace-id> <conflict-id> --action skip
+
+validation run --snapshot <snapshot-id> --exec <program> [--arg <argument>] [--cwd <relative-path>] [--timeout-ms <milliseconds>] [--max-stdout-bytes <bytes>] [--max-stderr-bytes <bytes>] [--env <name=value>] [--inherit-env] [--retain-output] [--retain-passing-checkpoints]
+release create --workspace <workspace-id> [--parent <release-id>] [--message <text>] [--validation-exec <program> [--validation-arg <argument>] [--validation-cwd <relative-path>] [--validation-timeout-ms <milliseconds>] [--validation-max-stdout-bytes <bytes>] [--validation-max-stderr-bytes <bytes>] [--validation-env <name=value>] [--validation-inherit-env] [--validation-retain-output]]
+release show <release-id>
+release verify <release-id>
+release list
+storage stats
+verify
+
+git import tree --repository <absolute-git-directory> --tree <full-git-tree-id>
+git import commit --repository <absolute-git-directory> --commit <full-git-commit-id>
+git import tag --repository <absolute-git-directory> --tag <name>
+git export release --repository <absolute-git-directory> --release <release-id> [--author-name <name> --author-email <email> --committer-name <name> --committer-email <email> --message <message>]
+git export revisions --repository <absolute-git-directory> --revision <capsule-id>:<revision-id>:<stored-object-id> [--revision <capsule-id>:<revision-id>:<stored-object-id> ...]
+```
+
+## Inspect a repository
+
+```sh
+dune exec bin/yeokcham.exe -- status
+dune exec bin/yeokcham.exe -- timeline --limit 32
+dune exec bin/yeokcham.exe -- storage stats
+dune exec bin/yeokcham.exe -- verify
+```
+
+`status` reports the current local repository state. `timeline` includes each
+checkpoint’s timestamp, changed paths, materialised content-byte total,
+retention-derived tags, validation state, and retention reasons. `storage stats`
+groups on-disk object bytes by storage domain; retained checkpoint bytes are a
+separate non-additive physical-storage subtotal. `verify` reads and hash-verifies
+stored objects, reachability, capsule revisions and declared dependencies,
+workspaces, and releases. Inspection commands do not repair or mutate state.
+
+## Recover scratch work
+
+```sh
+dune exec bin/yeokcham.exe -- init
+dune exec bin/yeokcham.exe -- checkpoint
+dune exec bin/yeokcham.exe -- pin <checkpoint-id>
+dune exec bin/yeokcham.exe -- unpin <checkpoint-id>
+dune exec bin/yeokcham.exe -- restore --dry-run <checkpoint-id>
+dune exec bin/yeokcham.exe -- restore <checkpoint-id>
+dune exec bin/yeokcham.exe -- compact --dry-run --explain
+dune exec bin/yeokcham.exe -- compact --explain
+```
+
+`restore` safety-checkpoints divergent work, validates its plan immediately
+before application, and moves `scratch-head` only after exact result
+verification. It is not crash-atomic for a populated working directory: after a
+reported partial failure, restore the reported safety checkpoint.
+
+Compaction retains logical checkpoint IDs while an active generation maps them
+to verified physical records. `compact --dry-run --explain` prints the planned
+cleanup IDs and stored-object bytes. `compact --prune` permanently removes a
+previous generation’s quarantined history and is irreversible. The compaction
+contract, budget meaning, and inverse reduction are documented in
+[compaction inverses](COMPACTION_INVERSES.md),
+[compaction budget](COMPACTION_BUDGET.md), and
+[validation retention](VALIDATION_RETENTION.md).
+
+## Curate capsules and compose workspaces
+
+```sh
+dune exec bin/yeokcham.exe -- capsule create --current --id <capsule-id> --title <title> --description <description>
+dune exec bin/yeokcham.exe -- capsule list
+dune exec bin/yeokcham.exe -- capsule show <capsule-id>
+dune exec bin/yeokcham.exe -- capsule history <capsule-id>
+dune exec bin/yeokcham.exe -- capsule retarget <capsule-id> --onto <snapshot-id>
+dune exec bin/yeokcham.exe -- work create --id <workspace-id> --base <snapshot-id>
+dune exec bin/yeokcham.exe -- work enable <workspace-id> <capsule-revision-id>
+dune exec bin/yeokcham.exe -- work explain-order <workspace-id>
+dune exec bin/yeokcham.exe -- work materialise <workspace-id> --dry-run
+dune exec bin/yeokcham.exe -- conflict list <workspace-id>
+```
+
+Capsules have a stable caller-supplied ID, immutable revisions, and explicit
+dependencies. `capsule create` also accepts `--requires-capsule`,
+`--requires-revision`, `--requires-release`, `--conflicts-with`, and
+`--ordered-after` declarations. Creating a capsule from an unchanged snapshot
+returns `no-changes` without publication.
+
+Exact `capsule retarget` replays the current complete revision on the selected
+snapshot. On success it CAS-publishes a new immutable revision with provenance;
+on conflict it leaves the current capsule ref unchanged. Semantic adapters are
+not used by this command.
+
+Workspace selection stores exact physical revision objects. Materialisation
+creates a complete or partial immutable attempt. Conflicts remain inspectable;
+the only v1 resolution is `conflict resolve <workspace-id> <conflict-id> --action
+skip`, which never guesses content, modes, or paths. The capsule, workspace,
+and conflict demos show the full workflow:
+[capsules](DEMO_CAPSULE.md), [workspaces](DEMO_WORKSPACE.md), and
+[conflicts](DEMO_CONFLICT.md).
+
+## Validate and release
+
+```sh
+dune exec bin/yeokcham.exe -- validation run --snapshot <snapshot-id> --exec <program>
+dune exec bin/yeokcham.exe -- release create --workspace <workspace-id>
+dune exec bin/yeokcham.exe -- release show <release-id>
+dune exec bin/yeokcham.exe -- release verify <release-id>
+dune exec bin/yeokcham.exe -- release list
+```
+
+Validation materialises only the named immutable snapshot in a fresh temporary
+directory before direct-argv execution. Output and execution are bounded;
+captured evidence is immutable. It never validates the live working directory
+or advances a canonical ref.
+
+Release creation replays the current workspace inputs, rejects unresolved
+conflicts, runs required validation, and publishes through a create-only
+binding. Production release signing is deferred. The only included signer is a
+deterministic test helper and does not authenticate releases. See
+[ADR-027](adr/027-validation-evidence-releases-and-attestations.md) and the
+[release demo](DEMO_RELEASE.md).
+
+## Git interchange
+
+```sh
+dune exec bin/yeokcham.exe -- git import tree --repository <absolute-git-directory> --tree <full-git-tree-id>
+dune exec bin/yeokcham.exe -- git import commit --repository <absolute-git-directory> --commit <full-git-commit-id>
+dune exec bin/yeokcham.exe -- git import tag --repository <absolute-git-directory> --tag <name>
+dune exec bin/yeokcham.exe -- git export release --repository <absolute-git-directory> --release <release-id>
+dune exec bin/yeokcham.exe -- git export revisions --repository <absolute-git-directory> --revision <capsule-id>:<revision-id>:<stored-object-id>
+```
+
+The bridge uses one absolute local Git repository, bounded direct argv, and a
+documented subset of Git representations. Import preserves supported snapshot
+bytes and opaque provenance; it does not infer a Yeokcham capsule, workspace,
+or release. Export uses create-only refs and records a mapping only after both
+sides validate. Full supported and rejected behaviour is in the
+[Git interchange contract](GIT_INTERCHANGE.md).
+
+## Further reading
+
+For model boundaries, use the [architecture walkthrough](ARCHITECTURE_WALKTHROUGH.md).
+For all project documentation, return to the [documentation index](README.md).
