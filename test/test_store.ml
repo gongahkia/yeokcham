@@ -137,7 +137,14 @@ let stale_temporary_is_ignored_on_reopen () =
       | Ok actual ->
           Alcotest.(check string)
             "published bytes survive stale temporary" (Envelope.encode envelope)
-            (Envelope.encode actual)
+            (Envelope.encode actual);
+          let inventory =
+            Store.list_objects reopened |> function
+            | Ok entries -> entries
+            | Error error -> Alcotest.fail (Store.error_to_string error)
+          in
+          Alcotest.(check int)
+            "stale temporary is not an object" 1 (List.length inventory)
       | Error error -> Alcotest.fail (Store.error_to_string error))
 
 let corruption_and_divergence_are_explicit () =

@@ -61,6 +61,13 @@ objects, CAS-protected current refs, exact replay validation, pinned scratch
 boundaries, and split/combine replay checks. Milestone 3 has retained-ID scratch
 compaction: immutable compacted generations shorten retained replay chains and
 quarantine superseded scratch records.
+M12 completes the local inspection surface: `status`, enriched `timeline`,
+repository-wide `verify`, and `storage stats` inspect verified repository state
+without writing it. Capsule creation accepts explicit dependencies, and exact
+operation retargeting creates a new immutable revision or returns structured
+conflicts while leaving the current ref unchanged. Semantic retargeting remains
+an isolated research adapter; M12 does not treat its evidence as canonical
+history.
 `docs/COMPACTION_RETENTION_BENCHMARK.md` records host-specific evidence for
 the implemented retention policies; its companion
 `docs/COMPACTION_RETENTION_RESULTS.md` publishes those measurements without a
@@ -165,6 +172,7 @@ make ci
 
 ```bash
 dune exec bin/yeokcham.exe -- init
+dune exec bin/yeokcham.exe -- status
 dune exec bin/yeokcham.exe -- checkpoint
 dune exec bin/yeokcham.exe -- timeline --limit 32
 dune exec bin/yeokcham.exe -- restore --dry-run <checkpoint>
@@ -176,9 +184,11 @@ dune exec bin/yeokcham.exe -- compact --explain
 dune exec bin/yeokcham.exe -- compact --resume
 dune exec bin/yeokcham.exe -- compact --prune
 dune exec bin/yeokcham.exe -- watch --interval-ms 500 --debounce-ms 500
-dune exec bin/yeokcham.exe -- capsule create --current --id <capsule-id> --title <title> --description <description>
+dune exec bin/yeokcham.exe -- capsule create --current --id <capsule-id> --title <title> --description <description> [--requires-capsule <capsule-id>] [--requires-revision <capsule-id>:<revision-id>] [--requires-release <release-id>] [--conflicts-with <capsule-id>] [--ordered-after <capsule-id>]
+dune exec bin/yeokcham.exe -- capsule list
 dune exec bin/yeokcham.exe -- capsule edit <capsule-id>
 dune exec bin/yeokcham.exe -- capsule fold <capsule-id> --from <editing-anchor> --to <checkpoint>
+dune exec bin/yeokcham.exe -- capsule retarget <capsule-id> --onto <snapshot-id>
 dune exec bin/yeokcham.exe -- capsule split <capsule-id> --left-id <capsule-id> --left-title <title> --left-description <description> --right-id <capsule-id> --right-title <title> --right-description <description> --left-indices <indices> --confirm
 dune exec bin/yeokcham.exe -- capsule combine --id <capsule-id> --title <title> --description <description> --source <capsule-id> --source <capsule-id> --confirm
 dune exec bin/yeokcham.exe -- capsule show <capsule-id>
@@ -200,6 +210,8 @@ dune exec bin/yeokcham.exe -- release create --workspace <workspace-id> [--paren
 dune exec bin/yeokcham.exe -- release show <release-id>
 dune exec bin/yeokcham.exe -- release verify <release-id>
 dune exec bin/yeokcham.exe -- release list
+dune exec bin/yeokcham.exe -- storage stats
+dune exec bin/yeokcham.exe -- verify
 dune exec bin/yeokcham.exe -- git import tree --repository <absolute-git-directory> --tree <full-git-tree-id>
 dune exec bin/yeokcham.exe -- git import commit --repository <absolute-git-directory> --commit <full-git-commit-id>
 dune exec bin/yeokcham.exe -- git import tag --repository <absolute-git-directory> --tag <name>
@@ -210,6 +222,22 @@ dune exec bin/yeokcham.exe -- git export revisions --repository <absolute-git-di
 `work explain-order` is read-only. It resolves each enabled capsule's current
 immutable revision, validates the selected graph, and prints canonical order
 and precedence edges. `--order` must name every enabled revision exactly once.
+
+`timeline` prints each checkpoint's timestamp, changed paths, materialised
+content-byte total, retention-derived tags, validation state, and retention
+reasons. `storage stats` reports on-disk object bytes by scratch, capsule,
+release, chunk, snapshot, and workspace domain; retained checkpoint bytes use
+the active compacted-generation physical objects and are intentionally a
+separate non-additive subtotal. `verify` reads and hash-verifies every stored
+object, then verifies stored snapshot reachability, capsule revision links and
+declared dependencies, current workspaces, and published releases. Both commands
+fail on corruption and never repair or mutate repository state.
+
+`capsule retarget` accepts a snapshot object ID. It replays the current complete
+revision's exact operations on that base; success CAS-publishes a new complete
+revision with `retargeted-from` provenance. A replay conflict is printed as a
+structured result and does not change the capsule ref. The experimental
+semantic adapters are not invoked by this command.
 
 `git export release` uses the fixed M8-08 Git identity and release message by
 default. Supplying all five metadata flags selects exact caller-provided Git

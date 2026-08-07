@@ -645,10 +645,11 @@ let verify root arguments =
           | Error error -> fail Inspection.error_to_string error
           | Ok report ->
               Printf.printf
-                "verified objects=%d snapshots=%d capsule-revisions=%d \
-                 workspaces=%d releases=%d\n"
+                "verified objects=%d snapshots=%d capsules=%d \
+                 capsule-revisions=%d workspaces=%d releases=%d\n"
                 report.Inspection.verified_objects
                 report.Inspection.verified_snapshots
+                report.Inspection.verified_capsules
                 report.Inspection.verified_capsule_revisions
                 report.Inspection.verified_workspaces
                 report.Inspection.verified_releases))

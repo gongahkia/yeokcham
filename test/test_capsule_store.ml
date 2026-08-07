@@ -304,6 +304,80 @@ let durable_creation_reopens_pins_and_resolves_exactly () =
         (Scratch.has_capsule_boundary fixture.scratch fixture.first ~capsule:id
         |> require_ok Scratch.error_to_string))
 
+let durable_retarget_publishes_an_immutable_revision_or_returns_conflicts () =
+  with_store (fun root store ->
+      let fixture, original = durable_create root store (capsule_id 70) in
+      let initial =
+        Scratch.resolve_checkpoint fixture.scratch fixture.initial
+        |> require_ok Scratch.error_to_string
+        |> Scratch.resolved_checkpoint |> Scratch.Checkpoint.snapshot
+      in
+      let retargeted =
+        Capsule_store.Durable.retarget ~store ~capsule:(capsule_id 70)
+          ~base:initial ~created_at:4L
+        |> require_ok Capsule_store.error_to_string
+      in
+      let retargeted =
+        match retargeted with
+        | Capsule_store.Durable.Retargeted resolved -> resolved
+        | Capsule_store.Durable.Retarget_conflicts _ ->
+            Alcotest.fail "matching base unexpectedly conflicted"
+      in
+      let revision = Capsule_store.Durable.resolved_revision retargeted in
+      Alcotest.(check bool)
+        "new logical revision" false
+        (Id.Capsule_revision_id.equal
+           (Capsule_store.revision_id
+              (Capsule_store.Durable.resolved_revision original))
+           (Capsule_store.revision_id revision));
+      Alcotest.(check bool)
+        "retargeted base" true
+        (Snapshot.Snapshot.equal_id initial
+           (Capsule_store.revision_declared_base revision));
+      (match Capsule_store.revision_provenance revision with
+      | Capsule_store.Retargeted_from source ->
+          Alcotest.(check bool)
+            "retarget provenance points at prior revision" true
+            (Id.Capsule_revision_id.equal
+               (Capsule_store.revision_id
+                  (Capsule_store.Durable.resolved_revision original))
+               (Capsule_store.revision_link_revision source))
+      | _ -> Alcotest.fail "retargeted revision has wrong provenance");
+      let history =
+        Capsule_store.Durable.history store (capsule_id 70)
+        |> require_ok Capsule_store.error_to_string
+      in
+      Alcotest.(check int) "retarget extends history" 2 (List.length history);
+      let changed_base =
+        Scratch.resolve_checkpoint fixture.scratch fixture.second
+        |> require_ok Scratch.error_to_string
+        |> Scratch.resolved_checkpoint |> Scratch.Checkpoint.snapshot
+      in
+      let before_conflict =
+        Capsule_store.Durable.resolved_current_ref retargeted
+        |> Capsule_store.current_revision
+      in
+      let conflict =
+        Capsule_store.Durable.retarget ~store ~capsule:(capsule_id 70)
+          ~base:changed_base ~created_at:5L
+        |> require_ok Capsule_store.error_to_string
+      in
+      (match conflict with
+      | Capsule_store.Durable.Retarget_conflicts (_ :: _) -> ()
+      | Capsule_store.Durable.Retarget_conflicts [] ->
+          Alcotest.fail "conflicting retarget returned no conflicts"
+      | Capsule_store.Durable.Retargeted _ ->
+          Alcotest.fail "conflicting retarget unexpectedly published");
+      let after_conflict =
+        Capsule_store.Durable.read_current store (capsule_id 70)
+        |> require_ok Capsule_store.error_to_string
+        |> Capsule_store.Durable.resolved_current_ref
+        |> Capsule_store.current_revision
+      in
+      Alcotest.(check bool)
+        "conflicting retarget keeps current revision" true
+        (Id.Capsule_revision_id.equal before_conflict after_conflict))
+
 let durable_creation_interruptions_retry_and_conflict_reuse () =
   with_store (fun root store ->
       let fixture = make_scratch_fixture root store in
@@ -1054,6 +1128,10 @@ let () =
             decoders_reject_noncanonical_and_wrong_types;
           Alcotest.test_case "durable creation reopens and pins" `Quick
             durable_creation_reopens_pins_and_resolves_exactly;
+          Alcotest.test_case
+            "durable retarget publishes or reports without mutating current"
+            `Quick
+            durable_retarget_publishes_an_immutable_revision_or_returns_conflicts;
           Alcotest.test_case "creation interruption retry and reuse" `Quick
             durable_creation_interruptions_retry_and_conflict_reuse;
           Alcotest.test_case "current working diff creates and pins" `Quick

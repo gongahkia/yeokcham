@@ -711,6 +711,20 @@
   (source_tree golden)))
 
 (test
+ (name test_inspection)
+ (modules test_inspection)
+ (libraries
+  alcotest
+  yeokcham_capsule
+  yeokcham_capsule_store
+  yeokcham_id
+  yeokcham_inspection
+  yeokcham_scratch
+  yeokcham_snapshot
+  yeokcham_store
+  unix))
+
+(test
  (name scratch_property_test)
  (modules scratch_property_test)
  (libraries

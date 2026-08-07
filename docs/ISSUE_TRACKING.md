@@ -61,6 +61,7 @@ Each migrated issue has an immutable hidden marker, `<!-- yeokcham-todo-id: ID -
 | M11-10 | [#117](https://github.com/gongahkia/yeokcham/issues/117) | M11 Demonstration and Reporting | implemented; verified by versioned evidence index, direct Git-export fixture, and seeded repository checks |
 | M11-11 | [#100](https://github.com/gongahkia/yeokcham/issues/100) | M11 Demonstration and Reporting | implemented; verified by source-labelled comparative-report and Git-export fixture coverage |
 | M11-12 | [#103](https://github.com/gongahkia/yeokcham/issues/103) | M11 Demonstration and Reporting | implemented; verified by architecture-boundary report and Git-export fixture coverage |
+| M12-01 | [#120](https://github.com/gongahkia/yeokcham/issues/120) | M12 Inspectable CLI and durable capsule operations | implemented; verified by read-only inspection, durable-retarget conflict/reopen, stale-publication inventory, seeded state-machine, and full repository checks |
 
 ## Migration verification
 

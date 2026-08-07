@@ -52,6 +52,7 @@ type timeline_entry = {
 type verification_report = {
   verified_objects : int;
   verified_snapshots : int;
+  verified_capsules : int;
   verified_capsule_revisions : int;
   verified_workspaces : int;
   verified_releases : int;
@@ -134,41 +135,40 @@ let stats entries =
 let scratch_repository store = Scratch.open_repository store
 
 let retained_checkpoints scratch entries =
-  Scratch.timeline scratch ~limit:max_int ()
-  |> Result.map_error (fun error -> Scratch_error error)
-  |> Result.bind (fun timeline ->
-      let retained =
-        List.filter
-          (fun entry -> entry.Scratch.effective_retention <> [])
-          timeline
-      in
-      let rec count seen bytes = function
-        | [] -> Ok (List.length retained, bytes)
-        | entry :: rest ->
-            let* resolved =
-              Scratch.resolve_checkpoint scratch entry.Scratch.logical_id
-              |> Result.map_error (fun error -> Scratch_error error)
-            in
-            let physical =
-              Scratch.resolved_physical_id resolved
-              |> Scratch.Checkpoint_id.stored_object_id
-            in
-            if List.exists (Store.Stored_object_id.equal physical) seen then
-              count seen bytes rest
-            else
-              match
-                List.find_opt
-                  (fun (item : Store.object_info) ->
-                    Store.Stored_object_id.equal item.Store.id physical)
-                  entries
-              with
-              | None -> Error (Missing_inventory_entry physical)
-              | Some item ->
-                  count (physical :: seen)
-                    (Int64.add bytes (Int64.of_int item.Store.stored_bytes))
-                    rest
-      in
-      count [] 0L retained)
+  let* timeline =
+    Scratch.timeline scratch ~limit:max_int ()
+    |> Result.map_error (fun error -> Scratch_error error)
+  in
+  let retained =
+    List.filter (fun entry -> entry.Scratch.effective_retention <> []) timeline
+  in
+  let rec count seen bytes = function
+    | [] -> Ok (List.length retained, bytes)
+    | entry :: rest -> (
+        let* resolved =
+          Scratch.resolve_checkpoint scratch entry.Scratch.logical_id
+          |> Result.map_error (fun error -> Scratch_error error)
+        in
+        let physical =
+          Scratch.resolved_physical_id resolved
+          |> Scratch.Checkpoint_id.stored_object_id
+        in
+        if List.exists (Store.Stored_object_id.equal physical) seen then
+          count seen bytes rest
+        else
+          match
+            List.find_opt
+              (fun (item : Store.object_info) ->
+                Store.Stored_object_id.equal item.Store.id physical)
+              entries
+          with
+          | None -> Error (Missing_inventory_entry physical)
+          | Some item ->
+              count (physical :: seen)
+                (Int64.add bytes (Int64.of_int item.Store.stored_bytes))
+                rest)
+  in
+  count [] 0L retained
 
 let storage store =
   let* entries =
@@ -401,6 +401,10 @@ let verify store =
            verify_capsule_revision store entry.Store.id)
          (Ok ())
   in
+  let* capsules =
+    Capsule_store.Durable.list store
+    |> Result.map_error (fun error -> Capsule_error error)
+  in
   let* workspaces =
     Workspace_store.Durable.list store
     |> Result.map_error (fun error -> Workspace_error error)
@@ -432,6 +436,7 @@ let verify store =
              (fun (entry : Store.object_info) ->
                entry.Store.object_type = Envelope.Snapshot)
              entries);
+      verified_capsules = List.length capsules;
       verified_capsule_revisions =
         List.length
           (List.filter

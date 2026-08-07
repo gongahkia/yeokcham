@@ -758,7 +758,8 @@ let provenance_of_value value =
       in
       loop [] links
   | [ Encoding.Integer 4L; link ] ->
-      revision_link_of_value link |> Result.map (fun link -> Retargeted_from link)
+      revision_link_of_value link
+      |> Result.map (fun link -> Retargeted_from link)
   | _ -> Error (Decode_error "provenance has an invalid shape")
 
 let create_capsule ~id ~title ~description ~created_at =
@@ -1935,7 +1936,7 @@ module Durable = struct
           | Some bytes ->
               decode_current_ref bytes
               |> Result.map_error (fun error ->
-                     Current_ref_corrupt (error_to_string error))
+                  Current_ref_corrupt (error_to_string error))
         in
         let* resolved = resolve_from_ref store current in
         let* base_snapshot =
@@ -1952,18 +1953,20 @@ module Durable = struct
         in
         let* temporary =
           Capsule.create_revision ~id:temporary_id
-            ~capsule:(capsule_model resolved.capsule) ~parent:None
-            ~declared_base:base
+            ~capsule:(capsule_model resolved.capsule)
+            ~parent:None ~declared_base:base
             ~operations:(revision_operations resolved.revision)
             ~expected_result:None ~evidence:[] ~created_at
           |> Result.map_error (fun error ->
-                 Draft_error (Capsule.construction_error_to_string error))
+              Draft_error (Capsule.construction_error_to_string error))
         in
         let applied = Capsule.apply ~actual_base:base ~state temporary in
         if applied.Capsule.conflicts <> [] then
           Ok (Retarget_conflicts applied.Capsule.conflicts)
         else
-          let* expected_result = store_state_snapshot store applied.Capsule.state in
+          let* expected_result =
+            store_state_snapshot store applied.Capsule.state
+          in
           let parent =
             Some
               {
@@ -1972,8 +1975,8 @@ module Durable = struct
               }
           in
           let* revision =
-            create_revision ~capsule:resolved.capsule ~parent ~declared_base:base
-              ~expected_result
+            create_revision ~capsule:resolved.capsule ~parent
+              ~declared_base:base ~expected_result
               ~operations:(revision_operations resolved.revision)
               ~dependencies:(revision_dependencies resolved.revision)
               ~evidence:(revision_evidence resolved.revision)
@@ -1997,7 +2000,8 @@ module Durable = struct
           else
             let* next =
               make_current_ref
-                ~generation:(Int64.succ (current_generation current)) ~capsule
+                ~generation:(Int64.succ (current_generation current))
+                ~capsule
                 ~capsule_object:(current_capsule_object current)
                 ~revision:(revision_id revision) ~revision_object
             in

@@ -637,7 +637,9 @@ let list_objects repository =
                       let rec read_entries reversed = function
                         | [] -> read_prefixes reversed remaining
                         | name :: tail ->
-                            if not (canonical_object_name name 60) then
+                            if String.starts_with ~prefix:"." name then
+                              read_entries reversed tail
+                            else if not (canonical_object_name name 60) then
                               Error
                                 (Io_error
                                    {

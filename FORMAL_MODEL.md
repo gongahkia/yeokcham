@@ -362,7 +362,7 @@ type capsule_revision = {
   dependencies : dependency list;
   evidence : validation_evidence list;
   source_boundaries : (checkpoint_id * checkpoint_id) list;
-  provenance : created | folded | split_from | combined_from;
+  provenance : created | folded | split_from | combined_from | retargeted_from;
   created_at : timestamp;
 }
 ```
@@ -413,6 +413,41 @@ repository writer lock. Parent-cycle validation remains required in durable
 history; synthetic parent cycles are exercised through the pure
 `Parent_resolver` graph seam because a hash-verifying persistent cycle is not a
 constructible fixture.
+
+### M12 exact durable retargeting and inspection
+
+The durable retarget adapter has one deliberately narrow transition:
+
+```ocaml
+retarget : capsule_id -> new_base:snapshot_id ->
+  [ `Retargeted of capsule_revision | `Conflicts of application_conflict list ]
+```
+
+It resolves the current verified complete revision under the capsule writer
+lock, applies its existing exact operations to `new_base`, and never mutates the
+old revision. A conflict returns the full pure application-conflict list and
+leaves the current ref unchanged. A successful application stores its exact
+result snapshot, creates a complete child revision with
+`Retargeted_from(current-link)` provenance, verifies the child, rereads the old
+ref bytes, and CAS-publishes the new generation. The child retains the source
+revision's operations, declared dependencies, evidence, and source boundaries.
+Thus a revision remains directly replayable from its own declared base.
+
+This adapter does not invoke semantic-anchor or textual fallback inference.
+Those evidence-stage experiments remain nonpersistent and cannot authorise a
+durable revision. A text operation that needs its fallback is therefore a
+structured retarget conflict, not an automatic rewrite.
+
+Repository inspection is a read-only query layer. Object enumeration ignores
+the dot-prefixed temporary files tolerated after interrupted publication, then
+accepts only canonical object paths and runs the normal stored-object identity
+and Envelope-1 verification for every entry. `verify` additionally materialises
+the reachable graph of every stored snapshot, validates every stored capsule
+revision and declared dependency, validates all current workspaces, and
+reproduces every published release. `storage stats` groups exact object-file
+lengths by object domain. Its retained-checkpoint subtotal resolves each retained
+logical checkpoint through the active scratch generation and counts each
+physical checkpoint object once; it is not additive with the domain totals.
 
 ## 6. Change operations
 
@@ -838,9 +873,11 @@ retarget(old_revision, new_base)
 Possible outcomes:
 
 - Exact replay.
-- Confident semantic replay.
-- Partial replay with conflicts.
+- Structured exact-operation conflicts with no ref mutation.
 - Complete rejection.
+
+The current durable command implements only the first two outcomes. Semantic
+and textual candidates are research evidence, not durable retargeting outcomes.
 
 ## 11. Release model
 

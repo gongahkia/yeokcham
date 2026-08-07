@@ -817,6 +817,19 @@ yeokcham release verify --explain
 yeokcham storage stats --by-history
 ```
 
+M12 implements the non-mutating subset as `status`, `timeline`, `storage
+stats`, and repository-wide `verify`. `yeokcham_inspection` is an imperative
+read adapter over verified immutable objects rather than a second source of
+repository truth. It first enumerates object paths through `yeokcham_store`,
+ignoring the dot-prefixed interrupted-publication temporaries tolerated by the
+store and hash- and envelope-verifying each canonical object; higher-level
+checks then reuse the snapshot, capsule, workspace, and release resolvers.
+Storage accounting reports exact regular-file lengths. Retained checkpoint bytes
+resolve logical IDs through the active compacted generation and de-duplicate
+physical checkpoint IDs, so that subtotal is intentionally not summed into a
+domain total. The layer has no write API, cache, repair action, or inferred
+metadata.
+
 Machine-readable JSON output should exist for experiments and future UI work.
 
 ## 16. Upgrade strategy

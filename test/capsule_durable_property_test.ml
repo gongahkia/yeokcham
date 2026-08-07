@@ -111,7 +111,7 @@ let create_fold_show_split_combine_reopen =
                 ~changed_at:1L ()
               |> Result.get_ok
             in
-            let _current =
+            let current =
               List.fold_left
                 (fun current (index, target) ->
                   let current_ref =
@@ -135,6 +135,29 @@ let create_fold_show_split_combine_reopen =
                    (fun index target -> (index, target))
                    (List.tl checkpoints))
             in
+            let retargeted =
+              Capsule_store.Durable.retarget ~store ~capsule:id
+                ~base:initial_snapshot ~created_at:9L
+              |> Result.get_ok
+            in
+            (match retargeted with
+            | Capsule_store.Durable.Retargeted resolved -> (
+                let prior = Capsule_store.Durable.resolved_revision current in
+                match
+                  Capsule_store.revision_provenance
+                    (Capsule_store.Durable.resolved_revision resolved)
+                with
+                | Capsule_store.Retargeted_from source ->
+                    if
+                      not
+                        (Id.Capsule_revision_id.equal
+                           (Capsule_store.revision_id prior)
+                           (Capsule_store.revision_link_revision source))
+                    then raise Exit
+                | Capsule_store.Created | Capsule_store.Folded
+                | Capsule_store.Split_from _ | Capsule_store.Combined_from _ ->
+                    raise Exit)
+            | Capsule_store.Durable.Retarget_conflicts _ -> raise Exit);
             let operations =
               Capsule_store.Durable.current_diff store id |> Result.get_ok
             in
@@ -164,7 +187,7 @@ let create_fold_show_split_combine_reopen =
                   Capsule_store.Durable.current_diff reopened (capsule_id 153)
                   |> Result.get_ok
                 in
-                List.length history = steps
+                List.length history = steps + 1
                 && List.length operations = steps
                 && List.length combined_diff = steps
                 && Id.Capsule_id.equal (capsule_id 153)

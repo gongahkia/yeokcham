@@ -255,15 +255,16 @@ module Durable : sig
     unit ->
     (resolved, error) result
 
-  (** Replays the current revision against [base] without weakening operation
-      preconditions. A successful result is a new immutable revision and
-      atomically advances the capsule current ref; conflicts leave it unchanged. *)
   val retarget :
     store:Yeokcham_store.repository ->
     capsule:Yeokcham_id.Capsule_id.t ->
     base:Yeokcham_snapshot.Snapshot.id ->
     created_at:int64 ->
     (retarget_result, error) result
+  (** Replays the current revision against [base] without weakening operation
+      preconditions. A successful result is a new immutable revision and
+      atomically advances the capsule current ref; conflicts leave it unchanged.
+  *)
 
   val read_current :
     Yeokcham_store.repository ->

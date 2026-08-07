@@ -46,6 +46,7 @@ type timeline_entry = {
 type verification_report = {
   verified_objects : int;
   verified_snapshots : int;
+  verified_capsules : int;
   verified_capsule_revisions : int;
   verified_workspaces : int;
   verified_releases : int;
