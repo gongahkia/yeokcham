@@ -181,6 +181,12 @@ type repository = {
   locks : string;
 }
 
+type object_info = {
+  id : Stored_object_id.t;
+  object_type : Envelope.object_type;
+  stored_bytes : int;
+}
+
 type error =
   | Root_not_directory of string
   | Repository_not_initialized of string
@@ -572,6 +578,113 @@ let get repository id =
   else
     Envelope.decode bytes
     |> Result.map_error (fun error -> Object_integrity_error error)
+
+let canonical_object_name value length =
+  String.length value = length
+  && String.for_all
+       (function '0' .. '9' | 'a' .. 'f' -> true | _ -> false)
+       value
+
+let list_objects repository =
+  let read_directory directory =
+    try Ok (Sys.readdir directory |> Array.to_list |> List.sort String.compare)
+    with Sys_error message ->
+      Error
+        (Io_error
+           { operation = "read object directory"; path = directory; message })
+  in
+  let* shards = read_directory repository.objects in
+  let rec read_objects reversed = function
+    | [] -> Ok (List.rev reversed)
+    | shard :: rest ->
+        if not (canonical_object_name shard 2) then
+          Error
+            (Io_error
+               {
+                 operation = "validate object directory";
+                 path = Filename.concat repository.objects shard;
+                 message =
+                   "object shard name is not two lowercase hexadecimal \
+                    characters";
+               })
+        else
+          let directory = Filename.concat repository.objects shard in
+          let* stat = lstat directory in
+          if stat.Unix.st_kind <> Unix.S_DIR then
+            Error (Root_not_directory directory)
+          else
+            let* prefixes = read_directory directory in
+            let rec read_prefixes reversed = function
+              | [] -> read_objects reversed rest
+              | prefix :: remaining ->
+                  if not (canonical_object_name prefix 2) then
+                    Error
+                      (Io_error
+                         {
+                           operation = "validate object directory";
+                           path = Filename.concat directory prefix;
+                           message =
+                             "object prefix is not two lowercase hexadecimal \
+                              characters";
+                         })
+                  else
+                    let prefix_directory = Filename.concat directory prefix in
+                    let* prefix_stat = lstat prefix_directory in
+                    if prefix_stat.Unix.st_kind <> Unix.S_DIR then
+                      Error (Root_not_directory prefix_directory)
+                    else
+                      let* names = read_directory prefix_directory in
+                      let rec read_entries reversed = function
+                        | [] -> read_prefixes reversed remaining
+                        | name :: tail ->
+                            if not (canonical_object_name name 60) then
+                              Error
+                                (Io_error
+                                   {
+                                     operation = "validate object filename";
+                                     path =
+                                       Filename.concat prefix_directory name;
+                                     message =
+                                       "object name is not 60 lowercase \
+                                        hexadecimal characters";
+                                   })
+                            else
+                              let hex = shard ^ prefix ^ name in
+                              let* id =
+                                Stored_object_id.of_hex hex
+                                |> Result.map_error (fun error ->
+                                    Io_error
+                                      {
+                                        operation = "decode object filename";
+                                        path =
+                                          Filename.concat prefix_directory name;
+                                        message =
+                                          Stored_object_id.parse_error_to_string
+                                            error;
+                                      })
+                              in
+                              let path =
+                                Filename.concat prefix_directory name
+                              in
+                              let* stat = lstat path in
+                              if stat.Unix.st_kind <> Unix.S_REG then
+                                Error (Not_regular_file path)
+                              else
+                                let* object_ = get repository id in
+                                read_entries
+                                  ({
+                                     id;
+                                     object_type = Envelope.object_type object_;
+                                     stored_bytes = stat.Unix.st_size;
+                                   }
+                                  :: reversed)
+                                  tail
+                      in
+                      read_entries reversed names
+            in
+            read_prefixes reversed prefixes
+  in
+  read_objects [] shards
 
 let existing_matches repository id expected =
   let path = object_path repository id in

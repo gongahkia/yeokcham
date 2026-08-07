@@ -10,6 +10,7 @@ module Validation = Yeokcham_validation
 module Validation_retention = Yeokcham_validation_retention
 module Release = Yeokcham_release
 module Git = Yeokcham_git
+module Inspection = Yeokcham_inspection
 
 let now () = Int64.of_float (Unix.gettimeofday ())
 
@@ -556,27 +557,102 @@ let timeline root arguments =
         | None -> exit 2)
     | _ -> exit 2
   in
-  match open_scratch root with
-  | Error error -> fail Fun.id error
-  | Ok (_, scratch) -> (
-      match Scratch.timeline scratch ~limit () with
-      | Error error -> fail Scratch.error_to_string error
+  match Store.open_repository ~root with
+  | Error error -> fail Store.error_to_string error
+  | Ok store -> (
+      match Inspection.timeline store ~limit with
+      | Error error -> fail Inspection.error_to_string error
       | Ok entries ->
           List.iter
             (fun entry ->
-              let checkpoint = entry.Scratch.checkpoint in
-              let retention =
-                entry.Scratch.effective_retention
-                |> List.map Scratch.retention_reason_to_string
-                |> String.concat ","
-              in
-              Printf.printf "%d %s %Ld %s\n" entry.Scratch.depth
+              Printf.printf
+                "checkpoint=%s created-at=%Ld changed-paths=%s \
+                 snapshot-bytes=%Ld tags=%s validation=%s retention=%s\n"
                 (Store.Stored_object_id.to_hex
                    (Scratch.Checkpoint_id.stored_object_id
-                      entry.Scratch.logical_id))
-                (Scratch.Checkpoint.created_at checkpoint)
-                retention)
+                      entry.Inspection.checkpoint))
+                entry.Inspection.created_at
+                (String.concat "," entry.Inspection.changed_paths)
+                entry.Inspection.snapshot_bytes
+                (String.concat "," entry.Inspection.tags)
+                entry.Inspection.validation_state
+                (String.concat "," entry.Inspection.retention))
             entries)
+
+let status root arguments =
+  match arguments with
+  | [] -> (
+      match Store.open_repository ~root with
+      | Error error -> fail Store.error_to_string error
+      | Ok store -> (
+          match Inspection.status store with
+          | Error error -> fail Inspection.error_to_string error
+          | Ok status ->
+              let checkpoint = function
+                | None -> "none"
+                | Some identity ->
+                    Store.Stored_object_id.to_hex
+                      (Scratch.Checkpoint_id.stored_object_id identity)
+              in
+              let generation = function
+                | None -> "none"
+                | Some identity ->
+                    Store.Stored_object_id.to_hex
+                      (Scratch.Generation_id.stored_object_id identity)
+              in
+              Printf.printf
+                "scratch-head=%s active-generation=%s capsules=%d \
+                 workspaces=%d releases=%d objects=%d\n"
+                (checkpoint status.Inspection.scratch_head)
+                (generation status.Inspection.active_generation)
+                status.Inspection.capsule_count
+                status.Inspection.workspace_count
+                status.Inspection.release_count
+                status.Inspection.repository_object_count))
+  | _ -> exit 2
+
+let storage root arguments =
+  match arguments with
+  | [ "stats" ] -> (
+      match Store.open_repository ~root with
+      | Error error -> fail Store.error_to_string error
+      | Ok store -> (
+          match Inspection.storage store with
+          | Error error -> fail Inspection.error_to_string error
+          | Ok report ->
+              List.iter
+                (fun (stat : Inspection.storage_stat) ->
+                  Printf.printf "bucket=%s objects=%d stored-bytes=%Ld\n"
+                    (Inspection.storage_bucket_to_string stat.Inspection.bucket)
+                    stat.Inspection.object_count stat.Inspection.stored_bytes)
+                report.Inspection.buckets;
+              Printf.printf
+                "total-objects=%d total-stored-bytes=%Ld \
+                 retained-checkpoints=%d retained-checkpoint-object-bytes=%Ld\n"
+                report.Inspection.total_objects
+                report.Inspection.total_stored_bytes
+                report.Inspection.retained_checkpoints
+                report.Inspection.retained_checkpoint_object_bytes))
+  | _ -> exit 2
+
+let verify root arguments =
+  match arguments with
+  | [] -> (
+      match Store.open_repository ~root with
+      | Error error -> fail Store.error_to_string error
+      | Ok store -> (
+          match Inspection.verify store with
+          | Error error -> fail Inspection.error_to_string error
+          | Ok report ->
+              Printf.printf
+                "verified objects=%d snapshots=%d capsule-revisions=%d \
+                 workspaces=%d releases=%d\n"
+                report.Inspection.verified_objects
+                report.Inspection.verified_snapshots
+                report.Inspection.verified_capsule_revisions
+                report.Inspection.verified_workspaces
+                report.Inspection.verified_releases))
+  | _ -> exit 2
 
 let restore root arguments =
   let dry_run, target =
@@ -801,6 +877,9 @@ let render_revision_provenance = function
   | Capsule_store.Split_from (link : Capsule_store.revision_link) ->
       "split-from="
       ^ Yeokcham_id.Capsule_revision_id.to_hex (revision_link_revision link)
+  | Capsule_store.Retargeted_from (link : Capsule_store.revision_link) ->
+      "retargeted-from="
+      ^ Yeokcham_id.Capsule_revision_id.to_hex (revision_link_revision link)
   | Capsule_store.Combined_from links ->
       "combined-from="
       ^ String.concat ","
@@ -880,28 +959,62 @@ let operation_indices value =
         List.map Option.get values
     | _ -> exit 2
 
+let capsule_revision_dependency value =
+  match String.split_on_char ':' value with
+  | [ capsule; revision ] ->
+      Capsule.Requires_capsule
+        { capsule = capsule_id capsule; revision = Some (revision_id revision) }
+  | _ -> fail Fun.id "required capsule revision must be capsule-id:revision-id"
+
 let capsule root arguments =
   match arguments with
   | "create" :: "--current" :: options -> (
-      let rec parse id title description = function
+      let rec parse id title description dependencies = function
         | [] -> (
             match (id, title, description) with
-            | Some id, Some title, Some description -> (id, title, description)
+            | Some id, Some title, Some description ->
+                (id, title, description, List.rev dependencies)
             | _ -> exit 2)
         | "--id" :: value :: rest ->
-            parse (Some (capsule_id value)) title description rest
-        | "--title" :: value :: rest -> parse id (Some value) description rest
-        | "--description" :: value :: rest -> parse id title (Some value) rest
+            parse (Some (capsule_id value)) title description dependencies rest
+        | "--title" :: value :: rest ->
+            parse id (Some value) description dependencies rest
+        | "--description" :: value :: rest ->
+            parse id title (Some value) dependencies rest
+        | "--requires-capsule" :: value :: rest ->
+            parse id title description
+              (Capsule.Requires_capsule
+                 { capsule = capsule_id value; revision = None }
+              :: dependencies)
+              rest
+        | "--requires-revision" :: value :: rest ->
+            parse id title description
+              (capsule_revision_dependency value :: dependencies)
+              rest
+        | "--requires-release" :: value :: rest ->
+            parse id title description
+              (Capsule.Requires_release (release_id value) :: dependencies)
+              rest
+        | "--conflicts-with" :: value :: rest ->
+            parse id title description
+              (Capsule.Conflicts_with_capsule (capsule_id value) :: dependencies)
+              rest
+        | "--ordered-after" :: value :: rest ->
+            parse id title description
+              (Capsule.Ordered_after (capsule_id value) :: dependencies)
+              rest
         | _ -> exit 2
       in
-      let id, title, description = parse None None None options in
+      let id, title, description, dependencies =
+        parse None None None [] options
+      in
       match open_scratch root with
       | Error error -> fail Fun.id error
       | Ok (store, scratch) -> (
           let timestamp = now () in
           Capsule_store.Durable.create_from_current ~store ~scratch ~root ~id
-            ~title ~description ~dependencies:[] ~evidence:[]
-            ~created_at:timestamp ~changed_at:timestamp ()
+            ~title ~description ~dependencies ~evidence:[] ~created_at:timestamp
+            ~changed_at:timestamp ()
           |> Result.map_error Capsule_store.error_to_string
           |> function
           | Error error -> fail Fun.id error
@@ -921,6 +1034,53 @@ let capsule root arguments =
                    (Scratch.Checkpoint_id.stored_object_id source))
                 (Store.Stored_object_id.to_hex
                    (Scratch.Checkpoint_id.stored_object_id target))))
+  | [ "list" ] -> (
+      match Store.open_repository ~root with
+      | Error error -> fail Store.error_to_string error
+      | Ok store -> (
+          match Capsule_store.Durable.list store with
+          | Error error -> fail Capsule_store.error_to_string error
+          | Ok resolved ->
+              List.iter
+                (fun value ->
+                  let capsule = Capsule_store.Durable.resolved_capsule value in
+                  let revision =
+                    Capsule_store.Durable.resolved_revision value
+                  in
+                  Printf.printf
+                    "capsule=%s revision=%s dependencies=%d title=%S\n"
+                    (Yeokcham_id.Capsule_id.to_hex
+                       (Capsule_store.capsule_id capsule))
+                    (Yeokcham_id.Capsule_revision_id.to_hex
+                       (Capsule_store.revision_id revision))
+                    (List.length (Capsule_store.revision_dependencies revision))
+                    (Capsule_store.capsule_title capsule))
+                resolved))
+  | [ "retarget"; identity; "--onto"; base ] -> (
+      match Store.open_repository ~root with
+      | Error error -> fail Store.error_to_string error
+      | Ok store -> (
+          let capsule = capsule_id identity in
+          Capsule_store.Durable.retarget ~store ~capsule
+            ~base:(snapshot_id base) ~created_at:(now ())
+          |> Result.map_error Capsule_store.error_to_string
+          |> function
+          | Error error -> fail Fun.id error
+          | Ok (Capsule_store.Durable.Retargeted resolved) ->
+              let revision = Capsule_store.Durable.resolved_revision resolved in
+              Printf.printf "capsule=%s revision=%s retargeted=true\n"
+                (Yeokcham_id.Capsule_id.to_hex capsule)
+                (Yeokcham_id.Capsule_revision_id.to_hex
+                   (Capsule_store.revision_id revision))
+          | Ok (Capsule_store.Durable.Retarget_conflicts conflicts) ->
+              Printf.printf "capsule=%s retargeted=false conflicts=%d\n"
+                (Yeokcham_id.Capsule_id.to_hex capsule)
+                (List.length conflicts);
+              List.iter
+                (fun conflict ->
+                  Printf.printf "conflict=%s\n"
+                    (Capsule.application_conflict_to_string conflict))
+                conflicts))
   | "split" :: source :: options -> (
       let rec parse left_id left_title left_description right_id right_title
           right_description indices confirmed = function
@@ -1729,7 +1889,7 @@ let git root arguments =
 let usage () =
   prerr_endline
     "usage: yeokcham \
-     <init|checkpoint|timeline|restore|pin|unpin|compact|watch|capsule|work|conflict|validation|release|git> \
+     <init|status|checkpoint|timeline|restore|pin|unpin|compact|watch|capsule|work|conflict|validation|release|storage|verify|git> \
      [--root PATH] ...";
   exit 2
 
@@ -1741,6 +1901,7 @@ let () =
         let root, arguments = parse_root arguments in
         match command with
         | "init" when arguments = [] -> initialise root
+        | "status" -> status root arguments
         | "checkpoint" when arguments = [] -> checkpoint root
         | "timeline" -> timeline root arguments
         | "restore" -> restore root arguments
@@ -1753,6 +1914,8 @@ let () =
         | "conflict" -> conflict root arguments
         | "validation" -> validation root arguments
         | "release" -> release root arguments
+        | "storage" -> storage root arguments
+        | "verify" -> verify root arguments
         | "git" -> git root arguments
         | _ -> usage ())
     | _ -> usage ()

@@ -24,6 +24,12 @@ end
 
 type repository
 
+type object_info = {
+  id : Stored_object_id.t;
+  object_type : Yeokcham_envelope.object_type;
+  stored_bytes : int;
+}
+
 type error =
   | Root_not_directory of string
   | Repository_not_initialized of string
@@ -82,6 +88,11 @@ val put :
 
 val get :
   repository -> Stored_object_id.t -> (Yeokcham_envelope.t, error) result
+
+val list_objects : repository -> (object_info list, error) result
+(** Lists every canonical object file in lexicographic object-ID order. Each
+    returned entry has passed the same identity and Envelope-1 checks as [get].
+*)
 
 val read_ref : repository -> name:string -> (Mutable_ref.t option, error) result
 

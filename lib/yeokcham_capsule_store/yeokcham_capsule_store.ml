@@ -37,6 +37,7 @@ type provenance =
   | Folded
   | Split_from of revision_link
   | Combined_from of revision_link list
+  | Retargeted_from of revision_link
 
 type capsule = { model : Capsule.capsule; created_at : int64 }
 
@@ -736,6 +737,9 @@ let provenance_value = function
       let* links = values_of_list revision_link_value links in
       let* links = encoding_array links in
       encoding_array [ Encoding.integer 3L; links ]
+  | Retargeted_from link ->
+      let* link = revision_link_value link in
+      encoding_array [ Encoding.integer 4L; link ]
 
 let provenance_of_value value =
   let* fields = array_values "provenance" value in
@@ -753,6 +757,8 @@ let provenance_of_value value =
             loop (link :: reversed) rest
       in
       loop [] links
+  | [ Encoding.Integer 4L; link ] ->
+      revision_link_of_value link |> Result.map (fun link -> Retargeted_from link)
   | _ -> Error (Decode_error "provenance has an invalid shape")
 
 let create_capsule ~id ~title ~description ~created_at =
@@ -1204,6 +1210,10 @@ module Durable = struct
     revision_object : Store.Stored_object_id.t;
     current : current_ref;
   }
+
+  type retarget_result =
+    | Retargeted of resolved
+    | Retarget_conflicts of Capsule.application_conflict list
 
   type current_creation =
     | No_current_changes of {
@@ -1915,6 +1925,85 @@ module Durable = struct
     let* root = store_tree [] in
     Snapshot.Snapshot.store store (Snapshot.Snapshot.create ~root)
     |> Result.map_error (fun error -> Snapshot_error error)
+
+  let retarget ~store ~capsule ~base ~created_at =
+    with_capsule_lock store capsule (fun () ->
+        let* existing_bytes = read_ref_bytes store capsule in
+        let* current =
+          match existing_bytes with
+          | None -> Error (Current_ref_missing capsule)
+          | Some bytes ->
+              decode_current_ref bytes
+              |> Result.map_error (fun error ->
+                     Current_ref_corrupt (error_to_string error))
+        in
+        let* resolved = resolve_from_ref store current in
+        let* base_snapshot =
+          Snapshot.Snapshot.load store base
+          |> Result.map_error (fun error -> Snapshot_error error)
+        in
+        let* state =
+          Scratch.State.of_snapshot store base_snapshot
+          |> Result.map_error (fun error -> Scratch_error error)
+        in
+        let temporary_id =
+          Id.Capsule_revision_id.of_bytes (String.make 32 '\000')
+          |> Result.get_ok
+        in
+        let* temporary =
+          Capsule.create_revision ~id:temporary_id
+            ~capsule:(capsule_model resolved.capsule) ~parent:None
+            ~declared_base:base
+            ~operations:(revision_operations resolved.revision)
+            ~expected_result:None ~evidence:[] ~created_at
+          |> Result.map_error (fun error ->
+                 Draft_error (Capsule.construction_error_to_string error))
+        in
+        let applied = Capsule.apply ~actual_base:base ~state temporary in
+        if applied.Capsule.conflicts <> [] then
+          Ok (Retarget_conflicts applied.Capsule.conflicts)
+        else
+          let* expected_result = store_state_snapshot store applied.Capsule.state in
+          let parent =
+            Some
+              {
+                revision = current_revision current;
+                object_id = current_revision_object current;
+              }
+          in
+          let* revision =
+            create_revision ~capsule:resolved.capsule ~parent ~declared_base:base
+              ~expected_result
+              ~operations:(revision_operations resolved.revision)
+              ~dependencies:(revision_dependencies resolved.revision)
+              ~evidence:(revision_evidence resolved.revision)
+              ~boundaries:(revision_boundaries resolved.revision)
+              ~provenance:(Retargeted_from (link_of_resolved resolved))
+              ~created_at
+          in
+          let* revision_object = store_revision store revision in
+          let* () = validate_revision store ~capsule revision in
+          let* current_again = read_ref_bytes store capsule in
+          if not (Option.equal String.equal existing_bytes current_again) then
+            Error
+              (Concurrent_current_update
+                 {
+                   capsule;
+                   expected_generation = Some (current_generation current);
+                   actual_generation = None;
+                 })
+          else if Int64.equal (current_generation current) Int64.max_int then
+            Error (Draft_error "capsule current ref generation is exhausted")
+          else
+            let* next =
+              make_current_ref
+                ~generation:(Int64.succ (current_generation current)) ~capsule
+                ~capsule_object:(current_capsule_object current)
+                ~revision:(revision_id revision) ~revision_object
+            in
+            let* () = publish_current store ~expected:existing_bytes ~next in
+            let* resolved = resolve_from_ref store next in
+            Ok (Retargeted resolved))
 
   let snapshot_id_of_state state =
     let entries = Scratch.State.entries state in

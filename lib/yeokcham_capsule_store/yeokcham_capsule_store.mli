@@ -31,6 +31,7 @@ type provenance =
   | Folded
   | Split_from of revision_link
   | Combined_from of revision_link list
+  | Retargeted_from of revision_link
 
 type capsule
 type revision
@@ -169,6 +170,10 @@ val current_ref_components : Yeokcham_id.Capsule_id.t -> string list
 module Durable : sig
   type resolved
 
+  type retarget_result =
+    | Retargeted of resolved
+    | Retarget_conflicts of Capsule.application_conflict list
+
   type current_creation =
     | No_current_changes of {
         checkpoint : Yeokcham_scratch.Checkpoint_id.t;
@@ -249,6 +254,16 @@ module Durable : sig
     ?fail_at:failure_point ->
     unit ->
     (resolved, error) result
+
+  (** Replays the current revision against [base] without weakening operation
+      preconditions. A successful result is a new immutable revision and
+      atomically advances the capsule current ref; conflicts leave it unchanged. *)
+  val retarget :
+    store:Yeokcham_store.repository ->
+    capsule:Yeokcham_id.Capsule_id.t ->
+    base:Yeokcham_snapshot.Snapshot.id ->
+    created_at:int64 ->
+    (retarget_result, error) result
 
   val read_current :
     Yeokcham_store.repository ->
