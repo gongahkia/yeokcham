@@ -1,0 +1,9 @@
+(library
+ (name yeokcham_v2_restore_materializer)
+ (libraries
+  unix
+  yeokcham_model
+  yeokcham_v2_restore_journal
+  yeokcham_v2_restore_journal_store
+  yeokcham_v2_restore_plan
+  yeokcham_v2_scanner))

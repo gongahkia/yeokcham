@@ -1581,8 +1581,16 @@ generation. For each operation, the files sorted by generation form exactly one
 chain starting with `Prepared` at zero; every later record is the byte-exact
 legal successor of the preceding record. The store is create-only and treats
 identical existing bytes as a retry; conflicting bytes, missing predecessors,
-or malformed/non-regular entries reject. A later filesystem adapter must still
-enforce snapshot, safety-publication, and materialisation relations.
+or malformed/non-regular entries reject. The materialisation adapter starts
+only from the durable `Applying(0)` record, first proves the pure replay reaches
+`T`, then requires `scan(root) = O` before its first write. It confines every
+action below the real root, rejects the metadata path and symlinked/non-directory
+parents, makes each action durable, and only then appends `Applying(n + 1)`.
+After all actions it requires `scan(root) = T` before it appends
+`Materialized`. Thus an injected interruption after an action but before its
+journal generation retains the safety checkpoint and the prior durable progress
+record; restart reconciliation and post-restore publication are separate
+relations.
 
 The implemented preparation relation accepts an explicit signed event `E` only
 when it is in the local device scratch scope and resolves to the target exact

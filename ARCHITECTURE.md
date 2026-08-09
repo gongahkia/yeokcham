@@ -102,11 +102,15 @@ targets. ADR-056 adds the opaque immutable restore-journal progression that
 names the safety event and the safety/target snapshots without storing source
 paths or bytes. Its create-only local store validates the fixed
 operation/generation filename against the payload and every generation chain
-alongside the existing V2 object-publication records. Before any filesystem
-adapter is introduced, the preparation service requires an explicitly named,
-signed device-scratch target event, re-scans the working tree, causally
-publishes the exact observed tree as a safety checkpoint, and appends
-`Prepared` then `Applying(0)`; the filesystem adapter remains separate.
+alongside the existing V2 object-publication records. The preparation service
+requires an explicitly named, signed device-scratch target event, re-scans the
+working tree, causally publishes the exact observed tree as a safety checkpoint,
+and appends `Prepared` then `Applying(0)`. The separate materialiser accepts
+only that durable pre-action boundary, validates pure replay, re-scans the
+exact observed tree before writing, rejects metadata paths and symlinked parent
+directories, fsyncs each action, and appends the corresponding `Applying(n)`
+generation afterwards. A final exact scan is required before `Materialized`.
+Post-restore scratch publication and restart recovery remain distinct steps.
 
 ## 2. Proposed OCaml workspace
 
