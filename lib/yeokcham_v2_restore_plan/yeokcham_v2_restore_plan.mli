@@ -39,6 +39,12 @@ val replay : t -> (Model.Snapshot.t, replay_error) result
     exactly [target]; the effectful adapter has to enforce the same
     preconditions against the working tree. *)
 
+val replay_prefix :
+  t -> completed_actions:int -> (Model.Snapshot.t, replay_error) result
+(** Applies exactly the first [completed_actions] entries. It supports explicit
+    recovery reconciliation against a durable [Applying(completed_actions)]
+    journal record; out-of-range counts reject. *)
+
 (** Actions are ordered as follows: removals are deepest path first, target
     directories are shallowest first, then target file and symlink operations
     are path-ascending. A symlink replacement always has an explicit removal;

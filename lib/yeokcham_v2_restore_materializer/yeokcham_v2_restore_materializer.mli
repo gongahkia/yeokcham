@@ -1,11 +1,10 @@
 (** Exact, guarded filesystem materialisation for a prepared V2 restore plan.
 
-    This adapter accepts only the durable [Applying(0)] boundary produced by
-    {!Yeokcham_v2_restore_preparation}. It re-scans the working tree before any
-    write, confines every operation below [root], advances the immutable restore
-    journal after each durable filesystem action, and re-scans the final tree.
-    It neither chooses a target nor publishes a post-restore scratch checkpoint.
-*)
+    This adapter accepts a durable [Applying(n)] boundary, re-scans the working
+    tree against its exact pure prefix before any write, confines every
+    operation below [root], advances the immutable restore journal after each
+    durable filesystem action, and re-scans the final tree. It neither chooses a
+    target nor publishes a post-restore scratch checkpoint. *)
 
 module Journal = Yeokcham_v2_restore_journal
 module Journal_store = Yeokcham_v2_restore_journal_store
@@ -33,7 +32,7 @@ type error =
   | Pure_plan_error of Restore_plan.replay_error
   | Invalid_plan of string
   | Journal_action_count_mismatch of { journal : int; plan : int }
-  | Journal_not_applying_zero of Journal.phase
+  | Journal_not_applying of Journal.phase
   | Stale_worktree of { expected : Model.Snapshot.t; actual : Model.Snapshot.t }
   | Verification_mismatch of {
       expected : Model.Snapshot.t;
@@ -55,6 +54,8 @@ val materialize :
   unit ->
   (outcome, error) result
 (** [materialize] only accepts a nonempty plan with a matching durable
-    [Applying(0)] journal. Every action is made durable before the journal
-    records its successor. An error retains the already-published safety
-    checkpoint and journal generations for an explicit later recovery path. *)
+    [Applying(n)] journal. The working tree must equal the pure prefix [n], or
+    the following prefix [n + 1] when reconciling an interruption after a
+    durable action but before its journal generation. Every subsequent action is
+    made durable before its successor record is appended. An error retains the
+    already-published safety checkpoint and journal generations. *)

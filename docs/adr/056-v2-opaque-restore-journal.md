@@ -118,19 +118,19 @@ checkpoint nor restore journal.
   raw journal plaintext.
 - The raw journal leaks operation progress and opaque identifiers to local disk
   readers but no file path, file content, symlink target, or private key.
-- The materialiser accepts only `Applying(0)`, proves its pure replay, requires
-  an exact re-scan before writes, rejects metadata paths and symlinked parents,
-  fsyncs each action, and appends one `Applying(n)` record only after action
-  `n` completes. It verifies the final exact target scan before
+- The materialiser accepts `Applying(n)`, proves its pure replay, requires the
+  exact pure prefix `n` before writes, rejects metadata paths and symlinked
+  parents, fsyncs each action, and appends one `Applying(n)` record only after
+  action `n` completes. It verifies the final exact target scan before
   `Materialized`.
 - The preparation boundary publishes a safety checkpoint even when an external
   caller later declines or fails to materialise; that durable state is the
   intentional recovery anchor, not a partial destructive action.
 - An interruption after a filesystem action but before its progress record
   intentionally leaves that action's physical result with the prior durable
-  journal generation. The safety checkpoint and journal are retained for a
-  later explicit restart-reconciliation step; this initial adapter does not
-  silently retry it.
+  journal generation. On an explicit retry, the adapter may append exactly the
+  next generation only when the root exactly equals the corresponding next pure
+  prefix. Any other state rejects rather than being interpreted as progress.
 
 ## Model and invariant impact
 
@@ -177,10 +177,10 @@ under the approved no-user-data development policy.
   and generated changed scans. No filesystem mutation is performed by this
   layer.
 - Materialiser tests cover exact bytes, executable modes, paths, and raw
-  symlink targets; stale pre-write scans; a deterministic post-write/pre-journal
-  interruption; durable per-action generations; and 60 seeded generated exact
-  target restorations. Restart reconciliation and post-restore publication
-  remain to be tested with their adapters.
+  symlink targets; stale pre-write scans; deterministic post-write/pre-journal
+  interruptions; durable per-action generations; explicit one-prefix recovery;
+  and 60 seeded generated target and interruption-reconciliation cases.
+  Post-restore publication remains to be tested with its adapter.
 - `make check` and `make property-test PROPERTY_TEST_SEED=17` are required.
 
 ## CLI and user impact

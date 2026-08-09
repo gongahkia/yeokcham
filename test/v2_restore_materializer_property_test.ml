@@ -149,6 +149,68 @@ let generated_exact_materialisation_reaches_the_authenticated_target =
                                     Model.Snapshot.equal actual
                                       target_checkpoint.Scratch.snapshot)))))))
 
+let generated_post_write_interruptions_reconcile_one_exact_prefix =
+  QCheck2.Test.make ~count:60
+    ~name:
+      "V2 restore materialiser reconciles generated post-write interruptions"
+    QCheck2.Gen.(pair string string)
+    (fun (target_bytes, observed_bytes) ->
+      if String.equal target_bytes observed_bytes then true
+      else
+        with_repository (fun root bootstrap_repository scratch ->
+            let work = Filename.concat root "work" in
+            write_file work target_bytes;
+            match Scanner.scan ~root with
+            | Error _ -> false
+            | Ok target_snapshot -> (
+                match
+                  Scratch.publish scratch ~snapshot:target_snapshot
+                    ~snapshot_nonce:(nonce '1') ~ledger_nonce:(nonce '2')
+                with
+                | Error _ | Ok (Scratch.Unchanged _) -> false
+                | Ok (Scratch.Published target_checkpoint) -> (
+                    write_file work observed_bytes;
+                    match
+                      Preparation.prepare ~root ~bootstrap_repository
+                        ~target_event_id:target_checkpoint.Scratch.event_id
+                        ~operation_id ~safety_snapshot_nonce:(nonce '3')
+                        ~safety_ledger_nonce:(nonce '4')
+                    with
+                    | Error _ | Ok (Preparation.Noop _) -> false
+                    | Ok (Preparation.Prepared prepared) -> (
+                        match
+                          Yeokcham_v2_restore_journal_store.open_repository
+                            ~root ~repository_id
+                        with
+                        | Error _ -> false
+                        | Ok journal_store -> (
+                            match
+                              Materializer.materialize
+                                ~fault:
+                                  (Materializer.Fault.interrupt_after_action 1)
+                                ~root ~journal_store
+                                ~plan:(Preparation.plan prepared)
+                                ~journal:(Preparation.journal prepared)
+                                ()
+                            with
+                            | Error
+                                (Materializer.Injected_interruption
+                                   { completed_actions = 1 }) -> (
+                                match
+                                  Materializer.materialize ~root ~journal_store
+                                    ~plan:(Preparation.plan prepared)
+                                    ~journal:(Preparation.journal prepared)
+                                    ()
+                                with
+                                | Error _ -> false
+                                | Ok _ -> (
+                                    match Scanner.scan ~root with
+                                    | Error _ -> false
+                                    | Ok actual ->
+                                        Model.Snapshot.equal actual
+                                          target_checkpoint.Scratch.snapshot))
+                            | Error _ | Ok _ -> false)))))) [@warning "-4"]
+
 let () =
   Alcotest.run "V2 restore materializer properties"
     [
@@ -157,5 +219,8 @@ let () =
           QCheck_alcotest.to_alcotest ~speed_level:`Quick
             ~rand:(state_for "exact-materialisation")
             generated_exact_materialisation_reaches_the_authenticated_target;
+          QCheck_alcotest.to_alcotest ~speed_level:`Quick
+            ~rand:(state_for "interruption-reconciliation")
+            generated_post_write_interruptions_reconcile_one_exact_prefix;
         ] );
     ]

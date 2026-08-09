@@ -105,12 +105,14 @@ operation/generation filename against the payload and every generation chain
 alongside the existing V2 object-publication records. The preparation service
 requires an explicitly named, signed device-scratch target event, re-scans the
 working tree, causally publishes the exact observed tree as a safety checkpoint,
-and appends `Prepared` then `Applying(0)`. The separate materialiser accepts
-only that durable pre-action boundary, validates pure replay, re-scans the
-exact observed tree before writing, rejects metadata paths and symlinked parent
-directories, fsyncs each action, and appends the corresponding `Applying(n)`
-generation afterwards. A final exact scan is required before `Materialized`.
-Post-restore scratch publication and restart recovery remain distinct steps.
+and appends `Prepared` then `Applying(0)`. The separate materialiser validates
+pure replay, re-scans the exact observed tree before writing, rejects metadata
+paths and symlinked parent directories, fsyncs each action, and appends the
+corresponding `Applying(n)` generation afterwards. On an explicit retry, the
+root must equal the durable pure prefix, or the immediately following prefix
+for the one post-write/pre-journal crash boundary; all other states reject. A
+final exact scan is required before `Materialized`. Post-restore scratch
+publication remains distinct.
 
 ## 2. Proposed OCaml workspace
 

@@ -29,7 +29,7 @@ type error =
   | Pure_plan_error of Restore_plan.replay_error
   | Invalid_plan of string
   | Journal_action_count_mismatch of { journal : int; plan : int }
-  | Journal_not_applying_zero of Journal.phase
+  | Journal_not_applying of Journal.phase
   | Stale_worktree of { expected : Model.Snapshot.t; actual : Model.Snapshot.t }
   | Verification_mismatch of {
       expected : Model.Snapshot.t;
@@ -64,7 +64,7 @@ let error_to_string = function
       Printf.sprintf
         "V2 restore journal action count %d does not match plan action count %d"
         journal plan
-  | Journal_not_applying_zero phase ->
+  | Journal_not_applying phase ->
       let phase =
         match phase with
         | Journal.Prepared -> "prepared"
@@ -72,7 +72,7 @@ let error_to_string = function
         | Journal.Materialized -> "materialized"
         | Journal.Published -> "published"
       in
-      "V2 restore materialisation requires applying(0), found " ^ phase
+      "V2 restore materialisation requires an applying phase, found " ^ phase
   | Stale_worktree { expected; actual } ->
       Printf.sprintf
         "V2 restore working tree changed after preparation: expected %s, found \
@@ -409,7 +409,7 @@ let append journal_store record =
   | Ok Journal_store.Appended | Ok Journal_store.Already_appended -> Ok ()
   | Error error -> Error (Journal_store_error error)
 
-let verify_initial_journal plan journal =
+let verify_journal plan journal =
   let action_count = List.length (Restore_plan.actions plan) in
   if action_count = 0 || Restore_plan.is_noop plan then
     Error (Invalid_plan "materialisation requires a nonempty restore plan")
@@ -417,11 +417,46 @@ let verify_initial_journal plan journal =
     Error
       (Journal_action_count_mismatch
          { journal = Journal.action_count journal; plan = action_count })
-  else if Journal.phase journal = Journal.Applying 0 then Ok ()
-  else Error (Journal_not_applying_zero (Journal.phase journal))
+  else
+    (match Journal.phase journal with
+    | Journal.Applying completed -> Ok completed
+    | phase -> Error (Journal_not_applying phase))
+    [@warning "-4"]
+
+let rec drop count values =
+  match (count, values) with
+  | 0, values -> values
+  | _, [] -> []
+  | count, _ :: rest -> drop (count - 1) rest
+
+let reconcile_progress ~root ~journal_store ~plan ~journal ~completed =
+  let* actual =
+    Scanner.scan ~root |> Result.map_error (fun error -> Scanner_error error)
+  in
+  let* expected =
+    Restore_plan.replay_prefix plan ~completed_actions:completed
+    |> Result.map_error (fun error -> Pure_plan_error error)
+  in
+  if Model.Snapshot.equal actual expected then Ok (completed, journal)
+  else if completed = Journal.action_count journal then
+    Error (Stale_worktree { expected; actual })
+  else
+    let* after_next =
+      Restore_plan.replay_prefix plan ~completed_actions:(completed + 1)
+      |> Result.map_error (fun error -> Pure_plan_error error)
+    in
+    if not (Model.Snapshot.equal actual after_next) then
+      Error (Stale_worktree { expected; actual })
+    else
+      let* advanced =
+        Journal.advance journal (Journal.Applying (completed + 1))
+        |> Result.map_error (fun error -> Journal_error error)
+      in
+      let* () = append journal_store advanced in
+      Ok (completed + 1, advanced)
 
 let materialize ?(fault = Fault.never) ~root ~journal_store ~plan ~journal () =
-  let* () = verify_initial_journal plan journal in
+  let* completed = verify_journal plan journal in
   let* replayed =
     Restore_plan.replay plan
     |> Result.map_error (fun error -> Pure_plan_error error)
@@ -430,40 +465,37 @@ let materialize ?(fault = Fault.never) ~root ~journal_store ~plan ~journal () =
     Error
       (Invalid_plan "pure restore replay does not reach its target snapshot")
   else
-    let* actual =
-      Scanner.scan ~root |> Result.map_error (fun error -> Scanner_error error)
+    let* completed, journal =
+      reconcile_progress ~root ~journal_store ~plan ~journal ~completed
     in
-    if not (Model.Snapshot.equal actual (Restore_plan.observed plan)) then
-      Error (Stale_worktree { expected = Restore_plan.observed plan; actual })
-    else
-      let rec run completed journal = function
-        | [] ->
-            let* actual =
-              Scanner.scan ~root
-              |> Result.map_error (fun error -> Scanner_error error)
+    let rec run completed journal = function
+      | [] ->
+          let* actual =
+            Scanner.scan ~root
+            |> Result.map_error (fun error -> Scanner_error error)
+          in
+          if not (Model.Snapshot.equal actual (Restore_plan.target plan)) then
+            Error
+              (Verification_mismatch
+                 { expected = Restore_plan.target plan; actual })
+          else
+            let* materialized =
+              Journal.advance journal Journal.Materialized
+              |> Result.map_error (fun error -> Journal_error error)
             in
-            if not (Model.Snapshot.equal actual (Restore_plan.target plan)) then
-              Error
-                (Verification_mismatch
-                   { expected = Restore_plan.target plan; actual })
-            else
-              let* materialized =
-                Journal.advance journal Journal.Materialized
-                |> Result.map_error (fun error -> Journal_error error)
-              in
-              let* () = append journal_store materialized in
-              Ok { journal = materialized }
-        | action :: rest ->
-            let* () = apply_action root action in
-            let completed = completed + 1 in
-            if Fault.interrupts_after fault completed then
-              Error (Injected_interruption { completed_actions = completed })
-            else
-              let* advanced =
-                Journal.advance journal (Journal.Applying completed)
-                |> Result.map_error (fun error -> Journal_error error)
-              in
-              let* () = append journal_store advanced in
-              run completed advanced rest
-      in
-      run 0 journal (Restore_plan.actions plan)
+            let* () = append journal_store materialized in
+            Ok { journal = materialized }
+      | action :: rest ->
+          let* () = apply_action root action in
+          let completed = completed + 1 in
+          if Fault.interrupts_after fault completed then
+            Error (Injected_interruption { completed_actions = completed })
+          else
+            let* advanced =
+              Journal.advance journal (Journal.Applying completed)
+              |> Result.map_error (fun error -> Journal_error error)
+            in
+            let* () = append journal_store advanced in
+            run completed advanced rest
+    in
+    run completed journal (drop completed (Restore_plan.actions plan))

@@ -228,7 +228,7 @@ let parent_is_directory entries path =
   | Some parent -> (
       match entry_at entries parent with Some `Directory -> true | _ -> false)
 
-let replay plan =
+let replay_actions plan actions =
   let error detail = Error (Invalid_action detail) in
   let apply entries = function
     | Remove_file path -> (
@@ -316,4 +316,21 @@ let replay plan =
     | action :: rest ->
         Result.bind (apply entries action) (fun entries -> run entries rest)
   in
-  run (entry_map plan.observed) plan.actions
+  run (entry_map plan.observed) actions
+
+let replay plan = replay_actions plan plan.actions
+
+let rec take count values =
+  match (count, values) with
+  | 0, _ -> []
+  | _, [] -> []
+  | count, value :: rest -> value :: take (count - 1) rest
+
+let replay_prefix plan ~completed_actions =
+  let action_count = List.length plan.actions in
+  if completed_actions < 0 || completed_actions > action_count then
+    Error
+      (Invalid_action
+         (Printf.sprintf "completed action count %d is outside 0..%d"
+            completed_actions action_count))
+  else replay_actions plan (take completed_actions plan.actions)

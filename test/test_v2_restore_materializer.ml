@@ -260,7 +260,18 @@ let injected_post_write_interruption_retains_safety_and_pre_action_journal () =
           Alcotest.(check bool)
             "safety remains the causal checkpoint" true
             (Scratch.Ledger.Event_id.equal current.Scratch.event_id
-               safety.Scratch.event_id)
+               safety.Scratch.event_id);
+          let resumed = materialize root prepared in
+          Alcotest.(check bool)
+            "explicit retry reaches materialized" true
+            (Journal.phase resumed.Materializer.journal = Journal.Materialized);
+          let records =
+            Journal_store.scan (journal_store root)
+            |> require_ok Journal_store.error_to_string
+          in
+          Alcotest.(check int)
+            "reconciliation records the completed action then materialized" 4
+            (List.length records)
       | Error error ->
           Alcotest.failf "expected injected interruption, received: %s"
             (Materializer.error_to_string error)
