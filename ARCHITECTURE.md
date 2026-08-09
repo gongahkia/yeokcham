@@ -120,8 +120,11 @@ encrypted source-object bytes, and builds one replacement event per selected
 checkpoint in causal order. It publishes those events and the generation frame
 before revalidating the source, generation, and protection heads immediately
 before activation; an interrupted or stale plan cannot switch the active scope.
-Protection publication, retired-scope quarantine verification, quarantine, and
-prune remain later slices.
+Protection publication follows the same object-first discipline: it names one
+explicitly selected active scratch event, writes its immutable claim frame, and
+then appends a causal protection event only if the prior protection head remains
+unchanged. Retired-scope quarantine verification, quarantine, and prune remain
+later slices.
 
 V2-016 currently supplies a pure restore planner over those exact
 snapshots: a changed target requires the observed snapshot as an explicit safety

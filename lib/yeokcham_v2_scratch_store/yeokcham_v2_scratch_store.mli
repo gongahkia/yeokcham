@@ -75,6 +75,24 @@ type compaction_publication = {
   published_retention : Retention.plan;
 }
 
+type protection_plan = {
+  protection_checkpoint_event_id : Ledger.Event_id.t;
+  protection_snapshot_ref : V2_model.Opaque_object_ref.t;
+  protection_predecessor : Ledger.Event_id.t option;
+  protection_record : Retention.protection;
+  protection_object_ref : V2_model.Opaque_object_ref.t;
+  protection_envelope : Envelope.t;
+  protection_event_id : Ledger.Event_id.t;
+  protection_ledger_envelope : Envelope.t;
+}
+(** An immutable claim-frame and its causal ledger event. The claim remains
+    inert until [protection_ledger_envelope] is published. *)
+
+type protection_publication = {
+  published_protection_event_id : Ledger.Event_id.t;
+  published_protection : Retention.protection;
+}
+
 type error =
   | Bootstrap_store_error of Bootstrap_store.error
   | Bootstrap_error of Bootstrap.error
@@ -137,6 +155,11 @@ type error =
       actual : Ledger.Event_id.t option;
     }
   | Compaction_protection_head_changed of {
+      expected : Ledger.Event_id.t option;
+      actual : Ledger.Event_id.t option;
+    }
+  | Protection_nonce_reuse
+  | Protection_head_changed of {
       expected : Ledger.Event_id.t option;
       actual : Ledger.Event_id.t option;
     }
@@ -218,3 +241,20 @@ val publish_compaction_plan :
     generation activation event. It rechecks the source, generation, and
     protection heads immediately before activation. An interruption before
     activation leaves the prior scope active and the plan can be retried. *)
+
+val plan_protection :
+  repository ->
+  event_id:Ledger.Event_id.t ->
+  action:Retention.protection_action ->
+  reason:Retention.protection_reason ->
+  protection_nonce:Envelope.nonce ->
+  ledger_nonce:Envelope.nonce ->
+  (protection_plan, error) result
+(** Creates a claim for the exact snapshot named by one currently active scratch
+    event. It writes nothing and does not infer a checkpoint. *)
+
+val publish_protection_plan :
+  repository -> protection_plan -> (protection_publication, error) result
+(** Publishes the immutable protection frame before its causal ledger event.
+    Before the ledger write it rechecks that the named scratch event remains
+    active and that the protection head has not changed. *)

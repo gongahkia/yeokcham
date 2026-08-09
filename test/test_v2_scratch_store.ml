@@ -730,7 +730,7 @@ let compaction_activation_preserves_selected_snapshots_and_retries () =
       | _ -> Alcotest.fail "compaction did not retain the expected two events")
 
 let compaction_folds_persisted_protection_claims () =
-  with_repository (fun root _ scratch ->
+  with_repository (fun _root _ scratch ->
       let oldest =
         match publish scratch (snapshot "oldest") '1' '2' with
         | Scratch.Published checkpoint -> checkpoint
@@ -746,19 +746,20 @@ let compaction_folds_persisted_protection_claims () =
         | Scratch.Published checkpoint -> checkpoint
         | Scratch.Unchanged _ -> Alcotest.fail "current scratch was unchanged"
       in
-      let claim =
-        Retention.protection ~snapshot_ref:oldest.Scratch.snapshot_ref
+      let claim_plan =
+        Scratch.plan_protection scratch ~event_id:oldest.Scratch.event_id
           ~action:Retention.Protect ~reason:Retention.User_pin
+          ~protection_nonce:(nonce '7') ~ledger_nonce:(nonce '8')
+        |> require_ok Scratch.error_to_string
       in
-      let claim_ref =
-        publish_frame root
-          ~frame:(Object.scratch_protection claim)
-          ~nonce_value:(nonce '7')
+      let claim =
+        Scratch.publish_protection_plan scratch claim_plan
+        |> require_ok Scratch.error_to_string
       in
-      ignore
-        (publish_ledger_event root
-           ~ref_name:(Scratch.protection_ref_name scratch)
-           ~predecessor:None ~target:claim_ref ~nonce_value:(nonce '8'));
+      Alcotest.(check bool)
+        "claim publication keeps planned identity" true
+        (Ledger.Event_id.equal claim_plan.Scratch.protection_event_id
+           claim.Scratch.published_protection_event_id);
       let plan =
         Scratch.plan_compaction scratch
           ~policy:(retention_policy ~recent_count:1)
@@ -785,6 +786,102 @@ let compaction_folds_persisted_protection_claims () =
         (List.exists
            (V2_model.Opaque_object_ref.equal middle.Scratch.snapshot_ref)
            selected))
+
+let protection_frame_interruption_is_inert_and_resumes () =
+  with_repository (fun root _ scratch ->
+      let oldest =
+        match publish scratch (snapshot "oldest") '1' '2' with
+        | Scratch.Published checkpoint -> checkpoint
+        | Scratch.Unchanged _ -> Alcotest.fail "initial scratch was unchanged"
+      in
+      ignore
+        (match publish scratch (snapshot "middle") '3' '4' with
+        | Scratch.Published checkpoint -> checkpoint
+        | Scratch.Unchanged _ -> Alcotest.fail "middle scratch was unchanged");
+      let current =
+        match publish scratch (snapshot "current") '5' '6' with
+        | Scratch.Published checkpoint -> checkpoint
+        | Scratch.Unchanged _ -> Alcotest.fail "current scratch was unchanged"
+      in
+      let claim_plan =
+        Scratch.plan_protection scratch ~event_id:oldest.Scratch.event_id
+          ~action:Retention.Protect ~reason:Retention.User_pin
+          ~protection_nonce:(nonce '7') ~ledger_nonce:(nonce '8')
+        |> require_ok Scratch.error_to_string
+      in
+      ignore
+        (Object_store.publish (object_store root)
+           ~envelope:claim_plan.Scratch.protection_envelope
+        |> require_ok Object_store.error_to_string);
+      let before_resume =
+        Scratch.plan_compaction scratch
+          ~policy:(retention_policy ~recent_count:1)
+          ~nonces:(compaction_nonces [ '9' ] 'a' 'b')
+        |> require_ok Scratch.error_to_string
+      in
+      Alcotest.(check int)
+        "unledgered claim does not affect retention" 1
+        (List.length
+           before_resume.Scratch.compaction_retention.Retention.retained);
+      ignore
+        (Scratch.publish_protection_plan scratch claim_plan
+        |> require_ok Scratch.error_to_string);
+      let after_resume =
+        Scratch.plan_compaction scratch
+          ~policy:(retention_policy ~recent_count:1)
+          ~nonces:(compaction_nonces [ 'c'; 'd' ] 'e' 'f')
+        |> require_ok Scratch.error_to_string
+      in
+      let selected =
+        after_resume.Scratch.compaction_retention.Retention.retained
+        |> List.map (fun planned ->
+            planned.Retention.checkpoint.Retention.checkpoint_snapshot_ref)
+      in
+      Alcotest.(check bool)
+        "resumed claim retains selected old snapshot" true
+        (List.exists
+           (V2_model.Opaque_object_ref.equal oldest.Scratch.snapshot_ref)
+           selected);
+      Alcotest.(check bool)
+        "resumed claim retains current snapshot" true
+        (List.exists
+           (V2_model.Opaque_object_ref.equal current.Scratch.snapshot_ref)
+           selected))
+
+let protection_plan_refuses_a_stale_claim_head () =
+  with_repository (fun _ _ scratch ->
+      let source =
+        match publish scratch (snapshot "source") '1' '2' with
+        | Scratch.Published checkpoint -> checkpoint
+        | Scratch.Unchanged _ -> Alcotest.fail "initial scratch was unchanged"
+      in
+      let first =
+        Scratch.plan_protection scratch ~event_id:source.Scratch.event_id
+          ~action:Retention.Protect ~reason:Retention.User_pin
+          ~protection_nonce:(nonce '3') ~ledger_nonce:(nonce '4')
+        |> require_ok Scratch.error_to_string
+      in
+      let second =
+        Scratch.plan_protection scratch ~event_id:source.Scratch.event_id
+          ~action:Retention.Protect ~reason:Retention.User_pin
+          ~protection_nonce:(nonce '5') ~ledger_nonce:(nonce '6')
+        |> require_ok Scratch.error_to_string
+      in
+      ignore
+        (Scratch.publish_protection_plan scratch second
+        |> require_ok Scratch.error_to_string);
+      let protection_head_changed =
+       (function
+       | Scratch.Protection_head_changed _ -> true
+       | _ -> false)
+       [@warning "-4"]
+      in
+      match Scratch.publish_protection_plan scratch first with
+      | Error error when protection_head_changed error -> ()
+      | Ok _ -> Alcotest.fail "stale protection plan published a fork"
+      | Error error ->
+          Alcotest.failf "wrong stale-claim error: %s"
+            (Scratch.error_to_string error))
 
 let compaction_refuses_to_activate_a_stale_source_plan () =
   with_repository (fun _ _ scratch ->
@@ -948,6 +1045,11 @@ let () =
             compaction_activation_preserves_selected_snapshots_and_retries;
           Alcotest.test_case "compaction folds persisted protection claims"
             `Quick compaction_folds_persisted_protection_claims;
+          Alcotest.test_case
+            "protection frame interruption remains inert and resumes" `Quick
+            protection_frame_interruption_is_inert_and_resumes;
+          Alcotest.test_case "protection plan refuses stale claim head" `Quick
+            protection_plan_refuses_a_stale_claim_head;
           Alcotest.test_case "compaction refuses stale source activation" `Quick
             compaction_refuses_to_activate_a_stale_source_plan;
           Alcotest.test_case "compaction refuses stale protection activation"

@@ -112,6 +112,14 @@ exact snapshot at this local retention boundary. A protection ledger chain is
 folded in causal order; its latest action for an equal `(snapshot, reason)`
 pair is effective. Any effective reason protects that snapshot.
 
+A protection author names an explicit current scratch event and its exact
+snapshot reference; it does not infer a checkpoint from a path, time, or causal
+head. The claim frame is published before its protection-ledger event. Before
+the latter, the adapter rechecks that the named event remains in the active
+scope and that the planned protection predecessor is still the sole head. A
+stale claim plan leaves only an inert create-only frame and cannot create a
+silent protection fork.
+
 The initial policy is runtime input rather than a persistent record:
 
 ```text
@@ -234,6 +242,8 @@ canonical objects.
 - Activation tests prove exact retained snapshot reopening and both pre- and
   post-activation interruption states; stale source and protection plans refuse
   activation.
+- Protection tests prove an unledgered claim frame is inert, a resumed claim is
+  effective for compaction, and a stale claim predecessor is explicit.
 - Quarantine tests inject failure around each candidate movement; permanent
   prune tests are separate and do not claim rollback.
 - `make check` and `make property-test PROPERTY_TEST_SEED=17` are required.

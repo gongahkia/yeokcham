@@ -72,6 +72,22 @@ type compaction_publication = {
   published_retention : Retention.plan;
 }
 
+type protection_plan = {
+  protection_checkpoint_event_id : Ledger.Event_id.t;
+  protection_snapshot_ref : V2_model.Opaque_object_ref.t;
+  protection_predecessor : Ledger.Event_id.t option;
+  protection_record : Retention.protection;
+  protection_object_ref : V2_model.Opaque_object_ref.t;
+  protection_envelope : Envelope.t;
+  protection_event_id : Ledger.Event_id.t;
+  protection_ledger_envelope : Envelope.t;
+}
+
+type protection_publication = {
+  published_protection_event_id : Ledger.Event_id.t;
+  published_protection : Retention.protection;
+}
+
 type error =
   | Bootstrap_store_error of Bootstrap_store.error
   | Bootstrap_error of Bootstrap.error
@@ -134,6 +150,11 @@ type error =
       actual : Ledger.Event_id.t option;
     }
   | Compaction_protection_head_changed of {
+      expected : Ledger.Event_id.t option;
+      actual : Ledger.Event_id.t option;
+    }
+  | Protection_nonce_reuse
+  | Protection_head_changed of {
       expected : Ledger.Event_id.t option;
       actual : Ledger.Event_id.t option;
     }
@@ -267,6 +288,15 @@ let error_to_string = function
       in
       Printf.sprintf
         "V2 scratch compaction protection head changed from %s to %s"
+        (render expected) (render actual)
+  | Protection_nonce_reuse ->
+      "V2 scratch protection envelopes require distinct nonces"
+  | Protection_head_changed { expected; actual } ->
+      let render = function
+        | None -> "none"
+        | Some event_id -> Ledger.Event_id.to_hex event_id
+      in
+      Printf.sprintf "V2 scratch protection head changed from %s to %s"
         (render expected) (render actual)
 
 let scratch_ref_of_device device_id =
@@ -1236,3 +1266,109 @@ let publish_compaction_plan repository (plan : compaction_plan) =
         }
       in
       Ok publication
+
+let plan_protection repository ~event_id ~action ~reason ~protection_nonce
+    ~ledger_nonce =
+  if
+    String.equal
+      (Envelope.nonce_to_bytes protection_nonce)
+      (Envelope.nonce_to_bytes ledger_nonce)
+  then Error Protection_nonce_reuse
+  else
+    let* checkpoint = checkpoint_for_event repository ~event_id in
+    let* protection_predecessor, _ = protection_state repository in
+    let protection_record =
+      Retention.protection ~snapshot_ref:checkpoint.snapshot_ref ~action ~reason
+    in
+    let capability = Bootstrap_store.capability repository.bootstrap in
+    let record = Bootstrap_store.bootstrap repository.bootstrap in
+    let* protection_envelope =
+      Envelope.seal
+        ~key:(Bootstrap.envelope_key capability)
+        ~nonce:protection_nonce ~mandatory_features:0L
+        (Object.scratch_protection protection_record |> Object.encode)
+      |> Result.map_error (fun error -> Envelope_error error)
+    in
+    let protection_object_ref =
+      Address.derive
+        ~repository_id:(Bootstrap.repository_id record)
+        ~key:(Bootstrap.address_key capability)
+        ~envelope:protection_envelope
+    in
+    let* protection_event_id, protection_ledger_envelope =
+      ledger_candidate repository ~ref_name:repository.protection_ref
+        ~predecessor:protection_predecessor ~target:protection_object_ref
+        ~nonce:ledger_nonce
+    in
+    let plan : protection_plan =
+      {
+        protection_checkpoint_event_id = checkpoint.event_id;
+        protection_snapshot_ref = checkpoint.snapshot_ref;
+        protection_predecessor;
+        protection_record;
+        protection_object_ref;
+        protection_envelope;
+        protection_event_id;
+        protection_ledger_envelope;
+      }
+    in
+    Ok plan
+
+let publish_protection_plan repository (plan : protection_plan) =
+  let* protection_object_ref =
+    Object_store.publish repository.objects ~envelope:plan.protection_envelope
+    |> Result.map publication_ref
+    |> Result.map_error (fun error -> Object_store_error error)
+  in
+  if
+    not
+      (V2_model.Opaque_object_ref.equal protection_object_ref
+         plan.protection_object_ref)
+  then assert false
+  else
+    let* checkpoint =
+      checkpoint_for_event repository
+        ~event_id:plan.protection_checkpoint_event_id
+    in
+    if
+      not
+        (V2_model.Opaque_object_ref.equal checkpoint.snapshot_ref
+           plan.protection_snapshot_ref)
+    then assert false
+    else
+      let* actual_predecessor, _ = protection_state repository in
+      if
+        not
+          (option_event_id_equal plan.protection_predecessor actual_predecessor)
+      then
+        Error
+          (Protection_head_changed
+             {
+               expected = plan.protection_predecessor;
+               actual = actual_predecessor;
+             })
+      else
+        let* publication =
+          Ledger_store.publish repository.ledger
+            ~envelope:plan.protection_ledger_envelope
+          |> Result.map_error (fun error -> Ledger_store_error error)
+        in
+        let published_protection_event_id =
+          match publication with
+          | Ledger_store.Published { event_id; _ }
+          | Ledger_store.Already_published { event_id; _ } ->
+              event_id
+        in
+        if
+          not
+            (Ledger.Event_id.equal published_protection_event_id
+               plan.protection_event_id)
+        then assert false
+        else
+          let publication : protection_publication =
+            {
+              published_protection_event_id;
+              published_protection = plan.protection_record;
+            }
+          in
+          Ok publication

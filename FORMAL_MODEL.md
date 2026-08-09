@@ -1672,6 +1672,14 @@ event and snapshot objects. It may exclude optional recent entries, but it
 reports a required-set overrun rather than evicting a protected or current
 state.
 
+Claim(scratch-event, action, reason) first resolves the exact snapshot of the
+explicitly named event in `Active_scratch(D)`. It then creates a protection
+frame followed by a protection-ledger event. The frame alone has no retention
+effect. Before that event is published, the adapter requires the planned
+protection predecessor still to be the sole protection head and rechecks the
+named event remains active. A changed claim head is explicit rather than a
+silently forked effective-claim history.
+
 Compaction creates a fresh immutable scratch ledger chain over the selected
 existing snapshot references, oldest-to-newest, then publishes a generation
 ledger event as the sole activation point. Its manifest binds the source ref

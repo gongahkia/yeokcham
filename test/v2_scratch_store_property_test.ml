@@ -319,6 +319,99 @@ let generated_compaction_reopens_each_retained_snapshot =
                                retained_contents compacted)))
       with Exit -> false)
 
+let generated_published_pin_survives_compaction =
+  QCheck2.Test.make ~count:50
+    ~name:"V2 published generated pins survive compaction"
+    QCheck2.Gen.(list_size (int_range 1 10) (string_size (int_range 0 2048)))
+    (fun contents ->
+      try
+        with_repository (fun _ _ scratch ->
+            let contents =
+              List.mapi
+                (fun index content -> Printf.sprintf "%d\000%s" index content)
+                contents
+            in
+            let published =
+              List.mapi
+                (fun index content ->
+                  Scratch.publish scratch ~snapshot:(snapshot content)
+                    ~snapshot_nonce:(nonce ((index * 2) + 1))
+                    ~ledger_nonce:(nonce ((index * 2) + 2)))
+                contents
+            in
+            if List.exists Result.is_error published then false
+            else
+              let checkpoints =
+                List.filter_map
+                  (function
+                    | Ok (Scratch.Published checkpoint) -> Some checkpoint
+                    | Ok (Scratch.Unchanged _) -> None
+                    | Error _ -> assert false)
+                  published
+              in
+              match checkpoints with
+              | [] -> false
+              | protected :: _ -> (
+                  let protection_plan =
+                    Scratch.plan_protection scratch
+                      ~event_id:protected.Scratch.event_id
+                      ~action:Retention.Protect ~reason:Retention.User_pin
+                      ~protection_nonce:(nonce 150) ~ledger_nonce:(nonce 151)
+                    |> get
+                  in
+                  match
+                    Scratch.publish_protection_plan scratch protection_plan
+                  with
+                  | Error _ -> false
+                  | Ok _ -> (
+                      let retained_count =
+                        if List.length checkpoints = 1 then 1 else 2
+                      in
+                      let policy =
+                        Retention.make_policy ~recent_count:1
+                          ~storage_budget_bytes:None
+                        |> get
+                      in
+                      let nonces =
+                        {
+                          Scratch.compact_ledger_nonces =
+                            List.init retained_count (fun index ->
+                                nonce (100 + index));
+                          generation_manifest_nonce = nonce 220;
+                          generation_ledger_nonce = nonce 221;
+                        }
+                      in
+                      match Scratch.plan_compaction scratch ~policy ~nonces with
+                      | Error _ -> false
+                      | Ok plan -> (
+                          match
+                            Scratch.publish_compaction_plan scratch plan
+                          with
+                          | Error _ -> false
+                          | Ok _ -> (
+                              match
+                                List.find_opt
+                                  (fun compacted ->
+                                    V2_model.Opaque_object_ref.equal
+                                      compacted.Scratch.source_checkpoint
+                                        .Retention.checkpoint_snapshot_ref
+                                      protected.Scratch.snapshot_ref)
+                                  plan.Scratch.compacted_events
+                              with
+                              | None -> false
+                              | Some compacted -> (
+                                  match
+                                    Scratch.checkpoint_for_event scratch
+                                      ~event_id:
+                                        compacted.Scratch.compacted_event_id
+                                  with
+                                  | Ok checkpoint ->
+                                      Model.Snapshot.equal
+                                        protected.Scratch.snapshot
+                                        checkpoint.Scratch.snapshot
+                                  | Error _ -> false))))))
+      with Exit -> false)
+
 let () =
   Alcotest.run "V2 local scratch publication properties"
     [
@@ -333,5 +426,8 @@ let () =
           QCheck_alcotest.to_alcotest ~speed_level:`Quick
             ~rand:(state_for "compaction-publication")
             generated_compaction_reopens_each_retained_snapshot;
+          QCheck_alcotest.to_alcotest ~speed_level:`Quick
+            ~rand:(state_for "published-pin")
+            generated_published_pin_survives_compaction;
         ] );
     ]
