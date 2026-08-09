@@ -158,3 +158,4 @@ The ADR lifecycle, numbering rules, and template are defined in [`docs/adr/READM
 - [ADR-045 — V2 canonical encrypted-object envelope](docs/adr/045-v2-canonical-encrypted-object-envelope.md) — Accepted.
 - [ADR-046 — V2 keyed opaque object addresses](docs/adr/046-v2-keyed-opaque-object-addresses.md) — Accepted.
 - [ADR-047 — Explicit V1 archive and V2 cutover boundary](docs/adr/047-v1-archive-and-v2-cutover.md) — Proposed.
+- [ADR-048 — V2 encrypted causal ref-ledger with external key verification](docs/adr/048-v2-encrypted-causal-ref-ledger.md) — Proposed.
