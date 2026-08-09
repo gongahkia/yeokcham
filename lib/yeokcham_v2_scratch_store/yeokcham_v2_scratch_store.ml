@@ -45,6 +45,8 @@ type error =
   | Envelope_error of Envelope.error
   | Ledger_error of Ledger.error
   | Scratch_event_missing_target of Ledger.Event_id.t
+  | Unknown_scratch_event of Ledger.Event_id.t
+  | Event_outside_scratch_scope of Ledger.Event_id.t
   | Scratch_target_not_snapshot of {
       event_id : Ledger.Event_id.t;
       object_ref : V2_model.Opaque_object_ref.t;
@@ -66,6 +68,11 @@ let error_to_string = function
   | Ledger_error error -> Ledger.error_to_string error
   | Scratch_event_missing_target event_id ->
       "scratch event has no snapshot target: " ^ Ledger.Event_id.to_hex event_id
+  | Unknown_scratch_event event_id ->
+      "unknown signed scratch event: " ^ Ledger.Event_id.to_hex event_id
+  | Event_outside_scratch_scope event_id ->
+      "selected event is outside this device scratch scope: "
+      ^ Ledger.Event_id.to_hex event_id
   | Scratch_target_not_snapshot { event_id; object_ref } ->
       Printf.sprintf "scratch event %s targets non-snapshot object %s"
         (Ledger.Event_id.to_hex event_id)
@@ -195,6 +202,41 @@ let inspect repository =
             |> List.sort Ledger.Event_id.compare
           in
           Ok (Divergent_checkpoints event_ids))
+
+let checkpoint_for_event repository ~event_id =
+  let* object_refs =
+    Ledger_store.list_object_refs repository.ledger
+    |> Result.map_error (fun error -> Ledger_store_error error)
+  in
+  let rec find = function
+    | [] -> Error (Unknown_scratch_event event_id)
+    | object_ref :: rest -> (
+        let* object_ =
+          Ledger_store.load_object repository.ledger ~object_ref
+          |> Result.map_error (fun error -> Ledger_store_error error)
+        in
+        match Object.ledger object_ with
+        | None -> find rest
+        | Some event
+          when not (Ledger.Event_id.equal event_id (Ledger.event_id event)) ->
+            find rest
+        | Some event ->
+            let ref_name =
+              Ledger.event_unsigned event |> Ledger.unsigned_ref_name
+            in
+            if not (Ledger.Ref_name.equal ref_name repository.scratch_ref) then
+              Error (Event_outside_scratch_scope event_id)
+            else
+              let* verified =
+                Ledger_store.load repository.ledger ~object_ref
+                |> Result.map_error (fun error -> Ledger_store_error error)
+              in
+              let actual = Ledger.verified_event verified |> Ledger.event_id in
+              if not (Ledger.Event_id.equal event_id actual) then
+                Error (Unknown_scratch_event event_id)
+              else checkpoint_of_verified repository verified)
+  in
+  find object_refs
 
 let publication_ref = function
   | Object_store.Published object_ref

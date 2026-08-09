@@ -102,6 +102,14 @@ record is an idempotent retry; different bytes at the same path are a collision.
 The root validator accepts only valid transaction and restore records in the
 shared journal namespace.
 
+The preparation service resolves the target from a caller-named signed event in
+the local device scratch scope; it never chooses a causal head. For a changed
+scan it causally publishes the exact observed snapshot as the safety checkpoint
+before it writes this journal's `Prepared` and `Applying(0)` records. A
+previously named operation is reported for explicit recovery rather than being
+silently continued. Equal target and observed snapshots create neither safety
+checkpoint nor restore journal.
+
 ## Consequences
 
 - The implemented restore store create-only names every generation and rejects
@@ -112,6 +120,9 @@ shared journal namespace.
   readers but no file path, file content, symlink target, or private key.
 - A later adapter must still verify that the safety event and snapshot
   references are valid in the selected repository before applying anything.
+- The preparation boundary publishes a safety checkpoint even when an external
+  caller later declines or fails to materialise; that durable state is the
+  intentional recovery anchor, not a partial destructive action.
 
 ## Model and invariant impact
 
@@ -153,6 +164,10 @@ under the approved no-user-data development policy.
   validation, stale regular temporary handling, non-regular temporary
   rejection, missing predecessors, repository mismatch, and generated durable
   chains.
+- Preparation tests cover signed explicit target lookup, no-op behavior, exact
+  safety publication before durable `Applying(0)`, reused-operation reporting,
+  and generated changed scans. No filesystem mutation is performed by this
+  layer.
 - Before a filesystem adapter is complete, add injected-write-failure and
   exact re-scan/safety-publication tests.
 - `make check` and `make property-test PROPERTY_TEST_SEED=17` are required.

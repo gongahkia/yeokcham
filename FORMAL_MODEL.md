@@ -1583,3 +1583,13 @@ legal successor of the preceding record. The store is create-only and treats
 identical existing bytes as a retry; conflicting bytes, missing predecessors,
 or malformed/non-regular entries reject. A later filesystem adapter must still
 enforce snapshot, safety-publication, and materialisation relations.
+
+The implemented preparation relation accepts an explicit signed event `E` only
+when it is in the local device scratch scope and resolves to the target exact
+snapshot `T`. It then scans `O`. If `O = T`, it produces no safety event or
+journal. Otherwise it first causally publishes `O` as a verified safety
+checkpoint `(S, O-ref)`, then creates `Prepared(repository, operation, S,
+O-ref, T-ref, action-count)`, and only then appends `Applying(0)`. A previously
+named operation is an explicit existing-operation result, not an implicit
+resume. This relation does not choose a target causal head or modify the
+working tree.
