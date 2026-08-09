@@ -23,6 +23,11 @@ type recovery_outcome = {
   completed_transactions : Transaction.Transaction_id.t list;
 }
 
+type verification_report = {
+  prepared_transactions : Transaction.Transaction_id.t list;
+  committed_transactions : Transaction.Transaction_id.t list;
+}
+
 type error =
   | Ledger_store_error of Ledger_store.error
   | Transaction_error of Transaction.error
@@ -66,3 +71,7 @@ val commit :
   (commit_outcome, error) result
 
 val recover : repository -> (recovery_outcome, error) result
+(** Validates journal records and candidates without publishing, deleting, or
+    repairing anything. *)
+
+val verify : repository -> (verification_report, error) result

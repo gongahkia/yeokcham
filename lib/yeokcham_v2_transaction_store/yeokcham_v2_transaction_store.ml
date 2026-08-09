@@ -18,6 +18,11 @@ type recovery_outcome = {
   completed_transactions : Transaction.Transaction_id.t list;
 }
 
+type verification_report = {
+  prepared_transactions : Transaction.Transaction_id.t list;
+  committed_transactions : Transaction.Transaction_id.t list;
+}
+
 type error =
   | Ledger_store_error of Ledger_store.error
   | Transaction_error of Transaction.error
@@ -435,6 +440,25 @@ let commit_for state transaction_id =
     (fun commit ->
       Transaction.Transaction_id.equal commit.commit_id transaction_id)
     state.commits
+
+let verify repository =
+  let* state = scan_journal repository in
+  let rec validate_prepares = function
+    | [] -> Ok ()
+    | prepare :: rest ->
+        let* () = validate_prepare_candidates repository prepare.prepared in
+        validate_prepares rest
+  in
+  let* () = validate_prepares state.prepares in
+  let committed_transactions =
+    List.map (fun commit -> commit.commit_id) state.commits
+  in
+  let prepared_transactions =
+    state.prepares
+    |> List.filter (fun prepare -> not (is_committed state prepare.prepare_id))
+    |> List.map (fun prepare -> prepare.prepare_id)
+  in
+  Ok { prepared_transactions; committed_transactions }
 
 let recover repository =
   let* state = scan_journal repository in

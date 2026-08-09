@@ -1410,3 +1410,20 @@ Thus a failure has one of three outcomes: unchanged valid state; a valid
 immutable object prefix plus resumable journal; or a typed invalid/corrupt
 journal result with no automatic repair. No recovery outcome selects a ref or
 asserts user intent.
+
+## 23. V2 read-only repository verification
+
+Given one supplied repository/address/encryption/key-registry context,
+`verify_v2(R)` has no transition on persistent state. It first parses and
+cryptographically validates every ADR-049 journal candidate, returning only
+the sets of prepared and committed transaction identities. It then enumerates
+every canonical opaque object path, verifies each ADR-046 address and ADR-048
+signature, and requires the signed repository ID to equal `R`.
+
+For every safe ref name `n`, it evaluates the complete verified set
+`E(R, n)`. A missing/cross-scope predecessor, duplicate event ID, cycle, bad
+signature, absent signer, invalid object path, or invalid journal causes a
+typed verification error and no repair. A successful report contains only
+counts of verified objects/events/ref scopes, causal heads, explicit
+divergences, prepared transactions, and committed/resumable transactions.
+It neither chooses heads nor turns a cryptographic result into authorization.

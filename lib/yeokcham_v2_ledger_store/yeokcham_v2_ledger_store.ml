@@ -32,6 +32,10 @@ type error =
   | Address_error of Address.error
   | Ledger_error of Ledger.error
   | Unknown_signer of Ledger.Signer_key_id.t
+  | Repository_mismatch of {
+      expected : Model.Repository_id.t;
+      actual : Model.Repository_id.t;
+    }
   | Object_collision of Model.Opaque_object_ref.t
 
 let max_object_bytes = Envelope.max_ciphertext_bytes + 128
@@ -51,6 +55,11 @@ let error_to_string = function
   | Ledger_error error -> Ledger.error_to_string error
   | Unknown_signer key ->
       "ref-ledger signer is unavailable: " ^ Ledger.Signer_key_id.to_hex key
+  | Repository_mismatch { expected; actual } ->
+      Printf.sprintf
+        "ref-ledger event repository %s does not match enclosing repository %s"
+        (Model.Repository_id.to_hex actual)
+        (Model.Repository_id.to_hex expected)
   | Object_collision object_ref ->
       "opaque object address already contains different bytes: "
       ^ Model.Opaque_object_ref.to_hex object_ref
@@ -88,6 +97,72 @@ let object_path repository object_ref =
   Filename.concat repository.objects
     (Filename.concat (String.sub hex 0 2)
        (Filename.concat (String.sub hex 2 2) (String.sub hex 4 60)))
+
+let lowercase_hex name expected_length =
+  String.length name = expected_length
+  && String.for_all
+       (function '0' .. '9' | 'a' .. 'f' -> true | _ -> false)
+       name
+
+let read_directory path =
+  try Ok (Sys.readdir path |> Array.to_list |> List.sort String.compare)
+  with Sys_error message ->
+    Error (Io_error { operation = "read directory"; path; message })
+
+let stat_kind path =
+  try Ok (Unix.lstat path).Unix.st_kind
+  with Unix.Unix_error (error, _, _) ->
+    Error (io_error ~operation:"lstat" ~path error)
+
+let list_object_refs repository =
+  let* () = check_v2_root repository.root in
+  let rec scan_leaves first_shard second_shard result = function
+    | [] -> Ok result
+    | name :: rest ->
+        let path = Filename.concat second_shard name in
+        let* kind = stat_kind path in
+        if
+          kind <> Unix.S_REG
+          || (not (lowercase_hex name 60))
+          || (not (lowercase_hex (Filename.basename first_shard) 2))
+          || not (lowercase_hex (Filename.basename second_shard) 2)
+        then Error (Invalid_object_path path)
+        else
+          let encoded = first_shard ^ Filename.basename second_shard ^ name in
+          let* object_ref =
+            Model.Opaque_object_ref.of_hex encoded
+            |> Result.map_error (fun _ -> Invalid_object_path path)
+          in
+          scan_leaves first_shard second_shard (object_ref :: result) rest
+  in
+  let rec scan_second_shards first_shard result = function
+    | [] -> Ok result
+    | name :: rest ->
+        let path = Filename.concat first_shard name in
+        let* kind = stat_kind path in
+        if kind <> Unix.S_DIR || not (lowercase_hex name 2) then
+          Error (Invalid_object_path path)
+        else
+          let* leaves = read_directory path in
+          let* result =
+            scan_leaves (Filename.basename first_shard) path result leaves
+          in
+          scan_second_shards first_shard result rest
+  in
+  let rec scan_first_shards result = function
+    | [] -> Ok (List.sort Model.Opaque_object_ref.compare result)
+    | name :: rest ->
+        let path = Filename.concat repository.objects name in
+        let* kind = stat_kind path in
+        if kind <> Unix.S_DIR || not (lowercase_hex name 2) then
+          Error (Invalid_object_path path)
+        else
+          let* second_shards = read_directory path in
+          let* result = scan_second_shards path result second_shards in
+          scan_first_shards result rest
+  in
+  let* first_shards = read_directory repository.objects in
+  scan_first_shards [] first_shards
 
 let fsync_directory path =
   try
@@ -251,7 +326,17 @@ let verified_envelope repository envelope =
     |> Result.map_error (fun error -> Ledger_error error)
   in
   match verification with
-  | Ledger.Cryptographically_valid verified -> Ok (object_ref, verified)
+  | Ledger.Cryptographically_valid verified ->
+      let event = Ledger.verified_event verified in
+      let actual_repository =
+        Ledger.event_unsigned event |> Ledger.unsigned_repository_id
+      in
+      if Model.Repository_id.equal repository.repository_id actual_repository
+      then Ok (object_ref, verified)
+      else
+        Error
+          (Repository_mismatch
+             { expected = repository.repository_id; actual = actual_repository })
   | Ledger.Unknown_signer key -> Error (Unknown_signer key)
 
 let validate_envelope repository ~envelope =

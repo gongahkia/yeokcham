@@ -40,6 +40,10 @@ let repository_id =
   Model.Repository_id.of_bytes (String.make 32 'r')
   |> require_ok Model.identity_error_to_string
 
+let other_repository_id =
+  Model.Repository_id.of_bytes (String.make 32 's')
+  |> require_ok Model.identity_error_to_string
+
 let address_key =
   Address.key_of_bytes (String.make 32 'a')
   |> require_ok Address.error_to_string
@@ -59,10 +63,12 @@ let target =
   |> require_ok Model.identity_error_to_string
   |> Ledger.Ref_target.of_opaque_object_ref
 
-let signed_event ?(signature_mutation = false) () =
+let signed_event ?(repository = repository_id) ?(signature_mutation = false) ()
+    =
   let unsigned =
-    Ledger.make_unsigned ~repository_id ~ref_name ~signer_key_id:signer.key_id
-      ~predecessor:None ~target:(Some target) ~mandatory_features:0L
+    Ledger.make_unsigned ~repository_id:repository ~ref_name
+      ~signer_key_id:signer.key_id ~predecessor:None ~target:(Some target)
+      ~mandatory_features:0L
     |> require_ok Ledger.error_to_string
   in
   let signature =
@@ -194,6 +200,21 @@ let rejected_or_blocked_publication_writes_no_object () =
       Alcotest.(check bool)
         "rejected event has no object path" false
         (Sys.file_exists (Ledger_store.object_path repository invalid_ref));
+      let foreign_envelope =
+        envelope ~nonce_offset:2
+          (signed_event ~repository:other_repository_id ())
+      in
+      let foreign_ref =
+        Address.derive ~repository_id ~key:address_key
+          ~envelope:foreign_envelope
+      in
+      Alcotest.(check bool)
+        "foreign repository event rejects before publication" true
+        (Result.is_error
+           (Ledger_store.publish repository ~envelope:foreign_envelope));
+      Alcotest.(check bool)
+        "foreign repository event has no object path" false
+        (Sys.file_exists (Ledger_store.object_path repository foreign_ref));
       let valid_envelope = envelope ~nonce_offset:1 (signed_event ()) in
       let object_ref =
         Address.derive ~repository_id ~key:address_key ~envelope:valid_envelope

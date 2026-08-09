@@ -30,6 +30,10 @@ type error =
   | Address_error of Address.error
   | Ledger_error of Ledger.error
   | Unknown_signer of Ledger.Signer_key_id.t
+  | Repository_mismatch of {
+      expected : Model.Repository_id.t;
+      actual : Model.Repository_id.t;
+    }
   | Object_collision of Model.Opaque_object_ref.t
 
 val error_to_string : error -> string
@@ -44,6 +48,10 @@ val open_repository :
   (repository, error) result
 
 val object_path : repository -> Model.Opaque_object_ref.t -> string
+
+val list_object_refs :
+  repository -> (Model.Opaque_object_ref.t list, error) result
+(** Lists every canonical object path without decrypting or mutating it. *)
 
 val validate_envelope :
   repository ->

@@ -1,0 +1,9 @@
+(library
+ (name yeokcham_v2_verification)
+ (libraries
+  yeokcham_v2_address
+  yeokcham_v2_envelope
+  yeokcham_v2_ledger
+  yeokcham_v2_ledger_store
+  yeokcham_v2_model
+  yeokcham_v2_transaction_store))

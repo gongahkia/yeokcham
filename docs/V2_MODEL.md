@@ -72,3 +72,18 @@ no mutable-ref, trust, authorization, membership, ownership, or history
 selection authority. Recovery is idempotent: completed journal cleanup may be
 retried, while corrupt, unknown, or invalid entries remain inspectable and
 block automatic cleanup.
+
+## Read-only repository verification
+
+V2-007 verifies a supplied V2 repository context without recovery, publication,
+repair, cleanup, mutable-ref access, or other mutation. It enumerates every
+canonical opaque object path, decrypts and verifies each ADR-048 event, and
+requires that the signed repository identity matches the enclosing V2
+repository. It groups valid records by ref name, evaluates every causal chain,
+and reports heads and unresolved divergences without selecting either.
+
+The verifier also reads the ADR-049 journal through the same strict parser and
+candidate validation as recovery, but reports prepared and committed/resumable
+transaction counts rather than deleting or publishing anything. Any malformed
+path/record, invalid address, unknown signer, wrong repository, broken causal
+link, or corrupt journal state is a typed error with object or journal context.
