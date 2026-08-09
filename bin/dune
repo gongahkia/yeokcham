@@ -5,6 +5,7 @@
   yeokcham_capsule
   yeokcham_capsule_store
   yeokcham_compaction
+  yeokcham_cutover
   yeokcham_git
   yeokcham_inspection
   yeokcham_release

@@ -1,6 +1,7 @@
 module Scratch = Yeokcham_scratch
 module Snapshot = Yeokcham_snapshot
 module Store = Yeokcham_store
+module Cutover = Yeokcham_cutover
 module Compaction = Yeokcham_compaction
 module Capsule = Yeokcham_capsule
 module Capsule_store = Yeokcham_capsule_store
@@ -505,23 +506,72 @@ let open_scratch root =
   in
   store |> Result.map (fun store -> (store, Scratch.open_repository store))
 
+let require_v2_root root =
+  match Cutover.detect ~root with
+  | Error error -> fail Cutover.error_to_string error
+  | Ok Cutover.V2 -> ()
+  | Ok Cutover.Empty -> fail Fun.id "repository is not initialized; run init first"
+  | Ok Cutover.Legacy ->
+      fail Fun.id
+        "legacy repository detected; archive it explicitly before V2 use with \
+         `yeokcham archive --name <archive-name>`"
+  | Ok (Cutover.Mixed_or_unknown detail) ->
+      fail Fun.id ("repository is mixed or unknown and was not opened: " ^ detail)
+  | Ok (Cutover.Incomplete detail) ->
+      fail Fun.id ("repository is incomplete and was not opened: " ^ detail)
+
 let initialise root =
-  let store = Store.init ~root |> Result.map_error Store.error_to_string in
-  match store with
-  | Error error -> fail Fun.id error
-  | Ok store -> (
-      let snapshot =
-        Snapshot.scan ~root ~store |> Result.map_error Snapshot.error_to_string
-      in
-      match snapshot with
-      | Error error -> fail Fun.id error
-      | Ok (snapshot, _) -> (
-          let scratch = Scratch.open_repository store in
-          match
-            Scratch.create_initial scratch ~snapshot ~created_at:(now ())
-          with
-          | Ok checkpoint -> print_checkpoint checkpoint
-          | Error error -> fail Scratch.error_to_string error))
+  match Cutover.detect ~root with
+  | Error error -> fail Cutover.error_to_string error
+  | Ok Cutover.Empty -> (
+      match Store.init ~root with
+      | Ok _ -> print_endline "initialized empty V2 repository"
+      | Error error -> fail Store.error_to_string error)
+  | Ok Cutover.V2 -> (
+      match Store.init ~root with
+      | Ok _ -> print_endline "V2 repository is already initialized"
+      | Error error -> fail Store.error_to_string error)
+  | Ok Cutover.Legacy ->
+      fail Fun.id
+        "legacy repository detected; init will not overwrite it. Run \
+         `yeokcham archive --name <archive-name>` first."
+  | Ok (Cutover.Mixed_or_unknown detail) ->
+      fail Fun.id ("init refused mixed or unknown repository state: " ^ detail)
+  | Ok (Cutover.Incomplete detail) ->
+      fail Fun.id ("init refused incomplete repository state: " ^ detail)
+
+let archive root arguments =
+  match arguments with
+  | [ "--name"; archive_name ] -> (
+      match Cutover.archive ~root ~archive_name with
+      | Error error -> fail Cutover.error_to_string error
+      | Ok (Cutover.Archived result) ->
+          Printf.printf "archived=%s manifest=%s\n" result.Cutover.archive_path
+            result.Cutover.manifest_path
+      | Ok (Cutover.Already_archived result) ->
+          Printf.printf "already-archived=%s manifest=%s\n"
+            result.Cutover.archive_path result.Cutover.manifest_path)
+  | _ -> exit 2
+
+let reset root arguments =
+  let rec parse selected_archive confirmed = function
+    | [] -> (
+        match (selected_archive, confirmed) with
+        | Some selected_archive, true -> Some selected_archive
+        | None, _ | Some _, false -> None)
+    | "--archive" :: name :: rest when Option.is_none selected_archive ->
+        parse (Some name) confirmed rest
+    | "--confirm-v2-reset" :: rest when not confirmed ->
+        parse selected_archive true rest
+    | _ -> None
+  in
+  match parse None false arguments with
+  | None -> exit 2
+  | Some archive_name -> (
+      match Cutover.reset ~root ~archive_name ~confirm:true with
+      | Error error -> fail Cutover.error_to_string error
+      | Ok Cutover.Reset -> print_endline "initialized empty V2 repository after verified archive"
+      | Ok Cutover.Already_reset -> print_endline "V2 repository is already initialized; archive remains verified")
 
 let checkpoint root =
   match open_scratch root with
@@ -1890,7 +1940,7 @@ let git root arguments =
 let usage ?(status = 2) () =
   let message =
     "usage: yeokcham \
-     <init|status|checkpoint|timeline|restore|pin|unpin|compact|watch|capsule|work|conflict|validation|release|storage|verify|git> \
+     <init|archive|reset|status|checkpoint|timeline|restore|pin|unpin|compact|watch|capsule|work|conflict|validation|release|storage|verify|git> \
      [--root PATH] ..."
   in
   if status = 0 then print_endline message else prerr_endline message;
@@ -1905,22 +1955,24 @@ let () =
         let root, arguments = parse_root arguments in
         match command with
         | "init" when arguments = [] -> initialise root
-        | "status" -> status root arguments
-        | "checkpoint" when arguments = [] -> checkpoint root
-        | "timeline" -> timeline root arguments
-        | "restore" -> restore root arguments
-        | "pin" -> change_pin root arguments true
-        | "unpin" -> change_pin root arguments false
-        | "compact" -> compact root arguments
-        | "watch" -> watch root arguments
-        | "capsule" -> capsule root arguments
-        | "work" -> workspace root arguments
-        | "conflict" -> conflict root arguments
-        | "validation" -> validation root arguments
-        | "release" -> release root arguments
-        | "storage" -> storage root arguments
-        | "verify" -> verify root arguments
-        | "git" -> git root arguments
+        | "archive" -> archive root arguments
+        | "reset" -> reset root arguments
+        | "status" -> require_v2_root root; status root arguments
+        | "checkpoint" when arguments = [] -> require_v2_root root; checkpoint root
+        | "timeline" -> require_v2_root root; timeline root arguments
+        | "restore" -> require_v2_root root; restore root arguments
+        | "pin" -> require_v2_root root; change_pin root arguments true
+        | "unpin" -> require_v2_root root; change_pin root arguments false
+        | "compact" -> require_v2_root root; compact root arguments
+        | "watch" -> require_v2_root root; watch root arguments
+        | "capsule" -> require_v2_root root; capsule root arguments
+        | "work" -> require_v2_root root; workspace root arguments
+        | "conflict" -> require_v2_root root; conflict root arguments
+        | "validation" -> require_v2_root root; validation root arguments
+        | "release" -> require_v2_root root; release root arguments
+        | "storage" -> require_v2_root root; storage root arguments
+        | "verify" -> require_v2_root root; verify root arguments
+        | "git" -> require_v2_root root; git root arguments
         | _ -> usage ())
     | _ -> usage ()
   with Sys.Break -> print_endline "watch stopped"

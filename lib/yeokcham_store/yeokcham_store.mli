@@ -20,6 +20,7 @@ module Mutable_ref : sig
   val generation : t -> int64
   val target : t -> Stored_object_id.t option
   val equal : t -> t -> bool
+  val decode : string -> (t, string) result
 end
 
 type repository

@@ -148,6 +148,22 @@
  (libraries alcotest qcheck-core qcheck-alcotest yeokcham_store unix))
 
 (test
+ (name test_cutover)
+ (modules test_cutover)
+ (libraries
+  alcotest
+  qcheck-core
+  qcheck-alcotest
+  yeokcham_cutover
+  yeokcham_encoding
+  yeokcham_envelope
+  yeokcham_store
+  yeokcham_testkit
+  unix)
+ (deps
+  (source_tree golden)))
+
+(test
  (name v2_model_test)
  (modules v2_model_test)
  (libraries alcotest qcheck-core qcheck-alcotest yeokcham_v2_model))

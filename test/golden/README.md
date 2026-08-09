@@ -49,4 +49,9 @@ trusted signer or update a mutable ref.
 retains one opaque random device ID and Ed25519 public-key binding; it contains
 no private key, host metadata, trust map, or mutable ref.
 
+`legacy-archive-manifest-v1.cbor.hex` is the canonical external archive
+manifest from ADR-047 for a V2-marker/V1-data legacy root. It records sorted
+relative nodes, modes, sizes, and SHA-256 digests. It is recovery evidence for
+the relocated V1 tree, not a V2 object or source of history authority.
+
 Changing any fixture bytes requires a format decision and retained compatibility evidence; adding a new schema requires a new named fixture.
