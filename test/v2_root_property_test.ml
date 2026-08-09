@@ -42,7 +42,7 @@ let write_file path bytes =
   Out_channel.with_open_bin path (fun channel ->
       Out_channel.output_string channel bytes)
 
-let required_directories = [ "objects"; "refs"; "locks"; "journal" ]
+let required_directories = [ "bootstrap"; "objects"; "refs"; "locks"; "journal" ]
 
 let write_layout root ~mask ~format =
   let metadata = metadata_path root in
@@ -57,7 +57,7 @@ let write_layout root ~mask ~format =
 let missing_layout_is_never_repaired =
   QCheck2.Test.make ~count:100
     ~name:"v2 root opening never repairs a generated incomplete layout"
-    (QCheck2.Gen.int_range 0 14) (fun mask ->
+    (QCheck2.Gen.int_range 0 30) (fun mask ->
       with_empty_root (fun root ->
           write_layout root ~mask ~format:Store.root_format;
           match Store.open_repository ~root with
@@ -77,7 +77,7 @@ let malformed_format_is_never_accepted =
     QCheck2.Gen.(string_size (0 -- 1024))
     (fun suffix ->
       with_empty_root (fun root ->
-          write_layout root ~mask:15 ~format:(Store.root_format ^ suffix ^ "x");
+        write_layout root ~mask:31 ~format:(Store.root_format ^ suffix ^ "x");
           match Store.open_repository ~root with
           | Error _ -> true
           | Ok _ -> false))

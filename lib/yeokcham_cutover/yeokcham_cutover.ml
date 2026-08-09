@@ -57,6 +57,7 @@ type error =
 let ( let* ) = Result.bind
 let metadata_name = ".yeokcham"
 let format_name = "format"
+let bootstrap_name = "bootstrap"
 let objects_name = "objects"
 let refs_name = "refs"
 let locks_name = "locks"
@@ -879,7 +880,7 @@ let directory_is_empty path =
 
 let v2_layout metadata =
   let expected =
-    [ format_name; journal_name; locks_name; objects_name; refs_name ]
+    [ bootstrap_name; format_name; journal_name; locks_name; objects_name; refs_name ]
     |> List.sort String.compare
   in
   let* () = has_exact_names metadata expected in
@@ -894,6 +895,7 @@ let v2_layout metadata =
            detail = "not the V2 root format";
          })
   else
+    let* () = ensure_directory (Filename.concat metadata bootstrap_name) in
     let* () = ensure_directory (Filename.concat metadata objects_name) in
     let* () = ensure_directory (Filename.concat metadata refs_name) in
     let* () = ensure_directory (Filename.concat metadata locks_name) in

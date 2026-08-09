@@ -176,6 +176,7 @@ end
 type repository = {
   root : string;
   yeokcham : string;
+  bootstrap : string;
   objects : string;
   refs : string;
   locks : string;
@@ -285,8 +286,9 @@ let repository_format =
   ^ "object-format-version 1\n"
 
 let root_format =
-  "yeokcham-repository-root 2\n" ^ "root-layout-version 2\n"
-  ^ "required-directory objects\n" ^ "required-directory refs\n"
+  "yeokcham-repository-root 2\n" ^ "root-layout-version 3\n"
+  ^ "required-directory bootstrap\n" ^ "required-directory objects\n"
+  ^ "required-directory refs\n"
   ^ "required-directory locks\n" ^ "required-directory journal\n"
 
 let max_object_bytes = 128 * 1024 * 1024
@@ -294,6 +296,7 @@ let root repository = repository.root
 let object_domain = "yeokcham:object:v1\000"
 let format_name = "format"
 let yeokcham_name = ".yeokcham"
+let bootstrap_name = "bootstrap"
 let objects_name = "objects"
 let refs_name = "refs"
 let locks_name = "locks"
@@ -448,6 +451,7 @@ let repository_paths_with_metadata ~root ~yeokcham =
   {
     root;
     yeokcham;
+    bootstrap = Filename.concat yeokcham bootstrap_name;
     objects = Filename.concat yeokcham objects_name;
     refs = Filename.concat yeokcham refs_name;
     locks = Filename.concat yeokcham locks_name;
@@ -552,6 +556,13 @@ let validate_repository_layout repository =
     require_directory
       ~missing:
         (Repository_incomplete
+           { path = repository.yeokcham; required = bootstrap_name })
+      repository.bootstrap
+  in
+  let* () =
+    require_directory
+      ~missing:
+        (Repository_incomplete
            { path = repository.yeokcham; required = objects_name })
       repository.objects
   in
@@ -611,16 +622,22 @@ let remove_staging_root repository =
   List.iter
     (fun path -> try Unix.rmdir path with Unix.Unix_error _ -> ())
     [
-      repository.objects; repository.refs; repository.locks; repository.journal;
+      repository.bootstrap;
+      repository.objects;
+      repository.refs;
+      repository.locks;
+      repository.journal;
     ];
   try Unix.rmdir repository.yeokcham with Unix.Unix_error _ -> ()
 
 let create_staged_layout repository =
+  let* () = ensure_directory repository.bootstrap in
   let* () = ensure_directory repository.objects in
   let* () = ensure_directory repository.refs in
   let* () = ensure_directory repository.locks in
   let* () = ensure_directory repository.journal in
   let* () = write_repository_format repository in
+  let* () = fsync_directory repository.bootstrap in
   let* () = fsync_directory repository.objects in
   let* () = fsync_directory repository.refs in
   let* () = fsync_directory repository.locks in
