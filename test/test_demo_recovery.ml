@@ -79,7 +79,13 @@ let safety_checkpoint_is_retained_after_exact_restore () =
   Fun.protect
     ~finally:(fun () -> remove_tree parent)
     (fun () ->
-      let environment = environment "YEOKCHAM_BIN" (yeokcham_binary ()) in
+      let environment =
+        environment "YEOKCHAM_BIN" (yeokcham_binary ())
+        |> Array.to_list
+        |> List.filter (fun entry ->
+            not (String.starts_with ~prefix:"YEOKCHAM_LEGACY_DEMO_V1=" entry))
+        |> fun entries -> Array.of_list ("YEOKCHAM_LEGACY_DEMO_V1=1" :: entries)
+      in
       let created =
         run ~environment "sh"
           [ script "create-repository-v1.sh"; "--root"; root ]

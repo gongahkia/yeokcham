@@ -2,8 +2,8 @@
 
 ## Status
 
-This document records the V2-001 vertical slice: an atomic, validated root
-boundary for a new repository. It is intentionally narrower than the final V2
+This document records the V2-001 root slice and the V2-010 explicit legacy
+archive/cutover boundary. It is intentionally narrower than the final V2
 encrypted object, identity, and ref protocols, which have their own issues.
 
 ## Model
@@ -42,6 +42,34 @@ required-directory journal
 
 `Yeokcham_store.repository_format` remains the V1 object/ref adapter identifier
 while the old prototype objects are still present in the codebase. It is no
-longer written to `.yeokcham/format`. This root declaration does **not** claim
-that V2 encrypted envelopes, opaque addressing, or an encrypted ref ledger are
-implemented; V2-003 through V2-007 replace those adapter-level formats.
+longer written to `.yeokcham/format`. The public CLI classifies a metadata root
+before `init` or any V2-facing command:
+
+- an empty workspace may receive only this V2 root;
+- a historical V1 root or the prior V2-marker/V1-data hybrid must be archived
+  with `yeokcham archive --name <archive-name>`;
+- mixed, incomplete, symlink-containing, and unknown roots refuse without
+  repair or overwrite;
+- `yeokcham reset --archive <archive-name> --confirm-v2-reset` initializes an
+  empty V2 root only after it verifies the independently recoverable archive.
+
+The archive is a same-parent rename of the legacy `.yeokcham` tree. Its sibling
+`<archive-name>.legacy-archive-manifest-v1` is canonical CBOR:
+
+```text
+manifest = [1, entries]
+entry    = [kind, path-components, mode, size, sha256-digest]
+kind     = 0  ; directory, size 0 and empty digest
+         / 1  ; regular file, raw 32-byte SHA-256 digest
+```
+
+Entries are sorted by raw relative path components; paths, modes, sizes, and
+digests are re-inventoried after relocation before the manifest is published.
+A durable same-parent `.pending` manifest permits explicit resumption after a
+failure between relocation and manifest publication. Neither manifest is a V2
+object, ref, ledger event, or authority over V1 history.
+
+Old V1 CLI workflows are deliberately refused for V2 roots until their V2
+transitions exist. This root declaration does **not** claim that V2 encrypted
+envelopes, opaque addressing, or an encrypted ref ledger are implemented;
+V2-003 through V2-007 replace those adapter-level formats.

@@ -506,39 +506,99 @@ let open_scratch root =
   in
   store |> Result.map (fun store -> (store, Scratch.open_repository store))
 
+let legacy_demo_mode () =
+  (* only the checked-in V1 demonstration fixtures enable this; it never changes
+     ordinary CLI behavior or permits old commands on a V2 repository. *)
+  match Sys.getenv_opt "YEOKCHAM_LEGACY_DEMO_V1" with
+  | Some "1" -> true
+  | None | Some _ -> false
+
+let legacy_demo_fixture root =
+  legacy_demo_mode ()
+  && Sys.file_exists (Filename.concat root ".yeokcham-demo-owned-v1")
+
 let require_v2_root root =
-  match Cutover.detect ~root with
-  | Error error -> fail Cutover.error_to_string error
-  | Ok Cutover.V2 -> ()
-  | Ok Cutover.Empty -> fail Fun.id "repository is not initialized; run init first"
-  | Ok Cutover.Legacy ->
-      fail Fun.id
-        "legacy repository detected; archive it explicitly before V2 use with \
-         `yeokcham archive --name <archive-name>`"
-  | Ok (Cutover.Mixed_or_unknown detail) ->
-      fail Fun.id ("repository is mixed or unknown and was not opened: " ^ detail)
-  | Ok (Cutover.Incomplete detail) ->
-      fail Fun.id ("repository is incomplete and was not opened: " ^ detail)
+  if legacy_demo_fixture root then
+    match Cutover.detect ~root with
+    | Error error -> fail Cutover.error_to_string error
+    | Ok Cutover.Legacy | Ok (Cutover.Mixed_or_unknown _) -> ()
+    | Ok Cutover.Empty | Ok Cutover.V2 | Ok (Cutover.Incomplete _) ->
+        fail Fun.id
+          "legacy demo mode only permits the checked-in V1 fixture repository"
+  else if legacy_demo_mode () then
+    fail Fun.id
+      "legacy demo mode requires the checked-in V1 fixture ownership marker"
+  else
+    match Cutover.detect ~root with
+    | Error error -> fail Cutover.error_to_string error
+    | Ok Cutover.V2 -> ()
+    | Ok Cutover.Empty ->
+        fail Fun.id "repository is not initialized; run init first"
+    | Ok Cutover.Legacy ->
+        fail Fun.id
+          "legacy repository detected; archive it explicitly before V2 use \
+           with `yeokcham archive --name <archive-name>`"
+    | Ok (Cutover.Mixed_or_unknown detail) ->
+        fail Fun.id
+          ("repository is mixed or unknown and was not opened: " ^ detail)
+    | Ok (Cutover.Incomplete detail) ->
+        fail Fun.id ("repository is incomplete and was not opened: " ^ detail)
+
+let initialise_legacy_demo root =
+  if not (legacy_demo_fixture root) then
+    fail Fun.id
+      "legacy demo mode requires the checked-in V1 fixture ownership marker"
+  else
+    match Cutover.detect ~root with
+    | Error error -> fail Cutover.error_to_string error
+    | Ok Cutover.Empty -> (
+        let store =
+          Store.init ~root |> Result.map_error Store.error_to_string
+        in
+        match store with
+        | Error error -> fail Fun.id error
+        | Ok store -> (
+            let snapshot =
+              Snapshot.scan ~root ~store
+              |> Result.map_error Snapshot.error_to_string
+            in
+            match snapshot with
+            | Error error -> fail Fun.id error
+            | Ok (snapshot, _) -> (
+                let scratch = Scratch.open_repository store in
+                match
+                  Scratch.create_initial scratch ~snapshot ~created_at:(now ())
+                with
+                | Ok checkpoint -> print_checkpoint checkpoint
+                | Error error -> fail Scratch.error_to_string error)))
+    | Ok Cutover.V2
+    | Ok Cutover.Legacy
+    | Ok (Cutover.Mixed_or_unknown _)
+    | Ok (Cutover.Incomplete _) ->
+        fail Fun.id
+          "legacy demo mode only initializes an empty V1 demonstration fixture"
 
 let initialise root =
-  match Cutover.detect ~root with
-  | Error error -> fail Cutover.error_to_string error
-  | Ok Cutover.Empty -> (
-      match Store.init ~root with
-      | Ok _ -> print_endline "initialized empty V2 repository"
-      | Error error -> fail Store.error_to_string error)
-  | Ok Cutover.V2 -> (
-      match Store.init ~root with
-      | Ok _ -> print_endline "V2 repository is already initialized"
-      | Error error -> fail Store.error_to_string error)
-  | Ok Cutover.Legacy ->
-      fail Fun.id
-        "legacy repository detected; init will not overwrite it. Run \
-         `yeokcham archive --name <archive-name>` first."
-  | Ok (Cutover.Mixed_or_unknown detail) ->
-      fail Fun.id ("init refused mixed or unknown repository state: " ^ detail)
-  | Ok (Cutover.Incomplete detail) ->
-      fail Fun.id ("init refused incomplete repository state: " ^ detail)
+  if legacy_demo_mode () then initialise_legacy_demo root
+  else
+    match Cutover.detect ~root with
+    | Error error -> fail Cutover.error_to_string error
+    | Ok Cutover.Empty -> (
+        match Store.init ~root with
+        | Ok _ -> print_endline "initialized empty V2 repository"
+        | Error error -> fail Store.error_to_string error)
+    | Ok Cutover.V2 -> (
+        match Store.init ~root with
+        | Ok _ -> print_endline "V2 repository is already initialized"
+        | Error error -> fail Store.error_to_string error)
+    | Ok Cutover.Legacy ->
+        fail Fun.id
+          "legacy repository detected; init will not overwrite it. Run \
+           `yeokcham archive --name <archive-name>` first."
+    | Ok (Cutover.Mixed_or_unknown detail) ->
+        fail Fun.id ("init refused mixed or unknown repository state: " ^ detail)
+    | Ok (Cutover.Incomplete detail) ->
+        fail Fun.id ("init refused incomplete repository state: " ^ detail)
 
 let archive root arguments =
   match arguments with
@@ -570,8 +630,11 @@ let reset root arguments =
   | Some archive_name -> (
       match Cutover.reset ~root ~archive_name ~confirm:true with
       | Error error -> fail Cutover.error_to_string error
-      | Ok Cutover.Reset -> print_endline "initialized empty V2 repository after verified archive"
-      | Ok Cutover.Already_reset -> print_endline "V2 repository is already initialized; archive remains verified")
+      | Ok Cutover.Reset ->
+          print_endline "initialized empty V2 repository after verified archive"
+      | Ok Cutover.Already_reset ->
+          print_endline
+            "V2 repository is already initialized; archive remains verified")
 
 let checkpoint root =
   match open_scratch root with
@@ -1957,22 +2020,54 @@ let () =
         | "init" when arguments = [] -> initialise root
         | "archive" -> archive root arguments
         | "reset" -> reset root arguments
-        | "status" -> require_v2_root root; status root arguments
-        | "checkpoint" when arguments = [] -> require_v2_root root; checkpoint root
-        | "timeline" -> require_v2_root root; timeline root arguments
-        | "restore" -> require_v2_root root; restore root arguments
-        | "pin" -> require_v2_root root; change_pin root arguments true
-        | "unpin" -> require_v2_root root; change_pin root arguments false
-        | "compact" -> require_v2_root root; compact root arguments
-        | "watch" -> require_v2_root root; watch root arguments
-        | "capsule" -> require_v2_root root; capsule root arguments
-        | "work" -> require_v2_root root; workspace root arguments
-        | "conflict" -> require_v2_root root; conflict root arguments
-        | "validation" -> require_v2_root root; validation root arguments
-        | "release" -> require_v2_root root; release root arguments
-        | "storage" -> require_v2_root root; storage root arguments
-        | "verify" -> require_v2_root root; verify root arguments
-        | "git" -> require_v2_root root; git root arguments
+        | "status" ->
+            require_v2_root root;
+            status root arguments
+        | "checkpoint" when arguments = [] ->
+            require_v2_root root;
+            checkpoint root
+        | "timeline" ->
+            require_v2_root root;
+            timeline root arguments
+        | "restore" ->
+            require_v2_root root;
+            restore root arguments
+        | "pin" ->
+            require_v2_root root;
+            change_pin root arguments true
+        | "unpin" ->
+            require_v2_root root;
+            change_pin root arguments false
+        | "compact" ->
+            require_v2_root root;
+            compact root arguments
+        | "watch" ->
+            require_v2_root root;
+            watch root arguments
+        | "capsule" ->
+            require_v2_root root;
+            capsule root arguments
+        | "work" ->
+            require_v2_root root;
+            workspace root arguments
+        | "conflict" ->
+            require_v2_root root;
+            conflict root arguments
+        | "validation" ->
+            require_v2_root root;
+            validation root arguments
+        | "release" ->
+            require_v2_root root;
+            release root arguments
+        | "storage" ->
+            require_v2_root root;
+            storage root arguments
+        | "verify" ->
+            require_v2_root root;
+            verify root arguments
+        | "git" ->
+            require_v2_root root;
+            git root arguments
         | _ -> usage ())
     | _ -> usage ()
   with Sys.Break -> print_endline "watch stopped"

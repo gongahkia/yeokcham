@@ -1,8 +1,8 @@
 (** The explicit V1 archive and V2 cutover boundary from ADR-047.
 
-    The adapter never converts V1 state.  It classifies the metadata root,
-    archives a validated legacy tree by same-parent rename, and permits a
-    fresh V2 root only after the external archive manifest verifies. *)
+    The adapter never converts V1 state. It classifies the metadata root,
+    archives a validated legacy tree by same-parent rename, and permits a fresh
+    V2 root only after the external archive manifest verifies. *)
 
 type classification =
   | Empty
@@ -13,13 +13,12 @@ type classification =
 
 type manifest
 type archive_plan
+type archive_result = { archive_path : string; manifest_path : string }
 
-type archive_result = {
-  archive_path : string;
-  manifest_path : string;
-}
+type archive_outcome =
+  | Archived of archive_result
+  | Already_archived of archive_result
 
-type archive_outcome = Archived of archive_result | Already_archived of archive_result
 type reset_outcome = Reset | Already_reset
 
 type error =
@@ -39,22 +38,27 @@ type error =
 val classification_to_string : classification -> string
 val error_to_string : error -> string
 
-(** [detect ~root] is read-only.  It fails closed on symlinks, malformed
-    layouts, unknown content, and the V2-marker/V1-data hybrid. *)
 val detect : root:string -> (classification, error) result
+(** [detect ~root] is read-only. It fails closed on symlinks, malformed layouts,
+    unknown content, and the V2-marker/V1-data hybrid. *)
 
+val plan_archive :
+  root:string -> archive_name:string -> (archive_plan, error) result
 (** [plan_archive] requires a currently valid legacy metadata directory and a
     safe previously-unused same-parent archive name. *)
-val plan_archive : root:string -> archive_name:string -> (archive_plan, error) result
 
-(** [archive] performs the archive plan, or explicitly resumes publication of
-    a manifest whose durable pending bytes already verify the relocated tree. *)
-val archive : root:string -> archive_name:string -> (archive_outcome, error) result
+val archive :
+  root:string -> archive_name:string -> (archive_outcome, error) result
+(** [archive] performs the archive plan, or explicitly resumes publication of a
+    manifest whose durable pending bytes already verify the relocated tree. *)
 
-(** [reset] requires an already verified archive and [confirm:true].  It
-    creates only an empty V2 root and never changes the archived V1 tree. *)
 val reset :
-  root:string -> archive_name:string -> confirm:bool -> (reset_outcome, error) result
+  root:string ->
+  archive_name:string ->
+  confirm:bool ->
+  (reset_outcome, error) result
+(** [reset] requires an already verified archive and [confirm:true]. It creates
+    only an empty V2 root and never changes the archived V1 tree. *)
 
 val manifest_encode : manifest -> string
 val manifest_decode : string -> (manifest, string) result

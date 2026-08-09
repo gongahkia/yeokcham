@@ -47,9 +47,9 @@ project_root=$(dirname "$(dirname "$script_dir")")
 run_yeokcham() {
   if [ -n "${YEOKCHAM_BIN:-}" ]; then
     [ -x "$YEOKCHAM_BIN" ] || fail 'YEOKCHAM_BIN must name an executable'
-    "$YEOKCHAM_BIN" "$@" --root "$root"
+    YEOKCHAM_LEGACY_DEMO_V1=1 "$YEOKCHAM_BIN" "$@" --root "$root"
   else
-    (cd "$project_root" && opam exec -- dune exec bin/yeokcham.exe -- "$@" --root "$root")
+    (cd "$project_root" && YEOKCHAM_LEGACY_DEMO_V1=1 opam exec -- dune exec bin/yeokcham.exe -- "$@" --root "$root")
   fi
 }
 run_release_evidence() {

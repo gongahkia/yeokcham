@@ -30,12 +30,12 @@ type archive_plan = {
   manifest : manifest;
 }
 
-type archive_result = {
-  archive_path : string;
-  manifest_path : string;
-}
+type archive_result = { archive_path : string; manifest_path : string }
 
-type archive_outcome = Archived of archive_result | Already_archived of archive_result
+type archive_outcome =
+  | Archived of archive_result
+  | Already_archived of archive_result
+
 type reset_outcome = Reset | Already_reset
 
 type error =
@@ -53,7 +53,6 @@ type error =
   | V2_initialization_error of Store.error
 
 let ( let* ) = Result.bind
-
 let metadata_name = ".yeokcham"
 let format_name = "format"
 let objects_name = "objects"
@@ -75,19 +74,24 @@ let classification_to_string = function
   | Incomplete detail -> "incomplete: " ^ detail
 
 let error_to_string = function
-  | Root_not_directory path -> Printf.sprintf "repository root is not a directory: %s" path
+  | Root_not_directory path ->
+      Printf.sprintf "repository root is not a directory: %s" path
   | Io_error { operation; path; message } ->
       Printf.sprintf "%s failed for %s: %s" operation path message
   | Unsafe_archive_name name -> Printf.sprintf "unsafe archive name: %S" name
   | Not_legacy classification ->
       Printf.sprintf "archive requires a validated legacy repository, found %s"
         (classification_to_string classification)
-  | Archive_already_exists path -> Printf.sprintf "archive already exists: %s" path
-  | Manifest_already_exists path -> Printf.sprintf "archive manifest already exists: %s" path
+  | Archive_already_exists path ->
+      Printf.sprintf "archive already exists: %s" path
+  | Manifest_already_exists path ->
+      Printf.sprintf "archive manifest already exists: %s" path
   | Pending_manifest_mismatch path ->
-      Printf.sprintf "pending archive manifest does not match this archive plan: %s" path
+      Printf.sprintf
+        "pending archive manifest does not match this archive plan: %s" path
   | Archive_incomplete path ->
-      Printf.sprintf "archive is incomplete and requires explicit recovery: %s" path
+      Printf.sprintf "archive is incomplete and requires explicit recovery: %s"
+        path
   | Archive_manifest_invalid { path; detail } ->
       Printf.sprintf "archive manifest is invalid at %s: %s" path detail
   | Archive_verification_failed { path; detail } ->
@@ -109,12 +113,17 @@ let lstat path =
   | Ok None ->
       Error
         (Io_error
-           { operation = "lstat"; path; message = "path disappeared during inspection" })
+           {
+             operation = "lstat";
+             path;
+             message = "path disappeared during inspection";
+           })
   | Error error -> Error error
 
 let ensure_directory path =
   let* stat = lstat path in
-  if stat.Unix.st_kind = Unix.S_DIR then Ok () else Error (Root_not_directory path)
+  if stat.Unix.st_kind = Unix.S_DIR then Ok ()
+  else Error (Root_not_directory path)
 
 let same_node left right =
   left.Unix.st_dev = right.Unix.st_dev
@@ -125,40 +134,47 @@ let fsync_directory path =
   try
     let descriptor = Unix.openfile path [ Unix.O_RDONLY ] 0 in
     Fun.protect
-      ~finally:(fun () -> try Unix.close descriptor with Unix.Unix_error _ -> ())
+      ~finally:(fun () ->
+        try Unix.close descriptor with Unix.Unix_error _ -> ())
       (fun () ->
         try
           Unix.fsync descriptor;
           Ok ()
         with
-        | Unix.Unix_error
-            ((Unix.EINVAL | Unix.ENOSYS | Unix.EOPNOTSUPP), _, _) ->
+        | Unix.Unix_error ((Unix.EINVAL | Unix.ENOSYS | Unix.EOPNOTSUPP), _, _)
+          ->
             Ok ()
-        | Unix.Unix_error (error, _, _) -> Error (io_error "fsync directory" path error))
+        | Unix.Unix_error (error, _, _) ->
+            Error (io_error "fsync directory" path error))
   with
-  | Unix.Unix_error ((Unix.EINVAL | Unix.ENOSYS | Unix.EOPNOTSUPP), _, _) -> Ok ()
-  | Unix.Unix_error (error, _, _) -> Error (io_error "open directory for fsync" path error)
+  | Unix.Unix_error ((Unix.EINVAL | Unix.ENOSYS | Unix.EOPNOTSUPP), _, _) ->
+      Ok ()
+  | Unix.Unix_error (error, _, _) ->
+      Error (io_error "open directory for fsync" path error)
 
 let read_directory path =
   try Ok (Sys.readdir path |> Array.to_list |> List.sort String.compare)
-  with Sys_error message -> Error (Io_error { operation = "read directory"; path; message })
+  with Sys_error message ->
+    Error (Io_error { operation = "read directory"; path; message })
 
 let valid_component component =
-  not (String.is_empty component)
-  && not (String.equal component ".")
-  && not (String.equal component "..")
-  && not (String.contains component '/')
-  && not (String.contains component '\000')
+  (not (String.is_empty component))
+  && (not (String.equal component "."))
+  && (not (String.equal component ".."))
+  && (not (String.contains component '/'))
+  && (not (String.contains component '\000'))
   && String.length component <= max_component_bytes
 
 let path_key path = String.concat "\000" path
 
-let compare_entry left right = String.compare (path_key left.path) (path_key right.path)
+let compare_entry left right =
+  String.compare (path_key left.path) (path_key right.path)
 
 let read_regular_file ~limit path =
   let* initial = lstat path in
   if initial.Unix.st_kind <> Unix.S_REG then
-    Error (Archive_verification_failed { path; detail = "expected a regular file" })
+    Error
+      (Archive_verification_failed { path; detail = "expected a regular file" })
   else if initial.Unix.st_size > limit then
     Error
       (Archive_verification_failed
@@ -170,10 +186,12 @@ let read_regular_file ~limit path =
     try
       let descriptor = Unix.openfile path [ Unix.O_RDONLY ] 0 in
       Fun.protect
-        ~finally:(fun () -> try Unix.close descriptor with Unix.Unix_error _ -> ())
+        ~finally:(fun () ->
+          try Unix.close descriptor with Unix.Unix_error _ -> ())
         (fun () ->
           let opened = Unix.fstat descriptor in
-          if opened.Unix.st_kind <> Unix.S_REG || not (same_node initial opened) then
+          if opened.Unix.st_kind <> Unix.S_REG || not (same_node initial opened)
+          then
             Error
               (Archive_verification_failed
                  { path; detail = "file changed while opening" })
@@ -183,22 +201,31 @@ let read_regular_file ~limit path =
               if offset = opened.Unix.st_size then Ok ()
               else
                 try
-                  match Unix.read descriptor bytes offset (opened.Unix.st_size - offset) with
+                  match
+                    Unix.read descriptor bytes offset
+                      (opened.Unix.st_size - offset)
+                  with
                   | 0 ->
                       Error
                         (Archive_verification_failed
                            { path; detail = "file shortened while reading" })
                   | count -> loop (offset + count)
-                with Unix.Unix_error (error, _, _) -> Error (io_error "read" path error)
+                with Unix.Unix_error (error, _, _) ->
+                  Error (io_error "read" path error)
             in
             let* () = loop 0 in
             let extra = Bytes.create 1 in
             let* extra_count =
               try Ok (Unix.read descriptor extra 0 1)
-              with Unix.Unix_error (error, _, _) -> Error (io_error "read" path error)
+              with Unix.Unix_error (error, _, _) ->
+                Error (io_error "read" path error)
             in
             let* final = lstat path in
-            if extra_count <> 0 || not (same_node opened final) || final.Unix.st_size <> opened.Unix.st_size
+            if
+              extra_count <> 0
+              || (not (same_node opened final))
+              || final.Unix.st_size <> opened.Unix.st_size
+              || final.Unix.st_perm <> opened.Unix.st_perm
             then
               Error
                 (Archive_verification_failed
@@ -208,15 +235,18 @@ let read_regular_file ~limit path =
 
 let digest_regular_file path initial =
   if initial.Unix.st_kind <> Unix.S_REG then
-    Error (Archive_verification_failed { path; detail = "expected a regular file" })
+    Error
+      (Archive_verification_failed { path; detail = "expected a regular file" })
   else
     try
       let descriptor = Unix.openfile path [ Unix.O_RDONLY ] 0 in
       Fun.protect
-        ~finally:(fun () -> try Unix.close descriptor with Unix.Unix_error _ -> ())
+        ~finally:(fun () ->
+          try Unix.close descriptor with Unix.Unix_error _ -> ())
         (fun () ->
           let opened = Unix.fstat descriptor in
-          if opened.Unix.st_kind <> Unix.S_REG || not (same_node initial opened) then
+          if opened.Unix.st_kind <> Unix.S_REG || not (same_node initial opened)
+          then
             Error
               (Archive_verification_failed
                  { path; detail = "file changed while opening" })
@@ -235,16 +265,22 @@ let digest_regular_file path initial =
                   | count ->
                       loop (remaining - count)
                         (Hash.feed_bytes context ~off:0 ~len:count buffer)
-                with Unix.Unix_error (error, _, _) -> Error (io_error "read" path error)
+                with Unix.Unix_error (error, _, _) ->
+                  Error (io_error "read" path error)
             in
             let* context = loop opened.Unix.st_size Hash.empty in
             let extra = Bytes.create 1 in
             let* extra_count =
               try Ok (Unix.read descriptor extra 0 1)
-              with Unix.Unix_error (error, _, _) -> Error (io_error "read" path error)
+              with Unix.Unix_error (error, _, _) ->
+                Error (io_error "read" path error)
             in
             let* final = lstat path in
-            if extra_count <> 0 || not (same_node opened final) || final.Unix.st_size <> opened.Unix.st_size
+            if
+              extra_count <> 0
+              || (not (same_node opened final))
+              || final.Unix.st_size <> opened.Unix.st_size
+              || final.Unix.st_perm <> opened.Unix.st_perm
             then
               Error
                 (Archive_verification_failed
@@ -263,7 +299,8 @@ let inventory_tree root =
     | Unix.S_DIR ->
         if List.length components > max_path_components then
           Error
-            (Archive_verification_failed { path; detail = "path nesting is too deep" })
+            (Archive_verification_failed
+               { path; detail = "path nesting is too deep" })
         else
           let* names = read_directory path in
           let* entries =
@@ -273,20 +310,34 @@ let inventory_tree root =
                 if not (valid_component name) then
                   Error
                     (Archive_verification_failed
-                       { path = Filename.concat path name; detail = "unsafe path component" })
+                       {
+                         path = Filename.concat path name;
+                         detail = "unsafe path component";
+                       })
                 else
-                  visit (Filename.concat path name) (components @ [ name ]) entries)
+                  visit
+                    (Filename.concat path name)
+                    (components @ [ name ]) entries)
               (Ok entries) names
           in
           let* final = lstat path in
-          if not (same_node stat final) then
+          if
+            (not (same_node stat final))
+            || stat.Unix.st_perm <> final.Unix.st_perm
+          then
             Error
               (Archive_verification_failed
                  { path; detail = "directory changed while inspecting" })
           else if components = [] then Ok entries
           else
             Ok
-              ({ kind = Directory; path = components; mode = stat.Unix.st_perm land 0o7777; size = 0L; digest = "" }
+              ({
+                 kind = Directory;
+                 path = components;
+                 mode = stat.Unix.st_perm land 0o7777;
+                 size = 0L;
+                 digest = "";
+               }
               :: entries)
     | Unix.S_REG ->
         let* digest = digest_regular_file path stat in
@@ -302,18 +353,23 @@ let inventory_tree root =
     | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK ->
         Error
           (Archive_verification_failed
-             { path; detail = "only regular files and directories are accepted" })
+             {
+               path;
+               detail = "only regular files and directories are accepted";
+             })
   in
   let* entries = visit root [] [] in
   let entries = List.sort compare_entry entries in
   if List.length entries > max_manifest_entries then
     Error
-      (Archive_verification_failed { path = root; detail = "tree has too many entries" })
+      (Archive_verification_failed
+         { path = root; detail = "tree has too many entries" })
   else Ok { entries }
 
 let expect_array name count = function
   | Encoding.Array values when List.length values = count -> Ok values
-  | Encoding.Array _ -> Error (Printf.sprintf "%s has the wrong field count" name)
+  | Encoding.Array _ ->
+      Error (Printf.sprintf "%s has the wrong field count" name)
   | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _ | Encoding.Map _
   | Encoding.Bool _ | Encoding.Null ->
       Error (Printf.sprintf "%s must be an array" name)
@@ -376,10 +432,13 @@ let validate_entry entry =
     Error "manifest entry has an unsafe path component"
   else if entry.mode < 0 || entry.mode > 0o7777 then
     Error "manifest entry has an invalid mode"
-  else if Int64.compare entry.size 0L < 0 then Error "manifest entry has a negative size"
+  else if Int64.compare entry.size 0L < 0 then
+    Error "manifest entry has a negative size"
   else
     match entry.kind with
-    | Directory when not (Int64.equal entry.size 0L) || not (String.is_empty entry.digest) ->
+    | Directory
+      when (not (Int64.equal entry.size 0L))
+           || not (String.is_empty entry.digest) ->
         Error "manifest directory entry has file metadata"
     | File when String.length entry.digest <> Hash.digest_size ->
         Error "manifest file digest must be 32 bytes"
@@ -416,16 +475,20 @@ let decode_entry value =
   | _ -> assert false
 
 let manifest_decode bytes =
-  let* value = Encoding.decode bytes |> Result.map_error Encoding.decode_error_to_string in
+  let* value =
+    Encoding.decode bytes |> Result.map_error Encoding.decode_error_to_string
+  in
   let* fields = expect_array "archive manifest" 2 value in
   match fields with
-  | [ version; entries ] ->
+  | [ version; entries ] -> (
       let* version = expect_integer "archive manifest version" version in
-      if not (Int64.equal version 1L) then Error "unsupported archive manifest version"
-      else (
+      if not (Int64.equal version 1L) then
+        Error "unsupported archive manifest version"
+      else
         match entries with
         | Encoding.Array values ->
-            if List.length values > max_manifest_entries then Error "archive manifest has too many entries"
+            if List.length values > max_manifest_entries then
+              Error "archive manifest has too many entries"
             else
               let rec decode reversed = function
                 | [] -> Ok (List.rev reversed)
@@ -435,21 +498,26 @@ let manifest_decode bytes =
               in
               let* entries = decode [] values in
               let sorted = List.sort compare_entry entries in
-              if entries <> sorted then Error "archive manifest entries are not strictly ordered"
+              if entries <> sorted then
+                Error "archive manifest entries are not strictly ordered"
               else
                 let rec distinct = function
                   | [] | [ _ ] -> true
                   | left :: (right :: _ as rest) ->
-                      not (String.equal (path_key left.path) (path_key right.path))
+                      (not
+                         (String.equal (path_key left.path)
+                            (path_key right.path)))
                       && distinct rest
                 in
-                if not (distinct entries) then Error "archive manifest has duplicate paths"
+                if not (distinct entries) then
+                  Error "archive manifest has duplicate paths"
                 else
                   let manifest = { entries } in
-                  if String.equal (manifest_encode manifest) bytes then Ok manifest
+                  if String.equal (manifest_encode manifest) bytes then
+                    Ok manifest
                   else Error "archive manifest bytes are noncanonical"
-        | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _ | Encoding.Map _
-        | Encoding.Bool _ | Encoding.Null ->
+        | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _
+        | Encoding.Map _ | Encoding.Bool _ | Encoding.Null ->
             Error "archive manifest entries must be an array")
   | _ -> assert false
 
@@ -468,30 +536,36 @@ let has_exact_names directory expected =
       (Archive_verification_failed
          {
            path = directory;
-           detail = "unexpected or missing root entries: " ^ String.concat "," names;
+           detail =
+             "unexpected or missing root entries: " ^ String.concat "," names;
          })
 
 let is_hex_name value length =
   String.length value = length
-  && String.for_all (function '0' .. '9' | 'a' .. 'f' -> true | _ -> false) value
+  && String.for_all
+       (function '0' .. '9' | 'a' .. 'f' -> true | _ -> false)
+       value
 
 let validate_v1_object_file path hex =
   let* expected =
     Store.Stored_object_id.of_hex hex
     |> Result.map_error (fun error ->
-           Archive_verification_failed
-             { path; detail = Store.Stored_object_id.parse_error_to_string error })
+        Archive_verification_failed
+          { path; detail = Store.Stored_object_id.parse_error_to_string error })
   in
   let* bytes = read_regular_file ~limit:Store.max_object_bytes path in
   let* envelope =
     Envelope.decode bytes
     |> Result.map_error (fun error ->
-           Archive_verification_failed
-             { path; detail = Envelope.decode_error_to_string error })
+        Archive_verification_failed
+          { path; detail = Envelope.decode_error_to_string error })
   in
   let actual = Store.id_of_envelope envelope in
   if Store.Stored_object_id.equal expected actual then Ok ()
-  else Error (Archive_verification_failed { path; detail = "object name does not match canonical bytes" })
+  else
+    Error
+      (Archive_verification_failed
+         { path; detail = "object name does not match canonical bytes" })
 
 let validate_v1_objects objects =
   let* shards = read_directory objects in
@@ -500,12 +574,18 @@ let validate_v1_objects objects =
     | name :: rest ->
         let path = Filename.concat prefix name in
         let* stat = lstat path in
-        if String.starts_with ~prefix:"." name && stat.Unix.st_kind = Unix.S_REG then
-          validate_leaves shard prefix rest
-        else if stat.Unix.st_kind <> Unix.S_REG || not (is_hex_name name 60) then
-          Error (Archive_verification_failed { path; detail = "invalid V1 object name" })
+        if String.starts_with ~prefix:"." name && stat.Unix.st_kind = Unix.S_REG
+        then validate_leaves shard prefix rest
+        else if stat.Unix.st_kind <> Unix.S_REG || not (is_hex_name name 60)
+        then
+          Error
+            (Archive_verification_failed
+               { path; detail = "invalid V1 object name" })
         else
-          let* () = validate_v1_object_file path (shard ^ Filename.basename prefix ^ name) in
+          let* () =
+            validate_v1_object_file path
+              (shard ^ Filename.basename prefix ^ name)
+          in
           validate_leaves shard prefix rest
   in
   let rec validate_prefixes shard = function
@@ -514,7 +594,9 @@ let validate_v1_objects objects =
         let path = Filename.concat (Filename.concat objects shard) prefix in
         let* stat = lstat path in
         if stat.Unix.st_kind <> Unix.S_DIR || not (is_hex_name prefix 2) then
-          Error (Archive_verification_failed { path; detail = "invalid V1 object prefix" })
+          Error
+            (Archive_verification_failed
+               { path; detail = "invalid V1 object prefix" })
         else
           let* names = read_directory path in
           let* () = validate_leaves shard path names in
@@ -526,7 +608,9 @@ let validate_v1_objects objects =
         let path = Filename.concat objects shard in
         let* stat = lstat path in
         if stat.Unix.st_kind <> Unix.S_DIR || not (is_hex_name shard 2) then
-          Error (Archive_verification_failed { path; detail = "invalid V1 object shard" })
+          Error
+            (Archive_verification_failed
+               { path; detail = "invalid V1 object shard" })
         else
           let* prefixes = read_directory path in
           let* () = validate_prefixes shard prefixes in
@@ -542,27 +626,39 @@ let validate_v1_direct_refs refs =
         let path = Filename.concat refs name in
         let* stat = lstat path in
         if not (valid_component name) then
-          Error (Archive_verification_failed { path; detail = "invalid V1 ref name" })
+          Error
+            (Archive_verification_failed
+               { path; detail = "invalid V1 ref name" })
         else if stat.Unix.st_kind = Unix.S_DIR then validate rest
         else if stat.Unix.st_kind <> Unix.S_REG then
-          Error (Archive_verification_failed { path; detail = "V1 ref is not a regular file" })
+          Error
+            (Archive_verification_failed
+               { path; detail = "V1 ref is not a regular file" })
         else if String.equal name "scratch-head" then
           let* bytes = read_regular_file ~limit:max_manifest_bytes path in
-          (match Store.Mutable_ref.decode bytes with
+          match Store.Mutable_ref.decode bytes with
           | Ok _ -> validate rest
-          | Error detail -> Error (Archive_verification_failed { path; detail }))
+          | Error detail -> Error (Archive_verification_failed { path; detail })
         else validate rest
   in
   validate names
 
 let validate_legacy_tree metadata =
-  let expected = [ format_name; locks_name; objects_name; refs_name ] |> List.sort String.compare in
+  let expected =
+    [ format_name; locks_name; objects_name; refs_name ]
+    |> List.sort String.compare
+  in
   let* () = has_exact_names metadata expected in
-  let* format = read_regular_file ~limit:4096 (Filename.concat metadata format_name) in
+  let* format =
+    read_regular_file ~limit:4096 (Filename.concat metadata format_name)
+  in
   if not (String.equal format Store.repository_format) then
     Error
       (Archive_verification_failed
-         { path = Filename.concat metadata format_name; detail = "not the V1 repository format" })
+         {
+           path = Filename.concat metadata format_name;
+           detail = "not the V1 repository format";
+         })
   else
     let* () = ensure_directory (Filename.concat metadata objects_name) in
     let* () = ensure_directory (Filename.concat metadata refs_name) in
@@ -576,14 +672,20 @@ let directory_is_empty path =
 
 let v2_layout metadata =
   let expected =
-    [ format_name; journal_name; locks_name; objects_name; refs_name ] |> List.sort String.compare
+    [ format_name; journal_name; locks_name; objects_name; refs_name ]
+    |> List.sort String.compare
   in
   let* () = has_exact_names metadata expected in
-  let* format = read_regular_file ~limit:4096 (Filename.concat metadata format_name) in
+  let* format =
+    read_regular_file ~limit:4096 (Filename.concat metadata format_name)
+  in
   if not (String.equal format Store.root_format) then
     Error
       (Archive_verification_failed
-         { path = Filename.concat metadata format_name; detail = "not the V2 root format" })
+         {
+           path = Filename.concat metadata format_name;
+           detail = "not the V2 root format";
+         })
   else
     let* () = ensure_directory (Filename.concat metadata objects_name) in
     let* () = ensure_directory (Filename.concat metadata refs_name) in
@@ -599,10 +701,13 @@ let has_v1_artifacts metadata =
   let* refs_empty = directory_is_empty refs in
   let* locks_empty = directory_is_empty locks in
   let* journal_empty = directory_is_empty journal in
-  if not locks_empty || not journal_empty then
+  if (not locks_empty) || not journal_empty then
     Error
       (Archive_verification_failed
-         { path = metadata; detail = "V2 root contains unknown lock or journal state" })
+         {
+           path = metadata;
+           detail = "V2 root contains unknown lock or journal state";
+         })
   else if objects_empty && refs_empty then Ok false
   else
     let* () = validate_v1_objects objects in
@@ -610,8 +715,11 @@ let has_v1_artifacts metadata =
     Ok true
 
 let validate_archivable_legacy_tree metadata =
-  let* format = read_regular_file ~limit:4096 (Filename.concat metadata format_name) in
-  if String.equal format Store.repository_format then validate_legacy_tree metadata
+  let* format =
+    read_regular_file ~limit:4096 (Filename.concat metadata format_name)
+  in
+  if String.equal format Store.repository_format then
+    validate_legacy_tree metadata
   else if String.equal format Store.root_format then
     let* () = v2_layout metadata in
     let* contains_v1 = has_v1_artifacts metadata in
@@ -623,7 +731,10 @@ let validate_archivable_legacy_tree metadata =
   else
     Error
       (Archive_verification_failed
-         { path = Filename.concat metadata format_name; detail = "unknown archive format" })
+         {
+           path = Filename.concat metadata format_name;
+           detail = "unknown archive format";
+         })
 
 let detect ~root =
   let* () = ensure_directory root in
@@ -633,11 +744,14 @@ let detect ~root =
   | Ok None -> Ok Empty
   | Ok (Some stat) when stat.Unix.st_kind <> Unix.S_DIR ->
       Ok (Mixed_or_unknown "metadata root is not a directory")
-  | Ok (Some _) ->
+  | Ok (Some _) -> (
       let* names = read_directory metadata in
-      if not (List.mem format_name names) then Ok (Incomplete "metadata root has no format record")
+      if not (List.mem format_name names) then
+        Ok (Incomplete "metadata root has no format record")
       else
-        match read_regular_file ~limit:4096 (Filename.concat metadata format_name) with
+        match
+          read_regular_file ~limit:4096 (Filename.concat metadata format_name)
+        with
         | Error error -> Ok (Mixed_or_unknown (error_to_string error))
         | Ok format when String.equal format Store.repository_format -> (
             match validate_legacy_tree metadata with
@@ -651,9 +765,12 @@ let detect ~root =
               [ format_name; journal_name; locks_name; objects_name; refs_name ]
               |> List.sort String.compare
             in
-            let missing = List.filter (fun name -> not (List.mem name names)) expected in
+            let missing =
+              List.filter (fun name -> not (List.mem name names)) expected
+            in
             if missing <> [] then
-              Ok (Incomplete ("V2 root is missing " ^ String.concat "," missing))
+              Ok
+                (Incomplete ("V2 root is missing " ^ String.concat "," missing))
             else
               match v2_layout metadata with
               | Error error -> Ok (Mixed_or_unknown (error_to_string error))
@@ -661,8 +778,10 @@ let detect ~root =
                   match has_v1_artifacts metadata with
                   | Ok true -> Ok Legacy
                   | Ok false -> Ok V2
-                  | Error error -> Ok (Mixed_or_unknown (error_to_string error))))
-        | Ok _ -> Ok (Mixed_or_unknown "metadata root has an unknown format record")
+                  | Error error -> Ok (Mixed_or_unknown (error_to_string error))
+                  ))
+        | Ok _ ->
+            Ok (Mixed_or_unknown "metadata root has an unknown format record"))
 
 let safe_archive_name name =
   let allowed = function
@@ -676,9 +795,7 @@ let safe_archive_name name =
 
 let archive_paths ~root ~archive_name =
   let archive_path = Filename.concat root archive_name in
-  ( archive_path,
-    archive_path ^ manifest_suffix,
-    archive_path ^ pending_suffix )
+  (archive_path, archive_path ^ manifest_suffix, archive_path ^ pending_suffix)
 
 let require_missing path make_error =
   match lstat_or_missing path with
@@ -687,17 +804,28 @@ let require_missing path make_error =
   | Error error -> Error error
 
 let plan_archive ~root ~archive_name =
-  if not (safe_archive_name archive_name) then Error (Unsafe_archive_name archive_name)
+  if not (safe_archive_name archive_name) then
+    Error (Unsafe_archive_name archive_name)
   else
     let* classification = detect ~root in
     match classification with
     | Legacy ->
         let metadata = Filename.concat root metadata_name in
         let* manifest = inventory_tree metadata in
-        let archive_path, manifest_path, pending_path = archive_paths ~root ~archive_name in
-        let* () = require_missing archive_path (fun path -> Archive_already_exists path) in
-        let* () = require_missing manifest_path (fun path -> Manifest_already_exists path) in
-        let* () = require_missing pending_path (fun path -> Pending_manifest_mismatch path) in
+        let archive_path, manifest_path, pending_path =
+          archive_paths ~root ~archive_name
+        in
+        let* () =
+          require_missing archive_path (fun path -> Archive_already_exists path)
+        in
+        let* () =
+          require_missing manifest_path (fun path ->
+              Manifest_already_exists path)
+        in
+        let* () =
+          require_missing pending_path (fun path ->
+              Pending_manifest_mismatch path)
+        in
         Ok
           {
             root;
@@ -706,34 +834,46 @@ let plan_archive ~root ~archive_name =
             pending_manifest = pending_path;
             manifest;
           }
-    | Empty | V2 | Mixed_or_unknown _ | Incomplete _ as other -> Error (Not_legacy other)
+    | (Empty | V2 | Mixed_or_unknown _ | Incomplete _) as other ->
+        Error (Not_legacy other)
 
 let write_all descriptor path bytes =
   let rec loop offset =
     if offset = Bytes.length bytes then Ok ()
     else
       try
-        match Unix.write descriptor bytes offset (Bytes.length bytes - offset) with
-        | 0 -> Error (Io_error { operation = "write"; path; message = "write returned zero" })
+        match
+          Unix.write descriptor bytes offset (Bytes.length bytes - offset)
+        with
+        | 0 ->
+            Error
+              (Io_error
+                 { operation = "write"; path; message = "write returned zero" })
         | count -> loop (offset + count)
-      with Unix.Unix_error (error, _, _) -> Error (io_error "write" path error)
+      with Unix.Unix_error (error, _, _) ->
+        Error (io_error "write" path error)
   in
   loop 0
 
 let write_exclusive path bytes =
   try
-    let descriptor = Unix.openfile path [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_EXCL ] 0o600 in
+    let descriptor =
+      Unix.openfile path [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_EXCL ] 0o600
+    in
     Fun.protect
-      ~finally:(fun () -> try Unix.close descriptor with Unix.Unix_error _ -> ())
+      ~finally:(fun () ->
+        try Unix.close descriptor with Unix.Unix_error _ -> ())
       (fun () ->
         let* () = write_all descriptor path (Bytes.of_string bytes) in
         try
           Unix.fsync descriptor;
           Ok ()
-        with Unix.Unix_error (error, _, _) -> Error (io_error "fsync" path error))
+        with Unix.Unix_error (error, _, _) ->
+          Error (io_error "fsync" path error))
   with
   | Unix.Unix_error (Unix.EEXIST, _, _) -> Error (Manifest_already_exists path)
-  | Unix.Unix_error (error, _, _) -> Error (io_error "create manifest" path error)
+  | Unix.Unix_error (error, _, _) ->
+      Error (io_error "create manifest" path error)
 
 let remove_if_present path =
   try
@@ -765,27 +905,37 @@ let publish_manifest ~root ~pending_path ~manifest_path =
         let* () = fsync_directory root in
         let* () = remove_if_present pending_path in
         fsync_directory root
-      with Unix.Unix_error (error, _, _) -> Error (io_error "publish archive manifest" manifest_path error))
+      with Unix.Unix_error (error, _, _) ->
+        Error (io_error "publish archive manifest" manifest_path error))
 
 let archive_result plan =
   { archive_path = plan.destination; manifest_path = plan.manifest_destination }
 
 let execute_archive plan =
   let metadata = Filename.concat plan.root metadata_name in
-  let* () = require_missing plan.destination (fun path -> Archive_already_exists path) in
-  let* () = require_missing plan.manifest_destination (fun path -> Manifest_already_exists path) in
+  let* () =
+    require_missing plan.destination (fun path -> Archive_already_exists path)
+  in
+  let* () =
+    require_missing plan.manifest_destination (fun path ->
+        Manifest_already_exists path)
+  in
   let* () = prepare_pending plan in
   let* classification = detect ~root:plan.root in
   let* () =
     match classification with
     | Legacy -> Ok ()
-    | Empty | V2 | Mixed_or_unknown _ | Incomplete _ as other -> Error (Not_legacy other)
+    | (Empty | V2 | Mixed_or_unknown _ | Incomplete _) as other ->
+        Error (Not_legacy other)
   in
   let* current = inventory_tree metadata in
   if not (same_manifest current plan.manifest) then
     Error
       (Archive_verification_failed
-         { path = metadata; detail = "legacy tree changed after archive preflight" })
+         {
+           path = metadata;
+           detail = "legacy tree changed after archive preflight";
+         })
   else
     try
       Unix.rename metadata plan.destination;
@@ -794,19 +944,26 @@ let execute_archive plan =
       if not (same_manifest archived plan.manifest) then
         Error
           (Archive_verification_failed
-             { path = plan.destination; detail = "relocated archive does not match preflight manifest" })
+             {
+               path = plan.destination;
+               detail = "relocated archive does not match preflight manifest";
+             })
       else
         let* () =
           publish_manifest ~root:plan.root ~pending_path:plan.pending_manifest
             ~manifest_path:plan.manifest_destination
         in
         Ok (Archived (archive_result plan))
-    with Unix.Unix_error (error, _, _) -> Error (io_error "rename legacy repository" metadata error)
+    with Unix.Unix_error (error, _, _) ->
+      Error (io_error "rename legacy repository" metadata error)
 
 let verify_existing_archive ~root ~archive_name =
-  let archive_path, manifest_path, pending_path = archive_paths ~root ~archive_name in
+  let archive_path, manifest_path, pending_path =
+    archive_paths ~root ~archive_name
+  in
   let* archive_stat = lstat archive_path in
-  if archive_stat.Unix.st_kind <> Unix.S_DIR then Error (Archive_incomplete archive_path)
+  if archive_stat.Unix.st_kind <> Unix.S_DIR then
+    Error (Archive_incomplete archive_path)
   else
     let* () = validate_archivable_legacy_tree archive_path in
     let* actual = inventory_tree archive_path in
@@ -821,7 +978,10 @@ let verify_existing_archive ~root ~archive_name =
         else
           Error
             (Archive_verification_failed
-               { path = archive_path; detail = "archive differs from its manifest" })
+               {
+                 path = archive_path;
+                 detail = "archive differs from its manifest";
+               })
     | Ok None -> (
         match lstat_or_missing pending_path with
         | Error error -> Error error
@@ -831,13 +991,17 @@ let verify_existing_archive ~root ~archive_name =
             if not (same_manifest expected actual) then
               Error
                 (Archive_verification_failed
-                   { path = archive_path; detail = "archive differs from pending manifest" })
+                   {
+                     path = archive_path;
+                     detail = "archive differs from pending manifest";
+                   })
             else
               let* () = publish_manifest ~root ~pending_path ~manifest_path in
               Ok (Archived { archive_path; manifest_path }))
 
 let archive ~root ~archive_name =
-  if not (safe_archive_name archive_name) then Error (Unsafe_archive_name archive_name)
+  if not (safe_archive_name archive_name) then
+    Error (Unsafe_archive_name archive_name)
   else
     let* classification = detect ~root in
     match classification with
@@ -845,12 +1009,14 @@ let archive ~root ~archive_name =
         let* plan = plan_archive ~root ~archive_name in
         execute_archive plan
     | Empty -> verify_existing_archive ~root ~archive_name
-    | V2 | Mixed_or_unknown _ | Incomplete _ as other -> Error (Not_legacy other)
+    | (V2 | Mixed_or_unknown _ | Incomplete _) as other ->
+        Error (Not_legacy other)
 
 let verified_archive ~root ~archive_name =
   let archive_path, manifest_path, _ = archive_paths ~root ~archive_name in
   let* archive_stat = lstat archive_path in
-  if archive_stat.Unix.st_kind <> Unix.S_DIR then Error (Archive_incomplete archive_path)
+  if archive_stat.Unix.st_kind <> Unix.S_DIR then
+    Error (Archive_incomplete archive_path)
   else
     let* () = validate_archivable_legacy_tree archive_path in
     let* actual = inventory_tree archive_path in
@@ -863,13 +1029,17 @@ let verified_archive ~root ~archive_name =
 
 let reset ~root ~archive_name ~confirm =
   if not confirm then Error Confirmation_required
-  else if not (safe_archive_name archive_name) then Error (Unsafe_archive_name archive_name)
+  else if not (safe_archive_name archive_name) then
+    Error (Unsafe_archive_name archive_name)
   else
     let* () = ensure_directory root in
     let* () = verified_archive ~root ~archive_name in
     let* classification = detect ~root in
     match classification with
     | Empty ->
-        Store.init ~root |> Result.map (fun _ -> Reset) |> Result.map_error (fun error -> V2_initialization_error error)
+        Store.init ~root
+        |> Result.map (fun _ -> Reset)
+        |> Result.map_error (fun error -> V2_initialization_error error)
     | V2 -> Ok Already_reset
-    | Legacy | Mixed_or_unknown _ | Incomplete _ -> Error (Not_legacy classification)
+    | Legacy | Mixed_or_unknown _ | Incomplete _ ->
+        Error (Not_legacy classification)

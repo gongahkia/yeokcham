@@ -1,3 +1,8 @@
 (library
  (name yeokcham_cutover)
- (libraries unix yeokcham_encoding yeokcham_envelope yeokcham_hash yeokcham_store))
+ (libraries
+  unix
+  yeokcham_encoding
+  yeokcham_envelope
+  yeokcham_hash
+  yeokcham_store))
