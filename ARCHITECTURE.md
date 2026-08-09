@@ -85,9 +85,12 @@ tree nor persists a checkpoint. ADR-053 replaces ADR-052's initial bootstrap
 format with a canonical signed repository/device/public-signer/key-handle
 bootstrap and a Linux Secret Service custody adapter for role-separated local
 capabilities. It is not user identity, policy, a mutable scratch head, or an
-automatic authority decision. Durable scratch publication now has a Linux
-provider but still needs the typed causal scratch record model before a
-bootstrap-aware daemon can act on `Publish_checkpoint`.
+automatic authority decision. ADR-054 frames each decrypted V2 object with an
+authenticated canonical kind, so exact scratch snapshots and causal ledger
+events can share the opaque create-only object namespace. The remaining V2-014
+work is exact scanning plus the snapshot-then-causal-ledger transition; a
+bootstrap-aware daemon still cannot act on `Publish_checkpoint` until that
+model and persistence boundary are complete.
 
 ## 2. Proposed OCaml workspace
 

@@ -1376,11 +1376,11 @@ IDs, missing/cross-scope predecessors, and cycles. It returns the sorted set of
 unreferenced valid events and every sorted same-predecessor child set with two
 or more elements; it never chooses a head or changes a mutable ref.
 
-The first adapter encrypts the complete canonical record under ADR-045,
-derives its ADR-046 opaque address, and create-only publishes those bytes under
-the V2 `objects` directory. An exact existing byte sequence is a retry; a
-different sequence at the same address rejects. No plaintext index or mutable
-ledger/ref record is persisted.
+The first adapter frames the complete canonical record as the ledger variant of
+ADR-054, encrypts that frame under ADR-045, derives its ADR-046 opaque address,
+and create-only publishes those bytes under the V2 `objects` directory. An
+exact existing byte sequence is a retry; a different sequence at the same
+address rejects. No plaintext index or mutable ledger/ref record is persisted.
 
 ## 22. V2 durable object-publication transactions
 
@@ -1396,7 +1396,8 @@ Commit = (version=1, transaction-id,
 ```
 
 For a repository `R`, `prepare(R, T)` first validates every staged envelope's
-decryption, canonical ledger record, signature, and ADR-046 address. It then
+decryption, ADR-054 ledger frame, canonical ledger record, signature, and
+ADR-046 address. It then
 durably create-only writes `journal/T.prepare`. `commit(R, T)` can durably
 create-only write `journal/T.commit` only when the exact stored prepare
 validates and the digest binds its bytes. Neither transition writes an object,
@@ -1417,8 +1418,9 @@ Given one supplied repository/address/encryption/key-registry context,
 `verify_v2(R)` has no transition on persistent state. It first parses and
 cryptographically validates every ADR-049 journal candidate, returning only
 the sets of prepared and committed transaction identities. It then enumerates
-every canonical opaque object path, verifies each ADR-046 address and ADR-048
-signature, and requires the signed repository ID to equal `R`.
+every canonical opaque object path, verifies each ADR-046 address and ADR-054
+frame, verifies ADR-048 signatures for ledger frames, and requires each signed
+ledger repository ID to equal `R`.
 
 For every safe ref name `n`, it evaluates the complete verified set
 `E(R, n)`. A missing/cross-scope predecessor, duplicate event ID, cycle, bad
@@ -1483,3 +1485,23 @@ before the repository opens. Enrolment writes custody before the create-only
 bootstrap, so the cross-service operation is deliberately non-atomic: an
 interruption may leave an unreachable service item but cannot create a
 repository bootstrap that validates with wrong key material.
+
+## 26. V2 typed encrypted objects
+
+ADR-054 makes the authenticated plaintext of every ADR-045 envelope one
+canonical typed object frame:
+
+```text
+Object_frame = (version=1, kind, canonical-payload-bytes, features)
+Object_kind = Ledger_event | Scratch_snapshot
+```
+
+`Ledger_event` contains an exact ADR-048 record. `Scratch_snapshot` contains
+the exact canonical `Yeokcham_model.Snapshot` bytes: sorted safe paths,
+directories, regular bytes, modes, and raw symlink targets. The kind remains
+encrypted; ADR-046 addresses bind the complete outer envelope and therefore the
+frame. A reader rejects unknown kinds/features, malformed selected payloads,
+and noncanonical re-encoding. A generic object store creates and loads frames;
+the ledger store is a typed view that analyses only ledger frames. Old
+development envelopes that directly contain a ledger record reject rather than
+migrate.

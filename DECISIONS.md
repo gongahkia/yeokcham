@@ -164,3 +164,4 @@ The ADR lifecycle, numbering rules, and template are defined in [`docs/adr/READM
 - [ADR-051 — Linux inotify as an advisory watcher source](docs/adr/051-linux-inotify-advisory-watcher.md) — Accepted.
 - [ADR-052 — V2 local bootstrap authority and role-separated capabilities](docs/adr/052-v2-local-bootstrap-authority.md) — Superseded by ADR-053.
 - [ADR-053 — Linux Secret Service custody and bootstrap key handles](docs/adr/053-linux-secret-service-custody.md) — Accepted.
+- [ADR-054 — V2 typed encrypted object frames](docs/adr/054-v2-typed-encrypted-objects.md) — Accepted.
