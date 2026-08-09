@@ -110,6 +110,7 @@ let prepare ~root ~bootstrap_repository ~target_event_id ~operation_id
             Journal.make_prepared
               ~repository_id:(Bootstrap.repository_id bootstrap)
               ~operation_id ~safety_event_id:safety.Scratch_store.event_id
+              ~target_event_id:target.Scratch_store.event_id
               ~safety_snapshot:safety.Scratch_store.snapshot_ref
               ~target_snapshot:target.Scratch_store.snapshot_ref
               ~action_count:(List.length (Restore_plan.actions plan))

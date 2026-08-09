@@ -8,6 +8,7 @@ type t = {
   repository_id : Model.Repository_id.t;
   operation_id : Model.Transaction_id.t;
   safety_event_id : Ledger.Event_id.t;
+  target_event_id : Ledger.Event_id.t;
   safety_snapshot : Model.Opaque_object_ref.t;
   target_snapshot : Model.Opaque_object_ref.t;
   generation : int64;
@@ -39,7 +40,7 @@ type error =
   | Invalid_journal_filename of string
   | Invalid_chain of string
 
-let current_schema_version = 1L
+let current_schema_version = 2L
 let supported_mandatory_features = 0L
 let max_actions = 1_000_000
 let max_record_bytes = 4096
@@ -126,8 +127,9 @@ let check_phase ~generation ~phase ~action_count =
     | Applying _ | Materialized | Published ->
         Error (Invalid_phase_for_generation { phase; generation })
 
-let make_record ~repository_id ~operation_id ~safety_event_id ~safety_snapshot
-    ~target_snapshot ~generation ~phase ~action_count ~mandatory_features =
+let make_record ~repository_id ~operation_id ~safety_event_id ~target_event_id
+    ~safety_snapshot ~target_snapshot ~generation ~phase ~action_count
+    ~mandatory_features =
   let* () = check_action_count action_count in
   let* () = check_mandatory_features mandatory_features in
   if Model.Opaque_object_ref.equal safety_snapshot target_snapshot then
@@ -139,6 +141,7 @@ let make_record ~repository_id ~operation_id ~safety_event_id ~safety_snapshot
         repository_id;
         operation_id;
         safety_event_id;
+        target_event_id;
         safety_snapshot;
         target_snapshot;
         generation;
@@ -147,15 +150,16 @@ let make_record ~repository_id ~operation_id ~safety_event_id ~safety_snapshot
         mandatory_features;
       }
 
-let make_prepared ~repository_id ~operation_id ~safety_event_id ~safety_snapshot
-    ~target_snapshot ~action_count ~mandatory_features =
-  make_record ~repository_id ~operation_id ~safety_event_id ~safety_snapshot
-    ~target_snapshot ~generation:0L ~phase:Prepared ~action_count
-    ~mandatory_features
+let make_prepared ~repository_id ~operation_id ~safety_event_id ~target_event_id
+    ~safety_snapshot ~target_snapshot ~action_count ~mandatory_features =
+  make_record ~repository_id ~operation_id ~safety_event_id ~target_event_id
+    ~safety_snapshot ~target_snapshot ~generation:0L ~phase:Prepared
+    ~action_count ~mandatory_features
 
 let repository_id record = record.repository_id
 let operation_id record = record.operation_id
 let safety_event_id record = record.safety_event_id
+let target_event_id record = record.target_event_id
 let safety_snapshot record = record.safety_snapshot
 let target_snapshot record = record.target_snapshot
 let generation record = record.generation
@@ -271,6 +275,7 @@ let advance record next =
   else
     make_record ~repository_id:record.repository_id
       ~operation_id:record.operation_id ~safety_event_id:record.safety_event_id
+      ~target_event_id:record.target_event_id
       ~safety_snapshot:record.safety_snapshot
       ~target_snapshot:record.target_snapshot
       ~generation:(Int64.succ record.generation)
@@ -317,6 +322,7 @@ let value record =
       Encoding.bytes (Model.Repository_id.to_bytes record.repository_id);
       Encoding.bytes (Model.Transaction_id.to_bytes record.operation_id);
       Encoding.bytes (Ledger.Event_id.to_bytes record.safety_event_id);
+      Encoding.bytes (Ledger.Event_id.to_bytes record.target_event_id);
       Encoding.bytes (Model.Opaque_object_ref.to_bytes record.safety_snapshot);
       Encoding.bytes (Model.Opaque_object_ref.to_bytes record.target_snapshot);
       Encoding.integer record.generation;
@@ -355,13 +361,14 @@ let decode encoded =
       |> Result.map_error (fun error ->
           Invalid_payload (Encoding.decode_error_to_string error))
     in
-    let* values = fields "V2 restore journal" 11 value in
+    let* values = fields "V2 restore journal" 12 value in
     match values with
     | [
      version;
      repository_id;
      operation_id;
      safety_event_id;
+     target_event_id;
      safety_snapshot;
      target_snapshot;
      generation;
@@ -394,6 +401,13 @@ let decode encoded =
           let* safety_event_id =
             identity "V2 restore journal safety event ID"
               Ledger.Event_id.of_bytes safety_event_id
+          in
+          let* target_event_id =
+            bytes "V2 restore journal target event ID" target_event_id
+          in
+          let* target_event_id =
+            identity "V2 restore journal target event ID"
+              Ledger.Event_id.of_bytes target_event_id
           in
           let* safety_snapshot =
             bytes "V2 restore journal safety snapshot" safety_snapshot
@@ -435,8 +449,8 @@ let decode encoded =
           in
           let* record =
             make_record ~repository_id ~operation_id ~safety_event_id
-              ~safety_snapshot ~target_snapshot ~generation ~phase ~action_count
-              ~mandatory_features
+              ~target_event_id ~safety_snapshot ~target_snapshot ~generation
+              ~phase ~action_count ~mandatory_features
           in
           if String.equal encoded (encode record) then Ok record
           else Error Noncanonical_record

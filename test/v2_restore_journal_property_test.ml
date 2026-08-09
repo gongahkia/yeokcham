@@ -28,6 +28,7 @@ let make action_count =
     ~repository_id:(identity Model.Repository_id.of_bytes 'r')
     ~operation_id:(identity Model.Transaction_id.of_bytes 'o')
     ~safety_event_id:(identity Ledger.Event_id.of_bytes 'e')
+    ~target_event_id:(identity Ledger.Event_id.of_bytes 't')
     ~safety_snapshot:(identity Model.Opaque_object_ref.of_bytes 's')
     ~target_snapshot:(identity Model.Opaque_object_ref.of_bytes 't')
     ~action_count ~mandatory_features:0L

@@ -54,12 +54,13 @@ plan is re-derived from the named exact snapshots. It is selected.
 
 ## Decision outcome
 
-`restore-journal-v1` is canonical CBOR:
+`restore-journal-v2` is canonical CBOR:
 
 ```text
-Restore_journal = [version=1, repository-id, operation-id,
-                   safety-event-id, safety-snapshot-ref, target-snapshot-ref,
-                   generation, phase-code, completed-actions, action-count,
+Restore_journal = [version=2, repository-id, operation-id,
+                   safety-event-id, target-event-id,
+                   safety-snapshot-ref, target-snapshot-ref, generation,
+                   phase-code, completed-actions, action-count,
                    mandatory-features]
 
 phase-code = 0 Prepared | 1 Applying | 2 Materialized | 3 Published
@@ -68,8 +69,10 @@ phase-code = 0 Prepared | 1 Applying | 2 Materialized | 3 Published
 All IDs and references are exactly 32 raw bytes. `operation-id` uses the V2
 transaction identity type only as an opaque local operation name; it is neither
 an ADR-049 object-publication transaction nor authorization. Safety and target
-references must differ. `action-count` is positive and bounded. Mandatory
-features start at zero; unknown mandatory bits reject.
+references must differ. `target-event-id` retains the caller-selected signed
+target source so restart can re-verify its device scope and exact target
+reference. `action-count` is positive and bounded. Mandatory features start at
+zero; unknown mandatory bits reject.
 
 The initial record is generation zero and `Prepared`. A next immutable
 generation may only be:
@@ -137,12 +140,13 @@ checkpoint nor restore journal.
 ```text
 Restore_phase = Prepared | Applying(completed-actions)
               | Materialized | Published
-Restore_record = (repository, operation, safety-event, safety-snapshot,
-                  target-snapshot, generation, phase, action-count)
+Restore_record = (repository, operation, safety-event, target-event,
+                  safety-snapshot, target-snapshot, generation, phase,
+                  action-count)
 ```
 
-1. Non-no-op restoration has a positive bounded action count and distinct
-   safety/target opaque references.
+1. Non-no-op restoration has a positive bounded action count, distinct
+   safety/target opaque references, and two explicit signed-event identities.
 2. `Prepared` occurs only at generation zero with zero completed actions.
 3. Progress stays in `0..action-count`; terminal phases require completion.
 4. A record can only advance through the listed transition relation.
@@ -152,15 +156,17 @@ Restore_record = (repository, operation, safety-event, safety-snapshot,
 
 ## Persistent-format and migration impact
 
-The journal is a version-1, bounded canonical CBOR record in a private
+The journal is a version-2, bounded canonical CBOR record in a private
 `.yeokcham/journal` create-only generation chain. It carries only opaque/public
 values and is not an ADR-045 encrypted object. The static golden fixture covers
 the initial record. Unknown schema versions/features, invalid IDs, equal
 snapshot references, impossible phase/progress combinations, noncanonical
 bytes, trailing bytes, oversized inputs, malformed paths, file/payload identity
 mismatches, invalid chain successors, and non-regular temporary entries fail
-closed. No old format reader, migration, or compatibility fixture is retained
-under the approved no-user-data development policy.
+closed. Version 2 deliberately replaces the earlier uncommitted development
+shape so target-event provenance can be re-verified. No V1 reader, migration,
+or compatibility fixture is retained under the approved no-user-data
+development policy.
 
 ## Verification
 

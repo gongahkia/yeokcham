@@ -78,13 +78,15 @@ opaque-address keys; it contains no private key, user identity, mutable scratch
 head, or trust policy. The private Secret Service capability format deliberately
 has no disk fixture.
 
-`v2-restore-journal-v1.cbor.hex` is ADR-056's canonical initial opaque restore
-journal record. It names the repository, operation, verified safety event, and
-distinct opaque safety/target snapshot references with generation zero and
-`Prepared` phase. It contains no source path, plaintext file content, symlink
-target, or private key. Its create-only local path is derived separately as
+`v2-restore-journal-v2.cbor.hex` is ADR-056's canonical initial opaque restore
+journal record. It names the repository, operation, caller-selected target
+event, verified safety event, and distinct opaque safety/target snapshot
+references with generation zero and `Prepared` phase. It contains no source
+path, plaintext file content, symlink target, or private key. Its create-only
+local path is derived separately as
 `restore-<operation-id>-<16-digit-generation>.cbor`; filename and record are
-both verified before the record is accepted.
+both verified before the record is accepted. The development-only format has no
+V1 reader or compatibility fixture.
 
 `v2-object-ledger-frame-v1.cbor.hex` and
 `v2-object-scratch-snapshot-frame-v1.cbor.hex` are ADR-054 typed plaintext

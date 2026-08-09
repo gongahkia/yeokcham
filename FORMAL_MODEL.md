@@ -1554,14 +1554,16 @@ ADR-056 gives a non-no-op `Restore_plan(O, T)` an opaque recovery record after
 `O` has become a verified safety checkpoint and before any destructive action:
 
 ```text
-Restore_record = (repository, operation, safety-event, safety-snapshot-ref,
-                  target-snapshot-ref, generation, phase, action-count)
+Restore_record = (repository, operation, safety-event, target-event,
+                  safety-snapshot-ref, target-snapshot-ref, generation, phase,
+                  action-count)
 Restore_phase  = Prepared | Applying(completed) | Materialized | Published
 ```
 
-Safety and target references differ; no path, content, symlink target, or
-private key appears in the record. `Prepared` is generation zero. The only
-transition relation is:
+Safety and target references differ. The two event IDs preserve the explicit
+device-scope sources that must be re-verified after restart; no path, content,
+symlink target, or private key appears in the record. `Prepared` is generation
+zero. The only transition relation is:
 
 ```text
 Prepared -> Applying(0)

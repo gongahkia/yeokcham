@@ -21,6 +21,7 @@ let prepared ?(repository = repository_id) ?(operation = operation_id)
     action_count =
   Journal.make_prepared ~repository_id:repository ~operation_id:operation
     ~safety_event_id:(identity Ledger.Event_id.of_bytes 'e')
+    ~target_event_id:(identity Ledger.Event_id.of_bytes 't')
     ~safety_snapshot:(identity Model.Opaque_object_ref.of_bytes 's')
     ~target_snapshot:(identity Model.Opaque_object_ref.of_bytes 't')
     ~action_count ~mandatory_features:0L
@@ -149,6 +150,7 @@ let invalid_predecessors_collisions_and_foreign_records_fail_closed () =
       let conflicting =
         Journal.make_prepared ~repository_id ~operation_id
           ~safety_event_id:(identity Ledger.Event_id.of_bytes 'e')
+          ~target_event_id:(identity Ledger.Event_id.of_bytes 't')
           ~safety_snapshot:(identity Model.Opaque_object_ref.of_bytes 'u')
           ~target_snapshot:(identity Model.Opaque_object_ref.of_bytes 't')
           ~action_count:1 ~mandatory_features:0L

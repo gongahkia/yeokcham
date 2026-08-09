@@ -33,6 +33,7 @@ let operation_id = identity Model.Transaction_id.of_bytes 'o'
 let prepared action_count =
   Journal.make_prepared ~repository_id ~operation_id
     ~safety_event_id:(identity Ledger.Event_id.of_bytes 'e')
+    ~target_event_id:(identity Ledger.Event_id.of_bytes 't')
     ~safety_snapshot:(identity Model.Opaque_object_ref.of_bytes 's')
     ~target_snapshot:(identity Model.Opaque_object_ref.of_bytes 't')
     ~action_count ~mandatory_features:0L

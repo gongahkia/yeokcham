@@ -1,8 +1,8 @@
 (** Canonical opaque recovery state for one non-no-op V2 restore.
 
     These records are intentionally unable to describe filesystem bytes or
-    paths. They bind the safety event and the encrypted snapshot references an
-    effectful restore adapter must use. *)
+    paths. They bind the caller-selected safety and target events with their
+    encrypted snapshot references, so a restart can re-verify both sources. *)
 
 module Ledger = Yeokcham_v2_ledger
 module Model = Yeokcham_v2_model
@@ -43,6 +43,7 @@ val make_prepared :
   repository_id:Model.Repository_id.t ->
   operation_id:Model.Transaction_id.t ->
   safety_event_id:Ledger.Event_id.t ->
+  target_event_id:Ledger.Event_id.t ->
   safety_snapshot:Model.Opaque_object_ref.t ->
   target_snapshot:Model.Opaque_object_ref.t ->
   action_count:int ->
@@ -52,6 +53,7 @@ val make_prepared :
 val repository_id : t -> Model.Repository_id.t
 val operation_id : t -> Model.Transaction_id.t
 val safety_event_id : t -> Ledger.Event_id.t
+val target_event_id : t -> Ledger.Event_id.t
 val safety_snapshot : t -> Model.Opaque_object_ref.t
 val target_snapshot : t -> Model.Opaque_object_ref.t
 val generation : t -> int64

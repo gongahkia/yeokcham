@@ -17,6 +17,7 @@ let sample () =
     ~repository_id:(identity Model.Repository_id.of_bytes 'r')
     ~operation_id:(identity Model.Transaction_id.of_bytes 'o')
     ~safety_event_id:(identity Ledger.Event_id.of_bytes 'e')
+    ~target_event_id:(identity Ledger.Event_id.of_bytes 't')
     ~safety_snapshot:(identity Model.Opaque_object_ref.of_bytes 's')
     ~target_snapshot:(identity Model.Opaque_object_ref.of_bytes 't')
     ~action_count:3 ~mandatory_features:0L
@@ -32,10 +33,14 @@ let expected_golden name actual =
 let canonical_journal_fixture_and_transitions () =
   let prepared = sample () in
   let encoded = Journal.encode prepared in
-  expected_golden "v2-restore-journal-v1.cbor.hex" encoded;
+  expected_golden "v2-restore-journal-v2.cbor.hex" encoded;
   let decoded = Journal.decode encoded |> require_ok Journal.error_to_string in
   Alcotest.(check int64) "prepared generation" 0L (Journal.generation decoded);
   Alcotest.(check int) "prepared count" 0 (Journal.completed_actions decoded);
+  Alcotest.(check string)
+    "target event survives canonical decode"
+    (String.init 64 (fun index -> if index mod 2 = 0 then '7' else '4'))
+    (Ledger.Event_id.to_hex (Journal.target_event_id decoded));
   let applying_zero =
     Journal.advance decoded (Journal.Applying 0)
     |> require_ok Journal.error_to_string
@@ -104,17 +109,18 @@ let invalid_records_and_transitions_reject () =
           ~repository_id:(identity Model.Repository_id.of_bytes 'r')
           ~operation_id:(identity Model.Transaction_id.of_bytes 'o')
           ~safety_event_id:(identity Ledger.Event_id.of_bytes 'e')
+          ~target_event_id:(identity Ledger.Event_id.of_bytes 't')
           ~safety_snapshot:(identity Model.Opaque_object_ref.of_bytes 's')
           ~target_snapshot:(identity Model.Opaque_object_ref.of_bytes 's')
           ~action_count:1 ~mandatory_features:0L));
   Alcotest.(check bool)
     "unknown feature rejects" true
     (Result.is_error
-       (Journal.decode (replace_field encoded 10 (Encoding.integer 1L))));
+       (Journal.decode (replace_field encoded 11 (Encoding.integer 1L))));
   Alcotest.(check bool)
     "prepared with progress rejects" true
     (Result.is_error
-       (Journal.decode (replace_field encoded 8 (Encoding.integer 1L))));
+       (Journal.decode (replace_field encoded 9 (Encoding.integer 1L))));
   Alcotest.(check bool)
     "trailing byte rejects" true
     (Result.is_error (Journal.decode (encoded ^ "\000")));
