@@ -1,9 +1,19 @@
 module Encoding = Yeokcham_encoding
 module Ledger = Yeokcham_v2_ledger
+module Retention = Yeokcham_v2_retention
 module Snapshot = Yeokcham_model.Snapshot
 
-type kind = Ledger_event | Scratch_snapshot
-type t = Ledger_event_frame of Ledger.t | Scratch_snapshot_frame of Snapshot.t
+type kind =
+  | Ledger_event
+  | Scratch_snapshot
+  | Scratch_protection
+  | Scratch_generation
+
+type t =
+  | Ledger_event_frame of Ledger.t
+  | Scratch_snapshot_frame of Snapshot.t
+  | Scratch_protection_frame of Retention.protection
+  | Scratch_generation_frame of Retention.generation
 
 type error =
   | Invalid_payload of string
@@ -12,6 +22,7 @@ type error =
   | Unsupported_mandatory_features of int64
   | Unknown_kind of int64
   | Ledger_error of Ledger.error
+  | Retention_error of Retention.error
   | Snapshot_error of Yeokcham_model.canonical_decode_error
   | Noncanonical_frame
 
@@ -36,6 +47,7 @@ let error_to_string = function
         features
   | Unknown_kind kind -> Printf.sprintf "unknown V2 typed object kind: %Ld" kind
   | Ledger_error error -> Ledger.error_to_string error
+  | Retention_error error -> Retention.error_to_string error
   | Snapshot_error error ->
       Yeokcham_model.canonical_decode_error_to_string error
   | Noncanonical_frame -> "V2 typed object frame is noncanonical"
@@ -78,24 +90,51 @@ let bytes name = function
 
 let ledger_event event = Ledger_event_frame event
 let scratch_snapshot snapshot = Scratch_snapshot_frame snapshot
+let scratch_protection protection = Scratch_protection_frame protection
+let scratch_generation generation = Scratch_generation_frame generation
 
 let kind = function
   | Ledger_event_frame _ -> Ledger_event
   | Scratch_snapshot_frame _ -> Scratch_snapshot
+  | Scratch_protection_frame _ -> Scratch_protection
+  | Scratch_generation_frame _ -> Scratch_generation
 
 let ledger = function
   | Ledger_event_frame event -> Some event
-  | Scratch_snapshot_frame _ -> None
+  | Scratch_snapshot_frame _ | Scratch_protection_frame _
+  | Scratch_generation_frame _ ->
+      None
 
 let snapshot = function
   | Ledger_event_frame _ -> None
   | Scratch_snapshot_frame snapshot -> Some snapshot
+  | Scratch_protection_frame _ | Scratch_generation_frame _ -> None
 
-let kind_code = function Ledger_event -> 0L | Scratch_snapshot -> 1L
+let protection = function
+  | Scratch_protection_frame protection -> Some protection
+  | Ledger_event_frame _ | Scratch_snapshot_frame _ | Scratch_generation_frame _
+    ->
+      None
+
+let generation = function
+  | Scratch_generation_frame generation -> Some generation
+  | Ledger_event_frame _ | Scratch_snapshot_frame _ | Scratch_protection_frame _
+    ->
+      None
+
+let kind_code = function
+  | Ledger_event -> 0L
+  | Scratch_snapshot -> 1L
+  | Scratch_protection -> 2L
+  | Scratch_generation -> 3L
 
 let payload = function
   | Ledger_event_frame event -> Ledger.encode event
   | Scratch_snapshot_frame snapshot -> Snapshot.canonical_bytes snapshot
+  | Scratch_protection_frame protection ->
+      Retention.encode_protection protection
+  | Scratch_generation_frame generation ->
+      Retention.encode_generation generation
 
 let encode frame =
   let value =
@@ -123,6 +162,14 @@ let decode_payload kind payload =
         Snapshot.decode_canonical_bytes payload
         |> Result.map scratch_snapshot
         |> Result.map_error (fun error -> Snapshot_error error)
+    | Scratch_protection ->
+        Retention.decode_protection payload
+        |> Result.map scratch_protection
+        |> Result.map_error (fun error -> Retention_error error)
+    | Scratch_generation ->
+        Retention.decode_generation payload
+        |> Result.map scratch_generation
+        |> Result.map_error (fun error -> Retention_error error)
 
 let decode encoded =
   let* value =
@@ -142,6 +189,8 @@ let decode encoded =
           match kind_value with
           | 0L -> Ok Ledger_event
           | 1L -> Ok Scratch_snapshot
+          | 2L -> Ok Scratch_protection
+          | 3L -> Ok Scratch_generation
           | value -> Error (Unknown_kind value)
         in
         let* payload = bytes "V2 typed object frame payload" payload in

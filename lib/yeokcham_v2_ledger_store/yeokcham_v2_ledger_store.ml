@@ -35,6 +35,8 @@ let ( let* ) = Result.bind
 let kind_to_string = function
   | Object.Ledger_event -> "ref-ledger event"
   | Object.Scratch_snapshot -> "scratch snapshot"
+  | Object.Scratch_protection -> "scratch protection"
+  | Object.Scratch_generation -> "scratch generation"
 
 let error_to_string = function
   | Object_store_error error -> Object_store.error_to_string error

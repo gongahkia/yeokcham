@@ -397,7 +397,8 @@
   yeokcham_model
   yeokcham_testkit
   yeokcham_v2_ledger
-  yeokcham_v2_object)
+  yeokcham_v2_object
+  yeokcham_v2_retention)
  (deps
   (source_tree golden)))
 
@@ -502,6 +503,7 @@
   alcotest
   qcheck-core
   qcheck-alcotest
+  yeokcham_testkit
   yeokcham_v2_ledger
   yeokcham_v2_model
   yeokcham_v2_restore_journal))
@@ -908,6 +910,21 @@
   yeokcham_exchange_store
   yeokcham_store
   unix))
+
+(test
+ (name test_v2_retention)
+ (modules test_v2_retention)
+ (libraries
+  alcotest
+  qcheck-core
+  qcheck-alcotest
+  yeokcham_testkit
+  yeokcham_v2_ledger
+  yeokcham_v2_model
+  yeokcham_v2_object
+  yeokcham_v2_retention)
+ (deps
+  (source_tree golden)))
 
 (test
  (name test_demo_fixture)
@@ -1658,6 +1675,7 @@
   (:test_v2_linux_scratch_daemon test_v2_linux_scratch_daemon.exe)
   (:test_v2_ledger test_v2_ledger.exe)
   (:test_v2_object test_v2_object.exe)
+  (:test_v2_retention test_v2_retention.exe)
   (:test_v2_object_store test_v2_object_store.exe)
   (:test_v2_scratch_store test_v2_scratch_store.exe)
   (:v2_scratch_store_property_test v2_scratch_store_property_test.exe)
@@ -1724,6 +1742,7 @@
    (run %{test_v2_linux_scratch_daemon})
    (run %{test_v2_ledger})
    (run %{test_v2_object})
+   (run %{test_v2_retention})
    (run %{test_v2_object_store})
    (run %{test_v2_scratch_store})
    (run %{v2_scratch_store_property_test})

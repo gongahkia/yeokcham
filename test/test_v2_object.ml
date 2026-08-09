@@ -3,6 +3,8 @@ module Golden = Yeokcham_testkit.Golden_fixture
 module Ledger = Yeokcham_v2_ledger
 module Model = Yeokcham_model
 module Object = Yeokcham_v2_object
+module Retention = Yeokcham_v2_retention
+module V2_model = Yeokcham_v2_model
 
 let default_seed = 20_260_809
 
@@ -41,6 +43,66 @@ let snapshot content =
 let ledger_event () =
   Ledger.decode (read_golden "v2-ref-ledger-event-v1.cbor.hex")
   |> require_ok Ledger.error_to_string
+
+let object_ref character =
+  V2_model.Opaque_object_ref.of_hex (String.make 64 character)
+  |> require_ok V2_model.identity_error_to_string
+
+let ref_name value = Ledger.Ref_name.of_string value |> require_ok Fun.id
+
+let retention_frames_are_canonical_and_type_separated () =
+  let protection =
+    Retention.protection ~snapshot_ref:(object_ref 'a')
+      ~action:Retention.Protect ~reason:Retention.User_pin
+  in
+  let protected_frame = Object.scratch_protection protection in
+  let decoded_protection =
+    Object.decode (Object.encode protected_frame)
+    |> require_ok Object.error_to_string
+  in
+  Alcotest.(check bool)
+    "protection frame preserves its kind" true
+    (Object.kind decoded_protection = Object.Scratch_protection);
+  (match Object.protection decoded_protection with
+  | Some actual ->
+      Alcotest.(check string)
+        "protection frame round trips canonically"
+        (Retention.encode_protection protection)
+        (Retention.encode_protection actual)
+  | None -> Alcotest.fail "protection frame decoded as another frame kind");
+  let generation =
+    Retention.make_generation
+      ~active_ref:(ref_name "scratch-compact-device-head")
+      ~active_head:(Ledger.event_id (ledger_event ()))
+      ~retired_refs:[ ref_name "scratch-device" ]
+      ~cleanup_candidates:
+        [
+          {
+            Retention.candidate_object_ref = object_ref 'b';
+            candidate_kind = Retention.Ledger_event;
+          };
+          {
+            Retention.candidate_object_ref = object_ref 'c';
+            candidate_kind = Retention.Scratch_snapshot;
+          };
+        ]
+    |> require_ok Retention.error_to_string
+  in
+  let generation_frame = Object.scratch_generation generation in
+  let decoded_generation =
+    Object.decode (Object.encode generation_frame)
+    |> require_ok Object.error_to_string
+  in
+  Alcotest.(check bool)
+    "generation frame preserves its kind" true
+    (Object.kind decoded_generation = Object.Scratch_generation);
+  match Object.generation decoded_generation with
+  | Some actual ->
+      Alcotest.(check string)
+        "generation frame round trips canonically"
+        (Retention.encode_generation generation)
+        (Retention.encode_generation actual)
+  | None -> Alcotest.fail "generation frame decoded as another frame kind"
 
 let frame ?(kind = 1L) ?(features = 0L) payload =
   Encoding.array
@@ -98,8 +160,8 @@ let malformed_or_untyped_payloads_reject () =
     | Ok _ -> Alcotest.fail "malformed typed object unexpectedly decoded"
   in
   expect
-    ((function Object.Unknown_kind 2L -> true | _ -> false) [@warning "-4"])
-    (frame ~kind:2L scratch);
+    ((function Object.Unknown_kind 4L -> true | _ -> false) [@warning "-4"])
+    (frame ~kind:4L scratch);
   expect
     ((function Object.Unsupported_mandatory_features 1L -> true | _ -> false)
       [@warning "-4"])
@@ -133,6 +195,8 @@ let () =
         [
           Alcotest.test_case "exact frames are canonical and type-separated"
             `Quick exact_frames_are_canonical_and_kind_separated;
+          Alcotest.test_case "retention frames are canonical and type-separated"
+            `Quick retention_frames_are_canonical_and_type_separated;
           Alcotest.test_case "malformed or untyped payloads reject" `Quick
             malformed_or_untyped_payloads_reject;
           QCheck_alcotest.to_alcotest ~speed_level:`Quick

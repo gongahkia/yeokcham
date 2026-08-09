@@ -1497,7 +1497,8 @@ canonical typed object frame:
 
 ```text
 Object_frame = (version=1, kind, canonical-payload-bytes, features)
-Object_kind = Ledger_event | Scratch_snapshot
+Object_kind = Ledger_event | Scratch_snapshot | Scratch_protection
+            | Scratch_generation
 ```
 
 `Ledger_event` contains an exact ADR-048 record. `Scratch_snapshot` contains
@@ -1638,3 +1639,38 @@ O-ref, T-ref, action-count)`, and only then appends `Applying(0)`. A previously
 named operation is an explicit existing-operation result, not an implicit
 resume. This relation does not choose a target causal head or modify the
 working tree.
+
+## 30. V2 scratch retention and compaction generations
+
+ADR-058 keeps V2 retention separate from the historical V1 mutable-ref model.
+For bootstrap device `D`, the base scratch causal scope is `scratch-D`; optional
+protection and generation scopes are separate signed ledger names. An active
+sole generation head names an immutable generation value and its replacement
+scratch scope. No mutable current-generation file or winner-selection rule is
+introduced.
+
+```text
+Protection = (snapshot-ref, Protect | Unprotect,
+              User_pin | Capsule_boundary(binding) | Release_boundary(binding))
+Generation = (active-ref, active-head, retired-refs, cleanup-candidates)
+Policy     = (recent-count, storage-budget-bytes?)
+```
+
+Claims fold in causal order; the latest action for the same exact snapshot and
+reason is effective. The current head and every effectively protected snapshot
+are retained. Since V2 does not contain an accepted trusted checkpoint time,
+`recent-count` selects ordinal newest positions rather than pretending to be a
+time window. A storage budget counts the exact regular-file bytes of the source
+event and snapshot objects. It may exclude optional recent entries, but it
+reports a required-set overrun rather than evicting a protected or current
+state.
+
+Compaction creates a fresh immutable scratch ledger chain over the selected
+existing snapshot references, oldest-to-newest, then publishes a generation
+ledger event as the sole activation point. A pre-activation interruption leaves
+the prior scope active. After activation, old source scopes are retired from
+scratch interpretation and may be quarantined only through the generation's
+canonical candidate list. That list can contain source ledger objects and
+unretained snapshots only when no retained checkpoint, effective claim, or live
+non-retired ledger target names the snapshot. Quarantine is resumable local
+maintenance; explicit prune is irreversible.

@@ -31,6 +31,8 @@ type storage = {
   encrypted_bytes : int64;
   ledger_frames : int;
   scratch_snapshot_frames : int;
+  scratch_protection_frames : int;
+  scratch_generation_frames : int;
   restore_journal_records : int;
 }
 
@@ -113,8 +115,8 @@ let storage ~root ~bootstrap_repository =
     Object_store.list_object_refs objects
     |> Result.map_error (fun error -> Object_store_error error)
   in
-  let rec count bytes ledger snapshots = function
-    | [] -> Ok (bytes, ledger, snapshots)
+  let rec count bytes ledger snapshots protections generations = function
+    | [] -> Ok (bytes, ledger, snapshots, protections, generations)
     | object_ref :: rest ->
         let path = Object_store.object_path objects object_ref in
         let* stat =
@@ -132,15 +134,27 @@ let storage ~root ~bootstrap_repository =
           Object_store.load objects ~object_ref
           |> Result.map_error (fun error -> Object_store_error error)
         in
-        let ledger, snapshots =
+        let ledger, snapshots, protections, generations =
           match Object.kind object_ with
-          | Object.Ledger_event -> (ledger + 1, snapshots)
-          | Object.Scratch_snapshot -> (ledger, snapshots + 1)
+          | Object.Ledger_event ->
+              (ledger + 1, snapshots, protections, generations)
+          | Object.Scratch_snapshot ->
+              (ledger, snapshots + 1, protections, generations)
+          | Object.Scratch_protection ->
+              (ledger, snapshots, protections + 1, generations)
+          | Object.Scratch_generation ->
+              (ledger, snapshots, protections, generations + 1)
         in
-        count Int64.(add bytes (of_int stat.Unix.st_size)) ledger snapshots rest
+        count
+          Int64.(add bytes (of_int stat.Unix.st_size))
+          ledger snapshots protections generations rest
   in
-  let* encrypted_bytes, ledger_frames, scratch_snapshot_frames =
-    count 0L 0 0 refs
+  let* ( encrypted_bytes,
+         ledger_frames,
+         scratch_snapshot_frames,
+         scratch_protection_frames,
+         scratch_generation_frames ) =
+    count 0L 0 0 0 0 refs
   in
   let* journal = journal_store ~root bootstrap_repository in
   let* records =
@@ -153,6 +167,8 @@ let storage ~root ~bootstrap_repository =
       encrypted_bytes;
       ledger_frames;
       scratch_snapshot_frames;
+      scratch_protection_frames;
+      scratch_generation_frames;
       restore_journal_records = List.length records;
     }
 

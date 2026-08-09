@@ -32,6 +32,8 @@ type storage = {
   encrypted_bytes : int64;
   ledger_frames : int;
   scratch_snapshot_frames : int;
+  scratch_protection_frames : int;
+  scratch_generation_frames : int;
   restore_journal_records : int;
 }
 

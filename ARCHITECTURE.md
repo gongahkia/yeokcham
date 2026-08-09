@@ -100,7 +100,20 @@ divergence rather than choosing a head, and treats an exact unchanged snapshot
 as a no-write result. Its exact scanner and narrow scratch service carry an
 explicit scan result into that durable transition. The daemon cannot invent
 snapshot bytes, keys, or a conflict resolution; errors such as divergence or
-watcher loss stop it explicitly. V2-016 currently supplies a pure restore planner over those exact
+watcher loss stop it explicitly.
+
+V2-015 now has an ADR-058 functional-core and persistence boundary:
+`yeokcham_v2_retention` canonically encodes explicit snapshot protection claims
+and immutable generation manifests, then selects a verified causal history by
+ordinal recent-count and exact encrypted object-byte budget. The current head
+and effective claims remain selected even when that reports an overrun. The
+generation protocol creates a fresh scratch scope over retained existing
+snapshots and activates it through a separate causal ledger event; it never
+uses a mutable generation ref. Physical activation, retired-scope verification,
+quarantine, and prune remain the next implementation slice and are not claimed
+by the pure planner.
+
+V2-016 currently supplies a pure restore planner over those exact
 snapshots: a changed target requires the observed snapshot as an explicit safety
 checkpoint input, removes children before parents, creates target directories
 before their contents, and preserves regular bytes, modes, and raw symlink
