@@ -30,6 +30,16 @@ type nonces = {
   binding_ledger_nonce : Envelope.nonce;
 }
 
+type revision_nonces = {
+  fold_selected_result_nonce : Envelope.nonce;
+  fold_revision_nonce : Envelope.nonce;
+  fold_source_protection_nonce : Envelope.nonce;
+  fold_source_protection_ledger_nonce : Envelope.nonce;
+  fold_target_protection_nonce : Envelope.nonce;
+  fold_target_protection_ledger_nonce : Envelope.nonce;
+  fold_binding_ledger_nonce : Envelope.nonce;
+}
+
 module Fault = struct
   type boundary =
     | After_capsule_object
@@ -91,6 +101,14 @@ type error =
   | Snapshot_identity_mismatch of V2_model.Opaque_object_ref.t
   | Revision_replay_rejected of Model.replay_error
   | Revision_result_mismatch
+  | Concurrent_current_update of {
+      expected_revision : V2_model.Capsule_revision_id.t;
+      expected_binding : Ledger.Event_id.t;
+      actual_revision : V2_model.Capsule_revision_id.t option;
+      actual_binding : Ledger.Event_id.t option;
+    }
+  | Parent_link_mismatch of string
+  | Revision_history_cycle of V2_model.Opaque_object_ref.t
   | Fault_injected of Fault.boundary
 
 let ( let* ) = Result.bind
@@ -144,6 +162,25 @@ let error_to_string = function
       "capsule revision replay rejected: " ^ Model.replay_error_to_string error
   | Revision_result_mismatch ->
       "capsule revision replay does not reach its declared exact result"
+  | Concurrent_current_update
+      { expected_revision; expected_binding; actual_revision; actual_binding } ->
+      let revision = function
+        | None -> "none"
+        | Some id -> V2_model.Capsule_revision_id.to_hex id
+      in
+      let binding = function
+        | None -> "none"
+        | Some id -> Ledger.Event_id.to_hex id
+      in
+      Printf.sprintf
+        "capsule current changed from revision %s at binding %s to revision %s at binding %s"
+        (V2_model.Capsule_revision_id.to_hex expected_revision)
+        (Ledger.Event_id.to_hex expected_binding)
+        (revision actual_revision) (binding actual_binding)
+  | Parent_link_mismatch detail -> "capsule revision parent link mismatch: " ^ detail
+  | Revision_history_cycle reference ->
+      "capsule revision history contains object cycle: "
+      ^ V2_model.Opaque_object_ref.to_hex reference
   | Fault_injected boundary ->
       let name =
         match boundary with
@@ -194,6 +231,21 @@ let distinct_nonces nonces =
   let values =
     [
       nonces.capsule_nonce;
+      nonces.fold_selected_result_nonce;
+      nonces.fold_revision_nonce;
+      nonces.fold_source_protection_nonce;
+      nonces.fold_source_protection_ledger_nonce;
+      nonces.fold_target_protection_nonce;
+      nonces.fold_target_protection_ledger_nonce;
+      nonces.fold_binding_ledger_nonce;
+    ]
+    |> List.map Envelope.nonce_to_bytes
+  in
+  List.length values = List.length (List.sort_uniq String.compare values)
+
+let distinct_revision_nonces nonces =
+  let values =
+    [
       nonces.selected_result_nonce;
       nonces.revision_nonce;
       nonces.source_protection_nonce;
@@ -278,6 +330,48 @@ let snapshot_for_link repository (link : Capsule.snapshot_link) =
       then Ok snapshot
       else Error (Snapshot_identity_mismatch link.Capsule.snapshot_ref)
 
+let rec verify_parent_chain repository ~visited revision =
+  match Capsule.revision_parent revision with
+  | None -> Ok ()
+  | Some parent ->
+      let parent_ref = Capsule.revision_link_ref parent in
+      if
+        List.exists
+          (V2_model.Opaque_object_ref.equal parent_ref)
+          visited
+      then Error (Revision_history_cycle parent_ref)
+      else if
+        not
+          (V2_model.Capsule_id.equal
+             (Capsule.revision_capsule_id revision)
+             (Capsule.revision_link_capsule_id parent))
+      then Error (Parent_link_mismatch "parent names another capsule")
+      else
+        let* object_ =
+          Object_store.load repository.objects ~object_ref:parent_ref
+          |> Result.map_error (fun error -> Object_store_error error)
+        in
+        let* parent_revision =
+          match Object.capsule_revision_record object_ with
+          | Some revision -> Ok revision
+          | None -> Error (Parent_link_mismatch "parent object is not a revision")
+        in
+        if
+          not
+            (V2_model.Capsule_revision_id.equal
+               (Capsule.revision_link_revision_id parent)
+               (Capsule.revision_id parent_revision))
+        then Error (Parent_link_mismatch "parent logical identity differs")
+        else if
+          not
+            (V2_model.Capsule_id.equal
+               (Capsule.revision_link_capsule_id parent)
+               (Capsule.revision_capsule_id parent_revision))
+        then Error (Parent_link_mismatch "parent capsule identity differs")
+        else
+          verify_parent_chain repository ~visited:(parent_ref :: visited)
+            parent_revision
+
 let resolve repository ~id =
   let* head = binding_head repository id in
   match head with
@@ -336,6 +430,9 @@ let resolve repository ~id =
             if not (Model.Snapshot.equal actual expected_result) then
               Error Revision_result_mismatch
             else
+              let* () =
+                verify_parent_chain repository ~visited:[ revision_ref ] revision
+              in
               Ok
                 (Some
                    {
@@ -382,7 +479,7 @@ let inject fault boundary =
   | Some actual when actual = boundary -> Error (Fault_injected boundary)
   | None | Some _ -> Ok ()
 
-let binding_envelope repository ~id ~revision_ref ~nonce =
+let binding_envelope repository ~id ~predecessor ~revision_ref ~nonce =
   let* ref_name = capsule_ref_name id in
   let record = Bootstrap_store.bootstrap repository.bootstrap in
   let capability = Bootstrap_store.capability repository.bootstrap in
@@ -391,7 +488,7 @@ let binding_envelope repository ~id ~revision_ref ~nonce =
       ~repository_id:(Bootstrap.repository_id record)
       ~ref_name
       ~signer_key_id:(Bootstrap.capability_signer_key_id capability)
-      ~predecessor:None
+      ~predecessor
       ~target:(Some (Ledger.Ref_target.of_opaque_object_ref revision_ref))
       ~mandatory_features:0L
     |> Result.map_error (fun error -> Ledger_error error)
@@ -555,7 +652,7 @@ let create ?fault repository ~id ~title ~description ~created_at ~source_event
                    })
         | None -> (
             let* expected_event_id, ledger_envelope =
-              binding_envelope repository ~id ~revision_ref
+              binding_envelope repository ~id ~predecessor:None ~revision_ref
                 ~nonce:nonces.binding_ledger_nonce
             in
             let* publication =

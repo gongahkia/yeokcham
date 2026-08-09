@@ -16,6 +16,14 @@ type source_boundary = {
   target_snapshot : snapshot_link;
 }
 
+type revision_link
+
+type provenance =
+  | Created
+  | Folded of revision_link
+  | Split_from of revision_link list
+  | Combined_from of revision_link list
+
 type proposal
 type selection
 type capsule
@@ -39,6 +47,9 @@ type error =
   | Boundary_base_mismatch
   | Boundary_target_mismatch
   | Selection_base_mismatch
+  | Parent_capsule_mismatch
+  | Empty_source_boundaries
+  | Invalid_provenance of string
   | Revision_replay_rejected of Model.replay_error
   | Invalid_payload of string
   | Unsupported_schema_version of int64
@@ -102,6 +113,35 @@ val revision_declared_base : revision -> snapshot_link
 val revision_expected_result : revision -> snapshot_link
 val revision_operations : revision -> Model.scratch_operation list
 val revision_source_boundary : revision -> source_boundary
+val revision_source_boundaries : revision -> source_boundary list
+val revision_parent : revision -> revision_link option
+val revision_provenance : revision -> provenance
+val revision_created_at : revision -> int64 option
+
+val make_revision_link :
+  capsule_id:V2_model.Capsule_id.t ->
+  revision_id:V2_model.Capsule_revision_id.t ->
+  revision_ref:V2_model.Opaque_object_ref.t ->
+  revision_link
+
+val revision_link_capsule_id : revision_link -> V2_model.Capsule_id.t
+val revision_link_revision_id : revision_link -> V2_model.Capsule_revision_id.t
+val revision_link_ref : revision_link -> V2_model.Opaque_object_ref.t
+
+val make_revision :
+  capsule:capsule ->
+  capsule_ref:V2_model.Opaque_object_ref.t ->
+  parent:revision_link option ->
+  declared_base:snapshot_link ->
+  declared_base_snapshot:Model.Snapshot.t ->
+  expected_result:snapshot_link ->
+  operations:Model.scratch_operation list ->
+  source_boundaries:source_boundary list ->
+  provenance:provenance ->
+  created_at:int64 ->
+  (revision, error) result
+(** Makes a version-2 complete revision. It retains immutable parent and
+    provenance links but still replays directly from [declared_base]. *)
 
 val apply_revision :
   base:Model.Snapshot.t ->

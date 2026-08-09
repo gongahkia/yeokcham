@@ -19,6 +19,18 @@ type source_boundary = {
   target_snapshot : snapshot_link;
 }
 
+type revision_link = {
+  linked_capsule_id : V2_model.Capsule_id.t;
+  linked_revision_id : V2_model.Capsule_revision_id.t;
+  linked_revision_ref : V2_model.Opaque_object_ref.t;
+}
+
+type provenance =
+  | Created
+  | Folded of revision_link
+  | Split_from of revision_link list
+  | Combined_from of revision_link list
+
 type proposal = {
   from_snapshot : Model.Snapshot.t;
   to_snapshot : Model.Snapshot.t;
@@ -40,13 +52,17 @@ type capsule = {
 }
 
 type revision = {
+  revision_schema_version : int64;
   revision_identity : V2_model.Capsule_revision_id.t;
-  capsule_id : V2_model.Capsule_id.t;
+  revision_capsule_id_ : V2_model.Capsule_id.t;
   capsule_ref : V2_model.Opaque_object_ref.t;
+  parent : revision_link option;
   declared_base : snapshot_link;
   expected_result : snapshot_link;
   revision_operations_ : Model.scratch_operation list;
-  source_boundary : source_boundary;
+  source_boundaries : source_boundary list;
+  provenance : provenance;
+  revision_created_at : int64 option;
 }
 
 type proposal_error = Derived_replay_mismatch
@@ -68,6 +84,9 @@ type error =
   | Boundary_base_mismatch
   | Boundary_target_mismatch
   | Selection_base_mismatch
+  | Parent_capsule_mismatch
+  | Empty_source_boundaries
+  | Invalid_provenance of string
   | Revision_replay_rejected of Model.replay_error
   | Invalid_payload of string
   | Unsupported_schema_version of int64
@@ -76,6 +95,7 @@ type error =
   | Noncanonical_record
 
 let current_schema_version = 1L
+let evolved_revision_schema_version = 2L
 let supported_mandatory_features = 0L
 let ( let* ) = Result.bind
 
@@ -111,6 +131,10 @@ let error_to_string = function
       "capsule source boundary does not end at the proposed target snapshot"
   | Selection_base_mismatch ->
       "capsule selection was not derived from the declared base snapshot"
+  | Parent_capsule_mismatch ->
+      "capsule revision parent belongs to a different capsule"
+  | Empty_source_boundaries -> "capsule revision has no source boundaries"
+  | Invalid_provenance detail -> "invalid capsule revision provenance: " ^ detail
   | Revision_replay_rejected error ->
       "capsule revision replay rejected: " ^ Model.replay_error_to_string error
   | Invalid_payload detail -> "invalid V2 capsule record: " ^ detail
@@ -340,6 +364,58 @@ let source_boundary_value boundary =
     ]
   |> Result.get_ok
 
+let revision_link_value (link : revision_link) =
+  Encoding.array
+    [
+      Encoding.bytes (V2_model.Capsule_id.to_bytes link.linked_capsule_id);
+      Encoding.bytes
+        (V2_model.Capsule_revision_id.to_bytes link.linked_revision_id);
+      Encoding.bytes
+        (V2_model.Opaque_object_ref.to_bytes link.linked_revision_ref);
+    ]
+  |> Result.get_ok
+
+let revision_link_identity_value (link : revision_link) =
+  Encoding.array
+    [
+      Encoding.bytes (V2_model.Capsule_id.to_bytes link.linked_capsule_id);
+      Encoding.bytes
+        (V2_model.Capsule_revision_id.to_bytes link.linked_revision_id);
+    ]
+  |> Result.get_ok
+
+let revision_link_list_value links =
+  Encoding.array (List.map revision_link_value links) |> Result.get_ok
+
+let revision_link_identity_list_value links =
+  Encoding.array (List.map revision_link_identity_value links) |> Result.get_ok
+
+let provenance_value = function
+  | Created -> Encoding.array [ Encoding.integer 0L ] |> Result.get_ok
+  | Folded link ->
+      Encoding.array [ Encoding.integer 1L; revision_link_value link ]
+      |> Result.get_ok
+  | Split_from links ->
+      Encoding.array [ Encoding.integer 2L; revision_link_list_value links ]
+      |> Result.get_ok
+  | Combined_from links ->
+      Encoding.array [ Encoding.integer 3L; revision_link_list_value links ]
+      |> Result.get_ok
+
+let provenance_identity_value = function
+  | Created -> Encoding.array [ Encoding.integer 0L ] |> Result.get_ok
+  | Folded link ->
+      Encoding.array [ Encoding.integer 1L; revision_link_identity_value link ]
+      |> Result.get_ok
+  | Split_from links ->
+      Encoding.array
+        [ Encoding.integer 2L; revision_link_identity_list_value links ]
+      |> Result.get_ok
+  | Combined_from links ->
+      Encoding.array
+        [ Encoding.integer 3L; revision_link_identity_list_value links ]
+      |> Result.get_ok
+
 let operation_values operations =
   List.map
     (fun operation ->
@@ -371,6 +447,37 @@ let derive_revision_id ~capsule_id ~declared_base ~expected_result ~operations
       (revision_identity_bytes ~capsule_id ~declared_base ~expected_result
          ~operations ~source_boundary)
   in
+  let digest = Hash.get context |> Hash.to_raw_string in
+  V2_model.Capsule_revision_id.of_bytes digest |> Result.get_ok
+
+let derive_evolved_revision_id ~capsule_id ~parent ~declared_base
+    ~expected_result ~operations ~source_boundaries ~provenance =
+  let parent =
+    match parent with
+    | None -> Encoding.null
+    | Some link -> revision_link_identity_value link
+  in
+  let identity =
+    Encoding.array
+      [
+        Encoding.integer evolved_revision_schema_version;
+        Encoding.bytes (V2_model.Capsule_id.to_bytes capsule_id);
+        parent;
+        Encoding.bytes
+          (Yeokcham_id.Snapshot_id.to_bytes declared_base.snapshot_id);
+        Encoding.bytes
+          (Yeokcham_id.Snapshot_id.to_bytes expected_result.snapshot_id);
+        Encoding.array (operation_values operations) |> Result.get_ok;
+        Encoding.array (List.map source_boundary_value source_boundaries)
+        |> Result.get_ok;
+        provenance_identity_value provenance;
+      ]
+    |> Result.get_ok |> Encoding.encode
+  in
+  let context =
+    Hash.feed_string Hash.empty "yeokcham:v2:capsule-revision:v2\000"
+  in
+  let context = Hash.feed_string context identity in
   let digest = Hash.get context |> Hash.to_raw_string in
   V2_model.Capsule_revision_id.of_bytes digest |> Result.get_ok
 
@@ -420,26 +527,106 @@ let make_initial_revision ~capsule ~capsule_ref ~declared_base
           in
           Ok
             {
+              revision_schema_version = current_schema_version;
               revision_identity = id;
-              capsule_id = capsule.capsule_identity;
+              revision_capsule_id_ = capsule.capsule_identity;
               capsule_ref;
+              parent = None;
               declared_base;
               expected_result;
               revision_operations_ = selected.selection_operations;
-              source_boundary;
+              source_boundaries = [ source_boundary ];
+              provenance = Created;
+              revision_created_at = None;
             }
+
+let validate_provenance capsule_id = function
+  | Created -> Error (Invalid_provenance "created is reserved for revision v1")
+  | Folded (link : revision_link) ->
+      if V2_model.Capsule_id.equal capsule_id link.linked_capsule_id then Ok ()
+      else Error (Invalid_provenance "fold source belongs to another capsule")
+  | Split_from [] -> Error (Invalid_provenance "split sources are empty")
+  | Split_from _ -> Ok ()
+  | Combined_from [] -> Error (Invalid_provenance "combine sources are empty")
+  | Combined_from _ -> Ok ()
+
+let make_revision ~capsule ~capsule_ref ~(parent : revision_link option) ~declared_base
+    ~declared_base_snapshot ~expected_result ~operations ~source_boundaries
+    ~provenance ~created_at =
+  if
+    not
+      (Yeokcham_id.Snapshot_id.equal declared_base.snapshot_id
+         (Model.Snapshot.id declared_base_snapshot))
+  then Error Declared_base_identity_mismatch
+  else
+    match source_boundaries with
+    | [] -> Error Empty_source_boundaries
+    | first_boundary :: _ ->
+        if not (same_snapshot_link declared_base first_boundary.source_snapshot)
+        then Error Boundary_base_mismatch
+        else
+          let* () =
+            match parent with
+            | None -> Ok ()
+            | Some link ->
+                if
+                  V2_model.Capsule_id.equal capsule.capsule_identity
+                    link.linked_capsule_id
+                then Ok ()
+                else Error Parent_capsule_mismatch
+          in
+          let* () = validate_provenance capsule.capsule_identity provenance in
+          match Model.Snapshot.apply_operations declared_base_snapshot operations with
+          | Error error -> Error (Revision_replay_rejected error)
+          | Ok actual ->
+              if
+                not
+                  (Yeokcham_id.Snapshot_id.equal expected_result.snapshot_id
+                     (Model.Snapshot.id actual))
+              then Error Expected_result_identity_mismatch
+              else
+                let id =
+                  derive_evolved_revision_id ~capsule_id:capsule.capsule_identity
+                    ~parent ~declared_base ~expected_result ~operations
+                    ~source_boundaries ~provenance
+                in
+                Ok
+                  {
+                    revision_schema_version = evolved_revision_schema_version;
+                    revision_identity = id;
+                    revision_capsule_id_ = capsule.capsule_identity;
+                    capsule_ref;
+                    parent;
+                    declared_base;
+                    expected_result;
+                    revision_operations_ = operations;
+                    source_boundaries;
+                    provenance;
+                    revision_created_at = Some created_at;
+                  }
 
 let capsule_id capsule = capsule.capsule_identity
 let capsule_title capsule = capsule.title
 let capsule_description capsule = capsule.description
 let capsule_created_at capsule = capsule.created_at
 let revision_id revision = revision.revision_identity
-let revision_capsule_id revision = revision.capsule_id
+let revision_capsule_id revision = revision.revision_capsule_id_
 let revision_capsule_ref revision = revision.capsule_ref
 let revision_declared_base revision = revision.declared_base
 let revision_expected_result revision = revision.expected_result
 let revision_operations revision = revision.revision_operations_
-let revision_source_boundary revision = revision.source_boundary
+let revision_source_boundary revision = List.hd revision.source_boundaries
+let revision_source_boundaries revision = revision.source_boundaries
+let revision_parent revision = revision.parent
+let revision_provenance revision = revision.provenance
+let revision_created_at revision = revision.revision_created_at
+
+let make_revision_link ~capsule_id ~revision_id ~revision_ref =
+  { linked_capsule_id = capsule_id; linked_revision_id = revision_id; linked_revision_ref = revision_ref }
+
+let revision_link_capsule_id link = link.linked_capsule_id
+let revision_link_revision_id link = link.linked_revision_id
+let revision_link_ref link = link.linked_revision_ref
 
 let apply_revision ~base revision =
   Model.Snapshot.apply_operations base revision.revision_operations_
@@ -468,21 +655,47 @@ let encode_capsule capsule =
   |> Result.get_ok |> Encoding.encode
 
 let encode_revision revision =
-  array
-    [
-      Encoding.integer current_schema_version;
-      Encoding.bytes (V2_model.Capsule_id.to_bytes revision.capsule_id);
-      Encoding.bytes
-        (V2_model.Capsule_revision_id.to_bytes revision.revision_identity);
-      Encoding.bytes (V2_model.Opaque_object_ref.to_bytes revision.capsule_ref);
-      snapshot_link_value revision.declared_base;
-      snapshot_link_value revision.expected_result;
-      Encoding.array (operation_values revision.revision_operations_)
-      |> Result.get_ok;
-      source_boundary_value revision.source_boundary;
-      Encoding.integer supported_mandatory_features;
-    ]
-  |> Result.get_ok |> Encoding.encode
+  if Int64.equal revision.revision_schema_version current_schema_version then
+    array
+      [
+        Encoding.integer current_schema_version;
+        Encoding.bytes (V2_model.Capsule_id.to_bytes revision.revision_capsule_id_);
+        Encoding.bytes
+          (V2_model.Capsule_revision_id.to_bytes revision.revision_identity);
+        Encoding.bytes (V2_model.Opaque_object_ref.to_bytes revision.capsule_ref);
+        snapshot_link_value revision.declared_base;
+        snapshot_link_value revision.expected_result;
+        Encoding.array (operation_values revision.revision_operations_)
+        |> Result.get_ok;
+        source_boundary_value (revision_source_boundary revision);
+        Encoding.integer supported_mandatory_features;
+      ]
+    |> Result.get_ok |> Encoding.encode
+  else
+    let parent =
+      match revision.parent with
+      | None -> Encoding.null
+      | Some link -> revision_link_value link
+    in
+    array
+      [
+        Encoding.integer evolved_revision_schema_version;
+        Encoding.bytes (V2_model.Capsule_id.to_bytes revision.revision_capsule_id_);
+        Encoding.bytes
+          (V2_model.Capsule_revision_id.to_bytes revision.revision_identity);
+        Encoding.bytes (V2_model.Opaque_object_ref.to_bytes revision.capsule_ref);
+        parent;
+        snapshot_link_value revision.declared_base;
+        snapshot_link_value revision.expected_result;
+        Encoding.array (operation_values revision.revision_operations_)
+        |> Result.get_ok;
+        Encoding.array (List.map source_boundary_value revision.source_boundaries)
+        |> Result.get_ok;
+        provenance_value revision.provenance;
+        Encoding.integer (Option.get revision.revision_created_at);
+        Encoding.integer supported_mandatory_features;
+      ]
+    |> Result.get_ok |> Encoding.encode
 
 let fields name expected = function
   | Encoding.Array values when List.length values = expected -> Ok values
@@ -548,6 +761,81 @@ let decode_boundary value =
       Ok { source_snapshot; target_snapshot }
   | _ -> assert false
 
+let decode_revision_link value =
+  let* fields = fields "capsule revision link" 3 value in
+  match fields with
+  | [ capsule_id; revision_id; revision_ref ] ->
+      let* capsule_id = bytes "revision link capsule identity" capsule_id in
+      let* revision_id = bytes "revision link revision identity" revision_id in
+      let* revision_ref = bytes "revision link object reference" revision_ref in
+      let* capsule_id =
+        V2_model.Capsule_id.of_bytes capsule_id
+        |> Result.map_error (fun _ ->
+            Invalid_payload "invalid revision link capsule identity")
+      in
+      let* revision_id =
+        V2_model.Capsule_revision_id.of_bytes revision_id
+        |> Result.map_error (fun _ ->
+            Invalid_payload "invalid revision link revision identity")
+      in
+      let* revision_ref =
+        V2_model.Opaque_object_ref.of_bytes revision_ref
+        |> Result.map_error (fun _ ->
+            Invalid_payload "invalid revision link object reference")
+      in
+      Ok
+        {
+          linked_capsule_id = capsule_id;
+          linked_revision_id = revision_id;
+          linked_revision_ref = revision_ref;
+        }
+  | _ -> assert false
+
+let decode_revision_link_list name = function
+  | Encoding.Array values ->
+      let rec decode reversed = function
+        | [] -> Ok (List.rev reversed)
+        | value :: rest ->
+            let* link = decode_revision_link value in
+            decode (link :: reversed) rest
+      in
+      decode [] values
+  | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _ | Encoding.Map _
+  | Encoding.Bool _ | Encoding.Null ->
+      Error (Invalid_payload (name ^ " must be an array"))
+
+let decode_provenance value =
+  let* fields = fields "capsule revision provenance" 2 value in
+  match fields with
+  | [ tag; source ] ->
+      let* tag = integer "capsule revision provenance tag" tag in
+      if Int64.equal tag 1L then
+        let* link = decode_revision_link source in
+        Ok (Folded link)
+      else if Int64.equal tag 2L then
+        let* links = decode_revision_link_list "split provenance links" source in
+        if links = [] then Error (Invalid_provenance "split sources are empty")
+        else Ok (Split_from links)
+      else if Int64.equal tag 3L then
+        let* links = decode_revision_link_list "combine provenance links" source in
+        if links = [] then Error (Invalid_provenance "combine sources are empty")
+        else Ok (Combined_from links)
+      else Error (Invalid_payload "unknown capsule revision provenance tag")
+  | _ -> assert false
+
+let decode_boundaries = function
+  | Encoding.Array values ->
+      let rec decode reversed = function
+        | [] -> Ok (List.rev reversed)
+        | value :: rest ->
+            let* boundary = decode_boundary value in
+            decode (boundary :: reversed) rest
+      in
+      decode [] values
+  | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _ | Encoding.Map _
+  | Encoding.Bool _ | Encoding.Null ->
+      Error (Invalid_payload "capsule revision boundaries must be an array")
+
 let decode_operations = function
   | Encoding.Array values ->
       let rec decode reversed = function
@@ -597,16 +885,28 @@ let decode_capsule encoded =
         else Error Noncanonical_record
   | _ -> assert false
 
-let decode_revision encoded =
-  let* value =
-    Encoding.decode encoded
-    |> Result.map_error (fun error ->
-        Invalid_payload (Encoding.decode_error_to_string error))
+let decode_revision_common ~capsule_id ~id ~capsule_ref =
+  let* capsule_id = bytes "capsule revision capsule identity" capsule_id in
+  let* capsule_id =
+    V2_model.Capsule_id.of_bytes capsule_id
+    |> Result.map_error (fun _ -> Invalid_payload "invalid revision capsule identity")
   in
-  let* fields = fields "capsule revision" 9 value in
+  let* id = bytes "capsule revision identity" id in
+  let* id =
+    V2_model.Capsule_revision_id.of_bytes id
+    |> Result.map_error (fun _ -> Invalid_payload "invalid revision identity")
+  in
+  let* capsule_ref = bytes "capsule revision capsule reference" capsule_ref in
+  let* capsule_ref =
+    V2_model.Opaque_object_ref.of_bytes capsule_ref
+    |> Result.map_error (fun _ -> Invalid_payload "invalid revision capsule reference")
+  in
+  Ok (capsule_id, id, capsule_ref)
+
+let decode_initial_revision encoded fields =
   match fields with
   | [
-   version;
+   _version;
    capsule_id;
    id;
    capsule_ref;
@@ -616,62 +916,138 @@ let decode_revision encoded =
    boundary;
    features;
   ] ->
-      let* version = integer "capsule revision version" version in
-      if not (Int64.equal version current_schema_version) then
-        Error (Unsupported_schema_version version)
+      let* capsule_id, id, capsule_ref =
+        decode_revision_common ~capsule_id ~id ~capsule_ref
+      in
+      let* declared_base = decode_snapshot_link declared_base in
+      let* expected_result = decode_snapshot_link expected_result in
+      let* operations = decode_operations operations in
+      let* source_boundary = decode_boundary boundary in
+      let* features = integer "capsule revision mandatory features" features in
+      let* () = check_features features in
+      if not (same_snapshot_link declared_base source_boundary.source_snapshot)
+      then Error Boundary_base_mismatch
       else
-        let* capsule_id =
-          bytes "capsule revision capsule identity" capsule_id
+        let expected_id =
+          derive_revision_id ~capsule_id ~declared_base ~expected_result
+            ~operations ~source_boundary
         in
-        let* capsule_id =
-          V2_model.Capsule_id.of_bytes capsule_id
-          |> Result.map_error (fun _ ->
-              Invalid_payload "invalid revision capsule identity")
-        in
-        let* id = bytes "capsule revision identity" id in
-        let* id =
-          V2_model.Capsule_revision_id.of_bytes id
-          |> Result.map_error (fun _ ->
-              Invalid_payload "invalid revision identity")
-        in
-        let* capsule_ref =
-          bytes "capsule revision capsule reference" capsule_ref
-        in
-        let* capsule_ref =
-          V2_model.Opaque_object_ref.of_bytes capsule_ref
-          |> Result.map_error (fun _ ->
-              Invalid_payload "invalid revision capsule reference")
-        in
-        let* declared_base = decode_snapshot_link declared_base in
-        let* expected_result = decode_snapshot_link expected_result in
-        let* operations = decode_operations operations in
-        let* source_boundary = decode_boundary boundary in
-        let* features =
-          integer "capsule revision mandatory features" features
-        in
-        let* () = check_features features in
-        if
-          not (same_snapshot_link declared_base source_boundary.source_snapshot)
-        then Error Boundary_base_mismatch
+        if not (V2_model.Capsule_revision_id.equal id expected_id) then
+          Error (Invalid_payload "capsule revision logical identity mismatch")
         else
-          let expected_id =
-            derive_revision_id ~capsule_id ~declared_base ~expected_result
-              ~operations ~source_boundary
+          let revision =
+            {
+              revision_schema_version = current_schema_version;
+              revision_identity = id;
+              revision_capsule_id_ = capsule_id;
+              capsule_ref;
+              parent = None;
+              declared_base;
+              expected_result;
+              revision_operations_ = operations;
+              source_boundaries = [ source_boundary ];
+              provenance = Created;
+              revision_created_at = None;
+            }
           in
-          if not (V2_model.Capsule_revision_id.equal id expected_id) then
-            Error (Invalid_payload "capsule revision logical identity mismatch")
-          else
-            let revision =
-              {
-                revision_identity = id;
-                capsule_id;
-                capsule_ref;
-                declared_base;
-                expected_result;
-                revision_operations_ = operations;
-                source_boundary;
-              }
-            in
-            if String.equal encoded (encode_revision revision) then Ok revision
-            else Error Noncanonical_record
+          if String.equal encoded (encode_revision revision) then Ok revision
+          else Error Noncanonical_record
   | _ -> assert false
+
+let decode_evolved_revision encoded fields =
+  match fields with
+  | [
+   _version;
+   capsule_id;
+   id;
+   capsule_ref;
+   parent;
+   declared_base;
+   expected_result;
+   operations;
+   boundaries;
+   provenance;
+   created_at;
+   features;
+  ] ->
+      let* capsule_id, id, capsule_ref =
+        decode_revision_common ~capsule_id ~id ~capsule_ref
+      in
+      let* parent =
+        match parent with
+        | Encoding.Null -> Ok None
+        | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _
+        | Encoding.Array _ | Encoding.Map _ | Encoding.Bool _ ->
+            decode_revision_link parent |> Result.map Option.some
+      in
+      let* declared_base = decode_snapshot_link declared_base in
+      let* expected_result = decode_snapshot_link expected_result in
+      let* operations = decode_operations operations in
+      let* source_boundaries = decode_boundaries boundaries in
+      let* provenance = decode_provenance provenance in
+      let* created_at = integer "capsule revision creation time" created_at in
+      let* features = integer "capsule revision mandatory features" features in
+      let* () = check_features features in
+      let* first_boundary =
+        match source_boundaries with
+        | first :: _ -> Ok first
+        | [] -> Error Empty_source_boundaries
+      in
+      let* () =
+        if same_snapshot_link declared_base first_boundary.source_snapshot then Ok ()
+        else Error Boundary_base_mismatch
+      in
+      let* () =
+        match parent with
+        | None -> Ok ()
+        | Some link ->
+            if V2_model.Capsule_id.equal capsule_id link.linked_capsule_id then Ok ()
+            else Error Parent_capsule_mismatch
+      in
+      let* () = validate_provenance capsule_id provenance in
+      let expected_id =
+        derive_evolved_revision_id ~capsule_id ~parent ~declared_base
+          ~expected_result ~operations ~source_boundaries ~provenance
+      in
+      if not (V2_model.Capsule_revision_id.equal id expected_id) then
+        Error (Invalid_payload "capsule revision logical identity mismatch")
+      else
+        let revision =
+          {
+            revision_schema_version = evolved_revision_schema_version;
+            revision_identity = id;
+            revision_capsule_id_ = capsule_id;
+            capsule_ref;
+            parent;
+            declared_base;
+            expected_result;
+            revision_operations_ = operations;
+            source_boundaries;
+            provenance;
+            revision_created_at = Some created_at;
+          }
+        in
+        if String.equal encoded (encode_revision revision) then Ok revision
+        else Error Noncanonical_record
+  | _ -> assert false
+
+let decode_revision encoded =
+  let* value =
+    Encoding.decode encoded
+    |> Result.map_error (fun error ->
+        Invalid_payload (Encoding.decode_error_to_string error))
+  in
+  match value with
+  | Encoding.Array (version :: _) ->
+      let* version = integer "capsule revision version" version in
+      if Int64.equal version current_schema_version then
+        let* fields = fields "capsule revision" 9 value in
+        decode_initial_revision encoded fields
+      else if Int64.equal version evolved_revision_schema_version then
+        let* fields = fields "capsule revision" 12 value in
+        decode_evolved_revision encoded fields
+      else Error (Unsupported_schema_version version)
+  | Encoding.Array [] -> Error (Invalid_payload "capsule revision is empty")
+  | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _ | Encoding.Map _
+  | Encoding.Bool _ | Encoding.Null ->
+      Error (Invalid_payload "capsule revision must be an array")

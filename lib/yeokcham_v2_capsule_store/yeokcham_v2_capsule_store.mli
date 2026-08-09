@@ -20,6 +20,16 @@ type nonces = {
   binding_ledger_nonce : Envelope.nonce;
 }
 
+type revision_nonces = {
+  fold_selected_result_nonce : Envelope.nonce;
+  fold_revision_nonce : Envelope.nonce;
+  fold_source_protection_nonce : Envelope.nonce;
+  fold_source_protection_ledger_nonce : Envelope.nonce;
+  fold_target_protection_nonce : Envelope.nonce;
+  fold_target_protection_ledger_nonce : Envelope.nonce;
+  fold_binding_ledger_nonce : Envelope.nonce;
+}
+
 module Fault : sig
   type boundary =
     | After_capsule_object
@@ -81,6 +91,14 @@ type error =
   | Snapshot_identity_mismatch of V2_model.Opaque_object_ref.t
   | Revision_replay_rejected of Model.replay_error
   | Revision_result_mismatch
+  | Concurrent_current_update of {
+      expected_revision : V2_model.Capsule_revision_id.t;
+      expected_binding : Ledger.Event_id.t;
+      actual_revision : V2_model.Capsule_revision_id.t option;
+      actual_binding : Ledger.Event_id.t option;
+    }
+  | Parent_link_mismatch of string
+  | Revision_history_cycle of V2_model.Opaque_object_ref.t
   | Fault_injected of Fault.boundary
 
 val error_to_string : error -> string
@@ -114,3 +132,19 @@ val resolve :
   repository -> id:V2_model.Capsule_id.t -> (resolved option, error) result
 (** Reads a sole verified capsule binding and replays the immutable initial
     revision. A malformed or divergent binding is an explicit error. *)
+
+val fold :
+  ?fault:Fault.t ->
+  repository ->
+  id:V2_model.Capsule_id.t ->
+  expected_revision:V2_model.Capsule_revision_id.t ->
+  expected_binding:Ledger.Event_id.t ->
+  source_event:Ledger.Event_id.t ->
+  target_event:Ledger.Event_id.t ->
+  selected_indices:int list ->
+  created_at:int64 ->
+  nonces:revision_nonces ->
+  (publication, error) result
+(** Adds one complete immutable child revision. The source checkpoint must
+    equal the expected current revision result; a stale current ref is an
+    explicit concurrent-update error. *)
