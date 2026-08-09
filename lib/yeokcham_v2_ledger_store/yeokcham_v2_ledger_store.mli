@@ -33,6 +33,7 @@ type error =
   | Object_collision of Model.Opaque_object_ref.t
 
 val error_to_string : error -> string
+val repository_id : repository -> Model.Repository_id.t
 
 val open_repository :
   root:string ->
@@ -43,6 +44,13 @@ val open_repository :
   (repository, error) result
 
 val object_path : repository -> Model.Opaque_object_ref.t -> string
+
+val validate_envelope :
+  repository ->
+  envelope:Envelope.t ->
+  (Model.Opaque_object_ref.t * Ledger.Event_id.t, error) result
+(** Strictly checks one candidate without writing an object or journal entry. *)
+
 val publish : repository -> envelope:Envelope.t -> (publication, error) result
 
 val load :

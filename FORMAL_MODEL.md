@@ -1381,3 +1381,32 @@ derives its ADR-046 opaque address, and create-only publishes those bytes under
 the V2 `objects` directory. An exact existing byte sequence is a retry; a
 different sequence at the same address rejects. No plaintext index or mutable
 ledger/ref record is persisted.
+
+## 22. V2 durable object-publication transactions
+
+V2-006 adds ADR-049 local recovery metadata, distinct from the repository
+graph and from all authority-bearing state:
+
+```text
+Staged = (opaque-object-ref, canonical-encrypted-envelope-bytes)
+Prepare = (version=1, repository-id, transaction-id, features,
+           ordered-nonempty Staged[1..64])
+Commit = (version=1, transaction-id,
+          SHA-256("yeokcham:v2:transaction-prepare:1\0" || cbor(Prepare)))
+```
+
+For a repository `R`, `prepare(R, T)` first validates every staged envelope's
+decryption, canonical ledger record, signature, and ADR-046 address. It then
+durably create-only writes `journal/T.prepare`. `commit(R, T)` can durably
+create-only write `journal/T.commit` only when the exact stored prepare
+validates and the digest binds its bytes. Neither transition writes an object,
+ref, candidate binding, key, trust value, or policy.
+
+`recover(R)` validates all recognised records before state change. For a
+prepare without a commit it removes only the exact prepare bytes. For a matching
+commit it runs `publish` for each staged envelope in address order, where each
+publication is independently create-only, then removes commit and prepare.
+Thus a failure has one of three outcomes: unchanged valid state; a valid
+immutable object prefix plus resumable journal; or a typed invalid/corrupt
+journal result with no automatic repair. No recovery outcome selects a ref or
+asserts user intent.

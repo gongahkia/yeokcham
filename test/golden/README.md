@@ -63,4 +63,12 @@ but repository/key-mismatched opaque address. These fixtures are deliberately
 static inputs; tests may derive additional bounded corruptions from the valid
 fixture through `Golden_fixture` but never regenerate a fixture file.
 
+`v2-transaction-prepare-v1.cbor.hex` and
+`v2-transaction-commit-v1.cbor.hex` are ADR-049's exact canonical local
+object-publication prepare and digest-bound commit records. The adjacent
+truncated, trailing-byte, unknown-feature, duplicate-address, reordered-address,
+and mismatched-prepare fixtures preserve fail-closed decoding and binding
+boundaries. The valid commit is also used as a stray-commit input by placing it
+without its matching prepare in a temporary journal test.
+
 Changing any fixture bytes requires a format decision and retained compatibility evidence; adding a new schema requires a new named fixture.

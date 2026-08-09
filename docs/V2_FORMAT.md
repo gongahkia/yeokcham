@@ -3,9 +3,9 @@
 ## Status
 
 This document records the V2-001 root slice, the V2-010 explicit legacy
-archive/cutover boundary, and V2-005's first encrypted immutable object kind.
-It is intentionally narrower than the later identity, authorization,
-transaction, and transport protocols.
+archive/cutover boundary, V2-005's first encrypted immutable object kind, and
+V2-006's local object-publication journal. It is intentionally narrower than
+the later identity, authorization, visibility-record, and transport protocols.
 
 ## Model
 
@@ -95,3 +95,62 @@ The fixed inner record, outer envelope, and opaque-address vectors are in
 `test/golden/v2-ref-ledger-*.hex`. This establishes cryptographic validity and
 causal data only. Key custody, trust, authorization, transactions, candidate
 discovery, and transport remain separate issues.
+
+## Durable object-publication journal
+
+V2-006 implements ADR-049 local transaction records under the reserved
+`journal` directory. They publish only a bounded set of already encrypted,
+cryptographically verifiable ledger envelopes; neither record is a V2 object,
+ref, trust decision, authorization decision, or history/visibility selection.
+
+```text
+transaction-prepare-v1 = [
+  1,
+  repository-id,
+  transaction-id,
+  mandatory-features,
+  [* [opaque-object-ref, canonical-encrypted-envelope-bytes]]
+]
+
+transaction-commit-v1 = [
+  1,
+  transaction-id,
+  SHA-256("yeokcham:v2:transaction-prepare:1\0" || prepare-bytes)
+]
+```
+
+`transaction-id` is a distinct 32-byte identity. Both records use canonical
+CBOR and exact lowercase-hex names:
+
+```text
+journal/<64-hex-transaction-id>.prepare
+journal/<64-hex-transaction-id>.commit
+```
+
+The prepare stages 1 through 64 entries, strictly ascending by opaque object
+reference, with no duplicates and a total encoded prepare size at most 128 MiB.
+Before the prepare is made durable and again during recovery, the adapter
+decrypts and verifies every candidate, including its opaque address and
+Ed25519 signature. The commit binds the exact canonical prepare bytes.
+Commit records are independently bounded to 4 KiB.
+Unsupported mandatory features, malformed candidates, unknown journal names,
+mismatched IDs/digests, and stray commits fail closed without automatic repair.
+
+The store writes a private regular temporary named
+`.<final-name>.tmp-<decimal-pid>-<decimal-attempt>` (for example,
+`.abcd…prepare.tmp-123-0`), fsyncs it, create-only links the final file, and
+synchronizes the journal directory. Such exact private temporary names are
+non-authoritative crash remnants: a valid V2 root and recovery scan ignore them
+only when they are regular files. They are never interpreted as a prepare or
+commit and are not deleted implicitly.
+
+A durable prepare alone is discarded idempotently and has no object side
+effect. Once a matching commit exists, recovery revalidates the whole set and
+publishes candidates in ascending address order through the V2-005 create-only
+adapter. It removes the commit then the prepare only after every object is
+durable. A crash or I/O failure can therefore leave a valid immutable object
+prefix and the unchanged journal for retry, but cannot overwrite an object or
+select a ref.
+
+The fixed valid and invalid format vectors are
+`test/golden/v2-transaction-*.hex`.

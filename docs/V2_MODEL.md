@@ -9,10 +9,11 @@ selection, or network transport.
 
 ## Identity types
 
-Repository, organization, account, device, opaque-object, ref-event, and
-signer-key identities are separate abstract types. Each contains exactly 32
-arbitrary bytes. Hex input must be 64 lowercase hexadecimal characters;
-constructors reject a wrong length, uppercase input, and non-hex characters.
+Repository, organization, account, device, opaque-object, ref-event,
+signer-key, and transaction identities are separate abstract types. Each
+contains exactly 32 arbitrary bytes. Hex input must be 64 lowercase hexadecimal
+characters; constructors reject a wrong length, uppercase input, and non-hex
+characters.
 
 ## Repository-state algebra
 
@@ -52,3 +53,22 @@ needs a known predecessor in the same repository/ref, duplicate IDs and cycles
 reject, and same-predecessor children are a sorted explicit divergence set.
 The result is a sorted set of concurrent heads, not a chosen mutable current
 ref.
+
+## Durable object-publication transactions
+
+ADR-049 adds distinct `transaction_id`, `staged_object`, `prepare`, `commit`,
+and recovery-result values. A staged object pairs one ADR-046 opaque object
+reference with its exact ADR-045 encrypted envelope. A prepare is valid only
+when it names this repository, contains one to 64 strictly ascending unique
+staged addresses, and uses supported mandatory features. A commit contains the
+same transaction identity and the domain-separated SHA-256 digest of the exact
+canonical prepare bytes.
+
+The local recovery adapter verifies every staged envelope and address before a
+prepare is made durable and before it is recovered. A prepare without a commit
+is discardable and publishes no object. A matching commit authorizes only
+forward, create-only object publication in ascending address order; it grants
+no mutable-ref, trust, authorization, membership, ownership, or history
+selection authority. Recovery is idempotent: completed journal cleanup may be
+retried, while corrupt, unknown, or invalid entries remain inspectable and
+block automatic cleanup.

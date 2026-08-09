@@ -3,6 +3,7 @@ module Envelope = Yeokcham_envelope
 module Hash = Yeokcham_hash.Sha256
 module Store = Yeokcham_store
 module V2_envelope = Yeokcham_v2_envelope
+module V2_transaction = Yeokcham_v2_transaction
 
 type classification =
   | Empty
@@ -674,6 +675,125 @@ let validate_v2_objects objects =
   let* shards = read_directory objects in
   validate_shards shards
 
+type v2_journal_entry =
+  | Prepared of V2_transaction.Transaction_id.t * V2_transaction.prepare
+  | Committed of V2_transaction.Transaction_id.t * V2_transaction.commit
+
+let validate_v2_journal_entry journal name =
+  let path = Filename.concat journal name in
+  let* journal_file =
+    V2_transaction.parse_journal_filename name
+    |> Result.map_error (fun error ->
+        Archive_verification_failed
+          { path; detail = V2_transaction.error_to_string error })
+  in
+  match journal_file with
+  | V2_transaction.Prepare_file transaction_id ->
+      let* bytes =
+        read_regular_file ~limit:V2_transaction.max_prepare_bytes path
+      in
+      let* prepare =
+        V2_transaction.decode_prepare bytes
+        |> Result.map_error (fun error ->
+            Archive_verification_failed
+              { path; detail = V2_transaction.error_to_string error })
+      in
+      if
+        V2_transaction.Transaction_id.equal transaction_id
+          (V2_transaction.prepare_transaction_id prepare)
+      then Ok (Prepared (transaction_id, prepare))
+      else
+        Error
+          (Archive_verification_failed
+             {
+               path;
+               detail = "V2 transaction prepare ID does not match its filename";
+             })
+  | V2_transaction.Commit_file transaction_id ->
+      let* bytes =
+        read_regular_file ~limit:V2_transaction.max_commit_bytes path
+      in
+      let* commit =
+        V2_transaction.decode_commit bytes
+        |> Result.map_error (fun error ->
+            Archive_verification_failed
+              { path; detail = V2_transaction.error_to_string error })
+      in
+      if
+        V2_transaction.Transaction_id.equal transaction_id
+          (V2_transaction.commit_transaction_id commit)
+      then Ok (Committed (transaction_id, commit))
+      else
+        Error
+          (Archive_verification_failed
+             {
+               path;
+               detail = "V2 transaction commit ID does not match its filename";
+             })
+
+let validate_v2_journal journal =
+  let* names = read_directory journal in
+  let rec read_entries result = function
+    | [] -> Ok (List.rev result)
+    | name :: rest when V2_transaction.is_temporary_journal_filename name ->
+        let path = Filename.concat journal name in
+        let* stat = lstat path in
+        if stat.Unix.st_kind <> Unix.S_REG then
+          Error
+            (Archive_verification_failed
+               {
+                 path;
+                 detail = "V2 transaction temporary is not a regular file";
+               })
+        else read_entries result rest
+    | name :: rest ->
+        let* entry = validate_v2_journal_entry journal name in
+        read_entries (entry :: result) rest
+  in
+  let* entries = read_entries [] names in
+  let prepares =
+    List.filter_map
+      (function
+        | Prepared (transaction_id, prepare) -> Some (transaction_id, prepare)
+        | Committed _ -> None)
+      entries
+  in
+  let rec validate_commits = function
+    | [] -> Ok ()
+    | Prepared _ :: rest -> validate_commits rest
+    | Committed (transaction_id, commit) :: rest ->
+        let prepare =
+          List.find_opt
+            (fun (candidate, _) ->
+              V2_transaction.Transaction_id.equal candidate transaction_id)
+            prepares
+        in
+        let* () =
+          match prepare with
+          | None ->
+              Error
+                (Archive_verification_failed
+                   {
+                     path =
+                       Filename.concat journal
+                         (V2_transaction.commit_filename transaction_id);
+                     detail = "V2 transaction commit has no matching prepare";
+                   })
+          | Some (_, prepare) ->
+              V2_transaction.validate_commit ~prepare commit
+              |> Result.map_error (fun error ->
+                  Archive_verification_failed
+                    {
+                      path =
+                        Filename.concat journal
+                          (V2_transaction.commit_filename transaction_id);
+                      detail = V2_transaction.error_to_string error;
+                    })
+        in
+        validate_commits rest
+  in
+  validate_commits entries
+
 let validate_v1_direct_refs refs =
   let* names = read_directory refs in
   let rec validate = function
@@ -756,22 +876,20 @@ let has_v1_artifacts metadata =
   let* objects_empty = directory_is_empty objects in
   let* refs_empty = directory_is_empty refs in
   let* locks_empty = directory_is_empty locks in
-  let* journal_empty = directory_is_empty journal in
-  if (not locks_empty) || not journal_empty then
+  if not locks_empty then
     Error
       (Archive_verification_failed
-         {
-           path = metadata;
-           detail = "V2 root contains unknown lock or journal state";
-         })
-  else if objects_empty && refs_empty then Ok false
-  else if refs_empty then
-    let* () = validate_v2_objects objects in
-    Ok false
+         { path = metadata; detail = "V2 root contains unknown lock state" })
   else
-    let* () = validate_v1_objects objects in
-    let* () = validate_v1_direct_refs refs in
-    Ok true
+    let* () = validate_v2_journal journal in
+    if objects_empty && refs_empty then Ok false
+    else if refs_empty then
+      let* () = validate_v2_objects objects in
+      Ok false
+    else
+      let* () = validate_v1_objects objects in
+      let* () = validate_v1_direct_refs refs in
+      Ok true
 
 let validate_archivable_legacy_tree metadata =
   let* format =

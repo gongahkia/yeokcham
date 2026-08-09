@@ -25,6 +25,7 @@ module Device_id : Identity
 module Opaque_object_ref : Identity
 module Ref_event_id : Identity
 module Signer_key_id : Identity
+module Transaction_id : Identity
 
 module Encrypted_ref_event : sig
   type t

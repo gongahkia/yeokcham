@@ -81,6 +81,8 @@ let open_repository ~root ~repository_id ~address_key ~encryption_key
       public_keys;
     }
 
+let repository_id repository = repository.repository_id
+
 let object_path repository object_ref =
   let hex = Model.Opaque_object_ref.to_hex object_ref in
   Filename.concat repository.objects
@@ -251,6 +253,11 @@ let verified_envelope repository envelope =
   match verification with
   | Ledger.Cryptographically_valid verified -> Ok (object_ref, verified)
   | Ledger.Unknown_signer key -> Error (Unknown_signer key)
+
+let validate_envelope repository ~envelope =
+  let* () = check_v2_root repository.root in
+  let* object_ref, verified = verified_envelope repository envelope in
+  Ok (object_ref, Ledger.event_id (Ledger.verified_event verified))
 
 let publish repository ~envelope =
   let* () = check_v2_root repository.root in

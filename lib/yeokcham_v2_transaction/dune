@@ -1,0 +1,7 @@
+(library
+ (name yeokcham_v2_transaction)
+ (libraries
+  yeokcham_encoding
+  yeokcham_hash
+  yeokcham_v2_envelope
+  yeokcham_v2_model))

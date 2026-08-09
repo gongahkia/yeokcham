@@ -102,7 +102,8 @@ envelope under the caller-supplied ADR-046 address key. Its envelope must
 strictly decode, decrypt, decode as an ADR-048 ledger record, and verify
 against the supplied bounded public-key registry before prepare publication or
 recovery can continue. The implementation initially permits at most 64 staged
-objects and 128 MiB of aggregate envelope bytes, including CBOR framing.
+objects and 128 MiB of aggregate envelope bytes, including CBOR framing. The
+fixed-size commit schema has a separate 4 KiB encoded-record limit.
 Unsupported prepare mandatory features reject before an envelope is inspected.
 
 The two local files are:
@@ -129,6 +130,13 @@ is an idempotent retry only when its existing prepare or commit bytes are
 identical; a different byte sequence is a typed collision. The prepare must be
 durable before the commit file exists. No final object is written before the
 commit marker is durable.
+
+The implementation's private temporary is exactly
+`.<64-lowercase-hex-transaction-id>.(prepare|commit).tmp-<decimal-pid>-<decimal-attempt>`.
+It is a same-directory regular-file staging name, never a journal record. A
+valid root and recovery scan ignore only that exact temporary grammar when it
+names a regular file; they neither interpret nor automatically delete it. All
+other journal names or kinds fail closed.
 
 On recovery, every recognized journal file is a regular file with an exact
 safe name. The adapter reads all prepare records first and rejects duplicate
