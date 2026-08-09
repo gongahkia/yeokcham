@@ -10,6 +10,12 @@ module Object_store = Yeokcham_v2_object_store
 module Retention = Yeokcham_v2_retention
 module V2_model = Yeokcham_v2_model
 
+module Object_ref_set = Set.Make (struct
+  type t = V2_model.Opaque_object_ref.t
+
+  let compare = V2_model.Opaque_object_ref.compare
+end)
+
 type repository = {
   bootstrap : Bootstrap_store.repository;
   objects : Object_store.repository;
@@ -70,6 +76,41 @@ type compaction_publication = {
   published_generation_event_id : Ledger.Event_id.t;
   published_generation_manifest : Retention.generation;
   published_retention : Retention.plan;
+}
+
+module Fault = struct
+  type boundary = Before_candidate of int | After_candidate of int
+  type t = boundary
+
+  let before_candidate index = Before_candidate index
+  let after_candidate index = After_candidate index
+
+  let equal left right =
+    match (left, right) with
+    | Before_candidate left, Before_candidate right
+    | After_candidate left, After_candidate right ->
+        Int.equal left right
+    | Before_candidate _, After_candidate _ | After_candidate _, Before_candidate _ ->
+        false
+end
+
+type cleanup_metric = {
+  cleanup_candidate : Retention.cleanup_candidate;
+  stored_bytes : int64;
+}
+
+type cleanup_report = {
+  cleanup_generation_event_id : Ledger.Event_id.t;
+  quarantined_objects : int;
+  quarantined_bytes : int64;
+  pruned_objects : int;
+  pruned_bytes : int64;
+  already_quarantined_objects : int;
+  already_pruned_objects : int;
+  quarantined_candidates : cleanup_metric list;
+  pruned_candidates : cleanup_metric list;
+  already_quarantined_candidates : Retention.cleanup_candidate list;
+  already_pruned_candidates : Retention.cleanup_candidate list;
 }
 
 type protection_plan = {
@@ -158,6 +199,13 @@ type error =
       expected : Ledger.Event_id.t option;
       actual : Ledger.Event_id.t option;
     }
+  | Active_generation_required
+  | Cleanup_keep_set_overlap of Retention.cleanup_candidate
+  | Cleanup_generation_changed of {
+      expected : Ledger.Event_id.t;
+      actual : Ledger.Event_id.t;
+    }
+  | Cleanup_fault_injected of Fault.boundary
 
 type validated_event = { validated_checkpoint : checkpoint }
 
@@ -298,6 +346,23 @@ let error_to_string = function
       in
       Printf.sprintf "V2 scratch protection head changed from %s to %s"
         (render expected) (render actual)
+  | Active_generation_required ->
+      "V2 scratch physical cleanup requires an active generation"
+  | Cleanup_keep_set_overlap candidate ->
+      Printf.sprintf
+        "V2 scratch cleanup candidate %s remains in the active keep set"
+        (V2_model.Opaque_object_ref.to_hex candidate.Retention.candidate_object_ref)
+  | Cleanup_generation_changed { expected; actual } ->
+      Printf.sprintf "V2 scratch cleanup generation changed from %s to %s"
+        (Ledger.Event_id.to_hex expected)
+        (Ledger.Event_id.to_hex actual)
+  | Cleanup_fault_injected boundary ->
+      let boundary =
+        match boundary with
+        | Fault.Before_candidate index -> Printf.sprintf "before-candidate-%d" index
+        | Fault.After_candidate index -> Printf.sprintf "after-candidate-%d" index
+      in
+      "V2 scratch cleanup fault injected at " ^ boundary
 
 let scratch_ref_of_device device_id =
   Ledger.Ref_name.of_string ("scratch-" ^ V2_model.Device_id.to_hex device_id)
@@ -1266,6 +1331,179 @@ let publish_compaction_plan repository (plan : compaction_plan) =
         }
       in
       Ok publication
+
+let cleanup_object_kind = function
+  | Retention.Ledger_event -> Object.Ledger_event
+  | Retention.Scratch_snapshot -> Object.Scratch_snapshot
+
+let cleanup_candidate_is_kept keep candidate =
+  Object_ref_set.mem candidate.Retention.candidate_object_ref keep
+
+let active_cleanup_generation repository =
+  let* active_generation = resolved_active_generation repository in
+  match active_generation with
+  | None -> Error Active_generation_required
+  | Some active_generation -> Ok active_generation
+
+let active_keep_set repository active_generation =
+  let manifest = active_generation.activation.manifest in
+  let* history, _ =
+    history_for_scope repository ~scope_ref:manifest.Retention.active_ref
+  in
+  let* _, claims = protection_state repository in
+  let* external_targets =
+    externally_referenced_targets repository ~retired_refs:manifest.Retention.retired_refs
+  in
+  let active_history_refs =
+    List.concat_map
+      (fun entry ->
+        [
+          entry.retention_checkpoint.Retention.event_object_ref;
+          entry.retention_checkpoint.Retention.checkpoint_snapshot_ref;
+        ])
+      history
+  in
+  let protected_refs = Retention.effective_protected_snapshots claims in
+  Ok
+    (List.fold_left
+       (fun keep object_ref -> Object_ref_set.add object_ref keep)
+       Object_ref_set.empty
+       (active_history_refs @ protected_refs @ external_targets))
+
+let inject_cleanup_fault fault boundary =
+  match fault with
+  | Some fault when Fault.equal fault boundary ->
+      Error (Cleanup_fault_injected boundary)
+  | None | Some _ -> Ok ()
+
+let empty_cleanup_report generation_event_id =
+  {
+    cleanup_generation_event_id = generation_event_id;
+    quarantined_objects = 0;
+    quarantined_bytes = 0L;
+    pruned_objects = 0;
+    pruned_bytes = 0L;
+    already_quarantined_objects = 0;
+    already_pruned_objects = 0;
+    quarantined_candidates = [];
+    pruned_candidates = [];
+    already_quarantined_candidates = [];
+    already_pruned_candidates = [];
+  }
+
+let complete_cleanup_report report =
+  {
+    report with
+    quarantined_candidates = List.rev report.quarantined_candidates;
+    pruned_candidates = List.rev report.pruned_candidates;
+    already_quarantined_candidates =
+      List.rev report.already_quarantined_candidates;
+    already_pruned_candidates = List.rev report.already_pruned_candidates;
+  }
+
+let revalidate_cleanup_candidate repository ~generation_event_id candidate =
+  let* active_generation = active_cleanup_generation repository in
+  if
+    not
+      (Ledger.Event_id.equal generation_event_id
+         active_generation.generation_head)
+  then
+    Error
+      (Cleanup_generation_changed
+         { expected = generation_event_id; actual = active_generation.generation_head })
+  else
+    let manifest = active_generation.activation.manifest in
+    if
+      not
+        (List.exists
+           (fun manifest_candidate ->
+             V2_model.Opaque_object_ref.equal
+               manifest_candidate.Retention.candidate_object_ref
+               candidate.Retention.candidate_object_ref
+             && manifest_candidate.Retention.candidate_kind
+                = candidate.Retention.candidate_kind)
+           manifest.Retention.cleanup_candidates)
+    then Error (Cleanup_keep_set_overlap candidate)
+    else
+      let* keep = active_keep_set repository active_generation in
+      if cleanup_candidate_is_kept keep candidate then
+        Error (Cleanup_keep_set_overlap candidate)
+      else Ok ()
+
+let cleanup_internal ?fault repository ~prune =
+  let* active_generation = active_cleanup_generation repository in
+  let generation_event_id = active_generation.generation_head in
+  let generation = Ledger.Event_id.to_hex generation_event_id in
+  let candidates =
+    active_generation.activation.manifest.Retention.cleanup_candidates
+  in
+  let rec process index report = function
+    | [] -> Ok (complete_cleanup_report report)
+    | candidate :: rest ->
+        let* () = inject_cleanup_fault fault (Fault.Before_candidate index) in
+        let* () =
+          revalidate_cleanup_candidate repository ~generation_event_id candidate
+        in
+        let expected_kind = cleanup_object_kind candidate.Retention.candidate_kind in
+        let* report =
+          if prune then
+            let* outcome =
+              Object_store.prune_quarantine repository.objects ~generation
+                ~object_ref:candidate.Retention.candidate_object_ref ~expected_kind
+              |> Result.map_error (fun error -> Object_store_error error)
+            in
+            match outcome with
+            | Object_store.Pruned stored_bytes ->
+                let metric = { cleanup_candidate = candidate; stored_bytes } in
+                Ok
+                  {
+                    report with
+                    pruned_objects = report.pruned_objects + 1;
+                    pruned_bytes = Int64.add report.pruned_bytes stored_bytes;
+                    pruned_candidates = metric :: report.pruned_candidates;
+                  }
+            | Object_store.Already_pruned ->
+                Ok
+                  {
+                    report with
+                    already_pruned_objects = report.already_pruned_objects + 1;
+                    already_pruned_candidates =
+                      candidate :: report.already_pruned_candidates;
+                  }
+          else
+            let* outcome =
+              Object_store.quarantine repository.objects ~generation
+                ~object_ref:candidate.Retention.candidate_object_ref ~expected_kind
+              |> Result.map_error (fun error -> Object_store_error error)
+            in
+            match outcome with
+            | Object_store.Quarantined stored_bytes ->
+                let metric = { cleanup_candidate = candidate; stored_bytes } in
+                Ok
+                  {
+                    report with
+                    quarantined_objects = report.quarantined_objects + 1;
+                    quarantined_bytes =
+                      Int64.add report.quarantined_bytes stored_bytes;
+                    quarantined_candidates = metric :: report.quarantined_candidates;
+                  }
+            | Object_store.Already_quarantined _ ->
+                Ok
+                  {
+                    report with
+                    already_quarantined_objects =
+                      report.already_quarantined_objects + 1;
+                    already_quarantined_candidates =
+                      candidate :: report.already_quarantined_candidates;
+                  }
+        in
+        let* () = inject_cleanup_fault fault (Fault.After_candidate index) in
+        process (index + 1) report rest
+  in
+  process 0 (empty_cleanup_report generation_event_id) candidates
+
+let resume_cleanup ?fault repository = cleanup_internal ?fault repository ~prune:false
+let prune_quarantine ?fault repository = cleanup_internal ?fault repository ~prune:true
 
 let plan_protection repository ~event_id ~action ~reason ~protection_nonce
     ~ledger_nonce =

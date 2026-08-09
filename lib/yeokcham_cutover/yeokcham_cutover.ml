@@ -63,6 +63,7 @@ let objects_name = "objects"
 let refs_name = "refs"
 let locks_name = "locks"
 let journal_name = "journal"
+let quarantine_name = "quarantine"
 let manifest_suffix = ".legacy-archive-manifest-v1"
 let pending_suffix = ".legacy-archive-manifest-v1.pending"
 let max_manifest_entries = 100_000
@@ -709,6 +710,37 @@ let validate_v2_objects objects =
   let* shards = read_directory objects in
   validate_shards shards
 
+let validate_v2_quarantine quarantine =
+  let rec validate_candidates directory = function
+    | [] -> Ok ()
+    | name :: rest ->
+        let path = Filename.concat directory name in
+        let* stat = lstat path in
+        if stat.Unix.st_kind <> Unix.S_REG || not (is_hex_name name 64) then
+          Error
+            (Archive_verification_failed
+               { path; detail = "invalid V2 quarantine candidate" })
+        else
+          let* () = validate_v2_object_file path in
+          validate_candidates directory rest
+  in
+  let rec validate_generations = function
+    | [] -> Ok ()
+    | name :: rest ->
+        let path = Filename.concat quarantine name in
+        let* stat = lstat path in
+        if stat.Unix.st_kind <> Unix.S_DIR || not (is_hex_name name 64) then
+          Error
+            (Archive_verification_failed
+               { path; detail = "invalid V2 quarantine generation" })
+        else
+          let* candidates = read_directory path in
+          let* () = validate_candidates path candidates in
+          validate_generations rest
+  in
+  let* generations = read_directory quarantine in
+  validate_generations generations
+
 type v2_journal_entry =
   | Prepared of V2_transaction.Transaction_id.t * V2_transaction.prepare
   | Committed of V2_transaction.Transaction_id.t * V2_transaction.commit
@@ -967,7 +999,7 @@ let directory_is_empty path =
   Ok (names = [])
 
 let v2_layout metadata =
-  let expected =
+  let required =
     [
       bootstrap_name;
       format_name;
@@ -978,7 +1010,22 @@ let v2_layout metadata =
     ]
     |> List.sort String.compare
   in
-  let* () = has_exact_names metadata expected in
+  let allowed = List.sort String.compare (quarantine_name :: required) in
+  let* names = read_directory metadata in
+  let missing = List.filter (fun name -> not (List.mem name names)) required in
+  let unexpected = List.filter (fun name -> not (List.mem name allowed)) names in
+  let* () =
+    if missing = [] && unexpected = [] then Ok ()
+    else
+      Error
+        (Archive_verification_failed
+           {
+             path = metadata;
+             detail =
+               "unexpected or missing root entries: "
+               ^ String.concat "," names;
+           })
+  in
   let* format =
     read_regular_file ~limit:4096 (Filename.concat metadata format_name)
   in
@@ -994,7 +1041,17 @@ let v2_layout metadata =
     let* () = ensure_directory (Filename.concat metadata objects_name) in
     let* () = ensure_directory (Filename.concat metadata refs_name) in
     let* () = ensure_directory (Filename.concat metadata locks_name) in
-    ensure_directory (Filename.concat metadata journal_name)
+    let* () = ensure_directory (Filename.concat metadata journal_name) in
+    let quarantine = Filename.concat metadata quarantine_name in
+    match lstat_or_missing quarantine with
+    | Error error -> Error error
+    | Ok None -> Ok ()
+    | Ok (Some stat) when stat.Unix.st_kind = Unix.S_DIR ->
+        validate_v2_quarantine quarantine
+    | Ok (Some _) ->
+        Error
+          (Archive_verification_failed
+             { path = quarantine; detail = "V2 quarantine is not a directory" })
 
 let has_v1_artifacts metadata =
   let objects = Filename.concat metadata objects_name in

@@ -75,6 +75,35 @@ type compaction_publication = {
   published_retention : Retention.plan;
 }
 
+module Fault : sig
+  type boundary = Before_candidate of int | After_candidate of int
+  type t
+
+  val before_candidate : int -> t
+  val after_candidate : int -> t
+end
+
+type cleanup_metric = {
+  cleanup_candidate : Retention.cleanup_candidate;
+  stored_bytes : int64;
+}
+
+type cleanup_report = {
+  cleanup_generation_event_id : Ledger.Event_id.t;
+  quarantined_objects : int;
+  quarantined_bytes : int64;
+  pruned_objects : int;
+  pruned_bytes : int64;
+  already_quarantined_objects : int;
+  already_pruned_objects : int;
+  quarantined_candidates : cleanup_metric list;
+  pruned_candidates : cleanup_metric list;
+  already_quarantined_candidates : Retention.cleanup_candidate list;
+  already_pruned_candidates : Retention.cleanup_candidate list;
+}
+(** Observed local maintenance only. It is not a canonical object, ledger
+    record, or claim that cleanup completed. *)
+
 type protection_plan = {
   protection_checkpoint_event_id : Ledger.Event_id.t;
   protection_snapshot_ref : V2_model.Opaque_object_ref.t;
@@ -163,6 +192,13 @@ type error =
       expected : Ledger.Event_id.t option;
       actual : Ledger.Event_id.t option;
     }
+  | Active_generation_required
+  | Cleanup_keep_set_overlap of Retention.cleanup_candidate
+  | Cleanup_generation_changed of {
+      expected : Ledger.Event_id.t;
+      actual : Ledger.Event_id.t;
+    }
+  | Cleanup_fault_injected of Fault.boundary
 
 val error_to_string : error -> string
 
@@ -241,6 +277,19 @@ val publish_compaction_plan :
     generation activation event. It rechecks the source, generation, and
     protection heads immediately before activation. An interruption before
     activation leaves the prior scope active and the plan can be retried. *)
+
+val resume_cleanup :
+  ?fault:Fault.t -> repository -> (cleanup_report, error) result
+(** Revalidates the sole active generation and every manifest candidate, then
+    moves only the verified retired objects into its no-overwrite local
+    quarantine. The physical destination is the retry state; no cleanup cursor
+    is persisted. *)
+
+val prune_quarantine :
+  ?fault:Fault.t -> repository -> (cleanup_report, error) result
+(** Revalidates the sole active generation and permanently removes only its
+    already quarantined verified candidates. It never falls back to deleting a
+    live object. *)
 
 val plan_protection :
   repository ->

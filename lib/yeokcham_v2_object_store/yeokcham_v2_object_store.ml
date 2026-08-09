@@ -16,6 +16,12 @@ type publication =
   | Published of Model.Opaque_object_ref.t
   | Already_published of Model.Opaque_object_ref.t
 
+type quarantine_outcome =
+  | Quarantined of int64
+  | Already_quarantined of int64
+
+type prune_outcome = Pruned of int64 | Already_pruned
+
 type error =
   | Cutover_error of Cutover.error
   | Not_v2_root of Cutover.classification
@@ -25,6 +31,16 @@ type error =
   | Address_error of Address.error
   | Object_error of Object.error
   | Object_collision of Model.Opaque_object_ref.t
+  | Invalid_quarantine_generation of string
+  | Quarantine_target_collision of Model.Opaque_object_ref.t
+  | Quarantine_candidate_missing of Model.Opaque_object_ref.t
+  | Quarantine_candidate_in_other_generation of Model.Opaque_object_ref.t
+  | Quarantine_source_still_present of Model.Opaque_object_ref.t
+  | Unexpected_object_kind of {
+      object_ref : Model.Opaque_object_ref.t;
+      expected : Object.kind;
+      actual : Object.kind;
+    }
 
 let max_object_bytes = Envelope.max_ciphertext_bytes + 128
 let max_temporary_attempts = 32
@@ -44,6 +60,30 @@ let error_to_string = function
   | Object_collision object_ref ->
       "opaque object address already contains different bytes: "
       ^ Model.Opaque_object_ref.to_hex object_ref
+  | Invalid_quarantine_generation generation ->
+      "invalid V2 quarantine generation: " ^ generation
+  | Quarantine_target_collision object_ref ->
+      "V2 quarantine target has different bytes for object: "
+      ^ Model.Opaque_object_ref.to_hex object_ref
+  | Quarantine_candidate_missing object_ref ->
+      "V2 quarantine candidate is absent from its source and active quarantine: "
+      ^ Model.Opaque_object_ref.to_hex object_ref
+  | Quarantine_candidate_in_other_generation object_ref ->
+      "V2 quarantine candidate appears in a different generation: "
+      ^ Model.Opaque_object_ref.to_hex object_ref
+  | Quarantine_source_still_present object_ref ->
+      "V2 prune refuses a candidate still present in the live object store: "
+      ^ Model.Opaque_object_ref.to_hex object_ref
+  | Unexpected_object_kind { object_ref; expected; actual } ->
+      let kind = function
+        | Object.Ledger_event -> "ledger event"
+        | Object.Scratch_snapshot -> "scratch snapshot"
+        | Object.Scratch_protection -> "scratch protection"
+        | Object.Scratch_generation -> "scratch generation"
+      in
+      Printf.sprintf "V2 object %s has kind %s, expected %s"
+        (Model.Opaque_object_ref.to_hex object_ref)
+        (kind actual) (kind expected)
 
 let io_error ~operation ~path error =
   Io_error { operation; path; message = Unix.error_message error }
@@ -174,8 +214,15 @@ let fsync_directory path =
     Fun.protect
       ~finally:(fun () -> Unix.close descriptor)
       (fun () ->
-        Unix.fsync descriptor;
-        Ok ())
+        try
+          Unix.fsync descriptor;
+          Ok ()
+        with
+        | Unix.Unix_error ((Unix.EINVAL | Unix.ENOSYS | Unix.EOPNOTSUPP), _, _)
+          ->
+            Ok ()
+        | Unix.Unix_error (error, _, _) ->
+            Error (io_error ~operation:"fsync" ~path error))
   with Unix.Unix_error (error, _, _) ->
     Error (io_error ~operation:"fsync" ~path error)
 
@@ -380,3 +427,188 @@ let load repository ~object_ref =
   let* actual_ref, object_ = verified_envelope repository envelope in
   if Model.Opaque_object_ref.equal object_ref actual_ref then Ok object_
   else Error (Object_collision object_ref)
+
+let quarantine_root repository =
+  Filename.concat repository.root ".yeokcham/quarantine"
+
+let quarantine_path repository ~generation ~object_ref =
+  if not (lowercase_hex generation 64) then
+    Error (Invalid_quarantine_generation generation)
+  else
+    Ok
+      (Filename.concat
+         (Filename.concat (quarantine_root repository) generation)
+         (Model.Opaque_object_ref.to_hex object_ref))
+
+let ensure_quarantine_directory repository ~generation ~object_ref =
+  let* destination = quarantine_path repository ~generation ~object_ref in
+  let* () = ensure_directory (quarantine_root repository) in
+  let* () = ensure_directory (Filename.dirname destination) in
+  Ok destination
+
+let file_if_present path =
+  try
+    let stat = Unix.lstat path in
+    if stat.Unix.st_kind = Unix.S_REG then Ok true
+    else Error (Invalid_object_path path)
+  with
+  | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok false
+  | Unix.Unix_error (error, _, _) ->
+      Error (io_error ~operation:"lstat" ~path error)
+
+let verified_candidate repository ~path ~object_ref ~expected_kind =
+  let* bytes = read_regular_file path in
+  let* envelope =
+    Envelope.decode bytes
+    |> Result.map_error (fun error -> Envelope_error error)
+  in
+  let* () =
+    Address.verify ~repository_id:repository.repository_id
+      ~key:repository.address_key ~address:object_ref ~envelope
+    |> Result.map_error (fun error -> Address_error error)
+  in
+  let* actual_ref, object_ = verified_envelope repository envelope in
+  if not (Model.Opaque_object_ref.equal object_ref actual_ref) then
+    Error (Object_collision object_ref)
+  else
+    let actual = Object.kind object_ in
+    if actual <> expected_kind then
+      Error (Unexpected_object_kind { object_ref; expected = expected_kind; actual })
+    else Ok (bytes, Int64.of_int (String.length bytes))
+
+let candidate_if_present repository ~path ~object_ref ~expected_kind =
+  let* present = file_if_present path in
+  if present then
+    verified_candidate repository ~path ~object_ref ~expected_kind
+    |> Result.map (fun candidate -> Some candidate)
+  else Ok None
+
+let foreign_quarantine_candidate repository ~generation ~object_ref =
+  let root = quarantine_root repository in
+  let* entries =
+    try
+      match (Unix.lstat root).Unix.st_kind with
+      | Unix.S_DIR -> read_directory root
+      | Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO
+      | Unix.S_SOCK -> Error (Invalid_object_path root)
+    with
+    | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok []
+    | Unix.Unix_error (error, _, _) ->
+        Error (io_error ~operation:"lstat" ~path:root error)
+  in
+  let candidate = Model.Opaque_object_ref.to_hex object_ref in
+  let rec inspect = function
+    | [] -> Ok false
+    | entry :: rest ->
+        let directory = Filename.concat root entry in
+        if not (lowercase_hex entry 64) then Error (Invalid_object_path directory)
+        else if String.equal entry generation then inspect rest
+        else
+          let* () =
+            try
+              if (Unix.lstat directory).Unix.st_kind = Unix.S_DIR then Ok ()
+              else Error (Invalid_object_path directory)
+            with Unix.Unix_error (error, _, _) ->
+              Error (io_error ~operation:"lstat" ~path:directory error)
+          in
+          let path = Filename.concat directory candidate in
+          try
+            match (Unix.lstat path).Unix.st_kind with
+            | Unix.S_REG -> Ok true
+            | Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO
+            | Unix.S_SOCK -> Error (Invalid_object_path path)
+          with
+          | Unix.Unix_error (Unix.ENOENT, _, _) -> inspect rest
+          | Unix.Unix_error (error, _, _) ->
+              Error (io_error ~operation:"lstat" ~path error)
+  in
+  inspect entries
+
+let quarantine repository ~generation ~object_ref ~expected_kind =
+  let* () = check_v2_root repository.root in
+  let* destination =
+    ensure_quarantine_directory repository ~generation ~object_ref
+  in
+  let source = object_path repository object_ref in
+  let source_directory = Filename.dirname source in
+  let destination_directory = Filename.dirname destination in
+  let rec move retries =
+    let* source_candidate =
+      candidate_if_present repository ~path:source ~object_ref ~expected_kind
+    in
+    let* destination_candidate =
+      candidate_if_present repository ~path:destination ~object_ref ~expected_kind
+    in
+    match (source_candidate, destination_candidate) with
+    | Some (_source_bytes, source_size), None -> (
+        try
+          Unix.link source destination;
+          let* () = fsync_directory destination_directory in
+          let* () =
+            try
+              Unix.unlink source;
+              Ok ()
+            with Unix.Unix_error (error, _, _) ->
+              Error (io_error ~operation:"unlink" ~path:source error)
+          in
+          let* () = fsync_directory source_directory in
+          Ok (Quarantined source_size)
+        with
+        | Unix.Unix_error ((Unix.EEXIST | Unix.ENOENT), _, _) when retries > 0 ->
+            move (retries - 1)
+        | Unix.Unix_error (error, _, _) ->
+            Error (io_error ~operation:"link" ~path:destination error))
+    | Some (source_bytes, source_size), Some (destination_bytes, _) ->
+        if not (String.equal source_bytes destination_bytes) then
+          Error (Quarantine_target_collision object_ref)
+        else
+          let* () = fsync_directory destination_directory in
+          let* () =
+            try
+              Unix.unlink source;
+              Ok ()
+            with Unix.Unix_error (error, _, _) ->
+              Error (io_error ~operation:"unlink" ~path:source error)
+          in
+          let* () = fsync_directory source_directory in
+          Ok (Already_quarantined source_size)
+    | None, Some (_, destination_size) -> Ok (Already_quarantined destination_size)
+    | None, None ->
+        let* foreign =
+          foreign_quarantine_candidate repository ~generation ~object_ref
+        in
+        if foreign then Error (Quarantine_candidate_in_other_generation object_ref)
+        else Error (Quarantine_candidate_missing object_ref)
+  in
+  move 1
+
+let prune_quarantine repository ~generation ~object_ref ~expected_kind =
+  let* () = check_v2_root repository.root in
+  let* destination = quarantine_path repository ~generation ~object_ref in
+  let source = object_path repository object_ref in
+  let destination_directory = Filename.dirname destination in
+  let* source_candidate =
+    candidate_if_present repository ~path:source ~object_ref ~expected_kind
+  in
+  let* destination_candidate =
+    candidate_if_present repository ~path:destination ~object_ref ~expected_kind
+  in
+  match (source_candidate, destination_candidate) with
+  | Some _, None | Some _, Some _ ->
+      Error (Quarantine_source_still_present object_ref)
+  | None, Some (_, size) ->
+      let* () =
+        try
+          Unix.unlink destination;
+          Ok ()
+        with Unix.Unix_error (error, _, _) ->
+          Error (io_error ~operation:"unlink" ~path:destination error)
+      in
+      let* () = fsync_directory destination_directory in
+      Ok (Pruned size)
+  | None, None ->
+      let* foreign =
+        foreign_quarantine_candidate repository ~generation ~object_ref
+      in
+      if foreign then Error (Quarantine_candidate_in_other_generation object_ref)
+      else Ok Already_pruned
