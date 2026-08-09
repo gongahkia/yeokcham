@@ -113,6 +113,20 @@ let invalid_poll_timeouts_are_rejected () =
             "negative timeout rejects" true
             (Result.is_error (Linux_watcher.poll watcher ~timeout:(-0.1)))))
 
+let repository_metadata_is_not_observed () =
+  with_root (fun root ->
+      let metadata = Filename.concat root ".yeokcham" in
+      Unix.mkdir metadata 0o700;
+      let watcher = Linux_watcher.start ~root |> require_ok in
+      Fun.protect
+        ~finally:(fun () -> Linux_watcher.close watcher)
+        (fun () ->
+          write_file (Filename.concat metadata "object") "opaque bytes";
+          let request = Linux_watcher.poll watcher ~timeout:0.1 |> require_ok in
+          Alcotest.(check (option bool))
+            "metadata writes do not request a scan" None
+            (Option.map (fun _ -> true) request)))
+
 let () =
   Alcotest.run "Linux watcher"
     [
@@ -128,5 +142,7 @@ let () =
             symlink_roots_are_rejected;
           Alcotest.test_case "invalid poll timeout rejects" `Quick
             invalid_poll_timeouts_are_rejected;
+          Alcotest.test_case "repository metadata is excluded" `Quick
+            repository_metadata_is_not_observed;
         ] );
     ]

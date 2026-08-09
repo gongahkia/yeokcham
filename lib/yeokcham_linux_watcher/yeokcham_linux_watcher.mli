@@ -1,5 +1,7 @@
 (** Advisory recursive Linux inotify source. Every output is normalized through
-    [Yeokcham_watcher]; the source never scans or creates a checkpoint. *)
+    [Yeokcham_watcher]; the source never scans or creates a checkpoint. The root
+    [".yeokcham"] metadata subtree is excluded so daemon publication does not
+    schedule itself. *)
 
 module Watcher = Yeokcham_watcher
 

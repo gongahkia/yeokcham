@@ -17,6 +17,8 @@ type error =
   | Discovery_invalid of string
   | Protocol_invalid of string
   | Unauthorized
+  | Invalid_idle_timeout of float
+  | Worker_error of string
   | Io_error of { operation : string; path : string; message : string }
 
 type serve_result = Continue | Stopped
@@ -39,6 +41,16 @@ val start : root:string -> runtime_dir:string -> (daemon, error) result
 
 val serve_once : daemon -> (serve_result, error) result
 val serve : daemon -> (unit, error) result
+
+val serve_with :
+  daemon ->
+  idle_timeout:float ->
+  on_idle:(unit -> (unit, string) result) ->
+  (unit, error) result
+(** Runs [on_idle] before every bounded socket wait. The callback is the
+    runtime-only hook used by a daemon worker; its failures stop the daemon and
+    are returned as [Worker_error]. *)
+
 val close : daemon -> unit
 val ping : root:string -> runtime_dir:string -> (unit, error) result
 val shutdown : root:string -> runtime_dir:string -> (unit, error) result

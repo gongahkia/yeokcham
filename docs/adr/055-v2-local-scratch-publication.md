@@ -12,8 +12,8 @@
 
 ADR-053 gives one local device a role-separated capability and a signed public
 bootstrap. ADR-054 permits exact snapshots and ledger events to share the
-opaque immutable object namespace. V2-014 still needs the transition that turns
-one exact observed snapshot into a candidate scratch checkpoint without
+opaque immutable object namespace. V2-014 needs the transition that turns one
+exact observed snapshot into a candidate scratch checkpoint without
 introducing a mutable head, inferred intent, or a second unencrypted cache.
 
 The causal ledger intentionally represents divergence rather than choosing a
@@ -101,8 +101,9 @@ head.
   explicit conflict for later user-facing resolution.
 - The scheduler's existing `Unchanged -> No_checkpoint` decision and this
   exact-snapshot equality rule independently prevent no-change publication.
-- Retention, compaction, restore/materialisation, multi-device policy, and
-  daemon wiring remain later V2-01 work.
+- Retention, compaction, restore/materialisation, and multi-device policy
+  remain later V2-01 work. ADR-057 owns daemon scheduling and passes exact
+  scanner results and fresh nonces through this boundary.
 
 ## Model and invariant impact
 
@@ -147,6 +148,6 @@ development policy.
 
 ## CLI and user impact
 
-No CLI or daemon mutation is added by this decision. A future daemon may pass
-an exact scanner result and fresh nonces to this adapter, but it must surface a
-divergent scratch result rather than select or overwrite a checkpoint.
+The VCS CLI performs no mutation under this decision. ADR-057's `yeokchamd`
+may pass an exact scanner result and fresh nonces to this adapter, but it must
+surface a divergent scratch result rather than select or overwrite a checkpoint.

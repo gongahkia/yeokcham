@@ -23,7 +23,12 @@
 (executable
  (name yeokchamd)
  (modules yeokchamd)
- (libraries yeokcham_local_daemon unix))
+ (libraries
+  yeokcham_local_daemon
+  yeokcham_v2_linux_scratch_daemon
+  yeokcham_v2_scratch_scheduler
+  yeokcham_v2_secret_service
+  unix))
 
 (executable
  (name workspace_base_v1)

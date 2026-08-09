@@ -20,6 +20,8 @@ type error =
   | Discovery_invalid of string
   | Protocol_invalid of string
   | Unauthorized
+  | Invalid_idle_timeout of float
+  | Worker_error of string
   | Io_error of { operation : string; path : string; message : string }
 
 type serve_result = Continue | Stopped
@@ -35,6 +37,10 @@ let error_to_string = function
   | Discovery_invalid detail -> "local daemon discovery is invalid: " ^ detail
   | Protocol_invalid detail -> "local daemon protocol is invalid: " ^ detail
   | Unauthorized -> "local daemon capability was rejected"
+  | Invalid_idle_timeout timeout ->
+      Printf.sprintf "daemon idle timeout must be finite and nonnegative: %g"
+        timeout
+  | Worker_error detail -> "local daemon worker failed: " ^ detail
   | Io_error { operation; path; message } ->
       Printf.sprintf "%s failed for %s: %s" operation path message
 
@@ -262,6 +268,41 @@ let serve daemon =
     | Error _ as error -> error
   in
   loop ()
+
+let serve_with daemon ~idle_timeout ~on_idle =
+  if
+    classify_float idle_timeout = FP_nan
+    || classify_float idle_timeout = FP_infinite
+    || idle_timeout < 0.0
+  then Error (Invalid_idle_timeout idle_timeout)
+  else
+    let rec loop () =
+      if daemon.closed then Ok ()
+      else
+        let* () =
+          on_idle () |> Result.map_error (fun detail -> Worker_error detail)
+        in
+        if daemon.closed then Ok ()
+        else
+          let* readable =
+            try
+              let readable, _, _ =
+                Unix.select [ daemon.listener ] [] [] idle_timeout
+              in
+              Ok readable
+            with Unix.Unix_error (error, _, _) ->
+              Error
+                (io "wait for local client" (socket_path daemon.endpoint) error)
+          in
+          match readable with
+          | [] -> loop ()
+          | _ -> (
+              match serve_once daemon with
+              | Ok Continue -> loop ()
+              | Ok Stopped -> Ok ()
+              | Error _ as error -> error)
+    in
+    loop ()
 
 let read_discovery endpoint =
   let path = discovery_path endpoint in

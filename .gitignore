@@ -1,4 +1,5 @@
 /_build/
 /_opam/
+/compile_commands.json
 /tools/yeokcham-typescript-adapter/node_modules/
 /tools/yeokcham-rust-adapter/target/

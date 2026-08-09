@@ -22,7 +22,8 @@ are optional arguments; placeholders are supplied by the caller.
 
 ```text
 init
-yeokchamd --root <path> [--runtime-dir <private-path>] [--recover-stale]
+yeokchamd --root <path> --quiet-period-ms <positive-integer> \
+  --max-latency-ms <positive-integer> [--runtime-dir <private-path>] [--recover-stale]
 status
 checkpoint
 timeline --limit <count>

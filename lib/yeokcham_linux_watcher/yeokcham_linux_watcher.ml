@@ -49,6 +49,10 @@ let valid_component component =
   && (not (String.contains component '/'))
   && not (String.contains component '\000')
 
+let is_repository_metadata_path = function
+  | ".yeokcham" :: _ -> true
+  | _ -> false
+
 let path_has_prefix prefix path =
   let rec loop prefix path =
     match (prefix, path) with
@@ -143,50 +147,53 @@ let selectors =
   ]
 
 let rec watch_directory state path =
-  let absolute = absolute_path state path in
-  let* stat = lstat_or_missing absolute in
-  match stat with
-  | None -> Ok ()
-  | Some stat when stat.Unix.st_kind <> Unix.S_DIR -> Ok ()
-  | Some _ when has_path state path -> Ok ()
-  | Some _ when List.length state.watches >= max_watches ->
-      Error (Watch_limit_exceeded max_watches)
-  | Some _ -> (
-      let* descriptor =
-        try Ok (Inotify.add_watch state.fd absolute selectors)
-        with Unix.Unix_error (error, _, _) ->
-          Error (io_error "add inotify watch" absolute error)
-      in
-      state.watches <- { descriptor; path } :: state.watches;
-      let* names = read_directory absolute in
-      let result =
-        List.fold_left
-          (fun result name ->
-            let* () = result in
-            if valid_component name then watch_directory state (path @ [ name ])
-            else
-              Error
-                (Io_error
-                   {
-                     operation = "watch directory";
-                     path = absolute;
-                     message = "unsafe directory entry";
-                   }))
-          (Ok ()) names
-      in
-      match result with
-      | Ok () -> Ok ()
-      | Error _ as error ->
-          (match find_watch state descriptor with
-          | Some watch ->
-              remove_watch_safely state watch;
-              state.watches <-
-                List.filter
-                  (fun candidate ->
-                    not (same_watch candidate.descriptor descriptor))
-                  state.watches
-          | None -> ());
-          error)
+  if is_repository_metadata_path path then Ok ()
+  else
+    let absolute = absolute_path state path in
+    let* stat = lstat_or_missing absolute in
+    match stat with
+    | None -> Ok ()
+    | Some stat when stat.Unix.st_kind <> Unix.S_DIR -> Ok ()
+    | Some _ when has_path state path -> Ok ()
+    | Some _ when List.length state.watches >= max_watches ->
+        Error (Watch_limit_exceeded max_watches)
+    | Some _ -> (
+        let* descriptor =
+          try Ok (Inotify.add_watch state.fd absolute selectors)
+          with Unix.Unix_error (error, _, _) ->
+            Error (io_error "add inotify watch" absolute error)
+        in
+        state.watches <- { descriptor; path } :: state.watches;
+        let* names = read_directory absolute in
+        let result =
+          List.fold_left
+            (fun result name ->
+              let* () = result in
+              if valid_component name then
+                watch_directory state (path @ [ name ])
+              else
+                Error
+                  (Io_error
+                     {
+                       operation = "watch directory";
+                       path = absolute;
+                       message = "unsafe directory entry";
+                     }))
+            (Ok ()) names
+        in
+        match result with
+        | Ok () -> Ok ()
+        | Error _ as error ->
+            (match find_watch state descriptor with
+            | Some watch ->
+                remove_watch_safely state watch;
+                state.watches <-
+                  List.filter
+                    (fun candidate ->
+                      not (same_watch candidate.descriptor descriptor))
+                    state.watches
+            | None -> ());
+            error)
 
 let start ~root =
   let* root_stat =
@@ -310,6 +317,8 @@ let poll state ~timeout =
                         process moves
                           (Watcher.Linux.Watch_lost :: reversed)
                           rest
+                    | Ok path when is_repository_metadata_path path ->
+                        process moves reversed rest
                     | Ok _ when contains Inotify.Ignored kinds ->
                         state.watches <-
                           List.filter

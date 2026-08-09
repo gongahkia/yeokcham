@@ -1,0 +1,10 @@
+(library
+ (name yeokcham_v2_scratch_daemon)
+ (libraries
+  mirage-crypto-rng.unix
+  yeokcham_v2_bootstrap_store
+  yeokcham_v2_envelope
+  yeokcham_v2_scratch_scheduler
+  yeokcham_v2_scratch_service
+  yeokcham_v2_scratch_store
+  yeokcham_watcher))

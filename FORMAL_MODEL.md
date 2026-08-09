@@ -1529,6 +1529,25 @@ state fails before snapshot publication. An interruption therefore leaves the
 old valid causal view plus, at most, an unreachable immutable snapshot; it does
 not create a mutable head or select a conflict.
 
+ADR-057 adds runtime-only automatic scheduling:
+
+```text
+Daemon_state = Scheduler_state
+
+due(request) -> Exact_scan(root) ->
+  Unchanged                         => No_checkpoint
+  Changed with no/one scratch head  => Publish_checkpoint
+  Divergent/corrupt/watcher loss    => explicit daemon error
+```
+
+`Daemon_state`, watcher observations, socket discovery, and monotonic timestamps
+are not persisted. A daemon start creates a fresh scheduler state and queues an
+`Initial_scan` whole-root request; it never reuses a lost in-memory path queue.
+Only a due request scans and reaches the ADR-055 transition, which receives two
+distinct fresh nonces. The Linux watcher excludes root `.yeokcham` metadata, so
+canonical publication cannot become a watcher source. A watcher-loss error ends
+the daemon rather than authorizing a partial observation or selecting a head.
+
 ## 28. V2 exact restore planning
 
 Given exact observed working-tree snapshot `O` and requested target snapshot

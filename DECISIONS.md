@@ -167,3 +167,4 @@ The ADR lifecycle, numbering rules, and template are defined in [`docs/adr/READM
 - [ADR-054 — V2 typed encrypted object frames](docs/adr/054-v2-typed-encrypted-objects.md) — Accepted.
 - [ADR-055 — V2 local scratch snapshot publication](docs/adr/055-v2-local-scratch-publication.md) — Accepted.
 - [ADR-056 — V2 opaque restore journal](docs/adr/056-v2-opaque-restore-journal.md) — Accepted.
+- [ADR-057 — V2 daemon-owned scratch scheduling](docs/adr/057-v2-daemon-scratch-scheduling.md) — Accepted.

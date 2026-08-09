@@ -56,12 +56,12 @@ same-batch move pairing. The invariants are:
 ## Persistent format, verification, and user impact
 
 No persistent bytes, migration, golden fixture, CLI command, or user-visible
-history semantics are introduced. The V2 daemon is not yet wired to this
-source. Focused Linux tests use a temporary directory to verify recursive
-new-directory coverage, paired rename normalization, root-symlink refusal, and
-invalid timeout rejection. The shared pure normalizer retains seeded generated
-burst, overflow, loss, and path-safety coverage. Full repository checks remain
-required.
+history semantics are introduced by this source alone. ADR-057 wires it to the
+Linux V2 daemon while retaining exact scans as the publication boundary. Focused
+Linux tests use a temporary directory to verify recursive new-directory
+coverage, paired rename normalization, root-symlink refusal, and invalid timeout
+rejection. The shared pure normalizer retains seeded generated burst, overflow,
+loss, and path-safety coverage. Full repository checks remain required.
 
 ## Sources
 

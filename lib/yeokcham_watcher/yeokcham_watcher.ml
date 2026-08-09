@@ -1,6 +1,7 @@
 type path = string list
 
 type reason =
+  | Initial_scan
   | Path_change
   | Rename
   | Overflow

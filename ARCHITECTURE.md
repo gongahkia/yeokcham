@@ -77,11 +77,17 @@ Queue overflow, root loss, unmount, and incomplete watch coverage request a
 whole-root rescan and explicit watcher restart. macOS FSEvents remains outside
 the implementation until it is built and verified on macOS.
 
-V2-014 currently supplies the pure `yeokcham_v2_scratch_scheduler` core. A
-caller supplies positive monotonic-clock quiet-period and maximum-latency bounds;
-the core coalesces normalized requests, emits each due scan once, and requests no
-checkpoint publication for an unchanged exact scan. It neither reads a working
-tree nor persists a checkpoint. ADR-053 replaces ADR-052's initial bootstrap
+V2-014 supplies the pure `yeokcham_v2_scratch_scheduler` core and the
+client-agnostic `yeokcham_v2_scratch_daemon` runner. A caller supplies positive
+monotonic-clock quiet-period and maximum-latency bounds; the core coalesces
+normalized requests, emits each due scan once, and requests no checkpoint
+publication for an unchanged exact scan. The runner calls the exact scanner and
+publication service only for those due requests, with two distinct fresh
+nonces. It persists neither the scheduler queue nor an inspection index.
+`yeokcham_v2_linux_scratch_daemon` is the Linux edge: it owns inotify, an
+initial whole-root scan after start, and the local socket loop using a POSIX
+monotonic clock. The Linux watcher excludes `.yeokcham`, preventing create-only
+object publication from scheduling itself. ADR-053 replaces ADR-052's initial bootstrap
 format with a canonical signed repository/device/public-signer/key-handle
 bootstrap and a Linux Secret Service custody adapter for role-separated local
 capabilities. It is not user identity, policy, a mutable scratch head, or an
@@ -92,9 +98,9 @@ device-scoped local scratch view over those frames: it publishes an immutable
 snapshot first and a causally linked signed ledger event second, rejects
 divergence rather than choosing a head, and treats an exact unchanged snapshot
 as a no-write result. Its exact scanner and narrow scratch service carry an
-explicit scan result into that durable transition. Daemon integration remains
-separate; the daemon cannot invent snapshot bytes, keys, or a conflict
-resolution. V2-016 currently supplies a pure restore planner over those exact
+explicit scan result into that durable transition. The daemon cannot invent
+snapshot bytes, keys, or a conflict resolution; errors such as divergence or
+watcher loss stop it explicitly. V2-016 currently supplies a pure restore planner over those exact
 snapshots: a changed target requires the observed snapshot as an explicit safety
 checkpoint input, removes children before parents, creates target directories
 before their contents, and preserves regular bytes, modes, and raw symlink
