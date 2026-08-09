@@ -411,6 +411,21 @@
   yeokcham_v2_scanner))
 
 (test
+ (name test_v2_restore_plan)
+ (modules test_v2_restore_plan)
+ (libraries alcotest yeokcham_model yeokcham_v2_restore_plan))
+
+(test
+ (name v2_restore_plan_property_test)
+ (modules v2_restore_plan_property_test)
+ (libraries
+  alcotest
+  qcheck-core
+  qcheck-alcotest
+  yeokcham_model
+  yeokcham_v2_restore_plan))
+
+(test
  (name test_v2_transaction)
  (modules test_v2_transaction)
  (libraries
@@ -1379,6 +1394,8 @@
   (:v2_scratch_store_property_test v2_scratch_store_property_test.exe)
   (:test_v2_scanner test_v2_scanner.exe)
   (:v2_scanner_property_test v2_scanner_property_test.exe)
+  (:test_v2_restore_plan test_v2_restore_plan.exe)
+  (:v2_restore_plan_property_test v2_restore_plan_property_test.exe)
   (:test_v2_bootstrap test_v2_bootstrap.exe)
   (:v2_bootstrap_property_test v2_bootstrap_property_test.exe)
   (:test_v2_secret_service test_v2_secret_service.exe)
@@ -1430,6 +1447,8 @@
    (run %{v2_scratch_store_property_test})
    (run %{test_v2_scanner})
    (run %{v2_scanner_property_test})
+   (run %{test_v2_restore_plan})
+   (run %{v2_restore_plan_property_test})
    (run %{test_v2_bootstrap})
    (run %{v2_bootstrap_property_test})
    (run %{test_v2_secret_service})

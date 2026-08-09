@@ -1524,3 +1524,26 @@ one exists. The two envelope nonces are distinct caller inputs. A divergent
 state fails before snapshot publication. An interruption therefore leaves the
 old valid causal view plus, at most, an unreachable immutable snapshot; it does
 not create a mutable head or select a conflict.
+
+## 28. V2 exact restore planning
+
+Given exact observed working-tree snapshot `O` and requested target snapshot
+`T`, the pure V2 restore planner defines:
+
+```text
+Restore_plan(O, T) = (precondition=O,
+                      safety=none                 when O = T
+                           O                    otherwise,
+                      ordered_actions)
+Replay_restore(O, ordered_actions) = T
+```
+
+The planner is not a filesystem transition. Its future adapter must re-scan and
+require the precondition before it writes, persist the nonempty safety value
+before destructive work, and refuse a stale observed result. Actions delete
+paths deepest-first, create target directories shallowest-first, and then write
+or mode-change target files and create target symlinks in path order. A symlink
+replacement always deletes the old path first; its raw target bytes remain data
+rather than an interpreted path. Equal snapshots have no action and no safety
+checkpoint requirement. No journal record, mutable head, or filesystem effect
+is introduced by this pure planning relation.

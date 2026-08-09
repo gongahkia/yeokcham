@@ -94,7 +94,11 @@ divergence rather than choosing a head, and treats an exact unchanged snapshot
 as a no-write result. Its exact scanner and narrow scratch service carry an
 explicit scan result into that durable transition. Daemon integration remains
 separate; the daemon cannot invent snapshot bytes, keys, or a conflict
-resolution.
+resolution. V2-016 currently supplies a pure restore planner over those exact
+snapshots: a changed target requires the observed snapshot as an explicit safety
+checkpoint input, removes children before parents, creates target directories
+before their contents, and preserves regular bytes, modes, and raw symlink
+targets. Its durable operation journal and filesystem adapter remain separate.
 
 ## 2. Proposed OCaml workspace
 
