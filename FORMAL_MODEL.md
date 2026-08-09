@@ -1353,3 +1353,31 @@ to ADR-042's complete validation-before-publication transition, so retry after
 an I/O interruption has only the existing valid immutable-prefix semantics.
 The adapter has no shared cursor, repair, cleanup, auto-import, ref operation,
 binding operation, trust/device operation, or key state.
+
+## 21. V2 encrypted causal ref ledger
+
+V2-005 adds a V2-only immutable record, separate from every Envelope-1
+ref-event and mutable ref:
+
+```text
+Unsigned = (version=1, repository-id, safe-ref-name, signer-key-id,
+            predecessor-event-id?, target-opaque-object-ref?, features)
+Event_id = SHA-256("yeokcham:v2:ref-ledger-event:1\\0" || cbor(Unsigned))
+Signature = Ed25519("yeokcham:v2:ref-ledger-signature:1\\0" || Event_id)
+Record = (Unsigned, Event_id, "ed25519", Signature)
+```
+
+All identities, targets, and public keys are exactly 32 raw bytes; signatures
+are 64 bytes. A caller-supplied canonical bounded key map may establish only
+`Cryptographically_valid` or `Unknown_signer`; it grants no identity, trust,
+membership, ownership, or authorization. Each valid non-root record needs a
+known predecessor for the same repository/ref. The evaluator rejects duplicate
+IDs, missing/cross-scope predecessors, and cycles. It returns the sorted set of
+unreferenced valid events and every sorted same-predecessor child set with two
+or more elements; it never chooses a head or changes a mutable ref.
+
+The first adapter encrypts the complete canonical record under ADR-045,
+derives its ADR-046 opaque address, and create-only publishes those bytes under
+the V2 `objects` directory. An exact existing byte sequence is a retry; a
+different sequence at the same address rejects. No plaintext index or mutable
+ledger/ref record is persisted.

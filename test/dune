@@ -197,6 +197,36 @@
   (source_tree golden)))
 
 (test
+ (name test_v2_ledger)
+ (modules test_v2_ledger)
+ (libraries
+  alcotest
+  mirage-crypto-ec
+  qcheck-core
+  qcheck-alcotest
+  yeokcham_encoding
+  yeokcham_v2_ledger
+  yeokcham_v2_model))
+
+(test
+ (name test_v2_ledger_store)
+ (modules test_v2_ledger_store)
+ (libraries
+  alcotest
+  mirage-crypto-ec
+  unix
+  yeokcham_cutover
+  yeokcham_store
+  yeokcham_v2_address
+  yeokcham_v2_envelope
+  yeokcham_v2_ledger
+  yeokcham_v2_ledger_store
+  yeokcham_v2_model
+  yeokcham_testkit)
+ (deps
+  (source_tree golden)))
+
+(test
  (name test_exchange)
  (modules test_exchange)
  (libraries
@@ -1053,6 +1083,7 @@
   (:v2_model_test v2_model_test.exe)
   (:test_v2_envelope test_v2_envelope.exe)
   (:test_v2_address test_v2_address.exe)
+  (:test_v2_ledger test_v2_ledger.exe)
   (:exchange_property_test exchange_property_test.exe)
   (:ref_event_property_test ref_event_property_test.exe)
   (:device_property_test device_property_test.exe)
@@ -1084,6 +1115,7 @@
    (run %{encoding_property_test})
    (run %{model_property_test})
    (run %{store_property_test})
+   (run %{test_v2_ledger})
    (run %{exchange_property_test})
    (run %{ref_event_property_test})
    (run %{device_property_test})

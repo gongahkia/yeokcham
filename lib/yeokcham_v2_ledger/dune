@@ -1,0 +1,7 @@
+(library
+ (name yeokcham_v2_ledger)
+ (libraries
+  mirage-crypto-ec
+  yeokcham_encoding
+  yeokcham_hash
+  yeokcham_v2_model))

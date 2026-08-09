@@ -2,6 +2,7 @@ module Encoding = Yeokcham_encoding
 module Envelope = Yeokcham_envelope
 module Hash = Yeokcham_hash.Sha256
 module Store = Yeokcham_store
+module V2_envelope = Yeokcham_v2_envelope
 
 type classification =
   | Empty
@@ -618,6 +619,61 @@ let validate_v1_objects objects =
   in
   validate_shards shards
 
+let validate_v2_object_file path =
+  let* bytes =
+    read_regular_file ~limit:(V2_envelope.max_ciphertext_bytes + 128) path
+  in
+  V2_envelope.decode bytes
+  |> Result.map_error (fun error ->
+      Archive_verification_failed
+        { path; detail = V2_envelope.error_to_string error })
+  |> Result.map (fun _ -> ())
+
+let validate_v2_objects objects =
+  let rec validate_leaves prefix = function
+    | [] -> Ok ()
+    | name :: rest ->
+        let path = Filename.concat prefix name in
+        let* stat = lstat path in
+        if stat.Unix.st_kind <> Unix.S_REG || not (is_hex_name name 60) then
+          Error
+            (Archive_verification_failed
+               { path; detail = "invalid V2 opaque object name" })
+        else
+          let* () = validate_v2_object_file path in
+          validate_leaves prefix rest
+  in
+  let rec validate_prefixes shard = function
+    | [] -> Ok ()
+    | prefix :: rest ->
+        let path = Filename.concat (Filename.concat objects shard) prefix in
+        let* stat = lstat path in
+        if stat.Unix.st_kind <> Unix.S_DIR || not (is_hex_name prefix 2) then
+          Error
+            (Archive_verification_failed
+               { path; detail = "invalid V2 opaque object prefix" })
+        else
+          let* names = read_directory path in
+          let* () = validate_leaves path names in
+          validate_prefixes shard rest
+  in
+  let rec validate_shards = function
+    | [] -> Ok ()
+    | shard :: rest ->
+        let path = Filename.concat objects shard in
+        let* stat = lstat path in
+        if stat.Unix.st_kind <> Unix.S_DIR || not (is_hex_name shard 2) then
+          Error
+            (Archive_verification_failed
+               { path; detail = "invalid V2 opaque object shard" })
+        else
+          let* prefixes = read_directory path in
+          let* () = validate_prefixes shard prefixes in
+          validate_shards rest
+  in
+  let* shards = read_directory objects in
+  validate_shards shards
+
 let validate_v1_direct_refs refs =
   let* names = read_directory refs in
   let rec validate = function
@@ -709,6 +765,9 @@ let has_v1_artifacts metadata =
            detail = "V2 root contains unknown lock or journal state";
          })
   else if objects_empty && refs_empty then Ok false
+  else if refs_empty then
+    let* () = validate_v2_objects objects in
+    Ok false
   else
     let* () = validate_v1_objects objects in
     let* () = validate_v1_direct_refs refs in

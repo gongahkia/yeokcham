@@ -2,9 +2,10 @@
 
 ## Status
 
-This document records the V2-001 root slice and the V2-010 explicit legacy
-archive/cutover boundary. It is intentionally narrower than the final V2
-encrypted object, identity, and ref protocols, which have their own issues.
+This document records the V2-001 root slice, the V2-010 explicit legacy
+archive/cutover boundary, and V2-005's first encrypted immutable object kind.
+It is intentionally narrower than the later identity, authorization,
+transaction, and transport protocols.
 
 ## Model
 
@@ -70,6 +71,27 @@ failure between relocation and manifest publication. Neither manifest is a V2
 object, ref, ledger event, or authority over V1 history.
 
 Old V1 CLI workflows are deliberately refused for V2 roots until their V2
-transitions exist. This root declaration does **not** claim that V2 encrypted
-envelopes, opaque addressing, or an encrypted ref ledger are implemented;
-V2-003 through V2-007 replace those adapter-level formats.
+transitions exist.
+
+## Encrypted immutable ledger objects
+
+V2-005 stores one ADR-048 `ref-ledger-event-v1` plaintext only inside an
+ADR-045 canonical encrypted envelope. Its 32-byte ADR-046 opaque address is
+the object name, sharded as `objects/<2 hex>/<2 hex>/<60 hex>`. The raw outer
+envelope is the sole object-file content; no plaintext ref name, target, event
+kind, signer ID, mutable current ref, or ledger index is present on disk.
+
+Before publication, the adapter decrypts the candidate envelope, strictly
+decodes its canonical ledger record, recomputes the opaque address, and
+verifies its Ed25519 signature against the caller-supplied key registry. It
+fsyncs each newly needed shard's parent, fsyncs a private sibling temporary
+file, create-only links the final path, and fsyncs the final directory before
+removing the temporary link. A byte-identical existing object is an idempotent
+retry; different bytes at the same opaque address are a collision error.
+Rejected inputs and blocked publication leave no accepted object or mutable-ref
+change.
+
+The fixed inner record, outer envelope, and opaque-address vectors are in
+`test/golden/v2-ref-ledger-*.hex`. This establishes cryptographic validity and
+causal data only. Key custody, trust, authorization, transactions, candidate
+discovery, and transport remain separate issues.

@@ -26,6 +26,7 @@ let kinds : (string * (module V2.Identity)) list =
     ("device", (module V2.Device_id));
     ("opaque object reference", (module V2.Opaque_object_ref));
     ("ref event", (module V2.Ref_event_id));
+    ("signer key", (module V2.Signer_key_id));
   ]
 
 let require_ok error_to_string = function
