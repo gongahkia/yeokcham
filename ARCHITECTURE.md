@@ -73,6 +73,14 @@ scan. These requests are advisory only: exact scanning remains authoritative and
 normalization cannot create a checkpoint or canonical event. Native OS event
 sources remain outside this model until their platform boundary is defined.
 
+V2-014 currently supplies the pure `yeokcham_v2_scratch_scheduler` core. A
+caller supplies positive monotonic-clock quiet-period and maximum-latency bounds;
+the core coalesces normalized requests, emits each due scan once, and requests no
+checkpoint publication for an unchanged exact scan. It neither reads a working
+tree nor persists a checkpoint. Durable V2 scratch records, key ownership, and
+visibility/ref semantics require their own accepted model before a daemon can
+publish the scheduler's `Publish_checkpoint` decision.
+
 ## 2. Proposed OCaml workspace
 
 ```text
