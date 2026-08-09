@@ -142,6 +142,13 @@ with a synthetic cycle. Persistent tests separately retain wrong-ID, corrupt,
 missing-parent, wrong-type, and cross-capsule-parent rejection; no impossible
 hash-verifying cyclic object fixture is claimed.
 
+V2-018 separately checks deterministic byte-only structural proposals, explicit
+dependent-subset conflicts, empty-directory replay, immutable Capsule and
+Capsule_revision frame goldens, encrypted reopen, pre-binding interruption,
+and source-boundary resolution after scratch compaction. Its seeded generated
+coverage varies exact file bytes and executable modes in both pure and durable
+paths; it makes no semantic or intent-inference claim.
+
 #### P7 — Stable capsule identity
 
 Creating a new revision does not change capsule ID.

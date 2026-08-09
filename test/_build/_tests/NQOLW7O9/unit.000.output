@@ -1,0 +1,5 @@
+ASSERT ledger frame preserves ledger kind
+ASSERT ledger frame canonical golden
+ASSERT scratch frame preserves scratch kind
+ASSERT scratch frame canonical golden
+ASSERT exact scratch snapshot survives frame

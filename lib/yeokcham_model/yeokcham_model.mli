@@ -35,6 +35,7 @@ val construction_error_to_string : construction_error -> string
 
 type scratch_operation =
   | Create_file of { path : Path.t; content : string; mode : file_mode }
+  | Create_directory of { path : Path.t }
   | Modify_file of {
       path : Path.t;
       expected_content : string;
@@ -77,6 +78,13 @@ type canonical_decode_error =
   | Noncanonical_canonical_bytes
 
 val canonical_decode_error_to_string : canonical_decode_error -> string
+
+module Scratch_operation : sig
+  val canonical_bytes : scratch_operation -> string
+
+  val decode_canonical_bytes :
+    string -> (scratch_operation, canonical_decode_error) result
+end
 
 type observation_source = Explicit | Scan
 

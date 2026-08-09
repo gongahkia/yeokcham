@@ -378,6 +378,19 @@ the ADR-025 canonical semantic preimage; it excludes its own ID and
 observational timestamps. Each revision is complete and directly applies from
 its declared base; parent links retain history and provenance only.
 
+### V2-018 exact curation boundary
+
+ADR-059 defines the V2 initial capsule record independently of the V1 durable
+representation below. Given exact V2 snapshots `S` and `T`, its pure proposal
+contains only deterministic structural operations `O` where `apply(S, O) = T`.
+It does not infer moves, semantic edits, grouping, or user intent. An explicit
+strictly ascending selection either yields an exact selected result or a
+transition conflict naming the original operation index. A visible V2 revision
+retains logical and encrypted links for base, result, and both source boundary
+snapshots. ADR-058 protects those source snapshots before the signed capsule
+binding is visible, so compaction may retire the original ledger range without
+removing the cited exact bytes.
+
 ### Durable Milestone 4 representation
 
 `Capsule_v1` is immutable initial metadata. `Capsule_revision_v1` holds

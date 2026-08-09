@@ -78,6 +78,8 @@ let error_to_string = function
         | Object.Scratch_snapshot -> "scratch snapshot"
         | Object.Scratch_protection -> "scratch protection"
         | Object.Scratch_generation -> "scratch generation"
+        | Object.Capsule -> "capsule"
+        | Object.Capsule_revision -> "capsule revision"
       in
       Printf.sprintf "V2 object %s has kind %s, expected %s"
         (Model.Opaque_object_ref.to_hex object_ref)

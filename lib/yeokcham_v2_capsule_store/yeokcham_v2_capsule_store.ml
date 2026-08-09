@@ -1,0 +1,577 @@
+module Address = Yeokcham_v2_address
+module Bootstrap = Yeokcham_v2_bootstrap
+module Bootstrap_store = Yeokcham_v2_bootstrap_store
+module Capsule = Yeokcham_v2_capsule
+module Envelope = Yeokcham_v2_envelope
+module Ledger = Yeokcham_v2_ledger
+module Ledger_store = Yeokcham_v2_ledger_store
+module Model = Yeokcham_model
+module Object = Yeokcham_v2_object
+module Object_store = Yeokcham_v2_object_store
+module Retention = Yeokcham_v2_retention
+module Scratch_store = Yeokcham_v2_scratch_store
+module V2_model = Yeokcham_v2_model
+
+type repository = {
+  bootstrap : Bootstrap_store.repository;
+  objects : Object_store.repository;
+  ledger : Ledger_store.repository;
+  scratch : Scratch_store.repository;
+}
+
+type nonces = {
+  capsule_nonce : Envelope.nonce;
+  selected_result_nonce : Envelope.nonce;
+  revision_nonce : Envelope.nonce;
+  source_protection_nonce : Envelope.nonce;
+  source_protection_ledger_nonce : Envelope.nonce;
+  target_protection_nonce : Envelope.nonce;
+  target_protection_ledger_nonce : Envelope.nonce;
+  binding_ledger_nonce : Envelope.nonce;
+}
+
+module Fault = struct
+  type boundary =
+    | After_capsule_object
+    | After_selected_result_object
+    | After_revision_object
+    | After_source_protection
+    | After_target_protection
+    | Before_binding
+
+  type t = boundary
+
+  let at boundary = boundary
+end
+
+type resolved = {
+  capsule : Capsule.capsule;
+  capsule_ref : V2_model.Opaque_object_ref.t;
+  revision : Capsule.revision;
+  revision_ref : V2_model.Opaque_object_ref.t;
+  binding_event_id : Ledger.Event_id.t;
+  declared_base : Model.Snapshot.t;
+  expected_result : Model.Snapshot.t;
+}
+
+type publication = Published of resolved | Already_published of resolved
+
+type error =
+  | Bootstrap_store_error of Bootstrap_store.error
+  | Capsule_error of Capsule.error
+  | Capsule_proposal_error of Capsule.proposal_error
+  | Capsule_selection_error of Capsule.selection_error
+  | Envelope_error of Envelope.error
+  | Ledger_error of Ledger.error
+  | Ledger_store_error of Ledger_store.error
+  | Object_store_error of Object_store.error
+  | Scratch_store_error of Scratch_store.error
+  | Invalid_capsule_ref_name of string
+  | Nonce_reuse
+  | Capsule_id_already_bound of V2_model.Capsule_id.t
+  | Divergent_capsule_binding of Ledger.Event_id.t list
+  | Capsule_binding_missing_target of Ledger.Event_id.t
+  | Capsule_binding_target_mismatch of {
+      capsule : V2_model.Capsule_id.t;
+      expected : V2_model.Opaque_object_ref.t;
+      actual : V2_model.Opaque_object_ref.t;
+    }
+  | Binding_target_not_revision of V2_model.Opaque_object_ref.t
+  | Revision_capsule_mismatch of {
+      expected : V2_model.Capsule_id.t;
+      actual : V2_model.Capsule_id.t;
+    }
+  | Revision_capsule_ref_mismatch of {
+      expected : V2_model.Opaque_object_ref.t;
+      actual : V2_model.Opaque_object_ref.t;
+    }
+  | Capsule_ref_not_capsule of V2_model.Opaque_object_ref.t
+  | Capsule_metadata_mismatch
+  | Snapshot_ref_not_snapshot of V2_model.Opaque_object_ref.t
+  | Snapshot_identity_mismatch of V2_model.Opaque_object_ref.t
+  | Revision_replay_rejected of Model.replay_error
+  | Revision_result_mismatch
+  | Fault_injected of Fault.boundary
+
+let ( let* ) = Result.bind
+
+let error_to_string = function
+  | Bootstrap_store_error error -> Bootstrap_store.error_to_string error
+  | Capsule_error error -> Capsule.error_to_string error
+  | Capsule_proposal_error error -> Capsule.proposal_error_to_string error
+  | Capsule_selection_error error -> Capsule.selection_error_to_string error
+  | Envelope_error error -> Envelope.error_to_string error
+  | Ledger_error error -> Ledger.error_to_string error
+  | Ledger_store_error error -> Ledger_store.error_to_string error
+  | Object_store_error error -> Object_store.error_to_string error
+  | Scratch_store_error error -> Scratch_store.error_to_string error
+  | Invalid_capsule_ref_name name -> "invalid capsule ref name: " ^ name
+  | Nonce_reuse -> "capsule creation requires pairwise distinct envelope nonces"
+  | Capsule_id_already_bound id ->
+      "capsule already has a current binding: " ^ V2_model.Capsule_id.to_hex id
+  | Divergent_capsule_binding events ->
+      "capsule binding has divergent causal heads: "
+      ^ String.concat "," (List.map Ledger.Event_id.to_hex events)
+  | Capsule_binding_missing_target event ->
+      "capsule binding has no revision target: " ^ Ledger.Event_id.to_hex event
+  | Capsule_binding_target_mismatch { capsule; expected; actual } ->
+      Printf.sprintf "capsule %s is already bound to %s, not %s"
+        (V2_model.Capsule_id.to_hex capsule)
+        (V2_model.Opaque_object_ref.to_hex actual)
+        (V2_model.Opaque_object_ref.to_hex expected)
+  | Binding_target_not_revision reference ->
+      "capsule binding targets a non-revision object: "
+      ^ V2_model.Opaque_object_ref.to_hex reference
+  | Revision_capsule_mismatch { expected; actual } ->
+      Printf.sprintf "capsule revision belongs to %s, expected %s"
+        (V2_model.Capsule_id.to_hex actual)
+        (V2_model.Capsule_id.to_hex expected)
+  | Revision_capsule_ref_mismatch { expected; actual } ->
+      Printf.sprintf "capsule revision names capsule object %s, expected %s"
+        (V2_model.Opaque_object_ref.to_hex actual)
+        (V2_model.Opaque_object_ref.to_hex expected)
+  | Capsule_ref_not_capsule reference ->
+      "capsule object reference is not a capsule frame: "
+      ^ V2_model.Opaque_object_ref.to_hex reference
+  | Capsule_metadata_mismatch -> "capsule metadata does not match its revision"
+  | Snapshot_ref_not_snapshot reference ->
+      "capsule snapshot link is not an exact snapshot: "
+      ^ V2_model.Opaque_object_ref.to_hex reference
+  | Snapshot_identity_mismatch reference ->
+      "capsule snapshot link logical identity mismatches: "
+      ^ V2_model.Opaque_object_ref.to_hex reference
+  | Revision_replay_rejected error ->
+      "capsule revision replay rejected: " ^ Model.replay_error_to_string error
+  | Revision_result_mismatch ->
+      "capsule revision replay does not reach its declared exact result"
+  | Fault_injected boundary ->
+      let name =
+        match boundary with
+        | Fault.After_capsule_object -> "after capsule object"
+        | Fault.After_selected_result_object -> "after selected result object"
+        | Fault.After_revision_object -> "after revision object"
+        | Fault.After_source_protection -> "after source protection"
+        | Fault.After_target_protection -> "after target protection"
+        | Fault.Before_binding -> "before capsule binding"
+      in
+      "injected capsule creation interruption " ^ name
+
+let open_repository ~root ~bootstrap_repository =
+  let record = Bootstrap_store.bootstrap bootstrap_repository in
+  let capability = Bootstrap_store.capability bootstrap_repository in
+  let* objects =
+    Object_store.open_repository ~root
+      ~repository_id:(Bootstrap.repository_id record)
+      ~address_key:(Bootstrap.address_key capability)
+      ~encryption_key:(Bootstrap.envelope_key capability)
+    |> Result.map_error (fun error -> Object_store_error error)
+  in
+  let* public_keys =
+    Bootstrap.public_key_registry capability
+    |> Result.map_error (fun error ->
+        Bootstrap_store_error (Bootstrap_store.Bootstrap_error error))
+  in
+  let* ledger =
+    Ledger_store.open_repository ~root
+      ~repository_id:(Bootstrap.repository_id record)
+      ~address_key:(Bootstrap.address_key capability)
+      ~encryption_key:(Bootstrap.envelope_key capability)
+      ~public_keys
+    |> Result.map_error (fun error -> Ledger_store_error error)
+  in
+  let* scratch =
+    Scratch_store.open_repository ~root ~bootstrap_repository
+    |> Result.map_error (fun error -> Scratch_store_error error)
+  in
+  Ok { bootstrap = bootstrap_repository; objects; ledger; scratch }
+
+let capsule_ref_name id =
+  let name = "capsule-" ^ V2_model.Capsule_id.to_hex id in
+  Ledger.Ref_name.of_string name
+  |> Result.map_error (fun _ -> Invalid_capsule_ref_name name)
+
+let distinct_nonces nonces =
+  let values =
+    [
+      nonces.capsule_nonce;
+      nonces.selected_result_nonce;
+      nonces.revision_nonce;
+      nonces.source_protection_nonce;
+      nonces.source_protection_ledger_nonce;
+      nonces.target_protection_nonce;
+      nonces.target_protection_ledger_nonce;
+      nonces.binding_ledger_nonce;
+    ]
+    |> List.map Envelope.nonce_to_bytes
+  in
+  List.length values = List.length (List.sort_uniq String.compare values)
+
+let event_id_of_verified verified =
+  Ledger.verified_event verified |> Ledger.event_id
+
+let scoped_events repository ref_name =
+  let* references =
+    Ledger_store.list_object_refs repository.ledger
+    |> Result.map_error (fun error -> Ledger_store_error error)
+  in
+  let rec collect reversed = function
+    | [] -> Ok (List.rev reversed)
+    | reference :: rest -> (
+        let* object_ =
+          Ledger_store.load_object repository.ledger ~object_ref:reference
+          |> Result.map_error (fun error -> Ledger_store_error error)
+        in
+        match Object.ledger object_ with
+        | None -> collect reversed rest
+        | Some event ->
+            let event_ref =
+              Ledger.event_unsigned event |> Ledger.unsigned_ref_name
+            in
+            if Ledger.Ref_name.equal event_ref ref_name then
+              let* verified =
+                Ledger_store.load repository.ledger ~object_ref:reference
+                |> Result.map_error (fun error -> Ledger_store_error error)
+              in
+              collect (verified :: reversed) rest
+            else collect reversed rest)
+  in
+  collect [] references
+
+let binding_head repository id =
+  let* ref_name = capsule_ref_name id in
+  let* events = scoped_events repository ref_name in
+  match events with
+  | [] -> Ok None
+  | _ -> (
+      let* heads =
+        Ledger.evaluate
+          ~repository_id:(Ledger_store.repository_id repository.ledger)
+          ~ref_name events
+        |> Result.map_error (fun error -> Ledger_error error)
+      in
+      match Ledger.heads heads with
+      | [] -> Ok None
+      | [ head ] -> Ok (Some head)
+      | heads ->
+          Error
+            (Divergent_capsule_binding
+               (List.map event_id_of_verified heads
+               |> List.sort Ledger.Event_id.compare)))
+
+let target_of_binding verified =
+  let event = Ledger.verified_event verified in
+  match Ledger.event_unsigned event |> Ledger.unsigned_target with
+  | Some target -> Ok (Ledger.Ref_target.to_opaque_object_ref target)
+  | None -> Error (Capsule_binding_missing_target (Ledger.event_id event))
+
+let snapshot_for_link repository (link : Capsule.snapshot_link) =
+  let* object_ =
+    Object_store.load repository.objects ~object_ref:link.Capsule.snapshot_ref
+    |> Result.map_error (fun error -> Object_store_error error)
+  in
+  match Object.snapshot object_ with
+  | None -> Error (Snapshot_ref_not_snapshot link.Capsule.snapshot_ref)
+  | Some snapshot ->
+      if
+        Yeokcham_id.Snapshot_id.equal link.Capsule.snapshot_id
+          (Model.Snapshot.id snapshot)
+      then Ok snapshot
+      else Error (Snapshot_identity_mismatch link.Capsule.snapshot_ref)
+
+let resolve repository ~id =
+  let* head = binding_head repository id in
+  match head with
+  | None -> Ok None
+  | Some verified ->
+      let binding_event_id = event_id_of_verified verified in
+      let* revision_ref = target_of_binding verified in
+      let* revision_object =
+        Object_store.load repository.objects ~object_ref:revision_ref
+        |> Result.map_error (fun error -> Object_store_error error)
+      in
+      let* revision =
+        match Object.capsule_revision_record revision_object with
+        | Some revision -> Ok revision
+        | None -> Error (Binding_target_not_revision revision_ref)
+      in
+      let actual_id = Capsule.revision_capsule_id revision in
+      if not (V2_model.Capsule_id.equal id actual_id) then
+        Error (Revision_capsule_mismatch { expected = id; actual = actual_id })
+      else
+        let capsule_ref = Capsule.revision_capsule_ref revision in
+        let* capsule_object =
+          Object_store.load repository.objects ~object_ref:capsule_ref
+          |> Result.map_error (fun error -> Object_store_error error)
+        in
+        let* capsule =
+          match Object.capsule_record capsule_object with
+          | Some capsule -> Ok capsule
+          | None -> Error (Capsule_ref_not_capsule capsule_ref)
+        in
+        if not (V2_model.Capsule_id.equal id (Capsule.capsule_id capsule)) then
+          Error Capsule_metadata_mismatch
+        else
+          let* declared_base =
+            snapshot_for_link repository
+              (Capsule.revision_declared_base revision)
+          in
+          let* expected_result =
+            snapshot_for_link repository
+              (Capsule.revision_expected_result revision)
+          in
+          let boundary = Capsule.revision_source_boundary revision in
+          let* boundary_source =
+            snapshot_for_link repository boundary.Capsule.source_snapshot
+          in
+          let* _boundary_target =
+            snapshot_for_link repository boundary.Capsule.target_snapshot
+          in
+          if not (Model.Snapshot.equal declared_base boundary_source) then
+            Error Revision_result_mismatch
+          else
+            let* actual =
+              Capsule.apply_revision ~base:declared_base revision
+              |> Result.map_error (fun error -> Revision_replay_rejected error)
+            in
+            if not (Model.Snapshot.equal actual expected_result) then
+              Error Revision_result_mismatch
+            else
+              Ok
+                (Some
+                   {
+                     capsule;
+                     capsule_ref;
+                     revision;
+                     revision_ref;
+                     binding_event_id;
+                     declared_base;
+                     expected_result;
+                   })
+
+let envelope_for repository ~nonce object_ =
+  let record = Bootstrap_store.bootstrap repository.bootstrap in
+  let capability = Bootstrap_store.capability repository.bootstrap in
+  let* envelope =
+    Envelope.seal
+      ~key:(Bootstrap.envelope_key capability)
+      ~nonce ~mandatory_features:0L (Object.encode object_)
+    |> Result.map_error (fun error -> Envelope_error error)
+  in
+  let reference =
+    Address.derive
+      ~repository_id:(Bootstrap.repository_id record)
+      ~key:(Bootstrap.address_key capability)
+      ~envelope
+  in
+  Ok (reference, envelope)
+
+let publish_object repository ~expected envelope =
+  let* actual =
+    Object_store.publish repository.objects ~envelope
+    |> Result.map_error (fun error -> Object_store_error error)
+    |> Result.map (function
+        | Object_store.Published reference
+        | Object_store.Already_published reference
+        -> reference)
+  in
+  if V2_model.Opaque_object_ref.equal expected actual then Ok ()
+  else assert false
+
+let inject fault boundary =
+  match fault with
+  | Some actual when actual = boundary -> Error (Fault_injected boundary)
+  | None | Some _ -> Ok ()
+
+let binding_envelope repository ~id ~revision_ref ~nonce =
+  let* ref_name = capsule_ref_name id in
+  let record = Bootstrap_store.bootstrap repository.bootstrap in
+  let capability = Bootstrap_store.capability repository.bootstrap in
+  let* unsigned =
+    Ledger.make_unsigned
+      ~repository_id:(Bootstrap.repository_id record)
+      ~ref_name
+      ~signer_key_id:(Bootstrap.capability_signer_key_id capability)
+      ~predecessor:None
+      ~target:(Some (Ledger.Ref_target.of_opaque_object_ref revision_ref))
+      ~mandatory_features:0L
+    |> Result.map_error (fun error -> Ledger_error error)
+  in
+  let* event =
+    Ledger.make ~unsigned ~algorithm:Ledger.algorithm
+      ~signature:(Bootstrap.sign_ledger capability unsigned)
+    |> Result.map_error (fun error -> Ledger_error error)
+  in
+  let* envelope =
+    Envelope.seal
+      ~key:(Bootstrap.envelope_key capability)
+      ~nonce ~mandatory_features:0L
+      (Object.ledger_event event |> Object.encode)
+    |> Result.map_error (fun error -> Envelope_error error)
+  in
+  Ok (Ledger.event_id event, envelope)
+
+let create ?fault repository ~id ~title ~description ~created_at ~source_event
+    ~target_event ~selected_indices ~nonces =
+  if not (distinct_nonces nonces) then Error Nonce_reuse
+  else
+    let* () =
+      Scratch_store.require_ancestor repository.scratch ~source:source_event
+        ~target:target_event
+      |> Result.map_error (fun error -> Scratch_store_error error)
+    in
+    let* source =
+      Scratch_store.checkpoint_for_event repository.scratch
+        ~event_id:source_event
+      |> Result.map_error (fun error -> Scratch_store_error error)
+    in
+    let* target =
+      Scratch_store.checkpoint_for_event repository.scratch
+        ~event_id:target_event
+      |> Result.map_error (fun error -> Scratch_store_error error)
+    in
+    let* proposal =
+      Capsule.propose ~from:source.Scratch_store.snapshot
+        ~to_:target.Scratch_store.snapshot
+      |> Result.map_error (fun error -> Capsule_proposal_error error)
+    in
+    let* selected =
+      Capsule.select proposal ~indices:selected_indices
+      |> Result.map_error (fun error -> Capsule_selection_error error)
+    in
+    let* capsule =
+      Capsule.make_capsule ~id ~title ~description ~created_at
+      |> Result.map_error (fun error -> Capsule_error error)
+    in
+    let* capsule_ref, capsule_envelope =
+      envelope_for repository ~nonce:nonces.capsule_nonce
+        (Object.capsule capsule)
+    in
+    let selected_result = Capsule.selected_result selected in
+    let target_link : Capsule.snapshot_link =
+      {
+        Capsule.snapshot_id = Model.Snapshot.id target.Scratch_store.snapshot;
+        snapshot_ref = target.Scratch_store.snapshot_ref;
+      }
+    in
+    let* expected_result, selected_result_envelope =
+      if Model.Snapshot.equal selected_result target.Scratch_store.snapshot then
+        Ok (target_link, None)
+      else
+        let* reference, envelope =
+          envelope_for repository ~nonce:nonces.selected_result_nonce
+            (Object.scratch_snapshot selected_result)
+        in
+        Ok
+          ( {
+              Capsule.snapshot_id = Model.Snapshot.id selected_result;
+              snapshot_ref = reference;
+            },
+            Some envelope )
+    in
+    let declared_base : Capsule.snapshot_link =
+      {
+        Capsule.snapshot_id = Model.Snapshot.id source.Scratch_store.snapshot;
+        snapshot_ref = source.Scratch_store.snapshot_ref;
+      }
+    in
+    let boundary : Capsule.source_boundary =
+      { Capsule.source_snapshot = declared_base; target_snapshot = target_link }
+    in
+    let* revision =
+      Capsule.make_initial_revision ~capsule ~capsule_ref ~declared_base
+        ~declared_base_snapshot:source.Scratch_store.snapshot ~expected_result
+        ~selected ~source_boundary:boundary
+      |> Result.map_error (fun error -> Capsule_error error)
+    in
+    let* revision_ref, revision_envelope =
+      envelope_for repository ~nonce:nonces.revision_nonce
+        (Object.capsule_revision revision)
+    in
+    let* prior = resolve repository ~id in
+    match prior with
+    | Some resolved ->
+        if V2_model.Opaque_object_ref.equal resolved.revision_ref revision_ref
+        then Ok (Already_published resolved)
+        else Error (Capsule_id_already_bound id)
+    | None -> (
+        let* () =
+          publish_object repository ~expected:capsule_ref capsule_envelope
+        in
+        let* () = inject fault Fault.After_capsule_object in
+        let* () =
+          match selected_result_envelope with
+          | None -> Ok ()
+          | Some envelope ->
+              publish_object repository
+                ~expected:expected_result.Capsule.snapshot_ref envelope
+        in
+        let* () = inject fault Fault.After_selected_result_object in
+        let* () =
+          publish_object repository ~expected:revision_ref revision_envelope
+        in
+        let* () = inject fault Fault.After_revision_object in
+        let reason = Retention.Capsule_boundary revision_ref in
+        let* source_protection =
+          Scratch_store.plan_protection repository.scratch
+            ~event_id:source_event ~action:Retention.Protect ~reason
+            ~protection_nonce:nonces.source_protection_nonce
+            ~ledger_nonce:nonces.source_protection_ledger_nonce
+          |> Result.map_error (fun error -> Scratch_store_error error)
+        in
+        let* _ =
+          Scratch_store.publish_protection_plan repository.scratch
+            source_protection
+          |> Result.map_error (fun error -> Scratch_store_error error)
+        in
+        let* () = inject fault Fault.After_source_protection in
+        let* target_protection =
+          Scratch_store.plan_protection repository.scratch
+            ~event_id:target_event ~action:Retention.Protect ~reason
+            ~protection_nonce:nonces.target_protection_nonce
+            ~ledger_nonce:nonces.target_protection_ledger_nonce
+          |> Result.map_error (fun error -> Scratch_store_error error)
+        in
+        let* _ =
+          Scratch_store.publish_protection_plan repository.scratch
+            target_protection
+          |> Result.map_error (fun error -> Scratch_store_error error)
+        in
+        let* () = inject fault Fault.After_target_protection in
+        let* () = inject fault Fault.Before_binding in
+        let* latest = resolve repository ~id in
+        match latest with
+        | Some resolved ->
+            if
+              V2_model.Opaque_object_ref.equal resolved.revision_ref
+                revision_ref
+            then Ok (Already_published resolved)
+            else
+              Error
+                (Capsule_binding_target_mismatch
+                   {
+                     capsule = id;
+                     expected = revision_ref;
+                     actual = resolved.revision_ref;
+                   })
+        | None -> (
+            let* expected_event_id, ledger_envelope =
+              binding_envelope repository ~id ~revision_ref
+                ~nonce:nonces.binding_ledger_nonce
+            in
+            let* publication =
+              Ledger_store.publish repository.ledger ~envelope:ledger_envelope
+              |> Result.map_error (fun error -> Ledger_store_error error)
+            in
+            let actual_event_id =
+              match publication with
+              | Ledger_store.Published { event_id; _ }
+              | Ledger_store.Already_published { event_id; _ } ->
+                  event_id
+            in
+            if not (Ledger.Event_id.equal expected_event_id actual_event_id)
+            then assert false
+            else
+              let* resolved = resolve repository ~id in
+              match resolved with
+              | Some resolved -> Ok (Published resolved)
+              | None -> assert false))

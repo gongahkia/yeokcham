@@ -432,6 +432,16 @@ A capsule service supports:
 
 The first capsule representation should use exact file transitions and textual edits. Semantic operations come later.
 
+V2 curation is an independent ADR-059 implementation over authenticated V2
+snapshots. It derives a deterministic structural delta, never a claim about
+user intent: exact deletes, directory creation (including empty directories),
+file creation, content modification, and mode changes, but no inferred move or
+semantic operation. An explicit ascending selection either replays from its
+exact source snapshot or returns the failed proposal index. Immutable Capsule
+and initial Capsule_revision frames become visible only through a signed causal
+`capsule-<id>` binding after both source snapshot links receive ADR-058
+protection claims. V2-019 adds later revision provenance and mutation flows.
+
 The Milestone 4 capsule service combines the pure `yeokcham_capsule` transition
 core with `yeokcham_capsule_store`. ADR-025 adds immutable `Capsule_v1` and
 complete `Capsule_revision_v1` Envelope-1 objects, and a checksummed

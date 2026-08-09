@@ -78,6 +78,7 @@ let construction_error_to_string = function
 
 type scratch_operation =
   | Create_file of { path : Path.t; content : string; mode : file_mode }
+  | Create_directory of { path : Path.t }
   | Modify_file of {
       path : Path.t;
       expected_content : string;
@@ -523,6 +524,9 @@ module Snapshot = struct
         insert_entry snapshot (Path.to_components path)
           (File { mode; content })
           path
+    | Create_directory { path } ->
+        insert_entry snapshot (Path.to_components path)
+          (Directory Component_map.empty) path
     | Modify_file { path; expected_content; replacement_content } -> (
         match find snapshot path with
         | None -> Error (Path_not_found path)
@@ -668,6 +672,8 @@ let scratch_operation_value = function
           Encoding.bytes content;
           mode_value mode;
         ]
+  | Create_directory { path } ->
+      value_array [ Encoding.integer 5L; path_value path ]
   | Modify_file { path; expected_content; replacement_content } ->
       value_array
         [
@@ -872,6 +878,15 @@ let canonical_operation value =
               Error
                 (Invalid_canonical_shape
                    "modify operation must contain four values"))
+      | Ok 5L -> (
+          match fields with
+          | [ path ] ->
+              canonical_path path
+              |> Result.map (fun path -> Create_directory { path })
+          | _ ->
+              Error
+                (Invalid_canonical_shape
+                   "create-directory operation must contain two values"))
       | Ok 2L -> (
           match fields with
           | [ path; prior ] -> (
@@ -932,6 +947,18 @@ let canonical_operations value =
             | Ok operation -> decode (operation :: reversed) rest)
       in
       decode [] values
+
+module Scratch_operation = struct
+  let canonical_bytes operation =
+    scratch_operation_value operation |> Encoding.encode
+
+  let decode_canonical_bytes bytes =
+    let ( let* ) = Result.bind in
+    let* value = canonical_value bytes in
+    let* operation = canonical_operation value in
+    if String.equal bytes (canonical_bytes operation) then Ok operation
+    else Error Noncanonical_canonical_bytes
+end
 
 let canonical_source value =
   match canonical_integer "scratch event source" value with
@@ -1249,6 +1276,8 @@ let scratch_operation_equal left right =
       Path.equal left.path right.path
       && String.equal left.content right.content
       && left.mode = right.mode
+  | Create_directory left, Create_directory right ->
+      Path.equal left.path right.path
   | Modify_file left, Modify_file right ->
       Path.equal left.path right.path
       && String.equal left.expected_content right.expected_content
@@ -1263,8 +1292,8 @@ let scratch_operation_equal left right =
       Path.equal left.path right.path
       && left.expected_mode = right.expected_mode
       && left.replacement_mode = right.replacement_mode
-  | ( ( Create_file _ | Modify_file _ | Delete_path _ | Move_path _
-      | Change_mode _ ),
+  | ( ( Create_file _ | Create_directory _ | Modify_file _ | Delete_path _
+      | Move_path _ | Change_mode _ ),
       _ ) ->
       false
 

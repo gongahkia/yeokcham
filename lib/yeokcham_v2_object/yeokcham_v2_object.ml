@@ -2,18 +2,23 @@ module Encoding = Yeokcham_encoding
 module Ledger = Yeokcham_v2_ledger
 module Retention = Yeokcham_v2_retention
 module Snapshot = Yeokcham_model.Snapshot
+module Capsule = Yeokcham_v2_capsule
 
 type kind =
   | Ledger_event
   | Scratch_snapshot
   | Scratch_protection
   | Scratch_generation
+  | Capsule
+  | Capsule_revision
 
 type t =
   | Ledger_event_frame of Ledger.t
   | Scratch_snapshot_frame of Snapshot.t
   | Scratch_protection_frame of Retention.protection
   | Scratch_generation_frame of Retention.generation
+  | Capsule_frame of Capsule.capsule
+  | Capsule_revision_frame of Capsule.revision
 
 type error =
   | Invalid_payload of string
@@ -23,6 +28,7 @@ type error =
   | Unknown_kind of int64
   | Ledger_error of Ledger.error
   | Retention_error of Retention.error
+  | Capsule_error of Capsule.error
   | Snapshot_error of Yeokcham_model.canonical_decode_error
   | Noncanonical_frame
 
@@ -48,6 +54,7 @@ let error_to_string = function
   | Unknown_kind kind -> Printf.sprintf "unknown V2 typed object kind: %Ld" kind
   | Ledger_error error -> Ledger.error_to_string error
   | Retention_error error -> Retention.error_to_string error
+  | Capsule_error error -> Capsule.error_to_string error
   | Snapshot_error error ->
       Yeokcham_model.canonical_decode_error_to_string error
   | Noncanonical_frame -> "V2 typed object frame is noncanonical"
@@ -92,34 +99,52 @@ let ledger_event event = Ledger_event_frame event
 let scratch_snapshot snapshot = Scratch_snapshot_frame snapshot
 let scratch_protection protection = Scratch_protection_frame protection
 let scratch_generation generation = Scratch_generation_frame generation
+let capsule capsule = Capsule_frame capsule
+let capsule_revision revision = Capsule_revision_frame revision
 
 let kind = function
   | Ledger_event_frame _ -> Ledger_event
   | Scratch_snapshot_frame _ -> Scratch_snapshot
   | Scratch_protection_frame _ -> Scratch_protection
   | Scratch_generation_frame _ -> Scratch_generation
+  | Capsule_frame _ -> Capsule
+  | Capsule_revision_frame _ -> Capsule_revision
 
 let ledger = function
   | Ledger_event_frame event -> Some event
   | Scratch_snapshot_frame _ | Scratch_protection_frame _
-  | Scratch_generation_frame _ ->
+  | Scratch_generation_frame _ | Capsule_frame _ | Capsule_revision_frame _ ->
       None
 
 let snapshot = function
   | Ledger_event_frame _ -> None
   | Scratch_snapshot_frame snapshot -> Some snapshot
-  | Scratch_protection_frame _ | Scratch_generation_frame _ -> None
+  | Scratch_protection_frame _ | Scratch_generation_frame _ | Capsule_frame _
+  | Capsule_revision_frame _ ->
+      None
 
 let protection = function
   | Scratch_protection_frame protection -> Some protection
   | Ledger_event_frame _ | Scratch_snapshot_frame _ | Scratch_generation_frame _
-    ->
+  | Capsule_frame _ | Capsule_revision_frame _ ->
       None
 
 let generation = function
   | Scratch_generation_frame generation -> Some generation
   | Ledger_event_frame _ | Scratch_snapshot_frame _ | Scratch_protection_frame _
-    ->
+  | Capsule_frame _ | Capsule_revision_frame _ ->
+      None
+
+let capsule_record = function
+  | Capsule_frame capsule -> Some capsule
+  | Ledger_event_frame _ | Scratch_snapshot_frame _ | Scratch_protection_frame _
+  | Scratch_generation_frame _ | Capsule_revision_frame _ ->
+      None
+
+let capsule_revision_record = function
+  | Capsule_revision_frame revision -> Some revision
+  | Ledger_event_frame _ | Scratch_snapshot_frame _ | Scratch_protection_frame _
+  | Scratch_generation_frame _ | Capsule_frame _ ->
       None
 
 let kind_code = function
@@ -127,6 +152,8 @@ let kind_code = function
   | Scratch_snapshot -> 1L
   | Scratch_protection -> 2L
   | Scratch_generation -> 3L
+  | Capsule -> 4L
+  | Capsule_revision -> 5L
 
 let payload = function
   | Ledger_event_frame event -> Ledger.encode event
@@ -135,6 +162,8 @@ let payload = function
       Retention.encode_protection protection
   | Scratch_generation_frame generation ->
       Retention.encode_generation generation
+  | Capsule_frame capsule -> Capsule.encode_capsule capsule
+  | Capsule_revision_frame revision -> Capsule.encode_revision revision
 
 let encode frame =
   let value =
@@ -170,6 +199,14 @@ let decode_payload kind payload =
         Retention.decode_generation payload
         |> Result.map scratch_generation
         |> Result.map_error (fun error -> Retention_error error)
+    | Capsule ->
+        Capsule.decode_capsule payload
+        |> Result.map capsule
+        |> Result.map_error (fun error -> Capsule_error error)
+    | Capsule_revision ->
+        Capsule.decode_revision payload
+        |> Result.map capsule_revision
+        |> Result.map_error (fun error -> Capsule_error error)
 
 let decode encoded =
   let* value =
@@ -191,6 +228,8 @@ let decode encoded =
           | 1L -> Ok Scratch_snapshot
           | 2L -> Ok Scratch_protection
           | 3L -> Ok Scratch_generation
+          | 4L -> Ok Capsule
+          | 5L -> Ok Capsule_revision
           | value -> Error (Unknown_kind value)
         in
         let* payload = bytes "V2 typed object frame payload" payload in

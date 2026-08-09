@@ -140,6 +140,10 @@ type error =
   | Scratch_event_missing_target of Ledger.Event_id.t
   | Unknown_scratch_event of Ledger.Event_id.t
   | Event_outside_scratch_scope of Ledger.Event_id.t
+  | Scratch_event_not_ancestor of {
+      source : Ledger.Event_id.t;
+      target : Ledger.Event_id.t;
+    }
   | Scratch_target_not_snapshot of {
       event_id : Ledger.Event_id.t;
       object_ref : V2_model.Opaque_object_ref.t;
@@ -248,6 +252,10 @@ let error_to_string = function
   | Event_outside_scratch_scope event_id ->
       "selected event is outside this device scratch scope: "
       ^ Ledger.Event_id.to_hex event_id
+  | Scratch_event_not_ancestor { source; target } ->
+      Printf.sprintf "scratch event %s is not an ancestor of %s"
+        (Ledger.Event_id.to_hex source)
+        (Ledger.Event_id.to_hex target)
   | Scratch_target_not_snapshot { event_id; object_ref } ->
       Printf.sprintf "scratch event %s targets non-snapshot object %s"
         (Ledger.Event_id.to_hex event_id)
@@ -891,6 +899,30 @@ let checkpoint_for_event repository ~event_id =
               else checkpoint_of_verified repository verified)
   in
   find object_refs
+
+let require_ancestor repository ~source ~target =
+  let* active_ref = active_scratch_ref repository in
+  let* history, _ = history_for_scope repository ~scope_ref:active_ref in
+  let rec find_source = function
+    | [] -> Error (Scratch_event_not_ancestor { source; target })
+    | checkpoint :: rest ->
+        if
+          Ledger.Event_id.equal source
+            checkpoint.retention_checkpoint.Retention.event_id
+        then find_target rest
+        else find_source rest
+  and find_target = function
+    | [] -> Error (Scratch_event_not_ancestor { source; target })
+    | checkpoint :: rest ->
+        if
+          Ledger.Event_id.equal target
+            checkpoint.retention_checkpoint.Retention.event_id
+        then Ok ()
+        else find_target rest
+  in
+  if Ledger.Event_id.equal source target then
+    checkpoint_for_event repository ~event_id:source |> Result.map (fun _ -> ())
+  else find_source history
 
 let publication_ref = function
   | Object_store.Published object_ref

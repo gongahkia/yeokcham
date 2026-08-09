@@ -37,6 +37,8 @@ let kind_to_string = function
   | Object.Scratch_snapshot -> "scratch snapshot"
   | Object.Scratch_protection -> "scratch protection"
   | Object.Scratch_generation -> "scratch generation"
+  | Object.Capsule -> "capsule"
+  | Object.Capsule_revision -> "capsule revision"
 
 let error_to_string = function
   | Object_store_error error -> Object_store.error_to_string error

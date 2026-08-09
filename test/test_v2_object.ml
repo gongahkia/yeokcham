@@ -1,5 +1,6 @@
 module Encoding = Yeokcham_encoding
 module Golden = Yeokcham_testkit.Golden_fixture
+module Capsule = Yeokcham_v2_capsule
 module Ledger = Yeokcham_v2_ledger
 module Model = Yeokcham_model
 module Object = Yeokcham_v2_object
@@ -32,6 +33,10 @@ let read_golden name =
   Golden.read_lower_hex_file (Filename.concat "golden" name)
   |> require_ok Fun.id
 
+let refreshed_golden name actual =
+  Golden.refresh_lower_hex_file (Filename.concat "golden" name) actual
+  |> require_ok Fun.id
+
 let path components =
   Model.Path.of_components components |> require_ok Model.Path.error_to_string
 
@@ -49,6 +54,49 @@ let object_ref character =
   |> require_ok V2_model.identity_error_to_string
 
 let ref_name value = Ledger.Ref_name.of_string value |> require_ok Fun.id
+
+let capsule_id character =
+  V2_model.Capsule_id.of_bytes (String.make 32 character)
+  |> require_ok V2_model.identity_error_to_string
+
+let capsule_records () =
+  let source = snapshot "before" in
+  let target = snapshot "after" in
+  let proposal =
+    Capsule.propose ~from:source ~to_:target
+    |> require_ok Capsule.proposal_error_to_string
+  in
+  let selection =
+    Capsule.select proposal ~indices:[ 0 ]
+    |> require_ok Capsule.selection_error_to_string
+  in
+  let capsule =
+    Capsule.make_capsule ~id:(capsule_id 'c') ~title:"exact"
+      ~description:"bytes" ~created_at:17L
+    |> require_ok Capsule.error_to_string
+  in
+  let source_link : Capsule.snapshot_link =
+    {
+      Capsule.snapshot_id = Model.Snapshot.id source;
+      snapshot_ref = object_ref 'a';
+    }
+  in
+  let target_link : Capsule.snapshot_link =
+    {
+      Capsule.snapshot_id = Model.Snapshot.id target;
+      snapshot_ref = object_ref 'b';
+    }
+  in
+  let boundary : Capsule.source_boundary =
+    { Capsule.source_snapshot = source_link; target_snapshot = target_link }
+  in
+  let revision =
+    Capsule.make_initial_revision ~capsule ~capsule_ref:(object_ref 'c')
+      ~declared_base:source_link ~declared_base_snapshot:source
+      ~expected_result:target_link ~selected:selection ~source_boundary:boundary
+    |> require_ok Capsule.error_to_string
+  in
+  (capsule, revision)
 
 let retention_frames_are_canonical_and_type_separated () =
   let protection =
@@ -151,6 +199,49 @@ let exact_frames_are_canonical_and_kind_separated () =
         (Model.Snapshot.equal scratch decoded)
   | None -> Alcotest.fail "scratch frame decoded as a ledger frame"
 
+let capsule_frames_are_canonical_and_kind_separated () =
+  let capsule, revision = capsule_records () in
+  let capsule_frame = Object.capsule capsule in
+  let revision_frame = Object.capsule_revision revision in
+  let decoded_capsule =
+    Object.decode (Object.encode capsule_frame)
+    |> require_ok Object.error_to_string
+  in
+  let decoded_revision =
+    Object.decode (Object.encode revision_frame)
+    |> require_ok Object.error_to_string
+  in
+  Alcotest.(check bool)
+    "capsule frame retains its kind" true
+    (Object.kind decoded_capsule = Object.Capsule);
+  Alcotest.(check bool)
+    "capsule revision frame retains its kind" true
+    (Object.kind decoded_revision = Object.Capsule_revision);
+  Alcotest.(check string)
+    "capsule frame canonical golden"
+    (refreshed_golden "v2-object-capsule-frame-v1.cbor.hex"
+       (Object.encode capsule_frame))
+    (Object.encode capsule_frame);
+  Alcotest.(check string)
+    "capsule revision frame canonical golden"
+    (refreshed_golden "v2-object-capsule-revision-frame-v1.cbor.hex"
+       (Object.encode revision_frame))
+    (Object.encode revision_frame);
+  match
+    ( Object.capsule_record decoded_capsule,
+      Object.capsule_revision_record decoded_revision )
+  with
+  | Some decoded_capsule, Some decoded_revision ->
+      Alcotest.(check string)
+        "capsule payload round trips"
+        (Capsule.encode_capsule capsule)
+        (Capsule.encode_capsule decoded_capsule);
+      Alcotest.(check string)
+        "revision payload round trips"
+        (Capsule.encode_revision revision)
+        (Capsule.encode_revision decoded_revision)
+  | None, _ | _, None -> Alcotest.fail "capsule frame decoded as another kind"
+
 let malformed_or_untyped_payloads_reject () =
   let scratch = snapshot "x" |> Model.Snapshot.canonical_bytes in
   let expect predicate encoded =
@@ -162,8 +253,10 @@ let malformed_or_untyped_payloads_reject () =
     | Ok _ -> Alcotest.fail "malformed typed object unexpectedly decoded"
   in
   expect
-    ((function Object.Unknown_kind 4L -> true | _ -> false) [@warning "-4"])
-    (frame ~kind:4L scratch);
+    ((function Object.Unknown_kind 6L -> true | _ -> false) [@warning "-4"])
+    (refreshed_golden
+       "v2-object-scratch-snapshot-frame-v1.unknown-kind.cbor.hex"
+       (frame ~kind:6L scratch));
   expect
     ((function Object.Unsupported_mandatory_features 1L -> true | _ -> false)
       [@warning "-4"])
@@ -199,6 +292,8 @@ let () =
             `Quick exact_frames_are_canonical_and_kind_separated;
           Alcotest.test_case "retention frames are canonical and type-separated"
             `Quick retention_frames_are_canonical_and_type_separated;
+          Alcotest.test_case "capsule frames are canonical and type-separated"
+            `Quick capsule_frames_are_canonical_and_kind_separated;
           Alcotest.test_case "malformed or untyped payloads reject" `Quick
             malformed_or_untyped_payloads_reject;
           QCheck_alcotest.to_alcotest ~speed_level:`Quick

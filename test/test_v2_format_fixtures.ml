@@ -75,6 +75,8 @@ let valid_fixtures_are_exact_and_canonical () =
   let ledger_event = canonical_ledger "v2-ref-ledger-event-v1.cbor.hex" in
   let ledger_frame = canonical_object "v2-object-ledger-frame-v1.cbor.hex" in
   ignore (canonical_object "v2-object-scratch-snapshot-frame-v1.cbor.hex");
+  ignore (canonical_object "v2-object-capsule-frame-v1.cbor.hex");
+  ignore (canonical_object "v2-object-capsule-revision-frame-v1.cbor.hex");
   let ledger_envelope =
     canonical_envelope "v2-ref-ledger-envelope-v1.cbor.hex"
   in
@@ -176,7 +178,7 @@ let fixed_invalid_fixtures_reject_with_typed_errors () =
     ];
   expect_object_fixture_error
     "v2-object-scratch-snapshot-frame-v1.unknown-kind.cbor.hex" (function
-    | Object.Unknown_kind 4L -> true
+    | Object.Unknown_kind 6L -> true
     | _ -> false)
   [@warning "-4"];
   expect_object_fixture_error
