@@ -65,11 +65,7 @@ type resolved = {
 }
 
 type publication = Published of resolved | Already_published of resolved
-
-type split_plan = {
-  split_source : resolved;
-  split : Capsule.split_plan;
-}
+type split_plan = { split_source : resolved; split : Capsule.split_plan }
 
 type combine_plan = {
   combine_sources : resolved list;
@@ -480,7 +476,9 @@ let plan_split repository ~source ~left_indices =
 let split_plan_source plan = plan.split_source
 let split_plan_left_indices plan = Capsule.split_plan_left_indices plan.split
 let split_plan_left_result plan = Capsule.split_plan_left_result plan.split
-let split_plan_right_operations plan = Capsule.split_plan_right_operations plan.split
+
+let split_plan_right_operations plan =
+  Capsule.split_plan_right_operations plan.split
 
 let plan_combine repository ~sources =
   let rec resolve_sources reversed = function

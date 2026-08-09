@@ -287,10 +287,12 @@ let split_and_combine_plans_do_not_publish () =
         |> require_ok Capsule_store.error_to_string
         |> function
         | Capsule_store.Published resolved -> resolved
-        | Capsule_store.Already_published _ -> Alcotest.fail "unexpected existing capsule"
+        | Capsule_store.Already_published _ ->
+            Alcotest.fail "unexpected existing capsule"
       in
       ignore
-        (Capsule_store.plan_split capsules ~source:capsule_id ~left_indices:[ 0 ]
+        (Capsule_store.plan_split capsules ~source:capsule_id
+           ~left_indices:[ 0 ]
         |> require_ok Capsule_store.error_to_string);
       ignore
         (Capsule_store.plan_combine capsules ~sources:[ capsule_id ]

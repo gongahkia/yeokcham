@@ -38,8 +38,8 @@ type selection_error =
   | Selection_index_out_of_bounds of { index : int; operation_count : int }
   | Selected_operation_rejected of {
       proposal_index : int;
-    cause : Model.transition_error;
-  }
+      cause : Model.transition_error;
+    }
 
 type split_error =
   | Split_selection_error of selection_error
@@ -188,15 +188,12 @@ val split_plan_left_result : split_plan -> Model.Snapshot.t
 val split_plan_right_operations : split_plan -> Model.scratch_operation list
 
 val plan_combine :
-  base:Model.Snapshot.t ->
-  revision list ->
-  (combine_plan, combine_error) result
+  base:Model.Snapshot.t -> revision list -> (combine_plan, combine_error) result
 (** Validates caller-supplied revision order without publication. Every source
     must begin at the exact result of the preceding source. *)
 
 val combine_plan_operations : combine_plan -> Model.scratch_operation list
 val combine_plan_result : combine_plan -> Model.Snapshot.t
-
 val encode_capsule : capsule -> string
 val decode_capsule : string -> (capsule, error) result
 val encode_revision : revision -> string

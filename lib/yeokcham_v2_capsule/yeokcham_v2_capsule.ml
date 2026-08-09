@@ -85,8 +85,8 @@ type selection_error =
   | Selection_index_out_of_bounds of { index : int; operation_count : int }
   | Selected_operation_rejected of {
       proposal_index : int;
-    cause : Model.transition_error;
-  }
+      cause : Model.transition_error;
+    }
 
 type split_error =
   | Split_selection_error of selection_error
@@ -156,7 +156,8 @@ let combine_error_to_string = function
   | Empty_combine -> "combine plan has no source revisions"
   | Combine_declared_base_mismatch { source_index; expected; actual } ->
       Printf.sprintf "combine source %d declares base %s, expected %s"
-        source_index (Yeokcham_id.Snapshot_id.to_hex actual)
+        source_index
+        (Yeokcham_id.Snapshot_id.to_hex actual)
         (Yeokcham_id.Snapshot_id.to_hex expected)
   | Combine_replay_rejected { source_index; cause } ->
       Printf.sprintf "combine source %d replay rejected: %s" source_index
@@ -726,17 +727,28 @@ let plan_combine ~base revisions =
   | [] -> Error Empty_combine
   | _ ->
       let rec apply source_index state operations = function
-        | [] -> Ok { combine_operations = List.rev operations; combine_result = state }
-        | revision :: rest ->
+        | [] ->
+            Ok
+              {
+                combine_operations = List.rev operations;
+                combine_result = state;
+              }
+        | revision :: rest -> (
             let expected_base = Model.Snapshot.id state in
             let actual_base = (revision_declared_base revision).snapshot_id in
-            if not (Yeokcham_id.Snapshot_id.equal expected_base actual_base) then
+            if not (Yeokcham_id.Snapshot_id.equal expected_base actual_base)
+            then
               Error
                 (Combine_declared_base_mismatch
-                   { source_index; expected = expected_base; actual = actual_base })
+                   {
+                     source_index;
+                     expected = expected_base;
+                     actual = actual_base;
+                   })
             else
               match apply_revision ~base:state revision with
-              | Error cause -> Error (Combine_replay_rejected { source_index; cause })
+              | Error cause ->
+                  Error (Combine_replay_rejected { source_index; cause })
               | Ok result ->
                   let expected_result =
                     (revision_expected_result revision).snapshot_id
@@ -744,7 +756,8 @@ let plan_combine ~base revisions =
                   let actual_result = Model.Snapshot.id result in
                   if
                     not
-                      (Yeokcham_id.Snapshot_id.equal expected_result actual_result)
+                      (Yeokcham_id.Snapshot_id.equal expected_result
+                         actual_result)
                   then
                     Error
                       (Combine_expected_result_mismatch
@@ -755,8 +768,10 @@ let plan_combine ~base revisions =
                          })
                   else
                     apply (source_index + 1) result
-                      (List.rev_append (revision_operations revision) operations)
-                      rest
+                      (List.rev_append
+                         (revision_operations revision)
+                         operations)
+                      rest)
       in
       apply 0 base [] revisions
 

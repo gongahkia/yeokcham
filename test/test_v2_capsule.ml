@@ -264,12 +264,17 @@ let immutable_child_revision_replays_and_round_trips () =
     |> require_ok Capsule.proposal_error_to_string
   in
   let adjacent =
-    Capsule.make_revision ~capsule ~capsule_ref:(opaque 'i') ~parent:(Some parent)
-      ~declared_base:target_link ~declared_base_snapshot:target
-      ~expected_result:later_link
+    Capsule.make_revision ~capsule ~capsule_ref:(opaque 'i')
+      ~parent:(Some parent) ~declared_base:target_link
+      ~declared_base_snapshot:target ~expected_result:later_link
       ~operations:(Capsule.proposal_operations adjacent_delta)
       ~source_boundaries:
-        [ { Capsule.source_snapshot = target_link; target_snapshot = later_link } ]
+        [
+          {
+            Capsule.source_snapshot = target_link;
+            target_snapshot = later_link;
+          };
+        ]
       ~provenance:(Capsule.Folded parent) ~created_at:18L
     |> require_ok Capsule.error_to_string
   in
