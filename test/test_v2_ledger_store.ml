@@ -184,6 +184,51 @@ let create_only_publication_reopens_and_preserves_v2_root () =
           Alcotest.failf "published V2 envelope changed root classification: %s"
             (Cutover.classification_to_string classification))
 
+let stale_ledger_temporary_is_non_authoritative () =
+  with_v2_repository (fun root repository ->
+      let event = signed_event () in
+      let envelope = envelope event in
+      let object_ref =
+        match Ledger_store.publish repository ~envelope with
+        | Ok (Ledger_store.Published { object_ref; _ }) -> object_ref
+        | Ok (Ledger_store.Already_published _) ->
+            Alcotest.fail "first publication reported an existing object"
+        | Error error -> Alcotest.fail (Ledger_store.error_to_string error)
+      in
+      let final = Ledger_store.object_path repository object_ref in
+      let temporary =
+        Filename.concat (Filename.dirname final)
+          (Printf.sprintf ".%s.ledger-123-0" (Filename.basename final))
+      in
+      let descriptor =
+        Unix.openfile temporary
+          [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_EXCL ]
+          0o600
+      in
+      Unix.close descriptor;
+      (match Cutover.detect ~root |> require_ok Cutover.error_to_string with
+      | Cutover.V2 -> ()
+      | ( Cutover.Empty | Cutover.Legacy | Cutover.Mixed_or_unknown _
+        | Cutover.Incomplete _ ) as classification ->
+          Alcotest.failf
+            "regular ledger temporary changed root classification: %s"
+            (Cutover.classification_to_string classification));
+      let objects =
+        Ledger_store.list_object_refs repository
+        |> require_ok Ledger_store.error_to_string
+      in
+      Alcotest.(check (list string))
+        "temporary is not an object"
+        [ Model.Opaque_object_ref.to_hex object_ref ]
+        (List.map Model.Opaque_object_ref.to_hex objects);
+      Unix.unlink temporary;
+      Unix.mkdir temporary 0o700;
+      match Cutover.detect ~root |> require_ok Cutover.error_to_string with
+      | Cutover.V2 -> Alcotest.fail "non-regular ledger temporary was accepted"
+      | Cutover.Empty | Cutover.Legacy | Cutover.Mixed_or_unknown _
+      | Cutover.Incomplete _ ->
+          ())
+
 let rejected_or_blocked_publication_writes_no_object () =
   with_v2_repository (fun _ repository ->
       let invalid_envelope =
@@ -243,6 +288,8 @@ let () =
             `Quick canonical_record_envelope_and_address_goldens;
           Alcotest.test_case "create-only publish/reopen retains V2 root" `Quick
             create_only_publication_reopens_and_preserves_v2_root;
+          Alcotest.test_case "stale ledger temporary is non-authoritative"
+            `Quick stale_ledger_temporary_is_non_authoritative;
           Alcotest.test_case "rejected and blocked publish leave no object"
             `Quick rejected_or_blocked_publication_writes_no_object;
         ] );

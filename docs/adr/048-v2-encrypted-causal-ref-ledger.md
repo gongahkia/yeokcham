@@ -160,6 +160,13 @@ unknown-signer, and signature fixtures must be checked in. There is no V1
 migration, V1 reader, or V1 object reuse. The object publication adapter must
 use only an accepted V2-only root and never mutate the sole legacy copy.
 
+The private same-shard staging name is exactly
+`.<60-lowercase-hex-object-leaf>.ledger-<decimal-pid>-<decimal-attempt>`.
+Only an exact regular file with that grammar is a non-authoritative crash
+remnant during root validation and object enumeration; it is never a ledger
+object and is not removed implicitly. Every other name or file kind fails
+closed.
+
 ## Verification
 
 - Unit tests cover canonical encode/decode, record-ID recomputation,

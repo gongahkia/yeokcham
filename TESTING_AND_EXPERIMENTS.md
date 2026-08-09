@@ -48,6 +48,27 @@ Generate:
 
 Core properties:
 
+#### P0 — V2 multiprocess immutable recovery
+
+V2-009 runs a seeded real-process state machine, with a separately derived
+per-property random state, over two through four sibling causal children and a
+bounded nonce offset. The printed base seed and `forks`/`offset` counterexample
+reproduce a failing sequence. Each run concurrently publishes sibling encrypted
+ledger events, races two byte-identical prepare writers, and models child exit
+immediately after durable prepare and immediately after durable commit.
+
+The parent reopens the repository, verifies it without mutation, then recovers
+the journals and verifies it again. Before recovery, the report must retain the
+complete explicit causal divergence together with one prepare-only and one
+committed transaction; the on-disk image must be byte-identical across the
+read-only verification. After recovery, exactly the prepare-only transaction is
+discarded, the committed transaction's immutable event is published, no journal
+state remains, and the causal heads remain an explicit divergence rather than a
+selected winner. Root validation and enumeration may ignore only the V2
+adapter's exact regular private staging-file grammar, including a temporary
+that disappears between enumeration and inspection; all canonical object names
+and other paths remain fail-closed.
+
 #### P1 — Snapshot round trip
 
 Serialise, store, load, and materialise a snapshot; resulting filesystem model is identical.

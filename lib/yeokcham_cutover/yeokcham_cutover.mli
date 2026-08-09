@@ -38,6 +38,10 @@ type error =
 val classification_to_string : classification -> string
 val error_to_string : error -> string
 
+val is_v2_object_temporary_filename : string -> bool
+(** [is_v2_object_temporary_filename] recognizes the exact private staging
+    grammar used by the V2 ledger object adapter. *)
+
 val detect : root:string -> (classification, error) result
 (** [detect ~root] is read-only. It fails closed on symlinks, malformed layouts,
     unknown content, and the V2-marker/V1-data hybrid. *)

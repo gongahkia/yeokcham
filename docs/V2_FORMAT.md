@@ -91,6 +91,13 @@ retry; different bytes at the same opaque address are a collision error.
 Rejected inputs and blocked publication leave no accepted object or mutable-ref
 change.
 
+The private staging name is exactly
+`.<60-lowercase-hex-object-leaf>.ledger-<decimal-pid>-<decimal-attempt>` in
+the final object shard. A valid V2 root and object enumeration ignore only an
+exact regular file with that grammar as a non-authoritative crash remnant; an
+otherwise matching non-regular path and every other name fail closed. It is
+never a published object and is not removed implicitly.
+
 The fixed inner record, outer envelope, and opaque-address vectors are in
 `test/golden/v2-ref-ledger-*.hex`. This establishes cryptographic validity and
 causal data only. Key custody, trust, authorization, transactions, candidate

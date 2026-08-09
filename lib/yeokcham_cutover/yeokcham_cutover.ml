@@ -630,19 +630,50 @@ let validate_v2_object_file path =
         { path; detail = V2_envelope.error_to_string error })
   |> Result.map (fun _ -> ())
 
+let decimal_name name =
+  String.length name > 0
+  && String.for_all (function '0' .. '9' -> true | _ -> false) name
+
+let is_v2_object_temporary_filename name =
+  match String.split_on_char '.' name with
+  | [ ""; object_name; staging ] when is_hex_name object_name 60 -> (
+      match String.split_on_char '-' staging with
+      | [ "ledger"; pid; attempt ] -> decimal_name pid && decimal_name attempt
+      | _ -> false)
+  | _ -> false
+
+let lstat_temporary_if_present path =
+  try Ok (Some (Unix.lstat path)) with
+  | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok None
+  | Unix.Unix_error (error, _, _) -> Error (io_error "lstat" path error)
+
 let validate_v2_objects objects =
   let rec validate_leaves prefix = function
     | [] -> Ok ()
     | name :: rest ->
         let path = Filename.concat prefix name in
-        let* stat = lstat path in
-        if stat.Unix.st_kind <> Unix.S_REG || not (is_hex_name name 60) then
-          Error
-            (Archive_verification_failed
-               { path; detail = "invalid V2 opaque object name" })
+        if is_v2_object_temporary_filename name then
+          let* stat = lstat_temporary_if_present path in
+          match stat with
+          | None -> validate_leaves prefix rest
+          | Some stat when stat.Unix.st_kind = Unix.S_REG ->
+              validate_leaves prefix rest
+          | Some _ ->
+              Error
+                (Archive_verification_failed
+                   {
+                     path;
+                     detail = "V2 object temporary is not a regular file";
+                   })
         else
-          let* () = validate_v2_object_file path in
-          validate_leaves prefix rest
+          let* stat = lstat path in
+          if stat.Unix.st_kind <> Unix.S_REG || not (is_hex_name name 60) then
+            Error
+              (Archive_verification_failed
+                 { path; detail = "invalid V2 opaque object name" })
+          else
+            let* () = validate_v2_object_file path in
+            validate_leaves prefix rest
   in
   let rec validate_prefixes shard = function
     | [] -> Ok ()

@@ -251,6 +251,24 @@
   yeokcham_v2_transaction))
 
 (test
+ (name v2_state_machine_property_test)
+ (modules v2_state_machine_property_test)
+ (libraries
+  alcotest
+  mirage-crypto-ec
+  qcheck-core
+  qcheck-alcotest
+  unix
+  yeokcham_store
+  yeokcham_v2_address
+  yeokcham_v2_envelope
+  yeokcham_v2_ledger
+  yeokcham_v2_ledger_store
+  yeokcham_v2_model
+  yeokcham_v2_transaction_store
+  yeokcham_v2_verification))
+
+(test
  (name test_v2_transaction_store)
  (modules test_v2_transaction_store)
  (libraries
@@ -1162,6 +1180,7 @@
   (:test_v2_address test_v2_address.exe)
   (:test_v2_ledger test_v2_ledger.exe)
   (:v2_transaction_property_test v2_transaction_property_test.exe)
+  (:v2_state_machine_property_test v2_state_machine_property_test.exe)
   (:test_v2_verification test_v2_verification.exe)
   (:test_v2_format_fixtures test_v2_format_fixtures.exe)
   (:exchange_property_test exchange_property_test.exe)
@@ -1198,6 +1217,7 @@
    (run %{store_property_test})
    (run %{test_v2_ledger})
    (run %{v2_transaction_property_test})
+   (run %{v2_state_machine_property_test})
    (run %{test_v2_verification})
    (run %{test_v2_format_fixtures})
    (run %{exchange_property_test})

@@ -114,26 +114,41 @@ let stat_kind path =
   with Unix.Unix_error (error, _, _) ->
     Error (io_error ~operation:"lstat" ~path error)
 
+let temporary_stat_kind_if_present path =
+  try Ok (Some (Unix.lstat path).Unix.st_kind) with
+  | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok None
+  | Unix.Unix_error (error, _, _) ->
+      Error (io_error ~operation:"lstat" ~path error)
+
 let list_object_refs repository =
   let* () = check_v2_root repository.root in
   let rec scan_leaves first_shard second_shard result = function
     | [] -> Ok result
     | name :: rest ->
         let path = Filename.concat second_shard name in
-        let* kind = stat_kind path in
-        if
-          kind <> Unix.S_REG
-          || (not (lowercase_hex name 60))
-          || (not (lowercase_hex (Filename.basename first_shard) 2))
-          || not (lowercase_hex (Filename.basename second_shard) 2)
-        then Error (Invalid_object_path path)
+        if Cutover.is_v2_object_temporary_filename name then
+          let* kind = temporary_stat_kind_if_present path in
+          match kind with
+          | None -> scan_leaves first_shard second_shard result rest
+          | Some kind ->
+              if kind = Unix.S_REG then
+                scan_leaves first_shard second_shard result rest
+              else Error (Invalid_object_path path)
         else
-          let encoded = first_shard ^ Filename.basename second_shard ^ name in
-          let* object_ref =
-            Model.Opaque_object_ref.of_hex encoded
-            |> Result.map_error (fun _ -> Invalid_object_path path)
-          in
-          scan_leaves first_shard second_shard (object_ref :: result) rest
+          let* kind = stat_kind path in
+          if
+            kind <> Unix.S_REG
+            || (not (lowercase_hex name 60))
+            || (not (lowercase_hex (Filename.basename first_shard) 2))
+            || not (lowercase_hex (Filename.basename second_shard) 2)
+          then Error (Invalid_object_path path)
+          else
+            let encoded = first_shard ^ Filename.basename second_shard ^ name in
+            let* object_ref =
+              Model.Opaque_object_ref.of_hex encoded
+              |> Result.map_error (fun _ -> Invalid_object_path path)
+            in
+            scan_leaves first_shard second_shard (object_ref :: result) rest
   in
   let rec scan_second_shards first_shard result = function
     | [] -> Ok result
