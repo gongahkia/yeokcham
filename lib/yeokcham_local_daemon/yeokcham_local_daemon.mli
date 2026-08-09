@@ -5,6 +5,7 @@
     session; it is not a device credential or repository authority. *)
 
 type operation = Ping | Shutdown
+type runtime_location = Xdg_runtime of string | Fallback_runtime of string
 type endpoint
 type daemon
 
@@ -21,6 +22,13 @@ type error =
 type serve_result = Continue | Stopped
 
 val error_to_string : error -> string
+val runtime_path : runtime_location -> string
+
+val default_runtime_location : unit -> (runtime_location, error) result
+(** Uses a private [XDG_RUNTIME_DIR/yeokcham] when available. The fallback is a
+    private per-user directory below the system temporary directory; callers
+    must surface that weaker lifetime guarantee. *)
+
 val endpoint : runtime_dir:string -> root:string -> (endpoint, error) result
 val socket_path : endpoint -> string
 val discovery_path : endpoint -> string

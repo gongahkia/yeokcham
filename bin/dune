@@ -21,6 +21,11 @@
   unix))
 
 (executable
+ (name yeokchamd)
+ (modules yeokchamd)
+ (libraries yeokcham_local_daemon unix))
+
+(executable
  (name workspace_base_v1)
  (modules workspace_base_v1)
  (libraries yeokcham_scratch yeokcham_snapshot yeokcham_store))

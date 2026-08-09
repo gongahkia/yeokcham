@@ -2,6 +2,7 @@ module Cutover = Yeokcham_cutover
 module Hash = Yeokcham_hash.Sha256
 
 type operation = Ping | Shutdown
+type runtime_location = Xdg_runtime of string | Fallback_runtime of string
 type endpoint = { directory : string; identity : string }
 
 type daemon = {
@@ -73,6 +74,28 @@ let secure_directory path =
     then Error (Runtime_path_rejected path)
     else Ok ()
   with Unix.Unix_error (error, _, _) -> Error (io "lstat" path error)
+
+let ensure_private_directory path =
+  (try Unix.mkdir path 0o700 with Unix.Unix_error (Unix.EEXIST, _, _) -> ())
+  |> fun () -> secure_directory path
+
+let runtime_path = function Xdg_runtime path | Fallback_runtime path -> path
+
+let default_runtime_location () =
+  match Sys.getenv_opt "XDG_RUNTIME_DIR" with
+  | Some base when not (String.is_empty base) ->
+      let* () = secure_directory base in
+      let path = Filename.concat base "yeokcham" in
+      let* () = ensure_private_directory path in
+      Ok (Xdg_runtime path)
+  | None | Some _ ->
+      let path =
+        Filename.concat
+          (Filename.get_temp_dir_name ())
+          (Printf.sprintf "yeokcham-%d" (Unix.getuid ()))
+      in
+      let* () = ensure_private_directory path in
+      Ok (Fallback_runtime path)
 
 let endpoint ~runtime_dir ~root =
   let* () = secure_directory runtime_dir in
