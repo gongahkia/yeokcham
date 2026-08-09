@@ -1,6 +1,6 @@
 # ADR-052 — V2 local bootstrap authority and role-separated capabilities
 
-- Status: Accepted
+- Status: Superseded by ADR-053
 - Date: 2026-08-09
 - Deciders: maintainer (approved development roadmap)
 - Governing issue: [#145](https://github.com/gongahkia/yeokcham/issues/145)

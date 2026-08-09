@@ -1430,15 +1430,17 @@ It neither chooses heads nor turns a cryptographic result into authorization.
 
 ## 24. V2 local bootstrap authority
 
-ADR-052 adds a narrow local precondition for a bootstrap-aware V2 scratch
+ADR-053 replaces ADR-052's initial bootstrap bytes with a narrow local
+precondition for a bootstrap-aware V2 scratch
 service. It is separate from the V2 object graph, causal ledger, transaction
 journal, user identity, and authorization policy:
 
 ```text
 Capability = (envelope-key, address-key, signing-private-key)
-Bootstrap_unsigned = (version=1, repository-id, device-id, signer-key-id,
-                      signer-public-key, envelope-key-commitment,
-                      address-key-commitment, features)
+Key_handle = 32-byte opaque public locator
+Bootstrap_unsigned = (version=2, repository-id, device-id, key-handle,
+                      signer-key-id, signer-public-key,
+                      envelope-key-commitment, address-key-commitment, features)
 Bootstrap = (Bootstrap_unsigned, Ed25519-signature)
 ```
 
@@ -1453,8 +1455,31 @@ match. It supplies no user, membership, trust, ownership, ref-selection, or
 policy result. A missing or mismatched capability is an explicit refusal.
 
 `initialize_bootstrap(R, B)` may create exactly one canonical
-`local-bootstrap-v1.cbor` record in a V2 layout-version-3 root. An exact retry
+`local-bootstrap-v2.cbor` record in a V2 layout-version-3 root. An exact retry
 returns `Already_initialized`; different existing bytes reject without
 overwrite. Strictly named same-directory staging files are non-authoritative
 crash remnants. Older V2 root layouts fail closed in this development phase;
 there is no migration transition.
+
+## 25. Linux Secret Service custody
+
+ADR-053 adds one Linux-only external custody relation. The service state is
+not a Yeokcham repository object:
+
+```text
+Secret_service_attributes = (application, schema, hex(Key_handle))
+Custody(Key_handle) = encode_v1(Capability)
+```
+
+Only fixed public application/schema labels and the signed public key handle
+are attributes. `encode_v1(Capability)` contains the three private role values
+and is supplied to `secret-tool` only on standard input. It is never a
+repository value, argument, log, or disk fixture.
+
+`open_custody(Bootstrap)` first rejects locked or unavailable service state,
+then looks up its key handle. Missing, malformed, and role-confused data reject.
+The reconstructed capability must satisfy `matches(Capability, Bootstrap)`
+before the repository opens. Enrolment writes custody before the create-only
+bootstrap, so the cross-service operation is deliberately non-atomic: an
+interruption may leave an unreachable service item but cannot create a
+repository bootstrap that validates with wrong key material.

@@ -81,12 +81,13 @@ V2-014 currently supplies the pure `yeokcham_v2_scratch_scheduler` core. A
 caller supplies positive monotonic-clock quiet-period and maximum-latency bounds;
 the core coalesces normalized requests, emits each due scan once, and requests no
 checkpoint publication for an unchanged exact scan. It neither reads a working
-tree nor persists a checkpoint. ADR-052 now supplies the first local V2-023
-slice: a canonical signed repository/device/public-signer bootstrap plus opaque
-role-separated injected capabilities. It is not a key store, user identity,
-policy, mutable scratch head, or automatic authority decision. Durable scratch
-publication still needs a concrete provider and the typed causal scratch record
-model before a bootstrap-aware daemon can act on `Publish_checkpoint`.
+tree nor persists a checkpoint. ADR-053 replaces ADR-052's initial bootstrap
+format with a canonical signed repository/device/public-signer/key-handle
+bootstrap and a Linux Secret Service custody adapter for role-separated local
+capabilities. It is not user identity, policy, a mutable scratch head, or an
+automatic authority decision. Durable scratch publication now has a Linux
+provider but still needs the typed causal scratch record model before a
+bootstrap-aware daemon can act on `Publish_checkpoint`.
 
 ## 2. Proposed OCaml workspace
 
