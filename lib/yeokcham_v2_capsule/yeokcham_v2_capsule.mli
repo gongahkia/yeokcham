@@ -28,6 +28,7 @@ type proposal
 type selection
 type capsule
 type revision
+type split_plan
 type proposal_error = Derived_replay_mismatch
 
 type selection_error =
@@ -36,8 +37,12 @@ type selection_error =
   | Selection_index_out_of_bounds of { index : int; operation_count : int }
   | Selected_operation_rejected of {
       proposal_index : int;
-      cause : Model.transition_error;
-    }
+    cause : Model.transition_error;
+  }
+
+type split_error =
+  | Split_selection_error of selection_error
+  | Split_derivation_error of proposal_error
 
 type error =
   | Invalid_title of Yeokcham_encoding.construction_error
@@ -59,6 +64,7 @@ type error =
 
 val proposal_error_to_string : proposal_error -> string
 val selection_error_to_string : selection_error -> string
+val split_error_to_string : split_error -> string
 val error_to_string : error -> string
 
 val propose :
@@ -147,6 +153,20 @@ val apply_revision :
   base:Model.Snapshot.t ->
   revision ->
   (Model.Snapshot.t, Model.replay_error) result
+
+val plan_split :
+  base:Model.Snapshot.t ->
+  revision ->
+  left_indices:int list ->
+  (split_plan, split_error) result
+(** A read-only structural partition. The left result is replayed from the
+    revision base; the right transition is freshly derived from that exact
+    intermediate snapshot to the revision result. *)
+
+val split_plan_left_indices : split_plan -> int list
+val split_plan_left_operations : split_plan -> Model.scratch_operation list
+val split_plan_left_result : split_plan -> Model.Snapshot.t
+val split_plan_right_operations : split_plan -> Model.scratch_operation list
 
 val encode_capsule : capsule -> string
 val decode_capsule : string -> (capsule, error) result

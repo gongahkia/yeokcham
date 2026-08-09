@@ -65,6 +65,13 @@ type revision = {
   revision_created_at : int64 option;
 }
 
+type split_plan = {
+  left_indices : int list;
+  left_operations : Model.scratch_operation list;
+  left_result : Model.Snapshot.t;
+  right_operations : Model.scratch_operation list;
+}
+
 type proposal_error = Derived_replay_mismatch
 
 type selection_error =
@@ -73,8 +80,12 @@ type selection_error =
   | Selection_index_out_of_bounds of { index : int; operation_count : int }
   | Selected_operation_rejected of {
       proposal_index : int;
-      cause : Model.transition_error;
-    }
+    cause : Model.transition_error;
+  }
+
+type split_error =
+  | Split_selection_error of selection_error
+  | Split_derivation_error of proposal_error
 
 type error =
   | Invalid_title of Encoding.construction_error
@@ -114,6 +125,10 @@ let selection_error_to_string = function
       Printf.sprintf "selected capsule operation %d was rejected: %s"
         proposal_index
         (Model.transition_error_to_string cause)
+
+let split_error_to_string = function
+  | Split_selection_error error -> selection_error_to_string error
+  | Split_derivation_error error -> proposal_error_to_string error
 
 let error_to_string = function
   | Invalid_title error ->
@@ -637,6 +652,38 @@ let revision_link_ref link = link.linked_revision_ref
 
 let apply_revision ~base revision =
   Model.Snapshot.apply_operations base revision.revision_operations_
+
+let plan_split ~base revision ~left_indices =
+  match apply_revision ~base revision with
+  | Error _ -> assert false
+  | Ok expected_result ->
+      let proposal =
+        {
+          from_snapshot = base;
+          to_snapshot = expected_result;
+          proposal_operations_ = revision.revision_operations_;
+        }
+      in
+      let* left =
+        select proposal ~indices:left_indices
+        |> Result.map_error (fun error -> Split_selection_error error)
+      in
+      let* right =
+        propose ~from:left.result ~to_:expected_result
+        |> Result.map_error (fun error -> Split_derivation_error error)
+      in
+      Ok
+        {
+          left_indices;
+          left_operations = left.selection_operations;
+          left_result = left.result;
+          right_operations = right.proposal_operations_;
+        }
+
+let split_plan_left_indices plan = plan.left_indices
+let split_plan_left_operations plan = plan.left_operations
+let split_plan_left_result plan = plan.left_result
+let split_plan_right_operations plan = plan.right_operations
 
 let text field value =
   Encoding.text value
