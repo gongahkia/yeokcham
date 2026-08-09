@@ -1,8 +1,8 @@
 # ADR-047 — Explicit V1 archive and V2 cutover boundary
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-09
-- Deciders: maintainer (pending review)
+- Deciders: maintainer (approved 2026-08-09)
 - Supersedes: None
 - Superseded by: None
 - Governing issue: [#132](https://github.com/gongahkia/yeokcham/issues/132)

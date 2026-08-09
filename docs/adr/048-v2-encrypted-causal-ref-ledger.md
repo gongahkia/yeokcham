@@ -1,8 +1,8 @@
 # ADR-048 — V2 encrypted causal ref-ledger with external key verification
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-09
-- Deciders: maintainer (pending review)
+- Deciders: maintainer (approved 2026-08-09)
 - Supersedes: None
 - Superseded by: None
 - Governing issue: [#127](https://github.com/gongahkia/yeokcham/issues/127)
