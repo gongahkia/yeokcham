@@ -38,6 +38,12 @@ let read_all descriptor =
   in
   loop []
 
+let read_file path = In_channel.with_open_bin path In_channel.input_all
+
+let write_file path bytes =
+  Out_channel.with_open_bin path (fun channel ->
+      Out_channel.output_string channel bytes)
+
 let malformed_client_is_rejected endpoint =
   let client = Unix.socket Unix.PF_UNIX Unix.SOCK_STREAM 0 in
   Fun.protect
@@ -49,6 +55,24 @@ let malformed_client_is_rejected endpoint =
       Alcotest.(check string)
         "malformed response" "yeokcham-local-response 1\nstatus=malformed\n"
         (read_all client))
+
+let unauthorized_client_is_rejected root runtime endpoint =
+  let discovery = Daemon.discovery_path endpoint in
+  let original = read_file discovery in
+  let replacement =
+    String.split_on_char '\n' original
+    |> List.map (fun line ->
+        if String.starts_with ~prefix:"capability=" line then
+          "capability=" ^ String.make 64 '0'
+        else line)
+    |> String.concat "\n"
+  in
+  write_file discovery replacement;
+  let rejected = Daemon.ping ~root ~runtime_dir:runtime in
+  write_file discovery original;
+  Alcotest.(check bool)
+    "wrong capability is rejected" true
+    (rejected = Error Daemon.Unauthorized)
 
 let daemon_lifecycle_and_protocol () =
   with_directories (fun root runtime ->
@@ -66,6 +90,7 @@ let daemon_lifecycle_and_protocol () =
       | child ->
           Daemon.ping ~root ~runtime_dir:runtime |> require_ok;
           malformed_client_is_rejected endpoint;
+          unauthorized_client_is_rejected root runtime endpoint;
           Daemon.shutdown ~root ~runtime_dir:runtime |> require_ok;
           let _, status = Unix.waitpid [] child in
           Alcotest.(check bool)
