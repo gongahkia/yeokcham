@@ -106,6 +106,17 @@ let nonces () =
     binding_ledger_nonce = nonce 'h';
   }
 
+let revision_nonces () =
+  {
+    Capsule_store.fold_selected_result_nonce = nonce 'q';
+    fold_revision_nonce = nonce 'r';
+    fold_source_protection_nonce = nonce 's';
+    fold_source_protection_ledger_nonce = nonce 't';
+    fold_target_protection_nonce = nonce 'u';
+    fold_target_protection_ledger_nonce = nonce 'v';
+    fold_binding_ledger_nonce = nonce 'w';
+  }
+
 let capsule_id =
   V2_model.Capsule_id.of_bytes (String.make 32 'c')
   |> require_ok V2_model.identity_error_to_string
@@ -171,6 +182,14 @@ let create scratch capsules ~source ~target ?fault () =
     ~target_event:target_checkpoint.Scratch.event_id
     ~selected_indices:(full_selection source target)
     ~nonces:(nonces ())
+
+let fold capsules ~current ~source_event ~target_event ~source ~target
+    ?fault () =
+  Capsule_store.fold ?fault capsules ~id:capsule_id
+    ~expected_revision:(Capsule.revision_id current.Capsule_store.revision)
+    ~expected_binding:current.Capsule_store.binding_event_id ~source_event
+    ~target_event ~selected_indices:(full_selection source target) ~created_at:18L
+    ~nonces:(revision_nonces ())
 
 let durable_creation_pins_boundaries_across_compaction () =
   with_repository (fun scratch capsules ->
@@ -258,6 +277,119 @@ let interrupted_creation_stays_unbound_and_retries () =
       | Capsule_store.Already_published _ ->
           Alcotest.fail "retry should publish the previously unbound capsule")
 
+let immutable_fold_reopens_and_stale_update_rejects () =
+  with_repository (fun scratch capsules ->
+      let source = source_snapshot "before" in
+      let target = target_snapshot "after" in
+      let initial =
+        create scratch capsules ~source ~target ()
+        |> require_ok Capsule_store.error_to_string
+        |> function
+        | Capsule_store.Published resolved -> resolved
+        | Capsule_store.Already_published _ -> Alcotest.fail "unexpected existing capsule"
+      in
+      let source_checkpoint = publish scratch target 'x' 'y' in
+      let later = target_snapshot "later" in
+      let target_checkpoint = publish scratch later 'z' 'A' in
+      let publication =
+        fold capsules ~current:initial
+          ~source_event:source_checkpoint.Scratch.event_id
+          ~target_event:target_checkpoint.Scratch.event_id ~source:target
+          ~target:later ()
+        |> require_ok Capsule_store.error_to_string
+      in
+      let child =
+        match publication with
+        | Capsule_store.Published resolved -> resolved
+        | Capsule_store.Already_published _ -> Alcotest.fail "first fold was already bound"
+      in
+      Alcotest.(check bool)
+        "folded child directly replays its complete result" true
+        (Model.Snapshot.equal later child.Capsule_store.expected_result);
+      Alcotest.(check bool)
+        "folded child preserves its parent link" true
+        (match Capsule.revision_parent child.Capsule_store.revision with
+        | Some parent ->
+            V2_model.Capsule_revision_id.equal
+              (Capsule.revision_link_revision_id parent)
+              (Capsule.revision_id initial.Capsule_store.revision)
+        | None -> false);
+      let reopened =
+        Capsule_store.resolve capsules ~id:capsule_id
+        |> require_ok Capsule_store.error_to_string
+        |> Option.get
+      in
+      Alcotest.(check bool)
+        "folded revision survives durable resolution" true
+        (V2_model.Capsule_revision_id.equal
+           (Capsule.revision_id child.Capsule_store.revision)
+           (Capsule.revision_id reopened.Capsule_store.revision));
+      (match
+         fold capsules ~current:initial
+           ~source_event:source_checkpoint.Scratch.event_id
+           ~target_event:target_checkpoint.Scratch.event_id ~source:target
+           ~target:later ()
+       with
+      | Error (Capsule_store.Concurrent_current_update _) -> ()
+      | Error error ->
+          Alcotest.fail
+            ("stale fold returned the wrong error: "
+            ^ Capsule_store.error_to_string error)
+      | Ok _ -> Alcotest.fail "stale fold unexpectedly advanced the current ref")
+      [@warning "-4"])
+
+let interrupted_fold_stays_on_prior_revision_and_retries () =
+  with_repository (fun scratch capsules ->
+      let source = source_snapshot "before" in
+      let target = target_snapshot "after" in
+      let initial =
+        create scratch capsules ~source ~target ()
+        |> require_ok Capsule_store.error_to_string
+        |> function
+        | Capsule_store.Published resolved -> resolved
+        | Capsule_store.Already_published _ -> Alcotest.fail "unexpected existing capsule"
+      in
+      let source_checkpoint = publish scratch target 'x' 'y' in
+      let later = target_snapshot "later" in
+      let target_checkpoint = publish scratch later 'z' 'A' in
+      (match
+         fold capsules ~current:initial
+           ~source_event:source_checkpoint.Scratch.event_id
+           ~target_event:target_checkpoint.Scratch.event_id ~source:target
+           ~target:later
+           ~fault:(Capsule_store.Fault.at Capsule_store.Fault.After_revision_object)
+           ()
+       with
+      | Error
+          (Capsule_store.Fault_injected Capsule_store.Fault.After_revision_object) ->
+          ()
+      | Error error ->
+          Alcotest.fail
+            ("fold interruption returned the wrong error: "
+            ^ Capsule_store.error_to_string error)
+      | Ok _ -> Alcotest.fail "interrupted fold unexpectedly advanced the current ref")
+      [@warning "-4"];
+      let prior =
+        Capsule_store.resolve capsules ~id:capsule_id
+        |> require_ok Capsule_store.error_to_string
+        |> Option.get
+      in
+      Alcotest.(check bool)
+        "interruption leaves old revision visible" true
+        (V2_model.Capsule_revision_id.equal
+           (Capsule.revision_id prior.Capsule_store.revision)
+           (Capsule.revision_id initial.Capsule_store.revision));
+      match
+        fold capsules ~current:initial
+          ~source_event:source_checkpoint.Scratch.event_id
+          ~target_event:target_checkpoint.Scratch.event_id ~source:target
+          ~target:later ()
+        |> require_ok Capsule_store.error_to_string
+      with
+      | Capsule_store.Published _ -> ()
+      | Capsule_store.Already_published _ ->
+          Alcotest.fail "fold retry should bind the previously unreachable child")
+
 let generated_create_and_reopen =
   QCheck2.Test.make ~count:48
     ~name:"V2 persisted exact capsules reopen with generated bytes"
@@ -286,6 +418,11 @@ let () =
             durable_creation_pins_boundaries_across_compaction;
           Alcotest.test_case "interrupted creation remains unbound and retries"
             `Quick interrupted_creation_stays_unbound_and_retries;
+          Alcotest.test_case "immutable fold reopens and stale update rejects"
+            `Quick immutable_fold_reopens_and_stale_update_rejects;
+          Alcotest.test_case
+            "interrupted fold stays on prior revision and retries" `Quick
+            interrupted_fold_stays_on_prior_revision_and_retries;
           QCheck_alcotest.to_alcotest ~speed_level:`Quick
             ~rand:(state_for "persisted-create-reopen")
             generated_create_and_reopen;

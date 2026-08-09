@@ -231,21 +231,6 @@ let distinct_nonces nonces =
   let values =
     [
       nonces.capsule_nonce;
-      nonces.fold_selected_result_nonce;
-      nonces.fold_revision_nonce;
-      nonces.fold_source_protection_nonce;
-      nonces.fold_source_protection_ledger_nonce;
-      nonces.fold_target_protection_nonce;
-      nonces.fold_target_protection_ledger_nonce;
-      nonces.fold_binding_ledger_nonce;
-    ]
-    |> List.map Envelope.nonce_to_bytes
-  in
-  List.length values = List.length (List.sort_uniq String.compare values)
-
-let distinct_revision_nonces nonces =
-  let values =
-    [
       nonces.selected_result_nonce;
       nonces.revision_nonce;
       nonces.source_protection_nonce;
@@ -253,6 +238,21 @@ let distinct_revision_nonces nonces =
       nonces.target_protection_nonce;
       nonces.target_protection_ledger_nonce;
       nonces.binding_ledger_nonce;
+    ]
+    |> List.map Envelope.nonce_to_bytes
+  in
+  List.length values = List.length (List.sort_uniq String.compare values)
+
+let distinct_revision_nonces (nonces : revision_nonces) =
+  let values =
+    [
+      nonces.fold_selected_result_nonce;
+      nonces.fold_revision_nonce;
+      nonces.fold_source_protection_nonce;
+      nonces.fold_source_protection_ledger_nonce;
+      nonces.fold_target_protection_nonce;
+      nonces.fold_target_protection_ledger_nonce;
+      nonces.fold_binding_ledger_nonce;
     ]
     |> List.map Envelope.nonce_to_bytes
   in
@@ -672,3 +672,194 @@ let create ?fault repository ~id ~title ~description ~created_at ~source_event
               match resolved with
               | Some resolved -> Ok (Published resolved)
               | None -> assert false))
+
+let checkpoint_link (checkpoint : Scratch_store.checkpoint) =
+  {
+    Capsule.snapshot_id = Model.Snapshot.id checkpoint.Scratch_store.snapshot;
+    snapshot_ref = checkpoint.Scratch_store.snapshot_ref;
+  }
+
+let current_matches resolved ~expected_revision ~expected_binding =
+  V2_model.Capsule_revision_id.equal
+    (Capsule.revision_id resolved.revision)
+    expected_revision
+  && Ledger.Event_id.equal resolved.binding_event_id expected_binding
+
+let stale_current_error ~expected_revision ~expected_binding = function
+  | None ->
+      Concurrent_current_update
+        {
+          expected_revision;
+          expected_binding;
+          actual_revision = None;
+          actual_binding = None;
+        }
+  | Some resolved ->
+      Concurrent_current_update
+        {
+          expected_revision;
+          expected_binding;
+          actual_revision = Some (Capsule.revision_id resolved.revision);
+          actual_binding = Some resolved.binding_event_id;
+        }
+
+let fold ?fault repository ~id ~expected_revision ~expected_binding ~source_event
+    ~target_event ~selected_indices ~created_at ~nonces =
+  if not (distinct_revision_nonces nonces) then Error Nonce_reuse
+  else
+    let* prior = resolve repository ~id in
+    let* current =
+      match prior with
+      | Some resolved when current_matches resolved ~expected_revision ~expected_binding ->
+          Ok resolved
+      | other -> Error (stale_current_error ~expected_revision ~expected_binding other)
+    in
+    let* () =
+      Scratch_store.require_ancestor repository.scratch ~source:source_event
+        ~target:target_event
+      |> Result.map_error (fun error -> Scratch_store_error error)
+    in
+    let* source =
+      Scratch_store.checkpoint_for_event repository.scratch ~event_id:source_event
+      |> Result.map_error (fun error -> Scratch_store_error error)
+    in
+    let* target =
+      Scratch_store.checkpoint_for_event repository.scratch ~event_id:target_event
+      |> Result.map_error (fun error -> Scratch_store_error error)
+    in
+    if
+      not
+        (Model.Snapshot.equal source.Scratch_store.snapshot current.expected_result)
+    then
+      Error Revision_result_mismatch
+    else
+      let* increment =
+        Capsule.propose ~from:current.expected_result
+          ~to_:target.Scratch_store.snapshot
+        |> Result.map_error (fun error -> Capsule_proposal_error error)
+      in
+      let* selection =
+        Capsule.select increment ~indices:selected_indices
+        |> Result.map_error (fun error -> Capsule_selection_error error)
+      in
+      let selected_result = Capsule.selected_result selection in
+      let target_link = checkpoint_link target in
+      let* expected_result, selected_result_envelope =
+        if Model.Snapshot.equal selected_result target.Scratch_store.snapshot then
+          Ok (target_link, None)
+        else
+          let* reference, envelope =
+            envelope_for repository ~nonce:nonces.fold_selected_result_nonce
+              (Object.scratch_snapshot selected_result)
+          in
+          Ok
+            ( {
+                Capsule.snapshot_id = Model.Snapshot.id selected_result;
+                snapshot_ref = reference;
+              },
+              Some envelope )
+      in
+      let* complete =
+        Capsule.propose ~from:current.declared_base ~to_:selected_result
+        |> Result.map_error (fun error -> Capsule_proposal_error error)
+      in
+      let operations = Capsule.proposal_operations complete in
+      let parent =
+        Capsule.make_revision_link ~capsule_id:id
+          ~revision_id:(Capsule.revision_id current.revision)
+          ~revision_ref:current.revision_ref
+      in
+      let source_link = checkpoint_link source in
+      let boundaries =
+        Capsule.revision_source_boundaries current.revision
+        @ [ { Capsule.source_snapshot = source_link; target_snapshot = target_link } ]
+      in
+      let* revision =
+        Capsule.make_revision ~capsule:current.capsule
+          ~capsule_ref:current.capsule_ref ~parent:(Some parent)
+          ~declared_base:(Capsule.revision_declared_base current.revision)
+          ~declared_base_snapshot:current.declared_base ~expected_result ~operations
+          ~source_boundaries:boundaries ~provenance:(Capsule.Folded parent)
+          ~created_at
+        |> Result.map_error (fun error -> Capsule_error error)
+      in
+      let* revision_ref, revision_envelope =
+        envelope_for repository ~nonce:nonces.fold_revision_nonce
+          (Object.capsule_revision revision)
+      in
+      let* latest = resolve repository ~id in
+      match latest with
+      | Some resolved
+        when V2_model.Opaque_object_ref.equal resolved.revision_ref revision_ref ->
+          Ok (Already_published resolved)
+      | Some resolved
+        when current_matches resolved ~expected_revision ~expected_binding ->
+          let* () =
+            match selected_result_envelope with
+            | None -> Ok ()
+            | Some envelope ->
+                publish_object repository
+                  ~expected:expected_result.Capsule.snapshot_ref envelope
+          in
+          let* () = publish_object repository ~expected:revision_ref revision_envelope in
+          let* () = inject fault Fault.After_revision_object in
+          let reason = Retention.Capsule_boundary revision_ref in
+          let* source_protection =
+            Scratch_store.plan_protection repository.scratch ~event_id:source_event
+              ~action:Retention.Protect ~reason
+              ~protection_nonce:nonces.fold_source_protection_nonce
+              ~ledger_nonce:nonces.fold_source_protection_ledger_nonce
+            |> Result.map_error (fun error -> Scratch_store_error error)
+          in
+          let* _ =
+            Scratch_store.publish_protection_plan repository.scratch
+              source_protection
+            |> Result.map_error (fun error -> Scratch_store_error error)
+          in
+          let* () = inject fault Fault.After_source_protection in
+          let* target_protection =
+            Scratch_store.plan_protection repository.scratch ~event_id:target_event
+              ~action:Retention.Protect ~reason
+              ~protection_nonce:nonces.fold_target_protection_nonce
+              ~ledger_nonce:nonces.fold_target_protection_ledger_nonce
+            |> Result.map_error (fun error -> Scratch_store_error error)
+          in
+          let* _ =
+            Scratch_store.publish_protection_plan repository.scratch
+              target_protection
+            |> Result.map_error (fun error -> Scratch_store_error error)
+          in
+          let* () = inject fault Fault.After_target_protection in
+          let* () = inject fault Fault.Before_binding in
+          let* latest = resolve repository ~id in
+          let* () =
+            match latest with
+            | Some resolved
+              when current_matches resolved ~expected_revision ~expected_binding ->
+                Ok ()
+            | other ->
+                Error
+                  (stale_current_error ~expected_revision ~expected_binding other)
+          in
+          let* expected_event_id, ledger_envelope =
+            binding_envelope repository ~id ~predecessor:(Some expected_binding)
+              ~revision_ref ~nonce:nonces.fold_binding_ledger_nonce
+          in
+          let* publication =
+            Ledger_store.publish repository.ledger ~envelope:ledger_envelope
+            |> Result.map_error (fun error -> Ledger_store_error error)
+          in
+          let actual_event_id =
+            match publication with
+            | Ledger_store.Published { event_id; _ }
+            | Ledger_store.Already_published { event_id; _ } ->
+                event_id
+          in
+          if not (Ledger.Event_id.equal expected_event_id actual_event_id) then
+            assert false
+          else
+            let* resolved = resolve repository ~id in
+            (match resolved with
+            | Some resolved -> Ok (Published resolved)
+            | None -> assert false)
+      | other -> Error (stale_current_error ~expected_revision ~expected_binding other)

@@ -77,6 +77,7 @@ let valid_fixtures_are_exact_and_canonical () =
   ignore (canonical_object "v2-object-scratch-snapshot-frame-v1.cbor.hex");
   ignore (canonical_object "v2-object-capsule-frame-v1.cbor.hex");
   ignore (canonical_object "v2-object-capsule-revision-frame-v1.cbor.hex");
+  ignore (canonical_object "v2-object-capsule-revision-frame-v2.cbor.hex");
   let ledger_envelope =
     canonical_envelope "v2-ref-ledger-envelope-v1.cbor.hex"
   in

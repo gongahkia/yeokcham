@@ -98,6 +98,38 @@ let capsule_records () =
   in
   (capsule, revision)
 
+let evolved_capsule_revision () =
+  let capsule, initial = capsule_records () in
+  let source = snapshot "before" in
+  let later = snapshot "later" in
+  let source_link = Capsule.revision_declared_base initial in
+  let target_link = Capsule.revision_expected_result initial in
+  let later_link : Capsule.snapshot_link =
+    {
+      Capsule.snapshot_id = Model.Snapshot.id later;
+      snapshot_ref = object_ref 'd';
+    }
+  in
+  let complete =
+    Capsule.propose ~from:source ~to_:later
+    |> require_ok Capsule.proposal_error_to_string
+  in
+  let parent =
+    Capsule.make_revision_link ~capsule_id:(Capsule.capsule_id capsule)
+      ~revision_id:(Capsule.revision_id initial) ~revision_ref:(object_ref 'e')
+  in
+  Capsule.make_revision ~capsule ~capsule_ref:(object_ref 'c')
+    ~parent:(Some parent) ~declared_base:source_link
+    ~declared_base_snapshot:source ~expected_result:later_link
+    ~operations:(Capsule.proposal_operations complete)
+    ~source_boundaries:
+      [
+        Capsule.revision_source_boundary initial;
+        { Capsule.source_snapshot = target_link; target_snapshot = later_link };
+      ]
+    ~provenance:(Capsule.Folded parent) ~created_at:18L
+  |> require_ok Capsule.error_to_string
+
 let retention_frames_are_canonical_and_type_separated () =
   let protection =
     Retention.protection ~snapshot_ref:(object_ref 'a')
@@ -201,8 +233,10 @@ let exact_frames_are_canonical_and_kind_separated () =
 
 let capsule_frames_are_canonical_and_kind_separated () =
   let capsule, revision = capsule_records () in
+  let evolved_revision = evolved_capsule_revision () in
   let capsule_frame = Object.capsule capsule in
   let revision_frame = Object.capsule_revision revision in
+  let evolved_revision_frame = Object.capsule_revision evolved_revision in
   let decoded_capsule =
     Object.decode (Object.encode capsule_frame)
     |> require_ok Object.error_to_string
@@ -227,6 +261,11 @@ let capsule_frames_are_canonical_and_kind_separated () =
     (refreshed_golden "v2-object-capsule-revision-frame-v1.cbor.hex"
        (Object.encode revision_frame))
     (Object.encode revision_frame);
+  Alcotest.(check string)
+    "evolved capsule revision frame canonical golden"
+    (refreshed_golden "v2-object-capsule-revision-frame-v2.cbor.hex"
+       (Object.encode evolved_revision_frame))
+    (Object.encode evolved_revision_frame);
   match
     ( Object.capsule_record decoded_capsule,
       Object.capsule_revision_record decoded_revision )
