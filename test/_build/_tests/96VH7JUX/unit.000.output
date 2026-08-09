@@ -1,5 +1,0 @@
-ASSERT canonical generic opaque identity fixture
-ASSERT ledger envelope decrypts to the canonical ledger frame fixture
-ASSERT ledger typed frame retains the canonical event
-ASSERT ledger event ID survives canonical fixture decoding
-ASSERT canonical encrypted ledger opaque address fixture

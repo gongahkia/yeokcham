@@ -1,4 +1,0 @@
-ASSERT protection frame preserves its kind
-ASSERT protection frame round trips canonically
-ASSERT generation frame preserves its kind
-ASSERT generation frame round trips canonically

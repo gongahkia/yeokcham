@@ -1,6 +1,0 @@
-ASSERT capsule frame retains its kind
-ASSERT capsule revision frame retains its kind
-ASSERT capsule frame canonical golden
-ASSERT capsule revision frame canonical golden
-ASSERT capsule payload round trips
-ASSERT revision payload round trips
