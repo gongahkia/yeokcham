@@ -36,10 +36,17 @@ let device byte =
   Model.Device_id.of_bytes (String.make 32 byte)
   |> require_ok Model.identity_error_to_string
 
-let bootstrap ?(repository_byte = 'r') ?(device_byte = 'd') capability =
+let key_handle byte =
+  Bootstrap.Key_handle.of_bytes (String.make 32 byte)
+  |> require_ok Model.identity_error_to_string
+
+let bootstrap ?(repository_byte = 'r') ?(device_byte = 'd')
+    ?(key_handle_byte = 'h') capability =
   Bootstrap.make
     ~repository_id:(repository repository_byte)
-    ~device_id:(device device_byte) ~capability ~mandatory_features:0L
+    ~device_id:(device device_byte)
+    ~key_handle:(key_handle key_handle_byte)
+    ~capability ~mandatory_features:0L
   |> require_ok Bootstrap.error_to_string
 
 let read_golden name =
@@ -51,7 +58,7 @@ let canonical_fixture_round_trips () =
   let encoded = Bootstrap.encode value in
   Alcotest.(check string)
     "canonical bootstrap bytes"
-    (read_golden "v2-local-bootstrap-v1.cbor.hex")
+    (read_golden "v2-local-bootstrap-v2.cbor.hex")
     encoded;
   let decoded =
     Bootstrap.decode encoded |> require_ok Bootstrap.error_to_string
@@ -64,6 +71,10 @@ let canonical_fixture_round_trips () =
     "device ID survives canonical decode"
     (Model.Device_id.to_bytes (device 'd'))
     (Model.Device_id.to_bytes (Bootstrap.device_id decoded));
+  Alcotest.(check string)
+    "key handle survives canonical decode"
+    (Bootstrap.Key_handle.to_bytes (key_handle 'h'))
+    (Bootstrap.Key_handle.to_bytes (Bootstrap.key_handle decoded));
   Alcotest.(check string)
     "canonical re-encoding is exact" encoded (Bootstrap.encode decoded)
 
@@ -175,7 +186,8 @@ let stale_staging_is_non_authoritative_and_unknown_entries_reject () =
       let value = bootstrap authority in
       let directory = Filename.dirname (Bootstrap_store.bootstrap_path ~root) in
       let stale =
-        Filename.concat directory ".local-bootstrap-v1.cbor.bootstrap-42-0"
+        Filename.concat directory
+          (Printf.sprintf ".%s.bootstrap-42-0" Bootstrap_store.filename)
       in
       let descriptor =
         Unix.openfile stale [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_EXCL ] 0o600

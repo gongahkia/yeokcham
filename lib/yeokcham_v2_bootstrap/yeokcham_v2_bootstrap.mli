@@ -58,9 +58,9 @@ val make_capability :
 (** Rejects reused raw key material across the three roles. *)
 
 val secret_material : capability -> string * string * string
-(** The envelope, opaque-address, and signing private-key octets, in that
-    order. This is only for a platform custody adapter; it must not be written
-    to repository storage, diagnostics, or fixture files. *)
+(** The envelope, opaque-address, and signing private-key octets, in that order.
+    This is only for a platform custody adapter; it must not be written to
+    repository storage, diagnostics, or fixture files. *)
 
 val capability_of_secret_material :
   encryption_key:string ->

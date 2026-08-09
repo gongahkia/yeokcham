@@ -35,15 +35,16 @@ let raw_identity = QCheck2.Gen.string_size (QCheck2.Gen.return 32)
 let round_trip =
   QCheck2.Test.make ~count:200
     ~name:"V2 local bootstrap canonical decode re-encodes arbitrary IDs exactly"
-    (QCheck2.Gen.pair raw_identity raw_identity)
-    (fun (repository_bytes, device_bytes) ->
+    (QCheck2.Gen.triple raw_identity raw_identity raw_identity)
+    (fun (repository_bytes, device_bytes, key_handle_bytes) ->
       match
         ( Model.Repository_id.of_bytes repository_bytes,
-          Model.Device_id.of_bytes device_bytes )
+          Model.Device_id.of_bytes device_bytes,
+          Bootstrap.Key_handle.of_bytes key_handle_bytes )
       with
-      | Ok repository_id, Ok device_id -> (
+      | Ok repository_id, Ok device_id, Ok key_handle -> (
           match
-            Bootstrap.make ~repository_id ~device_id ~capability
+            Bootstrap.make ~repository_id ~device_id ~key_handle ~capability
               ~mandatory_features:0L
           with
           | Error _ -> false
@@ -54,7 +55,7 @@ let round_trip =
                   String.equal
                     (Bootstrap.encode bootstrap)
                     (Bootstrap.encode decoded)))
-      | Error _, _ | _, Error _ -> false)
+      | Error _, _, _ | _, Error _, _ | _, _, Error _ -> false)
 
 let () =
   Alcotest.run "V2 local bootstrap properties"

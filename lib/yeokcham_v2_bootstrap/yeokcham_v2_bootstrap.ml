@@ -21,12 +21,11 @@ module Key_handle = struct
   type t = string
 
   let byte_length = 32
+
   let of_bytes bytes =
     let actual = String.length bytes in
     if actual = byte_length then Ok bytes
-    else
-      Error
-        (Model.Invalid_byte_length { expected = byte_length; actual })
+    else Error (Model.Invalid_byte_length { expected = byte_length; actual })
 
   let to_bytes handle = handle
 
@@ -217,17 +216,19 @@ let secret_material capability =
 let capability_of_secret_material ~encryption_key ~address_key ~signing_key =
   let* encryption_key =
     Envelope.key_of_bytes encryption_key
-    |> Result.map_error (fun error -> Invalid_payload (Envelope.error_to_string error))
+    |> Result.map_error (fun error ->
+        Invalid_payload (Envelope.error_to_string error))
   in
   let* address_key =
     Address.key_of_bytes address_key
-    |> Result.map_error (fun error -> Invalid_payload (Address.error_to_string error))
+    |> Result.map_error (fun error ->
+        Invalid_payload (Address.error_to_string error))
   in
   let* signing_key =
     Mirage_crypto_ec.Ed25519.priv_of_octets signing_key
     |> Result.map_error (fun error ->
-           Cryptographic_failure
-             (Format.asprintf "%a" Mirage_crypto_ec.pp_error error))
+        Cryptographic_failure
+          (Format.asprintf "%a" Mirage_crypto_ec.pp_error error))
   in
   make_capability ~encryption_key ~address_key ~signing_key
 
@@ -375,11 +376,13 @@ let decode input =
             |> Result.map_error (fun error ->
                 Invalid_payload (Model.identity_error_to_string error))
           in
-          let* key_handle_bytes = bytes "bootstrap local key handle" key_handle_value in
+          let* key_handle_bytes =
+            bytes "bootstrap local key handle" key_handle_value
+          in
           let* key_handle =
             Key_handle.of_bytes key_handle_bytes
             |> Result.map_error (fun _ ->
-                   Invalid_key_handle_length (String.length key_handle_bytes))
+                Invalid_key_handle_length (String.length key_handle_bytes))
           in
           let* signer_key_id_bytes =
             bytes "bootstrap signer-key ID" signer_key_id_value

@@ -15,7 +15,7 @@ type error =
   | Io_error of { operation : string; path : string; message : string }
   | Temporary_name_exhausted of string
 
-let filename = "local-bootstrap-v1.cbor"
+let filename = "local-bootstrap-v2.cbor"
 let metadata_name = ".yeokcham"
 let directory_name = "bootstrap"
 let max_temporary_attempts = 32
