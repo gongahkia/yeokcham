@@ -199,7 +199,9 @@ let immutable_child_revision_replays_and_round_trips () =
   in
   let initial_selection =
     Capsule.select initial_proposal
-      ~indices:(Capsule.proposal_operations initial_proposal |> List.mapi (fun i _ -> i))
+      ~indices:
+        (Capsule.proposal_operations initial_proposal
+        |> List.mapi (fun i _ -> i))
     |> require_ok Capsule.selection_error_to_string
   in
   let capsule =
@@ -225,18 +227,23 @@ let immutable_child_revision_replays_and_round_trips () =
   in
   let later_link = link later 'l' in
   let parent =
-    Capsule.make_revision_link ~capsule_id:(Capsule.capsule_id capsule)
-      ~revision_id:(Capsule.revision_id initial) ~revision_ref:(opaque 'r')
+    Capsule.make_revision_link
+      ~capsule_id:(Capsule.capsule_id capsule)
+      ~revision_id:(Capsule.revision_id initial)
+      ~revision_ref:(opaque 'r')
   in
   let child =
-    Capsule.make_revision ~capsule ~capsule_ref:(opaque 'i') ~parent:(Some parent)
-      ~declared_base:source_link ~declared_base_snapshot:source
-      ~expected_result:later_link
+    Capsule.make_revision ~capsule ~capsule_ref:(opaque 'i')
+      ~parent:(Some parent) ~declared_base:source_link
+      ~declared_base_snapshot:source ~expected_result:later_link
       ~operations:(Capsule.proposal_operations complete)
       ~source_boundaries:
         [
           initial_boundary;
-          { Capsule.source_snapshot = target_link; target_snapshot = later_link };
+          {
+            Capsule.source_snapshot = target_link;
+            target_snapshot = later_link;
+          };
         ]
       ~provenance:(Capsule.Folded parent) ~created_at:18L
     |> require_ok Capsule.error_to_string

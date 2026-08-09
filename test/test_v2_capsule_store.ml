@@ -183,13 +183,14 @@ let create scratch capsules ~source ~target ?fault () =
     ~selected_indices:(full_selection source target)
     ~nonces:(nonces ())
 
-let fold capsules ~current ~source_event ~target_event ~source ~target
-    ?fault () =
+let fold capsules ~current ~source_event ~target_event ~source ~target ?fault ()
+    =
   Capsule_store.fold ?fault capsules ~id:capsule_id
     ~expected_revision:(Capsule.revision_id current.Capsule_store.revision)
     ~expected_binding:current.Capsule_store.binding_event_id ~source_event
-    ~target_event ~selected_indices:(full_selection source target) ~created_at:18L
-    ~nonces:(revision_nonces ())
+    ~target_event
+    ~selected_indices:(full_selection source target)
+    ~created_at:18L ~nonces:(revision_nonces ())
 
 let durable_creation_pins_boundaries_across_compaction () =
   with_repository (fun scratch capsules ->
@@ -286,7 +287,8 @@ let immutable_fold_reopens_and_stale_update_rejects () =
         |> require_ok Capsule_store.error_to_string
         |> function
         | Capsule_store.Published resolved -> resolved
-        | Capsule_store.Already_published _ -> Alcotest.fail "unexpected existing capsule"
+        | Capsule_store.Already_published _ ->
+            Alcotest.fail "unexpected existing capsule"
       in
       let source_checkpoint = publish scratch target 'x' 'y' in
       let later = target_snapshot "later" in
@@ -301,7 +303,8 @@ let immutable_fold_reopens_and_stale_update_rejects () =
       let child =
         match publication with
         | Capsule_store.Published resolved -> resolved
-        | Capsule_store.Already_published _ -> Alcotest.fail "first fold was already bound"
+        | Capsule_store.Already_published _ ->
+            Alcotest.fail "first fold was already bound"
       in
       Alcotest.(check bool)
         "folded child directly replays its complete result" true
@@ -347,28 +350,32 @@ let interrupted_fold_stays_on_prior_revision_and_retries () =
         |> require_ok Capsule_store.error_to_string
         |> function
         | Capsule_store.Published resolved -> resolved
-        | Capsule_store.Already_published _ -> Alcotest.fail "unexpected existing capsule"
+        | Capsule_store.Already_published _ ->
+            Alcotest.fail "unexpected existing capsule"
       in
       let source_checkpoint = publish scratch target 'x' 'y' in
       let later = target_snapshot "later" in
       let target_checkpoint = publish scratch later 'z' 'A' in
-      (match
-         fold capsules ~current:initial
-           ~source_event:source_checkpoint.Scratch.event_id
-           ~target_event:target_checkpoint.Scratch.event_id ~source:target
-           ~target:later
-           ~fault:(Capsule_store.Fault.at Capsule_store.Fault.After_revision_object)
-           ()
-       with
+      ((match
+          fold capsules ~current:initial
+            ~source_event:source_checkpoint.Scratch.event_id
+            ~target_event:target_checkpoint.Scratch.event_id ~source:target
+            ~target:later
+            ~fault:
+              (Capsule_store.Fault.at Capsule_store.Fault.After_revision_object)
+            ()
+        with
       | Error
-          (Capsule_store.Fault_injected Capsule_store.Fault.After_revision_object) ->
+          (Capsule_store.Fault_injected
+             Capsule_store.Fault.After_revision_object) ->
           ()
       | Error error ->
           Alcotest.fail
             ("fold interruption returned the wrong error: "
             ^ Capsule_store.error_to_string error)
-      | Ok _ -> Alcotest.fail "interrupted fold unexpectedly advanced the current ref")
-      [@warning "-4"];
+      | Ok _ ->
+          Alcotest.fail "interrupted fold unexpectedly advanced the current ref")
+      [@warning "-4"]);
       let prior =
         Capsule_store.resolve capsules ~id:capsule_id
         |> require_ok Capsule_store.error_to_string
@@ -388,7 +395,8 @@ let interrupted_fold_stays_on_prior_revision_and_retries () =
       with
       | Capsule_store.Published _ -> ()
       | Capsule_store.Already_published _ ->
-          Alcotest.fail "fold retry should bind the previously unreachable child")
+          Alcotest.fail
+            "fold retry should bind the previously unreachable child")
 
 let generated_create_and_reopen =
   QCheck2.Test.make ~count:48

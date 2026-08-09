@@ -145,6 +145,6 @@ val fold :
   created_at:int64 ->
   nonces:revision_nonces ->
   (publication, error) result
-(** Adds one complete immutable child revision. The source checkpoint must
-    equal the expected current revision result; a stale current ref is an
-    explicit concurrent-update error. *)
+(** Adds one complete immutable child revision. The source checkpoint must equal
+    the expected current revision result; a stale current ref is an explicit
+    concurrent-update error. *)

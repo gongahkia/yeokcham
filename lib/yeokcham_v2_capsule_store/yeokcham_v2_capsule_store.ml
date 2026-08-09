@@ -163,7 +163,8 @@ let error_to_string = function
   | Revision_result_mismatch ->
       "capsule revision replay does not reach its declared exact result"
   | Concurrent_current_update
-      { expected_revision; expected_binding; actual_revision; actual_binding } ->
+      { expected_revision; expected_binding; actual_revision; actual_binding }
+    ->
       let revision = function
         | None -> "none"
         | Some id -> V2_model.Capsule_revision_id.to_hex id
@@ -173,11 +174,13 @@ let error_to_string = function
         | Some id -> Ledger.Event_id.to_hex id
       in
       Printf.sprintf
-        "capsule current changed from revision %s at binding %s to revision %s at binding %s"
+        "capsule current changed from revision %s at binding %s to revision %s \
+         at binding %s"
         (V2_model.Capsule_revision_id.to_hex expected_revision)
         (Ledger.Event_id.to_hex expected_binding)
         (revision actual_revision) (binding actual_binding)
-  | Parent_link_mismatch detail -> "capsule revision parent link mismatch: " ^ detail
+  | Parent_link_mismatch detail ->
+      "capsule revision parent link mismatch: " ^ detail
   | Revision_history_cycle reference ->
       "capsule revision history contains object cycle: "
       ^ V2_model.Opaque_object_ref.to_hex reference
@@ -335,11 +338,8 @@ let rec verify_parent_chain repository ~visited revision =
   | None -> Ok ()
   | Some parent ->
       let parent_ref = Capsule.revision_link_ref parent in
-      if
-        List.exists
-          (V2_model.Opaque_object_ref.equal parent_ref)
-          visited
-      then Error (Revision_history_cycle parent_ref)
+      if List.exists (V2_model.Opaque_object_ref.equal parent_ref) visited then
+        Error (Revision_history_cycle parent_ref)
       else if
         not
           (V2_model.Capsule_id.equal
@@ -354,7 +354,8 @@ let rec verify_parent_chain repository ~visited revision =
         let* parent_revision =
           match Object.capsule_revision_record object_ with
           | Some revision -> Ok revision
-          | None -> Error (Parent_link_mismatch "parent object is not a revision")
+          | None ->
+              Error (Parent_link_mismatch "parent object is not a revision")
         in
         if
           not
@@ -431,7 +432,8 @@ let resolve repository ~id =
               Error Revision_result_mismatch
             else
               let* () =
-                verify_parent_chain repository ~visited:[ revision_ref ] revision
+                verify_parent_chain repository ~visited:[ revision_ref ]
+                  revision
               in
               Ok
                 (Some
@@ -703,16 +705,18 @@ let stale_current_error ~expected_revision ~expected_binding = function
           actual_binding = Some resolved.binding_event_id;
         }
 
-let fold ?fault repository ~id ~expected_revision ~expected_binding ~source_event
-    ~target_event ~selected_indices ~created_at ~nonces =
+let fold ?fault repository ~id ~expected_revision ~expected_binding
+    ~source_event ~target_event ~selected_indices ~created_at ~nonces =
   if not (distinct_revision_nonces nonces) then Error Nonce_reuse
   else
     let* prior = resolve repository ~id in
     let* current =
       match prior with
-      | Some resolved when current_matches resolved ~expected_revision ~expected_binding ->
+      | Some resolved
+        when current_matches resolved ~expected_revision ~expected_binding ->
           Ok resolved
-      | other -> Error (stale_current_error ~expected_revision ~expected_binding other)
+      | other ->
+          Error (stale_current_error ~expected_revision ~expected_binding other)
     in
     let* () =
       Scratch_store.require_ancestor repository.scratch ~source:source_event
@@ -720,18 +724,20 @@ let fold ?fault repository ~id ~expected_revision ~expected_binding ~source_even
       |> Result.map_error (fun error -> Scratch_store_error error)
     in
     let* source =
-      Scratch_store.checkpoint_for_event repository.scratch ~event_id:source_event
+      Scratch_store.checkpoint_for_event repository.scratch
+        ~event_id:source_event
       |> Result.map_error (fun error -> Scratch_store_error error)
     in
     let* target =
-      Scratch_store.checkpoint_for_event repository.scratch ~event_id:target_event
+      Scratch_store.checkpoint_for_event repository.scratch
+        ~event_id:target_event
       |> Result.map_error (fun error -> Scratch_store_error error)
     in
     if
       not
-        (Model.Snapshot.equal source.Scratch_store.snapshot current.expected_result)
-    then
-      Error Revision_result_mismatch
+        (Model.Snapshot.equal source.Scratch_store.snapshot
+           current.expected_result)
+    then Error Revision_result_mismatch
     else
       let* increment =
         Capsule.propose ~from:current.expected_result
@@ -745,8 +751,8 @@ let fold ?fault repository ~id ~expected_revision ~expected_binding ~source_even
       let selected_result = Capsule.selected_result selection in
       let target_link = checkpoint_link target in
       let* expected_result, selected_result_envelope =
-        if Model.Snapshot.equal selected_result target.Scratch_store.snapshot then
-          Ok (target_link, None)
+        if Model.Snapshot.equal selected_result target.Scratch_store.snapshot
+        then Ok (target_link, None)
         else
           let* reference, envelope =
             envelope_for repository ~nonce:nonces.fold_selected_result_nonce
@@ -772,15 +778,20 @@ let fold ?fault repository ~id ~expected_revision ~expected_binding ~source_even
       let source_link = checkpoint_link source in
       let boundaries =
         Capsule.revision_source_boundaries current.revision
-        @ [ { Capsule.source_snapshot = source_link; target_snapshot = target_link } ]
+        @ [
+            {
+              Capsule.source_snapshot = source_link;
+              target_snapshot = target_link;
+            };
+          ]
       in
       let* revision =
         Capsule.make_revision ~capsule:current.capsule
           ~capsule_ref:current.capsule_ref ~parent:(Some parent)
           ~declared_base:(Capsule.revision_declared_base current.revision)
-          ~declared_base_snapshot:current.declared_base ~expected_result ~operations
-          ~source_boundaries:boundaries ~provenance:(Capsule.Folded parent)
-          ~created_at
+          ~declared_base_snapshot:current.declared_base ~expected_result
+          ~operations ~source_boundaries:boundaries
+          ~provenance:(Capsule.Folded parent) ~created_at
         |> Result.map_error (fun error -> Capsule_error error)
       in
       let* revision_ref, revision_envelope =
@@ -790,10 +801,11 @@ let fold ?fault repository ~id ~expected_revision ~expected_binding ~source_even
       let* latest = resolve repository ~id in
       match latest with
       | Some resolved
-        when V2_model.Opaque_object_ref.equal resolved.revision_ref revision_ref ->
+        when V2_model.Opaque_object_ref.equal resolved.revision_ref revision_ref
+        ->
           Ok (Already_published resolved)
       | Some resolved
-        when current_matches resolved ~expected_revision ~expected_binding ->
+        when current_matches resolved ~expected_revision ~expected_binding -> (
           let* () =
             match selected_result_envelope with
             | None -> Ok ()
@@ -801,12 +813,14 @@ let fold ?fault repository ~id ~expected_revision ~expected_binding ~source_even
                 publish_object repository
                   ~expected:expected_result.Capsule.snapshot_ref envelope
           in
-          let* () = publish_object repository ~expected:revision_ref revision_envelope in
+          let* () =
+            publish_object repository ~expected:revision_ref revision_envelope
+          in
           let* () = inject fault Fault.After_revision_object in
           let reason = Retention.Capsule_boundary revision_ref in
           let* source_protection =
-            Scratch_store.plan_protection repository.scratch ~event_id:source_event
-              ~action:Retention.Protect ~reason
+            Scratch_store.plan_protection repository.scratch
+              ~event_id:source_event ~action:Retention.Protect ~reason
               ~protection_nonce:nonces.fold_source_protection_nonce
               ~ledger_nonce:nonces.fold_source_protection_ledger_nonce
             |> Result.map_error (fun error -> Scratch_store_error error)
@@ -818,8 +832,8 @@ let fold ?fault repository ~id ~expected_revision ~expected_binding ~source_even
           in
           let* () = inject fault Fault.After_source_protection in
           let* target_protection =
-            Scratch_store.plan_protection repository.scratch ~event_id:target_event
-              ~action:Retention.Protect ~reason
+            Scratch_store.plan_protection repository.scratch
+              ~event_id:target_event ~action:Retention.Protect ~reason
               ~protection_nonce:nonces.fold_target_protection_nonce
               ~ledger_nonce:nonces.fold_target_protection_ledger_nonce
             |> Result.map_error (fun error -> Scratch_store_error error)
@@ -835,11 +849,13 @@ let fold ?fault repository ~id ~expected_revision ~expected_binding ~source_even
           let* () =
             match latest with
             | Some resolved
-              when current_matches resolved ~expected_revision ~expected_binding ->
+              when current_matches resolved ~expected_revision ~expected_binding
+              ->
                 Ok ()
             | other ->
                 Error
-                  (stale_current_error ~expected_revision ~expected_binding other)
+                  (stale_current_error ~expected_revision ~expected_binding
+                     other)
           in
           let* expected_event_id, ledger_envelope =
             binding_envelope repository ~id ~predecessor:(Some expected_binding)
@@ -859,7 +875,8 @@ let fold ?fault repository ~id ~expected_revision ~expected_binding ~source_even
             assert false
           else
             let* resolved = resolve repository ~id in
-            (match resolved with
+            match resolved with
             | Some resolved -> Ok (Published resolved)
             | None -> assert false)
-      | other -> Error (stale_current_error ~expected_revision ~expected_binding other)
+      | other ->
+          Error (stale_current_error ~expected_revision ~expected_binding other)

@@ -134,7 +134,8 @@ let error_to_string = function
   | Parent_capsule_mismatch ->
       "capsule revision parent belongs to a different capsule"
   | Empty_source_boundaries -> "capsule revision has no source boundaries"
-  | Invalid_provenance detail -> "invalid capsule revision provenance: " ^ detail
+  | Invalid_provenance detail ->
+      "invalid capsule revision provenance: " ^ detail
   | Revision_replay_rejected error ->
       "capsule revision replay rejected: " ^ Model.replay_error_to_string error
   | Invalid_payload detail -> "invalid V2 capsule record: " ^ detail
@@ -550,9 +551,9 @@ let validate_provenance capsule_id = function
   | Combined_from [] -> Error (Invalid_provenance "combine sources are empty")
   | Combined_from _ -> Ok ()
 
-let make_revision ~capsule ~capsule_ref ~(parent : revision_link option) ~declared_base
-    ~declared_base_snapshot ~expected_result ~operations ~source_boundaries
-    ~provenance ~created_at =
+let make_revision ~capsule ~capsule_ref ~(parent : revision_link option)
+    ~declared_base ~declared_base_snapshot ~expected_result ~operations
+    ~source_boundaries ~provenance ~created_at =
   if
     not
       (Yeokcham_id.Snapshot_id.equal declared_base.snapshot_id
@@ -561,7 +562,7 @@ let make_revision ~capsule ~capsule_ref ~(parent : revision_link option) ~declar
   else
     match source_boundaries with
     | [] -> Error Empty_source_boundaries
-    | first_boundary :: _ ->
+    | first_boundary :: _ -> (
         if not (same_snapshot_link declared_base first_boundary.source_snapshot)
         then Error Boundary_base_mismatch
         else
@@ -576,7 +577,9 @@ let make_revision ~capsule ~capsule_ref ~(parent : revision_link option) ~declar
                 else Error Parent_capsule_mismatch
           in
           let* () = validate_provenance capsule.capsule_identity provenance in
-          match Model.Snapshot.apply_operations declared_base_snapshot operations with
+          match
+            Model.Snapshot.apply_operations declared_base_snapshot operations
+          with
           | Error error -> Error (Revision_replay_rejected error)
           | Ok actual ->
               if
@@ -586,9 +589,9 @@ let make_revision ~capsule ~capsule_ref ~(parent : revision_link option) ~declar
               then Error Expected_result_identity_mismatch
               else
                 let id =
-                  derive_evolved_revision_id ~capsule_id:capsule.capsule_identity
-                    ~parent ~declared_base ~expected_result ~operations
-                    ~source_boundaries ~provenance
+                  derive_evolved_revision_id
+                    ~capsule_id:capsule.capsule_identity ~parent ~declared_base
+                    ~expected_result ~operations ~source_boundaries ~provenance
                 in
                 Ok
                   {
@@ -603,7 +606,7 @@ let make_revision ~capsule ~capsule_ref ~(parent : revision_link option) ~declar
                     source_boundaries;
                     provenance;
                     revision_created_at = Some created_at;
-                  }
+                  })
 
 let capsule_id capsule = capsule.capsule_identity
 let capsule_title capsule = capsule.title
@@ -622,7 +625,11 @@ let revision_provenance revision = revision.provenance
 let revision_created_at revision = revision.revision_created_at
 
 let make_revision_link ~capsule_id ~revision_id ~revision_ref =
-  { linked_capsule_id = capsule_id; linked_revision_id = revision_id; linked_revision_ref = revision_ref }
+  {
+    linked_capsule_id = capsule_id;
+    linked_revision_id = revision_id;
+    linked_revision_ref = revision_ref;
+  }
 
 let revision_link_capsule_id link = link.linked_capsule_id
 let revision_link_revision_id link = link.linked_revision_id
@@ -659,10 +666,12 @@ let encode_revision revision =
     array
       [
         Encoding.integer current_schema_version;
-        Encoding.bytes (V2_model.Capsule_id.to_bytes revision.revision_capsule_id_);
+        Encoding.bytes
+          (V2_model.Capsule_id.to_bytes revision.revision_capsule_id_);
         Encoding.bytes
           (V2_model.Capsule_revision_id.to_bytes revision.revision_identity);
-        Encoding.bytes (V2_model.Opaque_object_ref.to_bytes revision.capsule_ref);
+        Encoding.bytes
+          (V2_model.Opaque_object_ref.to_bytes revision.capsule_ref);
         snapshot_link_value revision.declared_base;
         snapshot_link_value revision.expected_result;
         Encoding.array (operation_values revision.revision_operations_)
@@ -680,16 +689,19 @@ let encode_revision revision =
     array
       [
         Encoding.integer evolved_revision_schema_version;
-        Encoding.bytes (V2_model.Capsule_id.to_bytes revision.revision_capsule_id_);
+        Encoding.bytes
+          (V2_model.Capsule_id.to_bytes revision.revision_capsule_id_);
         Encoding.bytes
           (V2_model.Capsule_revision_id.to_bytes revision.revision_identity);
-        Encoding.bytes (V2_model.Opaque_object_ref.to_bytes revision.capsule_ref);
+        Encoding.bytes
+          (V2_model.Opaque_object_ref.to_bytes revision.capsule_ref);
         parent;
         snapshot_link_value revision.declared_base;
         snapshot_link_value revision.expected_result;
         Encoding.array (operation_values revision.revision_operations_)
         |> Result.get_ok;
-        Encoding.array (List.map source_boundary_value revision.source_boundaries)
+        Encoding.array
+          (List.map source_boundary_value revision.source_boundaries)
         |> Result.get_ok;
         provenance_value revision.provenance;
         Encoding.integer (Option.get revision.revision_created_at);
@@ -813,12 +825,17 @@ let decode_provenance value =
         let* link = decode_revision_link source in
         Ok (Folded link)
       else if Int64.equal tag 2L then
-        let* links = decode_revision_link_list "split provenance links" source in
+        let* links =
+          decode_revision_link_list "split provenance links" source
+        in
         if links = [] then Error (Invalid_provenance "split sources are empty")
         else Ok (Split_from links)
       else if Int64.equal tag 3L then
-        let* links = decode_revision_link_list "combine provenance links" source in
-        if links = [] then Error (Invalid_provenance "combine sources are empty")
+        let* links =
+          decode_revision_link_list "combine provenance links" source
+        in
+        if links = [] then
+          Error (Invalid_provenance "combine sources are empty")
         else Ok (Combined_from links)
       else Error (Invalid_payload "unknown capsule revision provenance tag")
   | _ -> assert false
@@ -889,7 +906,8 @@ let decode_revision_common ~capsule_id ~id ~capsule_ref =
   let* capsule_id = bytes "capsule revision capsule identity" capsule_id in
   let* capsule_id =
     V2_model.Capsule_id.of_bytes capsule_id
-    |> Result.map_error (fun _ -> Invalid_payload "invalid revision capsule identity")
+    |> Result.map_error (fun _ ->
+        Invalid_payload "invalid revision capsule identity")
   in
   let* id = bytes "capsule revision identity" id in
   let* id =
@@ -899,7 +917,8 @@ let decode_revision_common ~capsule_id ~id ~capsule_ref =
   let* capsule_ref = bytes "capsule revision capsule reference" capsule_ref in
   let* capsule_ref =
     V2_model.Opaque_object_ref.of_bytes capsule_ref
-    |> Result.map_error (fun _ -> Invalid_payload "invalid revision capsule reference")
+    |> Result.map_error (fun _ ->
+        Invalid_payload "invalid revision capsule reference")
   in
   Ok (capsule_id, id, capsule_ref)
 
@@ -994,14 +1013,16 @@ let decode_evolved_revision encoded fields =
         | [] -> Error Empty_source_boundaries
       in
       let* () =
-        if same_snapshot_link declared_base first_boundary.source_snapshot then Ok ()
+        if same_snapshot_link declared_base first_boundary.source_snapshot then
+          Ok ()
         else Error Boundary_base_mismatch
       in
       let* () =
         match parent with
         | None -> Ok ()
         | Some link ->
-            if V2_model.Capsule_id.equal capsule_id link.linked_capsule_id then Ok ()
+            if V2_model.Capsule_id.equal capsule_id link.linked_capsule_id then
+              Ok ()
             else Error Parent_capsule_mismatch
       in
       let* () = validate_provenance capsule_id provenance in

@@ -115,8 +115,10 @@ let evolved_capsule_revision () =
     |> require_ok Capsule.proposal_error_to_string
   in
   let parent =
-    Capsule.make_revision_link ~capsule_id:(Capsule.capsule_id capsule)
-      ~revision_id:(Capsule.revision_id initial) ~revision_ref:(object_ref 'e')
+    Capsule.make_revision_link
+      ~capsule_id:(Capsule.capsule_id capsule)
+      ~revision_id:(Capsule.revision_id initial)
+      ~revision_ref:(object_ref 'e')
   in
   Capsule.make_revision ~capsule ~capsule_ref:(object_ref 'c')
     ~parent:(Some parent) ~declared_base:source_link
