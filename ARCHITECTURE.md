@@ -42,6 +42,22 @@ Changed bytes
           +--> confidence and fallback
 ```
 
+### V2 local command boundary
+
+V2-011 begins the executable split at the repository-root boundary.
+`yeokcham_local_service` exposes typed root classification, V2 admission,
+initialization, explicit archive, and explicitly confirmed reset outcomes. It
+delegates durable work to the cutover and object-store adapters and contains no
+command-line parsing or rendering. `yeokcham_local_command` parses exact root
+arguments and renders those outcomes deterministically; its sole effectful
+operation invokes the service. The executable remains the adapter that selects
+the command and writes output. Its checked-in V1 demonstration exception stays
+outside the reusable V2 service, so it cannot make a legacy root V2-ready.
+
+This is a shell refactor, not a V2 model or persistent-format transition. Later
+V2-011 slices can move the remaining command groups through the same boundary
+without making command parsing a second source of canonical transitions.
+
 ## 2. Proposed OCaml workspace
 
 ```text
@@ -63,7 +79,8 @@ yeokcham/
     yeokcham_release/
     yeokcham_semantic/
     yeokcham_git/
-    yeokcham_cli/
+    yeokcham_local_service/
+    yeokcham_local_command/
     yeokcham_testkit/
   test/
   bench/

@@ -1,0 +1,3 @@
+(library
+ (name yeokcham_local_service)
+ (libraries yeokcham_cutover yeokcham_store))

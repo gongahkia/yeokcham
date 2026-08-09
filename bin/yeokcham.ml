@@ -12,6 +12,8 @@ module Validation_retention = Yeokcham_validation_retention
 module Release = Yeokcham_release
 module Git = Yeokcham_git
 module Inspection = Yeokcham_inspection
+module Local_service = Yeokcham_local_service
+module Local_command = Yeokcham_local_command
 
 let now () = Int64.of_float (Unix.gettimeofday ())
 
@@ -529,20 +531,17 @@ let require_v2_root root =
     fail Fun.id
       "legacy demo mode requires the checked-in V1 fixture ownership marker"
   else
-    match Cutover.detect ~root with
-    | Error error -> fail Cutover.error_to_string error
-    | Ok Cutover.V2 -> ()
-    | Ok Cutover.Empty ->
-        fail Fun.id "repository is not initialized; run init first"
-    | Ok Cutover.Legacy ->
-        fail Fun.id
-          "legacy repository detected; archive it explicitly before V2 use \
-           with `yeokcham archive --name <archive-name>`"
-    | Ok (Cutover.Mixed_or_unknown detail) ->
-        fail Fun.id
-          ("repository is mixed or unknown and was not opened: " ^ detail)
-    | Ok (Cutover.Incomplete detail) ->
-        fail Fun.id ("repository is incomplete and was not opened: " ^ detail)
+    match Local_service.require_v2 ~root with
+    | Ok () -> ()
+    | Error error -> fail Local_service.error_to_string error
+
+let run_v2_root_command root name arguments =
+  match Local_command.parse ~name ~arguments with
+  | Error _ -> exit 2
+  | Ok command -> (
+      match Local_command.execute ~root command with
+      | Error error -> fail Local_service.error_to_string error
+      | Ok response -> Local_command.render response |> print_endline)
 
 let initialise_legacy_demo root =
   if not (legacy_demo_fixture root) then
@@ -580,61 +579,10 @@ let initialise_legacy_demo root =
 
 let initialise root =
   if legacy_demo_mode () then initialise_legacy_demo root
-  else
-    match Cutover.detect ~root with
-    | Error error -> fail Cutover.error_to_string error
-    | Ok Cutover.Empty -> (
-        match Store.init ~root with
-        | Ok _ -> print_endline "initialized empty V2 repository"
-        | Error error -> fail Store.error_to_string error)
-    | Ok Cutover.V2 -> (
-        match Store.init ~root with
-        | Ok _ -> print_endline "V2 repository is already initialized"
-        | Error error -> fail Store.error_to_string error)
-    | Ok Cutover.Legacy ->
-        fail Fun.id
-          "legacy repository detected; init will not overwrite it. Run \
-           `yeokcham archive --name <archive-name>` first."
-    | Ok (Cutover.Mixed_or_unknown detail) ->
-        fail Fun.id ("init refused mixed or unknown repository state: " ^ detail)
-    | Ok (Cutover.Incomplete detail) ->
-        fail Fun.id ("init refused incomplete repository state: " ^ detail)
+  else run_v2_root_command root "init" []
 
-let archive root arguments =
-  match arguments with
-  | [ "--name"; archive_name ] -> (
-      match Cutover.archive ~root ~archive_name with
-      | Error error -> fail Cutover.error_to_string error
-      | Ok (Cutover.Archived result) ->
-          Printf.printf "archived=%s manifest=%s\n" result.Cutover.archive_path
-            result.Cutover.manifest_path
-      | Ok (Cutover.Already_archived result) ->
-          Printf.printf "already-archived=%s manifest=%s\n"
-            result.Cutover.archive_path result.Cutover.manifest_path)
-  | _ -> exit 2
-
-let reset root arguments =
-  let rec parse selected_archive confirmed = function
-    | [] -> (
-        match (selected_archive, confirmed) with
-        | Some selected_archive, true -> Some selected_archive
-        | None, _ | Some _, false -> None)
-    | "--archive" :: name :: rest when Option.is_none selected_archive ->
-        parse (Some name) confirmed rest
-    | "--confirm-v2-reset" :: rest when not confirmed ->
-        parse selected_archive true rest
-    | _ -> None
-  in
-  match parse None false arguments with
-  | None -> exit 2
-  | Some archive_name -> (
-      match Cutover.reset ~root ~archive_name ~confirm:true with
-      | Error error -> fail Cutover.error_to_string error
-      | Ok Cutover.Reset ->
-          print_endline "initialized empty V2 repository after verified archive"
-      | Ok Cutover.Already_reset ->
-          print_endline
-            "V2 repository is already initialized; archive remains verified")
+let archive root arguments = run_v2_root_command root "archive" arguments
+let reset root arguments = run_v2_root_command root "reset" arguments
 
 let checkpoint root =
   match open_scratch root with

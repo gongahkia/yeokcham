@@ -169,6 +169,19 @@
  (libraries alcotest qcheck-core qcheck-alcotest yeokcham_v2_model))
 
 (test
+ (name test_v2_local_command)
+ (modules test_v2_local_command)
+ (libraries
+  alcotest
+  qcheck-alcotest
+  qcheck-core
+  unix
+  yeokcham_cutover
+  yeokcham_local_command
+  yeokcham_local_service
+  yeokcham_store))
+
+(test
  (name test_v2_envelope)
  (modules test_v2_envelope)
  (libraries
@@ -1178,6 +1191,7 @@
   (:v2_model_test v2_model_test.exe)
   (:test_v2_envelope test_v2_envelope.exe)
   (:test_v2_address test_v2_address.exe)
+  (:test_v2_local_command test_v2_local_command.exe)
   (:test_v2_ledger test_v2_ledger.exe)
   (:v2_transaction_property_test v2_transaction_property_test.exe)
   (:v2_state_machine_property_test v2_state_machine_property_test.exe)
@@ -1215,6 +1229,7 @@
    (run %{encoding_property_test})
    (run %{model_property_test})
    (run %{store_property_test})
+   (run %{test_v2_local_command})
    (run %{test_v2_ledger})
    (run %{v2_transaction_property_test})
    (run %{v2_state_machine_property_test})
