@@ -161,3 +161,4 @@ The ADR lifecycle, numbering rules, and template are defined in [`docs/adr/READM
 - [ADR-048 — V2 encrypted causal ref-ledger with external key verification](docs/adr/048-v2-encrypted-causal-ref-ledger.md) — Accepted.
 - [ADR-049 — V2 durable object transaction journals without implicit ref authority](docs/adr/049-v2-durable-object-transaction-journals.md) — Accepted.
 - [ADR-050 — Local V2 daemon runtime boundary](docs/adr/050-local-v2-daemon-runtime-boundary.md) — Accepted.
+- [ADR-051 — Linux inotify as an advisory watcher source](docs/adr/051-linux-inotify-advisory-watcher.md) — Accepted.

@@ -193,6 +193,11 @@
  (libraries alcotest qcheck-alcotest qcheck-core yeokcham_watcher))
 
 (test
+ (name linux_watcher_test)
+ (modules linux_watcher_test)
+ (libraries alcotest unix yeokcham_linux_watcher yeokcham_watcher))
+
+(test
  (name v2_scratch_scheduler_property_test)
  (modules v2_scratch_scheduler_property_test)
  (libraries

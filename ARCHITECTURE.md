@@ -70,8 +70,12 @@ V2-013 adds `yeokcham_watcher` as a pure adapter boundary. Linux and macOS
 observations normalize to sorted, unique, bounded relative-path scan requests;
 rename includes both paths, while overflow and watcher loss request a whole-root
 scan. These requests are advisory only: exact scanning remains authoritative and
-normalization cannot create a checkpoint or canonical event. Native OS event
-sources remain outside this model until their platform boundary is defined.
+normalization cannot create a checkpoint or canonical event. The Linux source
+adapter recursively watches a non-symlink root with inotify, pairs in-tree move
+cookies, and registers new directories before returning an advisory request.
+Queue overflow, root loss, unmount, and incomplete watch coverage request a
+whole-root rescan and explicit watcher restart. macOS FSEvents remains outside
+the implementation until it is built and verified on macOS.
 
 V2-014 currently supplies the pure `yeokcham_v2_scratch_scheduler` core. A
 caller supplies positive monotonic-clock quiet-period and maximum-latency bounds;

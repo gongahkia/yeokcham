@@ -1,0 +1,3 @@
+(library
+ (name yeokcham_linux_watcher)
+ (libraries inotify unix yeokcham_watcher))
