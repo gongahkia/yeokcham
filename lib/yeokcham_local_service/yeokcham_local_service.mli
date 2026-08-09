@@ -1,7 +1,7 @@
-(** Reusable local filesystem operations at the V2 root boundary.
+(** Reusable local filesystem operations at the V2 root and inspection boundary.
 
-    This service owns no command-line parsing or rendering. It delegates every
-    durable transition to the V2 cutover and store adapters. *)
+    This service owns no command-line parsing or rendering. It delegates work to
+    the V2 cutover, store, and inspection adapters. *)
 
 type root_availability =
   | V2_ready
@@ -12,6 +12,7 @@ type root_availability =
 
 type error =
   | Cutover_error of Yeokcham_cutover.error
+  | Inspection_error of Yeokcham_inspection.error
   | Store_error of Yeokcham_store.error
   | Root_unavailable of root_availability
 
@@ -52,3 +53,17 @@ val reset :
   confirm:bool ->
   (reset_outcome, error) result
 (** [reset] delegates the explicitly confirmed V2 reset transition. *)
+
+val status : root:string -> (Yeokcham_inspection.status, error) result
+
+val timeline :
+  root:string ->
+  limit:int ->
+  (Yeokcham_inspection.timeline_entry list, error) result
+
+val storage : root:string -> (Yeokcham_inspection.storage_report, error) result
+
+val verify :
+  root:string -> (Yeokcham_inspection.verification_report, error) result
+(** The inspection functions require a valid V2 root and never write an object,
+    journal, or mutable reference. *)

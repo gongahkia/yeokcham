@@ -535,13 +535,20 @@ let require_v2_root root =
     | Ok () -> ()
     | Error error -> fail Local_service.error_to_string error
 
-let run_v2_root_command root name arguments =
+let run_v2_local_command root name arguments =
   match Local_command.parse ~name ~arguments with
   | Error _ -> exit 2
   | Ok command -> (
       match Local_command.execute ~root command with
       | Error error -> fail Local_service.error_to_string error
-      | Ok response -> Local_command.render response |> print_endline)
+      | Ok response -> Local_command.render response |> List.iter print_endline)
+
+let run_v2_or_legacy_demo root name arguments legacy =
+  if legacy_demo_fixture root then legacy ()
+  else if legacy_demo_mode () then
+    fail Fun.id
+      "legacy demo mode requires the checked-in V1 fixture ownership marker"
+  else run_v2_local_command root name arguments
 
 let initialise_legacy_demo root =
   if not (legacy_demo_fixture root) then
@@ -579,10 +586,10 @@ let initialise_legacy_demo root =
 
 let initialise root =
   if legacy_demo_mode () then initialise_legacy_demo root
-  else run_v2_root_command root "init" []
+  else run_v2_local_command root "init" []
 
-let archive root arguments = run_v2_root_command root "archive" arguments
-let reset root arguments = run_v2_root_command root "reset" arguments
+let archive root arguments = run_v2_local_command root "archive" arguments
+let reset root arguments = run_v2_local_command root "reset" arguments
 
 let checkpoint root =
   match open_scratch root with
@@ -608,7 +615,7 @@ let checkpoint root =
                        (Scratch.Checkpoint.id checkpoint)))
           | Error error -> fail Scratch.error_to_string error))
 
-let timeline root arguments =
+let legacy_timeline root arguments =
   let limit =
     match arguments with
     | [] -> 32
@@ -640,7 +647,7 @@ let timeline root arguments =
                 (String.concat "," entry.Inspection.retention))
             entries)
 
-let status root arguments =
+let legacy_status root arguments =
   match arguments with
   | [] -> (
       match Store.open_repository ~root with
@@ -672,7 +679,7 @@ let status root arguments =
                 status.Inspection.repository_object_count))
   | _ -> exit 2
 
-let storage root arguments =
+let legacy_storage root arguments =
   match arguments with
   | [ "stats" ] -> (
       match Store.open_repository ~root with
@@ -696,7 +703,7 @@ let storage root arguments =
                 report.Inspection.retained_checkpoint_object_bytes))
   | _ -> exit 2
 
-let verify root arguments =
+let legacy_verify root arguments =
   match arguments with
   | [] -> (
       match Store.open_repository ~root with
@@ -715,6 +722,22 @@ let verify root arguments =
                 report.Inspection.verified_workspaces
                 report.Inspection.verified_releases))
   | _ -> exit 2
+
+let timeline root arguments =
+  run_v2_or_legacy_demo root "timeline" arguments (fun () ->
+      legacy_timeline root arguments)
+
+let status root arguments =
+  run_v2_or_legacy_demo root "status" arguments (fun () ->
+      legacy_status root arguments)
+
+let storage root arguments =
+  run_v2_or_legacy_demo root "storage" arguments (fun () ->
+      legacy_storage root arguments)
+
+let verify root arguments =
+  run_v2_or_legacy_demo root "verify" arguments (fun () ->
+      legacy_verify root arguments)
 
 let restore root arguments =
   let dry_run, target =
@@ -1968,15 +1991,11 @@ let () =
         | "init" when arguments = [] -> initialise root
         | "archive" -> archive root arguments
         | "reset" -> reset root arguments
-        | "status" ->
-            require_v2_root root;
-            status root arguments
+        | "status" -> status root arguments
         | "checkpoint" when arguments = [] ->
             require_v2_root root;
             checkpoint root
-        | "timeline" ->
-            require_v2_root root;
-            timeline root arguments
+        | "timeline" -> timeline root arguments
         | "restore" ->
             require_v2_root root;
             restore root arguments
@@ -2007,12 +2026,8 @@ let () =
         | "release" ->
             require_v2_root root;
             release root arguments
-        | "storage" ->
-            require_v2_root root;
-            storage root arguments
-        | "verify" ->
-            require_v2_root root;
-            verify root arguments
+        | "storage" -> storage root arguments
+        | "verify" -> verify root arguments
         | "git" ->
             require_v2_root root;
             git root arguments

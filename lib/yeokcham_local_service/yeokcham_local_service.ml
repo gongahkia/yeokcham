@@ -1,4 +1,5 @@
 module Cutover = Yeokcham_cutover
+module Inspection = Yeokcham_inspection
 module Store = Yeokcham_store
 
 type root_availability =
@@ -10,6 +11,7 @@ type root_availability =
 
 type error =
   | Cutover_error of Cutover.error
+  | Inspection_error of Inspection.error
   | Store_error of Store.error
   | Root_unavailable of root_availability
 
@@ -41,6 +43,7 @@ let root_availability_to_string = function
 
 let error_to_string = function
   | Cutover_error error -> Cutover.error_to_string error
+  | Inspection_error error -> Inspection.error_to_string error
   | Store_error error -> Store.error_to_string error
   | Root_unavailable availability -> root_availability_to_string availability
 
@@ -101,3 +104,28 @@ let reset ~root ~archive_name ~confirm =
   |> Result.map (function
     | Cutover.Reset -> Reset
     | Cutover.Already_reset -> Already_reset)
+
+let open_v2_repository ~root =
+  let* () = require_v2 ~root in
+  Store.open_repository ~root
+  |> Result.map_error (fun error -> Store_error error)
+
+let status ~root =
+  let* store = open_v2_repository ~root in
+  Inspection.status store
+  |> Result.map_error (fun error -> Inspection_error error)
+
+let timeline ~root ~limit =
+  let* store = open_v2_repository ~root in
+  Inspection.timeline store ~limit
+  |> Result.map_error (fun error -> Inspection_error error)
+
+let storage ~root =
+  let* store = open_v2_repository ~root in
+  Inspection.storage store
+  |> Result.map_error (fun error -> Inspection_error error)
+
+let verify ~root =
+  let* store = open_v2_repository ~root in
+  Inspection.verify store
+  |> Result.map_error (fun error -> Inspection_error error)

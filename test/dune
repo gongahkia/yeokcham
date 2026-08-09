@@ -177,6 +177,7 @@
   qcheck-core
   unix
   yeokcham_cutover
+  yeokcham_inspection
   yeokcham_local_command
   yeokcham_local_service
   yeokcham_store))

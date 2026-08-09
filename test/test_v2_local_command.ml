@@ -1,5 +1,6 @@
 module Command = Yeokcham_local_command
 module Cutover = Yeokcham_cutover
+module Inspection = Yeokcham_inspection
 module Service = Yeokcham_local_service
 module Store = Yeokcham_store
 
@@ -63,14 +64,29 @@ let parser_and_renderer_are_pure () =
        ~arguments:[ "--confirm-v2-reset"; "--archive"; "v1-archive" ]
     = Command.Reset { archive_name = "v1-archive" });
   Alcotest.(check bool)
+    "status command parses" true
+    (parse ~name:"status" ~arguments:[] = Command.Status);
+  Alcotest.(check bool)
+    "timeline command parses" true
+    (parse ~name:"timeline" ~arguments:[ "--limit"; "8" ]
+    = Command.Timeline { limit = 8 });
+  Alcotest.(check bool)
+    "storage command parses" true
+    (parse ~name:"storage" ~arguments:[ "stats" ] = Command.Storage_stats);
+  Alcotest.(check bool)
+    "verify command parses" true
+    (parse ~name:"verify" ~arguments:[] = Command.Verify);
+  Alcotest.(check bool)
     "missing reset confirmation rejects" true
     (Result.is_error
        (Command.parse ~name:"reset" ~arguments:[ "--archive"; "v1-archive" ]));
-  Alcotest.(check string)
-    "initialized rendering" "initialized empty V2 repository"
+  Alcotest.(check (list string))
+    "initialized rendering"
+    [ "initialized empty V2 repository" ]
     (Command.render Command.Initialized);
-  Alcotest.(check string)
-    "archive rendering" "archived=/tmp/archive manifest=/tmp/archive-manifest"
+  Alcotest.(check (list string))
+    "archive rendering"
+    [ "archived=/tmp/archive manifest=/tmp/archive-manifest" ]
     (Command.render
        (Command.Archived
           {
@@ -99,7 +115,47 @@ let initialization_is_reusable_and_idempotent () =
       in
       Alcotest.(check bool)
         "command adapter reuses service outcome" true
-        (response = Command.Already_initialized))
+        (response = Command.Already_initialized);
+      let store =
+        Store.open_repository ~root |> require_ok Store.error_to_string
+      in
+      let before =
+        Store.list_objects store |> require_ok Store.error_to_string
+      in
+      let status = Service.status ~root |> require_ok Service.error_to_string in
+      Alcotest.(check int)
+        "empty V2 root has no objects" 0
+        status.Inspection.repository_object_count;
+      let status_response =
+        Command.execute ~root Command.Status
+        |> require_ok Service.error_to_string
+      in
+      Alcotest.(check (list string))
+        "status rendering remains stable"
+        [
+          "scratch-head=none active-generation=none capsules=0 workspaces=0 \
+           releases=0 objects=0";
+        ]
+        (Command.render status_response);
+      let timeline =
+        Service.timeline ~root ~limit:32 |> require_ok Service.error_to_string
+      in
+      Alcotest.(check int) "empty timeline" 0 (List.length timeline);
+      let storage =
+        Service.storage ~root |> require_ok Service.error_to_string
+      in
+      Alcotest.(check int) "empty storage" 0 storage.Inspection.total_objects;
+      let verification =
+        Service.verify ~root |> require_ok Service.error_to_string
+      in
+      Alcotest.(check int)
+        "empty verification" 0 verification.Inspection.verified_objects;
+      let after =
+        Store.list_objects store |> require_ok Store.error_to_string
+      in
+      Alcotest.(check int)
+        "inspection service does not write" (List.length before)
+        (List.length after))
 
 let legacy_archive_and_confirmed_reset_are_service_effects () =
   with_root (fun root ->
@@ -152,9 +208,11 @@ let parser_round_trip =
              })
       in
       parsed = Ok (Command.Archive { archive_name })
-      && String.equal rendered
-           ("archived=/archive/" ^ archive_name ^ " manifest=/manifest/"
-          ^ archive_name))
+      && rendered
+         = [
+             "archived=/archive/" ^ archive_name ^ " manifest=/manifest/"
+             ^ archive_name;
+           ])
 
 let () =
   Alcotest.run "V2 local command adapters"
