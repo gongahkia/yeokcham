@@ -188,6 +188,11 @@
  (libraries alcotest unix yeokcham_local_daemon yeokcham_store))
 
 (test
+ (name watcher_property_test)
+ (modules watcher_property_test)
+ (libraries alcotest qcheck-alcotest qcheck-core yeokcham_watcher))
+
+(test
  (name test_v2_envelope)
  (modules test_v2_envelope)
  (libraries
@@ -1199,6 +1204,7 @@
   (:test_v2_address test_v2_address.exe)
   (:test_v2_local_command test_v2_local_command.exe)
   (:test_local_daemon test_local_daemon.exe)
+  (:watcher_property_test watcher_property_test.exe)
   (:test_v2_ledger test_v2_ledger.exe)
   (:v2_transaction_property_test v2_transaction_property_test.exe)
   (:v2_state_machine_property_test v2_state_machine_property_test.exe)
@@ -1238,6 +1244,7 @@
    (run %{store_property_test})
    (run %{test_v2_local_command})
    (run %{test_local_daemon})
+   (run %{watcher_property_test})
    (run %{test_v2_ledger})
    (run %{v2_transaction_property_test})
    (run %{v2_state_machine_property_test})

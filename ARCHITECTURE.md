@@ -66,6 +66,13 @@ explicit stale recovery is based on connection refusal, never a PID kill. Its
 small authenticated protocol currently offers liveness and controlled shutdown,
 not repository mutation or durable authorization.
 
+V2-013 adds `yeokcham_watcher` as a pure adapter boundary. Linux and macOS
+observations normalize to sorted, unique, bounded relative-path scan requests;
+rename includes both paths, while overflow and watcher loss request a whole-root
+scan. These requests are advisory only: exact scanning remains authoritative and
+normalization cannot create a checkpoint or canonical event. Native OS event
+sources remain outside this model until their platform boundary is defined.
+
 ## 2. Proposed OCaml workspace
 
 ```text
