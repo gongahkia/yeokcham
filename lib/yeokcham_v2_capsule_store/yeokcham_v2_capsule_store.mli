@@ -55,6 +55,8 @@ type resolved = {
 }
 
 type publication = Published of resolved | Already_published of resolved
+type split_plan
+type combine_plan
 
 type error =
   | Bootstrap_store_error of Bootstrap_store.error
@@ -69,6 +71,9 @@ type error =
   | Invalid_capsule_ref_name of string
   | Nonce_reuse
   | Capsule_id_already_bound of V2_model.Capsule_id.t
+  | Capsule_missing of V2_model.Capsule_id.t
+  | Capsule_split_error of Capsule.split_error
+  | Capsule_combine_error of Capsule.combine_error
   | Divergent_capsule_binding of Ledger.Event_id.t list
   | Capsule_binding_missing_target of Ledger.Event_id.t
   | Capsule_binding_target_mismatch of {
@@ -132,6 +137,26 @@ val resolve :
   repository -> id:V2_model.Capsule_id.t -> (resolved option, error) result
 (** Reads a sole verified capsule binding and replays the immutable initial
     revision. A malformed or divergent binding is an explicit error. *)
+
+val plan_split :
+  repository ->
+  source:V2_model.Capsule_id.t ->
+  left_indices:int list ->
+  (split_plan, error) result
+
+val split_plan_source : split_plan -> resolved
+val split_plan_left_indices : split_plan -> int list
+val split_plan_left_result : split_plan -> Model.Snapshot.t
+val split_plan_right_operations : split_plan -> Model.scratch_operation list
+
+val plan_combine :
+  repository ->
+  sources:V2_model.Capsule_id.t list ->
+  (combine_plan, error) result
+
+val combine_plan_sources : combine_plan -> resolved list
+val combine_plan_result : combine_plan -> Model.Snapshot.t
+val combine_plan_operations : combine_plan -> Model.scratch_operation list
 
 val fold :
   ?fault:Fault.t ->

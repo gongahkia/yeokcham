@@ -29,6 +29,7 @@ type selection
 type capsule
 type revision
 type split_plan
+type combine_plan
 type proposal_error = Derived_replay_mismatch
 
 type selection_error =
@@ -43,6 +44,23 @@ type selection_error =
 type split_error =
   | Split_selection_error of selection_error
   | Split_derivation_error of proposal_error
+
+type combine_error =
+  | Empty_combine
+  | Combine_declared_base_mismatch of {
+      source_index : int;
+      expected : Yeokcham_id.Snapshot_id.t;
+      actual : Yeokcham_id.Snapshot_id.t;
+    }
+  | Combine_replay_rejected of {
+      source_index : int;
+      cause : Model.replay_error;
+    }
+  | Combine_expected_result_mismatch of {
+      source_index : int;
+      expected : Yeokcham_id.Snapshot_id.t;
+      actual : Yeokcham_id.Snapshot_id.t;
+    }
 
 type error =
   | Invalid_title of Yeokcham_encoding.construction_error
@@ -65,6 +83,7 @@ type error =
 val proposal_error_to_string : proposal_error -> string
 val selection_error_to_string : selection_error -> string
 val split_error_to_string : split_error -> string
+val combine_error_to_string : combine_error -> string
 val error_to_string : error -> string
 
 val propose :
@@ -167,6 +186,16 @@ val split_plan_left_indices : split_plan -> int list
 val split_plan_left_operations : split_plan -> Model.scratch_operation list
 val split_plan_left_result : split_plan -> Model.Snapshot.t
 val split_plan_right_operations : split_plan -> Model.scratch_operation list
+
+val plan_combine :
+  base:Model.Snapshot.t ->
+  revision list ->
+  (combine_plan, combine_error) result
+(** Validates caller-supplied revision order without publication. Every source
+    must begin at the exact result of the preceding source. *)
+
+val combine_plan_operations : combine_plan -> Model.scratch_operation list
+val combine_plan_result : combine_plan -> Model.Snapshot.t
 
 val encode_capsule : capsule -> string
 val decode_capsule : string -> (capsule, error) result

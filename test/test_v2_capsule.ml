@@ -248,6 +248,38 @@ let immutable_child_revision_replays_and_round_trips () =
       ~provenance:(Capsule.Folded parent) ~created_at:18L
     |> require_ok Capsule.error_to_string
   in
+  let plan =
+    Capsule.plan_split ~base:source child ~left_indices:[ 0 ]
+    |> require_ok Capsule.split_error_to_string
+  in
+  Capsule.split_plan_right_operations plan
+  |> Model.Snapshot.apply_operations (Capsule.split_plan_left_result plan)
+  |> require_ok Model.replay_error_to_string
+  |> fun actual ->
+  Alcotest.(check bool)
+    "read-only split partition composes to the original result" true
+    (Model.Snapshot.equal later actual);
+  let adjacent_delta =
+    Capsule.propose ~from:target ~to_:later
+    |> require_ok Capsule.proposal_error_to_string
+  in
+  let adjacent =
+    Capsule.make_revision ~capsule ~capsule_ref:(opaque 'i') ~parent:(Some parent)
+      ~declared_base:target_link ~declared_base_snapshot:target
+      ~expected_result:later_link
+      ~operations:(Capsule.proposal_operations adjacent_delta)
+      ~source_boundaries:
+        [ { Capsule.source_snapshot = target_link; target_snapshot = later_link } ]
+      ~provenance:(Capsule.Folded parent) ~created_at:18L
+    |> require_ok Capsule.error_to_string
+  in
+  let combined =
+    Capsule.plan_combine ~base:source [ initial; adjacent ]
+    |> require_ok Capsule.combine_error_to_string
+  in
+  Alcotest.(check bool)
+    "read-only combine preserves caller source order" true
+    (Model.Snapshot.equal later (Capsule.combine_plan_result combined));
   let decoded =
     Capsule.decode_revision (Capsule.encode_revision child)
     |> require_ok Capsule.error_to_string

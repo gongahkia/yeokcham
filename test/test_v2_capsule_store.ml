@@ -278,6 +278,33 @@ let interrupted_creation_stays_unbound_and_retries () =
       | Capsule_store.Already_published _ ->
           Alcotest.fail "retry should publish the previously unbound capsule")
 
+let split_and_combine_plans_do_not_publish () =
+  with_repository (fun scratch capsules ->
+      let source = source_snapshot "before" in
+      let target = target_snapshot "after" in
+      let current =
+        create scratch capsules ~source ~target ()
+        |> require_ok Capsule_store.error_to_string
+        |> function
+        | Capsule_store.Published resolved -> resolved
+        | Capsule_store.Already_published _ -> Alcotest.fail "unexpected existing capsule"
+      in
+      ignore
+        (Capsule_store.plan_split capsules ~source:capsule_id ~left_indices:[ 0 ]
+        |> require_ok Capsule_store.error_to_string);
+      ignore
+        (Capsule_store.plan_combine capsules ~sources:[ capsule_id ]
+        |> require_ok Capsule_store.error_to_string);
+      let after =
+        Capsule_store.resolve capsules ~id:capsule_id
+        |> require_ok Capsule_store.error_to_string
+        |> Option.get
+      in
+      Alcotest.(check bool)
+        "read-only plans leave the signed current binding unchanged" true
+        (V2_model.Opaque_object_ref.equal current.Capsule_store.revision_ref
+           after.Capsule_store.revision_ref))
+
 let immutable_fold_reopens_and_stale_update_rejects () =
   with_repository (fun scratch capsules ->
       let source = source_snapshot "before" in
@@ -426,6 +453,8 @@ let () =
             durable_creation_pins_boundaries_across_compaction;
           Alcotest.test_case "interrupted creation remains unbound and retries"
             `Quick interrupted_creation_stays_unbound_and_retries;
+          Alcotest.test_case "split and combine plans do not publish" `Quick
+            split_and_combine_plans_do_not_publish;
           Alcotest.test_case "immutable fold reopens and stale update rejects"
             `Quick immutable_fold_reopens_and_stale_update_rejects;
           Alcotest.test_case

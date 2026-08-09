@@ -72,6 +72,11 @@ type split_plan = {
   right_operations : Model.scratch_operation list;
 }
 
+type combine_plan = {
+  combine_operations : Model.scratch_operation list;
+  combine_result : Model.Snapshot.t;
+}
+
 type proposal_error = Derived_replay_mismatch
 
 type selection_error =
@@ -86,6 +91,23 @@ type selection_error =
 type split_error =
   | Split_selection_error of selection_error
   | Split_derivation_error of proposal_error
+
+type combine_error =
+  | Empty_combine
+  | Combine_declared_base_mismatch of {
+      source_index : int;
+      expected : Yeokcham_id.Snapshot_id.t;
+      actual : Yeokcham_id.Snapshot_id.t;
+    }
+  | Combine_replay_rejected of {
+      source_index : int;
+      cause : Model.replay_error;
+    }
+  | Combine_expected_result_mismatch of {
+      source_index : int;
+      expected : Yeokcham_id.Snapshot_id.t;
+      actual : Yeokcham_id.Snapshot_id.t;
+    }
 
 type error =
   | Invalid_title of Encoding.construction_error
@@ -129,6 +151,20 @@ let selection_error_to_string = function
 let split_error_to_string = function
   | Split_selection_error error -> selection_error_to_string error
   | Split_derivation_error error -> proposal_error_to_string error
+
+let combine_error_to_string = function
+  | Empty_combine -> "combine plan has no source revisions"
+  | Combine_declared_base_mismatch { source_index; expected; actual } ->
+      Printf.sprintf "combine source %d declares base %s, expected %s"
+        source_index (Yeokcham_id.Snapshot_id.to_hex actual)
+        (Yeokcham_id.Snapshot_id.to_hex expected)
+  | Combine_replay_rejected { source_index; cause } ->
+      Printf.sprintf "combine source %d replay rejected: %s" source_index
+        (Model.replay_error_to_string cause)
+  | Combine_expected_result_mismatch { source_index; expected; actual } ->
+      Printf.sprintf "combine source %d reaches %s, expected %s" source_index
+        (Yeokcham_id.Snapshot_id.to_hex actual)
+        (Yeokcham_id.Snapshot_id.to_hex expected)
 
 let error_to_string = function
   | Invalid_title error ->
@@ -684,6 +720,48 @@ let split_plan_left_indices plan = plan.left_indices
 let split_plan_left_operations plan = plan.left_operations
 let split_plan_left_result plan = plan.left_result
 let split_plan_right_operations plan = plan.right_operations
+
+let plan_combine ~base revisions =
+  match revisions with
+  | [] -> Error Empty_combine
+  | _ ->
+      let rec apply source_index state operations = function
+        | [] -> Ok { combine_operations = List.rev operations; combine_result = state }
+        | revision :: rest ->
+            let expected_base = Model.Snapshot.id state in
+            let actual_base = (revision_declared_base revision).snapshot_id in
+            if not (Yeokcham_id.Snapshot_id.equal expected_base actual_base) then
+              Error
+                (Combine_declared_base_mismatch
+                   { source_index; expected = expected_base; actual = actual_base })
+            else
+              match apply_revision ~base:state revision with
+              | Error cause -> Error (Combine_replay_rejected { source_index; cause })
+              | Ok result ->
+                  let expected_result =
+                    (revision_expected_result revision).snapshot_id
+                  in
+                  let actual_result = Model.Snapshot.id result in
+                  if
+                    not
+                      (Yeokcham_id.Snapshot_id.equal expected_result actual_result)
+                  then
+                    Error
+                      (Combine_expected_result_mismatch
+                         {
+                           source_index;
+                           expected = expected_result;
+                           actual = actual_result;
+                         })
+                  else
+                    apply (source_index + 1) result
+                      (List.rev_append (revision_operations revision) operations)
+                      rest
+      in
+      apply 0 base [] revisions
+
+let combine_plan_operations plan = plan.combine_operations
+let combine_plan_result plan = plan.combine_result
 
 let text field value =
   Encoding.text value

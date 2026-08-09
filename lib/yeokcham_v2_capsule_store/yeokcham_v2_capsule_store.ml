@@ -66,6 +66,16 @@ type resolved = {
 
 type publication = Published of resolved | Already_published of resolved
 
+type split_plan = {
+  split_source : resolved;
+  split : Capsule.split_plan;
+}
+
+type combine_plan = {
+  combine_sources : resolved list;
+  combine : Capsule.combine_plan;
+}
+
 type error =
   | Bootstrap_store_error of Bootstrap_store.error
   | Capsule_error of Capsule.error
@@ -79,6 +89,9 @@ type error =
   | Invalid_capsule_ref_name of string
   | Nonce_reuse
   | Capsule_id_already_bound of V2_model.Capsule_id.t
+  | Capsule_missing of V2_model.Capsule_id.t
+  | Capsule_split_error of Capsule.split_error
+  | Capsule_combine_error of Capsule.combine_error
   | Divergent_capsule_binding of Ledger.Event_id.t list
   | Capsule_binding_missing_target of Ledger.Event_id.t
   | Capsule_binding_target_mismatch of {
@@ -127,6 +140,10 @@ let error_to_string = function
   | Nonce_reuse -> "capsule creation requires pairwise distinct envelope nonces"
   | Capsule_id_already_bound id ->
       "capsule already has a current binding: " ^ V2_model.Capsule_id.to_hex id
+  | Capsule_missing id ->
+      "capsule has no current binding: " ^ V2_model.Capsule_id.to_hex id
+  | Capsule_split_error error -> Capsule.split_error_to_string error
+  | Capsule_combine_error error -> Capsule.combine_error_to_string error
   | Divergent_capsule_binding events ->
       "capsule binding has divergent causal heads: "
       ^ String.concat "," (List.map Ledger.Event_id.to_hex events)
@@ -446,6 +463,51 @@ let resolve repository ~id =
                      declared_base;
                      expected_result;
                    })
+
+let plan_split repository ~source ~left_indices =
+  let* resolved = resolve repository ~id:source in
+  let* source =
+    match resolved with
+    | Some resolved -> Ok resolved
+    | None -> Error (Capsule_missing source)
+  in
+  let* split =
+    Capsule.plan_split ~base:source.declared_base source.revision ~left_indices
+    |> Result.map_error (fun error -> Capsule_split_error error)
+  in
+  Ok { split_source = source; split }
+
+let split_plan_source plan = plan.split_source
+let split_plan_left_indices plan = Capsule.split_plan_left_indices plan.split
+let split_plan_left_result plan = Capsule.split_plan_left_result plan.split
+let split_plan_right_operations plan = Capsule.split_plan_right_operations plan.split
+
+let plan_combine repository ~sources =
+  let rec resolve_sources reversed = function
+    | [] -> Ok (List.rev reversed)
+    | id :: rest ->
+        let* resolved = resolve repository ~id in
+        let* resolved =
+          match resolved with
+          | Some resolved -> Ok resolved
+          | None -> Error (Capsule_missing id)
+        in
+        resolve_sources (resolved :: reversed) rest
+  in
+  let* sources = resolve_sources [] sources in
+  match sources with
+  | [] -> Error (Capsule_combine_error Capsule.Empty_combine)
+  | first :: _ ->
+      let* combine =
+        Capsule.plan_combine ~base:first.declared_base
+          (List.map (fun source -> source.revision) sources)
+        |> Result.map_error (fun error -> Capsule_combine_error error)
+      in
+      Ok { combine_sources = sources; combine }
+
+let combine_plan_sources plan = plan.combine_sources
+let combine_plan_result plan = Capsule.combine_plan_result plan.combine
+let combine_plan_operations plan = Capsule.combine_plan_operations plan.combine
 
 let envelope_for repository ~nonce object_ =
   let record = Bootstrap_store.bootstrap repository.bootstrap in
