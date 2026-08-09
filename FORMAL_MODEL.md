@@ -1593,8 +1593,18 @@ record without rewriting the action. No other observed state is inferred as
 progress. The adapter confines every action below the real root, rejects the
 metadata path and symlinked/non-directory parents, makes each action durable,
 and only then appends `Applying(n + 1)`. After all actions it requires
-`scan(root) = T` before it appends `Materialized`. Post-restore publication is
-a separate relation.
+`scan(root) = T` before it appends `Materialized`.
+
+The authenticated recovery relation re-resolves both journal event IDs in the
+local signed device-scratch scope and requires their typed snapshot references
+to equal the record bindings. It therefore reconstructs the same `(O, T)` plan
+from verified source events rather than trusting opaque identifiers alone. For a
+`Materialized` record, it rechecks `scan(root) = T`; only when the sole scratch
+checkpoint is the named safety event may it causally publish `T`. A crash after
+that publication but before `Published` is reconciled only when the current
+scratch checkpoint is exactly `T`; other sole heads and divergence reject. The
+service appends `Published` only after this verified target checkpoint. It never
+selects a different head as source or target.
 
 The implemented preparation relation accepts an explicit signed event `E` only
 when it is in the local device scratch scope and resolves to the target exact

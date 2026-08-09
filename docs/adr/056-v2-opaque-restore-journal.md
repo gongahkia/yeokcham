@@ -134,6 +134,12 @@ checkpoint nor restore journal.
   journal generation. On an explicit retry, the adapter may append exactly the
   next generation only when the root exactly equals the corresponding next pure
   prefix. Any other state rejects rather than being interpreted as progress.
+- The recovery service re-resolves both named events in the signed local
+  scratch scope and requires their snapshot references to retain the journal's
+  bindings. It rechecks the materialized root before causal post-restore
+  publication, accepts a post-publication crash only when the current checkpoint
+  is exactly the target snapshot, and then appends `Published`. It never picks
+  an alternate scratch head.
 
 ## Model and invariant impact
 
@@ -153,6 +159,8 @@ Restore_record = (repository, operation, safety-event, target-event,
 5. Re-decoding and re-encoding retain exactly the same bytes.
 6. The record supplies no causal-head selection, user authorization, intent,
    filesystem contents, or recovery authority by itself.
+7. Recovery re-verifies both source events and their snapshot references before
+   it applies or publishes a plan.
 
 ## Persistent-format and migration impact
 
@@ -186,7 +194,9 @@ development policy.
   symlink targets; stale pre-write scans; deterministic post-write/pre-journal
   interruptions; durable per-action generations; explicit one-prefix recovery;
   and 60 seeded generated target and interruption-reconciliation cases.
-  Post-restore publication remains to be tested with its adapter.
+- Authenticated-recovery tests cover post-write restart publication, external
+  root rejection, forged target-event/reference rejection, idempotent published
+  resume, and 60 seeded interrupted restore-to-publication cases.
 - `make check` and `make property-test PROPERTY_TEST_SEED=17` are required.
 
 ## CLI and user impact

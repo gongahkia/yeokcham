@@ -111,8 +111,12 @@ paths and symlinked parent directories, fsyncs each action, and appends the
 corresponding `Applying(n)` generation afterwards. On an explicit retry, the
 root must equal the durable pure prefix, or the immediately following prefix
 for the one post-write/pre-journal crash boundary; all other states reject. A
-final exact scan is required before `Materialized`. Post-restore scratch
-publication remains distinct.
+final exact scan is required before `Materialized`. The recovery adapter
+re-resolves the journal's safety and caller-selected target event through the
+signed local scratch scope, verifies both opaque reference bindings, and only
+then resumes. It re-scans the target before publishing a causal post-restore
+scratch checkpoint and appends `Published` only after that exact checkpoint is
+verified. An externally advanced or divergent scratch view is never selected.
 
 ## 2. Proposed OCaml workspace
 

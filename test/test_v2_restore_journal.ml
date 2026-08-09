@@ -118,6 +118,10 @@ let invalid_records_and_transitions_reject () =
     (Result.is_error
        (Journal.decode (replace_field encoded 11 (Encoding.integer 1L))));
   Alcotest.(check bool)
+    "superseded development schema rejects without a reader" true
+    (Result.is_error
+       (Journal.decode (replace_field encoded 0 (Encoding.integer 1L))));
+  Alcotest.(check bool)
     "prepared with progress rejects" true
     (Result.is_error
        (Journal.decode (replace_field encoded 9 (Encoding.integer 1L))));
