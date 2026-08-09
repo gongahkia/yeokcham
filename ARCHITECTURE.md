@@ -123,8 +123,11 @@ before activation; an interrupted or stale plan cannot switch the active scope.
 Protection publication follows the same object-first discipline: it names one
 explicitly selected active scratch event, writes its immutable claim frame, and
 then appends a causal protection event only if the prior protection head remains
-unchanged. Retired-scope quarantine verification, quarantine, and prune remain
-later slices.
+unchanged. Physical maintenance re-resolves the active generation and keep set
+for every listed retired object, verifies its authenticated frame kind, and
+uses link-then-directory-sync-then-unlink to move it without replacement into
+generation-specific local quarantine. Retrying recognizes a durable target
+before source removal; permanent prune is a separate destination-only path.
 
 V2-016 currently supplies a pure restore planner over those exact
 snapshots: a changed target requires the observed snapshot as an explicit safety

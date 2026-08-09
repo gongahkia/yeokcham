@@ -970,6 +970,252 @@ let compaction_refuses_to_activate_after_protection_changes () =
           Alcotest.failf "wrong stale-protection error: %s"
             (Scratch.error_to_string error))
 
+let compact_cleanup_fixture scratch =
+  let oldest =
+    match publish scratch (snapshot "oldest") '1' '2' with
+    | Scratch.Published checkpoint -> checkpoint
+    | Scratch.Unchanged _ -> Alcotest.fail "initial scratch was unchanged"
+  in
+  let middle =
+    match publish scratch (snapshot "middle") '3' '4' with
+    | Scratch.Published checkpoint -> checkpoint
+    | Scratch.Unchanged _ -> Alcotest.fail "middle scratch was unchanged"
+  in
+  let current =
+    match publish scratch (snapshot "current") '5' '6' with
+    | Scratch.Published checkpoint -> checkpoint
+    | Scratch.Unchanged _ -> Alcotest.fail "current scratch was unchanged"
+  in
+  let plan =
+    Scratch.plan_compaction scratch
+      ~policy:(retention_policy ~recent_count:2)
+      ~nonces:(compaction_nonces [ '7'; '8' ] '9' 'a')
+    |> require_ok Scratch.error_to_string
+  in
+  let publication =
+    Scratch.publish_compaction_plan scratch plan
+    |> require_ok Scratch.error_to_string
+  in
+  (plan, publication, [ middle; current ], oldest)
+
+let quarantine_path root generation candidate =
+  Object_store.quarantine_path (object_store root)
+    ~generation:(Ledger.Event_id.to_hex generation)
+    ~object_ref:candidate.Retention.candidate_object_ref
+  |> require_ok Object_store.error_to_string
+
+let assert_quarantined root generation candidates =
+  let objects = object_store root in
+  List.iter
+    (fun candidate ->
+      let source =
+        Object_store.object_path objects
+          candidate.Retention.candidate_object_ref
+      in
+      let destination = quarantine_path root generation candidate in
+      Alcotest.(check bool)
+        "cleanup candidate leaves the live object namespace" false
+        (Sys.file_exists source);
+      Alcotest.(check bool)
+        "cleanup candidate enters its active-generation quarantine" true
+        (Sys.file_exists destination))
+    candidates
+
+let assert_pruned root generation candidates =
+  let objects = object_store root in
+  List.iter
+    (fun candidate ->
+      let source =
+        Object_store.object_path objects
+          candidate.Retention.candidate_object_ref
+      in
+      let destination = quarantine_path root generation candidate in
+      Alcotest.(check bool)
+        "pruned candidate is absent from the live namespace" false
+        (Sys.file_exists source);
+      Alcotest.(check bool)
+        "pruned candidate is absent from quarantine" false
+        (Sys.file_exists destination))
+    candidates
+
+let assert_retained_compacted_snapshots scratch plan expected =
+  let compacted = plan.Scratch.compacted_events in
+  Alcotest.(check int)
+    "selected checkpoints remain in compact history" (List.length expected)
+    (List.length compacted);
+  List.iter2
+    (fun compacted expected ->
+      let restored =
+        Scratch.checkpoint_for_event scratch
+          ~event_id:compacted.Scratch.compacted_event_id
+        |> require_ok Scratch.error_to_string
+      in
+      Alcotest.(check bool)
+        "retained checkpoint bytes remain exact" true
+        (Model.Snapshot.equal expected.Scratch.snapshot
+           restored.Scratch.snapshot))
+    compacted expected
+
+let quarantine_interruptions_resume_without_losing_retained_snapshots () =
+  let cleanup_fault_injected =
+   (function
+   | Scratch.Cleanup_fault_injected _ -> true
+   | _ -> false)
+   [@warning "-4"]
+  in
+  let run label fault =
+    with_repository (fun root bootstrap_repository scratch ->
+        let plan, publication, retained, _ = compact_cleanup_fixture scratch in
+        let candidates =
+          publication.Scratch.published_generation_manifest
+            .Retention.cleanup_candidates
+        in
+        Alcotest.(check int)
+          (label ^ " candidate count")
+          4 (List.length candidates);
+        (match Scratch.resume_cleanup ~fault scratch with
+        | Error error when cleanup_fault_injected error -> ()
+        | Error error ->
+            Alcotest.failf "%s returned the wrong cleanup error: %s" label
+              (Scratch.error_to_string error)
+        | Ok _ -> Alcotest.fail (label ^ " did not interrupt cleanup"));
+        let reopened =
+          Scratch.open_repository ~root ~bootstrap_repository
+          |> require_ok Scratch.error_to_string
+        in
+        let resumed =
+          Scratch.resume_cleanup reopened |> require_ok Scratch.error_to_string
+        in
+        assert_quarantined root
+          publication.Scratch.published_generation_event_id candidates;
+        assert_retained_compacted_snapshots reopened plan retained;
+        Alcotest.(check int)
+          (label ^ " resumed plus durable prior moves cover every candidate")
+          (List.length candidates)
+          (resumed.Scratch.quarantined_objects
+         + resumed.Scratch.already_quarantined_objects);
+        let repeated =
+          Scratch.resume_cleanup reopened |> require_ok Scratch.error_to_string
+        in
+        Alcotest.(check int)
+          (label ^ " repeat cleanup is idempotent")
+          (List.length candidates) repeated.Scratch.already_quarantined_objects)
+  in
+  List.iter
+    (fun index ->
+      run
+        (Printf.sprintf "before-%d" index)
+        (Scratch.Fault.before_candidate index);
+      run
+        (Printf.sprintf "after-%d" index)
+        (Scratch.Fault.after_candidate index))
+    (List.init 4 Fun.id)
+
+let quarantine_resumes_a_durable_link_before_source_unlink () =
+  with_repository (fun root _bootstrap_repository scratch ->
+      let plan, publication, retained, _ = compact_cleanup_fixture scratch in
+      let candidates =
+        publication.Scratch.published_generation_manifest
+          .Retention.cleanup_candidates
+      in
+      let candidate = List.hd candidates in
+      let objects = object_store root in
+      let source =
+        Object_store.object_path objects
+          candidate.Retention.candidate_object_ref
+      in
+      let destination =
+        quarantine_path root publication.Scratch.published_generation_event_id
+          candidate
+      in
+      let quarantine_root = Filename.dirname (Filename.dirname destination) in
+      Unix.mkdir quarantine_root 0o700;
+      Unix.mkdir (Filename.dirname destination) 0o700;
+      Unix.link source destination;
+      let resumed =
+        Scratch.resume_cleanup scratch |> require_ok Scratch.error_to_string
+      in
+      Alcotest.(check int)
+        "linked candidate is recognized as a retry" 1
+        resumed.Scratch.already_quarantined_objects;
+      assert_quarantined root publication.Scratch.published_generation_event_id
+        candidates;
+      assert_retained_compacted_snapshots scratch plan retained)
+
+let prune_interruptions_are_separate_and_never_delete_live_objects () =
+  let cleanup_fault_injected =
+   (function
+   | Scratch.Cleanup_fault_injected _ -> true
+   | _ -> false)
+   [@warning "-4"]
+  in
+  let run label fault =
+    with_repository (fun root bootstrap_repository scratch ->
+        let plan, publication, retained, _ = compact_cleanup_fixture scratch in
+        let candidates =
+          publication.Scratch.published_generation_manifest
+            .Retention.cleanup_candidates
+        in
+        ignore
+          (Scratch.resume_cleanup scratch |> require_ok Scratch.error_to_string);
+        (match Scratch.prune_quarantine ~fault scratch with
+        | Error error when cleanup_fault_injected error -> ()
+        | Error error ->
+            Alcotest.failf "%s returned the wrong prune error: %s" label
+              (Scratch.error_to_string error)
+        | Ok _ -> Alcotest.fail (label ^ " did not interrupt prune"));
+        let reopened =
+          Scratch.open_repository ~root ~bootstrap_repository
+          |> require_ok Scratch.error_to_string
+        in
+        let resumed =
+          Scratch.prune_quarantine reopened
+          |> require_ok Scratch.error_to_string
+        in
+        assert_pruned root publication.Scratch.published_generation_event_id
+          candidates;
+        assert_retained_compacted_snapshots reopened plan retained;
+        Alcotest.(check int)
+          (label ^ " resumed plus durable prior prunes cover every candidate")
+          (List.length candidates)
+          (resumed.Scratch.pruned_objects
+         + resumed.Scratch.already_pruned_objects);
+        let repeated =
+          Scratch.prune_quarantine reopened
+          |> require_ok Scratch.error_to_string
+        in
+        Alcotest.(check int)
+          (label ^ " repeat prune is idempotent")
+          (List.length candidates) repeated.Scratch.already_pruned_objects)
+  in
+  List.iter
+    (fun index ->
+      run
+        (Printf.sprintf "before-%d" index)
+        (Scratch.Fault.before_candidate index);
+      run
+        (Printf.sprintf "after-%d" index)
+        (Scratch.Fault.after_candidate index))
+    (List.init 4 Fun.id)
+
+let prune_refuses_candidates_that_are_not_quarantined () =
+  with_repository (fun _root _bootstrap_repository scratch ->
+      let _plan, _publication, _retained, _ = compact_cleanup_fixture scratch in
+      let live_object_prune_refusal =
+       (function
+       | Scratch.Object_store_error
+           (Object_store.Quarantine_source_still_present _) ->
+           true
+       | _ -> false)
+       [@warning "-4"]
+      in
+      match Scratch.prune_quarantine scratch with
+      | Error error when live_object_prune_refusal error -> ()
+      | Error error ->
+          Alcotest.failf "wrong live-object prune refusal: %s"
+            (Scratch.error_to_string error)
+      | Ok _ -> Alcotest.fail "prune deleted a live cleanup candidate")
+
 let exact_scan_service_publishes_only_changes () =
   with_repository (fun root bootstrap_repository scratch ->
       let file = Filename.concat root "work" in
@@ -1054,6 +1300,19 @@ let () =
             compaction_refuses_to_activate_a_stale_source_plan;
           Alcotest.test_case "compaction refuses stale protection activation"
             `Quick compaction_refuses_to_activate_after_protection_changes;
+          Alcotest.test_case
+            "quarantine interruption retries retain exact compact snapshots"
+            `Quick
+            quarantine_interruptions_resume_without_losing_retained_snapshots;
+          Alcotest.test_case
+            "quarantine resumes after a durable link before source removal"
+            `Quick quarantine_resumes_a_durable_link_before_source_unlink;
+          Alcotest.test_case
+            "prune interruption retries are separate from live-object cleanup"
+            `Quick
+            prune_interruptions_are_separate_and_never_delete_live_objects;
+          Alcotest.test_case "prune refuses live cleanup candidates" `Quick
+            prune_refuses_candidates_that_are_not_quarantined;
           Alcotest.test_case "exact scan service publishes only changes" `Quick
             exact_scan_service_publishes_only_changes;
         ] );

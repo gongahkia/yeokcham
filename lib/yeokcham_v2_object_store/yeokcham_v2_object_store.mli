@@ -11,10 +11,7 @@ type publication =
   | Published of Model.Opaque_object_ref.t
   | Already_published of Model.Opaque_object_ref.t
 
-type quarantine_outcome =
-  | Quarantined of int64
-  | Already_quarantined of int64
-
+type quarantine_outcome = Quarantined of int64 | Already_quarantined of int64
 type prune_outcome = Pruned of int64 | Already_pruned
 
 type error =
@@ -75,9 +72,9 @@ val quarantine_path :
   generation:string ->
   object_ref:Model.Opaque_object_ref.t ->
   (string, error) result
-(** Returns the validated local path for an exact generation-specific
-    quarantine entry. [generation] is a lowercase hexadecimal ledger-event ID,
-    never an untrusted pathname. *)
+(** Returns the validated local path for an exact generation-specific quarantine
+    entry. [generation] is a lowercase hexadecimal ledger-event ID, never an
+    untrusted pathname. *)
 
 val quarantine :
   repository ->

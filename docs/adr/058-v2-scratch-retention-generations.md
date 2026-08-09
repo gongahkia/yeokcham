@@ -173,11 +173,14 @@ and protection objects remain reachable history in this initial design.
 
 Quarantine happens only after activation. Each candidate is revalidated against
 the active generation, expected encrypted frame kind, canonical source path,
-and keep set. It moves into an exact generation-specific quarantine path on the
-same filesystem without overwrite; an already-present byte-identical target is
-a resumable prior move. Both directories are synced where supported. `prune`
+and keep set. It moves into
+`.yeokcham/quarantine/<generation-event-id>/<opaque-object-ref>` on the same
+filesystem without overwrite; an already-present byte-identical target is a
+resumable prior move. Both directories are synced where supported. `prune`
 deletes only an already quarantined active-manifest candidate; it is irreversible
-and has separate failure/retry behavior.
+and has separate failure/retry behavior. This directory is local maintenance
+state, validated by the strict V2-root classifier, not a canonical object,
+ledger event, or cleanup-completion record.
 
 ## Consequences
 

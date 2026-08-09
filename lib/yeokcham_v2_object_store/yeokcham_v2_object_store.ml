@@ -16,10 +16,7 @@ type publication =
   | Published of Model.Opaque_object_ref.t
   | Already_published of Model.Opaque_object_ref.t
 
-type quarantine_outcome =
-  | Quarantined of int64
-  | Already_quarantined of int64
-
+type quarantine_outcome = Quarantined of int64 | Already_quarantined of int64
 type prune_outcome = Pruned of int64 | Already_pruned
 
 type error =
@@ -66,7 +63,8 @@ let error_to_string = function
       "V2 quarantine target has different bytes for object: "
       ^ Model.Opaque_object_ref.to_hex object_ref
   | Quarantine_candidate_missing object_ref ->
-      "V2 quarantine candidate is absent from its source and active quarantine: "
+      "V2 quarantine candidate is absent from its source and active \
+       quarantine: "
       ^ Model.Opaque_object_ref.to_hex object_ref
   | Quarantine_candidate_in_other_generation object_ref ->
       "V2 quarantine candidate appears in a different generation: "
@@ -473,7 +471,8 @@ let verified_candidate repository ~path ~object_ref ~expected_kind =
   else
     let actual = Object.kind object_ in
     if actual <> expected_kind then
-      Error (Unexpected_object_kind { object_ref; expected = expected_kind; actual })
+      Error
+        (Unexpected_object_kind { object_ref; expected = expected_kind; actual })
     else Ok (bytes, Int64.of_int (String.length bytes))
 
 let candidate_if_present repository ~path ~object_ref ~expected_kind =
@@ -490,7 +489,8 @@ let foreign_quarantine_candidate repository ~generation ~object_ref =
       match (Unix.lstat root).Unix.st_kind with
       | Unix.S_DIR -> read_directory root
       | Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO
-      | Unix.S_SOCK -> Error (Invalid_object_path root)
+      | Unix.S_SOCK ->
+          Error (Invalid_object_path root)
     with
     | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok []
     | Unix.Unix_error (error, _, _) ->
@@ -499,9 +499,10 @@ let foreign_quarantine_candidate repository ~generation ~object_ref =
   let candidate = Model.Opaque_object_ref.to_hex object_ref in
   let rec inspect = function
     | [] -> Ok false
-    | entry :: rest ->
+    | entry :: rest -> (
         let directory = Filename.concat root entry in
-        if not (lowercase_hex entry 64) then Error (Invalid_object_path directory)
+        if not (lowercase_hex entry 64) then
+          Error (Invalid_object_path directory)
         else if String.equal entry generation then inspect rest
         else
           let* () =
@@ -516,11 +517,12 @@ let foreign_quarantine_candidate repository ~generation ~object_ref =
             match (Unix.lstat path).Unix.st_kind with
             | Unix.S_REG -> Ok true
             | Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO
-            | Unix.S_SOCK -> Error (Invalid_object_path path)
+            | Unix.S_SOCK ->
+                Error (Invalid_object_path path)
           with
           | Unix.Unix_error (Unix.ENOENT, _, _) -> inspect rest
           | Unix.Unix_error (error, _, _) ->
-              Error (io_error ~operation:"lstat" ~path error)
+              Error (io_error ~operation:"lstat" ~path error))
   in
   inspect entries
 
@@ -537,7 +539,8 @@ let quarantine repository ~generation ~object_ref ~expected_kind =
       candidate_if_present repository ~path:source ~object_ref ~expected_kind
     in
     let* destination_candidate =
-      candidate_if_present repository ~path:destination ~object_ref ~expected_kind
+      candidate_if_present repository ~path:destination ~object_ref
+        ~expected_kind
     in
     match (source_candidate, destination_candidate) with
     | Some (_source_bytes, source_size), None -> (
@@ -554,7 +557,8 @@ let quarantine repository ~generation ~object_ref ~expected_kind =
           let* () = fsync_directory source_directory in
           Ok (Quarantined source_size)
         with
-        | Unix.Unix_error ((Unix.EEXIST | Unix.ENOENT), _, _) when retries > 0 ->
+        | Unix.Unix_error ((Unix.EEXIST | Unix.ENOENT), _, _) when retries > 0
+          ->
             move (retries - 1)
         | Unix.Unix_error (error, _, _) ->
             Error (io_error ~operation:"link" ~path:destination error))
@@ -572,12 +576,14 @@ let quarantine repository ~generation ~object_ref ~expected_kind =
           in
           let* () = fsync_directory source_directory in
           Ok (Already_quarantined source_size)
-    | None, Some (_, destination_size) -> Ok (Already_quarantined destination_size)
+    | None, Some (_, destination_size) ->
+        Ok (Already_quarantined destination_size)
     | None, None ->
         let* foreign =
           foreign_quarantine_candidate repository ~generation ~object_ref
         in
-        if foreign then Error (Quarantine_candidate_in_other_generation object_ref)
+        if foreign then
+          Error (Quarantine_candidate_in_other_generation object_ref)
         else Error (Quarantine_candidate_missing object_ref)
   in
   move 1
@@ -610,5 +616,6 @@ let prune_quarantine repository ~generation ~object_ref ~expected_kind =
       let* foreign =
         foreign_quarantine_candidate repository ~generation ~object_ref
       in
-      if foreign then Error (Quarantine_candidate_in_other_generation object_ref)
+      if foreign then
+        Error (Quarantine_candidate_in_other_generation object_ref)
       else Ok Already_pruned

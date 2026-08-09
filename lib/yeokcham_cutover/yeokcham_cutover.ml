@@ -1013,7 +1013,9 @@ let v2_layout metadata =
   let allowed = List.sort String.compare (quarantine_name :: required) in
   let* names = read_directory metadata in
   let missing = List.filter (fun name -> not (List.mem name names)) required in
-  let unexpected = List.filter (fun name -> not (List.mem name allowed)) names in
+  let unexpected =
+    List.filter (fun name -> not (List.mem name allowed)) names
+  in
   let* () =
     if missing = [] && unexpected = [] then Ok ()
     else
@@ -1022,8 +1024,7 @@ let v2_layout metadata =
            {
              path = metadata;
              detail =
-               "unexpected or missing root entries: "
-               ^ String.concat "," names;
+               "unexpected or missing root entries: " ^ String.concat "," names;
            })
   in
   let* format =

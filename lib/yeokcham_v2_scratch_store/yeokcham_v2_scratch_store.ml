@@ -90,7 +90,8 @@ module Fault = struct
     | Before_candidate left, Before_candidate right
     | After_candidate left, After_candidate right ->
         Int.equal left right
-    | Before_candidate _, After_candidate _ | After_candidate _, Before_candidate _ ->
+    | Before_candidate _, After_candidate _
+    | After_candidate _, Before_candidate _ ->
         false
 end
 
@@ -351,7 +352,8 @@ let error_to_string = function
   | Cleanup_keep_set_overlap candidate ->
       Printf.sprintf
         "V2 scratch cleanup candidate %s remains in the active keep set"
-        (V2_model.Opaque_object_ref.to_hex candidate.Retention.candidate_object_ref)
+        (V2_model.Opaque_object_ref.to_hex
+           candidate.Retention.candidate_object_ref)
   | Cleanup_generation_changed { expected; actual } ->
       Printf.sprintf "V2 scratch cleanup generation changed from %s to %s"
         (Ledger.Event_id.to_hex expected)
@@ -359,8 +361,10 @@ let error_to_string = function
   | Cleanup_fault_injected boundary ->
       let boundary =
         match boundary with
-        | Fault.Before_candidate index -> Printf.sprintf "before-candidate-%d" index
-        | Fault.After_candidate index -> Printf.sprintf "after-candidate-%d" index
+        | Fault.Before_candidate index ->
+            Printf.sprintf "before-candidate-%d" index
+        | Fault.After_candidate index ->
+            Printf.sprintf "after-candidate-%d" index
       in
       "V2 scratch cleanup fault injected at " ^ boundary
 
@@ -1352,7 +1356,8 @@ let active_keep_set repository active_generation =
   in
   let* _, claims = protection_state repository in
   let* external_targets =
-    externally_referenced_targets repository ~retired_refs:manifest.Retention.retired_refs
+    externally_referenced_targets repository
+      ~retired_refs:manifest.Retention.retired_refs
   in
   let active_history_refs =
     List.concat_map
@@ -1410,7 +1415,10 @@ let revalidate_cleanup_candidate repository ~generation_event_id candidate =
   then
     Error
       (Cleanup_generation_changed
-         { expected = generation_event_id; actual = active_generation.generation_head })
+         {
+           expected = generation_event_id;
+           actual = active_generation.generation_head;
+         })
   else
     let manifest = active_generation.activation.manifest in
     if
@@ -1444,12 +1452,15 @@ let cleanup_internal ?fault repository ~prune =
         let* () =
           revalidate_cleanup_candidate repository ~generation_event_id candidate
         in
-        let expected_kind = cleanup_object_kind candidate.Retention.candidate_kind in
+        let expected_kind =
+          cleanup_object_kind candidate.Retention.candidate_kind
+        in
         let* report =
           if prune then
             let* outcome =
               Object_store.prune_quarantine repository.objects ~generation
-                ~object_ref:candidate.Retention.candidate_object_ref ~expected_kind
+                ~object_ref:candidate.Retention.candidate_object_ref
+                ~expected_kind
               |> Result.map_error (fun error -> Object_store_error error)
             in
             match outcome with
@@ -1473,7 +1484,8 @@ let cleanup_internal ?fault repository ~prune =
           else
             let* outcome =
               Object_store.quarantine repository.objects ~generation
-                ~object_ref:candidate.Retention.candidate_object_ref ~expected_kind
+                ~object_ref:candidate.Retention.candidate_object_ref
+                ~expected_kind
               |> Result.map_error (fun error -> Object_store_error error)
             in
             match outcome with
@@ -1485,7 +1497,8 @@ let cleanup_internal ?fault repository ~prune =
                     quarantined_objects = report.quarantined_objects + 1;
                     quarantined_bytes =
                       Int64.add report.quarantined_bytes stored_bytes;
-                    quarantined_candidates = metric :: report.quarantined_candidates;
+                    quarantined_candidates =
+                      metric :: report.quarantined_candidates;
                   }
             | Object_store.Already_quarantined _ ->
                 Ok
@@ -1502,8 +1515,11 @@ let cleanup_internal ?fault repository ~prune =
   in
   process 0 (empty_cleanup_report generation_event_id) candidates
 
-let resume_cleanup ?fault repository = cleanup_internal ?fault repository ~prune:false
-let prune_quarantine ?fault repository = cleanup_internal ?fault repository ~prune:true
+let resume_cleanup ?fault repository =
+  cleanup_internal ?fault repository ~prune:false
+
+let prune_quarantine ?fault repository =
+  cleanup_internal ?fault repository ~prune:true
 
 let plan_protection repository ~event_id ~action ~reason ~protection_nonce
     ~ledger_nonce =
