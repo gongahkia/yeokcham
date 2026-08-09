@@ -1547,3 +1547,30 @@ replacement always deletes the old path first; its raw target bytes remain data
 rather than an interpreted path. Equal snapshots have no action and no safety
 checkpoint requirement. No journal record, mutable head, or filesystem effect
 is introduced by this pure planning relation.
+
+## 29. V2 opaque restore journal
+
+ADR-056 gives a non-no-op `Restore_plan(O, T)` an opaque recovery record after
+`O` has become a verified safety checkpoint and before any destructive action:
+
+```text
+Restore_record = (repository, operation, safety-event, safety-snapshot-ref,
+                  target-snapshot-ref, generation, phase, action-count)
+Restore_phase  = Prepared | Applying(completed) | Materialized | Published
+```
+
+Safety and target references differ; no path, content, symlink target, or
+private key appears in the record. `Prepared` is generation zero. The only
+transition relation is:
+
+```text
+Prepared -> Applying(0)
+Applying(n) -> Applying(n + 1), n + 1 <= action-count
+Applying(action-count) -> Materialized -> Published
+```
+
+The first `Applying(0)` generation precedes destructive work. Each completed
+action advances the count in a new immutable record. The two terminal phases
+require all actions complete. The record does not apply an action, select a
+causal head, validate a working tree, or publish a post-restore snapshot; the
+later persistent adapter must enforce those relations.

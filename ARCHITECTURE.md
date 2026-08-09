@@ -98,7 +98,9 @@ resolution. V2-016 currently supplies a pure restore planner over those exact
 snapshots: a changed target requires the observed snapshot as an explicit safety
 checkpoint input, removes children before parents, creates target directories
 before their contents, and preserves regular bytes, modes, and raw symlink
-targets. Its durable operation journal and filesystem adapter remain separate.
+targets. ADR-056 adds the opaque immutable restore-journal progression that
+names the safety event and the safety/target snapshots without storing source
+paths or bytes; its journal store and filesystem adapter remain separate.
 
 ## 2. Proposed OCaml workspace
 
