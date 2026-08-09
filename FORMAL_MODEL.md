@@ -1685,3 +1685,12 @@ candidate list. That list can contain source ledger objects and unretained
 snapshots only when no retained checkpoint, effective claim, or live
 non-retired ledger target names the snapshot. Quarantine is resumable local
 maintenance; explicit prune is irreversible.
+
+For an authored plan `P`, replacement ledger envelopes are immutable and may
+be published in source order before activation. Immediately before publishing
+`P`'s generation ledger envelope, the adapter must re-evaluate and require the
+same active source ref/head, sole generation head, and sole protection head
+recorded by `P`. A mismatch is an explicit stale-plan result. Thus an
+interruption can leave unreachable durable candidates, but cannot make them
+active; a concurrently advanced source or protection history cannot be
+silently compacted using stale selection.

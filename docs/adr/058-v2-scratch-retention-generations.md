@@ -142,6 +142,14 @@ sole compact head at activation; later ordinary scratch publication may extend
 that same causal chain, so inspection requires the sole current head to descend
 from the anchor rather than remain byte-for-byte equal to it.
 
+The author supplies distinct envelope nonces for each replacement ledger event,
+the generation frame, and the activation event. The store writes the
+replacement events and frame first. Immediately before activation it requires
+the planned source ref/head plus generation and protection ledger heads to
+remain unchanged. A mismatch is a stale-plan error, not a winner selection or
+repair; preceding create-only writes are unreachable until a newly planned
+activation succeeds.
+
 After activation, inspection evaluates only the declared active scope. Retired
 scope events remain authenticated objects but are no longer candidate scratch
 history. A verifier obtains the active generation before evaluating ordinary
@@ -224,7 +232,8 @@ canonical objects.
 - Seeded generated tests vary causal histories, claim order, policy input, file
   sizes, and permutations; selection must be deterministic.
 - Activation tests prove exact retained snapshot reopening and both pre- and
-  post-activation interruption states.
+  post-activation interruption states; stale source and protection plans refuse
+  activation.
 - Quarantine tests inject failure around each candidate movement; permanent
   prune tests are separate and do not claim rollback.
 - `make check` and `make property-test PROPERTY_TEST_SEED=17` are required.

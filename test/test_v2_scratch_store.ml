@@ -195,6 +195,17 @@ let activate_generation root scratch ~manifest_ref ~nonce_value =
     ~ref_name:(Scratch.generation_ref_name scratch)
     ~predecessor:None ~target:manifest_ref ~nonce_value
 
+let retention_policy ~recent_count =
+  Retention.make_policy ~recent_count ~storage_budget_bytes:None
+  |> require_ok Retention.error_to_string
+
+let compaction_nonces compact_ledger_nonces manifest activation =
+  {
+    Scratch.compact_ledger_nonces = List.map nonce compact_ledger_nonces;
+    generation_manifest_nonce = nonce manifest;
+    generation_ledger_nonce = nonce activation;
+  }
+
 let write_file path bytes =
   Out_channel.with_open_bin path (fun channel ->
       Out_channel.output_string channel bytes)
@@ -614,6 +625,254 @@ let divergent_heads_refuse_automatic_publication () =
             (Scratch.error_to_string error))
       [@warning "-4"])
 
+let compaction_activation_preserves_selected_snapshots_and_retries () =
+  with_repository (fun root bootstrap_repository scratch ->
+      let oldest =
+        match publish scratch (snapshot "oldest") '1' '2' with
+        | Scratch.Published checkpoint -> checkpoint
+        | Scratch.Unchanged _ -> Alcotest.fail "initial scratch was unchanged"
+      in
+      let middle =
+        match publish scratch (snapshot "middle") '3' '4' with
+        | Scratch.Published checkpoint -> checkpoint
+        | Scratch.Unchanged _ -> Alcotest.fail "middle scratch was unchanged"
+      in
+      let current =
+        match publish scratch (snapshot "current") '5' '6' with
+        | Scratch.Published checkpoint -> checkpoint
+        | Scratch.Unchanged _ -> Alcotest.fail "current scratch was unchanged"
+      in
+      let plan =
+        Scratch.plan_compaction scratch
+          ~policy:(retention_policy ~recent_count:2)
+          ~nonces:(compaction_nonces [ '7'; '8' ] '9' 'a')
+        |> require_ok Scratch.error_to_string
+      in
+      Alcotest.(check int)
+        "recent window builds two replacement events" 2
+        (List.length plan.Scratch.compacted_events);
+      Alcotest.(check int)
+        "source cleanup names all source events and one expired snapshot" 4
+        (List.length
+           plan.Scratch.compaction_generation_manifest
+             .Retention.cleanup_candidates);
+      let first_compacted = List.hd plan.Scratch.compacted_events in
+      ignore
+        (Ledger_store.publish (ledger_store root)
+           ~envelope:first_compacted.Scratch.ledger_envelope
+        |> require_ok Ledger_store.error_to_string);
+      let before_activation =
+        Scratch.inspect scratch
+        |> require_ok Scratch.error_to_string
+        |> checkpoint
+      in
+      Alcotest.(check bool)
+        "durable replacement event does not change the active source" true
+        (Ledger.Event_id.equal current.Scratch.event_id
+           before_activation.Scratch.event_id);
+      let publication =
+        Scratch.publish_compaction_plan scratch plan
+        |> require_ok Scratch.error_to_string
+      in
+      Alcotest.(check bool)
+        "activation ID is the planned ID" true
+        (Ledger.Event_id.equal plan.Scratch.activation_event_id
+           publication.Scratch.published_generation_event_id);
+      let reopened =
+        Scratch.open_repository ~root ~bootstrap_repository
+        |> require_ok Scratch.error_to_string
+      in
+      let after_activation =
+        Scratch.inspect reopened
+        |> require_ok Scratch.error_to_string
+        |> checkpoint
+      in
+      Alcotest.(check bool)
+        "current selected snapshot remains exact" true
+        (Model.Snapshot.equal current.Scratch.snapshot
+           after_activation.Scratch.snapshot);
+      let compacted = plan.Scratch.compacted_events in
+      match compacted with
+      | [ retained_middle; retained_current ] -> (
+          let restored_middle =
+            Scratch.checkpoint_for_event reopened
+              ~event_id:retained_middle.Scratch.compacted_event_id
+            |> require_ok Scratch.error_to_string
+          in
+          let restored_current =
+            Scratch.checkpoint_for_event reopened
+              ~event_id:retained_current.Scratch.compacted_event_id
+            |> require_ok Scratch.error_to_string
+          in
+          Alcotest.(check bool)
+            "middle selected snapshot remains exact" true
+            (Model.Snapshot.equal middle.Scratch.snapshot
+               restored_middle.Scratch.snapshot);
+          Alcotest.(check bool)
+            "current replacement reuses exact bytes" true
+            (Model.Snapshot.equal current.Scratch.snapshot
+               restored_current.Scratch.snapshot);
+          let retired_event_is_outside =
+           (function
+           | Scratch.Event_outside_scratch_scope _ -> true
+           | _ -> false)
+           [@warning "-4"]
+          in
+          match
+            Scratch.checkpoint_for_event reopened
+              ~event_id:oldest.Scratch.event_id
+          with
+          | Error error when retired_event_is_outside error -> ()
+          | Error error ->
+              Alcotest.failf "wrong retired oldest error: %s"
+                (Scratch.error_to_string error)
+          | Ok _ -> Alcotest.fail "expired source event remained active")
+      | _ -> Alcotest.fail "compaction did not retain the expected two events")
+
+let compaction_folds_persisted_protection_claims () =
+  with_repository (fun root _ scratch ->
+      let oldest =
+        match publish scratch (snapshot "oldest") '1' '2' with
+        | Scratch.Published checkpoint -> checkpoint
+        | Scratch.Unchanged _ -> Alcotest.fail "initial scratch was unchanged"
+      in
+      let middle =
+        match publish scratch (snapshot "middle") '3' '4' with
+        | Scratch.Published checkpoint -> checkpoint
+        | Scratch.Unchanged _ -> Alcotest.fail "middle scratch was unchanged"
+      in
+      let current =
+        match publish scratch (snapshot "current") '5' '6' with
+        | Scratch.Published checkpoint -> checkpoint
+        | Scratch.Unchanged _ -> Alcotest.fail "current scratch was unchanged"
+      in
+      let claim =
+        Retention.protection ~snapshot_ref:oldest.Scratch.snapshot_ref
+          ~action:Retention.Protect ~reason:Retention.User_pin
+      in
+      let claim_ref =
+        publish_frame root
+          ~frame:(Object.scratch_protection claim)
+          ~nonce_value:(nonce '7')
+      in
+      ignore
+        (publish_ledger_event root
+           ~ref_name:(Scratch.protection_ref_name scratch)
+           ~predecessor:None ~target:claim_ref ~nonce_value:(nonce '8'));
+      let plan =
+        Scratch.plan_compaction scratch
+          ~policy:(retention_policy ~recent_count:1)
+          ~nonces:(compaction_nonces [ '9'; 'a' ] 'b' 'c')
+        |> require_ok Scratch.error_to_string
+      in
+      let selected =
+        plan.Scratch.compaction_retention.Retention.retained
+        |> List.map (fun planned ->
+            planned.Retention.checkpoint.Retention.checkpoint_snapshot_ref)
+      in
+      Alcotest.(check bool)
+        "explicit pin survives the recent window" true
+        (List.exists
+           (V2_model.Opaque_object_ref.equal oldest.Scratch.snapshot_ref)
+           selected);
+      Alcotest.(check bool)
+        "current snapshot is retained" true
+        (List.exists
+           (V2_model.Opaque_object_ref.equal current.Scratch.snapshot_ref)
+           selected);
+      Alcotest.(check bool)
+        "unprotected expired snapshot is excluded" false
+        (List.exists
+           (V2_model.Opaque_object_ref.equal middle.Scratch.snapshot_ref)
+           selected))
+
+let compaction_refuses_to_activate_a_stale_source_plan () =
+  with_repository (fun _ _ scratch ->
+      ignore
+        (match publish scratch (snapshot "before-plan") '1' '2' with
+        | Scratch.Published checkpoint -> checkpoint
+        | Scratch.Unchanged _ -> Alcotest.fail "initial scratch was unchanged");
+      let plan =
+        Scratch.plan_compaction scratch
+          ~policy:(retention_policy ~recent_count:1)
+          ~nonces:(compaction_nonces [ '3' ] '4' '5')
+        |> require_ok Scratch.error_to_string
+      in
+      let after_plan =
+        match publish scratch (snapshot "after-plan") '6' '7' with
+        | Scratch.Published checkpoint -> checkpoint
+        | Scratch.Unchanged _ -> Alcotest.fail "changed scratch was unchanged"
+      in
+      let source_head_changed =
+       (function
+       | Scratch.Compaction_source_head_changed _ -> true
+       | _ -> false)
+       [@warning "-4"]
+      in
+      match Scratch.publish_compaction_plan scratch plan with
+      | Error error when source_head_changed error ->
+          let active =
+            Scratch.inspect scratch
+            |> require_ok Scratch.error_to_string
+            |> checkpoint
+          in
+          Alcotest.(check bool)
+            "stale activation keeps newer source active" true
+            (Ledger.Event_id.equal after_plan.Scratch.event_id
+               active.Scratch.event_id)
+      | Ok _ -> Alcotest.fail "stale compaction plan activated"
+      | Error error ->
+          Alcotest.failf "wrong stale-plan error: %s"
+            (Scratch.error_to_string error))
+
+let compaction_refuses_to_activate_after_protection_changes () =
+  with_repository (fun root _ scratch ->
+      let source =
+        match publish scratch (snapshot "source") '1' '2' with
+        | Scratch.Published checkpoint -> checkpoint
+        | Scratch.Unchanged _ -> Alcotest.fail "initial scratch was unchanged"
+      in
+      let plan =
+        Scratch.plan_compaction scratch
+          ~policy:(retention_policy ~recent_count:1)
+          ~nonces:(compaction_nonces [ '3' ] '4' '5')
+        |> require_ok Scratch.error_to_string
+      in
+      let claim =
+        Retention.protection ~snapshot_ref:source.Scratch.snapshot_ref
+          ~action:Retention.Protect ~reason:Retention.User_pin
+      in
+      let claim_ref =
+        publish_frame root
+          ~frame:(Object.scratch_protection claim)
+          ~nonce_value:(nonce '6')
+      in
+      ignore
+        (publish_ledger_event root
+           ~ref_name:(Scratch.protection_ref_name scratch)
+           ~predecessor:None ~target:claim_ref ~nonce_value:(nonce '7'));
+      let protection_head_changed =
+       (function
+       | Scratch.Compaction_protection_head_changed _ -> true
+       | _ -> false)
+       [@warning "-4"]
+      in
+      match Scratch.publish_compaction_plan scratch plan with
+      | Error error when protection_head_changed error ->
+          let active =
+            Scratch.inspect scratch
+            |> require_ok Scratch.error_to_string
+            |> checkpoint
+          in
+          Alcotest.(check bool)
+            "stale activation keeps the unchanged source active" true
+            (Ledger.Event_id.equal source.Scratch.event_id
+               active.Scratch.event_id)
+      | Ok _ -> Alcotest.fail "stale compaction plan activated"
+      | Error error ->
+          Alcotest.failf "wrong stale-protection error: %s"
+            (Scratch.error_to_string error))
+
 let exact_scan_service_publishes_only_changes () =
   with_repository (fun root bootstrap_repository scratch ->
       let file = Filename.concat root "work" in
@@ -683,6 +942,16 @@ let () =
             divergent_generation_heads_remain_explicit;
           Alcotest.test_case "divergent heads refuse automatic publication"
             `Quick divergent_heads_refuse_automatic_publication;
+          Alcotest.test_case
+            "compaction activates selected exact snapshots after interruption"
+            `Quick
+            compaction_activation_preserves_selected_snapshots_and_retries;
+          Alcotest.test_case "compaction folds persisted protection claims"
+            `Quick compaction_folds_persisted_protection_claims;
+          Alcotest.test_case "compaction refuses stale source activation" `Quick
+            compaction_refuses_to_activate_a_stale_source_plan;
+          Alcotest.test_case "compaction refuses stale protection activation"
+            `Quick compaction_refuses_to_activate_after_protection_changes;
           Alcotest.test_case "exact scan service publishes only changes" `Quick
             exact_scan_service_publishes_only_changes;
         ] );

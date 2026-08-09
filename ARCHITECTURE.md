@@ -115,8 +115,13 @@ root derives from the base scope, later generations derive from their prior
 replacement scope, and the active compact chain must have one head descending
 from the signed activation anchor. A missing generation record leaves the base
 scope active; malformed or divergent records remain explicit failures. The
-compaction authoring path, protection publication, retired-scope verifier,
-quarantine, and prune remain later slices and are not claimed by the resolver.
+compaction writer folds the sole persisted protection chain, measures exact
+encrypted source-object bytes, and builds one replacement event per selected
+checkpoint in causal order. It publishes those events and the generation frame
+before revalidating the source, generation, and protection heads immediately
+before activation; an interrupted or stale plan cannot switch the active scope.
+Protection publication, retired-scope quarantine verification, quarantine, and
+prune remain later slices.
 
 V2-016 currently supplies a pure restore planner over those exact
 snapshots: a changed target requires the observed snapshot as an explicit safety

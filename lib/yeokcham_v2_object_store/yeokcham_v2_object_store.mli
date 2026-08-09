@@ -33,6 +33,11 @@ val open_repository :
 
 val object_path : repository -> Model.Opaque_object_ref.t -> string
 
+val stored_bytes :
+  repository -> object_ref:Model.Opaque_object_ref.t -> (int64, error) result
+(** Returns the exact regular-file length of one canonical opaque object. This
+    is observation only; it does not decrypt, repair, or rewrite the object. *)
+
 val list_object_refs :
   repository -> (Model.Opaque_object_ref.t list, error) result
 (** Lists every canonical opaque object path without decrypting or mutating it.

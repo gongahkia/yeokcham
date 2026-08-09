@@ -674,6 +674,13 @@ let effective_reasons claims snapshot_ref =
       | None | Some Unprotect -> false)
     reasons
 
+let effective_protected_snapshots claims =
+  claims
+  |> List.map (fun claim -> claim.protected_snapshot_ref)
+  |> unique_refs
+  |> List.filter (fun snapshot_ref ->
+      effective_reasons claims snapshot_ref <> [])
+
 let last count values =
   let length = List.length values in
   if count >= length then values

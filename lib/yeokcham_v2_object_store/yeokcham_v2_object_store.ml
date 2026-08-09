@@ -77,6 +77,16 @@ let object_path repository object_ref =
     (Filename.concat (String.sub hex 0 2)
        (Filename.concat (String.sub hex 2 2) (String.sub hex 4 60)))
 
+let stored_bytes repository ~object_ref =
+  let* () = check_v2_root repository.root in
+  let path = object_path repository object_ref in
+  try
+    let stat = Unix.lstat path in
+    if stat.Unix.st_kind <> Unix.S_REG then Error (Invalid_object_path path)
+    else Ok (Int64.of_int stat.Unix.st_size)
+  with Unix.Unix_error (error, _, _) ->
+    Error (io_error ~operation:"lstat" ~path error)
+
 let lowercase_hex name expected_length =
   String.length name = expected_length
   && String.for_all

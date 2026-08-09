@@ -122,6 +122,12 @@ val make_policy :
 (** [recent_count] is ordinal newest-to-oldest chain selection; V2 has no
     accepted checkpoint timestamp. *)
 
+val effective_protected_snapshots :
+  protection list -> Model.Opaque_object_ref.t list
+(** Returns the canonical distinct snapshot references with at least one
+    currently effective protection reason. Input claims are in causal order;
+    output references are opaque-ref ordered. *)
+
 val select :
   policy:policy ->
   claims:protection list ->

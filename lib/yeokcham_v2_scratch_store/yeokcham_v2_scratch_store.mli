@@ -10,6 +10,7 @@ module Envelope = Yeokcham_v2_envelope
 module Ledger = Yeokcham_v2_ledger
 module Model = Yeokcham_model
 module Object_store = Yeokcham_v2_object_store
+module Retention = Yeokcham_v2_retention
 module V2_model = Yeokcham_v2_model
 
 type repository
@@ -34,6 +35,45 @@ type plan =
       snapshot_envelope : Envelope.t;
       ledger_envelope : Envelope.t;
     }
+
+type compaction_nonces = {
+  compact_ledger_nonces : Envelope.nonce list;
+  generation_manifest_nonce : Envelope.nonce;
+  generation_ledger_nonce : Envelope.nonce;
+}
+(** Nonces are caller-supplied because this adapter owns neither a random source
+    nor nonce persistence. Every nonce in one compaction plan must be distinct;
+    [compact_ledger_nonces] has exactly one member per selected retained
+    checkpoint. *)
+
+type compacted_event = {
+  source_checkpoint : Retention.checkpoint;
+  compacted_event_id : Ledger.Event_id.t;
+  ledger_envelope : Envelope.t;
+}
+
+type compaction_plan = {
+  source_ref : Ledger.Ref_name.t;
+  source_head : Ledger.Event_id.t;
+  source_generation_head : Ledger.Event_id.t option;
+  source_protection_head : Ledger.Event_id.t option;
+  compaction_retention : Retention.plan;
+  compacted_events : compacted_event list;
+  compaction_generation_manifest : Retention.generation;
+  generation_object_ref : V2_model.Opaque_object_ref.t;
+  generation_envelope : Envelope.t;
+  activation_event_id : Ledger.Event_id.t;
+  activation_envelope : Envelope.t;
+}
+(** A complete immutable write set. Its compacted ledger events must all be
+    durable before [activation_envelope] is published; only the latter changes
+    the active scratch scope. *)
+
+type compaction_publication = {
+  published_generation_event_id : Ledger.Event_id.t;
+  published_generation_manifest : Retention.generation;
+  published_retention : Retention.plan;
+}
 
 type error =
   | Bootstrap_store_error of Bootstrap_store.error
@@ -73,7 +113,33 @@ type error =
       expected : Ledger.Event_id.t;
       actual : Ledger.Event_id.t list;
     }
+  | Protection_event_missing_target of Ledger.Event_id.t
+  | Protection_target_not_claim of {
+      event_id : Ledger.Event_id.t;
+      object_ref : V2_model.Opaque_object_ref.t;
+    }
+  | Missing_evaluated_protection of Ledger.Event_id.t
+  | Divergent_protection_heads of Ledger.Event_id.t list
   | Nonce_reuse
+  | Retention_error of Retention.error
+  | Invalid_compaction_nonce_count of { expected : int; actual : int }
+  | Compaction_nonce_reuse
+  | Compaction_source_not_active of {
+      expected : Ledger.Ref_name.t;
+      actual : Ledger.Ref_name.t;
+    }
+  | Compaction_source_head_changed of {
+      expected : Ledger.Event_id.t;
+      actual : Ledger.Event_id.t;
+    }
+  | Compaction_generation_head_changed of {
+      expected : Ledger.Event_id.t option;
+      actual : Ledger.Event_id.t option;
+    }
+  | Compaction_protection_head_changed of {
+      expected : Ledger.Event_id.t option;
+      actual : Ledger.Event_id.t option;
+    }
 
 val error_to_string : error -> string
 
@@ -89,6 +155,7 @@ val scratch_ref_name : repository -> Ledger.Ref_name.t
 (** The device's immutable base scratch scope, not a mutable active ref. *)
 
 val generation_ref_name : repository -> Ledger.Ref_name.t
+val protection_ref_name : repository -> Ledger.Ref_name.t
 
 val compact_ref_name :
   repository ->
@@ -133,3 +200,21 @@ val publish_plan : repository -> plan -> (publication, error) result
 (** Publishes a snapshot candidate before its ledger candidate. A caller may
     persist the snapshot half, crash, then reuse the exact plan to finish the
     ledger half; until then [inspect] returns the prior causal checkpoint. *)
+
+val plan_compaction :
+  repository ->
+  policy:Retention.policy ->
+  nonces:compaction_nonces ->
+  (compaction_plan, error) result
+(** Selects the active sole causal history, folds the sole protection history,
+    measures exact encrypted source-object bytes, and constructs a compact
+    replacement chain. It writes nothing. The returned plan includes no cleanup
+    action: source objects remain durable until a later explicit quarantine
+    operation. *)
+
+val publish_compaction_plan :
+  repository -> compaction_plan -> (compaction_publication, error) result
+(** Publishes replacement ledger events and the generation frame before the
+    generation activation event. It rechecks the source, generation, and
+    protection heads immediately before activation. An interruption before
+    activation leaves the prior scope active and the plan can be retried. *)
