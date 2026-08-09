@@ -5,7 +5,7 @@ OCAML_VERSION := 5.5.0
 OCAMLFORMAT_VERSION := 0.29.0
 LOCAL_SWITCH := $(CURDIR)
 
-.PHONY: setup deps build test property-test rust-adapter-build rust-adapter-test benchmark-encoding benchmark-large-content compaction-retention-benchmark compaction-retention-benchmark-verify semantic-experiment semantic-experiment-verify rust-retargeting-comparison rust-retargeting-comparison-verify marshal-audit lint check format workflow-lint ci
+.PHONY: setup deps build test property-test rust-adapter-build rust-adapter-test typescript-adapter-deps typescript-adapter-test benchmark-encoding benchmark-large-content compaction-retention-benchmark compaction-retention-benchmark-verify semantic-experiment semantic-experiment-verify rust-retargeting-comparison rust-retargeting-comparison-verify marshal-audit lint check format workflow-lint ci
 
 setup:
 	$(OPAM) init --bare --no-setup --yes
@@ -15,6 +15,7 @@ setup:
 deps:
 	$(OPAM) install . --deps-only --with-test --yes
 	$(OPAM) install ocamlformat.$(OCAMLFORMAT_VERSION) --yes
+	$(MAKE) typescript-adapter-deps
 
 build:
 	$(DUNE) build @all
@@ -26,7 +27,13 @@ rust-adapter-test:
 	cd tools/yeokcham-rust-adapter && cargo fmt --check
 	cd tools/yeokcham-rust-adapter && cargo test --locked
 
-test: rust-adapter-build rust-adapter-test
+typescript-adapter-deps:
+	cd tools/yeokcham-typescript-adapter && npm ci --ignore-scripts --no-audit --no-fund
+
+typescript-adapter-test:
+	cd tools/yeokcham-typescript-adapter && npm test
+
+test: rust-adapter-build rust-adapter-test typescript-adapter-test
 	YEOKCHAM_RUST_ADAPTER=$(CURDIR)/tools/yeokcham-rust-adapter/target/release/yeokcham-rust-adapter $(DUNE) runtest
 
 PROPERTY_TEST_SEED ?= 20260729
