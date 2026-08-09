@@ -3,6 +3,7 @@ module Envelope = Yeokcham_envelope
 module Hash = Yeokcham_hash.Sha256
 module Store = Yeokcham_store
 module V2_envelope = Yeokcham_v2_envelope
+module V2_restore_journal = Yeokcham_v2_restore_journal
 module V2_transaction = Yeokcham_v2_transaction
 
 type classification =
@@ -711,64 +712,100 @@ let validate_v2_objects objects =
 type v2_journal_entry =
   | Prepared of V2_transaction.Transaction_id.t * V2_transaction.prepare
   | Committed of V2_transaction.Transaction_id.t * V2_transaction.commit
+  | Restore of V2_restore_journal.t
 
 let validate_v2_journal_entry journal name =
   let path = Filename.concat journal name in
-  let* journal_file =
-    V2_transaction.parse_journal_filename name
-    |> Result.map_error (fun error ->
-        Archive_verification_failed
-          { path; detail = V2_transaction.error_to_string error })
-  in
-  match journal_file with
-  | V2_transaction.Prepare_file transaction_id ->
-      let* bytes =
-        read_regular_file ~limit:V2_transaction.max_prepare_bytes path
-      in
-      let* prepare =
-        V2_transaction.decode_prepare bytes
-        |> Result.map_error (fun error ->
-            Archive_verification_failed
-              { path; detail = V2_transaction.error_to_string error })
-      in
-      if
-        V2_transaction.Transaction_id.equal transaction_id
-          (V2_transaction.prepare_transaction_id prepare)
-      then Ok (Prepared (transaction_id, prepare))
-      else
-        Error
-          (Archive_verification_failed
-             {
-               path;
-               detail = "V2 transaction prepare ID does not match its filename";
-             })
-  | V2_transaction.Commit_file transaction_id ->
-      let* bytes =
-        read_regular_file ~limit:V2_transaction.max_commit_bytes path
-      in
-      let* commit =
-        V2_transaction.decode_commit bytes
-        |> Result.map_error (fun error ->
-            Archive_verification_failed
-              { path; detail = V2_transaction.error_to_string error })
-      in
-      if
-        V2_transaction.Transaction_id.equal transaction_id
-          (V2_transaction.commit_transaction_id commit)
-      then Ok (Committed (transaction_id, commit))
-      else
-        Error
-          (Archive_verification_failed
-             {
-               path;
-               detail = "V2 transaction commit ID does not match its filename";
-             })
+  if V2_restore_journal.is_journal_filename name then
+    let* journal_file =
+      V2_restore_journal.parse_filename name
+      |> Result.map_error (fun error ->
+          Archive_verification_failed
+            { path; detail = V2_restore_journal.error_to_string error })
+    in
+    let* bytes =
+      read_regular_file ~limit:V2_restore_journal.max_record_bytes path
+    in
+    let* record =
+      V2_restore_journal.decode bytes
+      |> Result.map_error (fun error ->
+          Archive_verification_failed
+            { path; detail = V2_restore_journal.error_to_string error })
+    in
+    if
+      V2_restore_journal.Model.Transaction_id.equal
+        (V2_restore_journal.journal_file_operation_id journal_file)
+        (V2_restore_journal.operation_id record)
+      && Int64.equal
+           (V2_restore_journal.journal_file_generation journal_file)
+           (V2_restore_journal.generation record)
+    then Ok (Restore record)
+    else
+      Error
+        (Archive_verification_failed
+           {
+             path;
+             detail = "V2 restore journal identity does not match its filename";
+           })
+  else
+    let* journal_file =
+      V2_transaction.parse_journal_filename name
+      |> Result.map_error (fun error ->
+          Archive_verification_failed
+            { path; detail = V2_transaction.error_to_string error })
+    in
+    match journal_file with
+    | V2_transaction.Prepare_file transaction_id ->
+        let* bytes =
+          read_regular_file ~limit:V2_transaction.max_prepare_bytes path
+        in
+        let* prepare =
+          V2_transaction.decode_prepare bytes
+          |> Result.map_error (fun error ->
+              Archive_verification_failed
+                { path; detail = V2_transaction.error_to_string error })
+        in
+        if
+          V2_transaction.Transaction_id.equal transaction_id
+            (V2_transaction.prepare_transaction_id prepare)
+        then Ok (Prepared (transaction_id, prepare))
+        else
+          Error
+            (Archive_verification_failed
+               {
+                 path;
+                 detail =
+                   "V2 transaction prepare ID does not match its filename";
+               })
+    | V2_transaction.Commit_file transaction_id ->
+        let* bytes =
+          read_regular_file ~limit:V2_transaction.max_commit_bytes path
+        in
+        let* commit =
+          V2_transaction.decode_commit bytes
+          |> Result.map_error (fun error ->
+              Archive_verification_failed
+                { path; detail = V2_transaction.error_to_string error })
+        in
+        if
+          V2_transaction.Transaction_id.equal transaction_id
+            (V2_transaction.commit_transaction_id commit)
+        then Ok (Committed (transaction_id, commit))
+        else
+          Error
+            (Archive_verification_failed
+               {
+                 path;
+                 detail = "V2 transaction commit ID does not match its filename";
+               })
 
 let validate_v2_journal journal =
   let* names = read_directory journal in
   let rec read_entries result = function
     | [] -> Ok (List.rev result)
-    | name :: rest when V2_transaction.is_temporary_journal_filename name -> (
+    | name :: rest
+      when V2_transaction.is_temporary_journal_filename name
+           || V2_restore_journal.is_temporary_journal_filename name -> (
         let path = Filename.concat journal name in
         let* stat = lstat_temporary_if_present path in
         match stat with
@@ -779,7 +816,7 @@ let validate_v2_journal journal =
                 (Archive_verification_failed
                    {
                      path;
-                     detail = "V2 transaction temporary is not a regular file";
+                     detail = "V2 journal temporary is not a regular file";
                    })
             else read_entries result rest)
     | name :: rest ->
@@ -791,12 +828,12 @@ let validate_v2_journal journal =
     List.filter_map
       (function
         | Prepared (transaction_id, prepare) -> Some (transaction_id, prepare)
-        | Committed _ -> None)
+        | Committed _ | Restore _ -> None)
       entries
   in
   let rec validate_commits = function
     | [] -> Ok ()
-    | Prepared _ :: rest -> validate_commits rest
+    | (Prepared _ | Restore _) :: rest -> validate_commits rest
     | Committed (transaction_id, commit) :: rest ->
         let prepare =
           List.find_opt
@@ -828,7 +865,54 @@ let validate_v2_journal journal =
         in
         validate_commits rest
   in
-  validate_commits entries
+  let* () = validate_commits entries in
+  let restores =
+    List.filter_map
+      ((function Restore record -> Some record | _ -> None) [@warning "-4"])
+      entries
+    |> List.sort (fun left right ->
+        let operation =
+          V2_restore_journal.Model.Transaction_id.compare
+            (V2_restore_journal.operation_id left)
+            (V2_restore_journal.operation_id right)
+        in
+        if operation <> 0 then operation
+        else
+          Int64.compare
+            (V2_restore_journal.generation left)
+            (V2_restore_journal.generation right))
+  in
+  let validate_restore_chain records =
+    match records with
+    | [] -> Ok ()
+    | first :: _ ->
+        V2_restore_journal.validate_chain records
+        |> Result.map_error (fun error ->
+            Archive_verification_failed
+              {
+                path =
+                  Filename.concat journal (V2_restore_journal.filename first);
+                detail = V2_restore_journal.error_to_string error;
+              })
+  in
+  let rec validate_restores current = function
+    | [] -> (
+        match current with
+        | [] -> Ok ()
+        | _ -> validate_restore_chain (List.rev current))
+    | record :: rest -> (
+        match current with
+        | previous :: _
+          when V2_restore_journal.Model.Transaction_id.equal
+                 (V2_restore_journal.operation_id previous)
+                 (V2_restore_journal.operation_id record) ->
+            validate_restores (record :: current) rest
+        | [] -> validate_restores [ record ] rest
+        | _ ->
+            let* () = validate_restore_chain (List.rev current) in
+            validate_restores [ record ] rest)
+  in
+  validate_restores [] restores
 
 let validate_v1_direct_refs refs =
   let* names = read_directory refs in

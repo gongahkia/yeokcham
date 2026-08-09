@@ -450,6 +450,33 @@
   yeokcham_v2_restore_journal))
 
 (test
+ (name test_v2_restore_journal_store)
+ (modules test_v2_restore_journal_store)
+ (libraries
+  alcotest
+  unix
+  yeokcham_cutover
+  yeokcham_store
+  yeokcham_v2_ledger
+  yeokcham_v2_model
+  yeokcham_v2_restore_journal
+  yeokcham_v2_restore_journal_store))
+
+(test
+ (name v2_restore_journal_store_property_test)
+ (modules v2_restore_journal_store_property_test)
+ (libraries
+  alcotest
+  qcheck-core
+  qcheck-alcotest
+  unix
+  yeokcham_store
+  yeokcham_v2_ledger
+  yeokcham_v2_model
+  yeokcham_v2_restore_journal
+  yeokcham_v2_restore_journal_store))
+
+(test
  (name test_v2_transaction)
  (modules test_v2_transaction)
  (libraries
@@ -1422,6 +1449,9 @@
   (:v2_restore_plan_property_test v2_restore_plan_property_test.exe)
   (:test_v2_restore_journal test_v2_restore_journal.exe)
   (:v2_restore_journal_property_test v2_restore_journal_property_test.exe)
+  (:test_v2_restore_journal_store test_v2_restore_journal_store.exe)
+  (:v2_restore_journal_store_property_test
+   v2_restore_journal_store_property_test.exe)
   (:test_v2_bootstrap test_v2_bootstrap.exe)
   (:v2_bootstrap_property_test v2_bootstrap_property_test.exe)
   (:test_v2_secret_service test_v2_secret_service.exe)
@@ -1477,6 +1507,8 @@
    (run %{v2_restore_plan_property_test})
    (run %{test_v2_restore_journal})
    (run %{v2_restore_journal_property_test})
+   (run %{test_v2_restore_journal_store})
+   (run %{v2_restore_journal_store_property_test})
    (run %{test_v2_bootstrap})
    (run %{v2_bootstrap_property_test})
    (run %{test_v2_secret_service})

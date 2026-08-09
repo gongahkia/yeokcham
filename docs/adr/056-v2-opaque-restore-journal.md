@@ -85,13 +85,27 @@ Materialized   -> Published
 effectful adapter will append `Applying(n + 1)` only after action `n + 1`
 completes. `Materialized` requires every action complete. `Published` means a
 later adapter has published and verified the post-restore scratch result. The
-codec alone performs no journal-directory write, scan, checkpoint publication,
-filesystem mutation, recovery, or cleanup.
+codec and store perform no checkpoint publication, filesystem mutation,
+recovery action, or cleanup.
+
+Each record's V2 journal path is exactly:
+
+```text
+restore-<64-lowercase-hex-operation-id>-<16-lowercase-hex-generation>.cbor
+```
+
+The fixed-width nonnegative generation makes lexical and numeric order agree.
+The store validates both filename/payload identity and every per-operation
+successor relation, creates the final path by hard link from a fsynced private
+temporary file, and fsyncs the containing directory. An existing identical
+record is an idempotent retry; different bytes at the same path are a collision.
+The root validator accepts only valid transaction and restore records in the
+shared journal namespace.
 
 ## Consequences
 
-- A future restore store can create-only name every generation and reject a
-  collision rather than overwriting recovery state.
+- The implemented restore store create-only names every generation and rejects
+  a collision rather than overwriting recovery state.
 - Resume derives the action plan from encrypted snapshots instead of trusting
   raw journal plaintext.
 - The raw journal leaks operation progress and opaque identifiers to local disk
@@ -119,14 +133,15 @@ Restore_record = (repository, operation, safety-event, safety-snapshot,
 
 ## Persistent-format and migration impact
 
-The journal is a version-1, bounded canonical CBOR record intended for a
-private `.yeokcham/journal` create-only generation chain. It carries only
-opaque/public values and is not an ADR-045 encrypted object. The static golden
-fixture covers the initial record. Unknown schema versions/features, invalid
-IDs, equal snapshot references, impossible phase/progress combinations,
-noncanonical bytes, trailing bytes, and oversized inputs fail closed. No old
-format reader, migration, or compatibility fixture is retained under the
-approved no-user-data development policy.
+The journal is a version-1, bounded canonical CBOR record in a private
+`.yeokcham/journal` create-only generation chain. It carries only opaque/public
+values and is not an ADR-045 encrypted object. The static golden fixture covers
+the initial record. Unknown schema versions/features, invalid IDs, equal
+snapshot references, impossible phase/progress combinations, noncanonical
+bytes, trailing bytes, oversized inputs, malformed paths, file/payload identity
+mismatches, invalid chain successors, and non-regular temporary entries fail
+closed. No old format reader, migration, or compatibility fixture is retained
+under the approved no-user-data development policy.
 
 ## Verification
 
@@ -134,8 +149,10 @@ approved no-user-data development policy.
   equal references, invalid features/progress, trailing bytes, and bounds.
 - Seeded generated traces cover positive action counts and prove every legal
   final journal decodes and re-encodes canonically.
-- Before a journal store is complete, add create-only collision, crash, retry,
-  stale-generation, and recovery tests.
+- Store tests cover create-only retry/collision behavior, reopening, root
+  validation, stale regular temporary handling, non-regular temporary
+  rejection, missing predecessors, repository mismatch, and generated durable
+  chains.
 - Before a filesystem adapter is complete, add injected-write-failure and
   exact re-scan/safety-publication tests.
 - `make check` and `make property-test PROPERTY_TEST_SEED=17` are required.

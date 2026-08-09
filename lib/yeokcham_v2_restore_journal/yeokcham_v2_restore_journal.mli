@@ -10,6 +10,11 @@ module Model = Yeokcham_v2_model
 type phase = Prepared | Applying of int | Materialized | Published
 type t
 
+type journal_file = {
+  file_operation_id : Model.Transaction_id.t;
+  file_generation : int64;
+}
+
 type error =
   | Nonpositive_action_count of int
   | Too_many_actions of int
@@ -25,6 +30,8 @@ type error =
   | Unknown_phase of int64
   | Invalid_payload of string
   | Noncanonical_record
+  | Invalid_journal_filename of string
+  | Invalid_chain of string
 
 val error_to_string : error -> string
 val current_schema_version : int64
@@ -52,6 +59,15 @@ val phase : t -> phase
 val action_count : t -> int
 val completed_actions : t -> int
 
+val filename : t -> string
+(** The fixed create-only filename for this record in [`.yeokcham/journal`]. *)
+
+val parse_filename : string -> (journal_file, error) result
+val journal_file_operation_id : journal_file -> Model.Transaction_id.t
+val journal_file_generation : journal_file -> int64
+val is_journal_filename : string -> bool
+val is_temporary_journal_filename : string -> bool
+
 val advance : t -> phase -> (t, error) result
 (** A legal advancement creates the next immutable generation. The first
     [Applying 0] record is written before the first destructive action; an
@@ -60,3 +76,6 @@ val advance : t -> phase -> (t, error) result
 
 val encode : t -> string
 val decode : string -> (t, error) result
+
+val validate_chain : t list -> (unit, error) result
+(** Validates one operation's generation-ascending immutable record chain. *)

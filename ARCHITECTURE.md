@@ -100,7 +100,10 @@ checkpoint input, removes children before parents, creates target directories
 before their contents, and preserves regular bytes, modes, and raw symlink
 targets. ADR-056 adds the opaque immutable restore-journal progression that
 names the safety event and the safety/target snapshots without storing source
-paths or bytes; its journal store and filesystem adapter remain separate.
+paths or bytes. Its create-only local store validates the fixed
+operation/generation filename against the payload and every generation chain
+alongside the existing V2 object-publication records; the filesystem adapter
+remains separate.
 
 ## 2. Proposed OCaml workspace
 

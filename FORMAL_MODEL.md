@@ -1572,5 +1572,14 @@ Applying(action-count) -> Materialized -> Published
 The first `Applying(0)` generation precedes destructive work. Each completed
 action advances the count in a new immutable record. The two terminal phases
 require all actions complete. The record does not apply an action, select a
-causal head, validate a working tree, or publish a post-restore snapshot; the
-later persistent adapter must enforce those relations.
+causal head, validate a working tree, or publish a post-restore snapshot.
+
+The ADR-056 store names each record
+`restore-<operation-id>-<16-digit-generation>.cbor` inside the existing strict
+V2 journal directory. Filename and payload must name the same operation and
+generation. For each operation, the files sorted by generation form exactly one
+chain starting with `Prepared` at zero; every later record is the byte-exact
+legal successor of the preceding record. The store is create-only and treats
+identical existing bytes as a retry; conflicting bytes, missing predecessors,
+or malformed/non-regular entries reject. A later filesystem adapter must still
+enforce snapshot, safety-publication, and materialisation relations.

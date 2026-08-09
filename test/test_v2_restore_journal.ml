@@ -123,6 +123,42 @@ let invalid_records_and_transitions_reject () =
     (Result.is_error
        (Journal.decode (encoded ^ String.make Journal.max_record_bytes '\000')))
 
+let filename_and_chain_validation_are_strict () =
+  let prepared = sample () in
+  let filename = Journal.filename prepared in
+  Alcotest.(check string)
+    "prepared filename"
+    ("restore-"
+    ^ String.concat "" (List.init 32 (fun _ -> "6f"))
+    ^ "-0000000000000000.cbor")
+    filename;
+  let parsed =
+    Journal.parse_filename filename |> require_ok Journal.error_to_string
+  in
+  Alcotest.(check int64)
+    "filename generation" 0L
+    (Journal.journal_file_generation parsed);
+  Alcotest.(check bool)
+    "filename operation identity" true
+    (Model.Transaction_id.equal
+       (Journal.journal_file_operation_id parsed)
+       (Journal.operation_id prepared));
+  Alcotest.(check bool)
+    "malformed filename rejects" true
+    (Result.is_error
+       (Journal.parse_filename
+          "restore-OOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOO-0000000000000000.cbor"));
+  let started =
+    Journal.advance prepared (Journal.Applying 0)
+    |> require_ok Journal.error_to_string
+  in
+  Alcotest.(check bool)
+    "generation chain validates" true
+    (Result.is_ok (Journal.validate_chain [ prepared; started ]));
+  Alcotest.(check bool)
+    "chain cannot start after prepared" true
+    (Result.is_error (Journal.validate_chain [ started ]))
+
 let () =
   Alcotest.run "V2 opaque restore journal"
     [
@@ -132,5 +168,7 @@ let () =
             canonical_journal_fixture_and_transitions;
           Alcotest.test_case "invalid records and transitions reject" `Quick
             invalid_records_and_transitions_reject;
+          Alcotest.test_case "filename and chain validation are strict" `Quick
+            filename_and_chain_validation_are_strict;
         ] );
     ]

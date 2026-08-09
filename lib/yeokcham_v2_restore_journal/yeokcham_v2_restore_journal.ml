@@ -16,6 +16,11 @@ type t = {
   mandatory_features : int64;
 }
 
+type journal_file = {
+  file_operation_id : Model.Transaction_id.t;
+  file_generation : int64;
+}
+
 type error =
   | Nonpositive_action_count of int
   | Too_many_actions of int
@@ -31,11 +36,15 @@ type error =
   | Unknown_phase of int64
   | Invalid_payload of string
   | Noncanonical_record
+  | Invalid_journal_filename of string
+  | Invalid_chain of string
 
 let current_schema_version = 1L
 let supported_mandatory_features = 0L
 let max_actions = 1_000_000
 let max_record_bytes = 4096
+let journal_filename_prefix = "restore-"
+let journal_filename_suffix = ".cbor"
 let ( let* ) = Result.bind
 
 let phase_to_string = function
@@ -79,6 +88,9 @@ let error_to_string = function
       Printf.sprintf "unknown V2 restore journal phase: %Ld" phase
   | Invalid_payload detail -> "invalid V2 restore journal record: " ^ detail
   | Noncanonical_record -> "V2 restore journal record is noncanonical"
+  | Invalid_journal_filename name ->
+      "invalid V2 restore journal filename: " ^ name
+  | Invalid_chain detail -> "invalid V2 restore journal chain: " ^ detail
 
 let check_mandatory_features features =
   if Int64.compare features 0L < 0 then
@@ -152,6 +164,88 @@ let action_count record = record.action_count
 
 let completed_actions record =
   completed_actions_for record.action_count record.phase
+
+let filename record =
+  Printf.sprintf "%s%s-%016Lx%s" journal_filename_prefix
+    (Model.Transaction_id.to_hex record.operation_id)
+    record.generation journal_filename_suffix
+
+let journal_file_operation_id file = file.file_operation_id
+let journal_file_generation file = file.file_generation
+
+let hexadecimal_value = function
+  | '0' .. '9' as character -> Some (Char.code character - Char.code '0')
+  | 'a' .. 'f' as character -> Some (Char.code character - Char.code 'a' + 10)
+  | _ -> None
+
+let nonnegative_int64_of_fixed_hex encoded =
+  if
+    String.length encoded <> 16
+    ||
+    match hexadecimal_value encoded.[0] with
+    | Some value -> value > 7
+    | None -> true
+  then Error ()
+  else
+    let rec decode offset result =
+      if offset = String.length encoded then Ok result
+      else
+        match hexadecimal_value encoded.[offset] with
+        | None -> Error ()
+        | Some value ->
+            decode (offset + 1)
+              Int64.(logor (shift_left result 4) (of_int value))
+    in
+    decode 0 0L
+
+let parse_filename name =
+  let prefix_length = String.length journal_filename_prefix in
+  let suffix_length = String.length journal_filename_suffix in
+  let operation_length = Model.Transaction_id.byte_length * 2 in
+  let generation_length = 16 in
+  let expected_length =
+    prefix_length + operation_length + 1 + generation_length + suffix_length
+  in
+  if
+    String.length name <> expected_length
+    || (not (String.starts_with ~prefix:journal_filename_prefix name))
+    || (not (String.ends_with ~suffix:journal_filename_suffix name))
+    || name.[prefix_length + operation_length] <> '-'
+  then Error (Invalid_journal_filename name)
+  else
+    let operation = String.sub name prefix_length operation_length in
+    let generation =
+      String.sub name (prefix_length + operation_length + 1) generation_length
+    in
+    let* operation_id =
+      Model.Transaction_id.of_hex operation
+      |> Result.map_error (fun _ -> Invalid_journal_filename name)
+    in
+    let* generation =
+      nonnegative_int64_of_fixed_hex generation
+      |> Result.map_error (fun () -> Invalid_journal_filename name)
+    in
+    Ok { file_operation_id = operation_id; file_generation = generation }
+
+let is_journal_filename name =
+  String.starts_with ~prefix:journal_filename_prefix name
+
+let is_decimal value =
+  String.length value > 0
+  && String.for_all (function '0' .. '9' -> true | _ -> false) value
+
+let is_temporary_journal_filename name =
+  if not (String.starts_with ~prefix:"." name) then false
+  else
+    let body = String.sub name 1 (String.length name - 1) in
+    match String.split_on_char '.' body with
+    | [ stem; "cbor"; temporary ] -> (
+        match String.split_on_char '-' temporary with
+        | [ "tmp"; process; attempt ] ->
+            is_decimal process && is_decimal attempt
+            && Result.is_ok (parse_filename (stem ^ journal_filename_suffix))
+        | _ -> false)
+    | _ -> false
 
 let phase_code = function
   | Prepared -> 0L
@@ -347,3 +441,26 @@ let decode encoded =
           if String.equal encoded (encode record) then Ok record
           else Error Noncanonical_record
     | _ -> assert false
+
+let validate_chain records =
+  let rec loop previous = function
+    | [] -> Ok ()
+    | current :: rest -> (
+        match advance previous (phase current) with
+        | Error error -> Error (Invalid_chain (error_to_string error))
+        | Ok expected ->
+            if String.equal (encode expected) (encode current) then
+              loop current rest
+            else
+              Error
+                (Invalid_chain
+                   "a successor does not retain the previous record bindings"))
+  in
+  match records with
+  | [] -> Ok ()
+  | first :: rest ->
+      if not (Int64.equal (generation first) 0L) then
+        Error (Invalid_chain "the first generation is not zero")
+      else if phase first <> Prepared then
+        Error (Invalid_chain "generation zero is not prepared")
+      else loop first rest
