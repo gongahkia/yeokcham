@@ -6,6 +6,8 @@ let hex_value = function
         (Printf.sprintf
            "fixture hex has invalid character %C; use lowercase hex" character)
 
+let ( let* ) = Result.bind
+
 let decode_lower_hex encoded =
   let length = String.length encoded in
   if length = 0 then Error "fixture hex is empty"
@@ -45,6 +47,36 @@ let read_lower_hex_file path =
         |> Result.map_error (fun message ->
             Printf.sprintf "%s: %s" path message)
   with Sys_error message -> Error message
+
+let decode_canonical_lower_hex_file ~path ~decode ~encode ~error_to_string =
+  let* bytes = read_lower_hex_file path in
+  let* value = decode bytes |> Result.map_error error_to_string in
+  if String.equal bytes (encode value) then Ok value
+  else
+    Error (Printf.sprintf "%s: decoder re-encoding differs from fixture" path)
+
+let truncate bytes ~length =
+  let actual = String.length bytes in
+  if length < 0 || length >= actual then
+    Error
+      (Printf.sprintf
+         "fixture truncation length %d is outside the proper range 0..%d" length
+         (actual - 1))
+  else Ok (String.sub bytes 0 length)
+
+let xor_byte bytes ~offset ~mask =
+  let length = String.length bytes in
+  if offset < 0 || offset >= length then
+    Error
+      (Printf.sprintf "fixture byte offset %d is outside the range 0..%d" offset
+         (length - 1))
+  else if mask <= 0 || mask > 255 then
+    Error (Printf.sprintf "fixture byte XOR mask %d is outside 1..255" mask)
+  else
+    let mutated = Bytes.of_string bytes in
+    Bytes.set mutated offset
+      (Char.chr (Char.code (Bytes.get mutated offset) lxor mask));
+    Ok (Bytes.unsafe_to_string mutated)
 
 let lower_hex bytes =
   let hex = "0123456789abcdef" in

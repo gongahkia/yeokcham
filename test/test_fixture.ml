@@ -65,6 +65,26 @@ let golden_file_shape () =
             (Result.is_error (Golden.read_lower_hex_file path))))
     [ ""; "00ff"; "00ff\n\n"; "00FF\n" ]
 
+let golden_mutations_are_bounded () =
+  Alcotest.(check (result string string))
+    "proper truncation" (Ok "\000")
+    (Golden.truncate "\000\255" ~length:1);
+  Alcotest.(check bool)
+    "empty truncation input rejects" true
+    (Result.is_error (Golden.truncate "" ~length:0));
+  Alcotest.(check bool)
+    "full-length truncation rejects" true
+    (Result.is_error (Golden.truncate "\000\255" ~length:2));
+  Alcotest.(check (result string string))
+    "bounded byte mutation" (Ok "\001\255")
+    (Golden.xor_byte "\000\255" ~offset:0 ~mask:1);
+  Alcotest.(check bool)
+    "out-of-range byte mutation rejects" true
+    (Result.is_error (Golden.xor_byte "\000" ~offset:1 ~mask:1));
+  Alcotest.(check bool)
+    "zero byte mutation mask rejects" true
+    (Result.is_error (Golden.xor_byte "\000" ~offset:0 ~mask:0))
+
 let generated_edges () =
   let fixture = Spec.generate ~seed:7 in
   expect_valid fixture;
@@ -191,6 +211,8 @@ let () =
           Alcotest.test_case "parses strict golden hex" `Quick golden_hex_parser;
           Alcotest.test_case "enforces golden file shape" `Quick
             golden_file_shape;
+          Alcotest.test_case "bounds fixture mutations" `Quick
+            golden_mutations_are_bounded;
           QCheck_alcotest.to_alcotest ~speed_level:`Quick deterministic_property;
         ] );
       ( "materializer",

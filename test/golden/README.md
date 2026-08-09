@@ -54,4 +54,13 @@ manifest from ADR-047 for a V2-marker/V1-data legacy root. It records sorted
 relative nodes, modes, sizes, and SHA-256 digests. It is recovery evidence for
 the relocated V1 tree, not a V2 object or source of history authority.
 
+The `v2-ciphertext-envelope-v1.*.cbor.hex` and
+`v2-ref-ledger-event-v1.*.cbor.hex` fixture families contain the valid
+canonical V2 envelope/ledger bytes plus fixed truncation, trailing-byte,
+unsupported-feature, and wrong-event-ID failures. The
+`v2-opaque-object-address-v1.wrong-identity.hex` fixture is a valid-length
+but repository/key-mismatched opaque address. These fixtures are deliberately
+static inputs; tests may derive additional bounded corruptions from the valid
+fixture through `Golden_fixture` but never regenerate a fixture file.
+
 Changing any fixture bytes requires a format decision and retained compatibility evidence; adding a new schema requires a new named fixture.

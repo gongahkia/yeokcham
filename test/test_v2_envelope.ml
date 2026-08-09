@@ -45,12 +45,18 @@ let read_golden name =
 let exact_golden_round_trip () =
   let envelope = seal () in
   let encoded = Envelope.encode envelope in
+  let golden_path =
+    Filename.concat "golden" "v2-ciphertext-envelope-v1.cbor.hex"
+  in
   Alcotest.(check string)
     "canonical ciphertext envelope"
     (read_golden "v2-ciphertext-envelope-v1.cbor.hex")
     encoded;
   let decoded =
-    Envelope.decode encoded |> require_ok Envelope.error_to_string
+    Golden.decode_canonical_lower_hex_file ~path:golden_path
+      ~decode:Envelope.decode ~encode:Envelope.encode
+      ~error_to_string:Envelope.error_to_string
+    |> require_ok Fun.id
   in
   Alcotest.(check string)
     "decode preserves canonical bytes" encoded (Envelope.encode decoded);
