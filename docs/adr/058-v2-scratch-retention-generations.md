@@ -78,7 +78,7 @@ ref-name limit admits every spelling above. Before the first generation,
 `scratch-base(D)` is active. A valid sole head in `scratch-generation(D)`
 targets a `Scratch_generation` frame and changes the active scope to that
 frame's declared `scratch-compact(D, H)`. A missing generation scope uses the
-base scope. A malformed target, mismatched active head, or divergent
+base scope. A malformed target, unavailable active anchor, or divergent
 protection/generation/scratch head is an explicit error; nothing chooses a
 winner.
 
@@ -96,7 +96,8 @@ protection-reason-v1 = [0] / [1, capsule-binding-opaque-ref]
                      / [2, release-binding-opaque-ref]
 
 scratch-generation-v1 = [
-  1, active-ref-name, active-head-event-id,
+  1, source-ref-name, source-head-event-id,
+  active-ref-name, active-anchor-event-id,
   [* retired-ref-name], [* cleanup-candidate-v1], mandatory-features
 ]
 cleanup-candidate-v1 = [opaque-object-ref, expected-frame-kind]
@@ -130,10 +131,16 @@ A compaction plan revalidates the active scope, effective claims, and exact
 regular-file lengths. It creates a new compact scope with one signed ledger
 event for each retained snapshot, oldest-to-newest, reusing the original
 snapshot opaque references. It then stores a `Scratch_generation` frame naming
-that scope and its sole final event, and publishes one signed generation ledger
-event targeting that frame. This last event activates the generation. The frame
-lists older retired scopes and canonical cleanup candidates; it must not list
-its active scope, active head event object, or a retained snapshot.
+the prior source scope/head and the new scope/activation anchor, and publishes
+one signed generation ledger event targeting that frame. This last event activates
+the generation. The source ref must appear in the sorted retired-ref list; it
+makes the `scratch-compact(D, H)` name checkable against the full source head
+`H` rather than trusting an unbound active-ref string. The frame lists older
+retired scopes and canonical cleanup candidates; it must not list its active
+scope, active anchor event object, or a retained snapshot. The anchor is the
+sole compact head at activation; later ordinary scratch publication may extend
+that same causal chain, so inspection requires the sole current head to descend
+from the anchor rather than remain byte-for-byte equal to it.
 
 After activation, inspection evaluates only the declared active scope. Retired
 scope events remain authenticated objects but are no longer candidate scratch
@@ -189,7 +196,9 @@ compact(retained) -> new-scratch-chain -> generation-frame
    never repaired by eviction.
 4. A compacted event targets an existing retained snapshot and names only the
    preceding compacted event as predecessor.
-5. Activation follows durable, verified compacted events and generation frame.
+5. Activation follows durable, verified compacted events and generation frame;
+   the anchor remains on the sole active compact chain as later scratch events
+   extend it.
 6. Cleanup never precedes activation or moves a keep-set object.
 7. Quarantine is idempotently resumable; permanent prune is not recoverable.
 8. Runtime policy, observed file sizes, and quarantine progress are not

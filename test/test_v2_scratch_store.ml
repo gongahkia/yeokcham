@@ -7,6 +7,7 @@ module Ledger_store = Yeokcham_v2_ledger_store
 module Model = Yeokcham_model
 module Object = Yeokcham_v2_object
 module Object_store = Yeokcham_v2_object_store
+module Retention = Yeokcham_v2_retention
 module Scratch = Yeokcham_v2_scratch_store
 module Scratch_service = Yeokcham_v2_scratch_service
 module Store = Yeokcham_store
@@ -113,6 +114,86 @@ let publish scratch snapshot snapshot_nonce ledger_nonce =
   Scratch.publish scratch ~snapshot ~snapshot_nonce:(nonce snapshot_nonce)
     ~ledger_nonce:(nonce ledger_nonce)
   |> require_ok Scratch.error_to_string
+
+let object_store root =
+  Object_store.open_repository ~root ~repository_id ~address_key ~encryption_key
+  |> require_ok Object_store.error_to_string
+
+let ledger_store root =
+  let public_keys =
+    Bootstrap.public_key_registry capability
+    |> require_ok Bootstrap.error_to_string
+  in
+  Ledger_store.open_repository ~root ~repository_id ~address_key ~encryption_key
+    ~public_keys
+  |> require_ok Ledger_store.error_to_string
+
+let published_ref = function
+  | Object_store.Published object_ref
+  | Object_store.Already_published object_ref ->
+      object_ref
+
+let publish_frame root ~frame ~nonce_value =
+  let envelope =
+    Envelope.seal ~key:encryption_key ~nonce:nonce_value ~mandatory_features:0L
+      (Object.encode frame)
+    |> require_ok Envelope.error_to_string
+  in
+  Object_store.publish (object_store root) ~envelope
+  |> require_ok Object_store.error_to_string
+  |> published_ref
+
+let publish_ledger_event root ~ref_name ~predecessor ~target ~nonce_value =
+  let unsigned =
+    Ledger.make_unsigned ~repository_id ~ref_name
+      ~signer_key_id:(Bootstrap.capability_signer_key_id capability)
+      ~predecessor
+      ~target:(Some (Ledger.Ref_target.of_opaque_object_ref target))
+      ~mandatory_features:0L
+    |> require_ok Ledger.error_to_string
+  in
+  let event =
+    Ledger.make ~unsigned ~algorithm:Ledger.algorithm
+      ~signature:(Bootstrap.sign_ledger capability unsigned)
+    |> require_ok Ledger.error_to_string
+  in
+  let envelope =
+    Envelope.seal ~key:encryption_key ~nonce:nonce_value ~mandatory_features:0L
+      (Object.ledger_event event |> Object.encode)
+    |> require_ok Envelope.error_to_string
+  in
+  ignore
+    (Ledger_store.publish (ledger_store root) ~envelope
+    |> require_ok Ledger_store.error_to_string);
+  Ledger.event_id event
+
+let prepare_generation root scratch source ~compact_nonce ~manifest_nonce =
+  let source_ref = Scratch.scratch_ref_name scratch in
+  let active_ref =
+    Scratch.compact_ref_name scratch ~source_head:source.Scratch.event_id
+    |> require_ok Scratch.error_to_string
+  in
+  let active_anchor =
+    publish_ledger_event root ~ref_name:active_ref ~predecessor:None
+      ~target:source.Scratch.snapshot_ref ~nonce_value:compact_nonce
+  in
+  let generation =
+    Retention.make_generation ~source_ref ~source_head:source.Scratch.event_id
+      ~active_ref ~active_anchor ~retired_refs:[ source_ref ]
+      ~cleanup_candidates:[]
+    |> require_ok Retention.error_to_string
+  in
+  let manifest_ref =
+    publish_frame root
+      ~frame:(Object.scratch_generation generation)
+      ~nonce_value:manifest_nonce
+  in
+  (active_ref, active_anchor, manifest_ref)
+
+let activate_generation root scratch ~manifest_ref ~nonce_value =
+  publish_ledger_event root
+    ~ref_name:(Scratch.generation_ref_name scratch)
+    ~predecessor:None ~target:manifest_ref ~nonce_value
 
 let write_file path bytes =
   Out_channel.with_open_bin path (fun channel ->
@@ -234,6 +315,225 @@ let snapshot_first_interruption_resumes_without_moving_head () =
       Alcotest.(check bool)
         "reopened resumed checkpoint is exact" true
         (Model.Snapshot.equal changed restored.Scratch.snapshot))
+
+let generation_activation_preserves_exact_snapshot_and_redirects_publication ()
+    =
+  with_repository (fun root bootstrap_repository scratch ->
+      let retained = snapshot "retained\000bytes" in
+      let source =
+        match publish scratch retained '1' '2' with
+        | Scratch.Published checkpoint -> checkpoint
+        | Scratch.Unchanged _ -> Alcotest.fail "initial scratch was unchanged"
+      in
+      let active_ref, active_anchor, manifest_ref =
+        prepare_generation root scratch source ~compact_nonce:(nonce '3')
+          ~manifest_nonce:(nonce '4')
+      in
+      let before_activation =
+        Scratch.inspect scratch
+        |> require_ok Scratch.error_to_string
+        |> checkpoint
+      in
+      Alcotest.(check bool)
+        "unpublished generation manifest leaves the base checkpoint active" true
+        (Ledger.Event_id.equal source.Scratch.event_id
+           before_activation.Scratch.event_id);
+      ignore
+        (activate_generation root scratch ~manifest_ref ~nonce_value:(nonce '5'));
+      let active =
+        Scratch.active_scratch_ref_name scratch
+        |> require_ok Scratch.error_to_string
+      in
+      Alcotest.(check string)
+        "generation selects the declared compact scope"
+        (Ledger.Ref_name.to_string active_ref)
+        (Ledger.Ref_name.to_string active);
+      let activated =
+        Scratch.inspect scratch
+        |> require_ok Scratch.error_to_string
+        |> checkpoint
+      in
+      Alcotest.(check bool)
+        "activated compact head is exact" true
+        (Ledger.Event_id.equal active_anchor activated.Scratch.event_id);
+      Alcotest.(check bool)
+        "activated compact checkpoint reuses exact retained bytes" true
+        (Model.Snapshot.equal retained activated.Scratch.snapshot);
+      let reopened =
+        Scratch.open_repository ~root ~bootstrap_repository
+        |> require_ok Scratch.error_to_string
+      in
+      let reopened_checkpoint =
+        Scratch.inspect reopened
+        |> require_ok Scratch.error_to_string
+        |> checkpoint
+      in
+      Alcotest.(check bool)
+        "reopened generation remains the exact active checkpoint" true
+        (Ledger.Event_id.equal active_anchor
+           reopened_checkpoint.Scratch.event_id);
+      let updated = snapshot "updated-after-generation" in
+      let published =
+        match publish reopened updated '6' '7' with
+        | Scratch.Published checkpoint -> checkpoint
+        | Scratch.Unchanged _ -> Alcotest.fail "updated scratch was unchanged"
+      in
+      let current =
+        Scratch.inspect reopened
+        |> require_ok Scratch.error_to_string
+        |> checkpoint
+      in
+      Alcotest.(check bool)
+        "post-activation publication extends the compact scope" true
+        (Ledger.Event_id.equal published.Scratch.event_id
+           current.Scratch.event_id);
+      Alcotest.(check bool)
+        "post-activation publication preserves new exact bytes" true
+        (Model.Snapshot.equal updated current.Scratch.snapshot);
+      let retired_event_is_outside =
+       (function
+       | Scratch.Event_outside_scratch_scope event_id ->
+           Ledger.Event_id.equal event_id source.Scratch.event_id
+       | _ -> false)
+       [@warning "-4"]
+      in
+      match
+        Scratch.checkpoint_for_event reopened ~event_id:source.Scratch.event_id
+      with
+      | Error error when retired_event_is_outside error -> ()
+      | Error error ->
+          Alcotest.failf "wrong retired-event error: %s"
+            (Scratch.error_to_string error)
+      | Ok _ -> Alcotest.fail "retired source event remained active")
+
+let malformed_generation_refuses_activation () =
+  with_repository (fun root _ scratch ->
+      let source =
+        match publish scratch (snapshot "source") '1' '2' with
+        | Scratch.Published checkpoint -> checkpoint
+        | Scratch.Unchanged _ -> Alcotest.fail "initial scratch was unchanged"
+      in
+      let source_ref = Scratch.scratch_ref_name scratch in
+      let wrong_active_ref =
+        Ledger.Ref_name.of_string "scratch-compact-wrong-device"
+        |> require_ok Fun.id
+      in
+      let generation =
+        Retention.make_generation ~source_ref
+          ~source_head:source.Scratch.event_id ~active_ref:wrong_active_ref
+          ~active_anchor:source.Scratch.event_id ~retired_refs:[ source_ref ]
+          ~cleanup_candidates:[]
+        |> require_ok Retention.error_to_string
+      in
+      let manifest_ref =
+        publish_frame root
+          ~frame:(Object.scratch_generation generation)
+          ~nonce_value:(nonce '3')
+      in
+      ignore
+        (activate_generation root scratch ~manifest_ref ~nonce_value:(nonce '4'));
+      let active_ref_is_malformed =
+       (function
+       | Scratch.Generation_active_ref_mismatch _ -> true
+       | _ -> false)
+       [@warning "-4"]
+      in
+      match Scratch.inspect scratch with
+      | Error error when active_ref_is_malformed error -> ()
+      | Error error ->
+          Alcotest.failf "wrong malformed-generation error: %s"
+            (Scratch.error_to_string error)
+      | Ok _ -> Alcotest.fail "malformed generation selected an active scope")
+
+let generation_anchor_must_remain_ancestral () =
+  with_repository (fun root _ scratch ->
+      let source =
+        match publish scratch (snapshot "source") '1' '2' with
+        | Scratch.Published checkpoint -> checkpoint
+        | Scratch.Unchanged _ -> Alcotest.fail "initial scratch was unchanged"
+      in
+      let source_ref = Scratch.scratch_ref_name scratch in
+      let active_ref =
+        Scratch.compact_ref_name scratch ~source_head:source.Scratch.event_id
+        |> require_ok Scratch.error_to_string
+      in
+      ignore
+        (publish_ledger_event root ~ref_name:active_ref ~predecessor:None
+           ~target:source.Scratch.snapshot_ref ~nonce_value:(nonce '3'));
+      let generation =
+        Retention.make_generation ~source_ref
+          ~source_head:source.Scratch.event_id ~active_ref
+          ~active_anchor:source.Scratch.event_id ~retired_refs:[ source_ref ]
+          ~cleanup_candidates:[]
+        |> require_ok Retention.error_to_string
+      in
+      let manifest_ref =
+        publish_frame root
+          ~frame:(Object.scratch_generation generation)
+          ~nonce_value:(nonce '4')
+      in
+      ignore
+        (activate_generation root scratch ~manifest_ref ~nonce_value:(nonce '5'));
+      let anchor_is_not_ancestral =
+       (function
+       | Scratch.Generation_active_anchor_not_reachable _ -> true
+       | _ -> false)
+       [@warning "-4"]
+      in
+      match Scratch.inspect scratch with
+      | Error error when anchor_is_not_ancestral error -> ()
+      | Error error ->
+          Alcotest.failf "wrong inactive-anchor error: %s"
+            (Scratch.error_to_string error)
+      | Ok _ -> Alcotest.fail "generation accepted an unrelated active anchor")
+
+let divergent_generation_heads_remain_explicit () =
+  with_repository (fun root _ scratch ->
+      let source =
+        match publish scratch (snapshot "source") '1' '2' with
+        | Scratch.Published checkpoint -> checkpoint
+        | Scratch.Unchanged _ -> Alcotest.fail "initial scratch was unchanged"
+      in
+      let source_ref = Scratch.scratch_ref_name scratch in
+      let wrong_active_ref =
+        Ledger.Ref_name.of_string "scratch-compact-wrong-device"
+        |> require_ok Fun.id
+      in
+      let generation =
+        Retention.make_generation ~source_ref
+          ~source_head:source.Scratch.event_id ~active_ref:wrong_active_ref
+          ~active_anchor:source.Scratch.event_id ~retired_refs:[ source_ref ]
+          ~cleanup_candidates:[]
+        |> require_ok Retention.error_to_string
+      in
+      let first_manifest =
+        publish_frame root
+          ~frame:(Object.scratch_generation generation)
+          ~nonce_value:(nonce '3')
+      in
+      let second_manifest =
+        publish_frame root
+          ~frame:(Object.scratch_generation generation)
+          ~nonce_value:(nonce '4')
+      in
+      ignore
+        (activate_generation root scratch ~manifest_ref:first_manifest
+           ~nonce_value:(nonce '5'));
+      ignore
+        (activate_generation root scratch ~manifest_ref:second_manifest
+           ~nonce_value:(nonce '6'));
+      let has_divergent_generation_heads =
+       (function
+       | Scratch.Divergent_generation_heads heads -> List.length heads = 2
+       | _ -> false)
+       [@warning "-4"]
+      in
+      match Scratch.inspect scratch with
+      | Error error when has_divergent_generation_heads error -> ()
+      | Error error ->
+          Alcotest.failf "wrong divergent-generation error: %s"
+            (Scratch.error_to_string error)
+      | Ok _ -> Alcotest.fail "divergent generation selected an active scope")
 
 let divergent_heads_refuse_automatic_publication () =
   with_repository (fun root _ scratch ->
@@ -370,6 +670,17 @@ let () =
             initial_change_unchanged_and_reopen;
           Alcotest.test_case "snapshot-first interruption resumes safely" `Quick
             snapshot_first_interruption_resumes_without_moving_head;
+          Alcotest.test_case
+            "generation activation preserves exact bytes and redirects \
+             publication"
+            `Quick
+            generation_activation_preserves_exact_snapshot_and_redirects_publication;
+          Alcotest.test_case "malformed generation refuses activation" `Quick
+            malformed_generation_refuses_activation;
+          Alcotest.test_case "generation anchor remains ancestral" `Quick
+            generation_anchor_must_remain_ancestral;
+          Alcotest.test_case "divergent generation heads remain explicit" `Quick
+            divergent_generation_heads_remain_explicit;
           Alcotest.test_case "divergent heads refuse automatic publication"
             `Quick divergent_heads_refuse_automatic_publication;
           Alcotest.test_case "exact scan service publishes only changes" `Quick

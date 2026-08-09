@@ -72,8 +72,10 @@ let retention_frames_are_canonical_and_type_separated () =
   | None -> Alcotest.fail "protection frame decoded as another frame kind");
   let generation =
     Retention.make_generation
+      ~source_ref:(ref_name "scratch-device")
+      ~source_head:(Ledger.event_id (ledger_event ()))
       ~active_ref:(ref_name "scratch-compact-device-head")
-      ~active_head:(Ledger.event_id (ledger_event ()))
+      ~active_anchor:(Ledger.event_id (ledger_event ()))
       ~retired_refs:[ ref_name "scratch-device" ]
       ~cleanup_candidates:
         [

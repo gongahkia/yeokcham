@@ -10,4 +10,5 @@
   yeokcham_v2_ledger_store
   yeokcham_v2_model
   yeokcham_v2_object
-  yeokcham_v2_object_store))
+  yeokcham_v2_object_store
+  yeokcham_v2_retention))

@@ -23,8 +23,10 @@ type cleanup_candidate = {
 }
 
 type generation = {
+  source_ref : Ledger.Ref_name.t;
+  source_head : Ledger.Event_id.t;
   active_ref : Ledger.Ref_name.t;
-  active_head : Ledger.Event_id.t;
+  active_anchor : Ledger.Event_id.t;
   retired_refs : Ledger.Ref_name.t list;
   cleanup_candidates : cleanup_candidate list;
 }
@@ -68,6 +70,7 @@ type error =
   | Unsupported_mandatory_features of int64
   | Duplicate_retired_ref of string
   | Empty_retired_refs
+  | Source_ref_not_retired of string
   | Active_ref_is_retired of string
   | Duplicate_cleanup_candidate of Model.Opaque_object_ref.t
   | Invalid_recent_count of int
@@ -99,6 +102,8 @@ let error_to_string = function
   | Duplicate_retired_ref ref_name ->
       "V2 retention generation repeats retired ref: " ^ ref_name
   | Empty_retired_refs -> "V2 retention generation has no retired source ref"
+  | Source_ref_not_retired ref_name ->
+      "V2 retention generation does not retire its source ref: " ^ ref_name
   | Active_ref_is_retired ref_name ->
       "V2 retention generation retires its active ref: " ^ ref_name
   | Duplicate_cleanup_candidate object_ref ->
@@ -364,8 +369,8 @@ let duplicate_by compare values =
   in
   loop (List.sort compare values)
 
-let validate_generation ~active_ref ~active_head:_ ~retired_refs
-    ~cleanup_candidates =
+let validate_generation ~source_ref ~source_head:_ ~active_ref ~active_anchor:_
+    ~retired_refs ~cleanup_candidates =
   match retired_refs with
   | [] -> Error Empty_retired_refs
   | _ -> (
@@ -374,6 +379,14 @@ let validate_generation ~active_ref ~active_head:_ ~retired_refs
           Error (Duplicate_retired_ref (Ledger.Ref_name.to_string duplicate))
       | None -> (
           if
+            not
+              (List.exists
+                 (fun retired -> Ledger.Ref_name.equal source_ref retired)
+                 retired_refs)
+          then
+            Error
+              (Source_ref_not_retired (Ledger.Ref_name.to_string source_ref))
+          else if
             List.exists
               (fun retired -> Ledger.Ref_name.equal active_ref retired)
               retired_refs
@@ -386,16 +399,18 @@ let validate_generation ~active_ref ~active_head:_ ~retired_refs
                   (Duplicate_cleanup_candidate duplicate.candidate_object_ref)
             | None -> Ok ()))
 
-let make_generation ~active_ref ~active_head ~retired_refs
-    ~(cleanup_candidates : cleanup_candidate list) =
+let make_generation ~source_ref ~source_head ~active_ref ~active_anchor
+    ~retired_refs ~(cleanup_candidates : cleanup_candidate list) =
   let* () =
-    validate_generation ~active_ref ~active_head ~retired_refs
-      ~cleanup_candidates
+    validate_generation ~source_ref ~source_head ~active_ref ~active_anchor
+      ~retired_refs ~cleanup_candidates
   in
   Ok
     {
+      source_ref;
+      source_head;
       active_ref;
-      active_head;
+      active_anchor;
       retired_refs = List.sort Ledger.Ref_name.compare retired_refs;
       cleanup_candidates =
         List.sort cleanup_candidate_compare cleanup_candidates;
@@ -403,8 +418,10 @@ let make_generation ~active_ref ~active_head ~retired_refs
 
 let generation_value generation =
   let* () =
-    validate_generation ~active_ref:generation.active_ref
-      ~active_head:generation.active_head ~retired_refs:generation.retired_refs
+    validate_generation ~source_ref:generation.source_ref
+      ~source_head:generation.source_head ~active_ref:generation.active_ref
+      ~active_anchor:generation.active_anchor
+      ~retired_refs:generation.retired_refs
       ~cleanup_candidates:generation.cleanup_candidates
   in
   let retired_refs =
@@ -424,13 +441,18 @@ let generation_value generation =
   let* active_ref =
     encoded_text (Ledger.Ref_name.to_string generation.active_ref)
   in
+  let* source_ref =
+    encoded_text (Ledger.Ref_name.to_string generation.source_ref)
+  in
   let* retired_refs = array retired_refs in
   let* cleanup = array cleanup in
   array
     [
       Encoding.integer schema_version;
+      source_ref;
+      Encoding.bytes (Ledger.Event_id.to_bytes generation.source_head);
       active_ref;
-      Encoding.bytes (Ledger.Event_id.to_bytes generation.active_head);
+      Encoding.bytes (Ledger.Event_id.to_bytes generation.active_anchor);
       retired_refs;
       cleanup;
       Encoding.integer supported_mandatory_features;
@@ -466,22 +488,41 @@ let decode_generation encoded =
     |> Result.map_error (fun error ->
         Invalid_payload (Encoding.decode_error_to_string error))
   in
-  let* values = fields "V2 scratch generation" 6 value in
+  let* values = fields "V2 scratch generation" 8 value in
   match values with
-  | [ version; active_ref; active_head; retired_refs; cleanup; features ] ->
+  | [
+   version;
+   source_ref;
+   source_head;
+   active_ref;
+   active_anchor;
+   retired_refs;
+   cleanup;
+   features;
+  ] ->
       let* version = integer "V2 scratch generation version" version in
       if not (Int64.equal version schema_version) then
         Error (Unsupported_schema_version version)
       else
+        let* source_ref = text "V2 scratch generation source ref" source_ref in
+        let* source_ref =
+          ref_name "V2 scratch generation source ref" source_ref
+        in
+        let* source_head =
+          bytes "V2 scratch generation source head" source_head
+        in
+        let* source_head =
+          event_id "V2 scratch generation source head" source_head
+        in
         let* active_ref = text "V2 scratch generation active ref" active_ref in
         let* active_ref =
           ref_name "V2 scratch generation active ref" active_ref
         in
-        let* active_head =
-          bytes "V2 scratch generation active head" active_head
+        let* active_anchor =
+          bytes "V2 scratch generation active anchor" active_anchor
         in
-        let* active_head =
-          event_id "V2 scratch generation active head" active_head
+        let* active_anchor =
+          event_id "V2 scratch generation active anchor" active_anchor
         in
         let* retired_refs =
           array_values "V2 scratch generation retired refs" retired_refs
@@ -496,8 +537,8 @@ let decode_generation encoded =
         in
         let* () = check_features features in
         let* generation =
-          make_generation ~active_ref ~active_head ~retired_refs
-            ~cleanup_candidates
+          make_generation ~source_ref ~source_head ~active_ref ~active_anchor
+            ~retired_refs ~cleanup_candidates
         in
         if String.equal encoded (encode_generation generation) then
           Ok generation

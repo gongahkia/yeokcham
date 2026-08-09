@@ -431,6 +431,7 @@
   yeokcham_v2_ledger_store
   yeokcham_v2_object
   yeokcham_v2_object_store
+  yeokcham_v2_retention
   yeokcham_v2_scratch_service
   yeokcham_v2_scratch_store))
 
@@ -450,6 +451,10 @@
   yeokcham_v2_bootstrap_store
   yeokcham_v2_envelope
   yeokcham_v2_ledger
+  yeokcham_v2_ledger_store
+  yeokcham_v2_object
+  yeokcham_v2_object_store
+  yeokcham_v2_retention
   yeokcham_v2_scratch_store))
 
 (test

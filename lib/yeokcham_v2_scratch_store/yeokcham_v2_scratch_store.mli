@@ -51,6 +51,28 @@ type error =
     }
   | Missing_evaluated_checkpoint of Ledger.Event_id.t
   | Divergent_scratch_heads of Ledger.Event_id.t list
+  | Generation_event_missing_target of Ledger.Event_id.t
+  | Generation_target_not_manifest of {
+      event_id : Ledger.Event_id.t;
+      object_ref : V2_model.Opaque_object_ref.t;
+    }
+  | Missing_evaluated_generation of Ledger.Event_id.t
+  | Divergent_generation_heads of Ledger.Event_id.t list
+  | Generation_source_ref_mismatch of {
+      event_id : Ledger.Event_id.t;
+      expected : Ledger.Ref_name.t;
+      actual : Ledger.Ref_name.t;
+    }
+  | Generation_active_ref_mismatch of {
+      event_id : Ledger.Event_id.t;
+      expected : Ledger.Ref_name.t;
+      actual : Ledger.Ref_name.t;
+    }
+  | Generation_active_anchor_not_reachable of {
+      event_id : Ledger.Event_id.t;
+      expected : Ledger.Event_id.t;
+      actual : Ledger.Event_id.t list;
+    }
   | Nonce_reuse
 
 val error_to_string : error -> string
@@ -64,10 +86,23 @@ val open_repository :
     different root without passing its own bootstrap validation. *)
 
 val scratch_ref_name : repository -> Ledger.Ref_name.t
+(** The device's immutable base scratch scope, not a mutable active ref. *)
+
+val generation_ref_name : repository -> Ledger.Ref_name.t
+
+val compact_ref_name :
+  repository ->
+  source_head:Ledger.Event_id.t ->
+  (Ledger.Ref_name.t, error) result
+
+val active_scratch_ref_name : repository -> (Ledger.Ref_name.t, error) result
+(** Read-only. A missing generation scope selects the base scratch ref. A sole
+    verified generation head selects only its verified compact scope; malformed
+    or divergent generation history is an explicit error. *)
 
 val inspect : repository -> (inspection, error) result
-(** Read-only. It verifies each typed ledger frame before considering this
-    device's scratch scope and rejects invalid scratch targets. *)
+(** Read-only. It resolves the active scope before verifying its typed ledger
+    frames and rejects invalid scratch targets. *)
 
 val checkpoint_for_event :
   repository -> event_id:Ledger.Event_id.t -> (checkpoint, error) result

@@ -109,9 +109,14 @@ ordinal recent-count and exact encrypted object-byte budget. The current head
 and effective claims remain selected even when that reports an overrun. The
 generation protocol creates a fresh scratch scope over retained existing
 snapshots and activates it through a separate causal ledger event; it never
-uses a mutable generation ref. Physical activation, retired-scope verification,
-quarantine, and prune remain the next implementation slice and are not claimed
-by the pure planner.
+uses a mutable generation ref. The scratch store resolves that immutable
+activation history before inspection or ordinary publication: the generation
+root derives from the base scope, later generations derive from their prior
+replacement scope, and the active compact chain must have one head descending
+from the signed activation anchor. A missing generation record leaves the base
+scope active; malformed or divergent records remain explicit failures. The
+compaction authoring path, protection publication, retired-scope verifier,
+quarantine, and prune remain later slices and are not claimed by the resolver.
 
 V2-016 currently supplies a pure restore planner over those exact
 snapshots: a changed target requires the observed snapshot as an explicit safety

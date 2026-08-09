@@ -1652,8 +1652,15 @@ introduced.
 ```text
 Protection = (snapshot-ref, Protect | Unprotect,
               User_pin | Capsule_boundary(binding) | Release_boundary(binding))
-Generation = (active-ref, active-head, retired-refs, cleanup-candidates)
+Generation = (source-ref, source-head, active-ref, active-anchor,
+              retired-refs, cleanup-candidates)
 Policy     = (recent-count, storage-budget-bytes?)
+```
+
+```text
+Active_scratch(D) = scratch-base(D)
+                  | generation-head(D).active-ref
+generation.active-anchor \preceq sole-head(Active_scratch(D))
 ```
 
 Claims fold in causal order; the latest action for the same exact snapshot and
@@ -1667,10 +1674,14 @@ state.
 
 Compaction creates a fresh immutable scratch ledger chain over the selected
 existing snapshot references, oldest-to-newest, then publishes a generation
-ledger event as the sole activation point. A pre-activation interruption leaves
-the prior scope active. After activation, old source scopes are retired from
-scratch interpretation and may be quarantined only through the generation's
-canonical candidate list. That list can contain source ledger objects and
-unretained snapshots only when no retained checkpoint, effective claim, or live
+ledger event as the sole activation point. Its manifest binds the source ref
+and source head to the replacement ref/activation anchor, so a destination
+compact-ref name is not an unaudited string. A pre-activation interruption
+leaves the prior scope active. The generation's active anchor must remain in
+the sole current replacement chain; ordinary scratch publication may extend
+that head after activation. After activation, old source scopes are retired
+from scratch interpretation and may be quarantined only through the generation's canonical
+candidate list. That list can contain source ledger objects and unretained
+snapshots only when no retained checkpoint, effective claim, or live
 non-retired ledger target names the snapshot. Quarantine is resumable local
 maintenance; explicit prune is irreversible.

@@ -261,7 +261,8 @@ let canonical_records_reject_invalid_generation_shapes () =
     }
   in
   let generation =
-    Retention.make_generation ~active_ref ~active_head:(event_id 334)
+    Retention.make_generation ~source_ref:retired_ref
+      ~source_head:(event_id 333) ~active_ref ~active_anchor:(event_id 334)
       ~retired_refs:[ retired_ref ] ~cleanup_candidates:[ candidate ]
     |> require_ok Retention.error_to_string
   in
@@ -280,7 +281,8 @@ let canonical_records_reject_invalid_generation_shapes () =
    [@warning "-4"]
   in
   (match
-     Retention.make_generation ~active_ref ~active_head:(event_id 335)
+     Retention.make_generation ~active_ref ~active_anchor:(event_id 335)
+       ~source_ref:retired_ref ~source_head:(event_id 333)
        ~retired_refs:[ retired_ref; retired_ref ]
        ~cleanup_candidates:[]
    with
@@ -289,6 +291,25 @@ let canonical_records_reject_invalid_generation_shapes () =
       Alcotest.failf "wrong generation validation error: %s"
         (Retention.error_to_string error)
   | Ok _ -> Alcotest.fail "duplicate retired ref was accepted");
+  let unretired_ref =
+    Ledger.Ref_name.of_string "scratch-unretired" |> require_ok Fun.id
+  in
+  let source_ref_not_retired =
+   (function
+   | Retention.Source_ref_not_retired _ -> true
+   | _ -> false)
+   [@warning "-4"]
+  in
+  (match
+     Retention.make_generation ~source_ref:unretired_ref
+       ~source_head:(event_id 333) ~active_ref ~active_anchor:(event_id 335)
+       ~retired_refs:[ retired_ref ] ~cleanup_candidates:[]
+   with
+  | Error error when source_ref_not_retired error -> ()
+  | Error error ->
+      Alcotest.failf "wrong source-ref validation error: %s"
+        (Retention.error_to_string error)
+  | Ok _ -> Alcotest.fail "unretired source ref was accepted");
   let later_retired_ref =
     Ledger.Ref_name.of_string "scratch-z" |> require_ok Fun.id
   in
@@ -305,6 +326,9 @@ let canonical_records_reject_invalid_generation_shapes () =
     array
       [
         Encoding.integer 1L;
+        Encoding.text (Ledger.Ref_name.to_string retired_ref)
+        |> require_ok Encoding.construction_error_to_string;
+        Encoding.bytes (Ledger.Event_id.to_bytes (event_id 332));
         Encoding.text (Ledger.Ref_name.to_string active_ref)
         |> require_ok Encoding.construction_error_to_string;
         Encoding.bytes (Ledger.Event_id.to_bytes (event_id 336));
@@ -351,10 +375,13 @@ let canonical_records_match_goldens () =
   in
   let generation =
     Retention.make_generation
+      ~source_ref:
+        (Ledger.Ref_name.of_string "scratch-device" |> require_ok Fun.id)
+      ~source_head:(event_id 400)
       ~active_ref:
         (Ledger.Ref_name.of_string "scratch-compact-device-head"
         |> require_ok Fun.id)
-      ~active_head:(event_id 401)
+      ~active_anchor:(event_id 401)
       ~retired_refs:
         [ Ledger.Ref_name.of_string "scratch-device" |> require_ok Fun.id ]
       ~cleanup_candidates:

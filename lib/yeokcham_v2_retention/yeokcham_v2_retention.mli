@@ -28,8 +28,10 @@ type cleanup_candidate = {
 }
 
 type generation = {
+  source_ref : Ledger.Ref_name.t;
+  source_head : Ledger.Event_id.t;
   active_ref : Ledger.Ref_name.t;
-  active_head : Ledger.Event_id.t;
+  active_anchor : Ledger.Event_id.t;
   retired_refs : Ledger.Ref_name.t list;
   cleanup_candidates : cleanup_candidate list;
 }
@@ -73,6 +75,7 @@ type error =
   | Unsupported_mandatory_features of int64
   | Duplicate_retired_ref of string
   | Empty_retired_refs
+  | Source_ref_not_retired of string
   | Active_ref_is_retired of string
   | Duplicate_cleanup_candidate of Model.Opaque_object_ref.t
   | Invalid_recent_count of int
@@ -101,8 +104,10 @@ val encode_protection : protection -> string
 val decode_protection : string -> (protection, error) result
 
 val make_generation :
+  source_ref:Ledger.Ref_name.t ->
+  source_head:Ledger.Event_id.t ->
   active_ref:Ledger.Ref_name.t ->
-  active_head:Ledger.Event_id.t ->
+  active_anchor:Ledger.Event_id.t ->
   retired_refs:Ledger.Ref_name.t list ->
   cleanup_candidates:cleanup_candidate list ->
   (generation, error) result
