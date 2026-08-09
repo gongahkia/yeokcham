@@ -100,7 +100,7 @@ let init_writes_complete_v2_root () =
             ("required root entry exists: " ^ name)
             true
             (Sys.file_exists (Filename.concat (metadata_path root) name)))
-        [ "objects"; "refs"; "locks"; "journal" ];
+        [ "bootstrap"; "objects"; "refs"; "locks"; "journal" ];
       Alcotest.(check bool)
         "staging root is not left behind" false
         (Sys.readdir root
@@ -120,7 +120,7 @@ let missing_malformed_and_unknown_roots_are_rejected () =
             ("wrong missing-root error: " ^ Store.error_to_string missing))
       [@warning "-4"]);
       write_v2_layout root ~format:"yeokcham-repository-root 2\n"
-        ~directories:[ "objects"; "refs"; "locks"; "journal" ];
+        ~directories:[ "bootstrap"; "objects"; "refs"; "locks"; "journal" ];
       let malformed =
         require_store_error "malformed v2 format" (Store.open_repository ~root)
       in
@@ -136,7 +136,7 @@ let missing_malformed_and_unknown_roots_are_rejected () =
           (String.map
              (fun character -> if character = '2' then '3' else character)
              Store.root_format)
-        ~directories:[ "objects"; "refs"; "locks"; "journal" ];
+        ~directories:[ "bootstrap"; "objects"; "refs"; "locks"; "journal" ];
       let unknown =
         require_store_error "unknown root format version"
           (Store.open_repository ~root)
@@ -151,7 +151,7 @@ let missing_malformed_and_unknown_roots_are_rejected () =
 let incomplete_root_is_rejected_without_repair () =
   with_empty_root (fun root ->
       write_v2_layout root ~format:Store.root_format
-        ~directories:[ "objects"; "refs"; "locks" ];
+        ~directories:[ "bootstrap"; "objects"; "refs"; "locks" ];
       let expect_incomplete result =
         let error = require_store_error "incomplete root" result in
         (match error with

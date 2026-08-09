@@ -979,7 +979,14 @@ let detect ~root =
                 | Error error -> Ok (Mixed_or_unknown (error_to_string error))))
         | Ok format when String.equal format Store.root_format -> (
             let expected =
-              [ format_name; journal_name; locks_name; objects_name; refs_name ]
+              [
+                bootstrap_name;
+                format_name;
+                journal_name;
+                locks_name;
+                objects_name;
+                refs_name;
+              ]
               |> List.sort String.compare
             in
             let missing =

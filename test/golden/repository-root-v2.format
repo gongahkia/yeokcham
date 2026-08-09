@@ -1,5 +1,6 @@
 yeokcham-repository-root 2
-root-layout-version 2
+root-layout-version 3
+required-directory bootstrap
 required-directory objects
 required-directory refs
 required-directory locks
