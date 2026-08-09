@@ -1,13 +1,15 @@
-(** Create-only publication of verified ADR-048 records into a V2 root.
+(** Typed verified ref-ledger view over generic V2 encrypted object storage.
 
-    The adapter writes raw ADR-045 envelopes at ADR-046 opaque addresses. It
-    owns no mutable ref, plaintext index, private key, trust policy, or repair
-    action. *)
+    Every V2 object remains in the opaque create-only namespace. This adapter
+    accepts only the ledger frame kind; callers that need a different kind use
+    [Yeokcham_v2_object_store]. *)
 
 module Address = Yeokcham_v2_address
 module Envelope = Yeokcham_v2_envelope
 module Ledger = Yeokcham_v2_ledger
 module Model = Yeokcham_v2_model
+module Object = Yeokcham_v2_object
+module Object_store = Yeokcham_v2_object_store
 
 type repository
 
@@ -22,19 +24,14 @@ type publication =
     }
 
 type error =
-  | Cutover_error of Yeokcham_cutover.error
-  | Not_v2_root of Yeokcham_cutover.classification
-  | Io_error of { operation : string; path : string; message : string }
-  | Invalid_object_path of string
-  | Envelope_error of Envelope.error
-  | Address_error of Address.error
+  | Object_store_error of Object_store.error
+  | Ledger_object_required of Object.kind
   | Ledger_error of Ledger.error
   | Unknown_signer of Ledger.Signer_key_id.t
   | Repository_mismatch of {
       expected : Model.Repository_id.t;
       actual : Model.Repository_id.t;
     }
-  | Object_collision of Model.Opaque_object_ref.t
 
 val error_to_string : error -> string
 val repository_id : repository -> Model.Repository_id.t
@@ -51,15 +48,21 @@ val object_path : repository -> Model.Opaque_object_ref.t -> string
 
 val list_object_refs :
   repository -> (Model.Opaque_object_ref.t list, error) result
-(** Lists every canonical object path without decrypting or mutating it. *)
+(** Lists every canonical opaque object path without decrypting or mutating it.
+*)
 
 val validate_envelope :
   repository ->
   envelope:Envelope.t ->
   (Model.Opaque_object_ref.t * Ledger.Event_id.t, error) result
-(** Strictly checks one candidate without writing an object or journal entry. *)
+(** Strictly checks one ledger-frame candidate without writing an object. *)
 
 val publish : repository -> envelope:Envelope.t -> (publication, error) result
+
+val load_object :
+  repository -> object_ref:Model.Opaque_object_ref.t -> (Object.t, error) result
+(** Strictly opens an authenticated typed frame but grants it no ledger result.
+*)
 
 val load :
   repository ->

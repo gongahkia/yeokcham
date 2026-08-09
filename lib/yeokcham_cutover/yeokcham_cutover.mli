@@ -40,7 +40,7 @@ val error_to_string : error -> string
 
 val is_v2_object_temporary_filename : string -> bool
 (** [is_v2_object_temporary_filename] recognizes the exact private staging
-    grammar used by the V2 ledger object adapter. *)
+    grammars used by the V2 typed object adapters. *)
 
 val detect : root:string -> (classification, error) result
 (** [detect ~root] is read-only. It fails closed on symlinks, malformed layouts,

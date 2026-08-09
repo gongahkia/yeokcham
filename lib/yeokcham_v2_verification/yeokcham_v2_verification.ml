@@ -3,6 +3,7 @@ module Envelope = Yeokcham_v2_envelope
 module Ledger = Yeokcham_v2_ledger
 module Ledger_store = Yeokcham_v2_ledger_store
 module Model = Yeokcham_v2_model
+module Object = Yeokcham_v2_object
 module Transaction_store = Yeokcham_v2_transaction_store
 
 type repository = {
@@ -74,18 +75,26 @@ let load_events repository =
   in
   let rec load result = function
     | [] -> Ok (List.rev result)
-    | object_ref :: rest ->
+    | object_ref :: rest -> (
         let path = Ledger_store.object_path repository.ledger object_ref in
-        let* verified =
-          Ledger_store.load repository.ledger ~object_ref
+        let* object_ =
+          Ledger_store.load_object repository.ledger ~object_ref
           |> Result.map_error (fun error ->
               Object_error { object_ref; path; error })
         in
-        let event = Ledger.verified_event verified in
-        let ref_name =
-          Ledger.event_unsigned event |> Ledger.unsigned_ref_name
-        in
-        load ({ verified; ref_name } :: result) rest
+        match Object.ledger object_ with
+        | None -> load result rest
+        | Some _ ->
+            let* verified =
+              Ledger_store.load repository.ledger ~object_ref
+              |> Result.map_error (fun error ->
+                  Object_error { object_ref; path; error })
+            in
+            let event = Ledger.verified_event verified in
+            let ref_name =
+              Ledger.event_unsigned event |> Ledger.unsigned_ref_name
+            in
+            load ({ verified; ref_name } :: result) rest)
   in
   let* events = load [] object_refs in
   Ok (object_refs, events)

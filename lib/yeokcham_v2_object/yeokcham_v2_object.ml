@@ -17,7 +17,11 @@ type error =
 
 let current_schema_version = 1L
 let supported_mandatory_features = 0L
-let max_payload_bytes = 128 * 1024 * 1024
+
+(* Keep the encoded frame below ADR-045's envelope plaintext limit.  Sixty-four
+   bytes is deliberately more than the fixed frame fields and their largest
+   canonical CBOR headers. *)
+let max_payload_bytes = (128 * 1024 * 1024) - 64
 let ( let* ) = Result.bind
 
 let error_to_string = function
@@ -28,11 +32,12 @@ let error_to_string = function
       Printf.sprintf "invalid V2 typed object frame mandatory features: %Ld"
         features
   | Unsupported_mandatory_features features ->
-      Printf.sprintf
-        "unsupported V2 typed object frame mandatory features: %Ld" features
+      Printf.sprintf "unsupported V2 typed object frame mandatory features: %Ld"
+        features
   | Unknown_kind kind -> Printf.sprintf "unknown V2 typed object kind: %Ld" kind
   | Ledger_error error -> Ledger.error_to_string error
-  | Snapshot_error error -> Yeokcham_model.canonical_decode_error_to_string error
+  | Snapshot_error error ->
+      Yeokcham_model.canonical_decode_error_to_string error
   | Noncanonical_frame -> "V2 typed object frame is noncanonical"
 
 let check_mandatory_features features =
@@ -48,12 +53,13 @@ let check_mandatory_features features =
 let array values =
   Encoding.array values
   |> Result.map_error (fun error ->
-         Invalid_payload (Encoding.construction_error_to_string error))
+      Invalid_payload (Encoding.construction_error_to_string error))
 
 let fields name expected = function
   | Encoding.Array values when List.length values = expected -> Ok values
   | Encoding.Array _ ->
-      Error (Invalid_payload (Printf.sprintf "%s has the wrong field count" name))
+      Error
+        (Invalid_payload (Printf.sprintf "%s has the wrong field count" name))
   | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _ | Encoding.Map _
   | Encoding.Bool _ | Encoding.Null ->
       Error (Invalid_payload (name ^ " must be an array"))
@@ -77,8 +83,13 @@ let kind = function
   | Ledger_event_frame _ -> Ledger_event
   | Scratch_snapshot_frame _ -> Scratch_snapshot
 
-let ledger = function Ledger_event_frame event -> Some event | _ -> None
-let snapshot = function Scratch_snapshot_frame snapshot -> Some snapshot | _ -> None
+let ledger = function
+  | Ledger_event_frame event -> Some event
+  | Scratch_snapshot_frame _ -> None
+
+let snapshot = function
+  | Ledger_event_frame _ -> None
+  | Scratch_snapshot_frame snapshot -> Some snapshot
 
 let kind_code = function Ledger_event -> 0L | Scratch_snapshot -> 1L
 
@@ -96,7 +107,9 @@ let encode frame =
         Encoding.integer supported_mandatory_features;
       ]
   in
-  match value with Ok value -> Encoding.encode value | Error error -> invalid_arg (error_to_string error)
+  match value with
+  | Ok value -> Encoding.encode value
+  | Error error -> invalid_arg (error_to_string error)
 
 let decode_payload kind payload =
   if String.length payload > max_payload_bytes then
@@ -104,8 +117,7 @@ let decode_payload kind payload =
   else
     match kind with
     | Ledger_event ->
-        Ledger.decode payload
-        |> Result.map ledger_event
+        Ledger.decode payload |> Result.map ledger_event
         |> Result.map_error (fun error -> Ledger_error error)
     | Scratch_snapshot ->
         Snapshot.decode_canonical_bytes payload
@@ -116,7 +128,7 @@ let decode encoded =
   let* value =
     Encoding.decode encoded
     |> Result.map_error (fun error ->
-           Invalid_payload (Encoding.decode_error_to_string error))
+        Invalid_payload (Encoding.decode_error_to_string error))
   in
   let* values = fields "V2 typed object frame" 4 value in
   match values with
@@ -133,7 +145,9 @@ let decode encoded =
           | value -> Error (Unknown_kind value)
         in
         let* payload = bytes "V2 typed object frame payload" payload in
-        let* features = integer "V2 typed object frame mandatory features" features in
+        let* features =
+          integer "V2 typed object frame mandatory features" features
+        in
         let* () = check_mandatory_features features in
         let* frame = decode_payload kind payload in
         if String.equal encoded (encode frame) then Ok frame

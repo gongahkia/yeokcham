@@ -3,6 +3,9 @@ module Envelope = Yeokcham_v2_envelope
 module Ledger = Yeokcham_v2_ledger
 module Ledger_store = Yeokcham_v2_ledger_store
 module Model = Yeokcham_v2_model
+module Object = Yeokcham_v2_object
+module Object_store = Yeokcham_v2_object_store
+module Snapshot_model = Yeokcham_model
 module Store = Yeokcham_store
 module Transaction_store = Yeokcham_v2_transaction_store
 module Verification = Yeokcham_v2_verification
@@ -111,7 +114,7 @@ let envelope ?(nonce_offset = 0) event =
     |> require_ok Envelope.error_to_string
   in
   Envelope.seal ~key:encryption_key ~nonce ~mandatory_features:0L
-    (Ledger.encode event)
+    (Object.ledger_event event |> Object.encode)
   |> require_ok Envelope.error_to_string
 
 let rec remove_tree path =
@@ -168,6 +171,19 @@ let rec filesystem_image path =
 let publish ledger candidate =
   Ledger_store.publish ledger ~envelope:candidate
   |> require_ok Ledger_store.error_to_string
+
+let snapshot_path components =
+  Snapshot_model.Path.of_components components
+  |> require_ok Snapshot_model.Path.error_to_string
+
+let exact_snapshot content =
+  Snapshot_model.Snapshot.of_entries
+    [
+      Snapshot_model.File_path
+        ( snapshot_path [ "file" ],
+          { Snapshot_model.mode = Snapshot_model.Regular; content } );
+    ]
+  |> require_ok Snapshot_model.construction_error_to_string
 
 let report_fields report =
   let {
@@ -244,6 +260,54 @@ let read_only_verification_reports_ledger_and_journal_state () =
       Alcotest.(check int) "unresolved divergences" 1 unresolved_divergences;
       Alcotest.(check int) "prepared transactions" 1 prepared_transactions;
       Alcotest.(check int) "committed transactions" 1 committed_transactions)
+
+let verification_accepts_typed_scratch_snapshots_without_treating_them_as_events
+    () =
+  with_v2_root (fun root _ _ ->
+      let nonce =
+        Envelope.nonce_of_bytes (String.make 12 's')
+        |> require_ok Envelope.error_to_string
+      in
+      let envelope =
+        Envelope.seal ~key:encryption_key ~nonce ~mandatory_features:0L
+          (Object.scratch_snapshot (exact_snapshot "exact") |> Object.encode)
+        |> require_ok Envelope.error_to_string
+      in
+      let objects =
+        Object_store.open_repository ~root ~repository_id ~address_key
+          ~encryption_key
+        |> require_ok Object_store.error_to_string
+      in
+      ignore
+        (Object_store.publish objects ~envelope
+        |> require_ok Object_store.error_to_string);
+      let report =
+        Verification.verify (verifier root)
+        |> require_ok Verification.error_to_string
+      in
+      let ( verified_objects,
+            verified_events,
+            verified_refs,
+            causal_heads,
+            unresolved_divergences,
+            prepared_transactions,
+            committed_transactions ) =
+        report_fields report
+      in
+      Alcotest.(check int)
+        "typed snapshot counts as verified object" 1 verified_objects;
+      Alcotest.(check int)
+        "typed snapshot is not a ledger event" 0 verified_events;
+      Alcotest.(check int)
+        "typed snapshot creates no ledger ref" 0 verified_refs;
+      Alcotest.(check int)
+        "typed snapshot creates no causal head" 0 causal_heads;
+      Alcotest.(check int)
+        "typed snapshot creates no divergence" 0 unresolved_divergences;
+      Alcotest.(check int)
+        "typed snapshot creates no prepare" 0 prepared_transactions;
+      Alcotest.(check int)
+        "typed snapshot creates no commit" 0 committed_transactions)
 
 let write_file path bytes =
   Out_channel.with_open_bin path (fun channel ->
@@ -349,6 +413,8 @@ let () =
         [
           Alcotest.test_case "read-only report covers ledger and journal state"
             `Quick read_only_verification_reports_ledger_and_journal_state;
+          Alcotest.test_case "typed snapshots are not ledger events" `Quick
+            verification_accepts_typed_scratch_snapshots_without_treating_them_as_events;
           Alcotest.test_case "invalid objects and causal context are typed"
             `Quick invalid_object_and_causal_contexts_are_typed;
           QCheck_alcotest.to_alcotest ~speed_level:`Quick

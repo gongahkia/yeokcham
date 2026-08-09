@@ -3,6 +3,7 @@ module Envelope = Yeokcham_v2_envelope
 module Golden = Yeokcham_testkit.Golden_fixture
 module Ledger = Yeokcham_v2_ledger
 module Model = Yeokcham_v2_model
+module Object = Yeokcham_v2_object
 
 let default_seed = 20_260_729
 
@@ -43,6 +44,12 @@ let canonical_ledger name =
     ~error_to_string:Ledger.error_to_string
   |> require_ok Fun.id
 
+let canonical_object name =
+  Golden.decode_canonical_lower_hex_file ~path:(fixture_path name)
+    ~decode:Object.decode ~encode:Object.encode
+    ~error_to_string:Object.error_to_string
+  |> require_ok Fun.id
+
 let repository_id =
   Model.Repository_id.of_bytes (String.make 32 'r')
   |> require_ok Model.identity_error_to_string
@@ -66,14 +73,24 @@ let valid_fixtures_are_exact_and_canonical () =
     (read "v2-opaque-object-address-v1.hex")
     (Model.Opaque_object_ref.to_bytes generic_address);
   let ledger_event = canonical_ledger "v2-ref-ledger-event-v1.cbor.hex" in
+  let ledger_frame = canonical_object "v2-object-ledger-frame-v1.cbor.hex" in
+  ignore (canonical_object "v2-object-scratch-snapshot-frame-v1.cbor.hex");
   let ledger_envelope =
     canonical_envelope "v2-ref-ledger-envelope-v1.cbor.hex"
   in
   Alcotest.(check string)
-    "ledger envelope decrypts to the canonical ledger event fixture"
-    (read "v2-ref-ledger-event-v1.cbor.hex")
+    "ledger envelope decrypts to the canonical ledger frame fixture"
+    (read "v2-object-ledger-frame-v1.cbor.hex")
     (Envelope.open_envelope ~key:encryption_key ledger_envelope
     |> require_ok Envelope.error_to_string);
+  Alcotest.(check bool)
+    "ledger typed frame retains the canonical event" true
+    (match Object.ledger ledger_frame with
+    | Some event ->
+        Ledger.Event_id.equal
+          (Ledger.event_id ledger_event)
+          (Ledger.event_id event)
+    | None -> false);
   Alcotest.(check bool)
     "ledger event ID survives canonical fixture decoding" true
     (Ledger.Event_id.equal
@@ -101,6 +118,14 @@ let expect_ledger_fixture_error name predicate =
   | Error error ->
       Alcotest.failf "%s returned the wrong error: %s" name
         (Ledger.error_to_string error)
+  | Ok _ -> Alcotest.failf "%s unexpectedly decoded" name
+
+let expect_object_fixture_error name predicate =
+  match Object.decode (read name) with
+  | Error error when predicate error -> ()
+  | Error error ->
+      Alcotest.failf "%s returned the wrong error: %s" name
+        (Object.error_to_string error)
   | Ok _ -> Alcotest.failf "%s unexpectedly decoded" name
 
 let fixed_invalid_fixtures_reject_with_typed_errors () =
@@ -137,6 +162,26 @@ let fixed_invalid_fixtures_reject_with_typed_errors () =
   expect_ledger_fixture_error "v2-ref-ledger-event-v1.wrong-event-id.cbor.hex"
     (function
     | Ledger.Invalid_event_id -> true
+    | _ -> false)
+  [@warning "-4"];
+  List.iter
+    (fun name ->
+      expect_object_fixture_error name ((function
+        | Object.Invalid_payload _ -> true
+        | _ -> false)
+        [@warning "-4"]))
+    [
+      "v2-object-scratch-snapshot-frame-v1.truncated.cbor.hex";
+      "v2-object-scratch-snapshot-frame-v1.trailing.cbor.hex";
+    ];
+  expect_object_fixture_error
+    "v2-object-scratch-snapshot-frame-v1.unknown-kind.cbor.hex" (function
+    | Object.Unknown_kind 2L -> true
+    | _ -> false)
+  [@warning "-4"];
+  expect_object_fixture_error
+    "v2-object-scratch-snapshot-frame-v1.unknown-feature.cbor.hex" (function
+    | Object.Unsupported_mandatory_features 1L -> true
     | _ -> false)
   [@warning "-4"];
   let envelope = canonical_envelope "v2-ciphertext-envelope-v1.cbor.hex" in

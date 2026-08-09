@@ -1505,3 +1505,22 @@ and noncanonical re-encoding. A generic object store creates and loads frames;
 the ledger store is a typed view that analyses only ledger frames. Old
 development envelopes that directly contain a ledger record reject rather than
 migrate.
+
+## 27. V2 local scratch snapshot publication
+
+ADR-055 assigns an ADR-053 bootstrap device `D` the deterministic ledger scope
+`"scratch-" || lowercase-hex(D)`. It is a causal ref name, not a mutable head
+or authorization claim. Typed-object inspection admits only verified ledger
+frames in that scope. A valid ledger event must target a typed exact snapshot;
+the result is no checkpoint, one `(event-id, snapshot-ref, snapshot)`, or an
+ordered divergent event set.
+
+For exact candidate snapshot `S`, equal to the sole current snapshot yields
+`Unchanged` with no persistent transition. Otherwise the transition first
+create-only publishes `Scratch_snapshot(S)` in an ADR-054/ADR-045 envelope,
+then create-only publishes a signed ADR-048 ledger frame whose target is the
+new opaque snapshot reference and whose predecessor is the sole old event if
+one exists. The two envelope nonces are distinct caller inputs. A divergent
+state fails before snapshot publication. An interruption therefore leaves the
+old valid causal view plus, at most, an unreachable immutable snapshot; it does
+not create a mutable head or select a conflict.

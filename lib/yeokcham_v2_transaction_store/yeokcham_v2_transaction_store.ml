@@ -368,19 +368,26 @@ let read_journal_directory repository =
            message;
          })
 
+let temporary_stat_kind_if_present path =
+  try Ok (Some (Unix.lstat path).Unix.st_kind) with
+  | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok None
+  | Unix.Unix_error (error, _, _) ->
+      Error (io_error ~operation:"lstat" ~path error)
+
 let scan_journal repository =
   let* names = read_journal_directory repository in
   let rec scan prepares commits = function
     | [] -> Ok { prepares = List.rev prepares; commits = List.rev commits }
-    | name :: rest when Transaction.is_temporary_journal_filename name ->
+    | name :: rest when Transaction.is_temporary_journal_filename name -> (
         let path = Filename.concat repository.journal name in
-        let* stat =
-          try Ok (Unix.lstat path)
-          with Unix.Unix_error (error, _, _) ->
-            Error (io_error ~operation:"lstat" ~path error)
-        in
-        if stat.Unix.st_kind = Unix.S_REG then scan prepares commits rest
-        else Error (Invalid_journal_path path)
+        let* kind = temporary_stat_kind_if_present path in
+        match kind with
+        | None -> scan prepares commits rest
+        | Some Unix.S_REG -> scan prepares commits rest
+        | Some
+            ( Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO
+            | Unix.S_SOCK ) ->
+            Error (Invalid_journal_path path))
     | name :: rest -> (
         let* journal_file =
           Transaction.parse_journal_filename name

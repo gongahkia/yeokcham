@@ -24,12 +24,10 @@ val error_to_string : error -> string
 val current_schema_version : int64
 val supported_mandatory_features : int64
 val max_payload_bytes : int
-
 val ledger_event : Ledger.t -> t
 val scratch_snapshot : Snapshot.t -> t
 val kind : t -> kind
 val ledger : t -> Ledger.t option
 val snapshot : t -> Snapshot.t option
-
 val encode : t -> string
 val decode : string -> (t, error) result

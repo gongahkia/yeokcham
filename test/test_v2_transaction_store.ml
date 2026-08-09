@@ -5,6 +5,7 @@ module Golden = Yeokcham_testkit.Golden_fixture
 module Ledger = Yeokcham_v2_ledger
 module Ledger_store = Yeokcham_v2_ledger_store
 module Model = Yeokcham_v2_model
+module Object = Yeokcham_v2_object
 module Store = Yeokcham_store
 module Transaction = Yeokcham_v2_transaction
 module Transaction_store = Yeokcham_v2_transaction_store
@@ -92,7 +93,7 @@ let envelope ?(nonce_offset = 0) ?(signature_mutation = false) () =
     |> require_ok Envelope.error_to_string
   in
   Envelope.seal ~key:encryption_key ~nonce ~mandatory_features:0L
-    (Ledger.encode (signed_event ~signature_mutation ()))
+    (Object.ledger_event (signed_event ~signature_mutation ()) |> Object.encode)
   |> require_ok Envelope.error_to_string
 
 let object_ref envelope =

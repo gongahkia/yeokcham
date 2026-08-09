@@ -87,10 +87,14 @@ bootstrap and a Linux Secret Service custody adapter for role-separated local
 capabilities. It is not user identity, policy, a mutable scratch head, or an
 automatic authority decision. ADR-054 frames each decrypted V2 object with an
 authenticated canonical kind, so exact scratch snapshots and causal ledger
-events can share the opaque create-only object namespace. The remaining V2-014
-work is exact scanning plus the snapshot-then-causal-ledger transition; a
-bootstrap-aware daemon still cannot act on `Publish_checkpoint` until that
-model and persistence boundary are complete.
+events can share the opaque create-only object namespace. ADR-055 builds a
+device-scoped local scratch view over those frames: it publishes an immutable
+snapshot first and a causally linked signed ledger event second, rejects
+divergence rather than choosing a head, and treats an exact unchanged snapshot
+as a no-write result. Its exact scanner and narrow scratch service carry an
+explicit scan result into that durable transition. Daemon integration remains
+separate; the daemon cannot invent snapshot bytes, keys, or a conflict
+resolution.
 
 ## 2. Proposed OCaml workspace
 

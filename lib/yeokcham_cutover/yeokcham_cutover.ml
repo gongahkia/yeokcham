@@ -639,7 +639,8 @@ let is_v2_object_temporary_filename name =
   match String.split_on_char '.' name with
   | [ ""; object_name; staging ] when is_hex_name object_name 60 -> (
       match String.split_on_char '-' staging with
-      | [ "ledger"; pid; attempt ] -> decimal_name pid && decimal_name attempt
+      | [ ("ledger" | "object"); pid; attempt ] ->
+          decimal_name pid && decimal_name attempt
       | _ -> false)
   | _ -> false
 
@@ -767,17 +768,20 @@ let validate_v2_journal journal =
   let* names = read_directory journal in
   let rec read_entries result = function
     | [] -> Ok (List.rev result)
-    | name :: rest when V2_transaction.is_temporary_journal_filename name ->
+    | name :: rest when V2_transaction.is_temporary_journal_filename name -> (
         let path = Filename.concat journal name in
-        let* stat = lstat path in
-        if stat.Unix.st_kind <> Unix.S_REG then
-          Error
-            (Archive_verification_failed
-               {
-                 path;
-                 detail = "V2 transaction temporary is not a regular file";
-               })
-        else read_entries result rest
+        let* stat = lstat_temporary_if_present path in
+        match stat with
+        | None -> read_entries result rest
+        | Some stat ->
+            if stat.Unix.st_kind <> Unix.S_REG then
+              Error
+                (Archive_verification_failed
+                   {
+                     path;
+                     detail = "V2 transaction temporary is not a regular file";
+                   })
+            else read_entries result rest)
     | name :: rest ->
         let* entry = validate_v2_journal_entry journal name in
         read_entries (entry :: result) rest

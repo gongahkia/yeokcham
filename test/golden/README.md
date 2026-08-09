@@ -78,4 +78,13 @@ opaque-address keys; it contains no private key, user identity, mutable scratch
 head, or trust policy. The private Secret Service capability format deliberately
 has no disk fixture.
 
+`v2-object-ledger-frame-v1.cbor.hex` and
+`v2-object-scratch-snapshot-frame-v1.cbor.hex` are ADR-054 typed plaintext
+frames carried inside an encrypted V2 envelope. They cover a complete signed
+ledger event and an exact one-file snapshot respectively. Their kind is not a
+filesystem path or outer-envelope field; their static bytes are only test
+inputs after decryption.
+The scratch-frame family's fixed truncated, trailing-byte, unknown-kind, and
+unknown-feature variants retain its fail-closed decoding boundary.
+
 Changing any fixture bytes requires a format decision and retained compatibility evidence; adding a new schema requires a new named fixture.

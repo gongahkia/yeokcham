@@ -5,6 +5,7 @@ module Envelope = Yeokcham_v2_envelope
 module Ledger = Yeokcham_v2_ledger
 module Ledger_store = Yeokcham_v2_ledger_store
 module Model = Yeokcham_v2_model
+module Object = Yeokcham_v2_object
 module Transaction_store = Yeokcham_v2_transaction_store
 
 type repository

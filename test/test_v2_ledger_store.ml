@@ -4,6 +4,7 @@ module Envelope = Yeokcham_v2_envelope
 module Ledger = Yeokcham_v2_ledger
 module Ledger_store = Yeokcham_v2_ledger_store
 module Model = Yeokcham_v2_model
+module Object = Yeokcham_v2_object
 module Store = Yeokcham_store
 module Golden = Yeokcham_testkit.Golden_fixture
 
@@ -92,7 +93,7 @@ let envelope ?(nonce_offset = 0) event =
     |> require_ok Envelope.error_to_string
   in
   Envelope.seal ~key:encryption_key ~nonce ~mandatory_features:0L
-    (Ledger.encode event)
+    (Object.ledger_event event |> Object.encode)
   |> require_ok Envelope.error_to_string
 
 let read_golden name =
@@ -110,6 +111,10 @@ let canonical_record_envelope_and_address_goldens () =
     "canonical ref-ledger plaintext"
     (read_golden "v2-ref-ledger-event-v1.cbor.hex")
     (Ledger.encode event);
+  Alcotest.(check string)
+    "canonical typed ref-ledger frame"
+    (read_golden "v2-object-ledger-frame-v1.cbor.hex")
+    (Object.ledger_event event |> Object.encode);
   Alcotest.(check string)
     "canonical encrypted ref-ledger envelope"
     (read_golden "v2-ref-ledger-envelope-v1.cbor.hex")
@@ -198,7 +203,7 @@ let stale_ledger_temporary_is_non_authoritative () =
       let final = Ledger_store.object_path repository object_ref in
       let temporary =
         Filename.concat (Filename.dirname final)
-          (Printf.sprintf ".%s.ledger-123-0" (Filename.basename final))
+          (Printf.sprintf ".%s.object-123-0" (Filename.basename final))
       in
       let descriptor =
         Unix.openfile temporary

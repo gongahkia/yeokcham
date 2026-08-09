@@ -3,6 +3,7 @@ module Envelope = Yeokcham_v2_envelope
 module Ledger = Yeokcham_v2_ledger
 module Ledger_store = Yeokcham_v2_ledger_store
 module Model = Yeokcham_v2_model
+module Object = Yeokcham_v2_object
 module Store = Yeokcham_store
 module Transaction_store = Yeokcham_v2_transaction_store
 module Verification = Yeokcham_v2_verification
@@ -94,7 +95,7 @@ let envelope ~nonce_offset value =
     |> Result.get_ok
   in
   Envelope.seal ~key:encryption_key ~nonce ~mandatory_features:0L
-    (Ledger.encode value)
+    (Object.ledger_event value |> Object.encode)
   |> Result.get_ok
 
 let rec remove_tree path =
@@ -220,11 +221,22 @@ let concurrent_interruption_and_reopen_state_machine =
                       in
                       fork_result (fun () ->
                           match open_ledger root with
-                          | Error _ -> false
-                          | Ok child_ledger ->
-                              Result.is_ok
-                                (Ledger_store.publish child_ledger
-                                   ~envelope:candidate)))
+                          | Error error ->
+                              prerr_endline
+                                ("V2 concurrent ledger open: "
+                                ^ Ledger_store.error_to_string error);
+                              false
+                          | Ok child_ledger -> (
+                              match
+                                Ledger_store.publish child_ledger
+                                  ~envelope:candidate
+                              with
+                              | Ok _ -> true
+                              | Error error ->
+                                  prerr_endline
+                                    ("V2 concurrent ledger publish: "
+                                    ^ Ledger_store.error_to_string error);
+                                  false)))
                     fork_events
                 in
                 let prepared_event =
