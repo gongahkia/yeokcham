@@ -1427,3 +1427,34 @@ typed verification error and no repair. A successful report contains only
 counts of verified objects/events/ref scopes, causal heads, explicit
 divergences, prepared transactions, and committed/resumable transactions.
 It neither chooses heads nor turns a cryptographic result into authorization.
+
+## 24. V2 local bootstrap authority
+
+ADR-052 adds a narrow local precondition for a bootstrap-aware V2 scratch
+service. It is separate from the V2 object graph, causal ledger, transaction
+journal, user identity, and authorization policy:
+
+```text
+Capability = (envelope-key, address-key, signing-private-key)
+Bootstrap_unsigned = (version=1, repository-id, device-id, signer-key-id,
+                      signer-public-key, envelope-key-commitment,
+                      address-key-commitment, features)
+Bootstrap = (Bootstrap_unsigned, Ed25519-signature)
+```
+
+The three capability byte strings are pairwise distinct. The signer-key ID
+recomputes from the Ed25519 public key. Each key commitment is a SHA-256 digest
+of a role-specific domain separator and its 32-byte secret key. The signature
+covers the canonical unsigned bytes under the distinct local-bootstrap domain.
+
+`matches(Capability, Bootstrap)` succeeds only when the derived public signing
+key, signer-key ID, encryption-key commitment, and address-key commitment all
+match. It supplies no user, membership, trust, ownership, ref-selection, or
+policy result. A missing or mismatched capability is an explicit refusal.
+
+`initialize_bootstrap(R, B)` may create exactly one canonical
+`local-bootstrap-v1.cbor` record in a V2 layout-version-3 root. An exact retry
+returns `Already_initialized`; different existing bytes reject without
+overwrite. Strictly named same-directory staging files are non-authoritative
+crash remnants. Older V2 root layouts fail closed in this development phase;
+there is no migration transition.

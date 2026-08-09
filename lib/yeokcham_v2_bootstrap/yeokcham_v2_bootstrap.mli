@@ -1,9 +1,10 @@
 (** V2 local repository bootstrap and role-separated capabilities.
 
-    This is the deliberately narrow V2-01.5 authority boundary.  It binds one
+    This is the deliberately narrow V2-01.5 authority boundary. It binds one
     repository and local device to one ledger signing public key, but does not
     claim user identity, membership, trust policy, or a mutable ref authority.
-    Private material is supplied by an external provider and is never encoded. *)
+    Private material is supplied by an external provider and is never encoded.
+*)
 
 module Model = Yeokcham_v2_model
 module Address = Yeokcham_v2_address
@@ -12,7 +13,6 @@ module Ledger = Yeokcham_v2_ledger
 
 type capability
 type t
-
 type role = Envelope_encryption | Opaque_address | Ledger_signing
 
 type error =
@@ -51,7 +51,9 @@ val address_key : capability -> Address.key
 val capability_signer_key_id : capability -> Ledger.Signer_key_id.t
 val capability_signer_public_key : capability -> string
 val sign_ledger : capability -> Ledger.unsigned -> string
-val public_key_registry : capability -> (Ledger.public_key_registry, error) result
+
+val public_key_registry :
+  capability -> (Ledger.public_key_registry, error) result
 
 val make :
   repository_id:Model.Repository_id.t ->

@@ -1,13 +1,12 @@
 (** Durable local-bootstrap adapter.
 
     The only repository bytes owned here are a signed public bootstrap record
-    and private same-directory staging files.  Secret capabilities are injected
+    and private same-directory staging files. Secret capabilities are injected
     by the caller and never written beneath [root]. *)
 
 module Bootstrap = Yeokcham_v2_bootstrap
 
 type repository
-
 type initialization = Initialized | Already_initialized
 
 type error =
@@ -26,14 +25,12 @@ val filename : string
 val bootstrap_path : root:string -> string
 
 val initialize : root:string -> Bootstrap.t -> (initialization, error) result
-(** Create-only publication.  A concurrent or repeated identical bootstrap is
+(** Create-only publication. A concurrent or repeated identical bootstrap is
     [Already_initialized]; different or malformed prior bytes are never
     overwritten. *)
 
 val open_repository :
-  root:string ->
-  capability:Bootstrap.capability ->
-  (repository, error) result
+  root:string -> capability:Bootstrap.capability -> (repository, error) result
 
 val bootstrap : repository -> Bootstrap.t
 val capability : repository -> Bootstrap.capability

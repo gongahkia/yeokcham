@@ -880,7 +880,14 @@ let directory_is_empty path =
 
 let v2_layout metadata =
   let expected =
-    [ bootstrap_name; format_name; journal_name; locks_name; objects_name; refs_name ]
+    [
+      bootstrap_name;
+      format_name;
+      journal_name;
+      locks_name;
+      objects_name;
+      refs_name;
+    ]
     |> List.sort String.compare
   in
   let* () = has_exact_names metadata expected in

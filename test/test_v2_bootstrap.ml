@@ -37,20 +37,25 @@ let device byte =
   |> require_ok Model.identity_error_to_string
 
 let bootstrap ?(repository_byte = 'r') ?(device_byte = 'd') capability =
-  Bootstrap.make ~repository_id:(repository repository_byte)
+  Bootstrap.make
+    ~repository_id:(repository repository_byte)
     ~device_id:(device device_byte) ~capability ~mandatory_features:0L
   |> require_ok Bootstrap.error_to_string
 
 let read_golden name =
-  Golden.read_lower_hex_file (Filename.concat "golden" name) |> require_ok Fun.id
+  Golden.read_lower_hex_file (Filename.concat "golden" name)
+  |> require_ok Fun.id
 
 let canonical_fixture_round_trips () =
   let value = bootstrap (capability ()) in
   let encoded = Bootstrap.encode value in
   Alcotest.(check string)
     "canonical bootstrap bytes"
-    (read_golden "v2-local-bootstrap-v1.cbor.hex") encoded;
-  let decoded = Bootstrap.decode encoded |> require_ok Bootstrap.error_to_string in
+    (read_golden "v2-local-bootstrap-v1.cbor.hex")
+    encoded;
+  let decoded =
+    Bootstrap.decode encoded |> require_ok Bootstrap.error_to_string
+  in
   Alcotest.(check string)
     "repository ID survives canonical decode"
     (Model.Repository_id.to_bytes (repository 'r'))
@@ -64,10 +69,12 @@ let canonical_fixture_round_trips () =
 
 let reused_role_key_material_rejects () =
   let shared =
-    String.make 32 'k' |> Envelope.key_of_bytes |> require_ok Envelope.error_to_string
+    String.make 32 'k' |> Envelope.key_of_bytes
+    |> require_ok Envelope.error_to_string
   in
   let address =
-    String.make 32 'k' |> Address.key_of_bytes |> require_ok Address.error_to_string
+    String.make 32 'k' |> Address.key_of_bytes
+    |> require_ok Address.error_to_string
   in
   Alcotest.(check bool)
     "reused envelope/address bytes reject" true
@@ -75,22 +82,25 @@ let reused_role_key_material_rejects () =
        (Bootstrap.make_capability ~encryption_key:shared ~address_key:address
           ~signing_key:(private_key 's')));
   let encryption =
-    String.make 32 's' |> Envelope.key_of_bytes |> require_ok Envelope.error_to_string
+    String.make 32 's' |> Envelope.key_of_bytes
+    |> require_ok Envelope.error_to_string
   in
   let address =
-    String.make 32 'a' |> Address.key_of_bytes |> require_ok Address.error_to_string
+    String.make 32 'a' |> Address.key_of_bytes
+    |> require_ok Address.error_to_string
   in
   Alcotest.(check bool)
     "reused envelope/signing bytes reject" true
     (Result.is_error
-       (Bootstrap.make_capability ~encryption_key:encryption ~address_key:address
-          ~signing_key:(private_key 's')))
+       (Bootstrap.make_capability ~encryption_key:encryption
+          ~address_key:address ~signing_key:(private_key 's')))
 
 let tampered_or_mismatched_capabilities_reject () =
   let original = capability () in
   let value = bootstrap original in
   let encoded = Bytes.of_string (Bootstrap.encode value) in
-  Bytes.set encoded (Bytes.length encoded - 1)
+  Bytes.set encoded
+    (Bytes.length encoded - 1)
     (Char.chr (Char.code (Bytes.get encoded (Bytes.length encoded - 1)) lxor 1));
   Alcotest.(check bool)
     "signature tampering rejects" true
@@ -138,9 +148,11 @@ let create_only_persistence_and_opening () =
         "unbootstrapped V2 root rejects opening" true
         (Result.is_error
            (Bootstrap_store.open_repository ~root ~capability:authority));
-      Alcotest.(check bool) "first bootstrap publication initializes" true
+      Alcotest.(check bool)
+        "first bootstrap publication initializes" true
         (Bootstrap_store.initialize ~root value = Ok Bootstrap_store.Initialized);
-      Alcotest.(check bool) "identical bootstrap retry is idempotent" true
+      Alcotest.(check bool)
+        "identical bootstrap retry is idempotent" true
         (Bootstrap_store.initialize ~root value
         = Ok Bootstrap_store.Already_initialized);
       let opened =
@@ -156,6 +168,45 @@ let create_only_persistence_and_opening () =
         "different bootstrap cannot overwrite canonical bytes" true
         (Result.is_error (Bootstrap_store.initialize ~root incompatible)))
 
+let stale_staging_is_non_authoritative_and_unknown_entries_reject () =
+  with_root (fun root ->
+      ignore (Store.init ~root |> require_ok Store.error_to_string);
+      let authority = capability () in
+      let value = bootstrap authority in
+      let directory = Filename.dirname (Bootstrap_store.bootstrap_path ~root) in
+      let stale =
+        Filename.concat directory ".local-bootstrap-v1.cbor.bootstrap-42-0"
+      in
+      let descriptor =
+        Unix.openfile stale [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_EXCL ] 0o600
+      in
+      Unix.close descriptor;
+      Alcotest.(check bool)
+        "stale strictly named staging file does not block publication" true
+        (Result.is_ok (Bootstrap_store.initialize ~root value));
+      Alcotest.(check bool)
+        "stale staging file does not become authority" true
+        (Result.is_ok
+           (Bootstrap_store.open_repository ~root ~capability:authority)));
+  with_root (fun root ->
+      ignore (Store.init ~root |> require_ok Store.error_to_string);
+      let authority = capability () in
+      let value = bootstrap authority in
+      let directory = Filename.dirname (Bootstrap_store.bootstrap_path ~root) in
+      let unexpected = Filename.concat directory "unexpected" in
+      let descriptor =
+        Unix.openfile unexpected
+          [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_EXCL ]
+          0o600
+      in
+      Unix.close descriptor;
+      Alcotest.(check bool)
+        "unknown bootstrap entry rejects before publication" true
+        (Result.is_error (Bootstrap_store.initialize ~root value));
+      Alcotest.(check bool)
+        "unknown entry leaves canonical bootstrap absent" false
+        (Sys.file_exists (Bootstrap_store.bootstrap_path ~root)))
+
 let () =
   Alcotest.run "V2 local bootstrap"
     [
@@ -165,9 +216,11 @@ let () =
             canonical_fixture_round_trips;
           Alcotest.test_case "role separation rejects reused bytes" `Quick
             reused_role_key_material_rejects;
-          Alcotest.test_case "tampering and mismatched capabilities reject" `Quick
-            tampered_or_mismatched_capabilities_reject;
+          Alcotest.test_case "tampering and mismatched capabilities reject"
+            `Quick tampered_or_mismatched_capabilities_reject;
           Alcotest.test_case "create-only persistence and opening" `Quick
             create_only_persistence_and_opening;
+          Alcotest.test_case "staging and unknown-entry persistence failures"
+            `Quick stale_staging_is_non_authoritative_and_unknown_entries_reject;
         ] );
     ]

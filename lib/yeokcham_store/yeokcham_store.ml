@@ -288,8 +288,8 @@ let repository_format =
 let root_format =
   "yeokcham-repository-root 2\n" ^ "root-layout-version 3\n"
   ^ "required-directory bootstrap\n" ^ "required-directory objects\n"
-  ^ "required-directory refs\n"
-  ^ "required-directory locks\n" ^ "required-directory journal\n"
+  ^ "required-directory refs\n" ^ "required-directory locks\n"
+  ^ "required-directory journal\n"
 
 let max_object_bytes = 128 * 1024 * 1024
 let root repository = repository.root

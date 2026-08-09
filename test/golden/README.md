@@ -71,4 +71,9 @@ and mismatched-prepare fixtures preserve fail-closed decoding and binding
 boundaries. The valid commit is also used as a stray-commit input by placing it
 without its matching prepare in a temporary journal test.
 
+`v2-local-bootstrap-v1.cbor.hex` is ADR-052's canonical signed public local
+bootstrap record. It binds one repository ID, device ID, Ed25519 ledger signer,
+and commitments for distinct envelope and opaque-address keys; it contains no
+private key, user identity, mutable scratch head, or trust policy.
+
 Changing any fixture bytes requires a format decision and retained compatibility evidence; adding a new schema requires a new named fixture.

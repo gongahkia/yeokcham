@@ -42,7 +42,8 @@ let write_file path bytes =
   Out_channel.with_open_bin path (fun channel ->
       Out_channel.output_string channel bytes)
 
-let required_directories = [ "bootstrap"; "objects"; "refs"; "locks"; "journal" ]
+let required_directories =
+  [ "bootstrap"; "objects"; "refs"; "locks"; "journal" ]
 
 let write_layout root ~mask ~format =
   let metadata = metadata_path root in
@@ -77,10 +78,30 @@ let malformed_format_is_never_accepted =
     QCheck2.Gen.(string_size (0 -- 1024))
     (fun suffix ->
       with_empty_root (fun root ->
-        write_layout root ~mask:31 ~format:(Store.root_format ^ suffix ^ "x");
+          write_layout root ~mask:31 ~format:(Store.root_format ^ suffix ^ "x");
           match Store.open_repository ~root with
           | Error _ -> true
           | Ok _ -> false))
+
+let old_layout_fails_closed_without_migration () =
+  let old_format =
+    "yeokcham-repository-root 2\n" ^ "root-layout-version 2\n"
+    ^ "required-directory objects\n" ^ "required-directory refs\n"
+    ^ "required-directory locks\n" ^ "required-directory journal\n"
+  in
+  with_empty_root (fun root ->
+      let metadata = metadata_path root in
+      Unix.mkdir metadata 0o700;
+      List.iter
+        (fun name -> Unix.mkdir (Filename.concat metadata name) 0o700)
+        [ "objects"; "refs"; "locks"; "journal" ];
+      write_file (Filename.concat metadata "format") old_format;
+      Alcotest.(check bool)
+        "layout version 2 does not acquire an implicit bootstrap directory" true
+        (Result.is_error (Store.open_repository ~root));
+      Alcotest.(check bool)
+        "layout version 2 remains unchanged after refusal" false
+        (Sys.file_exists (Filename.concat metadata "bootstrap")))
 
 let () =
   Alcotest.run "v2 repository root properties"
@@ -93,5 +114,10 @@ let () =
           QCheck_alcotest.to_alcotest ~speed_level:`Quick
             ~rand:(state_for "malformed-format")
             malformed_format_is_never_accepted;
+        ] );
+      ( "unit",
+        [
+          Alcotest.test_case "old root layout fails closed" `Quick
+            old_layout_fails_closed_without_migration;
         ] );
     ]

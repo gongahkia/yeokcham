@@ -1,11 +1,7 @@
 module Bootstrap = Yeokcham_v2_bootstrap
 module Cutover = Yeokcham_cutover
 
-type repository = {
-  bootstrap : Bootstrap.t;
-  capability : Bootstrap.capability;
-}
-
+type repository = { bootstrap : Bootstrap.t; capability : Bootstrap.capability }
 type initialization = Initialized | Already_initialized
 
 type error =
@@ -63,7 +59,8 @@ let check_v2_root root =
 let lstat path =
   try Ok (Some (Unix.lstat path)) with
   | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok None
-  | Unix.Unix_error (error, _, _) -> Error (io_error ~operation:"lstat" ~path error)
+  | Unix.Unix_error (error, _, _) ->
+      Error (io_error ~operation:"lstat" ~path error)
 
 let is_decimal value =
   String.length value > 0
@@ -73,8 +70,7 @@ let is_temporary_filename name =
   let prefix = "." ^ filename ^ ".bootstrap-" in
   let prefix_length = String.length prefix in
   if
-    String.length name <= prefix_length
-    || not (String.starts_with ~prefix name)
+    String.length name <= prefix_length || not (String.starts_with ~prefix name)
   then false
   else
     match
@@ -92,12 +88,14 @@ let bootstrap_directory_entries ~root =
     | Ok None -> Error (Invalid_bootstrap_path directory)
     | Error error -> Error error
   in
-  if stat.Unix.st_kind <> Unix.S_DIR then Error (Invalid_bootstrap_path directory)
+  if stat.Unix.st_kind <> Unix.S_DIR then
+    Error (Invalid_bootstrap_path directory)
   else
     let* names =
       try Ok (Sys.readdir directory |> Array.to_list |> List.sort String.compare)
       with Sys_error message ->
-        Error (Io_error { operation = "read directory"; path = directory; message })
+        Error
+          (Io_error { operation = "read directory"; path = directory; message })
     in
     let rec validate = function
       | [] -> Ok ()
@@ -112,7 +110,8 @@ let bootstrap_directory_entries ~root =
               | Ok None -> Error (Invalid_bootstrap_path path)
               | Error error -> Error error
             in
-            if stat.Unix.st_kind <> Unix.S_REG then Error (Invalid_bootstrap_path path)
+            if stat.Unix.st_kind <> Unix.S_REG then
+              Error (Invalid_bootstrap_path path)
             else validate rest
     in
     let* () = validate names in
@@ -164,7 +163,8 @@ let read_bootstrap ~root =
   let* () = bootstrap_directory_entries ~root |> Result.map (fun _ -> ()) in
   let path = bootstrap_path ~root in
   let* bytes = read_regular_file path in
-  Bootstrap.decode bytes |> Result.map_error (fun error -> Bootstrap_error error)
+  Bootstrap.decode bytes
+  |> Result.map_error (fun error -> Bootstrap_error error)
 
 let fsync_directory path =
   try
@@ -182,7 +182,9 @@ let write_all descriptor path bytes =
     if offset = Bytes.length bytes then Ok ()
     else
       try
-        let count = Unix.write descriptor bytes offset (Bytes.length bytes - offset) in
+        let count =
+          Unix.write descriptor bytes offset (Bytes.length bytes - offset)
+        in
         if count = 0 then Error (Invalid_bootstrap_path path)
         else write (offset + count)
       with Unix.Unix_error (error, _, _) ->
@@ -196,7 +198,8 @@ let temporary_path directory attempt =
 
 let create_temporary directory bytes =
   let rec create attempt =
-    if attempt = max_temporary_attempts then Error (Temporary_name_exhausted directory)
+    if attempt = max_temporary_attempts then
+      Error (Temporary_name_exhausted directory)
     else
       let path = temporary_path directory attempt in
       try
@@ -214,11 +217,11 @@ let create_temporary directory bytes =
               with Unix.Unix_error (error, _, _) ->
                 Error (io_error ~operation:"fsync" ~path error))
         in
-        (match result with
+        match result with
         | Ok () -> Ok path
         | Error error ->
             (try Unix.unlink path with Unix.Unix_error _ -> ());
-            Error error)
+            Error error
       with
       | Unix.Unix_error (Unix.EEXIST, _, _) -> create (attempt + 1)
       | Unix.Unix_error (error, _, _) ->
@@ -230,9 +233,10 @@ let cleanup_temporary ~directory path =
   try
     Unix.unlink path;
     fsync_directory directory
-  with Unix.Unix_error (Unix.ENOENT, _, _) -> Ok ()
-     | Unix.Unix_error (error, _, _) ->
-         Error (io_error ~operation:"unlink" ~path error)
+  with
+  | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok ()
+  | Unix.Unix_error (error, _, _) ->
+      Error (io_error ~operation:"unlink" ~path error)
 
 let initialize ~root bootstrap =
   let* () = check_v2_root root in
@@ -245,25 +249,30 @@ let initialize ~root bootstrap =
       let* actual = read_regular_file final in
       if String.equal actual expected then Ok Already_initialized
       else Error (Bootstrap_already_initialized final)
-  | Ok None ->
+  | Ok None -> (
       let* temporary = create_temporary directory (Bytes.of_string expected) in
       let publication =
         try
           Unix.link temporary final;
-          fsync_directory directory
-        with Unix.Unix_error (Unix.EEXIST, _, _) -> Ok ()
-           | Unix.Unix_error (error, _, _) ->
-               Error (io_error ~operation:"publish" ~path:final error)
+          fsync_directory directory |> Result.map (fun () -> `Published)
+        with
+        | Unix.Unix_error (Unix.EEXIST, _, _) -> Ok `Already_present
+        | Unix.Unix_error (error, _, _) ->
+            Error (io_error ~operation:"publish" ~path:final error)
       in
       let cleanup = cleanup_temporary ~directory temporary in
-      (match publication with
+      match publication with
       | Error error ->
           ignore cleanup;
           Error error
-      | Ok () ->
+      | Ok publication ->
           let* () = cleanup in
           let* actual = read_regular_file final in
-          if String.equal actual expected then Ok Initialized
+          if String.equal actual expected then
+            Ok
+              (match publication with
+              | `Published -> Initialized
+              | `Already_present -> Already_initialized)
           else Error (Bootstrap_already_initialized final))
 
 let open_repository ~root ~capability =

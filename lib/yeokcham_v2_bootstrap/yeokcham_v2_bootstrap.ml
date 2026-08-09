@@ -67,8 +67,8 @@ let error_to_string = function
       Printf.sprintf "%s and %s keys must use distinct raw key material"
         (role_to_string first) (role_to_string second)
   | Invalid_public_key_length length ->
-      Printf.sprintf "bootstrap Ed25519 public key must contain 32 bytes, got %d"
-        length
+      Printf.sprintf
+        "bootstrap Ed25519 public key must contain 32 bytes, got %d" length
   | Invalid_signature_length length ->
       Printf.sprintf "bootstrap signature must contain 64 bytes, got %d" length
   | Invalid_key_commitment_length length ->
@@ -77,7 +77,8 @@ let error_to_string = function
   | Invalid_mandatory_features features ->
       Printf.sprintf "invalid bootstrap mandatory feature bits: %Ld" features
   | Unsupported_mandatory_features features ->
-      Printf.sprintf "unsupported bootstrap mandatory feature bits: %Ld" features
+      Printf.sprintf "unsupported bootstrap mandatory feature bits: %Ld"
+        features
   | Unsupported_schema_version version ->
       Printf.sprintf "unsupported local bootstrap schema version: %Ld" version
   | Invalid_payload detail -> "invalid local bootstrap: " ^ detail
@@ -89,7 +90,8 @@ let error_to_string = function
   | Capability_signer_mismatch ->
       "injected signing capability does not match the local bootstrap signer"
   | Capability_encryption_key_mismatch ->
-      "injected envelope-encryption capability does not match the local bootstrap"
+      "injected envelope-encryption capability does not match the local \
+       bootstrap"
   | Capability_address_key_mismatch ->
       "injected opaque-address capability does not match the local bootstrap"
   | Ledger_error error -> Ledger.error_to_string error
@@ -102,7 +104,8 @@ let array values =
 let fields name expected = function
   | Encoding.Array values when List.length values = expected -> Ok values
   | Encoding.Array _ ->
-      Error (Invalid_payload (Printf.sprintf "%s has the wrong field count" name))
+      Error
+        (Invalid_payload (Printf.sprintf "%s has the wrong field count" name))
   | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _ | Encoding.Map _
   | Encoding.Bool _ | Encoding.Null ->
       Error (Invalid_payload (name ^ " must be an array"))
@@ -120,7 +123,8 @@ let bytes name = function
       Error (Invalid_payload (name ^ " must be bytes"))
 
 let check_mandatory_features features =
-  if Int64.compare features 0L < 0 then Error (Invalid_mandatory_features features)
+  if Int64.compare features 0L < 0 then
+    Error (Invalid_mandatory_features features)
   else
     let unsupported =
       Int64.logand features (Int64.lognot supported_mandatory_features)
@@ -204,8 +208,7 @@ let unsigned_bytes bootstrap =
   unsigned_value bootstrap |> Result.map Encoding.encode
 
 let signing_bytes bootstrap =
-  unsigned_bytes bootstrap
-  |> Result.map (fun bytes -> bootstrap_domain ^ bytes)
+  unsigned_bytes bootstrap |> Result.map (fun bytes -> bootstrap_domain ^ bytes)
 
 let encode bootstrap =
   array
@@ -221,7 +224,9 @@ let encode bootstrap =
       Encoding.bytes bootstrap.signature;
     ]
   |> Result.map Encoding.encode
-  |> function Ok bytes -> bytes | Error _ -> assert false
+  |> function
+  | Ok bytes -> bytes
+  | Error _ -> assert false
 
 let check_public_key public_key =
   if String.length public_key <> public_key_size then
@@ -230,7 +235,9 @@ let check_public_key public_key =
     match Mirage_crypto_ec.Ed25519.pub_of_octets public_key with
     | Ok _ -> Ok ()
     | Error error ->
-        Error (Cryptographic_failure (Format.asprintf "%a" Mirage_crypto_ec.pp_error error))
+        Error
+          (Cryptographic_failure
+             (Format.asprintf "%a" Mirage_crypto_ec.pp_error error))
 
 let check_commitment commitment =
   if String.length commitment = key_commitment_size then Ok ()
@@ -240,7 +247,9 @@ let verify_signature bootstrap =
   let* signing_bytes = signing_bytes bootstrap in
   match Mirage_crypto_ec.Ed25519.pub_of_octets bootstrap.signer_public_key with
   | Error error ->
-      Error (Cryptographic_failure (Format.asprintf "%a" Mirage_crypto_ec.pp_error error))
+      Error
+        (Cryptographic_failure
+           (Format.asprintf "%a" Mirage_crypto_ec.pp_error error))
   | Ok public_key ->
       if
         Mirage_crypto_ec.Ed25519.verify ~key:public_key ~msg:signing_bytes
@@ -294,7 +303,9 @@ let decode input =
         if not (Int64.equal version current_schema_version) then
           Error (Unsupported_schema_version version)
         else
-          let* repository_bytes = bytes "bootstrap repository ID" repository_value in
+          let* repository_bytes =
+            bytes "bootstrap repository ID" repository_value
+          in
           let* repository_id =
             Model.Repository_id.of_bytes repository_bytes
             |> Result.map_error (fun error ->
@@ -314,17 +325,22 @@ let decode input =
             |> Result.map_error (fun error ->
                 Invalid_payload (Model.identity_error_to_string error))
           in
-          let* signer_public_key = bytes "bootstrap signer public key" public_key_value in
+          let* signer_public_key =
+            bytes "bootstrap signer public key" public_key_value
+          in
           let* () = check_public_key signer_public_key in
           let* expected_signer_key_id =
             Ledger.signer_key_id_of_public_key signer_public_key
             |> Result.map_error (fun error -> Ledger_error error)
           in
-          if not (Ledger.Signer_key_id.equal signer_key_id expected_signer_key_id)
+          if
+            not
+              (Ledger.Signer_key_id.equal signer_key_id expected_signer_key_id)
           then Error Invalid_signer_key_id
           else
             let* encryption_key_commitment =
-              bytes "bootstrap envelope-key commitment" encryption_commitment_value
+              bytes "bootstrap envelope-key commitment"
+                encryption_commitment_value
             in
             let* () = check_commitment encryption_key_commitment in
             let* address_key_commitment =

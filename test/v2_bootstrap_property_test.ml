@@ -51,7 +51,9 @@ let round_trip =
               match Bootstrap.decode (Bootstrap.encode bootstrap) with
               | Error _ -> false
               | Ok decoded ->
-                  String.equal (Bootstrap.encode bootstrap) (Bootstrap.encode decoded)))
+                  String.equal
+                    (Bootstrap.encode bootstrap)
+                    (Bootstrap.encode decoded)))
       | Error _, _ | _, Error _ -> false)
 
 let () =
@@ -60,6 +62,7 @@ let () =
       ( "property",
         [
           QCheck_alcotest.to_alcotest ~speed_level:`Quick
-            ~rand:(state_for "bootstrap-round-trip") round_trip;
+            ~rand:(state_for "bootstrap-round-trip")
+            round_trip;
         ] );
     ]
