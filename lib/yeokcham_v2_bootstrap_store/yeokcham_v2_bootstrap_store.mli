@@ -29,6 +29,10 @@ val initialize : root:string -> Bootstrap.t -> (initialization, error) result
     [Already_initialized]; different or malformed prior bytes are never
     overwritten. *)
 
+val read_bootstrap : root:string -> (Bootstrap.t, error) result
+(** Reads and validates only the public bootstrap record. It never consults a
+    key provider and therefore grants no repository access. *)
+
 val open_repository :
   root:string -> capability:Bootstrap.capability -> (repository, error) result
 

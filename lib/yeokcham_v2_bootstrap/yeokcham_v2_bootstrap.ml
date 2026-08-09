@@ -17,9 +17,37 @@ type capability = {
   cap_address_key_commitment : string;
 }
 
+module Key_handle = struct
+  type t = string
+
+  let byte_length = 32
+  let of_bytes bytes =
+    let actual = String.length bytes in
+    if actual = byte_length then Ok bytes
+    else
+      Error
+        (Model.Invalid_byte_length { expected = byte_length; actual })
+
+  let to_bytes handle = handle
+
+  let to_hex handle =
+    let digits = "0123456789abcdef" in
+    let encoded = Bytes.create (String.length handle * 2) in
+    String.iteri
+      (fun index character ->
+        let value = Char.code character in
+        Bytes.set encoded (index * 2) digits.[value lsr 4];
+        Bytes.set encoded ((index * 2) + 1) digits.[value land 0x0f])
+      handle;
+    Bytes.unsafe_to_string encoded
+
+  let equal = String.equal
+end
+
 type t = {
   repository_id : Model.Repository_id.t;
   device_id : Model.Device_id.t;
+  key_handle : Key_handle.t;
   signer_key_id : Ledger.Signer_key_id.t;
   signer_public_key : string;
   encryption_key_commitment : string;
@@ -33,6 +61,7 @@ type error =
   | Invalid_public_key_length of int
   | Invalid_signature_length of int
   | Invalid_key_commitment_length of int
+  | Invalid_key_handle_length of int
   | Invalid_mandatory_features of int64
   | Unsupported_mandatory_features of int64
   | Unsupported_schema_version of int64
@@ -46,13 +75,13 @@ type error =
   | Capability_address_key_mismatch
   | Ledger_error of Ledger.error
 
-let current_schema_version = 1L
+let current_schema_version = 2L
 let supported_mandatory_features = 0L
 let max_bootstrap_bytes = 1024
 let public_key_size = 32
 let signature_size = 64
 let key_commitment_size = 32
-let bootstrap_domain = "yeokcham:v2:local-bootstrap:1\000"
+let bootstrap_domain = "yeokcham:v2:local-bootstrap:2\000"
 let envelope_key_domain = "yeokcham:v2:bootstrap-envelope-key:1\000"
 let address_key_domain = "yeokcham:v2:bootstrap-address-key:1\000"
 let ( let* ) = Result.bind
@@ -73,6 +102,9 @@ let error_to_string = function
       Printf.sprintf "bootstrap signature must contain 64 bytes, got %d" length
   | Invalid_key_commitment_length length ->
       Printf.sprintf "bootstrap key commitment must contain 32 bytes, got %d"
+        length
+  | Invalid_key_handle_length length ->
+      Printf.sprintf "bootstrap local key handle must contain 32 bytes, got %d"
         length
   | Invalid_mandatory_features features ->
       Printf.sprintf "invalid bootstrap mandatory feature bits: %Ld" features
@@ -177,6 +209,28 @@ let make_capability ~encryption_key ~address_key ~signing_key =
         cap_address_key_commitment = address_key_commitment address_key;
       }
 
+let secret_material capability =
+  ( Envelope.key_to_bytes capability.cap_encryption_key,
+    Address.key_to_bytes capability.cap_address_key,
+    Mirage_crypto_ec.Ed25519.priv_to_octets capability.cap_signing_key )
+
+let capability_of_secret_material ~encryption_key ~address_key ~signing_key =
+  let* encryption_key =
+    Envelope.key_of_bytes encryption_key
+    |> Result.map_error (fun error -> Invalid_payload (Envelope.error_to_string error))
+  in
+  let* address_key =
+    Address.key_of_bytes address_key
+    |> Result.map_error (fun error -> Invalid_payload (Address.error_to_string error))
+  in
+  let* signing_key =
+    Mirage_crypto_ec.Ed25519.priv_of_octets signing_key
+    |> Result.map_error (fun error ->
+           Cryptographic_failure
+             (Format.asprintf "%a" Mirage_crypto_ec.pp_error error))
+  in
+  make_capability ~encryption_key ~address_key ~signing_key
+
 let envelope_key capability = capability.cap_encryption_key
 let address_key capability = capability.cap_address_key
 let capability_signer_key_id capability = capability.cap_signer_key_id
@@ -197,6 +251,7 @@ let unsigned_value bootstrap =
       Encoding.integer current_schema_version;
       Encoding.bytes (Model.Repository_id.to_bytes bootstrap.repository_id);
       Encoding.bytes (Model.Device_id.to_bytes bootstrap.device_id);
+      Encoding.bytes (Key_handle.to_bytes bootstrap.key_handle);
       Encoding.bytes (Ledger.Signer_key_id.to_bytes bootstrap.signer_key_id);
       Encoding.bytes bootstrap.signer_public_key;
       Encoding.bytes bootstrap.encryption_key_commitment;
@@ -216,6 +271,7 @@ let encode bootstrap =
       Encoding.integer current_schema_version;
       Encoding.bytes (Model.Repository_id.to_bytes bootstrap.repository_id);
       Encoding.bytes (Model.Device_id.to_bytes bootstrap.device_id);
+      Encoding.bytes (Key_handle.to_bytes bootstrap.key_handle);
       Encoding.bytes (Ledger.Signer_key_id.to_bytes bootstrap.signer_key_id);
       Encoding.bytes bootstrap.signer_public_key;
       Encoding.bytes bootstrap.encryption_key_commitment;
@@ -257,12 +313,13 @@ let verify_signature bootstrap =
       then Ok ()
       else Error Signature_verification_failed
 
-let make ~repository_id ~device_id ~capability ~mandatory_features =
+let make ~repository_id ~device_id ~key_handle ~capability ~mandatory_features =
   let* () = check_mandatory_features mandatory_features in
   let unsigned =
     {
       repository_id;
       device_id;
+      key_handle;
       signer_key_id = capability.cap_signer_key_id;
       signer_public_key = capability.cap_signer_public_key;
       encryption_key_commitment = capability.cap_encryption_key_commitment;
@@ -286,12 +343,13 @@ let decode input =
       |> Result.map_error (fun error ->
           Invalid_payload (Encoding.decode_error_to_string error))
     in
-    let* values = fields "local bootstrap" 9 value in
+    let* values = fields "local bootstrap" 10 value in
     match values with
     | [
      version;
      repository_value;
      device_value;
+     key_handle_value;
      signer_key_id_value;
      public_key_value;
      encryption_commitment_value;
@@ -316,6 +374,12 @@ let decode input =
             Model.Device_id.of_bytes device_bytes
             |> Result.map_error (fun error ->
                 Invalid_payload (Model.identity_error_to_string error))
+          in
+          let* key_handle_bytes = bytes "bootstrap local key handle" key_handle_value in
+          let* key_handle =
+            Key_handle.of_bytes key_handle_bytes
+            |> Result.map_error (fun _ ->
+                   Invalid_key_handle_length (String.length key_handle_bytes))
           in
           let* signer_key_id_bytes =
             bytes "bootstrap signer-key ID" signer_key_id_value
@@ -359,6 +423,7 @@ let decode input =
                 {
                   repository_id;
                   device_id;
+                  key_handle;
                   signer_key_id;
                   signer_public_key;
                   encryption_key_commitment;
@@ -376,6 +441,7 @@ let decode input =
 
 let repository_id bootstrap = bootstrap.repository_id
 let device_id bootstrap = bootstrap.device_id
+let key_handle bootstrap = bootstrap.key_handle
 let signer_key_id bootstrap = bootstrap.signer_key_id
 let signer_public_key bootstrap = bootstrap.signer_public_key
 let mandatory_features bootstrap = bootstrap.mandatory_features
