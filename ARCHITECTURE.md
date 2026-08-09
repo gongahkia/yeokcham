@@ -270,6 +270,13 @@ rebuildable cache data and cannot be required to recover history.
 
 SQLite may be used for rebuildable indexes and queries. Canonical objects must remain independently readable.
 
+The initial V2 inspection adapter intentionally persists no query index. It
+derives scratch status from authenticated causal ledger objects, storage counts
+from strict object enumeration and decoding, restore activity from the
+append-only restore journal, and verification from the canonical objects. A
+future timeline or path index remains a disposable cache and cannot be needed
+for inspection, recovery, or verification.
+
 ## 5. Snapshot engine
 
 The snapshot engine:

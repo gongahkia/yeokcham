@@ -151,6 +151,10 @@ separate atomic retention-head ref.  Pinning therefore never replaces a
 checkpoint.  The canonical timeline is the bounded parent chain from the
 verified scratch-head; any timeline index is rebuildable cache data only.
 
+The initial V2 inspection projection persists no index. Its status, object
+counts, journal counts, and verification report are read-only functions of the
+authenticated bootstrap, canonical encrypted objects, and restore journal.
+
 ### Scratch event
 
 A scratch event describes an observed transition.
