@@ -183,6 +183,11 @@
   yeokcham_store))
 
 (test
+ (name test_local_daemon)
+ (modules test_local_daemon)
+ (libraries alcotest unix yeokcham_local_daemon yeokcham_store))
+
+(test
  (name test_v2_envelope)
  (modules test_v2_envelope)
  (libraries
@@ -1193,6 +1198,7 @@
   (:test_v2_envelope test_v2_envelope.exe)
   (:test_v2_address test_v2_address.exe)
   (:test_v2_local_command test_v2_local_command.exe)
+  (:test_local_daemon test_local_daemon.exe)
   (:test_v2_ledger test_v2_ledger.exe)
   (:v2_transaction_property_test v2_transaction_property_test.exe)
   (:v2_state_machine_property_test v2_state_machine_property_test.exe)
@@ -1231,6 +1237,7 @@
    (run %{model_property_test})
    (run %{store_property_test})
    (run %{test_v2_local_command})
+   (run %{test_local_daemon})
    (run %{test_v2_ledger})
    (run %{v2_transaction_property_test})
    (run %{v2_state_machine_property_test})

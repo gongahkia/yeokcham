@@ -59,6 +59,13 @@ This is a shell refactor, not a V2 model or persistent-format transition. Later
 V2-011 slices can move the remaining command groups through the same boundary
 without making command parsing a second source of canonical transitions.
 
+V2-012 adds `yeokcham_local_daemon` beside that service boundary. It owns only
+a versioned runtime socket, discovery file, and session capability outside the
+strict `.yeokcham` layout. Binding a per-root endpoint is the singleton claim;
+explicit stale recovery is based on connection refusal, never a PID kill. Its
+small authenticated protocol currently offers liveness and controlled shutdown,
+not repository mutation or durable authorization.
+
 ## 2. Proposed OCaml workspace
 
 ```text

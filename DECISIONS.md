@@ -160,3 +160,4 @@ The ADR lifecycle, numbering rules, and template are defined in [`docs/adr/READM
 - [ADR-047 — Explicit V1 archive and V2 cutover boundary](docs/adr/047-v1-archive-and-v2-cutover.md) — Accepted.
 - [ADR-048 — V2 encrypted causal ref-ledger with external key verification](docs/adr/048-v2-encrypted-causal-ref-ledger.md) — Accepted.
 - [ADR-049 — V2 durable object transaction journals without implicit ref authority](docs/adr/049-v2-durable-object-transaction-journals.md) — Accepted.
+- [ADR-050 — Local V2 daemon runtime boundary](docs/adr/050-local-v2-daemon-runtime-boundary.md) — Accepted.
