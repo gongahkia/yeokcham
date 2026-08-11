@@ -139,6 +139,7 @@ type error =
   | Ledger_error of Ledger.error
   | Scratch_event_missing_target of Ledger.Event_id.t
   | Unknown_scratch_event of Ledger.Event_id.t
+  | Snapshot_not_active of V2_model.Opaque_object_ref.t
   | Event_outside_scratch_scope of Ledger.Event_id.t
   | Scratch_event_not_ancestor of {
       source : Ledger.Event_id.t;

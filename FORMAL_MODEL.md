@@ -391,6 +391,43 @@ snapshots. ADR-058 protects those source snapshots before the signed capsule
 binding is visible, so compaction may retire the original ledger range without
 removing the cited exact bytes.
 
+### V2-019 confirmed split and combine publication
+
+V2 split and combine first resolve authenticated current capsule revisions and
+derive a read-only exact plan. An unconfirmed request has no object, protection,
+or ledger transition. Confirmation rebuilds the plan from the current durable
+inputs; a missing, divergent, malformed, replay-invalid, or changed source is
+an explicit error.
+
+A split requires two new capsule IDs distinct from its source and from each
+other, plus nonempty left and right operation partitions. It creates two
+immutable output capsules. The left revision applies from the source declared
+base to the exact intermediate result; the right revision applies from that
+intermediate result to the source result. Both use ordered `Split_from` links to
+the verified source revision. A combine accepts an explicit caller order of
+current source capsules only when each source result exactly equals the next
+declared base. It creates one new capsule revision that replays the concatenated
+operations from the first base to the last result and retains ordered
+`Combined_from` links.
+
+Before an output binding is signed, every source-boundary snapshot that remains
+in the active scratch history receives a separate `Capsule_boundary` protection
+claim for that output revision. Capsule-created intermediate snapshots are
+already immutable links of their output revisions, not invented scratch events,
+and therefore receive no synthetic checkpoint or protection claim. The two
+split output bindings are separate causal publications: an interruption may
+leave one valid visible child and one unbound child; retry requires the same
+exact publication inputs and never rewrites the visible child.
+
+For every visible V2 split or combined revision `r`:
+
+```text
+replay(snapshot(r.declared_base), r.operations) = snapshot(r.expected_result)
+```
+
+Source ordering and provenance links are immutable evidence, not inferred user
+intent, semantic equivalence, or a merge decision.
+
 ### Durable Milestone 4 representation
 
 `Capsule_v1` is immutable initial metadata. `Capsule_revision_v1` holds

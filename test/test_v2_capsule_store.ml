@@ -132,8 +132,10 @@ let split_nonces () =
     split_right_revision_nonce = nonce 'F';
     split_left_binding_nonce = nonce 'G';
     split_right_binding_nonce = nonce 'H';
-    split_left_protections = [ protection_nonces 'I' 'J'; protection_nonces 'K' 'L' ];
-    split_right_protections = [ protection_nonces 'M' 'N'; protection_nonces 'O' 'P' ];
+    split_left_protections =
+      [ protection_nonces 'I' 'J'; protection_nonces 'K' 'L' ];
+    split_right_protections =
+      [ protection_nonces 'M' 'N'; protection_nonces 'O' 'P' ];
   }
 
 let combine_nonces () =
@@ -141,7 +143,8 @@ let combine_nonces () =
     Capsule_store.combine_capsule_nonce = nonce 'Q';
     combine_revision_nonce = nonce 'R';
     combine_binding_nonce = nonce 'S';
-    combine_protections = [ protection_nonces 'T' 'U'; protection_nonces 'V' 'W' ];
+    combine_protections =
+      [ protection_nonces 'T' 'U'; protection_nonces 'V' 'W' ];
   }
 
 let capsule_id =
@@ -352,26 +355,26 @@ let confirmed_split_and_combine_publish_exact_provenance () =
       in
       let left_id = capsule_id_with 'l' in
       let right_id = capsule_id_with 'r' in
-      (match
-         Capsule_store.split capsules ~source:capsule_id ~left_id
-           ~left_title:"left" ~left_description:"left exact partition"
-           ~right_id ~right_title:"right"
-           ~right_description:"right exact partition" ~left_indices:[ 0 ]
-           ~created_at:19L ~confirmed:false ~nonces:(split_nonces ())
-       with
+      ((match
+          Capsule_store.split capsules ~source:capsule_id ~left_id
+            ~left_title:"left" ~left_description:"left exact partition"
+            ~right_id ~right_title:"right"
+            ~right_description:"right exact partition" ~left_indices:[ 0 ]
+            ~created_at:19L ~confirmed:false ~nonces:(split_nonces ())
+        with
       | Error (Capsule_store.Confirmation_required "split") -> ()
       | Error error ->
           Alcotest.fail
             ("unconfirmed split returned the wrong error: "
             ^ Capsule_store.error_to_string error)
       | Ok _ -> Alcotest.fail "unconfirmed split published output")
-      [@warning "-4"];
+      [@warning "-4"]);
       let left, right =
         Capsule_store.split capsules ~source:capsule_id ~left_id
-          ~left_title:"left" ~left_description:"left exact partition"
-          ~right_id ~right_title:"right"
-          ~right_description:"right exact partition" ~left_indices:[ 0 ]
-          ~created_at:19L ~confirmed:true ~nonces:(split_nonces ())
+          ~left_title:"left" ~left_description:"left exact partition" ~right_id
+          ~right_title:"right" ~right_description:"right exact partition"
+          ~left_indices:[ 0 ] ~created_at:19L ~confirmed:true
+          ~nonces:(split_nonces ())
         |> require_ok Capsule_store.error_to_string
       in
       let left =
@@ -388,7 +391,8 @@ let confirmed_split_and_combine_publish_exact_provenance () =
       in
       let source_link =
         Capsule.make_revision_link ~capsule_id
-          ~revision_id:(Capsule.revision_id source_current.Capsule_store.revision)
+          ~revision_id:
+            (Capsule.revision_id source_current.Capsule_store.revision)
           ~revision_ref:source_current.Capsule_store.revision_ref
       in
       let has_source_provenance revision =
@@ -401,72 +405,87 @@ let confirmed_split_and_combine_publish_exact_provenance () =
                  (Capsule.revision_link_revision_id link)
                  (Capsule.revision_link_revision_id source_link)
         | Capsule.Created | Capsule.Folded _ | Capsule.Split_from _
-        | Capsule.Combined_from _ -> false
+        | Capsule.Combined_from _ ->
+            false
       in
-      Alcotest.(check bool) "left records split source provenance" true
+      Alcotest.(check bool)
+        "left records split source provenance" true
         (has_source_provenance left.Capsule_store.revision);
-      Alcotest.(check bool) "right records split source provenance" true
+      Alcotest.(check bool)
+        "right records split source provenance" true
         (has_source_provenance right.Capsule_store.revision);
       Capsule.apply_revision ~base:left.Capsule_store.declared_base
         left.Capsule_store.revision
       |> require_ok Model.replay_error_to_string
       |> fun actual ->
-      Alcotest.(check bool) "left directly replays" true
+      Alcotest.(check bool)
+        "left directly replays" true
         (Model.Snapshot.equal actual left.Capsule_store.expected_result);
       Capsule.apply_revision ~base:right.Capsule_store.declared_base
         right.Capsule_store.revision
       |> require_ok Model.replay_error_to_string
       |> fun actual ->
-      Alcotest.(check bool) "right directly replays" true
+      Alcotest.(check bool)
+        "right directly replays" true
         (Model.Snapshot.equal actual right.Capsule_store.expected_result);
-      Alcotest.(check bool) "split composes to the original result" true
+      Alcotest.(check bool)
+        "split composes to the original result" true
         (Model.Snapshot.equal target right.Capsule_store.expected_result);
       let combined_id = capsule_id_with 'm' in
-      (match
-         Capsule_store.combine capsules ~id:combined_id ~title:"combined"
-           ~description:"caller ordered exact outputs" ~sources:[ left_id; right_id ]
-           ~created_at:20L ~confirmed:false ~nonces:(combine_nonces ())
-       with
+      ((match
+          Capsule_store.combine capsules ~id:combined_id ~title:"combined"
+            ~description:"caller ordered exact outputs"
+            ~sources:[ left_id; right_id ] ~created_at:20L ~confirmed:false
+            ~nonces:(combine_nonces ())
+        with
       | Error (Capsule_store.Confirmation_required "combine") -> ()
       | Error error ->
           Alcotest.fail
             ("unconfirmed combine returned the wrong error: "
             ^ Capsule_store.error_to_string error)
       | Ok _ -> Alcotest.fail "unconfirmed combine published output")
-      [@warning "-4"];
+      [@warning "-4"]);
       let combined =
         Capsule_store.combine capsules ~id:combined_id ~title:"combined"
-          ~description:"caller ordered exact outputs" ~sources:[ left_id; right_id ]
-          ~created_at:20L ~confirmed:true ~nonces:(combine_nonces ())
+          ~description:"caller ordered exact outputs"
+          ~sources:[ left_id; right_id ] ~created_at:20L ~confirmed:true
+          ~nonces:(combine_nonces ())
         |> require_ok Capsule_store.error_to_string
         |> function
         | Capsule_store.Published resolved -> resolved
         | Capsule_store.Already_published _ ->
             Alcotest.fail "first combined output was already published"
       in
-      Alcotest.(check bool) "combine records caller source order" true
+      Alcotest.(check bool)
+        "combine records caller source order" true
         (match Capsule.revision_provenance combined.Capsule_store.revision with
         | Capsule.Combined_from [ first; second ] ->
             V2_model.Capsule_id.equal
-              (Capsule.revision_link_capsule_id first) left_id
+              (Capsule.revision_link_capsule_id first)
+              left_id
             && V2_model.Capsule_id.equal
-                 (Capsule.revision_link_capsule_id second) right_id
+                 (Capsule.revision_link_capsule_id second)
+                 right_id
         | Capsule.Created | Capsule.Folded _ | Capsule.Split_from _
-        | Capsule.Combined_from _ -> false);
+        | Capsule.Combined_from _ ->
+            false);
       Capsule.apply_revision ~base:combined.Capsule_store.declared_base
         combined.Capsule_store.revision
       |> require_ok Model.replay_error_to_string
       |> fun actual ->
-      Alcotest.(check bool) "combined revision directly replays" true
+      Alcotest.(check bool)
+        "combined revision directly replays" true
         (Model.Snapshot.equal actual combined.Capsule_store.expected_result);
-      Alcotest.(check bool) "combined result remains exact" true
+      Alcotest.(check bool)
+        "combined result remains exact" true
         (Model.Snapshot.equal target combined.Capsule_store.expected_result);
       let reopened_bootstrap =
         Bootstrap_store.open_repository ~root ~capability
         |> require_ok Bootstrap_store.error_to_string
       in
       let reopened =
-        Capsule_store.open_repository ~root ~bootstrap_repository:reopened_bootstrap
+        Capsule_store.open_repository ~root
+          ~bootstrap_repository:reopened_bootstrap
         |> require_ok Capsule_store.error_to_string
       in
       let reopened_combined =
@@ -474,7 +493,8 @@ let confirmed_split_and_combine_publish_exact_provenance () =
         |> require_ok Capsule_store.error_to_string
         |> Option.get
       in
-      Alcotest.(check bool) "combined revision survives reopen" true
+      Alcotest.(check bool)
+        "combined revision survives reopen" true
         (V2_model.Capsule_revision_id.equal
            (Capsule.revision_id combined.Capsule_store.revision)
            (Capsule.revision_id reopened_combined.Capsule_store.revision)))
@@ -488,44 +508,49 @@ let interrupted_confirmed_split_stays_unbound_and_retries () =
         |> require_ok Capsule_store.error_to_string);
       let left_id = capsule_id_with 'l' in
       let right_id = capsule_id_with 'r' in
-      (match
-         Capsule_store.split capsules ~source:capsule_id ~left_id
-           ~left_title:"left" ~left_description:"left exact partition"
-           ~right_id ~right_title:"right"
-           ~right_description:"right exact partition" ~left_indices:[ 0 ]
-           ~created_at:19L ~confirmed:true ~nonces:(split_nonces ())
-           ~fault:(Capsule_store.Fault.at Capsule_store.Fault.After_revision_object)
-       with
+      ((match
+          Capsule_store.split capsules ~source:capsule_id ~left_id
+            ~left_title:"left" ~left_description:"left exact partition"
+            ~right_id ~right_title:"right"
+            ~right_description:"right exact partition" ~left_indices:[ 0 ]
+            ~created_at:19L ~confirmed:true ~nonces:(split_nonces ())
+            ~fault:
+              (Capsule_store.Fault.at Capsule_store.Fault.After_revision_object)
+        with
       | Error
           (Capsule_store.Fault_injected
-             Capsule_store.Fault.After_revision_object) -> ()
+             Capsule_store.Fault.After_revision_object) ->
+          ()
       | Error error ->
           Alcotest.fail
             ("split interruption returned the wrong error: "
             ^ Capsule_store.error_to_string error)
       | Ok _ -> Alcotest.fail "interrupted split unexpectedly published output")
-      [@warning "-4"];
-      Alcotest.(check bool) "interrupted left output remains unbound" true
+      [@warning "-4"]);
+      Alcotest.(check bool)
+        "interrupted left output remains unbound" true
         (Option.is_none
            (Capsule_store.resolve capsules ~id:left_id
            |> require_ok Capsule_store.error_to_string));
-      Alcotest.(check bool) "interrupted right output remains unbound" true
+      Alcotest.(check bool)
+        "interrupted right output remains unbound" true
         (Option.is_none
            (Capsule_store.resolve capsules ~id:right_id
            |> require_ok Capsule_store.error_to_string));
       match
         Capsule_store.split capsules ~source:capsule_id ~left_id
-          ~left_title:"left" ~left_description:"left exact partition"
-          ~right_id ~right_title:"right"
-          ~right_description:"right exact partition" ~left_indices:[ 0 ]
-          ~created_at:19L ~confirmed:true ~nonces:(split_nonces ())
+          ~left_title:"left" ~left_description:"left exact partition" ~right_id
+          ~right_title:"right" ~right_description:"right exact partition"
+          ~left_indices:[ 0 ] ~created_at:19L ~confirmed:true
+          ~nonces:(split_nonces ())
         |> require_ok Capsule_store.error_to_string
       with
       | Capsule_store.Published _, Capsule_store.Published _ -> ()
       | Capsule_store.Published _, Capsule_store.Already_published _
       | Capsule_store.Already_published _, Capsule_store.Published _
       | Capsule_store.Already_published _, Capsule_store.Already_published _ ->
-          Alcotest.fail "split retry should bind both previously unreachable outputs")
+          Alcotest.fail
+            "split retry should bind both previously unreachable outputs")
 
 let immutable_fold_reopens_and_stale_update_rejects () =
   with_repository (fun _root scratch capsules ->
@@ -668,14 +693,16 @@ let generated_create_and_reopen =
 let generated_confirmed_split_replays =
   QCheck2.Test.make ~count:48
     ~name:"V2 confirmed split directly replays generated byte results"
-    QCheck2.Gen.
-      (pair (string_size (int_range 0 4096)) (string_size (int_range 0 4096)))
+    QCheck2.Gen.(
+      pair (string_size (int_range 0 4096)) (string_size (int_range 0 4096)))
     (fun (before, after) ->
       try
         with_repository (fun _root scratch capsules ->
             let source = source_snapshot before in
             let target = target_snapshot after in
-            let _ = create scratch capsules ~source ~target () |> Result.get_ok in
+            let _ =
+              create scratch capsules ~source ~target () |> Result.get_ok
+            in
             let left_id = capsule_id_with 'l' in
             let right_id = capsule_id_with 'r' in
             match
@@ -685,7 +712,7 @@ let generated_confirmed_split_replays =
                 ~right_description:"generated partition" ~left_indices:[ 0 ]
                 ~created_at:19L ~confirmed:true ~nonces:(split_nonces ())
             with
-            | Ok (left, right) ->
+            | Ok (left, right) -> (
                 let resolved = function
                   | Capsule_store.Published resolved
                   | Capsule_store.Already_published resolved ->
@@ -693,13 +720,14 @@ let generated_confirmed_split_replays =
                 in
                 let left = resolved left in
                 let right = resolved right in
-                (match
-                   Capsule.apply_revision ~base:left.Capsule_store.declared_base
-                     left.Capsule_store.revision
-                 with
+                match
+                  Capsule.apply_revision ~base:left.Capsule_store.declared_base
+                    left.Capsule_store.revision
+                with
                 | Error _ -> false
                 | Ok actual ->
-                    Model.Snapshot.equal actual left.Capsule_store.expected_result
+                    Model.Snapshot.equal actual
+                      left.Capsule_store.expected_result
                     && Model.Snapshot.equal target
                          right.Capsule_store.expected_result)
             | Error _ -> false)

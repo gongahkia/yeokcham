@@ -244,9 +244,9 @@ val checkpoint_for_snapshot_ref :
   repository ->
   snapshot_ref:V2_model.Opaque_object_ref.t ->
   (checkpoint, error) result
-(** Resolves one exact snapshot reference in the active sole scratch history.
-    It rejects a missing or retired reference rather than inventing a
-    checkpoint. *)
+(** Resolves one exact snapshot reference in the active sole scratch history. It
+    rejects a missing or retired reference rather than inventing a checkpoint.
+*)
 
 val require_ancestor :
   repository ->

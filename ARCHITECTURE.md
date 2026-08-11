@@ -442,6 +442,16 @@ and initial Capsule_revision frames become visible only through a signed causal
 `capsule-<id>` binding after both source snapshot links receive ADR-058
 protection claims. V2-019 adds later revision provenance and mutation flows.
 
+Its confirmed split/combine adapter rebuilds the read-only plan from
+authenticated current bindings, persists only immutable Capsule and
+Capsule_revision frames, and protects each active scratch source boundary
+before an output binding becomes visible. Split writes two separately bound
+children with an exact intermediate-snapshot link, so an interruption can leave
+one valid child and one unbound child rather than pretending cross-binding
+atomicity. Combine records the caller-supplied verified source order in
+immutable provenance and produces one directly replayable output. Neither path
+creates a synthetic scratch checkpoint for a capsule-derived intermediate.
+
 The Milestone 4 capsule service combines the pure `yeokcham_capsule` transition
 core with `yeokcham_capsule_store`. ADR-025 adds immutable `Capsule_v1` and
 complete `Capsule_revision_v1` Envelope-1 objects, and a checksummed

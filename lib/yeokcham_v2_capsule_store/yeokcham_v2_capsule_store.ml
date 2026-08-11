@@ -160,7 +160,8 @@ let error_to_string = function
   | Object_store_error error -> Object_store.error_to_string error
   | Scratch_store_error error -> Scratch_store.error_to_string error
   | Invalid_capsule_ref_name name -> "invalid capsule ref name: " ^ name
-  | Nonce_reuse -> "capsule publication requires pairwise distinct envelope nonces"
+  | Nonce_reuse ->
+      "capsule publication requires pairwise distinct envelope nonces"
   | Capsule_id_already_bound id ->
       "capsule already has a current binding: " ^ V2_model.Capsule_id.to_hex id
   | Capsule_missing id ->
@@ -171,8 +172,8 @@ let error_to_string = function
       "split output capsule IDs must differ from the source and each other"
   | Protection_nonce_count_mismatch { expected; actual } ->
       Printf.sprintf
-        "capsule boundary protection needs %d nonce pairs, received %d"
-        expected actual
+        "capsule boundary protection needs %d nonce pairs, received %d" expected
+        actual
   | Capsule_split_error error -> Capsule.split_error_to_string error
   | Capsule_combine_error error -> Capsule.combine_error_to_string error
   | Divergent_capsule_binding events ->
@@ -323,28 +324,28 @@ let distinct_nonce_values values =
 
 let distinct_split_nonces (nonces : split_nonces) =
   distinct_nonce_values
-    ( [
-        nonces.split_left_capsule_nonce;
-        nonces.split_right_capsule_nonce;
-        nonces.split_left_result_nonce;
-        nonces.split_left_revision_nonce;
-        nonces.split_right_revision_nonce;
-        nonces.split_left_binding_nonce;
-        nonces.split_right_binding_nonce;
-      ]
+    ([
+       nonces.split_left_capsule_nonce;
+       nonces.split_right_capsule_nonce;
+       nonces.split_left_result_nonce;
+       nonces.split_left_revision_nonce;
+       nonces.split_right_revision_nonce;
+       nonces.split_left_binding_nonce;
+       nonces.split_right_binding_nonce;
+     ]
     |> List.map Envelope.nonce_to_bytes
     |> List.append (protection_nonce_values nonces.split_left_protections)
-    |> List.append (protection_nonce_values nonces.split_right_protections) )
+    |> List.append (protection_nonce_values nonces.split_right_protections))
 
 let distinct_combine_nonces (nonces : combine_nonces) =
   distinct_nonce_values
-    ( [
-        nonces.combine_capsule_nonce;
-        nonces.combine_revision_nonce;
-        nonces.combine_binding_nonce;
-      ]
+    ([
+       nonces.combine_capsule_nonce;
+       nonces.combine_revision_nonce;
+       nonces.combine_binding_nonce;
+     ]
     |> List.map Envelope.nonce_to_bytes
-    |> List.append (protection_nonce_values nonces.combine_protections) )
+    |> List.append (protection_nonce_values nonces.combine_protections))
 
 let event_id_of_verified verified =
   Ledger.verified_event verified |> Ledger.event_id
@@ -837,19 +838,6 @@ let stale_current_error ~expected_revision ~expected_binding = function
           actual_binding = Some resolved.binding_event_id;
         }
 
-let fold ?fault repository ~id ~expected_revision ~expected_binding
-    ~source_event ~target_event ~selected_indices ~created_at ~nonces =
-  if not (distinct_revision_nonces nonces) then Error Nonce_reuse
-  else
-    let* prior = resolve repository ~id in
-    let* current =
-      match prior with
-      | Some resolved
-        when current_matches resolved ~expected_revision ~expected_binding ->
-          Ok resolved
-      | other ->
-          Error (stale_current_error ~expected_revision ~expected_binding other)
-
 let revision_link_of_resolved (resolved : resolved) =
   Capsule.make_revision_link
     ~capsule_id:(Capsule.revision_capsule_id resolved.revision)
@@ -870,13 +858,16 @@ let active_boundary_checkpoints repository boundaries =
   let rec collect reversed = function
     | [] -> Ok (List.rev reversed)
     | snapshot_ref :: rest -> (
-        match
-          Scratch_store.checkpoint_for_snapshot_ref repository.scratch
-            ~snapshot_ref
-        with
+        (match
+           Scratch_store.checkpoint_for_snapshot_ref repository.scratch
+             ~snapshot_ref
+         with
         | Ok checkpoint -> collect ((snapshot_ref, checkpoint) :: reversed) rest
-        | Error (Scratch_store.Snapshot_not_active _) -> collect reversed rest
-        | Error error -> Error (Scratch_store_error error))
+        | Error error -> (
+            match error with
+            | Scratch_store.Snapshot_not_active _ -> collect reversed rest
+            | error -> Error (Scratch_store_error error)))
+        [@warning "-4"])
   in
   collect [] (boundary_snapshot_refs boundaries)
 
@@ -904,16 +895,16 @@ let publish_boundary_protections repository ~reason ~checkpoints ~nonces =
           publish (checkpoints, rest)
       | _ -> assert false
     in
-    publish (snapshot_refs, nonces)
+    publish (checkpoints, nonces)
 
 let publish_initial_binding repository ~id ~revision_ref ~nonce =
   let* existing = resolve repository ~id in
   match existing with
   | Some resolved ->
-      if V2_model.Opaque_object_ref.equal resolved.revision_ref revision_ref then
-        Ok (Already_published resolved)
+      if V2_model.Opaque_object_ref.equal resolved.revision_ref revision_ref
+      then Ok (Already_published resolved)
       else Error (Capsule_id_already_bound id)
-  | None ->
+  | None -> (
       let* expected_event_id, ledger_envelope =
         binding_envelope repository ~id ~predecessor:None ~revision_ref ~nonce
       in
@@ -933,7 +924,7 @@ let publish_initial_binding repository ~id ~revision_ref ~nonce =
         let* resolved = resolve repository ~id in
         match resolved with
         | Some resolved -> Ok (Published resolved)
-        | None -> assert false
+        | None -> assert false)
 
 let source_still_current repository (source : resolved) =
   let id = Capsule.revision_capsule_id source.revision in
@@ -984,7 +975,8 @@ let split ?fault repository ~source ~left_id ~left_title ~left_description
              expected = expected_protections;
              actual = List.length nonces.split_left_protections;
            })
-    else if List.length nonces.split_right_protections <> expected_protections then
+    else if List.length nonces.split_right_protections <> expected_protections
+    then
       Error
         (Protection_nonce_count_mismatch
            {
@@ -1014,12 +1006,12 @@ let split ?fault repository ~source ~left_id ~left_title ~left_description
         }
       in
       let* left_revision =
-        Capsule.make_revision ~capsule:left_capsule ~capsule_ref:left_capsule_ref
-          ~parent:None
+        Capsule.make_revision ~capsule:left_capsule
+          ~capsule_ref:left_capsule_ref ~parent:None
           ~declared_base:(Capsule.revision_declared_base source.revision)
           ~declared_base_snapshot:source.declared_base
           ~expected_result:left_expected
-          ~operations:(split_plan_left_operations plan)
+          ~operations:(Capsule.split_plan_left_operations plan.split)
           ~source_boundaries:inherited_boundaries
           ~provenance:(Capsule.Split_from [ source_link ]) ~created_at
         |> Result.map_error (fun error -> Capsule_error error)
@@ -1047,8 +1039,9 @@ let split ?fault repository ~source ~left_id ~left_title ~left_description
       in
       let* right_revision =
         Capsule.make_revision ~capsule:right_capsule
-          ~capsule_ref:right_capsule_ref ~parent:None ~declared_base:left_expected
-          ~declared_base_snapshot:left_result ~expected_result:right_expected
+          ~capsule_ref:right_capsule_ref ~parent:None
+          ~declared_base:left_expected ~declared_base_snapshot:left_result
+          ~expected_result:right_expected
           ~operations:(split_plan_right_operations plan)
           ~source_boundaries:right_boundaries
           ~provenance:(Capsule.Split_from [ source_link ]) ~created_at
@@ -1059,19 +1052,23 @@ let split ?fault repository ~source ~left_id ~left_title ~left_description
           (Object.capsule_revision right_revision)
       in
       let* () =
-        publish_object repository ~expected:left_capsule_ref left_capsule_envelope
+        publish_object repository ~expected:left_capsule_ref
+          left_capsule_envelope
       in
       let* () =
-        publish_object repository ~expected:right_capsule_ref right_capsule_envelope
+        publish_object repository ~expected:right_capsule_ref
+          right_capsule_envelope
       in
       let* () =
         publish_object repository ~expected:left_result_ref left_result_envelope
       in
       let* () =
-        publish_object repository ~expected:left_revision_ref left_revision_envelope
+        publish_object repository ~expected:left_revision_ref
+          left_revision_envelope
       in
       let* () =
-        publish_object repository ~expected:right_revision_ref right_revision_envelope
+        publish_object repository ~expected:right_revision_ref
+          right_revision_envelope
       in
       let* () = inject fault Fault.After_revision_object in
       let* () =
@@ -1091,12 +1088,13 @@ let split ?fault repository ~source ~left_id ~left_title ~left_description
       let* () = inject fault Fault.Before_binding in
       let* () = source_still_current repository source in
       let* left =
-        publish_initial_binding repository ~id:left_id ~revision_ref:left_revision_ref
-          ~nonce:nonces.split_left_binding_nonce
+        publish_initial_binding repository ~id:left_id
+          ~revision_ref:left_revision_ref ~nonce:nonces.split_left_binding_nonce
       in
       let* right =
         publish_initial_binding repository ~id:right_id
-          ~revision_ref:right_revision_ref ~nonce:nonces.split_right_binding_nonce
+          ~revision_ref:right_revision_ref
+          ~nonce:nonces.split_right_binding_nonce
       in
       Ok (left, right)
 
@@ -1156,20 +1154,36 @@ let combine ?fault repository ~id ~title ~description ~sources ~created_at
         envelope_for repository ~nonce:nonces.combine_revision_nonce
           (Object.capsule_revision revision)
       in
-      let* () = publish_object repository ~expected:capsule_ref capsule_envelope in
-      let* () = publish_object repository ~expected:revision_ref revision_envelope in
+      let* () =
+        publish_object repository ~expected:capsule_ref capsule_envelope
+      in
+      let* () =
+        publish_object repository ~expected:revision_ref revision_envelope
+      in
       let* () = inject fault Fault.After_revision_object in
       let* () =
         publish_boundary_protections repository
           ~reason:(Retention.Capsule_boundary revision_ref)
-          ~checkpoints:boundary_checkpoints
-          ~nonces:nonces.combine_protections
+          ~checkpoints:boundary_checkpoints ~nonces:nonces.combine_protections
       in
       let* () = inject fault Fault.After_source_protection in
       let* () = inject fault Fault.Before_binding in
       let* () = all_sources_still_current repository sources in
       publish_initial_binding repository ~id ~revision_ref
         ~nonce:nonces.combine_binding_nonce
+
+let fold ?fault repository ~id ~expected_revision ~expected_binding
+    ~source_event ~target_event ~selected_indices ~created_at ~nonces =
+  if not (distinct_revision_nonces nonces) then Error Nonce_reuse
+  else
+    let* prior = resolve repository ~id in
+    let* current =
+      match prior with
+      | Some resolved
+        when current_matches resolved ~expected_revision ~expected_binding ->
+          Ok resolved
+      | other ->
+          Error (stale_current_error ~expected_revision ~expected_binding other)
     in
     let* () =
       Scratch_store.require_ancestor repository.scratch ~source:source_event
