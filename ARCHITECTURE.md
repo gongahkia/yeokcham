@@ -464,7 +464,7 @@ mechanism. Split produces a validated base-to-intermediate then
 intermediate-to-result chain; combine accepts only an explicit replay-valid
 base/result source chain. No mutable capsule catalog is canonical.
 
-ADR-060 adds the separate V2 workspace boundary:
+ADR-061 adds the separate V2 workspace boundary:
 `yeokcham_v2_workspace` is the pure deterministic selection/order/application
 core, `yeokcham_v2_workspace_record` owns canonical immutable workspace,
 revision, attempt, conflict, and skip-resolution payloads, and

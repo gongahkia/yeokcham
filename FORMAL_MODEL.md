@@ -430,7 +430,7 @@ intent, semantic equivalence, or a merge decision.
 
 ### V2-020 deterministic workspace composition and resolution records
 
-ADR-060 defines V2 workspace composition independently of the V1
+ADR-061 defines V2 workspace composition independently of the V1
 materialisation records below. A V2 workspace revision contains a verified exact
 base snapshot link, unique immutable capsule revision links, explicit
 precedence edges, a stored resolved order, and immutable conflict-resolution
@@ -1604,7 +1604,7 @@ directories, regular bytes, modes, and raw symlink targets. The kind remains
 encrypted; ADR-046 addresses bind the complete outer envelope and therefore the
 frame. A reader rejects unknown kinds/features, malformed selected payloads,
 and noncanonical re-encoding. ADR-059 adds Capsule and Capsule_revision frames.
-ADR-060 adds the five workspace frame kinds and requires their record IDs, link
+ADR-061 adds the five workspace frame kinds and requires their record IDs, link
 order, and mandatory-feature bits to re-encode exactly. A generic object store
 creates and loads frames; the ledger store is a typed view that analyses only
 ledger frames. Old development envelopes that directly contain a ledger record

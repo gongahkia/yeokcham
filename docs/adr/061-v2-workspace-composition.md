@@ -1,4 +1,4 @@
-# ADR-060 — V2 deterministic workspaces and explicit conflict records
+# ADR-061 — V2 deterministic workspaces and explicit conflict records
 
 - Status: Accepted
 - Date: 2026-08-12
