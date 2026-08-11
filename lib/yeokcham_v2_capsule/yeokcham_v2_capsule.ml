@@ -91,6 +91,7 @@ type selection_error =
 type split_error =
   | Split_selection_error of selection_error
   | Split_derivation_error of proposal_error
+  | Split_empty_right_partition
 
 type combine_error =
   | Empty_combine
@@ -151,6 +152,8 @@ let selection_error_to_string = function
 let split_error_to_string = function
   | Split_selection_error error -> selection_error_to_string error
   | Split_derivation_error error -> proposal_error_to_string error
+  | Split_empty_right_partition ->
+      "split requires a non-empty right operation partition"
 
 let combine_error_to_string = function
   | Empty_combine -> "combine plan has no source revisions"
@@ -709,13 +712,15 @@ let plan_split ~base revision ~left_indices =
         propose ~from:left.result ~to_:expected_result
         |> Result.map_error (fun error -> Split_derivation_error error)
       in
-      Ok
-        {
-          left_indices;
-          left_operations = left.selection_operations;
-          left_result = left.result;
-          right_operations = right.proposal_operations_;
-        }
+      if right.proposal_operations_ = [] then Error Split_empty_right_partition
+      else
+        Ok
+          {
+            left_indices;
+            left_operations = left.selection_operations;
+            left_result = left.result;
+            right_operations = right.proposal_operations_;
+          }
 
 let split_plan_left_indices plan = plan.left_indices
 let split_plan_left_operations plan = plan.left_operations

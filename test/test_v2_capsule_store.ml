@@ -117,8 +117,39 @@ let revision_nonces () =
     fold_binding_ledger_nonce = nonce 'w';
   }
 
+let protection_nonces first second =
+  {
+    Capsule_store.protection_nonce = nonce first;
+    protection_ledger_nonce = nonce second;
+  }
+
+let split_nonces () =
+  {
+    Capsule_store.split_left_capsule_nonce = nonce 'B';
+    split_right_capsule_nonce = nonce 'C';
+    split_left_result_nonce = nonce 'D';
+    split_left_revision_nonce = nonce 'E';
+    split_right_revision_nonce = nonce 'F';
+    split_left_binding_nonce = nonce 'G';
+    split_right_binding_nonce = nonce 'H';
+    split_left_protections = [ protection_nonces 'I' 'J'; protection_nonces 'K' 'L' ];
+    split_right_protections = [ protection_nonces 'M' 'N'; protection_nonces 'O' 'P' ];
+  }
+
+let combine_nonces () =
+  {
+    Capsule_store.combine_capsule_nonce = nonce 'Q';
+    combine_revision_nonce = nonce 'R';
+    combine_binding_nonce = nonce 'S';
+    combine_protections = [ protection_nonces 'T' 'U'; protection_nonces 'V' 'W' ];
+  }
+
 let capsule_id =
   V2_model.Capsule_id.of_bytes (String.make 32 'c')
+  |> require_ok V2_model.identity_error_to_string
+
+let capsule_id_with character =
+  V2_model.Capsule_id.of_bytes (String.make 32 character)
   |> require_ok V2_model.identity_error_to_string
 
 let rec remove_tree path =
@@ -156,7 +187,7 @@ let with_repository run =
         Capsule_store.open_repository ~root ~bootstrap_repository
         |> require_ok Capsule_store.error_to_string
       in
-      run scratch capsules)
+      run root scratch capsules)
 
 let published_checkpoint = function
   | Scratch.Published checkpoint | Scratch.Unchanged checkpoint -> checkpoint
@@ -193,7 +224,7 @@ let fold capsules ~current ~source_event ~target_event ~source ~target ?fault ()
     ~created_at:18L ~nonces:(revision_nonces ())
 
 let durable_creation_pins_boundaries_across_compaction () =
-  with_repository (fun scratch capsules ->
+  with_repository (fun _root scratch capsules ->
       let source = source_snapshot "before" in
       let target = target_snapshot "after" in
       let publication =
@@ -244,7 +275,7 @@ let durable_creation_pins_boundaries_across_compaction () =
         (Model.Snapshot.equal target reopened.Capsule_store.expected_result))
 
 let interrupted_creation_stays_unbound_and_retries () =
-  with_repository (fun scratch capsules ->
+  with_repository (fun _root scratch capsules ->
       let source = source_snapshot "before" in
       let target = target_snapshot "after" in
       ((match
@@ -279,7 +310,7 @@ let interrupted_creation_stays_unbound_and_retries () =
           Alcotest.fail "retry should publish the previously unbound capsule")
 
 let split_and_combine_plans_do_not_publish () =
-  with_repository (fun scratch capsules ->
+  with_repository (fun _root scratch capsules ->
       let source = source_snapshot "before" in
       let target = target_snapshot "after" in
       let current =
@@ -307,8 +338,197 @@ let split_and_combine_plans_do_not_publish () =
         (V2_model.Opaque_object_ref.equal current.Capsule_store.revision_ref
            after.Capsule_store.revision_ref))
 
+let confirmed_split_and_combine_publish_exact_provenance () =
+  with_repository (fun root scratch capsules ->
+      let source = source_snapshot "before" in
+      let target = target_snapshot "after" in
+      let source_current =
+        create scratch capsules ~source ~target ()
+        |> require_ok Capsule_store.error_to_string
+        |> function
+        | Capsule_store.Published resolved -> resolved
+        | Capsule_store.Already_published _ ->
+            Alcotest.fail "unexpected existing source capsule"
+      in
+      let left_id = capsule_id_with 'l' in
+      let right_id = capsule_id_with 'r' in
+      (match
+         Capsule_store.split capsules ~source:capsule_id ~left_id
+           ~left_title:"left" ~left_description:"left exact partition"
+           ~right_id ~right_title:"right"
+           ~right_description:"right exact partition" ~left_indices:[ 0 ]
+           ~created_at:19L ~confirmed:false ~nonces:(split_nonces ())
+       with
+      | Error (Capsule_store.Confirmation_required "split") -> ()
+      | Error error ->
+          Alcotest.fail
+            ("unconfirmed split returned the wrong error: "
+            ^ Capsule_store.error_to_string error)
+      | Ok _ -> Alcotest.fail "unconfirmed split published output")
+      [@warning "-4"];
+      let left, right =
+        Capsule_store.split capsules ~source:capsule_id ~left_id
+          ~left_title:"left" ~left_description:"left exact partition"
+          ~right_id ~right_title:"right"
+          ~right_description:"right exact partition" ~left_indices:[ 0 ]
+          ~created_at:19L ~confirmed:true ~nonces:(split_nonces ())
+        |> require_ok Capsule_store.error_to_string
+      in
+      let left =
+        match left with
+        | Capsule_store.Published resolved -> resolved
+        | Capsule_store.Already_published _ ->
+            Alcotest.fail "first split left output was already published"
+      in
+      let right =
+        match right with
+        | Capsule_store.Published resolved -> resolved
+        | Capsule_store.Already_published _ ->
+            Alcotest.fail "first split right output was already published"
+      in
+      let source_link =
+        Capsule.make_revision_link ~capsule_id
+          ~revision_id:(Capsule.revision_id source_current.Capsule_store.revision)
+          ~revision_ref:source_current.Capsule_store.revision_ref
+      in
+      let has_source_provenance revision =
+        match Capsule.revision_provenance revision with
+        | Capsule.Split_from [ link ] ->
+            V2_model.Capsule_id.equal
+              (Capsule.revision_link_capsule_id link)
+              (Capsule.revision_link_capsule_id source_link)
+            && V2_model.Capsule_revision_id.equal
+                 (Capsule.revision_link_revision_id link)
+                 (Capsule.revision_link_revision_id source_link)
+        | Capsule.Created | Capsule.Folded _ | Capsule.Split_from _
+        | Capsule.Combined_from _ -> false
+      in
+      Alcotest.(check bool) "left records split source provenance" true
+        (has_source_provenance left.Capsule_store.revision);
+      Alcotest.(check bool) "right records split source provenance" true
+        (has_source_provenance right.Capsule_store.revision);
+      Capsule.apply_revision ~base:left.Capsule_store.declared_base
+        left.Capsule_store.revision
+      |> require_ok Model.replay_error_to_string
+      |> fun actual ->
+      Alcotest.(check bool) "left directly replays" true
+        (Model.Snapshot.equal actual left.Capsule_store.expected_result);
+      Capsule.apply_revision ~base:right.Capsule_store.declared_base
+        right.Capsule_store.revision
+      |> require_ok Model.replay_error_to_string
+      |> fun actual ->
+      Alcotest.(check bool) "right directly replays" true
+        (Model.Snapshot.equal actual right.Capsule_store.expected_result);
+      Alcotest.(check bool) "split composes to the original result" true
+        (Model.Snapshot.equal target right.Capsule_store.expected_result);
+      let combined_id = capsule_id_with 'm' in
+      (match
+         Capsule_store.combine capsules ~id:combined_id ~title:"combined"
+           ~description:"caller ordered exact outputs" ~sources:[ left_id; right_id ]
+           ~created_at:20L ~confirmed:false ~nonces:(combine_nonces ())
+       with
+      | Error (Capsule_store.Confirmation_required "combine") -> ()
+      | Error error ->
+          Alcotest.fail
+            ("unconfirmed combine returned the wrong error: "
+            ^ Capsule_store.error_to_string error)
+      | Ok _ -> Alcotest.fail "unconfirmed combine published output")
+      [@warning "-4"];
+      let combined =
+        Capsule_store.combine capsules ~id:combined_id ~title:"combined"
+          ~description:"caller ordered exact outputs" ~sources:[ left_id; right_id ]
+          ~created_at:20L ~confirmed:true ~nonces:(combine_nonces ())
+        |> require_ok Capsule_store.error_to_string
+        |> function
+        | Capsule_store.Published resolved -> resolved
+        | Capsule_store.Already_published _ ->
+            Alcotest.fail "first combined output was already published"
+      in
+      Alcotest.(check bool) "combine records caller source order" true
+        (match Capsule.revision_provenance combined.Capsule_store.revision with
+        | Capsule.Combined_from [ first; second ] ->
+            V2_model.Capsule_id.equal
+              (Capsule.revision_link_capsule_id first) left_id
+            && V2_model.Capsule_id.equal
+                 (Capsule.revision_link_capsule_id second) right_id
+        | Capsule.Created | Capsule.Folded _ | Capsule.Split_from _
+        | Capsule.Combined_from _ -> false);
+      Capsule.apply_revision ~base:combined.Capsule_store.declared_base
+        combined.Capsule_store.revision
+      |> require_ok Model.replay_error_to_string
+      |> fun actual ->
+      Alcotest.(check bool) "combined revision directly replays" true
+        (Model.Snapshot.equal actual combined.Capsule_store.expected_result);
+      Alcotest.(check bool) "combined result remains exact" true
+        (Model.Snapshot.equal target combined.Capsule_store.expected_result);
+      let reopened_bootstrap =
+        Bootstrap_store.open_repository ~root ~capability
+        |> require_ok Bootstrap_store.error_to_string
+      in
+      let reopened =
+        Capsule_store.open_repository ~root ~bootstrap_repository:reopened_bootstrap
+        |> require_ok Capsule_store.error_to_string
+      in
+      let reopened_combined =
+        Capsule_store.resolve reopened ~id:combined_id
+        |> require_ok Capsule_store.error_to_string
+        |> Option.get
+      in
+      Alcotest.(check bool) "combined revision survives reopen" true
+        (V2_model.Capsule_revision_id.equal
+           (Capsule.revision_id combined.Capsule_store.revision)
+           (Capsule.revision_id reopened_combined.Capsule_store.revision)))
+
+let interrupted_confirmed_split_stays_unbound_and_retries () =
+  with_repository (fun _root scratch capsules ->
+      let source = source_snapshot "before" in
+      let target = target_snapshot "after" in
+      ignore
+        (create scratch capsules ~source ~target ()
+        |> require_ok Capsule_store.error_to_string);
+      let left_id = capsule_id_with 'l' in
+      let right_id = capsule_id_with 'r' in
+      (match
+         Capsule_store.split capsules ~source:capsule_id ~left_id
+           ~left_title:"left" ~left_description:"left exact partition"
+           ~right_id ~right_title:"right"
+           ~right_description:"right exact partition" ~left_indices:[ 0 ]
+           ~created_at:19L ~confirmed:true ~nonces:(split_nonces ())
+           ~fault:(Capsule_store.Fault.at Capsule_store.Fault.After_revision_object)
+       with
+      | Error
+          (Capsule_store.Fault_injected
+             Capsule_store.Fault.After_revision_object) -> ()
+      | Error error ->
+          Alcotest.fail
+            ("split interruption returned the wrong error: "
+            ^ Capsule_store.error_to_string error)
+      | Ok _ -> Alcotest.fail "interrupted split unexpectedly published output")
+      [@warning "-4"];
+      Alcotest.(check bool) "interrupted left output remains unbound" true
+        (Option.is_none
+           (Capsule_store.resolve capsules ~id:left_id
+           |> require_ok Capsule_store.error_to_string));
+      Alcotest.(check bool) "interrupted right output remains unbound" true
+        (Option.is_none
+           (Capsule_store.resolve capsules ~id:right_id
+           |> require_ok Capsule_store.error_to_string));
+      match
+        Capsule_store.split capsules ~source:capsule_id ~left_id
+          ~left_title:"left" ~left_description:"left exact partition"
+          ~right_id ~right_title:"right"
+          ~right_description:"right exact partition" ~left_indices:[ 0 ]
+          ~created_at:19L ~confirmed:true ~nonces:(split_nonces ())
+        |> require_ok Capsule_store.error_to_string
+      with
+      | Capsule_store.Published _, Capsule_store.Published _ -> ()
+      | Capsule_store.Published _, Capsule_store.Already_published _
+      | Capsule_store.Already_published _, Capsule_store.Published _
+      | Capsule_store.Already_published _, Capsule_store.Already_published _ ->
+          Alcotest.fail "split retry should bind both previously unreachable outputs")
+
 let immutable_fold_reopens_and_stale_update_rejects () =
-  with_repository (fun scratch capsules ->
+  with_repository (fun _root scratch capsules ->
       let source = source_snapshot "before" in
       let target = target_snapshot "after" in
       let initial =
@@ -371,7 +591,7 @@ let immutable_fold_reopens_and_stale_update_rejects () =
       [@warning "-4"])
 
 let interrupted_fold_stays_on_prior_revision_and_retries () =
-  with_repository (fun scratch capsules ->
+  with_repository (fun _root scratch capsules ->
       let source = source_snapshot "before" in
       let target = target_snapshot "after" in
       let initial =
@@ -433,7 +653,7 @@ let generated_create_and_reopen =
     QCheck2.Gen.(
       pair (string_size (int_range 0 4096)) (string_size (int_range 0 4096)))
     (fun (before, after) ->
-      with_repository (fun scratch capsules ->
+      with_repository (fun _root scratch capsules ->
           let source = source_snapshot before in
           let target = target_snapshot after in
           match create scratch capsules ~source ~target () with
@@ -444,6 +664,46 @@ let generated_create_and_reopen =
                   Model.Snapshot.equal target
                     resolved.Capsule_store.expected_result
               | Ok None | Error _ -> false)))
+
+let generated_confirmed_split_replays =
+  QCheck2.Test.make ~count:48
+    ~name:"V2 confirmed split directly replays generated byte results"
+    QCheck2.Gen.
+      (pair (string_size (int_range 0 4096)) (string_size (int_range 0 4096)))
+    (fun (before, after) ->
+      try
+        with_repository (fun _root scratch capsules ->
+            let source = source_snapshot before in
+            let target = target_snapshot after in
+            let _ = create scratch capsules ~source ~target () |> Result.get_ok in
+            let left_id = capsule_id_with 'l' in
+            let right_id = capsule_id_with 'r' in
+            match
+              Capsule_store.split capsules ~source:capsule_id ~left_id
+                ~left_title:"left" ~left_description:"generated partition"
+                ~right_id ~right_title:"right"
+                ~right_description:"generated partition" ~left_indices:[ 0 ]
+                ~created_at:19L ~confirmed:true ~nonces:(split_nonces ())
+            with
+            | Ok (left, right) ->
+                let resolved = function
+                  | Capsule_store.Published resolved
+                  | Capsule_store.Already_published resolved ->
+                      resolved
+                in
+                let left = resolved left in
+                let right = resolved right in
+                (match
+                   Capsule.apply_revision ~base:left.Capsule_store.declared_base
+                     left.Capsule_store.revision
+                 with
+                | Error _ -> false
+                | Ok actual ->
+                    Model.Snapshot.equal actual left.Capsule_store.expected_result
+                    && Model.Snapshot.equal target
+                         right.Capsule_store.expected_result)
+            | Error _ -> false)
+      with _ -> false)
 
 let () =
   Alcotest.run "V2 durable exact capsule curation"
@@ -457,6 +717,12 @@ let () =
             `Quick interrupted_creation_stays_unbound_and_retries;
           Alcotest.test_case "split and combine plans do not publish" `Quick
             split_and_combine_plans_do_not_publish;
+          Alcotest.test_case
+            "confirmed split and combine publish exact provenance" `Quick
+            confirmed_split_and_combine_publish_exact_provenance;
+          Alcotest.test_case
+            "interrupted confirmed split stays unbound and retries" `Quick
+            interrupted_confirmed_split_stays_unbound_and_retries;
           Alcotest.test_case "immutable fold reopens and stale update rejects"
             `Quick immutable_fold_reopens_and_stale_update_rejects;
           Alcotest.test_case
@@ -465,5 +731,8 @@ let () =
           QCheck_alcotest.to_alcotest ~speed_level:`Quick
             ~rand:(state_for "persisted-create-reopen")
             generated_create_and_reopen;
+          QCheck_alcotest.to_alcotest ~speed_level:`Quick
+            ~rand:(state_for "confirmed-split-replay")
+            generated_confirmed_split_replays;
         ] );
     ]

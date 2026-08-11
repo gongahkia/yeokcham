@@ -249,6 +249,9 @@ let error_to_string = function
       "scratch event has no snapshot target: " ^ Ledger.Event_id.to_hex event_id
   | Unknown_scratch_event event_id ->
       "unknown signed scratch event: " ^ Ledger.Event_id.to_hex event_id
+  | Snapshot_not_active snapshot_ref ->
+      "snapshot is not in the active scratch history: "
+      ^ V2_model.Opaque_object_ref.to_hex snapshot_ref
   | Event_outside_scratch_scope event_id ->
       "selected event is outside this device scratch scope: "
       ^ Ledger.Event_id.to_hex event_id
@@ -899,6 +902,22 @@ let checkpoint_for_event repository ~event_id =
               else checkpoint_of_verified repository verified)
   in
   find object_refs
+
+let checkpoint_for_snapshot_ref repository ~snapshot_ref =
+  let* active_ref = active_scratch_ref repository in
+  let* history, _ = history_for_scope repository ~scope_ref:active_ref in
+  match
+    List.find_opt
+      (fun entry ->
+        V2_model.Opaque_object_ref.equal
+          entry.retention_checkpoint.Retention.checkpoint_snapshot_ref
+          snapshot_ref)
+      history
+  with
+  | None -> Error (Snapshot_not_active snapshot_ref)
+  | Some entry ->
+      checkpoint_for_event repository
+        ~event_id:entry.retention_checkpoint.Retention.event_id
 
 let require_ancestor repository ~source ~target =
   let* active_ref = active_scratch_ref repository in

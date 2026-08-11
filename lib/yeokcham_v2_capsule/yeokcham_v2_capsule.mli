@@ -44,6 +44,7 @@ type selection_error =
 type split_error =
   | Split_selection_error of selection_error
   | Split_derivation_error of proposal_error
+  | Split_empty_right_partition
 
 type combine_error =
   | Empty_combine

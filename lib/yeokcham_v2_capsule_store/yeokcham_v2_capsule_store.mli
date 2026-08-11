@@ -30,6 +30,30 @@ type revision_nonces = {
   fold_binding_ledger_nonce : Envelope.nonce;
 }
 
+type protection_nonces = {
+  protection_nonce : Envelope.nonce;
+  protection_ledger_nonce : Envelope.nonce;
+}
+
+type split_nonces = {
+  split_left_capsule_nonce : Envelope.nonce;
+  split_right_capsule_nonce : Envelope.nonce;
+  split_left_result_nonce : Envelope.nonce;
+  split_left_revision_nonce : Envelope.nonce;
+  split_right_revision_nonce : Envelope.nonce;
+  split_left_binding_nonce : Envelope.nonce;
+  split_right_binding_nonce : Envelope.nonce;
+  split_left_protections : protection_nonces list;
+  split_right_protections : protection_nonces list;
+}
+
+type combine_nonces = {
+  combine_capsule_nonce : Envelope.nonce;
+  combine_revision_nonce : Envelope.nonce;
+  combine_binding_nonce : Envelope.nonce;
+  combine_protections : protection_nonces list;
+}
+
 module Fault : sig
   type boundary =
     | After_capsule_object
@@ -72,6 +96,9 @@ type error =
   | Nonce_reuse
   | Capsule_id_already_bound of V2_model.Capsule_id.t
   | Capsule_missing of V2_model.Capsule_id.t
+  | Confirmation_required of string
+  | Split_output_ids_not_distinct
+  | Protection_nonce_count_mismatch of { expected : int; actual : int }
   | Capsule_split_error of Capsule.split_error
   | Capsule_combine_error of Capsule.combine_error
   | Divergent_capsule_binding of Ledger.Event_id.t list
@@ -173,3 +200,38 @@ val fold :
 (** Adds one complete immutable child revision. The source checkpoint must equal
     the expected current revision result; a stale current ref is an explicit
     concurrent-update error. *)
+
+val split :
+  ?fault:Fault.t ->
+  repository ->
+  source:V2_model.Capsule_id.t ->
+  left_id:V2_model.Capsule_id.t ->
+  left_title:string ->
+  left_description:string ->
+  right_id:V2_model.Capsule_id.t ->
+  right_title:string ->
+  right_description:string ->
+  left_indices:int list ->
+  created_at:int64 ->
+  confirmed:bool ->
+  nonces:split_nonces ->
+  (publication * publication, error) result
+(** Rebuilds and confirms one split plan. The two output revisions are direct
+    exact transitions, retain immutable [Split_from] provenance, and receive
+    independent signed bindings only after their reachable scratch boundaries
+    have protection claims. *)
+
+val combine :
+  ?fault:Fault.t ->
+  repository ->
+  id:V2_model.Capsule_id.t ->
+  title:string ->
+  description:string ->
+  sources:V2_model.Capsule_id.t list ->
+  created_at:int64 ->
+  confirmed:bool ->
+  nonces:combine_nonces ->
+  (publication, error) result
+(** Rebuilds and confirms one caller-ordered combine plan. The resulting
+    revision directly replays from the first source base and records every
+    verified source as immutable [Combined_from] provenance. *)
