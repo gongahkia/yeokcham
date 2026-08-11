@@ -80,6 +80,11 @@ let error_to_string = function
         | Object.Scratch_generation -> "scratch generation"
         | Object.Capsule -> "capsule"
         | Object.Capsule_revision -> "capsule revision"
+        | Object.Workspace -> "workspace"
+        | Object.Workspace_revision -> "workspace revision"
+        | Object.Workspace_attempt -> "workspace attempt"
+        | Object.Conflict -> "workspace conflict"
+        | Object.Resolution -> "workspace resolution"
       in
       Printf.sprintf "V2 object %s has kind %s, expected %s"
         (Model.Opaque_object_ref.to_hex object_ref)

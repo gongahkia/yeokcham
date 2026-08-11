@@ -88,6 +88,15 @@ type resolved = {
   expected_result : Model.Snapshot.t;
 }
 
+type verified_revision = {
+  verified_capsule : Capsule.capsule;
+  verified_capsule_ref : V2_model.Opaque_object_ref.t;
+  verified_revision : Capsule.revision;
+  verified_revision_ref : V2_model.Opaque_object_ref.t;
+  verified_declared_base : Model.Snapshot.t;
+  verified_expected_result : Model.Snapshot.t;
+}
+
 type publication = Published of resolved | Already_published of resolved
 type split_plan = { split_source : resolved; split : Capsule.split_plan }
 
@@ -144,6 +153,7 @@ type error =
       actual_binding : Ledger.Event_id.t option;
     }
   | Parent_link_mismatch of string
+  | Revision_link_mismatch of string
   | Revision_history_cycle of V2_model.Opaque_object_ref.t
   | Fault_injected of Fault.boundary
 
@@ -230,6 +240,7 @@ let error_to_string = function
         (revision actual_revision) (binding actual_binding)
   | Parent_link_mismatch detail ->
       "capsule revision parent link mismatch: " ^ detail
+  | Revision_link_mismatch detail -> "capsule revision link mismatch: " ^ detail
   | Revision_history_cycle reference ->
       "capsule revision history contains object cycle: "
       ^ V2_model.Opaque_object_ref.to_hex reference
@@ -458,6 +469,83 @@ let rec verify_parent_chain repository ~visited revision =
         else
           verify_parent_chain repository ~visited:(parent_ref :: visited)
             parent_revision
+
+let verify_revision_link repository link =
+  let revision_ref = Capsule.revision_link_ref link in
+  let* revision_object =
+    Object_store.load repository.objects ~object_ref:revision_ref
+    |> Result.map_error (fun error -> Object_store_error error)
+  in
+  let* revision =
+    match Object.capsule_revision_record revision_object with
+    | Some revision -> Ok revision
+    | None -> Error (Binding_target_not_revision revision_ref)
+  in
+  if
+    not
+      (V2_model.Capsule_id.equal
+         (Capsule.revision_link_capsule_id link)
+         (Capsule.revision_capsule_id revision))
+  then Error (Revision_link_mismatch "capsule identity differs")
+  else if
+    not
+      (V2_model.Capsule_revision_id.equal
+         (Capsule.revision_link_revision_id link)
+         (Capsule.revision_id revision))
+  then Error (Revision_link_mismatch "revision identity differs")
+  else
+    let capsule_ref = Capsule.revision_capsule_ref revision in
+    let* capsule_object =
+      Object_store.load repository.objects ~object_ref:capsule_ref
+      |> Result.map_error (fun error -> Object_store_error error)
+    in
+    let* capsule =
+      match Object.capsule_record capsule_object with
+      | Some capsule -> Ok capsule
+      | None -> Error (Capsule_ref_not_capsule capsule_ref)
+    in
+    if
+      not
+        (V2_model.Capsule_id.equal
+           (Capsule.revision_link_capsule_id link)
+           (Capsule.capsule_id capsule))
+    then Error Capsule_metadata_mismatch
+    else
+      let* declared_base =
+        snapshot_for_link repository (Capsule.revision_declared_base revision)
+      in
+      let* expected_result =
+        snapshot_for_link repository (Capsule.revision_expected_result revision)
+      in
+      let boundary = Capsule.revision_source_boundary revision in
+      let* boundary_source =
+        snapshot_for_link repository boundary.Capsule.source_snapshot
+      in
+      let* _boundary_target =
+        snapshot_for_link repository boundary.Capsule.target_snapshot
+      in
+      if not (Model.Snapshot.equal declared_base boundary_source) then
+        Error Revision_result_mismatch
+      else
+        let* actual =
+          Capsule.apply_revision ~base:declared_base revision
+          |> Result.map_error (fun error -> Revision_replay_rejected error)
+        in
+        if not (Model.Snapshot.equal actual expected_result) then
+          Error Revision_result_mismatch
+        else
+          let* () =
+            verify_parent_chain repository ~visited:[ revision_ref ] revision
+          in
+          Ok
+            {
+              verified_capsule = capsule;
+              verified_capsule_ref = capsule_ref;
+              verified_revision = revision;
+              verified_revision_ref = revision_ref;
+              verified_declared_base = declared_base;
+              verified_expected_result = expected_result;
+            }
 
 let resolve repository ~id =
   let* head = binding_head repository id in

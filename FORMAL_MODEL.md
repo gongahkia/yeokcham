@@ -428,6 +428,51 @@ replay(snapshot(r.declared_base), r.operations) = snapshot(r.expected_result)
 Source ordering and provenance links are immutable evidence, not inferred user
 intent, semantic equivalence, or a merge decision.
 
+### V2-020 deterministic workspace composition and resolution records
+
+ADR-060 defines V2 workspace composition independently of the V1
+materialisation records below. A V2 workspace revision contains a verified exact
+base snapshot link, unique immutable capsule revision links, explicit
+precedence edges, a stored resolved order, and immutable conflict-resolution
+bindings. Its logical identity is domain-separated over that canonical logical
+input; encrypted object references remain physical verification links rather
+than logical identity material.
+
+```text
+derive_order(selected, precedence) = ordered-selected
+apply_workspace(base, ordered-selected, skip-resolutions)
+  = (resulting-snapshot, ordered-outcomes, ordered-conflicts)
+```
+
+`derive_order` rejects duplicate capsule or revision identities, link/revision
+mismatches, unknown or duplicate precedence edges, and cycles. It canonicalises
+the selected set and uses capsule-revision identity as its only tie-breaker.
+Each capsule operation is applied independently in that order. A failed
+operation becomes a `Conflict`; only later operations whose touched paths
+overlap that conflict are `Blocked_by_conflict`. Operations on disjoint paths
+continue. Therefore equal verified inputs produce equal order, result, outcomes,
+and conflict set.
+
+A `Resolution` names one immutable conflict and has only:
+
+```text
+Skip_operation(capsule-revision-link, operation-index)
+```
+
+The action must exactly equal the cited conflict's source. It does not replace,
+modify, reorder, or semantically reinterpret bytes. Binding a resolution makes
+a new immutable workspace revision; replay reads all bound resolution records
+and applies their exact skip actions. A conflict or a resolution is never a
+process-only condition or a mutable flag.
+
+The visible `workspace-<workspace-id>` scope has one verified causal ledger
+head targeting a `Workspace_revision`. A distinct expected-absent
+`workspace-attempt-<workspace-id>-<attempt-id>` scope targets an immutable
+attempt. Publication writes workspace/result/conflict/resolution objects before
+their revision or attempt, and writes the signed binding last. An interruption
+may leave unreachable immutable objects but cannot make a partial workspace,
+attempt, or resolution visible.
+
 ### Durable Milestone 4 representation
 
 `Capsule_v1` is immutable initial metadata. `Capsule_revision_v1` holds
@@ -1548,7 +1593,9 @@ canonical typed object frame:
 ```text
 Object_frame = (version=1, kind, canonical-payload-bytes, features)
 Object_kind = Ledger_event | Scratch_snapshot | Scratch_protection
-            | Scratch_generation
+            | Scratch_generation | Capsule | Capsule_revision
+            | Workspace | Workspace_revision | Workspace_attempt
+            | Conflict | Resolution
 ```
 
 `Ledger_event` contains an exact ADR-048 record. `Scratch_snapshot` contains
@@ -1556,10 +1603,12 @@ the exact canonical `Yeokcham_model.Snapshot` bytes: sorted safe paths,
 directories, regular bytes, modes, and raw symlink targets. The kind remains
 encrypted; ADR-046 addresses bind the complete outer envelope and therefore the
 frame. A reader rejects unknown kinds/features, malformed selected payloads,
-and noncanonical re-encoding. A generic object store creates and loads frames;
-the ledger store is a typed view that analyses only ledger frames. Old
-development envelopes that directly contain a ledger record reject rather than
-migrate.
+and noncanonical re-encoding. ADR-059 adds Capsule and Capsule_revision frames.
+ADR-060 adds the five workspace frame kinds and requires their record IDs, link
+order, and mandatory-feature bits to re-encode exactly. A generic object store
+creates and loads frames; the ledger store is a typed view that analyses only
+ledger frames. Old development envelopes that directly contain a ledger record
+reject rather than migrate.
 
 ## 27. V2 local scratch snapshot publication
 

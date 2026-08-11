@@ -3,6 +3,7 @@ module Ledger = Yeokcham_v2_ledger
 module Retention = Yeokcham_v2_retention
 module Snapshot = Yeokcham_model.Snapshot
 module Capsule = Yeokcham_v2_capsule
+module Workspace_record = Yeokcham_v2_workspace_record
 
 type kind =
   | Ledger_event
@@ -11,6 +12,11 @@ type kind =
   | Scratch_generation
   | Capsule
   | Capsule_revision
+  | Workspace
+  | Workspace_revision
+  | Workspace_attempt
+  | Conflict
+  | Resolution
 
 type t =
   | Ledger_event_frame of Ledger.t
@@ -19,6 +25,11 @@ type t =
   | Scratch_generation_frame of Retention.generation
   | Capsule_frame of Capsule.capsule
   | Capsule_revision_frame of Capsule.revision
+  | Workspace_frame of Workspace_record.workspace
+  | Workspace_revision_frame of Workspace_record.workspace_revision
+  | Workspace_attempt_frame of Workspace_record.workspace_attempt
+  | Conflict_frame of Workspace_record.conflict
+  | Resolution_frame of Workspace_record.resolution
 
 type error =
   | Invalid_payload of string
@@ -29,6 +40,7 @@ type error =
   | Ledger_error of Ledger.error
   | Retention_error of Retention.error
   | Capsule_error of Capsule.error
+  | Workspace_record_error of Workspace_record.error
   | Snapshot_error of Yeokcham_model.canonical_decode_error
   | Noncanonical_frame
 
@@ -55,6 +67,7 @@ let error_to_string = function
   | Ledger_error error -> Ledger.error_to_string error
   | Retention_error error -> Retention.error_to_string error
   | Capsule_error error -> Capsule.error_to_string error
+  | Workspace_record_error error -> Workspace_record.error_to_string error
   | Snapshot_error error ->
       Yeokcham_model.canonical_decode_error_to_string error
   | Noncanonical_frame -> "V2 typed object frame is noncanonical"
@@ -101,6 +114,11 @@ let scratch_protection protection = Scratch_protection_frame protection
 let scratch_generation generation = Scratch_generation_frame generation
 let capsule capsule = Capsule_frame capsule
 let capsule_revision revision = Capsule_revision_frame revision
+let workspace workspace = Workspace_frame workspace
+let workspace_revision revision = Workspace_revision_frame revision
+let workspace_attempt attempt = Workspace_attempt_frame attempt
+let conflict conflict = Conflict_frame conflict
+let resolution resolution = Resolution_frame resolution
 
 let kind = function
   | Ledger_event_frame _ -> Ledger_event
@@ -109,42 +127,99 @@ let kind = function
   | Scratch_generation_frame _ -> Scratch_generation
   | Capsule_frame _ -> Capsule
   | Capsule_revision_frame _ -> Capsule_revision
+  | Workspace_frame _ -> Workspace
+  | Workspace_revision_frame _ -> Workspace_revision
+  | Workspace_attempt_frame _ -> Workspace_attempt
+  | Conflict_frame _ -> Conflict
+  | Resolution_frame _ -> Resolution
 
 let ledger = function
   | Ledger_event_frame event -> Some event
   | Scratch_snapshot_frame _ | Scratch_protection_frame _
   | Scratch_generation_frame _ | Capsule_frame _ | Capsule_revision_frame _ ->
       None
+  | Workspace_frame _ | Workspace_revision_frame _ | Workspace_attempt_frame _
+  | Conflict_frame _ | Resolution_frame _ ->
+      None
 
 let snapshot = function
   | Ledger_event_frame _ -> None
   | Scratch_snapshot_frame snapshot -> Some snapshot
   | Scratch_protection_frame _ | Scratch_generation_frame _ | Capsule_frame _
-  | Capsule_revision_frame _ ->
+  | Capsule_revision_frame _ | Workspace_frame _ | Workspace_revision_frame _
+  | Workspace_attempt_frame _ | Conflict_frame _ | Resolution_frame _ ->
       None
 
 let protection = function
   | Scratch_protection_frame protection -> Some protection
   | Ledger_event_frame _ | Scratch_snapshot_frame _ | Scratch_generation_frame _
-  | Capsule_frame _ | Capsule_revision_frame _ ->
+  | Capsule_frame _ | Capsule_revision_frame _ | Workspace_frame _
+  | Workspace_revision_frame _ | Workspace_attempt_frame _ | Conflict_frame _
+  | Resolution_frame _ ->
       None
 
 let generation = function
   | Scratch_generation_frame generation -> Some generation
   | Ledger_event_frame _ | Scratch_snapshot_frame _ | Scratch_protection_frame _
-  | Capsule_frame _ | Capsule_revision_frame _ ->
+  | Capsule_frame _ | Capsule_revision_frame _ | Workspace_frame _
+  | Workspace_revision_frame _ | Workspace_attempt_frame _ | Conflict_frame _
+  | Resolution_frame _ ->
       None
 
 let capsule_record = function
   | Capsule_frame capsule -> Some capsule
   | Ledger_event_frame _ | Scratch_snapshot_frame _ | Scratch_protection_frame _
-  | Scratch_generation_frame _ | Capsule_revision_frame _ ->
+  | Scratch_generation_frame _ | Capsule_revision_frame _ | Workspace_frame _
+  | Workspace_revision_frame _ | Workspace_attempt_frame _ | Conflict_frame _
+  | Resolution_frame _ ->
       None
 
 let capsule_revision_record = function
   | Capsule_revision_frame revision -> Some revision
   | Ledger_event_frame _ | Scratch_snapshot_frame _ | Scratch_protection_frame _
-  | Scratch_generation_frame _ | Capsule_frame _ ->
+  | Scratch_generation_frame _ | Capsule_frame _ | Workspace_frame _
+  | Workspace_revision_frame _ | Workspace_attempt_frame _ | Conflict_frame _
+  | Resolution_frame _ ->
+      None
+
+let workspace_record = function
+  | Workspace_frame workspace -> Some workspace
+  | Ledger_event_frame _ | Scratch_snapshot_frame _ | Scratch_protection_frame _
+  | Scratch_generation_frame _ | Capsule_frame _ | Capsule_revision_frame _
+  | Workspace_revision_frame _ | Workspace_attempt_frame _ | Conflict_frame _
+  | Resolution_frame _ ->
+      None
+
+let workspace_revision_record = function
+  | Workspace_revision_frame revision -> Some revision
+  | Ledger_event_frame _ | Scratch_snapshot_frame _ | Scratch_protection_frame _
+  | Scratch_generation_frame _ | Capsule_frame _ | Capsule_revision_frame _
+  | Workspace_frame _ | Workspace_attempt_frame _ | Conflict_frame _
+  | Resolution_frame _ ->
+      None
+
+let workspace_attempt_record = function
+  | Workspace_attempt_frame attempt -> Some attempt
+  | Ledger_event_frame _ | Scratch_snapshot_frame _ | Scratch_protection_frame _
+  | Scratch_generation_frame _ | Capsule_frame _ | Capsule_revision_frame _
+  | Workspace_frame _ | Workspace_revision_frame _ | Conflict_frame _
+  | Resolution_frame _ ->
+      None
+
+let conflict_record = function
+  | Conflict_frame conflict -> Some conflict
+  | Ledger_event_frame _ | Scratch_snapshot_frame _ | Scratch_protection_frame _
+  | Scratch_generation_frame _ | Capsule_frame _ | Capsule_revision_frame _
+  | Workspace_frame _ | Workspace_revision_frame _ | Workspace_attempt_frame _
+  | Resolution_frame _ ->
+      None
+
+let resolution_record = function
+  | Resolution_frame resolution -> Some resolution
+  | Ledger_event_frame _ | Scratch_snapshot_frame _ | Scratch_protection_frame _
+  | Scratch_generation_frame _ | Capsule_frame _ | Capsule_revision_frame _
+  | Workspace_frame _ | Workspace_revision_frame _ | Workspace_attempt_frame _
+  | Conflict_frame _ ->
       None
 
 let kind_code = function
@@ -154,6 +229,11 @@ let kind_code = function
   | Scratch_generation -> 3L
   | Capsule -> 4L
   | Capsule_revision -> 5L
+  | Workspace -> 6L
+  | Workspace_revision -> 7L
+  | Workspace_attempt -> 8L
+  | Conflict -> 9L
+  | Resolution -> 10L
 
 let payload = function
   | Ledger_event_frame event -> Ledger.encode event
@@ -164,6 +244,13 @@ let payload = function
       Retention.encode_generation generation
   | Capsule_frame capsule -> Capsule.encode_capsule capsule
   | Capsule_revision_frame revision -> Capsule.encode_revision revision
+  | Workspace_frame workspace -> Workspace_record.encode_workspace workspace
+  | Workspace_revision_frame revision ->
+      Workspace_record.encode_workspace_revision revision
+  | Workspace_attempt_frame attempt ->
+      Workspace_record.encode_workspace_attempt attempt
+  | Conflict_frame conflict -> Workspace_record.encode_conflict conflict
+  | Resolution_frame resolution -> Workspace_record.encode_resolution resolution
 
 let encode frame =
   let value =
@@ -207,6 +294,26 @@ let decode_payload kind payload =
         Capsule.decode_revision payload
         |> Result.map capsule_revision
         |> Result.map_error (fun error -> Capsule_error error)
+    | Workspace ->
+        Workspace_record.decode_workspace payload
+        |> Result.map workspace
+        |> Result.map_error (fun error -> Workspace_record_error error)
+    | Workspace_revision ->
+        Workspace_record.decode_workspace_revision payload
+        |> Result.map workspace_revision
+        |> Result.map_error (fun error -> Workspace_record_error error)
+    | Workspace_attempt ->
+        Workspace_record.decode_workspace_attempt payload
+        |> Result.map workspace_attempt
+        |> Result.map_error (fun error -> Workspace_record_error error)
+    | Conflict ->
+        Workspace_record.decode_conflict payload
+        |> Result.map conflict
+        |> Result.map_error (fun error -> Workspace_record_error error)
+    | Resolution ->
+        Workspace_record.decode_resolution payload
+        |> Result.map resolution
+        |> Result.map_error (fun error -> Workspace_record_error error)
 
 let decode encoded =
   let* value =
@@ -230,6 +337,11 @@ let decode encoded =
           | 3L -> Ok Scratch_generation
           | 4L -> Ok Capsule
           | 5L -> Ok Capsule_revision
+          | 6L -> Ok Workspace
+          | 7L -> Ok Workspace_revision
+          | 8L -> Ok Workspace_attempt
+          | 9L -> Ok Conflict
+          | 10L -> Ok Resolution
           | value -> Error (Unknown_kind value)
         in
         let* payload = bytes "V2 typed object frame payload" payload in

@@ -28,6 +28,11 @@ module Signer_key_id : Identity
 module Transaction_id : Identity
 module Capsule_id : Identity
 module Capsule_revision_id : Identity
+module Workspace_id : Identity
+module Workspace_revision_id : Identity
+module Workspace_attempt_id : Identity
+module Conflict_id : Identity
+module Resolution_id : Identity
 
 module Encrypted_ref_event : sig
   type t

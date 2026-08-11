@@ -294,10 +294,10 @@ let malformed_or_untyped_payloads_reject () =
     | Ok _ -> Alcotest.fail "malformed typed object unexpectedly decoded"
   in
   expect
-    ((function Object.Unknown_kind 6L -> true | _ -> false) [@warning "-4"])
+    ((function Object.Unknown_kind 11L -> true | _ -> false) [@warning "-4"])
     (refreshed_golden
        "v2-object-scratch-snapshot-frame-v1.unknown-kind.cbor.hex"
-       (frame ~kind:6L scratch));
+       (frame ~kind:11L scratch));
   expect
     ((function Object.Unsupported_mandatory_features 1L -> true | _ -> false)
       [@warning "-4"])

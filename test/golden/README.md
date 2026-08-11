@@ -97,4 +97,14 @@ inputs after decryption.
 The scratch-frame family's fixed truncated, trailing-byte, unknown-kind, and
 unknown-feature variants retain its fail-closed decoding boundary.
 
+`v2-object-workspace-frame-v1.cbor.hex`,
+`v2-object-workspace-revision-frame-v1.cbor.hex`,
+`v2-object-workspace-attempt-frame-v1.cbor.hex`,
+`v2-object-conflict-frame-v1.cbor.hex`, and
+`v2-object-resolution-frame-v1.cbor.hex` are ADR-060's exact V2 typed-object
+frames. They cover immutable workspace metadata, a canonical selected/order
+revision, an attempt, a typed transition conflict, and an exact skip-only
+resolution. The shifted scratch-frame unknown-kind fixture uses tag 11 because
+tags 6 through 10 are now assigned to those records.
+
 Changing any fixture bytes requires a format decision and retained compatibility evidence; adding a new schema requires a new named fixture.

@@ -97,6 +97,11 @@ module Signer_key_id = Make_identity ()
 module Transaction_id = Make_identity ()
 module Capsule_id = Make_identity ()
 module Capsule_revision_id = Make_identity ()
+module Workspace_id = Make_identity ()
+module Workspace_revision_id = Make_identity ()
+module Workspace_attempt_id = Make_identity ()
+module Conflict_id = Make_identity ()
+module Resolution_id = Make_identity ()
 
 module Encrypted_ref_event = struct
   type t = { id : Ref_event_id.t; object_ref : Opaque_object_ref.t }

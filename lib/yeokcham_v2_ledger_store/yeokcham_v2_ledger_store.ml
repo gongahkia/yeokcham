@@ -39,6 +39,11 @@ let kind_to_string = function
   | Object.Scratch_generation -> "scratch generation"
   | Object.Capsule -> "capsule"
   | Object.Capsule_revision -> "capsule revision"
+  | Object.Workspace -> "workspace"
+  | Object.Workspace_revision -> "workspace revision"
+  | Object.Workspace_attempt -> "workspace attempt"
+  | Object.Conflict -> "workspace conflict"
+  | Object.Resolution -> "workspace resolution"
 
 let error_to_string = function
   | Object_store_error error -> Object_store.error_to_string error

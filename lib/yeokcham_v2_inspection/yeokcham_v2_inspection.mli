@@ -36,6 +36,11 @@ type storage = {
   scratch_generation_frames : int;
   capsule_frames : int;
   capsule_revision_frames : int;
+  workspace_frames : int;
+  workspace_revision_frames : int;
+  workspace_attempt_frames : int;
+  conflict_frames : int;
+  resolution_frames : int;
   restore_journal_records : int;
 }
 

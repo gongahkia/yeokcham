@@ -464,6 +464,19 @@ mechanism. Split produces a validated base-to-intermediate then
 intermediate-to-result chain; combine accepts only an explicit replay-valid
 base/result source chain. No mutable capsule catalog is canonical.
 
+ADR-060 adds the separate V2 workspace boundary:
+`yeokcham_v2_workspace` is the pure deterministic selection/order/application
+core, `yeokcham_v2_workspace_record` owns canonical immutable workspace,
+revision, attempt, conflict, and skip-resolution payloads, and
+`yeokcham_v2_workspace_store` verifies and publishes them. It accepts selected
+immutable capsule revisions even when they are no longer a capsule's current
+head, because the selected revision link itself is fully verified. Workspace
+heads use signed `workspace-<id>` ledger scopes; attempts use separate
+expected-absent `workspace-attempt-<id>-<attempt-id>` scopes. Objects are
+published before their signed binding, so interruption exposes no partial
+workspace state. The store does not materialise a directory or add a CLI
+command in this slice.
+
 `capsule create --current` uses no separate working-diff format. Under the same
 writer lock it verifies a scratch head, double-scans the working directory, and
 uses the ordinary scratch checkpoint writer for a verified difference. The

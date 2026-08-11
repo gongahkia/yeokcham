@@ -78,6 +78,15 @@ type resolved = {
   expected_result : Model.Snapshot.t;
 }
 
+type verified_revision = {
+  verified_capsule : Capsule.capsule;
+  verified_capsule_ref : V2_model.Opaque_object_ref.t;
+  verified_revision : Capsule.revision;
+  verified_revision_ref : V2_model.Opaque_object_ref.t;
+  verified_declared_base : Model.Snapshot.t;
+  verified_expected_result : Model.Snapshot.t;
+}
+
 type publication = Published of resolved | Already_published of resolved
 type split_plan
 type combine_plan
@@ -130,6 +139,7 @@ type error =
       actual_binding : Ledger.Event_id.t option;
     }
   | Parent_link_mismatch of string
+  | Revision_link_mismatch of string
   | Revision_history_cycle of V2_model.Opaque_object_ref.t
   | Fault_injected of Fault.boundary
 
@@ -164,6 +174,11 @@ val resolve :
   repository -> id:V2_model.Capsule_id.t -> (resolved option, error) result
 (** Reads a sole verified capsule binding and replays the immutable initial
     revision. A malformed or divergent binding is an explicit error. *)
+
+val verify_revision_link :
+  repository -> Capsule.revision_link -> (verified_revision, error) result
+(** Verifies any immutable V2 capsule revision link, including a revision that
+    is no longer the capsule's current signed binding. *)
 
 val plan_split :
   repository ->

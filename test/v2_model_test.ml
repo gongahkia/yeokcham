@@ -28,6 +28,13 @@ let kinds : (string * (module V2.Identity)) list =
     ("ref event", (module V2.Ref_event_id));
     ("signer key", (module V2.Signer_key_id));
     ("transaction", (module V2.Transaction_id));
+    ("capsule", (module V2.Capsule_id));
+    ("capsule revision", (module V2.Capsule_revision_id));
+    ("workspace", (module V2.Workspace_id));
+    ("workspace revision", (module V2.Workspace_revision_id));
+    ("workspace attempt", (module V2.Workspace_attempt_id));
+    ("conflict", (module V2.Conflict_id));
+    ("resolution", (module V2.Resolution_id));
   ]
 
 let require_ok error_to_string = function
