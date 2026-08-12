@@ -477,6 +477,17 @@ published before their signed binding, so interruption exposes no partial
 workspace state. The store does not materialise a directory or add a CLI
 command in this slice.
 
+ADR-062 adds the separate V2 release boundary:
+`yeokcham_v2_release_record` owns canonical immutable Validation_evidence and
+Release payloads, while `yeokcham_v2_release_store` verifies and publishes
+them. A release resolves its named immutable workspace revision and complete
+attempt directly; it never reads a mutable workspace head or rebuildable index.
+The adapter requires passed evidence over the exact final snapshot and verifies
+the complete ordered parent closure. Its only visibility point is an
+expected-absent signed `release-<release-id>` ledger scope. This client-neutral
+slice adds neither CLI command, materialisation, process runner, review claim,
+nor signing workflow.
+
 `capsule create --current` uses no separate working-diff format. Under the same
 writer lock it verifies a scratch head, double-scans the working directory, and
 uses the ordinary scratch checkpoint writer for a verified difference. The
@@ -542,7 +553,12 @@ The final two ref publications are not cross-ref atomic. Recovery re-resolves
 immutable workspace inputs and allows an exact retry when scratch-head
 publication succeeded before workspace-attempt publication.
 
-## 9.1 Release service
+## 9.1 Legacy V1 release service
+
+The following `yeokcham_release` description is retained for the V1 model. It
+is not a V2 adapter and does not share V2 release frames, opaque object
+references, or ledger bindings; ADR-062's V2 boundary above is authoritative
+for this milestone.
 
 `yeokcham_release` is a read-mostly durable adapter over verified immutable
 workspace revisions and attempts. Release creation holds the existing

@@ -8,6 +8,7 @@ module Ledger = Yeokcham_v2_ledger
 module Retention = Yeokcham_v2_retention
 module Snapshot = Yeokcham_model.Snapshot
 module Capsule = Yeokcham_v2_capsule
+module Release_record = Yeokcham_v2_release_record
 module Workspace_record = Yeokcham_v2_workspace_record
 
 type kind =
@@ -22,6 +23,8 @@ type kind =
   | Workspace_attempt
   | Conflict
   | Resolution
+  | Validation_evidence
+  | Release
 
 type t
 
@@ -35,6 +38,7 @@ type error =
   | Retention_error of Retention.error
   | Capsule_error of Capsule.error
   | Workspace_record_error of Workspace_record.error
+  | Release_record_error of Release_record.error
   | Snapshot_error of Yeokcham_model.canonical_decode_error
   | Noncanonical_frame
 
@@ -53,6 +57,8 @@ val workspace_revision : Workspace_record.workspace_revision -> t
 val workspace_attempt : Workspace_record.workspace_attempt -> t
 val conflict : Workspace_record.conflict -> t
 val resolution : Workspace_record.resolution -> t
+val validation_evidence : Release_record.validation_evidence -> t
+val release : Release_record.release -> t
 val kind : t -> kind
 val ledger : t -> Ledger.t option
 val snapshot : t -> Snapshot.t option
@@ -65,5 +71,7 @@ val workspace_revision_record : t -> Workspace_record.workspace_revision option
 val workspace_attempt_record : t -> Workspace_record.workspace_attempt option
 val conflict_record : t -> Workspace_record.conflict option
 val resolution_record : t -> Workspace_record.resolution option
+val validation_evidence_record : t -> Release_record.validation_evidence option
+val release_record : t -> Release_record.release option
 val encode : t -> string
 val decode : string -> (t, error) result

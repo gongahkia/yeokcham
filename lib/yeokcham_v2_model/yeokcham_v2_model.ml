@@ -102,6 +102,8 @@ module Workspace_revision_id = Make_identity ()
 module Workspace_attempt_id = Make_identity ()
 module Conflict_id = Make_identity ()
 module Resolution_id = Make_identity ()
+module Validation_id = Make_identity ()
+module Release_id = Make_identity ()
 
 module Encrypted_ref_event = struct
   type t = { id : Ref_event_id.t; object_ref : Opaque_object_ref.t }

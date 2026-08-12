@@ -272,6 +272,15 @@ materialise, conflict, resolve, and rematerialise. Properties remain bounded
 and seeded; release dependencies still return the explicit unsupported resolver
 error.
 
+V2-021 separately checks canonical Validation_evidence and Release bytes with
+inverse decoders and typed-frame goldens; generated evidence round trips;
+release identity independence from observation timestamps and physical evidence
+references; exact complete-attempt replay after reopen; failed, mismatched, or
+missing evidence rejection; conflict-bearing attempt rejection; idempotent
+retry; parent physical-link rejection; interruption before binding; and typed
+storage counts. This client-neutral slice does not claim a process runner,
+review approval, signing workflow, CLI behaviour, or a benchmark.
+
 Milestone 6 validation checks canonical command/evidence goldens and inverse
 decoders; exact-snapshot materialisation; passing, failed, signalled, timeout,
 and execution-error observations; bounded stdout/stderr retention and hashes;

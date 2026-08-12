@@ -1,0 +1,8 @@
+(library
+ (name yeokcham_v2_release_record)
+ (libraries
+  yeokcham_encoding
+  yeokcham_hash
+  yeokcham_v2_capsule
+  yeokcham_v2_model
+  yeokcham_v2_workspace_record))

@@ -44,6 +44,8 @@ let kind_to_string = function
   | Object.Workspace_attempt -> "workspace attempt"
   | Object.Conflict -> "workspace conflict"
   | Object.Resolution -> "workspace resolution"
+  | Object.Validation_evidence -> "validation evidence"
+  | Object.Release -> "release"
 
 let error_to_string = function
   | Object_store_error error -> Object_store.error_to_string error

@@ -143,6 +143,14 @@ val resolve :
 (** Verifies the sole signed workspace head, every selected capsule revision,
     every bound resolution, and direct deterministic workspace replay. *)
 
+val load_revision_link :
+  repository ->
+  Record.workspace_revision_link ->
+  (Record.workspace_revision, error) result
+(** Loads one exact immutable workspace revision link without resolving a
+    mutable workspace head. The caller remains responsible for verifying any
+    larger context that names the revision. *)
+
 val attempt :
   ?fault:Fault.t ->
   repository ->

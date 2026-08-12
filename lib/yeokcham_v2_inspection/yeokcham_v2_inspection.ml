@@ -40,6 +40,8 @@ type storage = {
   workspace_attempt_frames : int;
   conflict_frames : int;
   resolution_frames : int;
+  validation_evidence_frames : int;
+  release_frames : int;
   restore_journal_records : int;
 }
 
@@ -122,23 +124,205 @@ let storage ~root ~bootstrap_repository =
     Object_store.list_object_refs objects
     |> Result.map_error (fun error -> Object_store_error error)
   in
-  let rec count bytes ledger snapshots protections generations capsules
-      revisions workspaces workspace_revisions workspace_attempts conflicts
-      resolutions = function
-    | [] ->
-        Ok
-          ( bytes,
-            ledger,
-            snapshots,
-            protections,
-            generations,
-            capsules,
-            revisions,
-            workspaces,
-            workspace_revisions,
-            workspace_attempts,
-            conflicts,
-            resolutions )
+  let bump
+      ( ledger,
+        snapshots,
+        protections,
+        generations,
+        capsules,
+        revisions,
+        workspaces,
+        workspace_revisions,
+        workspace_attempts,
+        conflicts,
+        resolutions,
+        validations,
+        releases ) = function
+    | Object.Ledger_event ->
+        ( ledger + 1,
+          snapshots,
+          protections,
+          generations,
+          capsules,
+          revisions,
+          workspaces,
+          workspace_revisions,
+          workspace_attempts,
+          conflicts,
+          resolutions,
+          validations,
+          releases )
+    | Object.Scratch_snapshot ->
+        ( ledger,
+          snapshots + 1,
+          protections,
+          generations,
+          capsules,
+          revisions,
+          workspaces,
+          workspace_revisions,
+          workspace_attempts,
+          conflicts,
+          resolutions,
+          validations,
+          releases )
+    | Object.Scratch_protection ->
+        ( ledger,
+          snapshots,
+          protections + 1,
+          generations,
+          capsules,
+          revisions,
+          workspaces,
+          workspace_revisions,
+          workspace_attempts,
+          conflicts,
+          resolutions,
+          validations,
+          releases )
+    | Object.Scratch_generation ->
+        ( ledger,
+          snapshots,
+          protections,
+          generations + 1,
+          capsules,
+          revisions,
+          workspaces,
+          workspace_revisions,
+          workspace_attempts,
+          conflicts,
+          resolutions,
+          validations,
+          releases )
+    | Object.Capsule ->
+        ( ledger,
+          snapshots,
+          protections,
+          generations,
+          capsules + 1,
+          revisions,
+          workspaces,
+          workspace_revisions,
+          workspace_attempts,
+          conflicts,
+          resolutions,
+          validations,
+          releases )
+    | Object.Capsule_revision ->
+        ( ledger,
+          snapshots,
+          protections,
+          generations,
+          capsules,
+          revisions + 1,
+          workspaces,
+          workspace_revisions,
+          workspace_attempts,
+          conflicts,
+          resolutions,
+          validations,
+          releases )
+    | Object.Workspace ->
+        ( ledger,
+          snapshots,
+          protections,
+          generations,
+          capsules,
+          revisions,
+          workspaces + 1,
+          workspace_revisions,
+          workspace_attempts,
+          conflicts,
+          resolutions,
+          validations,
+          releases )
+    | Object.Workspace_revision ->
+        ( ledger,
+          snapshots,
+          protections,
+          generations,
+          capsules,
+          revisions,
+          workspaces,
+          workspace_revisions + 1,
+          workspace_attempts,
+          conflicts,
+          resolutions,
+          validations,
+          releases )
+    | Object.Workspace_attempt ->
+        ( ledger,
+          snapshots,
+          protections,
+          generations,
+          capsules,
+          revisions,
+          workspaces,
+          workspace_revisions,
+          workspace_attempts + 1,
+          conflicts,
+          resolutions,
+          validations,
+          releases )
+    | Object.Conflict ->
+        ( ledger,
+          snapshots,
+          protections,
+          generations,
+          capsules,
+          revisions,
+          workspaces,
+          workspace_revisions,
+          workspace_attempts,
+          conflicts + 1,
+          resolutions,
+          validations,
+          releases )
+    | Object.Resolution ->
+        ( ledger,
+          snapshots,
+          protections,
+          generations,
+          capsules,
+          revisions,
+          workspaces,
+          workspace_revisions,
+          workspace_attempts,
+          conflicts,
+          resolutions + 1,
+          validations,
+          releases )
+    | Object.Validation_evidence ->
+        ( ledger,
+          snapshots,
+          protections,
+          generations,
+          capsules,
+          revisions,
+          workspaces,
+          workspace_revisions,
+          workspace_attempts,
+          conflicts,
+          resolutions,
+          validations + 1,
+          releases )
+    | Object.Release ->
+        ( ledger,
+          snapshots,
+          protections,
+          generations,
+          capsules,
+          revisions,
+          workspaces,
+          workspace_revisions,
+          workspace_attempts,
+          conflicts,
+          resolutions,
+          validations,
+          releases + 1 )
+  in
+  let rec count bytes counts = function
+    | [] -> Ok (bytes, counts)
     | object_ref :: rest ->
         let path = Object_store.object_path objects object_ref in
         let* stat =
@@ -156,169 +340,26 @@ let storage ~root ~bootstrap_repository =
           Object_store.load objects ~object_ref
           |> Result.map_error (fun error -> Object_store_error error)
         in
-        let ( ledger,
-              snapshots,
-              protections,
-              generations,
-              capsules,
-              revisions,
-              workspaces,
-              workspace_revisions,
-              workspace_attempts,
-              conflicts,
-              resolutions ) =
-          match Object.kind object_ with
-          | Object.Ledger_event ->
-              ( ledger + 1,
-                snapshots,
-                protections,
-                generations,
-                capsules,
-                revisions,
-                workspaces,
-                workspace_revisions,
-                workspace_attempts,
-                conflicts,
-                resolutions )
-          | Object.Scratch_snapshot ->
-              ( ledger,
-                snapshots + 1,
-                protections,
-                generations,
-                capsules,
-                revisions,
-                workspaces,
-                workspace_revisions,
-                workspace_attempts,
-                conflicts,
-                resolutions )
-          | Object.Scratch_protection ->
-              ( ledger,
-                snapshots,
-                protections + 1,
-                generations,
-                capsules,
-                revisions,
-                workspaces,
-                workspace_revisions,
-                workspace_attempts,
-                conflicts,
-                resolutions )
-          | Object.Scratch_generation ->
-              ( ledger,
-                snapshots,
-                protections,
-                generations + 1,
-                capsules,
-                revisions,
-                workspaces,
-                workspace_revisions,
-                workspace_attempts,
-                conflicts,
-                resolutions )
-          | Object.Capsule ->
-              ( ledger,
-                snapshots,
-                protections,
-                generations,
-                capsules + 1,
-                revisions,
-                workspaces,
-                workspace_revisions,
-                workspace_attempts,
-                conflicts,
-                resolutions )
-          | Object.Capsule_revision ->
-              ( ledger,
-                snapshots,
-                protections,
-                generations,
-                capsules,
-                revisions + 1,
-                workspaces,
-                workspace_revisions,
-                workspace_attempts,
-                conflicts,
-                resolutions )
-          | Object.Workspace ->
-              ( ledger,
-                snapshots,
-                protections,
-                generations,
-                capsules,
-                revisions,
-                workspaces + 1,
-                workspace_revisions,
-                workspace_attempts,
-                conflicts,
-                resolutions )
-          | Object.Workspace_revision ->
-              ( ledger,
-                snapshots,
-                protections,
-                generations,
-                capsules,
-                revisions,
-                workspaces,
-                workspace_revisions + 1,
-                workspace_attempts,
-                conflicts,
-                resolutions )
-          | Object.Workspace_attempt ->
-              ( ledger,
-                snapshots,
-                protections,
-                generations,
-                capsules,
-                revisions,
-                workspaces,
-                workspace_revisions,
-                workspace_attempts + 1,
-                conflicts,
-                resolutions )
-          | Object.Conflict ->
-              ( ledger,
-                snapshots,
-                protections,
-                generations,
-                capsules,
-                revisions,
-                workspaces,
-                workspace_revisions,
-                workspace_attempts,
-                conflicts + 1,
-                resolutions )
-          | Object.Resolution ->
-              ( ledger,
-                snapshots,
-                protections,
-                generations,
-                capsules,
-                revisions,
-                workspaces,
-                workspace_revisions,
-                workspace_attempts,
-                conflicts,
-                resolutions + 1 )
-        in
         count
           Int64.(add bytes (of_int stat.Unix.st_size))
-          ledger snapshots protections generations capsules revisions workspaces
-          workspace_revisions workspace_attempts conflicts resolutions rest
+          (bump counts (Object.kind object_))
+          rest
   in
   let* ( encrypted_bytes,
-         ledger_frames,
-         scratch_snapshot_frames,
-         scratch_protection_frames,
-         scratch_generation_frames,
-         capsule_frames,
-         capsule_revision_frames,
-         workspace_frames,
-         workspace_revision_frames,
-         workspace_attempt_frames,
-         conflict_frames,
-         resolution_frames ) =
-    count 0L 0 0 0 0 0 0 0 0 0 0 0 refs
+         ( ledger_frames,
+           scratch_snapshot_frames,
+           scratch_protection_frames,
+           scratch_generation_frames,
+           capsule_frames,
+           capsule_revision_frames,
+           workspace_frames,
+           workspace_revision_frames,
+           workspace_attempt_frames,
+           conflict_frames,
+           resolution_frames,
+           validation_evidence_frames,
+           release_frames ) ) =
+    count 0L (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0) refs
   in
   let* journal = journal_store ~root bootstrap_repository in
   let* records =
@@ -340,6 +381,8 @@ let storage ~root ~bootstrap_repository =
       workspace_attempt_frames;
       conflict_frames;
       resolution_frames;
+      validation_evidence_frames;
+      release_frames;
       restore_journal_records = List.length records;
     }
 

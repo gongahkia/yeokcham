@@ -172,4 +172,4 @@ The ADR lifecycle, numbering rules, and template are defined in [`docs/adr/READM
 - [ADR-059 — V2 exact capsule curation and initial bindings](docs/adr/059-v2-exact-capsule-curation.md) — Accepted.
 - [ADR-060 — V2 immutable capsule revisions and explicit composition plans](docs/adr/060-v2-immutable-capsule-revisions.md) — Proposed.
 - [ADR-061 — V2 deterministic workspaces and explicit conflict records](docs/adr/061-v2-workspace-composition.md) — Accepted.
-- [ADR-062 — V2 immutable releases and exact validation linkage](docs/adr/062-v2-immutable-releases.md) — Proposed.
+- [ADR-062 — V2 immutable releases and exact validation linkage](docs/adr/062-v2-immutable-releases.md) — Accepted.

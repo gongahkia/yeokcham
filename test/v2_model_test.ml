@@ -35,6 +35,8 @@ let kinds : (string * (module V2.Identity)) list =
     ("workspace attempt", (module V2.Workspace_attempt_id));
     ("conflict", (module V2.Conflict_id));
     ("resolution", (module V2.Resolution_id));
+    ("validation", (module V2.Validation_id));
+    ("release", (module V2.Release_id));
   ]
 
 let require_ok error_to_string = function

@@ -85,6 +85,8 @@ let error_to_string = function
         | Object.Workspace_attempt -> "workspace attempt"
         | Object.Conflict -> "workspace conflict"
         | Object.Resolution -> "workspace resolution"
+        | Object.Validation_evidence -> "validation evidence"
+        | Object.Release -> "release"
       in
       Printf.sprintf "V2 object %s has kind %s, expected %s"
         (Model.Opaque_object_ref.to_hex object_ref)

@@ -1,8 +1,8 @@
 # ADR-062 — V2 immutable releases and exact validation linkage
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-12
-- Deciders: maintainer review required
+- Deciders: maintainer
 - Supersedes: None
 - Superseded by: None
 - Governing issue: [#143](https://github.com/gongahkia/yeokcham/issues/143)
@@ -78,8 +78,8 @@ ordered capsule logical links, resolution logical IDs, and message. It excludes
 evidence links and observation/creation times; opaque object references remain
 required physical verification links but are not logical identity material.
 
-The pure composer rejects duplicate parents, self-parenting, duplicated
-evidence identities, and malformed or noncanonical record fields. The durable
+The pure composer rejects missing or duplicated evidence, duplicate parents,
+self-parenting, and malformed or noncanonical record fields. The durable
 adapter resolves the signed attempt binding and directly replays its workspace
 revision. The attempt must contain no conflicts, and its exact base, ordered
 capsules, resolutions, and final snapshot must equal the release declaration.
@@ -132,11 +132,11 @@ no user repositories before this issue set closes.
 
 ## Verification
 
-- Unit and generated tests cover canonical identity, malformed links, exact
-  composition checks, and parent closure/cycle rejection.
-- Durable tests cover passed/mismatched/failed evidence, unresolved conflicts,
-  direct replay after workspace-head change, reopen, retry, corruption, and
-  interruption before the release binding.
+- Unit and generated tests cover canonical identity, malformed links, and
+  noncanonical/identity rejection.
+- Durable tests cover passed/mismatched/failed evidence, missing evidence,
+  unresolved conflicts, exact replay after reopen, retry, parent physical-link
+  rejection, and interruption before the release binding.
 - Golden fixtures cover Validation_evidence, Release, and the shifted unknown
   kind; old object-frame goldens remain byte-identical.
 - `make check` and `make property-test PROPERTY_TEST_SEED=17` are required.

@@ -458,6 +458,8 @@ let verify_workspace_revision_link repository link =
       then Error (Workspace_revision_link_mismatch "revision identity differs")
       else Ok revision
 
+let load_revision_link = verify_workspace_revision_link
+
 let load_conflict_link repository link =
   let* object_ =
     Object_store.load repository.objects

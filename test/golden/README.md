@@ -104,7 +104,11 @@ unknown-feature variants retain its fail-closed decoding boundary.
 `v2-object-resolution-frame-v1.cbor.hex` are ADR-061's exact V2 typed-object
 frames. They cover immutable workspace metadata, a canonical selected/order
 revision, an attempt, a typed transition conflict, and an exact skip-only
-resolution. The shifted scratch-frame unknown-kind fixture uses tag 11 because
-tags 6 through 10 are now assigned to those records.
+resolution. `v2-object-validation-evidence-frame-v1.cbor.hex` and
+`v2-object-release-frame-v1.cbor.hex` are ADR-062's exact V2 typed-object
+frames for an immutable validation observation and an immutable release.
+They retain only byte-correct links and client-supplied status, not a process
+runner, reviewer, or signing workflow. The shifted scratch-frame unknown-kind
+fixture uses tag 13 because tags 6 through 12 are assigned to these records.
 
 Changing any fixture bytes requires a format decision and retained compatibility evidence; adding a new schema requires a new named fixture.

@@ -41,6 +41,8 @@ type storage = {
   workspace_attempt_frames : int;
   conflict_frames : int;
   resolution_frames : int;
+  validation_evidence_frames : int;
+  release_frames : int;
   restore_journal_records : int;
 }
 

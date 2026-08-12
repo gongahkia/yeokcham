@@ -33,6 +33,8 @@ module Workspace_revision_id : Identity
 module Workspace_attempt_id : Identity
 module Conflict_id : Identity
 module Resolution_id : Identity
+module Validation_id : Identity
+module Release_id : Identity
 
 module Encrypted_ref_event : sig
   type t

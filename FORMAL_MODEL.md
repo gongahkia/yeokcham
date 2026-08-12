@@ -473,6 +473,42 @@ their revision or attempt, and writes the signed binding last. An interruption
 may leave unreachable immutable objects but cannot make a partial workspace,
 attempt, or resolution visible.
 
+### V2-021 immutable releases and exact validation linkage
+
+ADR-062 adds client-neutral V2 release evidence. A `Validation_evidence`
+contains an exact snapshot link, nonempty caller-supplied check name, `Passed`
+or `Failed` status, and observed time. Its domain-separated logical identity
+includes the snapshot ID, check name, and status, but excludes observed time
+and the physical snapshot reference. It records an observation only: no V2
+process runner, reviewer, signer, or approval is implied.
+
+A `Release` contains ordered parent links, one exact workspace-revision link,
+one exact workspace-attempt link, base/final snapshot links, ordered capsule
+revision links, resolution bindings, at least one canonical evidence link, an
+optional message, and creation time. Its logical identity is domain-separated
+over parent logical IDs, workspace/revision and attempt logical IDs, base/final
+snapshot IDs, ordered capsule logical links, resolution logical IDs, and
+message. Evidence links, timestamps, and all physical references are required
+for verification but excluded from logical identity.
+
+```text
+visible_release(r) =>
+  replay(r.attempt) = r.final_snapshot
+  /\ conflicts(r.attempt) = []
+  /\ evidence(r) != []
+  /\ every e in evidence(r): Passed(e) /\ snapshot(e) = r.final_snapshot
+  /\ parents(r) form an acyclic visible closure
+```
+
+The pure record rejects duplicate parents, self-parenting, duplicate evidence,
+unknown mandatory features, identity mismatches, and noncanonical bytes. The
+durable adapter resolves the named immutable workspace revision and attempt,
+not a mutable workspace head, then checks the exact base, ordered capsules,
+resolution bindings, and final snapshot. The sole visibility point is a signed
+expected-absent `release-<release-id>` ledger scope targeting the exact Release
+frame. Objects may be unreachable after interruption, but no partial release
+is visible.
+
 ### Durable Milestone 4 representation
 
 `Capsule_v1` is immutable initial metadata. `Capsule_revision_v1` holds
@@ -1595,7 +1631,7 @@ Object_frame = (version=1, kind, canonical-payload-bytes, features)
 Object_kind = Ledger_event | Scratch_snapshot | Scratch_protection
             | Scratch_generation | Capsule | Capsule_revision
             | Workspace | Workspace_revision | Workspace_attempt
-            | Conflict | Resolution
+            | Conflict | Resolution | Validation_evidence | Release
 ```
 
 `Ledger_event` contains an exact ADR-048 record. `Scratch_snapshot` contains
@@ -1608,7 +1644,9 @@ ADR-061 adds the five workspace frame kinds and requires their record IDs, link
 order, and mandatory-feature bits to re-encode exactly. A generic object store
 creates and loads frames; the ledger store is a typed view that analyses only
 ledger frames. Old development envelopes that directly contain a ledger record
-reject rather than migrate.
+reject rather than migrate. ADR-062 assigns tags 11 and 12 to
+Validation_evidence and Release; the retained unknown-kind fixture consequently
+uses tag 13. Existing tag 0 through 10 frame bytes remain unchanged.
 
 ## 27. V2 local scratch snapshot publication
 
