@@ -1752,6 +1752,29 @@ flags, corrupt public fields, or AES-GCM authentication failure. Enrolment and
 removal alter only browser-local credential/storage state; they are not signed
 repository join/revocation transitions.
 
+## 25c. Offline recovery package
+
+ADR-068 defines a portable ciphertext that recovers a V2 authority root only
+with an independently retained random secret:
+
+```text
+Recovery_key = SHA-256(domain, Recovery_secret, package-id)
+Recovery_package = (public bindings,
+                    ChaCha20-Poly1305(Recovery_key, Recovery_payload))
+Recovery_payload = (package-id, authority, root-private-key)
+```
+
+`Recovery_secret` is a 32-byte CSPRNG value outside repository and service
+state. Its deterministic verification phrase is checked before decrypting but
+is only a transcription check. A valid recovery requires phrase match,
+authenticated decryption, canonical authority decoding, reconstructed root
+public-key/ID/user match, and equality of all duplicated public bindings.
+
+`recover_replacement_device` can construct a root-signed device-certificate
+proposal from explicit new device material. It has no transition that activates
+the certificate, edits a bootstrap, resets a service account, or replaces a
+repository key. Missing package or secret is explicit irreversible loss.
+
 ## 26. V2 typed encrypted objects
 
 ADR-054 makes the authenticated plaintext of every ADR-045 envelope one

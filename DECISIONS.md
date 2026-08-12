@@ -178,3 +178,4 @@ The ADR lifecycle, numbering rules, and template are defined in [`docs/adr/READM
 - [ADR-065 — V2 authority record causality](docs/adr/065-v2-authority-record-causality.md) — Accepted.
 - [ADR-066 — macOS Keychain device custody and explicit enrollment](docs/adr/066-macos-keychain-device-custody.md) — Accepted.
 - [ADR-067 — browser passkey PRF vault and origin-bound local custody](docs/adr/067-browser-passkey-prf-vault.md) — Accepted.
+- [ADR-068 — offline recovery package and explicit replacement-device proposal](docs/adr/068-offline-recovery-package.md) — Accepted.
