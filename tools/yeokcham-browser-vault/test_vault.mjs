@@ -184,7 +184,8 @@ assert.equal(source.includes("localStorage"), false, "vault implementation must 
 
 {
   const { store, webAuthn } = await enrolledFixture();
-  store.record.ciphertext = `${store.record.ciphertext.slice(0, -1)}A`;
+  const last = store.record.ciphertext.at(-1);
+  store.record.ciphertext = `${store.record.ciphertext.slice(0, -1)}${last === "A" ? "B" : "A"}`;
   const restarted = new BrowserVault({ origin: "https://vault.example.test", store, webAuthn, crypto: webcrypto });
   await expectVaultError(() => restarted.unlock(), "vault-corrupt");
   assert.equal(restarted.isUnlocked, false);
