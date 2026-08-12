@@ -305,6 +305,27 @@
   yeokcham_v2_model))
 
 (test
+ (name test_v2_authority)
+ (modules test_v2_authority)
+ (libraries
+  alcotest
+  mirage-crypto-ec
+  qcheck-core
+  qcheck-alcotest
+  yeokcham_encoding
+  yeokcham_store
+  yeokcham_testkit
+  yeokcham_v2_address
+  yeokcham_v2_authority
+  yeokcham_v2_envelope
+  yeokcham_v2_model
+  yeokcham_v2_object
+  yeokcham_v2_object_store
+  unix)
+ (deps
+  (source_tree golden)))
+
+(test
  (name test_v2_bootstrap)
  (modules test_v2_bootstrap)
  (libraries
@@ -1853,6 +1874,7 @@
   (:v2_scratch_daemon_property_test v2_scratch_daemon_property_test.exe)
   (:test_v2_linux_scratch_daemon test_v2_linux_scratch_daemon.exe)
   (:test_v2_ledger test_v2_ledger.exe)
+  (:test_v2_authority test_v2_authority.exe)
   (:test_v2_object test_v2_object.exe)
   (:test_v2_capsule test_v2_capsule.exe)
   (:test_v2_workspace test_v2_workspace.exe)
@@ -1929,6 +1951,7 @@
    (run %{v2_scratch_daemon_property_test})
    (run %{test_v2_linux_scratch_daemon})
    (run %{test_v2_ledger})
+   (run %{test_v2_authority})
    (run %{test_v2_object})
    (run %{test_v2_capsule})
    (run %{test_v2_workspace})

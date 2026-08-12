@@ -320,6 +320,21 @@ let storage ~root ~bootstrap_repository =
           resolutions,
           validations,
           releases + 1 )
+    | Object.Repository_authority | Object.Device_certificate
+    | Object.Device_revocation ->
+        ( ledger,
+          snapshots,
+          protections,
+          generations,
+          capsules,
+          revisions,
+          workspaces,
+          workspace_revisions,
+          workspace_attempts,
+          conflicts,
+          resolutions,
+          validations,
+          releases )
   in
   let rec count bytes counts = function
     | [] -> Ok (bytes, counts)

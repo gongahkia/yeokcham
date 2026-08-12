@@ -550,6 +550,48 @@ permanent prune is a later explicit operation. Neither the manifest, lock,
 byte accounting, quarantine path, nor progress state is a V2 object, ledger
 event, logical identity, or visibility source.
 
+### V2-023 repository root authority records
+
+ADRs 064 and 065 define a repository-scoped pseudonymous authority boundary.
+`user_id` and `root_key_id` are separate domain-separated SHA-256 digests of
+one exact Ed25519 root public key. They are cryptographic identifiers, not
+accounts, people, ownership claims, or a device signer ID. A
+`Repository_authority` self-signs its exact repository ID, user/root IDs, root
+public key, schema version, and mandatory feature mask. Its record identity is
+the domain-separated digest of that unsigned canonical body.
+
+Each `Device_certificate` independently binds one repository/user/device ID,
+device ledger signer ID and public key, envelope/address-key commitments, local
+key handle, and mandatory features. A `Device_revocation` independently binds
+one repository/user/certificate ID and feature mask. Certificate and revocation
+identities are domain-separated digests of their own canonical unsigned bodies;
+their signatures are over separate domain-prefixed record identities.
+
+```text
+active(c, A, C, R) =>
+  c in C
+  /\ valid_certificate(A, c)
+  /\ no r in R: valid_revocation(A, r) /\ r.certificate_id = c.id
+```
+
+The pure evaluator rejects duplicate certificate IDs, multiple certificates for
+one device, duplicate revocation IDs, multiple revocations for one certificate,
+and a revocation with no supplied certificate. A syntactically canonical
+certificate/revocation object is not an authority decision: it remains
+unverified until checked against its exact repository-authority root key.
+Authority-ledger ordering is intentionally not encoded in any record identity;
+the later authority-scoped causal ledger supplies that one ordering edge.
+
+Root signing and device ledger signing public keys must differ. Existing local
+bootstrap capability construction separately rejects reusing raw envelope,
+opaque-address, and device ledger key material. Authority records carry public
+commitments rather than private material and cannot prove whether a remote
+device reused an undisclosed symmetric key; they therefore make no such claim.
+All three record payloads and their typed encrypted-object frames are
+versioned canonical CBOR. An object-frame decoder self-verifies a repository
+authority, while certificate/revocation frames expose only validated canonical
+payloads until an authority anchor performs signature verification.
+
 ### Durable Milestone 4 representation
 
 `Capsule_v1` is immutable initial metadata. `Capsule_revision_v1` holds

@@ -21,7 +21,12 @@ end
 module Repository_id : Identity
 module Organization_id : Identity
 module Account_id : Identity
+module User_id : Identity
+module Root_key_id : Identity
 module Device_id : Identity
+module Repository_authority_id : Identity
+module Device_certificate_id : Identity
+module Device_revocation_id : Identity
 module Opaque_object_ref : Identity
 module Ref_event_id : Identity
 module Signer_key_id : Identity

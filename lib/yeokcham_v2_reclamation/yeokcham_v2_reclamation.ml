@@ -194,6 +194,9 @@ let kind_code = function
   | Object.Resolution -> 10L
   | Object.Validation_evidence -> 11L
   | Object.Release -> 12L
+  | Object.Repository_authority -> 13L
+  | Object.Device_certificate -> 14L
+  | Object.Device_revocation -> 15L
 
 let kind_of_code = function
   | 0L -> Ok Object.Ledger_event
@@ -209,6 +212,9 @@ let kind_of_code = function
   | 10L -> Ok Object.Resolution
   | 11L -> Ok Object.Validation_evidence
   | 12L -> Ok Object.Release
+  | 13L -> Ok Object.Repository_authority
+  | 14L -> Ok Object.Device_certificate
+  | 15L -> Ok Object.Device_revocation
   | _ -> Error (Invalid_payload "unknown V2 reclamation frame kind")
 
 let candidate_compare left right =

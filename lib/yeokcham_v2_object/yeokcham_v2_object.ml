@@ -5,6 +5,7 @@ module Snapshot = Yeokcham_model.Snapshot
 module Capsule = Yeokcham_v2_capsule
 module Release_record = Yeokcham_v2_release_record
 module Workspace_record = Yeokcham_v2_workspace_record
+module Authority = Yeokcham_v2_authority
 
 type kind =
   | Ledger_event
@@ -20,6 +21,14 @@ type kind =
   | Resolution
   | Validation_evidence
   | Release
+  | Repository_authority
+  | Device_certificate
+  | Device_revocation
+
+type authority_frame =
+  | Repository_authority_frame of Authority.repository_authority
+  | Device_certificate_frame of string
+  | Device_revocation_frame of string
 
 type t =
   | Ledger_event_frame of Ledger.t
@@ -35,6 +44,7 @@ type t =
   | Resolution_frame of Workspace_record.resolution
   | Validation_evidence_frame of Release_record.validation_evidence
   | Release_frame of Release_record.release
+  | Authority_frame of authority_frame
 
 type error =
   | Invalid_payload of string
@@ -47,6 +57,7 @@ type error =
   | Capsule_error of Capsule.error
   | Workspace_record_error of Workspace_record.error
   | Release_record_error of Release_record.error
+  | Authority_error of Authority.error
   | Snapshot_error of Yeokcham_model.canonical_decode_error
   | Noncanonical_frame
 
@@ -75,6 +86,7 @@ let error_to_string = function
   | Capsule_error error -> Capsule.error_to_string error
   | Workspace_record_error error -> Workspace_record.error_to_string error
   | Release_record_error error -> Release_record.error_to_string error
+  | Authority_error error -> Authority.error_to_string error
   | Snapshot_error error ->
       Yeokcham_model.canonical_decode_error_to_string error
   | Noncanonical_frame -> "V2 typed object frame is noncanonical"
@@ -129,6 +141,17 @@ let resolution resolution = Resolution_frame resolution
 let validation_evidence evidence = Validation_evidence_frame evidence
 let release release = Release_frame release
 
+let repository_authority authority =
+  Authority_frame (Repository_authority_frame authority)
+
+let device_certificate certificate =
+  Authority_frame
+    (Device_certificate_frame (Authority.encode_device_certificate certificate))
+
+let device_revocation revocation =
+  Authority_frame
+    (Device_revocation_frame (Authority.encode_device_revocation revocation))
+
 let kind = function
   | Ledger_event_frame _ -> Ledger_event
   | Scratch_snapshot_frame _ -> Scratch_snapshot
@@ -143,6 +166,9 @@ let kind = function
   | Resolution_frame _ -> Resolution
   | Validation_evidence_frame _ -> Validation_evidence
   | Release_frame _ -> Release
+  | Authority_frame (Repository_authority_frame _) -> Repository_authority
+  | Authority_frame (Device_certificate_frame _) -> Device_certificate
+  | Authority_frame (Device_revocation_frame _) -> Device_revocation
 
 let ledger = function
   | Ledger_event_frame event -> Some event
@@ -151,7 +177,7 @@ let ledger = function
       None
   | Workspace_frame _ | Workspace_revision_frame _ | Workspace_attempt_frame _
   | Conflict_frame _ | Resolution_frame _ | Validation_evidence_frame _
-  | Release_frame _ ->
+  | Release_frame _ | Authority_frame _ ->
       None
 
 let snapshot = function
@@ -160,7 +186,7 @@ let snapshot = function
   | Scratch_protection_frame _ | Scratch_generation_frame _ | Capsule_frame _
   | Capsule_revision_frame _ | Workspace_frame _ | Workspace_revision_frame _
   | Workspace_attempt_frame _ | Conflict_frame _ | Resolution_frame _
-  | Validation_evidence_frame _ | Release_frame _ ->
+  | Validation_evidence_frame _ | Release_frame _ | Authority_frame _ ->
       None
 
 let protection = function
@@ -168,7 +194,8 @@ let protection = function
   | Ledger_event_frame _ | Scratch_snapshot_frame _ | Scratch_generation_frame _
   | Capsule_frame _ | Capsule_revision_frame _ | Workspace_frame _
   | Workspace_revision_frame _ | Workspace_attempt_frame _ | Conflict_frame _
-  | Resolution_frame _ | Validation_evidence_frame _ | Release_frame _ ->
+  | Resolution_frame _ | Validation_evidence_frame _ | Release_frame _
+  | Authority_frame _ ->
       None
 
 let generation = function
@@ -176,7 +203,8 @@ let generation = function
   | Ledger_event_frame _ | Scratch_snapshot_frame _ | Scratch_protection_frame _
   | Capsule_frame _ | Capsule_revision_frame _ | Workspace_frame _
   | Workspace_revision_frame _ | Workspace_attempt_frame _ | Conflict_frame _
-  | Resolution_frame _ | Validation_evidence_frame _ | Release_frame _ ->
+  | Resolution_frame _ | Validation_evidence_frame _ | Release_frame _
+  | Authority_frame _ ->
       None
 
 let capsule_record = function
@@ -184,7 +212,8 @@ let capsule_record = function
   | Ledger_event_frame _ | Scratch_snapshot_frame _ | Scratch_protection_frame _
   | Scratch_generation_frame _ | Capsule_revision_frame _ | Workspace_frame _
   | Workspace_revision_frame _ | Workspace_attempt_frame _ | Conflict_frame _
-  | Resolution_frame _ | Validation_evidence_frame _ | Release_frame _ ->
+  | Resolution_frame _ | Validation_evidence_frame _ | Release_frame _
+  | Authority_frame _ ->
       None
 
 let capsule_revision_record = function
@@ -192,7 +221,8 @@ let capsule_revision_record = function
   | Ledger_event_frame _ | Scratch_snapshot_frame _ | Scratch_protection_frame _
   | Scratch_generation_frame _ | Capsule_frame _ | Workspace_frame _
   | Workspace_revision_frame _ | Workspace_attempt_frame _ | Conflict_frame _
-  | Resolution_frame _ | Validation_evidence_frame _ | Release_frame _ ->
+  | Resolution_frame _ | Validation_evidence_frame _ | Release_frame _
+  | Authority_frame _ ->
       None
 
 let workspace_record = function
@@ -200,7 +230,8 @@ let workspace_record = function
   | Ledger_event_frame _ | Scratch_snapshot_frame _ | Scratch_protection_frame _
   | Scratch_generation_frame _ | Capsule_frame _ | Capsule_revision_frame _
   | Workspace_revision_frame _ | Workspace_attempt_frame _ | Conflict_frame _
-  | Resolution_frame _ | Validation_evidence_frame _ | Release_frame _ ->
+  | Resolution_frame _ | Validation_evidence_frame _ | Release_frame _
+  | Authority_frame _ ->
       None
 
 let workspace_revision_record = function
@@ -208,7 +239,8 @@ let workspace_revision_record = function
   | Ledger_event_frame _ | Scratch_snapshot_frame _ | Scratch_protection_frame _
   | Scratch_generation_frame _ | Capsule_frame _ | Capsule_revision_frame _
   | Workspace_frame _ | Workspace_attempt_frame _ | Conflict_frame _
-  | Resolution_frame _ | Validation_evidence_frame _ | Release_frame _ ->
+  | Resolution_frame _ | Validation_evidence_frame _ | Release_frame _
+  | Authority_frame _ ->
       None
 
 let workspace_attempt_record = function
@@ -216,7 +248,8 @@ let workspace_attempt_record = function
   | Ledger_event_frame _ | Scratch_snapshot_frame _ | Scratch_protection_frame _
   | Scratch_generation_frame _ | Capsule_frame _ | Capsule_revision_frame _
   | Workspace_frame _ | Workspace_revision_frame _ | Conflict_frame _
-  | Resolution_frame _ | Validation_evidence_frame _ | Release_frame _ ->
+  | Resolution_frame _ | Validation_evidence_frame _ | Release_frame _
+  | Authority_frame _ ->
       None
 
 let conflict_record = function
@@ -224,7 +257,8 @@ let conflict_record = function
   | Ledger_event_frame _ | Scratch_snapshot_frame _ | Scratch_protection_frame _
   | Scratch_generation_frame _ | Capsule_frame _ | Capsule_revision_frame _
   | Workspace_frame _ | Workspace_revision_frame _ | Workspace_attempt_frame _
-  | Resolution_frame _ | Validation_evidence_frame _ | Release_frame _ ->
+  | Resolution_frame _ | Validation_evidence_frame _ | Release_frame _
+  | Authority_frame _ ->
       None
 
 let resolution_record = function
@@ -232,7 +266,8 @@ let resolution_record = function
   | Ledger_event_frame _ | Scratch_snapshot_frame _ | Scratch_protection_frame _
   | Scratch_generation_frame _ | Capsule_frame _ | Capsule_revision_frame _
   | Workspace_frame _ | Workspace_revision_frame _ | Workspace_attempt_frame _
-  | Conflict_frame _ | Validation_evidence_frame _ | Release_frame _ ->
+  | Conflict_frame _ | Validation_evidence_frame _ | Release_frame _
+  | Authority_frame _ ->
       None
 
 let validation_evidence_record = function
@@ -240,7 +275,8 @@ let validation_evidence_record = function
   | Ledger_event_frame _ | Scratch_snapshot_frame _ | Scratch_protection_frame _
   | Scratch_generation_frame _ | Capsule_frame _ | Capsule_revision_frame _
   | Workspace_frame _ | Workspace_revision_frame _ | Workspace_attempt_frame _
-  | Conflict_frame _ | Resolution_frame _ | Release_frame _ ->
+  | Conflict_frame _ | Resolution_frame _ | Release_frame _ | Authority_frame _
+    ->
       None
 
 let release_record = function
@@ -248,7 +284,41 @@ let release_record = function
   | Ledger_event_frame _ | Scratch_snapshot_frame _ | Scratch_protection_frame _
   | Scratch_generation_frame _ | Capsule_frame _ | Capsule_revision_frame _
   | Workspace_frame _ | Workspace_revision_frame _ | Workspace_attempt_frame _
-  | Conflict_frame _ | Resolution_frame _ | Validation_evidence_frame _ ->
+  | Conflict_frame _ | Resolution_frame _ | Validation_evidence_frame _
+  | Authority_frame _ ->
+      None
+
+let repository_authority_record = function
+  | Authority_frame (Repository_authority_frame authority) -> Some authority
+  | Ledger_event_frame _ | Scratch_snapshot_frame _ | Scratch_protection_frame _
+  | Scratch_generation_frame _ | Capsule_frame _ | Capsule_revision_frame _
+  | Workspace_frame _ | Workspace_revision_frame _ | Workspace_attempt_frame _
+  | Conflict_frame _ | Resolution_frame _ | Validation_evidence_frame _
+  | Release_frame _
+  | Authority_frame (Device_certificate_frame _)
+  | Authority_frame (Device_revocation_frame _) ->
+      None
+
+let device_certificate_payload = function
+  | Authority_frame (Device_certificate_frame payload) -> Some payload
+  | Ledger_event_frame _ | Scratch_snapshot_frame _ | Scratch_protection_frame _
+  | Scratch_generation_frame _ | Capsule_frame _ | Capsule_revision_frame _
+  | Workspace_frame _ | Workspace_revision_frame _ | Workspace_attempt_frame _
+  | Conflict_frame _ | Resolution_frame _ | Validation_evidence_frame _
+  | Release_frame _
+  | Authority_frame (Repository_authority_frame _)
+  | Authority_frame (Device_revocation_frame _) ->
+      None
+
+let device_revocation_payload = function
+  | Authority_frame (Device_revocation_frame payload) -> Some payload
+  | Ledger_event_frame _ | Scratch_snapshot_frame _ | Scratch_protection_frame _
+  | Scratch_generation_frame _ | Capsule_frame _ | Capsule_revision_frame _
+  | Workspace_frame _ | Workspace_revision_frame _ | Workspace_attempt_frame _
+  | Conflict_frame _ | Resolution_frame _ | Validation_evidence_frame _
+  | Release_frame _
+  | Authority_frame (Repository_authority_frame _)
+  | Authority_frame (Device_certificate_frame _) ->
       None
 
 let kind_code = function
@@ -265,6 +335,9 @@ let kind_code = function
   | Resolution -> 10L
   | Validation_evidence -> 11L
   | Release -> 12L
+  | Repository_authority -> 13L
+  | Device_certificate -> 14L
+  | Device_revocation -> 15L
 
 let payload = function
   | Ledger_event_frame event -> Ledger.encode event
@@ -285,6 +358,10 @@ let payload = function
   | Validation_evidence_frame evidence ->
       Release_record.encode_validation_evidence evidence
   | Release_frame release -> Release_record.encode_release release
+  | Authority_frame (Repository_authority_frame authority) ->
+      Authority.encode_repository_authority authority
+  | Authority_frame (Device_certificate_frame certificate) -> certificate
+  | Authority_frame (Device_revocation_frame revocation) -> revocation
 
 let encode frame =
   let value =
@@ -356,6 +433,20 @@ let decode_payload kind payload =
         Release_record.decode_release payload
         |> Result.map release
         |> Result.map_error (fun error -> Release_record_error error)
+    | Repository_authority ->
+        Authority.decode_repository_authority payload
+        |> Result.map repository_authority
+        |> Result.map_error (fun error -> Authority_error error)
+    | Device_certificate ->
+        Authority.validate_device_certificate_payload payload
+        |> Result.map (fun () ->
+            Authority_frame (Device_certificate_frame payload))
+        |> Result.map_error (fun error -> Authority_error error)
+    | Device_revocation ->
+        Authority.validate_device_revocation_payload payload
+        |> Result.map (fun () ->
+            Authority_frame (Device_revocation_frame payload))
+        |> Result.map_error (fun error -> Authority_error error)
 
 let decode encoded =
   let* value =
@@ -386,6 +477,9 @@ let decode encoded =
           | 10L -> Ok Resolution
           | 11L -> Ok Validation_evidence
           | 12L -> Ok Release
+          | 13L -> Ok Repository_authority
+          | 14L -> Ok Device_certificate
+          | 15L -> Ok Device_revocation
           | value -> Error (Unknown_kind value)
         in
         let* payload = bytes "V2 typed object frame payload" payload in

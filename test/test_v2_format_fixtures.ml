@@ -186,7 +186,7 @@ let fixed_invalid_fixtures_reject_with_typed_errors () =
     ];
   expect_object_fixture_error
     "v2-object-scratch-snapshot-frame-v1.unknown-kind.cbor.hex" (function
-    | Object.Unknown_kind 13L -> true
+    | Object.Unknown_kind 16L -> true
     | _ -> false)
   [@warning "-4"];
   expect_object_fixture_error

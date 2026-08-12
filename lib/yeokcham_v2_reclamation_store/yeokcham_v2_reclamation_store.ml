@@ -188,6 +188,9 @@ and kind_code = function
   | Object.Resolution -> 10L
   | Object.Validation_evidence -> 11L
   | Object.Release -> 12L
+  | Object.Repository_authority -> 13L
+  | Object.Device_certificate -> 14L
+  | Object.Device_revocation -> 15L
 
 let io_error ~operation ~path error =
   Io_error { operation; path; message = Unix.error_message error }
@@ -433,7 +436,10 @@ let links_for_nonledger raw_objects ledger_objects raw =
             |> Result.map List.singleton
       in
       Ok (predecessor @ target)
-  | Object.Scratch_snapshot | Object.Capsule | Object.Workspace -> Ok []
+  | Object.Scratch_snapshot | Object.Capsule | Object.Workspace
+  | Object.Repository_authority | Object.Device_certificate
+  | Object.Device_revocation ->
+      Ok []
   | Object.Scratch_protection ->
       let protection =
         match Object.protection raw.object_ with

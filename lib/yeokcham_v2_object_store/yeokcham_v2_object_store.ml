@@ -87,6 +87,9 @@ let error_to_string = function
         | Object.Resolution -> "workspace resolution"
         | Object.Validation_evidence -> "validation evidence"
         | Object.Release -> "release"
+        | Object.Repository_authority -> "repository authority"
+        | Object.Device_certificate -> "device certificate"
+        | Object.Device_revocation -> "device revocation"
       in
       Printf.sprintf "V2 object %s has kind %s, expected %s"
         (Model.Opaque_object_ref.to_hex object_ref)

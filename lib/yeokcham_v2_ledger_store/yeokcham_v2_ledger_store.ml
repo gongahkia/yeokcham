@@ -46,6 +46,9 @@ let kind_to_string = function
   | Object.Resolution -> "workspace resolution"
   | Object.Validation_evidence -> "validation evidence"
   | Object.Release -> "release"
+  | Object.Repository_authority -> "repository authority"
+  | Object.Device_certificate -> "device certificate"
+  | Object.Device_revocation -> "device revocation"
 
 let error_to_string = function
   | Object_store_error error -> Object_store.error_to_string error

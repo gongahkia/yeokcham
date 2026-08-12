@@ -292,7 +292,7 @@ release store suites re-exercise their complete publication intervals under the
 same shared guard. This slice adds no throughput benchmark, automatic cleanup,
 or CLI claim.
 
-V2-023's Linux custody boundary retains routine injected-runner tests and a
+V2-025's Linux custody boundary retains routine injected-runner tests and a
 seeded capability/bootstrap property that do not touch a desktop keyring. The
 separate opt-in `YEOKCHAM_RUN_SECRET_SERVICE_INTEGRATION=1 make
 secret-service-integration` check uses the production `busctl` and
@@ -305,6 +305,19 @@ On 2026-08-13, it passed against the local default `kdewallet` collection.
 [Inference] The initial timeout arose because the child inherited the stdin
 pipe's writer; after closing that descriptor on `exec`, the native
 enrol/reopen/clear/missing sequence completed successfully.
+
+V2-023 separately checks fixed canonical public repository-authority,
+device-certificate, and device-revocation records, their strict inverse
+decoders, and distinct typed encrypted-object frames. Focused cases reject
+tampered identities, unsupported mandatory features, cross-root certificate
+use, root/device signer reuse, duplicate device bindings, and malformed frame
+payload before publication. The durable case publishes all three records into
+the existing create-only encrypted object store, reopens them, verifies the
+certificate and revocation against the recovered authority anchor, and proves
+an exact retry is idempotent. The seeded property varies repository and device
+identities and requires canonical authority/certificate round trips. This
+slice does not claim authority-ledger ordering, bootstrap binding, recovery,
+remote encryption-key non-reuse, a CLI command, or a benchmark.
 
 Milestone 6 validation checks canonical command/evidence goldens and inverse
 decoders; exact-snapshot materialisation; passing, failed, signalled, timeout,

@@ -504,6 +504,18 @@ mutations hold it shared; reclamation holds it exclusively. This coordination
 and its metadata are local maintenance only, never a history or visibility
 authority. No CLI command or automatic deletion is introduced by this slice.
 
+ADRs 064 and 065 add `yeokcham_v2_authority` as the V2-023 pure root-authority
+core. It separates root signing from device ledger signing and the existing
+local envelope/address capabilities, derives opaque user/root-key/record IDs,
+and owns canonical root-signed repository-authority, device-certificate, and
+device-revocation records. `yeokcham_v2_object` carries them as three distinct
+encrypted frame kinds. The repository-authority frame is self-verifying; the
+certificate and revocation frame payloads are deliberately only structural
+until the caller supplies the exact authority anchor. This avoids treating a
+valid signature as an active-device decision. A later authority-ledger and
+bootstrap-version adapter will make the causal active/revoked state durable;
+this slice adds no mutable authority head, recovery package, or CLI command.
+
 `capsule create --current` uses no separate working-diff format. Under the same
 writer lock it verifies a scratch head, double-scans the working directory, and
 uses the ordinary scratch checkpoint writer for a verified difference. The
