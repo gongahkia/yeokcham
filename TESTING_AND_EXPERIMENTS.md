@@ -292,6 +292,20 @@ release store suites re-exercise their complete publication intervals under the
 same shared guard. This slice adds no throughput benchmark, automatic cleanup,
 or CLI claim.
 
+V2-023's Linux custody boundary retains routine injected-runner tests and a
+seeded capability/bootstrap property that do not touch a desktop keyring. The
+separate opt-in `YEOKCHAM_RUN_SECRET_SERVICE_INTEGRATION=1 make
+secret-service-integration` check uses the production `busctl` and
+`secret-tool` runner against an unlocked local service. It creates a random
+handle, verifies enrollment and reopening, confirms the public bootstrap does
+not contain any private role bytes, clears only the item initialized by that
+run, and verifies the resulting missing state. It is deliberately excluded from
+normal tests and CI because it mutates the caller's Secret Service collection.
+On 2026-08-13, it passed against the local default `kdewallet` collection.
+[Inference] The initial timeout arose because the child inherited the stdin
+pipe's writer; after closing that descriptor on `exec`, the native
+enrol/reopen/clear/missing sequence completed successfully.
+
 Milestone 6 validation checks canonical command/evidence goldens and inverse
 decoders; exact-snapshot materialisation; passing, failed, signalled, timeout,
 and execution-error observations; bounded stdout/stderr retention and hashes;

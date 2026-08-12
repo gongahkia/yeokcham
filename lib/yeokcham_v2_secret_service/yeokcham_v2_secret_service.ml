@@ -101,6 +101,7 @@ let run_system command =
       ]
   in
   try
+    List.iter Unix.set_close_on_exec [ stdin_write; stdout_read; stderr_read ];
     let arguments = Array.of_list (command.program :: command.arguments) in
     let process =
       Unix.create_process command.program arguments stdin_read stdout_write

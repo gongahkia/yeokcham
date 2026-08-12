@@ -168,9 +168,13 @@ closed rather than being converted.
   malformed/mismatched records, and occupied-handle refusal.
 - A seeded 120-case property generates repository IDs, device IDs, and key
   handles, then proves enrollment reopens the matching capability.
-- Tests deliberately do not mutate the host Secret Service. A configured Linux
-  implementation still needs native integration evidence before #147 can close,
-  alongside hosted evidence deferred by #122.
+- Routine tests deliberately do not mutate the host Secret Service. The explicit
+  `YEOKCHAM_RUN_SECRET_SERVICE_INTEGRATION=1 make secret-service-integration`
+  check creates one random-handle item, verifies enrolment and reopening through
+  the production runner, clears only an item it initialized, then verifies the
+  missing state. It remains outside normal test aliases. A configured Linux
+  implementation needs this evidence before #147 can close, alongside hosted
+  evidence deferred by #122.
 - `make check` and `make property-test PROPERTY_TEST_SEED=17` remain required.
 
 ## CLI and user impact
