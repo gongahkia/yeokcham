@@ -174,3 +174,4 @@ The ADR lifecycle, numbering rules, and template are defined in [`docs/adr/READM
 - [ADR-061 — V2 deterministic workspaces and explicit conflict records](docs/adr/061-v2-workspace-composition.md) — Accepted.
 - [ADR-062 — V2 immutable releases and exact validation linkage](docs/adr/062-v2-immutable-releases.md) — Accepted.
 - [ADR-063 — V2 local cache reclamation from complete reachable roots](docs/adr/063-v2-cache-reclamation.md) — Accepted.
+- [ADR-064 — V2 user, repository, and device authority hierarchy](docs/adr/064-v2-user-repository-device-authority.md) — Proposed.
