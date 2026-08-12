@@ -1,0 +1,12 @@
+{
+  "name": "yeokcham-browser-vault",
+  "version": "0.1.0",
+  "private": true,
+  "description": "origin-bound WebAuthn PRF encrypted local capability vault",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "test": "node ./test_vault.mjs"
+  }
+}

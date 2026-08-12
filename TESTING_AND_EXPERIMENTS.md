@@ -318,6 +318,18 @@ through Security.framework, reopens it, deletes only that item, and verifies
 missing state. It cannot be run on this Linux host and remains required native
 evidence before #146 can close, alongside #122's hosted-success gate.
 
+V2-026 adds the browser-vault package's deterministic fake-WebAuthn suite and
+a seeded 120-case restart property. It fixes a public associated-data vector,
+proves that the durable record contains no plaintext capability or stored key,
+and rejects changed origin/RP ID/credential data, missing user verification,
+PRF or WebAuthn unavailability, corrupt AES-GCM ciphertext, storage failure,
+and create-only collisions. `make check` and the seeded property command run
+that Node suite. [Unverified] The package has no real-browser or hardware
+passkey result yet: its fakes verify the boundary's requested options and its
+assertion checks, not browser/user-agent WebAuthn interoperability. A future
+Svelte/browser harness must execute the opt-in native flow before #148 can
+close, alongside #122's hosted-success gate.
+
 V2-023 separately checks fixed canonical public repository-authority,
 device-certificate, and device-revocation records, their strict inverse
 decoders, and distinct typed encrypted-object frames. Focused cases reject

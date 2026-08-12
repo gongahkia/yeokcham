@@ -5,7 +5,7 @@ OCAML_VERSION := 5.5.0
 OCAMLFORMAT_VERSION := 0.29.0
 LOCAL_SWITCH := $(CURDIR)
 
-.PHONY: setup deps build test property-test secret-service-integration keychain-integration rust-adapter-build rust-adapter-test typescript-adapter-deps typescript-adapter-test benchmark-encoding benchmark-large-content compaction-retention-benchmark compaction-retention-benchmark-verify semantic-experiment semantic-experiment-verify rust-retargeting-comparison rust-retargeting-comparison-verify marshal-audit lint check format workflow-lint ci
+.PHONY: setup deps build test property-test secret-service-integration keychain-integration rust-adapter-build rust-adapter-test typescript-adapter-deps typescript-adapter-test browser-vault-deps browser-vault-test benchmark-encoding benchmark-large-content compaction-retention-benchmark compaction-retention-benchmark-verify semantic-experiment semantic-experiment-verify rust-retargeting-comparison rust-retargeting-comparison-verify marshal-audit lint check format workflow-lint ci
 
 setup:
 	$(OPAM) init --bare --no-setup --yes
@@ -16,6 +16,7 @@ deps:
 	$(OPAM) install . --deps-only --with-test --yes
 	$(OPAM) install ocamlformat.$(OCAMLFORMAT_VERSION) --yes
 	$(MAKE) typescript-adapter-deps
+	$(MAKE) browser-vault-deps
 
 build:
 	$(DUNE) build @all
@@ -33,12 +34,18 @@ typescript-adapter-deps:
 typescript-adapter-test:
 	cd tools/yeokcham-typescript-adapter && npm test
 
-test: rust-adapter-build rust-adapter-test typescript-adapter-test
+browser-vault-deps:
+	cd tools/yeokcham-browser-vault && npm ci --ignore-scripts --no-audit --no-fund
+
+browser-vault-test:
+	cd tools/yeokcham-browser-vault && npm test
+
+test: rust-adapter-build rust-adapter-test typescript-adapter-test browser-vault-test
 	YEOKCHAM_RUST_ADAPTER=$(CURDIR)/tools/yeokcham-rust-adapter/target/release/yeokcham-rust-adapter $(DUNE) runtest
 
 PROPERTY_TEST_SEED ?= 20260729
 
-property-test: rust-adapter-build
+property-test: rust-adapter-build browser-vault-test
 	YEOKCHAM_RUST_ADAPTER=$(CURDIR)/tools/yeokcham-rust-adapter/target/release/yeokcham-rust-adapter PROPERTY_TEST_SEED=$(PROPERTY_TEST_SEED) $(DUNE) build @property-test
 
 secret-service-integration:
