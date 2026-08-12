@@ -101,6 +101,7 @@ type error =
   | Ledger_store_error of Yeokcham_v2_ledger_store.error
   | Object_store_error of Yeokcham_v2_object_store.error
   | Scratch_store_error of Yeokcham_v2_scratch_store.error
+  | Publication_guard_error of Yeokcham_v2_publication_guard.error
   | Invalid_capsule_ref_name of string
   | Nonce_reuse
   | Capsule_id_already_bound of V2_model.Capsule_id.t

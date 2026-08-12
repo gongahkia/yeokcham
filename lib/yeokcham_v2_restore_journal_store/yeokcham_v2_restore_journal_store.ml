@@ -1,6 +1,7 @@
 module Cutover = Yeokcham_cutover
 module Journal = Yeokcham_v2_restore_journal
 module Model = Yeokcham_v2_model
+module Publication_guard = Yeokcham_v2_publication_guard
 
 type repository = {
   root : string;
@@ -15,6 +16,7 @@ type error =
   | Cutover_error of Cutover.error
   | Not_v2_root of Cutover.classification
   | Journal_error of Journal.error
+  | Publication_guard_error of Publication_guard.error
   | Repository_mismatch of {
       expected : Model.Repository_id.t;
       actual : Model.Repository_id.t;
@@ -33,6 +35,7 @@ let error_to_string = function
       "V2 restore journal storage requires a V2-only root, found "
       ^ Cutover.classification_to_string classification
   | Journal_error error -> Journal.error_to_string error
+  | Publication_guard_error error -> Publication_guard.error_to_string error
   | Repository_mismatch { expected; actual } ->
       Printf.sprintf "V2 restore journal repository %s does not match %s"
         (Model.Repository_id.to_hex actual)
@@ -302,7 +305,7 @@ let scan repository =
   let* () = check_v2_root repository.root in
   scan_unchecked repository
 
-let append repository record =
+let append_unlocked repository record =
   let* () = check_v2_root repository.root in
   let* () = check_record_repository repository record in
   let* records = scan_unchecked repository in
@@ -337,6 +340,12 @@ let append repository record =
   match outcome with
   | Written -> Ok Appended
   | Already_present -> Ok Already_appended
+
+let append repository record =
+  Publication_guard.with_guard ~root:repository.root
+    ~mode:Publication_guard.Shared (fun () -> append_unlocked repository record)
+  |> Result.map_error (fun error -> Publication_guard_error error)
+  |> Result.join
 
 let latest repository ~operation_id =
   let* records = scan repository in

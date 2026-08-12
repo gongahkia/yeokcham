@@ -44,6 +44,7 @@ type error =
   | Object_store_error of Yeokcham_v2_object_store.error
   | Record_error of Record.error
   | Workspace_store_error of Yeokcham_v2_workspace_store.error
+  | Publication_guard_error of Yeokcham_v2_publication_guard.error
   | Invalid_release_ref_name of string
   | Nonce_reuse
   | Divergent_release_binding of Ledger.Event_id.t list

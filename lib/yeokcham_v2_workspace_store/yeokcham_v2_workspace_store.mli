@@ -78,6 +78,7 @@ type error =
   | Object_store_error of Yeokcham_v2_object_store.error
   | Record_error of Record.error
   | Workspace_error of Workspace.error
+  | Publication_guard_error of Yeokcham_v2_publication_guard.error
   | Invalid_workspace_ref_name of string
   | Invalid_attempt_ref_name of string
   | Nonce_reuse

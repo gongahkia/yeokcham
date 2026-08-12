@@ -8,11 +8,13 @@ module Ledger_store = Yeokcham_v2_ledger_store
 module Model = Yeokcham_model
 module Object = Yeokcham_v2_object
 module Object_store = Yeokcham_v2_object_store
+module Publication_guard = Yeokcham_v2_publication_guard
 module Retention = Yeokcham_v2_retention
 module Scratch_store = Yeokcham_v2_scratch_store
 module V2_model = Yeokcham_v2_model
 
 type repository = {
+  root : string;
   bootstrap : Bootstrap_store.repository;
   objects : Object_store.repository;
   ledger : Ledger_store.repository;
@@ -115,6 +117,7 @@ type error =
   | Ledger_store_error of Ledger_store.error
   | Object_store_error of Object_store.error
   | Scratch_store_error of Scratch_store.error
+  | Publication_guard_error of Publication_guard.error
   | Invalid_capsule_ref_name of string
   | Nonce_reuse
   | Capsule_id_already_bound of V2_model.Capsule_id.t
@@ -169,6 +172,7 @@ let error_to_string = function
   | Ledger_store_error error -> Ledger_store.error_to_string error
   | Object_store_error error -> Object_store.error_to_string error
   | Scratch_store_error error -> Scratch_store.error_to_string error
+  | Publication_guard_error error -> Publication_guard.error_to_string error
   | Invalid_capsule_ref_name name -> "invalid capsule ref name: " ^ name
   | Nonce_reuse ->
       "capsule publication requires pairwise distinct envelope nonces"
@@ -283,7 +287,15 @@ let open_repository ~root ~bootstrap_repository =
     Scratch_store.open_repository ~root ~bootstrap_repository
     |> Result.map_error (fun error -> Scratch_store_error error)
   in
-  Ok { bootstrap = bootstrap_repository; objects; ledger; scratch }
+  Ok { root; bootstrap = bootstrap_repository; objects; ledger; scratch }
+
+let with_shared_guard repository action =
+  match
+    Publication_guard.with_guard ~root:repository.root
+      ~mode:Publication_guard.Shared action
+  with
+  | Ok result -> result
+  | Error error -> Error (Publication_guard_error error)
 
 let capsule_ref_name id =
   let name = "capsule-" ^ V2_model.Capsule_id.to_hex id in
@@ -730,8 +742,8 @@ let binding_envelope repository ~id ~predecessor ~revision_ref ~nonce =
   in
   Ok (Ledger.event_id event, envelope)
 
-let create ?fault repository ~id ~title ~description ~created_at ~source_event
-    ~target_event ~selected_indices ~nonces =
+let create_unlocked ?fault repository ~id ~title ~description ~created_at
+    ~source_event ~target_event ~selected_indices ~nonces =
   if not (distinct_nonces nonces) then Error Nonce_reuse
   else
     let* () =
@@ -896,6 +908,12 @@ let create ?fault repository ~id ~title ~description ~created_at ~source_event
               | Some resolved -> Ok (Published resolved)
               | None -> assert false))
 
+let create ?fault repository ~id ~title ~description ~created_at ~source_event
+    ~target_event ~selected_indices ~nonces =
+  with_shared_guard repository (fun () ->
+      create_unlocked ?fault repository ~id ~title ~description ~created_at
+        ~source_event ~target_event ~selected_indices ~nonces)
+
 let checkpoint_link (checkpoint : Scratch_store.checkpoint) =
   {
     Capsule.snapshot_id = Model.Snapshot.id checkpoint.Scratch_store.snapshot;
@@ -1036,9 +1054,9 @@ let all_sources_still_current repository sources =
       source_still_current repository source)
     (Ok ()) sources
 
-let split ?fault repository ~source ~left_id ~left_title ~left_description
-    ~right_id ~right_title ~right_description ~left_indices ~created_at
-    ~confirmed ~nonces =
+let split_unlocked ?fault repository ~source ~left_id ~left_title
+    ~left_description ~right_id ~right_title ~right_description ~left_indices
+    ~created_at ~confirmed ~nonces =
   if not confirmed then Error (Confirmation_required "split")
   else if
     V2_model.Capsule_id.equal source left_id
@@ -1186,8 +1204,16 @@ let split ?fault repository ~source ~left_id ~left_title ~left_description
       in
       Ok (left, right)
 
-let combine ?fault repository ~id ~title ~description ~sources ~created_at
+let split ?fault repository ~source ~left_id ~left_title ~left_description
+    ~right_id ~right_title ~right_description ~left_indices ~created_at
     ~confirmed ~nonces =
+  with_shared_guard repository (fun () ->
+      split_unlocked ?fault repository ~source ~left_id ~left_title
+        ~left_description ~right_id ~right_title ~right_description
+        ~left_indices ~created_at ~confirmed ~nonces)
+
+let combine_unlocked ?fault repository ~id ~title ~description ~sources
+    ~created_at ~confirmed ~nonces =
   if not confirmed then Error (Confirmation_required "combine")
   else if not (distinct_combine_nonces nonces) then Error Nonce_reuse
   else
@@ -1260,7 +1286,13 @@ let combine ?fault repository ~id ~title ~description ~sources ~created_at
       publish_initial_binding repository ~id ~revision_ref
         ~nonce:nonces.combine_binding_nonce
 
-let fold ?fault repository ~id ~expected_revision ~expected_binding
+let combine ?fault repository ~id ~title ~description ~sources ~created_at
+    ~confirmed ~nonces =
+  with_shared_guard repository (fun () ->
+      combine_unlocked ?fault repository ~id ~title ~description ~sources
+        ~created_at ~confirmed ~nonces)
+
+let fold_unlocked ?fault repository ~id ~expected_revision ~expected_binding
     ~source_event ~target_event ~selected_indices ~created_at ~nonces =
   if not (distinct_revision_nonces nonces) then Error Nonce_reuse
   else
@@ -1435,3 +1467,9 @@ let fold ?fault repository ~id ~expected_revision ~expected_binding
             | None -> assert false)
       | other ->
           Error (stale_current_error ~expected_revision ~expected_binding other)
+
+let fold ?fault repository ~id ~expected_revision ~expected_binding
+    ~source_event ~target_event ~selected_indices ~created_at ~nonces =
+  with_shared_guard repository (fun () ->
+      fold_unlocked ?fault repository ~id ~expected_revision ~expected_binding
+        ~source_event ~target_event ~selected_indices ~created_at ~nonces)

@@ -31,6 +31,7 @@ type verification_report = {
 type error =
   | Ledger_store_error of Ledger_store.error
   | Transaction_error of Transaction.error
+  | Publication_guard_error of Yeokcham_v2_publication_guard.error
   | Repository_mismatch of {
       expected : Model.Repository_id.t;
       actual : Model.Repository_id.t;
@@ -73,5 +74,10 @@ val commit :
 val recover : repository -> (recovery_outcome, error) result
 (** Validates journal records and candidates without publishing, deleting, or
     repairing anything. *)
+
+val recovery_object_refs :
+  repository -> (Model.Opaque_object_ref.t list, error) result
+(** Returns the canonical distinct staged references in every validated local
+    transaction journal entry. They are recovery roots until journal cleanup. *)
 
 val verify : repository -> (verification_report, error) result

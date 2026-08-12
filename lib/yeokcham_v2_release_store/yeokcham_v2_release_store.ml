@@ -7,12 +7,14 @@ module Ledger = Yeokcham_v2_ledger
 module Ledger_store = Yeokcham_v2_ledger_store
 module Object = Yeokcham_v2_object
 module Object_store = Yeokcham_v2_object_store
+module Publication_guard = Yeokcham_v2_publication_guard
 module Record = Yeokcham_v2_release_record
 module V2_model = Yeokcham_v2_model
 module Workspace_record = Yeokcham_v2_workspace_record
 module Workspace_store = Yeokcham_v2_workspace_store
 
 type repository = {
+  root : string;
   bootstrap : Bootstrap_store.repository;
   objects : Object_store.repository;
   ledger : Ledger_store.repository;
@@ -54,6 +56,7 @@ type error =
   | Object_store_error of Object_store.error
   | Record_error of Record.error
   | Workspace_store_error of Workspace_store.error
+  | Publication_guard_error of Publication_guard.error
   | Invalid_release_ref_name of string
   | Nonce_reuse
   | Divergent_release_binding of Ledger.Event_id.t list
@@ -82,6 +85,7 @@ let error_to_string = function
   | Object_store_error error -> Object_store.error_to_string error
   | Record_error error -> Record.error_to_string error
   | Workspace_store_error error -> Workspace_store.error_to_string error
+  | Publication_guard_error error -> Publication_guard.error_to_string error
   | Invalid_release_ref_name name -> "invalid release ref name: " ^ name
   | Nonce_reuse -> "release publication requires distinct nonces"
   | Divergent_release_binding events ->
@@ -149,7 +153,15 @@ let open_repository ~root ~bootstrap_repository =
     Workspace_store.open_repository ~root ~bootstrap_repository
     |> Result.map_error (fun error -> Workspace_store_error error)
   in
-  Ok { bootstrap = bootstrap_repository; objects; ledger; workspaces }
+  Ok { root; bootstrap = bootstrap_repository; objects; ledger; workspaces }
+
+let with_shared_guard repository action =
+  match
+    Publication_guard.with_guard ~root:repository.root
+      ~mode:Publication_guard.Shared action
+  with
+  | Ok result -> result
+  | Error error -> Error (Publication_guard_error error)
 
 let release_ref_name id =
   let name = "release-" ^ V2_model.Release_id.to_hex id in
@@ -578,8 +590,8 @@ let resolve repository ~id =
   | Some _ ->
       resolve_internal repository ~visited:[] id |> Result.map Option.some
 
-let publish_evidence repository ~snapshot ~check_name ~status ~observed_at
-    ~nonce =
+let publish_evidence_unlocked repository ~snapshot ~check_name ~status
+    ~observed_at ~nonce =
   let* _ = snapshot_for_link repository snapshot in
   let* evidence =
     Record.make_validation_evidence ~snapshot ~check_name ~status ~observed_at
@@ -602,8 +614,14 @@ let publish_evidence repository ~snapshot ~check_name ~status ~observed_at
         Ok (Evidence_already_published { evidence; evidence_ref })
       else assert false
 
-let create ?fault repository ~parents ~workspace ~attempt ~evidence ~message
-    ~created_at ~nonces =
+let publish_evidence repository ~snapshot ~check_name ~status ~observed_at
+    ~nonce =
+  with_shared_guard repository (fun () ->
+      publish_evidence_unlocked repository ~snapshot ~check_name ~status
+        ~observed_at ~nonce)
+
+let create_unlocked ?fault repository ~parents ~workspace ~attempt ~evidence
+    ~message ~created_at ~nonces =
   if not (distinct_nonces [ nonces.release_nonce; nonces.binding_nonce ]) then
     Error Nonce_reuse
   else
@@ -668,3 +686,9 @@ let create ?fault repository ~parents ~workspace ~attempt ~evidence ~message
               match resolved with
               | Some resolved -> Ok (Published resolved)
               | None -> assert false))
+
+let create ?fault repository ~parents ~workspace ~attempt ~evidence ~message
+    ~created_at ~nonces =
+  with_shared_guard repository (fun () ->
+      create_unlocked ?fault repository ~parents ~workspace ~attempt ~evidence
+        ~message ~created_at ~nonces)

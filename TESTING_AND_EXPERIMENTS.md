@@ -281,6 +281,17 @@ retry; parent physical-link rejection; interruption before binding; and typed
 storage counts. This client-neutral slice does not claim a process runner,
 review approval, signing workflow, CLI behaviour, or a benchmark.
 
+V2-022 checks a pure complete typed-physical mark, permutation-independent
+opaque-reference eviction, retained-set budget overrun, canonical
+`cache-reclamation-v1` fixture decoding, and the invariant that no marked
+reference is selected. Durable tests retain active scratch and pin roots,
+reject changed root state before movement, inject interruption after a
+quarantine move, reopen/retry the same manifest, and separate successful
+quarantine from explicit prune. Existing scratch, capsule, workspace, and
+release store suites re-exercise their complete publication intervals under the
+same shared guard. This slice adds no throughput benchmark, automatic cleanup,
+or CLI claim.
+
 Milestone 6 validation checks canonical command/evidence goldens and inverse
 decoders; exact-snapshot materialisation; passing, failed, signalled, timeout,
 and execution-error observations; bounded stdout/stderr retention and hashes;

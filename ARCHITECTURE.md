@@ -488,6 +488,22 @@ expected-absent signed `release-<release-id>` ledger scope. This client-neutral
 slice adds neither CLI command, materialisation, process runner, review claim,
 nor signing workflow.
 
+ADR-063 adds `yeokcham_v2_reclamation` as a pure complete-mark and
+deterministic quota-planning core, plus `yeokcham_v2_reclamation_store` as the
+local adapter. The adapter authenticates every live opaque object, validates
+every recognised signed ledger scope, selects active scratch through the
+existing generation resolver, and traverses typed physical links from active
+scratch/protection, capsule, workspace, attempt, release, restore, and
+transaction roots. Unknown, divergent, malformed, or type-confused authority
+fails closed. It writes a create-only canonical local manifest under
+`.yeokcham/reclamation/<plan-id>/`, uses the existing no-overwrite object
+quarantine for a recovery interval, and makes permanent pruning separate.
+`yeokcham_v2_publication_guard` provides the fixed V2-local advisory lock:
+scratch, capsule, workspace, release, restore-journal, and transaction-journal
+mutations hold it shared; reclamation holds it exclusively. This coordination
+and its metadata are local maintenance only, never a history or visibility
+authority. No CLI command or automatic deletion is introduced by this slice.
+
 `capsule create --current` uses no separate working-diff format. Under the same
 writer lock it verifies a scratch head, double-scans the working directory, and
 uses the ordinary scratch checkpoint writer for a verified difference. The

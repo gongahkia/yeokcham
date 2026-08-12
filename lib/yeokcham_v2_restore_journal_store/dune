@@ -4,4 +4,5 @@
   unix
   yeokcham_cutover
   yeokcham_v2_model
+  yeokcham_v2_publication_guard
   yeokcham_v2_restore_journal))

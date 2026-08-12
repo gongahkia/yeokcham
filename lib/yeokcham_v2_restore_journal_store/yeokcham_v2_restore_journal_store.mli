@@ -14,6 +14,7 @@ type error =
   | Cutover_error of Yeokcham_cutover.error
   | Not_v2_root of Yeokcham_cutover.classification
   | Journal_error of Journal.error
+  | Publication_guard_error of Yeokcham_v2_publication_guard.error
   | Repository_mismatch of {
       expected : Model.Repository_id.t;
       actual : Model.Repository_id.t;

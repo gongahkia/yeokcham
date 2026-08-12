@@ -111,4 +111,9 @@ They retain only byte-correct links and client-supplied status, not a process
 runner, reviewer, or signing workflow. The shifted scratch-frame unknown-kind
 fixture uses tag 13 because tags 6 through 12 are assigned to these records.
 
+`v2-cache-reclamation-v1.cbor.hex` is ADR-063's canonical local maintenance
+manifest. It retains a versioned root digest, sorted marked references, budget,
+sorted candidate tuples, byte totals, and mandatory-feature field. It is not an
+encrypted V2 object, a ledger frame, or a visibility record.
+
 Changing any fixture bytes requires a format decision and retained compatibility evidence; adding a new schema requires a new named fixture.

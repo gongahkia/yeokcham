@@ -7,6 +7,7 @@ module Ledger_store = Yeokcham_v2_ledger_store
 module Model = Yeokcham_model
 module Object = Yeokcham_v2_object
 module Object_store = Yeokcham_v2_object_store
+module Publication_guard = Yeokcham_v2_publication_guard
 module Retention = Yeokcham_v2_retention
 module V2_model = Yeokcham_v2_model
 
@@ -17,6 +18,7 @@ module Object_ref_set = Set.Make (struct
 end)
 
 type repository = {
+  root : string;
   bootstrap : Bootstrap_store.repository;
   objects : Object_store.repository;
   ledger : Ledger_store.repository;
@@ -137,6 +139,7 @@ type error =
   | Ledger_store_error of Ledger_store.error
   | Envelope_error of Envelope.error
   | Ledger_error of Ledger.error
+  | Publication_guard_error of Publication_guard.error
   | Scratch_event_missing_target of Ledger.Event_id.t
   | Unknown_scratch_event of Ledger.Event_id.t
   | Snapshot_not_active of V2_model.Opaque_object_ref.t
@@ -246,6 +249,7 @@ let error_to_string = function
   | Ledger_store_error error -> Ledger_store.error_to_string error
   | Envelope_error error -> Envelope.error_to_string error
   | Ledger_error error -> Ledger.error_to_string error
+  | Publication_guard_error error -> Publication_guard.error_to_string error
   | Scratch_event_missing_target event_id ->
       "scratch event has no snapshot target: " ^ Ledger.Event_id.to_hex event_id
   | Unknown_scratch_event event_id ->
@@ -435,7 +439,32 @@ let open_repository ~root ~bootstrap_repository =
   let* scratch_ref = scratch_ref_of_device (Bootstrap.device_id record) in
   let* protection_ref = protection_ref_of_device (Bootstrap.device_id record) in
   let* generation_ref = generation_ref_of_device (Bootstrap.device_id record) in
-  Ok { bootstrap; objects; ledger; scratch_ref; protection_ref; generation_ref }
+  Ok
+    {
+      root;
+      bootstrap;
+      objects;
+      ledger;
+      scratch_ref;
+      protection_ref;
+      generation_ref;
+    }
+
+let with_shared_guard repository action =
+  match
+    Publication_guard.with_guard ~root:repository.root
+      ~mode:Publication_guard.Shared action
+  with
+  | Ok result -> result
+  | Error error -> Error (Publication_guard_error error)
+
+let with_exclusive_guard repository action =
+  match
+    Publication_guard.with_guard ~root:repository.root
+      ~mode:Publication_guard.Exclusive action
+  with
+  | Ok result -> result
+  | Error error -> Error (Publication_guard_error error)
 
 let scratch_ref_name repository = repository.scratch_ref
 let generation_ref_name repository = repository.generation_ref
@@ -1028,7 +1057,7 @@ let plan repository ~snapshot ~snapshot_nonce ~ledger_nonce =
                    ledger_envelope;
                  }))
 
-let publish_plan repository = function
+let publish_plan_unlocked repository = function
   | Unchanged_plan checkpoint -> Ok (Unchanged checkpoint)
   | Publish_plan { checkpoint; snapshot_envelope; ledger_envelope } ->
       let* snapshot_ref =
@@ -1056,8 +1085,12 @@ let publish_plan repository = function
         else Ok (Published checkpoint)
 
 let publish repository ~snapshot ~snapshot_nonce ~ledger_nonce =
-  let* plan = plan repository ~snapshot ~snapshot_nonce ~ledger_nonce in
-  publish_plan repository plan
+  with_shared_guard repository (fun () ->
+      let* plan = plan repository ~snapshot ~snapshot_nonce ~ledger_nonce in
+      publish_plan_unlocked repository plan)
+
+let publish_plan repository plan =
+  with_shared_guard repository (fun () -> publish_plan_unlocked repository plan)
 
 let ledger_candidate repository ~ref_name ~predecessor ~target ~nonce =
   let capability = Bootstrap_store.capability repository.bootstrap in
@@ -1334,7 +1367,7 @@ let revalidate_compaction_source repository (plan : compaction_plan) =
              })
       else Ok ()
 
-let publish_compaction_plan repository (plan : compaction_plan) =
+let publish_compaction_plan_unlocked repository (plan : compaction_plan) =
   let rec publish_compacted = function
     | [] -> Ok ()
     | compacted :: rest ->
@@ -1387,6 +1420,10 @@ let publish_compaction_plan repository (plan : compaction_plan) =
         }
       in
       Ok publication
+
+let publish_compaction_plan repository plan =
+  with_shared_guard repository (fun () ->
+      publish_compaction_plan_unlocked repository plan)
 
 let cleanup_object_kind = function
   | Retention.Ledger_event -> Object.Ledger_event
@@ -1568,10 +1605,12 @@ let cleanup_internal ?fault repository ~prune =
   process 0 (empty_cleanup_report generation_event_id) candidates
 
 let resume_cleanup ?fault repository =
-  cleanup_internal ?fault repository ~prune:false
+  with_exclusive_guard repository (fun () ->
+      cleanup_internal ?fault repository ~prune:false)
 
 let prune_quarantine ?fault repository =
-  cleanup_internal ?fault repository ~prune:true
+  with_exclusive_guard repository (fun () ->
+      cleanup_internal ?fault repository ~prune:true)
 
 let plan_protection repository ~event_id ~action ~reason ~protection_nonce
     ~ledger_nonce =
@@ -1620,7 +1659,7 @@ let plan_protection repository ~event_id ~action ~reason ~protection_nonce
     in
     Ok plan
 
-let publish_protection_plan repository (plan : protection_plan) =
+let publish_protection_plan_unlocked repository (plan : protection_plan) =
   let* protection_object_ref =
     Object_store.publish repository.objects ~envelope:plan.protection_envelope
     |> Result.map publication_ref
@@ -1678,3 +1717,7 @@ let publish_protection_plan repository (plan : protection_plan) =
             }
           in
           Ok publication
+
+let publish_protection_plan repository plan =
+  with_shared_guard repository (fun () ->
+      publish_protection_plan_unlocked repository plan)

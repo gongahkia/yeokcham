@@ -509,6 +509,47 @@ expected-absent `release-<release-id>` ledger scope targeting the exact Release
 frame. Objects may be unreachable after interruption, but no partial release
 is visible.
 
+### V2-022 local cache reclamation from complete roots
+
+ADR-063 separates local encrypted-cache maintenance from V2 history. Given an
+authenticated inventory `I`, verified recognised ledger scopes, and unfinished
+restore or transaction journals, the pure relation is:
+
+```text
+roots(I) = active-scratch(I) union protection(I) union visible-bindings(I)
+         union unfinished-restores(I) union prepared-transactions(I)
+mark(I) = transitive-typed-physical-closure(roots(I))
+```
+
+Every recognised visible scope must have one causal head; an unknown scope,
+divergent head, missing event/object, or wrong linked frame kind makes the
+relation undefined rather than producing a partial root set. Ledger-event
+predecessors and targets are physical edges. Typed frame edges retain exact
+snapshot, revision, conflict, resolution, evidence, attempt, and release
+references; a scratch-generation value contributes only its active-anchor
+event, never its audit cleanup candidates.
+
+For nonnegative cache budget `B`, entries outside `mark(I)` are ordered by
+ascending opaque reference and selected until the projected encrypted stored
+byte total is at most `B`. The marked closure is never selected. If its exact
+bytes already exceed `B`, the plan reports `marked_bytes - B` and selects no
+candidate. The canonical local manifest retains its root digest, canonical
+marked references, candidate `(reference, kind, stored-bytes)` list, totals,
+budget, and feature/version fields; its ID is a domain-separated digest of its
+canonical body.
+
+```text
+quarantine_or_prune(plan, I) is permitted only when
+  digest(roots(I)) = plan.root_digest
+```
+
+High-level V2 publication holds a shared local guard across its complete
+object-to-binding interval. Reclamation holds that guard exclusively while it
+marks, quarantines, or prunes. A quarantine destination is the retry cursor;
+permanent prune is a later explicit operation. Neither the manifest, lock,
+byte accounting, quarantine path, nor progress state is a V2 object, ledger
+event, logical identity, or visibility source.
+
 ### Durable Milestone 4 representation
 
 `Capsule_v1` is immutable initial metadata. `Capsule_revision_v1` holds

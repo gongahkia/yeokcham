@@ -3,9 +3,14 @@ module Envelope = Yeokcham_v2_envelope
 module Ledger = Yeokcham_v2_ledger
 module Ledger_store = Yeokcham_v2_ledger_store
 module Model = Yeokcham_v2_model
+module Publication_guard = Yeokcham_v2_publication_guard
 module Transaction = Yeokcham_v2_transaction
 
-type repository = { journal : string; ledger : Ledger_store.repository }
+type repository = {
+  root : string;
+  journal : string;
+  ledger : Ledger_store.repository;
+}
 
 type prepare_outcome =
   | Prepared of Transaction.prepare
@@ -26,6 +31,7 @@ type verification_report = {
 type error =
   | Ledger_store_error of Ledger_store.error
   | Transaction_error of Transaction.error
+  | Publication_guard_error of Publication_guard.error
   | Repository_mismatch of {
       expected : Model.Repository_id.t;
       actual : Model.Repository_id.t;
@@ -66,6 +72,7 @@ let ( let* ) = Result.bind
 let error_to_string = function
   | Ledger_store_error error -> Ledger_store.error_to_string error
   | Transaction_error error -> Transaction.error_to_string error
+  | Publication_guard_error error -> Publication_guard.error_to_string error
   | Repository_mismatch { expected; actual } ->
       Printf.sprintf "V2 transaction repository %s does not match repository %s"
         (Model.Repository_id.to_hex actual)
@@ -97,7 +104,7 @@ let open_repository ~root ~repository_id ~address_key ~encryption_key
       ~encryption_key ~public_keys
     |> Result.map_error (fun error -> Ledger_store_error error)
   in
-  Ok { journal = Filename.concat root ".yeokcham/journal"; ledger }
+  Ok { root; journal = Filename.concat root ".yeokcham/journal"; ledger }
 
 let prepare_path repository transaction_id =
   Filename.concat repository.journal
@@ -276,7 +283,7 @@ let validate_prepare_candidates repository prepare =
     in
     validate (Transaction.prepare_staged prepare)
 
-let prepare repository ~transaction_id ~envelopes =
+let prepare_unlocked repository ~transaction_id ~envelopes =
   let rec stage result = function
     | [] -> Ok result
     | envelope :: rest ->
@@ -311,6 +318,13 @@ let prepare repository ~transaction_id ~envelopes =
   | Written -> Ok (Prepared prepare)
   | Already_present -> Ok (Already_prepared prepare)
 
+let prepare repository ~transaction_id ~envelopes =
+  Publication_guard.with_guard ~root:repository.root
+    ~mode:Publication_guard.Shared (fun () ->
+      prepare_unlocked repository ~transaction_id ~envelopes)
+  |> Result.map_error (fun error -> Publication_guard_error error)
+  |> Result.join
+
 let read_prepare repository transaction_id =
   let path = prepare_path repository transaction_id in
   let* bytes = read_regular_file ~limit:Transaction.max_prepare_bytes path in
@@ -340,7 +354,7 @@ let read_commit repository transaction_id =
     Ok { commit_id = transaction_id; committed = commit; commit_bytes = bytes }
   else Error (Invalid_journal_path path)
 
-let commit repository ~transaction_id =
+let commit_unlocked repository ~transaction_id =
   let* prepared = read_prepare repository transaction_id in
   let* () = validate_prepare_candidates repository prepared.prepared in
   let commit = Transaction.make_commit prepared.prepared in
@@ -353,6 +367,13 @@ let commit repository ~transaction_id =
   match outcome with
   | Written -> Ok Committed
   | Already_present -> Ok Already_committed
+
+let commit repository ~transaction_id =
+  Publication_guard.with_guard ~root:repository.root
+    ~mode:Publication_guard.Shared (fun () ->
+      commit_unlocked repository ~transaction_id)
+  |> Result.map_error (fun error -> Publication_guard_error error)
+  |> Result.join
 
 let read_journal_directory repository =
   try
@@ -467,7 +488,22 @@ let verify repository =
   in
   Ok { prepared_transactions; committed_transactions }
 
-let recover repository =
+let recovery_object_refs repository =
+  let* state = scan_journal repository in
+  let rec collect refs = function
+    | [] -> Ok (List.sort_uniq Model.Opaque_object_ref.compare refs)
+    | prepare :: rest ->
+        let* () = validate_prepare_candidates repository prepare.prepared in
+        let refs =
+          Transaction.prepare_staged prepare.prepared
+          |> List.map Transaction.staged_object_ref
+          |> List.rev_append refs
+        in
+        collect refs rest
+  in
+  collect [] state.prepares
+
+let recover_unlocked repository =
   let* state = scan_journal repository in
   let rec validate_prepares = function
     | [] -> Ok ()
@@ -530,3 +566,9 @@ let recover repository =
   let* completed_transactions = complete [] committed_prepares in
   let* discarded_prepares = discard [] uncommitted in
   Ok { discarded_prepares; completed_transactions }
+
+let recover repository =
+  Publication_guard.with_guard ~root:repository.root
+    ~mode:Publication_guard.Shared (fun () -> recover_unlocked repository)
+  |> Result.map_error (fun error -> Publication_guard_error error)
+  |> Result.join

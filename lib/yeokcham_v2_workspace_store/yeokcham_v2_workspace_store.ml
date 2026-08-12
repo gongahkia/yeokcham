@@ -9,11 +9,13 @@ module Ledger_store = Yeokcham_v2_ledger_store
 module Model = Yeokcham_model
 module Object = Yeokcham_v2_object
 module Object_store = Yeokcham_v2_object_store
+module Publication_guard = Yeokcham_v2_publication_guard
 module Record = Yeokcham_v2_workspace_record
 module V2_model = Yeokcham_v2_model
 module Workspace = Yeokcham_v2_workspace
 
 type repository = {
+  root : string;
   bootstrap : Bootstrap_store.repository;
   objects : Object_store.repository;
   ledger : Ledger_store.repository;
@@ -87,6 +89,7 @@ type error =
   | Object_store_error of Object_store.error
   | Record_error of Record.error
   | Workspace_error of Workspace.error
+  | Publication_guard_error of Publication_guard.error
   | Invalid_workspace_ref_name of string
   | Invalid_attempt_ref_name of string
   | Nonce_reuse
@@ -127,6 +130,7 @@ let error_to_string = function
   | Object_store_error error -> Object_store.error_to_string error
   | Record_error error -> Record.error_to_string error
   | Workspace_error error -> Workspace.error_to_string error
+  | Publication_guard_error error -> Publication_guard.error_to_string error
   | Invalid_workspace_ref_name name -> "invalid workspace ref name: " ^ name
   | Invalid_attempt_ref_name name ->
       "invalid workspace attempt ref name: " ^ name
@@ -234,7 +238,15 @@ let open_repository ~root ~bootstrap_repository =
     Capsule_store.open_repository ~root ~bootstrap_repository
     |> Result.map_error (fun error -> Capsule_store_error error)
   in
-  Ok { bootstrap = bootstrap_repository; objects; ledger; capsules }
+  Ok { root; bootstrap = bootstrap_repository; objects; ledger; capsules }
+
+let with_shared_guard repository action =
+  match
+    Publication_guard.with_guard ~root:repository.root
+      ~mode:Publication_guard.Shared action
+  with
+  | Ok result -> result
+  | Error error -> Error (Publication_guard_error error)
 
 let workspace_ref_name id =
   let name = "workspace-" ^ V2_model.Workspace_id.to_hex id in
@@ -776,8 +788,8 @@ let stale_current_error ~expected_revision ~expected_binding = function
           actual_binding = Some resolved.workspace_binding_event_id;
         }
 
-let create ?fault repository ~id ~title ~description ~base ~selected ~precedence
-    ~created_at ~nonces =
+let create_unlocked ?fault repository ~id ~title ~description ~base ~selected
+    ~precedence ~created_at ~nonces =
   if not (distinct_create_nonces nonces) then Error Nonce_reuse
   else
     let* _base_snapshot = snapshot_for_link repository base in
@@ -869,6 +881,12 @@ let create ?fault repository ~id ~title ~description ~base ~selected ~precedence
               match resolved with
               | Some resolved -> Ok (Published resolved)
               | None -> assert false))
+
+let create ?fault repository ~id ~title ~description ~base ~selected ~precedence
+    ~created_at ~nonces =
+  with_shared_guard repository (fun () ->
+      create_unlocked ?fault repository ~id ~title ~description ~base ~selected
+        ~precedence ~created_at ~nonces)
 
 let resolved_revision_for_link repository link ~binding_event_id =
   let* revision = verify_workspace_revision_link repository link in
@@ -1125,7 +1143,7 @@ let publish_conflicts repository prepared =
         envelope)
     (Ok ()) prepared
 
-let attempt ?fault repository ~id ~expected_revision ~expected_binding
+let attempt_unlocked ?fault repository ~id ~expected_revision ~expected_binding
     ~created_at ~nonces =
   if not (distinct_attempt_nonces nonces) then Error Nonce_reuse
   else
@@ -1252,12 +1270,18 @@ let attempt ?fault repository ~id ~expected_revision ~expected_binding
               | Some resolved -> Ok (Attempt_published resolved)
               | None -> assert false))
 
+let attempt ?fault repository ~id ~expected_revision ~expected_binding
+    ~created_at ~nonces =
+  with_shared_guard repository (fun () ->
+      attempt_unlocked ?fault repository ~id ~expected_revision
+        ~expected_binding ~created_at ~nonces)
+
 let workspace_attempt_contains_conflict attempt link =
   List.exists (same_conflict_link link)
     (Record.workspace_attempt_conflicts attempt)
 
-let resolve_skip ?fault repository ~id ~expected_revision ~expected_binding
-    ~(conflict : Record.conflict_link) ~created_at ~nonces =
+let resolve_skip_unlocked ?fault repository ~id ~expected_revision
+    ~expected_binding ~(conflict : Record.conflict_link) ~created_at ~nonces =
   if not (distinct_resolution_nonces nonces) then Error Nonce_reuse
   else
     let* current = resolve repository ~id in
@@ -1391,3 +1415,9 @@ let resolve_skip ?fault repository ~id ~expected_revision ~expected_binding
             | None -> assert false)
       | other ->
           Error (stale_current_error ~expected_revision ~expected_binding other)
+
+let resolve_skip ?fault repository ~id ~expected_revision ~expected_binding
+    ~conflict ~created_at ~nonces =
+  with_shared_guard repository (fun () ->
+      resolve_skip_unlocked ?fault repository ~id ~expected_revision
+        ~expected_binding ~conflict ~created_at ~nonces)

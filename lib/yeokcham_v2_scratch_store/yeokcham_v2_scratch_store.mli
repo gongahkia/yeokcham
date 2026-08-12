@@ -129,6 +129,7 @@ type error =
   | Ledger_store_error of Yeokcham_v2_ledger_store.error
   | Envelope_error of Envelope.error
   | Ledger_error of Ledger.error
+  | Publication_guard_error of Yeokcham_v2_publication_guard.error
   | Scratch_event_missing_target of Ledger.Event_id.t
   | Unknown_scratch_event of Ledger.Event_id.t
   | Snapshot_not_active of V2_model.Opaque_object_ref.t

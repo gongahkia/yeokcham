@@ -64,6 +64,8 @@ let refs_name = "refs"
 let locks_name = "locks"
 let journal_name = "journal"
 let quarantine_name = "quarantine"
+let reclamation_name = "reclamation"
+let reclamation_lock_name = "cache-reclamation.lock"
 let manifest_suffix = ".legacy-archive-manifest-v1"
 let pending_suffix = ".legacy-archive-manifest-v1.pending"
 let max_manifest_entries = 100_000
@@ -741,6 +743,84 @@ let validate_v2_quarantine quarantine =
   let* generations = read_directory quarantine in
   validate_generations generations
 
+let is_v2_reclamation_temporary_filename name =
+  match String.split_on_char '.' name with
+  | [ ""; plan_id; staging ] when is_hex_name plan_id 64 -> (
+      match String.split_on_char '-' staging with
+      | [ "manifest"; pid; attempt ] -> decimal_name pid && decimal_name attempt
+      | _ -> false)
+  | _ -> false
+
+let validate_v2_reclamation reclamation =
+  let rec validate_entries directory = function
+    | [] -> Ok ()
+    | name :: rest ->
+        let path = Filename.concat directory name in
+        if is_v2_reclamation_temporary_filename name then
+          let* stat = lstat_temporary_if_present path in
+          match stat with
+          | None -> validate_entries directory rest
+          | Some stat ->
+              if stat.Unix.st_kind = Unix.S_REG then
+                validate_entries directory rest
+              else
+                Error
+                  (Archive_verification_failed
+                     {
+                       path;
+                       detail =
+                         "V2 reclamation manifest temporary is not a regular \
+                          file";
+                     })
+        else if not (String.equal name "manifest.cbor") then
+          Error
+            (Archive_verification_failed
+               { path; detail = "invalid V2 reclamation plan entry" })
+        else
+          let* stat = lstat path in
+          if stat.Unix.st_kind = Unix.S_REG then validate_entries directory rest
+          else
+            Error
+              (Archive_verification_failed
+                 {
+                   path;
+                   detail = "V2 reclamation manifest is not a regular file";
+                 })
+  in
+  let rec validate_plans = function
+    | [] -> Ok ()
+    | name :: rest ->
+        let path = Filename.concat reclamation name in
+        let* stat = lstat path in
+        if stat.Unix.st_kind <> Unix.S_DIR || not (is_hex_name name 64) then
+          Error
+            (Archive_verification_failed
+               { path; detail = "invalid V2 reclamation plan directory" })
+        else
+          let* entries = read_directory path in
+          let* () = validate_entries path entries in
+          validate_plans rest
+  in
+  let* plans = read_directory reclamation in
+  validate_plans plans
+
+let validate_v2_locks locks =
+  let* names = read_directory locks in
+  match names with
+  | [] -> Ok ()
+  | [ name ] when String.equal name reclamation_lock_name ->
+      let path = Filename.concat locks name in
+      let* stat = lstat path in
+      if stat.Unix.st_kind = Unix.S_REG then Ok ()
+      else
+        Error
+          (Archive_verification_failed
+             { path; detail = "V2 reclamation lock is not a regular file" })
+  | _ ->
+      Error
+        (Archive_verification_failed
+           { path = locks; detail = "V2 root contains unknown lock state" })
+
 type v2_journal_entry =
   | Prepared of V2_transaction.Transaction_id.t * V2_transaction.prepare
   | Committed of V2_transaction.Transaction_id.t * V2_transaction.commit
@@ -1010,7 +1090,9 @@ let v2_layout metadata =
     ]
     |> List.sort String.compare
   in
-  let allowed = List.sort String.compare (quarantine_name :: required) in
+  let allowed =
+    List.sort String.compare (quarantine_name :: reclamation_name :: required)
+  in
   let* names = read_directory metadata in
   let missing = List.filter (fun name -> not (List.mem name names)) required in
   let unexpected =
@@ -1041,18 +1123,38 @@ let v2_layout metadata =
     let* () = ensure_directory (Filename.concat metadata bootstrap_name) in
     let* () = ensure_directory (Filename.concat metadata objects_name) in
     let* () = ensure_directory (Filename.concat metadata refs_name) in
-    let* () = ensure_directory (Filename.concat metadata locks_name) in
+    let locks = Filename.concat metadata locks_name in
+    let* () = ensure_directory locks in
+    let* () = validate_v2_locks locks in
     let* () = ensure_directory (Filename.concat metadata journal_name) in
     let quarantine = Filename.concat metadata quarantine_name in
-    match lstat_or_missing quarantine with
+    let* () =
+      match lstat_or_missing quarantine with
+      | Error error -> Error error
+      | Ok None -> Ok ()
+      | Ok (Some stat) when stat.Unix.st_kind = Unix.S_DIR ->
+          validate_v2_quarantine quarantine
+      | Ok (Some _) ->
+          Error
+            (Archive_verification_failed
+               {
+                 path = quarantine;
+                 detail = "V2 quarantine is not a directory";
+               })
+    in
+    let reclamation = Filename.concat metadata reclamation_name in
+    match lstat_or_missing reclamation with
     | Error error -> Error error
     | Ok None -> Ok ()
     | Ok (Some stat) when stat.Unix.st_kind = Unix.S_DIR ->
-        validate_v2_quarantine quarantine
+        validate_v2_reclamation reclamation
     | Ok (Some _) ->
         Error
           (Archive_verification_failed
-             { path = quarantine; detail = "V2 quarantine is not a directory" })
+             {
+               path = reclamation;
+               detail = "V2 reclamation is not a directory";
+             })
 
 let has_v1_artifacts metadata =
   let objects = Filename.concat metadata objects_name in
@@ -1061,21 +1163,16 @@ let has_v1_artifacts metadata =
   let journal = Filename.concat metadata journal_name in
   let* objects_empty = directory_is_empty objects in
   let* refs_empty = directory_is_empty refs in
-  let* locks_empty = directory_is_empty locks in
-  if not locks_empty then
-    Error
-      (Archive_verification_failed
-         { path = metadata; detail = "V2 root contains unknown lock state" })
+  let* () = validate_v2_locks locks in
+  let* () = validate_v2_journal journal in
+  if objects_empty && refs_empty then Ok false
+  else if refs_empty then
+    let* () = validate_v2_objects objects in
+    Ok false
   else
-    let* () = validate_v2_journal journal in
-    if objects_empty && refs_empty then Ok false
-    else if refs_empty then
-      let* () = validate_v2_objects objects in
-      Ok false
-    else
-      let* () = validate_v1_objects objects in
-      let* () = validate_v1_direct_refs refs in
-      Ok true
+    let* () = validate_v1_objects objects in
+    let* () = validate_v1_direct_refs refs in
+    Ok true
 
 let validate_archivable_legacy_tree metadata =
   let* format =

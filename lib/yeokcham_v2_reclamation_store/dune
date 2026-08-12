@@ -1,6 +1,7 @@
 (library
- (name yeokcham_v2_release_store)
+ (name yeokcham_v2_reclamation_store)
  (libraries
+  unix
   yeokcham_v2_address
   yeokcham_v2_bootstrap
   yeokcham_v2_bootstrap_store
@@ -11,6 +12,12 @@
   yeokcham_v2_object
   yeokcham_v2_object_store
   yeokcham_v2_publication_guard
-  yeokcham_v2_release_record
+  yeokcham_v2_reclamation
+  yeokcham_v2_restore_journal
+  yeokcham_v2_restore_journal_store
+  yeokcham_v2_scratch_store
+  yeokcham_v2_retention
+  yeokcham_v2_capsule
   yeokcham_v2_workspace_record
-  yeokcham_v2_workspace_store))
+  yeokcham_v2_release_record
+  yeokcham_v2_transaction_store))
