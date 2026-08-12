@@ -1727,6 +1727,31 @@ or membership relation. A present non-exportable `SecKey` is not converted to
 raw capability bytes; it is an explicit refusal until a future capability model
 can operate on provider-held signing material.
 
+## 25b. Browser passkey PRF custody
+
+ADR-067 adds a browser-local encrypted relation that has no repository-object
+representation:
+
+```text
+Vault_public = (version, origin, rp-id, credential-id, salt, iv)
+Vault_ciphertext = AES-GCM(PRF_assertion(credential-id, salt),
+                           AAD(Vault_public), Capability)
+```
+
+The browser persists only `Vault_public` and ciphertext in origin-scoped
+IndexedDB. `PRF_assertion` is available only after a fresh user-verifying
+WebAuthn assertion with the configured credential and salt. Its 32-byte result
+is imported as a transient non-extractable AES-GCM key; it is neither stored
+nor sent to a repository/server boundary. Local storage holds no plaintext
+capability or key.
+
+`open_browser_vault(Vault_public)` rejects an unavailable WebAuthn/PRF API,
+wrong credential ID, changed `clientDataJSON` type/challenge/origin,
+cross-origin response, RP-ID-hash mismatch, missing presence/verification
+flags, corrupt public fields, or AES-GCM authentication failure. Enrolment and
+removal alter only browser-local credential/storage state; they are not signed
+repository join/revocation transitions.
+
 ## 26. V2 typed encrypted objects
 
 ADR-054 makes the authenticated plaintext of every ADR-045 envelope one

@@ -94,7 +94,11 @@ capabilities. ADR-066 adds a macOS Security.framework adapter over the same
 signed public key-handle/bootstrap boundary: its Data Protection Keychain item
 is local, lock-aware, and explicitly enrolled, while its removal changes no
 repository state. Neither adapter is user identity, policy, a mutable scratch
-head, or an automatic authority decision. ADR-054 frames each decrypted V2 object with an
+head, or an automatic authority decision. ADR-067 adds a separate browser-local
+vault: a fresh user-verifying WebAuthn PRF assertion imports a transient
+AES-GCM key that decrypts an IndexedDB ciphertext bound to the exact browser
+origin, RP ID, and credential ID. It does not place browser keys in repository
+objects or turn local enrolment/removal into repository authority. ADR-054 frames each decrypted V2 object with an
 authenticated canonical kind, so exact scratch snapshots and causal ledger
 events can share the opaque create-only object namespace. ADR-055 builds a
 device-scoped local scratch view over those frames: it publishes an immutable
