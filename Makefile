@@ -5,7 +5,7 @@ OCAML_VERSION := 5.5.0
 OCAMLFORMAT_VERSION := 0.29.0
 LOCAL_SWITCH := $(CURDIR)
 
-.PHONY: setup deps build test property-test secret-service-integration rust-adapter-build rust-adapter-test typescript-adapter-deps typescript-adapter-test benchmark-encoding benchmark-large-content compaction-retention-benchmark compaction-retention-benchmark-verify semantic-experiment semantic-experiment-verify rust-retargeting-comparison rust-retargeting-comparison-verify marshal-audit lint check format workflow-lint ci
+.PHONY: setup deps build test property-test secret-service-integration keychain-integration rust-adapter-build rust-adapter-test typescript-adapter-deps typescript-adapter-test benchmark-encoding benchmark-large-content compaction-retention-benchmark compaction-retention-benchmark-verify semantic-experiment semantic-experiment-verify rust-retargeting-comparison rust-retargeting-comparison-verify marshal-audit lint check format workflow-lint ci
 
 setup:
 	$(OPAM) init --bare --no-setup --yes
@@ -44,6 +44,10 @@ property-test: rust-adapter-build
 secret-service-integration:
 	test "$$YEOKCHAM_RUN_SECRET_SERVICE_INTEGRATION" = 1
 	$(DUNE) exec test/v2_secret_service_native.exe
+
+keychain-integration:
+	test "$$YEOKCHAM_RUN_KEYCHAIN_INTEGRATION" = 1
+	$(DUNE) exec test/v2_macos_keychain_native.exe
 
 benchmark-encoding:
 	BENCHMARK_DUNE_PROFILE=release $(DUNE) exec --profile release bench/encoding_benchmark.exe -- --output bench/results/canonical-codec-v1.json

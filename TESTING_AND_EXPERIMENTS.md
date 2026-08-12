@@ -306,6 +306,18 @@ On 2026-08-13, it passed against the local default `kdewallet` collection.
 pipe's writer; after closing that descriptor on `exec`, the native
 enrol/reopen/clear/missing sequence completed successfully.
 
+V2-024 provides an injected macOS Keychain custody core, a canonical public
+Keychain-account vector, and a seeded re-open property without modifying the
+host Keychain. Focused tests verify repository-byte exclusion, explicit
+locked/unavailable/non-exportable refusal, create-only handle collision,
+malformed/mismatched value rejection, and local removal that leaves the signed
+bootstrap unchanged. The separate opt-in
+`YEOKCHAM_RUN_KEYCHAIN_INTEGRATION=1 make keychain-integration` target is
+macOS-only: it creates a random Data Protection Keychain generic-password item
+through Security.framework, reopens it, deletes only that item, and verifies
+missing state. It cannot be run on this Linux host and remains required native
+evidence before #146 can close, alongside #122's hosted-success gate.
+
 V2-023 separately checks fixed canonical public repository-authority,
 device-certificate, and device-revocation records, their strict inverse
 decoders, and distinct typed encrypted-object frames. Focused cases reject

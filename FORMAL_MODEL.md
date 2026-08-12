@@ -1704,6 +1704,29 @@ bootstrap, so the cross-service operation is deliberately non-atomic: an
 interruption may leave an unreachable service item but cannot create a
 repository bootstrap that validates with wrong key material.
 
+## 25a. macOS Keychain custody
+
+ADR-066 adds a second platform-local custody relation without altering a
+repository format:
+
+```text
+Keychain_locator = (fixed-service, versioned-account(hex(Key_handle)))
+Keychain_custody(Key_handle) = encode_v1(Capability)
+```
+
+The generic-password item is Data Protection Keychain data, synchronisation is
+disabled, and its accessibility is `WhenUnlockedThisDeviceOnly`. Its strict
+capability value is encrypted Keychain state, not a Yeokcham object, bootstrap
+field, command argument, log, or fixture. `open_keychain_custody(Bootstrap)`
+rejects locked, unavailable, missing, malformed, mismatched, and
+non-exportable-key results before it evaluates `matches`.
+
+Enrolment and removal affect only `Keychain_custody(Key_handle)`. They do not
+add or revoke a repository authority record, device certificate, ledger event,
+or membership relation. A present non-exportable `SecKey` is not converted to
+raw capability bytes; it is an explicit refusal until a future capability model
+can operate on provider-held signing material.
+
 ## 26. V2 typed encrypted objects
 
 ADR-054 makes the authenticated plaintext of every ADR-045 envelope one

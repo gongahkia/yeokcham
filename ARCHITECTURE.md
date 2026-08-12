@@ -90,8 +90,11 @@ monotonic clock. The Linux watcher excludes `.yeokcham`, preventing create-only
 object publication from scheduling itself. ADR-053 replaces ADR-052's initial bootstrap
 format with a canonical signed repository/device/public-signer/key-handle
 bootstrap and a Linux Secret Service custody adapter for role-separated local
-capabilities. It is not user identity, policy, a mutable scratch head, or an
-automatic authority decision. ADR-054 frames each decrypted V2 object with an
+capabilities. ADR-066 adds a macOS Security.framework adapter over the same
+signed public key-handle/bootstrap boundary: its Data Protection Keychain item
+is local, lock-aware, and explicitly enrolled, while its removal changes no
+repository state. Neither adapter is user identity, policy, a mutable scratch
+head, or an automatic authority decision. ADR-054 frames each decrypted V2 object with an
 authenticated canonical kind, so exact scratch snapshots and causal ledger
 events can share the opaque create-only object namespace. ADR-055 builds a
 device-scoped local scratch view over those frames: it publishes an immutable

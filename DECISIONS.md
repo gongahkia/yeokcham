@@ -176,3 +176,4 @@ The ADR lifecycle, numbering rules, and template are defined in [`docs/adr/READM
 - [ADR-063 — V2 local cache reclamation from complete reachable roots](docs/adr/063-v2-cache-reclamation.md) — Accepted.
 - [ADR-064 — V2 user, repository, and device authority hierarchy](docs/adr/064-v2-user-repository-device-authority.md) — Superseded by ADR-065.
 - [ADR-065 — V2 authority record causality](docs/adr/065-v2-authority-record-causality.md) — Accepted.
+- [ADR-066 — macOS Keychain device custody and explicit enrollment](docs/adr/066-macos-keychain-device-custody.md) — Accepted.
