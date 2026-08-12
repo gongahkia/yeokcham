@@ -1,8 +1,8 @@
 # ADR-064 — V2 user, repository, and device authority hierarchy
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-13
-- Deciders: maintainer (approval pending)
+- Deciders: maintainer (approved 2026-08-13)
 - Governing issue: [#145](https://github.com/gongahkia/yeokcham/issues/145)
 - Related issues: [#146](https://github.com/gongahkia/yeokcham/issues/146), [#147](https://github.com/gongahkia/yeokcham/issues/147), [#149](https://github.com/gongahkia/yeokcham/issues/149), [#151](https://github.com/gongahkia/yeokcham/issues/151), [#153](https://github.com/gongahkia/yeokcham/issues/153)
 - Supersedes: None
