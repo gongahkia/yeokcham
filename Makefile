@@ -46,6 +46,7 @@ secret-service-integration:
 	$(DUNE) exec test/v2_secret_service_native.exe
 
 keychain-integration:
+	test "$$(uname)" = Darwin
 	test "$$YEOKCHAM_RUN_KEYCHAIN_INTEGRATION" = 1
 	$(DUNE) exec test/v2_macos_keychain_native.exe
 
