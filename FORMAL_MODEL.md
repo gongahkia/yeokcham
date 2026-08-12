@@ -1818,6 +1818,30 @@ authentication. A later Unix-socket adapter owns that local OS boundary; a
 later Rust runtime implements the opaque operations. No V2 repository semantics
 or custom cryptographic primitive is introduced here.
 
+## 25e. Repository MLS bootstrap
+
+ADR-070 defines one initial MLS group as an encrypted local bootstrap artifact,
+not a repository object or authority transition:
+
+```text
+Mls_group_id(R) = SHA-256("yeokcham:v2:mls-group:1\0" || R)
+Mls_group_state_v1 = (version=1, R, Mls_group_id(R), D, opaque-mls-state,
+                      mandatory-features)
+Group_file = ChaCha20-Poly1305(Bootstrap_envelope_key,
+                               Mls_group_state_v1)
+```
+
+Creation gives `opaque-mls-state` exactly one Basic MLS credential containing
+the bootstrap device ID `D`. Opening requires envelope authentication,
+canonical re-encoding, `R` and `D` equality with the authenticated local
+bootstrap, and runtime reload that proves the MLS GroupID and sole initial
+credential. Metadata encryption derives a fixed, domain-separated 32-byte MLS
+exporter secret and applies the existing V2 envelope; it does not use a
+self-addressed MLS application message. A final state is visible only after
+create-only durable publication; private staging files are not group state.
+Future additions, credential trust, epochs, and revocation remain separate
+transitions.
+
 ## 26. V2 typed encrypted objects
 
 ADR-054 makes the authenticated plaintext of every ADR-045 envelope one

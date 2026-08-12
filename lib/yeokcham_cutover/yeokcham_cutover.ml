@@ -60,6 +60,8 @@ let metadata_name = ".yeokcham"
 let format_name = "format"
 let bootstrap_name = "bootstrap"
 let recovery_name = "recovery"
+let mls_group_name = "mls-group"
+let mls_group_state_name = "group-state-v1.cbor"
 let objects_name = "objects"
 let refs_name = "refs"
 let locks_name = "locks"
@@ -1079,6 +1081,49 @@ let directory_is_empty path =
   let* names = read_directory path in
   Ok (names = [])
 
+let decimal_component value =
+  String.length value > 0
+  && String.for_all (function '0' .. '9' -> true | _ -> false) value
+
+let is_v2_mls_group_temporary_filename name =
+  let prefix = "." ^ mls_group_state_name ^ ".bootstrap-" in
+  let prefix_length = String.length prefix in
+  if
+    String.length name <= prefix_length || not (String.starts_with ~prefix name)
+  then false
+  else
+    match
+      String.sub name prefix_length (String.length name - prefix_length)
+      |> String.split_on_char '-'
+    with
+    | [ process; attempt ] ->
+        decimal_component process && decimal_component attempt
+    | _ -> false
+
+let validate_v2_mls_group directory =
+  let* names = read_directory directory in
+  let rec validate = function
+    | [] -> Ok ()
+    | name :: rest ->
+        let path = Filename.concat directory name in
+        if
+          not
+            (String.equal name mls_group_state_name
+            || is_v2_mls_group_temporary_filename name)
+        then
+          Error
+            (Archive_verification_failed
+               { path; detail = "unexpected V2 MLS group entry" })
+        else
+          let* stat = lstat path in
+          if stat.Unix.st_kind <> Unix.S_REG then
+            Error
+              (Archive_verification_failed
+                 { path; detail = "V2 MLS group entry is not a regular file" })
+          else validate rest
+  in
+  validate names
+
 let v2_layout metadata =
   let required =
     [
@@ -1093,7 +1138,8 @@ let v2_layout metadata =
   in
   let allowed =
     List.sort String.compare
-      (recovery_name :: quarantine_name :: reclamation_name :: required)
+      (mls_group_name :: recovery_name :: quarantine_name :: reclamation_name
+     :: required)
   in
   let* names = read_directory metadata in
   let missing = List.filter (fun name -> not (List.mem name names)) required in
@@ -1129,6 +1175,18 @@ let v2_layout metadata =
     let* () = ensure_directory locks in
     let* () = validate_v2_locks locks in
     let* () = ensure_directory (Filename.concat metadata journal_name) in
+    let mls_group = Filename.concat metadata mls_group_name in
+    let* () =
+      match lstat_or_missing mls_group with
+      | Error error -> Error error
+      | Ok None -> Ok ()
+      | Ok (Some stat) when stat.Unix.st_kind = Unix.S_DIR ->
+          validate_v2_mls_group mls_group
+      | Ok (Some _) ->
+          Error
+            (Archive_verification_failed
+               { path = mls_group; detail = "V2 MLS group is not a directory" })
+    in
     let quarantine = Filename.concat metadata quarantine_name in
     let* () =
       match lstat_or_missing quarantine with

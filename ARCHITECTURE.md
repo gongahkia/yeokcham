@@ -546,6 +546,17 @@ module has no listener, peer-authentication policy, repository-object schema,
 key persistence, or runtime cryptography. Those remain explicit later socket,
 runtime, and protocol decisions.
 
+ADR-070 adds a narrow `yeokcham_v2_mls_runtime` client, an opaque canonical
+`yeokcham_v2_mls_group` model, and `yeokcham_v2_mls_group_store`. The isolated
+Rust process creates and reloads real `mls-rs` state but has no repository-path
+or persistence capability. OCaml derives the repository GroupID, binds the
+outer canonical state to the authenticated bootstrap repository/device, and
+persists only a V2-envelope ciphertext under `.yeokcham/mls-group/`. Runtime
+reload verifies the GroupID and sole initial device credential before an MLS
+exporter key encrypts metadata. Publication is create-only with inert staging;
+it creates neither a remote membership authority nor an invitation/rotation
+path.
+
 `capsule create --current` uses no separate working-diff format. Under the same
 writer lock it verifies a scratch head, double-scans the working directory, and
 uses the ordinary scratch checkpoint writer for a verified difference. The

@@ -87,6 +87,10 @@ val make_response :
 
 val accept_request : server -> request -> (server, error) result
 val validate_response : request:request -> response -> (unit, error) result
+val response_result : response -> result_kind
+val response_payload : response -> string
+val hello_ack_of_message : message -> hello_ack option
+val response_of_message : message -> response option
 val encode : message -> string
 val decode : string -> (message, error) result
 

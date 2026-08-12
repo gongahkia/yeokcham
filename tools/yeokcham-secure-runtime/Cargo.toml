@@ -1,0 +1,19 @@
+[workspace]
+members = ["."]
+resolver = "2"
+
+[package]
+name = "yeokcham-secure-runtime"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.82"
+publish = false
+description = "isolated MLS runtime for Yeokcham V2 local IPC"
+license = "MIT"
+
+[dependencies]
+mls-rs = "=0.55.3"
+mls-rs-codec = "=0.7.0"
+mls-rs-core = "=0.27.0"
+mls-rs-crypto-openssl = "=0.21.0"
+zeroize = "=1.8.1"

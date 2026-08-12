@@ -29,6 +29,7 @@ module Device_certificate_id : Identity
 module Device_revocation_id : Identity
 module Recovery_package_id : Identity
 module Secure_runtime_session_id : Identity
+module Mls_group_id : Identity
 module Opaque_object_ref : Identity
 module Ref_event_id : Identity
 module Signer_key_id : Identity

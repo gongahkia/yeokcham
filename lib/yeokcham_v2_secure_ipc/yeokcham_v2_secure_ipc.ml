@@ -460,6 +460,17 @@ let validate_response ~request response =
     Error (Response_mismatch "operation")
   else Ok ()
 
+let response_result response = response.response_result
+let response_payload response = response.response_payload
+
+let hello_ack_of_message = function
+  | Hello_ack acknowledgement -> Some acknowledgement
+  | Hello _ | Request _ | Response _ -> None
+
+let response_of_message = function
+  | Response response -> Some response
+  | Hello _ | Hello_ack _ | Request _ -> None
+
 let value_array values =
   Encoding.array values
   |> Result.map_error (fun error ->

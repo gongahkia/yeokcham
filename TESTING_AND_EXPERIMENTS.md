@@ -370,6 +370,17 @@ one sequence acceptance, and duplicate refusal. This covers only the local
 wire contract: it does not establish a Rust runtime, socket peer authentication,
 MLS behaviour, key custody, network transport, or repository semantics.
 
+V2-029 exercises the real constrained `mls-rs` bootstrap runtime rather than
+mocking group state. Rust coverage creates and reloads an initial group, proves
+stable exporter output, and rejects foreign group IDs, wrong initial device
+credentials, and corrupt snapshots. OCaml coverage fixes a nonsecret canonical
+state fixture; verifies encrypted, create-only same-directory state
+publication/reopen; proves exporter-encrypted metadata round-trips; and rejects
+foreign repository, wrong-device, corrupt, and interrupted-staging cases. The
+seeded property varies repository/device IDs and requires verified creation,
+reload, and metadata round-trip. This is not evidence of invitation security,
+remote identity, transport, rotation, or group recovery.
+
 Milestone 6 validation checks canonical command/evidence goldens and inverse
 decoders; exact-snapshot materialisation; passing, failed, signalled, timeout,
 and execution-error observations; bounded stdout/stderr retention and hashes;
