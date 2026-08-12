@@ -1,0 +1,3 @@
+(library
+ (name yeokcham_v2_recovery_store)
+ (libraries unix yeokcham_cutover yeokcham_v2_recovery))

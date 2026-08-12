@@ -1759,9 +1759,10 @@ with an independently retained random secret:
 
 ```text
 Recovery_key = SHA-256(domain, Recovery_secret, package-id)
-Recovery_package = (public bindings,
-                    ChaCha20-Poly1305(Recovery_key, Recovery_payload))
-Recovery_payload = (package-id, authority, root-private-key)
+Recovery_package = (version, package-id, repository-id, user-id, root-key-id,
+                    root-public-key,
+                    ChaCha20-Poly1305(Recovery_key, Recovery_payload), features)
+Recovery_payload = (version, package-id, authority, root-private-key)
 ```
 
 `Recovery_secret` is a 32-byte CSPRNG value outside repository and service
@@ -1774,6 +1775,13 @@ public-key/ID/user match, and equality of all duplicated public bindings.
 proposal from explicit new device material. It has no transition that activates
 the certificate, edits a bootstrap, resets a service account, or replaces a
 repository key. Missing package or secret is explicit irreversible loss.
+
+The optional local artifact is one canonical encrypted file at
+`.yeokcham/recovery/recovery-package-v1.cbor`. Publication is create-only:
+private same-directory staging files are non-authoritative; byte-exact retry is
+`Already_initialized`; divergent, malformed, or unknown entries reject without
+replacing an existing copy. This local package does not add a repository object,
+service endpoint, or authority-state transition.
 
 ## 26. V2 typed encrypted objects
 

@@ -72,6 +72,8 @@ val envelope_key : capability -> Envelope.key
 val address_key : capability -> Address.key
 val capability_signer_key_id : capability -> Ledger.Signer_key_id.t
 val capability_signer_public_key : capability -> string
+val capability_encryption_key_commitment : capability -> string
+val capability_address_key_commitment : capability -> string
 val sign_ledger : capability -> Ledger.unsigned -> string
 
 val public_key_registry :

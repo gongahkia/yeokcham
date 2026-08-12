@@ -53,6 +53,10 @@ val root_signing_capability_of_private_key :
   string -> (root_signing_capability, error) result
 
 val root_public_key : root_signing_capability -> string
+
+(* Raw private bytes are only for an encrypted, caller-owned recovery package;
+   callers must not persist them in repository or service state. *)
+val root_private_key_bytes : root_signing_capability -> string
 val root_key_id : root_signing_capability -> Root_key_id.t
 val user_id : root_signing_capability -> User_id.t
 val user_id_of_root_public_key : string -> (User_id.t, error) result

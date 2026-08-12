@@ -59,6 +59,7 @@ let ( let* ) = Result.bind
 let metadata_name = ".yeokcham"
 let format_name = "format"
 let bootstrap_name = "bootstrap"
+let recovery_name = "recovery"
 let objects_name = "objects"
 let refs_name = "refs"
 let locks_name = "locks"
@@ -1091,7 +1092,8 @@ let v2_layout metadata =
     |> List.sort String.compare
   in
   let allowed =
-    List.sort String.compare (quarantine_name :: reclamation_name :: required)
+    List.sort String.compare
+      (recovery_name :: quarantine_name :: reclamation_name :: required)
   in
   let* names = read_directory metadata in
   let missing = List.filter (fun name -> not (List.mem name names)) required in

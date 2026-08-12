@@ -169,6 +169,8 @@ let header_bytes envelope =
   | Ok bytes -> bytes
   | Error error -> invalid_arg (error_to_string error)
 
+let mandatory_features envelope = envelope.mandatory_features
+
 let decode encoded =
   if String.length encoded > max_ciphertext_bytes + max_outer_overhead_bytes
   then Error (Ciphertext_too_large (String.length encoded))

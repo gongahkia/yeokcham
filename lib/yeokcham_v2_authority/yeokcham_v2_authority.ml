@@ -253,6 +253,10 @@ let root_signing_capability_of_private_key private_key =
       : root_signing_capability)
 
 let root_public_key (root : root_signing_capability) = root.root_cap_public_key
+
+let root_private_key_bytes root =
+  Mirage_crypto_ec.Ed25519.priv_to_octets root.root_cap_private_key
+
 let root_key_id (root : root_signing_capability) = root.root_cap_key_id
 let user_id (root : root_signing_capability) = root.root_cap_user_id
 

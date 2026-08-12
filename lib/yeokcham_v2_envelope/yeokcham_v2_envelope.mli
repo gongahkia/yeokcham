@@ -35,5 +35,6 @@ val seal :
 
 val encode : t -> string
 val header_bytes : t -> string
+val mandatory_features : t -> int64
 val decode : string -> (t, error) result
 val open_envelope : key:key -> t -> (string, error) result

@@ -27,6 +27,7 @@ module Device_id : Identity
 module Repository_authority_id : Identity
 module Device_certificate_id : Identity
 module Device_revocation_id : Identity
+module Recovery_package_id : Identity
 module Opaque_object_ref : Identity
 module Ref_event_id : Identity
 module Signer_key_id : Identity

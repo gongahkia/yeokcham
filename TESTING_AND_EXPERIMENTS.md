@@ -343,6 +343,20 @@ identities and requires canonical authority/certificate round trips. This
 slice does not claim authority-ledger ordering, bootstrap binding, recovery,
 remote encryption-key non-reuse, a CLI command, or a benchmark.
 
+V2-027 fixes a canonical ciphertext-only recovery-package vector and exercises
+strict inverse decoding, phrase-before-decrypt refusal, wrong-secret
+authentication failure, tampering, unsupported features, root/authority and
+public-header/payload mismatches, and explicit malformed-secret/package loss.
+Durable coverage creates a V2 root, proves a missing package is explicit,
+publishes once via create-only same-directory staging, reopens the exact bytes,
+accepts only byte-identical retry, leaves strictly named stale staging inert,
+and rejects divergent, corrupt, and unknown prior local state without touching
+the public bootstrap. The seeded 120-case property varies secret, package ID,
+root key, repository ID, and nonce; it requires the matching phrase/secret to
+recover and a distinct secret to fail. This is local cryptographic and durable
+format coverage only: it does not demonstrate a service reset, device
+activation, real-world secret backup, remote storage, or a CLI workflow.
+
 Milestone 6 validation checks canonical command/evidence goldens and inverse
 decoders; exact-snapshot materialisation; passing, failed, signalled, timeout,
 and execution-error observations; bounded stdout/stderr retention and hashes;

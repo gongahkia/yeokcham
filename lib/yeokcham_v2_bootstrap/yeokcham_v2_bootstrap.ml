@@ -237,6 +237,12 @@ let address_key capability = capability.cap_address_key
 let capability_signer_key_id capability = capability.cap_signer_key_id
 let capability_signer_public_key capability = capability.cap_signer_public_key
 
+let capability_encryption_key_commitment capability =
+  capability.cap_encryption_key_commitment
+
+let capability_address_key_commitment capability =
+  capability.cap_address_key_commitment
+
 let sign_ledger capability unsigned =
   Ledger.signing_bytes unsigned
   |> Mirage_crypto_ec.Ed25519.sign ~key:capability.cap_signing_key

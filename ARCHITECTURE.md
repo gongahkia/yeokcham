@@ -523,6 +523,19 @@ valid signature as an active-device decision. A later authority-ledger and
 bootstrap-version adapter will make the causal active/revoked state durable;
 this slice adds no mutable authority head, recovery package, or CLI command.
 
+ADR-068 adds `yeokcham_v2_recovery` and its local-only
+`yeokcham_v2_recovery_store` adapter. A CSPRNG 32-byte secret plus public
+package ID derives a one-package ChaCha20-Poly1305 key; only the canonical
+encrypted authority/root payload and its public bindings are persisted under
+`.yeokcham/recovery/`. The store permits exact retries and private staging
+remnants but refuses divergent, malformed, or unknown entries without
+overwrite. Recovery verifies its phrase, ciphertext, canonical authority, and
+all duplicated bindings before returning a root capability. It can sign only a
+proposed replacement-device certificate from caller-supplied device material;
+it cannot publish that proposal, alter bootstrap bytes, activate a device, or
+provide a service-side reset path. This is an optional V2 root directory, not a
+repository object, remote API, or CLI command.
+
 `capsule create --current` uses no separate working-diff format. Under the same
 writer lock it verifies a scratch head, double-scans the working directory, and
 uses the ordinary scratch checkpoint writer for a verified difference. The
