@@ -536,6 +536,16 @@ it cannot publish that proposal, alter bootstrap bytes, activate a device, or
 provide a service-side reset path. This is an optional V2 root directory, not a
 repository object, remote API, or CLI command.
 
+ADR-069 adds `yeokcham_v2_secure_ipc`, the bounded canonical CBOR contract
+between the OCaml control plane and a later Rust secure runtime. Its versioned
+Hello/Acknowledgement pins a 32-byte session identity, compatible version, and
+selected MLS/device-crypto/mesh capabilities before any request. Length-framed
+opaque requests are sequence-bound and become stale after the in-memory runtime
+restarts; responses must bind the same session, sequence, and operation. The
+module has no listener, peer-authentication policy, repository-object schema,
+key persistence, or runtime cryptography. Those remain explicit later socket,
+runtime, and protocol decisions.
+
 `capsule create --current` uses no separate working-diff format. Under the same
 writer lock it verifies a scratch head, double-scans the working directory, and
 uses the ordinary scratch checkpoint writer for a verified difference. The

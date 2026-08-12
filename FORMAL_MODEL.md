@@ -1783,6 +1783,41 @@ private same-directory staging files are non-authoritative; byte-exact retry is
 replacing an existing copy. This local package does not add a repository object,
 service endpoint, or authority-state transition.
 
+## 25d. Secure-runtime IPC
+
+ADR-069 defines a bounded local control-plane protocol, separate from both the
+repository graph and custody records:
+
+```text
+Frame = (version, kind, body, mandatory-features)
+Hello = (session-id, supported-versions, required-capabilities,
+         optional-capabilities)
+Request = (session-id, sequence, operation-kind, opaque-payload)
+Response = (session-id, sequence, operation-kind, result-kind, opaque-payload)
+```
+
+`session-id` is an opaque 32-byte caller-created identity. A server selects the
+highest shared version and a canonical subset of requested capabilities only
+when every required capability is supported. A client validates the returned
+session, version, and capability subset before it creates a request. V1's
+closed capability and operation set is `MLS | device-crypto | mesh`; the
+payload is bounded opaque bytes, not a repository ID, object, ref, authority
+record, or interpretation rule.
+
+For active session `S`, `next(S)` starts at zero. A request is accepted only
+when its negotiated operation capability is present and
+`request.sequence = next(S)`; acceptance increments `next(S)` exactly once.
+An unknown session, a restart-lost session, duplicate, or gap is an explicit
+refusal. A response is valid only when its session, sequence, and operation
+equal the corresponding request. Frames use a bounded four-byte length prefix
+and one canonical CBOR item; malformed, noncanonical, over-limit, or unknown
+mandatory-feature input has no partial result.
+
+This relation stores nothing and supplies neither endpoint ownership nor peer
+authentication. A later Unix-socket adapter owns that local OS boundary; a
+later Rust runtime implements the opaque operations. No V2 repository semantics
+or custom cryptographic primitive is introduced here.
+
 ## 26. V2 typed encrypted objects
 
 ADR-054 makes the authenticated plaintext of every ADR-045 envelope one

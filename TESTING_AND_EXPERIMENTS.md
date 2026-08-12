@@ -357,6 +357,19 @@ recover and a distinct secret to fail. This is local cryptographic and durable
 format coverage only: it does not demonstrate a service reset, device
 activation, real-world secret backup, remote storage, or a CLI workflow.
 
+V2-028 fixes canonical CBOR vectors for secure-runtime Hello,
+acknowledgement, request, and response frames. Focused coverage verifies
+compatible version/capability negotiation, exact dispatch/response bindings,
+malformed and noncanonical bytes, unknown mandatory features, payload and wire
+bounds, missing capability, duplicate/gapped sequences, stale sessions after a
+runtime restart, and mismatched responses. Unix `socketpair` coverage verifies
+the big-endian length prefix, exact frame delivery, truncation, and oversize
+rejection before allocation. The seeded 120-case property varies session IDs,
+payloads, and the three operation capabilities, then requires canonical decode,
+one sequence acceptance, and duplicate refusal. This covers only the local
+wire contract: it does not establish a Rust runtime, socket peer authentication,
+MLS behaviour, key custody, network transport, or repository semantics.
+
 Milestone 6 validation checks canonical command/evidence goldens and inverse
 decoders; exact-snapshot materialisation; passing, failed, signalled, timeout,
 and execution-error observations; bounded stdout/stderr retention and hashes;
