@@ -26,7 +26,9 @@ The initial MLS roster has exactly the bootstrap device's opaque 32-byte Basic
 credential. This identifies a local member only; it is not a remote identity,
 trust, or invitation assertion. The runtime reloads a snapshot only when its
 GroupID and sole initial credential equal the requested group/device values. It
-then derives a 32-byte, domain-separated MLS exporter secret. Yeokcham uses
+then derives a 32-byte, domain-separated MLS exporter secret. For the initial
+state, the roster has exactly that one credential; later valid states must
+contain the wrapper's local device credential. Yeokcham uses
 that secret only as the existing V2 ChaCha20-Poly1305 envelope key for
 repository metadata. A sole MLS member does not process an application message
 sent to itself, so exporter-derived encryption is the defined bootstrap path.
@@ -65,7 +67,7 @@ private staging grammar.
 
 1. Repository GroupID is deterministic and cannot be selected independently.
 2. A state is usable only if both its outer repository/device bindings and its
-   reloaded MLS GroupID/sole initial credential match.
+   reloaded MLS GroupID/local device credential match.
 3. Repository storage contains no plaintext MLS snapshot, exporter secret, or
    bootstrap capability.
 4. A missing final state means no visible local membership; staging alone is

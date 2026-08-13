@@ -12,6 +12,13 @@ type t = {
   state_mandatory_features : int64;
 }
 
+type add_member_result = {
+  issuer_state : t;
+  recipient_state : t;
+  commit : string;
+  welcome : string;
+}
+
 type error =
   | Invalid_runtime_state of string
   | Invalid_payload of string
@@ -217,6 +224,41 @@ let metadata_key ~runtime state =
 
 let verify ~runtime state =
   metadata_key ~runtime state |> Result.map (fun _ -> ())
+
+let add_member ~runtime ~issuer_state ~recipient_device_id =
+  let* () = verify ~runtime issuer_state in
+  let* (result : Runtime.add_member_result) =
+    Runtime.add_member runtime ~group_id:issuer_state.state_group_id
+      ~issuer_device_id:issuer_state.state_device_id
+      ~issuer_runtime_state:issuer_state.state_runtime_bytes ~recipient_device_id
+    |> Result.map_error (fun error -> Runtime_error error)
+  in
+  let issuer_runtime_state = result.Runtime.issuer_runtime_state in
+  let recipient_runtime_state = result.Runtime.recipient_runtime_state in
+  let commit = result.Runtime.commit in
+  let welcome = result.Runtime.welcome in
+  let* issuer_state =
+    make ~repository_id:issuer_state.state_repository_id
+      ~group_id:issuer_state.state_group_id
+      ~device_id:issuer_state.state_device_id
+      ~runtime_state:issuer_runtime_state
+      ~mandatory_features:issuer_state.state_mandatory_features
+  in
+  let* recipient_state =
+    make ~repository_id:issuer_state.state_repository_id
+      ~group_id:issuer_state.state_group_id ~device_id:recipient_device_id
+      ~runtime_state:recipient_runtime_state
+      ~mandatory_features:issuer_state.state_mandatory_features
+  in
+  let* () = verify ~runtime issuer_state in
+  let* () = verify ~runtime recipient_state in
+  Ok
+    {
+      issuer_state;
+      recipient_state;
+      commit;
+      welcome;
+    }
 
 let encrypt_metadata ~runtime ~state ~nonce plaintext =
   if String.length plaintext > metadata_plaintext_limit then

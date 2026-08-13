@@ -9,6 +9,13 @@ module Model = Yeokcham_v2_model
 
 type configuration
 
+type add_member_result = {
+  issuer_runtime_state : string;
+  recipient_runtime_state : string;
+  commit : string;
+  welcome : string;
+}
+
 type error =
   | Runtime_missing of string
   | Runtime_start_failed of string
@@ -43,3 +50,13 @@ val derive_metadata_key :
   runtime_state:string ->
   (Yeokcham_v2_envelope.key, error) result
 (** Derives one 32-byte exporter secret from a verified group snapshot. *)
+
+val add_member :
+  configuration ->
+  group_id:Model.Mls_group_id.t ->
+  issuer_device_id:Model.Device_id.t ->
+  issuer_runtime_state:string ->
+  recipient_device_id:Model.Device_id.t ->
+  (add_member_result, error) result
+(** Performs one MLS Add proposal, Commit, and Welcome join entirely in the
+    isolated runtime. Both returned snapshots are opaque MLS-library state. *)

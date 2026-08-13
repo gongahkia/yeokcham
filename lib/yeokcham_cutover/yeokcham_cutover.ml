@@ -62,6 +62,8 @@ let bootstrap_name = "bootstrap"
 let recovery_name = "recovery"
 let mls_group_name = "mls-group"
 let mls_group_state_name = "group-state-v1.cbor"
+let mls_invitations_name = "mls-invitations"
+let mls_membership_events_name = "mls-membership-events"
 let objects_name = "objects"
 let refs_name = "refs"
 let locks_name = "locks"
@@ -1124,6 +1126,62 @@ let validate_v2_mls_group directory =
   in
   validate names
 
+let lowercase_hex value =
+  String.length value = 64
+  && String.for_all
+       (function '0' .. '9' | 'a' .. 'f' -> true | _ -> false)
+       value
+
+let is_v2_mls_record_filename name =
+  String.length name = 69
+  && String.ends_with ~suffix:".cbor" name
+  && lowercase_hex (String.sub name 0 64)
+
+let is_v2_mls_record_temporary_filename name =
+  let suffix = ".cbor.stage-" in
+  match String.index_opt name '.' with
+  | None -> false
+  | Some 0 ->
+      let name = String.sub name 1 (String.length name - 1) in
+      let prefix_length = 64 + String.length suffix in
+      if
+        String.length name <= prefix_length
+        || not (String.sub name 64 (String.length suffix) = suffix)
+        || not (lowercase_hex (String.sub name 0 64))
+      then false
+      else
+        (match
+           String.sub name prefix_length (String.length name - prefix_length)
+           |> String.split_on_char '-'
+         with
+        | [ process; attempt ] -> decimal_component process && decimal_component attempt
+        | _ -> false)
+  | Some _ -> false
+
+let validate_v2_mls_records directory =
+  let* names = read_directory directory in
+  let rec validate = function
+    | [] -> Ok ()
+    | name :: rest ->
+        let path = Filename.concat directory name in
+        if
+          not
+            (is_v2_mls_record_filename name
+            || is_v2_mls_record_temporary_filename name)
+        then
+          Error
+            (Archive_verification_failed
+               { path; detail = "unexpected V2 MLS invitation record entry" })
+        else
+          let* stat = lstat path in
+          if stat.Unix.st_kind <> Unix.S_REG then
+            Error
+              (Archive_verification_failed
+                 { path; detail = "V2 MLS invitation record is not a regular file" })
+          else validate rest
+  in
+  validate names
+
 let v2_layout metadata =
   let required =
     [
@@ -1138,8 +1196,8 @@ let v2_layout metadata =
   in
   let allowed =
     List.sort String.compare
-      (mls_group_name :: recovery_name :: quarantine_name :: reclamation_name
-     :: required)
+      (mls_group_name :: mls_invitations_name :: mls_membership_events_name
+     :: recovery_name :: quarantine_name :: reclamation_name :: required)
   in
   let* names = read_directory metadata in
   let missing = List.filter (fun name -> not (List.mem name names)) required in
@@ -1187,6 +1245,20 @@ let v2_layout metadata =
             (Archive_verification_failed
                { path = mls_group; detail = "V2 MLS group is not a directory" })
     in
+    let validate_optional_mls_records name =
+      let directory = Filename.concat metadata name in
+      match lstat_or_missing directory with
+      | Error error -> Error error
+      | Ok None -> Ok ()
+      | Ok (Some stat) when stat.Unix.st_kind = Unix.S_DIR ->
+          validate_v2_mls_records directory
+      | Ok (Some _) ->
+          Error
+            (Archive_verification_failed
+               { path = directory; detail = "V2 MLS record store is not a directory" })
+    in
+    let* () = validate_optional_mls_records mls_invitations_name in
+    let* () = validate_optional_mls_records mls_membership_events_name in
     let quarantine = Filename.concat metadata quarantine_name in
     let* () =
       match lstat_or_missing quarantine with

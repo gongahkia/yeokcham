@@ -5,6 +5,13 @@ module Model = Yeokcham_v2_model
 
 type configuration = { runtime_path : string }
 
+type add_member_result = {
+  issuer_runtime_state : string;
+  recipient_runtime_state : string;
+  commit : string;
+  welcome : string;
+}
+
 type error =
   | Runtime_missing of string
   | Runtime_start_failed of string
@@ -23,6 +30,7 @@ let max_runtime_state_bytes = 24 * 1024
 let request_schema_version = 1L
 let operation_bootstrap = 1L
 let operation_derive_metadata_key = 2L
+let operation_add_member = 3L
 let ( let* ) = Result.bind
 
 let default_configuration =
@@ -381,4 +389,55 @@ let derive_metadata_key configuration ~group_id ~device_id ~runtime_state =
               Envelope.key_of_bytes key
               |> Result.map_error (fun error ->
                   Invalid_runtime_response (Envelope.error_to_string error))
+        | _ -> assert false)
+
+let add_member configuration ~group_id ~issuer_device_id ~issuer_runtime_state
+    ~recipient_device_id =
+  if
+    String.length issuer_runtime_state = 0
+    || String.length issuer_runtime_state > max_runtime_state_bytes
+  then Error (Invalid_runtime_response "MLS issuer state violates bounds")
+  else
+    let payload =
+      [
+        Encoding.integer request_schema_version;
+        Encoding.integer operation_add_member;
+        Encoding.bytes (Model.Mls_group_id.to_bytes group_id);
+        Encoding.bytes (Model.Device_id.to_bytes issuer_device_id);
+        Encoding.bytes issuer_runtime_state;
+        Encoding.bytes (Model.Device_id.to_bytes recipient_device_id);
+      ]
+    in
+    invoke configuration payload (fun response ->
+        let* value = decode_payload response in
+        let* values = fields "MLS add-member response" 5 value in
+        match values with
+        | [ version; issuer_state; recipient_state; commit; welcome ] ->
+            let* version = integer "MLS add-member response version" version in
+            let* issuer_runtime_state =
+              bytes "MLS add-member issuer state" issuer_state
+            in
+            let* recipient_runtime_state =
+              bytes "MLS add-member recipient state" recipient_state
+            in
+            let* commit = bytes "MLS add-member commit" commit in
+            let* welcome = bytes "MLS add-member welcome" welcome in
+            if not (Int64.equal version request_schema_version) then
+              Error (Invalid_runtime_response "unsupported MLS response version")
+            else if
+              String.length issuer_runtime_state = 0
+              || String.length issuer_runtime_state > max_runtime_state_bytes
+              || String.length recipient_runtime_state = 0
+              || String.length recipient_runtime_state > max_runtime_state_bytes
+            then Error (Invalid_runtime_response "MLS response state violates bounds")
+            else if String.length commit = 0 || String.length welcome = 0 then
+              Error (Invalid_runtime_response "MLS add-member response omits protocol bytes")
+            else
+              Ok
+                {
+                  issuer_runtime_state;
+                  recipient_runtime_state;
+                  commit;
+                  welcome;
+                }
         | _ -> assert false)

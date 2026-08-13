@@ -311,6 +311,22 @@ let verify_signature ~public_key ~message ~signature =
   with Mirage_crypto_ec.Message_too_long ->
     Error (Cryptographic_failure "authority signing message is too long")
 
+let sign_root_message root ~domain message =
+  if String.length domain = 0 then
+    Error (Cryptographic_failure "root-signature domain must not be empty")
+  else
+    try
+      Ok
+        (Mirage_crypto_ec.Ed25519.sign ~key:root.root_cap_private_key
+           (domain ^ message))
+    with Mirage_crypto_ec.Message_too_long ->
+      Error (Cryptographic_failure "authority signing message is too long")
+
+let verify_root_message ~public_key ~domain message ~signature =
+  if String.length domain = 0 then
+    Error (Cryptographic_failure "root-signature domain must not be empty")
+  else verify_signature ~public_key ~message:(domain ^ message) ~signature
+
 let make_repository_authority ~repository_id ~(root : root_signing_capability)
     ~mandatory_features =
   let* () = check_mandatory_features mandatory_features in

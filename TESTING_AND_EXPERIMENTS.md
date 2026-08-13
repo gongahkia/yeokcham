@@ -381,6 +381,17 @@ seeded property varies repository/device IDs and requires verified creation,
 reload, and metadata round-trip. This is not evidence of invitation security,
 remote identity, transport, rotation, or group recovery.
 
+V2-030 extends the same real runtime coverage with a KeyPackage, by-value Add
+proposal, Commit, Welcome, and recipient Join. Rust tests reload both resulting
+member snapshots. OCaml unit coverage verifies root-only issuer refusal,
+signed/encrypted invitation round-trip, wrong capability, expiry, revocation,
+replay, tampered bytes, durable create-only retry/reopen, corruption, and
+unknown-record refusal. The seeded property varies repository and device IDs
+and requires both issuer and recipient snapshots to runtime-reload after the
+transition. This is not evidence of remote invitation delivery, Basic-
+credential identity, delegated policy roles, removal, epoch recovery, or
+crash-safe issuer-snapshot replacement.
+
 Milestone 6 validation checks canonical command/evidence goldens and inverse
 decoders; exact-snapshot materialisation; passing, failed, signalled, timeout,
 and execution-error observations; bounded stdout/stderr retention and hashes;

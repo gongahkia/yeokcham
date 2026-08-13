@@ -10,6 +10,13 @@ module Runtime = Yeokcham_v2_mls_runtime
 
 type t
 
+type add_member_result = {
+  issuer_state : t;
+  recipient_state : t;
+  commit : string;
+  welcome : string;
+}
+
 type error =
   | Invalid_runtime_state of string
   | Invalid_payload of string
@@ -53,6 +60,15 @@ val open_state :
 val verify : runtime:Runtime.configuration -> t -> (unit, error) result
 (** Loading the snapshot and deriving the domain-separated exporter key proves
     that the runtime accepts the state for its declared repository group. *)
+
+val add_member :
+  runtime:Runtime.configuration ->
+  issuer_state:t ->
+  recipient_device_id:Model.Device_id.t ->
+  (add_member_result, error) result
+(** Advances an issuer snapshot by one MLS Add/Commit and joins the requested
+    recipient device through the emitted Welcome. The runtime must verify both
+    resulting snapshots before they are returned. *)
 
 val encrypt_metadata :
   runtime:Runtime.configuration ->

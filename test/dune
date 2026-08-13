@@ -453,6 +453,52 @@
   yeokcham_v2_model))
 
 (test
+ (name test_v2_mls_invitation)
+ (modules test_v2_mls_invitation)
+ (libraries
+  alcotest
+  mirage-crypto-ec
+  yeokcham_v2_authority
+  yeokcham_v2_envelope
+  yeokcham_v2_mls_group
+  yeokcham_v2_mls_invitation
+  yeokcham_v2_mls_runtime
+  yeokcham_v2_model
+  yeokcham_testkit)
+ (deps
+  (source_tree golden)))
+
+(test
+ (name test_v2_mls_invitation_store)
+ (modules test_v2_mls_invitation_store)
+ (libraries
+  alcotest
+  mirage-crypto-ec
+  unix
+  yeokcham_store
+  yeokcham_v2_authority
+  yeokcham_v2_envelope
+  yeokcham_v2_mls_group
+  yeokcham_v2_mls_invitation
+  yeokcham_v2_mls_invitation_store
+  yeokcham_v2_mls_runtime
+  yeokcham_v2_model))
+
+(test
+ (name v2_mls_invitation_property_test)
+ (modules v2_mls_invitation_property_test)
+ (libraries
+  alcotest
+  qcheck-core
+  qcheck-alcotest
+  yeokcham_v2_authority
+  yeokcham_v2_envelope
+  yeokcham_v2_mls_group
+  yeokcham_v2_mls_invitation
+  yeokcham_v2_mls_runtime
+  yeokcham_v2_model))
+
+(test
  (name test_v2_secure_ipc)
  (modules test_v2_secure_ipc)
  (libraries alcotest unix yeokcham_testkit yeokcham_v2_secure_ipc)
@@ -2036,6 +2082,9 @@
   (:v2_recovery_property_test v2_recovery_property_test.exe)
   (:test_v2_mls_group test_v2_mls_group.exe)
   (:v2_mls_group_property_test v2_mls_group_property_test.exe)
+  (:test_v2_mls_invitation test_v2_mls_invitation.exe)
+  (:test_v2_mls_invitation_store test_v2_mls_invitation_store.exe)
+  (:v2_mls_invitation_property_test v2_mls_invitation_property_test.exe)
   (:test_v2_secure_ipc test_v2_secure_ipc.exe)
   (:v2_secure_ipc_property_test v2_secure_ipc_property_test.exe)
   (:v2_transaction_property_test v2_transaction_property_test.exe)
@@ -2119,6 +2168,9 @@
    (run %{v2_recovery_property_test})
    (run %{test_v2_mls_group})
    (run %{v2_mls_group_property_test})
+   (run %{test_v2_mls_invitation})
+   (run %{test_v2_mls_invitation_store})
+   (run %{v2_mls_invitation_property_test})
    (run %{test_v2_secure_ipc})
    (run %{v2_secure_ipc_property_test})
    (run %{v2_transaction_property_test})

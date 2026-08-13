@@ -552,10 +552,22 @@ Rust process creates and reloads real `mls-rs` state but has no repository-path
 or persistence capability. OCaml derives the repository GroupID, binds the
 outer canonical state to the authenticated bootstrap repository/device, and
 persists only a V2-envelope ciphertext under `.yeokcham/mls-group/`. Runtime
-reload verifies the GroupID and sole initial device credential before an MLS
+reload verifies the GroupID and wrapped local device credential before an MLS
 exporter key encrypts metadata. Publication is create-only with inert staging;
 it creates neither a remote membership authority nor an invitation/rotation
 path.
+
+ADR-071 extends that isolated runtime with one real MLS Add/Commit/Welcome
+join. `yeokcham_v2_mls_invitation` accepts only the repository-authority root
+as the currently provable invitation policy role, seals the joined recipient
+snapshot under a caller-held invitation capability, and signs canonical
+invitation/lifecycle records. The acceptance path requires the complete
+lifecycle history and runtime revalidation of the encrypted recipient state;
+the event history itself cannot create membership. The companion
+`yeokcham_v2_mls_invitation_store` publishes create-only signed/encrypted
+records in strict optional V2 namespaces. It does not deliver invitations over
+a network, infer a remote identity from a Basic credential, provide delegated
+roles, or crash-safely replace the issuer's local MLS group snapshot.
 
 `capsule create --current` uses no separate working-diff format. Under the same
 writer lock it verifies a scratch head, double-scans the working directory, and

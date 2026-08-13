@@ -62,6 +62,14 @@ val user_id : root_signing_capability -> User_id.t
 val user_id_of_root_public_key : string -> (User_id.t, error) result
 val root_key_id_of_public_key : string -> (Root_key_id.t, error) result
 
+val sign_root_message :
+  root_signing_capability -> domain:string -> string -> (string, error) result
+(** Signs a caller-owned, domain-separated protocol message. The caller must
+    use a fixed protocol domain; raw private key bytes remain unnecessary. *)
+
+val verify_root_message :
+  public_key:string -> domain:string -> string -> signature:string -> (unit, error) result
+
 val make_repository_authority :
   repository_id:Repository_id.t ->
   root:root_signing_capability ->

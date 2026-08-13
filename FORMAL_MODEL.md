@@ -1834,13 +1834,39 @@ Group_file = ChaCha20-Poly1305(Bootstrap_envelope_key,
 Creation gives `opaque-mls-state` exactly one Basic MLS credential containing
 the bootstrap device ID `D`. Opening requires envelope authentication,
 canonical re-encoding, `R` and `D` equality with the authenticated local
-bootstrap, and runtime reload that proves the MLS GroupID and sole initial
-credential. Metadata encryption derives a fixed, domain-separated 32-byte MLS
+bootstrap, and runtime reload that proves the MLS GroupID and wrapped local
+device credential. The initial state has exactly one credential; later member
+states may have more. Metadata encryption derives a fixed, domain-separated 32-byte MLS
 exporter secret and applies the existing V2 envelope; it does not use a
 self-addressed MLS application message. A final state is visible only after
 create-only durable publication; private staging files are not group state.
 Future additions, credential trust, epochs, and revocation remain separate
 transitions.
+
+## 25f. V2 MLS member invitations
+
+ADR-071 defines a root-authorized invitation lifecycle without introducing a
+second membership system. The sole currently modeled invitation policy role is
+the repository authority root. Its canonical signed invitation binds `R`, the
+derived `Mls_group_id(R)`, recipient device `D2`, issue/expiry times, and an
+envelope containing the recipient's opaque MLS snapshot. The 32-byte envelope
+key is an out-of-band invitation capability and is never record content.
+
+```text
+Invite(R, D1, D2) = MLS.Add(KeyPackage(D2)) ; Commit ; Welcome ; Join
+Invitation = Sign_root(R, GroupID(R), D2, issued, expires,
+                       Envelope(invitation-capability, Mls_group_state(D2)))
+```
+
+The constrained runtime applies the Commit to the issuer snapshot and joins
+the Welcome for `D2` before either returned snapshot is accepted. A valid
+acceptance requires an unexpired invitation, a history with one issued event
+and no revocation or earlier acceptance, envelope authentication, canonical
+state decoding, exact `R`/GroupID/`D2` bindings, and runtime reload. A history
+event records lifecycle only; it cannot create membership without this verified
+MLS state transition. Canonical encrypted invitation and event records publish
+create-only under `.yeokcham/mls-invitations` and
+`.yeokcham/mls-membership-events`; unknown or divergent durable bytes reject.
 
 ## 26. V2 typed encrypted objects
 

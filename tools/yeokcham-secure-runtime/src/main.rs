@@ -11,6 +11,7 @@ use mls_rs::{
     },
     CipherSuite, CipherSuiteProvider, Client, CryptoProvider, ExtensionList, GroupStateStorage,
 };
+use mls_rs_codec::MlsEncode;
 use mls_rs_core::group::{EpochRecord, GroupState};
 use mls_rs_crypto_openssl::OpensslCryptoProvider;
 use zeroize::Zeroizing;
@@ -27,6 +28,7 @@ const RESULT_REFUSED: u64 = 2;
 const REQUEST_SCHEMA_VERSION: u64 = 1;
 const REQUEST_BOOTSTRAP: u64 = 1;
 const REQUEST_EXPORTER: u64 = 2;
+const REQUEST_ADD_MEMBER: u64 = 3;
 const GROUP_ID_BYTES: usize = 32;
 const DEVICE_ID_BYTES: usize = 32;
 const EXPORTER_BYTES: usize = 32;
@@ -486,15 +488,15 @@ fn exporter_key(group_id: Vec<u8>, device_id: &[u8], state: Vec<u8>) -> Result<V
     if group.group_id() != group_id.as_slice() {
         return Err("MLS snapshot group ID differs from request".into());
     }
-    let members = group.roster().members();
-    let initial_member_matches = matches!(members.as_slice(), [member]
-        if member
+    let member_matches = group.roster().members().iter().any(|member| {
+        member
             .signing_identity()
             .credential
             .as_basic()
-            .is_some_and(|credential| credential.identifier() == device_id));
-    if !initial_member_matches {
-        return Err("MLS snapshot does not contain exactly the requested initial device".into());
+            .is_some_and(|credential| credential.identifier() == device_id)
+    });
+    if !member_matches {
+        return Err("MLS snapshot does not contain the requested device credential".into());
     }
     let key = group
         .export_secret(EXPORTER_LABEL, &group_id, EXPORTER_BYTES)
@@ -502,8 +504,128 @@ fn exporter_key(group_id: Vec<u8>, device_id: &[u8], state: Vec<u8>) -> Result<V
     Ok(key.as_bytes().to_vec())
 }
 
+fn add_member(
+    group_id: Vec<u8>,
+    issuer_device_id: &[u8],
+    issuer_state: Vec<u8>,
+    recipient_device_id: Vec<u8>,
+) -> Result<(Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>), String> {
+    if issuer_state.is_empty() || issuer_state.len() > MAX_RUNTIME_STATE_BYTES {
+        return Err("MLS issuer snapshot violates runtime bound".into());
+    }
+
+    let issuer_storage = StateStorage::default();
+    issuer_storage.put(group_id.clone(), issuer_state);
+    let issuer_client = Client::builder()
+        .crypto_provider(OpensslCryptoProvider::default())
+        .identity_provider(BasicIdentityProvider::new())
+        .group_state_storage(issuer_storage.clone())
+        .build();
+    let mut issuer_group = issuer_client
+        .load_group(&group_id)
+        .map_err(|error| format!("MLS issuer snapshot reload failed: {error}"))?;
+    if issuer_group.group_id() != group_id.as_slice() {
+        return Err("MLS issuer snapshot group ID differs from request".into());
+    }
+    let issuer_is_member = issuer_group.roster().members().iter().any(|member| {
+        member
+            .signing_identity()
+            .credential
+            .as_basic()
+            .is_some_and(|credential| credential.identifier() == issuer_device_id)
+    });
+    if !issuer_is_member {
+        return Err("MLS issuer snapshot does not contain the issuing device credential".into());
+    }
+
+    let recipient_storage = StateStorage::default();
+    let recipient_provider = OpensslCryptoProvider::default();
+    let (recipient_secret_key, recipient_public_key) = recipient_provider
+        .cipher_suite_provider(CipherSuite::CURVE25519_AES128)
+        .ok_or_else(|| "MLS provider lacks the selected cipher suite".to_string())?
+        .signature_key_generate()
+        .map_err(|error| format!("MLS recipient signing key creation failed: {error}"))?;
+    let recipient_identity = SigningIdentity::new(
+        BasicCredential::new(recipient_device_id.clone()).into_credential(),
+        recipient_public_key,
+    );
+    let recipient_client = Client::builder()
+        .crypto_provider(recipient_provider)
+        .identity_provider(BasicIdentityProvider::new())
+        .group_state_storage(recipient_storage.clone())
+        .signing_identity(
+            recipient_identity,
+            recipient_secret_key,
+            CipherSuite::CURVE25519_AES128,
+        )
+        .build();
+    let key_package = recipient_client
+        .generate_key_package_message(ExtensionList::default(), ExtensionList::default(), None)
+        .map_err(|error| format!("MLS recipient key package creation failed: {error}"))?;
+    let mut output = issuer_group
+        .commit_builder()
+        .add_member(key_package)
+        .map_err(|error| format!("MLS add-member proposal failed: {error}"))?
+        .build()
+        .map_err(|error| format!("MLS add-member commit failed: {error}"))?;
+    let commit = output
+        .commit_message
+        .mls_encode_to_vec()
+        .map_err(|error| format!("MLS commit encoding failed: {error}"))?;
+    if output.welcome_messages.len() != 1 {
+        return Err("MLS add-member commit did not produce exactly one welcome".into());
+    }
+    let welcome = output
+        .welcome_messages
+        .pop()
+        .ok_or_else(|| "MLS add-member commit omitted its welcome".to_string())?;
+    let welcome_bytes = welcome
+        .mls_encode_to_vec()
+        .map_err(|error| format!("MLS welcome encoding failed: {error}"))?;
+    issuer_group
+        .apply_pending_commit()
+        .map_err(|error| format!("MLS issuer commit application failed: {error}"))?;
+    issuer_group
+        .write_to_storage()
+        .map_err(|error| format!("MLS issuer state persistence failed: {error}"))?;
+    let issuer_state = issuer_storage.state()?;
+
+    let (mut recipient_group, _) = recipient_client
+        .join_group(None, &welcome, None)
+        .map_err(|error| format!("MLS recipient welcome join failed: {error}"))?;
+    if recipient_group.group_id() != group_id.as_slice() {
+        return Err("MLS recipient joined a group different from the request".into());
+    }
+    let recipient_is_member = recipient_group.roster().members().iter().any(|member| {
+        member
+            .signing_identity()
+            .credential
+            .as_basic()
+            .is_some_and(|credential| credential.identifier() == recipient_device_id)
+    });
+    if !recipient_is_member {
+        return Err("MLS recipient join omitted its requested device credential".into());
+    }
+    recipient_group
+        .write_to_storage()
+        .map_err(|error| format!("MLS recipient state persistence failed: {error}"))?;
+    let recipient_state = recipient_storage.state()?;
+    for (name, state) in [("issuer", &issuer_state), ("recipient", &recipient_state)] {
+        if state.is_empty() || state.len() > MAX_RUNTIME_STATE_BYTES {
+            return Err(format!("MLS {name} snapshot violates runtime bound"));
+        }
+    }
+    Ok((issuer_state, recipient_state, commit, welcome_bytes))
+}
+
 fn dispatch(payload: &[u8]) -> Result<Vec<u8>, String> {
-    let values = array(decode(payload)?, "MLS request", 5)?;
+    let values = match decode(payload)? {
+        Cbor::Array(values) => values,
+        Cbor::Uint(_) | Cbor::Bytes(_) => return Err("MLS request must be an array".into()),
+    };
+    if values.len() < 2 {
+        return Err("MLS request has too few fields".into());
+    }
     let mut fields = values.into_iter();
     let version = uint(fields.next().unwrap(), "MLS request version")?;
     if version != REQUEST_SCHEMA_VERSION {
@@ -523,6 +645,9 @@ fn dispatch(payload: &[u8]) -> Result<Vec<u8>, String> {
     let state = bytes(fields.next().unwrap(), "MLS request state")?;
     match operation {
         REQUEST_BOOTSTRAP => {
+            if fields.next().is_some() {
+                return Err("MLS bootstrap request has extra fields".into());
+            }
             if !state.is_empty() {
                 return Err("MLS bootstrap request state must be empty".into());
             }
@@ -533,10 +658,38 @@ fn dispatch(payload: &[u8]) -> Result<Vec<u8>, String> {
             ])))
         }
         REQUEST_EXPORTER => {
+            if fields.next().is_some() {
+                return Err("MLS exporter request has extra fields".into());
+            }
             let key = exporter_key(group_id, &device_id, state)?;
             Ok(encoded(&Cbor::Array(vec![
                 Cbor::Uint(REQUEST_SCHEMA_VERSION),
                 Cbor::Bytes(key),
+            ])))
+        }
+        REQUEST_ADD_MEMBER => {
+            let recipient_device_id = bytes(
+                fields.next().ok_or_else(|| {
+                    "MLS add-member request omits recipient device ID".to_string()
+                })?,
+                "MLS add-member recipient device ID",
+            )?;
+            if recipient_device_id.len() != DEVICE_ID_BYTES {
+                return Err(format!(
+                    "MLS add-member recipient device ID must contain {DEVICE_ID_BYTES} bytes"
+                ));
+            }
+            if fields.next().is_some() {
+                return Err("MLS add-member request has extra fields".into());
+            }
+            let (issuer_state, recipient_state, commit, welcome) =
+                add_member(group_id, &device_id, state, recipient_device_id)?;
+            Ok(encoded(&Cbor::Array(vec![
+                Cbor::Uint(REQUEST_SCHEMA_VERSION),
+                Cbor::Bytes(issuer_state),
+                Cbor::Bytes(recipient_state),
+                Cbor::Bytes(commit),
+                Cbor::Bytes(welcome),
             ])))
         }
         _ => Err("unsupported MLS request operation".into()),
@@ -626,5 +779,24 @@ mod tests {
         .is_err());
         assert!(exporter_key(group_id.clone(), &[b'x'; DEVICE_ID_BYTES], state.clone()).is_err());
         assert!(exporter_key(group_id, &[b'd'; DEVICE_ID_BYTES], vec![0; state.len()]).is_err());
+    }
+
+    #[test]
+    fn add_member_commits_and_joins_a_distinct_device() {
+        let group_id = vec![b'g'; GROUP_ID_BYTES];
+        let issuer_id = vec![b'i'; DEVICE_ID_BYTES];
+        let recipient_id = vec![b'r'; DEVICE_ID_BYTES];
+        let issuer_state = create_state(group_id.clone(), issuer_id.clone()).unwrap();
+        let (next_issuer, recipient_state, commit, welcome) = add_member(
+            group_id.clone(),
+            &issuer_id,
+            issuer_state,
+            recipient_id.clone(),
+        )
+        .unwrap();
+        assert!(!commit.is_empty());
+        assert!(!welcome.is_empty());
+        assert!(exporter_key(group_id.clone(), &issuer_id, next_issuer).is_ok());
+        assert!(exporter_key(group_id, &recipient_id, recipient_state).is_ok());
     }
 }
