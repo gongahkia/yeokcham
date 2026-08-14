@@ -30,15 +30,14 @@ let snapshot content =
     [ Model.File_path (path [ "a" ], { Model.mode = Model.Regular; content }) ]
   |> require_ok Model.construction_error_to_string
 
-let envelope ?(nonce_offset = 0) object_ =
+let envelope ?(nonce_offset = 0) repository object_ =
   let nonce =
     Envelope.nonce_of_bytes
       (String.init 12 (fun index -> Char.chr (index + nonce_offset + 32)))
     |> require_ok Envelope.error_to_string
   in
-  Envelope.seal ~key:encryption_key ~nonce ~mandatory_features:0L
-    (Object.encode object_)
-  |> require_ok Envelope.error_to_string
+  Object_store.seal repository ~nonce object_
+  |> require_ok Object_store.error_to_string
 
 let rec remove_tree path =
   try
@@ -70,7 +69,7 @@ let with_v2_repository run =
 let snapshot_publication_is_create_only_and_reopens () =
   with_v2_repository (fun root repository ->
       let original = snapshot "exact bytes\000and a symlink-free tree" in
-      let candidate = envelope (Object.scratch_snapshot original) in
+      let candidate = envelope repository (Object.scratch_snapshot original) in
       let object_ref =
         match Object_store.publish repository ~envelope:candidate with
         | Ok (Object_store.Published object_ref) -> object_ref
@@ -109,8 +108,14 @@ let malformed_plaintext_does_not_publish () =
         |> require_ok Envelope.error_to_string
       in
       let invalid =
-        Envelope.seal ~key:encryption_key ~nonce ~mandatory_features:0L
-          "not a V2 object frame"
+        let context =
+          Envelope.make_context
+            ~repository_id:(V2_model.Repository_id.to_bytes repository_id)
+            ~epoch:0L ~object_kind:1L
+          |> require_ok Envelope.error_to_string
+        in
+        Envelope.seal_bound ~key:encryption_key ~nonce ~mandatory_features:0L
+          ~context "not a V2 object frame"
         |> require_ok Envelope.error_to_string
       in
       let object_ref =

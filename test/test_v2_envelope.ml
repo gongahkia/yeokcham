@@ -38,6 +38,16 @@ let seal () =
   Envelope.seal ~key ~nonce ~mandatory_features:0L plaintext
   |> require_ok Envelope.error_to_string
 
+let bound_context ?(repository = 'r') ?(epoch = 0L) ?(kind = 1L) () =
+  Envelope.make_context ~repository_id:(String.make 32 repository) ~epoch
+    ~object_kind:kind
+  |> require_ok Envelope.error_to_string
+
+let seal_bound () =
+  Envelope.seal_bound ~key ~nonce ~mandatory_features:0L
+    ~context:(bound_context ()) plaintext
+  |> require_ok Envelope.error_to_string
+
 let read_golden name =
   Golden.read_lower_hex_file (Filename.concat "golden" name)
   |> require_ok Fun.id
@@ -132,6 +142,45 @@ let failures_are_typed_and_prepublication_safe () =
             |> require_ok Envelope.error_to_string)
           envelope))
 
+let bound_context_rejects_transplants_before_plaintext () =
+  let envelope = seal_bound () in
+  let encoded = Envelope.encode envelope in
+  let decoded = Envelope.decode encoded |> require_ok Envelope.error_to_string in
+  Alcotest.(check bool) "bound envelope is marked" true
+    (Envelope.is_bound decoded);
+  Alcotest.(check string) "bound envelope re-encodes canonically" encoded
+    (Envelope.encode decoded);
+  Alcotest.(check string) "bound context opens exact plaintext" plaintext
+    (Envelope.open_bound ~key ~context:(bound_context ()) decoded
+    |> require_ok Envelope.error_to_string);
+  Alcotest.(check bool) "legacy open rejects a bound envelope" true
+    (Result.is_error (Envelope.open_envelope ~key decoded));
+  Alcotest.(check bool) "foreign repository rejects before plaintext" true
+    (Result.is_error
+       (Envelope.open_bound ~key ~context:(bound_context ~repository:'s' ())
+          decoded));
+  Alcotest.(check bool) "wrong epoch rejects before plaintext" true
+    (Result.is_error
+       (Envelope.open_bound ~key ~context:(bound_context ~epoch:1L ()) decoded));
+  Alcotest.(check bool) "wrong type rejects before plaintext" true
+    (Result.is_error
+       (Envelope.open_bound ~key ~context:(bound_context ~kind:2L ()) decoded));
+  let tampered_context =
+    (match Encoding.decode encoded with
+    | Ok
+        (Encoding.Array
+          [ _; _; _; Encoding.Bytes object_context; _; _ ]) ->
+        replace_field encoded 3 (Encoding.bytes (alter_last_byte object_context))
+    | Ok _ -> Alcotest.fail "bound envelope object context is absent"
+    | Error error -> Alcotest.fail (Encoding.decode_error_to_string error))
+    [@warning "-4"]
+    |> Envelope.decode
+    |> require_ok Envelope.error_to_string
+  in
+  Alcotest.(check bool) "opaque object context tampering rejects" true
+    (Result.is_error
+       (Envelope.open_bound ~key ~context:(bound_context ()) tampered_context))
+
 let arbitrary_plaintext = QCheck2.Gen.(string_size (0 -- 4096))
 
 let envelope_round_trip_property =
@@ -165,6 +214,9 @@ let () =
             exact_golden_round_trip;
           Alcotest.test_case "failures are typed and safe" `Quick
             failures_are_typed_and_prepublication_safe;
+          Alcotest.test_case
+            "bound contexts reject repository, epoch, type, and object swaps"
+            `Quick bound_context_rejects_transplants_before_plaintext;
           QCheck_alcotest.to_alcotest ~speed_level:`Quick
             ~rand:(state_for "round-trip") envelope_round_trip_property;
           QCheck_alcotest.to_alcotest ~speed_level:`Quick
