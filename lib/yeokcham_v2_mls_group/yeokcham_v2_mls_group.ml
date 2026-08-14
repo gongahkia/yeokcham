@@ -13,11 +13,28 @@ type t = {
 }
 
 type add_member_result = {
-  issuer_state : t;
-  recipient_state : t;
-  commit : string;
-  welcome : string;
+  added_issuer_state : t;
+  added_recipient_state : t;
+  add_commit : string;
+  add_welcome : string;
+  add_previous_epoch : int64;
+  add_next_epoch : int64;
 }
+
+type remove_member_result = {
+  removed_issuer_state : t;
+  removal_commit : string;
+  removal_previous_epoch : int64;
+  removal_next_epoch : int64;
+}
+
+type apply_commit_result =
+  | Applied of {
+      advanced_state : t;
+      advanced_previous_epoch : int64;
+      advanced_next_epoch : int64;
+    }
+  | Removed of { removed_previous_epoch : int64; removed_observed_epoch : int64 }
 
 type error =
   | Invalid_runtime_state of string
@@ -234,10 +251,12 @@ let add_member ~runtime ~issuer_state ~recipient_device_id =
       ~recipient_device_id
     |> Result.map_error (fun error -> Runtime_error error)
   in
-  let issuer_runtime_state = result.Runtime.issuer_runtime_state in
-  let recipient_runtime_state = result.Runtime.recipient_runtime_state in
-  let commit = result.Runtime.commit in
-  let welcome = result.Runtime.welcome in
+  let issuer_runtime_state = result.Runtime.add_issuer_runtime_state in
+  let recipient_runtime_state = result.Runtime.add_recipient_runtime_state in
+  let commit = result.Runtime.add_commit in
+  let welcome = result.Runtime.add_welcome in
+  let previous_epoch = result.Runtime.add_previous_epoch in
+  let next_epoch = result.Runtime.add_next_epoch in
   let* issuer_state =
     make ~repository_id:issuer_state.state_repository_id
       ~group_id:issuer_state.state_group_id
@@ -253,7 +272,66 @@ let add_member ~runtime ~issuer_state ~recipient_device_id =
   in
   let* () = verify ~runtime issuer_state in
   let* () = verify ~runtime recipient_state in
-  Ok { issuer_state; recipient_state; commit; welcome }
+  Ok
+    {
+      added_issuer_state = issuer_state;
+      added_recipient_state = recipient_state;
+      add_commit = commit;
+      add_welcome = welcome;
+      add_previous_epoch = previous_epoch;
+      add_next_epoch = next_epoch;
+    }
+
+let remove_member ~runtime ~issuer_state ~removed_device_id =
+  let* () = verify ~runtime issuer_state in
+  let* (result : Runtime.remove_member_result) =
+    Runtime.remove_member runtime ~group_id:issuer_state.state_group_id
+      ~issuer_device_id:issuer_state.state_device_id
+      ~issuer_runtime_state:issuer_state.state_runtime_bytes ~removed_device_id
+    |> Result.map_error (fun error -> Runtime_error error)
+  in
+  let* issuer_state =
+    make ~repository_id:issuer_state.state_repository_id
+      ~group_id:issuer_state.state_group_id
+      ~device_id:issuer_state.state_device_id
+      ~runtime_state:result.Runtime.remove_issuer_runtime_state
+      ~mandatory_features:issuer_state.state_mandatory_features
+  in
+  let* () = verify ~runtime issuer_state in
+  Ok
+    {
+      removed_issuer_state = issuer_state;
+      removal_commit = result.Runtime.remove_commit;
+      removal_previous_epoch = result.Runtime.remove_previous_epoch;
+      removal_next_epoch = result.Runtime.remove_next_epoch;
+    }
+
+let apply_commit ~runtime ~state ~commit =
+  let* () = verify ~runtime state in
+  let* result =
+    Runtime.apply_commit runtime ~group_id:state.state_group_id
+      ~device_id:state.state_device_id ~runtime_state:state.state_runtime_bytes
+      ~commit
+    |> Result.map_error (fun error -> Runtime_error error)
+  in
+  match result with
+  | Runtime.Removed { removed_previous_epoch; removed_observed_epoch } ->
+      Ok (Removed { removed_previous_epoch; removed_observed_epoch })
+  | Runtime.Applied { applied_runtime_state; applied_previous_epoch; applied_next_epoch } ->
+      let* state =
+        make ~repository_id:state.state_repository_id
+          ~group_id:state.state_group_id ~device_id:state.state_device_id
+          ~runtime_state:applied_runtime_state
+          ~mandatory_features:state.state_mandatory_features
+      in
+      let* () = verify ~runtime state in
+      Ok
+        (Applied
+           {
+             advanced_state = state;
+             advanced_previous_epoch = applied_previous_epoch;
+             advanced_next_epoch = applied_next_epoch;
+           })
 
 let encrypt_metadata ~runtime ~state ~nonce plaintext =
   if String.length plaintext > metadata_plaintext_limit then

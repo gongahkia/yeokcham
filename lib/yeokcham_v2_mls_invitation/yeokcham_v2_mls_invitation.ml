@@ -606,10 +606,10 @@ let issue ~runtime ~authority ~root ~issuer_state ~recipient_device_id
       Group.add_member ~runtime ~issuer_state ~recipient_device_id
       |> Result.map_error (fun error -> Group_error error)
     in
-    let joined_recipient_state = joined.Group.recipient_state in
-    let joined_issuer_state = joined.Group.issuer_state in
-    let joined_commit = joined.Group.commit in
-    let joined_welcome = joined.Group.welcome in
+    let joined_recipient_state = joined.Group.added_recipient_state in
+    let joined_issuer_state = joined.Group.added_issuer_state in
+    let joined_commit = joined.Group.add_commit in
+    let joined_welcome = joined.Group.add_welcome in
     let* join_state =
       Envelope.seal ~key:join_key ~nonce:invitation_nonce ~mandatory_features:0L
         (Group.encode joined_recipient_state)

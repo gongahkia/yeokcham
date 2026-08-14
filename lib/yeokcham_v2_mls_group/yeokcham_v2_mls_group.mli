@@ -11,11 +11,28 @@ module Runtime = Yeokcham_v2_mls_runtime
 type t
 
 type add_member_result = {
-  issuer_state : t;
-  recipient_state : t;
-  commit : string;
-  welcome : string;
+  added_issuer_state : t;
+  added_recipient_state : t;
+  add_commit : string;
+  add_welcome : string;
+  add_previous_epoch : int64;
+  add_next_epoch : int64;
 }
+
+type remove_member_result = {
+  removed_issuer_state : t;
+  removal_commit : string;
+  removal_previous_epoch : int64;
+  removal_next_epoch : int64;
+}
+
+type apply_commit_result =
+  | Applied of {
+      advanced_state : t;
+      advanced_previous_epoch : int64;
+      advanced_next_epoch : int64;
+    }
+  | Removed of { removed_previous_epoch : int64; removed_observed_epoch : int64 }
 
 type error =
   | Invalid_runtime_state of string
@@ -69,6 +86,23 @@ val add_member :
 (** Advances an issuer snapshot by one MLS Add/Commit and joins the requested
     recipient device through the emitted Welcome. The runtime must verify both
     resulting snapshots before they are returned. *)
+
+val remove_member :
+  runtime:Runtime.configuration ->
+  issuer_state:t ->
+  removed_device_id:Model.Device_id.t ->
+  (remove_member_result, error) result
+(** Advances an issuer snapshot with one MLS Remove/Commit. The issuer and
+    target must be distinct current devices, and the runtime proves the epoch
+    increases by exactly one. *)
+
+val apply_commit :
+  runtime:Runtime.configuration ->
+  state:t ->
+  commit:string ->
+  (apply_commit_result, error) result
+(** Rekeys an active device from a delivered Commit. A device removed by that
+    Commit receives no successor snapshot. *)
 
 val encrypt_metadata :
   runtime:Runtime.configuration ->

@@ -10,11 +10,28 @@ module Model = Yeokcham_v2_model
 type configuration
 
 type add_member_result = {
-  issuer_runtime_state : string;
-  recipient_runtime_state : string;
-  commit : string;
-  welcome : string;
+  add_issuer_runtime_state : string;
+  add_recipient_runtime_state : string;
+  add_commit : string;
+  add_welcome : string;
+  add_previous_epoch : int64;
+  add_next_epoch : int64;
 }
+
+type remove_member_result = {
+  remove_issuer_runtime_state : string;
+  remove_commit : string;
+  remove_previous_epoch : int64;
+  remove_next_epoch : int64;
+}
+
+type apply_commit_result =
+  | Applied of {
+      applied_runtime_state : string;
+      applied_previous_epoch : int64;
+      applied_next_epoch : int64;
+    }
+  | Removed of { removed_previous_epoch : int64; removed_observed_epoch : int64 }
 
 type error =
   | Runtime_missing of string
@@ -60,3 +77,23 @@ val add_member :
   (add_member_result, error) result
 (** Performs one MLS Add proposal, Commit, and Welcome join entirely in the
     isolated runtime. Both returned snapshots are opaque MLS-library state. *)
+
+val remove_member :
+  configuration ->
+  group_id:Model.Mls_group_id.t ->
+  issuer_device_id:Model.Device_id.t ->
+  issuer_runtime_state:string ->
+  removed_device_id:Model.Device_id.t ->
+  (remove_member_result, error) result
+(** Removes one distinct current device through a MLS Commit and advances the
+    issuer snapshot exactly one MLS epoch. *)
+
+val apply_commit :
+  configuration ->
+  group_id:Model.Mls_group_id.t ->
+  device_id:Model.Device_id.t ->
+  runtime_state:string ->
+  commit:string ->
+  (apply_commit_result, error) result
+(** Applies an externally delivered MLS Commit to an active local device. A
+    removed device receives [Removed] and never gets a successor snapshot. *)

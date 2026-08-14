@@ -10,8 +10,10 @@ use mls_rs::{
         SigningIdentity,
     },
     CipherSuite, CipherSuiteProvider, Client, CryptoProvider, ExtensionList, GroupStateStorage,
+    MlsMessage,
 };
 use mls_rs_codec::MlsEncode;
+use mls_rs::group::ReceivedMessage;
 use mls_rs_core::group::{EpochRecord, GroupState};
 use mls_rs_crypto_openssl::OpensslCryptoProvider;
 use zeroize::Zeroizing;
@@ -29,6 +31,8 @@ const REQUEST_SCHEMA_VERSION: u64 = 1;
 const REQUEST_BOOTSTRAP: u64 = 1;
 const REQUEST_EXPORTER: u64 = 2;
 const REQUEST_ADD_MEMBER: u64 = 3;
+const REQUEST_REMOVE_MEMBER: u64 = 4;
+const REQUEST_APPLY_COMMIT: u64 = 5;
 const GROUP_ID_BYTES: usize = 32;
 const DEVICE_ID_BYTES: usize = 32;
 const EXPORTER_BYTES: usize = 32;
@@ -509,7 +513,7 @@ fn add_member(
     issuer_device_id: &[u8],
     issuer_state: Vec<u8>,
     recipient_device_id: Vec<u8>,
-) -> Result<(Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>), String> {
+) -> Result<(Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>, u64, u64), String> {
     if issuer_state.is_empty() || issuer_state.len() > MAX_RUNTIME_STATE_BYTES {
         return Err("MLS issuer snapshot violates runtime bound".into());
     }
@@ -562,6 +566,7 @@ fn add_member(
     let key_package = recipient_client
         .generate_key_package_message(ExtensionList::default(), ExtensionList::default(), None)
         .map_err(|error| format!("MLS recipient key package creation failed: {error}"))?;
+    let previous_epoch = issuer_group.current_epoch();
     let mut output = issuer_group
         .commit_builder()
         .add_member(key_package)
@@ -589,6 +594,10 @@ fn add_member(
         .write_to_storage()
         .map_err(|error| format!("MLS issuer state persistence failed: {error}"))?;
     let issuer_state = issuer_storage.state()?;
+    let next_epoch = issuer_group.current_epoch();
+    if next_epoch != previous_epoch.checked_add(1).ok_or_else(|| "MLS epoch overflows".to_string())? {
+        return Err("MLS add-member did not advance exactly one epoch".into());
+    }
 
     let (mut recipient_group, _) = recipient_client
         .join_group(None, &welcome, None)
@@ -615,7 +624,138 @@ fn add_member(
             return Err(format!("MLS {name} snapshot violates runtime bound"));
         }
     }
-    Ok((issuer_state, recipient_state, commit, welcome_bytes))
+    Ok((issuer_state, recipient_state, commit, welcome_bytes, previous_epoch, next_epoch))
+}
+
+fn remove_member(
+    group_id: Vec<u8>,
+    issuer_device_id: &[u8],
+    issuer_state: Vec<u8>,
+    removed_device_id: &[u8],
+) -> Result<(Vec<u8>, Vec<u8>, u64, u64), String> {
+    if issuer_state.is_empty() || issuer_state.len() > MAX_RUNTIME_STATE_BYTES {
+        return Err("MLS issuer snapshot violates runtime bound".into());
+    }
+    let issuer_storage = StateStorage::default();
+    issuer_storage.put(group_id.clone(), issuer_state);
+    let issuer_client = Client::builder()
+        .crypto_provider(OpensslCryptoProvider::default())
+        .identity_provider(BasicIdentityProvider::new())
+        .group_state_storage(issuer_storage.clone())
+        .build();
+    let mut issuer_group = issuer_client
+        .load_group(&group_id)
+        .map_err(|error| format!("MLS issuer snapshot reload failed: {error}"))?;
+    let issuer_is_member = issuer_group.roster().members_iter().any(|member| {
+        member
+            .signing_identity
+            .credential
+            .as_basic()
+            .is_some_and(|credential| credential.identifier() == issuer_device_id)
+    });
+    if !issuer_is_member {
+        return Err("MLS issuer snapshot does not contain the issuing device credential".into());
+    }
+    let removed_index = issuer_group
+        .roster()
+        .members_iter()
+        .find(|member| {
+            member
+                .signing_identity
+                .credential
+                .as_basic()
+                .is_some_and(|credential| credential.identifier() == removed_device_id)
+        })
+        .map(|member| member.index)
+        .ok_or_else(|| "MLS removal target is not a current member".to_string())?;
+    if issuer_device_id == removed_device_id {
+        return Err("MLS issuer may not remove its own active device in this vertical slice".into());
+    }
+    let previous_epoch = issuer_group.current_epoch();
+    let output = issuer_group
+        .commit_builder()
+        .remove_member(removed_index)
+        .map_err(|error| format!("MLS remove-member proposal failed: {error}"))?
+        .build()
+        .map_err(|error| format!("MLS remove-member commit failed: {error}"))?;
+    if !output.welcome_messages.is_empty() {
+        return Err("MLS remove-member commit unexpectedly produced a welcome".into());
+    }
+    let commit = output
+        .commit_message
+        .mls_encode_to_vec()
+        .map_err(|error| format!("MLS commit encoding failed: {error}"))?;
+    issuer_group
+        .apply_pending_commit()
+        .map_err(|error| format!("MLS issuer commit application failed: {error}"))?;
+    let next_epoch = issuer_group.current_epoch();
+    if next_epoch != previous_epoch.checked_add(1).ok_or_else(|| "MLS epoch overflows".to_string())? {
+        return Err("MLS removal did not advance exactly one epoch".into());
+    }
+    issuer_group
+        .write_to_storage()
+        .map_err(|error| format!("MLS issuer state persistence failed: {error}"))?;
+    let state = issuer_storage.state()?;
+    if state.is_empty() || state.len() > MAX_RUNTIME_STATE_BYTES {
+        return Err("MLS issuer snapshot violates runtime bound".into());
+    }
+    Ok((state, commit, previous_epoch, next_epoch))
+}
+
+fn apply_commit(
+    group_id: Vec<u8>,
+    device_id: &[u8],
+    state: Vec<u8>,
+    commit: Vec<u8>,
+) -> Result<(u64, Vec<u8>, u64, u64), String> {
+    if state.is_empty() || state.len() > MAX_RUNTIME_STATE_BYTES {
+        return Err("MLS active snapshot violates runtime bound".into());
+    }
+    let storage = StateStorage::default();
+    storage.put(group_id.clone(), state);
+    let client = Client::builder()
+        .crypto_provider(OpensslCryptoProvider::default())
+        .identity_provider(BasicIdentityProvider::new())
+        .group_state_storage(storage.clone())
+        .build();
+    let mut group = client
+        .load_group(&group_id)
+        .map_err(|error| format!("MLS active snapshot reload failed: {error}"))?;
+    let previous_epoch = group.current_epoch();
+    let message = MlsMessage::from_bytes(&commit)
+        .map_err(|error| format!("MLS commit decode failed: {error}"))?;
+    match group
+        .process_incoming_message(message)
+        .map_err(|error| format!("MLS commit application failed: {error}"))?
+    {
+        ReceivedMessage::Commit(_) => {}
+        _ => return Err("MLS active-client update is not a Commit".into()),
+    }
+    let next_epoch = group.current_epoch();
+    // mls-rs intentionally leaves a removed member on its previous state. Its
+    // roster therefore remains historical; a non-advancing epoch is the only
+    // safe outcome for this committed, successfully processed removal.
+    if next_epoch == previous_epoch {
+        return Ok((2, Vec::new(), previous_epoch, next_epoch));
+    }
+    let still_member = group.roster().members_iter().any(|member| {
+        member
+            .signing_identity
+            .credential
+            .as_basic()
+            .is_some_and(|credential| credential.identifier() == device_id)
+    });
+    if !still_member {
+        return Err("MLS active-client commit advanced without its local credential".into());
+    }
+    if next_epoch != previous_epoch.checked_add(1).ok_or_else(|| "MLS epoch overflows".to_string())? {
+        return Err("MLS active-client commit did not advance exactly one epoch".into());
+    }
+    group
+        .write_to_storage()
+        .map_err(|error| format!("MLS active state persistence failed: {error}"))?;
+    let state = storage.state()?;
+    Ok((1, state, previous_epoch, next_epoch))
 }
 
 fn dispatch(payload: &[u8]) -> Result<Vec<u8>, String> {
@@ -682,7 +822,7 @@ fn dispatch(payload: &[u8]) -> Result<Vec<u8>, String> {
             if fields.next().is_some() {
                 return Err("MLS add-member request has extra fields".into());
             }
-            let (issuer_state, recipient_state, commit, welcome) =
+            let (issuer_state, recipient_state, commit, welcome, previous_epoch, next_epoch) =
                 add_member(group_id, &device_id, state, recipient_device_id)?;
             Ok(encoded(&Cbor::Array(vec![
                 Cbor::Uint(REQUEST_SCHEMA_VERSION),
@@ -690,6 +830,54 @@ fn dispatch(payload: &[u8]) -> Result<Vec<u8>, String> {
                 Cbor::Bytes(recipient_state),
                 Cbor::Bytes(commit),
                 Cbor::Bytes(welcome),
+                Cbor::Uint(previous_epoch),
+                Cbor::Uint(next_epoch),
+            ])))
+        }
+        REQUEST_REMOVE_MEMBER => {
+            let removed_device_id = bytes(
+                fields.next().ok_or_else(|| {
+                    "MLS remove-member request omits removed device ID".to_string()
+                })?,
+                "MLS remove-member removed device ID",
+            )?;
+            if removed_device_id.len() != DEVICE_ID_BYTES {
+                return Err(format!(
+                    "MLS remove-member device ID must contain {DEVICE_ID_BYTES} bytes"
+                ));
+            }
+            if fields.next().is_some() {
+                return Err("MLS remove-member request has extra fields".into());
+            }
+            let (issuer_state, commit, previous_epoch, next_epoch) =
+                remove_member(group_id, &device_id, state, &removed_device_id)?;
+            Ok(encoded(&Cbor::Array(vec![
+                Cbor::Uint(REQUEST_SCHEMA_VERSION),
+                Cbor::Bytes(issuer_state),
+                Cbor::Bytes(commit),
+                Cbor::Uint(previous_epoch),
+                Cbor::Uint(next_epoch),
+            ])))
+        }
+        REQUEST_APPLY_COMMIT => {
+            let commit = bytes(
+                fields.next().ok_or_else(|| "MLS apply-commit request omits commit".to_string())?,
+                "MLS apply-commit commit",
+            )?;
+            if commit.is_empty() {
+                return Err("MLS apply-commit commit must not be empty".into());
+            }
+            if fields.next().is_some() {
+                return Err("MLS apply-commit request has extra fields".into());
+            }
+            let (outcome, state, previous_epoch, next_epoch) =
+                apply_commit(group_id, &device_id, state, commit)?;
+            Ok(encoded(&Cbor::Array(vec![
+                Cbor::Uint(REQUEST_SCHEMA_VERSION),
+                Cbor::Uint(outcome),
+                Cbor::Bytes(state),
+                Cbor::Uint(previous_epoch),
+                Cbor::Uint(next_epoch),
             ])))
         }
         _ => Err("unsupported MLS request operation".into()),
@@ -787,16 +975,48 @@ mod tests {
         let issuer_id = vec![b'i'; DEVICE_ID_BYTES];
         let recipient_id = vec![b'r'; DEVICE_ID_BYTES];
         let issuer_state = create_state(group_id.clone(), issuer_id.clone()).unwrap();
-        let (next_issuer, recipient_state, commit, welcome) = add_member(
+        let (next_issuer, recipient_state, commit, welcome, previous_epoch, next_epoch) = add_member(
             group_id.clone(),
             &issuer_id,
             issuer_state,
             recipient_id.clone(),
         )
         .unwrap();
+        assert_eq!(next_epoch, previous_epoch + 1);
         assert!(!commit.is_empty());
         assert!(!welcome.is_empty());
         assert!(exporter_key(group_id.clone(), &issuer_id, next_issuer).is_ok());
         assert!(exporter_key(group_id, &recipient_id, recipient_state).is_ok());
+    }
+
+    #[test]
+    fn removal_rekeys_an_active_member_and_refuses_the_removed_member() {
+        let group_id = vec![b'g'; GROUP_ID_BYTES];
+        let issuer_id = vec![b'a'; DEVICE_ID_BYTES];
+        let member_b = vec![b'b'; DEVICE_ID_BYTES];
+        let member_c = vec![b'c'; DEVICE_ID_BYTES];
+        let issuer_state = create_state(group_id.clone(), issuer_id.clone()).unwrap();
+        let (issuer_after_b, b_state, _, _, _, _) =
+            add_member(group_id.clone(), &issuer_id, issuer_state, member_b.clone()).unwrap();
+        let (issuer_after_c, c_state, add_c, _, _, _) =
+            add_member(group_id.clone(), &issuer_id, issuer_after_b, member_c.clone()).unwrap();
+        let (outcome, b_state, previous, next) =
+            apply_commit(group_id.clone(), &member_b, b_state, add_c).unwrap();
+        assert_eq!(outcome, 1);
+        assert_eq!((previous, next), (1, 2));
+        let (issuer_after_removal, removal, previous, next) =
+            remove_member(group_id.clone(), &issuer_id, issuer_after_c, &member_c).unwrap();
+        assert_eq!((previous, next), (2, 3));
+        assert!(exporter_key(group_id.clone(), &issuer_id, issuer_after_removal).is_ok());
+        let (outcome, b_state, previous, next) =
+            apply_commit(group_id.clone(), &member_b, b_state, removal.clone()).unwrap();
+        assert_eq!(outcome, 1);
+        assert_eq!((previous, next), (2, 3));
+        assert!(exporter_key(group_id.clone(), &member_b, b_state).is_ok());
+        let (outcome, state, previous, observed) =
+            apply_commit(group_id, &member_c, c_state, removal).unwrap();
+        assert_eq!(outcome, 2);
+        assert!(state.is_empty());
+        assert_eq!(previous, observed);
     }
 }

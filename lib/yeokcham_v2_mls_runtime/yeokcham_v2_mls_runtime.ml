@@ -6,11 +6,28 @@ module Model = Yeokcham_v2_model
 type configuration = { runtime_path : string }
 
 type add_member_result = {
-  issuer_runtime_state : string;
-  recipient_runtime_state : string;
-  commit : string;
-  welcome : string;
+  add_issuer_runtime_state : string;
+  add_recipient_runtime_state : string;
+  add_commit : string;
+  add_welcome : string;
+  add_previous_epoch : int64;
+  add_next_epoch : int64;
 }
+
+type remove_member_result = {
+  remove_issuer_runtime_state : string;
+  remove_commit : string;
+  remove_previous_epoch : int64;
+  remove_next_epoch : int64;
+}
+
+type apply_commit_result =
+  | Applied of {
+      applied_runtime_state : string;
+      applied_previous_epoch : int64;
+      applied_next_epoch : int64;
+    }
+  | Removed of { removed_previous_epoch : int64; removed_observed_epoch : int64 }
 
 type error =
   | Runtime_missing of string
@@ -31,6 +48,8 @@ let request_schema_version = 1L
 let operation_bootstrap = 1L
 let operation_derive_metadata_key = 2L
 let operation_add_member = 3L
+let operation_remove_member = 4L
+let operation_apply_commit = 5L
 let ( let* ) = Result.bind
 
 let default_configuration =
@@ -410,9 +429,9 @@ let add_member configuration ~group_id ~issuer_device_id ~issuer_runtime_state
     in
     invoke configuration payload (fun response ->
         let* value = decode_payload response in
-        let* values = fields "MLS add-member response" 5 value in
+        let* values = fields "MLS add-member response" 7 value in
         match values with
-        | [ version; issuer_state; recipient_state; commit; welcome ] ->
+        | [ version; issuer_state; recipient_state; commit; welcome; previous_epoch; next_epoch ] ->
             let* version = integer "MLS add-member response version" version in
             let* issuer_runtime_state =
               bytes "MLS add-member issuer state" issuer_state
@@ -422,6 +441,8 @@ let add_member configuration ~group_id ~issuer_device_id ~issuer_runtime_state
             in
             let* commit = bytes "MLS add-member commit" commit in
             let* welcome = bytes "MLS add-member welcome" welcome in
+            let* previous_epoch = integer "MLS add-member previous epoch" previous_epoch in
+            let* next_epoch = integer "MLS add-member next epoch" next_epoch in
             if not (Int64.equal version request_schema_version) then
               Error
                 (Invalid_runtime_response "unsupported MLS response version")
@@ -437,12 +458,115 @@ let add_member configuration ~group_id ~issuer_device_id ~issuer_runtime_state
               Error
                 (Invalid_runtime_response
                    "MLS add-member response omits protocol bytes")
+            else if not (Int64.equal next_epoch (Int64.succ previous_epoch)) then
+              Error (Invalid_runtime_response "MLS add-member epoch did not advance once")
             else
               Ok
                 {
-                  issuer_runtime_state;
-                  recipient_runtime_state;
-                  commit;
-                  welcome;
+                  add_issuer_runtime_state = issuer_runtime_state;
+                  add_recipient_runtime_state = recipient_runtime_state;
+                  add_commit = commit;
+                  add_welcome = welcome;
+                  add_previous_epoch = previous_epoch;
+                  add_next_epoch = next_epoch;
                 }
+        | _ -> assert false)
+
+let remove_member configuration ~group_id ~issuer_device_id ~issuer_runtime_state
+    ~removed_device_id =
+  if
+    String.length issuer_runtime_state = 0
+    || String.length issuer_runtime_state > max_runtime_state_bytes
+  then Error (Invalid_runtime_response "MLS issuer state violates bounds")
+  else
+    let payload =
+      [
+        Encoding.integer request_schema_version;
+        Encoding.integer operation_remove_member;
+        Encoding.bytes (Model.Mls_group_id.to_bytes group_id);
+        Encoding.bytes (Model.Device_id.to_bytes issuer_device_id);
+        Encoding.bytes issuer_runtime_state;
+        Encoding.bytes (Model.Device_id.to_bytes removed_device_id);
+      ]
+    in
+    invoke configuration payload (fun response ->
+        let* value = decode_payload response in
+        let* values = fields "MLS remove-member response" 5 value in
+        match values with
+        | [ version; issuer_state; commit; previous_epoch; next_epoch ] ->
+            let* version = integer "MLS remove-member response version" version in
+            let* issuer_runtime_state = bytes "MLS remove-member issuer state" issuer_state in
+            let* commit = bytes "MLS remove-member commit" commit in
+            let* previous_epoch = integer "MLS remove-member previous epoch" previous_epoch in
+            let* next_epoch = integer "MLS remove-member next epoch" next_epoch in
+            if not (Int64.equal version request_schema_version) then
+              Error (Invalid_runtime_response "unsupported MLS response version")
+            else if
+              String.length issuer_runtime_state = 0
+              || String.length issuer_runtime_state > max_runtime_state_bytes
+              || String.length commit = 0
+            then Error (Invalid_runtime_response "MLS remove-member response violates bounds")
+            else if not (Int64.equal next_epoch (Int64.succ previous_epoch)) then
+              Error (Invalid_runtime_response "MLS removal epoch did not advance once")
+            else
+              Ok
+                {
+                  remove_issuer_runtime_state = issuer_runtime_state;
+                  remove_commit = commit;
+                  remove_previous_epoch = previous_epoch;
+                  remove_next_epoch = next_epoch;
+                }
+        | _ -> assert false)
+
+let apply_commit configuration ~group_id ~device_id ~runtime_state ~commit =
+  if
+    String.length runtime_state = 0
+    || String.length runtime_state > max_runtime_state_bytes
+    || String.length commit = 0
+  then Error (Invalid_runtime_response "MLS apply-commit request violates bounds")
+  else
+    let payload =
+      [
+        Encoding.integer request_schema_version;
+        Encoding.integer operation_apply_commit;
+        Encoding.bytes (Model.Mls_group_id.to_bytes group_id);
+        Encoding.bytes (Model.Device_id.to_bytes device_id);
+        Encoding.bytes runtime_state;
+        Encoding.bytes commit;
+      ]
+    in
+    invoke configuration payload (fun response ->
+        let* value = decode_payload response in
+        let* values = fields "MLS apply-commit response" 5 value in
+        match values with
+        | [ version; outcome; state; previous_epoch; next_epoch ] ->
+            let* version = integer "MLS apply-commit response version" version in
+            let* outcome = integer "MLS apply-commit outcome" outcome in
+            let* state = bytes "MLS apply-commit state" state in
+            let* previous_epoch = integer "MLS apply-commit previous epoch" previous_epoch in
+            let* next_epoch = integer "MLS apply-commit next epoch" next_epoch in
+            if not (Int64.equal version request_schema_version) then
+              Error (Invalid_runtime_response "unsupported MLS response version")
+            else if Int64.equal outcome 1L then
+              if
+                String.length state = 0
+                || String.length state > max_runtime_state_bytes
+                || not (Int64.equal next_epoch (Int64.succ previous_epoch))
+              then Error (Invalid_runtime_response "MLS active rekey response violates bounds")
+              else
+                Ok
+                  (Applied
+                     {
+                       applied_runtime_state = state;
+                       applied_previous_epoch = previous_epoch;
+                       applied_next_epoch = next_epoch;
+                     })
+            else if Int64.equal outcome 2L && String.equal state "" then
+              Ok
+                (Removed
+                   {
+                     removed_previous_epoch = previous_epoch;
+                     removed_observed_epoch = next_epoch;
+                   })
+            else Error (Invalid_runtime_response "MLS apply-commit outcome is invalid")
         | _ -> assert false)
