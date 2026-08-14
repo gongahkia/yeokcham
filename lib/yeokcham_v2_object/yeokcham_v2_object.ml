@@ -339,26 +339,6 @@ let kind_code = function
   | Device_certificate -> 14L
   | Device_revocation -> 15L
 
-let all_kinds =
-  [
-    Ledger_event;
-    Scratch_snapshot;
-    Scratch_protection;
-    Scratch_generation;
-    Capsule;
-    Capsule_revision;
-    Workspace;
-    Workspace_revision;
-    Workspace_attempt;
-    Conflict;
-    Resolution;
-    Validation_evidence;
-    Release;
-    Repository_authority;
-    Device_certificate;
-    Device_revocation;
-  ]
-
 let payload = function
   | Ledger_event_frame event -> Ledger.encode event
   | Scratch_snapshot_frame snapshot -> Snapshot.canonical_bytes snapshot

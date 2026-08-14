@@ -10,7 +10,6 @@ type repository = {
   repository_id : Model.Repository_id.t;
   address_key : Address.key;
   encryption_key : Envelope.key;
-  epoch : int64;
 }
 
 type publication =
@@ -110,14 +109,6 @@ let check_v2_root root =
       Error (Not_v2_root classification)
 
 let open_repository ~root ~repository_id ~address_key ~encryption_key =
-  let epoch = 0L in
-  let* () =
-    Envelope.make_context
-      ~repository_id:(Model.Repository_id.to_bytes repository_id)
-      ~epoch ~object_kind:0L
-    |> Result.map (fun _ -> ())
-    |> Result.map_error (fun error -> Envelope_error error)
-  in
   let* () = check_v2_root root in
   Ok
     {
@@ -126,22 +117,9 @@ let open_repository ~root ~repository_id ~address_key ~encryption_key =
       repository_id;
       address_key;
       encryption_key;
-      epoch;
     }
 
 let repository_id repository = repository.repository_id
-
-let context repository kind =
-  Envelope.make_context
-    ~repository_id:(Model.Repository_id.to_bytes repository.repository_id)
-    ~epoch:repository.epoch ~object_kind:(Object.kind_code kind)
-  |> Result.map_error (fun error -> Envelope_error error)
-
-let seal repository ~nonce object_ =
-  let* context = context repository (Object.kind object_) in
-  Envelope.seal_bound ~key:repository.encryption_key ~nonce
-    ~mandatory_features:0L ~context (Object.encode object_)
-  |> Result.map_error (fun error -> Envelope_error error)
 
 let object_path repository object_ref =
   let hex = Model.Opaque_object_ref.to_hex object_ref in
@@ -391,39 +369,19 @@ let read_regular_file path =
   with Unix.Unix_error (error, _, _) ->
     Error (io_error ~operation:"lstat" ~path error)
 
-let decrypted_object repository envelope =
-  if not (Envelope.is_bound envelope) then Error (Envelope_error Envelope.Context_required)
-  else
-    let rec open_for_kind = function
-      | [] -> Error (Envelope_error Envelope.Authentication_failed)
-      | kind :: rest ->
-          let* context = context repository kind in
-          match
-            Envelope.open_bound ~key:repository.encryption_key ~context envelope
-          with
-          | Error error ->
-              if error = Envelope.Authentication_failed then open_for_kind rest
-              else Error (Envelope_error error)
-          | Ok plaintext ->
-              let* object_ =
-                Object.decode plaintext
-                |> Result.map_error (fun error -> Object_error error)
-              in
-              if Object.kind object_ = kind then Ok object_
-              else
-                Error
-                  (Object_error
-                     (Object.Invalid_payload
-                        "bound object context does not match frame kind"))
-    in
-    open_for_kind Object.all_kinds
-
 let verified_envelope repository envelope =
   let object_ref =
     Address.derive ~repository_id:repository.repository_id
       ~key:repository.address_key ~envelope
   in
-  let* object_ = decrypted_object repository envelope in
+  let* plaintext =
+    Envelope.open_envelope ~key:repository.encryption_key envelope
+    |> Result.map_error (fun error -> Envelope_error error)
+  in
+  let* object_ =
+    Object.decode plaintext
+    |> Result.map_error (fun error -> Object_error error)
+  in
   Ok (object_ref, object_)
 
 let validate_envelope repository ~envelope =

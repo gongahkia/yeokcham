@@ -68,8 +68,6 @@ val repository_authority : Authority.repository_authority -> t
 val device_certificate : Authority.device_certificate -> t
 val device_revocation : Authority.device_revocation -> t
 val kind : t -> kind
-val all_kinds : kind list
-val kind_code : kind -> int64
 val ledger : t -> Ledger.t option
 val snapshot : t -> Snapshot.t option
 val protection : t -> Retention.protection option

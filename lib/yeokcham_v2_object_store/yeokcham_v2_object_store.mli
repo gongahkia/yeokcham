@@ -44,14 +44,6 @@ val open_repository :
   encryption_key:Envelope.key ->
   (repository, error) result
 
-val seal :
-  repository ->
-  nonce:Envelope.nonce ->
-  Object.t ->
-  (Envelope.t, error) result
-(** Encrypts one typed repository object using the repository's current object
-    epoch and an opaque per-object context commitment. *)
-
 val object_path : repository -> Model.Opaque_object_ref.t -> string
 
 val stored_bytes :
