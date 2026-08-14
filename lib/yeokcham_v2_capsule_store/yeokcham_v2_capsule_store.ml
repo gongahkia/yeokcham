@@ -684,10 +684,8 @@ let envelope_for repository ~nonce object_ =
   let record = Bootstrap_store.bootstrap repository.bootstrap in
   let capability = Bootstrap_store.capability repository.bootstrap in
   let* envelope =
-    Envelope.seal
-      ~key:(Bootstrap.envelope_key capability)
-      ~nonce ~mandatory_features:0L (Object.encode object_)
-    |> Result.map_error (fun error -> Envelope_error error)
+    Object_store.seal repository.objects ~nonce object_
+    |> Result.map_error (fun error -> Object_store_error error)
   in
   let reference =
     Address.derive
@@ -734,11 +732,8 @@ let binding_envelope repository ~id ~predecessor ~revision_ref ~nonce =
     |> Result.map_error (fun error -> Ledger_error error)
   in
   let* envelope =
-    Envelope.seal
-      ~key:(Bootstrap.envelope_key capability)
-      ~nonce ~mandatory_features:0L
-      (Object.ledger_event event |> Object.encode)
-    |> Result.map_error (fun error -> Envelope_error error)
+    Object_store.seal repository.objects ~nonce (Object.ledger_event event)
+    |> Result.map_error (fun error -> Object_store_error error)
   in
   Ok (Ledger.event_id event, envelope)
 
