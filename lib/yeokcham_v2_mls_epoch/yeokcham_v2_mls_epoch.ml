@@ -231,10 +231,14 @@ let value transition =
 let encode transition = value transition |> Result.get_ok |> Encoding.encode
 
 let decode ~authority encoded =
+  Printf.eprintf "epoch-decode-input=%d first=%02x\n%!" (String.length encoded)
+    (Char.code encoded.[0]);
   let* value =
-    Encoding.decode encoded
-    |> Result.map_error (fun error ->
-           Invalid_payload (Encoding.decode_error_to_string error))
+    match Encoding.decode encoded with
+    | Ok value -> Ok value
+    | Error error ->
+        Printf.eprintf "epoch-decode-error=%s\n%!" (Encoding.decode_error_to_string error);
+        Error (Invalid_payload (Encoding.decode_error_to_string error))
   in
   let* values = fields "MLS epoch transition" 17 value in
   match values with

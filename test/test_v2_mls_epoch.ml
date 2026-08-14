@@ -2,6 +2,7 @@ module Address = Yeokcham_v2_address
 module Authority = Yeokcham_v2_authority
 module Bootstrap = Yeokcham_v2_bootstrap
 module Bootstrap_store = Yeokcham_v2_bootstrap_store
+module Encoding = Yeokcham_encoding
 module Envelope = Yeokcham_v2_envelope
 module Epoch = Yeokcham_v2_mls_epoch
 module Epoch_store = Yeokcham_v2_mls_epoch_store
@@ -147,12 +148,24 @@ let canonical_fixture_is_strict () =
     Group.seal_state ~key:(key 'k') ~nonce:(nonce 'n') state
     |> require_ok Group.error_to_string
   in
+  ignore (Envelope.decode (Envelope.encode debug_envelope) |> require_ok Envelope.error_to_string);
   Printf.printf "envelope=%s\n%!" (String.concat ""
     (List.init (String.length (Envelope.encode debug_envelope)) (fun index ->
       Printf.sprintf "%02x" (Char.code (Envelope.encode debug_envelope).[index]))));
   Printf.printf "epoch-fixture=%s\n%!" (String.concat ""
     (List.init (String.length (Epoch.encode expected)) (fun index ->
       Printf.sprintf "%02x" (Char.code (Epoch.encode expected).[index]))));
+  (match Encoding.decode (Epoch.encode expected) with
+  | Ok (Encoding.Array values) ->
+      Printf.printf "epoch-fields=%d\n%!" (List.length values);
+      (match List.nth values 13 with
+      | Encoding.Bytes envelope ->
+          Printf.printf "epoch-envelope-bytes=%d\n%!" (String.length envelope);
+          ignore (Envelope.decode envelope |> require_ok Envelope.error_to_string)
+      | _ -> Alcotest.fail "epoch envelope field is not bytes")
+  | Ok _ -> Printf.printf "epoch-fields=not-array\n%!"
+  | Error error -> Printf.printf "epoch-fields-error=%s\n%!" (Encoding.decode_error_to_string error))
+  [@warning "-4"];
   let bytes = read_golden "v2-mls-epoch-transition-v1.cbor.hex" in
   let decoded = Epoch.decode ~authority bytes |> require_ok Epoch.error_to_string in
   Alcotest.(check string) "canonical epoch fixture re-encodes exactly" bytes
