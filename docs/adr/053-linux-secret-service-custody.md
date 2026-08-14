@@ -1,11 +1,10 @@
 # ADR-053 — Linux Secret Service custody and bootstrap key handles
 
-- Status: Superseded by ADR-073
+- Status: Accepted
 - Date: 2026-08-09
 - Deciders: maintainer (approved development roadmap)
 - Governing issue: [#147](https://github.com/gongahkia/yeokcham/issues/147)
 - Supersedes: ADR-052
-- Superseded by: ADR-073
 - Related issues: [#145](https://github.com/gongahkia/yeokcham/issues/145), [#136](https://github.com/gongahkia/yeokcham/issues/136)
 
 ## Context and problem statement

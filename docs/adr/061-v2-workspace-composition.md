@@ -1,10 +1,10 @@
 # ADR-061 — V2 deterministic workspaces and explicit conflict records
 
-- Status: Superseded by ADR-073
+- Status: Accepted
 - Date: 2026-08-12
 - Deciders: maintainer (delegated V2-020 implementation)
 - Supersedes: None
-- Superseded by: ADR-073
+- Superseded by: None
 - Governing issue: [#142](https://github.com/gongahkia/yeokcham/issues/142)
 - Related decisions: ADR-006, ADR-007, ADR-026, ADR-048, ADR-054, ADR-059
 

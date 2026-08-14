@@ -1,10 +1,10 @@
 # ADR-059 — V2 exact capsule curation and initial bindings
 
-- Status: Superseded by ADR-073
+- Status: Accepted
 - Date: 2026-08-10
 - Deciders: maintainer (approved V2-01 client-neutral continuation)
 - Supersedes: None
-- Superseded by: ADR-073
+- Superseded by: None
 - Governing issue: [#140](https://github.com/gongahkia/yeokcham/issues/140)
 - Related issues: [#137](https://github.com/gongahkia/yeokcham/issues/137), [#139](https://github.com/gongahkia/yeokcham/issues/139), [#141](https://github.com/gongahkia/yeokcham/issues/141)
 

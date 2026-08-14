@@ -1,10 +1,10 @@
 # ADR-046 — V2 keyed opaque object addresses
 
-- Status: Superseded by ADR-073
+- Status: Accepted
 - Date: 2026-08-07
 - Deciders: maintainer
 - Supersedes: None
-- Superseded by: ADR-073
+- Superseded by: None
 
 ## Context and problem statement
 

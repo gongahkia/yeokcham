@@ -1,8 +1,7 @@
 # ADR-051 — Linux inotify as an advisory watcher source
 
-- Status: Superseded by ADR-073
+- Status: Accepted
 - Date: 2026-08-09
-- Superseded by: ADR-073
 - Deciders: maintainer (autonomous issue workflow)
 - Governing issue: [#135](https://github.com/gongahkia/yeokcham/issues/135)
 

@@ -1,10 +1,10 @@
 # ADR-056 — V2 opaque restore journal
 
-- Status: Superseded by ADR-073
+- Status: Accepted
 - Date: 2026-08-09
 - Deciders: maintainer (approved V2-01 continuation)
 - Supersedes: None
-- Superseded by: ADR-073
+- Superseded by: None
 - Governing issue: [#138](https://github.com/gongahkia/yeokcham/issues/138)
 - Related issues: [#136](https://github.com/gongahkia/yeokcham/issues/136), [#145](https://github.com/gongahkia/yeokcham/issues/145)
 
