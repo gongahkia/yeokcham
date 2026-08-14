@@ -41,11 +41,12 @@ type error =
 val error_to_string : error -> string
 val current_schema_version : int64
 val supported_mandatory_features : int64
-
 val encode : transition -> string
 
 val decode :
-  authority:Authority.repository_authority -> string -> (transition, error) result
+  authority:Authority.repository_authority ->
+  string ->
+  (transition, error) result
 
 val id : transition -> Model.Mls_epoch_id.t
 val parent_id : transition -> Model.Mls_epoch_id.t option
@@ -71,8 +72,8 @@ val create :
   state_key:Envelope.key ->
   state_nonce:Envelope.nonce ->
   (transition, error) result
-(** Constructs and root-signs one canonical transition from already produced
-    MLS states and Commit bytes. It does not itself perform an MLS operation. *)
+(** Constructs and root-signs one canonical transition from already produced MLS
+    states and Commit bytes. It does not itself perform an MLS operation. *)
 
 val advance_add :
   runtime:Runtime.configuration ->

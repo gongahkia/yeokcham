@@ -32,7 +32,10 @@ type apply_commit_result =
       advanced_previous_epoch : int64;
       advanced_next_epoch : int64;
     }
-  | Removed of { removed_previous_epoch : int64; removed_observed_epoch : int64 }
+  | Removed of {
+      removed_previous_epoch : int64;
+      removed_observed_epoch : int64;
+    }
 
 type error =
   | Invalid_runtime_state of string

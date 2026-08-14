@@ -277,7 +277,8 @@ let removal_rekeys_active_devices_without_revoking_historical_copies () =
     |> require_ok Group.error_to_string
   in
   let added_b =
-    Group.add_member ~runtime ~issuer_state:issuer ~recipient_device_id:(device 'b')
+    Group.add_member ~runtime ~issuer_state:issuer
+      ~recipient_device_id:(device 'b')
     |> require_ok Group.error_to_string
   in
   let added_c =
@@ -292,7 +293,8 @@ let removal_rekeys_active_devices_without_revoking_historical_copies () =
   in
   let active_b =
     match active_b with
-    | Group.Applied { advanced_state; advanced_previous_epoch; advanced_next_epoch } ->
+    | Group.Applied
+        { advanced_state; advanced_previous_epoch; advanced_next_epoch } ->
         Alcotest.(check int64) "B joins C epoch" 1L advanced_previous_epoch;
         Alcotest.(check int64) "B reaches C epoch" 2L advanced_next_epoch;
         advanced_state
@@ -308,18 +310,21 @@ let removal_rekeys_active_devices_without_revoking_historical_copies () =
       ~removed_device_id:(device 'c')
     |> require_ok Group.error_to_string
   in
-  Alcotest.(check int64) "issuer removes at epoch two" 2L
-    removal.Group.removal_previous_epoch;
-  Alcotest.(check int64) "issuer advances to epoch three" 3L
-    removal.Group.removal_next_epoch;
+  Alcotest.(check int64)
+    "issuer removes at epoch two" 2L removal.Group.removal_previous_epoch;
+  Alcotest.(check int64)
+    "issuer advances to epoch three" 3L removal.Group.removal_next_epoch;
   let rekeyed_b =
-    Group.apply_commit ~runtime ~state:active_b ~commit:removal.Group.removal_commit
+    Group.apply_commit ~runtime ~state:active_b
+      ~commit:removal.Group.removal_commit
     |> require_ok Group.error_to_string
   in
   let rekeyed_b =
     match rekeyed_b with
-    | Group.Applied { advanced_state; advanced_previous_epoch; advanced_next_epoch } ->
-        Alcotest.(check int64) "B rekeys from epoch two" 2L advanced_previous_epoch;
+    | Group.Applied
+        { advanced_state; advanced_previous_epoch; advanced_next_epoch } ->
+        Alcotest.(check int64)
+          "B rekeys from epoch two" 2L advanced_previous_epoch;
         Alcotest.(check int64) "B rekeys to epoch three" 3L advanced_next_epoch;
         advanced_state
     | Group.Removed _ -> Alcotest.fail "B must remain an active member"
@@ -329,22 +334,26 @@ let removal_rekeys_active_devices_without_revoking_historical_copies () =
       ~commit:removal.Group.removal_commit
     |> require_ok Group.error_to_string
   in
-  Alcotest.(check bool) "C is explicitly removed" true
+  Alcotest.(check bool)
+    "C is explicitly removed" true
     (match removed with Group.Removed _ -> true | Group.Applied _ -> false);
   let current =
     Group.encrypt_metadata ~runtime ~state:removal.Group.removed_issuer_state
       ~nonce:(nonce 'n') "epoch-three metadata"
     |> require_ok Group.error_to_string
   in
-  Alcotest.(check string) "active B decrypts current metadata" "epoch-three metadata"
+  Alcotest.(check string)
+    "active B decrypts current metadata" "epoch-three metadata"
     (Group.decrypt_metadata ~runtime ~state:rekeyed_b current
     |> require_ok Group.error_to_string);
-  Alcotest.(check bool) "removed C cannot decrypt current metadata" true
+  Alcotest.(check bool)
+    "removed C cannot decrypt current metadata" true
     (Result.is_error
-       (Group.decrypt_metadata ~runtime ~state:added_c.Group.added_recipient_state
-          current));
+       (Group.decrypt_metadata ~runtime
+          ~state:added_c.Group.added_recipient_state current));
   Alcotest.(check string)
-    "historical plaintext already copied by C remains decryptable" "epoch-two metadata"
+    "historical plaintext already copied by C remains decryptable"
+    "epoch-two metadata"
     (Group.decrypt_metadata ~runtime ~state:added_c.Group.added_recipient_state
        historical
     |> require_ok Group.error_to_string)
@@ -365,7 +374,9 @@ let () =
           Alcotest.test_case "interrupted bootstrap has no visible membership"
             `Slow interrupted_bootstrap_has_no_visible_membership;
           Alcotest.test_case
-            "removal rekeys active devices but does not revoke historical copies"
-            `Slow removal_rekeys_active_devices_without_revoking_historical_copies;
+            "removal rekeys active devices but does not revoke historical \
+             copies"
+            `Slow
+            removal_rekeys_active_devices_without_revoking_historical_copies;
         ] );
     ]

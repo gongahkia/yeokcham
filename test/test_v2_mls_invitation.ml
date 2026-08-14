@@ -70,6 +70,14 @@ let successful_join_is_signed_encrypted_and_single_use () =
   in
   Group.verify ~runtime issue.Invitation.issuer_state
   |> require_ok Group.error_to_string;
+  Alcotest.(check bool)
+    "issuer transition exposes its MLS commit" true
+    (String.length issue.Invitation.issuer_commit > 0);
+  Alcotest.(check int64)
+    "issuer transition starts at epoch zero" 0L
+    issue.Invitation.issuer_previous_epoch;
+  Alcotest.(check int64)
+    "issuer transition reaches epoch one" 1L issue.Invitation.issuer_next_epoch;
   let acceptance =
     Invitation.accept ~runtime ~authority ~root ~invitation
       ~history:[ issued_event ] ~now:11L ~invitation_key:(key 'k')

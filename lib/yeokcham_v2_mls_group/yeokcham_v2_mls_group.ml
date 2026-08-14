@@ -34,7 +34,10 @@ type apply_commit_result =
       advanced_previous_epoch : int64;
       advanced_next_epoch : int64;
     }
-  | Removed of { removed_previous_epoch : int64; removed_observed_epoch : int64 }
+  | Removed of {
+      removed_previous_epoch : int64;
+      removed_observed_epoch : int64;
+    }
 
 type error =
   | Invalid_runtime_state of string
@@ -317,7 +320,8 @@ let apply_commit ~runtime ~state ~commit =
   match result with
   | Runtime.Removed { removed_previous_epoch; removed_observed_epoch } ->
       Ok (Removed { removed_previous_epoch; removed_observed_epoch })
-  | Runtime.Applied { applied_runtime_state; applied_previous_epoch; applied_next_epoch } ->
+  | Runtime.Applied
+      { applied_runtime_state; applied_previous_epoch; applied_next_epoch } ->
       let* state =
         make ~repository_id:state.state_repository_id
           ~group_id:state.state_group_id ~device_id:state.state_device_id

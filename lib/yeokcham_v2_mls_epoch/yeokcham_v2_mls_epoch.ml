@@ -65,27 +65,33 @@ let error_to_string = function
   | Invalid_mandatory_features features ->
       Printf.sprintf "invalid MLS epoch mandatory feature bits: %Ld" features
   | Unsupported_mandatory_features features ->
-      Printf.sprintf "unsupported MLS epoch mandatory feature bits: %Ld" features
+      Printf.sprintf "unsupported MLS epoch mandatory feature bits: %Ld"
+        features
   | Invalid_epoch detail -> "invalid MLS epoch transition: " ^ detail
   | Unauthorized_root -> "MLS epoch transitions require the repository root"
   | Authority_error error -> Authority.error_to_string error
   | Group_error error -> Group.error_to_string error
   | Envelope_error error -> Envelope.error_to_string error
-  | Signature_verification_failed -> "MLS epoch transition root signature is invalid"
-  | Identity_mismatch detail -> "MLS epoch transition identity mismatch: " ^ detail
+  | Signature_verification_failed ->
+      "MLS epoch transition root signature is invalid"
+  | Identity_mismatch detail ->
+      "MLS epoch transition identity mismatch: " ^ detail
   | Noncanonical_record -> "MLS epoch transition bytes are noncanonical"
   | Divergent_epoch None -> "MLS epoch history has multiple root transitions"
   | Divergent_epoch (Some id) ->
-      "MLS epoch history has competing successors after " ^ Model.Mls_epoch_id.short_hex id
+      "MLS epoch history has competing successors after "
+      ^ Model.Mls_epoch_id.short_hex id
   | Disconnected_epoch id ->
-      "MLS epoch history contains a disconnected transition " ^ Model.Mls_epoch_id.short_hex id
+      "MLS epoch history contains a disconnected transition "
+      ^ Model.Mls_epoch_id.short_hex id
 
 let digest domain bytes =
   Hash.feed_string Hash.empty domain |> fun context ->
   Hash.feed_string context bytes |> Hash.get |> Hash.to_raw_string
 
 let check_features features =
-  if Int64.compare features 0L < 0 then Error (Invalid_mandatory_features features)
+  if Int64.compare features 0L < 0 then
+    Error (Invalid_mandatory_features features)
   else
     let unsupported =
       Int64.logand features (Int64.lognot supported_mandatory_features)
@@ -96,41 +102,49 @@ let check_features features =
 let array values =
   Encoding.array values
   |> Result.map_error (fun error ->
-         Invalid_payload (Encoding.construction_error_to_string error))
+      Invalid_payload (Encoding.construction_error_to_string error))
 
 let fields name expected = function
   | Encoding.Array values when List.length values = expected -> Ok values
-  | Encoding.Array _ -> Error (Invalid_payload (name ^ " has wrong field count"))
+  | Encoding.Array _ ->
+      Error (Invalid_payload (name ^ " has wrong field count"))
   | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _ | Encoding.Map _
-  | Encoding.Bool _ | Encoding.Null -> Error (Invalid_payload (name ^ " must be an array"))
+  | Encoding.Bool _ | Encoding.Null ->
+      Error (Invalid_payload (name ^ " must be an array"))
 
 let integer name = function
   | Encoding.Integer value -> Ok value
   | Encoding.Bytes _ | Encoding.Text _ | Encoding.Array _ | Encoding.Map _
-  | Encoding.Bool _ | Encoding.Null -> Error (Invalid_payload (name ^ " must be an integer"))
+  | Encoding.Bool _ | Encoding.Null ->
+      Error (Invalid_payload (name ^ " must be an integer"))
 
 let bytes name = function
   | Encoding.Bytes value -> Ok value
   | Encoding.Integer _ | Encoding.Text _ | Encoding.Array _ | Encoding.Map _
-  | Encoding.Bool _ | Encoding.Null -> Error (Invalid_payload (name ^ " must be bytes"))
+  | Encoding.Bool _ | Encoding.Null ->
+      Error (Invalid_payload (name ^ " must be bytes"))
 
 let text name = function
   | Encoding.Text value -> Ok value
   | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Array _ | Encoding.Map _
-  | Encoding.Bool _ | Encoding.Null -> Error (Invalid_payload (name ^ " must be text"))
+  | Encoding.Bool _ | Encoding.Null ->
+      Error (Invalid_payload (name ^ " must be text"))
 
 let identity name of_bytes value =
   let* value = bytes name value in
-  of_bytes value |> Result.map_error (fun _ -> Invalid_payload (name ^ " has invalid length"))
+  of_bytes value
+  |> Result.map_error (fun _ -> Invalid_payload (name ^ " has invalid length"))
 
 let parent_id = function
   | Encoding.Null -> Ok None
   | Encoding.Bytes value ->
       Model.Mls_epoch_id.of_bytes value
       |> Result.map Option.some
-      |> Result.map_error (fun _ -> Invalid_payload "MLS epoch parent ID has invalid length")
+      |> Result.map_error (fun _ ->
+          Invalid_payload "MLS epoch parent ID has invalid length")
   | Encoding.Integer _ | Encoding.Text _ | Encoding.Array _ | Encoding.Map _
-  | Encoding.Bool _ -> Error (Invalid_payload "MLS epoch parent ID must be bytes or null")
+  | Encoding.Bool _ ->
+      Error (Invalid_payload "MLS epoch parent ID must be bytes or null")
 
 let change_code = function Member_added -> 1L | Member_removed -> 2L
 
@@ -151,19 +165,26 @@ let check_commitment name value =
   else Error (Invalid_payload (name ^ " must contain 32 bytes"))
 
 let ensure_authority ~authority ~repository_id ~issuer_key_id =
-  if not (Model.Repository_id.equal repository_id
-            (Authority.repository_authority_repository_id authority))
+  if
+    not
+      (Model.Repository_id.equal repository_id
+         (Authority.repository_authority_repository_id authority))
   then Error (Identity_mismatch "repository authority")
-  else if not (Model.Root_key_id.equal issuer_key_id
-                 (Authority.repository_authority_root_key_id authority))
+  else if
+    not
+      (Model.Root_key_id.equal issuer_key_id
+         (Authority.repository_authority_root_key_id authority))
   then Error Unauthorized_root
   else Ok ()
 
 let ensure_root ~authority root =
-  if Model.Root_key_id.equal (Authority.root_key_id root)
-       (Authority.repository_authority_root_key_id authority)
-     && String.equal (Authority.root_public_key root)
-          (Authority.repository_authority_root_public_key authority)
+  if
+    Model.Root_key_id.equal
+      (Authority.root_key_id root)
+      (Authority.repository_authority_root_key_id authority)
+    && String.equal
+         (Authority.root_public_key root)
+         (Authority.repository_authority_root_public_key authority)
   then Ok ()
   else Error Unauthorized_root
 
@@ -209,14 +230,16 @@ let value transition =
     [
       Encoding.integer current_schema_version;
       Encoding.bytes (Model.Mls_epoch_id.to_bytes transition.epoch_record_id);
-      Encoding.bytes (Model.Repository_id.to_bytes transition.epoch_repository_id);
+      Encoding.bytes
+        (Model.Repository_id.to_bytes transition.epoch_repository_id);
       Encoding.bytes (Model.Mls_group_id.to_bytes transition.epoch_group_id);
       Encoding.bytes (Model.Root_key_id.to_bytes transition.epoch_issuer_key_id);
       (match transition.epoch_parent_id with
       | None -> Encoding.null
       | Some id -> Encoding.bytes (Model.Mls_epoch_id.to_bytes id));
       Encoding.integer (change_code transition.epoch_change);
-      Encoding.bytes (Model.Device_id.to_bytes transition.epoch_changed_device_id);
+      Encoding.bytes
+        (Model.Device_id.to_bytes transition.epoch_changed_device_id);
       Encoding.integer transition.epoch_previous;
       Encoding.integer transition.epoch_next;
       Encoding.bytes transition.epoch_predecessor_state_commitment;
@@ -231,48 +254,85 @@ let value transition =
 let encode transition = value transition |> Result.get_ok |> Encoding.encode
 
 let decode ~authority encoded =
-  Printf.eprintf "epoch-decode-input=%d first=%02x\n%!" (String.length encoded)
-    (Char.code encoded.[0]);
   let* value =
-    match Encoding.decode encoded with
-    | Ok value -> Ok value
-    | Error error ->
-        Printf.eprintf "epoch-decode-error=%s\n%!" (Encoding.decode_error_to_string error);
-        Error (Invalid_payload (Encoding.decode_error_to_string error))
+    Encoding.decode encoded
+    |> Result.map_error (fun error ->
+        Invalid_payload (Encoding.decode_error_to_string error))
   in
   let* values = fields "MLS epoch transition" 17 value in
   match values with
-  | [ version; id; repository; group; issuer; parent; kind; changed; previous; next;
-      predecessor; successor; commit; envelope; features; algorithm; signature ] ->
+  | [
+   version;
+   id;
+   repository;
+   group;
+   issuer;
+   parent;
+   kind;
+   changed;
+   previous;
+   next;
+   predecessor;
+   successor;
+   commit;
+   envelope;
+   features;
+   algorithm;
+   signature;
+  ] ->
       let* version = integer "MLS epoch schema version" version in
       if not (Int64.equal version current_schema_version) then
         Error (Unsupported_schema_version version)
       else
-        let* record_id = identity "MLS epoch ID" Model.Mls_epoch_id.of_bytes id in
-        let* repository_id = identity "MLS epoch repository ID" Model.Repository_id.of_bytes repository in
-        let* group_id = identity "MLS epoch group ID" Model.Mls_group_id.of_bytes group in
-        let* issuer_key_id = identity "MLS epoch issuer key ID" Model.Root_key_id.of_bytes issuer in
+        let* record_id =
+          identity "MLS epoch ID" Model.Mls_epoch_id.of_bytes id
+        in
+        let* repository_id =
+          identity "MLS epoch repository ID" Model.Repository_id.of_bytes
+            repository
+        in
+        let* group_id =
+          identity "MLS epoch group ID" Model.Mls_group_id.of_bytes group
+        in
+        let* issuer_key_id =
+          identity "MLS epoch issuer key ID" Model.Root_key_id.of_bytes issuer
+        in
         let* parent_id = parent_id parent in
         let* kind = integer "MLS epoch change kind" kind in
         let* change = change_of_code kind in
-        let* changed_device_id = identity "MLS epoch changed device ID" Model.Device_id.of_bytes changed in
+        let* changed_device_id =
+          identity "MLS epoch changed device ID" Model.Device_id.of_bytes
+            changed
+        in
         let* previous = integer "MLS epoch previous value" previous in
         let* next = integer "MLS epoch next value" next in
         let* () = check_epoch ~previous ~next in
-        let* predecessor_state = bytes "MLS epoch predecessor commitment" predecessor in
-        let* () = check_commitment "MLS epoch predecessor commitment" predecessor_state in
-        let* successor_state = bytes "MLS epoch successor commitment" successor in
-        let* () = check_commitment "MLS epoch successor commitment" successor_state in
+        let* predecessor_state =
+          bytes "MLS epoch predecessor commitment" predecessor
+        in
+        let* () =
+          check_commitment "MLS epoch predecessor commitment" predecessor_state
+        in
+        let* successor_state =
+          bytes "MLS epoch successor commitment" successor
+        in
+        let* () =
+          check_commitment "MLS epoch successor commitment" successor_state
+        in
         let* commit = bytes "MLS epoch commit commitment" commit in
         let* () = check_commitment "MLS epoch commit commitment" commit in
         let* envelope = bytes "MLS epoch successor envelope" envelope in
         let* successor_envelope =
-          Envelope.decode envelope |> Result.map_error (fun error -> Envelope_error error)
+          Envelope.decode envelope
+          |> Result.map_error (fun error -> Envelope_error error)
         in
         let* features = integer "MLS epoch mandatory features" features in
         let* () = check_features features in
         let* () =
-          if Int64.equal features (Envelope.mandatory_features successor_envelope) then Ok ()
+          if
+            Int64.equal features
+              (Envelope.mandatory_features successor_envelope)
+          then Ok ()
           else Error (Identity_mismatch "successor envelope mandatory features")
         in
         let* algorithm = text "MLS epoch signature algorithm" algorithm in
@@ -284,15 +344,18 @@ let decode ~authority encoded =
           let* expected_id =
             derive_id ~repository_id ~group_id ~issuer_key_id ~parent:parent_id
               ~change ~changed_device_id ~previous ~next ~predecessor_state
-              ~successor_state ~commit ~successor_envelope ~mandatory_features:features
+              ~successor_state ~commit ~successor_envelope
+              ~mandatory_features:features
           in
           if not (Model.Mls_epoch_id.equal record_id expected_id) then
             Error (Identity_mismatch "derived record ID")
           else
             let* () =
               Authority.verify_root_message
-                ~public_key:(Authority.repository_authority_root_public_key authority)
-                ~domain:signature_domain (Model.Mls_epoch_id.to_bytes record_id)
+                ~public_key:
+                  (Authority.repository_authority_root_public_key authority)
+                ~domain:signature_domain
+                (Model.Mls_epoch_id.to_bytes record_id)
                 ~signature
               |> Result.map_error (fun _ -> Signature_verification_failed)
             in
@@ -329,7 +392,9 @@ let next_epoch transition = transition.epoch_next
 let predecessor_state_commitment transition =
   transition.epoch_predecessor_state_commitment
 
-let successor_state_commitment transition = transition.epoch_successor_state_commitment
+let successor_state_commitment transition =
+  transition.epoch_successor_state_commitment
+
 let successor_envelope transition = transition.epoch_successor_envelope
 
 let create ~authority ~root ~parent_id ~change ~changed_device_id
@@ -343,8 +408,11 @@ let create ~authority ~root ~parent_id ~change ~changed_device_id
       ~issuer_key_id:(Authority.root_key_id root)
   in
   let* () = check_epoch ~previous:previous_epoch ~next:next_epoch in
-  if not (Model.Repository_id.equal repository_id (Group.repository_id successor_state))
-     || not (Model.Mls_group_id.equal group_id (Group.group_id successor_state))
+  if
+    (not
+       (Model.Repository_id.equal repository_id
+          (Group.repository_id successor_state)))
+    || not (Model.Mls_group_id.equal group_id (Group.group_id successor_state))
   then Error (Identity_mismatch "successor repository/group binding")
   else
     let predecessor_state = state_commitment predecessor_state in
@@ -357,8 +425,8 @@ let create ~authority ~root ~parent_id ~change ~changed_device_id
     let mandatory_features = 0L in
     let issuer_key_id = Authority.root_key_id root in
     let* record_id =
-      derive_id ~repository_id ~group_id ~issuer_key_id ~parent:parent_id ~change
-        ~changed_device_id ~previous:previous_epoch ~next:next_epoch
+      derive_id ~repository_id ~group_id ~issuer_key_id ~parent:parent_id
+        ~change ~changed_device_id ~previous:previous_epoch ~next:next_epoch
         ~predecessor_state ~successor_state:successor_state_commitment ~commit
         ~successor_envelope ~mandatory_features
     in
@@ -404,13 +472,15 @@ let advance_add ~runtime ~authority ~root ~parent_id ~issuer_state
   let* record =
     create ~authority ~root ~parent_id ~change:Member_added
       ~changed_device_id:recipient_device_id ~predecessor_state:issuer_state
-      ~successor_state:joined.Group.added_issuer_state ~commit:joined.Group.add_commit
+      ~successor_state:joined.Group.added_issuer_state
+      ~commit:joined.Group.add_commit
       ~previous_epoch:joined.Group.add_previous_epoch
       ~next_epoch:joined.Group.add_next_epoch ~state_key ~state_nonce
   in
   Ok
     (result ~record ~successor_state:joined.Group.added_issuer_state
-       ~commit:joined.Group.add_commit ~previous_epoch:joined.Group.add_previous_epoch
+       ~commit:joined.Group.add_commit
+       ~previous_epoch:joined.Group.add_previous_epoch
        ~next_epoch:joined.Group.add_next_epoch)
 
 let advance_removal ~runtime ~authority ~root ~parent_id ~issuer_state
@@ -438,19 +508,30 @@ let open_successor ~runtime ~state_key transition =
     Group.open_state ~key:state_key transition.epoch_successor_envelope
     |> Result.map_error (fun error -> Group_error error)
   in
-  if not (String.equal (state_commitment state)
-            transition.epoch_successor_state_commitment)
+  if
+    not
+      (String.equal (state_commitment state)
+         transition.epoch_successor_state_commitment)
   then Error (Identity_mismatch "successor state commitment")
-  else if not (Model.Repository_id.equal (Group.repository_id state)
-                 transition.epoch_repository_id)
-          || not (Model.Mls_group_id.equal (Group.group_id state) transition.epoch_group_id)
+  else if
+    (not
+       (Model.Repository_id.equal
+          (Group.repository_id state)
+          transition.epoch_repository_id))
+    || not
+         (Model.Mls_group_id.equal (Group.group_id state)
+            transition.epoch_group_id)
   then Error (Identity_mismatch "successor state binding")
   else
-    Group.verify ~runtime state |> Result.map_error (fun error -> Group_error error)
+    Group.verify ~runtime state
+    |> Result.map_error (fun error -> Group_error error)
     |> Result.map (fun () -> state)
 
 let verify_chain ~runtime ~authority ~state_key ~initial_state transitions =
-  let* () = Group.verify ~runtime initial_state |> Result.map_error (fun error -> Group_error error) in
+  let* () =
+    Group.verify ~runtime initial_state
+    |> Result.map_error (fun error -> Group_error error)
+  in
   let repository_id = Group.repository_id initial_state in
   let group_id = Group.group_id initial_state in
   let rec walk parent epoch state remaining used =
@@ -468,18 +549,23 @@ let verify_chain ~runtime ~authority ~state_key ~initial_state transitions =
         if List.length used = List.length transitions then Ok state
         else
           let disconnected =
-            List.find (fun transition -> not (List.memq transition used)) transitions
+            List.find
+              (fun transition -> not (List.memq transition used))
+              transitions
           in
           Error (Disconnected_epoch disconnected.epoch_record_id)
     | [ transition ] ->
         let* checked = decode ~authority (encode transition) in
-        if not (Model.Repository_id.equal checked.epoch_repository_id repository_id)
-           || not (Model.Mls_group_id.equal checked.epoch_group_id group_id)
+        if
+          (not
+             (Model.Repository_id.equal checked.epoch_repository_id
+                repository_id))
+          || not (Model.Mls_group_id.equal checked.epoch_group_id group_id)
         then Error (Identity_mismatch "epoch chain repository/group")
         else
           let* successor = open_successor ~runtime ~state_key checked in
-          walk (Some checked.epoch_record_id) checked.epoch_next successor remaining
-            (checked :: used)
+          walk (Some checked.epoch_record_id) checked.epoch_next successor
+            remaining (checked :: used)
     | _ -> Error (Divergent_epoch parent)
   in
   walk None 0L initial_state transitions []

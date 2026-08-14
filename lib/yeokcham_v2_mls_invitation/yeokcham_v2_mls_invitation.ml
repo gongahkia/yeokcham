@@ -41,6 +41,9 @@ type issue = {
   invitation : member_invitation;
   issued_event : membership_event;
   issuer_state : Group.t;
+  issuer_commit : string;
+  issuer_previous_epoch : int64;
+  issuer_next_epoch : int64;
 }
 
 type acceptance = {
@@ -610,6 +613,8 @@ let issue ~runtime ~authority ~root ~issuer_state ~recipient_device_id
     let joined_issuer_state = joined.Group.added_issuer_state in
     let joined_commit = joined.Group.add_commit in
     let joined_welcome = joined.Group.add_welcome in
+    let joined_previous_epoch = joined.Group.add_previous_epoch in
+    let joined_next_epoch = joined.Group.add_next_epoch in
     let* join_state =
       Envelope.seal ~key:join_key ~nonce:invitation_nonce ~mandatory_features:0L
         (Group.encode joined_recipient_state)
@@ -651,7 +656,15 @@ let issue ~runtime ~authority ~root ~issuer_state ~recipient_device_id
       make_event ~root ~invitation ~kind:Event_issued ~occurred_at:issued_at
         ~payload
     in
-    Ok { invitation; issued_event; issuer_state = joined_issuer_state }
+    Ok
+      {
+        invitation;
+        issued_event;
+        issuer_state = joined_issuer_state;
+        issuer_commit = joined_commit;
+        issuer_previous_epoch = joined_previous_epoch;
+        issuer_next_epoch = joined_next_epoch;
+      }
 
 let event_matches invitation event =
   Model.Mls_invitation_id.equal event.membership_event_invitation_id

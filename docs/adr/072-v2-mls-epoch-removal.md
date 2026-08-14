@@ -93,7 +93,7 @@ development format.
   historical-plaintext limitation.
 - A seeded property varies repository and device IDs and proves append-only Add
   and Remove records replay to their unique runtime-verified successor.
-- Canonical record format is covered by the V2 format test/golden fixture; the
+- A dedicated canonical record/golden-fixture test validates the V2 format; the
   store validates strict lowercase-hex names and staging grammar.
 
 ## Consequences

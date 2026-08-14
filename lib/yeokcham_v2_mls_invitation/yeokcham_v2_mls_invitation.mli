@@ -20,6 +20,9 @@ type issue = {
   invitation : member_invitation;
   issued_event : membership_event;
   issuer_state : Group.t;
+  issuer_commit : string;
+  issuer_previous_epoch : int64;
+  issuer_next_epoch : int64;
 }
 
 type acceptance = {
@@ -88,8 +91,9 @@ val issue :
   event_nonce:Envelope.nonce ->
   (issue, error) result
 (** Performs the MLS add/commit/join, then root-signs an encrypted invitation
-    and its encrypted issued event. The returned [issuer_state] must replace the
-    issuer's previous durable MLS snapshot through a later state adapter. *)
+    and its encrypted issued event. [issuer_state], [issuer_commit], and the
+    consecutive epoch values are returned to an append-only state adapter; they
+    do not overwrite the initial durable group snapshot. *)
 
 val lifecycle :
   authority:Authority.repository_authority ->

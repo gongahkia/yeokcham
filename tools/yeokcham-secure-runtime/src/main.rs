@@ -4,6 +4,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+use mls_rs::group::ReceivedMessage;
 use mls_rs::{
     identity::{
         basic::{BasicCredential, BasicIdentityProvider},
@@ -13,7 +14,6 @@ use mls_rs::{
     MlsMessage,
 };
 use mls_rs_codec::MlsEncode;
-use mls_rs::group::ReceivedMessage;
 use mls_rs_core::group::{EpochRecord, GroupState};
 use mls_rs_crypto_openssl::OpensslCryptoProvider;
 use zeroize::Zeroizing;
@@ -595,7 +595,11 @@ fn add_member(
         .map_err(|error| format!("MLS issuer state persistence failed: {error}"))?;
     let issuer_state = issuer_storage.state()?;
     let next_epoch = issuer_group.current_epoch();
-    if next_epoch != previous_epoch.checked_add(1).ok_or_else(|| "MLS epoch overflows".to_string())? {
+    if next_epoch
+        != previous_epoch
+            .checked_add(1)
+            .ok_or_else(|| "MLS epoch overflows".to_string())?
+    {
         return Err("MLS add-member did not advance exactly one epoch".into());
     }
 
@@ -624,7 +628,14 @@ fn add_member(
             return Err(format!("MLS {name} snapshot violates runtime bound"));
         }
     }
-    Ok((issuer_state, recipient_state, commit, welcome_bytes, previous_epoch, next_epoch))
+    Ok((
+        issuer_state,
+        recipient_state,
+        commit,
+        welcome_bytes,
+        previous_epoch,
+        next_epoch,
+    ))
 }
 
 fn remove_member(
@@ -669,7 +680,9 @@ fn remove_member(
         .map(|member| member.index)
         .ok_or_else(|| "MLS removal target is not a current member".to_string())?;
     if issuer_device_id == removed_device_id {
-        return Err("MLS issuer may not remove its own active device in this vertical slice".into());
+        return Err(
+            "MLS issuer may not remove its own active device in this vertical slice".into(),
+        );
     }
     let previous_epoch = issuer_group.current_epoch();
     let output = issuer_group
@@ -689,7 +702,11 @@ fn remove_member(
         .apply_pending_commit()
         .map_err(|error| format!("MLS issuer commit application failed: {error}"))?;
     let next_epoch = issuer_group.current_epoch();
-    if next_epoch != previous_epoch.checked_add(1).ok_or_else(|| "MLS epoch overflows".to_string())? {
+    if next_epoch
+        != previous_epoch
+            .checked_add(1)
+            .ok_or_else(|| "MLS epoch overflows".to_string())?
+    {
         return Err("MLS removal did not advance exactly one epoch".into());
     }
     issuer_group
@@ -748,7 +765,11 @@ fn apply_commit(
     if !still_member {
         return Err("MLS active-client commit advanced without its local credential".into());
     }
-    if next_epoch != previous_epoch.checked_add(1).ok_or_else(|| "MLS epoch overflows".to_string())? {
+    if next_epoch
+        != previous_epoch
+            .checked_add(1)
+            .ok_or_else(|| "MLS epoch overflows".to_string())?
+    {
         return Err("MLS active-client commit did not advance exactly one epoch".into());
     }
     group
@@ -861,7 +882,9 @@ fn dispatch(payload: &[u8]) -> Result<Vec<u8>, String> {
         }
         REQUEST_APPLY_COMMIT => {
             let commit = bytes(
-                fields.next().ok_or_else(|| "MLS apply-commit request omits commit".to_string())?,
+                fields
+                    .next()
+                    .ok_or_else(|| "MLS apply-commit request omits commit".to_string())?,
                 "MLS apply-commit commit",
             )?;
             if commit.is_empty() {
@@ -975,13 +998,14 @@ mod tests {
         let issuer_id = vec![b'i'; DEVICE_ID_BYTES];
         let recipient_id = vec![b'r'; DEVICE_ID_BYTES];
         let issuer_state = create_state(group_id.clone(), issuer_id.clone()).unwrap();
-        let (next_issuer, recipient_state, commit, welcome, previous_epoch, next_epoch) = add_member(
-            group_id.clone(),
-            &issuer_id,
-            issuer_state,
-            recipient_id.clone(),
-        )
-        .unwrap();
+        let (next_issuer, recipient_state, commit, welcome, previous_epoch, next_epoch) =
+            add_member(
+                group_id.clone(),
+                &issuer_id,
+                issuer_state,
+                recipient_id.clone(),
+            )
+            .unwrap();
         assert_eq!(next_epoch, previous_epoch + 1);
         assert!(!commit.is_empty());
         assert!(!welcome.is_empty());
@@ -998,8 +1022,13 @@ mod tests {
         let issuer_state = create_state(group_id.clone(), issuer_id.clone()).unwrap();
         let (issuer_after_b, b_state, _, _, _, _) =
             add_member(group_id.clone(), &issuer_id, issuer_state, member_b.clone()).unwrap();
-        let (issuer_after_c, c_state, add_c, _, _, _) =
-            add_member(group_id.clone(), &issuer_id, issuer_after_b, member_c.clone()).unwrap();
+        let (issuer_after_c, c_state, add_c, _, _, _) = add_member(
+            group_id.clone(),
+            &issuer_id,
+            issuer_after_b,
+            member_c.clone(),
+        )
+        .unwrap();
         let (outcome, b_state, previous, next) =
             apply_commit(group_id.clone(), &member_b, b_state, add_c).unwrap();
         assert_eq!(outcome, 1);

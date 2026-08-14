@@ -2,7 +2,6 @@ module Address = Yeokcham_v2_address
 module Authority = Yeokcham_v2_authority
 module Bootstrap = Yeokcham_v2_bootstrap
 module Bootstrap_store = Yeokcham_v2_bootstrap_store
-module Encoding = Yeokcham_encoding
 module Envelope = Yeokcham_v2_envelope
 module Epoch = Yeokcham_v2_mls_epoch
 module Epoch_store = Yeokcham_v2_mls_epoch_store
@@ -25,10 +24,12 @@ let device byte =
   |> require_ok Model.identity_error_to_string
 
 let nonce byte =
-  Envelope.nonce_of_bytes (String.make 12 byte) |> require_ok Envelope.error_to_string
+  Envelope.nonce_of_bytes (String.make 12 byte)
+  |> require_ok Envelope.error_to_string
 
 let key byte =
-  Envelope.key_of_bytes (String.make 32 byte) |> require_ok Envelope.error_to_string
+  Envelope.key_of_bytes (String.make 32 byte)
+  |> require_ok Envelope.error_to_string
 
 let root seed =
   String.init 32 (fun index -> Char.chr ((seed + index) land 255))
@@ -36,17 +37,20 @@ let root seed =
   |> require_ok Authority.error_to_string
 
 let authority repository_id root =
-  Authority.make_repository_authority ~repository_id ~root ~mandatory_features:0L
+  Authority.make_repository_authority ~repository_id ~root
+    ~mandatory_features:0L
   |> require_ok Authority.error_to_string
 
 let capability () =
   let encryption_key = key 'e' in
   let address_key =
-    Address.key_of_bytes (String.make 32 'a') |> require_ok Address.error_to_string
+    Address.key_of_bytes (String.make 32 'a')
+    |> require_ok Address.error_to_string
   in
   let signing_key =
     Mirage_crypto_ec.Ed25519.priv_of_octets (String.make 32 's')
-    |> require_ok (fun error -> Format.asprintf "%a" Mirage_crypto_ec.pp_error error)
+    |> require_ok (fun error ->
+        Format.asprintf "%a" Mirage_crypto_ec.pp_error error)
   in
   Bootstrap.make_capability ~encryption_key ~address_key ~signing_key
   |> require_ok Bootstrap.error_to_string
@@ -68,7 +72,8 @@ let rec remove_tree path =
         |> Array.iter (fun name -> remove_tree (Filename.concat path name));
         Unix.rmdir path
     | Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO
-    | Unix.S_SOCK -> Unix.unlink path
+    | Unix.S_SOCK ->
+        Unix.unlink path
   with Unix.Unix_error (Unix.ENOENT, _, _) -> ()
 
 let with_root run =
@@ -97,8 +102,9 @@ let sequence () =
     |> require_ok Group.error_to_string
   in
   let added_b =
-    Epoch.advance_add ~runtime ~authority ~root ~parent_id:None ~issuer_state:initial
-      ~recipient_device_id:(device 'b') ~state_key ~state_nonce:(nonce 'b')
+    Epoch.advance_add ~runtime ~authority ~root ~parent_id:None
+      ~issuer_state:initial ~recipient_device_id:(device 'b') ~state_key
+      ~state_nonce:(nonce 'b')
     |> require_ok Epoch.error_to_string
   in
   let added_c =
@@ -115,18 +121,25 @@ let sequence () =
       ~removed_device_id:(device 'c') ~state_key ~state_nonce:(nonce 'd')
     |> require_ok Epoch.error_to_string
   in
-  { runtime; authority; initial; last = removed_c;
+  {
+    runtime;
+    authority;
+    initial;
+    last = removed_c;
     records =
       [
         added_b.Epoch.transition_result_record;
         added_c.Epoch.transition_result_record;
         removed_c.Epoch.transition_result_record;
       ];
-    state_key }
+    state_key;
+  }
 
 let read_golden name =
   let local = Filename.concat "golden" name in
-  let path = if Sys.file_exists local then local else Filename.concat "test" local in
+  let path =
+    if Sys.file_exists local then local else Filename.concat "test" local
+  in
   Golden.read_lower_hex_file path |> require_ok Fun.id
 
 let canonical_fixture_is_strict () =
@@ -140,50 +153,19 @@ let canonical_fixture_is_strict () =
   let expected =
     Epoch.create ~authority ~root ~parent_id:None ~change:Epoch.Member_added
       ~changed_device_id:(device 'b') ~predecessor_state:state
-      ~successor_state:state ~commit:"fixed-MLS-commit-vector" ~previous_epoch:0L
-      ~next_epoch:1L ~state_key:(key 'k') ~state_nonce:(nonce 'n')
+      ~successor_state:state ~commit:"fixed-MLS-commit-vector"
+      ~previous_epoch:0L ~next_epoch:1L ~state_key:(key 'k')
+      ~state_nonce:(nonce 'n')
     |> require_ok Epoch.error_to_string
   in
-  let debug_envelope =
-    Group.seal_state ~key:(key 'k') ~nonce:(nonce 'n') state
-    |> require_ok Group.error_to_string
-  in
-  ignore (Envelope.decode (Envelope.encode debug_envelope) |> require_ok Envelope.error_to_string);
-  Printf.printf "envelope=%s\n%!" (String.concat ""
-    (List.init (String.length (Envelope.encode debug_envelope)) (fun index ->
-      Printf.sprintf "%02x" (Char.code (Envelope.encode debug_envelope).[index]))));
-  Printf.printf "epoch-fixture=%s\n%!" (String.concat ""
-    (List.init (String.length (Epoch.encode expected)) (fun index ->
-      Printf.sprintf "%02x" (Char.code (Epoch.encode expected).[index]))));
-  (match Encoding.decode (Epoch.encode expected) with
-  | Ok (Encoding.Array values) ->
-      Printf.printf "epoch-fields=%d\n%!" (List.length values);
-      (match List.nth values 13 with
-      | Encoding.Bytes envelope ->
-          Printf.printf "epoch-envelope-bytes=%d\n%!" (String.length envelope);
-          ignore (Envelope.decode envelope |> require_ok Envelope.error_to_string)
-      | _ -> Alcotest.fail "epoch envelope field is not bytes")
-  | Ok _ -> Printf.printf "epoch-fields=not-array\n%!"
-  | Error error -> Printf.printf "epoch-fields-error=%s\n%!" (Encoding.decode_error_to_string error))
-  [@warning "-4"];
   let bytes = read_golden "v2-mls-epoch-transition-v1.cbor.hex" in
-  Printf.printf "fixture-equals-expected=%b\n%!" (String.equal bytes (Epoch.encode expected));
-  let rec first_difference offset =
-    if offset = String.length bytes then None
-    else if Char.equal bytes.[offset] (Epoch.encode expected).[offset] then
-      first_difference (offset + 1)
-    else Some offset
+  let decoded =
+    Epoch.decode ~authority bytes |> require_ok Epoch.error_to_string
   in
-  (match first_difference 0 with
-  | Some offset ->
-      Printf.printf "fixture-first-difference=%d expected=%02x actual=%02x\n%!" offset
-        (Char.code (Epoch.encode expected).[offset]) (Char.code bytes.[offset])
-  | None -> ());
-  let decoded = Epoch.decode ~authority bytes |> require_ok Epoch.error_to_string in
-  Alcotest.(check string) "canonical epoch fixture re-encodes exactly" bytes
-    (Epoch.encode decoded);
-  Alcotest.(check string) "fixture is the fixed signed transition"
-    (Epoch.encode expected) bytes
+  Alcotest.(check string)
+    "canonical epoch fixture re-encodes exactly" bytes (Epoch.encode decoded);
+  Alcotest.(check string)
+    "fixture is the fixed signed transition" (Epoch.encode expected) bytes
 
 let signed_encrypted_chain_replays_one_successor_per_epoch () =
   let sequence = sequence () in
@@ -199,19 +181,24 @@ let signed_encrypted_chain_replays_one_successor_per_epoch () =
       ~state_key:sequence.state_key ~initial_state:sequence.initial decoded
     |> require_ok Epoch.error_to_string
   in
-  Alcotest.(check int64) "three transitions reach epoch three" 3L
+  Alcotest.(check int64)
+    "three transitions reach epoch three" 3L
     (Epoch.next_epoch sequence.last.Epoch.transition_result_record);
-  Alcotest.(check string) "replayed successor is the removed issuer state"
+  Alcotest.(check string)
+    "replayed successor is the removed issuer state"
     (Group.encode sequence.last.Epoch.transition_result_successor_state)
     (Group.encode current);
   let durable = Epoch.encode sequence.last.Epoch.transition_result_record in
-  Alcotest.(check bool) "record contains no plaintext successor state" false
+  Alcotest.(check bool)
+    "record contains no plaintext successor state" false
     (let plaintext =
        Group.encode sequence.last.Epoch.transition_result_successor_state
      in
      let rec contains offset =
        offset + String.length plaintext <= String.length durable
-       && (String.equal (String.sub durable offset (String.length plaintext)) plaintext
+       && (String.equal
+             (String.sub durable offset (String.length plaintext))
+             plaintext
           || contains (offset + 1))
      in
      contains 0)
@@ -228,6 +215,16 @@ let persistent_exact_retry_ignores_interruption_and_refuses_divergence () =
       ignore
         (Bootstrap_store.initialize ~root:root_path bootstrap
         |> require_ok Bootstrap_store.error_to_string);
+      let empty_current =
+        Epoch_store.load_current ~runtime:sequence.runtime ~root:root_path
+          ~authority:sequence.authority ~state_key:sequence.state_key
+          ~initial_state:sequence.initial
+        |> require_ok Epoch_store.error_to_string
+      in
+      Alcotest.(check string)
+        "absent optional epoch directory keeps initial state"
+        (Group.encode sequence.initial)
+        (Group.encode empty_current);
       let first = List.hd sequence.records in
       let staged_directory = Epoch_store.directory ~root:root_path in
       Unix.mkdir staged_directory 0o700;
@@ -235,15 +232,19 @@ let persistent_exact_retry_ignores_interruption_and_refuses_divergence () =
         Filename.concat staged_directory
           ("." ^ Model.Mls_epoch_id.to_hex (Epoch.id first) ^ ".cbor.stage-42-0")
       in
-      let descriptor = Unix.openfile stage [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_EXCL ] 0o600 in
+      let descriptor =
+        Unix.openfile stage [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_EXCL ] 0o600
+      in
       Unix.close descriptor;
       List.iter
         (fun record ->
           ignore
-            (Epoch_store.write ~root:root_path ~authority:sequence.authority record
+            (Epoch_store.write ~root:root_path ~authority:sequence.authority
+               record
             |> require_ok Epoch_store.error_to_string))
         sequence.records;
-      Alcotest.(check bool) "exact durable retry is idempotent" true
+      Alcotest.(check bool)
+        "exact durable retry is idempotent" true
         (Epoch_store.write ~root:root_path ~authority:sequence.authority first
         |> require_ok Epoch_store.error_to_string
         = Epoch_store.Already_published);
@@ -253,31 +254,37 @@ let persistent_exact_retry_ignores_interruption_and_refuses_divergence () =
           ~initial_state:sequence.initial
         |> require_ok Epoch_store.error_to_string
       in
-      Alcotest.(check string) "durable chain reaches expected successor"
+      Alcotest.(check string)
+        "durable chain reaches expected successor"
         (Group.encode sequence.last.Epoch.transition_result_successor_state)
         (Group.encode current);
       let other_root = root 29 in
       let competing =
-        Epoch.advance_add ~runtime:sequence.runtime ~authority:sequence.authority
-          ~root:other_root ~parent_id:None ~issuer_state:sequence.initial
-          ~recipient_device_id:(device 'x') ~state_key:sequence.state_key
-          ~state_nonce:(nonce 'x')
+        Epoch.advance_add ~runtime:sequence.runtime
+          ~authority:sequence.authority ~root:other_root ~parent_id:None
+          ~issuer_state:sequence.initial ~recipient_device_id:(device 'x')
+          ~state_key:sequence.state_key ~state_nonce:(nonce 'x')
       in
-      Alcotest.(check bool) "foreign root cannot create a transition" true
+      Alcotest.(check bool)
+        "foreign root cannot create a transition" true
         (Result.is_error competing);
       let unknown = Filename.concat staged_directory "unexpected" in
-      let descriptor = Unix.openfile unknown [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_EXCL ] 0o600 in
+      let descriptor =
+        Unix.openfile unknown [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_EXCL ] 0o600
+      in
       Unix.close descriptor;
-      Alcotest.(check bool) "unknown durable entry fails closed" true
-        (Result.is_error (Epoch_store.read_all ~root:root_path ~authority:sequence.authority)))
+      Alcotest.(check bool)
+        "unknown durable entry fails closed" true
+        (Result.is_error
+           (Epoch_store.read_all ~root:root_path ~authority:sequence.authority)))
 
 let () =
   Alcotest.run "V2 MLS epochs"
     [
       ( "unit",
         [
-          Alcotest.test_case "signed encrypted epoch chain replays uniquely" `Slow
-            signed_encrypted_chain_replays_one_successor_per_epoch;
+          Alcotest.test_case "signed encrypted epoch chain replays uniquely"
+            `Slow signed_encrypted_chain_replays_one_successor_per_epoch;
           Alcotest.test_case "canonical epoch fixture is strict" `Quick
             canonical_fixture_is_strict;
           Alcotest.test_case

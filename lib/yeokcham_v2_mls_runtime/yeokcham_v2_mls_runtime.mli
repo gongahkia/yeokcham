@@ -31,7 +31,10 @@ type apply_commit_result =
       applied_previous_epoch : int64;
       applied_next_epoch : int64;
     }
-  | Removed of { removed_previous_epoch : int64; removed_observed_epoch : int64 }
+  | Removed of {
+      removed_previous_epoch : int64;
+      removed_observed_epoch : int64;
+    }
 
 type error =
   | Runtime_missing of string

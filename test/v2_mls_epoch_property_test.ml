@@ -12,11 +12,9 @@ let seed =
 
 let root =
   String.init 32 (fun index -> Char.chr ((7 + index) land 255))
-  |> Authority.root_signing_capability_of_private_key
-  |> Result.get_ok
+  |> Authority.root_signing_capability_of_private_key |> Result.get_ok
 
 let state_key = Envelope.key_of_bytes (String.make 32 'k') |> Result.get_ok
-
 let nonce byte = Envelope.nonce_of_bytes (String.make 12 byte) |> Result.get_ok
 let raw = QCheck2.Gen.string_size (QCheck2.Gen.return 32)
 
@@ -31,29 +29,35 @@ let property =
           Model.Device_id.of_bytes member_bytes )
       with
       | Ok repository_id, Ok issuer_device_id, Ok member_device_id
-        when not (Model.Device_id.equal issuer_device_id member_device_id) ->
+        when not (Model.Device_id.equal issuer_device_id member_device_id) -> (
           let runtime = Runtime.default_configuration in
           let authority =
             Authority.make_repository_authority ~repository_id ~root
               ~mandatory_features:0L
           in
-          (match authority with
+          match authority with
           | Error _ -> false
-          | Ok authority ->
-              match Group.create ~runtime ~repository_id ~device_id:issuer_device_id with
+          | Ok authority -> (
+              match
+                Group.create ~runtime ~repository_id ~device_id:issuer_device_id
+              with
               | Error _ -> false
-              | Ok initial ->
+              | Ok initial -> (
                   match
                     Epoch.advance_add ~runtime ~authority ~root ~parent_id:None
-                      ~issuer_state:initial ~recipient_device_id:member_device_id
-                      ~state_key ~state_nonce:(nonce 'a')
+                      ~issuer_state:initial
+                      ~recipient_device_id:member_device_id ~state_key
+                      ~state_nonce:(nonce 'a')
                   with
                   | Error _ -> false
-                  | Ok added ->
+                  | Ok added -> (
                       match
                         Epoch.advance_removal ~runtime ~authority ~root
-                          ~parent_id:(Some (Epoch.id added.Epoch.transition_result_record))
-                          ~issuer_state:added.Epoch.transition_result_successor_state
+                          ~parent_id:
+                            (Some
+                               (Epoch.id added.Epoch.transition_result_record))
+                          ~issuer_state:
+                            added.Epoch.transition_result_successor_state
                           ~removed_device_id:member_device_id ~state_key
                           ~state_nonce:(nonce 'r')
                       with
@@ -65,7 +69,8 @@ let property =
                               added.Epoch.transition_result_record;
                               removed.Epoch.transition_result_record;
                             ]
-                          = Ok removed.Epoch.transition_result_successor_state)
+                          = Ok removed.Epoch.transition_result_successor_state))
+              ))
       | Ok _, Ok _, Ok _ -> true
       | Error _, _, _ | _, Error _, _ | _, _, Error _ -> false)
 
@@ -75,6 +80,7 @@ let () =
       ( "property",
         [
           QCheck_alcotest.to_alcotest ~speed_level:`Quick
-            ~rand:(Random.State.make [| seed |]) property;
+            ~rand:(Random.State.make [| seed |])
+            property;
         ] );
     ]
