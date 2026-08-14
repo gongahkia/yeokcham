@@ -4193,29 +4193,33 @@ let load_archive store archive_identity =
 
 let list_archives store =
   let directory =
-    Filename.concat (Filename.concat (Store.root store) "refs") "git-archives"
+    Filename.concat
+      (Filename.concat (Filename.concat (Store.root store) ".yeokcham") "refs")
+      "git-archives"
   in
-  try
-    let entries =
-      Sys.readdir directory |> Array.to_list |> List.sort String.compare
-    in
-    let rec loop reversed = function
-      | [] -> Ok (List.rev reversed)
-      | entry :: rest ->
-          let* archive_identity =
-            Id.Git_archive_id.of_hex entry
-            |> Result.map_error (fun error ->
-                Archive_error
-                  ("invalid Git archive binding filename: "
-                  ^ Id.parse_error_to_string error))
-          in
-          let* archive = load_archive store archive_identity in
-          loop (archive :: reversed) rest
-    in
-    loop [] entries
-  with
-  | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok []
-  | Sys_error message -> Error (Archive_error message)
+  if not (Sys.file_exists directory) then Ok []
+  else
+    try
+      let entries =
+        Sys.readdir directory |> Array.to_list |> List.sort String.compare
+      in
+      let rec loop reversed = function
+        | [] -> Ok (List.rev reversed)
+        | entry :: rest ->
+            let* archive_identity =
+              Id.Git_archive_id.of_hex entry
+              |> Result.map_error (fun error ->
+                  Archive_error
+                    ("invalid Git archive binding filename: "
+                    ^ Id.parse_error_to_string error))
+            in
+            let* archive = load_archive store archive_identity in
+            loop (archive :: reversed) rest
+      in
+      loop [] entries
+    with
+    | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok []
+    | Sys_error message -> Error (Archive_error message)
 
 let publish_archive store archive =
   let* envelope = archive_envelope archive in

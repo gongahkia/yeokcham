@@ -2978,6 +2978,7 @@ let archive_persistence_goldens_are_stable () =
       let store_root = Filename.concat root "store" in
       let git = git_path () in
       direct_process git [ "init"; "-q"; repository ];
+      Unix.mkdir store_root 0o700;
       direct_process git
         [ "-C"; repository; "config"; "user.name"; "Yeokcham Golden" ];
       direct_process git
