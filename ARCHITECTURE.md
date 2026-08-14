@@ -569,6 +569,18 @@ records in strict optional V2 namespaces. It does not deliver invitations over
 a network, infer a remote identity from a Basic credential, provide delegated
 roles, or crash-safely replace the issuer's local MLS group snapshot.
 
+ADR-072 adds `yeokcham_v2_mls_epoch` and
+`yeokcham_v2_mls_epoch_store`. The runtime boundary now has explicit Remove
+and active-client Apply-Commit operations; it returns a successor only to a
+retained active member and an explicit removal outcome otherwise. The pure
+epoch core root-signs canonical Add/Remove transition records, commits both
+state bytes and Commit bytes, and encrypts the successor snapshot with the
+existing local envelope. The store appends create-only files beneath
+`mls-epochs`; it never replaces `mls-group/group-state-v1.cbor`. Chain loading
+verifies all signed records and runtime-reloads every successor, refusing a
+competing or disconnected history. Commit transport, remote state delivery, and
+retroactive revocation remain outside this boundary.
+
 `capsule create --current` uses no separate working-diff format. Under the same
 writer lock it verifies a scratch head, double-scans the working directory, and
 uses the ordinary scratch checkpoint writer for a verified difference. The

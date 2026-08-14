@@ -26,6 +26,37 @@ required-directory locks
 required-directory journal
 ```
 
+## Optional MLS epoch records
+
+ADR-072 adds the optional strict namespace
+`.yeokcham/mls-epochs/<64-lowercase-hex-epoch-id>.cbor`. A record is canonical
+CBOR with this conceptual shape:
+
+```text
+[
+  1, epoch-id, repository-id, derived-group-id, root-key-id,
+  parent-epoch-id-or-null, change-kind, changed-device-id,
+  previous-epoch, next-epoch,
+  sha256(predecessor-state), sha256(successor-state), sha256(mls-commit),
+  canonical-v2-envelope(successor-group-state), mandatory-features,
+  "ed25519", root-signature
+]
+```
+
+`epoch-id` is the domain-separated SHA-256 of the unsigned fields. The
+signature is separately domain-separated. `next-epoch` must be exactly one
+greater than `previous-epoch`; all commitments are 32 bytes; the envelope's
+mandatory features must equal the record's features. The successor group state
+is canonical only inside the authenticated envelope and no plaintext MLS state
+or secret is included.
+
+The store accepts only final filenames above or a regular private staging name
+`.<64-hex>.cbor.stage-<decimal-pid>-<decimal-attempt>`. It publishes via
+create-only hard link after file `fsync`, then `fsync`s the directory. Exact
+bytes retry idempotently; different bytes, unknown names, non-regular paths,
+and divergent or disconnected chains fail closed. Older V2 roots may omit this
+optional directory.
+
 ## Invariants
 
 - Under the current single-initializer contract, `init` constructs the complete

@@ -57,6 +57,23 @@ val predecessor_state_commitment : transition -> string
 val successor_state_commitment : transition -> string
 val successor_envelope : transition -> Envelope.t
 
+val create :
+  authority:Authority.repository_authority ->
+  root:Authority.root_signing_capability ->
+  parent_id:Model.Mls_epoch_id.t option ->
+  change:change ->
+  changed_device_id:Model.Device_id.t ->
+  predecessor_state:Group.t ->
+  successor_state:Group.t ->
+  commit:string ->
+  previous_epoch:int64 ->
+  next_epoch:int64 ->
+  state_key:Envelope.key ->
+  state_nonce:Envelope.nonce ->
+  (transition, error) result
+(** Constructs and root-signs one canonical transition from already produced
+    MLS states and Commit bytes. It does not itself perform an MLS operation. *)
+
 val advance_add :
   runtime:Runtime.configuration ->
   authority:Authority.repository_authority ->

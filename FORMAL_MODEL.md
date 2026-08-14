@@ -1868,6 +1868,33 @@ MLS state transition. Canonical encrypted invitation and event records publish
 create-only under `.yeokcham/mls-invitations` and
 `.yeokcham/mls-membership-events`; unknown or divergent durable bytes reject.
 
+## 25g. V2 MLS epoch removal
+
+ADR-072 models durable MLS evolution as an append-only relation, separate from
+the initial encrypted snapshot and invitation lifecycle records:
+
+```text
+EpochTransition(R, parent, D, change, e, e + 1, S, S', C) =
+  Sign_root(R, GroupID(R), parent, D, change, e, e + 1,
+            H(state(S)), H(state(S')), H(C), Envelope(local-key, S'))
+
+Remove(R, S, D) = MLS.Remove(D) ; Commit(C) ; S'
+Apply(C, S_active) = S'_active | Removed
+```
+
+The transition is valid only if `S` and `S'` bind `R` and `GroupID(R)`, both
+runtime-reload, `e + 1` is exact, and the root signature, parent, state
+commitments, and encrypted successor all verify. Starting from one initial
+state, the record set must yield one complete chain. More than one matching
+child is `Divergent_epoch`; any unconsumed record is disconnected; neither is a
+process error or an arbitrarily selected current state.
+
+For a retained active device MLS Commit processing yields a successor epoch.
+For the removed device it yields `Removed` and no successor state. This proves
+forward state separation for new metadata, not retroactive erasure: plaintext
+or historical keys previously copied by a removed participant remain outside
+the model's revocation power.
+
 ## 26. V2 typed encrypted objects
 
 ADR-054 makes the authenticated plaintext of every ADR-045 envelope one

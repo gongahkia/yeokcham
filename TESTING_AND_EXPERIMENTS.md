@@ -392,6 +392,20 @@ transition. This is not evidence of remote invitation delivery, Basic-
 credential identity, delegated policy roles, removal, epoch recovery, or
 crash-safe issuer-snapshot replacement.
 
+V2-031 exercises real MLS Add/Add/Remove commits with three devices. Rust and
+OCaml unit tests show that a retained active device applies the removal Commit
+and decrypts newly encrypted metadata, while the removed device receives no
+successor and cannot decrypt that metadata. The same test deliberately proves
+the removed device can decrypt an epoch-two ciphertext it already possessed;
+this is an explicit limit, not evidence of retroactive revocation. Epoch-store
+tests cover root authorization, canonical signed/encrypted records, exact
+retry, inert interrupted staging, unknown-entry refusal, unique replay, and
+divergence/disconnection failure. The seeded property varies repository and
+device IDs through Add then Remove and requires the complete append-only chain
+to runtime-reload its unique final successor. These tests do not establish
+commit transport, distributed synchronization, remote-device identity, server
+recovery, or erasure of copied historical plaintext.
+
 Milestone 6 validation checks canonical command/evidence goldens and inverse
 decoders; exact-snapshot materialisation; passing, failed, signalled, timeout,
 and execution-error observations; bounded stdout/stderr retention and hashes;

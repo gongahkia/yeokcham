@@ -15,6 +15,27 @@ contains exactly 32 arbitrary bytes. Hex input must be 64 lowercase hexadecimal
 characters; constructors reject a wrong length, uppercase input, and non-hex
 characters.
 
+`Mls_epoch_id` is a separate 32-byte identity for ADR-072's signed,
+append-only MLS state transitions. It is not a GroupID, invitation ID, device
+identity, authority decision, or mutable current-epoch selector.
+
+## MLS epoch transitions
+
+An `Mls_epoch_transition_v1` represents either `Member_added` or
+`Member_removed`. It binds the repository-derived GroupID, root key ID,
+parent-or-initial root, changed device, consecutive prior/next epoch numbers,
+commitments to both canonical group states and the MLS Commit, encrypted
+successor state, mandatory features, and a root signature. The group state and
+transition ID are distinct: the latter is SHA-256 over canonical unsigned
+record bytes.
+
+The pure chain evaluator accepts only one complete causal path from the
+initial group snapshot. Each successor must decrypt with local bootstrap
+custody, preserve repository/GroupID bindings, runtime-reload, and match its
+commitment. A same-parent competing successor becomes an explicit divergence;
+unreachable records reject. It returns a verified successor state but does not
+choose between branches or infer a removal policy.
+
 ## Repository-state algebra
 
 `Encrypted_ref_event` contains a typed event ID and a typed opaque object

@@ -182,3 +182,4 @@ The ADR lifecycle, numbering rules, and template are defined in [`docs/adr/READM
 - [ADR-069 — bounded local secure-runtime IPC contract](docs/adr/069-v2-secure-runtime-ipc.md) — Accepted.
 - [ADR-070 — V2 repository MLS bootstrap](docs/adr/070-v2-repository-mls-bootstrap.md) — Accepted.
 - [ADR-071 — V2 MLS member invitations and device join](docs/adr/071-v2-mls-member-invitations.md) — Accepted.
+- [ADR-072 — V2 MLS epoch removal and append-only rekeying](docs/adr/072-v2-mls-epoch-removal.md) — Accepted.

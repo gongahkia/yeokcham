@@ -64,6 +64,7 @@ let mls_group_name = "mls-group"
 let mls_group_state_name = "group-state-v1.cbor"
 let mls_invitations_name = "mls-invitations"
 let mls_membership_events_name = "mls-membership-events"
+let mls_epochs_name = "mls-epochs"
 let objects_name = "objects"
 let refs_name = "refs"
 let locks_name = "locks"
@@ -1201,7 +1202,8 @@ let v2_layout metadata =
   let allowed =
     List.sort String.compare
       (mls_group_name :: mls_invitations_name :: mls_membership_events_name
-     :: recovery_name :: quarantine_name :: reclamation_name :: required)
+     :: mls_epochs_name :: recovery_name :: quarantine_name :: reclamation_name
+     :: required)
   in
   let* names = read_directory metadata in
   let missing = List.filter (fun name -> not (List.mem name names)) required in
@@ -1266,6 +1268,7 @@ let v2_layout metadata =
     in
     let* () = validate_optional_mls_records mls_invitations_name in
     let* () = validate_optional_mls_records mls_membership_events_name in
+    let* () = validate_optional_mls_records mls_epochs_name in
     let quarantine = Filename.concat metadata quarantine_name in
     let* () =
       match lstat_or_missing quarantine with

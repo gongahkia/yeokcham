@@ -328,11 +328,12 @@ let predecessor_state_commitment transition =
 let successor_state_commitment transition = transition.epoch_successor_state_commitment
 let successor_envelope transition = transition.epoch_successor_envelope
 
-let make ~authority ~root ~parent_id ~change ~changed_device_id ~issuer_state
-    ~successor_state ~commit ~previous_epoch ~next_epoch ~state_key ~state_nonce =
+let create ~authority ~root ~parent_id ~change ~changed_device_id
+    ~predecessor_state ~successor_state ~commit ~previous_epoch ~next_epoch
+    ~state_key ~state_nonce =
   let* () = ensure_root ~authority root in
-  let repository_id = Group.repository_id issuer_state in
-  let group_id = Group.group_id issuer_state in
+  let repository_id = Group.repository_id predecessor_state in
+  let group_id = Group.group_id predecessor_state in
   let* () =
     ensure_authority ~authority ~repository_id
       ~issuer_key_id:(Authority.root_key_id root)
@@ -342,7 +343,7 @@ let make ~authority ~root ~parent_id ~change ~changed_device_id ~issuer_state
      || not (Model.Mls_group_id.equal group_id (Group.group_id successor_state))
   then Error (Identity_mismatch "successor repository/group binding")
   else
-    let predecessor_state = state_commitment issuer_state in
+    let predecessor_state = state_commitment predecessor_state in
     let successor_state_commitment = state_commitment successor_state in
     let commit = commit_commitment commit in
     let* successor_envelope =
@@ -397,8 +398,8 @@ let advance_add ~runtime ~authority ~root ~parent_id ~issuer_state
     |> Result.map_error (fun error -> Group_error error)
   in
   let* record =
-    make ~authority ~root ~parent_id ~change:Member_added
-      ~changed_device_id:recipient_device_id ~issuer_state
+    create ~authority ~root ~parent_id ~change:Member_added
+      ~changed_device_id:recipient_device_id ~predecessor_state:issuer_state
       ~successor_state:joined.Group.added_issuer_state ~commit:joined.Group.add_commit
       ~previous_epoch:joined.Group.add_previous_epoch
       ~next_epoch:joined.Group.add_next_epoch ~state_key ~state_nonce
@@ -415,8 +416,8 @@ let advance_removal ~runtime ~authority ~root ~parent_id ~issuer_state
     |> Result.map_error (fun error -> Group_error error)
   in
   let* record =
-    make ~authority ~root ~parent_id ~change:Member_removed
-      ~changed_device_id:removed_device_id ~issuer_state
+    create ~authority ~root ~parent_id ~change:Member_removed
+      ~changed_device_id:removed_device_id ~predecessor_state:issuer_state
       ~successor_state:removed.Group.removed_issuer_state
       ~commit:removed.Group.removal_commit
       ~previous_epoch:removed.Group.removal_previous_epoch
