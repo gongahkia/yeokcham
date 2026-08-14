@@ -167,6 +167,18 @@ let canonical_fixture_is_strict () =
   | Error error -> Printf.printf "epoch-fields-error=%s\n%!" (Encoding.decode_error_to_string error))
   [@warning "-4"];
   let bytes = read_golden "v2-mls-epoch-transition-v1.cbor.hex" in
+  Printf.printf "fixture-equals-expected=%b\n%!" (String.equal bytes (Epoch.encode expected));
+  let rec first_difference offset =
+    if offset = String.length bytes then None
+    else if Char.equal bytes.[offset] (Epoch.encode expected).[offset] then
+      first_difference (offset + 1)
+    else Some offset
+  in
+  (match first_difference 0 with
+  | Some offset ->
+      Printf.printf "fixture-first-difference=%d expected=%02x actual=%02x\n%!" offset
+        (Char.code (Epoch.encode expected).[offset]) (Char.code bytes.[offset])
+  | None -> ());
   let decoded = Epoch.decode ~authority bytes |> require_ok Epoch.error_to_string in
   Alcotest.(check string) "canonical epoch fixture re-encodes exactly" bytes
     (Epoch.encode decoded);
