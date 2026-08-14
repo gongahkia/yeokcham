@@ -1,10 +1,10 @@
 # ADR-055 — V2 local scratch snapshot publication
 
-- Status: Accepted
+- Status: Superseded by ADR-073
 - Date: 2026-08-09
 - Deciders: maintainer (approved V2-01 continuation)
 - Supersedes: None
-- Superseded by: None
+- Superseded by: ADR-073
 - Governing issue: [#136](https://github.com/gongahkia/yeokcham/issues/136)
 - Related issues: [#145](https://github.com/gongahkia/yeokcham/issues/145), [#147](https://github.com/gongahkia/yeokcham/issues/147)
 

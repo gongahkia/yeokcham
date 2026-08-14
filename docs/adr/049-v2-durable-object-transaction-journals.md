@@ -1,10 +1,10 @@
 # ADR-049 — V2 durable object transaction journals without implicit ref authority
 
-- Status: Accepted
+- Status: Superseded by ADR-073
 - Date: 2026-08-09
 - Deciders: maintainer (approved 2026-08-09)
 - Supersedes: None
-- Superseded by: None
+- Superseded by: ADR-073
 - Governing issue: [#128](https://github.com/gongahkia/yeokcham/issues/128)
 
 ## Context and problem statement

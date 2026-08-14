@@ -1,7 +1,8 @@
 # ADR-067 — browser passkey PRF vault and origin-bound local custody
 
-- Status: Accepted
+- Status: Superseded by ADR-073
 - Date: 2026-08-13
+- Superseded by: ADR-073
 - Deciders: maintainer (approved development roadmap)
 - Governing issue: [#148](https://github.com/gongahkia/yeokcham/issues/148)
 - Related issues: [#145](https://github.com/gongahkia/yeokcham/issues/145), [#146](https://github.com/gongahkia/yeokcham/issues/146), [#122](https://github.com/gongahkia/yeokcham/issues/122)

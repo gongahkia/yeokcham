@@ -3,9 +3,9 @@
 GitHub Issues is Yeokcham’s authoritative historical migration record and future
 backlog. Live state is intentionally not duplicated here: inspect it with
 `gh issue list --repo gongahkia/yeokcham --state open` or the
-[issue tracker](https://github.com/gongahkia/yeokcham/issues). At the 2026-08-07
-audit baseline, all 120 then-existing issues were closed; later work may create
-new issues, so that count is evidence rather than a standing claim.
+[issue tracker](https://github.com/gongahkia/yeokcham/issues). The V2 programme
+was retired on 2026-08-15 under ADR-073. Its closed issues and ADRs remain
+historical evidence; they do not describe the current delivery scope.
 
 Historical migrated issues retain their immutable hidden
 `<!-- paengi-todo-id: ID -->` marker, including [#44](https://github.com/gongahkia/yeokcham/issues/44).
@@ -19,17 +19,21 @@ criteria and verification evidence are complete. Architecture and
 `needs-decision` blockers require approval before dependent implementation
 begins.
 
-## V2 programme
+## Active V3 programme
 
-The approved V2 programme is represented by the 110 atomic issues
-[#123](https://github.com/gongahkia/yeokcham/issues/123) through
-[#232](https://github.com/gongahkia/yeokcham/issues/232), distributed across
-the V2-00 through V2-09 milestones. Every one has a unique
-`<!-- yeokcham-todo-id: V2-NNN -->` marker. This document does not duplicate
-their live status, dependencies, or acceptance evidence; use GitHub for those
-fields. Issue [#122](https://github.com/gongahkia/yeokcham/issues/122) remains
-the separate hosted-CI recovery gate and must remain open until its stated
-successful `main` workflow evidence exists.
+The active product work is intentionally small and represented by four issues:
+
+- [#233](https://github.com/gongahkia/yeokcham/issues/233) — Unix local VCS core.
+- [#234](https://github.com/gongahkia/yeokcham/issues/234) — Git preservation,
+  adoption, and exit.
+- [#235](https://github.com/gongahkia/yeokcham/issues/235) — direct peer
+  repository exchange.
+- [#236](https://github.com/gongahkia/yeokcham/issues/236) — macOS/Linux CLI
+  artifacts.
+
+Each V3 issue records its own acceptance criteria and verification scope. No
+hosted CI result is a closure prerequisite; manual verification must be
+reported honestly.
 
 ## Migration map
 
@@ -90,7 +94,7 @@ successful `main` workflow evidence exists.
 | M11-12 | [#103](https://github.com/gongahkia/yeokcham/issues/103) | M11 Demonstration and Reporting | implemented; verified by architecture-boundary report and Git-export fixture coverage |
 | M12-01 | [#120](https://github.com/gongahkia/yeokcham/issues/120) | M12 Inspectable CLI and durable capsule operations | implemented; verified by read-only inspection, durable-retarget conflict/reopen, stale-publication inventory, seeded state-machine, and full repository checks |
 | M12-02 | [#121](https://github.com/gongahkia/yeokcham/issues/121) | M12 Maintenance and documentation reconciliation | implemented; verified by live GitHub reconciliation, CLI help exit checks, project checks, and workflow lint |
-| M12-03 | [#122](https://github.com/gongahkia/yeokcham/issues/122) | M12 Hosted CI recovery gate | open; closes only after a new successful GitHub Actions CI run on `main` is recorded |
+| M12-03 | [#122](https://github.com/gongahkia/yeokcham/issues/122) | M12 Hosted CI recovery gate | closed as not planned when ADR-073 retired hosted CI as a project gate |
 
 ## Migration verification
 

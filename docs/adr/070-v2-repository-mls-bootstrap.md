@@ -1,7 +1,8 @@
 # ADR-070 — V2 repository MLS bootstrap
 
-- Status: Accepted
+- Status: Superseded by ADR-073
 - Date: 2026-08-13
+- Superseded by: ADR-073
 - Deciders: maintainer (approved development roadmap)
 - Governing issue: [#151](https://github.com/gongahkia/yeokcham/issues/151)
 - Related issues: [#150](https://github.com/gongahkia/yeokcham/issues/150), [#152](https://github.com/gongahkia/yeokcham/issues/152), [#195](https://github.com/gongahkia/yeokcham/issues/195), and [#122](https://github.com/gongahkia/yeokcham/issues/122)

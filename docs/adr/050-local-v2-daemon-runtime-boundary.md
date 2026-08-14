@@ -1,7 +1,8 @@
 # ADR-050 — Local V2 daemon runtime boundary
 
-- Status: Accepted
+- Status: Superseded by ADR-073
 - Date: 2026-08-09
+- Superseded by: ADR-073
 - Deciders: maintainer (autonomous issue workflow)
 - Governing issue: [#134](https://github.com/gongahkia/yeokcham/issues/134)
 

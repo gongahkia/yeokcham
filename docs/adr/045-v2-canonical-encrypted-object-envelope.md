@@ -1,10 +1,10 @@
 # ADR-045 — V2 canonical encrypted-object envelope
 
-- Status: Accepted
+- Status: Superseded by ADR-073
 - Date: 2026-08-07
 - Deciders: maintainer
 - Supersedes: None
-- Superseded by: None
+- Superseded by: ADR-073
 
 ## Context and problem statement
 

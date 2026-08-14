@@ -5,6 +5,20 @@ implemented M8 bridge only. It does not claim that a Git repository and a
 Yeokcham repository, commit, branch, capsule, workspace, or release are
 equivalent.
 
+## V3 migration commitment — not implemented yet
+
+ADR-073 extends this narrow bridge into a Git preservation, adoption, and exit
+workflow. It must preserve selected reachable Git objects and ref provenance as
+foreign archival evidence; require a user to choose any adoption into native
+Yeokcham concepts; and create a valid Git exit repository containing preserved
+history plus separately named Yeokcham exports. It must not infer that a Git
+commit is a capsule, flatten Git topology into native composition, or promise
+semantic round-trip equivalence.
+
+The current M8 behaviour below remains the only implemented contract until
+[#234](https://github.com/gongahkia/yeokcham/issues/234) has passed its
+acceptance and verification criteria.
+
 ## Evidence boundary
 
 An ADR-028 Git mapping records one verified association between a typed Yeokcham

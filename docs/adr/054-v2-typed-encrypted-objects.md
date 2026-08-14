@@ -1,10 +1,10 @@
 # ADR-054 — V2 typed encrypted object frames
 
-- Status: Accepted
+- Status: Superseded by ADR-073
 - Date: 2026-08-09
 - Deciders: maintainer (approved V2-01 continuation)
 - Supersedes: None
-- Superseded by: None
+- Superseded by: ADR-073
 - Governing issue: [#136](https://github.com/gongahkia/yeokcham/issues/136)
 - Related issues: [#127](https://github.com/gongahkia/yeokcham/issues/127), [#128](https://github.com/gongahkia/yeokcham/issues/128), [#145](https://github.com/gongahkia/yeokcham/issues/145)
 

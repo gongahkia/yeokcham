@@ -1,10 +1,10 @@
 # ADR-057 — V2 daemon-owned scratch scheduling
 
-- Status: Accepted
+- Status: Superseded by ADR-073
 - Date: 2026-08-09
 - Deciders: maintainer (approved V2-01 continuation)
 - Supersedes: None
-- Superseded by: None
+- Superseded by: ADR-073
 - Governing issue: [#136](https://github.com/gongahkia/yeokcham/issues/136)
 - Related issues: [#134](https://github.com/gongahkia/yeokcham/issues/134), [#135](https://github.com/gongahkia/yeokcham/issues/135), [#147](https://github.com/gongahkia/yeokcham/issues/147)
 

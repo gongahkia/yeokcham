@@ -1,7 +1,8 @@
 # ADR-071 — V2 MLS member invitations and device join
 
-- Status: Accepted
+- Status: Superseded by ADR-073
 - Date: 2026-08-13
+- Superseded by: ADR-073
 - Deciders: maintainer (approved development roadmap)
 - Governing issue: [#152](https://github.com/gongahkia/yeokcham/issues/152)
 - Related issues: [#151](https://github.com/gongahkia/yeokcham/issues/151), [#153](https://github.com/gongahkia/yeokcham/issues/153), and [#122](https://github.com/gongahkia/yeokcham/issues/122)

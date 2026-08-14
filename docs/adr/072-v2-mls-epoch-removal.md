@@ -1,7 +1,8 @@
 # ADR-072 — V2 MLS epoch removal and append-only rekeying
 
-- Status: Accepted
+- Status: Superseded by ADR-073
 - Date: 2026-08-14
+- Superseded by: ADR-073
 - Deciders: maintainer (approved development roadmap)
 - Governing issue: [#153](https://github.com/gongahkia/yeokcham/issues/153)
 - Related issues: [#152](https://github.com/gongahkia/yeokcham/issues/152) and [#122](https://github.com/gongahkia/yeokcham/issues/122)

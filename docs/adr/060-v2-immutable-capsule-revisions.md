@@ -1,10 +1,10 @@
 # ADR-060 — V2 immutable capsule revisions and explicit composition plans
 
-- Status: Proposed
+- Status: Superseded by ADR-073
 - Date: 2026-08-10
 - Deciders: maintainer (approved V2-01 client-neutral continuation)
 - Supersedes: None
-- Superseded by: None
+- Superseded by: ADR-073
 - Governing issue: [#141](https://github.com/gongahkia/yeokcham/issues/141)
 - Related issues: [#140](https://github.com/gongahkia/yeokcham/issues/140), [#142](https://github.com/gongahkia/yeokcham/issues/142)
 

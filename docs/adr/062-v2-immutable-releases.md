@@ -1,10 +1,10 @@
 # ADR-062 — V2 immutable releases and exact validation linkage
 
-- Status: Accepted
+- Status: Superseded by ADR-073
 - Date: 2026-08-12
 - Deciders: maintainer
 - Supersedes: None
-- Superseded by: None
+- Superseded by: ADR-073
 - Governing issue: [#143](https://github.com/gongahkia/yeokcham/issues/143)
 - Related decisions: ADR-027, ADR-048, ADR-054, ADR-061
 

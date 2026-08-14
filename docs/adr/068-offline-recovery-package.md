@@ -1,7 +1,8 @@
 # ADR-068 — offline recovery package and explicit replacement-device proposal
 
-- Status: Accepted
+- Status: Superseded by ADR-073
 - Date: 2026-08-13
+- Superseded by: ADR-073
 - Deciders: maintainer (approved development roadmap)
 - Governing issue: [#149](https://github.com/gongahkia/yeokcham/issues/149)
 - Related issues: [#145](https://github.com/gongahkia/yeokcham/issues/145), [#148](https://github.com/gongahkia/yeokcham/issues/148), [#122](https://github.com/gongahkia/yeokcham/issues/122)

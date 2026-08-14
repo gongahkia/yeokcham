@@ -44,7 +44,8 @@ The VCS should:
 - Preserve stable change identity while its implementation is revised.
 - Compose several logical changes in one workspace.
 - Keep unresolved conflicts explicit without globally blocking work.
-- Produce reproducible releases and conventional Git exports.
+- Produce reproducible releases, preserve selected Git history for migration,
+  and exchange selected Yeokcham history directly with a peer.
 
 ## Product thesis
 
@@ -60,9 +61,12 @@ Initially:
 - Comfortable trying a new CLI.
 - Interested in local-first workflows and version-control research.
 - Working in repositories where TypeScript or Rust semantic experiments are useful.
-- Willing to use Git export for external collaboration.
+- Willing to use an explicit Git migration boundary while Yeokcham's native
+  peer workflow matures.
 
-The long-term aspiration is ordinary software development, but the prototype must not pretend broad adoption exists.
+The long-term aspiration is ordinary software development through Yeokcham's
+own repository and peer model. The current implementation remains experimental
+and must not pretend broad adoption or production readiness exists.
 
 ## Core concepts
 
@@ -126,9 +130,19 @@ A release records exactly which capsule revisions and content snapshot produced 
 
 Semantic replay may be wrong. yeokcham should expose confidence and require validation rather than silently claiming correctness.
 
-### Git is an interchange format
+### Git is a migration and exit format
 
-Git import and export are valuable, but yeokcham should not redesign itself around Git's internal graph.
+Git import and export are valuable, but yeokcham should not redesign itself
+around Git's internal graph. A selected Git history is preserved as foreign
+provenance; users explicitly adopt chosen work into Yeokcham concepts and can
+export an ordinary Git projection when they leave.
+
+### Peer exchange is selective publication
+
+Native collaboration transfers explicitly published capsule revisions and
+releases. Scratch checkpoints remain local unless a future explicit policy says
+otherwise. A received publication is a proposal or divergence, never an
+implicit workspace mutation.
 
 ## Project relationship to Relay
 

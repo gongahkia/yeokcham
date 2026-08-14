@@ -1,12 +1,12 @@
 # ADR-065 — V2 authority record causality
 
-- Status: Accepted
+- Status: Superseded by ADR-073
 - Date: 2026-08-13
 - Deciders: maintainer (standing implementation approval 2026-08-13)
 - Governing issue: [#145](https://github.com/gongahkia/yeokcham/issues/145)
 - Related decisions: ADR-048, ADR-053, ADR-064
 - Supersedes: ADR-064
-- Superseded by: None
+- Superseded by: ADR-073
 
 ## Context and problem statement
 

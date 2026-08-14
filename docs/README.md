@@ -21,10 +21,12 @@ short project entry point; this page maps readers to the detailed material.
   boundaries.
 - [Architecture walkthrough](ARCHITECTURE_WALKTHROUGH.md) maps the implemented
   model to modules, operational boundaries, and verification.
-- [Git interchange](GIT_INTERCHANGE.md) records the intentionally narrow Git
-  import/export contract.
+- [Git interchange](GIT_INTERCHANGE.md) records the implemented narrow bridge
+  and the specified V3 preservation/adoption/exit target.
 - [Local synchronisation](LOCAL_SYNCHRONISATION.md) documents the local object
-  exchange and offline-bundle boundary.
+  exchange experiment and specified V3 direct-peer target.
+- [ADR-073](adr/073-unix-first-vcs-git-migration-and-peer-exchange.md) records
+  the active Unix-first VCS direction and retired V2 scope.
 - [Validation retention](VALIDATION_RETENTION.md),
   [compaction budget](COMPACTION_BUDGET.md), and
   [compaction inverses](COMPACTION_INVERSES.md) specify retention and compaction

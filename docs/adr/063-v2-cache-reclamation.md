@@ -1,10 +1,10 @@
 # ADR-063 — V2 local cache reclamation from complete reachable roots
 
-- Status: Accepted
+- Status: Superseded by ADR-073
 - Date: 2026-08-12
 - Deciders: maintainer (approved 2026-08-12)
 - Supersedes: None
-- Superseded by: None
+- Superseded by: ADR-073
 - Governing issue: [#144](https://github.com/gongahkia/yeokcham/issues/144)
 - Related decisions: ADR-045, ADR-048, ADR-049, ADR-054, ADR-056, ADR-058,
   ADR-059, ADR-061, ADR-062

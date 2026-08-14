@@ -1,7 +1,8 @@
 # ADR-066 — macOS Keychain device custody and explicit enrollment
 
-- Status: Accepted
+- Status: Superseded by ADR-073
 - Date: 2026-08-13
+- Superseded by: ADR-073
 - Deciders: maintainer (approved development roadmap)
 - Governing issue: [#146](https://github.com/gongahkia/yeokcham/issues/146)
 - Related issues: [#145](https://github.com/gongahkia/yeokcham/issues/145), [#147](https://github.com/gongahkia/yeokcham/issues/147), [#122](https://github.com/gongahkia/yeokcham/issues/122)

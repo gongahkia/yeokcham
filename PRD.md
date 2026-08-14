@@ -4,7 +4,10 @@
 
 Yeokcham is a local-first version-control system that separates scratch, intent, and release history.
 
-It automatically records working-directory states, lets users curate those states into logical change capsules, composes capsules into workspaces, and emits immutable releases or Git exports.
+It automatically records working-directory states, lets users curate those
+states into logical change capsules, composes capsules into workspaces, emits
+immutable releases, supports explicit Git migration, and will exchange selected
+native history directly between peers.
 
 ## 2. Product objectives
 
@@ -32,9 +35,16 @@ Unresolved application conflicts should not make the entire repository unusable.
 
 Semantic features must be sidecars over a byte-accurate canonical store.
 
-### O7 — Remain externally useful
+### O7 — Make Git adoption reversible
 
-Yeokcham should import Git repositories and export selected release or capsule history to Git.
+Yeokcham should preserve selected Git history, let users explicitly adopt it,
+and export selected Yeokcham history to Git without claiming semantic
+equivalence.
+
+### O8 — Become a native peer VCS
+
+Yeokcham should exchange explicitly published capsule revisions and releases
+between peers without requiring a hosted service.
 
 ## 3. Core user journeys
 
@@ -109,15 +119,30 @@ Acceptance condition: no ambiguous transformation is silently treated as certain
 
 Acceptance condition: release snapshot is reproducible from stored objects and declared composition.
 
-### J7 — Export to Git
+### J7 — Migrate from and exit to Git
 
-1. User chooses a release or ordered capsule sequence.
-2. Yeokcham materialises standard snapshots.
-3. Yeokcham emits one Git commit per selected capsule revision or another explicit export policy.
-4. Yeokcham records yeokcham-to-Git mapping.
-5. User pushes the branch to GitHub with ordinary Git.
+1. User selects Git refs to preserve.
+2. Yeokcham inventories and archives their reachable Git provenance.
+3. The user explicitly adopts selected imported work into Yeokcham capsules,
+   workspaces, or releases.
+4. The user selects releases or ordered capsule revisions for Git export.
+5. Yeokcham creates a valid Git repository and records mapping receipts.
 
-Acceptance condition: exported repository passes `git fsck` and matches the Yeokcham release bytes.
+Acceptance condition: supported imported Git checkout bytes and selected
+reachable provenance survive preservation/exit, and every Yeokcham export
+passes `git fsck` and matches its selected snapshot bytes.
+
+### J8 — Exchange a publication with a peer
+
+1. User explicitly publishes a capsule revision or release.
+2. User fetches from a local-path or SSH peer.
+3. Yeokcham exchanges only missing verified immutable objects.
+4. Yeokcham shows an integration proposal or a divergence value.
+5. User explicitly integrates the publication into local work.
+
+Acceptance condition: peer exchange neither shares scratch checkpoints by
+default nor mutates a workspace, ref selection, or working tree without an
+explicit user operation.
 
 ## 4. Functional requirements
 
@@ -205,9 +230,11 @@ Yeokcham shall create immutable reproducible release snapshots.
 
 Yeokcham shall support signing releases after the local model is stable.
 
-### FR-022 Git import
+### FR-022 Git preservation and adoption
 
-Yeokcham shall import Git commits as opaque or inferred capsules while preserving a mapping.
+Yeokcham shall preserve selected reachable Git objects, refs, topology, and
+metadata as opaque foreign provenance, then require an explicit adoption action
+before creating Yeokcham concepts.
 
 ### FR-023 Git export
 
@@ -220,6 +247,16 @@ Yeokcham shall report scratch, capsule, release, chunk, and retained-history sto
 ### FR-025 Integrity verification
 
 Yeokcham shall verify object hashes, snapshot reachability, capsule dependencies, and release reproducibility.
+
+### FR-026 Peer publication
+
+Yeokcham shall let users explicitly publish capsule revisions and releases.
+Scratch checkpoints shall remain local by default.
+
+### FR-027 Direct peer exchange
+
+Yeokcham shall fetch, verify, and propose integration of selected peer
+publications over a local path and SSH without requiring a hosted service.
 
 ## 5. Non-functional requirements
 
@@ -290,6 +327,9 @@ yeokcham release verify <release>
 
 yeokcham import git <path>
 yeokcham export git <destination>
+yeokcham peer publish <capsule-revision-or-release>
+yeokcham peer fetch <path-or-ssh-peer>
+yeokcham peer integrate <publication>
 yeokcham verify
 yeokcham storage stats
 ```
@@ -313,21 +353,17 @@ yeokcham storage stats
 - Release snapshots.
 - CLI inspection.
 
-### Research beta
+### Git migration
 
-- TypeScript semantic sidecars.
-- Retargeting experiments.
-- Validation evidence.
-- Git import/export.
-- Published comparative studies.
+- Git source capability report and preservation archive.
+- Explicit Git adoption and valid Git exit/export.
+- Mapping receipts and preservation/exit verification.
 
-### Extended prototype
+### Native peer exchange
 
-- Rust semantic sidecars.
-- Local HTTP synchronisation.
-- Signed refs and releases.
-- Encrypted object exchange.
-- Visual history explorer.
+- Explicit publication selection.
+- Local-path transfer, then SSH transfer.
+- Missing-object transfer, divergence, and explicit integration.
 
 ## 8. Explicit non-goals
 
@@ -338,6 +374,8 @@ yeokcham storage stats
 - Reproducing every Git topology exactly as native Yeokcham concepts.
 - Supporting every programming language.
 - Production multi-user hosting.
+- Peer discovery, relays, NAT traversal, background synchronisation, web
+  review, or IDE integration in the first native peer workflow.
 - Concealing experimental limitations.
 
 ## 9. Success metrics
@@ -347,7 +385,10 @@ yeokcham storage stats
 - A developer can recover recent work without having made a manual checkpoint.
 - A developer can turn messy scratch history into one coherent capsule.
 - A developer can enable multiple capsules in one workspace.
-- A developer can export a reviewable Git branch.
+- A developer can preserve Git history before adoption and exit to a valid Git
+  repository later.
+- A developer can exchange a selected release or capsule revision directly with
+  a peer without sharing scratch history by default.
 
 ### Model correctness
 
@@ -386,6 +427,11 @@ Mitigation: explicit dependency graph, deterministic order, and visible preceden
 ### R5 — Git bridge distorts Yeokcham
 
 Mitigation: make Git an import/export layer, not the canonical internal model.
+
+### R7 — Peer exchange recreates hosted-system complexity
+
+Mitigation: begin only with explicit local-path and SSH peers, immutable object
+transfer, and user-confirmed integration.
 
 ### R6 — OCaml ecosystem friction
 

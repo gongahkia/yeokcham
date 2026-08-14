@@ -23,6 +23,9 @@ type operation_id
 type device_id
 type validation_id
 type resolution_id
+type git_archive_id
+type publication_id
+type peer_id
 ```
 
 All persistent identities must have:
@@ -37,6 +40,31 @@ All persistent identities must have:
 `release_attestation` has no logical ID in v1: its immutable physical
 `stored_object_id` identifies the complete statement and remains distinct from
 the `release_id` it names.
+
+### V3 migration and publication boundary
+
+The current implementation has only a narrow Git bridge and object-exchange
+experiment. ADR-073 defines the target extension below; it is not evidence that
+the types or persistent records have been implemented.
+
+```ocaml
+type publication_target =
+  | Published_capsule_revision of capsule_id * capsule_revision_id
+  | Published_release of release_id
+
+type integration_outcome =
+  | Ready_for_explicit_integration of publication_id
+  | Publication_divergence of publication_id list
+  | Rejected_peer_publication of string
+```
+
+A `git_archive_id` identifies immutable foreign Git provenance, never a native
+snapshot, capsule, workspace, conflict, release, or repository identity. An
+adoption transition explicitly names its archive source and selected native
+target. A `publication_id` identifies only a verified selected capsule revision
+or release; scratch checkpoints are excluded by default. Receiving a
+publication cannot change local workspace selection or materialise files until
+a separate explicit integration transition succeeds.
 
 ## 2. Canonical content model
 

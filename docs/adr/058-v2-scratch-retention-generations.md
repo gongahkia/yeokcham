@@ -1,10 +1,10 @@
 # ADR-058 — V2 scratch retention and immutable generation activation
 
-- Status: Accepted
+- Status: Superseded by ADR-073
 - Date: 2026-08-09
 - Deciders: maintainer (approved V2-01 continuation)
 - Supersedes: None
-- Superseded by: None
+- Superseded by: ADR-073
 - Governing issue: [#137](https://github.com/gongahkia/yeokcham/issues/137)
 - Related issues: [#136](https://github.com/gongahkia/yeokcham/issues/136), [#139](https://github.com/gongahkia/yeokcham/issues/139), [#140](https://github.com/gongahkia/yeokcham/issues/140), [#143](https://github.com/gongahkia/yeokcham/issues/143)
 

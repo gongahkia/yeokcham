@@ -1,7 +1,8 @@
 # Yeokcham
 
-An experimental, local-first version-control system that keeps recovery,
-collaborative intent, and release history distinct.
+An experimental Unix-first version-control system that keeps recovery,
+collaborative intent, and release history distinct. Yeokcham aims to become a
+native alternative VCS; it is not yet a production-ready replacement for Git.
 
 > Recovery history, collaborative intent history, and release history serve
 > different purposes and should not be forced into one commit graph.
@@ -12,8 +13,10 @@ bounded evidence rather than source-of-truth history.
 
 ## Start here
 
-The development environment is macOS with Homebrew, opam, and OCaml 5.5.0.
-Create the repository-local switch and run the standard local check:
+The supported product direction is macOS, Linux, and WSL. The checked-in
+development environment uses opam and OCaml 5.5.0; platform verification is
+recorded only where it has actually been run. Create the repository-local
+switch and run the standard local check:
 
 ```sh
 brew install opam actionlint
@@ -62,14 +65,34 @@ implemented data flow and failure boundaries.
 - A deliberately narrow local Git import/export bridge and local immutable
   object exchange experiments.
 
+## V3 direction
+
+The active roadmap is a small native VCS rather than the retired V2 hosted
+platform:
+
+1. Stabilise the local scratch, capsule, workspace, conflict, and release
+   workflow.
+2. Provide explicit Git preservation, adoption, and exit so Git users can try
+   Yeokcham without abandoning their history.
+3. Add direct peer exchange over a local path and SSH, publishing only
+   selected intent and release history by default.
+
+This direction is governed by [ADR-073](docs/adr/073-unix-first-vcs-git-migration-and-peer-exchange.md)
+and issues [#233](https://github.com/gongahkia/yeokcham/issues/233) through
+[#236](https://github.com/gongahkia/yeokcham/issues/236).
+
 Important limits remain intentional:
 
 - Production release signing is deferred; the deterministic signer is test-only
   and does not authenticate a release.
 - Semantic TypeScript and Rust adapters are isolated experiments. They do not
   become canonical data or authorise a rewrite.
-- Git interchange is not Git compatibility, and local exchange does not supply
-  a network protocol, identity, trust policy, or ref reconciliation.
+- The implemented Git bridge remains deliberately narrow. The broader V3
+  preservation/adoption/exit contract is specified but not implemented yet.
+- The implemented local exchange is an object-transfer experiment, not yet the
+  V3 peer publication, fetch, and integration workflow.
+- V2 encrypted, hosted, browser, mesh, and IDE code is historical experimental
+  work and is not a supported repository format or delivery path.
 - Restore and workspace materialisation guard divergent work, but are not
   crash-atomic for a populated working directory.
 
