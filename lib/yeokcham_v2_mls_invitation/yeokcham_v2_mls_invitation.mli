@@ -51,7 +51,6 @@ val error_to_string : error -> string
 val current_schema_version : int64
 val supported_mandatory_features : int64
 val invitation_key : unit -> (Envelope.key, error) result
-
 val encode_invitation : member_invitation -> string
 
 val decode_invitation :
@@ -72,7 +71,9 @@ val invitation_group_id : member_invitation -> Model.Mls_group_id.t
 val invitation_recipient_device_id : member_invitation -> Model.Device_id.t
 val invitation_expires_at : member_invitation -> int64
 val membership_event_id : membership_event -> Model.Mls_invitation_id.t
-val membership_event_invitation_id : membership_event -> Model.Mls_invitation_id.t
+
+val membership_event_invitation_id :
+  membership_event -> Model.Mls_invitation_id.t
 
 val issue :
   runtime:Runtime.configuration ->
@@ -87,8 +88,8 @@ val issue :
   event_nonce:Envelope.nonce ->
   (issue, error) result
 (** Performs the MLS add/commit/join, then root-signs an encrypted invitation
-    and its encrypted issued event. The returned [issuer_state] must replace
-    the issuer's previous durable MLS snapshot through a later state adapter. *)
+    and its encrypted issued event. The returned [issuer_state] must replace the
+    issuer's previous durable MLS snapshot through a later state adapter. *)
 
 val lifecycle :
   authority:Authority.repository_authority ->

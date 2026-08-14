@@ -32,7 +32,8 @@ let error_to_string = function
   | Missing_record path -> "MLS invitation record is missing: " ^ path
   | Invalid_record_path path -> "invalid MLS invitation record path: " ^ path
   | Record_collision path ->
-      "MLS invitation record already contains different canonical bytes: " ^ path
+      "MLS invitation record already contains different canonical bytes: "
+      ^ path
   | Io_error { operation; path; message } ->
       Printf.sprintf "%s failed for %s: %s" operation path message
   | Temporary_name_exhausted directory ->
@@ -42,7 +43,9 @@ let invitation_directory ~root =
   Filename.concat (Filename.concat root metadata_name) invitation_directory_name
 
 let membership_event_directory ~root =
-  Filename.concat (Filename.concat root metadata_name) membership_event_directory_name
+  Filename.concat
+    (Filename.concat root metadata_name)
+    membership_event_directory_name
 
 let filename id = Model.Mls_invitation_id.to_hex id ^ suffix
 
@@ -58,7 +61,8 @@ let io_error ~operation ~path error =
 let lstat path =
   try Ok (Some (Unix.lstat path)) with
   | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok None
-  | Unix.Unix_error (error, _, _) -> Error (io_error ~operation:"lstat" ~path error)
+  | Unix.Unix_error (error, _, _) ->
+      Error (io_error ~operation:"lstat" ~path error)
 
 let check_v2_root root =
   let* classification =
@@ -81,11 +85,13 @@ let fsync_directory path =
           Ok ()
         with
         | Unix.Unix_error ((Unix.EINVAL | Unix.ENOSYS | Unix.EOPNOTSUPP), _, _)
-          -> Ok ()
+          ->
+            Ok ()
         | Unix.Unix_error (error, _, _) ->
             Error (io_error ~operation:"fsync directory" ~path error))
   with
-  | Unix.Unix_error ((Unix.EINVAL | Unix.ENOSYS | Unix.EOPNOTSUPP), _, _) -> Ok ()
+  | Unix.Unix_error ((Unix.EINVAL | Unix.ENOSYS | Unix.EOPNOTSUPP), _, _) ->
+      Ok ()
   | Unix.Unix_error (error, _, _) ->
       Error (io_error ~operation:"open directory for fsync" ~path error)
 
@@ -119,12 +125,13 @@ let is_temporary name =
   else
     let body = String.sub name 1 (String.length name - 1) in
     if
-      not (valid_hex (String.sub body 0 64))
+      (not (valid_hex (String.sub body 0 64)))
       || not (String.sub body 64 (String.length marker) = marker)
     then false
     else
       match
-        String.sub body (64 + String.length marker)
+        String.sub body
+          (64 + String.length marker)
           (String.length body - 64 - String.length marker)
         |> String.split_on_char '-'
       with
@@ -152,7 +159,8 @@ let directory_entries directory =
     let* names =
       try Ok (Sys.readdir directory |> Array.to_list |> List.sort String.compare)
       with Sys_error message ->
-        Error (Io_error { operation = "read directory"; path = directory; message })
+        Error
+          (Io_error { operation = "read directory"; path = directory; message })
     in
     let rec validate records = function
       | [] -> Ok (List.rev records)
@@ -167,7 +175,8 @@ let directory_entries directory =
               | Ok None -> Error (Invalid_record_path path)
               | Error error -> Error error
             in
-            if stat.Unix.st_kind <> Unix.S_REG then Error (Invalid_record_path path)
+            if stat.Unix.st_kind <> Unix.S_REG then
+              Error (Invalid_record_path path)
             else if valid_record_name name then validate (name :: records) rest
             else validate records rest
     in
@@ -193,7 +202,9 @@ let read_regular path =
             if offset = stat.Unix.st_size then Ok ()
             else
               try
-                let count = Unix.read descriptor bytes offset (stat.Unix.st_size - offset) in
+                let count =
+                  Unix.read descriptor bytes offset (stat.Unix.st_size - offset)
+                in
                 if count = 0 then Error (Invalid_record_path path)
                 else read (offset + count)
               with Unix.Unix_error (error, _, _) ->
@@ -201,17 +212,21 @@ let read_regular path =
           in
           let* () = read 0 in
           Ok (Bytes.unsafe_to_string bytes))
-    with Unix.Unix_error (error, _, _) -> Error (io_error ~operation:"open" ~path error)
+    with Unix.Unix_error (error, _, _) ->
+      Error (io_error ~operation:"open" ~path error)
 
 let write_all descriptor path bytes =
   let rec write offset =
     if offset = Bytes.length bytes then Ok ()
     else
       try
-        let count = Unix.write descriptor bytes offset (Bytes.length bytes - offset) in
+        let count =
+          Unix.write descriptor bytes offset (Bytes.length bytes - offset)
+        in
         if count = 0 then Error (Invalid_record_path path)
         else write (offset + count)
-      with Unix.Unix_error (error, _, _) -> Error (io_error ~operation:"write" ~path error)
+      with Unix.Unix_error (error, _, _) ->
+        Error (io_error ~operation:"write" ~path error)
   in
   write 0
 
@@ -221,7 +236,8 @@ let temporary_path directory final attempt =
 
 let create_temporary directory final bytes =
   let rec create attempt =
-    if attempt = maximum_temporary_attempts then Error (Temporary_name_exhausted directory)
+    if attempt = maximum_temporary_attempts then
+      Error (Temporary_name_exhausted directory)
     else
       let path = temporary_path directory final attempt in
       try
@@ -257,7 +273,8 @@ let cleanup_temporary directory path =
     fsync_directory directory
   with
   | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok ()
-  | Unix.Unix_error (error, _, _) -> Error (io_error ~operation:"unlink" ~path error)
+  | Unix.Unix_error (error, _, _) ->
+      Error (io_error ~operation:"unlink" ~path error)
 
 let publish ~directory ~final ~bytes =
   match lstat final with
@@ -267,7 +284,10 @@ let publish ~directory ~final ~bytes =
       if String.equal actual bytes then Ok Already_published
       else Error (Record_collision final)
   | Ok None ->
-      let* temporary = create_temporary directory (Filename.basename final) (Bytes.of_string bytes) in
+      let* temporary =
+        create_temporary directory (Filename.basename final)
+          (Bytes.of_string bytes)
+      in
       let publication =
         try
           Unix.link temporary final;
@@ -281,7 +301,8 @@ let publish ~directory ~final ~bytes =
       let* result = publication in
       let* () = cleanup in
       let* actual = read_regular final in
-      if String.equal actual bytes then Ok result else Error (Record_collision final)
+      if String.equal actual bytes then Ok result
+      else Error (Record_collision final)
 
 let write_invitation ~root ~authority invitation =
   let bytes = Invitation.encode_invitation invitation in
@@ -294,7 +315,8 @@ let write_invitation ~root ~authority invitation =
   let* () = ensure_directory directory in
   let* _ = directory_entries directory in
   publish ~directory
-    ~final:(invitation_path ~root (Invitation.invitation_id checked)) ~bytes
+    ~final:(invitation_path ~root (Invitation.invitation_id checked))
+    ~bytes
 
 let write_membership_event ~root ~authority event =
   let bytes = Invitation.encode_membership_event event in
@@ -307,7 +329,8 @@ let write_membership_event ~root ~authority event =
   let* () = ensure_directory directory in
   let* _ = directory_entries directory in
   publish ~directory
-    ~final:(membership_event_path ~root (Invitation.membership_event_id checked))
+    ~final:
+      (membership_event_path ~root (Invitation.membership_event_id checked))
     ~bytes
 
 let read_invitation ~root ~authority id =

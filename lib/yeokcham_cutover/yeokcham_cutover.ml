@@ -1141,20 +1141,21 @@ let is_v2_mls_record_temporary_filename name =
   let suffix = ".cbor.stage-" in
   match String.index_opt name '.' with
   | None -> false
-  | Some 0 ->
+  | Some 0 -> (
       let name = String.sub name 1 (String.length name - 1) in
       let prefix_length = 64 + String.length suffix in
       if
         String.length name <= prefix_length
-        || not (String.sub name 64 (String.length suffix) = suffix)
+        || (not (String.sub name 64 (String.length suffix) = suffix))
         || not (lowercase_hex (String.sub name 0 64))
       then false
       else
-        (match
-           String.sub name prefix_length (String.length name - prefix_length)
-           |> String.split_on_char '-'
-         with
-        | [ process; attempt ] -> decimal_component process && decimal_component attempt
+        match
+          String.sub name prefix_length (String.length name - prefix_length)
+          |> String.split_on_char '-'
+        with
+        | [ process; attempt ] ->
+            decimal_component process && decimal_component attempt
         | _ -> false)
   | Some _ -> false
 
@@ -1177,7 +1178,10 @@ let validate_v2_mls_records directory =
           if stat.Unix.st_kind <> Unix.S_REG then
             Error
               (Archive_verification_failed
-                 { path; detail = "V2 MLS invitation record is not a regular file" })
+                 {
+                   path;
+                   detail = "V2 MLS invitation record is not a regular file";
+                 })
           else validate rest
   in
   validate names
@@ -1255,7 +1259,10 @@ let v2_layout metadata =
       | Ok (Some _) ->
           Error
             (Archive_verification_failed
-               { path = directory; detail = "V2 MLS record store is not a directory" })
+               {
+                 path = directory;
+                 detail = "V2 MLS record store is not a directory";
+               })
     in
     let* () = validate_optional_mls_records mls_invitations_name in
     let* () = validate_optional_mls_records mls_membership_events_name in

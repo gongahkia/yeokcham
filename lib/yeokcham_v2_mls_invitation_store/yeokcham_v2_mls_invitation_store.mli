@@ -20,7 +20,10 @@ type error =
 val error_to_string : error -> string
 val invitation_directory : root:string -> string
 val membership_event_directory : root:string -> string
-val invitation_path : root:string -> Invitation.Model.Mls_invitation_id.t -> string
+
+val invitation_path :
+  root:string -> Invitation.Model.Mls_invitation_id.t -> string
+
 val membership_event_path :
   root:string -> Invitation.Model.Mls_invitation_id.t -> string
 

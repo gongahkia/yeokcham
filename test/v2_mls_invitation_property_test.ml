@@ -12,13 +12,18 @@ let seed =
 
 let root =
   String.init 32 (fun index -> Char.chr ((71 + index) land 255))
-  |> Authority.root_signing_capability_of_private_key
-  |> Result.get_ok
+  |> Authority.root_signing_capability_of_private_key |> Result.get_ok
 
 let invitation_key = Envelope.key_of_bytes (String.make 32 'k') |> Result.get_ok
-let invitation_nonce = Envelope.nonce_of_bytes (String.make 12 'n') |> Result.get_ok
+
+let invitation_nonce =
+  Envelope.nonce_of_bytes (String.make 12 'n') |> Result.get_ok
+
 let issued_nonce = Envelope.nonce_of_bytes (String.make 12 'e') |> Result.get_ok
-let accepted_nonce = Envelope.nonce_of_bytes (String.make 12 'a') |> Result.get_ok
+
+let accepted_nonce =
+  Envelope.nonce_of_bytes (String.make 12 'a') |> Result.get_ok
+
 let raw = QCheck2.Gen.string_size (QCheck2.Gen.return 32)
 
 let recipient_bytes bytes =
@@ -30,14 +35,15 @@ let recipient_bytes bytes =
 
 let property =
   QCheck2.Test.make ~count:12
-    ~name:"authorized MLS invitations replay to a verified distinct recipient state"
+    ~name:
+      "authorized MLS invitations replay to a verified distinct recipient state"
     (QCheck2.Gen.pair raw raw) (fun (repository_bytes, issuer_bytes) ->
       match
         ( Model.Repository_id.of_bytes repository_bytes,
           Model.Device_id.of_bytes issuer_bytes,
           Model.Device_id.of_bytes (recipient_bytes issuer_bytes) )
       with
-      | Ok repository_id, Ok issuer_device_id, Ok recipient_device_id ->
+      | Ok repository_id, Ok issuer_device_id, Ok recipient_device_id -> (
           let runtime = Runtime.default_configuration in
           let authority =
             Authority.make_repository_authority ~repository_id ~root
@@ -46,7 +52,7 @@ let property =
           let issuer_state =
             Group.create ~runtime ~repository_id ~device_id:issuer_device_id
           in
-          (match (authority, issuer_state) with
+          match (authority, issuer_state) with
           | Ok authority, Ok issuer_state -> (
               match
                 Invitation.issue ~runtime ~authority ~root ~issuer_state
@@ -58,13 +64,15 @@ let property =
                   match
                     Invitation.accept ~runtime ~authority ~root
                       ~invitation:issue.Invitation.invitation
-                      ~history:[ issue.Invitation.issued_event ] ~now:1L
-                      ~invitation_key ~event_nonce:accepted_nonce
+                      ~history:[ issue.Invitation.issued_event ]
+                      ~now:1L ~invitation_key ~event_nonce:accepted_nonce
                   with
                   | Error _ -> false
                   | Ok acceptance ->
-                      Group.verify ~runtime issue.Invitation.issuer_state = Ok ()
-                      && Group.verify ~runtime acceptance.Invitation.recipient_state
+                      Group.verify ~runtime issue.Invitation.issuer_state
+                      = Ok ()
+                      && Group.verify ~runtime
+                           acceptance.Invitation.recipient_state
                          = Ok ()))
           | Error _, _ | _, Error _ -> false)
       | Error _, _, _ | _, Error _, _ | _, _, Error _ -> false)
@@ -75,6 +83,7 @@ let () =
       ( "property",
         [
           QCheck_alcotest.to_alcotest ~speed_level:`Quick
-            ~rand:(Random.State.make [| seed |]) property;
+            ~rand:(Random.State.make [| seed |])
+            property;
         ] );
     ]

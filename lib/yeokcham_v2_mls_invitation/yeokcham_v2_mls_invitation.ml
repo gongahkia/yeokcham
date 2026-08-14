@@ -82,7 +82,8 @@ let error_to_string = function
   | Unsupported_schema_version version ->
       Printf.sprintf "unsupported MLS invitation schema version: %Ld" version
   | Invalid_mandatory_features features ->
-      Printf.sprintf "invalid MLS invitation mandatory feature bits: %Ld" features
+      Printf.sprintf "invalid MLS invitation mandatory feature bits: %Ld"
+        features
   | Unsupported_mandatory_features features ->
       Printf.sprintf "unsupported MLS invitation mandatory feature bits: %Ld"
         features
@@ -98,7 +99,8 @@ let error_to_string = function
   | Identity_mismatch detail -> "MLS invitation identity mismatch: " ^ detail
   | Noncanonical_record -> "MLS invitation record bytes are noncanonical"
   | Missing_issued_event -> "MLS invitation history omits its issued event"
-  | Duplicate_issued_event -> "MLS invitation history has duplicate issued events"
+  | Duplicate_issued_event ->
+      "MLS invitation history has duplicate issued events"
   | Replayed_invitation -> "MLS invitation was already accepted"
   | Revoked_invitation -> "MLS invitation was revoked"
   | Entropy_failure -> "OS CSPRNG unavailable while creating an invitation key"
@@ -108,7 +110,8 @@ let digest domain bytes =
   Hash.feed_string context bytes |> Hash.get |> Hash.to_raw_string
 
 let check_features features =
-  if Int64.compare features 0L < 0 then Error (Invalid_mandatory_features features)
+  if Int64.compare features 0L < 0 then
+    Error (Invalid_mandatory_features features)
   else
     let unsupported =
       Int64.logand features (Int64.lognot supported_mandatory_features)
@@ -123,24 +126,29 @@ let array values =
 
 let fields name expected = function
   | Encoding.Array values when List.length values = expected -> Ok values
-  | Encoding.Array _ -> Error (Invalid_payload (name ^ " has wrong field count"))
+  | Encoding.Array _ ->
+      Error (Invalid_payload (name ^ " has wrong field count"))
   | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _ | Encoding.Map _
-  | Encoding.Bool _ | Encoding.Null -> Error (Invalid_payload (name ^ " must be an array"))
+  | Encoding.Bool _ | Encoding.Null ->
+      Error (Invalid_payload (name ^ " must be an array"))
 
 let integer name = function
   | Encoding.Integer value -> Ok value
   | Encoding.Bytes _ | Encoding.Text _ | Encoding.Array _ | Encoding.Map _
-  | Encoding.Bool _ | Encoding.Null -> Error (Invalid_payload (name ^ " must be an integer"))
+  | Encoding.Bool _ | Encoding.Null ->
+      Error (Invalid_payload (name ^ " must be an integer"))
 
 let bytes name = function
   | Encoding.Bytes value -> Ok value
   | Encoding.Integer _ | Encoding.Text _ | Encoding.Array _ | Encoding.Map _
-  | Encoding.Bool _ | Encoding.Null -> Error (Invalid_payload (name ^ " must be bytes"))
+  | Encoding.Bool _ | Encoding.Null ->
+      Error (Invalid_payload (name ^ " must be bytes"))
 
 let text name = function
   | Encoding.Text value -> Ok value
   | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Array _ | Encoding.Map _
-  | Encoding.Bool _ | Encoding.Null -> Error (Invalid_payload (name ^ " must be text"))
+  | Encoding.Bool _ | Encoding.Null ->
+      Error (Invalid_payload (name ^ " must be text"))
 
 let repository_id name value =
   let* value = bytes name value in
@@ -193,15 +201,18 @@ let ensure_authority ~authority ~repository_id ~issuer_key_id =
 
 let ensure_root ~authority root =
   if
-    Model.Root_key_id.equal (Authority.root_key_id root)
+    Model.Root_key_id.equal
+      (Authority.root_key_id root)
       (Authority.repository_authority_root_key_id authority)
-    && String.equal (Authority.root_public_key root)
+    && String.equal
+         (Authority.root_public_key root)
          (Authority.repository_authority_root_public_key authority)
   then Ok ()
   else Error Unauthorized_issuer
 
 let invitation_unsigned_value ~repository_id ~group_id ~issuer_key_id
-    ~recipient_device_id ~issued_at ~expires_at ~join_state ~mandatory_features =
+    ~recipient_device_id ~issued_at ~expires_at ~join_state ~mandatory_features
+    =
   array
     [
       Encoding.integer current_schema_version;
@@ -216,10 +227,12 @@ let invitation_unsigned_value ~repository_id ~group_id ~issuer_key_id
     ]
 
 let derive_invitation_id ~repository_id ~group_id ~issuer_key_id
-    ~recipient_device_id ~issued_at ~expires_at ~join_state ~mandatory_features =
+    ~recipient_device_id ~issued_at ~expires_at ~join_state ~mandatory_features
+    =
   let* value =
     invitation_unsigned_value ~repository_id ~group_id ~issuer_key_id
-      ~recipient_device_id ~issued_at ~expires_at ~join_state ~mandatory_features
+      ~recipient_device_id ~issued_at ~expires_at ~join_state
+      ~mandatory_features
   in
   Model.Mls_invitation_id.of_bytes
     (digest invitation_id_domain (Encoding.encode value))
@@ -229,10 +242,14 @@ let invitation_value invitation =
   array
     [
       Encoding.integer current_schema_version;
-      Encoding.bytes (Model.Mls_invitation_id.to_bytes invitation.invitation_record_id);
-      Encoding.bytes (Model.Repository_id.to_bytes invitation.invitation_repository_id);
-      Encoding.bytes (Model.Mls_group_id.to_bytes invitation.invitation_group_id);
-      Encoding.bytes (Model.Root_key_id.to_bytes invitation.invitation_issuer_key_id);
+      Encoding.bytes
+        (Model.Mls_invitation_id.to_bytes invitation.invitation_record_id);
+      Encoding.bytes
+        (Model.Repository_id.to_bytes invitation.invitation_repository_id);
+      Encoding.bytes
+        (Model.Mls_group_id.to_bytes invitation.invitation_group_id);
+      Encoding.bytes
+        (Model.Root_key_id.to_bytes invitation.invitation_issuer_key_id);
       Encoding.bytes
         (Model.Device_id.to_bytes invitation.invitation_recipient_device_id);
       Encoding.integer invitation.invitation_issued_at;
@@ -243,7 +260,8 @@ let invitation_value invitation =
       Encoding.bytes invitation.invitation_signature;
     ]
 
-let encode_invitation invitation = invitation_value invitation |> Result.get_ok |> Encoding.encode
+let encode_invitation invitation =
+  invitation_value invitation |> Result.get_ok |> Encoding.encode
 
 let event_unsigned_value ~invitation_id ~repository_id ~group_id ~issuer_key_id
     ~recipient_device_id ~kind ~occurred_at ~payload ~mandatory_features =
@@ -267,19 +285,22 @@ let derive_event_id ~invitation_id ~repository_id ~group_id ~issuer_key_id
     event_unsigned_value ~invitation_id ~repository_id ~group_id ~issuer_key_id
       ~recipient_device_id ~kind ~occurred_at ~payload ~mandatory_features
   in
-  Model.Mls_invitation_id.of_bytes (digest event_id_domain (Encoding.encode value))
+  Model.Mls_invitation_id.of_bytes
+    (digest event_id_domain (Encoding.encode value))
   |> Result.map_error (fun _ -> assert false)
 
 let event_value event =
   array
     [
       Encoding.integer current_schema_version;
-      Encoding.bytes (Model.Mls_invitation_id.to_bytes event.membership_event_record_id);
+      Encoding.bytes
+        (Model.Mls_invitation_id.to_bytes event.membership_event_record_id);
       Encoding.bytes
         (Model.Mls_invitation_id.to_bytes event.membership_event_invitation_id);
       Encoding.bytes
         (Model.Repository_id.to_bytes event.membership_event_repository_id);
-      Encoding.bytes (Model.Mls_group_id.to_bytes event.membership_event_group_id);
+      Encoding.bytes
+        (Model.Mls_group_id.to_bytes event.membership_event_group_id);
       Encoding.bytes
         (Model.Root_key_id.to_bytes event.membership_event_issuer_key_id);
       Encoding.bytes
@@ -292,7 +313,8 @@ let event_value event =
       Encoding.bytes event.membership_event_signature;
     ]
 
-let encode_membership_event event = event_value event |> Result.get_ok |> Encoding.encode
+let encode_membership_event event =
+  event_value event |> Result.get_ok |> Encoding.encode
 
 let make_event ~root ~invitation ~kind ~occurred_at ~payload =
   let mandatory_features = invitation.invitation_mandatory_features in
@@ -316,7 +338,8 @@ let make_event ~root ~invitation ~kind ~occurred_at ~payload =
       membership_event_repository_id = invitation.invitation_repository_id;
       membership_event_group_id = invitation.invitation_group_id;
       membership_event_issuer_key_id = invitation.invitation_issuer_key_id;
-      membership_event_recipient_device_id = invitation.invitation_recipient_device_id;
+      membership_event_recipient_device_id =
+        invitation.invitation_recipient_device_id;
       membership_event_kind = kind;
       membership_event_occurred_at = occurred_at;
       membership_event_payload = payload;
@@ -342,7 +365,8 @@ let seal_event_payload ~key ~nonce ~kind ~first ~second =
 let invitation_key () =
   try
     Mirage_crypto_rng_unix.use_default ();
-    Mirage_crypto_rng.generate invitation_key_bytes |> Envelope.key_of_bytes
+    Mirage_crypto_rng.generate invitation_key_bytes
+    |> Envelope.key_of_bytes
     |> Result.map_error (fun _ -> Entropy_failure)
   with _ -> Error Entropy_failure
 
@@ -373,25 +397,38 @@ let decode_invitation ~authority encoded =
         Error (Unsupported_schema_version version)
       else
         let* id = invitation_id_value "MLS invitation ID" id in
-        let* repository_id = repository_id "MLS invitation repository ID" repository in
+        let* repository_id =
+          repository_id "MLS invitation repository ID" repository
+        in
         let* group_id = group_id "MLS invitation group ID" group in
-        let* issuer_key_id = root_key_id "MLS invitation issuer key ID" issuer in
-        let* recipient_device_id = device_id "MLS invitation recipient" recipient in
+        let* issuer_key_id =
+          root_key_id "MLS invitation issuer key ID" issuer
+        in
+        let* recipient_device_id =
+          device_id "MLS invitation recipient" recipient
+        in
         let* issued_at = integer "MLS invitation issued-at" issued_at in
         let* expires_at = integer "MLS invitation expires-at" expires_at in
-        let* join_state = bytes "MLS invitation encrypted join state" join_state in
         let* join_state =
-          Envelope.decode join_state |> Result.map_error (fun error -> Envelope_error error)
+          bytes "MLS invitation encrypted join state" join_state
         in
-        let* mandatory_features = integer "MLS invitation mandatory features" features in
+        let* join_state =
+          Envelope.decode join_state
+          |> Result.map_error (fun error -> Envelope_error error)
+        in
+        let* mandatory_features =
+          integer "MLS invitation mandatory features" features
+        in
         let* () = check_features mandatory_features in
         let* algorithm = text "MLS invitation signature algorithm" algorithm in
         if not (String.equal algorithm Authority.algorithm) then
-          Error (Invalid_payload "MLS invitation signature algorithm is unsupported")
+          Error
+            (Invalid_payload "MLS invitation signature algorithm is unsupported")
         else
           let* signature = bytes "MLS invitation signature" signature in
           let* () = ensure_authority ~authority ~repository_id ~issuer_key_id in
-          if Int64.compare expires_at issued_at <= 0 then Error Invalid_time_range
+          if Int64.compare expires_at issued_at <= 0 then
+            Error Invalid_time_range
           else if
             not
               (Model.Mls_group_id.equal group_id
@@ -408,9 +445,11 @@ let decode_invitation ~authority encoded =
             else
               let* () =
                 Authority.verify_root_message
-                  ~public_key:(Authority.repository_authority_root_public_key authority)
+                  ~public_key:
+                    (Authority.repository_authority_root_public_key authority)
                   ~domain:invitation_signature_domain
-                  (Model.Mls_invitation_id.to_bytes id) ~signature
+                  (Model.Mls_invitation_id.to_bytes id)
+                  ~signature
                 |> Result.map_error (fun _ -> Signature_verification_failed)
               in
               let invitation =
@@ -427,7 +466,8 @@ let decode_invitation ~authority encoded =
                   invitation_signature = signature;
                 }
               in
-              if String.equal encoded (encode_invitation invitation) then Ok invitation
+              if String.equal encoded (encode_invitation invitation) then
+                Ok invitation
               else Error Noncanonical_record
   | _ -> assert false
 
@@ -462,22 +502,37 @@ let decode_membership_event ~authority encoded =
         let* invitation_id =
           invitation_id_value "MLS membership event invitation ID" invitation_id
         in
-        let* repository_id = repository_id "MLS membership event repository ID" repository in
+        let* repository_id =
+          repository_id "MLS membership event repository ID" repository
+        in
         let* group_id = group_id "MLS membership event group ID" group in
-        let* issuer_key_id = root_key_id "MLS membership event issuer key ID" issuer in
-        let* recipient_device_id = device_id "MLS membership event recipient" recipient in
+        let* issuer_key_id =
+          root_key_id "MLS membership event issuer key ID" issuer
+        in
+        let* recipient_device_id =
+          device_id "MLS membership event recipient" recipient
+        in
         let* kind_code = integer "MLS membership event kind" kind in
         let* kind = event_kind_of_code kind_code in
-        let* occurred_at = integer "MLS membership event occurred-at" occurred_at in
+        let* occurred_at =
+          integer "MLS membership event occurred-at" occurred_at
+        in
         let* payload = bytes "MLS membership event encrypted payload" payload in
         let* payload =
-          Envelope.decode payload |> Result.map_error (fun error -> Envelope_error error)
+          Envelope.decode payload
+          |> Result.map_error (fun error -> Envelope_error error)
         in
-        let* mandatory_features = integer "MLS membership event mandatory features" features in
+        let* mandatory_features =
+          integer "MLS membership event mandatory features" features
+        in
         let* () = check_features mandatory_features in
-        let* algorithm = text "MLS membership event signature algorithm" algorithm in
+        let* algorithm =
+          text "MLS membership event signature algorithm" algorithm
+        in
         if not (String.equal algorithm Authority.algorithm) then
-          Error (Invalid_payload "MLS membership event signature algorithm is unsupported")
+          Error
+            (Invalid_payload
+               "MLS membership event signature algorithm is unsupported")
         else
           let* signature = bytes "MLS membership event signature" signature in
           let* () = ensure_authority ~authority ~repository_id ~issuer_key_id in
@@ -488,17 +543,20 @@ let decode_membership_event ~authority encoded =
           then Error (Identity_mismatch "repository-derived MLS group ID")
           else
             let* derived_id =
-              derive_event_id ~invitation_id ~repository_id ~group_id ~issuer_key_id
-                ~recipient_device_id ~kind ~occurred_at ~payload ~mandatory_features
+              derive_event_id ~invitation_id ~repository_id ~group_id
+                ~issuer_key_id ~recipient_device_id ~kind ~occurred_at ~payload
+                ~mandatory_features
             in
             if not (Model.Mls_invitation_id.equal id derived_id) then
               Error (Identity_mismatch "MLS membership event ID")
             else
               let* () =
                 Authority.verify_root_message
-                  ~public_key:(Authority.repository_authority_root_public_key authority)
+                  ~public_key:
+                    (Authority.repository_authority_root_public_key authority)
                   ~domain:event_signature_domain
-                  (Model.Mls_invitation_id.to_bytes id) ~signature
+                  (Model.Mls_invitation_id.to_bytes id)
+                  ~signature
                 |> Result.map_error (fun _ -> Signature_verification_failed)
               in
               let event =
@@ -516,25 +574,31 @@ let decode_membership_event ~authority encoded =
                   membership_event_signature = signature;
                 }
               in
-              if String.equal encoded (encode_membership_event event) then Ok event
+              if String.equal encoded (encode_membership_event event) then
+                Ok event
               else Error Noncanonical_record
   | _ -> assert false
 
 let invitation_id invitation = invitation.invitation_record_id
 let invitation_repository_id invitation = invitation.invitation_repository_id
 let invitation_group_id invitation = invitation.invitation_group_id
-let invitation_recipient_device_id invitation = invitation.invitation_recipient_device_id
+
+let invitation_recipient_device_id invitation =
+  invitation.invitation_recipient_device_id
+
 let invitation_expires_at invitation = invitation.invitation_expires_at
 let membership_event_id event = event.membership_event_record_id
 let membership_event_invitation_id event = event.membership_event_invitation_id
 
-let issue ~runtime ~authority ~root ~issuer_state ~recipient_device_id ~issued_at
-    ~expires_at ~invitation_key:join_key ~invitation_nonce ~event_nonce =
+let issue ~runtime ~authority ~root ~issuer_state ~recipient_device_id
+    ~issued_at ~expires_at ~invitation_key:join_key ~invitation_nonce
+    ~event_nonce =
   let* () = ensure_root ~authority root in
   if Int64.compare expires_at issued_at <= 0 then Error Invalid_time_range
   else if
     not
-      (Model.Repository_id.equal (Group.repository_id issuer_state)
+      (Model.Repository_id.equal
+         (Group.repository_id issuer_state)
          (Authority.repository_authority_repository_id authority))
   then Error (Identity_mismatch "issuer MLS state repository")
   else
@@ -584,7 +648,8 @@ let issue ~runtime ~authority ~root ~issuer_state ~recipient_device_id ~issued_a
         ~second:(digest "yeokcham:v2:mls-welcome:1\000" joined_welcome)
     in
     let* issued_event =
-      make_event ~root ~invitation ~kind:Event_issued ~occurred_at:issued_at ~payload
+      make_event ~root ~invitation ~kind:Event_issued ~occurred_at:issued_at
+        ~payload
     in
     Ok { invitation; issued_event; issuer_state = joined_issuer_state }
 
@@ -593,7 +658,8 @@ let event_matches invitation event =
     invitation.invitation_record_id
   && Model.Repository_id.equal event.membership_event_repository_id
        invitation.invitation_repository_id
-  && Model.Mls_group_id.equal event.membership_event_group_id invitation.invitation_group_id
+  && Model.Mls_group_id.equal event.membership_event_group_id
+       invitation.invitation_group_id
   && Model.Device_id.equal event.membership_event_recipient_device_id
        invitation.invitation_recipient_device_id
 
@@ -611,8 +677,11 @@ let lifecycle ~authority ~invitation history =
           decode_membership_event ~authority (encode_membership_event event)
         in
         if event_matches invitation event then
-          let id = Model.Mls_invitation_id.to_bytes event.membership_event_record_id in
-          if List.mem id seen then Error (Identity_mismatch "duplicate membership event")
+          let id =
+            Model.Mls_invitation_id.to_bytes event.membership_event_record_id
+          in
+          if List.mem id seen then
+            Error (Identity_mismatch "duplicate membership event")
           else
             let issued, revoked, accepted =
               match event.membership_event_kind with
@@ -635,18 +704,19 @@ let revoke ~authority ~root ~invitation ~history ~revoked_at
   | Open ->
       let* payload =
         seal_event_payload ~key:join_key ~nonce:event_nonce ~kind:Event_revoked
-          ~first:(Model.Mls_invitation_id.to_bytes invitation.invitation_record_id)
+          ~first:
+            (Model.Mls_invitation_id.to_bytes invitation.invitation_record_id)
           ~second:""
       in
-      make_event ~root ~invitation ~kind:Event_revoked ~occurred_at:revoked_at ~payload
+      make_event ~root ~invitation ~kind:Event_revoked ~occurred_at:revoked_at
+        ~payload
 
 let accept ~runtime ~authority ~root ~invitation ~history ~now
     ~invitation_key:join_key ~event_nonce =
   let* checked = decode_invitation ~authority (encode_invitation invitation) in
   if Int64.compare now checked.invitation_expires_at >= 0 then
     Error
-      (Invitation_expired
-         { now; expires_at = checked.invitation_expires_at })
+      (Invitation_expired { now; expires_at = checked.invitation_expires_at })
   else
     let* status = lifecycle ~authority ~invitation:checked history in
     match status with
@@ -658,21 +728,25 @@ let accept ~runtime ~authority ~root ~invitation ~history ~now
           |> Result.map_error (fun error -> Envelope_error error)
         in
         let* recipient_state =
-          Group.decode plaintext |> Result.map_error (fun error -> Group_error error)
+          Group.decode plaintext
+          |> Result.map_error (fun error -> Group_error error)
         in
         if
           not
-            (Model.Repository_id.equal (Group.repository_id recipient_state)
+            (Model.Repository_id.equal
+               (Group.repository_id recipient_state)
                checked.invitation_repository_id)
         then Error (Identity_mismatch "accepted MLS state repository")
         else if
           not
-            (Model.Mls_group_id.equal (Group.group_id recipient_state)
+            (Model.Mls_group_id.equal
+               (Group.group_id recipient_state)
                checked.invitation_group_id)
         then Error (Identity_mismatch "accepted MLS state group")
         else if
           not
-            (Model.Device_id.equal (Group.device_id recipient_state)
+            (Model.Device_id.equal
+               (Group.device_id recipient_state)
                checked.invitation_recipient_device_id)
         then Error (Identity_mismatch "accepted MLS state recipient")
         else
@@ -681,14 +755,16 @@ let accept ~runtime ~authority ~root ~invitation ~history ~now
             |> Result.map_error (fun error -> Group_error error)
           in
           let* payload =
-            seal_event_payload ~key:join_key ~nonce:event_nonce ~kind:Event_accepted
-              ~first:(digest "yeokcham:v2:mls-recipient-state:1\000"
-                        (Group.encode recipient_state))
+            seal_event_payload ~key:join_key ~nonce:event_nonce
+              ~kind:Event_accepted
+              ~first:
+                (digest "yeokcham:v2:mls-recipient-state:1\000"
+                   (Group.encode recipient_state))
               ~second:""
           in
           let* () = ensure_root ~authority root in
           let* accepted_event =
-            make_event ~root ~invitation:checked ~kind:Event_accepted ~occurred_at:now
-              ~payload
+            make_event ~root ~invitation:checked ~kind:Event_accepted
+              ~occurred_at:now ~payload
           in
           Ok { recipient_state; accepted_event }

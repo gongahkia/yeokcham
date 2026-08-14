@@ -423,15 +423,20 @@ let add_member configuration ~group_id ~issuer_device_id ~issuer_runtime_state
             let* commit = bytes "MLS add-member commit" commit in
             let* welcome = bytes "MLS add-member welcome" welcome in
             if not (Int64.equal version request_schema_version) then
-              Error (Invalid_runtime_response "unsupported MLS response version")
+              Error
+                (Invalid_runtime_response "unsupported MLS response version")
             else if
               String.length issuer_runtime_state = 0
               || String.length issuer_runtime_state > max_runtime_state_bytes
               || String.length recipient_runtime_state = 0
               || String.length recipient_runtime_state > max_runtime_state_bytes
-            then Error (Invalid_runtime_response "MLS response state violates bounds")
+            then
+              Error
+                (Invalid_runtime_response "MLS response state violates bounds")
             else if String.length commit = 0 || String.length welcome = 0 then
-              Error (Invalid_runtime_response "MLS add-member response omits protocol bytes")
+              Error
+                (Invalid_runtime_response
+                   "MLS add-member response omits protocol bytes")
             else
               Ok
                 {

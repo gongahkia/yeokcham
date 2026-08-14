@@ -40,7 +40,8 @@ let rec remove_tree path =
         |> Array.iter (fun name -> remove_tree (Filename.concat path name));
         Unix.rmdir path
     | Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO
-    | Unix.S_SOCK -> Unix.unlink path
+    | Unix.S_SOCK ->
+        Unix.unlink path
   with Unix.Unix_error (Unix.ENOENT, _, _) -> ()
 
 let with_root run =
@@ -77,15 +78,18 @@ let records_publish_create_only_and_corruption_refuses () =
       let authority, issue = fixture () in
       let invitation = issue.Invitation.invitation in
       let issued_event = issue.Invitation.issued_event in
-      Alcotest.(check bool) "first invitation publication" true
+      Alcotest.(check bool)
+        "first invitation publication" true
         (Invitation_store.write_invitation ~root ~authority invitation
         |> require_ok Invitation_store.error_to_string
         = Invitation_store.Published);
-      Alcotest.(check bool) "exact invitation retry" true
+      Alcotest.(check bool)
+        "exact invitation retry" true
         (Invitation_store.write_invitation ~root ~authority invitation
         |> require_ok Invitation_store.error_to_string
         = Invitation_store.Already_published);
-      Alcotest.(check bool) "issued event publication" true
+      Alcotest.(check bool)
+        "issued event publication" true
         (Invitation_store.write_membership_event ~root ~authority issued_event
         |> require_ok Invitation_store.error_to_string
         = Invitation_store.Published);
@@ -94,7 +98,8 @@ let records_publish_create_only_and_corruption_refuses () =
           (Invitation.invitation_id invitation)
         |> require_ok Invitation_store.error_to_string
       in
-      Alcotest.(check string) "canonical invitation reopens"
+      Alcotest.(check string)
+        "canonical invitation reopens"
         (Invitation.encode_invitation invitation)
         (Invitation.encode_invitation reopened);
       let events =
@@ -103,15 +108,22 @@ let records_publish_create_only_and_corruption_refuses () =
       in
       Alcotest.(check int) "one canonical event reopens" 1 (List.length events);
       let path =
-        Invitation_store.invitation_path ~root (Invitation.invitation_id invitation)
+        Invitation_store.invitation_path ~root
+          (Invitation.invitation_id invitation)
       in
-      let descriptor = Unix.openfile path [ Unix.O_WRONLY; Unix.O_TRUNC ] 0o600 in
-      Fun.protect ~finally:(fun () -> Unix.close descriptor) (fun () ->
+      let descriptor =
+        Unix.openfile path [ Unix.O_WRONLY; Unix.O_TRUNC ] 0o600
+      in
+      Fun.protect
+        ~finally:(fun () -> Unix.close descriptor)
+        (fun () ->
           ignore (Unix.write descriptor (Bytes.of_string "corrupt") 0 7));
-      Alcotest.(check bool) "corruption is not overwritten" true
+      Alcotest.(check bool)
+        "corruption is not overwritten" true
         (Result.is_error
            (Invitation_store.write_invitation ~root ~authority invitation));
-      Alcotest.(check bool) "corruption refuses reopening" true
+      Alcotest.(check bool)
+        "corruption refuses reopening" true
         (Result.is_error
            (Invitation_store.read_invitation ~root ~authority
               (Invitation.invitation_id invitation))))
@@ -125,15 +137,18 @@ let unknown_records_fail_closed () =
            issue.Invitation.issued_event
         |> require_ok Invitation_store.error_to_string);
       let unknown =
-        Filename.concat (Invitation_store.membership_event_directory ~root)
+        Filename.concat
+          (Invitation_store.membership_event_directory ~root)
           "not-a-record"
       in
       let descriptor =
         Unix.openfile unknown [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_EXCL ] 0o600
       in
       Unix.close descriptor;
-      Alcotest.(check bool) "unknown durable entry refuses enumeration" true
-        (Result.is_error (Invitation_store.read_membership_events ~root ~authority)))
+      Alcotest.(check bool)
+        "unknown durable entry refuses enumeration" true
+        (Result.is_error
+           (Invitation_store.read_membership_events ~root ~authority)))
 
 let () =
   Alcotest.run "V2 MLS invitation store"

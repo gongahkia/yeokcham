@@ -230,7 +230,8 @@ let add_member ~runtime ~issuer_state ~recipient_device_id =
   let* (result : Runtime.add_member_result) =
     Runtime.add_member runtime ~group_id:issuer_state.state_group_id
       ~issuer_device_id:issuer_state.state_device_id
-      ~issuer_runtime_state:issuer_state.state_runtime_bytes ~recipient_device_id
+      ~issuer_runtime_state:issuer_state.state_runtime_bytes
+      ~recipient_device_id
     |> Result.map_error (fun error -> Runtime_error error)
   in
   let issuer_runtime_state = result.Runtime.issuer_runtime_state in
@@ -252,13 +253,7 @@ let add_member ~runtime ~issuer_state ~recipient_device_id =
   in
   let* () = verify ~runtime issuer_state in
   let* () = verify ~runtime recipient_state in
-  Ok
-    {
-      issuer_state;
-      recipient_state;
-      commit;
-      welcome;
-    }
+  Ok { issuer_state; recipient_state; commit; welcome }
 
 let encrypt_metadata ~runtime ~state ~nonce plaintext =
   if String.length plaintext > metadata_plaintext_limit then
