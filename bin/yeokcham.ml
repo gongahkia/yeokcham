@@ -1736,12 +1736,18 @@ let git_archive_id value =
   | Error error -> fail Yeokcham_id.parse_error_to_string error
 
 let print_git_archive archive =
-  Printf.printf "archive=%s format=%s refs=%d bundle=%s\n"
+  let source_bare =
+    match Git.archive_capability archive with
+    | None -> "unknown"
+    | Some capability -> string_of_bool capability.Git.archive_source_bare
+  in
+  Printf.printf "archive=%s format=%s refs=%d bundle=%s source-bare=%s\n"
     (Yeokcham_id.Git_archive_id.to_hex (Git.archive_id archive))
     (Git.object_format_to_string (Git.archive_object_format archive))
     (List.length (Git.archive_refs archive))
     (Git.archive_bundle archive |> Snapshot.Content.stored_object_id
    |> Store.Stored_object_id.to_hex)
+    source_bare
 
 let show_git_archive archive =
   print_git_archive archive;
@@ -1752,12 +1758,28 @@ let show_git_archive archive =
 
 let git root arguments =
   match arguments with
-  | [ "archive"; "create"; "--repository"; repository ] -> (
+  | "archive" :: "create" :: options -> (
+      let rec parse repository refs = function
+        | [] -> (
+            match repository with
+            | Some repository -> (repository, List.rev refs)
+            | None -> exit 2)
+        | "--repository" :: repository :: rest -> (
+            match repository with
+            | "" -> exit 2
+            | _ -> (
+                match refs with
+                | _ -> parse (Some repository) refs rest))
+        | "--ref" :: reference :: rest -> parse repository (reference :: refs) rest
+        | _ -> exit 2
+      in
+      let repository, refs = parse None [] options in
       match Store.open_repository ~root with
       | Error error -> fail Store.error_to_string error
       | Ok store -> (
           match
-            Git.archive_repository Git.default_configuration ~store ~repository
+            Git.archive_repository ~refs Git.default_configuration ~store
+              ~repository
           with
           | Error error -> fail Git.error_to_string error
           | Ok archive -> print_git_archive archive))

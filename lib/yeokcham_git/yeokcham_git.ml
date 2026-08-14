@@ -4119,17 +4119,15 @@ let decode_archive_payload value =
   in
   let* fields = fields in
   match fields with
-  | [ version; supplied_id; format; bundle; refs ] ->
+  | [ version; supplied_id; format_or_capability; bundle; refs ] ->
       let* version = archive_integer "Git archive version" version in
-      if not (Int64.equal version 1L) then
-        Error
-          (Archive_error
-             (Printf.sprintf "unsupported Git archive version: %Ld" version))
-      else
+      if Int64.equal version 1L then
         let* supplied_id =
           archive_raw_id "Git archive ID" Id.Git_archive_id.of_bytes supplied_id
         in
-        let* format = archive_integer "Git archive object format" format in
+        let* format =
+          archive_integer "Git archive object format" format_or_capability
+        in
         let* format = archive_format_of_code format in
         let* bundle =
           archive_stored_id "Git archive bundle content ID" bundle
@@ -4149,17 +4147,11 @@ let decode_archive_payload value =
           if String.equal (Encoding.encode canonical) (Encoding.encode value)
           then Ok archive
           else Error (Archive_error "Git archive payload is noncanonical")
-  | [ version; supplied_id; capability; bundle; refs ] ->
-      let* version = archive_integer "Git archive version" version in
-      if not (Int64.equal version 2L) then
-        Error
-          (Archive_error
-             (Printf.sprintf "unsupported Git archive version: %Ld" version))
-      else
+      else if Int64.equal version 2L then
         let* supplied_id =
           archive_raw_id "Git archive ID" Id.Git_archive_id.of_bytes supplied_id
         in
-        let* capability = decode_archive_capability capability in
+        let* capability = decode_archive_capability format_or_capability in
         let* bundle =
           archive_stored_id "Git archive bundle content ID" bundle
         in
@@ -4182,6 +4174,10 @@ let decode_archive_payload value =
           if String.equal (Encoding.encode canonical) (Encoding.encode value)
           then Ok archive
           else Error (Archive_error "Git archive payload is noncanonical")
+      else
+        Error
+          (Archive_error
+             (Printf.sprintf "unsupported Git archive version: %Ld" version))
   | _ -> Error (Archive_error "Git archive has an unsupported field count")
 
 let archive_binding_body archive_identity physical =
@@ -4382,6 +4378,51 @@ let archive_refs_for_repository ?runner configuration executable repository
   in
   archive_refs_of_output format output
 
+let select_archive_refs requested available =
+  if requested = [] then Ok available
+  else
+    let requested = List.sort String.compare requested in
+    let rec requested_names previous = function
+      | [] -> Ok ()
+      | name :: rest ->
+          if
+            String.is_empty name
+            || String.contains name '\000'
+            || String.contains name '\n'
+            || String.contains name '\r'
+          then Error (Archive_error "requested Git ref name is malformed")
+          else
+            let* () =
+              match previous with
+              | None -> Ok ()
+              | Some previous when String.compare previous name < 0 -> Ok ()
+              | Some _ ->
+                  Error (Archive_error "requested Git ref name is duplicated")
+            in
+            requested_names (Some name) rest
+    in
+    let* () = requested_names None requested in
+    let rec select selected requested available =
+      match (requested, available) with
+      | [], _ -> Ok (List.rev selected)
+      | requested_name :: _, [] ->
+          Error
+            (Archive_error
+               ("requested Git ref is absent: " ^ requested_name))
+      | requested_name :: requested_rest, candidate :: available_rest ->
+          let comparison =
+            String.compare requested_name candidate.archive_ref_name
+          in
+          if comparison = 0 then
+            select (candidate :: selected) requested_rest available_rest
+          else if comparison < 0 then
+            Error
+              (Archive_error
+                 ("requested Git ref is absent: " ^ requested_name))
+          else select selected requested available_rest
+    in
+    select [] requested available
+
 let archive_is_shallow ?runner configuration executable repository =
   let* output =
     run ?runner configuration executable repository
@@ -4426,7 +4467,7 @@ let with_temporary_archive label run =
            (Unix.error_message error ^ ": " ^ operation ^ " " ^ argument))
   | Sys_error message -> Error (Archive_error message)
 
-let archive_repository ?runner configuration ~store ~repository =
+let archive_repository ?runner ?(refs = []) configuration ~store ~repository =
   let* configuration = validate_configuration configuration in
   let* repository = validate_repository_path repository in
   let* executable =
@@ -4441,10 +4482,11 @@ let archive_repository ?runner configuration ~store ~repository =
   if shallow then
     Error (Archive_error "shallow Git repositories are not archivable")
   else
-    let* before =
+    let* available_before =
       archive_refs_for_repository ?runner configuration executable repository
         inspection.object_format
     in
+    let* before = select_archive_refs refs available_before in
     with_temporary_archive "archive" (fun path ->
         let* () =
           try
@@ -4458,17 +4500,19 @@ let archive_repository ?runner configuration ~store ~repository =
         let* _ =
           run ?runner configuration executable repository
             ~operation:"archive-bundle-create"
-            [ "--no-replace-objects"; "bundle"; "create"; path; "--all" ]
+            ([ "--no-replace-objects"; "bundle"; "create"; path ]
+            @ if refs = [] then [ "--all" ] else List.map (fun ref -> ref) refs)
         in
         let* _ =
           run ?runner configuration executable repository
             ~operation:"archive-bundle-verify"
             [ "bundle"; "verify"; path ]
         in
-        let* after =
+        let* available_after =
           archive_refs_for_repository ?runner configuration executable
             repository inspection.object_format
         in
+        let* after = select_archive_refs refs available_after in
         let same_inventory =
           List.length before = List.length after
           && List.for_all2
@@ -4490,7 +4534,14 @@ let archive_repository ?runner configuration ~store ~repository =
                   ^ Snapshot.error_to_string error))
           in
           let* archive =
-            create_archive ~format:inspection.object_format ~bundle:content
+            create_archive ~version:2 ~format:inspection.object_format
+              ~capability:
+                (Some
+                   {
+                     archive_source_bare = inspection.bare;
+                     archive_source_object_format = inspection.object_format;
+                   })
+              ~bundle:content
               ~refs:before
           in
           publish_archive store archive)
@@ -4594,6 +4645,7 @@ let archive_id archive = archive.archive_identity
 let archive_object_format archive = archive.archive_format
 let archive_refs archive = archive.archive_ref_inventory
 let archive_bundle archive = archive.archive_content
+let archive_capability archive = archive.archive_source_capability
 
 module Legacy_format = struct
   let create_imported_transition_v1 = create_imported_transition
