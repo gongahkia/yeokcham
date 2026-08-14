@@ -155,25 +155,25 @@ The ADR lifecycle, numbering rules, and template are defined in [`docs/adr/READM
 - [ADR-042 — Encrypted offline object bundles](docs/adr/042-encrypted-offline-object-bundles.md) — Accepted.
 - [ADR-043 — Shared-directory encrypted bundle workflow](docs/adr/043-shared-directory-encrypted-bundle-workflow.md) — Accepted.
 - [ADR-044 — Inspectable repository operations and exact durable retargeting](docs/adr/044-inspection-and-exact-durable-retargeting.md) — Accepted.
-- [ADR-045 — V2 canonical encrypted-object envelope](docs/adr/045-v2-canonical-encrypted-object-envelope.md) — Superseded by ADR-073.
-- [ADR-046 — V2 keyed opaque object addresses](docs/adr/046-v2-keyed-opaque-object-addresses.md) — Superseded by ADR-073.
-- [ADR-047 — Explicit V1 archive and V2 cutover boundary](docs/adr/047-v1-archive-and-v2-cutover.md) — Superseded by ADR-073.
-- [ADR-048 — V2 encrypted causal ref-ledger with external key verification](docs/adr/048-v2-encrypted-causal-ref-ledger.md) — Superseded by ADR-073.
-- [ADR-049 — V2 durable object transaction journals without implicit ref authority](docs/adr/049-v2-durable-object-transaction-journals.md) — Superseded by ADR-073.
-- [ADR-050 — Local V2 daemon runtime boundary](docs/adr/050-local-v2-daemon-runtime-boundary.md) — Superseded by ADR-073.
-- [ADR-051 — Linux inotify as an advisory watcher source](docs/adr/051-linux-inotify-advisory-watcher.md) — Superseded by ADR-073.
+- [ADR-045 — V2 canonical encrypted-object envelope](docs/adr/045-v2-canonical-encrypted-object-envelope.md) — Accepted.
+- [ADR-046 — V2 keyed opaque object addresses](docs/adr/046-v2-keyed-opaque-object-addresses.md) — Accepted.
+- [ADR-047 — Explicit V1 archive and V2 cutover boundary](docs/adr/047-v1-archive-and-v2-cutover.md) — Accepted.
+- [ADR-048 — V2 encrypted causal ref-ledger with external key verification](docs/adr/048-v2-encrypted-causal-ref-ledger.md) — Accepted.
+- [ADR-049 — V2 durable object transaction journals without implicit ref authority](docs/adr/049-v2-durable-object-transaction-journals.md) — Accepted.
+- [ADR-050 — Local V2 daemon runtime boundary](docs/adr/050-local-v2-daemon-runtime-boundary.md) — Accepted.
+- [ADR-051 — Linux inotify as an advisory watcher source](docs/adr/051-linux-inotify-advisory-watcher.md) — Accepted.
 - [ADR-052 — V2 local bootstrap authority and role-separated capabilities](docs/adr/052-v2-local-bootstrap-authority.md) — Superseded by ADR-053.
-- [ADR-053 — Linux Secret Service custody and bootstrap key handles](docs/adr/053-linux-secret-service-custody.md) — Superseded by ADR-073.
-- [ADR-054 — V2 typed encrypted object frames](docs/adr/054-v2-typed-encrypted-objects.md) — Superseded by ADR-073.
-- [ADR-055 — V2 local scratch snapshot publication](docs/adr/055-v2-local-scratch-publication.md) — Superseded by ADR-073.
-- [ADR-056 — V2 opaque restore journal](docs/adr/056-v2-opaque-restore-journal.md) — Superseded by ADR-073.
-- [ADR-057 — V2 daemon-owned scratch scheduling](docs/adr/057-v2-daemon-scratch-scheduling.md) — Superseded by ADR-073.
-- [ADR-058 — V2 scratch retention and immutable generation activation](docs/adr/058-v2-scratch-retention-generations.md) — Superseded by ADR-073.
-- [ADR-059 — V2 exact capsule curation and initial bindings](docs/adr/059-v2-exact-capsule-curation.md) — Superseded by ADR-073.
+- [ADR-053 — Linux Secret Service custody and bootstrap key handles](docs/adr/053-linux-secret-service-custody.md) — Accepted.
+- [ADR-054 — V2 typed encrypted object frames](docs/adr/054-v2-typed-encrypted-objects.md) — Accepted.
+- [ADR-055 — V2 local scratch snapshot publication](docs/adr/055-v2-local-scratch-publication.md) — Accepted.
+- [ADR-056 — V2 opaque restore journal](docs/adr/056-v2-opaque-restore-journal.md) — Accepted.
+- [ADR-057 — V2 daemon-owned scratch scheduling](docs/adr/057-v2-daemon-scratch-scheduling.md) — Accepted.
+- [ADR-058 — V2 scratch retention and immutable generation activation](docs/adr/058-v2-scratch-retention-generations.md) — Accepted.
+- [ADR-059 — V2 exact capsule curation and initial bindings](docs/adr/059-v2-exact-capsule-curation.md) — Accepted.
 - [ADR-060 — V2 immutable capsule revisions and explicit composition plans](docs/adr/060-v2-immutable-capsule-revisions.md) — Superseded by ADR-073.
-- [ADR-061 — V2 deterministic workspaces and explicit conflict records](docs/adr/061-v2-workspace-composition.md) — Superseded by ADR-073.
-- [ADR-062 — V2 immutable releases and exact validation linkage](docs/adr/062-v2-immutable-releases.md) — Superseded by ADR-073.
-- [ADR-063 — V2 local cache reclamation from complete reachable roots](docs/adr/063-v2-cache-reclamation.md) — Superseded by ADR-073.
+- [ADR-061 — V2 deterministic workspaces and explicit conflict records](docs/adr/061-v2-workspace-composition.md) — Accepted.
+- [ADR-062 — V2 immutable releases and exact validation linkage](docs/adr/062-v2-immutable-releases.md) — Accepted.
+- [ADR-063 — V2 local cache reclamation from complete reachable roots](docs/adr/063-v2-cache-reclamation.md) — Accepted.
 - [ADR-064 — V2 user, repository, and device authority hierarchy](docs/adr/064-v2-user-repository-device-authority.md) — Superseded by ADR-065.
 - [ADR-065 — V2 authority record causality](docs/adr/065-v2-authority-record-causality.md) — Superseded by ADR-073.
 - [ADR-066 — macOS Keychain device custody and explicit enrollment](docs/adr/066-macos-keychain-device-custody.md) — Superseded by ADR-073.

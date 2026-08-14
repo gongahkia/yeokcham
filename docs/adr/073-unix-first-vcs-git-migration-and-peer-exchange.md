@@ -4,18 +4,19 @@
 - Date: 2026-08-15
 - Deciders: maintainer
 - Governing issues: [#233](https://github.com/gongahkia/yeokcham/issues/233), [#234](https://github.com/gongahkia/yeokcham/issues/234), [#235](https://github.com/gongahkia/yeokcham/issues/235), and [#236](https://github.com/gongahkia/yeokcham/issues/236)
-- Supersedes: the V2 delivery direction represented by ADR-045 through ADR-072
+- Supersedes: the V2 hosted, team, web, mesh, and MLS delivery direction
 - Superseded by: None
 
 ## Context and problem statement
 
 Yeokcham is intended to become a usable alternative VCS, not a hosted Git
 integration product. Its distinct model is the separation of bounded recovery
-history, curated intent, and immutable release history. The V2 programme added
-encrypted objects, user and device authority, MLS, hosted services, review,
-web UI, relay infrastructure, and IDE integration before proving that core
-workflow. That programme is larger than the supported product direction and
-does not make a Unix CLI easier to adopt.
+history, curated intent, and immutable release history. The existing local V2
+root implements much of that core and remains the current CLI substrate. The
+V2 programme also added user/device authority, MLS, hosted services, review,
+web UI, relay infrastructure, and IDE integration before proving a coherent
+user workflow. That expansion is larger than the supported product direction
+and does not make a Unix CLI easier to adopt.
 
 Adoption nevertheless requires an honest Git boundary. A user must be able to
 preserve a selected Git history before trying Yeokcham, explicitly turn chosen
@@ -66,10 +67,11 @@ Select the Unix local core, explicit Git migration, and direct peer exchange
 option.
 
 The supported core is a local CLI on macOS and Linux. Its canonical source of
-truth remains exact bytes and the existing versioned portable object model.
-Automatic scratch capture may use a scanner or an advisory watcher, but a
-daemon, local socket, account, encryption system, or Git repository is not a
-prerequisite for the supported local workflow.
+truth remains exact bytes and the existing versioned portable local object
+model, currently rooted in the V2 local format. That implementation detail does
+not revive the retired hosted/MLS roadmap. Automatic scratch capture may use a
+scanner or an advisory watcher, but a hosted account, network endpoint, or Git
+repository is not a prerequisite for the supported local workflow.
 
 Git is a compatibility and migration adapter with three explicit operations:
 
@@ -100,8 +102,9 @@ peer silently selects a head, overwrites a ref, or materialises a workspace.
 
 ## Consequences
 
-- The V2 encrypted/hosted/mesh/IDE roadmap is retired; its source remains
-  historical experimental work, not the supported VCS path.
+- The V2 hosted, browser, MLS, mesh, and IDE roadmap is retired. The tested V2
+  local-root, storage, restore, and authoring implementation remains the
+  current substrate until a separately approved format change replaces it.
 - The local model is the first implementation milestone, Git migration follows
   it, and native peer exchange follows the migration boundary.
 - Git interoperability is broader than the prior object-level bridge, but its
@@ -155,17 +158,13 @@ Required invariants are:
 
 ## Persistent-format and migration impact
 
-The existing V1 canonical objects remain readable and are the supported base.
-V3 records for Git archives, adoption receipts, publications, and integration
-proposals must be additive, versioned, canonically ordered, and separately
-golden-tested. They must reject unknown mandatory features and use create-only
-publication; no existing object or sole copy is overwritten in place.
-
-There is no migration from V2 experimental repositories into V3. A V2 root is
-detected as an unsupported historical format and must never be silently opened
-or overwritten. A user may archive it outside Yeokcham before creating a V3
-repository. The old V2 ADRs remain part of the historical record but no longer
-govern new implementation.
+The existing V2 local root remains readable and is the supported V3 runtime
+base. The earlier V1 format remains a legacy/cutover format and must never be
+silently opened or overwritten. V3 records for Git archives, adoption receipts,
+publications, and integration proposals must be additive, versioned,
+canonically ordered, and separately golden-tested. They must reject unknown
+mandatory features and use create-only publication; no existing object or sole
+copy is overwritten in place.
 
 Git archive support preserves selected reachable Git objects and refs, not
 working-tree state, indexes, reflogs, configuration, hooks, credential files,

@@ -91,8 +91,9 @@ Important limits remain intentional:
   preservation/adoption/exit contract is specified but not implemented yet.
 - The implemented local exchange is an object-transfer experiment, not yet the
   V3 peer publication, fetch, and integration workflow.
-- V2 encrypted, hosted, browser, mesh, and IDE code is historical experimental
-  work and is not a supported repository format or delivery path.
+- The local CLI currently uses the V2 repository format. The retired parts are
+  its hosted, browser, MLS, mesh, and IDE roadmap; they are not a supported
+  delivery path.
 - Restore and workspace materialisation guard divergent work, but are not
   crash-atomic for a populated working directory.
 

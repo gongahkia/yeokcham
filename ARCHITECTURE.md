@@ -2,18 +2,18 @@
 
 ## V3 current product direction
 
-ADR-073 supersedes the V2 delivery direction. The supported path is a local
-macOS/Linux CLI over the existing portable V1 object model, followed by explicit
-Git preservation/adoption/exit and direct peer repository exchange. A local
-daemon is optional; hosted APIs, browser clients, user/device authority, MLS,
-encrypted-object storage, relay infrastructure, and IDE integration are not
-part of that path.
+ADR-073 supersedes the V2 product expansion, not the tested local V2 root the
+CLI currently uses. The supported path is a local macOS/Linux CLI over that
+portable object model, followed by explicit Git preservation/adoption/exit and
+direct peer repository exchange. A local daemon is optional; hosted APIs,
+browser clients, MLS, relay infrastructure, and IDE integration are not part of
+that path.
 
-The V2 implementation notes below are retained as historical experimental
-evidence. They do not define a supported repository format or a dependency for
-new V3 work. New adapters must preserve the existing functional-core boundary:
-Git is foreign provenance, and a received peer publication is not an implicit
-workspace or working-directory mutation.
+The V2 implementation notes below document the current local substrate. Notes
+about hosted, browser, MLS, mesh, and IDE work are historical only. New
+adapters must preserve the existing functional-core boundary: Git is foreign
+provenance, and a received peer publication is not an implicit workspace or
+working-directory mutation.
 
 ## 1. System overview
 

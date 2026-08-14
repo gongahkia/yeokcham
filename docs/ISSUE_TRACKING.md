@@ -3,9 +3,10 @@
 GitHub Issues is Yeokcham’s authoritative historical migration record and future
 backlog. Live state is intentionally not duplicated here: inspect it with
 `gh issue list --repo gongahkia/yeokcham --state open` or the
-[issue tracker](https://github.com/gongahkia/yeokcham/issues). The V2 programme
-was retired on 2026-08-15 under ADR-073. Its closed issues and ADRs remain
-historical evidence; they do not describe the current delivery scope.
+[issue tracker](https://github.com/gongahkia/yeokcham/issues). The V2 hosted,
+team, web, mesh, and MLS roadmap was retired on 2026-08-15 under ADR-073. The
+existing V2 local-root implementation remains the V3 substrate; closed issues
+and ADRs outside that boundary remain historical evidence.
 
 Historical migrated issues retain their immutable hidden
 `<!-- paengi-todo-id: ID -->` marker, including [#44](https://github.com/gongahkia/yeokcham/issues/44).
