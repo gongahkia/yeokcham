@@ -38,6 +38,11 @@ type imported_tag
 type archive
 type archive_ref = { archive_ref_name : string; archive_ref_object : object_id }
 
+type archive_capability = {
+  archive_source_bare : bool;
+  archive_source_object_format : object_format;
+}
+
 type import_result = {
   snapshot : Yeokcham_snapshot.Snapshot.id;
   mapping : mapping;
@@ -226,6 +231,7 @@ val export_revisions :
 
 val archive_repository :
   ?runner:(module Yeokcham_validation.Process_runner) ->
+  ?refs:string list ->
   configuration ->
   store:Yeokcham_store.repository ->
   repository:string ->
@@ -250,6 +256,7 @@ val archive_id : archive -> Yeokcham_id.Git_archive_id.t
 val archive_object_format : archive -> object_format
 val archive_refs : archive -> archive_ref list
 val archive_bundle : archive -> Yeokcham_snapshot.Content.id
+val archive_capability : archive -> archive_capability option
 val mapping_id : mapping -> Yeokcham_id.Git_mapping_id.t
 val mapping_direction : mapping -> mapping_direction
 val mapping_git_object : mapping -> object_id

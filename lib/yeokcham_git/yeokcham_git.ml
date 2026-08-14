@@ -104,10 +104,16 @@ type imported_tag = {
 type tag_import_result = { imported_tag : imported_tag; tag_mapping : mapping }
 type archive_ref = { archive_ref_name : string; archive_ref_object : object_id }
 
+type archive_capability = {
+  archive_source_bare : bool;
+  archive_source_object_format : object_format;
+}
+
 type archive = {
   archive_version : int;
   archive_identity : Id.Git_archive_id.t;
   archive_format : object_format;
+  archive_source_capability : archive_capability option;
   archive_content : Snapshot.Content.id;
   archive_ref_inventory : archive_ref list;
 }
@@ -3867,6 +3873,7 @@ let export_revisions ?runner ?fail_at configuration ~store ~repository
       Ok { revision_exports = exports; revision_export_target_ref = target_ref })
 
 let archive_domain = "yeokcham:git-archive:v1\000"
+let archive_v2_domain = "yeokcham:git-archive:v2\000"
 let archive_binding_domain = "yeokcham:git-archive-binding:v1\000"
 
 let archive_error_of_encoding error =
@@ -3928,6 +3935,32 @@ let archive_format_of_code = function
         (Archive_error
            (Printf.sprintf "unknown Git archive object format: %Ld" value))
 
+let archive_boolean name = function
+  | Encoding.Bool value -> Ok value
+  | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _ | Encoding.Array _
+  | Encoding.Map _ | Encoding.Null ->
+      Error (Archive_error (name ^ " must be a Boolean"))
+
+let archive_capability_value capability =
+  archive_array
+    [
+      Encoding.bool capability.archive_source_bare;
+      Encoding.integer
+        (archive_format_code capability.archive_source_object_format);
+    ]
+
+let decode_archive_capability value =
+  let* fields = archive_fields "Git archive capability" 2 value in
+  match fields with
+  | [ bare; object_format ] ->
+      let* archive_source_bare = archive_boolean "Git archive source bare flag" bare in
+      let* object_format =
+        archive_integer "Git archive source object format" object_format
+      in
+      let* archive_source_object_format = archive_format_of_code object_format in
+      Ok { archive_source_bare; archive_source_object_format }
+  | _ -> assert false
+
 let archive_ref_value format reference =
   if String.is_empty reference.archive_ref_name then
     Error (Archive_error "Git archive ref name must not be empty")
@@ -3965,19 +3998,30 @@ let archive_ref_values format references =
   in
   loop None [] references
 
-let archive_identity_payload format references =
+let archive_identity_payload version format capability references =
   let* references = archive_ref_values format references in
-  archive_array
-    [
-      Encoding.integer 1L;
-      Encoding.integer (archive_format_code format);
-      references;
-    ]
+  match (version, capability) with
+  | 1, None ->
+      archive_array
+        [
+          Encoding.integer 1L;
+          Encoding.integer (archive_format_code format);
+          references;
+        ]
+  | 2, Some capability
+    when capability.archive_source_object_format = format ->
+      let* capability = archive_capability_value capability in
+      archive_array [ Encoding.integer 2L; capability; references ]
+  | 1, Some _ | 2, None | _, _ ->
+      Error (Archive_error "invalid Git archive version and capability report")
 
-let derive_archive_id format references =
-  let* identity = archive_identity_payload format references in
+let derive_archive_id version format capability references =
+  let* identity = archive_identity_payload version format capability references in
+  let domain = match version with 1 -> archive_domain | 2 -> archive_v2_domain | _ -> "" in
+  if String.is_empty domain then Error (Archive_error "unsupported Git archive version")
+  else
   let raw =
-    Hash.feed_string Hash.empty archive_domain |> fun context ->
+    Hash.feed_string Hash.empty domain |> fun context ->
     Hash.feed_string context (Encoding.encode identity)
     |> Hash.get |> Hash.to_raw_string
   in
@@ -3985,13 +4029,14 @@ let derive_archive_id format references =
   |> Result.map_error (fun error ->
       Archive_error (Id.parse_error_to_string error))
 
-let create_archive ~format ~bundle ~refs =
-  let* archive_identity = derive_archive_id format refs in
+let create_archive ~version ~format ~capability ~bundle ~refs =
+  let* archive_identity = derive_archive_id version format capability refs in
   Ok
     {
-      archive_version = 1;
+      archive_version = version;
       archive_identity;
       archive_format = format;
+      archive_source_capability = capability;
       archive_content = bundle;
       archive_ref_inventory = refs;
     }
@@ -4011,14 +4056,23 @@ let archive_payload archive =
     Snapshot.Content.stored_object_id archive.archive_content
     |> Store.Stored_object_id.to_raw_bytes |> Encoding.bytes
   in
-  archive_array
-    [
-      Encoding.integer (Int64.of_int archive.archive_version);
-      archive_identity;
-      Encoding.integer (archive_format_code archive.archive_format);
-      bundle;
-      refs;
-    ]
+  match (archive.archive_version, archive.archive_source_capability) with
+  | 1, None ->
+      archive_array
+        [
+          Encoding.integer 1L;
+          archive_identity;
+          Encoding.integer (archive_format_code archive.archive_format);
+          bundle;
+          refs;
+        ]
+  | 2, Some capability
+    when capability.archive_source_object_format = archive.archive_format ->
+      let* capability = archive_capability_value capability in
+      archive_array
+        [ Encoding.integer 2L; archive_identity; capability; bundle; refs ]
+  | 1, Some _ | 2, None | _, _ ->
+      Error (Archive_error "invalid Git archive version and capability report")
 
 let archive_envelope archive =
   let* payload = archive_payload archive in
@@ -4056,7 +4110,14 @@ let decode_archive_refs format value =
       Error (Archive_error "Git archive refs must be an array")
 
 let decode_archive_payload value =
-  let* fields = archive_fields "Git archive" 5 value in
+  let fields =
+    match value with
+    | Encoding.Array fields -> Ok fields
+    | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _ | Encoding.Map _
+    | Encoding.Bool _ | Encoding.Null ->
+        Error (Archive_error "Git archive must be an array")
+  in
+  let* fields = fields in
   match fields with
   | [ version; supplied_id; format; bundle; refs ] ->
       let* version = archive_integer "Git archive version" version in
@@ -4075,7 +4136,7 @@ let decode_archive_payload value =
         in
         let* refs = decode_archive_refs format refs in
         let* archive =
-          create_archive ~format
+          create_archive ~version:1 ~format ~capability:None
             ~bundle:(Snapshot.Content.of_stored_object_id bundle)
             ~refs
         in
@@ -4088,7 +4149,40 @@ let decode_archive_payload value =
           if String.equal (Encoding.encode canonical) (Encoding.encode value)
           then Ok archive
           else Error (Archive_error "Git archive payload is noncanonical")
-  | _ -> assert false
+  | [ version; supplied_id; capability; bundle; refs ] ->
+      let* version = archive_integer "Git archive version" version in
+      if not (Int64.equal version 2L) then
+        Error
+          (Archive_error
+             (Printf.sprintf "unsupported Git archive version: %Ld" version))
+      else
+        let* supplied_id =
+          archive_raw_id "Git archive ID" Id.Git_archive_id.of_bytes supplied_id
+        in
+        let* capability = decode_archive_capability capability in
+        let* bundle =
+          archive_stored_id "Git archive bundle content ID" bundle
+        in
+        let* refs =
+          decode_archive_refs capability.archive_source_object_format refs
+        in
+        let* archive =
+          create_archive ~version:2
+            ~format:capability.archive_source_object_format
+            ~capability:(Some capability)
+            ~bundle:(Snapshot.Content.of_stored_object_id bundle)
+            ~refs
+        in
+        if not (Id.Git_archive_id.equal supplied_id archive.archive_identity)
+        then
+          Error
+            (Archive_error "Git archive logical ID does not match its preimage")
+        else
+          let* canonical = archive_payload archive in
+          if String.equal (Encoding.encode canonical) (Encoding.encode value)
+          then Ok archive
+          else Error (Archive_error "Git archive payload is noncanonical")
+  | _ -> Error (Archive_error "Git archive has an unsupported field count")
 
 let archive_binding_body archive_identity physical =
   archive_array
