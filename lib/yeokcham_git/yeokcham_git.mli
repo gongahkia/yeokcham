@@ -35,6 +35,8 @@ type mapping_subject =
 type mapping
 type imported_transition
 type imported_tag
+type archive
+type archive_ref = { archive_ref_name : string; archive_ref_object : object_id }
 
 type import_result = {
   snapshot : Yeokcham_snapshot.Snapshot.id;
@@ -99,6 +101,7 @@ type configuration = {
   max_tag_bytes : int;
   max_tag_name_bytes : int;
   max_export_commits : int;
+  max_archive_bytes : int;
 }
 
 val default_configuration : configuration
@@ -119,6 +122,7 @@ val configuration_with :
   ?max_tag_bytes:int ->
   ?max_tag_name_bytes:int ->
   ?max_export_commits:int ->
+  ?max_archive_bytes:int ->
   configuration ->
   configuration
 
@@ -158,6 +162,7 @@ type error =
   | Mapping_error of string
   | Imported_transition_error of string
   | Imported_tag_error of string
+  | Archive_error of string
   | Store_error of Yeokcham_store.error
 
 val error_to_string : error -> string
@@ -219,6 +224,32 @@ val export_revisions :
   revisions:Yeokcham_capsule_store.revision_link list ->
   (revision_sequence_export_result, error) result
 
+val archive_repository :
+  ?runner:(module Yeokcham_validation.Process_runner) ->
+  configuration ->
+  store:Yeokcham_store.repository ->
+  repository:string ->
+  (archive, error) result
+
+val load_archive :
+  Yeokcham_store.repository ->
+  Yeokcham_id.Git_archive_id.t ->
+  (archive, error) result
+
+val list_archives : Yeokcham_store.repository -> (archive list, error) result
+
+val exit_archive :
+  ?runner:(module Yeokcham_validation.Process_runner) ->
+  configuration ->
+  store:Yeokcham_store.repository ->
+  archive:Yeokcham_id.Git_archive_id.t ->
+  destination:string ->
+  (archive, error) result
+
+val archive_id : archive -> Yeokcham_id.Git_archive_id.t
+val archive_object_format : archive -> object_format
+val archive_refs : archive -> archive_ref list
+val archive_bundle : archive -> Yeokcham_snapshot.Content.id
 val mapping_id : mapping -> Yeokcham_id.Git_mapping_id.t
 val mapping_direction : mapping -> mapping_direction
 val mapping_git_object : mapping -> object_id

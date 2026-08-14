@@ -107,6 +107,7 @@ let object_type_generator =
       Envelope.Ref_event;
       Envelope.Device_identity;
       Envelope.Divergent_ref_set;
+      Envelope.Git_archive;
     ]
 
 let boundary_lengths =

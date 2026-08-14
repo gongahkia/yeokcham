@@ -38,6 +38,7 @@ type object_type =
   | Ref_event
   | Device_identity
   | Divergent_ref_set
+  | Git_archive
 
 let object_type_code = function
   | Content -> 1
@@ -68,6 +69,7 @@ let object_type_code = function
   | Ref_event -> 26
   | Device_identity -> 27
   | Divergent_ref_set -> 28
+  | Git_archive -> 29
 
 let object_type_of_code = function
   | 1 -> Some Content
@@ -98,6 +100,7 @@ let object_type_of_code = function
   | 26 -> Some Ref_event
   | 27 -> Some Device_identity
   | 28 -> Some Divergent_ref_set
+  | 29 -> Some Git_archive
   | _ -> None
 
 type creation_error =

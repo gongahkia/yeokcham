@@ -1730,8 +1730,61 @@ let git_object_id value =
       | Ok identity -> identity
       | Error error -> fail Git.error_to_string error)
 
+let git_archive_id value =
+  match Yeokcham_id.Git_archive_id.of_hex value with
+  | Ok identity -> identity
+  | Error error -> fail Yeokcham_id.parse_error_to_string error
+
+let print_git_archive archive =
+  Printf.printf "archive=%s format=%s refs=%d bundle=%s\n"
+    (Yeokcham_id.Git_archive_id.to_hex (Git.archive_id archive))
+    (Git.object_format_to_string (Git.archive_object_format archive))
+    (List.length (Git.archive_refs archive))
+    (Git.archive_bundle archive |> Snapshot.Content.stored_object_id
+   |> Store.Stored_object_id.to_hex)
+
+let show_git_archive archive =
+  print_git_archive archive;
+  Git.archive_refs archive
+  |> List.iter (fun reference ->
+      Printf.printf "ref=%s object=%s\n" reference.Git.archive_ref_name
+        (Git.object_id_to_hex reference.Git.archive_ref_object))
+
 let git root arguments =
   match arguments with
+  | [ "archive"; "create"; "--repository"; repository ] -> (
+      match Store.open_repository ~root with
+      | Error error -> fail Store.error_to_string error
+      | Ok store -> (
+          match
+            Git.archive_repository Git.default_configuration ~store ~repository
+          with
+          | Error error -> fail Git.error_to_string error
+          | Ok archive -> print_git_archive archive))
+  | [ "archive"; "list" ] -> (
+      match Store.open_repository ~root with
+      | Error error -> fail Store.error_to_string error
+      | Ok store -> (
+          match Git.list_archives store with
+          | Error error -> fail Git.error_to_string error
+          | Ok archives -> List.iter print_git_archive archives))
+  | [ "archive"; "show"; archive ] -> (
+      match Store.open_repository ~root with
+      | Error error -> fail Store.error_to_string error
+      | Ok store -> (
+          match Git.load_archive store (git_archive_id archive) with
+          | Error error -> fail Git.error_to_string error
+          | Ok archive -> show_git_archive archive))
+  | [ "archive"; "exit"; archive; "--destination"; destination ] -> (
+      match Store.open_repository ~root with
+      | Error error -> fail Store.error_to_string error
+      | Ok store -> (
+          match
+            Git.exit_archive Git.default_configuration ~store
+              ~archive:(git_archive_id archive) ~destination
+          with
+          | Error error -> fail Git.error_to_string error
+          | Ok archive -> print_git_archive archive))
   | [ "import"; "tree"; "--repository"; repository; "--tree"; tree ] -> (
       match Store.open_repository ~root with
       | Error error -> fail Store.error_to_string error

@@ -110,7 +110,8 @@ let bucket_of_type = function
       Workspace
   | Envelope.Repository_config | Envelope.Git_mapping
   | Envelope.Imported_transition | Envelope.Imported_tag | Envelope.Ref_event
-  | Envelope.Device_identity | Envelope.Divergent_ref_set ->
+  | Envelope.Device_identity | Envelope.Divergent_ref_set | Envelope.Git_archive
+    ->
       Other
 
 let stats entries =

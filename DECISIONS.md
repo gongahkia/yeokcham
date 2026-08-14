@@ -184,3 +184,4 @@ The ADR lifecycle, numbering rules, and template are defined in [`docs/adr/READM
 - [ADR-071 — V2 MLS member invitations and device join](docs/adr/071-v2-mls-member-invitations.md) — Superseded by ADR-073.
 - [ADR-072 — V2 MLS epoch removal and append-only rekeying](docs/adr/072-v2-mls-epoch-removal.md) — Superseded by ADR-073.
 - [ADR-073 — Unix-first native VCS, Git migration, and direct peer exchange](docs/adr/073-unix-first-vcs-git-migration-and-peer-exchange.md) — Accepted.
+- [ADR-074 — Git archive preservation and exit](docs/adr/074-git-archive-preservation-and-exit.md) — Accepted.

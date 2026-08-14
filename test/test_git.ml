@@ -96,6 +96,19 @@ let direct_process executable arguments =
   | _, Unix.WSIGNALED signal | _, Unix.WSTOPPED signal ->
       Alcotest.fail (Printf.sprintf "Git fixture command received %d" signal)
 
+let direct_process_with_environment executable environment arguments =
+  let argv = Array.of_list (executable :: arguments) in
+  let child =
+    Unix.create_process_env executable argv environment Unix.stdin Unix.stdout
+      Unix.stderr
+  in
+  match Unix.waitpid [] child with
+  | _, Unix.WEXITED 0 -> ()
+  | _, Unix.WEXITED code ->
+      Alcotest.fail (Printf.sprintf "Git fixture command exited %d" code)
+  | _, Unix.WSIGNALED signal | _, Unix.WSTOPPED signal ->
+      Alcotest.fail (Printf.sprintf "Git fixture command received %d" signal)
+
 let direct_capture executable arguments =
   let argv = Array.of_list (executable :: arguments) in
   let channel = Unix.open_process_args_in executable argv in
@@ -2841,6 +2854,189 @@ let rejects_blob_limit () =
                (contains ~needle:"cat-file-blob stdout exceeded 4 bytes"
                   (Git.error_to_string error))))
 
+let ref_inventory git repository =
+  direct_capture git
+    [
+      "-C";
+      repository;
+      "for-each-ref";
+      "--sort=refname";
+      "--format=%(refname) %(objectname)";
+    ]
+  |> String.split_on_char '\n'
+
+let archive_envelope_bytes store archive =
+  let components =
+    [ "git-archives"; Id.Git_archive_id.to_hex (Git.archive_id archive) ]
+  in
+  let binding = binding_bytes store components in
+  match Encoding.decode binding with
+  | Ok (Encoding.Array [ _; _; Encoding.Bytes physical; _ ]) -> (
+      match Store.Stored_object_id.of_raw_bytes physical with
+      | Some physical ->
+          Store.get store physical
+          |> require_ok Store.error_to_string
+          |> Envelope.encode
+      | None -> Alcotest.fail "Git archive binding object ID is invalid")
+  | Ok
+      ( Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _
+      | Encoding.Array _ | Encoding.Map _ | Encoding.Bool _ | Encoding.Null )
+  | Error _ ->
+      Alcotest.fail "Git archive binding does not decode"
+
+let archives_and_exits_complete_git_history () =
+  commit_fixture (fun repository store _format _merge _parents ->
+      let git = git_path () in
+      direct_process git
+        [
+          "-C";
+          repository;
+          "tag";
+          "-a";
+          "archive-tag";
+          "-m";
+          "annotated archive tag";
+        ];
+      let source_refs = ref_inventory git repository in
+      let first =
+        Git.archive_repository Git.default_configuration ~store ~repository
+        |> require_ok Git.error_to_string
+      in
+      let second =
+        Git.archive_repository Git.default_configuration ~store ~repository
+        |> require_ok Git.error_to_string
+      in
+      Alcotest.(check bool)
+        "repeated archive has one logical ID" true
+        (Id.Git_archive_id.equal (Git.archive_id first) (Git.archive_id second));
+      Alcotest.(check int)
+        "archive inventory retains every source ref" (List.length source_refs)
+        (List.length (Git.archive_refs first));
+      let listed = Git.list_archives store |> require_ok Git.error_to_string in
+      Alcotest.(check int)
+        "one immutable archive is listed" 1 (List.length listed);
+      let destination =
+        Filename.concat (Filename.dirname repository) "exit.git"
+      in
+      let exited =
+        Git.exit_archive Git.default_configuration ~store
+          ~archive:(Git.archive_id first) ~destination
+        |> require_ok Git.error_to_string
+      in
+      Alcotest.(check bool)
+        "exit returns the archived identity" true
+        (Id.Git_archive_id.equal (Git.archive_id first) (Git.archive_id exited));
+      direct_process git [ "-C"; destination; "fsck"; "--full" ];
+      Alcotest.(check (list string))
+        "exit has the exact ref inventory" source_refs
+        (ref_inventory git destination);
+      let checkout = Filename.concat (Filename.dirname repository) "checkout" in
+      direct_process git [ "clone"; "-q"; destination; checkout ];
+      Alcotest.(check string)
+        "exit preserves regular bytes" "base\n"
+        (read_file (Filename.concat checkout "base"));
+      Alcotest.(check string)
+        "exit preserves symlink" "base"
+        (Unix.readlink (Filename.concat checkout "link"));
+      Alcotest.(check bool)
+        "exit preserves executable mode" true
+        ((Unix.stat (Filename.concat checkout "run")).Unix.st_perm land 0o111
+        <> 0);
+      let nonempty = Filename.concat (Filename.dirname repository) "nonempty" in
+      Unix.mkdir nonempty 0o700;
+      write_file (Filename.concat nonempty "keep") "keep";
+      Git.exit_archive Git.default_configuration ~store
+        ~archive:(Git.archive_id first) ~destination:nonempty
+      |> Result.fold
+           ~ok:(fun _ ->
+             Alcotest.fail "nonempty Git exit destination was accepted")
+           ~error:(fun error ->
+             Alcotest.(check bool)
+               "nonempty exit has a structured error" true
+               (contains ~needle:"destination directory is not empty"
+                  (Git.error_to_string error)));
+      let components =
+        [ "git-archives"; Id.Git_archive_id.to_hex (Git.archive_id first) ]
+      in
+      let binding = binding_bytes store components in
+      Store.Ref_file.compare_and_swap store ~components ~expected:(Some binding)
+        ~replacement:"corrupt"
+      |> require_ok Store.error_to_string;
+      Git.load_archive store (Git.archive_id first)
+      |> Result.fold
+           ~ok:(fun _ ->
+             Alcotest.fail "corrupt Git archive binding was accepted")
+           ~error:(fun error ->
+             Alcotest.(check bool)
+               "corrupt archive binding has a structured error" true
+               (contains ~needle:"Git archive error"
+                  (Git.error_to_string error))))
+
+let archive_persistence_goldens_are_stable () =
+  with_directory "yeokcham-git-archive-golden-" (fun root ->
+      let repository = Filename.concat root "repository" in
+      let store_root = Filename.concat root "store" in
+      let git = git_path () in
+      direct_process git [ "init"; "-q"; repository ];
+      direct_process git
+        [ "-C"; repository; "config"; "user.name"; "Yeokcham Golden" ];
+      direct_process git
+        [ "-C"; repository; "config"; "user.email"; "golden@example.invalid" ];
+      write_file (Filename.concat repository "archive") "golden archive\n";
+      direct_process git [ "-C"; repository; "add"; "--all" ];
+      direct_process_with_environment git golden_commit_environment
+        [ "-C"; repository; "commit"; "-q"; "-m"; "archive golden" ];
+      direct_process_with_environment git golden_commit_environment
+        [
+          "-C";
+          repository;
+          "tag";
+          "-a";
+          "archive-golden";
+          "-m";
+          "archive golden tag";
+        ];
+      let store =
+        Store.init ~root:store_root |> require_ok Store.error_to_string
+      in
+      let archive =
+        Git.archive_repository Git.default_configuration ~store ~repository
+        |> require_ok Git.error_to_string
+      in
+      let archive_id = Git.archive_id archive in
+      Alcotest.(check string)
+        "canonical Git archive envelope"
+        (refreshed_golden "git-archive-v1.yeok.hex"
+           (archive_envelope_bytes store archive))
+        (archive_envelope_bytes store archive);
+      Alcotest.(check string)
+        "canonical Git archive binding"
+        (refreshed_golden "git-archive-v1.ref.hex"
+           (binding_bytes store
+              [ "git-archives"; Id.Git_archive_id.to_hex archive_id ]))
+        (binding_bytes store
+           [ "git-archives"; Id.Git_archive_id.to_hex archive_id ]))
+
+let shallow_archive_rejects_before_publication () =
+  commit_fixture (fun repository store _format _merge _parents ->
+      let shallow = Filename.concat (Filename.dirname repository) "shallow" in
+      let git = git_path () in
+      direct_process git
+        [ "clone"; "-q"; "--depth"; "1"; "file://" ^ repository; shallow ];
+      Git.archive_repository Git.default_configuration ~store
+        ~repository:shallow
+      |> Result.fold
+           ~ok:(fun _ -> Alcotest.fail "shallow Git repository was archived")
+           ~error:(fun error ->
+             Alcotest.(check bool)
+               "shallow archive has a structured error" true
+               (contains ~needle:"shallow Git repositories are not archivable"
+                  (Git.error_to_string error)));
+      Alcotest.(check int)
+        "shallow rejection publishes no archive" 0
+        (List.length
+           (Git.list_archives store |> require_ok Git.error_to_string)))
+
 let rejects_corrupt_mapping_binding () =
   import_fixture (fun repository store tree ->
       let imported =
@@ -2939,6 +3135,12 @@ let () =
           Alcotest.test_case "unsupported mode and missing object reject" `Quick
             rejects_unsupported_mode_and_missing_object;
           Alcotest.test_case "blob bound rejects" `Quick rejects_blob_limit;
+          Alcotest.test_case "archive preserves and exits complete Git history"
+            `Quick archives_and_exits_complete_git_history;
+          Alcotest.test_case "Git archive schemas have stable goldens" `Quick
+            archive_persistence_goldens_are_stable;
+          Alcotest.test_case "shallow archive rejects before publication" `Quick
+            shallow_archive_rejects_before_publication;
           Alcotest.test_case "corrupt mapping binding rejects" `Quick
             rejects_corrupt_mapping_binding;
         ] );

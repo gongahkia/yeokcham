@@ -102,6 +102,16 @@ type imported_tag = {
 }
 
 type tag_import_result = { imported_tag : imported_tag; tag_mapping : mapping }
+type archive_ref = { archive_ref_name : string; archive_ref_object : object_id }
+
+type archive = {
+  archive_version : int;
+  archive_identity : Id.Git_archive_id.t;
+  archive_format : object_format;
+  archive_content : Snapshot.Content.id;
+  archive_ref_inventory : archive_ref list;
+}
+
 type git_identity = { git_identity_name : string; git_identity_email : string }
 
 type release_export_metadata = {
@@ -154,6 +164,7 @@ type configuration = {
   max_tag_bytes : int;
   max_tag_name_bytes : int;
   max_export_commits : int;
+  max_archive_bytes : int;
 }
 
 let default_configuration =
@@ -173,12 +184,14 @@ let default_configuration =
     max_tag_bytes = 8 * 1024 * 1024;
     max_tag_name_bytes = 1_024;
     max_export_commits = 4_096;
+    max_archive_bytes = 256 * 1024 * 1024;
   }
 
 let configuration_with ?git ?timeout_ms ?max_stdout_bytes ?max_stderr_bytes
     ?max_tree_bytes ?max_total_tree_bytes ?max_blob_bytes ?max_total_blob_bytes
     ?max_tree_entries ?max_depth ?max_commit_bytes ?max_commit_parents
-    ?max_tag_bytes ?max_tag_name_bytes ?max_export_commits configuration =
+    ?max_tag_bytes ?max_tag_name_bytes ?max_export_commits ?max_archive_bytes
+    configuration =
   {
     git = Option.value ~default:configuration.git git;
     timeout_ms = Option.value ~default:configuration.timeout_ms timeout_ms;
@@ -209,6 +222,8 @@ let configuration_with ?git ?timeout_ms ?max_stdout_bytes ?max_stderr_bytes
       Option.value ~default:configuration.max_tag_name_bytes max_tag_name_bytes;
     max_export_commits =
       Option.value ~default:configuration.max_export_commits max_export_commits;
+    max_archive_bytes =
+      Option.value ~default:configuration.max_archive_bytes max_archive_bytes;
   }
 
 type error =
@@ -247,6 +262,7 @@ type error =
   | Mapping_error of string
   | Imported_transition_error of string
   | Imported_tag_error of string
+  | Archive_error of string
   | Store_error of Store.error
 
 let error_to_string = function
@@ -303,6 +319,7 @@ let error_to_string = function
   | Mapping_error detail -> "Git mapping error: " ^ detail
   | Imported_transition_error detail -> "imported transition error: " ^ detail
   | Imported_tag_error detail -> "imported tag error: " ^ detail
+  | Archive_error detail -> "Git archive error: " ^ detail
   | Store_error error -> Store.error_to_string error
 
 let inspection_bare inspection = inspection.bare
@@ -352,6 +369,7 @@ let validate_configuration configuration =
     || configuration.max_tag_bytes <= 0
     || configuration.max_tag_name_bytes <= 0
     || configuration.max_export_commits <= 0
+    || configuration.max_archive_bytes <= 0
   then Error (Invalid_configuration "Git import limits must be positive")
   else if configuration.max_blob_bytes > Store.max_object_bytes then
     Error
@@ -3847,6 +3865,637 @@ let export_revisions ?runner ?fail_at configuration ~store ~repository
       in
       let* exports = publish 0 [] emitted in
       Ok { revision_exports = exports; revision_export_target_ref = target_ref })
+
+let archive_domain = "yeokcham:git-archive:v1\000"
+let archive_binding_domain = "yeokcham:git-archive-binding:v1\000"
+
+let archive_error_of_encoding error =
+  Archive_error (Encoding.construction_error_to_string error)
+
+let archive_array values =
+  Encoding.array values |> Result.map_error archive_error_of_encoding
+
+let archive_bytes name = function
+  | Encoding.Bytes value -> Ok value
+  | Encoding.Integer _ | Encoding.Text _ | Encoding.Array _ | Encoding.Map _
+  | Encoding.Bool _ | Encoding.Null ->
+      Error (Archive_error (name ^ " must be bytes"))
+
+let archive_integer name = function
+  | Encoding.Integer value -> Ok value
+  | Encoding.Bytes _ | Encoding.Text _ | Encoding.Array _ | Encoding.Map _
+  | Encoding.Bool _ | Encoding.Null ->
+      Error (Archive_error (name ^ " must be an integer"))
+
+let archive_fields name length = function
+  | Encoding.Array values when List.length values = length -> Ok values
+  | Encoding.Array _ ->
+      Error
+        (Archive_error (Printf.sprintf "%s must contain %d values" name length))
+  | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _ | Encoding.Map _
+  | Encoding.Bool _ | Encoding.Null ->
+      Error (Archive_error (name ^ " must be an array"))
+
+let archive_raw_id name parser value =
+  let* raw = archive_bytes name value in
+  if String.length raw <> 32 then
+    Error
+      (Archive_error
+         (Printf.sprintf "%s must be exactly 32 bytes, got %d" name
+            (String.length raw)))
+  else
+    parser raw
+    |> Result.map_error (fun error ->
+        Archive_error (Id.parse_error_to_string error))
+
+let archive_stored_id name value =
+  let* raw = archive_bytes name value in
+  match Store.Stored_object_id.of_raw_bytes raw with
+  | Some identity -> Ok identity
+  | None ->
+      Error
+        (Archive_error
+           (Printf.sprintf "%s must be exactly 32 bytes, got %d" name
+              (String.length raw)))
+
+let archive_format_code = function Sha1 -> 1L | Sha256 -> 2L
+
+let archive_format_of_code = function
+  | 1L -> Ok Sha1
+  | 2L -> Ok Sha256
+  | value ->
+      Error
+        (Archive_error
+           (Printf.sprintf "unknown Git archive object format: %Ld" value))
+
+let archive_ref_value format reference =
+  if String.is_empty reference.archive_ref_name then
+    Error (Archive_error "Git archive ref name must not be empty")
+  else if
+    String.contains reference.archive_ref_name '\000'
+    || String.contains reference.archive_ref_name '\n'
+    || String.contains reference.archive_ref_name '\r'
+  then Error (Archive_error "Git archive ref name contains a forbidden byte")
+  else if reference.archive_ref_object.format <> format then
+    Error (Archive_error "Git archive ref has a different object format")
+  else
+    archive_array
+      [
+        Encoding.bytes reference.archive_ref_name;
+        Encoding.bytes reference.archive_ref_object.raw;
+      ]
+
+let archive_ref_values format references =
+  let rec loop previous reversed = function
+    | [] -> archive_array (List.rev reversed)
+    | reference :: rest ->
+        let* () =
+          match previous with
+          | None -> Ok ()
+          | Some previous
+            when String.compare previous reference.archive_ref_name < 0 ->
+              Ok ()
+          | Some _ ->
+              Error
+                (Archive_error
+                   "Git archive refs must be strictly bytewise ordered")
+        in
+        let* value = archive_ref_value format reference in
+        loop (Some reference.archive_ref_name) (value :: reversed) rest
+  in
+  loop None [] references
+
+let archive_identity_payload format references =
+  let* references = archive_ref_values format references in
+  archive_array
+    [
+      Encoding.integer 1L;
+      Encoding.integer (archive_format_code format);
+      references;
+    ]
+
+let derive_archive_id format references =
+  let* identity = archive_identity_payload format references in
+  let raw =
+    Hash.feed_string Hash.empty archive_domain |> fun context ->
+    Hash.feed_string context (Encoding.encode identity)
+    |> Hash.get |> Hash.to_raw_string
+  in
+  Id.Git_archive_id.of_bytes raw
+  |> Result.map_error (fun error ->
+      Archive_error (Id.parse_error_to_string error))
+
+let create_archive ~format ~bundle ~refs =
+  let* archive_identity = derive_archive_id format refs in
+  Ok
+    {
+      archive_version = 1;
+      archive_identity;
+      archive_format = format;
+      archive_content = bundle;
+      archive_ref_inventory = refs;
+    }
+
+let archive_payload archive =
+  let* refs =
+    archive_ref_values archive.archive_format archive.archive_ref_inventory
+  in
+  let* archive_identity =
+    archive_raw_id "Git archive ID" Id.Git_archive_id.of_bytes
+      (Encoding.bytes (Id.Git_archive_id.to_bytes archive.archive_identity))
+  in
+  let archive_identity =
+    Encoding.bytes (Id.Git_archive_id.to_bytes archive_identity)
+  in
+  let bundle =
+    Snapshot.Content.stored_object_id archive.archive_content
+    |> Store.Stored_object_id.to_raw_bytes |> Encoding.bytes
+  in
+  archive_array
+    [
+      Encoding.integer (Int64.of_int archive.archive_version);
+      archive_identity;
+      Encoding.integer (archive_format_code archive.archive_format);
+      bundle;
+      refs;
+    ]
+
+let archive_envelope archive =
+  let* payload = archive_payload archive in
+  Envelope.create ~object_type:Envelope.Git_archive
+    ~object_format_version:Envelope.current_object_format_version
+    ~mandatory_features:Envelope.supported_mandatory_features ~payload ()
+  |> Result.map_error (fun error ->
+      Archive_error (Envelope.creation_error_to_string error))
+
+let decode_archive_ref format value =
+  let* fields = archive_fields "Git archive ref" 2 value in
+  match fields with
+  | [ name; object_raw ] ->
+      let* archive_ref_name = archive_bytes "Git archive ref name" name in
+      let* raw = archive_bytes "Git archive ref object ID" object_raw in
+      let* archive_ref_object =
+        object_id_of_raw format raw
+        |> Result.map_error (fun error -> Archive_error (error_to_string error))
+      in
+      Ok { archive_ref_name; archive_ref_object }
+  | _ -> assert false
+
+let decode_archive_refs format value =
+  match value with
+  | Encoding.Array values ->
+      let rec loop reversed = function
+        | [] -> Ok (List.rev reversed)
+        | value :: rest ->
+            let* reference = decode_archive_ref format value in
+            loop (reference :: reversed) rest
+      in
+      loop [] values
+  | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _ | Encoding.Map _
+  | Encoding.Bool _ | Encoding.Null ->
+      Error (Archive_error "Git archive refs must be an array")
+
+let decode_archive_payload value =
+  let* fields = archive_fields "Git archive" 5 value in
+  match fields with
+  | [ version; supplied_id; format; bundle; refs ] ->
+      let* version = archive_integer "Git archive version" version in
+      if not (Int64.equal version 1L) then
+        Error
+          (Archive_error
+             (Printf.sprintf "unsupported Git archive version: %Ld" version))
+      else
+        let* supplied_id =
+          archive_raw_id "Git archive ID" Id.Git_archive_id.of_bytes supplied_id
+        in
+        let* format = archive_integer "Git archive object format" format in
+        let* format = archive_format_of_code format in
+        let* bundle =
+          archive_stored_id "Git archive bundle content ID" bundle
+        in
+        let* refs = decode_archive_refs format refs in
+        let* archive =
+          create_archive ~format
+            ~bundle:(Snapshot.Content.of_stored_object_id bundle)
+            ~refs
+        in
+        if not (Id.Git_archive_id.equal supplied_id archive.archive_identity)
+        then
+          Error
+            (Archive_error "Git archive logical ID does not match its preimage")
+        else
+          let* canonical = archive_payload archive in
+          if String.equal (Encoding.encode canonical) (Encoding.encode value)
+          then Ok archive
+          else Error (Archive_error "Git archive payload is noncanonical")
+  | _ -> assert false
+
+let archive_binding_body archive_identity physical =
+  archive_array
+    [
+      Encoding.integer 1L;
+      Encoding.bytes (Id.Git_archive_id.to_bytes archive_identity);
+      Encoding.bytes (Store.Stored_object_id.to_raw_bytes physical);
+    ]
+
+let archive_binding_checksum body =
+  Hash.feed_string Hash.empty archive_binding_domain |> fun context ->
+  Hash.feed_string context (Encoding.encode body)
+  |> Hash.get |> Hash.to_raw_string
+
+let encode_archive_binding archive_identity physical =
+  let* body = archive_binding_body archive_identity physical in
+  archive_array
+    [
+      Encoding.integer 1L;
+      Encoding.bytes (Id.Git_archive_id.to_bytes archive_identity);
+      Encoding.bytes (Store.Stored_object_id.to_raw_bytes physical);
+      Encoding.bytes (archive_binding_checksum body);
+    ]
+  |> Result.map Encoding.encode
+
+let decode_archive_binding bytes =
+  let* value =
+    Encoding.decode bytes
+    |> Result.map_error (fun error ->
+        Archive_error (Encoding.decode_error_to_string error))
+  in
+  let* fields = archive_fields "Git archive binding" 4 value in
+  match fields with
+  | [ version; archive_identity; physical; checksum ] ->
+      let* version = archive_integer "Git archive binding version" version in
+      if not (Int64.equal version 1L) then
+        Error
+          (Archive_error
+             (Printf.sprintf "unsupported Git archive binding version: %Ld"
+                version))
+      else
+        let* archive_identity =
+          archive_raw_id "Git archive binding ID" Id.Git_archive_id.of_bytes
+            archive_identity
+        in
+        let* physical =
+          archive_stored_id "Git archive binding object ID" physical
+        in
+        let* checksum = archive_bytes "Git archive binding checksum" checksum in
+        if String.length checksum <> 32 then
+          Error (Archive_error "Git archive binding checksum must be 32 bytes")
+        else
+          let* body = archive_binding_body archive_identity physical in
+          if not (String.equal checksum (archive_binding_checksum body)) then
+            Error (Archive_error "Git archive binding checksum mismatch")
+          else
+            let* canonical = encode_archive_binding archive_identity physical in
+            if String.equal canonical bytes then Ok (archive_identity, physical)
+            else Error (Archive_error "Git archive binding is noncanonical")
+  | _ -> assert false
+
+let archive_ref_components archive_identity =
+  [ "git-archives"; Id.Git_archive_id.to_hex archive_identity ]
+
+let load_archive_from_binding store archive_identity binding =
+  let* bound_identity, physical = decode_archive_binding binding in
+  if not (Id.Git_archive_id.equal bound_identity archive_identity) then
+    Error
+      (Archive_error "Git archive binding logical ID disagrees with its path")
+  else
+    let* envelope =
+      Store.get store physical
+      |> Result.map_error (fun error -> Store_error error)
+    in
+    if Envelope.object_type envelope <> Envelope.Git_archive then
+      Error
+        (Archive_error
+           (Printf.sprintf "expected Git archive object type 29, got %d"
+              (Envelope.object_type_code (Envelope.object_type envelope))))
+    else
+      let* archive = decode_archive_payload (Envelope.payload envelope) in
+      if not (Id.Git_archive_id.equal archive.archive_identity archive_identity)
+      then
+        Error (Archive_error "Git archive object ID disagrees with its binding")
+      else
+        Snapshot.Content.load store archive.archive_content
+        |> Result.map_error (fun error ->
+            Archive_error
+              ("Git archive bundle content is unavailable: "
+              ^ Snapshot.error_to_string error))
+        |> Result.map (fun _ -> archive)
+
+let load_archive store archive_identity =
+  let components = archive_ref_components archive_identity in
+  let* binding =
+    Store.Ref_file.read store ~components
+    |> Result.map_error (fun error -> Store_error error)
+  in
+  match binding with
+  | None -> Error (Archive_error "Git archive binding is absent")
+  | Some binding -> load_archive_from_binding store archive_identity binding
+
+let list_archives store =
+  let directory =
+    Filename.concat (Filename.concat (Store.root store) "refs") "git-archives"
+  in
+  try
+    let entries =
+      Sys.readdir directory |> Array.to_list |> List.sort String.compare
+    in
+    let rec loop reversed = function
+      | [] -> Ok (List.rev reversed)
+      | entry :: rest ->
+          let* archive_identity =
+            Id.Git_archive_id.of_hex entry
+            |> Result.map_error (fun error ->
+                Archive_error
+                  ("invalid Git archive binding filename: "
+                  ^ Id.parse_error_to_string error))
+          in
+          let* archive = load_archive store archive_identity in
+          loop (archive :: reversed) rest
+    in
+    loop [] entries
+  with
+  | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok []
+  | Sys_error message -> Error (Archive_error message)
+
+let publish_archive store archive =
+  let* envelope = archive_envelope archive in
+  let* physical =
+    Store.put store envelope
+    |> Result.map_error (fun error -> Store_error error)
+  in
+  let* binding = encode_archive_binding archive.archive_identity physical in
+  Store.with_lock store ~name:"git-archives"
+    ~on_error:(fun error -> Store_error error)
+    (fun () ->
+      let components = archive_ref_components archive.archive_identity in
+      let* current =
+        Store.Ref_file.read store ~components
+        |> Result.map_error (fun error -> Store_error error)
+      in
+      match current with
+      | None ->
+          Store.Ref_file.compare_and_swap store ~components ~expected:None
+            ~replacement:binding
+          |> Result.map_error (fun error -> Store_error error)
+          |> Result.map (fun () -> archive)
+      | Some current ->
+          load_archive_from_binding store archive.archive_identity current)
+
+let archive_refs_of_output format output =
+  let lines =
+    String.split_on_char '\n' output
+    |> List.filter (fun line -> not (String.is_empty line))
+  in
+  let rec loop reversed = function
+    | [] -> Ok (List.rev reversed)
+    | line :: rest -> (
+        match String.split_on_char '\000' line with
+        | [ archive_ref_name; object_hex ] ->
+            let* archive_ref_object =
+              object_id_of_hex format object_hex
+              |> Result.map_error (fun error ->
+                  Archive_error (error_to_string error))
+            in
+            loop ({ archive_ref_name; archive_ref_object } :: reversed) rest
+        | _ ->
+            Error
+              (Archive_error
+                 "Git ref inventory did not contain exactly one ref and object \
+                  ID"))
+  in
+  let* refs = loop [] lines in
+  if refs = [] then
+    Error (Archive_error "Git repository has no refs to archive")
+  else
+    let* _ = archive_ref_values format refs in
+    Ok refs
+
+let archive_refs_for_repository ?runner configuration executable repository
+    format =
+  let* output =
+    run ?runner configuration executable repository
+      ~operation:"archive-ref-inventory"
+      [
+        "--no-replace-objects";
+        "for-each-ref";
+        "--sort=refname";
+        "--format=%(refname)%00%(objectname)";
+      ]
+  in
+  archive_refs_of_output format output
+
+let archive_is_shallow ?runner configuration executable repository =
+  let* output =
+    run ?runner configuration executable repository
+      ~operation:"archive-is-shallow"
+      [ "rev-parse"; "--is-shallow-repository" ]
+  in
+  let* output = single_line ~operation:"archive-is-shallow" output in
+  parse_boolean ~operation:"archive-is-shallow" output
+
+let read_archive_bundle configuration path =
+  try
+    let size = (Unix.stat path).Unix.st_size in
+    if size < 0 || size > configuration.max_archive_bytes then
+      Error
+        (Archive_error
+           (Printf.sprintf "Git bundle exceeds archive limit (%d > %d)" size
+              configuration.max_archive_bytes))
+    else
+      In_channel.with_open_bin path (fun channel ->
+          let bytes = In_channel.input_all channel in
+          if String.length bytes <> size then
+            Error (Archive_error "Git bundle changed while being read")
+          else Ok bytes)
+  with
+  | Unix.Unix_error (error, operation, argument) ->
+      Error
+        (Archive_error
+           (Unix.error_message error ^ ": " ^ operation ^ " " ^ argument))
+  | Sys_error message -> Error (Archive_error message)
+
+let with_temporary_archive label run =
+  try
+    let path = Filename.temp_file ("yeokcham-git-" ^ label ^ "-") ".bundle" in
+    Fun.protect
+      ~finally:(fun () ->
+        try Unix.unlink path with Unix.Unix_error (Unix.ENOENT, _, _) -> ())
+      (fun () -> run path)
+  with
+  | Unix.Unix_error (error, operation, argument) ->
+      Error
+        (Archive_error
+           (Unix.error_message error ^ ": " ^ operation ^ " " ^ argument))
+  | Sys_error message -> Error (Archive_error message)
+
+let archive_repository ?runner configuration ~store ~repository =
+  let* configuration = validate_configuration configuration in
+  let* repository = validate_repository_path repository in
+  let* executable =
+    match executable_path configuration.git with
+    | Some executable -> Ok executable
+    | None -> Error (Git_missing configuration.git)
+  in
+  let* inspection = inspect ?runner configuration ~repository in
+  let* shallow =
+    archive_is_shallow ?runner configuration executable repository
+  in
+  if shallow then
+    Error (Archive_error "shallow Git repositories are not archivable")
+  else
+    let* before =
+      archive_refs_for_repository ?runner configuration executable repository
+        inspection.object_format
+    in
+    with_temporary_archive "archive" (fun path ->
+        let* () =
+          try
+            Unix.unlink path;
+            Ok ()
+          with Unix.Unix_error (error, operation, argument) ->
+            Error
+              (Archive_error
+                 (Unix.error_message error ^ ": " ^ operation ^ " " ^ argument))
+        in
+        let* _ =
+          run ?runner configuration executable repository
+            ~operation:"archive-bundle-create"
+            [ "--no-replace-objects"; "bundle"; "create"; path; "--all" ]
+        in
+        let* _ =
+          run ?runner configuration executable repository
+            ~operation:"archive-bundle-verify"
+            [ "bundle"; "verify"; path ]
+        in
+        let* after =
+          archive_refs_for_repository ?runner configuration executable
+            repository inspection.object_format
+        in
+        let same_inventory =
+          List.length before = List.length after
+          && List.for_all2
+               (fun left right ->
+                 String.equal left.archive_ref_name right.archive_ref_name
+                 && String.equal left.archive_ref_object.raw
+                      right.archive_ref_object.raw)
+               before after
+        in
+        if not same_inventory then
+          Error (Archive_error "Git refs changed while archive creation ran")
+        else
+          let* bundle = read_archive_bundle configuration path in
+          let* content =
+            Snapshot.Content.store store bundle
+            |> Result.map_error (fun error ->
+                Archive_error
+                  ("unable to store Git bundle content: "
+                  ^ Snapshot.error_to_string error))
+          in
+          let* archive =
+            create_archive ~format:inspection.object_format ~bundle:content
+              ~refs:before
+          in
+          publish_archive store archive)
+
+let validate_archive_destination destination =
+  if String.is_empty destination then
+    Error (Archive_error "destination is empty")
+  else if String.length destination > maximum_repository_path_bytes then
+    Error
+      (Archive_error
+         (Printf.sprintf "destination exceeds %d bytes"
+            maximum_repository_path_bytes))
+  else if String.contains destination '\000' then
+    Error (Archive_error "destination contains NUL")
+  else if Filename.is_relative destination then
+    Error (Archive_error "destination must be absolute")
+  else
+    try
+      let parent = Filename.dirname destination in
+      if (Unix.stat parent).Unix.st_kind <> Unix.S_DIR then
+        Error (Archive_error "destination parent is not a directory")
+      else
+        match (Unix.lstat destination).Unix.st_kind with
+        | Unix.S_DIR ->
+            if Array.length (Sys.readdir destination) = 0 then Ok destination
+            else Error (Archive_error "destination directory is not empty")
+        | Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO
+        | Unix.S_SOCK ->
+            Error (Archive_error "destination exists and is not a directory")
+    with
+    | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok destination
+    | Unix.Unix_error (error, operation, argument) ->
+        Error
+          (Archive_error
+             (Unix.error_message error ^ ": " ^ operation ^ " " ^ argument))
+    | Sys_error message -> Error (Archive_error message)
+
+let exit_archive ?runner configuration ~store ~archive ~destination =
+  let* configuration = validate_configuration configuration in
+  let* destination = validate_archive_destination destination in
+  let* archive = load_archive store archive in
+  let* executable =
+    match executable_path configuration.git with
+    | Some executable -> Ok executable
+    | None -> Error (Git_missing configuration.git)
+  in
+  let* bundle =
+    Snapshot.Content.load store archive.archive_content
+    |> Result.map_error (fun error ->
+        Archive_error
+          ("Git archive bundle content is unavailable: "
+          ^ Snapshot.error_to_string error))
+  in
+  with_temporary_archive "exit" (fun path ->
+      try
+        Out_channel.with_open_bin path (fun channel ->
+            Out_channel.output_string channel bundle);
+        let* _ =
+          run ?runner configuration executable (Filename.dirname path)
+            ~operation:"archive-exit-clone"
+            [ "clone"; "--mirror"; "--no-local"; path; destination ]
+        in
+        let* inspection =
+          inspect ?runner configuration ~repository:destination
+        in
+        if inspection.object_format <> archive.archive_format then
+          Error
+            (Archive_error
+               "reconstructed Git object format does not match archive")
+        else
+          let* _ =
+            run ?runner configuration executable destination
+              ~operation:"archive-exit-fsck" [ "fsck"; "--full" ]
+          in
+          let* refs =
+            archive_refs_for_repository ?runner configuration executable
+              destination archive.archive_format
+          in
+          let same_inventory =
+            List.length refs = List.length archive.archive_ref_inventory
+            && List.for_all2
+                 (fun left right ->
+                   String.equal left.archive_ref_name right.archive_ref_name
+                   && String.equal left.archive_ref_object.raw
+                        right.archive_ref_object.raw)
+                 refs archive.archive_ref_inventory
+          in
+          if same_inventory then Ok archive
+          else
+            Error
+              (Archive_error
+                 "reconstructed Git ref inventory does not match archive")
+      with
+      | Unix.Unix_error (error, operation, argument) ->
+          Error
+            (Archive_error
+               (Unix.error_message error ^ ": " ^ operation ^ " " ^ argument))
+      | Sys_error message -> Error (Archive_error message))
+
+let archive_id archive = archive.archive_identity
+let archive_object_format archive = archive.archive_format
+let archive_refs archive = archive.archive_ref_inventory
+let archive_bundle archive = archive.archive_content
 
 module Legacy_format = struct
   let create_imported_transition_v1 = create_imported_transition

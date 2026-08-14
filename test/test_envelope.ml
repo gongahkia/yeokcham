@@ -115,6 +115,7 @@ let object_type_codes () =
       (Envelope.Ref_event, 26);
       (Envelope.Device_identity, 27);
       (Envelope.Divergent_ref_set, 28);
+      (Envelope.Git_archive, 29);
     ]
   in
   List.iter
