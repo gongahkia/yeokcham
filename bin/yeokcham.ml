@@ -15,6 +15,7 @@ module Inspection = Yeokcham_inspection
 module Local_service = Yeokcham_local_service
 module Local_command = Yeokcham_local_command
 
+let ( let* ) = Result.bind
 let now () = Int64.of_float (Unix.gettimeofday ())
 
 let fail render error =
@@ -1756,6 +1757,84 @@ let show_git_archive archive =
       Printf.printf "ref=%s object=%s\n" reference.Git.archive_ref_name
         (Git.object_id_to_hex reference.Git.archive_ref_object))
 
+let empty_adoption_snapshot store =
+  let* tree =
+    Snapshot.Tree.create [] |> Result.map_error Snapshot.error_to_string
+  in
+  let* tree =
+    Snapshot.Tree.store store tree |> Result.map_error Snapshot.error_to_string
+  in
+  Snapshot.Snapshot.create ~root:tree
+  |> Snapshot.Snapshot.store store
+  |> Result.map_error Snapshot.error_to_string
+
+let detached_adoption_checkpoints store ~source ~target =
+  let source_checkpoint =
+    Scratch.Checkpoint.create_initial ~snapshot:source ~created_at:(now ())
+  in
+  let* source =
+    Scratch.Checkpoint.store store source_checkpoint
+    |> Result.map_error Scratch.error_to_string
+  in
+  let* source_snapshot =
+    Snapshot.Snapshot.load store (Scratch.Checkpoint.snapshot source_checkpoint)
+    |> Result.map_error Snapshot.error_to_string
+  in
+  let* target_snapshot =
+    Snapshot.Snapshot.load store target
+    |> Result.map_error Snapshot.error_to_string
+  in
+  let* source_state =
+    Scratch.State.of_snapshot store source_snapshot
+    |> Result.map_error Scratch.error_to_string
+  in
+  let* target_state =
+    Scratch.State.of_snapshot store target_snapshot
+    |> Result.map_error Scratch.error_to_string
+  in
+  let operations = Scratch.State.diff ~from:source_state ~to_:target_state in
+  let* replayed =
+    Scratch.State.apply source_state operations
+    |> Result.map_error Scratch.error_to_string
+  in
+  if not (Scratch.State.equal replayed target_state) then
+    Error "Git adoption checkpoint replay did not reach the selected commit"
+  else
+    let event =
+      Scratch.Event.create ~parent:source
+        ~base:(Scratch.Checkpoint.snapshot source_checkpoint)
+        ~resulting:target ~operations ~source:Scratch.Explicit
+        ~observed_at:(now ())
+    in
+    let* event =
+      Scratch.Event.store store event
+      |> Result.map_error Scratch.error_to_string
+    in
+    let target_checkpoint =
+      Scratch.Checkpoint.create ~parent:source ~event ~snapshot:target
+        ~created_at:(now ())
+    in
+    let* target =
+      Scratch.Checkpoint.store store target_checkpoint
+      |> Result.map_error Scratch.error_to_string
+    in
+    Ok (source, target)
+
+let print_git_adoption adoption =
+  Printf.printf
+    "adoption=%s archive=%s git-commit=%s mapping=%s capsule=%s revision=%s \
+     from=%s to=%s\n"
+    (Yeokcham_id.Git_adoption_id.to_hex (Git.adoption_id adoption))
+    (Yeokcham_id.Git_archive_id.to_hex (Git.adoption_archive adoption))
+    (Git.object_id_to_hex (Git.adoption_commit adoption))
+    (Yeokcham_id.Git_mapping_id.to_hex (Git.adoption_mapping adoption))
+    (Yeokcham_id.Capsule_id.to_hex (Git.adoption_capsule adoption))
+    (Yeokcham_id.Capsule_revision_id.to_hex (Git.adoption_revision adoption))
+    (Git.adoption_source adoption
+    |> Scratch.Checkpoint_id.stored_object_id |> Store.Stored_object_id.to_hex)
+    (Git.adoption_target adoption
+    |> Scratch.Checkpoint_id.stored_object_id |> Store.Stored_object_id.to_hex)
+
 let git root arguments =
   match arguments with
   | "archive" :: "create" :: options -> (
@@ -1807,6 +1886,171 @@ let git root arguments =
           with
           | Error error -> fail Git.error_to_string error
           | Ok archive -> print_git_archive archive))
+  | "archive" :: "adopt" :: archive :: options -> (
+      let rec parse commit parent root_adoption capsule title description =
+        function
+        | [] -> (
+            match
+              (commit, parent, root_adoption, capsule, title, description)
+            with
+            | ( Some commit,
+                Some parent,
+                false,
+                Some capsule,
+                Some title,
+                Some description ) ->
+                (commit, Some parent, capsule, title, description)
+            | ( Some commit,
+                None,
+                true,
+                Some capsule,
+                Some title,
+                Some description ) ->
+                (commit, None, capsule, title, description)
+            | _ -> exit 2)
+        | "--commit" :: value :: rest -> (
+            match commit with
+            | None ->
+                parse
+                  (Some (git_object_id value))
+                  parent root_adoption capsule title description rest
+            | Some _ -> exit 2)
+        | "--parent" :: value :: rest -> (
+            match parent with
+            | None when not root_adoption ->
+                parse commit
+                  (Some (git_object_id value))
+                  root_adoption capsule title description rest
+            | None | Some _ -> exit 2)
+        | "--root" :: rest when (not root_adoption) && Option.is_none parent ->
+            parse commit parent true capsule title description rest
+        | "--as-capsule" :: value :: rest -> (
+            match capsule with
+            | None ->
+                parse commit parent root_adoption
+                  (Some (capsule_id value))
+                  title description rest
+            | Some _ -> exit 2)
+        | "--title" :: value :: rest -> (
+            match title with
+            | None ->
+                parse commit parent root_adoption capsule (Some value)
+                  description rest
+            | Some _ -> exit 2)
+        | "--description" :: value :: rest -> (
+            match description with
+            | None ->
+                parse commit parent root_adoption capsule title (Some value)
+                  rest
+            | Some _ -> exit 2)
+        | _ -> exit 2
+      in
+      let commit, parent, capsule, title, description =
+        parse None None false None None None options
+      in
+      match Store.open_repository ~root with
+      | Error error -> fail Store.error_to_string error
+      | Ok store -> (
+          let archive = git_archive_id archive in
+          match
+            Git.import_archive_commit Git.default_configuration ~store ~archive
+              ~commit
+          with
+          | Error error -> fail Git.error_to_string error
+          | Ok imported -> (
+              let transition = imported.Git.imported_transition in
+              let parents = Git.imported_transition_parents transition in
+              let parent_import =
+                match parent with
+                | None ->
+                    if parents = [] then Ok None
+                    else
+                      Error
+                        "selected non-root Git commit requires one --parent \
+                         direct parent"
+                | Some parent ->
+                    if
+                      List.exists
+                        (fun candidate ->
+                          String.equal
+                            (Git.object_id_raw candidate)
+                            (Git.object_id_raw parent)
+                          && Git.object_id_format candidate
+                             = Git.object_id_format parent)
+                        parents
+                    then
+                      Git.import_archive_commit Git.default_configuration ~store
+                        ~archive ~commit:parent
+                      |> Result.map Option.some
+                      |> Result.map_error Git.error_to_string
+                    else
+                      Error
+                        "selected --parent is not a direct parent of the Git \
+                         commit"
+              in
+              match parent_import with
+              | Error error -> fail Fun.id error
+              | Ok parent_import -> (
+                  let source =
+                    match parent_import with
+                    | Some imported ->
+                        Ok
+                          (Git.imported_transition_snapshot
+                             imported.Git.imported_transition)
+                    | None -> empty_adoption_snapshot store
+                  in
+                  match source with
+                  | Error error -> fail Fun.id error
+                  | Ok source -> (
+                      let target =
+                        Git.imported_transition_snapshot transition
+                      in
+                      if Snapshot.Snapshot.equal_id source target then
+                        fail Fun.id
+                          "selected Git change has no byte-exact snapshot \
+                           delta; it remains preserved as foreign evidence"
+                      else
+                        match
+                          detached_adoption_checkpoints store ~source ~target
+                        with
+                        | Error error -> fail Fun.id error
+                        | Ok (source, target) -> (
+                            let scratch = Scratch.open_repository store in
+                            let timestamp = now () in
+                            match
+                              Capsule_store.Durable.create_from_checkpoints
+                                ~store ~scratch ~id:capsule ~title ~description
+                                ~dependencies:[] ~evidence:[] ~from:source
+                                ~target ~created_at:timestamp
+                                ~changed_at:timestamp ()
+                            with
+                            | Error error ->
+                                fail Capsule_store.error_to_string error
+                            | Ok resolved -> (
+                                let revision =
+                                  Capsule_store.Durable.resolved_revision
+                                    resolved
+                                in
+                                let parent_transition, parent_mapping =
+                                  match parent_import with
+                                  | None -> (None, None)
+                                  | Some imported ->
+                                      ( Some imported.Git.imported_transition,
+                                        Some imported.Git.commit_mapping )
+                                in
+                                match
+                                  Git.record_archive_adoption store ~archive
+                                    ~commit ~parent
+                                    ~transition:imported.Git.imported_transition
+                                    ~mapping:imported.Git.commit_mapping
+                                    ~parent_transition ~parent_mapping ~capsule
+                                    ~revision:
+                                      (Capsule_store.revision_id revision)
+                                    ~source ~target
+                                with
+                                | Error error -> fail Git.error_to_string error
+                                | Ok adoption -> print_git_adoption adoption))))
+              )))
   | [ "import"; "tree"; "--repository"; repository; "--tree"; tree ] -> (
       match Store.open_repository ~root with
       | Error error -> fail Store.error_to_string error

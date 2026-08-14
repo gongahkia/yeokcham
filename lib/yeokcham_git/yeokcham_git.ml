@@ -5,6 +5,7 @@ module Envelope = Yeokcham_envelope
 module Hash = Yeokcham_hash.Sha256
 module Id = Yeokcham_id
 module Release = Yeokcham_release
+module Scratch = Yeokcham_scratch
 module Snapshot = Yeokcham_snapshot
 module Store = Yeokcham_store
 
@@ -116,6 +117,22 @@ type archive = {
   archive_source_capability : archive_capability option;
   archive_content : Snapshot.Content.id;
   archive_ref_inventory : archive_ref list;
+}
+
+type adoption = {
+  adoption_identity : Id.Git_adoption_id.t;
+  adoption_archive : Id.Git_archive_id.t;
+  adoption_format : object_format;
+  adoption_commit : object_id;
+  adoption_parent : object_id option;
+  adoption_transition : Id.Imported_transition_id.t;
+  adoption_mapping : Id.Git_mapping_id.t;
+  adoption_parent_transition : Id.Imported_transition_id.t option;
+  adoption_parent_mapping : Id.Git_mapping_id.t option;
+  adoption_capsule : Id.Capsule_id.t;
+  adoption_revision : Id.Capsule_revision_id.t;
+  adoption_source : Scratch.Checkpoint_id.t;
+  adoption_target : Scratch.Checkpoint_id.t;
 }
 
 type git_identity = { git_identity_name : string; git_identity_email : string }
@@ -269,6 +286,7 @@ type error =
   | Imported_transition_error of string
   | Imported_tag_error of string
   | Archive_error of string
+  | Adoption_error of string
   | Store_error of Store.error
 
 let error_to_string = function
@@ -326,6 +344,7 @@ let error_to_string = function
   | Imported_transition_error detail -> "imported transition error: " ^ detail
   | Imported_tag_error detail -> "imported tag error: " ^ detail
   | Archive_error detail -> "Git archive error: " ^ detail
+  | Adoption_error detail -> "Git adoption error: " ^ detail
   | Store_error error -> Store.error_to_string error
 
 let inspection_bare inspection = inspection.bare
@@ -4651,6 +4670,680 @@ let archive_object_format archive = archive.archive_format
 let archive_refs archive = archive.archive_ref_inventory
 let archive_bundle archive = archive.archive_content
 let archive_capability archive = archive.archive_source_capability
+
+let with_temporary_archive_directory label run =
+  let rec remove path =
+    try
+      match (Unix.lstat path).Unix.st_kind with
+      | Unix.S_DIR ->
+          Sys.readdir path
+          |> Array.iter (fun name -> remove (Filename.concat path name));
+          Unix.rmdir path
+      | Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO
+      | Unix.S_SOCK ->
+          Unix.unlink path
+    with Unix.Unix_error (Unix.ENOENT, _, _) -> ()
+  in
+  try
+    let path = Filename.temp_file ("yeokcham-git-" ^ label ^ "-") "" in
+    Unix.unlink path;
+    Unix.mkdir path 0o700;
+    Fun.protect ~finally:(fun () -> remove path) (fun () -> run path)
+  with
+  | Unix.Unix_error (error, operation, argument) ->
+      Error
+        (Adoption_error
+           (Unix.error_message error ^ ": " ^ operation ^ " " ^ argument))
+  | Sys_error message -> Error (Adoption_error message)
+
+let import_archive_commit ?runner configuration ~store ~archive ~commit =
+  let* preserved = load_archive store archive in
+  if preserved.archive_format <> commit.format then
+    Error
+      (Adoption_error
+         "selected Git commit object format does not match the archive")
+  else
+    with_temporary_archive_directory "archive-adopt" (fun repository ->
+        let* _ =
+          exit_archive ?runner configuration ~store ~archive
+            ~destination:repository
+        in
+        import_commit ?runner configuration ~store ~repository ~commit)
+
+let adoption_domain = "yeokcham:git-adoption:v1\000"
+let adoption_binding_domain = "yeokcham:git-adoption-binding:v1\000"
+
+let adoption_error_of_encoding error =
+  Adoption_error (Encoding.construction_error_to_string error)
+
+let adoption_array values =
+  Encoding.array values |> Result.map_error adoption_error_of_encoding
+
+let adoption_bytes name = function
+  | Encoding.Bytes value -> Ok value
+  | Encoding.Integer _ | Encoding.Text _ | Encoding.Array _ | Encoding.Map _
+  | Encoding.Bool _ | Encoding.Null ->
+      Error (Adoption_error (name ^ " must be bytes"))
+
+let adoption_integer name = function
+  | Encoding.Integer value -> Ok value
+  | Encoding.Bytes _ | Encoding.Text _ | Encoding.Array _ | Encoding.Map _
+  | Encoding.Bool _ | Encoding.Null ->
+      Error (Adoption_error (name ^ " must be an integer"))
+
+let adoption_fields name length = function
+  | Encoding.Array values when List.length values = length -> Ok values
+  | Encoding.Array _ ->
+      Error
+        (Adoption_error (Printf.sprintf "%s must contain %d values" name length))
+  | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _ | Encoding.Map _
+  | Encoding.Bool _ | Encoding.Null ->
+      Error (Adoption_error (name ^ " must be an array"))
+
+let adoption_raw_id name parser value =
+  let* raw = adoption_bytes name value in
+  if String.length raw <> 32 then
+    Error
+      (Adoption_error
+         (Printf.sprintf "%s must be exactly 32 bytes, got %d" name
+            (String.length raw)))
+  else
+    parser raw
+    |> Result.map_error (fun error ->
+        Adoption_error (Id.parse_error_to_string error))
+
+let adoption_object_value format identity =
+  if identity.format <> format then
+    Error (Adoption_error "Git adoption object format disagrees with archive")
+  else Ok (Encoding.bytes identity.raw)
+
+let decode_adoption_object format name value =
+  let* raw = adoption_bytes name value in
+  object_id_of_raw format raw
+  |> Result.map_error (fun error -> Adoption_error (error_to_string error))
+
+let adoption_optional_object_value format = function
+  | None -> Ok Encoding.null
+  | Some identity -> adoption_object_value format identity
+
+let decode_adoption_optional_object format name = function
+  | Encoding.Null -> Ok None
+  | ( Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _ | Encoding.Array _
+    | Encoding.Map _ | Encoding.Bool _ ) as value ->
+      decode_adoption_object format name value |> Result.map Option.some
+
+let adoption_optional_id_value render = function
+  | None -> Ok Encoding.null
+  | Some identity -> Ok (Encoding.bytes (render identity))
+
+let decode_adoption_optional_id name parser = function
+  | Encoding.Null -> Ok None
+  | ( Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _ | Encoding.Array _
+    | Encoding.Map _ | Encoding.Bool _ ) as value ->
+      adoption_raw_id name parser value |> Result.map Option.some
+
+let adoption_identity_payload adoption =
+  let* commit =
+    adoption_object_value adoption.adoption_format adoption.adoption_commit
+  in
+  let* parent =
+    adoption_optional_object_value adoption.adoption_format
+      adoption.adoption_parent
+  in
+  let transition =
+    Encoding.bytes
+      (Id.Imported_transition_id.to_bytes adoption.adoption_transition)
+  in
+  let mapping =
+    Encoding.bytes (Id.Git_mapping_id.to_bytes adoption.adoption_mapping)
+  in
+  let* parent_transition =
+    adoption_optional_id_value Id.Imported_transition_id.to_bytes
+      adoption.adoption_parent_transition
+  in
+  let* parent_mapping =
+    adoption_optional_id_value Id.Git_mapping_id.to_bytes
+      adoption.adoption_parent_mapping
+  in
+  let capsule =
+    Encoding.bytes (Id.Capsule_id.to_bytes adoption.adoption_capsule)
+  in
+  let revision =
+    Encoding.bytes (Id.Capsule_revision_id.to_bytes adoption.adoption_revision)
+  in
+  let source =
+    Encoding.bytes
+      (Scratch.Checkpoint_id.stored_object_id adoption.adoption_source
+      |> Store.Stored_object_id.to_raw_bytes)
+  in
+  let target =
+    Encoding.bytes
+      (Scratch.Checkpoint_id.stored_object_id adoption.adoption_target
+      |> Store.Stored_object_id.to_raw_bytes)
+  in
+  adoption_array
+    [
+      Encoding.integer 1L;
+      Encoding.bytes (Id.Git_archive_id.to_bytes adoption.adoption_archive);
+      Encoding.integer (archive_format_code adoption.adoption_format);
+      commit;
+      parent;
+      transition;
+      mapping;
+      parent_transition;
+      parent_mapping;
+      capsule;
+      revision;
+      source;
+      target;
+    ]
+
+let derive_adoption_id adoption =
+  let* identity = adoption_identity_payload adoption in
+  let raw =
+    Hash.feed_string Hash.empty adoption_domain |> fun context ->
+    Hash.feed_string context (Encoding.encode identity)
+    |> Hash.get |> Hash.to_raw_string
+  in
+  Id.Git_adoption_id.of_bytes raw
+  |> Result.map_error (fun error ->
+      Adoption_error (Id.parse_error_to_string error))
+
+let make_adoption ~archive ~format ~commit ~parent ~transition ~mapping
+    ~parent_transition ~parent_mapping ~capsule ~revision ~source ~target =
+  let provisional =
+    {
+      adoption_identity =
+        Id.Git_adoption_id.of_bytes (String.make 32 '\000') |> Result.get_ok;
+      adoption_archive = archive;
+      adoption_format = format;
+      adoption_commit = commit;
+      adoption_parent = parent;
+      adoption_transition = transition;
+      adoption_mapping = mapping;
+      adoption_parent_transition = parent_transition;
+      adoption_parent_mapping = parent_mapping;
+      adoption_capsule = capsule;
+      adoption_revision = revision;
+      adoption_source = source;
+      adoption_target = target;
+    }
+  in
+  let* adoption_identity = derive_adoption_id provisional in
+  Ok { provisional with adoption_identity }
+
+let adoption_payload adoption =
+  let* identity = adoption_identity_payload adoption in
+  let supplied_id =
+    Encoding.bytes (Id.Git_adoption_id.to_bytes adoption.adoption_identity)
+  in
+  match identity with
+  | Encoding.Array (_ :: rest) ->
+      adoption_array (Encoding.integer 1L :: supplied_id :: rest)
+  | Encoding.Array [] -> assert false
+  | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _ | Encoding.Map _
+  | Encoding.Bool _ | Encoding.Null ->
+      assert false
+
+let adoption_envelope adoption =
+  let* payload = adoption_payload adoption in
+  Envelope.create ~object_type:Envelope.Git_adoption
+    ~object_format_version:Envelope.current_object_format_version
+    ~mandatory_features:Envelope.supported_mandatory_features ~payload ()
+  |> Result.map_error (fun error ->
+      Adoption_error (Envelope.creation_error_to_string error))
+
+let checkpoint_id_of_adoption_value name value =
+  let* raw = adoption_bytes name value in
+  match Store.Stored_object_id.of_raw_bytes raw with
+  | Some identity -> Ok (Scratch.Checkpoint_id.of_stored_object_id identity)
+  | None ->
+      Error
+        (Adoption_error
+           (Printf.sprintf "%s must be exactly 32 bytes, got %d" name
+              (String.length raw)))
+
+let decode_adoption_payload value =
+  let* fields = adoption_fields "Git adoption" 14 value in
+  match fields with
+  | [
+   version;
+   supplied_id;
+   archive;
+   format;
+   commit;
+   parent;
+   transition;
+   mapping;
+   parent_transition;
+   parent_mapping;
+   capsule;
+   revision;
+   source;
+   target;
+  ] ->
+      let* version = adoption_integer "Git adoption version" version in
+      if not (Int64.equal version 1L) then
+        Error
+          (Adoption_error
+             (Printf.sprintf "unsupported Git adoption version: %Ld" version))
+      else
+        let* adoption_identity =
+          adoption_raw_id "Git adoption ID" Id.Git_adoption_id.of_bytes
+            supplied_id
+        in
+        let* adoption_archive =
+          adoption_raw_id "Git adoption archive ID" Id.Git_archive_id.of_bytes
+            archive
+        in
+        let* format = adoption_integer "Git adoption object format" format in
+        let* adoption_format =
+          match format with
+          | 1L -> Ok Sha1
+          | 2L -> Ok Sha256
+          | value ->
+              Error
+                (Adoption_error
+                   (Printf.sprintf "unknown Git adoption object format: %Ld"
+                      value))
+        in
+        let* adoption_commit =
+          decode_adoption_object adoption_format "Git adoption commit" commit
+        in
+        let* adoption_parent =
+          decode_adoption_optional_object adoption_format "Git adoption parent"
+            parent
+        in
+        let* adoption_transition =
+          adoption_raw_id "Git adoption transition ID"
+            Id.Imported_transition_id.of_bytes transition
+        in
+        let* adoption_mapping =
+          adoption_raw_id "Git adoption mapping ID" Id.Git_mapping_id.of_bytes
+            mapping
+        in
+        let* adoption_parent_transition =
+          decode_adoption_optional_id "Git adoption parent transition ID"
+            Id.Imported_transition_id.of_bytes parent_transition
+        in
+        let* adoption_parent_mapping =
+          decode_adoption_optional_id "Git adoption parent mapping ID"
+            Id.Git_mapping_id.of_bytes parent_mapping
+        in
+        let* adoption_capsule =
+          adoption_raw_id "Git adoption capsule ID" Id.Capsule_id.of_bytes
+            capsule
+        in
+        let* adoption_revision =
+          adoption_raw_id "Git adoption revision ID"
+            Id.Capsule_revision_id.of_bytes revision
+        in
+        let* adoption_source =
+          checkpoint_id_of_adoption_value "Git adoption source checkpoint"
+            source
+        in
+        let* adoption_target =
+          checkpoint_id_of_adoption_value "Git adoption target checkpoint"
+            target
+        in
+        let* adoption =
+          make_adoption ~archive:adoption_archive ~format:adoption_format
+            ~commit:adoption_commit ~parent:adoption_parent
+            ~transition:adoption_transition ~mapping:adoption_mapping
+            ~parent_transition:adoption_parent_transition
+            ~parent_mapping:adoption_parent_mapping ~capsule:adoption_capsule
+            ~revision:adoption_revision ~source:adoption_source
+            ~target:adoption_target
+        in
+        if
+          not
+            (Id.Git_adoption_id.equal adoption_identity
+               adoption.adoption_identity)
+        then
+          Error
+            (Adoption_error
+               "Git adoption logical ID does not match its preimage")
+        else
+          let* canonical = adoption_payload adoption in
+          if String.equal (Encoding.encode canonical) (Encoding.encode value)
+          then Ok adoption
+          else Error (Adoption_error "Git adoption payload is noncanonical")
+  | _ -> assert false
+
+let adoption_binding_body adoption_identity physical =
+  adoption_array
+    [
+      Encoding.integer 1L;
+      Encoding.bytes (Id.Git_adoption_id.to_bytes adoption_identity);
+      Encoding.bytes (Store.Stored_object_id.to_raw_bytes physical);
+    ]
+
+let adoption_binding_checksum body =
+  Hash.feed_string Hash.empty adoption_binding_domain |> fun context ->
+  Hash.feed_string context (Encoding.encode body)
+  |> Hash.get |> Hash.to_raw_string
+
+let encode_adoption_binding adoption_identity physical =
+  let* body = adoption_binding_body adoption_identity physical in
+  adoption_array
+    [
+      Encoding.integer 1L;
+      Encoding.bytes (Id.Git_adoption_id.to_bytes adoption_identity);
+      Encoding.bytes (Store.Stored_object_id.to_raw_bytes physical);
+      Encoding.bytes (adoption_binding_checksum body);
+    ]
+  |> Result.map Encoding.encode
+
+let decode_adoption_binding bytes =
+  let* value =
+    Encoding.decode bytes
+    |> Result.map_error (fun error ->
+        Adoption_error (Encoding.decode_error_to_string error))
+  in
+  let* fields = adoption_fields "Git adoption binding" 4 value in
+  match fields with
+  | [ version; adoption_identity; physical; checksum ] ->
+      let* version = adoption_integer "Git adoption binding version" version in
+      if not (Int64.equal version 1L) then
+        Error
+          (Adoption_error
+             (Printf.sprintf "unsupported Git adoption binding version: %Ld"
+                version))
+      else
+        let* adoption_identity =
+          adoption_raw_id "Git adoption binding ID" Id.Git_adoption_id.of_bytes
+            adoption_identity
+        in
+        let* physical_raw =
+          adoption_bytes "Git adoption binding object ID" physical
+        in
+        let* physical =
+          match Store.Stored_object_id.of_raw_bytes physical_raw with
+          | Some identity -> Ok identity
+          | None ->
+              Error
+                (Adoption_error
+                   "Git adoption binding object ID must be exactly 32 bytes")
+        in
+        let* checksum =
+          adoption_bytes "Git adoption binding checksum" checksum
+        in
+        if String.length checksum <> 32 then
+          Error
+            (Adoption_error "Git adoption binding checksum must be 32 bytes")
+        else
+          let* body = adoption_binding_body adoption_identity physical in
+          if not (String.equal checksum (adoption_binding_checksum body)) then
+            Error (Adoption_error "Git adoption binding checksum mismatch")
+          else
+            let* canonical =
+              encode_adoption_binding adoption_identity physical
+            in
+            if String.equal canonical bytes then Ok (adoption_identity, physical)
+            else Error (Adoption_error "Git adoption binding is noncanonical")
+  | _ -> assert false
+
+let adoption_ref_components adoption_identity =
+  [ "git-adoptions"; Id.Git_adoption_id.to_hex adoption_identity ]
+
+let mapping_matches_transition mapping transition commit =
+  mapping.direction = Import && mapping.git_kind = Commit
+  && object_id_equal mapping.git_object commit
+  &&
+  match mapping.subject with
+  | Imported_transition { transition = identity; _ } ->
+      Id.Imported_transition_id.equal identity transition
+  | Imported_snapshot _ | Imported_tag _ | Imported_revision _
+  | Exported_release _ | Exported_revision _ ->
+      false
+
+let checkpoint_snapshot store checkpoint =
+  Scratch.Checkpoint.load store checkpoint
+  |> Result.map (fun checkpoint -> Scratch.Checkpoint.snapshot checkpoint)
+  |> Result.map_error (fun error ->
+      Adoption_error (Scratch.error_to_string error))
+
+let snapshot_is_empty store snapshot =
+  let* snapshot =
+    Snapshot.Snapshot.load store snapshot
+    |> Result.map_error (fun error ->
+        Adoption_error (Snapshot.error_to_string error))
+  in
+  Snapshot.Tree.load store (Snapshot.Snapshot.root snapshot)
+  |> Result.map (fun tree -> Snapshot.Tree.entries tree = [])
+  |> Result.map_error (fun error ->
+      Adoption_error (Snapshot.error_to_string error))
+
+let adoption_revision store capsule revision =
+  let* revisions =
+    Capsule_store.Durable.history store capsule
+    |> Result.map_error (fun error ->
+        Adoption_error (Capsule_store.error_to_string error))
+  in
+  match
+    List.find_opt
+      (fun candidate ->
+        Id.Capsule_revision_id.equal
+          (Capsule_store.revision_id candidate)
+          revision)
+      revisions
+  with
+  | Some revision -> Ok revision
+  | None -> Error (Adoption_error "adoption capsule revision is absent")
+
+let validate_adoption store adoption =
+  let* archive = load_archive store adoption.adoption_archive in
+  if archive.archive_format <> adoption.adoption_format then
+    Error
+      (Adoption_error "adoption archive object format disagrees with receipt")
+  else
+    let* transition =
+      load_imported_transition store adoption.adoption_transition
+      |> Result.map_error (fun error -> Adoption_error (error_to_string error))
+    in
+    if
+      not
+        (object_id_equal transition.transition_commit adoption.adoption_commit)
+    then
+      Error (Adoption_error "adoption transition commit disagrees with receipt")
+    else
+      let* mapping =
+        load_mapping store adoption.adoption_mapping
+        |> Result.map_error (fun error ->
+            Adoption_error (error_to_string error))
+      in
+      if
+        not
+          (mapping_matches_transition mapping adoption.adoption_transition
+             adoption.adoption_commit)
+      then
+        Error (Adoption_error "adoption mapping does not name its transition")
+      else
+        let* source_snapshot =
+          checkpoint_snapshot store adoption.adoption_source
+        in
+        let* target_snapshot =
+          checkpoint_snapshot store adoption.adoption_target
+        in
+        if
+          not
+            (Snapshot.Snapshot.equal_id target_snapshot
+               transition.transition_snapshot)
+        then
+          Error
+            (Adoption_error "adoption target checkpoint disagrees with commit")
+        else
+          let* () =
+            match
+              ( adoption.adoption_parent,
+                adoption.adoption_parent_transition,
+                adoption.adoption_parent_mapping )
+            with
+            | None, None, None ->
+                if transition.transition_parents <> [] then
+                  Error
+                    (Adoption_error
+                       "non-root adoption must name one direct Git parent")
+                else
+                  let* empty = snapshot_is_empty store source_snapshot in
+                  if empty then Ok ()
+                  else
+                    Error
+                      (Adoption_error
+                         "root adoption source checkpoint must be empty")
+            | Some parent, Some parent_transition, Some parent_mapping ->
+                if
+                  not
+                    (List.exists (object_id_equal parent)
+                       transition.transition_parents)
+                then
+                  Error
+                    (Adoption_error
+                       "adoption parent is not a direct parent of the commit")
+                else
+                  let* imported_parent =
+                    load_imported_transition store parent_transition
+                    |> Result.map_error (fun error ->
+                        Adoption_error (error_to_string error))
+                  in
+                  if
+                    not
+                      (object_id_equal imported_parent.transition_commit parent)
+                  then
+                    Error
+                      (Adoption_error
+                         "adoption parent transition disagrees with parent")
+                  else if
+                    not
+                      (Snapshot.Snapshot.equal_id source_snapshot
+                         imported_parent.transition_snapshot)
+                  then
+                    Error
+                      (Adoption_error
+                         "adoption source checkpoint disagrees with parent")
+                  else
+                    let* mapping =
+                      load_mapping store parent_mapping
+                      |> Result.map_error (fun error ->
+                          Adoption_error (error_to_string error))
+                    in
+                    if
+                      mapping_matches_transition mapping parent_transition
+                        parent
+                    then Ok ()
+                    else
+                      Error
+                        (Adoption_error
+                           "adoption parent mapping does not name its \
+                            transition")
+            | None, Some _, Some _
+            | Some _, None, _
+            | Some _, _, None
+            | None, Some _, None
+            | None, None, Some _ ->
+                Error
+                  (Adoption_error
+                     "adoption parent, transition, and mapping must appear \
+                      together")
+          in
+          let* revision =
+            adoption_revision store adoption.adoption_capsule
+              adoption.adoption_revision
+          in
+          if
+            List.exists
+              (fun boundary ->
+                Scratch.Checkpoint_id.equal boundary.Capsule_store.source
+                  adoption.adoption_source
+                && Scratch.Checkpoint_id.equal boundary.Capsule_store.target
+                     adoption.adoption_target)
+              (Capsule_store.revision_boundaries revision)
+          then Ok adoption
+          else
+            Error
+              (Adoption_error
+                 "adoption capsule revision does not retain its checkpoint \
+                  boundary")
+
+let load_adoption_from_binding store adoption_identity binding =
+  let* bound_identity, physical = decode_adoption_binding binding in
+  if not (Id.Git_adoption_id.equal bound_identity adoption_identity) then
+    Error
+      (Adoption_error "Git adoption binding logical ID disagrees with its path")
+  else
+    let* envelope =
+      Store.get store physical
+      |> Result.map_error (fun error -> Store_error error)
+    in
+    if Envelope.object_type envelope <> Envelope.Git_adoption then
+      Error
+        (Adoption_error
+           (Printf.sprintf "expected Git adoption object type 30, got %d"
+              (Envelope.object_type_code (Envelope.object_type envelope))))
+    else
+      let* adoption = decode_adoption_payload (Envelope.payload envelope) in
+      if
+        not
+          (Id.Git_adoption_id.equal adoption.adoption_identity adoption_identity)
+      then
+        Error
+          (Adoption_error "Git adoption object ID disagrees with its binding")
+      else validate_adoption store adoption
+
+let load_adoption store adoption_identity =
+  let* binding =
+    Store.Ref_file.read store
+      ~components:(adoption_ref_components adoption_identity)
+    |> Result.map_error (fun error -> Store_error error)
+  in
+  match binding with
+  | None -> Error (Adoption_error "Git adoption binding is absent")
+  | Some binding -> load_adoption_from_binding store adoption_identity binding
+
+let record_archive_adoption store ~archive ~commit ~parent ~transition ~mapping
+    ~parent_transition ~parent_mapping ~capsule ~revision ~source ~target =
+  let* preserved = load_archive store archive in
+  let* adoption =
+    make_adoption ~archive ~format:preserved.archive_format ~commit ~parent
+      ~transition:(imported_transition_id transition)
+      ~mapping:(mapping_id mapping)
+      ~parent_transition:(Option.map imported_transition_id parent_transition)
+      ~parent_mapping:(Option.map mapping_id parent_mapping)
+      ~capsule ~revision ~source ~target
+  in
+  let* () = validate_adoption store adoption |> Result.map (fun _ -> ()) in
+  let* envelope = adoption_envelope adoption in
+  let* physical =
+    Store.put store envelope
+    |> Result.map_error (fun error -> Store_error error)
+  in
+  let* binding = encode_adoption_binding adoption.adoption_identity physical in
+  Store.with_lock store ~name:"git-adoptions"
+    ~on_error:(fun error -> Store_error error)
+    (fun () ->
+      let components = adoption_ref_components adoption.adoption_identity in
+      let* current =
+        Store.Ref_file.read store ~components
+        |> Result.map_error (fun error -> Store_error error)
+      in
+      match current with
+      | None ->
+          Store.Ref_file.compare_and_swap store ~components ~expected:None
+            ~replacement:binding
+          |> Result.map_error (fun error -> Store_error error)
+          |> Result.map (fun () -> adoption)
+      | Some current ->
+          load_adoption_from_binding store adoption.adoption_identity current)
+
+let adoption_id adoption = adoption.adoption_identity
+let adoption_archive adoption = adoption.adoption_archive
+let adoption_commit adoption = adoption.adoption_commit
+let adoption_parent adoption = adoption.adoption_parent
+let adoption_mapping adoption = adoption.adoption_mapping
+let adoption_capsule adoption = adoption.adoption_capsule
+let adoption_revision adoption = adoption.adoption_revision
+let adoption_source adoption = adoption.adoption_source
+let adoption_target adoption = adoption.adoption_target
 
 module Legacy_format = struct
   let create_imported_transition_v1 = create_imported_transition

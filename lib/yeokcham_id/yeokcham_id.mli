@@ -37,3 +37,4 @@ module Imported_transition_id : S
 module Imported_tag_id : S
 module Ref_event_id : S
 module Git_archive_id : S
+module Git_adoption_id : S

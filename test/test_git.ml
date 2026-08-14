@@ -3160,6 +3160,155 @@ let archive_selection_is_exact_and_rejects_before_publication () =
         (List.length
            (Git.list_archives empty_store |> require_ok Git.error_to_string)))
 
+let detached_adoption_checkpoints store ~source ~target =
+  let source_checkpoint =
+    Scratch.Checkpoint.create_initial ~snapshot:source ~created_at:0L
+  in
+  let source =
+    Scratch.Checkpoint.store store source_checkpoint
+    |> require_ok Scratch.error_to_string
+  in
+  let source_snapshot =
+    Snapshot.Snapshot.load store (Scratch.Checkpoint.snapshot source_checkpoint)
+    |> require_ok Snapshot.error_to_string
+  in
+  let target_snapshot =
+    Snapshot.Snapshot.load store target |> require_ok Snapshot.error_to_string
+  in
+  let source_state =
+    Scratch.State.of_snapshot store source_snapshot
+    |> require_ok Scratch.error_to_string
+  in
+  let target_state =
+    Scratch.State.of_snapshot store target_snapshot
+    |> require_ok Scratch.error_to_string
+  in
+  let operations = Scratch.State.diff ~from:source_state ~to_:target_state in
+  let replayed =
+    Scratch.State.apply source_state operations
+    |> require_ok Scratch.error_to_string
+  in
+  Alcotest.(check bool)
+    "adoption checkpoint replay is exact" true
+    (Scratch.State.equal replayed target_state);
+  let event =
+    Scratch.Event.create ~parent:source
+      ~base:(Scratch.Checkpoint.snapshot source_checkpoint)
+      ~resulting:target ~operations ~source:Scratch.Explicit ~observed_at:0L
+  in
+  let event =
+    Scratch.Event.store store event |> require_ok Scratch.error_to_string
+  in
+  let target =
+    Scratch.Checkpoint.create ~parent:source ~event ~snapshot:target
+      ~created_at:0L
+    |> Scratch.Checkpoint.store store
+    |> require_ok Scratch.error_to_string
+  in
+  (source, target)
+
+let archive_adoption_is_explicit_and_durable () =
+  commit_fixture (fun repository store format commit parents ->
+      let archive =
+        Git.archive_repository Git.default_configuration ~store ~repository
+        |> require_ok Git.error_to_string
+      in
+      let imported =
+        Git.import_archive_commit Git.default_configuration ~store
+          ~archive:(Git.archive_id archive) ~commit
+        |> require_ok Git.error_to_string
+      in
+      let parent =
+        match parents with
+        | parent :: _ ->
+            Git.object_id_of_hex format parent |> require_ok Git.error_to_string
+        | [] -> Alcotest.fail "merge fixture did not provide a parent"
+      in
+      let imported_parent =
+        Git.import_archive_commit Git.default_configuration ~store
+          ~archive:(Git.archive_id archive) ~commit:parent
+        |> require_ok Git.error_to_string
+      in
+      let source, target =
+        detached_adoption_checkpoints store
+          ~source:
+            (Git.imported_transition_snapshot
+               imported_parent.Git.imported_transition)
+          ~target:
+            (Git.imported_transition_snapshot imported.Git.imported_transition)
+      in
+      let capsule = export_capsule_id 91 in
+      let scratch = Scratch.open_repository store in
+      let resolved =
+        Capsule_store.Durable.create_from_checkpoints ~store ~scratch
+          ~id:capsule ~title:"adopted Git change"
+          ~description:"chosen merge parent delta" ~dependencies:[] ~evidence:[]
+          ~from:source ~target ~created_at:0L ~changed_at:0L ()
+        |> require_ok Capsule_store.error_to_string
+      in
+      let revision =
+        Capsule_store.Durable.resolved_revision resolved
+        |> Capsule_store.revision_id
+      in
+      let adoption =
+        Git.record_archive_adoption store ~archive:(Git.archive_id archive)
+          ~commit ~parent:(Some parent)
+          ~transition:imported.Git.imported_transition
+          ~mapping:imported.Git.commit_mapping
+          ~parent_transition:(Some imported_parent.Git.imported_transition)
+          ~parent_mapping:(Some imported_parent.Git.commit_mapping) ~capsule
+          ~revision ~source ~target
+        |> require_ok Git.error_to_string
+      in
+      let reopened =
+        Git.load_adoption store (Git.adoption_id adoption)
+        |> require_ok Git.error_to_string
+      in
+      Alcotest.(check bool)
+        "adoption retains its archive" true
+        (Id.Git_archive_id.equal
+           (Git.adoption_archive reopened)
+           (Git.archive_id archive));
+      Alcotest.(check string)
+        "adoption retains selected commit"
+        (Git.object_id_to_hex commit)
+        (Git.object_id_to_hex (Git.adoption_commit reopened));
+      Alcotest.(check string)
+        "adoption retains selected parent"
+        (Git.object_id_to_hex parent)
+        (match Git.adoption_parent reopened with
+        | Some parent -> Git.object_id_to_hex parent
+        | None -> Alcotest.fail "adoption lost selected parent");
+      Git.record_archive_adoption store ~archive:(Git.archive_id archive)
+        ~commit ~parent:None ~transition:imported.Git.imported_transition
+        ~mapping:imported.Git.commit_mapping ~parent_transition:None
+        ~parent_mapping:None ~capsule ~revision ~source ~target
+      |> Result.fold
+           ~ok:(fun _ -> Alcotest.fail "merge adoption accepted no parent")
+           ~error:(fun error ->
+             Alcotest.(check bool)
+               "missing merge parent has a structured error" true
+               (contains
+                  ~needle:"non-root adoption must name one direct Git parent"
+                  (Git.error_to_string error)));
+      let components =
+        [
+          "git-adoptions"; Id.Git_adoption_id.to_hex (Git.adoption_id adoption);
+        ]
+      in
+      let binding = binding_bytes store components in
+      Store.Ref_file.compare_and_swap store ~components ~expected:(Some binding)
+        ~replacement:"corrupt"
+      |> require_ok Store.error_to_string;
+      Git.load_adoption store (Git.adoption_id adoption)
+      |> Result.fold
+           ~ok:(fun _ -> Alcotest.fail "corrupt adoption binding was accepted")
+           ~error:(fun error ->
+             Alcotest.(check bool)
+               "corrupt adoption has a structured error" true
+               (contains ~needle:"Git adoption error"
+                  (Git.error_to_string error))))
+
 let rejects_corrupt_mapping_binding () =
   import_fixture (fun repository store tree ->
       let imported =
@@ -3267,6 +3416,8 @@ let () =
           Alcotest.test_case
             "archive selection is exact and rejects before publication" `Quick
             archive_selection_is_exact_and_rejects_before_publication;
+          Alcotest.test_case "archive adoption is explicit and durable" `Quick
+            archive_adoption_is_explicit_and_durable;
           Alcotest.test_case "corrupt mapping binding rejects" `Quick
             rejects_corrupt_mapping_binding;
         ] );

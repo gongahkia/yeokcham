@@ -186,3 +186,4 @@ The ADR lifecycle, numbering rules, and template are defined in [`docs/adr/READM
 - [ADR-073 — Unix-first native VCS, Git migration, and direct peer exchange](docs/adr/073-unix-first-vcs-git-migration-and-peer-exchange.md) — Accepted.
 - [ADR-074 — Git archive preservation and exit](docs/adr/074-git-archive-preservation-and-exit.md) — Accepted.
 - [ADR-075 — Git archive selection and capability provenance](docs/adr/075-git-archive-selection-and-capability-provenance.md) — Accepted.
+- [ADR-076 — Explicit Git archive capsule adoption](docs/adr/076-explicit-git-archive-capsule-adoption.md) — Accepted.

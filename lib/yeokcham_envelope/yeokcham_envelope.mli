@@ -34,6 +34,7 @@ type object_type =
   | Device_identity
   | Divergent_ref_set
   | Git_archive
+  | Git_adoption
 
 val object_type_code : object_type -> int
 val object_type_of_code : int -> object_type option
