@@ -1004,9 +1004,11 @@ let plan repository ~snapshot ~snapshot_nonce ~ledger_nonce =
             let capability = Bootstrap_store.capability repository.bootstrap in
             let record = Bootstrap_store.bootstrap repository.bootstrap in
             let* snapshot_envelope =
-              Object_store.seal repository.objects ~nonce:snapshot_nonce
-                (Object.scratch_snapshot snapshot)
-              |> Result.map_error (fun error -> Object_store_error error)
+              Envelope.seal
+                ~key:(Bootstrap.envelope_key capability)
+                ~nonce:snapshot_nonce ~mandatory_features:0L
+                (Object.scratch_snapshot snapshot |> Object.encode)
+              |> Result.map_error (fun error -> Envelope_error error)
             in
             let snapshot_ref =
               Address.derive
@@ -1036,9 +1038,11 @@ let plan repository ~snapshot ~snapshot_nonce ~ledger_nonce =
               |> Result.map_error (fun error -> Ledger_error error)
             in
             let* ledger_envelope =
-              Object_store.seal repository.objects ~nonce:ledger_nonce
-                (Object.ledger_event event)
-              |> Result.map_error (fun error -> Object_store_error error)
+              Envelope.seal
+                ~key:(Bootstrap.envelope_key capability)
+                ~nonce:ledger_nonce ~mandatory_features:0L
+                (Object.ledger_event event |> Object.encode)
+              |> Result.map_error (fun error -> Envelope_error error)
             in
             Ok
               (Publish_plan
@@ -1107,8 +1111,11 @@ let ledger_candidate repository ~ref_name ~predecessor ~target ~nonce =
     |> Result.map_error (fun error -> Ledger_error error)
   in
   let* envelope =
-    Object_store.seal repository.objects ~nonce (Object.ledger_event event)
-    |> Result.map_error (fun error -> Object_store_error error)
+    Envelope.seal
+      ~key:(Bootstrap.envelope_key capability)
+      ~nonce ~mandatory_features:0L
+      (Object.ledger_event event |> Object.encode)
+    |> Result.map_error (fun error -> Envelope_error error)
   in
   Ok (Ledger.event_id event, envelope)
 
@@ -1274,10 +1281,11 @@ let plan_compaction repository ~policy ~nonces =
       let capability = Bootstrap_store.capability repository.bootstrap in
       let record = Bootstrap_store.bootstrap repository.bootstrap in
       let* generation_envelope =
-        Object_store.seal repository.objects
-          ~nonce:nonces.generation_manifest_nonce
-          (Object.scratch_generation generation)
-        |> Result.map_error (fun error -> Object_store_error error)
+        Envelope.seal
+          ~key:(Bootstrap.envelope_key capability)
+          ~nonce:nonces.generation_manifest_nonce ~mandatory_features:0L
+          (Object.scratch_generation generation |> Object.encode)
+        |> Result.map_error (fun error -> Envelope_error error)
       in
       let generation_object_ref =
         Address.derive
@@ -1620,9 +1628,11 @@ let plan_protection repository ~event_id ~action ~reason ~protection_nonce
     let capability = Bootstrap_store.capability repository.bootstrap in
     let record = Bootstrap_store.bootstrap repository.bootstrap in
     let* protection_envelope =
-      Object_store.seal repository.objects ~nonce:protection_nonce
-        (Object.scratch_protection protection_record)
-      |> Result.map_error (fun error -> Object_store_error error)
+      Envelope.seal
+        ~key:(Bootstrap.envelope_key capability)
+        ~nonce:protection_nonce ~mandatory_features:0L
+        (Object.scratch_protection protection_record |> Object.encode)
+      |> Result.map_error (fun error -> Envelope_error error)
     in
     let protection_object_ref =
       Address.derive
