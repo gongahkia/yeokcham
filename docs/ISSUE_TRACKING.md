@@ -22,11 +22,12 @@ begins.
 
 ## Active V3 programme
 
-The active product work is intentionally small and represented by four issues:
+The active product work is intentionally small and represented by the remaining
+three issues:
 
-- [#233](https://github.com/gongahkia/yeokcham/issues/233) — Unix local VCS core.
 - [#234](https://github.com/gongahkia/yeokcham/issues/234) — Git preservation,
-  adoption, and exit.
+  adoption, and exit. Preservation/exit is implemented; explicit native adoption
+  remains open.
 - [#235](https://github.com/gongahkia/yeokcham/issues/235) — direct peer
   repository exchange.
 - [#236](https://github.com/gongahkia/yeokcham/issues/236) — macOS/Linux CLI

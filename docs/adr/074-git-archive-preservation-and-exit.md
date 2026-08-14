@@ -53,6 +53,11 @@ preservation/exit promise.
 
 Use a self-contained Git bundle and an immutable `Git_archive_v1` record.
 
+ADR-075 extends new creation to `Git_archive_v2` for exact ref selection and
+source capability provenance. The V1 record and decoder remain valid for
+already-created archives; this decision continues to define the preservation
+and exit boundary for both versions.
+
 The importer inventories all selected Git refs with `--no-replace-objects`,
 rejects shallow repositories before publication, and creates a self-contained
 bundle for the same ref set. It stores the exact bundle bytes as ordinary

@@ -5,19 +5,28 @@ implemented M8 bridge only. It does not claim that a Git repository and a
 Yeokcham repository, commit, branch, capsule, workspace, or release are
 equivalent.
 
-## V3 migration commitment — not implemented yet
+## V3 archive preservation and exit
 
-ADR-073 extends this narrow bridge into a Git preservation, adoption, and exit
-workflow. It must preserve selected reachable Git objects and ref provenance as
-foreign archival evidence; require a user to choose any adoption into native
-Yeokcham concepts; and create a valid Git exit repository containing preserved
-history plus separately named Yeokcham exports. It must not infer that a Git
-commit is a capsule, flatten Git topology into native composition, or promise
-semantic round-trip equivalence.
+ADR-073–075 extend the narrow object bridge with a preservation and exit
+boundary. `yeokcham git archive create --repository <absolute-path>` preserves
+all visible refs by default; repeating `--ref <exact-ref-name>` preserves only
+the selected refs. Archive creation disables Git replace refs, rejects shallow
+sources and malformed or absent requested refs before publication, records the
+source's bare/non-bare and object-format capability report, stores a
+self-contained Git bundle as foreign content, and publishes an immutable
+archive binding.
 
-The current M8 behaviour below remains the only implemented contract until
-[#234](https://github.com/gongahkia/yeokcham/issues/234) has passed its
-acceptance and verification criteria.
+`yeokcham git archive list`, `show <archive-id>`, and
+`exit <archive-id> --destination <absolute-directory>` inspect or reconstruct
+that archive. Exit uses a new or empty destination, then requires `git fsck
+--full`, the original object format, and the exact selected ref inventory to
+match. It does not modify the source Yeokcham repository.
+
+Archive preservation is deliberately distinct from native adoption. The
+existing tree/commit/tag import commands may be run against an explicit exit
+repository to retain selected opaque object evidence; they do not infer a
+capsule, workspace, release, conflict resolution, or other user intent. A
+first-class archive-adoption transition remains part of [#234](https://github.com/gongahkia/yeokcham/issues/234), so the issue remains open.
 
 ## Evidence boundary
 
@@ -57,6 +66,7 @@ Default limits are part of the bridge contract:
 | Commit or tag bytes | 8 MiB each |
 | Commit parents / exported revisions | 4,096 / 4,096 |
 | Tag-name bytes | 1 KiB |
+| One Git archive bundle | 256 MiB |
 
 The adapter rejects empty, relative, NUL-containing, non-directory, or
 over-4-KiB repository paths. It returns typed errors for missing executables,
@@ -82,6 +92,9 @@ failure into a Yeokcham ref, release, capsule, workspace, or mapping update.
 - Every supported import/export publishes an ADR-028 mapping only after its
   typed source and Git object validate. The mapping is bridge evidence, not a
   repository-wide import/export guarantee.
+- An archive's V2 logical identity is the versioned source capability report and
+  bytewise-sorted selected ref inventory, not the physical pack representation.
+  V1 archive records remain readable but report no invented capability value.
 
 ## Yeokcham to Git export
 
@@ -124,6 +137,10 @@ No current round trip is an equivalence guarantee.
   topology, timestamps, signatures, metadata policy, or repository identity.
 - A mapping is bridge evidence in the Yeokcham repository. Losing that mapping
   loses the approved association even when the Git object still exists.
+- Archive to Git exit preserves the selected reachable Git object/ref graph and
+  validates it with Git. It does not preserve unreachable objects, a working
+  tree, index, configuration, reflogs, hooks, credentials, remote state, or
+  native Yeokcham semantics.
 
 The supported way to inspect an export is its reported Git ref, commit, and
 mapping ID. The supported way to recover Yeokcham semantics is the original
@@ -140,7 +157,8 @@ make property-test PROPERTY_TEST_SEED=17
 ```
 
 Focused fixtures cover the local preflight, supported tree/commit/tag import,
-release and linear-revision export, mapping reopen/corruption, create-only ref
-retry/collision, interruption, `git fsck --full`, and the shared final-byte
-oracle. These checks verify the stated bridge contract only; they do not claim
-full Git compatibility.
+release and linear-revision export, mapping reopen/corruption, archive V1/V2
+goldens, selected-ref archive creation, shallow/invalid/corrupt archive
+failures, reconstructed `git fsck --full`, and exact checkout bytes. Generated
+tests vary preserved file bytes and modes. These checks verify the stated bridge
+contract only; they do not claim full Git compatibility.
