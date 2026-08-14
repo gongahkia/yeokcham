@@ -3953,11 +3953,15 @@ let decode_archive_capability value =
   let* fields = archive_fields "Git archive capability" 2 value in
   match fields with
   | [ bare; object_format ] ->
-      let* archive_source_bare = archive_boolean "Git archive source bare flag" bare in
+      let* archive_source_bare =
+        archive_boolean "Git archive source bare flag" bare
+      in
       let* object_format =
         archive_integer "Git archive source object format" object_format
       in
-      let* archive_source_object_format = archive_format_of_code object_format in
+      let* archive_source_object_format =
+        archive_format_of_code object_format
+      in
       Ok { archive_source_bare; archive_source_object_format }
   | _ -> assert false
 
@@ -4008,26 +4012,30 @@ let archive_identity_payload version format capability references =
           Encoding.integer (archive_format_code format);
           references;
         ]
-  | 2, Some capability
-    when capability.archive_source_object_format = format ->
+  | 2, Some capability when capability.archive_source_object_format = format ->
       let* capability = archive_capability_value capability in
       archive_array [ Encoding.integer 2L; capability; references ]
   | 1, Some _ | 2, None | _, _ ->
       Error (Archive_error "invalid Git archive version and capability report")
 
 let derive_archive_id version format capability references =
-  let* identity = archive_identity_payload version format capability references in
-  let domain = match version with 1 -> archive_domain | 2 -> archive_v2_domain | _ -> "" in
-  if String.is_empty domain then Error (Archive_error "unsupported Git archive version")
-  else
-  let raw =
-    Hash.feed_string Hash.empty domain |> fun context ->
-    Hash.feed_string context (Encoding.encode identity)
-    |> Hash.get |> Hash.to_raw_string
+  let* identity =
+    archive_identity_payload version format capability references
   in
-  Id.Git_archive_id.of_bytes raw
-  |> Result.map_error (fun error ->
-      Archive_error (Id.parse_error_to_string error))
+  let domain =
+    match version with 1 -> archive_domain | 2 -> archive_v2_domain | _ -> ""
+  in
+  if String.is_empty domain then
+    Error (Archive_error "unsupported Git archive version")
+  else
+    let raw =
+      Hash.feed_string Hash.empty domain |> fun context ->
+      Hash.feed_string context (Encoding.encode identity)
+      |> Hash.get |> Hash.to_raw_string
+    in
+    Id.Git_archive_id.of_bytes raw
+    |> Result.map_error (fun error ->
+        Archive_error (Id.parse_error_to_string error))
 
 let create_archive ~version ~format ~capability ~bundle ~refs =
   let* archive_identity = derive_archive_id version format capability refs in
@@ -4388,8 +4396,7 @@ let select_archive_refs requested available =
           if
             String.is_empty name
             || String.contains name '\000'
-            || String.contains name '\n'
-            || String.contains name '\r'
+            || String.contains name '\n' || String.contains name '\r'
           then Error (Archive_error "requested Git ref name is malformed")
           else
             let* () =
@@ -4407,8 +4414,7 @@ let select_archive_refs requested available =
       | [], _ -> Ok (List.rev selected)
       | requested_name :: _, [] ->
           Error
-            (Archive_error
-               ("requested Git ref is absent: " ^ requested_name))
+            (Archive_error ("requested Git ref is absent: " ^ requested_name))
       | requested_name :: requested_rest, candidate :: available_rest ->
           let comparison =
             String.compare requested_name candidate.archive_ref_name
@@ -4417,8 +4423,7 @@ let select_archive_refs requested available =
             select (candidate :: selected) requested_rest available_rest
           else if comparison < 0 then
             Error
-              (Archive_error
-                 ("requested Git ref is absent: " ^ requested_name))
+              (Archive_error ("requested Git ref is absent: " ^ requested_name))
           else select selected requested available_rest
     in
     select [] requested available
@@ -4501,7 +4506,8 @@ let archive_repository ?runner ?(refs = []) configuration ~store ~repository =
           run ?runner configuration executable repository
             ~operation:"archive-bundle-create"
             ([ "--no-replace-objects"; "bundle"; "create"; path ]
-            @ if refs = [] then [ "--all" ] else List.map (fun ref -> ref) refs)
+            @ if refs = [] then [ "--all" ] else List.map (fun ref -> ref) refs
+            )
         in
         let* _ =
           run ?runner configuration executable repository
@@ -4541,8 +4547,7 @@ let archive_repository ?runner ?(refs = []) configuration ~store ~repository =
                      archive_source_bare = inspection.bare;
                      archive_source_object_format = inspection.object_format;
                    })
-              ~bundle:content
-              ~refs:before
+              ~bundle:content ~refs:before
           in
           publish_archive store archive)
 

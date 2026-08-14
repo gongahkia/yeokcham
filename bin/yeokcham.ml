@@ -1759,18 +1759,18 @@ let show_git_archive archive =
 let git root arguments =
   match arguments with
   | "archive" :: "create" :: options -> (
-      let rec parse repository refs = function
+      let rec parse repository_option refs = function
         | [] -> (
-            match repository with
+            match repository_option with
             | Some repository -> (repository, List.rev refs)
             | None -> exit 2)
         | "--repository" :: repository :: rest -> (
-            match repository with
-            | "" -> exit 2
-            | _ -> (
-                match refs with
-                | _ -> parse (Some repository) refs rest))
-        | "--ref" :: reference :: rest -> parse repository (reference :: refs) rest
+            match repository_option with
+            | None when not (String.is_empty repository) ->
+                parse (Some repository) refs rest
+            | None | Some _ -> exit 2)
+        | "--ref" :: reference :: rest ->
+            parse repository_option (reference :: refs) rest
         | _ -> exit 2
       in
       let repository, refs = parse None [] options in

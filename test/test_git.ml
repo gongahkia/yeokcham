@@ -2912,6 +2912,11 @@ let archives_and_exits_complete_git_history () =
       Alcotest.(check int)
         "archive inventory retains every source ref" (List.length source_refs)
         (List.length (Git.archive_refs first));
+      Alcotest.(check bool)
+        "archive retains the source bare capability" false
+        (match Git.archive_capability first with
+        | Some capability -> capability.Git.archive_source_bare
+        | None -> Alcotest.fail "new archive lost its capability report");
       let listed = Git.list_archives store |> require_ok Git.error_to_string in
       Alcotest.(check int)
         "one immutable archive is listed" 1 (List.length listed);
@@ -3007,16 +3012,65 @@ let archive_persistence_goldens_are_stable () =
       let archive_id = Git.archive_id archive in
       Alcotest.(check string)
         "canonical Git archive envelope"
-        (refreshed_golden "git-archive-v1.yeok.hex"
+        (refreshed_golden "git-archive-v2.yeok.hex"
            (archive_envelope_bytes store archive))
         (archive_envelope_bytes store archive);
       Alcotest.(check string)
         "canonical Git archive binding"
-        (refreshed_golden "git-archive-v1.ref.hex"
+        (refreshed_golden "git-archive-v2.ref.hex"
            (binding_bytes store
               [ "git-archives"; Id.Git_archive_id.to_hex archive_id ]))
         (binding_bytes store
-           [ "git-archives"; Id.Git_archive_id.to_hex archive_id ]))
+           [ "git-archives"; Id.Git_archive_id.to_hex archive_id ]);
+      let legacy_envelope =
+        refreshed_golden "git-archive-v1.yeok.hex" "unused"
+        |> Envelope.decode
+        |> require_ok Envelope.decode_error_to_string
+      in
+      let legacy_physical =
+        Store.put store legacy_envelope |> require_ok Store.error_to_string
+      in
+      let legacy_binding =
+        refreshed_golden "git-archive-v1.ref.hex" "unused"
+      in
+      let legacy_id =
+        match Encoding.decode legacy_binding with
+        | Ok
+            (Encoding.Array [ _; Encoding.Bytes id; Encoding.Bytes physical; _ ])
+          ->
+            let id =
+              Id.Git_archive_id.of_bytes id
+              |> require_ok Id.parse_error_to_string
+            in
+            let physical =
+              Store.Stored_object_id.of_raw_bytes physical
+              |> Option.value
+                   ~default:
+                     (Alcotest.fail
+                        "legacy archive binding has an invalid object ID")
+            in
+            Alcotest.(check bool)
+              "legacy binding names the fixture envelope" true
+              (Store.Stored_object_id.equal physical legacy_physical);
+            id
+        | Ok
+            ( Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _
+            | Encoding.Array _ | Encoding.Map _ | Encoding.Bool _
+            | Encoding.Null )
+        | Error _ ->
+            Alcotest.fail "legacy archive binding does not decode"
+      in
+      Store.Ref_file.compare_and_swap store
+        ~components:[ "git-archives"; Id.Git_archive_id.to_hex legacy_id ]
+        ~expected:None ~replacement:legacy_binding
+      |> require_ok Store.error_to_string;
+      let legacy =
+        Git.load_archive store legacy_id |> require_ok Git.error_to_string
+      in
+      Alcotest.(check (option bool))
+        "V1 archive retains no invented capability report" None
+        (Git.archive_capability legacy
+        |> Option.map (fun capability -> capability.Git.archive_source_bare)))
 
 let shallow_archive_rejects_before_publication () =
   commit_fixture (fun repository store _format _merge _parents ->
@@ -3037,6 +3091,66 @@ let shallow_archive_rejects_before_publication () =
         "shallow rejection publishes no archive" 0
         (List.length
            (Git.list_archives store |> require_ok Git.error_to_string)))
+
+let archive_selection_is_exact_and_rejects_before_publication () =
+  commit_fixture (fun repository store _format _merge _parents ->
+      let git = git_path () in
+      direct_process git [ "-C"; repository; "tag"; "selected-ref"; "HEAD" ];
+      let selected_ref = "refs/tags/selected-ref" in
+      let archive =
+        Git.archive_repository ~refs:[ selected_ref ] Git.default_configuration
+          ~store ~repository
+        |> require_ok Git.error_to_string
+      in
+      Alcotest.(check (list string))
+        "only the selected ref is retained" [ selected_ref ]
+        (Git.archive_refs archive
+        |> List.map (fun reference -> reference.Git.archive_ref_name));
+      let destination =
+        Filename.concat (Filename.dirname repository) "selected.git"
+      in
+      Git.exit_archive Git.default_configuration ~store
+        ~archive:(Git.archive_id archive) ~destination
+      |> require_ok Git.error_to_string
+      |> ignore;
+      Alcotest.(check (list string))
+        "exit contains only the selected ref" [ selected_ref ]
+        (ref_inventory git destination
+        |> List.map (fun line ->
+            match String.split_on_char ' ' line with
+            | name :: _ -> name
+            | [] -> Alcotest.fail "Git ref inventory line was empty"));
+      let empty_store_root =
+        Filename.concat (Filename.dirname repository) "empty-store"
+      in
+      Unix.mkdir empty_store_root 0o700;
+      let empty_store =
+        Store.init ~root:empty_store_root |> require_ok Store.error_to_string
+      in
+      Git.archive_repository ~refs:[ "refs/heads/absent" ]
+        Git.default_configuration ~store:empty_store ~repository
+      |> Result.fold
+           ~ok:(fun _ -> Alcotest.fail "absent selected Git ref was accepted")
+           ~error:(fun error ->
+             Alcotest.(check bool)
+               "absent selected ref has a structured error" true
+               (contains ~needle:"requested Git ref is absent"
+                  (Git.error_to_string error)));
+      Git.archive_repository
+        ~refs:[ selected_ref; selected_ref ]
+        Git.default_configuration ~store:empty_store ~repository
+      |> Result.fold
+           ~ok:(fun _ ->
+             Alcotest.fail "duplicate selected Git ref was accepted")
+           ~error:(fun error ->
+             Alcotest.(check bool)
+               "duplicate selected ref has a structured error" true
+               (contains ~needle:"requested Git ref name is duplicated"
+                  (Git.error_to_string error)));
+      Alcotest.(check int)
+        "selection failures publish no archive" 0
+        (List.length
+           (Git.list_archives empty_store |> require_ok Git.error_to_string)))
 
 let rejects_corrupt_mapping_binding () =
   import_fixture (fun repository store tree ->
@@ -3142,6 +3256,9 @@ let () =
             archive_persistence_goldens_are_stable;
           Alcotest.test_case "shallow archive rejects before publication" `Quick
             shallow_archive_rejects_before_publication;
+          Alcotest.test_case
+            "archive selection is exact and rejects before publication" `Quick
+            archive_selection_is_exact_and_rejects_before_publication;
           Alcotest.test_case "corrupt mapping binding rejects" `Quick
             rejects_corrupt_mapping_binding;
         ] );
