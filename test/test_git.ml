@@ -29,6 +29,16 @@ let refreshed_golden name actual =
   Golden.refresh_lower_hex_file (Filename.concat "golden" name) actual
   |> require_ok Fun.id
 
+let golden_bytes name =
+  match Sys.getenv_opt "YEOKCHAM_GOLDEN_ROOT" with
+  | Some root ->
+      Golden.read_lower_hex_file
+        (Filename.concat (Filename.concat root "test/golden") name)
+      |> require_ok Fun.id
+  | None ->
+      Golden.refresh_lower_hex_file (Filename.concat "golden" name) ""
+      |> require_ok Fun.id
+
 let stream ?(limit = max_int) value =
   {
     Validation.digest = String.make 32 '\000';
@@ -3023,16 +3033,14 @@ let archive_persistence_goldens_are_stable () =
         (binding_bytes store
            [ "git-archives"; Id.Git_archive_id.to_hex archive_id ]);
       let legacy_envelope =
-        refreshed_golden "git-archive-v1.yeok.hex" "unused"
+        golden_bytes "git-archive-v1.yeok.hex"
         |> Envelope.decode
         |> require_ok Envelope.decode_error_to_string
       in
       let legacy_physical =
         Store.put store legacy_envelope |> require_ok Store.error_to_string
       in
-      let legacy_binding =
-        refreshed_golden "git-archive-v1.ref.hex" "unused"
-      in
+      let legacy_binding = golden_bytes "git-archive-v1.ref.hex" in
       let legacy_id =
         match Encoding.decode legacy_binding with
         | Ok
@@ -3043,11 +3051,11 @@ let archive_persistence_goldens_are_stable () =
               |> require_ok Id.parse_error_to_string
             in
             let physical =
-              Store.Stored_object_id.of_raw_bytes physical
-              |> Option.value
-                   ~default:
-                     (Alcotest.fail
-                        "legacy archive binding has an invalid object ID")
+              match Store.Stored_object_id.of_raw_bytes physical with
+              | Some physical -> physical
+              | None ->
+                  Alcotest.fail
+                    "legacy archive binding has an invalid object ID"
             in
             Alcotest.(check bool)
               "legacy binding names the fixture envelope" true
