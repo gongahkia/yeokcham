@@ -98,6 +98,17 @@
   (source_tree golden)))
 
 (test
+ (name test_peer_sync)
+ (modules test_peer_sync)
+ (libraries
+  alcotest
+  mirage-crypto-ec
+  unix
+  yeokcham_peer_sync
+  yeokcham_snapshot
+  yeokcham_store))
+
+(test
  (name peer_property_test)
  (modules peer_property_test)
  (libraries

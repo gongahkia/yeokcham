@@ -6,6 +6,9 @@
   mirage-crypto-rng.unix
   yeokcham_encoding
   yeokcham_envelope
+  yeokcham_exchange
+  yeokcham_exchange_store
   yeokcham_hash
   yeokcham_id
+  yeokcham_snapshot
   yeokcham_store))
