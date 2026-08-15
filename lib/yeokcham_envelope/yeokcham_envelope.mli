@@ -35,6 +35,8 @@ type object_type =
   | Divergent_ref_set
   | Git_archive
   | Git_adoption
+  | Peer_publication
+  | Peer_integration
 
 val object_type_code : object_type -> int
 val object_type_of_code : int -> object_type option

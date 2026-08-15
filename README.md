@@ -62,8 +62,10 @@ implemented data flow and failure boundaries.
   and repository-wide `verify`.
 - Bounded direct-argv validation, immutable release records, and separate
   test-only deterministic attestations.
-- A deliberately narrow local Git import/export bridge and local immutable
-  object exchange experiments.
+- A deliberately narrow local Git preservation/adoption/exit bridge.
+- Direct peer publication over a selected local repository or SSH: the
+  receiver gets an inspectable capsule or release projection, never a sender's
+  scratch history or an implicit workspace mutation.
 
 ## V3 direction
 
@@ -87,10 +89,13 @@ Important limits remain intentional:
   and does not authenticate a release.
 - Semantic TypeScript and Rust adapters are isolated experiments. They do not
   become canonical data or authorise a rewrite.
-- The implemented Git bridge remains deliberately narrow. The broader V3
-  preservation/adoption/exit contract is specified but not implemented yet.
-- The implemented local exchange is an object-transfer experiment, not yet the
-  V3 peer publication, fetch, and integration workflow.
+- The V3 Git bridge preserves selected Git refs as foreign bundles, supports
+  explicit one-parent (or root) capsule adoption with a durable receipt, and
+  reconstructs a valid Git exit repository. It does not provide implicit sync,
+  general Git semantic equivalence, or automatic merge interpretation.
+- Peer exchange is deliberately proposal-only. Capsule projections can be
+  adopted into a receiver-authored local capsule; release projections retain
+  provenance but cannot manufacture local validation or a native release.
 - The local CLI currently uses the V2 repository format. The retired parts are
   its hosted, browser, MLS, mesh, and IDE roadmap; they are not a supported
   delivery path.

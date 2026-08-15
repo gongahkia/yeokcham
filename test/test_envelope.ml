@@ -117,6 +117,8 @@ let object_type_codes () =
       (Envelope.Divergent_ref_set, 28);
       (Envelope.Git_archive, 29);
       (Envelope.Git_adoption, 30);
+      (Envelope.Peer_publication, 31);
+      (Envelope.Peer_integration, 32);
     ]
   in
   List.iter
@@ -133,7 +135,7 @@ let object_type_codes () =
     (Option.is_none (Envelope.object_type_of_code 0));
   Alcotest.(check bool)
     "unassigned type is rejected" true
-    (Option.is_none (Envelope.object_type_of_code 31))
+    (Option.is_none (Envelope.object_type_of_code 33))
 
 let golden_envelope () =
   let actual = Envelope.encode sample in

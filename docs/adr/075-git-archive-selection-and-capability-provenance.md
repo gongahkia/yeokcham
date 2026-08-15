@@ -60,8 +60,8 @@ logical archive ID to one immutable physical object and need no schema change.
   operational state into Yeokcham state.
 - Existing V1 archive bytes remain readable; newly created V2 records never
   replace them.
-- Explicit native adoption remains a separate operation governed by ADR-074;
-  selection and archive provenance do not infer capsule or release intent.
+- Explicit native adoption is defined by ADR-076; selection and archive
+  provenance do not infer capsule or release intent.
 
 ## Verification
 
@@ -70,4 +70,3 @@ logical archive ID to one immutable physical object and need no schema change.
   duplicate requested refs before publication.
 - Preservation/exit tests compare the selected inventory and run `git fsck`.
 - Generated archive/exit tests retain byte and executable-mode coverage.
-

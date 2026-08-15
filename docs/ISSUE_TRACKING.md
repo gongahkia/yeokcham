@@ -20,22 +20,26 @@ criteria and verification evidence are complete. Architecture and
 `needs-decision` blockers require approval before dependent implementation
 begins.
 
-## Active V3 programme
+## V3 programme status
 
-The active product work is intentionally small and represented by the remaining
-three issues:
+There are no open V3 issues. Completed V3 work:
 
-- [#234](https://github.com/gongahkia/yeokcham/issues/234) — Git preservation,
-  adoption, and exit. Preservation/exit is implemented; explicit native adoption
-  remains open.
-- [#235](https://github.com/gongahkia/yeokcham/issues/235) — direct peer
-  repository exchange.
-- [#236](https://github.com/gongahkia/yeokcham/issues/236) — macOS/Linux CLI
-  artifacts.
+- [#234](https://github.com/gongahkia/yeokcham/issues/234) provided lossless
+  Git archive preservation and exit, explicit archive-scoped capsule adoption,
+  durable adoption receipts, and an auditable mapping back to the selected Git
+  commit and parent. It deliberately does not translate Git branch topology or
+  merge semantics into Yeokcham semantics.
+- [#235](https://github.com/gongahkia/yeokcham/issues/235) provided direct
+  publication of verified capsule/release projections, local-path and SSH
+  transfer, and explicit local capsule integration without copying scratch
+  history or selecting a workspace.
+- [#236](https://github.com/gongahkia/yeokcham/issues/236) was closed as not
+  planned: package publication and cross-platform artifact verification are
+  deliberately deferred delivery work, not current core feature scope.
 
-Each V3 issue records its own acceptance criteria and verification scope. No
-hosted CI result is a closure prerequisite; manual verification must be
-reported honestly.
+No hosted CI result is a closure prerequisite; any future platform verification
+or artifact publication must be reported with its actual host and signing
+status.
 
 ## Migration map
 

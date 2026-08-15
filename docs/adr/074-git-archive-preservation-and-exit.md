@@ -95,10 +95,10 @@ runs `git fsck --full`, and inventories refs again. It succeeds only when the
 object format and sorted ref inventory equal the archive record. It refuses a
 nonempty destination and never modifies the source Yeokcham repository.
 
-Explicit adoption remains a separate transition. It may use the reconstructed
-archive as the source for the existing opaque tree/commit/tag bridge, but it
-cannot create a capsule, workspace, release, or conflict resolution without an
-explicit user choice.
+Explicit adoption remains a separate transition. ADR-076 defines the
+archive-scoped capsule operation, including its required direct-parent or root
+choice and durable receipt. Preservation itself cannot create a capsule,
+workspace, release, or conflict resolution without an explicit user choice.
 
 ## Consequences
 

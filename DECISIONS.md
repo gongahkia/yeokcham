@@ -187,3 +187,4 @@ The ADR lifecycle, numbering rules, and template are defined in [`docs/adr/READM
 - [ADR-074 — Git archive preservation and exit](docs/adr/074-git-archive-preservation-and-exit.md) — Accepted.
 - [ADR-075 — Git archive selection and capability provenance](docs/adr/075-git-archive-selection-and-capability-provenance.md) — Accepted.
 - [ADR-076 — Explicit Git archive capsule adoption](docs/adr/076-explicit-git-archive-capsule-adoption.md) — Accepted.
+- [ADR-077 — Peer publication projections and explicit integration](docs/adr/077-peer-publication-projections-and-explicit-integration.md) — Accepted.

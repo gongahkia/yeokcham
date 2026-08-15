@@ -25,7 +25,7 @@ type validation_id
 type resolution_id
 type git_archive_id
 type publication_id
-type peer_id
+type peer_integration_id
 ```
 
 All persistent identities must have:
@@ -43,28 +43,55 @@ the `release_id` it names.
 
 ### V3 migration and publication boundary
 
-The current implementation has only a narrow Git bridge and object-exchange
-experiment. ADR-073 defines the target extension below; it is not evidence that
-the types or persistent records have been implemented.
+ADR-077 implements the following V3 extension. `Peer_publication_v1` is an
+immutable projection, not a portable copy of a sender's native records.
 
 ```ocaml
 type publication_target =
-  | Published_capsule_revision of capsule_id * capsule_revision_id
-  | Published_release of release_id
+  | Published_capsule_revision of {
+      source_capsule : capsule_id;
+      source_revision : capsule_revision_id;
+      source_title : string;
+      source_description : string;
+      declared_base : snapshot_id;
+      expected_result : snapshot_id;
+    }
+  | Published_release of {
+      source_release : release_id;
+      source_message : string option;
+      source_created_at : int64;
+      source_base : snapshot_id;
+      source_final_snapshot : snapshot_id;
+    }
 
-type integration_outcome =
-  | Ready_for_explicit_integration of publication_id
-  | Publication_divergence of publication_id list
-  | Rejected_peer_publication of string
+type peer_publication = {
+  publication_id : publication_id;
+  target : publication_target;
+  exact_snapshot_closure : stored_object_id list;
+}
+
+type peer_integration = {
+  integration_id : peer_integration_id;
+  publication_id : publication_id;
+  local_capsule : capsule_id;
+  local_revision : capsule_revision_id;
+  local_source_checkpoint : checkpoint_id;
+  local_target_checkpoint : checkpoint_id;
+}
 ```
 
 A `git_archive_id` identifies immutable foreign Git provenance, never a native
 snapshot, capsule, workspace, conflict, release, or repository identity. An
 adoption transition explicitly names its archive source and selected native
-target. A `publication_id` identifies only a verified selected capsule revision
-or release; scratch checkpoints are excluded by default. Receiving a
-publication cannot change local workspace selection or materialise files until
-a separate explicit integration transition succeeds.
+target. A `publication_id` identifies a verified selected capsule revision or
+release together with the exact sorted snapshot-storage closure. That closure
+may contain only Snapshot, Tree, Content, File_manifest, and Chunk objects;
+scratch checkpoints and events, capsules, releases, workspaces, validation
+evidence, and refs are excluded. Receiving a publication cannot change local
+workspace selection, scratch head, capsule current ref, release binding, or
+working files. A capsule integration creates fresh detached receiver
+checkpoints and a receiver-chosen capsule/revision; a release projection has no
+native-release integration transition.
 
 ## 2. Canonical content model
 

@@ -5,9 +5,9 @@ implemented M8 bridge only. It does not claim that a Git repository and a
 Yeokcham repository, commit, branch, capsule, workspace, or release are
 equivalent.
 
-## V3 archive preservation and exit
+## V3 archive preservation, adoption, and exit
 
-ADR-073–075 extend the narrow object bridge with a preservation and exit
+ADR-073–076 extend the narrow object bridge with a preservation, adoption, and exit
 boundary. `yeokcham git archive create --repository <absolute-path>` preserves
 all visible refs by default; repeating `--ref <exact-ref-name>` preserves only
 the selected refs. Archive creation disables Git replace refs, rejects shallow
@@ -22,11 +22,25 @@ that archive. Exit uses a new or empty destination, then requires `git fsck
 --full`, the original object format, and the exact selected ref inventory to
 match. It does not modify the source Yeokcham repository.
 
-Archive preservation is deliberately distinct from native adoption. The
-existing tree/commit/tag import commands may be run against an explicit exit
-repository to retain selected opaque object evidence; they do not infer a
-capsule, workspace, release, conflict resolution, or other user intent. A
-first-class archive-adoption transition remains part of [#234](https://github.com/gongahkia/yeokcham/issues/234), so the issue remains open.
+Archive preservation is deliberately distinct from native adoption.
+`yeokcham git archive adopt <archive-id> --commit <git-object-id>
+(--parent <direct-parent-id> | --root) --as-capsule <capsule-id> --title
+<title> --description <description>` is the explicit conversion point. It
+reconstructs the selected archive privately, imports the commit and (when
+named) the selected direct parent through the verified object bridge, and
+builds one exact capsule delta. A non-root commit requires one named direct
+parent; a merge does not create a Yeokcham merge, dependency, workspace order,
+or conflict resolution. A root commit uses a canonical empty source snapshot.
+
+The command does not write the current working tree or advance its mutable
+scratch head. It stores retained detached checkpoint boundaries and publishes a
+create-only `Git_adoption_v1` receipt containing the archive, commit, selected
+parent, imported transitions and mappings, capsule revision, and checkpoints.
+`yeokcham git archive adoption show <adoption-id>` reopens that receipt for
+later audit. The required capsule title and description remain user-authored
+intent; Git commit messages stay opaque foreign metadata. Tree/commit/tag
+import commands remain available for opaque evidence only and do not infer
+native intent.
 
 ## Evidence boundary
 
@@ -95,6 +109,9 @@ failure into a Yeokcham ref, release, capsule, workspace, or mapping update.
 - An archive's V2 logical identity is the versioned source capability report and
   bytewise-sorted selected ref inventory, not the physical pack representation.
   V1 archive records remain readable but report no invented capability value.
+- A `Git_adoption_v1` receipt binds one explicit archive-scoped native capsule
+  interpretation to its source Git evidence. It is not a claim that a Git
+  commit, merge, ref, or tag has become an equivalent Yeokcham concept.
 
 ## Yeokcham to Git export
 
@@ -123,7 +140,10 @@ release ID, release object, snapshot, workspace, or Yeokcham authoring data.
 
 Importing a Git merge retains its ordered parent object references in opaque
 provenance. It does not turn that merge graph into Yeokcham capsule dependencies,
-workspace composition, conflict resolution, or release ancestry.
+workspace composition, conflict resolution, or release ancestry. The explicit
+archive-adoption command may make a capsule only after the user selects one
+direct parent; the receipt retains that choice and does not generalise it into
+merge semantics.
 
 ## Round trips
 
@@ -158,7 +178,9 @@ make property-test PROPERTY_TEST_SEED=17
 
 Focused fixtures cover the local preflight, supported tree/commit/tag import,
 release and linear-revision export, mapping reopen/corruption, archive V1/V2
-goldens, selected-ref archive creation, shallow/invalid/corrupt archive
-failures, reconstructed `git fsck --full`, and exact checkout bytes. Generated
-tests vary preserved file bytes and modes. These checks verify the stated bridge
-contract only; they do not claim full Git compatibility.
+and adoption V1 goldens, selected-ref archive creation, explicit merge-parent
+adoption, shallow/invalid/corrupt archive and adoption failures, reconstructed
+`git fsck --full`, and exact checkout bytes. Generated tests vary preserved
+file bytes and modes through both archive exit and archive-scoped capsule
+adoption. These checks verify the stated bridge contract only; they do not
+claim full Git compatibility.

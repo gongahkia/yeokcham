@@ -1,14 +1,17 @@
 # Local synchronisation boundary
 
-## V3 peer-exchange commitment — not implemented yet
+## V3 peer-exchange successor
 
-ADR-073 and [#235](https://github.com/gongahkia/yeokcham/issues/235) define a
-future native peer workflow: a user explicitly publishes a capsule revision or
-release; a local-path or SSH peer transfers only verified missing immutable
-objects; and receiving yields an inspectable integration proposal or divergence
-rather than a workspace/ref/working-directory mutation. Scratch checkpoints
-remain local by default. This document's M10 fixture is useful prior art, but
-it does not implement that user-facing workflow.
+ADR-077 implements the native peer workflow formerly planned by ADR-073 and
+[#235](https://github.com/gongahkia/yeokcham/issues/235): a user explicitly
+publishes a capsule revision or release; a local-path or SSH peer transfers
+only a verified snapshot closure; and receiving creates an inspectable
+publication proposal rather than a workspace/ref/working-directory mutation.
+Scratch checkpoints remain local by default. Capsule proposals require an
+explicit receiver-authored adoption; release proposals intentionally have no
+native-release adoption. See [peer exchange](PEER_EXCHANGE.md) for the current
+contract. This document's M10 fixture remains useful prior art, but is not the
+user-facing V3 workflow.
 
 ## M10-11 vertical slice
 

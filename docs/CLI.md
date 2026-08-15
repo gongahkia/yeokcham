@@ -69,6 +69,15 @@ git import commit --repository <absolute-git-directory> --commit <full-git-commi
 git import tag --repository <absolute-git-directory> --tag <name>
 git export release --repository <absolute-git-directory> --release <release-id> [--author-name <name> --author-email <email> --committer-name <name> --committer-email <email> --message <message>]
 git export revisions --repository <absolute-git-directory> --revision <capsule-id>:<revision-id>:<stored-object-id> [--revision <capsule-id>:<revision-id>:<stored-object-id> ...]
+
+peer publish capsule --capsule <capsule-id> --revision <capsule-revision-id>
+peer publish release --release <release-id>
+peer show <publication-id>
+peer fetch --from <absolute-local-repository-root> --publication <publication-id>
+peer fetch --ssh <user@host> --remote-root <absolute-remote-repository-root> --publication <publication-id>
+peer serve --publication <publication-id>
+peer integrate <publication-id> --as-capsule <new-capsule-id> --title <title> --description <description>
+peer integration show <peer-integration-id>
 ```
 
 ## Inspect a repository
@@ -187,6 +196,39 @@ bytes and opaque provenance; it does not infer a Yeokcham capsule, workspace,
 or release. Export uses create-only refs and records a mapping only after both
 sides validate. Full supported and rejected behaviour is in the
 [Git interchange contract](GIT_INTERCHANGE.md).
+
+## Peer exchange
+
+```sh
+dune exec bin/yeokcham.exe -- peer publish capsule --capsule <capsule-id> --revision <capsule-revision-id>
+dune exec bin/yeokcham.exe -- peer fetch --from <absolute-local-repository-root> --publication <publication-id>
+dune exec bin/yeokcham.exe -- peer show <publication-id>
+dune exec bin/yeokcham.exe -- peer integrate <publication-id> --as-capsule <new-capsule-id> --title <title> --description <description>
+```
+
+`peer publish` derives a stable `Peer_publication_v1` projection from a
+verified native capsule revision or release. It includes source IDs and
+metadata for provenance, the exact base/result snapshots, and only the sorted
+snapshot-storage closure. `peer fetch` transfers the publication record and
+the closure's missing objects through bounded exchange frames, validates the
+whole closure, then publishes an inspectable local binding. It does not copy
+scratch history, alter a scratch head, choose a workspace, create a local
+capsule/release, or materialise files.
+
+`--from` is a caller-selected local repository. `--ssh` invokes one direct SSH
+command with a constrained target and absolute remote root; the remote host
+must make the same `yeokcham` executable available. `peer serve` is the
+corresponding one-shot framed endpoint and writes protocol bytes to standard
+output, so it is not a normal interactive command. No peer discovery, account,
+daemon, relay, ref synchronisation, or peer authentication is provided.
+
+Only a capsule projection can be integrated. The user supplies a new local
+capsule ID, title, and description; Yeokcham makes fresh detached local
+checkpoints, creates a normal durable capsule, and records a
+`Peer_integration_v1` receipt. A release projection remains inspectable source
+provenance because it cannot establish the local workspace and validation
+composition needed for a native release. The complete contract is in
+[peer exchange](PEER_EXCHANGE.md).
 
 ## Further reading
 

@@ -4,6 +4,7 @@ module Encoding = Yeokcham_encoding
 module Envelope = Yeokcham_envelope
 module Golden = Yeokcham_testkit.Golden_fixture
 module Id = Yeokcham_id
+module Local_service = Yeokcham_local_service
 module Release = Yeokcham_release
 module Scratch = Yeokcham_scratch
 module Snapshot = Yeokcham_snapshot
@@ -2894,6 +2895,72 @@ let archive_envelope_bytes store archive =
   | Error _ ->
       Alcotest.fail "Git archive binding does not decode"
 
+let adoption_envelope_bytes store adoption =
+  let components =
+    [ "git-adoptions"; Id.Git_adoption_id.to_hex (Git.adoption_id adoption) ]
+  in
+  let binding = binding_bytes store components in
+  match Encoding.decode binding with
+  | Ok (Encoding.Array [ _; _; Encoding.Bytes physical; _ ]) -> (
+      match Store.Stored_object_id.of_raw_bytes physical with
+      | Some physical ->
+          Store.get store physical
+          |> require_ok Store.error_to_string
+          |> Envelope.encode
+      | None -> Alcotest.fail "Git adoption binding object ID is invalid")
+  | Ok
+      ( Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _
+      | Encoding.Array _ | Encoding.Map _ | Encoding.Bool _ | Encoding.Null )
+  | Error _ ->
+      Alcotest.fail "Git adoption binding does not decode"
+
+let detached_adoption_checkpoints store ~source ~target =
+  let source_checkpoint =
+    Scratch.Checkpoint.create_initial ~snapshot:source ~created_at:0L
+  in
+  let source =
+    Scratch.Checkpoint.store store source_checkpoint
+    |> require_ok Scratch.error_to_string
+  in
+  let source_snapshot =
+    Snapshot.Snapshot.load store (Scratch.Checkpoint.snapshot source_checkpoint)
+    |> require_ok Snapshot.error_to_string
+  in
+  let target_snapshot =
+    Snapshot.Snapshot.load store target |> require_ok Snapshot.error_to_string
+  in
+  let source_state =
+    Scratch.State.of_snapshot store source_snapshot
+    |> require_ok Scratch.error_to_string
+  in
+  let target_state =
+    Scratch.State.of_snapshot store target_snapshot
+    |> require_ok Scratch.error_to_string
+  in
+  let operations = Scratch.State.diff ~from:source_state ~to_:target_state in
+  let replayed =
+    Scratch.State.apply source_state operations
+    |> require_ok Scratch.error_to_string
+  in
+  Alcotest.(check bool)
+    "adoption checkpoint replay is exact" true
+    (Scratch.State.equal replayed target_state);
+  let event =
+    Scratch.Event.create ~parent:source
+      ~base:(Scratch.Checkpoint.snapshot source_checkpoint)
+      ~resulting:target ~operations ~source:Scratch.Explicit ~observed_at:0L
+  in
+  let event =
+    Scratch.Event.store store event |> require_ok Scratch.error_to_string
+  in
+  let target =
+    Scratch.Checkpoint.create ~parent:source ~event ~snapshot:target
+      ~created_at:0L
+    |> Scratch.Checkpoint.store store
+    |> require_ok Scratch.error_to_string
+  in
+  (source, target)
+
 let archives_and_exits_complete_git_history () =
   commit_fixture (fun repository store _format _merge _parents ->
       let git = git_path () in
@@ -2916,6 +2983,8 @@ let archives_and_exits_complete_git_history () =
         Git.archive_repository Git.default_configuration ~store ~repository
         |> require_ok Git.error_to_string
       in
+      Local_service.require_v2 ~root:(Store.root store)
+      |> require_ok Local_service.error_to_string;
       Alcotest.(check bool)
         "repeated archive has one logical ID" true
         (Id.Git_archive_id.equal (Git.archive_id first) (Git.archive_id second));
@@ -3080,6 +3149,104 @@ let archive_persistence_goldens_are_stable () =
         (Git.archive_capability legacy
         |> Option.map (fun capability -> capability.Git.archive_source_bare)))
 
+let adoption_persistence_goldens_are_stable () =
+  with_directory "yeokcham-git-adoption-golden-" (fun root ->
+      let repository = Filename.concat root "repository" in
+      let store_root = Filename.concat root "store" in
+      let git = git_path () in
+      direct_process git [ "init"; "-q"; repository ];
+      Unix.mkdir store_root 0o700;
+      direct_process git
+        [ "-C"; repository; "config"; "user.name"; "Yeokcham Golden" ];
+      direct_process git
+        [ "-C"; repository; "config"; "user.email"; "golden@example.invalid" ];
+      write_file (Filename.concat repository "tracked") "before\n";
+      direct_process git [ "-C"; repository; "add"; "--all" ];
+      direct_process_with_environment git golden_commit_environment
+        [ "-C"; repository; "commit"; "-q"; "-m"; "adoption base" ];
+      let parent =
+        direct_capture git [ "-C"; repository; "rev-parse"; "HEAD" ]
+      in
+      write_file (Filename.concat repository "tracked") "after\n";
+      direct_process git [ "-C"; repository; "add"; "--all" ];
+      direct_process_with_environment git golden_commit_environment
+        [ "-C"; repository; "commit"; "-q"; "-m"; "adoption child" ];
+      let commit =
+        direct_capture git [ "-C"; repository; "rev-parse"; "HEAD" ]
+      in
+      let store =
+        Store.init ~root:store_root |> require_ok Store.error_to_string
+      in
+      let format =
+        Git.inspect Git.default_configuration ~repository
+        |> require_ok Git.error_to_string
+        |> Git.inspection_object_format
+      in
+      let commit =
+        Git.object_id_of_hex format commit |> require_ok Git.error_to_string
+      in
+      let parent =
+        Git.object_id_of_hex format parent |> require_ok Git.error_to_string
+      in
+      let archive =
+        Git.archive_repository Git.default_configuration ~store ~repository
+        |> require_ok Git.error_to_string
+      in
+      let imported =
+        Git.import_archive_commit Git.default_configuration ~store
+          ~archive:(Git.archive_id archive) ~commit
+        |> require_ok Git.error_to_string
+      in
+      let imported_parent =
+        Git.import_archive_commit Git.default_configuration ~store
+          ~archive:(Git.archive_id archive) ~commit:parent
+        |> require_ok Git.error_to_string
+      in
+      let source, target =
+        detached_adoption_checkpoints store
+          ~source:
+            (Git.imported_transition_snapshot
+               imported_parent.Git.imported_transition)
+          ~target:
+            (Git.imported_transition_snapshot imported.Git.imported_transition)
+      in
+      let capsule = export_capsule_id 92 in
+      let scratch = Scratch.open_repository store in
+      let resolved =
+        Capsule_store.Durable.create_from_checkpoints ~store ~scratch
+          ~id:capsule ~title:"golden adoption" ~description:"golden delta"
+          ~dependencies:[] ~evidence:[] ~from:source ~target ~created_at:0L
+          ~changed_at:0L ()
+        |> require_ok Capsule_store.error_to_string
+      in
+      let revision =
+        Capsule_store.Durable.resolved_revision resolved
+        |> Capsule_store.revision_id
+      in
+      let adoption =
+        Git.record_archive_adoption store ~archive:(Git.archive_id archive)
+          ~commit ~parent:(Some parent)
+          ~transition:imported.Git.imported_transition
+          ~mapping:imported.Git.commit_mapping
+          ~parent_transition:(Some imported_parent.Git.imported_transition)
+          ~parent_mapping:(Some imported_parent.Git.commit_mapping) ~capsule
+          ~revision ~source ~target
+        |> require_ok Git.error_to_string
+      in
+      let adoption_id = Git.adoption_id adoption in
+      Alcotest.(check string)
+        "canonical Git adoption envelope"
+        (refreshed_golden "git-adoption-v1.yeok.hex"
+           (adoption_envelope_bytes store adoption))
+        (adoption_envelope_bytes store adoption);
+      Alcotest.(check string)
+        "canonical Git adoption binding"
+        (refreshed_golden "git-adoption-v1.ref.hex"
+           (binding_bytes store
+              [ "git-adoptions"; Id.Git_adoption_id.to_hex adoption_id ]))
+        (binding_bytes store
+           [ "git-adoptions"; Id.Git_adoption_id.to_hex adoption_id ]))
+
 let shallow_archive_rejects_before_publication () =
   commit_fixture (fun repository store _format _merge _parents ->
       let shallow = Filename.concat (Filename.dirname repository) "shallow" in
@@ -3159,53 +3326,6 @@ let archive_selection_is_exact_and_rejects_before_publication () =
         "selection failures publish no archive" 0
         (List.length
            (Git.list_archives empty_store |> require_ok Git.error_to_string)))
-
-let detached_adoption_checkpoints store ~source ~target =
-  let source_checkpoint =
-    Scratch.Checkpoint.create_initial ~snapshot:source ~created_at:0L
-  in
-  let source =
-    Scratch.Checkpoint.store store source_checkpoint
-    |> require_ok Scratch.error_to_string
-  in
-  let source_snapshot =
-    Snapshot.Snapshot.load store (Scratch.Checkpoint.snapshot source_checkpoint)
-    |> require_ok Snapshot.error_to_string
-  in
-  let target_snapshot =
-    Snapshot.Snapshot.load store target |> require_ok Snapshot.error_to_string
-  in
-  let source_state =
-    Scratch.State.of_snapshot store source_snapshot
-    |> require_ok Scratch.error_to_string
-  in
-  let target_state =
-    Scratch.State.of_snapshot store target_snapshot
-    |> require_ok Scratch.error_to_string
-  in
-  let operations = Scratch.State.diff ~from:source_state ~to_:target_state in
-  let replayed =
-    Scratch.State.apply source_state operations
-    |> require_ok Scratch.error_to_string
-  in
-  Alcotest.(check bool)
-    "adoption checkpoint replay is exact" true
-    (Scratch.State.equal replayed target_state);
-  let event =
-    Scratch.Event.create ~parent:source
-      ~base:(Scratch.Checkpoint.snapshot source_checkpoint)
-      ~resulting:target ~operations ~source:Scratch.Explicit ~observed_at:0L
-  in
-  let event =
-    Scratch.Event.store store event |> require_ok Scratch.error_to_string
-  in
-  let target =
-    Scratch.Checkpoint.create ~parent:source ~event ~snapshot:target
-      ~created_at:0L
-    |> Scratch.Checkpoint.store store
-    |> require_ok Scratch.error_to_string
-  in
-  (source, target)
 
 let archive_adoption_is_explicit_and_durable () =
   commit_fixture (fun repository store format commit parents ->
@@ -3411,6 +3531,8 @@ let () =
             `Quick archives_and_exits_complete_git_history;
           Alcotest.test_case "Git archive schemas have stable goldens" `Quick
             archive_persistence_goldens_are_stable;
+          Alcotest.test_case "Git adoption schema has stable goldens" `Quick
+            adoption_persistence_goldens_are_stable;
           Alcotest.test_case "shallow archive rejects before publication" `Quick
             shallow_archive_rejects_before_publication;
           Alcotest.test_case

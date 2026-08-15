@@ -49,6 +49,7 @@
   yeokcham_envelope
   yeokcham_git
   yeokcham_id
+  yeokcham_local_service
   yeokcham_release
   yeokcham_scratch
   yeokcham_snapshot
@@ -75,6 +76,41 @@
   yeokcham_snapshot
   yeokcham_store
   yeokcham_workspace_store
+  unix))
+
+(test
+ (name test_peer)
+ (modules test_peer)
+ (libraries
+  alcotest
+  yeokcham_capsule_store
+  yeokcham_encoding
+  yeokcham_envelope
+  yeokcham_exchange
+  yeokcham_id
+  yeokcham_peer
+  yeokcham_scratch
+  yeokcham_snapshot
+  yeokcham_store
+  yeokcham_testkit
+  unix)
+ (deps
+  (source_tree golden)))
+
+(test
+ (name peer_property_test)
+ (modules peer_property_test)
+ (libraries
+  alcotest
+  qcheck-core
+  qcheck-alcotest
+  yeokcham_capsule_store
+  yeokcham_envelope
+  yeokcham_id
+  yeokcham_peer
+  yeokcham_scratch
+  yeokcham_snapshot
+  yeokcham_store
   unix))
 
 (test
@@ -2154,6 +2190,7 @@
   (:rust_retarget_fixture_property_test
    rust_retarget_fixture_property_test.exe)
   (:git_property_test git_property_test.exe)
+  (:peer_property_test peer_property_test.exe)
   (source_tree golden)
   (source_tree fixtures/encoding))
  (action
@@ -2238,4 +2275,5 @@
    (run %{semantic_retarget_property_test})
    (run %{rust_adapter_property_test})
    (run %{rust_retarget_fixture_property_test})
-   (run %{git_property_test}))))
+   (run %{git_property_test})
+   (run %{peer_property_test}))))

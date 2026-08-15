@@ -14,6 +14,7 @@ module Git = Yeokcham_git
 module Inspection = Yeokcham_inspection
 module Local_service = Yeokcham_local_service
 module Local_command = Yeokcham_local_command
+module Peer = Yeokcham_peer
 
 let ( let* ) = Result.bind
 let now () = Int64.of_float (Unix.gettimeofday ())
@@ -1736,6 +1737,21 @@ let git_archive_id value =
   | Ok identity -> identity
   | Error error -> fail Yeokcham_id.parse_error_to_string error
 
+let publication_id value =
+  match Yeokcham_id.Publication_id.of_hex value with
+  | Ok identity -> identity
+  | Error error -> fail Yeokcham_id.parse_error_to_string error
+
+let peer_integration_id value =
+  match Yeokcham_id.Peer_integration_id.of_hex value with
+  | Ok identity -> identity
+  | Error error -> fail Yeokcham_id.parse_error_to_string error
+
+let git_adoption_id value =
+  match Yeokcham_id.Git_adoption_id.of_hex value with
+  | Ok identity -> identity
+  | Error error -> fail Yeokcham_id.parse_error_to_string error
+
 let print_git_archive archive =
   let source_bare =
     match Git.archive_capability archive with
@@ -1821,12 +1837,18 @@ let detached_adoption_checkpoints store ~source ~target =
     Ok (source, target)
 
 let print_git_adoption adoption =
+  let parent =
+    match Git.adoption_parent adoption with
+    | None -> "none"
+    | Some parent -> Git.object_id_to_hex parent
+  in
   Printf.printf
-    "adoption=%s archive=%s git-commit=%s mapping=%s capsule=%s revision=%s \
-     from=%s to=%s\n"
+    "adoption=%s archive=%s git-commit=%s parent=%s mapping=%s capsule=%s \
+     revision=%s from=%s to=%s\n"
     (Yeokcham_id.Git_adoption_id.to_hex (Git.adoption_id adoption))
     (Yeokcham_id.Git_archive_id.to_hex (Git.adoption_archive adoption))
     (Git.object_id_to_hex (Git.adoption_commit adoption))
+    parent
     (Yeokcham_id.Git_mapping_id.to_hex (Git.adoption_mapping adoption))
     (Yeokcham_id.Capsule_id.to_hex (Git.adoption_capsule adoption))
     (Yeokcham_id.Capsule_revision_id.to_hex (Git.adoption_revision adoption))
@@ -1876,6 +1898,13 @@ let git root arguments =
           match Git.load_archive store (git_archive_id archive) with
           | Error error -> fail Git.error_to_string error
           | Ok archive -> show_git_archive archive))
+  | [ "archive"; "adoption"; "show"; adoption ] -> (
+      match Store.open_repository ~root with
+      | Error error -> fail Store.error_to_string error
+      | Ok store -> (
+          match Git.load_adoption store (git_adoption_id adoption) with
+          | Error error -> fail Git.error_to_string error
+          | Ok adoption -> print_git_adoption adoption))
   | [ "archive"; "exit"; archive; "--destination"; destination ] -> (
       match Store.open_repository ~root with
       | Error error -> fail Store.error_to_string error
@@ -2290,10 +2319,190 @@ let git root arguments =
                 result.Git.revision_export_target_ref))
   | _ -> exit 2
 
+let print_peer_publication publication =
+  let identity =
+    Yeokcham_id.Publication_id.to_hex (Peer.publication_id publication)
+  in
+  let objects = List.length (Peer.publication_objects publication) in
+  match Peer.publication_target publication with
+  | Peer.Capsule_revision target ->
+      Printf.printf
+        "publication=%s kind=capsule source-capsule=%s source-revision=%s \
+         source-snapshot=%s target-snapshot=%s objects=%d\n"
+        identity
+        (Yeokcham_id.Capsule_id.to_hex
+           (Peer.capsule_target_source_capsule target))
+        (Yeokcham_id.Capsule_revision_id.to_hex
+           (Peer.capsule_target_source_revision target))
+        (Peer.capsule_target_source_snapshot target
+        |> Snapshot.Snapshot.stored_object_id |> Store.Stored_object_id.to_hex)
+        (Peer.capsule_target_result_snapshot target
+        |> Snapshot.Snapshot.stored_object_id |> Store.Stored_object_id.to_hex)
+        objects
+  | Peer.Release target ->
+      Printf.printf
+        "publication=%s kind=release source-release=%s base-snapshot=%s \
+         final-snapshot=%s objects=%d\n"
+        identity
+        (Yeokcham_id.Release_id.to_hex
+           (Peer.release_target_source_release target))
+        (Peer.release_target_base target
+        |> Snapshot.Snapshot.stored_object_id |> Store.Stored_object_id.to_hex)
+        (Peer.release_target_final_snapshot target
+        |> Snapshot.Snapshot.stored_object_id |> Store.Stored_object_id.to_hex)
+        objects
+
+let print_peer_integration integration =
+  Printf.printf
+    "integration=%s publication=%s capsule=%s revision=%s from=%s to=%s\n"
+    (Yeokcham_id.Peer_integration_id.to_hex (Peer.integration_id integration))
+    (Yeokcham_id.Publication_id.to_hex
+       (Peer.integration_publication integration))
+    (Yeokcham_id.Capsule_id.to_hex (Peer.integration_capsule integration))
+    (Yeokcham_id.Capsule_revision_id.to_hex
+       (Peer.integration_revision integration))
+    (Peer.integration_source integration
+    |> Scratch.Checkpoint_id.stored_object_id |> Store.Stored_object_id.to_hex)
+    (Peer.integration_target integration
+    |> Scratch.Checkpoint_id.stored_object_id |> Store.Stored_object_id.to_hex)
+
+let peer root arguments =
+  match arguments with
+  | [ "publish"; "capsule"; "--capsule"; capsule; "--revision"; revision ]
+  | [ "publish"; "capsule"; "--revision"; revision; "--capsule"; capsule ] -> (
+      match Store.open_repository ~root with
+      | Error error -> fail Store.error_to_string error
+      | Ok store -> (
+          Peer.publish_capsule_revision store ~capsule:(capsule_id capsule)
+            ~revision:(revision_id revision)
+          |> Result.map_error Peer.error_to_string
+          |> function
+          | Error error -> fail Fun.id error
+          | Ok publication -> print_peer_publication publication))
+  | [ "publish"; "release"; "--release"; release ] -> (
+      match Store.open_repository ~root with
+      | Error error -> fail Store.error_to_string error
+      | Ok store -> (
+          Peer.publish_release store (release_id release)
+          |> Result.map_error Peer.error_to_string
+          |> function
+          | Error error -> fail Fun.id error
+          | Ok publication -> print_peer_publication publication))
+  | [ "show"; publication ] -> (
+      match Store.open_repository ~root with
+      | Error error -> fail Store.error_to_string error
+      | Ok store -> (
+          Peer.load_publication store (publication_id publication)
+          |> Result.map_error Peer.error_to_string
+          |> function
+          | Error error -> fail Fun.id error
+          | Ok publication -> print_peer_publication publication))
+  | [ "fetch"; "--from"; source; "--publication"; publication ]
+  | [ "fetch"; "--publication"; publication; "--from"; source ] -> (
+      match
+        (Store.open_repository ~root, Store.open_repository ~root:source)
+      with
+      | Error error, _ | _, Error error -> fail Store.error_to_string error
+      | Ok destination, Ok source -> (
+          Peer.fetch_local ~source ~destination (publication_id publication)
+          |> Result.map_error Peer.error_to_string
+          |> function
+          | Error error -> fail Fun.id error
+          | Ok (outcome, publication) ->
+              print_peer_publication publication;
+              Printf.printf "offered=%d requested=%d transferred=%d\n"
+                outcome.Yeokcham_exchange_store.offered
+                outcome.Yeokcham_exchange_store.requested
+                (List.length outcome.Yeokcham_exchange_store.transferred)))
+  | [
+      "fetch";
+      "--ssh";
+      target;
+      "--remote-root";
+      remote_root;
+      "--publication";
+      publication;
+    ]
+  | [
+      "fetch";
+      "--publication";
+      publication;
+      "--ssh";
+      target;
+      "--remote-root";
+      remote_root;
+    ] -> (
+      match Store.open_repository ~root with
+      | Error error -> fail Store.error_to_string error
+      | Ok destination -> (
+          Peer.fetch_ssh ~destination ~target ~remote_root
+            ~publication:(publication_id publication)
+          |> Result.map_error Peer.error_to_string
+          |> function
+          | Error error -> fail Fun.id error
+          | Ok (outcome, publication) ->
+              print_peer_publication publication;
+              Printf.printf "offered=%d requested=%d transferred=%d\n"
+                outcome.Yeokcham_exchange_store.offered
+                outcome.Yeokcham_exchange_store.requested
+                (List.length outcome.Yeokcham_exchange_store.transferred)))
+  | [ "serve"; "--publication"; publication ] -> (
+      match Store.open_repository ~root with
+      | Error error -> fail Store.error_to_string error
+      | Ok store -> (
+          Peer.serve store
+            ~publication:(publication_id publication)
+            ~input:stdin ~output:stdout
+          |> Result.map_error Peer.error_to_string
+          |> function
+          | Error error -> fail Fun.id error
+          | Ok () -> ()))
+  | [
+      "integrate";
+      publication;
+      "--as-capsule";
+      capsule;
+      "--title";
+      title;
+      "--description";
+      description;
+    ]
+  | [
+      "integrate";
+      publication;
+      "--as-capsule";
+      capsule;
+      "--description";
+      description;
+      "--title";
+      title;
+    ] -> (
+      match Store.open_repository ~root with
+      | Error error -> fail Store.error_to_string error
+      | Ok store -> (
+          Peer.integrate_capsule store
+            ~publication:(publication_id publication)
+            ~capsule:(capsule_id capsule) ~title ~description
+            ~created_at:(now ())
+          |> Result.map_error Peer.error_to_string
+          |> function
+          | Error error -> fail Fun.id error
+          | Ok integration -> print_peer_integration integration))
+  | [ "integration"; "show"; integration ] -> (
+      match Store.open_repository ~root with
+      | Error error -> fail Store.error_to_string error
+      | Ok store -> (
+          Peer.load_integration store (peer_integration_id integration)
+          |> Result.map_error Peer.error_to_string
+          |> function
+          | Error error -> fail Fun.id error
+          | Ok integration -> print_peer_integration integration))
+  | _ -> exit 2
+
 let usage ?(status = 2) () =
   let message =
     "usage: yeokcham \
-     <init|archive|reset|status|checkpoint|timeline|restore|pin|unpin|compact|watch|capsule|work|conflict|validation|release|storage|verify|git> \
+     <init|archive|reset|status|checkpoint|timeline|restore|pin|unpin|compact|watch|capsule|work|conflict|validation|release|storage|verify|git|peer> \
      [--root PATH] ..."
   in
   if status = 0 then print_endline message else prerr_endline message;
@@ -2350,6 +2559,9 @@ let () =
         | "git" ->
             require_v2_root root;
             git root arguments
+        | "peer" ->
+            require_v2_root root;
+            peer root arguments
         | _ -> usage ())
     | _ -> usage ()
   with Sys.Break -> print_endline "watch stopped"

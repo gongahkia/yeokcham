@@ -260,6 +260,20 @@ retry with zero requests/transfers, corruption rejection before destination
 publication, and unchanged refs. The existing seeded ADR-038 exchange property
 varies bounded missing object sets, duplicate input, interruption, and retry.
 
+#### P24 — Direct peer publication projection
+
+ADR-077 retains Peer_publication_v1 and Peer_integration_v1 Envelope/binding
+goldens with inverse loading. Focused two-repository tests cover a capsule
+projection, a release projection, missing-only transfer, interrupted/retried
+fetch with no visible publication binding, missing closure rejection, sender
+scratch-head preservation, receiver scratch absence, explicit local capsule
+adoption, release-adoption refusal, and a framed two-process exchange. The SSH
+test checks constrained direct argv only; it does not claim a configured server
+or peer authentication. A seeded 24-case property varies exact file bytes,
+executable mode, and a receiver with an already-present snapshot. It verifies
+that every published closure object is available after fetch while no scratch
+object or scratch head appears at the receiver.
+
 Milestone 5 additionally checks Workspace/Workspace_revision/Workspace_attempt,
 Conflict, Resolution, and workspace-current-ref canonical goldens with inverse
 decoders; workspace reopen; immutable enable/reorder revisions; stale workspace

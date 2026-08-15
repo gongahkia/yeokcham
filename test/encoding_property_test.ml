@@ -109,6 +109,8 @@ let object_type_generator =
       Envelope.Divergent_ref_set;
       Envelope.Git_archive;
       Envelope.Git_adoption;
+      Envelope.Peer_publication;
+      Envelope.Peer_integration;
     ]
 
 let boundary_lengths =

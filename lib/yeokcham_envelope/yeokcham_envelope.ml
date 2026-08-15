@@ -40,6 +40,8 @@ type object_type =
   | Divergent_ref_set
   | Git_archive
   | Git_adoption
+  | Peer_publication
+  | Peer_integration
 
 let object_type_code = function
   | Content -> 1
@@ -72,6 +74,8 @@ let object_type_code = function
   | Divergent_ref_set -> 28
   | Git_archive -> 29
   | Git_adoption -> 30
+  | Peer_publication -> 31
+  | Peer_integration -> 32
 
 let object_type_of_code = function
   | 1 -> Some Content
@@ -104,6 +108,8 @@ let object_type_of_code = function
   | 28 -> Some Divergent_ref_set
   | 29 -> Some Git_archive
   | 30 -> Some Git_adoption
+  | 31 -> Some Peer_publication
+  | 32 -> Some Peer_integration
   | _ -> None
 
 type creation_error =

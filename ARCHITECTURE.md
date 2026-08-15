@@ -15,6 +15,18 @@ adapters must preserve the existing functional-core boundary: Git is foreign
 provenance, and a received peer publication is not an implicit workspace or
 working-directory mutation.
 
+ADR-077 adds `yeokcham_peer` as a V3 adapter over the existing immutable store
+and ADR-038 exchange frames. A source projects a verified capsule revision or
+release into `Peer_publication_v1`, containing only its declared snapshots and
+their exact snapshot-storage closure. Local-path and one-shot SSH transports
+transfer that publication record plus missing closure objects. The receiver
+checks the closure before create-only publication under
+`refs/peer-publications/`; it receives no scratch or native capsule/release
+record. Explicit capsule integration creates fresh detached receiver
+checkpoints, an ordinary durable local capsule, and a separate
+`Peer_integration_v1` receipt. Release projections remain inspectable foreign
+provenance because a remote release cannot establish local workspace validation.
+
 ## 1. System overview
 
 Yeokcham consists of a pure model core surrounded by storage, filesystem, parser, and CLI adapters.
@@ -40,7 +52,7 @@ Object Store              Working Directory Adapter
       +--> Indexes
       |
       v
-Filesystem / explicit Git adapter / future direct peer adapter
+Filesystem / explicit Git adapter / direct peer adapter
 ```
 
 Semantic analysis is an optional sidecar:

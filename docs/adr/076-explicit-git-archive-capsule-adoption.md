@@ -73,8 +73,8 @@ dependency, conflict resolution, or composition order.
 After the immutable capsule revision is published, Yeokcham publishes a
 create-only `Git_adoption_v1` receipt that connects archive, commit, optional
 chosen parent, imported transition and mapping, capsule revision, and source /
-target checkpoints. A retry with exactly the same values resolves the existing
-receipt; a different value cannot replace it.
+target checkpoints. A direct receipt-publication retry with exactly the same
+values resolves the existing receipt; a different value cannot replace it.
 
 ## Consequences
 
@@ -111,6 +111,12 @@ This adds Envelope object type `Git_adoption` and a create-only binding at
 canonical versioned record. Existing archives, mappings, imported transitions,
 checkpoints, and capsule records are unchanged. Unknown object types and
 unknown mandatory features remain rejected. No old record is rewritten.
+
+The V3 CLI accepts retained local-core records only after the V2 root format
+and layout validate through the local store. The cutover classifier may still
+recognise those records as archivable V1-shaped artifacts; it remains the
+authority for an actual V1 root, which fails the V2 store open and remains
+rejected. This is a compatibility boundary, not a conversion of a V1 root.
 
 ## Verification
 

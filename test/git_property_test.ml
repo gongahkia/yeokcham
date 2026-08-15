@@ -107,6 +107,43 @@ let export_checkpoint scratch snapshot time =
   | Scratch.Created checkpoint | Scratch.Unchanged checkpoint ->
       Scratch.Checkpoint.id checkpoint
 
+let detached_adoption_checkpoints store ~source ~target =
+  match
+    ( Scratch.Checkpoint.store store
+        (Scratch.Checkpoint.create_initial ~snapshot:source ~created_at:0L),
+      Snapshot.Snapshot.load store source,
+      Snapshot.Snapshot.load store target )
+  with
+  | Ok source_checkpoint, Ok source_snapshot, Ok target_snapshot -> (
+      match
+        ( Scratch.State.of_snapshot store source_snapshot,
+          Scratch.State.of_snapshot store target_snapshot )
+      with
+      | Ok source_state, Ok target_state -> (
+          let operations =
+            Scratch.State.diff ~from:source_state ~to_:target_state
+          in
+          match Scratch.State.apply source_state operations with
+          | Error _ -> None
+          | Ok replayed when not (Scratch.State.equal replayed target_state) ->
+              None
+          | Ok _ -> (
+              let event =
+                Scratch.Event.create ~parent:source_checkpoint ~base:source
+                  ~resulting:target ~operations ~source:Scratch.Explicit
+                  ~observed_at:0L
+              in
+              match Scratch.Event.store store event with
+              | Error _ -> None
+              | Ok event ->
+                  Scratch.Checkpoint.create ~parent:source_checkpoint ~event
+                    ~snapshot:target ~created_at:0L
+                  |> Scratch.Checkpoint.store store
+                  |> Result.to_option
+                  |> Option.map (fun target -> (source_checkpoint, target))))
+      | Error _, _ | _, Error _ -> None)
+  | Error _, _, _ | _, Error _, _ | _, _, Error _ -> None
+
 let import_replays_generated_file (bytes, executable) =
   match git_path () with
   | None -> false
@@ -1089,6 +1126,173 @@ let generated_archives =
     QCheck2.Gen.(pair (string_size (int_range 0 4096)) bool)
     archive_exits_generated_file
 
+let archive_adopts_generated_file (bytes, executable) =
+  match git_path () with
+  | None -> false
+  | Some git ->
+      with_directory "yeokcham-git-adoption-property-" (fun root ->
+          let repository = Filename.concat root "repository" in
+          let store_root = Filename.concat root "store" in
+          Unix.mkdir repository 0o700;
+          Unix.mkdir store_root 0o700;
+          write_file (Filename.concat repository "generated") "base";
+          if not (direct_process git [ "init"; "-q"; repository ]) then false
+          else if
+            not
+              (direct_process git
+                 [ "-C"; repository; "config"; "user.name"; "Yeokcham Test" ])
+          then false
+          else if
+            not
+              (direct_process git
+                 [
+                   "-C";
+                   repository;
+                   "config";
+                   "user.email";
+                   "test@example.invalid";
+                 ])
+          then false
+          else if not (direct_process git [ "-C"; repository; "add"; "--all" ])
+          then false
+          else if
+            not
+              (direct_process git
+                 [ "-C"; repository; "commit"; "-q"; "-m"; "base" ])
+          then false
+          else
+            match
+              direct_capture git [ "-C"; repository; "rev-parse"; "HEAD" ]
+            with
+            | None -> false
+            | Some parent -> (
+                write_file (Filename.concat repository "generated") bytes;
+                if executable then
+                  Unix.chmod (Filename.concat repository "generated") 0o755;
+                if not (direct_process git [ "-C"; repository; "add"; "--all" ])
+                then false
+                else if
+                  not
+                    (direct_process git
+                       [ "-C"; repository; "commit"; "-q"; "-m"; "generated" ])
+                then false
+                else
+                  match
+                    ( direct_capture git
+                        [ "-C"; repository; "rev-parse"; "HEAD" ],
+                      Store.init ~root:store_root )
+                  with
+                  | Some commit, Ok store -> (
+                      match
+                        Git.inspect Git.default_configuration ~repository
+                        |> Result.map Git.inspection_object_format
+                      with
+                      | Error _ -> false
+                      | Ok format -> (
+                          match
+                            ( Git.object_id_of_hex format commit,
+                              Git.object_id_of_hex format parent )
+                          with
+                          | Ok commit, Ok parent -> (
+                              match
+                                Git.archive_repository Git.default_configuration
+                                  ~store ~repository
+                              with
+                              | Error _ -> false
+                              | Ok archive -> (
+                                  match
+                                    ( Git.import_archive_commit
+                                        Git.default_configuration ~store
+                                        ~archive:(Git.archive_id archive)
+                                        ~commit,
+                                      Git.import_archive_commit
+                                        Git.default_configuration ~store
+                                        ~archive:(Git.archive_id archive)
+                                        ~commit:parent )
+                                  with
+                                  | Ok imported, Ok imported_parent -> (
+                                      match
+                                        detached_adoption_checkpoints store
+                                          ~source:
+                                            (Git.imported_transition_snapshot
+                                               imported_parent
+                                                 .Git.imported_transition)
+                                          ~target:
+                                            (Git.imported_transition_snapshot
+                                               imported.Git.imported_transition)
+                                      with
+                                      | None -> false
+                                      | Some (source, target) -> (
+                                          let capsule = export_capsule_id 93 in
+                                          let scratch =
+                                            Scratch.open_repository store
+                                          in
+                                          match
+                                            Capsule_store.Durable
+                                            .create_from_checkpoints ~store
+                                              ~scratch ~id:capsule
+                                              ~title:"generated adoption"
+                                              ~description:"generated delta"
+                                              ~dependencies:[] ~evidence:[]
+                                              ~from:source ~target
+                                              ~created_at:0L ~changed_at:0L ()
+                                          with
+                                          | Error _ -> false
+                                          | Ok resolved -> (
+                                              let revision =
+                                                Capsule_store.Durable
+                                                .resolved_revision resolved
+                                                |> Capsule_store.revision_id
+                                              in
+                                              match
+                                                Git.record_archive_adoption
+                                                  store
+                                                  ~archive:
+                                                    (Git.archive_id archive)
+                                                  ~commit ~parent:(Some parent)
+                                                  ~transition:
+                                                    imported
+                                                      .Git.imported_transition
+                                                  ~mapping:
+                                                    imported.Git.commit_mapping
+                                                  ~parent_transition:
+                                                    (Some
+                                                       imported_parent
+                                                         .Git
+                                                          .imported_transition)
+                                                  ~parent_mapping:
+                                                    (Some
+                                                       imported_parent
+                                                         .Git.commit_mapping)
+                                                  ~capsule ~revision ~source
+                                                  ~target
+                                              with
+                                              | Error _ -> false
+                                              | Ok adoption -> (
+                                                  match
+                                                    Git.load_adoption store
+                                                      (Git.adoption_id adoption)
+                                                  with
+                                                  | Error _ -> false
+                                                  | Ok reopened ->
+                                                      String.equal
+                                                        (Git.object_id_to_hex
+                                                           commit)
+                                                        (Git.object_id_to_hex
+                                                           (Git.adoption_commit
+                                                              reopened))))))
+                                  | Ok _, Error _ | Error _, _ -> false))
+                          | Ok _, Error _ | Error _, _ -> false))
+                  | Some _, Error _ | None, _ -> false))
+
+let generated_adoptions =
+  QCheck2.Test.make ~count:8
+    ~name:
+      "Git archive adoption replays generated bytes and executable mode into a \
+       capsule"
+    QCheck2.Gen.(pair (string_size (int_range 0 4096)) bool)
+    archive_adopts_generated_file
+
 let () =
   Alcotest.run "Git properties"
     [
@@ -1118,5 +1322,8 @@ let () =
           QCheck_alcotest.to_alcotest ~speed_level:`Quick
             ~rand:(state_for "generated-archives")
             generated_archives;
+          QCheck_alcotest.to_alcotest ~speed_level:`Quick
+            ~rand:(state_for "generated-adoptions")
+            generated_adoptions;
         ] );
     ]

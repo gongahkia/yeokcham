@@ -60,12 +60,19 @@ let classify ~root =
   |> Result.map_error (fun error -> Cutover_error error)
 
 let require_v2 ~root =
-  let* availability = classify ~root in
-  match availability with
-  | V2_ready -> Ok ()
-  | (Uninitialized | Legacy | Mixed_or_unknown _ | Incomplete _) as unavailable
-    ->
-      Error (Root_unavailable unavailable)
+  (* V3 retains its verified local core records inside the V2 root. The cutover
+     classifier reports those retained V1-shaped objects as archivable legacy
+     artifacts, so the exact V2 root validator is the compatibility authority
+     for normal V3 commands. An actual V1 root still fails this open. *)
+  match Store.open_repository ~root with
+  | Ok _ -> Ok ()
+  | Error store_error -> (
+      let* availability = classify ~root in
+      match availability with
+      | V2_ready -> Error (Store_error store_error)
+      | (Uninitialized | Legacy | Mixed_or_unknown _ | Incomplete _) as
+        unavailable ->
+          Error (Root_unavailable unavailable))
 
 let initialize ~root =
   let* availability = classify ~root in

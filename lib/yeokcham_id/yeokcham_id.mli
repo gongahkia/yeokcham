@@ -38,3 +38,5 @@ module Imported_tag_id : S
 module Ref_event_id : S
 module Git_archive_id : S
 module Git_adoption_id : S
+module Publication_id : S
+module Peer_integration_id : S

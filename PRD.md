@@ -6,8 +6,8 @@ Yeokcham is a local-first version-control system that separates scratch, intent,
 
 It automatically records working-directory states, lets users curate those
 states into logical change capsules, composes capsules into workspaces, emits
-immutable releases, supports explicit Git migration, and will exchange selected
-native history directly between peers.
+immutable releases, supports explicit Git migration, and exchanges selected
+native work projections directly between peers.
 
 ## 2. Product objectives
 
@@ -137,7 +137,7 @@ passes `git fsck` and matches its selected snapshot bytes.
 1. User explicitly publishes a capsule revision or release.
 2. User fetches from a local-path or SSH peer.
 3. Yeokcham exchanges only missing verified immutable objects.
-4. Yeokcham shows an integration proposal or a divergence value.
+4. Yeokcham stores an inspectable integration proposal.
 5. User explicitly integrates the publication into local work.
 
 Acceptance condition: peer exchange neither shares scratch checkpoints by
@@ -255,8 +255,10 @@ Scratch checkpoints shall remain local by default.
 
 ### FR-027 Direct peer exchange
 
-Yeokcham shall fetch, verify, and propose integration of selected peer
-publications over a local path and SSH without requiring a hosted service.
+Yeokcham shall fetch and verify selected peer publications over a local path
+and SSH without requiring a hosted service. A capsule projection may be
+explicitly integrated into a new receiver-authored capsule; a release
+projection remains provenance until a later release-adoption decision.
 
 ## 5. Non-functional requirements
 
@@ -362,8 +364,9 @@ yeokcham storage stats
 ### Native peer exchange
 
 - Explicit publication selection.
-- Local-path transfer, then SSH transfer.
-- Missing-object transfer, divergence, and explicit integration.
+- Local-path and SSH transfer.
+- Missing-object transfer, inspectable proposal, and explicit capsule
+  integration.
 
 ## 8. Explicit non-goals
 
