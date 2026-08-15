@@ -188,3 +188,4 @@ The ADR lifecycle, numbering rules, and template are defined in [`docs/adr/READM
 - [ADR-075 — Git archive selection and capability provenance](docs/adr/075-git-archive-selection-and-capability-provenance.md) — Accepted.
 - [ADR-076 — Explicit Git archive capsule adoption](docs/adr/076-explicit-git-archive-capsule-adoption.md) — Accepted.
 - [ADR-077 — Peer publication projections and explicit integration](docs/adr/077-peer-publication-projections-and-explicit-integration.md) — Accepted.
+- [ADR-078 — Native Git lineage and authenticated peer synchronization](docs/adr/078-native-git-lineage-and-authenticated-peer-sync.md) — Accepted.

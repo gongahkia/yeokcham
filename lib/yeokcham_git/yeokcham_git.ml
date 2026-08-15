@@ -135,6 +135,35 @@ type adoption = {
   adoption_target : Scratch.Checkpoint_id.t;
 }
 
+type lineage_node = {
+  lineage_node_identity : Id.Git_lineage_node_id.t;
+  lineage_node_archive : Id.Git_archive_id.t;
+  lineage_node_format : object_format;
+  lineage_node_commit : object_id;
+  lineage_node_transition : Id.Imported_transition_id.t;
+  lineage_node_mapping : Id.Git_mapping_id.t;
+  lineage_node_snapshot : Snapshot.Snapshot.id;
+  lineage_node_parents : Id.Git_lineage_node_id.t list;
+}
+
+type lineage_ref = {
+  lineage_ref_name : string;
+  lineage_ref_object : object_id;
+  lineage_ref_head : Id.Git_lineage_node_id.t option;
+}
+
+type lineage = {
+  lineage_identity : Id.Git_lineage_id.t;
+  lineage_archive : Id.Git_archive_id.t;
+  lineage_format : object_format;
+  lineage_refs : lineage_ref list;
+}
+
+type lineage_result = {
+  lineage : lineage;
+  lineage_nodes : lineage_node list;
+}
+
 type git_identity = { git_identity_name : string; git_identity_email : string }
 
 type release_export_metadata = {
@@ -287,6 +316,7 @@ type error =
   | Imported_tag_error of string
   | Archive_error of string
   | Adoption_error of string
+  | Lineage_error of string
   | Store_error of Store.error
 
 let error_to_string = function
@@ -345,6 +375,7 @@ let error_to_string = function
   | Imported_tag_error detail -> "imported tag error: " ^ detail
   | Archive_error detail -> "Git archive error: " ^ detail
   | Adoption_error detail -> "Git adoption error: " ^ detail
+  | Lineage_error detail -> "Git lineage error: " ^ detail
   | Store_error error -> Store.error_to_string error
 
 let inspection_bare inspection = inspection.bare
@@ -1432,6 +1463,12 @@ let transition_v2_identity_payload ~commit ~tree ~snapshot ~parents ~author
 
 let object_id_equal left right =
   left.format = right.format && String.equal left.raw right.raw
+
+let object_id_compare left right =
+  match (left.format, right.format) with
+  | Sha1, Sha256 -> -1
+  | Sha256, Sha1 -> 1
+  | Sha1, Sha1 | Sha256, Sha256 -> String.compare left.raw right.raw
 
 let valid_transition_parents commit parents =
   let rec loop seen = function
@@ -5358,3 +5395,994 @@ module Legacy_format = struct
   let encode_mapping_binding logical physical =
     encode_mapping_binding 2 logical physical
 end
+
+(* Git lineage deliberately models foreign topology in its own graph.  It is
+   not an alternate encoding of scratch, capsules, or releases. *)
+let lineage_node_domain = "yeokcham:git-lineage-node:v1\000"
+let lineage_domain = "yeokcham:git-lineage:v1\000"
+let lineage_node_binding_domain = "yeokcham:git-lineage-node-binding:v1\000"
+let lineage_binding_domain = "yeokcham:git-lineage-binding:v1\000"
+
+let lineage_error_of_encoding error =
+  Lineage_error (Encoding.construction_error_to_string error)
+
+let lineage_array values =
+  Encoding.array values |> Result.map_error lineage_error_of_encoding
+
+let lineage_bytes name = function
+  | Encoding.Bytes value -> Ok value
+  | Encoding.Integer _ | Encoding.Text _ | Encoding.Array _ | Encoding.Map _
+  | Encoding.Bool _ | Encoding.Null ->
+      Error (Lineage_error (name ^ " must be bytes"))
+
+let lineage_integer name = function
+  | Encoding.Integer value -> Ok value
+  | Encoding.Bytes _ | Encoding.Text _ | Encoding.Array _ | Encoding.Map _
+  | Encoding.Bool _ | Encoding.Null ->
+      Error (Lineage_error (name ^ " must be an integer"))
+
+let lineage_fields name length = function
+  | Encoding.Array values when List.length values = length -> Ok values
+  | Encoding.Array _ ->
+      Error
+        (Lineage_error (Printf.sprintf "%s must contain %d values" name length))
+  | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _ | Encoding.Map _
+  | Encoding.Bool _ | Encoding.Null ->
+      Error (Lineage_error (name ^ " must be an array"))
+
+let lineage_raw_id name parser value =
+  let* raw = lineage_bytes name value in
+  if String.length raw <> 32 then
+    Error
+      (Lineage_error
+         (Printf.sprintf "%s must be exactly 32 bytes, got %d" name
+            (String.length raw)))
+  else
+    parser raw
+    |> Result.map_error (fun error ->
+        Lineage_error (Id.parse_error_to_string error))
+
+let lineage_stored_id name value =
+  let* raw = lineage_bytes name value in
+  match Store.Stored_object_id.of_raw_bytes raw with
+  | Some identity -> Ok identity
+  | None ->
+      Error
+        (Lineage_error
+           (Printf.sprintf "%s must be exactly 32 bytes, got %d" name
+              (String.length raw)))
+
+let lineage_format_code = function Sha1 -> 1L | Sha256 -> 2L
+
+let lineage_format_of_code = function
+  | 1L -> Ok Sha1
+  | 2L -> Ok Sha256
+  | value ->
+      Error
+        (Lineage_error
+           (Printf.sprintf "unknown Git lineage object format: %Ld" value))
+
+let lineage_object_value identity =
+  lineage_array
+    [
+      Encoding.integer (lineage_format_code identity.format);
+      Encoding.bytes identity.raw;
+    ]
+
+let decode_lineage_object name format value =
+  let* fields = lineage_fields name 2 value in
+  match fields with
+  | [ encoded_format; raw ] ->
+      let* encoded_format = lineage_integer (name ^ " format") encoded_format in
+      let* encoded_format = lineage_format_of_code encoded_format in
+      if encoded_format <> format then
+        Error (Lineage_error (name ^ " object format disagrees with record"))
+      else
+        let* raw = lineage_bytes (name ^ " raw ID") raw in
+        object_id_of_raw format raw
+        |> Result.map_error (fun error -> Lineage_error (error_to_string error))
+  | _ -> assert false
+
+let distinct_lineage_ids name identities =
+  let rec loop seen = function
+    | [] -> Ok ()
+    | identity :: rest ->
+        let raw = Id.Git_lineage_node_id.to_bytes identity in
+        if List.exists (String.equal raw) seen then
+          Error (Lineage_error (name ^ " contains a duplicate node ID"))
+        else loop (raw :: seen) rest
+  in
+  loop [] identities
+
+let lineage_node_identity_payload archive format commit =
+  let* commit = lineage_object_value commit in
+  lineage_array
+    [
+      Encoding.integer 1L;
+      Encoding.bytes (Id.Git_archive_id.to_bytes archive);
+      Encoding.integer (lineage_format_code format);
+      commit;
+    ]
+
+let derive_lineage_node_id archive format commit =
+  let* identity = lineage_node_identity_payload archive format commit in
+  let raw =
+    Hash.feed_string Hash.empty lineage_node_domain |> fun context ->
+    Hash.feed_string context (Encoding.encode identity)
+    |> Hash.get |> Hash.to_raw_string
+  in
+  Id.Git_lineage_node_id.of_bytes raw
+  |> Result.map_error (fun error ->
+      Lineage_error (Id.parse_error_to_string error))
+
+let make_lineage_node ~archive ~format ~commit ~transition ~mapping ~snapshot
+    ~parents =
+  if commit.format <> format then
+    Error (Lineage_error "Git lineage commit has a different object format")
+  else
+    let* () = distinct_lineage_ids "Git lineage parents" parents in
+    let* lineage_node_identity = derive_lineage_node_id archive format commit in
+    Ok
+      {
+        lineage_node_identity;
+        lineage_node_archive = archive;
+        lineage_node_format = format;
+        lineage_node_commit = commit;
+        lineage_node_transition = transition;
+        lineage_node_mapping = mapping;
+        lineage_node_snapshot = snapshot;
+        lineage_node_parents = parents;
+      }
+
+let lineage_node_payload node =
+  let* commit = lineage_object_value node.lineage_node_commit in
+  let* parents =
+    List.map
+      (fun parent ->
+        Encoding.bytes (Id.Git_lineage_node_id.to_bytes parent))
+      node.lineage_node_parents
+    |> lineage_array
+  in
+  lineage_array
+    [
+      Encoding.integer 1L;
+      Encoding.bytes
+        (Id.Git_lineage_node_id.to_bytes node.lineage_node_identity);
+      Encoding.bytes (Id.Git_archive_id.to_bytes node.lineage_node_archive);
+      Encoding.integer (lineage_format_code node.lineage_node_format);
+      commit;
+      Encoding.bytes
+        (Id.Imported_transition_id.to_bytes node.lineage_node_transition);
+      Encoding.bytes (Id.Git_mapping_id.to_bytes node.lineage_node_mapping);
+      Encoding.bytes
+        (Snapshot.Snapshot.stored_object_id node.lineage_node_snapshot
+        |> Store.Stored_object_id.to_raw_bytes);
+      parents;
+    ]
+
+let lineage_node_envelope node =
+  let* payload = lineage_node_payload node in
+  Envelope.create ~object_type:Envelope.Git_lineage_node
+    ~object_format_version:Envelope.current_object_format_version
+    ~mandatory_features:Envelope.supported_mandatory_features ~payload ()
+  |> Result.map_error (fun error ->
+      Lineage_error (Envelope.creation_error_to_string error))
+
+let decode_lineage_node_payload value =
+  let* fields = lineage_fields "Git lineage node" 9 value in
+  match fields with
+  | [
+   version;
+   supplied_id;
+   archive;
+   format;
+   commit;
+   transition;
+   mapping;
+   snapshot;
+   parents;
+  ] ->
+      let* version = lineage_integer "Git lineage node version" version in
+      if not (Int64.equal version 1L) then
+        Error
+          (Lineage_error
+             (Printf.sprintf "unsupported Git lineage node version: %Ld" version))
+      else
+        let* supplied_id =
+          lineage_raw_id "Git lineage node ID" Id.Git_lineage_node_id.of_bytes
+            supplied_id
+        in
+        let* archive =
+          lineage_raw_id "Git lineage node archive" Id.Git_archive_id.of_bytes
+            archive
+        in
+        let* format = lineage_integer "Git lineage node format" format in
+        let* format = lineage_format_of_code format in
+        let* commit = decode_lineage_object "Git lineage node commit" format commit in
+        let* transition =
+          lineage_raw_id "Git lineage node transition"
+            Id.Imported_transition_id.of_bytes transition
+        in
+        let* mapping =
+          lineage_raw_id "Git lineage node mapping" Id.Git_mapping_id.of_bytes
+            mapping
+        in
+        let* snapshot = lineage_stored_id "Git lineage node snapshot" snapshot in
+        let snapshot = Snapshot.Snapshot.of_stored_object_id snapshot in
+        let* parents =
+          match parents with
+          | Encoding.Array values ->
+              List.fold_left
+                (fun result value ->
+                  let* reversed = result in
+                  let* parent =
+                    lineage_raw_id "Git lineage node parent"
+                      Id.Git_lineage_node_id.of_bytes value
+                  in
+                  Ok (parent :: reversed))
+                (Ok []) values
+              |> Result.map List.rev
+          | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _ | Encoding.Map _
+          | Encoding.Bool _ | Encoding.Null ->
+              Error (Lineage_error "Git lineage node parents must be an array")
+        in
+        let* node =
+          make_lineage_node ~archive ~format ~commit ~transition ~mapping
+            ~snapshot ~parents
+        in
+        if
+          not
+            (Id.Git_lineage_node_id.equal supplied_id
+               node.lineage_node_identity)
+        then Error (Lineage_error "Git lineage node logical ID does not match its preimage")
+        else
+          let* canonical = lineage_node_payload node in
+          if String.equal (Encoding.encode canonical) (Encoding.encode value) then
+            Ok node
+          else Error (Lineage_error "Git lineage node payload is noncanonical")
+  | _ -> assert false
+
+let lineage_node_binding_body identity physical =
+  lineage_array
+    [
+      Encoding.integer 1L;
+      Encoding.bytes (Id.Git_lineage_node_id.to_bytes identity);
+      Encoding.bytes (Store.Stored_object_id.to_raw_bytes physical);
+    ]
+
+let lineage_node_binding_checksum body =
+  Hash.feed_string Hash.empty lineage_node_binding_domain |> fun context ->
+  Hash.feed_string context (Encoding.encode body)
+  |> Hash.get |> Hash.to_raw_string
+
+let encode_lineage_node_binding identity physical =
+  let* body = lineage_node_binding_body identity physical in
+  lineage_array
+    [
+      Encoding.integer 1L;
+      Encoding.bytes (Id.Git_lineage_node_id.to_bytes identity);
+      Encoding.bytes (Store.Stored_object_id.to_raw_bytes physical);
+      Encoding.bytes (lineage_node_binding_checksum body);
+    ]
+  |> Result.map Encoding.encode
+
+let decode_lineage_node_binding bytes =
+  let* value =
+    Encoding.decode bytes
+    |> Result.map_error (fun error ->
+        Lineage_error (Encoding.decode_error_to_string error))
+  in
+  let* fields = lineage_fields "Git lineage node binding" 4 value in
+  match fields with
+  | [ version; identity; physical; checksum ] ->
+      let* version = lineage_integer "Git lineage node binding version" version in
+      if not (Int64.equal version 1L) then
+        Error (Lineage_error "unsupported Git lineage node binding version")
+      else
+        let* identity =
+          lineage_raw_id "Git lineage node binding ID"
+            Id.Git_lineage_node_id.of_bytes identity
+        in
+        let* physical =
+          lineage_stored_id "Git lineage node binding object ID" physical
+        in
+        let* checksum = lineage_bytes "Git lineage node binding checksum" checksum in
+        if String.length checksum <> 32 then
+          Error (Lineage_error "Git lineage node binding checksum must be 32 bytes")
+        else
+          let* body = lineage_node_binding_body identity physical in
+          if not (String.equal checksum (lineage_node_binding_checksum body)) then
+            Error (Lineage_error "Git lineage node binding checksum mismatch")
+          else
+            let* canonical = encode_lineage_node_binding identity physical in
+            if String.equal canonical bytes then Ok (identity, physical)
+            else Error (Lineage_error "Git lineage node binding is noncanonical")
+  | _ -> assert false
+
+let lineage_node_ref_components identity =
+  [ "git-lineage-nodes"; Id.Git_lineage_node_id.to_hex identity ]
+
+let rec validate_lineage_node store visited node =
+  let node_raw = Id.Git_lineage_node_id.to_bytes node.lineage_node_identity in
+  if List.exists (String.equal node_raw) visited then
+    Error (Lineage_error "Git lineage graph contains a cycle")
+  else
+    let visited = node_raw :: visited in
+    let* archive = load_archive store node.lineage_node_archive in
+    if archive.archive_format <> node.lineage_node_format then
+      Error (Lineage_error "Git lineage node format disagrees with archive")
+    else
+      let* transition =
+        load_imported_transition store node.lineage_node_transition
+        |> Result.map_error (fun error -> Lineage_error (error_to_string error))
+      in
+      if not (object_id_equal transition.transition_commit node.lineage_node_commit)
+      then Error (Lineage_error "Git lineage transition commit disagrees with node")
+      else if
+        not
+          (Snapshot.Snapshot.equal_id transition.transition_snapshot
+             node.lineage_node_snapshot)
+      then Error (Lineage_error "Git lineage transition snapshot disagrees with node")
+      else
+        let* mapping =
+          load_mapping store node.lineage_node_mapping
+          |> Result.map_error (fun error -> Lineage_error (error_to_string error))
+        in
+        if
+          not
+            (mapping_matches_transition mapping node.lineage_node_transition
+               node.lineage_node_commit)
+        then Error (Lineage_error "Git lineage mapping does not name its transition")
+        else
+          let* parents =
+            List.fold_left
+              (fun result identity ->
+                let* reversed = result in
+                let* parent = load_lineage_node_with_visited store visited identity in
+                Ok (parent :: reversed))
+              (Ok []) node.lineage_node_parents
+            |> Result.map List.rev
+          in
+          let parent_commits = List.map (fun parent -> parent.lineage_node_commit) parents in
+          let same_parent_order =
+            List.length parent_commits = List.length transition.transition_parents
+            && List.for_all2 object_id_equal parent_commits transition.transition_parents
+          in
+          if same_parent_order then Ok node
+          else Error (Lineage_error "Git lineage parent order disagrees with transition")
+
+and load_lineage_node_with_visited store visited identity =
+  let* binding =
+    Store.Ref_file.read store ~components:(lineage_node_ref_components identity)
+    |> Result.map_error (fun error -> Store_error error)
+  in
+  match binding with
+  | None -> Error (Lineage_error "Git lineage node binding is absent")
+  | Some binding ->
+      let* bound_identity, physical = decode_lineage_node_binding binding in
+      if not (Id.Git_lineage_node_id.equal bound_identity identity) then
+        Error (Lineage_error "Git lineage node binding ID disagrees with its path")
+      else
+        let* envelope =
+          Store.get store physical |> Result.map_error (fun error -> Store_error error)
+        in
+        if Envelope.object_type envelope <> Envelope.Git_lineage_node then
+          Error (Lineage_error "Git lineage node binding names the wrong object type")
+        else
+          let* node = decode_lineage_node_payload (Envelope.payload envelope) in
+          if not (Id.Git_lineage_node_id.equal node.lineage_node_identity identity)
+          then Error (Lineage_error "Git lineage node object ID disagrees with binding")
+          else validate_lineage_node store visited node
+
+let load_lineage_node store identity =
+  load_lineage_node_with_visited store [] identity
+
+let publish_lineage_node store node =
+  let* _ = validate_lineage_node store [] node in
+  let* envelope = lineage_node_envelope node in
+  let* physical = Store.put store envelope |> Result.map_error (fun error -> Store_error error) in
+  let* binding = encode_lineage_node_binding node.lineage_node_identity physical in
+  Store.with_lock store ~name:"git-lineage-nodes"
+    ~on_error:(fun error -> Store_error error)
+    (fun () ->
+      let components = lineage_node_ref_components node.lineage_node_identity in
+      let* current =
+        Store.Ref_file.read store ~components
+        |> Result.map_error (fun error -> Store_error error)
+      in
+      match current with
+      | None ->
+          Store.Ref_file.compare_and_swap store ~components ~expected:None
+            ~replacement:binding
+          |> Result.map_error (fun error -> Store_error error)
+          |> Result.map (fun () -> node)
+      | Some _ -> load_lineage_node store node.lineage_node_identity)
+
+let valid_lineage_ref_name name =
+  not (String.is_empty name)
+  && not (String.contains name '\000')
+  && not (String.contains name '\n')
+  && not (String.contains name '\r')
+
+let lineage_ref_value format reference =
+  if not (valid_lineage_ref_name reference.lineage_ref_name) then
+    Error (Lineage_error "Git lineage ref name is malformed")
+  else if reference.lineage_ref_object.format <> format then
+    Error (Lineage_error "Git lineage ref has a different object format")
+  else
+    let* object_id = lineage_object_value reference.lineage_ref_object in
+    let head =
+      match reference.lineage_ref_head with
+      | None -> Encoding.null
+      | Some identity ->
+          Encoding.bytes (Id.Git_lineage_node_id.to_bytes identity)
+    in
+    lineage_array [ Encoding.bytes reference.lineage_ref_name; object_id; head ]
+
+let lineage_ref_values format references =
+  let rec loop previous reversed = function
+    | [] -> lineage_array (List.rev reversed)
+    | reference :: rest ->
+        let* () =
+          match previous with
+          | None -> Ok ()
+          | Some previous
+            when String.compare previous reference.lineage_ref_name < 0 ->
+              Ok ()
+          | Some _ ->
+              Error
+                (Lineage_error
+                   "Git lineage refs must be strictly bytewise ordered")
+        in
+        let* value = lineage_ref_value format reference in
+        loop (Some reference.lineage_ref_name) (value :: reversed) rest
+  in
+  loop None [] references
+
+let lineage_identity_payload archive =
+  lineage_array
+    [ Encoding.integer 1L; Encoding.bytes (Id.Git_archive_id.to_bytes archive) ]
+
+let derive_lineage_id archive =
+  let* identity = lineage_identity_payload archive in
+  let raw =
+    Hash.feed_string Hash.empty lineage_domain |> fun context ->
+    Hash.feed_string context (Encoding.encode identity)
+    |> Hash.get |> Hash.to_raw_string
+  in
+  Id.Git_lineage_id.of_bytes raw
+  |> Result.map_error (fun error ->
+      Lineage_error (Id.parse_error_to_string error))
+
+let make_lineage ~archive ~format ~refs =
+  let* () = lineage_ref_values format refs |> Result.map (fun _ -> ()) in
+  let* lineage_identity = derive_lineage_id archive in
+  Ok { lineage_identity; lineage_archive = archive; lineage_format = format; lineage_refs = refs }
+
+let lineage_payload lineage =
+  let* refs = lineage_ref_values lineage.lineage_format lineage.lineage_refs in
+  lineage_array
+    [
+      Encoding.integer 1L;
+      Encoding.bytes (Id.Git_lineage_id.to_bytes lineage.lineage_identity);
+      Encoding.bytes (Id.Git_archive_id.to_bytes lineage.lineage_archive);
+      Encoding.integer (lineage_format_code lineage.lineage_format);
+      refs;
+    ]
+
+let lineage_envelope lineage =
+  let* payload = lineage_payload lineage in
+  Envelope.create ~object_type:Envelope.Git_lineage
+    ~object_format_version:Envelope.current_object_format_version
+    ~mandatory_features:Envelope.supported_mandatory_features ~payload ()
+  |> Result.map_error (fun error ->
+      Lineage_error (Envelope.creation_error_to_string error))
+
+let decode_lineage_ref format value =
+  let* fields = lineage_fields "Git lineage ref" 3 value in
+  match fields with
+  | [ name; object_value; head ] ->
+      let* lineage_ref_name = lineage_bytes "Git lineage ref name" name in
+      let* lineage_ref_object =
+        decode_lineage_object "Git lineage ref object" format object_value
+      in
+      let* lineage_ref_head =
+        match head with
+        | Encoding.Null -> Ok None
+        | Encoding.Bytes _ ->
+            lineage_raw_id "Git lineage ref head" Id.Git_lineage_node_id.of_bytes
+              head
+            |> Result.map Option.some
+        | Encoding.Integer _ | Encoding.Text _ | Encoding.Array _ | Encoding.Map _
+        | Encoding.Bool _ ->
+            Error (Lineage_error "Git lineage ref head must be null or a node ID")
+      in
+      Ok { lineage_ref_name; lineage_ref_object; lineage_ref_head }
+  | _ -> assert false
+
+let decode_lineage_refs format = function
+  | Encoding.Array values ->
+      List.fold_left
+        (fun result value ->
+          let* reversed = result in
+          let* reference = decode_lineage_ref format value in
+          Ok (reference :: reversed))
+        (Ok []) values
+      |> Result.map List.rev
+  | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _ | Encoding.Map _
+  | Encoding.Bool _ | Encoding.Null ->
+      Error (Lineage_error "Git lineage refs must be an array")
+
+let decode_lineage_payload value =
+  let* fields = lineage_fields "Git lineage" 5 value in
+  match fields with
+  | [ version; supplied_id; archive; format; refs ] ->
+      let* version = lineage_integer "Git lineage version" version in
+      if not (Int64.equal version 1L) then
+        Error
+          (Lineage_error
+             (Printf.sprintf "unsupported Git lineage version: %Ld" version))
+      else
+        let* supplied_id =
+          lineage_raw_id "Git lineage ID" Id.Git_lineage_id.of_bytes supplied_id
+        in
+        let* archive =
+          lineage_raw_id "Git lineage archive" Id.Git_archive_id.of_bytes archive
+        in
+        let* format = lineage_integer "Git lineage format" format in
+        let* format = lineage_format_of_code format in
+        let* refs = decode_lineage_refs format refs in
+        let* lineage = make_lineage ~archive ~format ~refs in
+        if not (Id.Git_lineage_id.equal supplied_id lineage.lineage_identity) then
+          Error (Lineage_error "Git lineage logical ID does not match its preimage")
+        else
+          let* canonical = lineage_payload lineage in
+          if String.equal (Encoding.encode canonical) (Encoding.encode value) then
+            Ok lineage
+          else Error (Lineage_error "Git lineage payload is noncanonical")
+  | _ -> assert false
+
+let lineage_binding_body identity physical =
+  lineage_array
+    [
+      Encoding.integer 1L;
+      Encoding.bytes (Id.Git_lineage_id.to_bytes identity);
+      Encoding.bytes (Store.Stored_object_id.to_raw_bytes physical);
+    ]
+
+let lineage_binding_checksum body =
+  Hash.feed_string Hash.empty lineage_binding_domain |> fun context ->
+  Hash.feed_string context (Encoding.encode body)
+  |> Hash.get |> Hash.to_raw_string
+
+let encode_lineage_binding identity physical =
+  let* body = lineage_binding_body identity physical in
+  lineage_array
+    [
+      Encoding.integer 1L;
+      Encoding.bytes (Id.Git_lineage_id.to_bytes identity);
+      Encoding.bytes (Store.Stored_object_id.to_raw_bytes physical);
+      Encoding.bytes (lineage_binding_checksum body);
+    ]
+  |> Result.map Encoding.encode
+
+let decode_lineage_binding bytes =
+  let* value =
+    Encoding.decode bytes
+    |> Result.map_error (fun error ->
+        Lineage_error (Encoding.decode_error_to_string error))
+  in
+  let* fields = lineage_fields "Git lineage binding" 4 value in
+  match fields with
+  | [ version; identity; physical; checksum ] ->
+      let* version = lineage_integer "Git lineage binding version" version in
+      if not (Int64.equal version 1L) then
+        Error (Lineage_error "unsupported Git lineage binding version")
+      else
+        let* identity =
+          lineage_raw_id "Git lineage binding ID" Id.Git_lineage_id.of_bytes
+            identity
+        in
+        let* physical = lineage_stored_id "Git lineage binding object ID" physical in
+        let* checksum = lineage_bytes "Git lineage binding checksum" checksum in
+        if String.length checksum <> 32 then
+          Error (Lineage_error "Git lineage binding checksum must be 32 bytes")
+        else
+          let* body = lineage_binding_body identity physical in
+          if not (String.equal checksum (lineage_binding_checksum body)) then
+            Error (Lineage_error "Git lineage binding checksum mismatch")
+          else
+            let* canonical = encode_lineage_binding identity physical in
+            if String.equal canonical bytes then Ok (identity, physical)
+            else Error (Lineage_error "Git lineage binding is noncanonical")
+  | _ -> assert false
+
+let lineage_ref_components identity =
+  [ "git-lineages"; Id.Git_lineage_id.to_hex identity ]
+
+let same_archive_inventory lineage archive =
+  List.length lineage.lineage_refs = List.length archive.archive_ref_inventory
+  && List.for_all2
+       (fun left right ->
+         String.equal left.lineage_ref_name right.archive_ref_name
+         && object_id_equal left.lineage_ref_object right.archive_ref_object)
+       lineage.lineage_refs archive.archive_ref_inventory
+
+let validate_lineage store lineage =
+  let* archive = load_archive store lineage.lineage_archive in
+  if archive.archive_format <> lineage.lineage_format then
+    Error (Lineage_error "Git lineage format disagrees with archive")
+  else if not (same_archive_inventory lineage archive) then
+    Error (Lineage_error "Git lineage refs disagree with archive inventory")
+  else
+    List.fold_left
+      (fun result reference ->
+        let* () = result in
+        match reference.lineage_ref_head with
+        | None -> Ok ()
+        | Some head ->
+            let* node = load_lineage_node store head in
+            if Id.Git_archive_id.equal node.lineage_node_archive lineage.lineage_archive
+            then Ok ()
+            else Error (Lineage_error "Git lineage ref head belongs to another archive"))
+      (Ok ()) lineage.lineage_refs
+    |> Result.map (fun () -> lineage)
+
+let load_lineage_from_binding store identity binding =
+  let* bound_identity, physical = decode_lineage_binding binding in
+  if not (Id.Git_lineage_id.equal bound_identity identity) then
+    Error (Lineage_error "Git lineage binding ID disagrees with its path")
+  else
+    let* envelope = Store.get store physical |> Result.map_error (fun error -> Store_error error) in
+    if Envelope.object_type envelope <> Envelope.Git_lineage then
+      Error (Lineage_error "Git lineage binding names the wrong object type")
+    else
+      let* lineage = decode_lineage_payload (Envelope.payload envelope) in
+      if not (Id.Git_lineage_id.equal lineage.lineage_identity identity) then
+        Error (Lineage_error "Git lineage object ID disagrees with binding")
+      else validate_lineage store lineage
+
+let load_lineage store identity =
+  let* binding =
+    Store.Ref_file.read store ~components:(lineage_ref_components identity)
+    |> Result.map_error (fun error -> Store_error error)
+  in
+  match binding with
+  | None -> Error (Lineage_error "Git lineage binding is absent")
+  | Some binding -> load_lineage_from_binding store identity binding
+
+let publish_lineage store lineage =
+  let* () = validate_lineage store lineage |> Result.map (fun _ -> ()) in
+  let* envelope = lineage_envelope lineage in
+  let* physical = Store.put store envelope |> Result.map_error (fun error -> Store_error error) in
+  let* binding = encode_lineage_binding lineage.lineage_identity physical in
+  Store.with_lock store ~name:"git-lineages"
+    ~on_error:(fun error -> Store_error error)
+    (fun () ->
+      let components = lineage_ref_components lineage.lineage_identity in
+      let* current =
+        Store.Ref_file.read store ~components
+        |> Result.map_error (fun error -> Store_error error)
+      in
+      match current with
+      | None ->
+          Store.Ref_file.compare_and_swap store ~components ~expected:None
+            ~replacement:binding
+          |> Result.map_error (fun error -> Store_error error)
+          |> Result.map (fun () -> lineage)
+      | Some current ->
+          load_lineage_from_binding store lineage.lineage_identity current)
+
+type archived_lineage_ref = {
+  archived_lineage_reference : archive_ref;
+  archived_lineage_head : object_id option;
+}
+
+type discovered_lineage_commit = {
+  discovered_lineage_commit : object_id;
+  discovered_lineage_parents : object_id list;
+}
+
+let parse_archived_lineage_refs format archive output =
+  let lines =
+    String.split_on_char '\n' output
+    |> List.filter (fun line -> not (String.is_empty line))
+  in
+  if List.length lines > 100_000 then
+    Error (Lineage_error "Git lineage ref inventory exceeds 100000 refs")
+  else
+    let rec parse reversed = function
+      | [] -> Ok (List.rev reversed)
+      | line :: rest -> (
+          match String.split_on_char '\000' line with
+          | [ name; object_hex; object_kind; peeled_hex; peeled_kind ] ->
+              let* object_id =
+                object_id_of_hex format object_hex
+                |> Result.map_error (fun error ->
+                    Lineage_error (error_to_string error))
+              in
+              let* archived_lineage_head =
+                if String.equal object_kind "commit" then Ok (Some object_id)
+                else if String.equal peeled_kind "commit" then
+                  object_id_of_hex format peeled_hex
+                  |> Result.map Option.some
+                  |> Result.map_error (fun error ->
+                      Lineage_error (error_to_string error))
+                else Ok None
+              in
+              parse
+                ({
+                   archived_lineage_reference =
+                     { archive_ref_name = name; archive_ref_object = object_id };
+                   archived_lineage_head;
+                 }
+                :: reversed)
+                rest
+          | _ ->
+              Error
+                (Lineage_error
+                   "Git lineage ref inventory has an invalid field count"))
+    in
+    let* references = parse [] lines in
+    let same_inventory =
+      List.length references = List.length archive.archive_ref_inventory
+      && List.for_all2
+           (fun left right ->
+             String.equal left.archived_lineage_reference.archive_ref_name
+               right.archive_ref_name
+             && object_id_equal
+                  left.archived_lineage_reference.archive_ref_object
+                  right.archive_ref_object)
+           references archive.archive_ref_inventory
+    in
+    if same_inventory then Ok references
+    else Error (Lineage_error "reconstructed archive refs changed during lineage materialization")
+
+let archive_lineage_refs ?runner configuration executable repository archive =
+  let* output =
+    run_bytes ?runner configuration executable repository
+      ~operation:"lineage-ref-inventory"
+      ~max_stdout_bytes:configuration.max_total_tree_bytes
+      [
+        "--no-replace-objects";
+        "for-each-ref";
+        "--sort=refname";
+        "--format=%(refname)%00%(objectname)%00%(objecttype)%00%(*objectname)%00%(*objecttype)";
+      ]
+  in
+  parse_archived_lineage_refs archive.archive_format archive output
+
+let object_ids_distinct identities =
+  let rec loop seen = function
+    | [] -> Ok ()
+    | identity :: rest ->
+        if List.exists (object_id_equal identity) seen then
+          Error (Lineage_error "Git commit parent list contains a duplicate")
+        else loop (identity :: seen) rest
+  in
+  loop [] identities
+
+let parse_lineage_commit_graph format ~max_commits ~max_parents output =
+  let lines =
+    String.split_on_char '\n' output
+    |> List.filter (fun line -> not (String.is_empty line))
+  in
+  let rec parse table count = function
+    | [] -> Ok table
+    | _ :: _ when count = max_commits ->
+        Error
+          (Import_limit_exceeded
+             {
+               resource = "reachable Git commits for lineage";
+               limit = max_commits;
+               actual = count + 1;
+             })
+    | line :: rest ->
+        if String.contains line '\000' || String.contains line '\r' then
+          Error (Lineage_error "Git lineage commit graph contains forbidden bytes")
+        else
+          let fields = String.split_on_char ' ' line in
+          match fields with
+          | [] | [ "" ] ->
+              Error (Lineage_error "Git lineage commit graph has an empty line")
+          | commit_hex :: parent_hexes ->
+              if List.exists String.is_empty parent_hexes then
+                Error (Lineage_error "Git lineage commit graph has repeated spaces")
+              else if List.length parent_hexes > max_parents then
+                Error
+                  (Import_limit_exceeded
+                     {
+                       resource = "commit parents";
+                       limit = max_parents;
+                       actual = List.length parent_hexes;
+                     })
+              else
+                let* discovered_lineage_commit =
+                  object_id_of_hex format commit_hex
+                  |> Result.map_error (fun error ->
+                      Lineage_error (error_to_string error))
+                in
+                let raw = discovered_lineage_commit.raw in
+                if Hashtbl.mem table raw then
+                  Error (Lineage_error "Git lineage commit graph repeats a commit")
+                else
+                  let* discovered_lineage_parents =
+                    List.fold_left
+                      (fun result hex ->
+                        let* reversed = result in
+                        let* parent =
+                          object_id_of_hex format hex
+                          |> Result.map_error (fun error ->
+                              Lineage_error (error_to_string error))
+                        in
+                        if object_id_equal parent discovered_lineage_commit then
+                          Error (Lineage_error "Git lineage commit is its own parent")
+                        else Ok (parent :: reversed))
+                      (Ok []) parent_hexes
+                    |> Result.map List.rev
+                  in
+                  let* () = object_ids_distinct discovered_lineage_parents in
+                  Hashtbl.add table raw
+                    { discovered_lineage_commit; discovered_lineage_parents };
+                  parse table (count + 1) rest
+  in
+  parse (Hashtbl.create (max 16 (List.length lines))) 0 lines
+
+let discover_lineage_commits ?runner configuration executable repository format
+    references =
+  let heads =
+    references
+    |> List.filter_map (fun reference -> reference.archived_lineage_head)
+    |> List.sort_uniq object_id_compare
+  in
+  match heads with
+  | [] -> Ok (Hashtbl.create 0)
+  | _ ->
+      let* output =
+        run_bytes ?runner configuration executable repository
+          ~operation:"lineage-rev-list"
+          ~max_stdout_bytes:configuration.max_total_tree_bytes
+          ([ "--no-replace-objects"; "rev-list"; "--topo-order"; "--reverse"; "--parents" ]
+          @ List.map object_id_to_hex heads)
+      in
+      let* graph =
+        parse_lineage_commit_graph format
+          ~max_commits:configuration.max_export_commits
+          ~max_parents:configuration.max_commit_parents output
+      in
+      let* () =
+        List.fold_left
+          (fun result head ->
+            let* () = result in
+            if Hashtbl.mem graph head.raw then Ok ()
+            else Error (Lineage_error "Git lineage graph omits a selected ref head"))
+          (Ok ()) heads
+      in
+      let* () =
+        Hashtbl.fold
+          (fun _ discovered result ->
+            let* () = result in
+            List.fold_left
+              (fun result parent ->
+                let* () = result in
+                if Hashtbl.mem graph parent.raw then Ok ()
+                else Error (Lineage_error "Git lineage graph omits a parent"))
+              (Ok ()) discovered.discovered_lineage_parents)
+          graph (Ok ())
+      in
+      Ok graph
+
+let materialize_archive_lineage ?runner configuration ~store ~archive =
+  let* configuration = validate_configuration configuration in
+  let* preserved = load_archive store archive in
+  let* executable =
+    match executable_path configuration.git with
+    | Some executable -> Ok executable
+    | None -> Error (Git_missing configuration.git)
+  in
+  with_temporary_archive_directory "lineage" (fun repository ->
+      let* _ =
+        exit_archive ?runner configuration ~store ~archive ~destination:repository
+      in
+      let* references =
+        archive_lineage_refs ?runner configuration executable repository preserved
+      in
+      let* graph =
+        discover_lineage_commits ?runner configuration executable repository
+          preserved.archive_format references
+      in
+      let materialized = Hashtbl.create (max 16 (Hashtbl.length graph)) in
+      let visiting = Hashtbl.create (max 16 (Hashtbl.length graph)) in
+      let created = ref [] in
+      let rec visit commit =
+        match Hashtbl.find_opt materialized commit.raw with
+        | Some node -> Ok node
+        | None ->
+            if Hashtbl.mem visiting commit.raw then
+              Error (Lineage_error "Git lineage graph contains a cycle")
+            else
+              match Hashtbl.find_opt graph commit.raw with
+              | None -> Error (Lineage_error "Git lineage commit is missing from graph")
+              | Some discovered ->
+                  Hashtbl.add visiting commit.raw ();
+                  let result =
+                    let* parents =
+                      List.fold_left
+                        (fun result parent ->
+                          let* reversed = result in
+                          let* node = visit parent in
+                          Ok (node :: reversed))
+                        (Ok []) discovered.discovered_lineage_parents
+                      |> Result.map List.rev
+                    in
+                    let* imported =
+                      import_commit ?runner configuration ~store ~repository
+                        ~commit:discovered.discovered_lineage_commit
+                    in
+                    let transition = imported.imported_transition in
+                    let imported_parents = transition.transition_parents in
+                    let expected_parents = discovered.discovered_lineage_parents in
+                    if
+                      List.length imported_parents <> List.length expected_parents
+                      || not (List.for_all2 object_id_equal imported_parents expected_parents)
+                    then Error (Lineage_error "Git commit import parent order disagrees with rev-list")
+                    else
+                      let* node =
+                        make_lineage_node ~archive
+                          ~format:preserved.archive_format
+                          ~commit:discovered.discovered_lineage_commit
+                          ~transition:(imported_transition_id transition)
+                          ~mapping:(mapping_id imported.commit_mapping)
+                          ~snapshot:transition.transition_snapshot
+                          ~parents:(List.map (fun parent -> parent.lineage_node_identity) parents)
+                      in
+                      let* node = publish_lineage_node store node in
+                      Hashtbl.replace materialized commit.raw node;
+                      created := node :: !created;
+                      Ok node
+                  in
+                  Hashtbl.remove visiting commit.raw;
+                  result
+      in
+      let* resolved_references =
+        List.fold_left
+          (fun result reference ->
+            let* reversed = result in
+            let* lineage_ref_head =
+              match reference.archived_lineage_head with
+              | None -> Ok None
+              | Some head ->
+                  visit head
+                  |> Result.map (fun node -> Some node.lineage_node_identity)
+            in
+            Ok
+              ({
+                 lineage_ref_name = reference.archived_lineage_reference.archive_ref_name;
+                 lineage_ref_object = reference.archived_lineage_reference.archive_ref_object;
+                 lineage_ref_head;
+               }
+              :: reversed))
+          (Ok []) references
+        |> Result.map List.rev
+      in
+      let* lineage =
+        make_lineage ~archive ~format:preserved.archive_format
+          ~refs:resolved_references
+      in
+      let* lineage = publish_lineage store lineage in
+      let* lineage = load_lineage store lineage.lineage_identity in
+      Ok { lineage; lineage_nodes = List.rev !created })
+
+let lineage_id lineage = lineage.lineage_identity
+let lineage_archive lineage = lineage.lineage_archive
+let lineage_refs lineage = lineage.lineage_refs
+let lineage_ref_name reference = reference.lineage_ref_name
+let lineage_ref_object reference = reference.lineage_ref_object
+let lineage_ref_head reference = reference.lineage_ref_head
+let lineage_node_id node = node.lineage_node_identity
+let lineage_node_archive node = node.lineage_node_archive
+let lineage_node_commit node = node.lineage_node_commit
+let lineage_node_snapshot node = node.lineage_node_snapshot
+let lineage_node_transition node = node.lineage_node_transition
+let lineage_node_mapping node = node.lineage_node_mapping
+let lineage_node_parents node = node.lineage_node_parents

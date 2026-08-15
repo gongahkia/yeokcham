@@ -42,6 +42,13 @@ type object_type =
   | Git_adoption
   | Peer_publication
   | Peer_integration
+  | Git_lineage_node
+  | Git_lineage
+  | Peer_identity
+  | Peer_contact
+  | Peer_advertisement
+  | Peer_sync_node
+  | Peer_sync_conflict
 
 let object_type_code = function
   | Content -> 1
@@ -76,6 +83,13 @@ let object_type_code = function
   | Git_adoption -> 30
   | Peer_publication -> 31
   | Peer_integration -> 32
+  | Git_lineage_node -> 33
+  | Git_lineage -> 34
+  | Peer_identity -> 35
+  | Peer_contact -> 36
+  | Peer_advertisement -> 37
+  | Peer_sync_node -> 38
+  | Peer_sync_conflict -> 39
 
 let object_type_of_code = function
   | 1 -> Some Content
@@ -110,6 +124,13 @@ let object_type_of_code = function
   | 30 -> Some Git_adoption
   | 31 -> Some Peer_publication
   | 32 -> Some Peer_integration
+  | 33 -> Some Git_lineage_node
+  | 34 -> Some Git_lineage
+  | 35 -> Some Peer_identity
+  | 36 -> Some Peer_contact
+  | 37 -> Some Peer_advertisement
+  | 38 -> Some Peer_sync_node
+  | 39 -> Some Peer_sync_conflict
   | _ -> None
 
 type creation_error =

@@ -37,6 +37,13 @@ type object_type =
   | Git_adoption
   | Peer_publication
   | Peer_integration
+  | Git_lineage_node
+  | Git_lineage
+  | Peer_identity
+  | Peer_contact
+  | Peer_advertisement
+  | Peer_sync_node
+  | Peer_sync_conflict
 
 val object_type_code : object_type -> int
 val object_type_of_code : int -> object_type option

@@ -37,11 +37,19 @@ type imported_transition
 type imported_tag
 type archive
 type adoption
+type lineage
+type lineage_node
+type lineage_ref
 type archive_ref = { archive_ref_name : string; archive_ref_object : object_id }
 
 type archive_capability = {
   archive_source_bare : bool;
   archive_source_object_format : object_format;
+}
+
+type lineage_result = {
+  lineage : lineage;
+  lineage_nodes : lineage_node list;
 }
 
 type import_result = {
@@ -170,6 +178,7 @@ type error =
   | Imported_tag_error of string
   | Archive_error of string
   | Adoption_error of string
+  | Lineage_error of string
   | Store_error of Yeokcham_store.error
 
 val error_to_string : error -> string
@@ -261,6 +270,37 @@ val import_archive_commit :
   archive:Yeokcham_id.Git_archive_id.t ->
   commit:object_id ->
   (commit_import_result, error) result
+
+val materialize_archive_lineage :
+  ?runner:(module Yeokcham_validation.Process_runner) ->
+  configuration ->
+  store:Yeokcham_store.repository ->
+  archive:Yeokcham_id.Git_archive_id.t ->
+  (lineage_result, error) result
+
+val load_lineage :
+  Yeokcham_store.repository ->
+  Yeokcham_id.Git_lineage_id.t ->
+  (lineage, error) result
+
+val load_lineage_node :
+  Yeokcham_store.repository ->
+  Yeokcham_id.Git_lineage_node_id.t ->
+  (lineage_node, error) result
+
+val lineage_id : lineage -> Yeokcham_id.Git_lineage_id.t
+val lineage_archive : lineage -> Yeokcham_id.Git_archive_id.t
+val lineage_refs : lineage -> lineage_ref list
+val lineage_ref_name : lineage_ref -> string
+val lineage_ref_object : lineage_ref -> object_id
+val lineage_ref_head : lineage_ref -> Yeokcham_id.Git_lineage_node_id.t option
+val lineage_node_id : lineage_node -> Yeokcham_id.Git_lineage_node_id.t
+val lineage_node_archive : lineage_node -> Yeokcham_id.Git_archive_id.t
+val lineage_node_commit : lineage_node -> object_id
+val lineage_node_snapshot : lineage_node -> Yeokcham_snapshot.Snapshot.id
+val lineage_node_transition : lineage_node -> Yeokcham_id.Imported_transition_id.t
+val lineage_node_mapping : lineage_node -> Yeokcham_id.Git_mapping_id.t
+val lineage_node_parents : lineage_node -> Yeokcham_id.Git_lineage_node_id.t list
 
 val record_archive_adoption :
   Yeokcham_store.repository ->

@@ -40,3 +40,9 @@ module Git_archive_id : S
 module Git_adoption_id : S
 module Publication_id : S
 module Peer_integration_id : S
+module Git_lineage_id : S
+module Git_lineage_node_id : S
+module Peer_id : S
+module Peer_contact_id : S
+module Peer_sync_node_id : S
+module Peer_sync_conflict_id : S

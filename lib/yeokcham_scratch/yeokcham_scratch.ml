@@ -1274,7 +1274,10 @@ module Cleanup_manifest = struct
     | Envelope.Git_mapping | Envelope.Imported_transition
     | Envelope.Imported_tag | Envelope.Ref_event | Envelope.Device_identity
     | Envelope.Divergent_ref_set | Envelope.Git_archive | Envelope.Git_adoption
-    | Envelope.Peer_publication | Envelope.Peer_integration ->
+    | Envelope.Peer_publication | Envelope.Peer_integration
+    | Envelope.Git_lineage_node | Envelope.Git_lineage | Envelope.Peer_identity
+    | Envelope.Peer_contact | Envelope.Peer_advertisement
+    | Envelope.Peer_sync_node | Envelope.Peer_sync_conflict ->
         false
 
   let compare_candidate left right =

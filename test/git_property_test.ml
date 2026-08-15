@@ -1126,6 +1126,184 @@ let generated_archives =
     QCheck2.Gen.(pair (string_size (int_range 0 4096)) bool)
     archive_exits_generated_file
 
+let archive_materializes_generated_topology branch_count =
+  match git_path () with
+  | None -> false
+  | Some git ->
+      with_directory "yeokcham-git-lineage-property-" (fun root ->
+          let repository = Filename.concat root "repository" in
+          let store_root = Filename.concat root "store" in
+          Unix.mkdir repository 0o700;
+          Unix.mkdir store_root 0o700;
+          let run arguments = direct_process git arguments in
+          if not (run [ "init"; "-q"; repository ]) then false
+          else if
+            not
+              (run
+                 [ "-C"; repository; "config"; "user.name"; "Yeokcham Test" ])
+          then false
+          else if
+            not
+              (run
+                 [
+                   "-C";
+                   repository;
+                   "config";
+                   "user.email";
+                   "test@example.invalid";
+                 ])
+          then false
+          else
+            let setup_base () =
+              write_file (Filename.concat repository "base") "base";
+              run [ "-C"; repository; "add"; "--all" ]
+              && run [ "-C"; repository; "commit"; "-q"; "-m"; "base" ]
+            in
+            if not (setup_base ()) then false
+            else
+              match
+                ( direct_capture git [ "-C"; repository; "rev-parse"; "HEAD" ],
+                  direct_capture git
+                    [ "-C"; repository; "branch"; "--show-current" ] )
+              with
+              | None, _ | _, None -> false
+              | Some base, Some main_branch ->
+                  let sides =
+                    List.init branch_count (fun index ->
+                        Printf.sprintf "side-%d" index)
+                  in
+                  let rec create_sides index =
+                    if index = branch_count then true
+                    else
+                      let side = List.nth sides index in
+                      if
+                        not
+                          (run
+                             [
+                               "-C";
+                               repository;
+                               "checkout";
+                               "-q";
+                               "-b";
+                               side;
+                               base;
+                             ])
+                      then false
+                      else (
+                        write_file
+                          (Filename.concat repository
+                             (Printf.sprintf "side-%d" index))
+                          (Printf.sprintf "side-%d" index);
+                        run [ "-C"; repository; "add"; "--all" ]
+                        && run [ "-C"; repository; "commit"; "-q"; "-m"; side ]
+                        && create_sides (index + 1))
+                  in
+                  if not (create_sides 0) then false
+                  else if
+                    not
+                      (run
+                         [
+                           "-C";
+                           repository;
+                           "checkout";
+                           "-q";
+                           main_branch;
+                         ])
+                  then false
+                  else (
+                    write_file (Filename.concat repository "main") "main";
+                    if not (run [ "-C"; repository; "add"; "--all" ]) then false
+                    else if
+                      not
+                        (run
+                           [
+                             "-C";
+                             repository;
+                             "commit";
+                             "-q";
+                             "-m";
+                             "main";
+                           ])
+                    then false
+                    else if
+                      not
+                        (run
+                           ([
+                              "-C";
+                              repository;
+                              "merge";
+                              "--no-ff";
+                              "-q";
+                              "-m";
+                              "octopus";
+                            ]
+                           @ sides))
+                    then false
+                    else
+                      match
+                        ( direct_capture git
+                            [ "-C"; repository; "rev-parse"; "HEAD" ],
+                          direct_capture git
+                            [ "-C"; repository; "show"; "-s"; "--format=%P"; "HEAD" ],
+                          Store.init ~root:store_root )
+                      with
+                      | Some merge, Some parents, Ok store ->
+                          (match
+                             Git.inspect Git.default_configuration ~repository
+                             |> Result.map Git.inspection_object_format
+                           with
+                          | Error _ -> false
+                          | Ok format ->
+                              (match
+                                 ( Git.object_id_of_hex format merge,
+                                   Git.archive_repository
+                                     Git.default_configuration ~store ~repository )
+                               with
+                              | Error _, _ | _, Error _ -> false
+                              | Ok merge, Ok archive ->
+                                  (match
+                                     Git.materialize_archive_lineage
+                                       Git.default_configuration ~store
+                                       ~archive:(Git.archive_id archive)
+                                   with
+                                  | Error _ -> false
+                                  | Ok materialized ->
+                                      (match
+                                         List.find_opt
+                                           (fun node ->
+                                             String.equal
+                                               (Git.object_id_to_hex
+                                                  (Git.lineage_node_commit node))
+                                               (Git.object_id_to_hex merge))
+                                           materialized.Git.lineage_nodes
+                                       with
+                                      | None -> false
+                                      | Some node ->
+                                          let actual_parents =
+                                            Git.lineage_node_parents node
+                                            |> List.map (fun identity ->
+                                                   Git.load_lineage_node store
+                                                     identity
+                                                   |> Result.map
+                                                        Git.lineage_node_commit
+                                                   |> Result.map
+                                                        Git.object_id_to_hex)
+                                          in
+                                          List.for_all Result.is_ok actual_parents
+                                          && List.map Result.get_ok actual_parents
+                                             = String.split_on_char ' ' parents
+                                          && List.length materialized.Git.lineage_nodes
+                                             = branch_count + 3)))
+                      | Some _, Some _, Error _ | Some _, None, _ | None, _, _ ->
+                          false)))
+
+let generated_lineages =
+  QCheck2.Test.make ~count:12
+    ~name:
+      "Git archive lineage preserves generated octopus merge topology and parent order"
+    QCheck2.Gen.(int_range 2 4)
+    archive_materializes_generated_topology
+
 let archive_adopts_generated_file (bytes, executable) =
   match git_path () with
   | None -> false
@@ -1322,6 +1500,9 @@ let () =
           QCheck_alcotest.to_alcotest ~speed_level:`Quick
             ~rand:(state_for "generated-archives")
             generated_archives;
+          QCheck_alcotest.to_alcotest ~speed_level:`Quick
+            ~rand:(state_for "generated-lineages")
+            generated_lineages;
           QCheck_alcotest.to_alcotest ~speed_level:`Quick
             ~rand:(state_for "generated-adoptions")
             generated_adoptions;

@@ -1752,6 +1752,11 @@ let git_adoption_id value =
   | Ok identity -> identity
   | Error error -> fail Yeokcham_id.parse_error_to_string error
 
+let git_lineage_id value =
+  match Yeokcham_id.Git_lineage_id.of_hex value with
+  | Ok identity -> identity
+  | Error error -> fail Yeokcham_id.parse_error_to_string error
+
 let print_git_archive archive =
   let source_bare =
     match Git.archive_capability archive with
@@ -1857,6 +1862,59 @@ let print_git_adoption adoption =
     (Git.adoption_target adoption
     |> Scratch.Checkpoint_id.stored_object_id |> Store.Stored_object_id.to_hex)
 
+let print_git_lineage_node node =
+  Printf.printf "node=%s commit=%s snapshot=%s transition=%s mapping=%s parents=%s\n"
+    (Yeokcham_id.Git_lineage_node_id.to_hex (Git.lineage_node_id node))
+    (Git.object_id_to_hex (Git.lineage_node_commit node))
+    (Git.lineage_node_snapshot node |> Snapshot.Snapshot.stored_object_id
+   |> Store.Stored_object_id.to_hex)
+    (Yeokcham_id.Imported_transition_id.to_hex
+       (Git.lineage_node_transition node))
+    (Yeokcham_id.Git_mapping_id.to_hex (Git.lineage_node_mapping node))
+    (Git.lineage_node_parents node
+    |> List.map Yeokcham_id.Git_lineage_node_id.to_hex
+    |> String.concat ",")
+
+let show_git_lineage store lineage =
+  Printf.printf "lineage=%s archive=%s refs=%d\n"
+    (Yeokcham_id.Git_lineage_id.to_hex (Git.lineage_id lineage))
+    (Yeokcham_id.Git_archive_id.to_hex (Git.lineage_archive lineage))
+    (List.length (Git.lineage_refs lineage));
+  let seen = Hashtbl.create 16 in
+  let rec show_node identity =
+    let raw = Yeokcham_id.Git_lineage_node_id.to_bytes identity in
+    if Hashtbl.mem seen raw then Ok ()
+    else (
+      Hashtbl.add seen raw ();
+      match Git.load_lineage_node store identity with
+      | Error error -> Error (Git.error_to_string error)
+      | Ok node ->
+          print_git_lineage_node node;
+          List.fold_left
+            (fun result parent ->
+              let* () = result in
+              show_node parent)
+            (Ok ()) (Git.lineage_node_parents node))
+  in
+  let result =
+    List.fold_left
+      (fun result reference ->
+        let* () = result in
+        let head =
+          match Git.lineage_ref_head reference with
+          | None -> "none"
+          | Some identity -> Yeokcham_id.Git_lineage_node_id.to_hex identity
+        in
+        Printf.printf "ref=%s object=%s head=%s\n"
+          (Git.lineage_ref_name reference)
+          (Git.object_id_to_hex (Git.lineage_ref_object reference)) head;
+        match Git.lineage_ref_head reference with
+        | None -> Ok ()
+        | Some identity -> show_node identity)
+      (Ok ()) (Git.lineage_refs lineage)
+  in
+  match result with Error error -> fail Fun.id error | Ok () -> ()
+
 let git root arguments =
   match arguments with
   | "archive" :: "create" :: options -> (
@@ -1898,6 +1956,29 @@ let git root arguments =
           match Git.load_archive store (git_archive_id archive) with
           | Error error -> fail Git.error_to_string error
           | Ok archive -> show_git_archive archive))
+  | [ "archive"; "materialize-lineage"; archive ] -> (
+      match Store.open_repository ~root with
+      | Error error -> fail Store.error_to_string error
+      | Ok store -> (
+          match
+            Git.materialize_archive_lineage Git.default_configuration ~store
+              ~archive:(git_archive_id archive)
+          with
+          | Error error -> fail Git.error_to_string error
+          | Ok result ->
+              Printf.printf "lineage=%s archive=%s nodes=%d\n"
+                (Yeokcham_id.Git_lineage_id.to_hex
+                   (Git.lineage_id result.Git.lineage))
+                (Yeokcham_id.Git_archive_id.to_hex
+                   (Git.lineage_archive result.Git.lineage))
+                (List.length result.Git.lineage_nodes)))
+  | [ "lineage"; "show"; lineage ] -> (
+      match Store.open_repository ~root with
+      | Error error -> fail Store.error_to_string error
+      | Ok store -> (
+          match Git.load_lineage store (git_lineage_id lineage) with
+          | Error error -> fail Git.error_to_string error
+          | Ok lineage -> show_git_lineage store lineage))
   | [ "archive"; "adoption"; "show"; adoption ] -> (
       match Store.open_repository ~root with
       | Error error -> fail Store.error_to_string error

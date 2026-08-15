@@ -2895,6 +2895,22 @@ let archive_envelope_bytes store archive =
   | Error _ ->
       Alcotest.fail "Git archive binding does not decode"
 
+let immutable_envelope_bytes store components =
+  let binding = binding_bytes store components in
+  match Encoding.decode binding with
+  | Ok (Encoding.Array [ _; _; Encoding.Bytes physical; _ ]) -> (
+      match Store.Stored_object_id.of_raw_bytes physical with
+      | Some physical ->
+          Store.get store physical
+          |> require_ok Store.error_to_string
+          |> Envelope.encode
+      | None -> Alcotest.fail "immutable binding object ID is invalid")
+  | Ok
+      ( Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _
+      | Encoding.Array _ | Encoding.Map _ | Encoding.Bool _ | Encoding.Null )
+  | Error _ ->
+      Alcotest.fail "immutable binding does not decode"
+
 let adoption_envelope_bytes store adoption =
   let components =
     [ "git-adoptions"; Id.Git_adoption_id.to_hex (Git.adoption_id adoption) ]
@@ -3056,6 +3072,84 @@ let archives_and_exits_complete_git_history () =
                (contains ~needle:"Git archive error"
                   (Git.error_to_string error))))
 
+let archive_lineage_materializes_merge_topology () =
+  commit_fixture (fun repository store _format merge expected_parents ->
+      let archive =
+        Git.archive_repository Git.default_configuration ~store ~repository
+        |> require_ok Git.error_to_string
+      in
+      let first =
+        Git.materialize_archive_lineage Git.default_configuration ~store
+          ~archive:(Git.archive_id archive)
+        |> require_ok Git.error_to_string
+      in
+      let second =
+        Git.materialize_archive_lineage Git.default_configuration ~store
+          ~archive:(Git.archive_id archive)
+        |> require_ok Git.error_to_string
+      in
+      Alcotest.(check bool)
+        "lineage retry keeps one logical identity" true
+        (Id.Git_lineage_id.equal (Git.lineage_id first.Git.lineage)
+           (Git.lineage_id second.Git.lineage));
+      Alcotest.(check int) "reachable merge fixture node count" 4
+        (List.length first.Git.lineage_nodes);
+      let reopened =
+        Store.open_repository ~root:(Store.root store)
+        |> require_ok Store.error_to_string
+      in
+      let lineage =
+        Git.load_lineage reopened (Git.lineage_id first.Git.lineage)
+        |> require_ok Git.error_to_string
+      in
+      Alcotest.(check bool) "lineage retains its archive" true
+        (Id.Git_archive_id.equal (Git.lineage_archive lineage)
+           (Git.archive_id archive));
+      let merge_node =
+        match
+          List.find_opt
+            (fun node ->
+              String.equal
+                (Git.object_id_to_hex (Git.lineage_node_commit node))
+                (Git.object_id_to_hex merge))
+            first.Git.lineage_nodes
+        with
+        | Some node -> node
+        | None ->
+            Alcotest.failf "lineage omitted merge node expected=%s actual=%s"
+              (Git.object_id_to_hex merge)
+              (first.Git.lineage_nodes
+              |> List.map (fun node ->
+                     Git.lineage_node_commit node |> Git.object_id_to_hex)
+              |> String.concat ",")
+      in
+      Alcotest.(check (list string)) "lineage retains ordered merge parents"
+        expected_parents
+        (Git.lineage_node_parents merge_node
+        |> List.map (fun identity ->
+               Git.load_lineage_node reopened identity
+               |> require_ok Git.error_to_string
+               |> Git.lineage_node_commit |> Git.object_id_to_hex));
+      let heads =
+        Git.lineage_refs lineage
+        |> List.filter_map Git.lineage_ref_head
+      in
+      Alcotest.(check bool) "selected branch refs retain lineage heads" true
+        (List.length heads >= 2);
+      let components =
+        [ "git-lineages"; Id.Git_lineage_id.to_hex (Git.lineage_id lineage) ]
+      in
+      let binding = binding_bytes reopened components in
+      Store.Ref_file.compare_and_swap reopened ~components
+        ~expected:(Some binding) ~replacement:"corrupt"
+      |> require_ok Store.error_to_string;
+      Git.load_lineage reopened (Git.lineage_id lineage)
+      |> Result.fold
+           ~ok:(fun _ -> Alcotest.fail "corrupt Git lineage binding was accepted")
+           ~error:(fun error ->
+             Alcotest.(check bool) "corrupt lineage has structured error" true
+               (contains ~needle:"Git lineage error" (Git.error_to_string error))))
+
 let archive_persistence_goldens_are_stable () =
   with_directory "yeokcham-git-archive-golden-" (fun root ->
       let repository = Filename.concat root "repository" in
@@ -3148,6 +3242,93 @@ let archive_persistence_goldens_are_stable () =
         "V1 archive retains no invented capability report" None
         (Git.archive_capability legacy
         |> Option.map (fun capability -> capability.Git.archive_source_bare)))
+
+let lineage_persistence_goldens_are_stable () =
+  with_directory "yeokcham-git-lineage-golden-" (fun root ->
+      let repository = Filename.concat root "repository" in
+      let store_root = Filename.concat root "store" in
+      let git = git_path () in
+      direct_process git [ "init"; "-q"; repository ];
+      Unix.mkdir store_root 0o700;
+      direct_process git
+        [ "-C"; repository; "config"; "user.name"; "Yeokcham Golden" ];
+      direct_process git
+        [ "-C"; repository; "config"; "user.email"; "golden@example.invalid" ];
+      write_file (Filename.concat repository "base") "base\n";
+      direct_process git [ "-C"; repository; "add"; "--all" ];
+      direct_process_with_environment git golden_commit_environment
+        [ "-C"; repository; "commit"; "-q"; "-m"; "lineage base" ];
+      let base = direct_capture git [ "-C"; repository; "rev-parse"; "HEAD" ] in
+      let branch =
+        direct_capture git [ "-C"; repository; "branch"; "--show-current" ]
+      in
+      direct_process git [ "-C"; repository; "checkout"; "-q"; "-b"; "side"; base ];
+      write_file (Filename.concat repository "side") "side\n";
+      direct_process git [ "-C"; repository; "add"; "--all" ];
+      direct_process_with_environment git golden_commit_environment
+        [ "-C"; repository; "commit"; "-q"; "-m"; "lineage side" ];
+      direct_process git [ "-C"; repository; "checkout"; "-q"; branch ];
+      write_file (Filename.concat repository "main") "main\n";
+      direct_process git [ "-C"; repository; "add"; "--all" ];
+      direct_process_with_environment git golden_commit_environment
+        [ "-C"; repository; "commit"; "-q"; "-m"; "lineage main" ];
+      direct_process_with_environment git golden_commit_environment
+        [ "-C"; repository; "merge"; "--no-ff"; "-q"; "-m"; "lineage merge"; "side" ];
+      let merge = direct_capture git [ "-C"; repository; "rev-parse"; "HEAD" ] in
+      let store = Store.init ~root:store_root |> require_ok Store.error_to_string in
+      let archive =
+        Git.archive_repository Git.default_configuration ~store ~repository
+        |> require_ok Git.error_to_string
+      in
+      let result =
+        Git.materialize_archive_lineage Git.default_configuration ~store
+          ~archive:(Git.archive_id archive)
+        |> require_ok Git.error_to_string
+      in
+      let node =
+        match
+          List.find_opt
+            (fun candidate ->
+              String.equal
+                (Git.object_id_to_hex (Git.lineage_node_commit candidate))
+                merge)
+            result.Git.lineage_nodes
+        with
+        | Some node -> node
+        | None ->
+            Alcotest.failf "lineage golden omitted merge expected=%s actual=%s"
+              merge
+              (result.Git.lineage_nodes
+              |> List.map (fun candidate ->
+                     Git.lineage_node_commit candidate |> Git.object_id_to_hex)
+              |> String.concat ",")
+      in
+      let node_id = Git.lineage_node_id node in
+      let lineage_id = Git.lineage_id result.Git.lineage in
+      Alcotest.(check string) "canonical Git lineage node envelope"
+        (refreshed_golden "git-lineage-node-v1.yeok.hex"
+           (immutable_envelope_bytes store
+              [ "git-lineage-nodes"; Id.Git_lineage_node_id.to_hex node_id ]))
+        (immutable_envelope_bytes store
+           [ "git-lineage-nodes"; Id.Git_lineage_node_id.to_hex node_id ]);
+      Alcotest.(check string) "canonical Git lineage node binding"
+        (refreshed_golden "git-lineage-node-v1.ref.hex"
+           (binding_bytes store
+              [ "git-lineage-nodes"; Id.Git_lineage_node_id.to_hex node_id ]))
+        (binding_bytes store
+           [ "git-lineage-nodes"; Id.Git_lineage_node_id.to_hex node_id ]);
+      Alcotest.(check string) "canonical Git lineage envelope"
+        (refreshed_golden "git-lineage-v1.yeok.hex"
+           (immutable_envelope_bytes store
+              [ "git-lineages"; Id.Git_lineage_id.to_hex lineage_id ]))
+        (immutable_envelope_bytes store
+           [ "git-lineages"; Id.Git_lineage_id.to_hex lineage_id ]);
+      Alcotest.(check string) "canonical Git lineage binding"
+        (refreshed_golden "git-lineage-v1.ref.hex"
+           (binding_bytes store
+              [ "git-lineages"; Id.Git_lineage_id.to_hex lineage_id ]))
+        (binding_bytes store
+           [ "git-lineages"; Id.Git_lineage_id.to_hex lineage_id ]))
 
 let adoption_persistence_goldens_are_stable () =
   with_directory "yeokcham-git-adoption-golden-" (fun root ->
@@ -3529,8 +3710,13 @@ let () =
           Alcotest.test_case "blob bound rejects" `Quick rejects_blob_limit;
           Alcotest.test_case "archive preserves and exits complete Git history"
             `Quick archives_and_exits_complete_git_history;
+          Alcotest.test_case
+            "archive lineage materializes merge topology and rejects corruption"
+            `Quick archive_lineage_materializes_merge_topology;
           Alcotest.test_case "Git archive schemas have stable goldens" `Quick
             archive_persistence_goldens_are_stable;
+          Alcotest.test_case "Git lineage schemas have stable goldens" `Quick
+            lineage_persistence_goldens_are_stable;
           Alcotest.test_case "Git adoption schema has stable goldens" `Quick
             adoption_persistence_goldens_are_stable;
           Alcotest.test_case "shallow archive rejects before publication" `Quick
