@@ -1,0 +1,11 @@
+(library
+ (name yeokcham_peer_sync)
+ (libraries
+  mirage-crypto-ec
+  mirage-crypto-rng
+  mirage-crypto-rng.unix
+  yeokcham_encoding
+  yeokcham_envelope
+  yeokcham_hash
+  yeokcham_id
+  yeokcham_store))

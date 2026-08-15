@@ -47,10 +47,7 @@ type archive_capability = {
   archive_source_object_format : object_format;
 }
 
-type lineage_result = {
-  lineage : lineage;
-  lineage_nodes : lineage_node list;
-}
+type lineage_result = { lineage : lineage; lineage_nodes : lineage_node list }
 
 type import_result = {
   snapshot : Yeokcham_snapshot.Snapshot.id;
@@ -283,6 +280,13 @@ val load_lineage :
   Yeokcham_id.Git_lineage_id.t ->
   (lineage, error) result
 
+val verify_lineage :
+  ?runner:(module Yeokcham_validation.Process_runner) ->
+  configuration ->
+  store:Yeokcham_store.repository ->
+  Yeokcham_id.Git_lineage_id.t ->
+  (lineage, error) result
+
 val load_lineage_node :
   Yeokcham_store.repository ->
   Yeokcham_id.Git_lineage_node_id.t ->
@@ -298,9 +302,14 @@ val lineage_node_id : lineage_node -> Yeokcham_id.Git_lineage_node_id.t
 val lineage_node_archive : lineage_node -> Yeokcham_id.Git_archive_id.t
 val lineage_node_commit : lineage_node -> object_id
 val lineage_node_snapshot : lineage_node -> Yeokcham_snapshot.Snapshot.id
-val lineage_node_transition : lineage_node -> Yeokcham_id.Imported_transition_id.t
+
+val lineage_node_transition :
+  lineage_node -> Yeokcham_id.Imported_transition_id.t
+
 val lineage_node_mapping : lineage_node -> Yeokcham_id.Git_mapping_id.t
-val lineage_node_parents : lineage_node -> Yeokcham_id.Git_lineage_node_id.t list
+
+val lineage_node_parents :
+  lineage_node -> Yeokcham_id.Git_lineage_node_id.t list
 
 val record_archive_adoption :
   Yeokcham_store.repository ->

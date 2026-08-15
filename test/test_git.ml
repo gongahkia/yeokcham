@@ -3090,9 +3090,11 @@ let archive_lineage_materializes_merge_topology () =
       in
       Alcotest.(check bool)
         "lineage retry keeps one logical identity" true
-        (Id.Git_lineage_id.equal (Git.lineage_id first.Git.lineage)
+        (Id.Git_lineage_id.equal
+           (Git.lineage_id first.Git.lineage)
            (Git.lineage_id second.Git.lineage));
-      Alcotest.(check int) "reachable merge fixture node count" 4
+      Alcotest.(check int)
+        "reachable merge fixture node count" 4
         (List.length first.Git.lineage_nodes);
       let reopened =
         Store.open_repository ~root:(Store.root store)
@@ -3102,8 +3104,10 @@ let archive_lineage_materializes_merge_topology () =
         Git.load_lineage reopened (Git.lineage_id first.Git.lineage)
         |> require_ok Git.error_to_string
       in
-      Alcotest.(check bool) "lineage retains its archive" true
-        (Id.Git_archive_id.equal (Git.lineage_archive lineage)
+      Alcotest.(check bool)
+        "lineage retains its archive" true
+        (Id.Git_archive_id.equal
+           (Git.lineage_archive lineage)
            (Git.archive_id archive));
       let merge_node =
         match
@@ -3120,22 +3124,27 @@ let archive_lineage_materializes_merge_topology () =
               (Git.object_id_to_hex merge)
               (first.Git.lineage_nodes
               |> List.map (fun node ->
-                     Git.lineage_node_commit node |> Git.object_id_to_hex)
+                  Git.lineage_node_commit node |> Git.object_id_to_hex)
               |> String.concat ",")
       in
-      Alcotest.(check (list string)) "lineage retains ordered merge parents"
-        expected_parents
+      Alcotest.(check (list string))
+        "lineage retains ordered merge parents" expected_parents
         (Git.lineage_node_parents merge_node
         |> List.map (fun identity ->
-               Git.load_lineage_node reopened identity
-               |> require_ok Git.error_to_string
-               |> Git.lineage_node_commit |> Git.object_id_to_hex));
+            Git.load_lineage_node reopened identity
+            |> require_ok Git.error_to_string
+            |> Git.lineage_node_commit |> Git.object_id_to_hex));
       let heads =
-        Git.lineage_refs lineage
-        |> List.filter_map Git.lineage_ref_head
+        Git.lineage_refs lineage |> List.filter_map Git.lineage_ref_head
       in
-      Alcotest.(check bool) "selected branch refs retain lineage heads" true
+      Alcotest.(check bool)
+        "selected branch refs retain lineage heads" true
         (List.length heads >= 2);
+      let _ =
+        Git.verify_lineage Git.default_configuration ~store:reopened
+          (Git.lineage_id lineage)
+        |> require_ok Git.error_to_string
+      in
       let components =
         [ "git-lineages"; Id.Git_lineage_id.to_hex (Git.lineage_id lineage) ]
       in
@@ -3145,10 +3154,13 @@ let archive_lineage_materializes_merge_topology () =
       |> require_ok Store.error_to_string;
       Git.load_lineage reopened (Git.lineage_id lineage)
       |> Result.fold
-           ~ok:(fun _ -> Alcotest.fail "corrupt Git lineage binding was accepted")
+           ~ok:(fun _ ->
+             Alcotest.fail "corrupt Git lineage binding was accepted")
            ~error:(fun error ->
-             Alcotest.(check bool) "corrupt lineage has structured error" true
-               (contains ~needle:"Git lineage error" (Git.error_to_string error))))
+             Alcotest.(check bool)
+               "corrupt lineage has structured error" true
+               (contains ~needle:"Git lineage error"
+                  (Git.error_to_string error))))
 
 let archive_persistence_goldens_are_stable () =
   with_directory "yeokcham-git-archive-golden-" (fun root ->
@@ -3262,7 +3274,8 @@ let lineage_persistence_goldens_are_stable () =
       let branch =
         direct_capture git [ "-C"; repository; "branch"; "--show-current" ]
       in
-      direct_process git [ "-C"; repository; "checkout"; "-q"; "-b"; "side"; base ];
+      direct_process git
+        [ "-C"; repository; "checkout"; "-q"; "-b"; "side"; base ];
       write_file (Filename.concat repository "side") "side\n";
       direct_process git [ "-C"; repository; "add"; "--all" ];
       direct_process_with_environment git golden_commit_environment
@@ -3273,9 +3286,22 @@ let lineage_persistence_goldens_are_stable () =
       direct_process_with_environment git golden_commit_environment
         [ "-C"; repository; "commit"; "-q"; "-m"; "lineage main" ];
       direct_process_with_environment git golden_commit_environment
-        [ "-C"; repository; "merge"; "--no-ff"; "-q"; "-m"; "lineage merge"; "side" ];
-      let merge = direct_capture git [ "-C"; repository; "rev-parse"; "HEAD" ] in
-      let store = Store.init ~root:store_root |> require_ok Store.error_to_string in
+        [
+          "-C";
+          repository;
+          "merge";
+          "--no-ff";
+          "-q";
+          "-m";
+          "lineage merge";
+          "side";
+        ];
+      let merge =
+        direct_capture git [ "-C"; repository; "rev-parse"; "HEAD" ]
+      in
+      let store =
+        Store.init ~root:store_root |> require_ok Store.error_to_string
+      in
       let archive =
         Git.archive_repository Git.default_configuration ~store ~repository
         |> require_ok Git.error_to_string
@@ -3300,30 +3326,34 @@ let lineage_persistence_goldens_are_stable () =
               merge
               (result.Git.lineage_nodes
               |> List.map (fun candidate ->
-                     Git.lineage_node_commit candidate |> Git.object_id_to_hex)
+                  Git.lineage_node_commit candidate |> Git.object_id_to_hex)
               |> String.concat ",")
       in
       let node_id = Git.lineage_node_id node in
       let lineage_id = Git.lineage_id result.Git.lineage in
-      Alcotest.(check string) "canonical Git lineage node envelope"
+      Alcotest.(check string)
+        "canonical Git lineage node envelope"
         (refreshed_golden "git-lineage-node-v1.yeok.hex"
            (immutable_envelope_bytes store
               [ "git-lineage-nodes"; Id.Git_lineage_node_id.to_hex node_id ]))
         (immutable_envelope_bytes store
            [ "git-lineage-nodes"; Id.Git_lineage_node_id.to_hex node_id ]);
-      Alcotest.(check string) "canonical Git lineage node binding"
+      Alcotest.(check string)
+        "canonical Git lineage node binding"
         (refreshed_golden "git-lineage-node-v1.ref.hex"
            (binding_bytes store
               [ "git-lineage-nodes"; Id.Git_lineage_node_id.to_hex node_id ]))
         (binding_bytes store
            [ "git-lineage-nodes"; Id.Git_lineage_node_id.to_hex node_id ]);
-      Alcotest.(check string) "canonical Git lineage envelope"
+      Alcotest.(check string)
+        "canonical Git lineage envelope"
         (refreshed_golden "git-lineage-v1.yeok.hex"
            (immutable_envelope_bytes store
               [ "git-lineages"; Id.Git_lineage_id.to_hex lineage_id ]))
         (immutable_envelope_bytes store
            [ "git-lineages"; Id.Git_lineage_id.to_hex lineage_id ]);
-      Alcotest.(check string) "canonical Git lineage binding"
+      Alcotest.(check string)
+        "canonical Git lineage binding"
         (refreshed_golden "git-lineage-v1.ref.hex"
            (binding_bytes store
               [ "git-lineages"; Id.Git_lineage_id.to_hex lineage_id ]))

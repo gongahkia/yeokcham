@@ -1863,11 +1863,12 @@ let print_git_adoption adoption =
     |> Scratch.Checkpoint_id.stored_object_id |> Store.Stored_object_id.to_hex)
 
 let print_git_lineage_node node =
-  Printf.printf "node=%s commit=%s snapshot=%s transition=%s mapping=%s parents=%s\n"
+  Printf.printf
+    "node=%s commit=%s snapshot=%s transition=%s mapping=%s parents=%s\n"
     (Yeokcham_id.Git_lineage_node_id.to_hex (Git.lineage_node_id node))
     (Git.object_id_to_hex (Git.lineage_node_commit node))
-    (Git.lineage_node_snapshot node |> Snapshot.Snapshot.stored_object_id
-   |> Store.Stored_object_id.to_hex)
+    (Git.lineage_node_snapshot node
+    |> Snapshot.Snapshot.stored_object_id |> Store.Stored_object_id.to_hex)
     (Yeokcham_id.Imported_transition_id.to_hex
        (Git.lineage_node_transition node))
     (Yeokcham_id.Git_mapping_id.to_hex (Git.lineage_node_mapping node))
@@ -1894,7 +1895,8 @@ let show_git_lineage store lineage =
             (fun result parent ->
               let* () = result in
               show_node parent)
-            (Ok ()) (Git.lineage_node_parents node))
+            (Ok ())
+            (Git.lineage_node_parents node))
   in
   let result =
     List.fold_left
@@ -1907,7 +1909,8 @@ let show_git_lineage store lineage =
         in
         Printf.printf "ref=%s object=%s head=%s\n"
           (Git.lineage_ref_name reference)
-          (Git.object_id_to_hex (Git.lineage_ref_object reference)) head;
+          (Git.object_id_to_hex (Git.lineage_ref_object reference))
+          head;
         match Git.lineage_ref_head reference with
         | None -> Ok ()
         | Some identity -> show_node identity)
@@ -1979,6 +1982,21 @@ let git root arguments =
           match Git.load_lineage store (git_lineage_id lineage) with
           | Error error -> fail Git.error_to_string error
           | Ok lineage -> show_git_lineage store lineage))
+  | [ "lineage"; "verify"; lineage ] -> (
+      match Store.open_repository ~root with
+      | Error error -> fail Store.error_to_string error
+      | Ok store -> (
+          match
+            Git.verify_lineage Git.default_configuration ~store
+              (git_lineage_id lineage)
+          with
+          | Error error -> fail Git.error_to_string error
+          | Ok lineage ->
+              Printf.printf
+                "lineage=%s archive=%s verification=archive-ref-peel\n"
+                (Yeokcham_id.Git_lineage_id.to_hex (Git.lineage_id lineage))
+                (Yeokcham_id.Git_archive_id.to_hex
+                   (Git.lineage_archive lineage))))
   | [ "archive"; "adoption"; "show"; adoption ] -> (
       match Store.open_repository ~root with
       | Error error -> fail Store.error_to_string error
