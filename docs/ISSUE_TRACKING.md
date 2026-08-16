@@ -22,7 +22,11 @@ begins.
 
 ## V3 programme status
 
-There are no open V3 issues. Completed V3 work:
+The active native peer-synchronisation work is
+[#238](https://github.com/gongahkia/yeokcham/issues/238). It remains open:
+the direct local authenticated-transfer vertical slice is implemented, but SSH
+sync transport, relay delivery/discovery, a peer daemon, and their acceptance
+fixtures are not. Completed V3 work:
 
 - [#234](https://github.com/gongahkia/yeokcham/issues/234) provided lossless
   Git archive preservation and exit, explicit archive-scoped capsule adoption,

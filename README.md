@@ -82,7 +82,9 @@ platform:
 
 This direction is governed by [ADR-073](docs/adr/073-unix-first-vcs-git-migration-and-peer-exchange.md)
 and issues [#233](https://github.com/gongahkia/yeokcham/issues/233) through
-[#236](https://github.com/gongahkia/yeokcham/issues/236).
+[#236](https://github.com/gongahkia/yeokcham/issues/236), with authenticated
+peer synchronisation tracked separately in
+[#238](https://github.com/gongahkia/yeokcham/issues/238).
 
 Important limits remain intentional:
 

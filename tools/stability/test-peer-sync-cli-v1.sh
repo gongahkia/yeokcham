@@ -51,6 +51,19 @@ contact_id=$(printf '%s\n' "$contact" | sed -n 's/^contact=//p')
 [ -n "$contact_id" ]
 run peer contact show "$contact_id" --root "$destination_root" |
   grep -F "endpoint=local:$source_root" >/dev/null
+
+printf 'synchronized bytes\n' > "$source_root/tracked"
+snapshot=$(run peer sync snapshot --root "$source_root" |
+  sed -n 's/^snapshot=//p')
+[ -n "$snapshot" ]
+sync_node=$(run peer sync node create --identity "$source_peer" \
+  --key "$source_key" --snapshot "$snapshot" --root "$source_root" |
+  sed -n 's/^sync-node=//p')
+[ -n "$sync_node" ]
+run peer sync local --to "$destination_root" --contact "$contact_id" \
+  --destination-identity "$destination_peer" --source-key "$source_key" \
+  --head "$sync_node" --tracking main --root "$source_root" |
+  grep -F 'tracking=advanced' >/dev/null
 run verify --root "$destination_root" >/dev/null
 
 if run peer identity init --key "$source_key" --root "$source_root" \

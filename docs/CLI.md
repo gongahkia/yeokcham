@@ -263,11 +263,11 @@ composition needed for a native release. The complete contract is in
 
 ```sh
 dune exec bin/yeokcham.exe -- peer identity init --key /absolute/path/to/peer.key
-dune exec bin/yeokcham.exe -- peer contact add alice \\
-  --peer-public-key <64-hex-character-ed25519-public-key> \\
+dune exec bin/yeokcham.exe -- peer contact add alice \
+  --peer-public-key <64-hex-character-ed25519-public-key> \
   --direct /absolute/path/to/alice-repository
-dune exec bin/yeokcham.exe -- peer contact add alice \\
-  --peer-public-key <64-hex-character-ed25519-public-key> \\
+dune exec bin/yeokcham.exe -- peer contact add alice \
+  --peer-public-key <64-hex-character-ed25519-public-key> \
   --ssh alice@example.test --remote-root /absolute/path/to/alice-repository
 dune exec bin/yeokcham.exe -- peer contact show <contact-id>
 ```
@@ -282,16 +282,24 @@ The first executable vertical slice supports an explicitly local, source-run
 transfer:
 
 ```sh
-dune exec bin/yeokcham.exe -- peer sync local \\
-  --to /absolute/path/to/destination \\
-  --contact <destination-contact-id> \\
-  --destination-identity <destination-peer-id> \\
-  --source-key /absolute/path/to/source.key \\
-  --head <source-sync-node-id> \\
+dune exec bin/yeokcham.exe -- peer sync snapshot
+dune exec bin/yeokcham.exe -- peer sync node create \
+  --identity <source-peer-id> --key /absolute/path/to/source.key \
+  --snapshot <snapshot-id>
+dune exec bin/yeokcham.exe -- peer sync local \
+  --to /absolute/path/to/destination \
+  --contact <destination-contact-id> \
+  --destination-identity <destination-peer-id> \
+  --source-key /absolute/path/to/source.key \
+  --head <source-sync-node-id> \
   --tracking main
 ```
 
-It authenticates the source against the destination's pinned contact,
+`peer sync snapshot` records an exact working-tree snapshot while excluding
+`.yeokcham`; `peer sync node create` signs it into the separate peer-sync graph.
+Neither command makes a scratch checkpoint, capsule, workspace, or release.
+
+`peer sync local` authenticates the source against the destination's pinned contact,
 transfers and verifies the immutable sync-node closure, and changes only the
 destination contact's tracking reference. A failed transfer leaves that
 tracking reference unchanged. `peer reconcile` accepts two verified sync-node

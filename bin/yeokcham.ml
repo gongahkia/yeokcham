@@ -566,6 +566,10 @@ let mutation_progress_message command arguments =
   | "peer", [ "identity"; "init"; "--key"; _ ] ->
       Some "Creating pinned peer identity"
   | "peer", "contact" :: "add" :: _ -> Some "Adding pinned peer contact"
+  | "peer", [ "sync"; "snapshot" ] ->
+      Some "Scanning peer synchronization snapshot"
+  | "peer", "sync" :: "node" :: "create" :: _ ->
+      Some "Creating signed peer synchronization node"
   | "peer", "sync" :: "local" :: _ -> Some "Synchronizing peer tracking"
   | "peer", "reconcile" :: _ -> Some "Reconciling peer snapshots"
   | _ -> None
@@ -2777,6 +2781,32 @@ let parse_peer_sync_local_options arguments =
   in
   loop None None None None None None arguments
 
+let parse_peer_sync_node_options arguments =
+  let rec loop identity key snapshot parents = function
+    | [] -> (
+        match (identity, key, snapshot) with
+        | Some identity, Some key, Some snapshot ->
+            Ok
+              ( peer_id identity,
+                key,
+                snapshot_id snapshot,
+                List.rev_map peer_sync_node_id parents )
+        | _ ->
+            Error
+              "peer sync node create requires --identity, --key, and --snapshot"
+        )
+    | "--identity" :: value :: rest when Option.is_none identity ->
+        loop (Some value) key snapshot parents rest
+    | "--key" :: value :: rest when Option.is_none key ->
+        loop identity (Some value) snapshot parents rest
+    | "--snapshot" :: value :: rest when Option.is_none snapshot ->
+        loop identity key (Some value) parents rest
+    | "--parent" :: value :: rest ->
+        loop identity key snapshot (value :: parents) rest
+    | _ -> Error "invalid or duplicated peer sync node option"
+  in
+  loop None None None [] arguments
+
 let print_peer_sync_outcome outcome decision =
   Printf.printf "offered=%d\nrequested=%d\ntransferred=%d\n"
     outcome.Yeokcham_exchange_store.offered
@@ -2887,6 +2917,41 @@ let peer root arguments =
           |> function
           | Error error -> fail Fun.id error
           | Ok contact -> print_peer_contact contact))
+  | [ "sync"; "snapshot" ] -> (
+      match Store.open_repository ~root with
+      | Error error -> fail Store.error_to_string error
+      | Ok store -> (
+          Snapshot.scan ~root ~store
+          |> Result.map_error Snapshot.error_to_string
+          |> function
+          | Error error -> fail Fun.id error
+          | Ok (snapshot, _) ->
+              Printf.printf "snapshot=%s\n"
+                (snapshot |> Snapshot.Snapshot.stored_object_id
+               |> Store.Stored_object_id.to_hex)))
+  | "sync" :: "node" :: "create" :: options -> (
+      match parse_peer_sync_node_options options with
+      | Error error -> fail Fun.id error
+      | Ok (identity_id, key, snapshot, parents) -> (
+          match (Store.open_repository ~root, peer_private_key key) with
+          | Error error, _ -> fail Store.error_to_string error
+          | _, Error error -> fail Fun.id error
+          | Ok store, Ok private_key -> (
+              match Peer_sync.load_identity store identity_id with
+              | Error error -> fail Peer_sync.error_to_string error
+              | Ok identity -> (
+                  Peer_sync.make_sync_node ~author:identity ~private_key
+                    ~snapshot ~parents
+                  |> Result.map_error Peer_sync.error_to_string
+                  |> function
+                  | Error error -> fail Fun.id error
+                  | Ok node -> (
+                      match Peer_sync.store_sync_node store node with
+                      | Error error -> fail Peer_sync.error_to_string error
+                      | Ok _ ->
+                          Printf.printf "sync-node=%s\n"
+                            (Yeokcham_id.Peer_sync_node_id.to_hex
+                               (Peer_sync.sync_node_id node)))))))
   | "sync" :: "local" :: options -> (
       match parse_peer_sync_local_options options with
       | Error error -> fail Fun.id error
