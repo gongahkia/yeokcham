@@ -126,6 +126,7 @@ val activate :
   ?cleanup:bool ->
   ?cleanup_fault:Fault.t ->
   ?before_publish:(unit -> unit) ->
+  ?on_progress:(completed:int -> total:int -> unit) ->
   store:Yeokcham_store.repository ->
   Yeokcham_scratch.repository ->
   policy:Policy.t ->
@@ -139,6 +140,7 @@ val execution_cleanup : execution -> cleanup_report
 val resume_cleanup :
   ?fault:Fault.t ->
   ?expected_generation:Yeokcham_scratch.Generation_id.t ->
+  ?on_progress:(completed:int -> total:int -> unit) ->
   store:Yeokcham_store.repository ->
   Yeokcham_scratch.repository ->
   (cleanup_report, error) result
@@ -146,6 +148,7 @@ val resume_cleanup :
 val prune :
   ?fault:Fault.t ->
   ?expected_generation:Yeokcham_scratch.Generation_id.t ->
+  ?on_progress:(completed:int -> total:int -> unit) ->
   store:Yeokcham_store.repository ->
   Yeokcham_scratch.repository ->
   (cleanup_report, error) result

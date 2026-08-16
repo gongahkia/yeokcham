@@ -405,6 +405,25 @@ let with_cleanup_fixture run =
       |> require_ok Scratch.error_to_string;
       run root store scratch initial middle head)
 
+let cleanup_reports_exact_candidate_progress () =
+  with_history (fun _root store scratch _initial _middle _head ->
+      let observed = ref [] in
+      let execution =
+        Compaction.activate ~on_progress:(fun ~completed ~total ->
+            observed := (completed, total) :: !observed)
+          ~store scratch ~policy:(policy ~recent:6L ~periodic:0L) ~now:25L
+        |> require_ok Compaction.error_to_string
+      in
+      let cleanup = Compaction.execution_cleanup execution in
+      let total =
+        cleanup.Compaction.quarantined_objects
+        + cleanup.Compaction.already_quarantined_objects
+      in
+      Alcotest.(check (list (pair int int)))
+        "cleanup candidate sequence"
+        (List.init (total + 1) (fun completed -> (completed, total)))
+        (List.rev !observed))
+
 let metrics_equal left right =
   List.length left = List.length right
   && List.for_all2
@@ -1301,6 +1320,8 @@ let () =
             compaction_eliminates_exact_inverse_gap;
           Alcotest.test_case "invalid policy values reject" `Quick
             invalid_policy_values_are_rejected;
+          Alcotest.test_case "cleanup reports exact candidate progress" `Quick
+            cleanup_reports_exact_candidate_progress;
           Alcotest.test_case "planner is read-only and explains exact cleanup"
             `Quick planner_is_read_only_and_explains_exact_cleanup;
           Alcotest.test_case "planner rejects missing reachable record" `Quick

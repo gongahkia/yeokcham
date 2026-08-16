@@ -23,6 +23,13 @@ behavior; normal command results still go to stdout and errors remain on
 stderr. Inspection commands, dry runs, `watch`, `yeokchamd`, and `peer serve`
 do not show progress.
 
+When an operation reaches an exact, monotonic unit count, the spinner changes
+to a labeled `█`/`░` progress bar with its completed/total count. This applies
+to non-dry-run restore and workspace materialisation filesystem actions,
+compaction cleanup candidates, and local peer-fetch object reconciliation.
+Yeokcham does not estimate totals for scanning, validation, Git operations, or
+SSH peer fetch, so those operations retain the spinner.
+
 Pass `--no-progress` after the command or set `YEOKCHAM_NO_PROGRESS=1` to hide
 the spinner. Non-interactive stderr also hides it automatically, so scripts,
 pipes, and captured logs retain their ordinary output.

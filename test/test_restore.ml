@@ -198,6 +198,27 @@ let regular_file_to_symlink_restore_is_exact () =
       Alcotest.(check string)
         "regular file is replaced by target symlink" "file" (Unix.readlink link))
 
+let restore_reports_exact_action_progress () =
+  target_history (fun root _store scratch target ->
+      mutate_current root;
+      let expected =
+        Scratch.Restore.dry_run scratch ~root
+          ~target:(Scratch.Checkpoint.id target)
+        |> require_ok Scratch.error_to_string
+        |> Scratch.Restore.actions |> List.length
+      in
+      let observed = ref [] in
+      ignore
+        (Scratch.Restore.restore scratch ~root
+           ~target:(Scratch.Checkpoint.id target)
+           ~observed_at:60L ~created_at:61L
+           ~on_progress:(fun ~completed ~total ->
+             observed := (completed, total) :: !observed)
+        |> require_ok Scratch.error_to_string);
+      Alcotest.(check (list (pair int int))) "restore action sequence"
+        (List.init (expected + 1) (fun completed -> (completed, expected)))
+        (List.rev !observed))
+
 let () =
   Alcotest.run "guarded restore"
     [
@@ -211,5 +232,7 @@ let () =
             dry_run_is_nonmutating;
           Alcotest.test_case "regular file to symlink restore is exact" `Quick
             regular_file_to_symlink_restore_is_exact;
+          Alcotest.test_case "restore reports exact applied action progress"
+            `Quick restore_reports_exact_action_progress;
         ] );
     ]

@@ -378,6 +378,7 @@ module Durable : sig
     created_at:int64 ->
     dry_run:bool ->
     ?before_apply:(unit -> unit) ->
+    ?on_progress:(completed:int -> total:int -> unit) ->
     unit ->
     (materialisation, error) result
 

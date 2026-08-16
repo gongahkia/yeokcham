@@ -31,6 +31,16 @@ let capture_stderr callback =
   Unix.close reader;
   (result, output)
 
+let contains text fragment =
+  let text_length = String.length text in
+  let fragment_length = String.length fragment in
+  let rec search index =
+    if index + fragment_length > text_length then false
+    else if String.sub text index fragment_length = fragment then true
+    else search (index + 1)
+  in
+  search 0
+
 let test_default_spinner_sequence () =
   Alcotest.(check string) "first frame" "⠁" (Progress.spinner_frame 0);
   Alcotest.(check string) "repeated first frame" "⠁"
@@ -46,6 +56,22 @@ let test_default_template () =
   Alcotest.(check string) "clear line" "\r\027[2K" Progress.clear_sequence;
   Alcotest.check (Alcotest.float 0.0001) "20 Hz" 0.05
     Progress.refresh_interval_seconds
+
+let test_default_bar_template () =
+  Alcotest.(check int) "fallback width" 20
+    (Progress.bar_width ~columns:None ~message:"Restoring" ~completed:0
+       ~total:4);
+  Alcotest.(check int) "terminal width" 23
+    (Progress.bar_width ~columns:(Some 40) ~message:"Restoring" ~completed:2
+       ~total:4);
+  Alcotest.(check string) "half complete"
+    "Restoring [██████████░░░░░░░░░░] 2/4"
+    (Progress.render_bar ~columns:None ~message:"Restoring" ~completed:2
+       ~total:4);
+  Alcotest.(check string) "clamped complete"
+    "Restoring [████████████████████] 4/4"
+    (Progress.render_bar ~columns:None ~message:"Restoring" ~completed:9
+       ~total:4)
 
 let test_visibility_policy () =
   let check name expected ~no_progress ~stderr_isatty ~environment =
@@ -92,6 +118,36 @@ let test_disabled_progress_does_not_draw () =
   in
   Alcotest.(check string) "no terminal bytes" "" output
 
+let test_determinate_progress_replaces_spinner_and_clears () =
+  let (), output =
+    capture_stderr (fun () ->
+        Progress.with_progress ~enabled:true "Planning restore" (fun () ->
+            Progress.with_determinate_progress ~enabled:true
+              ~message:"Restoring checkpoint" (fun ~report ->
+                report ~completed:0 ~total:4;
+                ignore (Unix.select [] [] [] 0.06);
+                report ~completed:2 ~total:4;
+                ignore (Unix.select [] [] [] 0.06))))
+  in
+  Alcotest.(check bool) "spinner was shown while planning" true
+    (contains output "⠁ Planning restore");
+  Alcotest.(check bool) "bar starts at zero" true
+    (contains output "Restoring checkpoint [");
+  Alcotest.(check bool) "bar receives the reported count" true
+    (contains output " 2/4");
+  Alcotest.(check bool) "completion clears the line" true
+    (String.ends_with ~suffix:Progress.clear_sequence output)
+
+let test_disabled_determinate_progress_does_not_draw () =
+  let (), output =
+    capture_stderr (fun () ->
+        Progress.with_determinate_progress ~enabled:false
+          ~message:"must not render" (fun ~report ->
+            report ~completed:0 ~total:1;
+            report ~completed:1 ~total:1))
+  in
+  Alcotest.(check string) "no terminal bytes" "" output
+
 let () =
   Alcotest.run "CLI progress"
     [
@@ -101,6 +157,8 @@ let () =
             test_default_spinner_sequence;
           Alcotest.test_case "uses the default template and clearing" `Quick
             test_default_template;
+          Alcotest.test_case "uses the default determinate bar" `Quick
+            test_default_bar_template;
         ] );
       ( "visibility",
         [
@@ -112,5 +170,9 @@ let () =
             test_spinner_draws_and_clears;
           Alcotest.test_case "disabled progress does not draw stderr" `Quick
             test_disabled_progress_does_not_draw;
+          Alcotest.test_case "determinate progress replaces spinner and clears"
+            `Slow test_determinate_progress_replaces_spinner_and_clears;
+          Alcotest.test_case "disabled determinate progress does not draw stderr"
+            `Quick test_disabled_determinate_progress_does_not_draw;
         ] );
     ]

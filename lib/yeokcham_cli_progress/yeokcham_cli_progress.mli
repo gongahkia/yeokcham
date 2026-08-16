@@ -10,6 +10,9 @@ val clear_sequence : string
 
 val spinner_frame : int -> string
 val render_line : tick:int -> message:string -> string
+val bar_width : columns:int option -> message:string -> completed:int -> total:int -> int
+val render_bar :
+  columns:int option -> message:string -> completed:int -> total:int -> string
 
 val should_render :
   no_progress:bool -> stderr_isatty:bool -> environment:string option -> bool
@@ -22,5 +25,14 @@ val enabled : no_progress:bool -> bool
 val with_progress : enabled:bool -> string -> (unit -> 'a) -> 'a
 (** Render a spinner until the callback returns or raises. The spinner is
     cleared before the callback's output, exception, or process exit is shown. *)
+
+val with_determinate_progress :
+  enabled:bool ->
+  message:string ->
+  (report:(completed:int -> total:int -> unit) -> 'a) ->
+  'a
+(** [with_determinate_progress] leaves its caller's spinner active until
+    [report] receives the first exact [completed]/[total] value, then replaces
+    it with a bar. It clears the bar before ordinary output or errors. *)
 
 val stop_active : unit -> unit

@@ -2879,7 +2879,7 @@ module Restore = struct
         with Unix.Unix_error (error, _, _) ->
           Error (restore_error plan source "rename" error))
 
-  let apply repository ~root plan =
+  let apply ?on_progress repository ~root plan =
     let* actual_snapshot, actual = scan root repository in
     if not (Snapshot.Snapshot.equal_id actual_snapshot plan.current_snapshot)
     then
@@ -2892,13 +2892,22 @@ module Restore = struct
       if not (State.equal replayed plan.target_state) then
         Error (Replay_mismatch plan.target_checkpoint)
       else
-        let* () =
-          List.fold_left
-            (fun result action ->
-              Result.bind result (fun () ->
-                  apply_action repository plan root action))
-            (Ok ()) plan.actions
+        let total = List.length plan.actions in
+        let notify completed =
+          Option.iter
+            (fun callback ->
+              try callback ~completed ~total with _ -> ())
+            on_progress
         in
+        let rec apply_actions completed = function
+          | [] -> Ok ()
+          | action :: rest ->
+              let* () = apply_action repository plan root action in
+              notify (completed + 1);
+              apply_actions (completed + 1) rest
+        in
+        notify 0;
+        let* () = apply_actions 0 plan.actions in
         let* verified_snapshot, _ = scan root repository in
         if
           not
@@ -2915,8 +2924,8 @@ module Restore = struct
           |> Result.map_error (fun error -> Store_error error)
           |> Result.map (fun _ -> ())
 
-  let restore repository ~root ~target ~observed_at ~created_at =
+  let restore ?on_progress repository ~root ~target ~observed_at ~created_at =
     let* plan = prepare repository ~root ~target ~observed_at ~created_at in
-    let* () = apply repository ~root plan in
+    let* () = apply ?on_progress repository ~root plan in
     Ok plan.safety_checkpoint
 end

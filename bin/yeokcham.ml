@@ -19,6 +19,11 @@ module Progress = Yeokcham_cli_progress
 
 let ( let* ) = Result.bind
 let now () = Int64.of_float (Unix.gettimeofday ())
+let progress_enabled = ref false
+
+let with_determinate_progress message callback =
+  Progress.with_determinate_progress ~enabled:!progress_enabled ~message
+    callback
 
 let fail render error =
   Progress.stop_active ();
@@ -817,10 +822,10 @@ let restore root arguments =
         | Error error -> fail Scratch.error_to_string error
       else
         let timestamp = now () in
-        match
-          Scratch.Restore.restore scratch ~root ~target ~observed_at:timestamp
-            ~created_at:timestamp
-        with
+        with_determinate_progress "Restoring checkpoint" (fun ~report ->
+            Scratch.Restore.restore ~on_progress:report scratch ~root ~target
+              ~observed_at:timestamp ~created_at:timestamp)
+        |> function
         | Ok None -> print_endline "restored"
         | Ok (Some safety) ->
             Printf.printf "restored safety=%s\n"
@@ -921,9 +926,11 @@ let compact root arguments =
               | Ok plan ->
                   Compaction.render_explain plan |> List.iter print_endline)
           | `Activate -> (
-              match
-                Compaction.activate ~store scratch ~policy ~now:timestamp
-              with
+              with_determinate_progress "Processing compaction cleanup"
+                (fun ~report ->
+                  Compaction.activate ~on_progress:report ~store scratch ~policy
+                    ~now:timestamp)
+              |> function
               | Error error -> fail Compaction.error_to_string error
               | Ok execution ->
                   if explain then
@@ -932,11 +939,17 @@ let compact root arguments =
                     |> List.iter print_endline;
                   print_cleanup (Compaction.execution_cleanup execution))
           | `Resume -> (
-              match Compaction.resume_cleanup ~store scratch with
+              with_determinate_progress "Processing compaction cleanup"
+                (fun ~report ->
+                  Compaction.resume_cleanup ~on_progress:report ~store scratch)
+              |> function
               | Error error -> fail Compaction.error_to_string error
               | Ok report -> print_cleanup report)
           | `Prune -> (
-              match Compaction.prune ~store scratch with
+              with_determinate_progress "Processing compaction cleanup"
+                (fun ~report ->
+                  Compaction.prune ~on_progress:report ~store scratch)
+              |> function
               | Error error -> fail Compaction.error_to_string error
               | Ok report -> print_cleanup report)))
 
@@ -1693,9 +1706,16 @@ let workspace root arguments =
       match open_scratch root with
       | Error error -> fail Fun.id error
       | Ok (store, scratch) -> (
-          Workspace_store.Durable.materialise ~store ~scratch ~root
-            ~workspace:(workspace_id workspace) ~observed_at:(now ())
-            ~created_at:(now ()) ~dry_run ()
+          (if dry_run then
+             Workspace_store.Durable.materialise ~store ~scratch ~root
+               ~workspace:(workspace_id workspace) ~observed_at:(now ())
+               ~created_at:(now ()) ~dry_run ()
+           else
+             with_determinate_progress "Materialising workspace"
+               (fun ~report ->
+                 Workspace_store.Durable.materialise ~on_progress:report ~store
+                   ~scratch ~root ~workspace:(workspace_id workspace)
+                   ~observed_at:(now ()) ~created_at:(now ()) ~dry_run ()))
           |> Result.map_error Workspace_store.error_to_string
           |> function
           | Error error -> fail Fun.id error
@@ -2558,7 +2578,9 @@ let peer root arguments =
       with
       | Error error, _ | _, Error error -> fail Store.error_to_string error
       | Ok destination, Ok source -> (
-          Peer.fetch_local ~source ~destination (publication_id publication)
+          with_determinate_progress "Reconciling peer objects" (fun ~report ->
+              Peer.fetch_local ~on_progress:report ~source ~destination
+                (publication_id publication))
           |> Result.map_error Peer.error_to_string
           |> function
           | Error error -> fail Fun.id error
@@ -2670,6 +2692,7 @@ let () =
     | [ _; ("--help" | "-h" | "help") ] -> usage ~status:0 ()
     | _ :: command :: raw_arguments -> (
         let root, no_progress, arguments = parse_cli_options raw_arguments in
+        progress_enabled := Progress.enabled ~no_progress;
         let execute () =
           match command with
           | "init" when arguments = [] -> initialise root
@@ -2723,7 +2746,6 @@ let () =
         match mutation_progress_message command arguments with
         | None -> execute ()
         | Some message ->
-            Progress.with_progress ~enabled:(Progress.enabled ~no_progress)
-              message execute)
+            Progress.with_progress ~enabled:!progress_enabled message execute)
     | _ -> usage ()
   with Sys.Break -> print_endline "watch stopped"

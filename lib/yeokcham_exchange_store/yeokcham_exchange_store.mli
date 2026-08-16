@@ -33,6 +33,7 @@ val receive_object :
 
 val transfer :
   ?interrupt_after:int ->
+  ?on_progress:(completed:int -> total:int -> unit) ->
   ?object_byte_budget:int ->
   source:Yeokcham_store.repository ->
   destination:Yeokcham_store.repository ->

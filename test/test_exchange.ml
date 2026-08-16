@@ -466,6 +466,23 @@ let local_transfer_is_idempotent_and_leaves_refs () =
            (Store.Mutable_ref.equal destination_ref)
            actual_destination))
 
+let local_transfer_reports_reconciled_object_progress () =
+  with_repositories (fun source destination ->
+      let object_ids =
+        [ "first"; "second" ]
+        |> List.map (fun bytes -> Store.put source (content bytes) |> require_store)
+        |> List.sort Store.Stored_object_id.compare
+      in
+      let observed = ref [] in
+      ignore
+        (Exchange_store.transfer ~on_progress:(fun ~completed ~total ->
+             observed := (completed, total) :: !observed)
+           ~source ~destination ~session_id:session ~object_ids ()
+        |> require_adapter);
+      Alcotest.(check (list (pair int int)))
+        "transfer reconciles the exact offered inventory"
+        [ (0, 2); (2, 2) ] (List.rev !observed))
+
 let restart_after_interruption_preserves_refs () =
   with_repositories (fun source destination ->
       let ids =
@@ -521,6 +538,8 @@ let () =
             bad_identity_and_sequence_do_not_publish;
           Alcotest.test_case "transfer is idempotent and leaves refs" `Quick
             local_transfer_is_idempotent_and_leaves_refs;
+          Alcotest.test_case "transfer reports reconciled object progress"
+            `Quick local_transfer_reports_reconciled_object_progress;
           Alcotest.test_case "restart preserves refs" `Quick
             restart_after_interruption_preserves_refs;
         ] );

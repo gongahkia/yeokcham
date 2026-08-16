@@ -758,7 +758,7 @@ let transfer_session publication =
   |> Result.map_error (fun error ->
       Exchange_error (Exchange_store.Protocol_error error))
 
-let fetch_local ?interrupt_after ~source ~destination identity =
+let fetch_local ?interrupt_after ?on_progress ~source ~destination identity =
   let* publication = load_publication source identity in
   let* publication_object = store_publication source publication in
   let objects =
@@ -766,8 +766,8 @@ let fetch_local ?interrupt_after ~source ~destination identity =
   in
   let* session_id = transfer_session publication in
   let* outcome =
-    Exchange_store.transfer ?interrupt_after ~source ~destination ~session_id
-      ~object_ids:objects ()
+    Exchange_store.transfer ?interrupt_after ?on_progress ~source ~destination
+      ~session_id ~object_ids:objects ()
     |> Result.map_error (fun error -> Exchange_error error)
   in
   let* received = load_publication_object destination publication_object in

@@ -3018,7 +3018,7 @@ module Durable = struct
     Ok (Scratch.State.diff ~from:observed ~to_:state)
 
   let materialise ~store ~scratch ~root ~workspace ~observed_at ~created_at
-      ~dry_run ?before_apply () =
+      ~dry_run ?before_apply ?on_progress () =
     with_repository_lock store (fun () ->
         let* _ = read_current_ref store workspace in
         let* () =
@@ -3065,7 +3065,7 @@ module Durable = struct
           let actions = Scratch.Restore.actions plan in
           Option.iter (fun callback -> callback ()) before_apply;
           let* () =
-            Scratch.Restore.apply scratch ~root plan
+            Scratch.Restore.apply ?on_progress scratch ~root plan
             |> Result.map_error (fun error -> Scratch_error error)
           in
           let* scratch_checkpoint =

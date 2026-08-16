@@ -364,9 +364,15 @@ module Restore : sig
     created_at:int64 ->
     (plan, error) result
 
-  val apply : repository -> root:string -> plan -> (unit, error) result
+  val apply :
+    ?on_progress:(completed:int -> total:int -> unit) ->
+    repository ->
+    root:string ->
+    plan ->
+    (unit, error) result
 
   val restore :
+    ?on_progress:(completed:int -> total:int -> unit) ->
     repository ->
     root:string ->
     target:Checkpoint_id.t ->

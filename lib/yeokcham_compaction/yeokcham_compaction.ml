@@ -1661,7 +1661,7 @@ let cleanup_candidate_of_manifest_candidate candidate =
     candidate_expected_type = candidate.Scratch.Cleanup_manifest.expected_type;
   }
 
-let cleanup_internal ?fault ?expected_generation store ~prune =
+let cleanup_internal ?fault ?expected_generation ?on_progress store ~prune =
   let* reference, generation, root, manifest =
     active_cleanup_generation store
   in
@@ -1680,6 +1680,14 @@ let cleanup_internal ?fault ?expected_generation store ~prune =
   in
   let* () = ensure_directory trash_root in
   let* () = ensure_directory generation_trash in
+  let candidates = Scratch.Cleanup_manifest.candidates manifest in
+  let total = List.length candidates in
+  let notify completed =
+    Option.iter
+      (fun callback ->
+        try callback ~completed ~total with _ -> ())
+      on_progress
+  in
   let rec move index report = function
     | [] ->
         Ok
@@ -1811,8 +1819,10 @@ let cleanup_internal ?fault ?expected_generation store ~prune =
                       and quarantine")
           in
           let* () = inject_fault fault (Fault.After_candidate index) in
+          notify (index + 1);
           move (index + 1) report rest
   in
+  notify 0;
   move 0
     {
       generation;
@@ -1827,10 +1837,10 @@ let cleanup_internal ?fault ?expected_generation store ~prune =
       already_quarantined_candidates = [];
       already_pruned_candidates = [];
     }
-    (Scratch.Cleanup_manifest.candidates manifest)
+    candidates
 
-let activate ?(cleanup = true) ?cleanup_fault ?before_publish ~store scratch
-    ~policy ~now =
+let activate ?(cleanup = true) ?cleanup_fault ?before_publish ?on_progress
+    ~store scratch ~policy ~now =
   Store.with_lock store ~name:compaction_lock_name
     ~on_error:(fun error -> Store_error error)
     (fun () ->
@@ -1916,7 +1926,7 @@ let activate ?(cleanup = true) ?cleanup_fault ?before_publish ~store scratch
         in
         let* cleanup_report =
           if cleanup then
-            cleanup_internal ?fault:cleanup_fault store ~prune:false
+            cleanup_internal ?fault:cleanup_fault ?on_progress store ~prune:false
           else
             Ok
               {
@@ -1940,12 +1950,16 @@ let activate ?(cleanup = true) ?cleanup_fault ?before_publish ~store scratch
             cleanup = cleanup_report;
           })
 
-let resume_cleanup ?fault ?expected_generation ~store _scratch =
+let resume_cleanup ?fault ?expected_generation ?on_progress ~store _scratch =
   Store.with_lock store ~name:compaction_lock_name
     ~on_error:(fun error -> Store_error error)
-    (fun () -> cleanup_internal ?fault ?expected_generation store ~prune:false)
+    (fun () ->
+      cleanup_internal ?fault ?expected_generation ?on_progress store
+        ~prune:false)
 
-let prune ?fault ?expected_generation ~store _scratch =
+let prune ?fault ?expected_generation ?on_progress ~store _scratch =
   Store.with_lock store ~name:compaction_lock_name
     ~on_error:(fun error -> Store_error error)
-    (fun () -> cleanup_internal ?fault ?expected_generation store ~prune:true)
+    (fun () ->
+      cleanup_internal ?fault ?expected_generation ?on_progress store
+        ~prune:true)

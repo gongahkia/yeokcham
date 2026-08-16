@@ -472,12 +472,24 @@ let conflicts_materialise_and_resolve_immutably () =
              ]
            ~expected_generation:None ~created_at:10L
         |> require_ok Workspace_store.error_to_string);
+      let observed_progress = ref [] in
       let materialised =
         Workspace_store.Durable.materialise ~store ~scratch:fixture.scratch
           ~root ~workspace:identity ~observed_at:11L ~created_at:11L
-          ~dry_run:false ()
+          ~dry_run:false
+          ~on_progress:(fun ~completed ~total ->
+            observed_progress := (completed, total) :: !observed_progress)
+          ()
         |> require_ok Workspace_store.error_to_string
       in
+      let action_count =
+        List.length materialised.Workspace_store.Durable.actions
+      in
+      Alcotest.(check (list (pair int int)))
+        "materialisation reports exact applied action progress"
+        (List.init (action_count + 1) (fun completed ->
+             (completed, action_count)))
+        (List.rev !observed_progress);
       Alcotest.(check bool)
         "materialisation reports partial application" true
         materialised.Workspace_store.Durable.partial;

@@ -86,6 +86,7 @@ val transfer_objects : publication -> Yeokcham_store.Stored_object_id.t list
 
 val fetch_local :
   ?interrupt_after:int ->
+  ?on_progress:(completed:int -> total:int -> unit) ->
   source:Yeokcham_store.repository ->
   destination:Yeokcham_store.repository ->
   Yeokcham_id.Publication_id.t ->

@@ -134,7 +134,7 @@ let check_want ~session_id ~sequence expected = function
   | Exchange.Error_message _ ->
       Error (Invalid_transfer_input "expected Want after inventory")
 
-let transfer ?interrupt_after
+let transfer ?interrupt_after ?on_progress
     ?(object_byte_budget = Exchange.max_total_object_bytes) ~source ~destination
     ~session_id ~object_ids () =
   if not (strictly_sorted_ids object_ids) then
@@ -159,7 +159,14 @@ let transfer ?interrupt_after
       Exchange.accept_hello receiver hello
       |> Result.map_error (fun error -> Protocol_error error)
     in
-    let rec transfer_pages receiver object_sequence requested transferred
+    let total = List.length object_ids in
+    let notify completed =
+      Option.iter
+        (fun callback ->
+          try callback ~completed ~total with _ -> ())
+        on_progress
+    in
+    let rec transfer_pages receiver object_sequence requested transferred completed
         page_index = function
       | [] ->
           let end_message =
@@ -241,9 +248,12 @@ let transfer ?interrupt_after
           let* receiver, object_sequence, transferred =
             transfer_wants receiver object_sequence transferred wants
           in
+          let completed = completed + List.length offered in
+          notify completed;
           transfer_pages receiver object_sequence
             (requested + List.length wants)
-            transferred (page_index + 1) rest
+            transferred completed (page_index + 1) rest
     in
-    transfer_pages receiver 0L 0 [] 0
+    notify 0;
+    transfer_pages receiver 0L 0 [] 0 0
       (chunks Exchange.max_ids_per_page object_ids)
