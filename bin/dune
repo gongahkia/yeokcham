@@ -4,6 +4,7 @@
  (libraries
   yeokcham_capsule
   yeokcham_capsule_store
+  yeokcham_cli_progress
   yeokcham_compaction
   yeokcham_cutover
   yeokcham_git

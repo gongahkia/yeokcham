@@ -42,6 +42,14 @@ The demos exercise representative paths without extending the product contract:
 [workspaces](DEMO_WORKSPACE.md), [conflicts](DEMO_CONFLICT.md),
 [release](DEMO_RELEASE.md), and [Git export](DEMO_GIT_EXPORT.md).
 
+Each stateful demonstration requires its own freshly created fixture root. Do
+not chain the demonstration scripts against one root: later demonstrations
+make assumptions about the setup fixture's scratch and workspace state. In
+particular, the release demonstration creates its own workspace composition;
+after the capsule demonstration advances scratch history, materialisation is
+expected to report a partial result rather than silently applying a mismatched
+composition.
+
 ## Read research and evidence carefully
 
 - [Research and benchmark report](RESEARCH_AND_BENCHMARK_REPORT.md) is the

@@ -15,11 +15,13 @@ module Inspection = Yeokcham_inspection
 module Local_service = Yeokcham_local_service
 module Local_command = Yeokcham_local_command
 module Peer = Yeokcham_peer
+module Progress = Yeokcham_cli_progress
 
 let ( let* ) = Result.bind
 let now () = Int64.of_float (Unix.gettimeofday ())
 
 let fail render error =
+  Progress.stop_active ();
   prerr_endline (render error);
   exit 2
 
@@ -496,13 +498,66 @@ let render_capsule_operation = function
       "move " ^ render_path source ^ " -> " ^ render_path destination
   | Capsule.Mode_change { path; _ } -> "mode " ^ render_path path
 
-let parse_root arguments =
-  let rec loop root reversed = function
-    | "--root" :: path :: rest -> loop path reversed rest
-    | value :: rest -> loop root (value :: reversed) rest
-    | [] -> (root, List.rev reversed)
+let parse_cli_options arguments =
+  let rec loop root no_progress reversed = function
+    | "--root" :: path :: rest -> loop path no_progress reversed rest
+    | "--no-progress" :: rest -> loop root true reversed rest
+    | value :: rest -> loop root no_progress (value :: reversed) rest
+    | [] -> (root, no_progress, List.rev reversed)
   in
-  loop (Sys.getcwd ()) [] arguments
+  loop (Sys.getcwd ()) false [] arguments
+
+let has_option option = List.exists (String.equal option)
+
+let compaction_is_dry_run arguments =
+  List.fold_left
+    (fun mode -> function
+      | "--dry-run" -> `Dry_run
+      | "--resume" | "--prune" -> `Mutating
+      | _ -> mode)
+    `Mutating arguments
+  = `Dry_run
+
+let mutation_progress_message command arguments =
+  match (command, arguments) with
+  | "init", [] -> Some "Initializing repository"
+  | "archive", _ -> Some "Archiving legacy repository"
+  | "reset", _ -> Some "Resetting repository"
+  | "checkpoint", [] -> Some "Scanning working tree and recording checkpoint"
+  | "restore", [ _ ] -> Some "Restoring checkpoint"
+  | "pin", [ _ ] -> Some "Pinning checkpoint"
+  | "unpin", [ _ ] -> Some "Unpinning checkpoint"
+  | "compact", _ when not (compaction_is_dry_run arguments) ->
+      Some "Compacting scratch history"
+  | "capsule", "create" :: _ -> Some "Creating capsule revision"
+  | "capsule", "edit" :: _ -> Some "Preparing capsule editing"
+  | "capsule", "fold" :: _ -> Some "Folding capsule revision"
+  | "capsule", "retarget" :: _ -> Some "Retargeting capsule revision"
+  | "capsule", "split" :: _ when has_option "--confirm" arguments ->
+      Some "Publishing capsule split"
+  | "capsule", "combine" :: _ when has_option "--confirm" arguments ->
+      Some "Publishing combined capsule"
+  | "work", "create" :: _ -> Some "Creating workspace"
+  | "work", "enable" :: _ -> Some "Enabling capsule revision"
+  | "work", "disable" :: _ -> Some "Disabling capsule"
+  | "work", "reorder" :: _ -> Some "Reordering workspace"
+  | "work", "materialise" :: _ when not (has_option "--dry-run" arguments) ->
+      Some "Materialising workspace"
+  | "conflict", "resolve" :: _ -> Some "Recording conflict resolution"
+  | "validation", "run" :: _ -> Some "Running validation"
+  | "release", "create" :: _ -> Some "Creating release"
+  | "git", "archive" :: "create" :: _ -> Some "Archiving Git repository"
+  | "git", [ "archive"; "materialize-lineage"; _ ] ->
+      Some "Materialising Git lineage"
+  | "git", [ "archive"; "exit"; _; "--destination"; _ ] ->
+      Some "Exporting Git archive"
+  | "git", "archive" :: "adopt" :: _ -> Some "Adopting Git archive"
+  | "git", "import" :: _ -> Some "Importing Git history"
+  | "git", "export" :: _ -> Some "Exporting Git history"
+  | "peer", "publish" :: _ -> Some "Publishing peer projection"
+  | "peer", "fetch" :: _ -> Some "Fetching peer publication"
+  | "peer", "integrate" :: _ -> Some "Integrating peer capsule"
+  | _ -> None
 
 let open_scratch root =
   let store =
@@ -2599,10 +2654,11 @@ let peer root arguments =
   | _ -> exit 2
 
 let usage ?(status = 2) () =
+  Progress.stop_active ();
   let message =
     "usage: yeokcham \
      <init|archive|reset|status|checkpoint|timeline|restore|pin|unpin|compact|watch|capsule|work|conflict|validation|release|storage|verify|git|peer> \
-     [--root PATH] ..."
+     [--root PATH] [--no-progress] ..."
   in
   if status = 0 then print_endline message else prerr_endline message;
   exit status
@@ -2612,55 +2668,62 @@ let () =
   try
     match Array.to_list Sys.argv with
     | [ _; ("--help" | "-h" | "help") ] -> usage ~status:0 ()
-    | _ :: command :: arguments -> (
-        let root, arguments = parse_root arguments in
-        match command with
-        | "init" when arguments = [] -> initialise root
-        | "archive" -> archive root arguments
-        | "reset" -> reset root arguments
-        | "status" -> status root arguments
-        | "checkpoint" when arguments = [] ->
-            require_v2_root root;
-            checkpoint root
-        | "timeline" -> timeline root arguments
-        | "restore" ->
-            require_v2_root root;
-            restore root arguments
-        | "pin" ->
-            require_v2_root root;
-            change_pin root arguments true
-        | "unpin" ->
-            require_v2_root root;
-            change_pin root arguments false
-        | "compact" ->
-            require_v2_root root;
-            compact root arguments
-        | "watch" ->
-            require_v2_root root;
-            watch root arguments
-        | "capsule" ->
-            require_v2_root root;
-            capsule root arguments
-        | "work" ->
-            require_v2_root root;
-            workspace root arguments
-        | "conflict" ->
-            require_v2_root root;
-            conflict root arguments
-        | "validation" ->
-            require_v2_root root;
-            validation root arguments
-        | "release" ->
-            require_v2_root root;
-            release root arguments
-        | "storage" -> storage root arguments
-        | "verify" -> verify root arguments
-        | "git" ->
-            require_v2_root root;
-            git root arguments
-        | "peer" ->
-            require_v2_root root;
-            peer root arguments
-        | _ -> usage ())
+    | _ :: command :: raw_arguments -> (
+        let root, no_progress, arguments = parse_cli_options raw_arguments in
+        let execute () =
+          match command with
+          | "init" when arguments = [] -> initialise root
+          | "archive" -> archive root arguments
+          | "reset" -> reset root arguments
+          | "status" -> status root arguments
+          | "checkpoint" when arguments = [] ->
+              require_v2_root root;
+              checkpoint root
+          | "timeline" -> timeline root arguments
+          | "restore" ->
+              require_v2_root root;
+              restore root arguments
+          | "pin" ->
+              require_v2_root root;
+              change_pin root arguments true
+          | "unpin" ->
+              require_v2_root root;
+              change_pin root arguments false
+          | "compact" ->
+              require_v2_root root;
+              compact root arguments
+          | "watch" ->
+              require_v2_root root;
+              watch root arguments
+          | "capsule" ->
+              require_v2_root root;
+              capsule root arguments
+          | "work" ->
+              require_v2_root root;
+              workspace root arguments
+          | "conflict" ->
+              require_v2_root root;
+              conflict root arguments
+          | "validation" ->
+              require_v2_root root;
+              validation root arguments
+          | "release" ->
+              require_v2_root root;
+              release root arguments
+          | "storage" -> storage root arguments
+          | "verify" -> verify root arguments
+          | "git" ->
+              require_v2_root root;
+              git root arguments
+          | "peer" ->
+              require_v2_root root;
+              peer root arguments
+          | _ -> usage ()
+        in
+        match mutation_progress_message command arguments with
+        | None -> execute ()
+        | Some message ->
+            Progress.with_progress ~enabled:(Progress.enabled ~no_progress)
+              message execute)
     | _ -> usage ()
   with Sys.Break -> print_endline "watch stopped"

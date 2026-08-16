@@ -30,6 +30,14 @@ sh tools/demo/create-repository-v1.sh --root "$demo_root"
 sh tools/demo/demonstrate-release-v1.sh --root "$demo_root"
 ```
 
+Run this demonstration from a freshly created fixture. It is not composable
+with the recovery, capsule, or other stateful demonstration scripts on the
+same root: those scripts intentionally advance scratch state, while this one
+constructs and materialises its own workspace from the original setup fixture.
+If it follows the capsule demonstration on the same root,
+`release workspace materialisation is partial` is the intended safe refusal to
+materialise a composition whose declared base no longer matches scratch.
+
 The script invokes the M11-05 workspace demonstration itself. Its evidence is
 kept under `.yeokcham/`: `demo-v1-release-create`,
 `demo-v1-release-evidence`, `demo-v1-release-validation`, and the before/after

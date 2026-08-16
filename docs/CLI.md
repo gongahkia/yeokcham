@@ -15,10 +15,23 @@ The top-level help output is the authoritative list of command groups. All
 commands either publish a checked immutable result through their documented
 boundary or return a structured failure; they do not silently fabricate history.
 
+## Terminal progress
+
+Finite mutating commands render a spinner on an interactive stderr stream. The
+spinner uses uv's current default indicatif frame sequence and clear-on-finish
+behavior; normal command results still go to stdout and errors remain on
+stderr. Inspection commands, dry runs, `watch`, `yeokchamd`, and `peer serve`
+do not show progress.
+
+Pass `--no-progress` after the command or set `YEOKCHAM_NO_PROGRESS=1` to hide
+the spinner. Non-interactive stderr also hides it automatically, so scripts,
+pipes, and captured logs retain their ordinary output.
+
 ## Complete command forms
 
 The following forms cover the current local command surface. Square brackets
-are optional arguments; placeholders are supplied by the caller.
+are optional arguments; placeholders are supplied by the caller. Any
+`yeokcham` form may additionally take `[--root <path>] [--no-progress]`.
 
 ```text
 init

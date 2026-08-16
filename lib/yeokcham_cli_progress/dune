@@ -1,0 +1,3 @@
+(library
+ (name yeokcham_cli_progress)
+ (libraries threads unix))

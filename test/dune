@@ -4,6 +4,11 @@
  (libraries alcotest qcheck-core qcheck-alcotest))
 
 (test
+ (name test_cli_progress)
+ (modules test_cli_progress)
+ (libraries alcotest yeokcham_cli_progress unix))
+
+(test
  (name test_typescript_adapter)
  (modules test_typescript_adapter)
  (libraries
