@@ -190,6 +190,7 @@ val sync_local :
   transcript:string ->
   tracking_name:string ->
   head:Yeokcham_id.Peer_sync_node_id.t ->
+  unit ->
   (Yeokcham_exchange_store.outcome * direct_sync, error) result
 
 val reconcile :

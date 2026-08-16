@@ -162,12 +162,11 @@ let transfer ?interrupt_after ?on_progress
     let total = List.length object_ids in
     let notify completed =
       Option.iter
-        (fun callback ->
-          try callback ~completed ~total with _ -> ())
+        (fun callback -> try callback ~completed ~total with _ -> ())
         on_progress
     in
-    let rec transfer_pages receiver object_sequence requested transferred completed
-        page_index = function
+    let rec transfer_pages receiver object_sequence requested transferred
+        completed page_index = function
       | [] ->
           let end_message =
             Exchange.End

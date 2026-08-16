@@ -2895,8 +2895,7 @@ module Restore = struct
         let total = List.length plan.actions in
         let notify completed =
           Option.iter
-            (fun callback ->
-              try callback ~completed ~total with _ -> ())
+            (fun callback -> try callback ~completed ~total with _ -> ())
             on_progress
         in
         let rec apply_actions completed = function

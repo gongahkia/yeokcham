@@ -7,10 +7,12 @@
 val spinner_frames : string list
 val refresh_interval_seconds : float
 val clear_sequence : string
-
 val spinner_frame : int -> string
 val render_line : tick:int -> message:string -> string
-val bar_width : columns:int option -> message:string -> completed:int -> total:int -> int
+
+val bar_width :
+  columns:int option -> message:string -> completed:int -> total:int -> int
+
 val render_bar :
   columns:int option -> message:string -> completed:int -> total:int -> string
 
@@ -24,7 +26,8 @@ val enabled : no_progress:bool -> bool
 
 val with_progress : enabled:bool -> string -> (unit -> 'a) -> 'a
 (** Render a spinner until the callback returns or raises. The spinner is
-    cleared before the callback's output, exception, or process exit is shown. *)
+    cleared before the callback's output, exception, or process exit is shown.
+*)
 
 val with_determinate_progress :
   enabled:bool ->

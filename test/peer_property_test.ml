@@ -73,7 +73,11 @@ let no_scratch_objects store =
       | Yeokcham_envelope.Ref_event | Yeokcham_envelope.Device_identity
       | Yeokcham_envelope.Divergent_ref_set | Yeokcham_envelope.Git_archive
       | Yeokcham_envelope.Git_adoption | Yeokcham_envelope.Peer_publication
-      | Yeokcham_envelope.Peer_integration ->
+      | Yeokcham_envelope.Peer_integration | Yeokcham_envelope.Git_lineage_node
+      | Yeokcham_envelope.Git_lineage | Yeokcham_envelope.Peer_identity
+      | Yeokcham_envelope.Peer_contact | Yeokcham_envelope.Peer_advertisement
+      | Yeokcham_envelope.Peer_sync_node | Yeokcham_envelope.Peer_sync_conflict
+        ->
           true)
 
 let generated_capsule_projection_is_missing_only_and_scratch_free =

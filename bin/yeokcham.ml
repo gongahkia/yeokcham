@@ -1730,8 +1730,7 @@ let workspace root arguments =
                ~workspace:(workspace_id workspace) ~observed_at:(now ())
                ~created_at:(now ()) ~dry_run ()
            else
-             with_determinate_progress "Materialising workspace"
-               (fun ~report ->
+             with_determinate_progress "Materialising workspace" (fun ~report ->
                  Workspace_store.Durable.materialise ~on_progress:report ~store
                    ~scratch ~root ~workspace:(workspace_id workspace)
                    ~observed_at:(now ()) ~created_at:(now ()) ~dry_run ()))

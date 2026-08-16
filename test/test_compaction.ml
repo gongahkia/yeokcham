@@ -409,9 +409,12 @@ let cleanup_reports_exact_candidate_progress () =
   with_history (fun _root store scratch _initial _middle _head ->
       let observed = ref [] in
       let execution =
-        Compaction.activate ~on_progress:(fun ~completed ~total ->
+        Compaction.activate
+          ~on_progress:(fun ~completed ~total ->
             observed := (completed, total) :: !observed)
-          ~store scratch ~policy:(policy ~recent:6L ~periodic:0L) ~now:25L
+          ~store scratch
+          ~policy:(policy ~recent:6L ~periodic:0L)
+          ~now:25L
         |> require_ok Compaction.error_to_string
       in
       let cleanup = Compaction.execution_cleanup execution in

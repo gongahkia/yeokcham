@@ -470,18 +470,21 @@ let local_transfer_reports_reconciled_object_progress () =
   with_repositories (fun source destination ->
       let object_ids =
         [ "first"; "second" ]
-        |> List.map (fun bytes -> Store.put source (content bytes) |> require_store)
+        |> List.map (fun bytes ->
+            Store.put source (content bytes) |> require_store)
         |> List.sort Store.Stored_object_id.compare
       in
       let observed = ref [] in
       ignore
-        (Exchange_store.transfer ~on_progress:(fun ~completed ~total ->
+        (Exchange_store.transfer
+           ~on_progress:(fun ~completed ~total ->
              observed := (completed, total) :: !observed)
            ~source ~destination ~session_id:session ~object_ids ()
         |> require_adapter);
       Alcotest.(check (list (pair int int)))
         "transfer reconciles the exact offered inventory"
-        [ (0, 2); (2, 2) ] (List.rev !observed))
+        [ (0, 2); (2, 2) ]
+        (List.rev !observed))
 
 let restart_after_interruption_preserves_refs () =
   with_repositories (fun source destination ->

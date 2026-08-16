@@ -215,7 +215,8 @@ let restore_reports_exact_action_progress () =
            ~on_progress:(fun ~completed ~total ->
              observed := (completed, total) :: !observed)
         |> require_ok Scratch.error_to_string);
-      Alcotest.(check (list (pair int int))) "restore action sequence"
+      Alcotest.(check (list (pair int int)))
+        "restore action sequence"
         (List.init (expected + 1) (fun completed -> (completed, expected)))
         (List.rev !observed))
 

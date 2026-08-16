@@ -119,6 +119,13 @@ let object_type_codes () =
       (Envelope.Git_adoption, 30);
       (Envelope.Peer_publication, 31);
       (Envelope.Peer_integration, 32);
+      (Envelope.Git_lineage_node, 33);
+      (Envelope.Git_lineage, 34);
+      (Envelope.Peer_identity, 35);
+      (Envelope.Peer_contact, 36);
+      (Envelope.Peer_advertisement, 37);
+      (Envelope.Peer_sync_node, 38);
+      (Envelope.Peer_sync_conflict, 39);
     ]
   in
   List.iter
@@ -135,7 +142,7 @@ let object_type_codes () =
     (Option.is_none (Envelope.object_type_of_code 0));
   Alcotest.(check bool)
     "unassigned type is rejected" true
-    (Option.is_none (Envelope.object_type_of_code 33))
+    (Option.is_none (Envelope.object_type_of_code 40))
 
 let golden_envelope () =
   let actual = Envelope.encode sample in

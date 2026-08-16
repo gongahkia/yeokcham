@@ -51,7 +51,9 @@ let clamp ~lower ~upper value = max lower (min upper value)
 
 let normalized_progress ~completed ~total =
   let total = max 0 total in
-  let completed = if total = 0 then 0 else clamp ~lower:0 ~upper:total completed in
+  let completed =
+    if total = 0 then 0 else clamp ~lower:0 ~upper:total completed
+  in
   (completed, total)
 
 let bar_width ~columns ~message ~completed ~total =
@@ -71,18 +73,15 @@ let render_bar ~columns ~message ~completed ~total =
     if total = 0 then 0
     else
       Int64.(
-        div
-          (mul (of_int completed) (of_int width))
-          (of_int total)
-        |> to_int)
+        div (mul (of_int completed) (of_int width)) (of_int total) |> to_int)
   in
-  message ^ " [" ^ repeat "█" filled ^ repeat "░" (width - filled) ^ "] "
-  ^ string_of_int completed ^ "/" ^ string_of_int total
+  message ^ " [" ^ repeat "█" filled
+  ^ repeat "░" (width - filled)
+  ^ "] " ^ string_of_int completed ^ "/" ^ string_of_int total
 
 let should_render ~no_progress ~stderr_isatty ~environment =
-  not no_progress && stderr_isatty
-  &&
-  match environment with Some "1" -> false | None | Some _ -> true
+  (not no_progress) && stderr_isatty
+  && match environment with Some "1" -> false | None | Some _ -> true
 
 let stderr_isatty () =
   try Unix.isatty Unix.stderr with Unix.Unix_error _ -> false
@@ -212,7 +211,8 @@ let with_determinate_progress ~enabled ~message callback =
           let progress = start ~display:(Bar { completed; total }) message in
           state := Some progress
     in
-    Fun.protect (fun () -> callback ~report) ~finally:(fun () ->
-        Option.iter stop !state)
+    Fun.protect
+      (fun () -> callback ~report)
+      ~finally:(fun () -> Option.iter stop !state)
 
 let () = at_exit stop_active

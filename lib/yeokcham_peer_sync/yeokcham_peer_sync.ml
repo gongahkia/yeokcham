@@ -1267,6 +1267,271 @@ let update_tracking_head store ~contact ~name ~expected node =
         ~replacement
       |> Result.map_error (fun error -> Store_error error)
 
+let sorted_unique_object_ids identities =
+  List.sort_uniq Store.Stored_object_id.compare identities
+
+let collect_sync_content_objects store seen content =
+  let identity = Snapshot.Content.stored_object_id content in
+  if List.exists (Store.Stored_object_id.equal identity) seen then Ok seen
+  else
+    let* object_ =
+      Store.get store identity
+      |> Result.map_error (fun error -> Store_error error)
+    in
+    let object_type = Envelope.object_type object_ in
+    if object_type = Envelope.Content then Ok (identity :: seen)
+    else if object_type = Envelope.File_manifest then
+      let* manifest =
+        Snapshot.Manifest.load store
+          (Snapshot.Manifest.of_stored_object_id identity)
+        |> Result.map_error (fun error -> Snapshot_error error)
+      in
+      let rec collect_chunks seen = function
+        | [] -> Ok seen
+        | (chunk, _) :: rest ->
+            let identity = Snapshot.Chunk.stored_object_id chunk in
+            if List.exists (Store.Stored_object_id.equal identity) seen then
+              collect_chunks seen rest
+            else
+              let* object_ =
+                Store.get store identity
+                |> Result.map_error (fun error -> Store_error error)
+              in
+              if Envelope.object_type object_ <> Envelope.Chunk then
+                Error
+                  (Invalid_sync_node
+                     "peer sync snapshot manifest references a non-chunk object")
+              else collect_chunks (identity :: seen) rest
+      in
+      collect_chunks (identity :: seen) (Snapshot.Manifest.chunks manifest)
+    else
+      Error
+        (Invalid_sync_node
+           ("peer sync snapshot content has unsupported object type "
+           ^ string_of_int (Envelope.object_type_code object_type)))
+
+let rec collect_sync_tree_objects store seen tree =
+  let identity = Snapshot.Tree.stored_object_id tree in
+  if List.exists (Store.Stored_object_id.equal identity) seen then Ok seen
+  else
+    let* tree =
+      Snapshot.Tree.load store tree
+      |> Result.map_error (fun error -> Snapshot_error error)
+    in
+    let rec collect_entries seen = function
+      | [] -> Ok seen
+      | (_, Snapshot.Tree.File { content; _ }) :: rest ->
+          let* seen = collect_sync_content_objects store seen content in
+          collect_entries seen rest
+      | (_, Snapshot.Tree.Directory child) :: rest ->
+          let* seen = collect_sync_tree_objects store seen child in
+          collect_entries seen rest
+    in
+    collect_entries (identity :: seen) (Snapshot.Tree.entries tree)
+
+let collect_sync_snapshot_objects store snapshot =
+  let identity = Snapshot.Snapshot.stored_object_id snapshot in
+  let* snapshot =
+    Snapshot.Snapshot.load store snapshot
+    |> Result.map_error (fun error -> Snapshot_error error)
+  in
+  collect_sync_tree_objects store [ identity ] (Snapshot.Snapshot.root snapshot)
+
+let collect_sync_nodes store head =
+  let rec visit seen identity =
+    let raw = Sync_node_id.to_bytes identity in
+    if List.mem_assoc raw seen then Ok seen
+    else if List.length seen >= max_sync_graph_nodes then
+      Error (Invalid_sync_node "peer sync graph exceeds its verification bound")
+    else
+      let* node = load_sync_node_raw store identity in
+      let* seen =
+        List.fold_left
+          (fun result parent ->
+            let* seen = result in
+            visit seen parent)
+          (Ok seen) node.sync_node_parents
+      in
+      Ok ((raw, node) :: seen)
+  in
+  visit [] head |> Result.map (fun nodes -> List.rev_map snd nodes)
+
+let identity_object_id identity =
+  let* payload = identity_payload identity in
+  let* envelope =
+    Envelope.create ~object_type:Envelope.Peer_identity
+      ~object_format_version:Envelope.current_object_format_version
+      ~mandatory_features:Envelope.supported_mandatory_features ~payload ()
+    |> Result.map_error (fun error -> Envelope_error error)
+  in
+  Ok (Store.id_of_envelope envelope)
+
+let sync_node_object_id node =
+  let* payload = sync_node_payload node in
+  let* envelope =
+    Envelope.create ~object_type:Envelope.Peer_sync_node
+      ~object_format_version:Envelope.current_object_format_version
+      ~mandatory_features:Envelope.supported_mandatory_features ~payload ()
+    |> Result.map_error (fun error -> Envelope_error error)
+  in
+  Ok (Store.id_of_envelope envelope)
+
+let sync_transfer_session proof =
+  let* payload = session_proof_payload proof in
+  let raw =
+    digest "yeokcham:peer-sync-local-transfer-session:v1\000"
+      (Encoding.encode payload)
+  in
+  Exchange.session_id_of_bytes (String.sub raw 0 16)
+  |> Result.map_error (fun error ->
+      Exchange_error (Exchange_store.Protocol_error error))
+
+let sync_node_is_ancestor store ~ancestor ~descendant =
+  let target = Sync_node_id.to_bytes ancestor in
+  let rec visit seen identity =
+    let raw = Sync_node_id.to_bytes identity in
+    if String.equal raw target then Ok true
+    else if List.exists (String.equal raw) seen then Ok false
+    else if List.length seen >= max_sync_graph_nodes then
+      Error (Invalid_sync_node "peer sync graph exceeds its verification bound")
+    else
+      let* node = load_sync_node_raw store identity in
+      let rec visit_parents = function
+        | [] -> Ok false
+        | parent :: rest ->
+            let* found = visit (raw :: seen) parent in
+            if found then Ok true else visit_parents rest
+      in
+      visit_parents node.sync_node_parents
+  in
+  visit [] descendant
+
+let sync_local ?interrupt_after ~source ~destination ~contact
+    ~destination_identity ~source_private_key ~nonce ~transcript ~tracking_name
+    ~head () =
+  let* contact = load_contact destination (contact_id contact) in
+  let* configured_destination_identity =
+    load_identity destination (peer_id destination_identity)
+  in
+  if not (identity_equal configured_destination_identity destination_identity)
+  then Error Identity_mismatch
+  else
+    let* source_identity =
+      load_identity source (peer_id (contact_identity contact))
+    in
+    if not (identity_equal source_identity (contact_identity contact)) then
+      Error Contact_mismatch
+    else
+      let* received = load_sync_node source head in
+      if
+        not
+          (Peer_id.equal received.sync_node_author
+             (peer_id (contact_identity contact)))
+      then Error Contact_mismatch
+      else
+        let* unsigned =
+          make_unsigned_session ~repository_format:Store.repository_format
+            ~initiator:source_identity
+            ~responder:configured_destination_identity ~nonce ~transcript
+        in
+        let* proof = sign_session unsigned ~private_key:source_private_key in
+        let* () =
+          verify_session ~repository_format:Store.repository_format
+            ~expected_signer:contact
+            ~expected_initiator:(peer_id source_identity)
+            ~expected_responder:(peer_id configured_destination_identity)
+            ~expected_nonce:nonce ~expected_transcript:transcript proof
+        in
+        let* nodes = collect_sync_nodes source head in
+        let* identities =
+          collect_results
+            (List.map
+               (fun node -> load_identity source node.sync_node_author)
+               nodes)
+        in
+        let identities =
+          List.sort_uniq
+            (fun left right ->
+              String.compare
+                (Peer_id.to_bytes (peer_id left))
+                (Peer_id.to_bytes (peer_id right)))
+            identities
+        in
+        let* snapshot_objects =
+          List.fold_left
+            (fun result node ->
+              let* seen = result in
+              let* closure =
+                collect_sync_snapshot_objects source node.sync_node_snapshot
+              in
+              Ok (List.rev_append closure seen))
+            (Ok []) nodes
+        in
+        let* identity_objects =
+          collect_results (List.map identity_object_id identities)
+        in
+        let* node_objects =
+          collect_results (List.map sync_node_object_id nodes)
+        in
+        let object_ids =
+          sorted_unique_object_ids
+            (List.rev_append identity_objects
+               (List.rev_append node_objects snapshot_objects))
+        in
+        let* session_id = sync_transfer_session proof in
+        let* outcome =
+          Exchange_store.transfer ?interrupt_after ~source ~destination
+            ~session_id ~object_ids ()
+          |> Result.map_error (fun error -> Exchange_error error)
+        in
+        let* () =
+          List.fold_left
+            (fun result identity ->
+              let* () = result in
+              let* _ = store_identity destination identity in
+              Ok ())
+            (Ok ()) identities
+        in
+        let* () =
+          List.fold_left
+            (fun result node ->
+              let* () = result in
+              let* _ = store_sync_node destination node in
+              Ok ())
+            (Ok ()) nodes
+        in
+        let* received = load_sync_node destination head in
+        let* current = tracking_head destination ~contact ~name:tracking_name in
+        match current with
+        | None ->
+            let* () =
+              update_tracking_head destination ~contact ~name:tracking_name
+                ~expected:None head
+            in
+            Ok (outcome, Tracking_advanced received)
+        | Some current when Sync_node_id.equal current head ->
+            Ok (outcome, Tracking_already_current received)
+        | Some current ->
+            let* current_node = load_sync_node destination current in
+            let* current_is_ancestor =
+              sync_node_is_ancestor destination ~ancestor:current
+                ~descendant:head
+            in
+            if current_is_ancestor then
+              let* () =
+                update_tracking_head destination ~contact ~name:tracking_name
+                  ~expected:(Some current) head
+              in
+              Ok (outcome, Tracking_advanced received)
+            else
+              let* received_is_ancestor =
+                sync_node_is_ancestor destination ~ancestor:head
+                  ~descendant:current
+              in
+              if received_is_ancestor then
+                Ok (outcome, Tracking_already_current current_node)
+              else Ok (outcome, Tracking_diverged { current; received })
+
 let entry_equal left right =
   match (left, right) with
   | None, None -> true

@@ -209,6 +209,115 @@ let persists_conflict_and_protects_tracking () =
       | Peer_sync.Merged _ ->
           Alcotest.fail "incompatible same-path bytes must persist a conflict")
 
+let direct_sync_transfers_verified_closure_and_advances_tracking () =
+  with_directory "yeokcham-peer-sync-source-" (fun source_root ->
+      with_directory "yeokcham-peer-sync-destination-" (fun destination_root ->
+          let source =
+            Store.init ~root:source_root |> require_ok Store.error_to_string
+          in
+          let destination =
+            Store.init ~root:destination_root
+            |> require_ok Store.error_to_string
+          in
+          let alice, alice_private = identity 'a' in
+          let bob, _ = identity 'b' in
+          store_identity source alice;
+          store_identity destination bob;
+          let contact =
+            Peer_sync.make_contact ~name:"alice" ~identity:alice
+              ~endpoints:[ Peer_sync.Local_path source_root ]
+            |> require_ok Peer_sync.error_to_string
+          in
+          ignore
+            (Peer_sync.store_contact destination contact
+            |> require_ok Peer_sync.error_to_string);
+          let head =
+            store_node source ~author:alice ~private_key:alice_private
+              ~snapshot:(snapshot source [ ("tracked", "peer sync\n") ])
+              ~parents:[]
+          in
+          let outcome, decision =
+            Peer_sync.sync_local ~source ~destination ~contact
+              ~destination_identity:bob ~source_private_key:alice_private
+              ~nonce:(String.make Peer_sync.nonce_bytes 'n')
+              ~transcript:"peer-sync:main" ~tracking_name:"main"
+              ~head:(Peer_sync.sync_node_id head)
+              ()
+            |> require_ok Peer_sync.error_to_string
+          in
+          Alcotest.(check bool)
+            "sync transfers an immutable closure" true
+            (outcome.Yeokcham_exchange_store.transferred <> []);
+          (match decision with
+          | Peer_sync.Tracking_advanced received ->
+              Alcotest.(check string)
+                "received tracking head"
+                (Yeokcham_id.Peer_sync_node_id.to_hex
+                   (Peer_sync.sync_node_id head))
+                (Yeokcham_id.Peer_sync_node_id.to_hex
+                   (Peer_sync.sync_node_id received))
+          | Peer_sync.Tracking_already_current _ | Peer_sync.Tracking_diverged _
+            ->
+              Alcotest.fail
+                "new remote head must advance its empty tracking ref");
+          Alcotest.(check bool)
+            "received node verifies" true
+            (Result.is_ok
+               (Peer_sync.load_sync_node destination
+                  (Peer_sync.sync_node_id head)));
+          Alcotest.(check (option string))
+            "tracking ref records remote head"
+            (Some
+               (Yeokcham_id.Peer_sync_node_id.to_hex
+                  (Peer_sync.sync_node_id head)))
+            (Peer_sync.tracking_head destination ~contact ~name:"main"
+            |> require_ok Peer_sync.error_to_string
+            |> Option.map Yeokcham_id.Peer_sync_node_id.to_hex)))
+
+let interrupted_direct_sync_does_not_advance_tracking () =
+  with_directory "yeokcham-peer-sync-interrupted-source-" (fun source_root ->
+      with_directory "yeokcham-peer-sync-interrupted-destination-"
+        (fun destination_root ->
+          let source =
+            Store.init ~root:source_root |> require_ok Store.error_to_string
+          in
+          let destination =
+            Store.init ~root:destination_root
+            |> require_ok Store.error_to_string
+          in
+          let alice, alice_private = identity 'a' in
+          let bob, _ = identity 'b' in
+          store_identity source alice;
+          store_identity destination bob;
+          let contact =
+            Peer_sync.make_contact ~name:"alice" ~identity:alice
+              ~endpoints:[ Peer_sync.Local_path source_root ]
+            |> require_ok Peer_sync.error_to_string
+          in
+          ignore
+            (Peer_sync.store_contact destination contact
+            |> require_ok Peer_sync.error_to_string);
+          let head =
+            store_node source ~author:alice ~private_key:alice_private
+              ~snapshot:(snapshot source [ ("tracked", "peer sync\n") ])
+              ~parents:[]
+          in
+          Alcotest.(check bool)
+            "interrupted transfer refuses before tracking" true
+            (Result.is_error
+               (Peer_sync.sync_local ~interrupt_after:0 ~source ~destination
+                  ~contact ~destination_identity:bob
+                  ~source_private_key:alice_private
+                  ~nonce:(String.make Peer_sync.nonce_bytes 'n')
+                  ~transcript:"peer-sync:main" ~tracking_name:"main"
+                  ~head:(Peer_sync.sync_node_id head)
+                  ()));
+          Alcotest.(check (option string))
+            "tracking ref stays absent" None
+            (Peer_sync.tracking_head destination ~contact ~name:"main"
+            |> require_ok Peer_sync.error_to_string
+            |> Option.map Yeokcham_id.Peer_sync_node_id.to_hex)))
+
 let () =
   Alcotest.run "yeokcham_peer_sync"
     [
@@ -223,5 +332,10 @@ let () =
             merges_disjoint_paths;
           Alcotest.test_case "conflicts and tracking isolation" `Quick
             persists_conflict_and_protects_tracking;
+          Alcotest.test_case
+            "direct sync transfers a verified closure and advances tracking"
+            `Quick direct_sync_transfers_verified_closure_and_advances_tracking;
+          Alcotest.test_case "interrupted direct sync preserves tracking" `Quick
+            interrupted_direct_sync_does_not_advance_tracking;
         ] );
     ]

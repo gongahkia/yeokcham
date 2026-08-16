@@ -43,39 +43,43 @@ let contains text fragment =
 
 let test_default_spinner_sequence () =
   Alcotest.(check string) "first frame" "⠁" (Progress.spinner_frame 0);
-  Alcotest.(check string) "repeated first frame" "⠁"
-    (Progress.spinner_frame 1);
-  Alcotest.(check string) "last frame clears" " "
+  Alcotest.(check string) "repeated first frame" "⠁" (Progress.spinner_frame 1);
+  Alcotest.(check string)
+    "last frame clears" " "
     (Progress.spinner_frame (List.length Progress.spinner_frames - 1));
-  Alcotest.(check string) "sequence wraps" "⠁"
+  Alcotest.(check string)
+    "sequence wraps" "⠁"
     (Progress.spinner_frame (List.length Progress.spinner_frames))
 
 let test_default_template () =
-  Alcotest.(check string) "spinner and message" "⠁ Restoring checkpoint"
+  Alcotest.(check string)
+    "spinner and message" "⠁ Restoring checkpoint"
     (Progress.render_line ~tick:0 ~message:"Restoring checkpoint");
   Alcotest.(check string) "clear line" "\r\027[2K" Progress.clear_sequence;
   Alcotest.check (Alcotest.float 0.0001) "20 Hz" 0.05
     Progress.refresh_interval_seconds
 
 let test_default_bar_template () =
-  Alcotest.(check int) "fallback width" 20
-    (Progress.bar_width ~columns:None ~message:"Restoring" ~completed:0
-       ~total:4);
-  Alcotest.(check int) "terminal width" 23
+  Alcotest.(check int)
+    "fallback width" 20
+    (Progress.bar_width ~columns:None ~message:"Restoring" ~completed:0 ~total:4);
+  Alcotest.(check int)
+    "terminal width" 23
     (Progress.bar_width ~columns:(Some 40) ~message:"Restoring" ~completed:2
        ~total:4);
-  Alcotest.(check string) "half complete"
-    "Restoring [██████████░░░░░░░░░░] 2/4"
+  Alcotest.(check string)
+    "half complete" "Restoring [██████████░░░░░░░░░░] 2/4"
     (Progress.render_bar ~columns:None ~message:"Restoring" ~completed:2
        ~total:4);
-  Alcotest.(check string) "clamped complete"
-    "Restoring [████████████████████] 4/4"
+  Alcotest.(check string)
+    "clamped complete" "Restoring [████████████████████] 4/4"
     (Progress.render_bar ~columns:None ~message:"Restoring" ~completed:9
        ~total:4)
 
 let test_visibility_policy () =
   let check name expected ~no_progress ~stderr_isatty ~environment =
-    Alcotest.(check bool) name expected
+    Alcotest.(check bool)
+      name expected
       (Progress.should_render ~no_progress ~stderr_isatty ~environment)
   in
   check "interactive by default" true ~no_progress:false ~stderr_isatty:true
@@ -105,10 +109,13 @@ let test_spinner_draws_and_clears () =
         Progress.with_progress ~enabled:true "Applying update" (fun () ->
             ignore (Unix.select [] [] [] 0.06)))
   in
-  Alcotest.(check bool) "first draw uses the default template" true
-    (String.starts_with ~prefix:(Progress.clear_sequence ^ "⠁ Applying update")
+  Alcotest.(check bool)
+    "first draw uses the default template" true
+    (String.starts_with
+       ~prefix:(Progress.clear_sequence ^ "⠁ Applying update")
        output);
-  Alcotest.(check bool) "completion clears the line" true
+  Alcotest.(check bool)
+    "completion clears the line" true
     (String.ends_with ~suffix:Progress.clear_sequence output)
 
 let test_disabled_progress_does_not_draw () =
@@ -129,13 +136,16 @@ let test_determinate_progress_replaces_spinner_and_clears () =
                 report ~completed:2 ~total:4;
                 ignore (Unix.select [] [] [] 0.06))))
   in
-  Alcotest.(check bool) "spinner was shown while planning" true
+  Alcotest.(check bool)
+    "spinner was shown while planning" true
     (contains output "⠁ Planning restore");
-  Alcotest.(check bool) "bar starts at zero" true
+  Alcotest.(check bool)
+    "bar starts at zero" true
     (contains output "Restoring checkpoint [");
-  Alcotest.(check bool) "bar receives the reported count" true
-    (contains output " 2/4");
-  Alcotest.(check bool) "completion clears the line" true
+  Alcotest.(check bool)
+    "bar receives the reported count" true (contains output " 2/4");
+  Alcotest.(check bool)
+    "completion clears the line" true
     (String.ends_with ~suffix:Progress.clear_sequence output)
 
 let test_disabled_determinate_progress_does_not_draw () =
@@ -172,7 +182,8 @@ let () =
             test_disabled_progress_does_not_draw;
           Alcotest.test_case "determinate progress replaces spinner and clears"
             `Slow test_determinate_progress_replaces_spinner_and_clears;
-          Alcotest.test_case "disabled determinate progress does not draw stderr"
-            `Quick test_disabled_determinate_progress_does_not_draw;
+          Alcotest.test_case
+            "disabled determinate progress does not draw stderr" `Quick
+            test_disabled_determinate_progress_does_not_draw;
         ] );
     ]

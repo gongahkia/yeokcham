@@ -1684,8 +1684,7 @@ let cleanup_internal ?fault ?expected_generation ?on_progress store ~prune =
   let total = List.length candidates in
   let notify completed =
     Option.iter
-      (fun callback ->
-        try callback ~completed ~total with _ -> ())
+      (fun callback -> try callback ~completed ~total with _ -> ())
       on_progress
   in
   let rec move index report = function
@@ -1926,7 +1925,8 @@ let activate ?(cleanup = true) ?cleanup_fault ?before_publish ?on_progress
         in
         let* cleanup_report =
           if cleanup then
-            cleanup_internal ?fault:cleanup_fault ?on_progress store ~prune:false
+            cleanup_internal ?fault:cleanup_fault ?on_progress store
+              ~prune:false
           else
             Ok
               {
