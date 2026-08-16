@@ -47,6 +47,7 @@ yeokchamd --root <path> --quiet-period-ms <positive-integer> \
 status
 checkpoint
 timeline --limit <count>
+history --graph [--scratch | --capsules | --workspace <workspace-id> | --releases]
 restore [--dry-run] <checkpoint-id>
 pin <checkpoint-id>
 unpin <checkpoint-id>
@@ -116,6 +117,15 @@ groups on-disk object bytes by storage domain; retained checkpoint bytes are a
 separate non-additive physical-storage subtotal. `verify` reads and hash-verifies
 stored objects, reachability, capsule revisions and declared dependencies,
 workspaces, and releases. Inspection commands do not repair or mutate state.
+
+`history --graph` renders an ASCII map of retained native records. With no
+selector, it combines scratch checkpoints, capsule revisions, workspace
+revisions, conflicts, and releases; selectors provide a focused view. It uses
+typed labels rather than a Git-style universal commit graph: a checkpoint,
+capsule revision, workspace revision, and release remain different objects.
+The graph does not include Git or peer provenance, and it is not an event log:
+compacted scratch history and command executions that create no durable record
+are absent.
 
 ## Recover scratch work
 

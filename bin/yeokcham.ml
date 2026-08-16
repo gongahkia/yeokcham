@@ -801,6 +801,25 @@ let verify root arguments =
   run_v2_or_legacy_demo root "verify" arguments (fun () ->
       legacy_verify root arguments)
 
+let history root arguments =
+  let scope =
+    match arguments with
+    | [ "--graph" ] -> Inspection.Combined_history
+    | [ "--graph"; "--scratch" ] -> Inspection.Scratch_history
+    | [ "--graph"; "--capsules" ] -> Inspection.Capsule_histories
+    | [ "--graph"; "--workspace"; workspace ] ->
+        Inspection.Workspace_history (workspace_id workspace)
+    | [ "--graph"; "--releases" ] -> Inspection.Release_history
+    | _ -> exit 2
+  in
+  match Store.open_repository ~root with
+  | Error error -> fail Store.error_to_string error
+  | Ok store -> (
+      match Inspection.history_graph store ~scope with
+      | Error error -> fail Inspection.error_to_string error
+      | Ok graph ->
+          Inspection.render_history_graph graph |> List.iter print_endline)
+
 let restore root arguments =
   let dry_run, target =
     match arguments with
@@ -2679,7 +2698,7 @@ let usage ?(status = 2) () =
   Progress.stop_active ();
   let message =
     "usage: yeokcham \
-     <init|archive|reset|status|checkpoint|timeline|restore|pin|unpin|compact|watch|capsule|work|conflict|validation|release|storage|verify|git|peer> \
+     <init|archive|reset|status|checkpoint|timeline|history|restore|pin|unpin|compact|watch|capsule|work|conflict|validation|release|storage|verify|git|peer> \
      [--root PATH] [--no-progress] ..."
   in
   if status = 0 then print_endline message else prerr_endline message;
@@ -2735,6 +2754,9 @@ let () =
               release root arguments
           | "storage" -> storage root arguments
           | "verify" -> verify root arguments
+          | "history" ->
+              require_v2_root root;
+              history root arguments
           | "git" ->
               require_v2_root root;
               git root arguments

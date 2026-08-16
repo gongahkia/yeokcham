@@ -43,6 +43,15 @@ type timeline_entry = {
   retention : string list;
 }
 
+type history_scope =
+  | Combined_history
+  | Scratch_history
+  | Capsule_histories
+  | Workspace_history of Yeokcham_id.Workspace_id.t
+  | Release_history
+
+type history_graph
+
 type verification_report = {
   verified_objects : int;
   verified_snapshots : int;
@@ -61,6 +70,16 @@ val status : Yeokcham_store.repository -> (status, error) result
 
 val timeline :
   Yeokcham_store.repository -> limit:int -> (timeline_entry list, error) result
+
+val history_graph :
+  Yeokcham_store.repository ->
+  scope:history_scope ->
+  (history_graph, error) result
+(** Loads a read-only graph of retained native history. It does not represent a
+    command event log and does not include Git or peer provenance. *)
+
+val render_history_graph : history_graph -> string list
+(** Renders a deterministic ASCII view with no terminal control sequences. *)
 
 val verify : Yeokcham_store.repository -> (verification_report, error) result
 (** Verifies every object file, every stored snapshot's reachable tree/content

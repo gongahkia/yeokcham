@@ -2,9 +2,11 @@ module Capsule = Yeokcham_capsule
 module Capsule_store = Yeokcham_capsule_store
 module Id = Yeokcham_id
 module Inspection = Yeokcham_inspection
+module Release = Yeokcham_release
 module Scratch = Yeokcham_scratch
 module Snapshot = Yeokcham_snapshot
 module Store = Yeokcham_store
+module Workspace_store = Yeokcham_workspace_store
 
 let require_ok render = function
   | Ok value -> value
@@ -15,6 +17,7 @@ let raw_id seed =
   |> Bytes.unsafe_to_string
 
 let capsule_id seed = Id.Capsule_id.of_bytes (raw_id seed) |> Result.get_ok
+let workspace_id seed = Id.Workspace_id.of_bytes (raw_id seed) |> Result.get_ok
 
 let rec remove_tree path =
   try
@@ -149,6 +152,107 @@ let inspection_is_read_only_complete_and_compaction_safe () =
         "inspection does not write objects" (List.length before)
         (List.length after))
 
+let graph_is_read_only_and_preserves_native_boundaries () =
+  with_repository (fun root store ->
+      let tracked = Filename.concat root "tracked" in
+      write_file tracked "zero";
+      let scratch = Scratch.open_repository store in
+      let initial_snapshot, _ =
+        Snapshot.scan ~root ~store |> require_ok Snapshot.error_to_string
+      in
+      let initial =
+        Scratch.create_initial scratch ~snapshot:initial_snapshot ~created_at:0L
+        |> require_ok Scratch.error_to_string
+        |> Scratch.Checkpoint.id
+      in
+      write_file tracked "one";
+      let changed = checkpoint scratch store root 1L in
+      let capsule =
+        Capsule_store.Durable.create_from_checkpoints ~store ~scratch
+          ~id:(capsule_id 10) ~title:"safe\nname" ~description:"history"
+          ~dependencies:[] ~evidence:[] ~from:initial ~target:changed
+          ~created_at:2L ~changed_at:2L ()
+        |> require_ok Capsule_store.error_to_string
+      in
+      let capsule_revision =
+        Capsule_store.Durable.resolved_revision capsule
+        |> Capsule_store.revision_id
+      in
+      ignore
+        (Workspace_store.Durable.create ~store ~id:(workspace_id 11)
+           ~base:initial_snapshot ~name:(Some "inspection workspace")
+           ~description:None ~created_at:3L
+        |> require_ok Workspace_store.error_to_string);
+      ignore
+        (Workspace_store.Durable.enable_revision ~store
+           ~workspace:(workspace_id 11) ~revision:capsule_revision
+           ~expected_generation:None ~created_at:4L
+        |> require_ok Workspace_store.error_to_string);
+      ignore
+        (Workspace_store.Durable.materialise ~store ~scratch ~root
+           ~workspace:(workspace_id 11) ~observed_at:5L ~created_at:5L
+           ~dry_run:false ()
+        |> require_ok Workspace_store.error_to_string);
+      let release =
+        Release.Durable.create ~store ~workspace:(workspace_id 11) ~parents:[]
+          ~commands:[] ~message:(Some "first release") ~observed_at:6L
+          ~created_at:6L ()
+        |> require_ok Release.error_to_string
+      in
+      ignore
+        (Release.Durable.create ~store ~workspace:(workspace_id 11)
+           ~parents:[ Release.release_id release ]
+           ~commands:[] ~message:(Some "second release") ~observed_at:7L
+           ~created_at:7L ()
+        |> require_ok Release.error_to_string);
+      let before =
+        Store.list_objects store |> require_ok Store.error_to_string
+      in
+      let graph =
+        Inspection.history_graph store ~scope:Inspection.Combined_history
+        |> require_ok Inspection.error_to_string
+        |> Inspection.render_history_graph
+      in
+      let contains needle = List.exists (String.equal needle) graph in
+      Alcotest.(check bool)
+        "scratch heading" true
+        (contains "scratch (retained checkpoints, newest first)");
+      Alcotest.(check bool)
+        "capsule heading" true
+        (contains "capsules (immutable revisions)");
+      Alcotest.(check bool)
+        "workspace heading" true
+        (contains "workspaces (selected capsule revisions)");
+      Alcotest.(check bool)
+        "release heading" true
+        (contains "releases (immutable reproducible snapshots)");
+      Alcotest.(check bool)
+        "newlines are escaped" true
+        (List.exists (fun line -> String.contains line '\\') graph);
+      Alcotest.(check bool)
+        "release parent is rendered" true
+        (List.exists
+           (fun line ->
+             String.starts_with ~prefix:"  |-- parent -> release" line)
+           graph);
+      let focused =
+        Inspection.history_graph store
+          ~scope:(Inspection.Workspace_history (workspace_id 11))
+        |> require_ok Inspection.error_to_string
+        |> Inspection.render_history_graph
+      in
+      Alcotest.(check bool)
+        "focused workspace graph" true
+        (List.exists
+           (String.equal "workspaces (selected capsule revisions)")
+           focused);
+      let after =
+        Store.list_objects store |> require_ok Store.error_to_string
+      in
+      Alcotest.(check int)
+        "graph inspection does not write objects" (List.length before)
+        (List.length after))
+
 let () =
   Alcotest.run "repository inspection"
     [
@@ -157,5 +261,7 @@ let () =
           Alcotest.test_case
             "read-only status timeline storage and verification" `Quick
             inspection_is_read_only_complete_and_compaction_safe;
+          Alcotest.test_case "native graph is typed, complete, and read-only"
+            `Quick graph_is_read_only_and_preserves_native_boundaries;
         ] );
     ]

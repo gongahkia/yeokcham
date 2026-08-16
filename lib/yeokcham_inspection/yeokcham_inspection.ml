@@ -6,6 +6,7 @@ module Scratch = Yeokcham_scratch
 module Snapshot = Yeokcham_snapshot
 module Store = Yeokcham_store
 module Workspace_store = Yeokcham_workspace_store
+module Id = Yeokcham_id
 
 type storage_bucket =
   | Scratch
@@ -49,6 +50,16 @@ type timeline_entry = {
   retention : string list;
 }
 
+type history_scope =
+  | Combined_history
+  | Scratch_history
+  | Capsule_histories
+  | Workspace_history of Id.Workspace_id.t
+  | Release_history
+
+type history_section = { heading : string; lines : string list }
+type history_graph = { sections : history_section list }
+
 type verification_report = {
   verified_objects : int;
   verified_snapshots : int;
@@ -67,6 +78,7 @@ type error =
   | Release_error of Release.error
   | Materialize_error of Snapshot.Materialize.error
   | Invalid_dependency of string
+  | Invalid_history_link of string
   | Missing_inventory_entry of Store.Stored_object_id.t
 
 let error_to_string = function
@@ -78,6 +90,7 @@ let error_to_string = function
   | Release_error error -> Release.error_to_string error
   | Materialize_error error -> Snapshot.Materialize.error_to_string error
   | Invalid_dependency detail -> "invalid capsule dependency: " ^ detail
+  | Invalid_history_link detail -> "invalid history link: " ^ detail
   | Missing_inventory_entry id ->
       "verified object inventory is missing checkpoint object "
       ^ Store.Stored_object_id.to_hex id
@@ -319,6 +332,360 @@ let timeline store ~limit =
           rest
   in
   render [] entries
+
+let short_id value =
+  let length = String.length value in
+  if length <= 12 then value else String.sub value 0 12
+
+let checkpoint_text identity =
+  Scratch.Checkpoint_id.stored_object_id identity
+  |> Store.Stored_object_id.to_hex |> short_id
+
+let capsule_text identity = Id.Capsule_id.to_hex identity |> short_id
+
+let capsule_revision_text identity =
+  Id.Capsule_revision_id.to_hex identity |> short_id
+
+let workspace_text identity = Id.Workspace_id.to_hex identity |> short_id
+
+let workspace_revision_text identity =
+  Id.Workspace_revision_id.to_hex identity |> short_id
+
+let conflict_text identity = Id.Conflict_id.to_hex identity |> short_id
+let resolution_text identity = Id.Resolution_id.to_hex identity |> short_id
+let release_text identity = Id.Release_id.to_hex identity |> short_id
+let quoted value = Printf.sprintf "%S" value
+
+let capsule_link_text link =
+  Printf.sprintf "capsule=%s revision=%s"
+    (capsule_text (Capsule_store.revision_link_capsule link))
+    (capsule_revision_text (Capsule_store.revision_link_revision link))
+
+let capsule_provenance_text = function
+  | Capsule_store.Created -> "created"
+  | Capsule_store.Folded -> "folded"
+  | Capsule_store.Retargeted_from link ->
+      "retargeted-from " ^ capsule_link_text link
+  | Capsule_store.Split_from link -> "split-from " ^ capsule_link_text link
+  | Capsule_store.Combined_from links ->
+      "combined-from " ^ String.concat "," (List.map capsule_link_text links)
+
+let scratch_history_section store =
+  let scratch = scratch_repository store in
+  let* entries =
+    Scratch.timeline scratch ~limit:max_int ()
+    |> Result.map_error (fun error -> Scratch_error error)
+  in
+  let lines =
+    match entries with
+    | [] -> [ "  (no retained checkpoints)" ]
+    | entries ->
+        entries
+        |> List.mapi (fun index entry ->
+            let checkpoint = entry.Scratch.checkpoint in
+            let node =
+              Printf.sprintf "  * checkpoint %s created-at=%Ld"
+                (checkpoint_text entry.Scratch.logical_id)
+                (Scratch.Checkpoint.created_at checkpoint)
+            in
+            if index = List.length entries - 1 then [ node ]
+            else [ node; "  | parent" ])
+        |> List.concat
+  in
+  Ok { heading = "scratch (retained checkpoints, newest first)"; lines }
+
+let capsule_history_lines store resolved =
+  let capsule = Capsule_store.Durable.resolved_capsule resolved in
+  let current = Capsule_store.Durable.resolved_revision resolved in
+  let* revisions =
+    Capsule_store.Durable.history store (Capsule_store.capsule_id capsule)
+    |> Result.map_error (fun error -> Capsule_error error)
+  in
+  let revision_lines =
+    revisions
+    |> List.concat_map (fun revision ->
+        let marker =
+          if
+            Id.Capsule_revision_id.equal
+              (Capsule_store.revision_id revision)
+              (Capsule_store.revision_id current)
+          then " current"
+          else ""
+        in
+        let node =
+          Printf.sprintf "  |-- revision %s%s created-at=%Ld provenance=%s"
+            (capsule_revision_text (Capsule_store.revision_id revision))
+            marker
+            (Capsule_store.revision_created_at revision)
+            (capsule_provenance_text
+               (Capsule_store.revision_provenance revision))
+        in
+        match Capsule_store.revision_parent revision with
+        | None -> [ node ]
+        | Some parent ->
+            [
+              node;
+              Printf.sprintf "  |   +-- parent -> revision %s"
+                (capsule_revision_text parent.Capsule_store.revision);
+            ])
+  in
+  Ok
+    (Printf.sprintf "  * capsule %s title=%s"
+       (capsule_text (Capsule_store.capsule_id capsule))
+       (quoted (Capsule_store.capsule_title capsule))
+    :: revision_lines)
+
+let capsule_history_section store =
+  let* capsules =
+    Capsule_store.Durable.list store
+    |> Result.map_error (fun error -> Capsule_error error)
+  in
+  let rec collect reversed = function
+    | [] -> Ok (List.rev reversed |> List.concat)
+    | resolved :: rest ->
+        let* lines = capsule_history_lines store resolved in
+        collect (lines :: reversed) rest
+  in
+  let* lines = collect [] capsules in
+  let lines = if lines = [] then [ "  (no capsules)" ] else lines in
+  Ok { heading = "capsules (immutable revisions)"; lines }
+
+let workspace_conflict_kind_text = function
+  | Workspace_store.Missing_or_ambiguous_precondition ->
+      "missing-or-ambiguous-precondition"
+  | Workspace_store.Competing_edits -> "competing-edits"
+  | Workspace_store.Delete_modify -> "delete-modify"
+  | Workspace_store.Move_modify -> "move-modify"
+  | Workspace_store.Binary_conflict -> "binary-conflict"
+  | Workspace_store.Dependency_failure -> "dependency-failure"
+  | Workspace_store.Unsupported_or_uncertain_operation ->
+      "unsupported-or-uncertain-operation"
+
+let workspace_revision_history store ~workspace ~revision ~object_id =
+  let rec collect seen reversed revision object_id =
+    let identity = Workspace_store.revision_id revision in
+    if
+      List.exists
+        (fun seen -> Id.Workspace_revision_id.equal seen identity)
+        seen
+    then
+      Error
+        (Invalid_history_link
+           ("workspace revision cycle at " ^ workspace_revision_text identity))
+    else if
+      not
+        (Id.Workspace_id.equal
+           (Workspace_store.revision_workspace revision)
+           workspace)
+    then
+      Error
+        (Invalid_history_link
+           ("workspace revision belongs to another workspace: "
+           ^ workspace_revision_text identity))
+    else
+      match Workspace_store.revision_parent revision with
+      | None -> Ok (List.rev ((revision, object_id) :: reversed))
+      | Some parent ->
+          let* parent_revision =
+            Workspace_store.load_revision store
+              parent.Workspace_store.parent_object_id
+            |> Result.map_error (fun error -> Workspace_error error)
+          in
+          if
+            not
+              (Id.Workspace_revision_id.equal
+                 (Workspace_store.revision_id parent_revision)
+                 parent.Workspace_store.parent_revision)
+          then
+            Error
+              (Invalid_history_link
+                 ("workspace parent object does not match revision "
+                 ^ workspace_revision_text
+                     parent.Workspace_store.parent_revision))
+          else
+            collect (identity :: seen)
+              ((revision, object_id) :: reversed)
+              parent_revision parent.Workspace_store.parent_object_id
+  in
+  collect [] [] revision object_id
+
+let workspace_revision_lines revision =
+  let node =
+    Printf.sprintf "  |-- revision %s created-at=%Ld"
+      (workspace_revision_text (Workspace_store.revision_id revision))
+      (Workspace_store.revision_created_at revision)
+  in
+  let parent_lines =
+    match Workspace_store.revision_parent revision with
+    | None -> []
+    | Some parent ->
+        [
+          Printf.sprintf "  |   +-- parent -> revision %s"
+            (workspace_revision_text parent.Workspace_store.parent_revision);
+        ]
+  in
+  let selection_lines =
+    Workspace_store.revision_selected revision
+    |> List.map (fun link -> "  |   +-- selects -> " ^ capsule_link_text link)
+  in
+  let order_lines =
+    Workspace_store.revision_precedence revision
+    |> List.map (fun edge ->
+        Printf.sprintf "  |   +-- order %s -> %s"
+          (capsule_revision_text edge.Workspace_store.before)
+          (capsule_revision_text edge.Workspace_store.after))
+  in
+  let resolution_lines =
+    Workspace_store.revision_resolutions revision
+    |> List.map (fun binding ->
+        Printf.sprintf "  |   +-- resolution %s -> conflict %s"
+          (resolution_text binding.Workspace_store.binding_resolution)
+          (conflict_text binding.Workspace_store.binding_conflict))
+  in
+  (node :: parent_lines) @ selection_lines @ order_lines @ resolution_lines
+
+let workspace_history_lines store resolved =
+  let workspace = Workspace_store.resolved_workspace resolved in
+  let workspace_id = Workspace_store.workspace_id workspace in
+  let* revisions =
+    workspace_revision_history store ~workspace:workspace_id
+      ~revision:(Workspace_store.resolved_revision resolved)
+      ~object_id:(Workspace_store.resolved_revision_object resolved)
+  in
+  let* conflicts =
+    Workspace_store.Durable.list_conflicts store workspace_id
+    |> Result.map_error (fun error -> Workspace_error error)
+  in
+  let conflict_lines =
+    conflicts
+    |> List.map (fun conflict ->
+        Printf.sprintf "  |-- conflict %s revision=%s capsule=%s kind=%s"
+          (conflict_text (Workspace_store.conflict_id conflict))
+          (workspace_revision_text
+             (Workspace_store.conflict_workspace_revision conflict))
+          (capsule_text (Workspace_store.conflict_capsule conflict))
+          (workspace_conflict_kind_text
+             (Workspace_store.conflict_kind conflict)))
+  in
+  let name =
+    match Workspace_store.workspace_name workspace with
+    | None -> "none"
+    | Some value -> quoted value
+  in
+  Ok
+    (Printf.sprintf "  * workspace %s name=%s"
+       (workspace_text workspace_id)
+       name
+     :: List.concat_map
+          (fun (revision, _) -> workspace_revision_lines revision)
+          revisions
+    @ conflict_lines)
+
+let workspace_history_section store scope =
+  let* workspaces =
+    match scope with
+    | Workspace_history workspace ->
+        Workspace_store.Durable.read_current store workspace
+        |> Result.map (fun resolved -> [ resolved ])
+        |> Result.map_error (fun error -> Workspace_error error)
+    | Combined_history ->
+        Workspace_store.Durable.list store
+        |> Result.map_error (fun error -> Workspace_error error)
+    | Scratch_history | Capsule_histories | Release_history -> Ok []
+  in
+  let rec collect reversed = function
+    | [] -> Ok (List.rev reversed |> List.concat)
+    | resolved :: rest ->
+        let* lines = workspace_history_lines store resolved in
+        collect (lines :: reversed) rest
+  in
+  let* lines = collect [] workspaces in
+  let lines = if lines = [] then [ "  (no workspaces)" ] else lines in
+  Ok { heading = "workspaces (selected capsule revisions)"; lines }
+
+let compare_release left right =
+  String.compare
+    (Id.Release_id.to_hex (Release.release_id left))
+    (Id.Release_id.to_hex (Release.release_id right))
+
+let release_history_section store =
+  let* releases =
+    Release.Durable.list store
+    |> Result.map_error (fun error -> Release_error error)
+  in
+  let lines =
+    releases |> List.sort compare_release
+    |> List.concat_map (fun release ->
+        let message =
+          match Release.release_message release with
+          | None -> "none"
+          | Some value -> quoted value
+        in
+        let parents =
+          Release.release_parents release
+          |> List.sort (fun left right ->
+              String.compare
+                (Id.Release_id.to_hex left)
+                (Id.Release_id.to_hex right))
+          |> List.map (fun parent ->
+              "  |-- parent -> release " ^ release_text parent)
+        in
+        let workspace =
+          [
+            Printf.sprintf "  |-- workspace -> %s revision=%s"
+              (workspace_text (Release.release_workspace release))
+              (workspace_revision_text
+                 (Release.release_workspace_revision release));
+          ]
+        in
+        let capsules =
+          Release.release_capsules release
+          |> List.sort (fun left right ->
+              String.compare (capsule_link_text left) (capsule_link_text right))
+          |> List.map (fun link -> "  |-- selects -> " ^ capsule_link_text link)
+        in
+        Printf.sprintf "  * release %s created-at=%Ld message=%s"
+          (release_text (Release.release_id release))
+          (Release.release_created_at release)
+          message
+        :: parents
+        @ workspace @ capsules)
+  in
+  let lines = if lines = [] then [ "  (no releases)" ] else lines in
+  Ok { heading = "releases (immutable reproducible snapshots)"; lines }
+
+let history_graph store ~scope =
+  match scope with
+  | Scratch_history ->
+      scratch_history_section store
+      |> Result.map (fun section -> { sections = [ section ] })
+  | Capsule_histories ->
+      capsule_history_section store
+      |> Result.map (fun section -> { sections = [ section ] })
+  | Workspace_history _ ->
+      workspace_history_section store scope
+      |> Result.map (fun section -> { sections = [ section ] })
+  | Release_history ->
+      release_history_section store
+      |> Result.map (fun section -> { sections = [ section ] })
+  | Combined_history ->
+      let* scratch = scratch_history_section store in
+      let* capsules = capsule_history_section store in
+      let* workspaces = workspace_history_section store scope in
+      let* releases = release_history_section store in
+      Ok { sections = [ scratch; capsules; workspaces; releases ] }
+
+let render_history_graph graph =
+  let header =
+    [
+      "history graph (retained native records; not a command event log)";
+      "legend: * record, | parent or contained record, +-- typed relationship";
+    ]
+  in
+  header
+  @ List.concat_map
+      (fun section -> "" :: section.heading :: section.lines)
+      graph.sections
 
 let verify_snapshot store object_id =
   let snapshot = Snapshot.Snapshot.of_stored_object_id object_id in

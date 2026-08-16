@@ -31,6 +31,7 @@ dune exec bin/yeokcham.exe -- init
 dune exec bin/yeokcham.exe -- status
 dune exec bin/yeokcham.exe -- checkpoint
 dune exec bin/yeokcham.exe -- timeline --limit 32
+dune exec bin/yeokcham.exe -- history --graph
 dune exec bin/yeokcham.exe -- --help
 ```
 

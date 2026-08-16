@@ -1844,9 +1844,11 @@
   yeokcham_capsule_store
   yeokcham_id
   yeokcham_inspection
+  yeokcham_release
   yeokcham_scratch
   yeokcham_snapshot
   yeokcham_store
+  yeokcham_workspace_store
   unix))
 
 (rule
