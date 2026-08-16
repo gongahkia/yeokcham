@@ -12,6 +12,7 @@
   yeokcham_local_command
   yeokcham_local_service
   yeokcham_peer
+  yeokcham_peer_sync
   yeokcham_release
   yeokcham_scratch
   yeokcham_snapshot
@@ -20,6 +21,9 @@
   yeokcham_validation_retention
   yeokcham_workspace
   yeokcham_workspace_store
+  mirage-crypto-ec
+  mirage-crypto-rng
+  mirage-crypto-rng.unix
   unix))
 
 (executable

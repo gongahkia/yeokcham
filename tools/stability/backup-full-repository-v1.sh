@@ -9,14 +9,14 @@ usage() {
 }
 
 physical_directory() {
-  cd -P -- "$1" && pwd
+  cd -P "$1" && pwd
 }
 
 sha256_file() {
   if command -v sha256sum >/dev/null 2>&1; then
-    sha256sum -- "$1"
+    sha256sum "$1"
   elif command -v shasum >/dev/null 2>&1; then
-    shasum -a 256 -- "$1"
+    shasum -a 256 "$1"
   else
     printf '%s\n' 'requires sha256sum or shasum' >&2
     return 127
@@ -80,10 +80,10 @@ esac
 }
 
 source_root=$(physical_directory "$source_root")
-source_parent=$(physical_directory "$(dirname -- "$source_root")")
-source_name=$(basename -- "$source_root")
-archive_parent=$(physical_directory "$(dirname -- "$archive")")
-archive_name=$(basename -- "$archive")
+source_parent=$(physical_directory "$(dirname "$source_root")")
+source_name=$(basename "$source_root")
+archive_parent=$(physical_directory "$(dirname "$archive")")
+archive_name=$(basename "$archive")
 
 case "$source_root" in
   /)
@@ -118,14 +118,17 @@ case "$archive" in
     ;;
 esac
 
-umask 077
-restore_parent=$(mktemp -d "\${TMPDIR:-/tmp}/yeokcham-backup-restore.XXXXXX")
+restore_parent=$(mktemp -d "${TMPDIR:-/tmp}/yeokcham-backup-restore.XXXXXX")
 cleanup() {
-  rm -rf -- "$restore_parent"
+  rm -rf "$restore_parent"
 }
 trap cleanup EXIT HUP INT TERM
 
+: > "$archive"
+chmod 600 "$archive"
 tar -cf "$archive" -C "$source_parent" "$source_name"
+: > "$archive.sha256"
+chmod 600 "$archive.sha256"
 sha256_file "$archive" > "$archive.sha256"
 
 # Detect a source mutation during archiving before declaring the copy usable.

@@ -1,10 +1,10 @@
 #!/bin/sh
 set -eu
 
-repository_root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
-fixture_parent=$(mktemp -d "\${TMPDIR:-/tmp}/yeokcham-backup-test.XXXXXX")
+repository_root=$(CDPATH= cd "$(dirname "$0")/../.." && pwd)
+fixture_parent=$(mktemp -d "${TMPDIR:-/tmp}/yeokcham-backup-test.XXXXXX")
 cleanup() {
-  rm -rf -- "$fixture_parent"
+  rm -rf "$fixture_parent"
 }
 trap cleanup EXIT HUP INT TERM
 

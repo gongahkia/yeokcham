@@ -15,6 +15,7 @@ module Inspection = Yeokcham_inspection
 module Local_service = Yeokcham_local_service
 module Local_command = Yeokcham_local_command
 module Peer = Yeokcham_peer
+module Peer_sync = Yeokcham_peer_sync
 module Progress = Yeokcham_cli_progress
 
 let ( let* ) = Result.bind
@@ -562,6 +563,11 @@ let mutation_progress_message command arguments =
   | "peer", "publish" :: _ -> Some "Publishing peer projection"
   | "peer", "fetch" :: _ -> Some "Fetching peer publication"
   | "peer", "integrate" :: _ -> Some "Integrating peer capsule"
+  | "peer", [ "identity"; "init"; "--key"; _ ] ->
+      Some "Creating pinned peer identity"
+  | "peer", "contact" :: "add" :: _ -> Some "Adding pinned peer contact"
+  | "peer", "sync" :: "local" :: _ -> Some "Synchronizing peer tracking"
+  | "peer", "reconcile" :: _ -> Some "Reconciling peer snapshots"
   | _ -> None
 
 let open_scratch root =
@@ -1840,6 +1846,168 @@ let peer_integration_id value =
   | Ok identity -> identity
   | Error error -> fail Yeokcham_id.parse_error_to_string error
 
+let peer_id value =
+  match Yeokcham_id.Peer_id.of_hex value with
+  | Ok identity -> identity
+  | Error error -> fail Yeokcham_id.parse_error_to_string error
+
+let peer_contact_id value =
+  match Yeokcham_id.Peer_contact_id.of_hex value with
+  | Ok identity -> identity
+  | Error error -> fail Yeokcham_id.parse_error_to_string error
+
+let peer_sync_node_id value =
+  match Yeokcham_id.Peer_sync_node_id.of_hex value with
+  | Ok identity -> identity
+  | Error error -> fail Yeokcham_id.parse_error_to_string error
+
+let hex_of_bytes bytes =
+  let hex = "0123456789abcdef" in
+  let output = Bytes.create (2 * String.length bytes) in
+  String.iteri
+    (fun index byte ->
+      Bytes.set output (2 * index) hex.[Char.code byte lsr 4];
+      Bytes.set output ((2 * index) + 1) hex.[Char.code byte land 15])
+    bytes;
+  Bytes.unsafe_to_string output
+
+let bytes_of_hex value =
+  let hex_value = function
+    | '0' .. '9' as character -> Some (Char.code character - Char.code '0')
+    | 'a' .. 'f' as character -> Some (10 + Char.code character - Char.code 'a')
+    | 'A' .. 'F' as character -> Some (10 + Char.code character - Char.code 'A')
+    | _ -> None
+  in
+  if String.length value mod 2 <> 0 then None
+  else
+    let output = Bytes.create (String.length value / 2) in
+    let rec decode index =
+      if index = String.length value then Some (Bytes.unsafe_to_string output)
+      else
+        match (hex_value value.[index], hex_value value.[index + 1]) with
+        | Some high, Some low ->
+            Bytes.set output (index / 2) (Char.chr ((high lsl 4) lor low));
+            decode (index + 2)
+        | None, _ | _, None -> None
+    in
+    decode 0
+
+let peer_public_key value =
+  match bytes_of_hex value with
+  | Some public_key -> public_key
+  | None -> fail Fun.id "peer public key must be even-length hexadecimal"
+
+let peer_private_key path =
+  let invalid detail = Error ("invalid peer private key file: " ^ detail) in
+  if Filename.is_relative path then invalid "path must be absolute"
+  else
+    try
+      let before = Unix.lstat path in
+      if before.Unix.st_kind <> Unix.S_REG then invalid "not a regular file"
+      else if before.Unix.st_uid <> Unix.getuid () then
+        invalid "not owned by the current user"
+      else if before.Unix.st_perm land 0o077 <> 0 then
+        invalid "accessible by group or other users"
+      else if before.Unix.st_size <> 32 then
+        invalid "must contain exactly 32 bytes"
+      else
+        let descriptor =
+          Unix.openfile path [ Unix.O_RDONLY; Unix.O_CLOEXEC ] 0
+        in
+        Fun.protect
+          ~finally:(fun () -> Unix.close descriptor)
+          (fun () ->
+            let after = Unix.fstat descriptor in
+            if
+              after.Unix.st_kind <> Unix.S_REG
+              || before.Unix.st_dev <> after.Unix.st_dev
+              || before.Unix.st_ino <> after.Unix.st_ino
+            then invalid "changed while opening"
+            else
+              let bytes = Bytes.create 32 in
+              let rec read offset =
+                if offset = Bytes.length bytes then Ok ()
+                else
+                  match
+                    Unix.read descriptor bytes offset
+                      (Bytes.length bytes - offset)
+                  with
+                  | 0 -> invalid "ended before 32 bytes"
+                  | read_bytes -> read (offset + read_bytes)
+              in
+              let* () = read 0 in
+              Mirage_crypto_ec.Ed25519.priv_of_octets
+                (Bytes.unsafe_to_string bytes)
+              |> Result.map_error (fun _ -> "invalid peer private key bytes"))
+    with Unix.Unix_error (error, operation, path) ->
+      invalid
+        (Printf.sprintf "%s %s: %s" operation path (Unix.error_message error))
+
+let write_peer_private_key path private_key =
+  if Filename.is_relative path then
+    Error "peer private key path must be absolute"
+  else
+    let bytes = Mirage_crypto_ec.Ed25519.priv_to_octets private_key in
+    let created = ref false in
+    let cleanup () =
+      if !created then try Unix.unlink path with Unix.Unix_error _ -> ()
+    in
+    try
+      let descriptor =
+        Unix.openfile path
+          [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_EXCL; Unix.O_CLOEXEC ]
+          0o600
+      in
+      created := true;
+      Fun.protect
+        ~finally:(fun () -> Unix.close descriptor)
+        (fun () ->
+          Unix.fchmod descriptor 0o600;
+          let rec write offset =
+            if offset = String.length bytes then Ok ()
+            else
+              let written =
+                Unix.write_substring descriptor bytes offset
+                  (String.length bytes - offset)
+              in
+              if written = 0 then Error "could not write peer private key"
+              else write (offset + written)
+          in
+          write 0)
+      |> Result.map_error (fun error ->
+          cleanup ();
+          error)
+    with Unix.Unix_error (error, operation, failed_path) ->
+      cleanup ();
+      Error
+        (Printf.sprintf "could not create peer private key (%s %s: %s)"
+           operation failed_path (Unix.error_message error))
+
+let peer_sync_nonce () =
+  try
+    Mirage_crypto_rng_unix.use_default ();
+    Ok (Mirage_crypto_rng.generate Peer_sync.nonce_bytes)
+  with _ -> Error "could not obtain peer-sync nonce from the OS CSPRNG"
+
+let print_peer_identity identity =
+  Printf.printf "peer=%s\npublic-key=%s\n"
+    (Yeokcham_id.Peer_id.to_hex (Peer_sync.peer_id identity))
+    (hex_of_bytes (Peer_sync.public_key identity))
+
+let print_peer_endpoint = function
+  | Peer_sync.Local_path path -> Printf.printf "endpoint=local:%s\n" path
+  | Peer_sync.Ssh { target; root } ->
+      Printf.printf "endpoint=ssh:%s:%s\n" target root
+  | Peer_sync.Relay path -> Printf.printf "endpoint=relay:%s\n" path
+
+let print_peer_contact contact =
+  Printf.printf "contact=%s\nname=%s\npeer=%s\n"
+    (Yeokcham_id.Peer_contact_id.to_hex (Peer_sync.contact_id contact))
+    (Peer_sync.contact_name contact)
+    (Yeokcham_id.Peer_id.to_hex
+       (Peer_sync.peer_id (Peer_sync.contact_identity contact)));
+  List.iter print_peer_endpoint (Peer_sync.contact_endpoints contact)
+
 let git_adoption_id value =
   match Yeokcham_id.Git_adoption_id.of_hex value with
   | Ok identity -> identity
@@ -2558,8 +2726,246 @@ let print_peer_integration integration =
     (Peer.integration_target integration
     |> Scratch.Checkpoint_id.stored_object_id |> Store.Stored_object_id.to_hex)
 
+let parse_peer_sync_local_options arguments =
+  let rec loop destination contact destination_identity source_key head tracking
+      = function
+    | [] -> (
+        match
+          ( destination,
+            contact,
+            destination_identity,
+            source_key,
+            head,
+            tracking )
+        with
+        | ( Some destination,
+            Some contact,
+            Some destination_identity,
+            Some source_key,
+            Some head,
+            Some tracking ) ->
+            Ok
+              ( destination,
+                peer_contact_id contact,
+                peer_id destination_identity,
+                source_key,
+                peer_sync_node_id head,
+                tracking )
+        | _ ->
+            Error
+              "peer sync local requires --to, --contact, \
+               --destination-identity, --source-key, --head, and --tracking")
+    | "--to" :: value :: rest when Option.is_none destination ->
+        loop (Some value) contact destination_identity source_key head tracking
+          rest
+    | "--contact" :: value :: rest when Option.is_none contact ->
+        loop destination (Some value) destination_identity source_key head
+          tracking rest
+    | "--destination-identity" :: value :: rest
+      when Option.is_none destination_identity ->
+        loop destination contact (Some value) source_key head tracking rest
+    | "--source-key" :: value :: rest when Option.is_none source_key ->
+        loop destination contact destination_identity (Some value) head tracking
+          rest
+    | "--head" :: value :: rest when Option.is_none head ->
+        loop destination contact destination_identity source_key (Some value)
+          tracking rest
+    | "--tracking" :: value :: rest when Option.is_none tracking ->
+        loop destination contact destination_identity source_key head
+          (Some value) rest
+    | _ -> Error "invalid or duplicated peer sync local option"
+  in
+  loop None None None None None None arguments
+
+let print_peer_sync_outcome outcome decision =
+  Printf.printf "offered=%d\nrequested=%d\ntransferred=%d\n"
+    outcome.Yeokcham_exchange_store.offered
+    outcome.Yeokcham_exchange_store.requested
+    (List.length outcome.Yeokcham_exchange_store.transferred);
+  match decision with
+  | Peer_sync.Tracking_advanced node ->
+      Printf.printf "tracking=advanced\nhead=%s\n"
+        (Yeokcham_id.Peer_sync_node_id.to_hex (Peer_sync.sync_node_id node))
+  | Peer_sync.Tracking_already_current node ->
+      Printf.printf "tracking=already-current\nhead=%s\n"
+        (Yeokcham_id.Peer_sync_node_id.to_hex (Peer_sync.sync_node_id node))
+  | Peer_sync.Tracking_diverged { current; received } ->
+      Printf.printf "tracking=diverged\ncurrent=%s\nreceived=%s\n"
+        (Yeokcham_id.Peer_sync_node_id.to_hex current)
+        (Yeokcham_id.Peer_sync_node_id.to_hex (Peer_sync.sync_node_id received))
+
 let peer root arguments =
   match arguments with
+  | [ "identity"; "init"; "--key"; key ] -> (
+      let identity, private_key =
+        Peer_sync.generate () |> function
+        | Ok value -> value
+        | Error error -> fail Peer_sync.error_to_string error
+      in
+      match write_peer_private_key key private_key with
+      | Error error -> fail Fun.id error
+      | Ok () -> (
+          match Store.open_repository ~root with
+          | Error error ->
+              (try Unix.unlink key with Unix.Unix_error _ -> ());
+              fail Store.error_to_string error
+          | Ok store -> (
+              match Peer_sync.store_identity store identity with
+              | Error error ->
+                  (try Unix.unlink key with Unix.Unix_error _ -> ());
+                  fail Peer_sync.error_to_string error
+              | Ok _ ->
+                  print_peer_identity identity;
+                  Printf.printf "key=%s\n" key)))
+  | [ "identity"; "show"; identity ] -> (
+      match Store.open_repository ~root with
+      | Error error -> fail Store.error_to_string error
+      | Ok store -> (
+          Peer_sync.load_identity store (peer_id identity)
+          |> Result.map_error Peer_sync.error_to_string
+          |> function
+          | Error error -> fail Fun.id error
+          | Ok identity -> print_peer_identity identity))
+  | [
+   "contact"; "add"; name; "--peer-public-key"; public_key; "--direct"; endpoint;
+  ] -> (
+      match Store.open_repository ~root with
+      | Error error -> fail Store.error_to_string error
+      | Ok store -> (
+          let identity =
+            Peer_sync.make_identity ~public_key:(peer_public_key public_key)
+            |> Result.map_error Peer_sync.error_to_string
+          in
+          match identity with
+          | Error error -> fail Fun.id error
+          | Ok identity -> (
+              Peer_sync.make_contact ~name ~identity
+                ~endpoints:[ Peer_sync.Local_path endpoint ]
+              |> Result.map_error Peer_sync.error_to_string
+              |> function
+              | Error error -> fail Fun.id error
+              | Ok contact -> (
+                  match Peer_sync.store_contact store contact with
+                  | Error error -> fail Peer_sync.error_to_string error
+                  | Ok _ -> print_peer_contact contact))))
+  | [
+   "contact";
+   "add";
+   name;
+   "--peer-public-key";
+   public_key;
+   "--ssh";
+   target;
+   "--remote-root";
+   remote_root;
+  ] -> (
+      match Store.open_repository ~root with
+      | Error error -> fail Store.error_to_string error
+      | Ok store -> (
+          let identity =
+            Peer_sync.make_identity ~public_key:(peer_public_key public_key)
+            |> Result.map_error Peer_sync.error_to_string
+          in
+          match identity with
+          | Error error -> fail Fun.id error
+          | Ok identity -> (
+              Peer_sync.make_contact ~name ~identity
+                ~endpoints:[ Peer_sync.Ssh { target; root = remote_root } ]
+              |> Result.map_error Peer_sync.error_to_string
+              |> function
+              | Error error -> fail Fun.id error
+              | Ok contact -> (
+                  match Peer_sync.store_contact store contact with
+                  | Error error -> fail Peer_sync.error_to_string error
+                  | Ok _ -> print_peer_contact contact))))
+  | [ "contact"; "show"; contact ] -> (
+      match Store.open_repository ~root with
+      | Error error -> fail Store.error_to_string error
+      | Ok store -> (
+          Peer_sync.load_contact store (peer_contact_id contact)
+          |> Result.map_error Peer_sync.error_to_string
+          |> function
+          | Error error -> fail Fun.id error
+          | Ok contact -> print_peer_contact contact))
+  | "sync" :: "local" :: options -> (
+      match parse_peer_sync_local_options options with
+      | Error error -> fail Fun.id error
+      | Ok
+          ( destination_root,
+            contact_id,
+            destination_identity_id,
+            source_key,
+            head,
+            tracking_name ) -> (
+          match
+            ( Store.open_repository ~root,
+              Store.open_repository ~root:destination_root,
+              peer_private_key source_key )
+          with
+          | Error error, _, _ | _, Error error, _ ->
+              fail Store.error_to_string error
+          | _, _, Error error -> fail Fun.id error
+          | Ok source, Ok destination, Ok source_private_key -> (
+              match
+                ( Peer_sync.load_contact destination contact_id,
+                  Peer_sync.load_identity destination destination_identity_id,
+                  peer_sync_nonce () )
+              with
+              | Error error, _, _ | _, Error error, _ ->
+                  fail Peer_sync.error_to_string error
+              | _, _, Error error -> fail Fun.id error
+              | Ok contact, Ok destination_identity, Ok nonce -> (
+                  Peer_sync.sync_local ~source ~destination ~contact
+                    ~destination_identity ~source_private_key ~nonce
+                    ~transcript:("peer-sync:" ^ tracking_name)
+                    ~tracking_name ~head ()
+                  |> Result.map_error Peer_sync.error_to_string
+                  |> function
+                  | Error error -> fail Fun.id error
+                  | Ok (outcome, decision) ->
+                      print_peer_sync_outcome outcome decision))))
+  | [
+   "reconcile";
+   "--identity";
+   identity;
+   "--key";
+   key;
+   "--local";
+   local;
+   "--remote";
+   remote;
+  ] -> (
+      match (Store.open_repository ~root, peer_private_key key) with
+      | Error error, _ -> fail Store.error_to_string error
+      | _, Error error -> fail Fun.id error
+      | Ok store, Ok private_key -> (
+          Peer_sync.load_identity store (peer_id identity)
+          |> Result.map_error Peer_sync.error_to_string
+          |> function
+          | Error error -> fail Fun.id error
+          | Ok identity -> (
+              Peer_sync.reconcile store ~author:identity ~private_key
+                ~local:(peer_sync_node_id local)
+                ~remote:(peer_sync_node_id remote)
+              |> Result.map_error Peer_sync.error_to_string
+              |> function
+              | Error error -> fail Fun.id error
+              | Ok (Peer_sync.Fast_forward node) ->
+                  Printf.printf "reconciliation=fast-forward\nhead=%s\n"
+                    (Yeokcham_id.Peer_sync_node_id.to_hex
+                       (Peer_sync.sync_node_id node))
+              | Ok (Peer_sync.Already_current node) ->
+                  Printf.printf "reconciliation=already-current\nhead=%s\n"
+                    (Yeokcham_id.Peer_sync_node_id.to_hex
+                       (Peer_sync.sync_node_id node))
+              | Ok (Peer_sync.Merged node) ->
+                  Printf.printf "reconciliation=merged\nhead=%s\n"
+                    (Yeokcham_id.Peer_sync_node_id.to_hex
+                       (Peer_sync.sync_node_id node))
+              | Ok (Peer_sync.Conflict conflict) ->
+                  Printf.printf "reconciliation=conflict\nconflict=%s\n"
+                    (Yeokcham_id.Peer_sync_conflict_id.to_hex
+                       (Peer_sync.conflict_id conflict)))))
   | [ "publish"; "capsule"; "--capsule"; capsule; "--revision"; revision ]
   | [ "publish"; "capsule"; "--revision"; revision; "--capsule"; capsule ] -> (
       match Store.open_repository ~root with

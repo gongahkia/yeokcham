@@ -249,8 +249,7 @@ capsule/release, or materialise files.
 command with a constrained target and absolute remote root; the remote host
 must make the same `yeokcham` executable available. `peer serve` is the
 corresponding one-shot framed endpoint and writes protocol bytes to standard
-output, so it is not a normal interactive command. No peer discovery, account,
-daemon, relay, ref synchronisation, or peer authentication is provided.
+output, so it is not a normal interactive command.
 
 Only a capsule projection can be integrated. The user supplies a new local
 capsule ID, title, and description; Yeokcham makes fresh detached local
@@ -259,6 +258,50 @@ checkpoints, creates a normal durable capsule, and records a
 provenance because it cannot establish the local workspace and validation
 composition needed for a native release. The complete contract is in
 [peer exchange](PEER_EXCHANGE.md).
+
+## Authenticated peer sync (experimental)
+
+```sh
+dune exec bin/yeokcham.exe -- peer identity init --key /absolute/path/to/peer.key
+dune exec bin/yeokcham.exe -- peer contact add alice \\
+  --peer-public-key <64-hex-character-ed25519-public-key> \\
+  --direct /absolute/path/to/alice-repository
+dune exec bin/yeokcham.exe -- peer contact add alice \\
+  --peer-public-key <64-hex-character-ed25519-public-key> \\
+  --ssh alice@example.test --remote-root /absolute/path/to/alice-repository
+dune exec bin/yeokcham.exe -- peer contact show <contact-id>
+```
+
+`peer identity init` creates one Ed25519 private-key file at the requested
+absolute path with mode `0600`; only its public identity is written to the
+repository. It refuses a key file that already exists. `peer contact add` pins
+the supplied public key and endpoint. It never trusts a key discovered from a
+network location.
+
+The first executable vertical slice supports an explicitly local, source-run
+transfer:
+
+```sh
+dune exec bin/yeokcham.exe -- peer sync local \\
+  --to /absolute/path/to/destination \\
+  --contact <destination-contact-id> \\
+  --destination-identity <destination-peer-id> \\
+  --source-key /absolute/path/to/source.key \\
+  --head <source-sync-node-id> \\
+  --tracking main
+```
+
+It authenticates the source against the destination's pinned contact,
+transfers and verifies the immutable sync-node closure, and changes only the
+destination contact's tracking reference. A failed transfer leaves that
+tracking reference unchanged. `peer reconcile` accepts two verified sync-node
+IDs plus the local identity/key and reports either a causal fast-forward, a
+new exact snapshot merge node, or a durable conflict.
+
+The `--ssh` contact form only stores a validated endpoint in this slice; it
+does not yet perform SSH peer synchronization. Relay discovery, relay
+delivery, background daemon polling, and SSH peer synchronization remain
+unimplemented acceptance criteria of [#238](https://github.com/gongahkia/yeokcham/issues/238).
 
 ## Further reading
 

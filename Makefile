@@ -5,7 +5,7 @@ OCAML_VERSION := 5.5.0
 OCAMLFORMAT_VERSION := 0.29.0
 LOCAL_SWITCH := $(CURDIR)
 
-.PHONY: setup deps build test property-test secret-service-integration keychain-integration rust-adapter-build rust-adapter-test secure-runtime-build secure-runtime-test typescript-adapter-deps typescript-adapter-test browser-vault-deps browser-vault-test benchmark-encoding benchmark-large-content compaction-retention-benchmark compaction-retention-benchmark-verify semantic-experiment semantic-experiment-verify rust-retargeting-comparison rust-retargeting-comparison-verify marshal-audit stability-backup-test lint check format workflow-lint ci
+.PHONY: setup deps build test property-test secret-service-integration keychain-integration rust-adapter-build rust-adapter-test secure-runtime-build secure-runtime-test typescript-adapter-deps typescript-adapter-test browser-vault-deps browser-vault-test benchmark-encoding benchmark-large-content compaction-retention-benchmark compaction-retention-benchmark-verify semantic-experiment semantic-experiment-verify rust-retargeting-comparison rust-retargeting-comparison-verify marshal-audit stability-backup-test stability-peer-cli-test release-gate lint check format workflow-lint ci
 
 setup:
 	$(OPAM) init --bare --no-setup --yes
@@ -47,11 +47,20 @@ browser-vault-deps:
 browser-vault-test:
 	cd tools/yeokcham-browser-vault && npm test
 
-test: rust-adapter-build rust-adapter-test secure-runtime-build secure-runtime-test typescript-adapter-test browser-vault-test stability-backup-test
+test: rust-adapter-build rust-adapter-test secure-runtime-build secure-runtime-test typescript-adapter-test browser-vault-test stability-backup-test stability-peer-cli-test
 	YEOKCHAM_RUST_ADAPTER=$(CURDIR)/tools/yeokcham-rust-adapter/target/release/yeokcham-rust-adapter YEOKCHAM_MLS_RUNTIME=$(CURDIR)/tools/yeokcham-secure-runtime/target/release/yeokcham-secure-runtime $(DUNE) runtest
 
 stability-backup-test:
 	sh tools/stability/test-backup-full-repository-v1.sh
+
+stability-peer-cli-test:
+	sh tools/stability/test-peer-sync-cli-v1.sh
+
+release-gate:
+	test -n "$(RELEASE_VERSION)"
+	test -n "$(RELEASE_EVIDENCE_DIR)"
+	test -n "$(RELEASE_ARCHIVE)"
+	sh tools/stability/release-gate-v1.sh --version "$(RELEASE_VERSION)" --evidence-dir "$(RELEASE_EVIDENCE_DIR)" --archive "$(RELEASE_ARCHIVE)"
 
 PROPERTY_TEST_SEED ?= 20260729
 

@@ -9,13 +9,13 @@ field trials, release signing, and opam publication have not yet happened.
 
 ## Compatibility promise
 
-The first \`v1.0.0\` tag starts the 1.x compatibility line. A later 1.x release
+The first `v1.0.0` tag starts the 1.x compatibility line. A later 1.x release
 must read and verify every repository written by an earlier 1.x release. It
 must retain the meaning of existing scratch checkpoints, capsule revisions,
 workspace revisions, validation evidence, releases, preserved Git records,
 peer records, and their references.
 
-The canonical format covered by that promise is the \`.yeokcham\` root format,
+The canonical format covered by that promise is the `.yeokcham` root format,
 envelope format, canonical payload encodings, immutable object IDs, mutable
 reference encodings, and the versioned V2 local-root records. It does not
 include private signing keys, daemon sockets or state, relay delivery markers,
@@ -31,15 +31,15 @@ For 1.x:
 - Every new persistent record needs a version, canonical encoder/decoder,
   old-format fixture, inverse-decoding test, and documented migration effect.
 - An incompatible schema, object type, object meaning, reference meaning, or
-  command-semantic change requires \`2.0.0\` and an explicit migration tool.
+  command-semantic change requires `2.0.0` and an explicit migration tool.
 - Private material and noncanonical runtime state never become part of this
   compatibility surface.
 
-The frozen baseline is \`yeokcham-repository-root 2\`, root layout version 3,
-the SHA-256 \`envelope-1-domain-v1\` object preimage, envelope version 1,
+The frozen baseline is `yeokcham-repository-root 2`, root layout version 3,
+the SHA-256 `envelope-1-domain-v1` object preimage, envelope version 1,
 object-format version 1, and the envelope type registry in
-\`lib/yeokcham_envelope\`. The format fixture and persistent-format audit in
-\`make check\` are the executable checks for this baseline.
+`lib/yeokcham_envelope`. The format fixture and persistent-format audit in
+`make check` are the executable checks for this baseline.
 
 ## Supported release surface
 
@@ -52,7 +52,7 @@ The release manager validates the source package on:
 - macOS; and
 - WSL running a supported Linux distribution.
 
-Each field trial runs \`make check\`, creates a fresh repository, restores a
+Each field trial runs `make check`, creates a fresh repository, restores a
 full archive, and exercises the documented direct known-contact SSH workflow.
 The evidence records the OS/version, architecture, OCaml/opam/Dune versions,
 Yeokcham revision, exact commands, and result. A green Linux CI job is useful
@@ -76,13 +76,13 @@ failure/restart fixtures, are complete.
 ## Backup and recovery
 
 Before upgrade, sharing, or release testing, create an archive containing the
-whole working root, including \`.yeokcham\`:
+whole working root, including `.yeokcham`:
 
-\`\`\`sh
+```sh
 sh tools/stability/backup-full-repository-v1.sh \
   --source /absolute/path/to/repository \
   --archive /absolute/path/to/repository-2026-08-16.tar
-\`\`\`
+```
 
 The tool refuses to overwrite an archive, writes a SHA-256 sidecar, compares
 the source to the archive, extracts it into a temporary directory, and compares
@@ -92,13 +92,13 @@ on it for disaster recovery.
 
 To restore, create a new empty directory and extract the archive into it:
 
-\`\`\`sh
+```sh
 mkdir /absolute/path/to/restore-parent
 tar -xf /absolute/path/to/repository-2026-08-16.tar \
   -C /absolute/path/to/restore-parent
-\`\`\`
+```
 
-Then run \`yeokcham verify --root\` against the extracted repository before
+Then run `yeokcham verify --root` against the extracted repository before
 using it. The archive is a recovery copy, not a replacement for independent
 backup retention.
 
@@ -107,9 +107,9 @@ backup retention.
 Only a maintainer may perform the following external actions:
 
 1. Record passing Linux, macOS, and WSL field-trial evidence.
-2. Run \`make check\` from the exact release commit and retain its log.
+2. Run `make check` from the exact release commit and retain its log.
 3. Build the source archive from that commit and publish its SHA-256 checksum.
-4. Create an annotated GPG-signed \`vMAJOR.MINOR.PATCH\` tag and publish the
+4. Create an annotated GPG-signed `vMAJOR.MINOR.PATCH` tag and publish the
    maintainer fingerprint and verification command.
 5. Publish the same source release to opam only after the tag and checksum are
    available.
@@ -117,19 +117,35 @@ Only a maintainer may perform the following external actions:
 
 Consumers verify a release with:
 
-\`\`\`sh
+```sh
 git verify-tag vMAJOR.MINOR.PATCH
 git tag --verify vMAJOR.MINOR.PATCH
 sha256sum -c yeokcham-MAJOR.MINOR.PATCH.tar.gz.sha256
-\`\`\`
+```
 
-On systems without \`sha256sum\`, use \`shasum -a 256\` to calculate the archive
+On systems without `sha256sum`, use `shasum -a 256` to calculate the archive
 hash and compare it with the published value. Fingerprint verification must
 use the fingerprint published with the release, not an unverified key lookup.
 
+The maintainer runs the local release gate only after recording the three
+field-trial files described by
+[`field-trial-v1.schema.json`](stability/field-trial-v1.schema.json):
+
+```sh
+make release-gate \
+  RELEASE_VERSION=MAJOR.MINOR.PATCH \
+  RELEASE_EVIDENCE_DIR=/absolute/path/to/evidence \
+  RELEASE_ARCHIVE=/absolute/path/to/yeokcham-MAJOR.MINOR.PATCH.tar.gz
+```
+
+It refuses an unsigned/lightweight/wrong-commit tag, a dirty tree, absent or
+invalid platform evidence, or an existing archive. It then reruns `make check`
+and creates the source archive plus its SHA-256 sidecar. It does not publish a
+GitHub release or send anything to opam.
+
 ## GitHub Pages guide
 
-The minimal Pages guide belongs on the dedicated \`docs\` branch only after the
+The minimal Pages guide belongs on the dedicated `docs` branch only after the
 release gate passes. Until then, publishing it as a stable learning path would
 overstate the product status. Its source should remain static HTML/CSS/JS and
 must state the version it documents.
