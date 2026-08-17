@@ -1,5 +1,6 @@
 (executable
  (name yeokcham)
+ (public_name yeokcham)
  (modules yeokcham)
  (libraries
   yeokcham_capsule

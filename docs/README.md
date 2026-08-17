@@ -38,6 +38,8 @@ short project entry point; this page maps readers to the detailed material.
   evidence without treating CI as a platform trial.
 - [Release signing v1](RELEASE_SIGNING_V1.md) defines the external-key and
   signed-tag verification boundary without claiming a released key.
+- [opam source release v1](OPAM_RELEASE_V1.md) records the source-package
+  preflight and upstream-review boundary without claiming publication.
 - [Local synchronisation](LOCAL_SYNCHRONISATION.md) documents the local object
   exchange substrate and its historical V3 predecessor.
 - [ADR-073](adr/073-unix-first-vcs-git-migration-and-peer-exchange.md) records

@@ -5,7 +5,7 @@ OCAML_VERSION := 5.5.0
 OCAMLFORMAT_VERSION := 0.29.0
 LOCAL_SWITCH := $(CURDIR)
 
-.PHONY: setup deps build test property-test secret-service-integration keychain-integration rust-adapter-build rust-adapter-test secure-runtime-build secure-runtime-test typescript-adapter-deps typescript-adapter-test browser-vault-deps browser-vault-test benchmark-encoding benchmark-large-content compaction-retention-benchmark compaction-retention-benchmark-verify semantic-experiment semantic-experiment-verify rust-retargeting-comparison rust-retargeting-comparison-verify marshal-audit stability-backup-test stability-peer-cli-test stability-field-trial-test stability-release-gate-test release-gate lint check format workflow-lint ci
+.PHONY: setup deps build test property-test secret-service-integration keychain-integration rust-adapter-build rust-adapter-test secure-runtime-build secure-runtime-test typescript-adapter-deps typescript-adapter-test browser-vault-deps browser-vault-test benchmark-encoding benchmark-large-content compaction-retention-benchmark compaction-retention-benchmark-verify semantic-experiment semantic-experiment-verify rust-retargeting-comparison rust-retargeting-comparison-verify marshal-audit stability-backup-test stability-peer-cli-test stability-field-trial-test stability-opam-package-test stability-release-gate-test release-gate lint check format workflow-lint ci
 
 setup:
 	$(OPAM) init --bare --no-setup --yes
@@ -47,7 +47,7 @@ browser-vault-deps:
 browser-vault-test:
 	cd tools/yeokcham-browser-vault && npm test
 
-test: rust-adapter-build rust-adapter-test secure-runtime-build secure-runtime-test typescript-adapter-test browser-vault-test stability-backup-test stability-peer-cli-test stability-field-trial-test stability-release-gate-test
+test: rust-adapter-build rust-adapter-test secure-runtime-build secure-runtime-test typescript-adapter-test browser-vault-test stability-backup-test stability-peer-cli-test stability-field-trial-test stability-opam-package-test stability-release-gate-test
 	YEOKCHAM_RUST_ADAPTER=$(CURDIR)/tools/yeokcham-rust-adapter/target/release/yeokcham-rust-adapter YEOKCHAM_MLS_RUNTIME=$(CURDIR)/tools/yeokcham-secure-runtime/target/release/yeokcham-secure-runtime $(DUNE) runtest
 
 stability-backup-test:
@@ -58,6 +58,9 @@ stability-peer-cli-test:
 
 stability-field-trial-test:
 	sh tools/stability/test-field-trial-v1.sh
+
+stability-opam-package-test:
+	sh tools/stability/test-opam-package-v1.sh
 
 stability-release-gate-test:
 	sh tools/stability/test-release-gate-v1.sh
