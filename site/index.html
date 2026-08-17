@@ -21,40 +21,24 @@
           <p>built from the repository's implemented CLI and formal model</p>
           <p><a href="https://github.com/gongahkia/yeokcham">read the source</a> · <a href="https://github.com/gongahkia/yeokcham/issues">report a guide issue</a></p>
         </div>
-        <a class="down-arrow" href="#setup" aria-label="Start the guide"><span aria-hidden="true">↓</span></a>
+        <a class="down-arrow" href="#start" aria-label="Start the guide"><span aria-hidden="true">↓</span></a>
       </header>
 
-      <section class="guide-panel panel-sky" id="setup" aria-labelledby="setup-title">
+      <section class="guide-panel panel-sky" id="start" aria-labelledby="start-title">
         <div class="panel-content panel-content--short">
           <p class="panel-number">01</p>
-          <h2 id="setup-title">setup</h2>
-          <p>Work from a Yeokcham checkout. The examples use the checked-out executable so they remain accurate before installation.</p>
-          <div class="command-stack">
-            <div class="command-card"><pre><code>make setup
-make check
-dune exec bin/yeokcham.exe -- --help</code></pre><button class="copy-button" type="button" data-copy aria-label="Copy setup commands">Copy</button></div>
-          </div>
-          <p class="panel-note">The guide intentionally does not claim that a signed public release exists.</p>
-        </div>
-      </section>
-
-      <section class="guide-panel panel-deep" id="start" aria-labelledby="start-title">
-        <div class="panel-content panel-content--short">
-          <p class="panel-number">02</p>
           <h2 id="start-title">start a local repository</h2>
-          <p>Point Yeokcham at the ordinary directory you want to manage. Start with the directory, not a release or a shared history.</p>
+          <p>Open the directory you want Yeokcham to manage, then initialize it. The normal command form is deliberately as direct as Git's.</p>
           <div class="command-stack">
-            <div class="command-card"><pre><code>dune exec bin/yeokcham.exe -- init \
-  --root /path/to/project
-dune exec bin/yeokcham.exe -- status \
-  --root /path/to/project</code></pre><button class="copy-button" type="button" data-copy aria-label="Copy initialization commands">Copy</button></div>
+            <div class="command-card"><pre><code>yeokcham init
+yeokcham status</code></pre><button class="copy-button" type="button" data-copy aria-label="Copy initialization commands">Copy</button></div>
           </div>
         </div>
       </section>
 
       <section class="guide-panel panel-paper" aria-labelledby="workflow-title">
         <div class="panel-content">
-          <p class="panel-number">03</p>
+          <p class="panel-number">02</p>
           <h2 id="workflow-title">the workflow</h2>
           <p>Yeokcham does not have one universal commit. It keeps recovery, chosen intent, and released output as distinct values.</p>
           <div class="workflow-diagram" role="img" aria-label="A working directory flows through scratch checkpoint, intent capsule and revision, workspace, validation, and release.">
@@ -74,7 +58,7 @@ dune exec bin/yeokcham.exe -- status \
 
       <section class="guide-panel panel-mint" id="recovery" aria-labelledby="recovery-title">
         <div class="panel-content">
-          <p class="panel-number">04</p>
+          <p class="panel-number">03</p>
           <h2 id="recovery-title">checkpoint &amp; restore</h2>
           <p>A checkpoint is a local safety record. Inspect it before changing the working directory, and start a restore with a dry run.</p>
           <div class="command-stack">
@@ -92,7 +76,7 @@ yeokcham restore &lt;checkpoint-id&gt;</code></pre><button class="copy-button" t
 
       <section class="guide-panel panel-coral" id="intent" aria-labelledby="intent-title">
         <div class="panel-content">
-          <p class="panel-number">05</p>
+          <p class="panel-number">04</p>
           <h2 id="intent-title">make intent explicit</h2>
           <p>A capsule names a logical unit of work. Its caller-supplied ID is stable; each revision is immutable. Yeokcham never infers a capsule from a Git commit.</p>
           <div class="command-stack command-stack--split">
@@ -109,7 +93,7 @@ yeokcham capsule history search-filter</code></pre><button class="copy-button" t
 
       <section class="guide-panel panel-plum" id="workspace" aria-labelledby="workspace-title">
         <div class="panel-content">
-          <p class="panel-number">06</p>
+          <p class="panel-number">05</p>
           <h2 id="workspace-title">compose a workspace</h2>
           <p>A workspace declares its base and ordered capsule revisions. If they conflict, the conflict is stored and inspectable; Yeokcham does not invent a text merge.</p>
           <div class="command-stack">
@@ -124,7 +108,7 @@ yeokcham work materialise product-search --dry-run</code></pre><button class="co
 
       <section class="guide-panel panel-gold" id="release" aria-labelledby="release-title">
         <div class="panel-content">
-          <p class="panel-number">07</p>
+          <p class="panel-number">06</p>
           <h2 id="release-title">validate &amp; release</h2>
           <p>Validation runs against a named immutable snapshot in a fresh temporary directory. A release records the verified workspace composition and final snapshot.</p>
           <div class="command-stack command-stack--split">
@@ -142,7 +126,7 @@ yeokcham release verify &lt;release-id&gt;</code></pre><button class="copy-butto
 
       <section class="guide-panel panel-blue" id="share" aria-labelledby="share-title">
         <div class="panel-content">
-          <p class="panel-number">08</p>
+          <p class="panel-number">07</p>
           <h2 id="share-title">share deliberately</h2>
           <p>Git preservation and peer publication are explicit interchange boundaries. The receiving repository chooses whether to make a new local capsule.</p>
           <div class="command-stack command-stack--split">
@@ -162,7 +146,7 @@ yeokcham peer fetch \
 
       <section class="guide-panel panel-ink" id="inspect" aria-labelledby="inspect-title">
         <div class="panel-content panel-content--short">
-          <p class="panel-number">09</p>
+          <p class="panel-number">08</p>
           <h2 id="inspect-title">inspect what you have</h2>
           <p>These commands read and explain the repository. They do not repair or silently mutate it.</p>
           <div class="command-stack">
@@ -177,7 +161,7 @@ yeokcham verify</code></pre><button class="copy-button" type="button" data-copy 
 
       <section class="guide-panel panel-resources" id="resources" aria-labelledby="resources-title">
         <div class="panel-content panel-content--short">
-          <p class="panel-number">10</p>
+          <p class="panel-number">09</p>
           <h2 id="resources-title">links &amp; resources</h2>
           <p>The quick guide is an entry point; the repository contracts remain the authority.</p>
           <ul class="resource-list">

@@ -31,7 +31,7 @@ for marker in \
 done
 
 for command in \
-  'dune exec bin/yeokcham.exe -- init' \
+  'yeokcham init' \
   'yeokcham checkpoint' \
   'yeokcham capsule create --current' \
   'yeokcham work create' \
