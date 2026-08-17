@@ -114,6 +114,31 @@
   yeokcham_store))
 
 (test
+ (name test_peer_sync_ssh)
+ (modules test_peer_sync_ssh)
+ (libraries
+  alcotest
+  mirage-crypto-ec
+  unix
+  yeokcham_peer_sync
+  yeokcham_peer_sync_ssh
+  yeokcham_snapshot
+  yeokcham_store)
+ (deps ../bin/yeokcham.exe))
+
+(test
+ (name peer_sync_ssh_property_test)
+ (modules peer_sync_ssh_property_test)
+ (libraries
+  alcotest
+  qcheck-core
+  qcheck-alcotest
+  mirage-crypto-ec
+  yeokcham_peer_sync
+  yeokcham_peer_sync_ssh
+  yeokcham_store))
+
+(test
  (name peer_property_test)
  (modules peer_property_test)
  (libraries

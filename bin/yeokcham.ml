@@ -16,6 +16,7 @@ module Local_service = Yeokcham_local_service
 module Local_command = Yeokcham_local_command
 module Peer = Yeokcham_peer
 module Peer_sync = Yeokcham_peer_sync
+module Peer_sync_ssh = Yeokcham_peer_sync_ssh
 module Progress = Yeokcham_cli_progress
 
 let ( let* ) = Result.bind
@@ -571,6 +572,7 @@ let mutation_progress_message command arguments =
   | "peer", "sync" :: "node" :: "create" :: _ ->
       Some "Creating signed peer synchronization node"
   | "peer", "sync" :: "local" :: _ -> Some "Synchronizing peer tracking"
+  | "peer", "sync" :: "ssh" :: _ -> Some "Synchronizing peer tracking over SSH"
   | "peer", "reconcile" :: _ -> Some "Reconciling peer snapshots"
   | _ -> None
 
@@ -2781,6 +2783,42 @@ let parse_peer_sync_local_options arguments =
   in
   loop None None None None None None arguments
 
+let parse_peer_sync_ssh_options arguments =
+  let rec loop contact identity known_hosts ssh_config head tracking = function
+    | [] -> (
+        match (contact, identity, known_hosts, head, tracking) with
+        | ( Some contact,
+            Some identity,
+            Some known_hosts,
+            Some head,
+            Some tracking ) ->
+            Ok
+              ( peer_contact_id contact,
+                peer_id identity,
+                known_hosts,
+                ssh_config,
+                peer_sync_node_id head,
+                tracking )
+        | _ ->
+            Error
+              "peer sync ssh requires --contact, --identity, --known-hosts, \
+               --head, and --tracking")
+    | "--contact" :: value :: rest when Option.is_none contact ->
+        loop (Some value) identity known_hosts ssh_config head tracking rest
+    | "--identity" :: value :: rest when Option.is_none identity ->
+        loop contact (Some value) known_hosts ssh_config head tracking rest
+    | "--known-hosts" :: value :: rest when Option.is_none known_hosts ->
+        loop contact identity (Some value) ssh_config head tracking rest
+    | "--ssh-config" :: value :: rest when Option.is_none ssh_config ->
+        loop contact identity known_hosts (Some value) head tracking rest
+    | "--head" :: value :: rest when Option.is_none head ->
+        loop contact identity known_hosts ssh_config (Some value) tracking rest
+    | "--tracking" :: value :: rest when Option.is_none tracking ->
+        loop contact identity known_hosts ssh_config head (Some value) rest
+    | _ -> Error "invalid or duplicated peer sync ssh option"
+  in
+  loop None None None None None None arguments
+
 let parse_peer_sync_node_options arguments =
   let rec loop identity key snapshot parents = function
     | [] -> (
@@ -2952,6 +2990,70 @@ let peer root arguments =
                           Printf.printf "sync-node=%s\n"
                             (Yeokcham_id.Peer_sync_node_id.to_hex
                                (Peer_sync.sync_node_id node)))))))
+  | [ "sync"; "ssh-serve" ] -> (
+      match Peer_sync_ssh.read_request stdin with
+      | Error error -> fail Peer_sync_ssh.error_to_string error
+      | Ok request -> (
+          let remote_root = Peer_sync_ssh.request_remote_root request in
+          let capability = Peer_sync_ssh.capability_path ~root:remote_root in
+          let remote_failure code render error =
+            ignore
+              (Peer_sync_ssh.write_remote_error stdout ~code
+                 ~detail:(render error));
+            prerr_endline (render error);
+            exit 2
+          in
+          match
+            ( Store.open_repository ~root:remote_root,
+              peer_private_key capability )
+          with
+          | Error error, _ ->
+              remote_failure "repository" Store.error_to_string error
+          | _, Error error -> remote_failure "capability" Fun.id error
+          | Ok store, Ok source_private_key -> (
+              match
+                Peer_sync.load_identity store
+                  (Peer_sync_ssh.request_source request)
+              with
+              | Error error ->
+                  remote_failure "identity" Peer_sync.error_to_string error
+              | Ok source_identity -> (
+                  Peer_sync_ssh.serve_stream ~source:store ~source_identity
+                    ~source_private_key ~request ~input:stdin ~output:stdout
+                  |> function
+                  | Error error -> fail Peer_sync_ssh.error_to_string error
+                  | Ok () -> ()))))
+  | "sync" :: "ssh" :: options -> (
+      match parse_peer_sync_ssh_options options with
+      | Error error -> fail Fun.id error
+      | Ok
+          ( contact_id,
+            destination_identity_id,
+            known_hosts,
+            ssh_config,
+            head,
+            tracking_name ) -> (
+          match Store.open_repository ~root with
+          | Error error -> fail Store.error_to_string error
+          | Ok destination -> (
+              match
+                ( Peer_sync.load_contact destination contact_id,
+                  Peer_sync.load_identity destination destination_identity_id,
+                  peer_sync_nonce () )
+              with
+              | Error error, _, _ | _, Error error, _ ->
+                  fail Peer_sync.error_to_string error
+              | _, _, Error error -> fail Fun.id error
+              | Ok contact, Ok destination_identity, Ok nonce -> (
+                  Peer_sync_ssh.sync_ssh ~destination ~contact
+                    ~destination_identity ~known_hosts ?ssh_config ~nonce
+                    ~tracking_name ~head ()
+                  |> Result.map_error Peer_sync_ssh.error_to_string
+                  |> function
+                  | Error error -> fail Fun.id error
+                  | Ok (outcome, decision) ->
+                      Printf.printf "transport=ssh\n";
+                      print_peer_sync_outcome outcome decision))))
   | "sync" :: "local" :: options -> (
       match parse_peer_sync_local_options options with
       | Error error -> fail Fun.id error
@@ -3231,8 +3333,10 @@ let () =
               require_v2_root root;
               git root arguments
           | "peer" ->
-              require_v2_root root;
-              peer root arguments
+              if arguments = [ "sync"; "ssh-serve" ] then peer root arguments
+              else (
+                require_v2_root root;
+                peer root arguments)
           | _ -> usage ()
         in
         match mutation_progress_message command arguments with

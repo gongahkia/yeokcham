@@ -13,6 +13,7 @@
   yeokcham_local_service
   yeokcham_peer
   yeokcham_peer_sync
+  yeokcham_peer_sync_ssh
   yeokcham_release
   yeokcham_scratch
   yeokcham_snapshot

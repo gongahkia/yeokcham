@@ -21,7 +21,9 @@ output=$(sh "$repository_root/tools/stability/backup-full-repository-v1.sh" \
 
 [ -f "$archive" ]
 [ -f "$archive.sha256" ]
-printf '%s\n' "$output" | grep -F "archive=$archive" >/dev/null
+archive_parent=$(CDPATH= cd -P "$(dirname "$archive")" && pwd)
+archive_output=$archive_parent/$(basename "$archive")
+printf '%s\n' "$output" | grep -F "archive=$archive_output" >/dev/null
 tar -tf "$archive" | grep -F 'source/.yeokcham/objects/object' >/dev/null
 tar -tf "$archive" | grep -F 'source/linked-run' >/dev/null
 

@@ -23,6 +23,59 @@ sha256_file() {
   fi
 }
 
+verify_restored_tree() {
+  source_tree=$1
+  restored_tree=$2
+
+  diff -r "$source_tree" "$restored_tree" >/dev/null
+
+  find "$source_tree" -exec sh -c '
+    source_tree=$1
+    restored_tree=$2
+    shift 2
+
+    metadata() {
+      if stat -f "%Lp:%m:%z" "$1" >/dev/null 2>&1; then
+        stat -f "%Lp:%m:%z" "$1"
+      else
+        stat -c "%a:%Y:%s" "$1"
+      fi
+    }
+
+    kind() {
+      if [ -L "$1" ]; then
+        printf symlink
+      elif [ -d "$1" ]; then
+        printf directory
+      elif [ -f "$1" ]; then
+        printf file
+      else
+        printf unsupported
+      fi
+    }
+
+    for source_path do
+      relative=${source_path#"$source_tree"}
+      restored_path=$restored_tree$relative
+      source_kind=$(kind "$source_path")
+      restored_kind=$(kind "$restored_path")
+      [ "$source_kind" = "$restored_kind" ] || exit 1
+
+      case "$source_kind" in
+        symlink)
+          [ "$(readlink "$source_path")" = "$(readlink "$restored_path")" ] || exit 1
+          ;;
+        directory|file)
+          [ "$(metadata "$source_path")" = "$(metadata "$restored_path")" ] || exit 1
+          ;;
+        unsupported)
+          exit 1
+          ;;
+      esac
+    done
+  ' sh "$source_tree" "$restored_tree" {} +
+}
+
 source_root=''
 archive=''
 
@@ -132,9 +185,9 @@ chmod 600 "$archive.sha256"
 sha256_file "$archive" > "$archive.sha256"
 
 # Detect a source mutation during archiving before declaring the copy usable.
-tar -df "$archive" -C "$source_parent"
+tar -tf "$archive" >/dev/null
 tar -xf "$archive" -C "$restore_parent"
-tar -df "$archive" -C "$restore_parent"
+verify_restored_tree "$source_root" "$restore_parent/$source_name"
 
 printf 'archive=%s\nchecksum=%s\nrestored-root=%s\n' \
   "$archive" "$archive.sha256" "$restore_parent/$source_name"

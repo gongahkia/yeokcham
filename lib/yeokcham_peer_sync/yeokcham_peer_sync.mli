@@ -137,6 +137,14 @@ val session_proof_payload : session_proof -> (Yeokcham_encoding.t, error) result
 val decode_session_proof_payload :
   Yeokcham_encoding.t -> (session_proof, error) result
 
+val ssh_transcript :
+  tracking_name:string ->
+  head:Yeokcham_id.Peer_sync_node_id.t ->
+  (string, error) result
+
+val ssh_session_id :
+  session_proof -> (Yeokcham_exchange.session_id, error) result
+
 val sync_node_id : sync_node -> Yeokcham_id.Peer_sync_node_id.t
 val sync_node_author : sync_node -> Peer_id.t
 val sync_node_snapshot : sync_node -> Yeokcham_snapshot.Snapshot.id
@@ -192,6 +200,25 @@ val sync_local :
   head:Yeokcham_id.Peer_sync_node_id.t ->
   unit ->
   (Yeokcham_exchange_store.outcome * direct_sync, error) result
+
+val verify_sync_snapshot_closure :
+  Yeokcham_store.repository ->
+  Yeokcham_snapshot.Snapshot.id ->
+  (unit, error) result
+
+val advance_tracking :
+  Yeokcham_store.repository ->
+  contact:contact ->
+  tracking_name:string ->
+  head:Yeokcham_id.Peer_sync_node_id.t ->
+  (direct_sync, error) result
+
+val sync_transfer_closure :
+  Yeokcham_store.repository ->
+  Yeokcham_id.Peer_sync_node_id.t ->
+  ( Yeokcham_store.Stored_object_id.t list * Yeokcham_store.Stored_object_id.t,
+    error )
+  result
 
 val reconcile :
   Yeokcham_store.repository ->

@@ -293,23 +293,39 @@ dune exec bin/yeokcham.exe -- peer sync local \
   --source-key /absolute/path/to/source.key \
   --head <source-sync-node-id> \
   --tracking main
+dune exec bin/yeokcham.exe -- peer sync ssh \
+  --contact <contact-id> \
+  --identity <local-peer-id> \
+  --known-hosts /absolute/path/to/known_hosts \
+  [--ssh-config /absolute/path/to/ssh_config] \
+  --head <source-sync-node-id> \
+  --tracking main
 ```
 
 `peer sync snapshot` records an exact working-tree snapshot while excluding
 `.yeokcham`; `peer sync node create` signs it into the separate peer-sync graph.
 Neither command makes a scratch checkpoint, capsule, workspace, or release.
 
-`peer sync local` authenticates the source against the destination's pinned contact,
-transfers and verifies the immutable sync-node closure, and changes only the
-destination contact's tracking reference. A failed transfer leaves that
-tracking reference unchanged. `peer reconcile` accepts two verified sync-node
-IDs plus the local identity/key and reports either a causal fast-forward, a
-new exact snapshot merge node, or a durable conflict.
+`peer sync local` authenticates the source against the destination's pinned
+contact, transfers and verifies the immutable sync-node closure, and changes
+only the destination contact's tracking reference. A failed transfer leaves
+that tracking reference unchanged. `peer reconcile` accepts two verified
+sync-node IDs plus the local identity/key and reports either a causal
+fast-forward, a new exact snapshot merge node, or a durable conflict.
 
-The `--ssh` contact form only stores a validated endpoint in this slice; it
-does not yet perform SSH peer synchronization. Relay discovery, relay
-delivery, background daemon polling, and SSH peer synchronization remain
-unimplemented acceptance criteria of [#238](https://github.com/gongahkia/yeokcham/issues/238).
+`peer sync ssh` selects the contact's configured SSH endpoint. It requires an
+explicit known-hosts file and enforces `StrictHostKeyChecking=yes`; SSH host
+authentication protects the transport but never replaces the pinned Yeokcham
+Ed25519 contact. The remote command is fixed as `yeokcham peer sync
+ssh-serve`; the configured remote root travels in a bounded framed request,
+not a shell command. The remote host keeps its own `0600` signing capability
+at `<repository>/.yeokcham/bootstrap/peer-sync-ed25519`, created explicitly by
+`peer identity init --key`; no private key crosses SSH or enters a canonical
+object. The server signs the local challenge before the immutable closure is
+accepted, so replay, bad signatures, malformed frames, unavailable hosts, and
+interrupted transfers leave the tracking reference unchanged. Relay discovery,
+relay delivery, and background daemon polling remain open work under
+[#238](https://github.com/gongahkia/yeokcham/issues/238).
 
 ## Further reading
 

@@ -25,6 +25,8 @@ short project entry point; this page maps readers to the detailed material.
   and its preservation/adoption/exit contract.
 - [Peer exchange](PEER_EXCHANGE.md) records the implemented direct publication,
   transfer, and explicit-integration boundary.
+- [SSH peer-sync v1](SSH_PEER_SYNC_V1.md) records the experimental pinned SSH
+  transport, noncanonical capability placement, and verification boundary.
 - [1.0 stability contract and release gate](STABILITY_1_0.md) distinguishes the
   proposed compatibility/release promises from the evidence still required to
   make them.

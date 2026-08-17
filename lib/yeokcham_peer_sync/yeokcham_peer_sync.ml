@@ -1168,6 +1168,21 @@ let valid_tracking_name name =
          | _ -> false)
        name
 
+let ssh_transcript ~tracking_name ~head =
+  if not (valid_tracking_name tracking_name) then
+    Error (Invalid_tracking_name tracking_name)
+  else
+    let* domain = text "yeokcham:peer-sync:ssh:v1" in
+    let* tracking_name = text tracking_name in
+    array
+      [
+        Encoding.integer 1L;
+        domain;
+        tracking_name;
+        Encoding.bytes (Sync_node_id.to_bytes head);
+      ]
+    |> Result.map Encoding.encode
+
 let tracking_components contact name =
   [ "peer-tracking"; Contact_id.to_hex (contact_id contact); name ]
 
@@ -1337,6 +1352,9 @@ let collect_sync_snapshot_objects store snapshot =
   in
   collect_sync_tree_objects store [ identity ] (Snapshot.Snapshot.root snapshot)
 
+let verify_sync_snapshot_closure store snapshot =
+  collect_sync_snapshot_objects store snapshot |> Result.map (fun _ -> ())
+
 let collect_sync_nodes store head =
   let rec visit seen identity =
     let raw = Sync_node_id.to_bytes identity in
@@ -1376,15 +1394,55 @@ let sync_node_object_id node =
   in
   Ok (Store.id_of_envelope envelope)
 
-let sync_transfer_session proof =
-  let* payload = session_proof_payload proof in
-  let raw =
-    digest "yeokcham:peer-sync-local-transfer-session:v1\000"
-      (Encoding.encode payload)
+let sync_transfer_closure store head =
+  let* nodes = collect_sync_nodes store head in
+  let* identities =
+    collect_results
+      (List.map (fun node -> load_identity store node.sync_node_author) nodes)
   in
+  let identities =
+    List.sort_uniq
+      (fun left right ->
+        String.compare
+          (Peer_id.to_bytes (peer_id left))
+          (Peer_id.to_bytes (peer_id right)))
+      identities
+  in
+  let* snapshot_objects =
+    List.fold_left
+      (fun result node ->
+        let* seen = result in
+        let* closure =
+          collect_sync_snapshot_objects store node.sync_node_snapshot
+        in
+        Ok (List.rev_append closure seen))
+      (Ok []) nodes
+  in
+  let* identity_objects =
+    collect_results (List.map identity_object_id identities)
+  in
+  let* node_objects = collect_results (List.map sync_node_object_id nodes) in
+  let* head_node = load_sync_node store head in
+  let* head_object = sync_node_object_id head_node in
+  let object_ids =
+    sorted_unique_object_ids
+      (List.rev_append identity_objects
+         (List.rev_append node_objects snapshot_objects))
+  in
+  Ok (object_ids, head_object)
+
+let exchange_session_id domain proof =
+  let* payload = session_proof_payload proof in
+  let raw = digest domain (Encoding.encode payload) in
   Exchange.session_id_of_bytes (String.sub raw 0 16)
   |> Result.map_error (fun error ->
       Exchange_error (Exchange_store.Protocol_error error))
+
+let sync_transfer_session proof =
+  exchange_session_id "yeokcham:peer-sync-local-transfer-session:v1\000" proof
+
+let ssh_session_id proof =
+  exchange_session_id "yeokcham:peer-sync-ssh-transfer-session:v1\000" proof
 
 let sync_node_is_ancestor store ~ancestor ~descendant =
   let target = Sync_node_id.to_bytes ancestor in
@@ -1405,6 +1463,36 @@ let sync_node_is_ancestor store ~ancestor ~descendant =
       visit_parents node.sync_node_parents
   in
   visit [] descendant
+
+let advance_tracking store ~contact ~tracking_name ~head =
+  let* received = load_sync_node store head in
+  let* current = tracking_head store ~contact ~name:tracking_name in
+  match current with
+  | None ->
+      let* () =
+        update_tracking_head store ~contact ~name:tracking_name ~expected:None
+          head
+      in
+      Ok (Tracking_advanced received)
+  | Some current when Sync_node_id.equal current head ->
+      Ok (Tracking_already_current received)
+  | Some current ->
+      let* current_node = load_sync_node store current in
+      let* current_is_ancestor =
+        sync_node_is_ancestor store ~ancestor:current ~descendant:head
+      in
+      if current_is_ancestor then
+        let* () =
+          update_tracking_head store ~contact ~name:tracking_name
+            ~expected:(Some current) head
+        in
+        Ok (Tracking_advanced received)
+      else
+        let* received_is_ancestor =
+          sync_node_is_ancestor store ~ancestor:head ~descendant:current
+        in
+        if received_is_ancestor then Ok (Tracking_already_current current_node)
+        else Ok (Tracking_diverged { current; received })
 
 let sync_local ?interrupt_after ~source ~destination ~contact
     ~destination_identity ~source_private_key ~nonce ~transcript ~tracking_name
@@ -1500,37 +1588,10 @@ let sync_local ?interrupt_after ~source ~destination ~contact
               Ok ())
             (Ok ()) nodes
         in
-        let* received = load_sync_node destination head in
-        let* current = tracking_head destination ~contact ~name:tracking_name in
-        match current with
-        | None ->
-            let* () =
-              update_tracking_head destination ~contact ~name:tracking_name
-                ~expected:None head
-            in
-            Ok (outcome, Tracking_advanced received)
-        | Some current when Sync_node_id.equal current head ->
-            Ok (outcome, Tracking_already_current received)
-        | Some current ->
-            let* current_node = load_sync_node destination current in
-            let* current_is_ancestor =
-              sync_node_is_ancestor destination ~ancestor:current
-                ~descendant:head
-            in
-            if current_is_ancestor then
-              let* () =
-                update_tracking_head destination ~contact ~name:tracking_name
-                  ~expected:(Some current) head
-              in
-              Ok (outcome, Tracking_advanced received)
-            else
-              let* received_is_ancestor =
-                sync_node_is_ancestor destination ~ancestor:head
-                  ~descendant:current
-              in
-              if received_is_ancestor then
-                Ok (outcome, Tracking_already_current current_node)
-              else Ok (outcome, Tracking_diverged { current; received })
+        let* decision =
+          advance_tracking destination ~contact ~tracking_name ~head
+        in
+        Ok (outcome, decision)
 
 let entry_equal left right =
   match (left, right) with
