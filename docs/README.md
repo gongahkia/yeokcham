@@ -36,6 +36,8 @@ short project entry point; this page maps readers to the detailed material.
   make them.
 - [Field-trial evidence v1](FIELD_TRIAL_V1.md) defines reproducible host
   evidence without treating CI as a platform trial.
+- [Release signing v1](RELEASE_SIGNING_V1.md) defines the external-key and
+  signed-tag verification boundary without claiming a released key.
 - [Local synchronisation](LOCAL_SYNCHRONISATION.md) documents the local object
   exchange substrate and its historical V3 predecessor.
 - [ADR-073](adr/073-unix-first-vcs-git-migration-and-peer-exchange.md) records

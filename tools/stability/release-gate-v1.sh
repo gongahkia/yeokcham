@@ -3,7 +3,7 @@ set -eu
 
 usage() {
   printf '%s\n' \
-    'usage: release-gate-v1.sh --version MAJOR.MINOR.PATCH --evidence-dir ABSOLUTE_DIRECTORY --archive ABSOLUTE_ARCHIVE.tar.gz' \
+    'usage: release-gate-v1.sh --version MAJOR.MINOR.PATCH --signing-fingerprint 40_HEX --evidence-dir ABSOLUTE_DIRECTORY --archive ABSOLUTE_ARCHIVE.tar.gz' \
     'Verifies a signed, clean release tag and recorded Linux/macOS/WSL evidence, then creates a new source archive and SHA-256 sidecar.' >&2
   exit 2
 }
@@ -20,6 +20,7 @@ sha256_file() {
 }
 
 version=''
+signing_fingerprint=''
 evidence_dir=''
 archive=''
 
@@ -28,6 +29,11 @@ while [ "$#" -gt 0 ]; do
     --version)
       [ "$#" -ge 2 ] || usage
       version=$2
+      shift 2
+      ;;
+    --signing-fingerprint)
+      [ "$#" -ge 2 ] || usage
+      signing_fingerprint=$2
       shift 2
       ;;
     --evidence-dir)
@@ -46,11 +52,16 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
-[ -n "$version" ] && [ -n "$evidence_dir" ] && [ -n "$archive" ] || usage
+[ -n "$version" ] && [ -n "$signing_fingerprint" ] && [ -n "$evidence_dir" ] && [ -n "$archive" ] || usage
 printf '%s\n' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || {
   printf '%s\n' 'release version must be MAJOR.MINOR.PATCH' >&2
   exit 2
 }
+printf '%s\n' "$signing_fingerprint" | grep -Eq '^[0-9A-Fa-f]{40}$' || {
+  printf '%s\n' 'signing fingerprint must be exactly 40 hexadecimal characters' >&2
+  exit 2
+}
+signing_fingerprint=$(printf '%s' "$signing_fingerprint" | tr 'A-F' 'a-f')
 
 case "$evidence_dir" in
   /*) ;;
@@ -97,7 +108,23 @@ git cat-file -e "$tag^{tag}" 2>/dev/null || {
   printf '%s\n' "release tag $tag must be annotated" >&2
   exit 1
 }
-git verify-tag "$tag"
+signature_status=$(git verify-tag --raw "$tag" 2>&1) || {
+  printf '%s\n' "$signature_status" >&2
+  printf '%s\n' "release tag $tag has no valid signature" >&2
+  exit 1
+}
+printf '%s\n' "$signature_status" |
+  awk -v expected="$signing_fingerprint" '
+    $1 == "[GNUPG:]" && $2 == "VALIDSIG" {
+      for (index = 3; index <= NF; index++) {
+        if (tolower($index) == expected) found = 1
+      }
+    }
+    END { exit(found ? 0 : 1) }
+  ' || {
+  printf '%s\n' "release tag $tag was not signed by the expected fingerprint" >&2
+  exit 1
+}
 
 [ -z "$(git status --porcelain)" ] || {
   printf '%s\n' 'working tree is not clean' >&2

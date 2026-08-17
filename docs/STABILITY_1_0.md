@@ -134,6 +134,7 @@ field-trial files described by
 ```sh
 make release-gate \
   RELEASE_VERSION=MAJOR.MINOR.PATCH \
+  RELEASE_SIGNING_FINGERPRINT=<40-hex-fingerprint> \
   RELEASE_EVIDENCE_DIR=/absolute/path/to/evidence \
   RELEASE_ARCHIVE=/absolute/path/to/yeokcham-MAJOR.MINOR.PATCH.tar.gz
 ```

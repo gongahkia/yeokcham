@@ -64,9 +64,10 @@ stability-release-gate-test:
 
 release-gate:
 	test -n "$(RELEASE_VERSION)"
+	test -n "$(RELEASE_SIGNING_FINGERPRINT)"
 	test -n "$(RELEASE_EVIDENCE_DIR)"
 	test -n "$(RELEASE_ARCHIVE)"
-	sh tools/stability/release-gate-v1.sh --version "$(RELEASE_VERSION)" --evidence-dir "$(RELEASE_EVIDENCE_DIR)" --archive "$(RELEASE_ARCHIVE)"
+	sh tools/stability/release-gate-v1.sh --version "$(RELEASE_VERSION)" --signing-fingerprint "$(RELEASE_SIGNING_FINGERPRINT)" --evidence-dir "$(RELEASE_EVIDENCE_DIR)" --archive "$(RELEASE_ARCHIVE)"
 
 PROPERTY_TEST_SEED ?= 20260729
 
