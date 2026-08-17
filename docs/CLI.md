@@ -269,6 +269,9 @@ dune exec bin/yeokcham.exe -- peer contact add alice \
 dune exec bin/yeokcham.exe -- peer contact add alice \
   --peer-public-key <64-hex-character-ed25519-public-key> \
   --ssh alice@example.test --remote-root /absolute/path/to/alice-repository
+dune exec bin/yeokcham.exe -- peer contact add alice \
+  --peer-public-key <64-hex-character-ed25519-public-key> \
+  --relay /absolute/path/to/shared-relay
 dune exec bin/yeokcham.exe -- peer contact show <contact-id>
 ```
 
@@ -300,6 +303,16 @@ dune exec bin/yeokcham.exe -- peer sync ssh \
   [--ssh-config /absolute/path/to/ssh_config] \
   --head <source-sync-node-id> \
   --tracking main
+dune exec bin/yeokcham.exe -- peer relay publish \
+  --identity <source-peer-id> --key /absolute/path/to/source.key \
+  --destination-public-key <64-hex-character-ed25519-public-key> \
+  --relay /absolute/path/to/shared-relay \
+  --head <source-sync-node-id> --tracking main
+dune exec bin/yeokcham.exe -- peer relay discover \
+  --relay /absolute/path/to/shared-relay
+dune exec bin/yeokcham.exe -- peer sync relay \
+  --contact <contact-id> --identity <local-peer-id> \
+  --relay /absolute/path/to/shared-relay --tracking main
 ```
 
 `peer sync snapshot` records an exact working-tree snapshot while excluding
@@ -324,8 +337,15 @@ at `<repository>/.yeokcham/bootstrap/peer-sync-ed25519`, created explicitly by
 object. The server signs the local challenge before the immutable closure is
 accepted, so replay, bad signatures, malformed frames, unavailable hosts, and
 interrupted transfers leave the tracking reference unchanged. Relay discovery,
-relay delivery, and background daemon polling remain open work under
-[#238](https://github.com/gongahkia/yeokcham/issues/238).
+relay delivery uses a configured shared filesystem mailbox. `peer relay
+discover` reports only syntactically valid, signed, current advertisements; it
+does not add a contact or trust a discovered key. `peer sync relay` accepts one
+advertisement only when it names the selected pinned contact, the local
+identity, repository format, and tracking name. It validates the package in an
+isolated staging repository before copying an immutable closure and advancing
+only the matching contact tracking ref. Relay files and receipts are runtime
+state, not canonical history. The remaining background daemon work is tracked
+under [#238](https://github.com/gongahkia/yeokcham/issues/238).
 
 ## Further reading
 

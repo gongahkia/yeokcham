@@ -1,5 +1,11 @@
 # Canonical golden fixtures
 
+`peer-sync-relay-v1.package.hex` and
+`peer-sync-relay-v1.advertisement.hex` retain the exact versioned CBOR bytes of
+the noncanonical filesystem-relay protocol. They bind the repository format,
+sender and destination identities, nonce-based freshness, and the advertised
+sync head; they are transport inputs, never canonical repository objects.
+
 Each fixture is exactly one nonempty line of lowercase ASCII hexadecimal digits followed by one LF. It represents the exact binary bytes that a persistent codec or envelope must retain; fixtures are test inputs, never generated test outputs.
 
 `profile1-v1-composite.cbor.hex` is the canonical Yeokcham CBOR Profile 1 encoding of:

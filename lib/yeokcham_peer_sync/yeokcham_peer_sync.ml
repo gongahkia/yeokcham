@@ -1471,7 +1471,9 @@ let import_sync_closure destination ~contact ~head_object ~head ~offered =
         let object_type = Envelope.object_type envelope in
         let* () =
           if object_type = Envelope.Peer_identity then
-            let* identity = decode_identity_payload (Envelope.payload envelope) in
+            let* identity =
+              decode_identity_payload (Envelope.payload envelope)
+            in
             add_identity identity
           else if object_type = Envelope.Peer_sync_node then
             let* node = decode_sync_node_payload (Envelope.payload envelope) in
@@ -1486,8 +1488,7 @@ let import_sync_closure destination ~contact ~head_object ~head ~offered =
     else
       match Hashtbl.find_opt nodes key with
       | None ->
-          Error
-            (Invalid_sync_node "peer sync closure omits a causal parent")
+          Error (Invalid_sync_node "peer sync closure omits a causal parent")
       | Some node ->
           Hashtbl.add seen key ();
           let* ordered =
@@ -1509,11 +1510,14 @@ let import_sync_closure destination ~contact ~head_object ~head ~offered =
     Error (Invalid_sync_node "peer sync head object does not match the request")
   else if
     not
-      (Peer_id.equal (sync_node_author head_node)
+      (Peer_id.equal
+         (sync_node_author head_node)
          (peer_id (contact_identity contact)))
   then Error Contact_mismatch
   else
-    let* graph = graph_nodes (Hashtbl.create 32) [] head |> Result.map List.rev in
+    let* graph =
+      graph_nodes (Hashtbl.create 32) [] head |> Result.map List.rev
+    in
     let* () = add_identity (contact_identity contact) in
     let* graph_identities =
       List.fold_left
@@ -1526,14 +1530,14 @@ let import_sync_closure destination ~contact ~head_object ~head ~offered =
           | Some identity -> Ok (identity :: values)
           | None ->
               Error
-                (Invalid_sync_node
-                   "peer sync closure omits an author identity"))
+                (Invalid_sync_node "peer sync closure omits an author identity"))
         (Ok []) graph
     in
     let graph_identities =
       List.sort_uniq
         (fun left right ->
-          String.compare (Peer_id.to_bytes (peer_id left))
+          String.compare
+            (Peer_id.to_bytes (peer_id left))
             (Peer_id.to_bytes (peer_id right)))
         graph_identities
     in

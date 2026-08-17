@@ -16,6 +16,7 @@ module Local_service = Yeokcham_local_service
 module Local_command = Yeokcham_local_command
 module Peer = Yeokcham_peer
 module Peer_sync = Yeokcham_peer_sync
+module Peer_sync_relay = Yeokcham_peer_sync_relay
 module Peer_sync_ssh = Yeokcham_peer_sync_ssh
 module Progress = Yeokcham_cli_progress
 
@@ -567,12 +568,17 @@ let mutation_progress_message command arguments =
   | "peer", [ "identity"; "init"; "--key"; _ ] ->
       Some "Creating pinned peer identity"
   | "peer", "contact" :: "add" :: _ -> Some "Adding pinned peer contact"
+  | "peer", "relay" :: "publish" :: _ -> Some "Publishing signed relay package"
+  | "peer", [ "relay"; "discover"; "--relay"; _ ] ->
+      Some "Discovering signed relay advertisements"
   | "peer", [ "sync"; "snapshot" ] ->
       Some "Scanning peer synchronization snapshot"
   | "peer", "sync" :: "node" :: "create" :: _ ->
       Some "Creating signed peer synchronization node"
   | "peer", "sync" :: "local" :: _ -> Some "Synchronizing peer tracking"
   | "peer", "sync" :: "ssh" :: _ -> Some "Synchronizing peer tracking over SSH"
+  | "peer", "sync" :: "relay" :: _ ->
+      Some "Synchronizing peer tracking through relay"
   | "peer", "reconcile" :: _ -> Some "Reconciling peer snapshots"
   | _ -> None
 
@@ -2819,6 +2825,66 @@ let parse_peer_sync_ssh_options arguments =
   in
   loop None None None None None None arguments
 
+let parse_peer_relay_publish_options arguments =
+  let rec loop identity key destination relay head tracking = function
+    | [] -> (
+        match (identity, key, destination, relay, head, tracking) with
+        | ( Some identity,
+            Some key,
+            Some destination,
+            Some relay,
+            Some head,
+            Some tracking ) ->
+            Ok
+              ( peer_id identity,
+                key,
+                peer_public_key destination,
+                relay,
+                peer_sync_node_id head,
+                tracking )
+        | _ ->
+            Error
+              "peer relay publish requires --identity, --key, \
+               --destination-public-key, --relay, --head, and --tracking")
+    | "--identity" :: value :: rest when Option.is_none identity ->
+        loop (Some value) key destination relay head tracking rest
+    | "--key" :: value :: rest when Option.is_none key ->
+        loop identity (Some value) destination relay head tracking rest
+    | "--destination-public-key" :: value :: rest
+      when Option.is_none destination ->
+        loop identity key (Some value) relay head tracking rest
+    | "--relay" :: value :: rest when Option.is_none relay ->
+        loop identity key destination (Some value) head tracking rest
+    | "--head" :: value :: rest when Option.is_none head ->
+        loop identity key destination relay (Some value) tracking rest
+    | "--tracking" :: value :: rest when Option.is_none tracking ->
+        loop identity key destination relay head (Some value) rest
+    | _ -> Error "invalid or duplicated peer relay publish option"
+  in
+  loop None None None None None None arguments
+
+let parse_peer_sync_relay_options arguments =
+  let rec loop contact identity relay tracking = function
+    | [] -> (
+        match (contact, identity, relay, tracking) with
+        | Some contact, Some identity, Some relay, Some tracking ->
+            Ok (peer_contact_id contact, peer_id identity, relay, tracking)
+        | _ ->
+            Error
+              "peer sync relay requires --contact, --identity, --relay, and \
+               --tracking")
+    | "--contact" :: value :: rest when Option.is_none contact ->
+        loop (Some value) identity relay tracking rest
+    | "--identity" :: value :: rest when Option.is_none identity ->
+        loop contact (Some value) relay tracking rest
+    | "--relay" :: value :: rest when Option.is_none relay ->
+        loop contact identity (Some value) tracking rest
+    | "--tracking" :: value :: rest when Option.is_none tracking ->
+        loop contact identity relay (Some value) rest
+    | _ -> Error "invalid or duplicated peer sync relay option"
+  in
+  loop None None None None arguments
+
 let parse_peer_sync_node_options arguments =
   let rec loop identity key snapshot parents = function
     | [] -> (
@@ -2850,6 +2916,19 @@ let print_peer_sync_outcome outcome decision =
     outcome.Yeokcham_exchange_store.offered
     outcome.Yeokcham_exchange_store.requested
     (List.length outcome.Yeokcham_exchange_store.transferred);
+  match decision with
+  | Peer_sync.Tracking_advanced node ->
+      Printf.printf "tracking=advanced\nhead=%s\n"
+        (Yeokcham_id.Peer_sync_node_id.to_hex (Peer_sync.sync_node_id node))
+  | Peer_sync.Tracking_already_current node ->
+      Printf.printf "tracking=already-current\nhead=%s\n"
+        (Yeokcham_id.Peer_sync_node_id.to_hex (Peer_sync.sync_node_id node))
+  | Peer_sync.Tracking_diverged { current; received } ->
+      Printf.printf "tracking=diverged\ncurrent=%s\nreceived=%s\n"
+        (Yeokcham_id.Peer_sync_node_id.to_hex current)
+        (Yeokcham_id.Peer_sync_node_id.to_hex (Peer_sync.sync_node_id received))
+
+let print_peer_tracking_decision decision =
   match decision with
   | Peer_sync.Tracking_advanced node ->
       Printf.printf "tracking=advanced\nhead=%s\n"
@@ -2946,6 +3025,28 @@ let peer root arguments =
                   match Peer_sync.store_contact store contact with
                   | Error error -> fail Peer_sync.error_to_string error
                   | Ok _ -> print_peer_contact contact))))
+  | [
+   "contact"; "add"; name; "--peer-public-key"; public_key; "--relay"; relay;
+  ] -> (
+      match Store.open_repository ~root with
+      | Error error -> fail Store.error_to_string error
+      | Ok store -> (
+          let identity =
+            Peer_sync.make_identity ~public_key:(peer_public_key public_key)
+            |> Result.map_error Peer_sync.error_to_string
+          in
+          match identity with
+          | Error error -> fail Fun.id error
+          | Ok identity -> (
+              Peer_sync.make_contact ~name ~identity
+                ~endpoints:[ Peer_sync.Relay relay ]
+              |> Result.map_error Peer_sync.error_to_string
+              |> function
+              | Error error -> fail Fun.id error
+              | Ok contact -> (
+                  match Peer_sync.store_contact store contact with
+                  | Error error -> fail Peer_sync.error_to_string error
+                  | Ok _ -> print_peer_contact contact))))
   | [ "contact"; "show"; contact ] -> (
       match Store.open_repository ~root with
       | Error error -> fail Store.error_to_string error
@@ -2955,6 +3056,74 @@ let peer root arguments =
           |> function
           | Error error -> fail Fun.id error
           | Ok contact -> print_peer_contact contact))
+  | [ "relay"; "discover"; "--relay"; relay ] -> (
+      match Peer_sync_relay.list_advertisements ~relay ~now:(now ()) with
+      | Error error -> fail Peer_sync_relay.error_to_string error
+      | Ok advertisements ->
+          List.iter
+            (fun advertisement ->
+              Printf.printf
+                "advertisement=%s\n\
+                 package=%s\n\
+                 peer=%s\n\
+                 destination=%s\n\
+                 tracking=%s\n\
+                 head=%s\n"
+                (Peer_sync_relay.advertisement_id advertisement)
+                (Peer_sync_relay.advertisement_package_id advertisement)
+                (Peer_sync_relay.advertisement_sender advertisement
+                |> Peer_sync.peer_id |> Yeokcham_id.Peer_id.to_hex)
+                (Peer_sync_relay.advertisement_destination advertisement
+                |> Yeokcham_id.Peer_id.to_hex)
+                (Peer_sync_relay.advertisement_tracking_name advertisement)
+                (Peer_sync_relay.advertisement_head advertisement
+                |> Yeokcham_id.Peer_sync_node_id.to_hex))
+            advertisements)
+  | "relay" :: "publish" :: options -> (
+      match parse_peer_relay_publish_options options with
+      | Error error -> fail Fun.id error
+      | Ok
+          ( source_identity_id,
+            key,
+            destination_public_key,
+            relay,
+            head,
+            tracking_name ) -> (
+          match (Store.open_repository ~root, peer_private_key key) with
+          | Error error, _ -> fail Store.error_to_string error
+          | _, Error error -> fail Fun.id error
+          | Ok source, Ok source_private_key -> (
+              match
+                ( Peer_sync.load_identity source source_identity_id,
+                  Peer_sync.make_identity ~public_key:destination_public_key,
+                  peer_sync_nonce () )
+              with
+              | Error error, _, _ | _, Error error, _ ->
+                  fail Peer_sync.error_to_string error
+              | _, _, Error error -> fail Fun.id error
+              | Ok source_identity, Ok destination_identity, Ok nonce -> (
+                  let issued_at = now () in
+                  let expires_at = Int64.add issued_at 86_400L in
+                  Peer_sync_relay.make_package ~source ~source_identity
+                    ~source_private_key ~destination:destination_identity
+                    ~tracking_name ~head ~issued_at ~expires_at ~nonce
+                  |> Result.map_error Peer_sync_relay.error_to_string
+                  |> function
+                  | Error error -> fail Fun.id error
+                  | Ok package -> (
+                      Peer_sync_relay.make_advertisement package
+                        ~private_key:source_private_key
+                      |> Result.map_error Peer_sync_relay.error_to_string
+                      |> function
+                      | Error error -> fail Fun.id error
+                      | Ok advertisement -> (
+                          Peer_sync_relay.publish ~relay ~package ~advertisement
+                          |> Result.map_error Peer_sync_relay.error_to_string
+                          |> function
+                          | Error error -> fail Fun.id error
+                          | Ok () ->
+                              Printf.printf "transport=relay\npackage=%s\n"
+                                (Peer_sync_relay.package_id package)))))))
   | [ "sync"; "snapshot" ] -> (
       match Store.open_repository ~root with
       | Error error -> fail Store.error_to_string error
@@ -3054,6 +3223,59 @@ let peer root arguments =
                   | Ok (outcome, decision) ->
                       Printf.printf "transport=ssh\n";
                       print_peer_sync_outcome outcome decision))))
+  | "sync" :: "relay" :: options -> (
+      match parse_peer_sync_relay_options options with
+      | Error error -> fail Fun.id error
+      | Ok (contact_id, destination_identity_id, relay, tracking_name) -> (
+          match Store.open_repository ~root with
+          | Error error -> fail Store.error_to_string error
+          | Ok destination -> (
+              match
+                ( Peer_sync.load_contact destination contact_id,
+                  Peer_sync.load_identity destination destination_identity_id )
+              with
+              | Error error, _ | _, Error error ->
+                  fail Peer_sync.error_to_string error
+              | Ok contact, Ok destination_identity -> (
+                  match
+                    Peer_sync_relay.list_advertisements ~relay ~now:(now ())
+                  with
+                  | Error error -> fail Peer_sync_relay.error_to_string error
+                  | Ok advertisements -> (
+                      let advertisement =
+                        List.find_opt
+                          (fun advertisement ->
+                            Peer_sync.identity_equal
+                              (Peer_sync_relay.advertisement_sender
+                                 advertisement)
+                              (Peer_sync.contact_identity contact)
+                            && Yeokcham_id.Peer_id.equal
+                                 (Peer_sync_relay.advertisement_destination
+                                    advertisement)
+                                 (Peer_sync.peer_id destination_identity)
+                            && String.equal
+                                 (Peer_sync_relay.advertisement_tracking_name
+                                    advertisement)
+                                 tracking_name)
+                          advertisements
+                      in
+                      match advertisement with
+                      | None ->
+                          fail Fun.id
+                            "no current signed relay advertisement matches the \
+                             pinned contact"
+                      | Some advertisement -> (
+                          Peer_sync_relay.import_advertisement ~destination
+                            ~contact ~destination_identity ~relay ~tracking_name
+                            ~now:(now ()) ~advertisement
+                          |> Result.map_error Peer_sync_relay.error_to_string
+                          |> function
+                          | Error error -> fail Fun.id error
+                          | Ok decision ->
+                              Printf.printf "transport=relay\npackage=%s\n"
+                                (Peer_sync_relay.advertisement_package_id
+                                   advertisement);
+                              print_peer_tracking_decision decision))))))
   | "sync" :: "local" :: options -> (
       match parse_peer_sync_local_options options with
       | Error error -> fail Fun.id error
