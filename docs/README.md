@@ -34,6 +34,8 @@ short project entry point; this page maps readers to the detailed material.
 - [1.0 stability contract and release gate](STABILITY_1_0.md) distinguishes the
   proposed compatibility/release promises from the evidence still required to
   make them.
+- [Field-trial evidence v1](FIELD_TRIAL_V1.md) defines reproducible host
+  evidence without treating CI as a platform trial.
 - [Local synchronisation](LOCAL_SYNCHRONISATION.md) documents the local object
   exchange substrate and its historical V3 predecessor.
 - [ADR-073](adr/073-unix-first-vcs-git-migration-and-peer-exchange.md) records
