@@ -1431,6 +1431,140 @@ let sync_transfer_closure store head =
   in
   Ok (object_ids, head_object)
 
+let import_sync_closure destination ~contact ~head_object ~head ~offered =
+  let identities = Hashtbl.create 32 in
+  let nodes = Hashtbl.create 32 in
+  let add_identity identity =
+    let key = Peer_id.to_bytes (peer_id identity) in
+    match Hashtbl.find_opt identities key with
+    | None ->
+        Hashtbl.add identities key identity;
+        Ok ()
+    | Some existing when identity_equal existing identity -> Ok ()
+    | Some _ ->
+        Error
+          (Invalid_sync_node
+             "peer sync closure contains conflicting identity bytes")
+  in
+  let add_node node =
+    let key = Sync_node_id.to_bytes (sync_node_id node) in
+    match Hashtbl.find_opt nodes key with
+    | None ->
+        Hashtbl.add nodes key node;
+        Ok ()
+    | Some _ ->
+        Error
+          (Invalid_sync_node "peer sync closure contains duplicate sync nodes")
+  in
+  let offered =
+    if List.exists (Store.Stored_object_id.equal head_object) offered then
+      offered
+    else head_object :: offered
+  in
+  let rec inspect = function
+    | [] -> Ok ()
+    | object_id :: rest ->
+        let* envelope =
+          Store.get destination object_id
+          |> Result.map_error (fun error -> Store_error error)
+        in
+        let object_type = Envelope.object_type envelope in
+        let* () =
+          if object_type = Envelope.Peer_identity then
+            let* identity = decode_identity_payload (Envelope.payload envelope) in
+            add_identity identity
+          else if object_type = Envelope.Peer_sync_node then
+            let* node = decode_sync_node_payload (Envelope.payload envelope) in
+            add_node node
+          else Ok ()
+        in
+        inspect rest
+  in
+  let rec graph_nodes seen ordered identity =
+    let key = Sync_node_id.to_bytes identity in
+    if Hashtbl.mem seen key then Ok ordered
+    else
+      match Hashtbl.find_opt nodes key with
+      | None ->
+          Error
+            (Invalid_sync_node "peer sync closure omits a causal parent")
+      | Some node ->
+          Hashtbl.add seen key ();
+          let* ordered =
+            List.fold_left
+              (fun result parent ->
+                let* ordered = result in
+                graph_nodes seen ordered parent)
+              (Ok ordered) node.sync_node_parents
+          in
+          Ok (node :: ordered)
+  in
+  let* () = inspect offered in
+  let* head_node =
+    match Hashtbl.find_opt nodes (Sync_node_id.to_bytes head) with
+    | Some node -> Ok node
+    | None -> Error (Invalid_sync_node "peer sync head object is absent")
+  in
+  if not (Sync_node_id.equal (sync_node_id head_node) head) then
+    Error (Invalid_sync_node "peer sync head object does not match the request")
+  else if
+    not
+      (Peer_id.equal (sync_node_author head_node)
+         (peer_id (contact_identity contact)))
+  then Error Contact_mismatch
+  else
+    let* graph = graph_nodes (Hashtbl.create 32) [] head |> Result.map List.rev in
+    let* () = add_identity (contact_identity contact) in
+    let* graph_identities =
+      List.fold_left
+        (fun result node ->
+          let* values = result in
+          match
+            Hashtbl.find_opt identities
+              (Peer_id.to_bytes (sync_node_author node))
+          with
+          | Some identity -> Ok (identity :: values)
+          | None ->
+              Error
+                (Invalid_sync_node
+                   "peer sync closure omits an author identity"))
+        (Ok []) graph
+    in
+    let graph_identities =
+      List.sort_uniq
+        (fun left right ->
+          String.compare (Peer_id.to_bytes (peer_id left))
+            (Peer_id.to_bytes (peer_id right)))
+        graph_identities
+    in
+    let* () =
+      List.fold_left
+        (fun result identity ->
+          let* () = result in
+          store_identity destination identity |> Result.map (fun _ -> ()))
+        (Ok ()) graph_identities
+    in
+    let* () =
+      List.fold_left
+        (fun result node ->
+          let* () = result in
+          store_sync_node destination node |> Result.map (fun _ -> ()))
+        (Ok ()) graph
+    in
+    let snapshots =
+      List.sort_uniq Store.Stored_object_id.compare
+        (List.map
+           (fun node ->
+             sync_node_snapshot node |> Snapshot.Snapshot.stored_object_id)
+           graph)
+    in
+    List.fold_left
+      (fun result snapshot ->
+        let* () = result in
+        verify_sync_snapshot_closure destination
+          (Snapshot.Snapshot.of_stored_object_id snapshot))
+      (Ok ()) snapshots
+
 let exchange_session_id domain proof =
   let* payload = session_proof_payload proof in
   let raw = digest domain (Encoding.encode payload) in

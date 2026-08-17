@@ -220,6 +220,17 @@ val sync_transfer_closure :
     error )
   result
 
+(** Validates and binds an already-transferred immutable sync closure.  The
+    caller must arrange a staging boundary when malformed input must not create
+    destination objects.  This function never advances a tracking ref. *)
+val import_sync_closure :
+  Yeokcham_store.repository ->
+  contact:contact ->
+  head_object:Yeokcham_store.Stored_object_id.t ->
+  head:Yeokcham_id.Peer_sync_node_id.t ->
+  offered:Yeokcham_store.Stored_object_id.t list ->
+  (unit, error) result
+
 val reconcile :
   Yeokcham_store.repository ->
   author:identity ->
