@@ -29,6 +29,8 @@
 (executable
  (name yeokchamd)
  (modules yeokchamd)
+ (enabled_if
+  (= %{system} linux))
  (libraries
   yeokcham_local_daemon
   yeokcham_v2_linux_scratch_daemon

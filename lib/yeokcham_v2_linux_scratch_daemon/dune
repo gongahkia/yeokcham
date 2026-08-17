@@ -1,5 +1,7 @@
 (library
  (name yeokcham_v2_linux_scratch_daemon)
+ (enabled_if
+  (= %{system} linux))
  (libraries
   yeokcham_linux_watcher
   yeokcham_local_daemon

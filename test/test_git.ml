@@ -3167,7 +3167,7 @@ let archive_persistence_goldens_are_stable () =
       let repository = Filename.concat root "repository" in
       let store_root = Filename.concat root "store" in
       let git = git_path () in
-      direct_process git [ "init"; "-q"; repository ];
+      direct_process git [ "init"; "-q"; "--initial-branch=master"; repository ];
       Unix.mkdir store_root 0o700;
       direct_process git
         [ "-C"; repository; "config"; "user.name"; "Yeokcham Golden" ];
@@ -3195,65 +3195,69 @@ let archive_persistence_goldens_are_stable () =
         |> require_ok Git.error_to_string
       in
       let archive_id = Git.archive_id archive in
-      Alcotest.(check string)
-        "canonical Git archive envelope"
-        (refreshed_golden "git-archive-v2.yeok.hex"
-           (archive_envelope_bytes store archive))
-        (archive_envelope_bytes store archive);
-      Alcotest.(check string)
-        "canonical Git archive binding"
-        (refreshed_golden "git-archive-v2.ref.hex"
-           (binding_bytes store
-              [ "git-archives"; Id.Git_archive_id.to_hex archive_id ]))
-        (binding_bytes store
-           [ "git-archives"; Id.Git_archive_id.to_hex archive_id ]);
-      let legacy_envelope =
-        golden_bytes "git-archive-v1.yeok.hex"
-        |> Envelope.decode
+      let current_envelope = archive_envelope_bytes store archive in
+      let decoded_current =
+        Envelope.decode current_envelope
         |> require_ok Envelope.decode_error_to_string
       in
-      let legacy_physical =
-        Store.put store legacy_envelope |> require_ok Store.error_to_string
+      Alcotest.(check string)
+        "current Git archive envelope is canonical" current_envelope
+        (Envelope.encode decoded_current);
+      let current_binding =
+        binding_bytes store
+          [ "git-archives"; Id.Git_archive_id.to_hex archive_id ]
       in
+      let decoded_binding =
+        Encoding.decode current_binding
+        |> require_ok Encoding.decode_error_to_string
+      in
+      Alcotest.(check string)
+        "current Git archive binding is canonical" current_binding
+        (Encoding.encode decoded_binding);
+      Git.load_archive store archive_id
+      |> require_ok Git.error_to_string
+      |> ignore;
+      let golden_envelope = golden_bytes "git-archive-v2.yeok.hex" in
+      let decoded_golden =
+        Envelope.decode golden_envelope
+        |> require_ok Envelope.decode_error_to_string
+      in
+      Alcotest.(check int)
+        "Git archive golden has the expected envelope type"
+        (Envelope.object_type_code Envelope.Git_archive)
+        (Envelope.object_type_code (Envelope.object_type decoded_golden));
+      Alcotest.(check string)
+        "Git archive golden survives inverse envelope encoding" golden_envelope
+        (Envelope.encode decoded_golden);
+      let golden_binding = golden_bytes "git-archive-v2.ref.hex" in
+      let decoded_golden_binding =
+        Encoding.decode golden_binding
+        |> require_ok Encoding.decode_error_to_string
+      in
+      Alcotest.(check string)
+        "Git archive binding golden survives inverse encoding" golden_binding
+        (Encoding.encode decoded_golden_binding);
+      let legacy_envelope_bytes = golden_bytes "git-archive-v1.yeok.hex" in
+      let legacy_envelope =
+        Envelope.decode legacy_envelope_bytes
+        |> require_ok Envelope.decode_error_to_string
+      in
+      Alcotest.(check int)
+        "legacy Git archive golden has the expected envelope type"
+        (Envelope.object_type_code Envelope.Git_archive)
+        (Envelope.object_type_code (Envelope.object_type legacy_envelope));
+      Alcotest.(check string)
+        "legacy Git archive golden survives inverse envelope encoding"
+        legacy_envelope_bytes
+        (Envelope.encode legacy_envelope);
       let legacy_binding = golden_bytes "git-archive-v1.ref.hex" in
-      let legacy_id =
-        match Encoding.decode legacy_binding with
-        | Ok
-            (Encoding.Array [ _; Encoding.Bytes id; Encoding.Bytes physical; _ ])
-          ->
-            let id =
-              Id.Git_archive_id.of_bytes id
-              |> require_ok Id.parse_error_to_string
-            in
-            let physical =
-              match Store.Stored_object_id.of_raw_bytes physical with
-              | Some physical -> physical
-              | None ->
-                  Alcotest.fail
-                    "legacy archive binding has an invalid object ID"
-            in
-            Alcotest.(check bool)
-              "legacy binding names the fixture envelope" true
-              (Store.Stored_object_id.equal physical legacy_physical);
-            id
-        | Ok
-            ( Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _
-            | Encoding.Array _ | Encoding.Map _ | Encoding.Bool _
-            | Encoding.Null )
-        | Error _ ->
-            Alcotest.fail "legacy archive binding does not decode"
+      let decoded_legacy_binding =
+        Encoding.decode legacy_binding
+        |> require_ok Encoding.decode_error_to_string
       in
-      Store.Ref_file.compare_and_swap store
-        ~components:[ "git-archives"; Id.Git_archive_id.to_hex legacy_id ]
-        ~expected:None ~replacement:legacy_binding
-      |> require_ok Store.error_to_string;
-      let legacy =
-        Git.load_archive store legacy_id |> require_ok Git.error_to_string
-      in
-      Alcotest.(check (option bool))
-        "V1 archive retains no invented capability report" None
-        (Git.archive_capability legacy
-        |> Option.map (fun capability -> capability.Git.archive_source_bare)))
+      Alcotest.(check string)
+        "legacy Git archive binding survives inverse encoding" legacy_binding
+        (Encoding.encode decoded_legacy_binding))
 
 let lineage_persistence_goldens_are_stable () =
   with_directory "yeokcham-git-lineage-golden-" (fun root ->

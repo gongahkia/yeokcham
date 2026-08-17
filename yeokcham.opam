@@ -8,19 +8,6 @@ authors: ["Gabriel Ong Zhe Mian"]
 license: "MIT"
 homepage: "https://github.com/gongahkia/yeokcham"
 bug-reports: "https://github.com/gongahkia/yeokcham/issues"
-depends: [
-  "ocaml" {= "5.5.0"}
-  "dune" {>= "3.23"}
-  "digestif" {= "1.3.1"}
-  "mirage-crypto" {= "2.2.0"}
-  "mirage-crypto-ec" {= "2.2.0"}
-  "mirage-crypto-rng" {= "2.2.0"}
-  "inotify" {= "2.6"}
-  "alcotest" {= "1.9.1" & with-test}
-  "qcheck-core" {= "0.91" & with-test}
-  "qcheck-alcotest" {= "0.91" & with-test}
-  "odoc" {with-doc}
-]
 build: [
   ["dune" "subst"] {dev}
   [
@@ -37,3 +24,16 @@ build: [
 ]
 dev-repo: "git+https://github.com/gongahkia/yeokcham.git"
 x-maintenance-intent: ["(latest)"]
+depends: [
+  "ocaml" {= "5.5.0"}
+  "dune" {>= "3.23"}
+  "digestif" {= "1.3.1"}
+  "mirage-crypto" {= "2.2.0"}
+  "mirage-crypto-ec" {= "2.2.0"}
+  "mirage-crypto-rng" {= "2.2.0"}
+  "inotify" {= "2.6" & os = "linux"}
+  "alcotest" {= "1.9.1" & with-test}
+  "qcheck-core" {= "0.91" & with-test}
+  "qcheck-alcotest" {= "0.91" & with-test}
+  "odoc" {with-doc}
+]

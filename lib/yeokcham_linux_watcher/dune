@@ -1,3 +1,5 @@
 (library
  (name yeokcham_linux_watcher)
+ (enabled_if
+  (= %{system} linux))
  (libraries inotify unix yeokcham_watcher))

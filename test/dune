@@ -247,6 +247,8 @@
 (test
  (name linux_watcher_test)
  (modules linux_watcher_test)
+ (build_if
+  (= %{system} linux))
  (libraries alcotest unix yeokcham_linux_watcher yeokcham_watcher))
 
 (test
@@ -302,6 +304,8 @@
 (test
  (name test_v2_linux_scratch_daemon)
  (modules test_v2_linux_scratch_daemon)
+ (build_if
+  (= %{system} linux))
  (libraries
   alcotest
   mirage-crypto-ec
