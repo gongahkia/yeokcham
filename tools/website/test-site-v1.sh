@@ -20,7 +20,8 @@ for marker in \
   'id="release"' \
   'id="share"' \
   'id="inspect"' \
-  'data-theme-toggle' \
+  'class="guide-panel' \
+  'class="workflow-diagram"' \
   'data-copy' \
   'Skip to the guide'; do
   rg -Fq "$marker" site/index.html || {
@@ -45,6 +46,6 @@ done
 rg -Fq 'href="styles.css"' site/index.html
 rg -Fq 'src="app.js"' site/index.html
 rg -Fq 'navigator.clipboard.writeText' site/app.js
-rg -Fq '@media (max-width: 600px)' site/styles.css
+rg -Fq '@media (max-width: 680px)' site/styles.css
 rg -Fq 'prefers-reduced-motion' site/styles.css
 rg -Fq 'no third-party font, script, image, tracker, or analytics' site/README.md

@@ -32,7 +32,7 @@ make website-test
 ```
 
 `make ci` includes that check. Visual verification covers a desktop viewport
-and a narrow mobile viewport, keyboard navigation, the colour-theme control,
+and a narrow mobile viewport, keyboard navigation, the long-form panel rhythm,
 and copy controls.
 
 ## GitHub Pages enablement
