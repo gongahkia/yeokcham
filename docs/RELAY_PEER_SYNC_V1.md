@@ -70,9 +70,8 @@ two-repository import, staging on corruption, untrusted signatures, replay,
 and incomplete files. Its fixtures verify inverse canonical decoders and an
 unknown top-level package version. `peer_sync_relay_property_test` adds
 generated nonce/tracking canonical round trips. The aggregate check is
-`TMPDIR=/tmp make check` on macOS because the default Dune sandbox temporary
-path can exceed the platform Unix-domain socket limit in an unrelated daemon
-test.
+`make check`; the shared local runtime falls back to a short private socket
+directory when a requested runtime path exceeds the platform Unix-socket bound.
 
 ## ADR impact
 

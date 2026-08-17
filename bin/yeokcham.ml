@@ -16,6 +16,7 @@ module Local_service = Yeokcham_local_service
 module Local_command = Yeokcham_local_command
 module Peer = Yeokcham_peer
 module Peer_sync = Yeokcham_peer_sync
+module Peer_sync_daemon = Yeokcham_peer_sync_daemon
 module Peer_sync_relay = Yeokcham_peer_sync_relay
 module Peer_sync_ssh = Yeokcham_peer_sync_ssh
 module Progress = Yeokcham_cli_progress
@@ -579,6 +580,7 @@ let mutation_progress_message command arguments =
   | "peer", "sync" :: "ssh" :: _ -> Some "Synchronizing peer tracking over SSH"
   | "peer", "sync" :: "relay" :: _ ->
       Some "Synchronizing peer tracking through relay"
+  | "peer", "daemon" :: "run" :: _ -> Some "Running peer synchronization daemon"
   | "peer", "reconcile" :: _ -> Some "Reconciling peer snapshots"
   | _ -> None
 
@@ -2885,6 +2887,89 @@ let parse_peer_sync_relay_options arguments =
   in
   loop None None None None arguments
 
+type peer_daemon_transport =
+  | Daemon_local of string * string * Yeokcham_id.Peer_sync_node_id.t
+  | Daemon_relay of string
+  | Daemon_ssh of string * string option * Yeokcham_id.Peer_sync_node_id.t
+
+let parse_peer_daemon_run_options arguments =
+  let rec loop contact identity runtime tracking relay source_root source_key
+      known_hosts ssh_config head interval = function
+    | [] -> (
+        match (contact, identity, runtime, tracking) with
+        | Some contact, Some identity, Some runtime, Some tracking ->
+            let transport =
+              match (relay, source_root, source_key, known_hosts, head) with
+              | Some relay, None, None, None, None -> Ok (Daemon_relay relay)
+              | None, Some source_root, Some source_key, None, Some head ->
+                  Ok
+                    (Daemon_local
+                       (source_root, source_key, peer_sync_node_id head))
+              | None, None, None, Some known_hosts, Some head ->
+                  Ok
+                    (Daemon_ssh (known_hosts, ssh_config, peer_sync_node_id head))
+              | _ ->
+                  Error
+                    "peer daemon run requires exactly one configured \
+                     transport: --relay, --source-root/--source-key/--head, or \
+                     --known-hosts/--head"
+            in
+            transport
+            |> Result.map (fun transport ->
+                ( peer_contact_id contact,
+                  peer_id identity,
+                  runtime,
+                  tracking,
+                  transport,
+                  Option.value interval ~default:5.0 ))
+        | _ ->
+            Error
+              "peer daemon run requires --contact, --identity, --runtime, and \
+               --tracking")
+    | "--contact" :: value :: rest when Option.is_none contact ->
+        loop (Some value) identity runtime tracking relay source_root source_key
+          known_hosts ssh_config head interval rest
+    | "--identity" :: value :: rest when Option.is_none identity ->
+        loop contact (Some value) runtime tracking relay source_root source_key
+          known_hosts ssh_config head interval rest
+    | "--runtime" :: value :: rest when Option.is_none runtime ->
+        loop contact identity (Some value) tracking relay source_root source_key
+          known_hosts ssh_config head interval rest
+    | "--tracking" :: value :: rest when Option.is_none tracking ->
+        loop contact identity runtime (Some value) relay source_root source_key
+          known_hosts ssh_config head interval rest
+    | "--relay" :: value :: rest when Option.is_none relay ->
+        loop contact identity runtime tracking (Some value) source_root
+          source_key known_hosts ssh_config head interval rest
+    | "--source-root" :: value :: rest when Option.is_none source_root ->
+        loop contact identity runtime tracking relay (Some value) source_key
+          known_hosts ssh_config head interval rest
+    | "--source-key" :: value :: rest when Option.is_none source_key ->
+        loop contact identity runtime tracking relay source_root (Some value)
+          known_hosts ssh_config head interval rest
+    | "--known-hosts" :: value :: rest when Option.is_none known_hosts ->
+        loop contact identity runtime tracking relay source_root source_key
+          (Some value) ssh_config head interval rest
+    | "--ssh-config" :: value :: rest when Option.is_none ssh_config ->
+        loop contact identity runtime tracking relay source_root source_key
+          known_hosts (Some value) head interval rest
+    | "--head" :: value :: rest when Option.is_none head ->
+        loop contact identity runtime tracking relay source_root source_key
+          known_hosts ssh_config (Some value) interval rest
+    | "--interval-seconds" :: value :: rest when Option.is_none interval -> (
+        match float_of_string_opt value with
+        | Some value
+          when classify_float value <> FP_nan
+               && classify_float value <> FP_infinite
+               && value > 0.0 ->
+            loop contact identity runtime tracking relay source_root source_key
+              known_hosts ssh_config head (Some value) rest
+        | None | Some _ ->
+            Error "peer daemon interval must be a positive finite number")
+    | _ -> Error "invalid or duplicated peer daemon run option"
+  in
+  loop None None None None None None None None None None None arguments
+
 let parse_peer_sync_node_options arguments =
   let rec loop identity key snapshot parents = function
     | [] -> (
@@ -2940,6 +3025,16 @@ let print_peer_tracking_decision decision =
       Printf.printf "tracking=diverged\ncurrent=%s\nreceived=%s\n"
         (Yeokcham_id.Peer_sync_node_id.to_hex current)
         (Yeokcham_id.Peer_sync_node_id.to_hex (Peer_sync.sync_node_id received))
+
+let print_peer_daemon_status status =
+  Printf.printf "state=%s\nattempts=%d\ndetail=%s\n"
+    (Peer_sync_daemon.poll_status_to_string
+       (Peer_sync_daemon.status_kind status))
+    (Peer_sync_daemon.status_attempts status)
+    (Peer_sync_daemon.status_detail status);
+  match Peer_sync_daemon.status_next_retry_at status with
+  | None -> Printf.printf "next-retry=none\n"
+  | Some retry -> Printf.printf "next-retry=%.6f\n" retry
 
 let peer root arguments =
   match arguments with
@@ -3124,6 +3219,67 @@ let peer root arguments =
                           | Ok () ->
                               Printf.printf "transport=relay\npackage=%s\n"
                                 (Peer_sync_relay.package_id package)))))))
+  | "daemon" :: "run" :: options -> (
+      match parse_peer_daemon_run_options options with
+      | Error error -> fail Fun.id error
+      | Ok (contact, identity, runtime_dir, tracking_name, transport, interval)
+        -> (
+          let transport =
+            match transport with
+            | Daemon_local (source_root, source_key, head) ->
+                Peer_sync_daemon.Local { source_root; source_key; head }
+            | Daemon_relay relay -> Peer_sync_daemon.Relay { relay }
+            | Daemon_ssh (known_hosts, ssh_config, head) ->
+                Peer_sync_daemon.Ssh { known_hosts; ssh_config; head }
+          in
+          Peer_sync_daemon.make_configuration ~root ~runtime_dir ~contact
+            ~identity ~tracking_name ~transport
+          |> Result.map_error Peer_sync_daemon.error_to_string
+          |> function
+          | Error error -> fail Fun.id error
+          | Ok configuration -> (
+              match Peer_sync_daemon.start configuration with
+              | Error error -> fail Peer_sync_daemon.error_to_string error
+              | Ok daemon -> (
+                  let status_path =
+                    Peer_sync_daemon.status_path ~root ~runtime_dir
+                    |> Result.map_error Peer_sync_daemon.error_to_string
+                  in
+                  match status_path with
+                  | Error error ->
+                      Peer_sync_daemon.close daemon;
+                      fail Fun.id error
+                  | Ok status_path -> (
+                      Printf.printf "runtime=%s\nstatus=%s\n" runtime_dir
+                        status_path;
+                      flush stdout;
+                      Peer_sync_daemon.run daemon ~idle_timeout:interval
+                      |> Result.map_error Peer_sync_daemon.error_to_string
+                      |> function
+                      | Error error -> fail Fun.id error
+                      | Ok () -> ())))))
+  | [ "daemon"; "status"; "--runtime"; runtime_dir ] -> (
+      match Peer_sync_daemon.read_status ~root ~runtime_dir with
+      | Error error -> fail Peer_sync_daemon.error_to_string error
+      | Ok status -> print_peer_daemon_status status)
+  | [ "daemon"; "ping"; "--runtime"; runtime_dir ] -> (
+      Peer_sync_daemon.ping ~root ~runtime_dir
+      |> Result.map_error Peer_sync_daemon.error_to_string
+      |> function
+      | Error error -> fail Fun.id error
+      | Ok () -> print_endline "daemon=alive")
+  | [ "daemon"; "shutdown"; "--runtime"; runtime_dir ] -> (
+      Peer_sync_daemon.shutdown ~root ~runtime_dir
+      |> Result.map_error Peer_sync_daemon.error_to_string
+      |> function
+      | Error error -> fail Fun.id error
+      | Ok () -> print_endline "daemon=stopped")
+  | [ "daemon"; "recover"; "--runtime"; runtime_dir ] -> (
+      Peer_sync_daemon.recover_stale ~root ~runtime_dir
+      |> Result.map_error Peer_sync_daemon.error_to_string
+      |> function
+      | Error error -> fail Fun.id error
+      | Ok () -> print_endline "daemon=recovered")
   | [ "sync"; "snapshot" ] -> (
       match Store.open_repository ~root with
       | Error error -> fail Store.error_to_string error

@@ -39,6 +39,13 @@ val start : root:string -> runtime_dir:string -> (daemon, error) result
 (** [start] requires a V2 root, creates one private listener, and publishes a
     versioned 0600 discovery file. It never modifies repository history. *)
 
+val start_for_validated_root :
+  root:string -> runtime_dir:string -> (daemon, error) result
+(** Starts the same private runtime without applying the V2-only root detector.
+    The caller must already have validated the repository root for its own
+    model. This keeps the socket/capability protocol reusable without changing
+    the V2 contract of [start]. *)
+
 val serve_once : daemon -> (serve_result, error) result
 val serve : daemon -> (unit, error) result
 

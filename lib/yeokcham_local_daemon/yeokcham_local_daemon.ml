@@ -3,7 +3,12 @@ module Hash = Yeokcham_hash.Sha256
 
 type operation = Ping | Shutdown
 type runtime_location = Xdg_runtime of string | Fallback_runtime of string
-type endpoint = { directory : string; identity : string }
+
+type endpoint = {
+  directory : string;
+  socket_directory : string;
+  identity : string;
+}
 
 type daemon = {
   endpoint : endpoint;
@@ -65,7 +70,7 @@ let is_hex value =
        value
 
 let socket_path endpoint =
-  Filename.concat endpoint.directory ("y-" ^ endpoint.identity ^ ".sock")
+  Filename.concat endpoint.socket_directory ("y-" ^ endpoint.identity ^ ".sock")
 
 let discovery_path endpoint =
   Filename.concat endpoint.directory ("y-" ^ endpoint.identity ^ ".discovery")
@@ -84,6 +89,12 @@ let secure_directory path =
 let ensure_private_directory path =
   (try Unix.mkdir path 0o700 with Unix.Unix_error (Unix.EEXIST, _, _) -> ())
   |> fun () -> secure_directory path
+
+let short_socket_directory () =
+  Filename.concat "/tmp" (Printf.sprintf "yeokcham-%d-sockets" (Unix.getuid ()))
+
+let socket_path_for directory identity =
+  Filename.concat directory ("y-" ^ identity ^ ".sock")
 
 let runtime_path = function Xdg_runtime path | Fallback_runtime path -> path
 
@@ -111,7 +122,15 @@ let endpoint ~runtime_dir ~root =
       Hash.digest_string canonical_root |> Hash.to_raw_string |> hex
       |> fun value -> String.sub value 0 32
     in
-    Ok { directory = runtime_dir; identity }
+    let direct_socket = socket_path_for runtime_dir identity in
+    let* socket_directory =
+      if String.length direct_socket <= 90 then Ok runtime_dir
+      else
+        let directory = short_socket_directory () in
+        let* () = ensure_private_directory directory in
+        Ok directory
+    in
+    Ok { directory = runtime_dir; socket_directory; identity }
   with Unix.Unix_error (error, _, _) -> Error (io "realpath" root error)
 
 let check_v2_root root =
@@ -162,8 +181,7 @@ let remove_if_kind path kind =
   try if (Unix.lstat path).Unix.st_kind = kind then Unix.unlink path
   with Unix.Unix_error _ -> ()
 
-let start ~root ~runtime_dir =
-  let* () = check_v2_root root in
+let start_listener ~root ~runtime_dir =
   let* endpoint = endpoint ~runtime_dir ~root in
   let path = socket_path endpoint in
   try
@@ -191,6 +209,13 @@ let start ~root ~runtime_dir =
             Error (io "bind local socket" path error))
   with Unix.Unix_error (error, _, _) ->
     Error (io "create local socket" path error)
+
+let start ~root ~runtime_dir =
+  let* () = check_v2_root root in
+  start_listener ~root ~runtime_dir
+
+let start_for_validated_root ~root ~runtime_dir =
+  start_listener ~root ~runtime_dir
 
 let close daemon =
   if not daemon.closed then (

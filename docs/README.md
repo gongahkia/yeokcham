@@ -29,6 +29,8 @@ short project entry point; this page maps readers to the detailed material.
   transport, noncanonical capability placement, and verification boundary.
 - [Relay peer-sync v1](RELAY_PEER_SYNC_V1.md) records the signed filesystem
   mailbox, untrusted discovery, and staging-before-import boundary.
+- [Peer sync daemon v1](PEER_SYNC_DAEMON_V1.md) records the Unix runtime
+  scheduler, private control status, and bounded retry boundary.
 - [1.0 stability contract and release gate](STABILITY_1_0.md) distinguishes the
   proposed compatibility/release promises from the evidence still required to
   make them.

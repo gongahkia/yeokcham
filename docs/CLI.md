@@ -313,6 +313,20 @@ dune exec bin/yeokcham.exe -- peer relay discover \
 dune exec bin/yeokcham.exe -- peer sync relay \
   --contact <contact-id> --identity <local-peer-id> \
   --relay /absolute/path/to/shared-relay --tracking main
+dune exec bin/yeokcham.exe -- peer daemon run \
+  --runtime /absolute/private/runtime-dir \
+  --contact <contact-id> --identity <local-peer-id> --tracking main \
+  --relay /absolute/path/to/shared-relay \
+  [--interval-seconds 5]
+dune exec bin/yeokcham.exe -- peer daemon run \
+  --runtime /absolute/private/runtime-dir \
+  --contact <contact-id> --identity <local-peer-id> --tracking main \
+  --source-root /absolute/path/to/source --source-key /absolute/path/to/source.key \
+  --head <source-sync-node-id>
+dune exec bin/yeokcham.exe -- peer daemon status --runtime /absolute/private/runtime-dir
+dune exec bin/yeokcham.exe -- peer daemon ping --runtime /absolute/private/runtime-dir
+dune exec bin/yeokcham.exe -- peer daemon shutdown --runtime /absolute/private/runtime-dir
+dune exec bin/yeokcham.exe -- peer daemon recover --runtime /absolute/private/runtime-dir
 ```
 
 `peer sync snapshot` records an exact working-tree snapshot while excluding
@@ -344,8 +358,15 @@ advertisement only when it names the selected pinned contact, the local
 identity, repository format, and tracking name. It validates the package in an
 isolated staging repository before copying an immutable closure and advancing
 only the matching contact tracking ref. Relay files and receipts are runtime
-state, not canonical history. The remaining background daemon work is tracked
-under [#238](https://github.com/gongahkia/yeokcham/issues/238).
+state, not canonical history.
+
+`peer daemon run` is foreground and starts exactly one explicitly selected
+transport. Its runtime directory must already be private to the current user.
+The daemon writes inspectable private status only; its socket requires a
+per-run capability, `shutdown` is explicit, and `recover` removes only a
+connection-refused stale endpoint. A failed poll records a bounded retry rather
+than claiming success. The [peer daemon v1 contract](PEER_SYNC_DAEMON_V1.md)
+describes the runtime state and transport boundaries.
 
 ## Further reading
 

@@ -172,6 +172,20 @@
   yeokcham_store))
 
 (test
+ (name test_peer_sync_daemon)
+ (modules test_peer_sync_daemon)
+ (libraries
+  alcotest
+  mirage-crypto-ec
+  unix
+  yeokcham_local_daemon
+  yeokcham_peer_sync
+  yeokcham_peer_sync_daemon
+  yeokcham_peer_sync_relay
+  yeokcham_snapshot
+  yeokcham_store))
+
+(test
  (name peer_property_test)
  (modules peer_property_test)
  (libraries
