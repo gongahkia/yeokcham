@@ -1,6 +1,5 @@
 #!/bin/sh
 set -eu
-umask 077
 
 usage() {
   printf '%s\n' \
@@ -81,10 +80,13 @@ cd "$repository_root"
 commit=$(git rev-parse HEAD)
 
 mkdir -p "$evidence_dir"
+chmod 700 "$evidence_dir"
 evidence=$evidence_dir/$platform.json
 log=$evidence_dir/$platform.log
 [ ! -e "$evidence" ] && [ ! -L "$evidence" ] || fail "evidence already exists: $evidence"
 [ ! -e "$log" ] && [ ! -L "$log" ] || fail "log already exists: $log"
+: > "$log"
+chmod 600 "$log"
 
 fixture_parent=$(mktemp -d "${TMPDIR:-/tmp}/yeokcham-field-trial.XXXXXX")
 cleanup() {
@@ -199,6 +201,7 @@ with open(path, "x", encoding="utf-8") as handle:
     json.dump(evidence, handle, indent=2, sort_keys=True)
     handle.write("\n")
 PY
+chmod 600 "$evidence"
 python3 -m jsonschema --instance "$evidence" docs/stability/field-trial-v1.schema.json >> "$log" 2>&1
 
 printf 'evidence=%s\nlog=%s\n' "$evidence" "$log"
