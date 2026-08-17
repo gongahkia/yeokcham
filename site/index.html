@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="A straightforward guide to Yeokcham's scratch, intent, and release workflow.">
+    <meta name="theme-color" content="#f6f3ed">
+    <title>Yeokcham — the practical guide</title>
+    <link rel="stylesheet" href="styles.css">
+    <script defer src="app.js"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#guide">Skip to the guide</a>
+
+    <header class="site-header" data-header>
+      <a class="brand" href="#top" aria-label="Yeokcham guide home">
+        <span class="brand-mark" aria-hidden="true">Y</span><span>yeokcham</span>
+      </a>
+      <nav class="section-nav" aria-label="Guide sections">
+        <a href="#start">Start</a><a href="#recovery">Recover</a>
+        <a href="#intent">Compose</a><a href="#release">Release</a><a href="#share">Share</a>
+      </nav>
+      <button class="theme-toggle" type="button" data-theme-toggle aria-pressed="false">
+        <span aria-hidden="true">◐</span><span class="theme-label">Night</span>
+      </button>
+    </header>
+
+    <main id="guide">
+      <section class="hero section-shell" id="top" aria-labelledby="hero-title">
+        <div class="hero-copy">
+          <p class="eyebrow">A practical guide to local-first version control</p>
+          <h1 id="hero-title">Keep recovery,<br><em>intent,</em> and release<br>history separate.</h1>
+          <p class="hero-summary">
+            Yeokcham is a command-line VCS for working freely first, then deliberately
+            turning selected work into durable intent and exact releases.
+          </p>
+          <div class="hero-actions">
+            <a class="button button-primary" href="#start">Start the guide <span aria-hidden="true">↓</span></a>
+            <a class="button button-secondary" href="https://github.com/gongahkia/yeokcham">View source <span aria-hidden="true">↗</span></a>
+          </div>
+          <ul class="hero-facts" aria-label="Guide facts">
+            <li><strong>01</strong> exact bytes are canonical</li>
+            <li><strong>02</strong> ambiguity stays visible</li>
+            <li><strong>03</strong> local work comes first</li>
+          </ul>
+        </div>
+
+        <div class="history-map" aria-label="The three distinct Yeokcham histories">
+          <div class="map-caption">three different histories</div><div class="map-path" aria-hidden="true"></div>
+          <article class="history-card scratch-card">
+            <span class="card-index">01</span><h2>scratch</h2><p>automatic, bounded recovery checkpoints</p><span class="card-state">local safety</span>
+          </article>
+          <article class="history-card intent-card">
+            <span class="card-index">02</span><h2>intent</h2><p>human-curated capsules and revisions</p><span class="card-state">chosen meaning</span>
+          </article>
+          <article class="history-card release-card">
+            <span class="card-index">03</span><h2>release</h2><p>immutable, reproducible snapshots</p><span class="card-state">validated output</span>
+          </article>
+          <p class="map-note">They connect through explicit actions. They never collapse into one universal commit.</p>
+        </div>
+      </section>
+
+      <section class="guide-intro section-shell" aria-labelledby="intro-title">
+        <p class="section-kicker">The short version</p>
+        <div class="intro-grid">
+          <h2 id="intro-title">A calm workflow for work that is still becoming clear.</h2>
+          <p>
+            Checkpoints make experimentation recoverable. Capsules name the work you want
+            to keep. Workspaces assemble selected capsule revisions. Releases preserve the
+            exact result after validation. Each layer answers a different question.
+          </p>
+        </div>
+      </section>
+
+      <section class="guide-section section-shell" id="start" aria-labelledby="start-title">
+        <div class="section-heading">
+          <p class="section-kicker">01 — setup</p>
+          <h2 id="start-title">Start with a directory, not a commit.</h2>
+          <p>
+            Yeokcham manages a local working directory. The setup commands use the
+            checked-out executable through Dune; subsequent examples use <code>yeokcham</code>
+            for readability after installation.
+          </p>
+        </div>
+        <div class="step-grid two-up">
+          <article class="step-card">
+            <span class="step-number">a</span><h3>Prepare the checkout</h3>
+            <p>Install dependencies and confirm the executable is available.</p>
+            <div class="code-block"><pre><code>make setup
+make check
+dune exec bin/yeokcham.exe -- --help</code></pre><button class="copy-button" type="button" data-copy aria-label="Copy setup commands">Copy</button></div>
+          </article>
+          <article class="step-card">
+            <span class="step-number">b</span><h3>Initialize a working directory</h3>
+            <p>Run from the Yeokcham checkout and point the command at the directory you want to manage.</p>
+            <div class="code-block"><pre><code>dune exec bin/yeokcham.exe -- init \
+  --root /path/to/project
+dune exec bin/yeokcham.exe -- status \
+  --root /path/to/project</code></pre><button class="copy-button" type="button" data-copy aria-label="Copy initialization commands">Copy</button></div>
+          </article>
+        </div>
+      </section>
+
+      <section class="workflow section-shell" aria-labelledby="workflow-title">
+        <div class="section-heading narrow-heading"><p class="section-kicker">The working loop</p><h2 id="workflow-title">Work first. Decide later.</h2></div>
+        <ol class="workflow-steps">
+          <li><span class="workflow-number">01</span><strong>Edit</strong><small>your ordinary working directory</small></li>
+          <li><span class="workflow-number">02</span><strong>Checkpoint</strong><small>an exact local recovery state</small></li>
+          <li><span class="workflow-number">03</span><strong>Curate</strong><small>a capsule with human intent</small></li>
+          <li><span class="workflow-number">04</span><strong>Compose</strong><small>a workspace from selected revisions</small></li>
+          <li><span class="workflow-number">05</span><strong>Release</strong><small>one reproducible validated snapshot</small></li>
+        </ol>
+      </section>
+
+      <section class="guide-section section-shell" id="recovery" aria-labelledby="recovery-title">
+        <div class="section-heading">
+          <p class="section-kicker">02 — recovery</p><h2 id="recovery-title">Checkpoint often. Restore deliberately.</h2>
+          <p>A checkpoint is a local safety record, not a collaboration claim. Use the timeline to inspect it before changing the working directory.</p>
+        </div>
+        <div class="feature-layout">
+          <article class="terminal-panel" aria-label="Checkpoint workflow commands">
+            <div class="terminal-topline"><span aria-hidden="true">•</span><span aria-hidden="true">•</span><span aria-hidden="true">•</span><b>recovery loop</b></div>
+            <div class="terminal-body">
+              <p><span class="prompt">$</span> yeokcham checkpoint</p><p class="output">checkpoint=ckpt_… changed-paths=src/app.ml</p>
+              <p><span class="prompt">$</span> yeokcham timeline --limit 12</p><p class="output">retained checkpoint · current safety state</p>
+              <p><span class="prompt">$</span> yeokcham restore --dry-run &lt;checkpoint-id&gt;</p><p class="output">plan=ready · working tree unchanged</p>
+              <p><span class="prompt">$</span> yeokcham restore &lt;checkpoint-id&gt;</p>
+            </div>
+            <button class="copy-button terminal-copy" type="button" data-copy aria-label="Copy recovery workflow commands">Copy commands</button>
+          </article>
+          <div class="feature-copy">
+            <div class="note-card amber-note"><p class="note-label">Safety boundary</p><p>Start with <code>--dry-run</code>. Restore protects divergent work with a safety checkpoint and verifies the intended result before moving the scratch head.</p></div>
+            <div class="mini-command"><code>yeokcham pin &lt;checkpoint-id&gt;</code><span>keep a specific recovery state</span></div>
+            <div class="mini-command"><code>yeokcham compact --dry-run --explain</code><span>inspect retention before cleanup</span></div>
+            <div class="mini-command"><code>yeokcham history --graph</code><span>inspect typed native history</span></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="guide-section section-shell tinted-section" id="intent" aria-labelledby="intent-title">
+        <div class="section-heading">
+          <p class="section-kicker">03 — intent</p><h2 id="intent-title">Turn selected work into a capsule.</h2>
+          <p>A capsule names one logical unit of work. Its caller-supplied ID stays stable while each revision is immutable, so changing an implementation does not rewrite its meaning.</p>
+        </div>
+        <div class="step-grid three-up">
+          <article class="step-card compact-card">
+            <span class="step-number">01</span><h3>Create from current work</h3>
+            <div class="code-block"><pre><code>yeokcham capsule create --current \
+  --id search-filter \
+  --title "Add search filter" \
+  --description "Filter results locally"</code></pre><button class="copy-button" type="button" data-copy aria-label="Copy capsule creation command">Copy</button></div>
+          </article>
+          <article class="step-card compact-card">
+            <span class="step-number">02</span><h3>Inspect before revising</h3>
+            <div class="code-block"><pre><code>yeokcham capsule list
+yeokcham capsule show search-filter
+yeokcham capsule history search-filter</code></pre><button class="copy-button" type="button" data-copy aria-label="Copy capsule inspection commands">Copy</button></div>
+          </article>
+          <article class="step-card compact-card">
+            <span class="step-number">03</span><h3>Keep uncertainty explicit</h3>
+            <p>Dependencies, ordering, and conflicts are declared values. A capsule is never silently inferred from a Git commit or a peer publication.</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="guide-section section-shell" id="workspace" aria-labelledby="workspace-title">
+        <div class="section-heading">
+          <p class="section-kicker">04 — composition</p><h2 id="workspace-title">Build a workspace from chosen revisions.</h2>
+          <p>A workspace has a declared base and ordered capsule revisions. Yeokcham explains the order and stores conflicts as inspectable values instead of inventing a text merge.</p>
+        </div>
+        <div class="workspace-demo">
+          <div class="workspace-rail" aria-hidden="true"><span>base snapshot</span><span class="workspace-connector">→</span><span>capsule revisions</span><span class="workspace-connector">→</span><span>workspace attempt</span></div>
+          <div class="workspace-commands">
+            <div class="code-block wide-code"><pre><code>yeokcham work create --id product-search --base &lt;snapshot-id&gt;
+yeokcham work enable product-search &lt;search-filter-revision-id&gt;
+yeokcham work explain-order product-search
+yeokcham work materialise product-search --dry-run</code></pre><button class="copy-button" type="button" data-copy aria-label="Copy workspace commands">Copy</button></div>
+            <p class="callout-line"><strong>Conflict?</strong> Inspect it with <code>yeokcham conflict list product-search</code>. Unrelated work remains available.</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="guide-section section-shell release-section" id="release" aria-labelledby="release-title">
+        <div class="section-heading">
+          <p class="section-kicker">05 — validation and release</p><h2 id="release-title">Release one exact, reproducible result.</h2>
+          <p>Validation runs against a named immutable snapshot in a fresh temporary directory. A release records the verified workspace composition and final snapshot; it is not a renamed checkpoint or capsule.</p>
+        </div>
+        <div class="release-grid">
+          <article class="release-step"><span>01</span><h3>Validate a snapshot</h3><div class="code-block"><pre><code>yeokcham validation run \
+  --snapshot &lt;snapshot-id&gt; \
+  --exec make --arg check</code></pre><button class="copy-button" type="button" data-copy aria-label="Copy validation command">Copy</button></div></article>
+          <article class="release-step"><span>02</span><h3>Create the release</h3><div class="code-block"><pre><code>yeokcham release create \
+  --workspace product-search \
+  --message "Search filters"</code></pre><button class="copy-button" type="button" data-copy aria-label="Copy release command">Copy</button></div></article>
+          <article class="release-step"><span>03</span><h3>Verify it later</h3><div class="code-block"><pre><code>yeokcham release list
+yeokcham release show &lt;release-id&gt;
+yeokcham release verify &lt;release-id&gt;</code></pre><button class="copy-button" type="button" data-copy aria-label="Copy release verification commands">Copy</button></div></article>
+        </div>
+        <p class="quiet-note">A native release records reproducibility. External source-release signing and distribution are separate, explicit procedures.</p>
+      </section>
+
+      <section class="guide-section section-shell tinted-section" id="share" aria-labelledby="share-title">
+        <div class="section-heading">
+          <p class="section-kicker">06 — interchange and sharing</p><h2 id="share-title">Keep foreign history foreign. Share deliberately.</h2>
+          <p>Git preservation is an explicit migration boundary. Peer publication transfers a verified projection; the receiving repository chooses whether to create a new local capsule. Neither operation makes a workspace selection for you.</p>
+        </div>
+        <div class="share-grid">
+          <article class="share-card"><div class="share-icon" aria-hidden="true">↔</div><p class="note-label">Git interchange</p><h3>Preserve and adopt without pretending equivalence.</h3><div class="code-block"><pre><code>yeokcham git import commit \
+  --repository /absolute/git-dir \
+  --commit &lt;full-git-commit-id&gt;</code></pre><button class="copy-button" type="button" data-copy aria-label="Copy Git import command">Copy</button></div></article>
+          <article class="share-card"><div class="share-icon" aria-hidden="true">⇄</div><p class="note-label">Peer publication</p><h3>Receive a proposal, then explicitly integrate it.</h3><div class="code-block"><pre><code>yeokcham peer publish capsule \
+  --capsule search-filter \
+  --revision &lt;revision-id&gt;
+
+yeokcham peer fetch \
+  --from /absolute/source-root \
+  --publication &lt;publication-id&gt;</code></pre><button class="copy-button" type="button" data-copy aria-label="Copy peer publication commands">Copy</button></div></article>
+        </div>
+      </section>
+
+      <section class="guide-section section-shell" id="inspect" aria-labelledby="inspect-title">
+        <div class="section-heading"><p class="section-kicker">07 — inspect</p><h2 id="inspect-title">When in doubt, inspect the state you have.</h2><p>These commands read and explain the repository. They do not repair or silently mutate it.</p></div>
+        <div class="command-index" role="list">
+          <div class="command-row" role="listitem"><code>yeokcham status</code><span>current local state</span></div>
+          <div class="command-row" role="listitem"><code>yeokcham timeline --limit 32</code><span>retained scratch checkpoints</span></div>
+          <div class="command-row" role="listitem"><code>yeokcham history --graph</code><span>typed native history, not one commit graph</span></div>
+          <div class="command-row" role="listitem"><code>yeokcham storage stats</code><span>storage by history domain</span></div>
+          <div class="command-row" role="listitem"><code>yeokcham verify</code><span>hashes, reachability, and reproducibility</span></div>
+        </div>
+      </section>
+
+      <section class="resources section-shell" id="resources" aria-labelledby="resources-title">
+        <div><p class="section-kicker">Keep going</p><h2 id="resources-title">The quick guide ends here. The contracts do not.</h2></div>
+        <div class="resource-links">
+          <a href="https://github.com/gongahkia/yeokcham/blob/main/docs/CLI.md">Complete CLI reference <span aria-hidden="true">↗</span></a>
+          <a href="https://github.com/gongahkia/yeokcham/blob/main/FORMAL_MODEL.md">Formal model and invariants <span aria-hidden="true">↗</span></a>
+          <a href="https://github.com/gongahkia/yeokcham/blob/main/docs/ARCHITECTURE_WALKTHROUGH.md">Architecture walkthrough <span aria-hidden="true">↗</span></a>
+          <a href="https://github.com/gongahkia/yeokcham/issues">Issue tracker <span aria-hidden="true">↗</span></a>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer section-shell">
+      <a class="brand" href="#top"><span class="brand-mark" aria-hidden="true">Y</span><span>yeokcham</span></a>
+      <p>Recovery is not intent. Intent is not a release.</p><a href="#top">Back to top ↑</a>
+    </footer>
+  </body>
+</html>

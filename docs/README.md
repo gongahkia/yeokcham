@@ -19,6 +19,8 @@ short project entry point; this page maps readers to the detailed material.
 
 - [CLI reference](CLI.md) describes the local command groups and their safety
   boundaries.
+- [Website source](../site/README.md) contains the static, GitHub Pages-ready
+  quick guide and its local verification instructions.
 - [Architecture walkthrough](ARCHITECTURE_WALKTHROUGH.md) maps the implemented
   model to modules, operational boundaries, and verification.
 - [Git interchange](GIT_INTERCHANGE.md) records the implemented narrow bridge
