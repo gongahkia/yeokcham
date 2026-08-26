@@ -1140,7 +1140,7 @@ let rec is_prefix prefix path =
 let is_ignored rules components =
   List.exists (fun rule -> is_prefix rule components) rules
 
-let scan ~root ~store =
+let scan_excluding_root_names ~excluded_root_names ~root ~store =
   let* root_stat =
     try Ok (Unix.lstat root)
     with Unix.Unix_error (error, _, _) ->
@@ -1162,7 +1162,7 @@ let scan ~root ~store =
         | name :: rest ->
             let child_relative = relative @ [ name ] in
             if
-              (relative = [] && String.equal name ".yeokcham")
+              (relative = [] && List.mem name excluded_root_names)
               || is_ignored ignore_rules child_relative
             then scan_entries reversed rest
             else
@@ -1208,3 +1208,6 @@ let scan ~root ~store =
     let snapshot = Snapshot.create ~root:root_tree in
     let* identity = Snapshot.store store snapshot in
     Ok (identity, snapshot)
+
+let scan ~root ~store =
+  scan_excluding_root_names ~excluded_root_names:[ ".yeokcham" ] ~root ~store

@@ -145,4 +145,12 @@ val scan :
   store:Yeokcham_store.repository ->
   (Snapshot.id * Snapshot.t, error) result
 
+val scan_excluding_root_names :
+  excluded_root_names:string list ->
+  root:string ->
+  store:Yeokcham_store.repository ->
+  (Snapshot.id * Snapshot.t, error) result
+(** Like [scan], with an explicit list of root-level metadata names to exclude.
+    [scan] preserves the historical default of excluding only [.yeokcham]. *)
+
 val inline_file_limit : int

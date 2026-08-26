@@ -11,6 +11,8 @@ let usage () =
     \  yeokcham-v4 init [--root PATH] --device ID --draft ID --title TITLE\n\
     \  yeokcham-v4 save [--root PATH]\n\
     \  yeokcham-v4 status [--root PATH]\n\
+    \  yeokcham-v4 timeline [--root PATH]\n\
+    \  yeokcham-v4 restore [--root PATH] --checkpoint ID --destination PATH\n\
     \  yeokcham-v4 draft new [--root PATH] --id ID --title TITLE"
 
 let require_ok render = function
@@ -75,6 +77,23 @@ let parse_new_draft arguments =
   in
   loop None None None arguments
 
+let parse_restore arguments =
+  let rec loop root checkpoint destination = function
+    | [] -> (
+        match (checkpoint, destination) with
+        | Some checkpoint, Some destination ->
+            (Option.value root ~default:default_root, checkpoint, destination)
+        | None, _ | _, None -> usage ())
+    | "--root" :: value :: rest when Option.is_none root ->
+        loop (Some value) checkpoint destination rest
+    | "--checkpoint" :: value :: rest when Option.is_none checkpoint ->
+        loop root (Some value) destination rest
+    | "--destination" :: value :: rest when Option.is_none destination ->
+        loop root checkpoint (Some value) rest
+    | _ -> usage ()
+  in
+  loop None None None arguments
+
 let run_init arguments =
   let root, creator, draft, title = parse_init arguments in
   let creator =
@@ -102,6 +121,27 @@ let run_status arguments =
   let root = parse_root arguments in
   Service.status ~root |> require_ok Service.error_to_string |> render_status
 
+let run_timeline arguments =
+  let root = parse_root arguments in
+  Service.status ~root |> require_ok Service.error_to_string |> fun status ->
+  List.iter
+    (fun checkpoint ->
+      Printf.printf "checkpoint %s\n"
+        (Model.Snapshot_id.to_string checkpoint.Model.checkpoint_snapshot))
+    status.Service.checkpoints
+
+let run_restore arguments =
+  let root, checkpoint, destination = parse_restore arguments in
+  let checkpoint =
+    parse_identifier "invalid checkpoint identifier" Model.Snapshot_id.of_string
+      checkpoint
+  in
+  Service.restore ~root ~checkpoint ~destination
+  |> require_ok Service.error_to_string;
+  Printf.printf "restored %s to %s\n"
+    (Model.Snapshot_id.to_string checkpoint)
+    destination
+
 let run_new_draft arguments =
   let root, id, title = parse_new_draft arguments in
   let id =
@@ -116,5 +156,7 @@ let () =
   | _ :: "init" :: arguments -> run_init arguments
   | _ :: "save" :: arguments -> run_save arguments
   | _ :: "status" :: arguments -> run_status arguments
+  | _ :: "timeline" :: arguments -> run_timeline arguments
+  | _ :: "restore" :: arguments -> run_restore arguments
   | _ :: "draft" :: "new" :: arguments -> run_new_draft arguments
   | _ -> usage ()

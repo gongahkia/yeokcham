@@ -61,6 +61,22 @@ let contains output needle =
 let expect_output_contains name needle output =
   Alcotest.(check bool) name true (contains output needle)
 
+let saved_checkpoint output =
+  let prefix = "saved " in
+  let prefix_length = String.length prefix in
+  let rec find index =
+    if index + prefix_length > String.length output then
+      Alcotest.fail "CLI output did not contain a saved checkpoint"
+    else if String.equal (String.sub output index prefix_length) prefix then
+      let value_start = index + prefix_length in
+      match String.index_from_opt output value_start '\n' with
+      | Some value_end -> String.sub output value_start (value_end - value_start)
+      | None ->
+          Alcotest.fail "saved checkpoint output was not newline-terminated"
+    else find (index + 1)
+  in
+  find 0
+
 let write_file root name contents =
   Out_channel.with_open_bin (Filename.concat root name) (fun channel ->
       Out_channel.output_string channel contents)
@@ -84,6 +100,7 @@ let command_journey_reports_saved_work_and_drafts () =
       in
       require_success "init" status errors;
       expect_output_contains "init reports a saved checkpoint" "saved " output;
+      let initial_checkpoint = saved_checkpoint output in
       let output, errors, status = run [ "save"; "--root"; root ] in
       require_success "unchanged save" status errors;
       expect_output_contains "unchanged save is explicit" "save unchanged"
@@ -92,6 +109,32 @@ let command_journey_reports_saved_work_and_drafts () =
       let output, errors, status = run [ "save"; "--root"; root ] in
       require_success "changed save" status errors;
       expect_output_contains "changed save is explicit" "save recorded" output;
+      let output, errors, status = run [ "timeline"; "--root"; root ] in
+      require_success "timeline" status errors;
+      expect_output_contains "timeline includes initial checkpoint"
+        ("checkpoint " ^ initial_checkpoint)
+        output;
+      let destination = Filename.concat root "recovered" in
+      Unix.mkdir destination 0o700;
+      let output, errors, status =
+        run
+          [
+            "restore";
+            "--root";
+            root;
+            "--checkpoint";
+            initial_checkpoint;
+            "--destination";
+            destination;
+          ]
+      in
+      require_success "restore" status errors;
+      expect_output_contains "restore is explicit" "restored " output;
+      Alcotest.(check string)
+        "CLI restore materializes prior file bytes" "let version = 1\n"
+        (In_channel.with_open_bin
+           (Filename.concat destination "main.ml")
+           In_channel.input_all);
       let output, errors, status =
         run
           [

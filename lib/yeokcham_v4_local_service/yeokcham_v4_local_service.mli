@@ -6,7 +6,10 @@
 type error =
   | Store_error of Yeokcham_v4_store.error
   | Snapshot_error of Yeokcham_snapshot.error
+  | Materialize_error of Yeokcham_snapshot.Materialize.error
   | Model_error of Yeokcham_v4_model.error
+  | Invalid_checkpoint_id of string
+  | Unknown_checkpoint of Yeokcham_v4_model.Snapshot_id.t
 
 type save_outcome = Unchanged of status | Saved of status
 
@@ -16,6 +19,7 @@ and status = {
   shared_change_count : int;
   open_decisions : Yeokcham_v4_model.decision list;
   delivery_count : int;
+  checkpoints : Yeokcham_v4_model.checkpoint list;
 }
 
 val error_to_string : error -> string
@@ -29,6 +33,12 @@ val init :
 
 val save : root:string -> (save_outcome, error) result
 val status : root:string -> (status, error) result
+
+val restore :
+  root:string ->
+  checkpoint:Yeokcham_v4_model.Snapshot_id.t ->
+  destination:string ->
+  (unit, error) result
 
 val new_draft :
   root:string ->

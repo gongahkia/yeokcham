@@ -27,6 +27,9 @@ let write_file root name contents =
   Out_channel.with_open_bin (Filename.concat root name) (fun channel ->
       Out_channel.output_string channel contents)
 
+let read_file root name =
+  In_channel.with_open_bin (Filename.concat root name) In_channel.input_all
+
 let id parser value = parser value |> Result.get_ok
 let device value = id Model.Device_id.of_string value
 let draft value = id Model.Draft_id.of_string value
@@ -82,6 +85,57 @@ let new_draft_closes_the_previous_draft_without_losing_saved_state () =
         (Model.Snapshot_id.to_string initial.Service.checkpoint)
         (Model.Snapshot_id.to_string next.Service.checkpoint))
 
+let restore_materializes_a_prior_checkpoint_without_touching_the_project () =
+  with_directory "yeokcham-v4-service-restore-" (fun root ->
+      write_file root "main.ml" "let version = 1\n";
+      let initial = initialize root in
+      write_file root "main.ml" "let version = 2\n";
+      ignore (Service.save ~root |> require_ok Service.error_to_string);
+      let destination = Filename.concat root "recovered" in
+      Unix.mkdir destination 0o700;
+      Service.restore ~root ~checkpoint:initial.Service.checkpoint ~destination
+      |> require_ok Service.error_to_string;
+      Alcotest.(check string)
+        "restored directory has the prior bytes" "let version = 1\n"
+        (read_file destination "main.ml");
+      Alcotest.(check string)
+        "active project remains untouched" "let version = 2\n"
+        (read_file root "main.ml"))
+
+let restore_rejects_a_nonempty_destination () =
+  with_directory "yeokcham-v4-service-restore-failure-" (fun root ->
+      write_file root "main.ml" "let version = 1\n";
+      let initial = initialize root in
+      let destination = Filename.concat root "occupied" in
+      Unix.mkdir destination 0o700;
+      write_file destination "already-here" "keep this\n";
+      match
+        Service.restore ~root ~checkpoint:initial.Service.checkpoint
+          ~destination
+      with
+      | Error error ->
+          Alcotest.(check bool)
+            "destination safety error is explicit" true
+            (String.starts_with
+               ~prefix:"materialisation destination is not empty:"
+               (Service.error_to_string error))
+      | Ok () -> Alcotest.fail "restore wrote into a nonempty destination")
+
+let v4_capture_excludes_git_metadata () =
+  with_directory "yeokcham-v4-service-git-metadata-" (fun root ->
+      write_file root "main.ml" "let version = 1\n";
+      let git = Filename.concat root ".git" in
+      Unix.mkdir git 0o700;
+      write_file git "config" "private metadata\n";
+      let initial = initialize root in
+      let destination = Filename.concat root "recovered" in
+      Unix.mkdir destination 0o700;
+      Service.restore ~root ~checkpoint:initial.Service.checkpoint ~destination
+      |> require_ok Service.error_to_string;
+      Alcotest.(check bool)
+        "restored snapshot excludes the Git directory" false
+        (Sys.file_exists (Filename.concat destination ".git")))
+
 let () =
   Alcotest.run "V4 local service"
     [
@@ -93,5 +147,11 @@ let () =
             changed_save_creates_a_new_checkpoint;
           Alcotest.test_case "new draft retains saved state" `Quick
             new_draft_closes_the_previous_draft_without_losing_saved_state;
+          Alcotest.test_case "restore materializes a prior checkpoint" `Quick
+            restore_materializes_a_prior_checkpoint_without_touching_the_project;
+          Alcotest.test_case "restore rejects a nonempty destination" `Quick
+            restore_rejects_a_nonempty_destination;
+          Alcotest.test_case "capture excludes Git metadata" `Quick
+            v4_capture_excludes_git_metadata;
         ] );
     ]

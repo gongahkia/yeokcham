@@ -56,11 +56,54 @@ let disjoint_text_spans_are_order_independent =
              (fun revision -> V4.Revision_id.to_string revision.V4.revision)
              right.V4.applied)
 
+let checkpoint_history_is_unique_and_newest_first =
+  QCheck2.Test.make ~count:200
+    ~name:"V4 checkpoint history retains unique snapshots newest-first"
+    QCheck2.Gen.(list_size (int_range 0 80) (int_range 0 20))
+    (fun values ->
+      let snapshots =
+        List.map
+          (fun value -> snapshot ("snapshot-" ^ string_of_int value))
+          values
+      in
+      let state =
+        List.fold_left
+          (fun state snapshot -> V4.checkpoint state ~snapshot)
+          (project ()) snapshots
+      in
+      let expected =
+        List.fold_left
+          (fun history snapshot ->
+            if
+              List.exists
+                (fun existing -> V4.Snapshot_id.equal existing snapshot)
+                history
+            then history
+            else snapshot :: history)
+          [ snapshot "snapshot-base" ]
+          snapshots
+      in
+      let actual =
+        V4.checkpoints state
+        |> List.map (fun checkpoint -> checkpoint.V4.checkpoint_snapshot)
+      in
+      let active = V4.active_draft state in
+      let expected_active =
+        match List.rev snapshots with
+        | [] -> snapshot "snapshot-base"
+        | latest :: _ -> latest
+      in
+      List.length expected = List.length actual
+      && List.for_all2 V4.Snapshot_id.equal expected actual
+      && V4.Snapshot_id.equal active.V4.latest_checkpoint expected_active)
+
 let () =
   Alcotest.run "V4 model properties"
     [
       ( "composition",
         [
           QCheck_alcotest.to_alcotest disjoint_text_spans_are_order_independent;
+          QCheck_alcotest.to_alcotest
+            checkpoint_history_is_unique_and_newest_first;
         ] );
     ]
