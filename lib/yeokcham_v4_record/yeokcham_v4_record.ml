@@ -18,7 +18,8 @@ let error_to_string = function
   | Model_error error -> Model.error_to_string error
   | Noncanonical_bytes -> "V4 state record is not canonically encoded"
 
-let schema_version = 1L
+let legacy_schema_version = 1L
+let schema_version = 2L
 let ( let* ) = Result.bind
 
 let construction value =
@@ -250,6 +251,13 @@ let decode_draft value =
       Ok Model.{ draft_id; title; state; latest_checkpoint; shared_change }
   | _ -> assert false
 
+let encode_checkpoint checkpoint =
+  encode_snapshot checkpoint.Model.checkpoint_snapshot
+
+let decode_checkpoint value =
+  let* checkpoint_snapshot = decode_snapshot value in
+  Ok Model.{ checkpoint_snapshot }
+
 let encode_change change =
   let* id = encode_change_id change.Model.change_id in
   let* source = encode_optional encode_draft_id change.Model.source_draft in
@@ -360,12 +368,18 @@ let sort_deliveries =
   List.sort (fun left right ->
       Model.Delivery_id.compare left.Model.delivery_id right.Model.delivery_id)
 
-let encode_state_value state =
+let encode_state_value ~version ~checkpoints state =
   let* creator = encode_device_id state.Model.state_creator in
   let* baseline = encode_snapshot state.Model.state_baseline in
   let* active = encode_draft_id state.Model.state_active_draft in
   let* drafts =
     encode_list encode_draft (sort_drafts state.Model.state_drafts)
+  in
+  let* checkpoints =
+    match checkpoints with
+    | None -> Ok None
+    | Some checkpoints ->
+        encode_list encode_checkpoint checkpoints |> Result.map Option.some
   in
   let* changes =
     encode_list encode_change (sort_changes state.Model.state_changes)
@@ -377,57 +391,114 @@ let encode_state_value state =
   let* deliveries =
     encode_list encode_delivery (sort_deliveries state.Model.state_deliveries)
   in
-  array
-    [
-      Encoding.integer schema_version;
-      creator;
-      baseline;
-      active;
-      drafts;
-      changes;
-      resolutions;
-      deliveries;
-    ]
+  match checkpoints with
+  | None ->
+      array
+        [
+          Encoding.integer version;
+          creator;
+          baseline;
+          active;
+          drafts;
+          changes;
+          resolutions;
+          deliveries;
+        ]
+  | Some checkpoints ->
+      array
+        [
+          Encoding.integer version;
+          creator;
+          baseline;
+          active;
+          drafts;
+          checkpoints;
+          changes;
+          resolutions;
+          deliveries;
+        ]
+
+let encode_current_state_value state =
+  encode_state_value ~version:schema_version
+    ~checkpoints:(Some state.Model.state_checkpoints) state
+
+let encode_legacy_state_value state =
+  encode_state_value ~version:legacy_schema_version ~checkpoints:None state
+
+let legacy_checkpoints baseline drafts =
+  baseline
+  :: List.map
+       (fun (draft : Model.draft) -> draft.Model.latest_checkpoint)
+       drafts
+  |> List.sort_uniq Model.Snapshot_id.compare
+  |> List.map (fun checkpoint_snapshot -> Model.{ checkpoint_snapshot })
+
+let decode_state_components ~creator ~baseline ~active ~drafts ~checkpoints
+    ~changes ~resolutions ~deliveries =
+  let* state_creator = decode_device_id creator in
+  let* state_baseline = decode_snapshot baseline in
+  let* state_active_draft = decode_draft_id active in
+  let* state_drafts = decode_list "drafts" decode_draft drafts in
+  let* state_checkpoints =
+    match checkpoints with
+    | Some checkpoints ->
+        decode_list "checkpoints" decode_checkpoint checkpoints
+    | None -> Ok (legacy_checkpoints state_baseline state_drafts)
+  in
+  let* state_changes = decode_list "shared changes" decode_change changes in
+  let* state_resolutions =
+    decode_list "resolutions" decode_resolution resolutions
+  in
+  let* state_deliveries = decode_list "deliveries" decode_delivery deliveries in
+  Ok
+    Model.
+      {
+        state_creator;
+        state_baseline;
+        state_active_draft;
+        state_drafts;
+        state_checkpoints;
+        state_changes;
+        state_resolutions;
+        state_deliveries;
+      }
 
 let decode_state_value value =
-  let* fields = exact_array "V4 state" 8 value in
+  let* fields = array_values "V4 state" value in
   match fields with
   | [
-   version; creator; baseline; active; drafts; changes; resolutions; deliveries;
+   version;
+   creator;
+   baseline;
+   active;
+   drafts;
+   checkpoints;
+   changes;
+   resolutions;
+   deliveries;
   ] ->
       let* version = decoded_integer "V4 state schema version" version in
       if not (Int64.equal version schema_version) then
         Error (Unsupported_schema_version version)
       else
-        let* state_creator = decode_device_id creator in
-        let* state_baseline = decode_snapshot baseline in
-        let* state_active_draft = decode_draft_id active in
-        let* state_drafts = decode_list "drafts" decode_draft drafts in
-        let* state_changes =
-          decode_list "shared changes" decode_change changes
-        in
-        let* state_resolutions =
-          decode_list "resolutions" decode_resolution resolutions
-        in
-        let* state_deliveries =
-          decode_list "deliveries" decode_delivery deliveries
-        in
-        Ok
-          Model.
-            {
-              state_creator;
-              state_baseline;
-              state_active_draft;
-              state_drafts;
-              state_changes;
-              state_resolutions;
-              state_deliveries;
-            }
-  | _ -> assert false
+        decode_state_components ~creator ~baseline ~active ~drafts
+          ~checkpoints:(Some checkpoints) ~changes ~resolutions ~deliveries
+        |> Result.map (fun state -> (version, state))
+  | [
+   version; creator; baseline; active; drafts; changes; resolutions; deliveries;
+  ] ->
+      let* version = decoded_integer "V4 state schema version" version in
+      if not (Int64.equal version legacy_schema_version) then
+        Error (Unsupported_schema_version version)
+      else
+        decode_state_components ~creator ~baseline ~active ~drafts
+          ~checkpoints:None ~changes ~resolutions ~deliveries
+        |> Result.map (fun state -> (version, state))
+  | _ -> Error (Invalid_schema "V4 state has an unsupported field count")
 
 let encode_state state =
   let* _ = Model.import state |> model in
-  let* value = encode_state_value state in
+  let* value = encode_current_state_value state in
   Ok (Encoding.encode value)
 
 let decode_state encoded =
@@ -435,9 +506,14 @@ let decode_state encoded =
     Encoding.decode encoded
     |> Result.map_error (fun error -> Decode_error error)
   in
-  let* state = decode_state_value value in
+  let* version, state = decode_state_value value in
   let* _ = Model.import state |> model in
-  let* canonical = encode_state state in
+  let* canonical_value =
+    if Int64.equal version legacy_schema_version then
+      encode_legacy_state_value state
+    else encode_current_state_value state
+  in
+  let canonical = Encoding.encode canonical_value in
   if String.equal encoded canonical then Ok state else Error Noncanonical_bytes
 
 let encode_project project = Model.export project |> encode_state

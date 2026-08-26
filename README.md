@@ -16,6 +16,19 @@ small-team change composer built around saved, shared, needs-a-decision, and
 delivered. V3 remains the implemented prototype while V4's functional core is
 developed and tested independently.
 
+The first V4 local slice is available through `yeokcham-v4`:
+
+```sh
+yeokcham-v4 init --device alice --draft first-task --title "first task"
+yeokcham-v4 status
+yeokcham-v4 save
+yeokcham-v4 draft new --id next-task --title "next task"
+```
+
+It currently implements exact command-triggered saving and draft changes only.
+Sharing, conflict resolution, watcher capture, and transport are not exposed by
+this CLI yet.
+
 ## Start here
 
 The supported product direction is macOS, Linux, and WSL. The checked-in

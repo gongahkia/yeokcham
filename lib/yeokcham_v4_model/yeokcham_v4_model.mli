@@ -104,6 +104,8 @@ type draft = {
   shared_change : Change_id.t option;
 }
 
+type checkpoint = { checkpoint_snapshot : Snapshot_id.t }
+
 type shared_change = {
   change_id : Change_id.t;
   source_draft : Draft_id.t option;
@@ -158,6 +160,7 @@ type state = {
   state_baseline : Snapshot_id.t;
   state_active_draft : Draft_id.t;
   state_drafts : draft list;
+  state_checkpoints : checkpoint list;
   state_changes : shared_change list;
   state_resolutions : resolution list;
   state_deliveries : delivery list;
@@ -175,6 +178,7 @@ val init :
 val creator : project -> Device_id.t
 val active_draft : project -> draft
 val drafts : project -> draft list
+val checkpoints : project -> checkpoint list
 val shared_changes : project -> shared_change list
 val resolutions : project -> resolution list
 val deliveries : project -> delivery list

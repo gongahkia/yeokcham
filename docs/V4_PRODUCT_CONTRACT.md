@@ -17,12 +17,14 @@ state can be encoded, decoded, written as an immutable object, published only
 through a compare-and-swap head, and bound to an exact snapshot before watcher,
 CLI, or transport implementation is added.
 
-The record slice owns these types: `state`, `draft`, `shared_change`,
-`change_revision`, `edit`, `resolution`, and `delivery`.  Its invariants are
+The record slice owns these types: `state`, `checkpoint`, `draft`,
+`shared_change`, `change_revision`, `edit`, `resolution`, and `delivery`. Its invariants are
 one active draft, unique identities, linear immutable revision chains, a
-resolution based on the current delivery baseline, and canonical field/list
-ordering.  It requires round-trip, noncanonical-byte, malformed-state, and
-golden-byte tests.  The local adapter adds a `V4_project_state` object and one
+resolution based on the current delivery baseline, retained unique checkpoints,
+and canonical field/list ordering. It requires round-trip, noncanonical-byte,
+malformed-state, and golden-byte tests. The V2 state schema retains the V1
+fixture decoder and deterministically upgrades its single known checkpoint.
+The local adapter adds a `V4_project_state` object and one
 `v4-project-state` mutable head.  Initialization refuses a pre-existing
 `.yeokcham` directory, so it cannot reinterpret or add V4 records to an
 existing repository.  Saves write the immutable object before the head changes;
@@ -37,6 +39,19 @@ byte-correct scanner, maps the stored snapshot identity into the V4 model, and
 does not write a new head when the snapshot is unchanged. It needs init/scan,
 unchanged save, changed save, and draft-lifecycle tests. Automatic watcher
 capture remains a later slice.
+
+The first inspectable CLI is deliberately small: `yeokcham-v4 init`, `save`,
+`status`, and `draft new`. `status` renders the four facts where they are known:
+the saved checkpoint, active draft, shared-change count, open decision count,
+and delivery count. The command rejects unsupported V4 actions instead of
+routing them through V3 or Git behaviour. CLI journey tests cover init,
+unchanged save, changed save, status, and a new draft.
+
+`timeline` lists retained saved checkpoints. `restore --checkpoint ID
+--destination PATH` materializes one only into an existing empty directory; it
+never replaces the active project tree. Its tests cover recovery of prior bytes
+and rejection of a non-empty destination. In-place restore, its safety journal,
+and compaction remain later slices.
 
 ## Product promise
 

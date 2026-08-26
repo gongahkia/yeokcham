@@ -40,11 +40,11 @@ let golden_path name =
   let local = Filename.concat "golden" name in
   if Sys.file_exists local then local else Filename.concat "test/golden" name
 
-let golden_state_bytes_are_stable () =
-  let expected =
-    Golden.read_lower_hex_file (golden_path "v4/state-v1.cbor.hex")
-    |> require_ok Fun.id
-  in
+let read_golden name =
+  Golden.read_lower_hex_file (golden_path name) |> require_ok Fun.id
+
+let current_golden_state_bytes_are_stable () =
+  let expected = read_golden "v4/state-v2.cbor.hex" in
   let actual =
     fixture_project () |> Record.encode_project
     |> require_ok Record.error_to_string
@@ -55,6 +55,21 @@ let golden_state_bytes_are_stable () =
   in
   Alcotest.(check string)
     "re-encoded fixture is byte-identical" expected
+    (Record.encode_project decoded |> require_ok Record.error_to_string)
+
+let legacy_v1_fixture_remains_decodable () =
+  let decoded =
+    read_golden "v4/state-v1.cbor.hex"
+    |> Record.decode_project
+    |> require_ok Record.error_to_string
+  in
+  Alcotest.(check string)
+    "legacy state gains its retained initial checkpoint" "snapshot-base"
+    (Model.Snapshot_id.to_string
+       (Model.active_draft decoded).Model.latest_checkpoint);
+  Alcotest.(check string)
+    "legacy state upgrades to the current canonical record"
+    (read_golden "v4/state-v2.cbor.hex")
     (Record.encode_project decoded |> require_ok Record.error_to_string)
 
 let state_round_trips_with_shared_change () =
@@ -106,8 +121,10 @@ let () =
     [
       ( "state",
         [
-          Alcotest.test_case "golden state bytes are stable" `Quick
-            golden_state_bytes_are_stable;
+          Alcotest.test_case "current golden state bytes are stable" `Quick
+            current_golden_state_bytes_are_stable;
+          Alcotest.test_case "legacy V1 fixture remains decodable" `Quick
+            legacy_v1_fixture_remains_decodable;
           Alcotest.test_case "shared state round trips" `Quick
             state_round_trips_with_shared_change;
           Alcotest.test_case "malformed model state is rejected" `Quick

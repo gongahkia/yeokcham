@@ -35,6 +35,12 @@ let one_active_draft_and_checkpoints () =
     "checkpoint belongs to active draft" "snapshot-edit"
     ( V4.active_draft project |> fun active ->
       V4.Snapshot_id.to_string active.V4.latest_checkpoint );
+  Alcotest.(check (list string))
+    "saved checkpoints retain newest-first recovery history"
+    [ "snapshot-edit"; "snapshot-base" ]
+    (V4.checkpoints project
+    |> List.map (fun checkpoint ->
+        V4.Snapshot_id.to_string checkpoint.V4.checkpoint_snapshot));
   let project =
     V4.new_draft project ~id:(draft "draft-two") ~title:"second task"
     |> require_ok

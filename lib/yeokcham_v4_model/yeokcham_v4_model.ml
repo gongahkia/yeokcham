@@ -211,6 +211,8 @@ type draft = {
   shared_change : Change_id.t option;
 }
 
+type checkpoint = { checkpoint_snapshot : Snapshot_id.t }
+
 type shared_change = {
   change_id : Change_id.t;
   source_draft : Draft_id.t option;
@@ -265,6 +267,7 @@ type state = {
   state_baseline : Snapshot_id.t;
   state_active_draft : Draft_id.t;
   state_drafts : draft list;
+  state_checkpoints : checkpoint list;
   state_changes : shared_change list;
   state_resolutions : resolution list;
   state_deliveries : delivery list;
@@ -275,6 +278,7 @@ type project = {
   baseline : Snapshot_id.t;
   active : Draft_id.t;
   drafts : draft list;
+  checkpoints : checkpoint list;
   changes : shared_change list;
   resolutions : resolution list;
   deliveries : delivery list;
@@ -299,12 +303,14 @@ let init ~creator ~initial_snapshot ~initial_draft ~title =
         };
       ];
     changes = [];
+    checkpoints = [ { checkpoint_snapshot = initial_snapshot } ];
     resolutions = [];
     deliveries = [];
   }
 
 let creator project = project.creator
 let drafts project = project.drafts
+let checkpoints project = project.checkpoints
 let shared_changes project = project.changes
 let resolutions project = project.resolutions
 let deliveries project = project.deliveries
@@ -315,6 +321,7 @@ let export project =
     state_baseline = project.baseline;
     state_active_draft = project.active;
     state_drafts = project.drafts;
+    state_checkpoints = project.checkpoints;
     state_changes = project.changes;
     state_resolutions = project.resolutions;
     state_deliveries = project.deliveries;
@@ -341,8 +348,22 @@ let replace_draft project (replacement : draft) =
         project.drafts;
   }
 
+let record_checkpoint project snapshot =
+  if
+    List.exists
+      (fun checkpoint ->
+        Snapshot_id.equal checkpoint.checkpoint_snapshot snapshot)
+      project.checkpoints
+  then project
+  else
+    {
+      project with
+      checkpoints = { checkpoint_snapshot = snapshot } :: project.checkpoints;
+    }
+
 let checkpoint project ~snapshot =
   let active = active_draft project in
+  record_checkpoint project snapshot |> fun project ->
   replace_draft project { active with latest_checkpoint = snapshot }
 
 let new_draft project ~id ~title =
@@ -447,6 +468,25 @@ let import state =
     has_duplicate Draft_id.equal
       (List.map (fun (draft : draft) -> draft.draft_id) state.state_drafts)
   then invalid "draft identifiers are not unique"
+  else if state.state_checkpoints = [] then
+    invalid "project has no saved checkpoint"
+  else if
+    has_duplicate Snapshot_id.equal
+      (List.map
+         (fun checkpoint -> checkpoint.checkpoint_snapshot)
+         state.state_checkpoints)
+  then invalid "checkpoint snapshots are not unique"
+  else if
+    List.exists
+      (fun (draft : draft) ->
+        not
+          (List.exists
+             (fun checkpoint ->
+               Snapshot_id.equal checkpoint.checkpoint_snapshot
+                 draft.latest_checkpoint)
+             state.state_checkpoints))
+      state.state_drafts
+  then invalid "draft checkpoint is not retained"
   else if
     has_duplicate Change_id.equal
       (List.map
@@ -551,6 +591,7 @@ let import state =
                 baseline = state.state_baseline;
                 active = state.state_active_draft;
                 drafts = state.state_drafts;
+                checkpoints = state.state_checkpoints;
                 changes = state.state_changes;
                 resolutions = state.state_resolutions;
                 deliveries = state.state_deliveries;
@@ -989,6 +1030,7 @@ let deliver project ~id ~author ~snapshot ~included ~next_draft ~next_title
                     created_at;
                   }
                 in
+                let project = record_checkpoint project snapshot in
                 Ok
                   {
                     project with

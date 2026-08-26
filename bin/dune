@@ -43,6 +43,12 @@
   unix))
 
 (executable
+ (name yeokcham_v4)
+ (public_name yeokcham-v4)
+ (modules yeokcham_v4)
+ (libraries yeokcham_v4_local_service yeokcham_v4_model))
+
+(executable
  (name workspace_base_v1)
  (modules workspace_base_v1)
  (libraries yeokcham_scratch yeokcham_snapshot yeokcham_store))

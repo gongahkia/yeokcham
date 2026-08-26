@@ -38,6 +38,12 @@
  (libraries alcotest unix yeokcham_v4_local_service yeokcham_v4_model))
 
 (test
+ (name test_v4_cli)
+ (modules test_v4_cli)
+ (libraries alcotest unix)
+ (deps ../bin/yeokcham_v4.exe))
+
+(test
  (name test_cli_progress)
  (modules test_cli_progress)
  (libraries alcotest yeokcham_cli_progress unix))
