@@ -6,11 +6,14 @@ type error =
   | Invalid_span of { start_byte : int; end_byte : int }
   | Empty_edits
   | Empty_title
+  | Invalid_project_state of string
   | Duplicate_draft
   | Duplicate_change
+  | Duplicate_revision
   | Duplicate_delivery
   | Unknown_change
   | Unknown_decision
+  | Decision_already_resolved
   | Unknown_revision
   | Active_draft_already_shared
   | Active_draft_not_shared
@@ -19,6 +22,7 @@ type error =
   | Revision_parent_mismatch
   | Initial_revision_has_parent
   | Received_revision_missing_parent
+  | Resolution_base_mismatch
   | Active_change_withdrawal
   | Delivery_has_open_decisions
   | Delivery_includes_unknown_revision
@@ -35,20 +39,26 @@ let error_to_string = function
       Printf.sprintf "invalid span [%d, %d)" start_byte end_byte
   | Empty_edits -> "a change revision needs at least one edit"
   | Empty_title -> "draft title must not be empty"
+  | Invalid_project_state detail -> "invalid persisted project state: " ^ detail
   | Duplicate_draft -> "draft identifier already exists"
   | Duplicate_change -> "change identifier already exists"
+  | Duplicate_revision -> "revision identifier already exists"
   | Duplicate_delivery -> "delivery identifier already exists"
   | Unknown_change -> "unknown shared change"
   | Unknown_decision -> "unknown decision"
+  | Decision_already_resolved -> "decision already has a resolution"
   | Unknown_revision -> "unknown revision"
   | Active_draft_already_shared -> "the active draft is already shared"
   | Active_draft_not_shared -> "the active draft is not shared"
   | Revision_change_mismatch -> "revision belongs to a different change"
   | Revision_author_mismatch -> "revision author differs from change author"
   | Revision_parent_mismatch -> "revision parent is not the current revision"
-  | Initial_revision_has_parent -> "initial shared revision must not have a parent"
+  | Initial_revision_has_parent ->
+      "initial shared revision must not have a parent"
   | Received_revision_missing_parent ->
       "a received revision for an existing change must name its parent"
+  | Resolution_base_mismatch ->
+      "a resolution must be based on the current delivery baseline"
   | Active_change_withdrawal ->
       "close the active draft before withdrawing its shared change"
   | Delivery_has_open_decisions -> "cannot deliver while decisions are open"
@@ -56,7 +66,8 @@ let error_to_string = function
       "delivery includes a revision that is not currently visible"
   | Delivery_includes_duplicate_revision -> "delivery includes a revision twice"
   | Delivery_omits_active_change ->
-      "delivery must include the active shared change or start from another draft"
+      "delivery must include the active shared change or start from another \
+       draft"
   | Delivery_requires_shared_active_draft ->
       "delivery requires an active shared draft"
 
@@ -121,20 +132,21 @@ module Path = struct
 
   let safe_component component =
     String.length component > 0
-    && not (String.equal component ".")
-    && not (String.equal component "..")
-    && not (String.contains component '/')
+    && (not (String.equal component "."))
+    && (not (String.equal component ".."))
+    && (not (String.contains component '/'))
     && not (String.contains component '\000')
 
   let of_components = function
     | [] -> Error Empty_path
-    | components ->
+    | components -> (
         let rec first_unsafe = function
           | [] -> None
           | component :: rest ->
-              if safe_component component then first_unsafe rest else Some component
+              if safe_component component then first_unsafe rest
+              else Some component
         in
-        (match first_unsafe components with
+        match first_unsafe components with
         | None -> Ok components
         | Some component -> Error (Unsafe_path_component component))
 
@@ -147,7 +159,8 @@ module Path = struct
     | [], _ -> true
     | _, [] -> false
     | left :: left_rest, right :: right_rest ->
-        String.equal left right && is_ancestor ~ancestor:left_rest ~descendant:right_rest
+        String.equal left right
+        && is_ancestor ~ancestor:left_rest ~descendant:right_rest
 
   let to_string value = String.concat "/" value
 end
@@ -172,7 +185,8 @@ type change_revision = {
   edits : edit list;
 }
 
-let make_change_revision ~change ~revision ~parent ~author ~base ~result ~edits =
+let make_change_revision ~change ~revision ~parent ~author ~base ~result ~edits
+    =
   match edits with
   | [] -> Error Empty_edits
   | _ ->
@@ -207,16 +221,28 @@ type shared_change = {
 
 type decision_kind = Stale_base | Edit_overlap
 
+type edit_reference = {
+  referenced_revision : Revision_id.t;
+  referenced_edit_index : int;
+}
+
+type edit_candidate = {
+  candidate_revision : change_revision;
+  candidate_edit_index : int;
+  candidate_edit : edit;
+}
+
 type decision = {
   decision_id : Decision_id.t;
   decision_kind : decision_kind;
   decision_paths : Path.t list;
-  candidates : change_revision list;
+  candidates : edit_candidate list;
 }
 
 type projection = {
   projection_baseline : Snapshot_id.t;
   applied : change_revision list;
+  applied_edits : edit_candidate list;
   decisions : decision list;
 }
 
@@ -228,12 +254,29 @@ type delivery = {
   created_at : int64;
 }
 
+type resolution = {
+  resolved_decision : Decision_id.t;
+  suppressed_edits : edit_reference list;
+  replacement_revision : change_revision;
+}
+
+type state = {
+  state_creator : Device_id.t;
+  state_baseline : Snapshot_id.t;
+  state_active_draft : Draft_id.t;
+  state_drafts : draft list;
+  state_changes : shared_change list;
+  state_resolutions : resolution list;
+  state_deliveries : delivery list;
+}
+
 type project = {
   creator : Device_id.t;
   baseline : Snapshot_id.t;
   active : Draft_id.t;
   drafts : draft list;
   changes : shared_change list;
+  resolutions : resolution list;
   deliveries : delivery list;
 }
 
@@ -256,14 +299,26 @@ let init ~creator ~initial_snapshot ~initial_draft ~title =
         };
       ];
     changes = [];
+    resolutions = [];
     deliveries = [];
   }
 
 let creator project = project.creator
-
 let drafts project = project.drafts
 let shared_changes project = project.changes
+let resolutions project = project.resolutions
 let deliveries project = project.deliveries
+
+let export project =
+  {
+    state_creator = project.creator;
+    state_baseline = project.baseline;
+    state_active_draft = project.active;
+    state_drafts = project.drafts;
+    state_changes = project.changes;
+    state_resolutions = project.resolutions;
+    state_deliveries = project.deliveries;
+  }
 
 let find_draft project draft_id =
   List.find_opt
@@ -281,7 +336,8 @@ let replace_draft project (replacement : draft) =
     drafts =
       List.map
         (fun (draft : draft) ->
-          if Draft_id.equal draft.draft_id replacement.draft_id then replacement else draft)
+          if Draft_id.equal draft.draft_id replacement.draft_id then replacement
+          else draft)
         project.drafts;
   }
 
@@ -295,8 +351,7 @@ let new_draft project ~id ~title =
     List.exists
       (fun (draft : draft) -> Draft_id.equal draft.draft_id id)
       project.drafts
-  then
-    Error Duplicate_draft
+  then Error Duplicate_draft
   else
     let active = active_draft project in
     let closed = { active with state = Closed } in
@@ -317,7 +372,8 @@ let new_draft project ~id ~title =
           next
           :: List.map
                (fun (draft : draft) ->
-                 if Draft_id.equal draft.draft_id closed.draft_id then closed else draft)
+                 if Draft_id.equal draft.draft_id closed.draft_id then closed
+                 else draft)
                project.drafts;
       }
 
@@ -325,6 +381,21 @@ let find_change project change_id =
   List.find_opt
     (fun (change : shared_change) -> Change_id.equal change.change_id change_id)
     project.changes
+
+let revision_exists project revision_id =
+  let shared =
+    List.exists
+      (fun (change : shared_change) ->
+        List.exists
+          (fun revision -> Revision_id.equal revision.revision revision_id)
+          change.revisions)
+      project.changes
+  in
+  shared
+  || List.exists
+       (fun resolution ->
+         Revision_id.equal resolution.replacement_revision.revision revision_id)
+       project.resolutions
 
 let latest_revision (change : shared_change) =
   match change.revisions with
@@ -337,29 +408,179 @@ let replace_change project (replacement : shared_change) =
     changes =
       List.map
         (fun (change : shared_change) ->
-          if Change_id.equal change.change_id replacement.change_id then replacement else change)
+          if Change_id.equal change.change_id replacement.change_id then
+            replacement
+          else change)
         project.changes;
   }
 
 let validate_initial_revision revision =
-  match revision.parent with None -> Ok () | Some _ -> Error Initial_revision_has_parent
+  match revision.parent with
+  | None -> Ok ()
+  | Some _ -> Error Initial_revision_has_parent
 
 let validate_next_revision (change : shared_change) revision =
-  if not (Change_id.equal change.change_id revision.change) then Error Revision_change_mismatch
-  else if not (Device_id.equal change.change_author revision.revision_author) then
-    Error Revision_author_mismatch
+  if not (Change_id.equal change.change_id revision.change) then
+    Error Revision_change_mismatch
+  else if not (Device_id.equal change.change_author revision.revision_author)
+  then Error Revision_author_mismatch
   else
     match revision.parent with
     | None -> Error Received_revision_missing_parent
-    | Some parent when Revision_id.equal parent (latest_revision change).revision -> Ok ()
+    | Some parent
+      when Revision_id.equal parent (latest_revision change).revision ->
+        Ok ()
     | Some _ -> Error Revision_parent_mismatch
+
+let has_duplicate equal values =
+  let rec loop seen = function
+    | [] -> false
+    | value :: rest ->
+        if List.exists (fun prior -> equal value prior) seen then true
+        else loop (value :: seen) rest
+  in
+  loop [] values
+
+let import state =
+  let invalid detail = Error (Invalid_project_state detail) in
+  if
+    has_duplicate Draft_id.equal
+      (List.map (fun (draft : draft) -> draft.draft_id) state.state_drafts)
+  then invalid "draft identifiers are not unique"
+  else if
+    has_duplicate Change_id.equal
+      (List.map
+         (fun (change : shared_change) -> change.change_id)
+         state.state_changes)
+  then invalid "change identifiers are not unique"
+  else if
+    has_duplicate Delivery_id.equal
+      (List.map
+         (fun (delivery : delivery) -> delivery.delivery_id)
+         state.state_deliveries)
+  then invalid "delivery identifiers are not unique"
+  else
+    let active =
+      List.filter
+        (fun (draft : draft) -> draft.state = Active)
+        state.state_drafts
+    in
+    match active with
+    | [ draft ] when Draft_id.equal draft.draft_id state.state_active_draft ->
+        let all_revisions =
+          List.concat_map
+            (fun (change : shared_change) -> change.revisions)
+            state.state_changes
+          @ List.map
+              (fun resolution -> resolution.replacement_revision)
+              state.state_resolutions
+        in
+        if
+          has_duplicate Revision_id.equal
+            (List.map (fun revision -> revision.revision) all_revisions)
+        then invalid "revision identifiers are not unique"
+        else
+          let valid_revision_chain (change : shared_change) = function
+            | [] -> Error "shared change has no initial revision"
+            | first :: rest -> (
+                if not (Change_id.equal first.change change.change_id) then
+                  Error "initial revision names a different change"
+                else if
+                  not
+                    (Device_id.equal first.revision_author change.change_author)
+                then Error "initial revision names a different author"
+                else
+                  match first.parent with
+                  | Some _ -> Error "initial revision has a parent"
+                  | None ->
+                      let rec follow previous = function
+                        | [] -> Ok ()
+                        | next :: remaining -> (
+                            if
+                              not (Change_id.equal next.change change.change_id)
+                            then Error "revision names a different change"
+                            else if
+                              not
+                                (Device_id.equal next.revision_author
+                                   change.change_author)
+                            then Error "revision names a different author"
+                            else
+                              match next.parent with
+                              | Some parent
+                                when Revision_id.equal parent previous.revision
+                                ->
+                                  follow next remaining
+                              | Some _ -> Error "revision parent is not linear"
+                              | None ->
+                                  Error "non-initial revision lacks parent")
+                      in
+                      follow first rest)
+          in
+          let changes_valid =
+            List.for_all
+              (fun (change : shared_change) ->
+                change.revisions <> []
+                && Result.is_ok
+                     (valid_revision_chain change (List.rev change.revisions)))
+              state.state_changes
+          in
+          if not changes_valid then
+            invalid "shared change revision chain is invalid"
+          else if
+            List.exists
+              (fun (draft : draft) -> not (nonempty_title draft.title))
+              state.state_drafts
+          then invalid "draft title is empty"
+          else if
+            List.exists
+              (fun resolution ->
+                resolution.replacement_revision.parent <> None
+                || (not
+                      (Snapshot_id.equal
+                         resolution.replacement_revision.base_snapshot
+                         state.state_baseline))
+                || List.exists
+                     (fun reference -> reference.referenced_edit_index < 0)
+                     resolution.suppressed_edits)
+              state.state_resolutions
+          then invalid "resolution is malformed"
+          else
+            let project =
+              {
+                creator = state.state_creator;
+                baseline = state.state_baseline;
+                active = state.state_active_draft;
+                drafts = state.state_drafts;
+                changes = state.state_changes;
+                resolutions = state.state_resolutions;
+                deliveries = state.state_deliveries;
+              }
+            in
+            let active = active_draft project in
+            let active_link_valid =
+              match active.shared_change with
+              | None -> true
+              | Some change_id -> (
+                  match find_change project change_id with
+                  | Some change ->
+                      Option.fold ~none:false
+                        ~some:(Draft_id.equal active.draft_id)
+                        change.source_draft
+                  | None -> false)
+            in
+            if active_link_valid then Ok project
+            else invalid "active draft refers to a missing shared change"
+    | [] -> invalid "project has no active draft"
+    | _ -> invalid "project has more than one active draft"
 
 let share_active project revision =
   let active = active_draft project in
   match active.shared_change with
   | Some _ -> Error Active_draft_already_shared
-  | None ->
-      if Option.is_some (find_change project revision.change) then Error Duplicate_change
+  | None -> (
+      if revision_exists project revision.revision then Error Duplicate_revision
+      else if Option.is_some (find_change project revision.change) then
+        Error Duplicate_change
       else
         match validate_initial_revision revision with
         | Error error -> Error error
@@ -373,8 +594,12 @@ let share_active project revision =
                 withdrawn = false;
               }
             in
-            let project = { project with changes = change :: project.changes } in
-            Ok (replace_draft project { active with shared_change = Some revision.change })
+            let project =
+              { project with changes = change :: project.changes }
+            in
+            Ok
+              (replace_draft project
+                 { active with shared_change = Some revision.change }))
 
 let amend_active project revision =
   let active = active_draft project in
@@ -383,44 +608,58 @@ let amend_active project revision =
   | Some change_id -> (
       match find_change project change_id with
       | None -> invalid_arg "active draft refers to a missing V4 shared change"
-      | Some change ->
-          match validate_next_revision change revision with
-          | Error error -> Error error
-          | Ok () -> Ok (replace_change project { change with revisions = revision :: change.revisions }))
+      | Some change -> (
+          if revision_exists project revision.revision then
+            Error Duplicate_revision
+          else
+            match validate_next_revision change revision with
+            | Error error -> Error error
+            | Ok () ->
+                Ok
+                  (replace_change project
+                     { change with revisions = revision :: change.revisions })))
 
 let receive project revision =
-  match find_change project revision.change with
-  | None -> (
-      match validate_initial_revision revision with
-      | Error error -> Error error
-      | Ok () ->
-          Ok
-            {
-              project with
-              changes =
-                {
-                  change_id = revision.change;
-                  source_draft = None;
-                  change_author = revision.revision_author;
-                  revisions = [ revision ];
-                  withdrawn = false;
-                }
-                :: project.changes;
-            })
-  | Some change ->
-      if change.withdrawn then Error Unknown_change
-      else
-        match validate_next_revision change revision with
+  if revision_exists project revision.revision then Error Duplicate_revision
+  else
+    match find_change project revision.change with
+    | None -> (
+        match validate_initial_revision revision with
         | Error error -> Error error
-        | Ok () -> Ok (replace_change project { change with revisions = revision :: change.revisions })
+        | Ok () ->
+            Ok
+              {
+                project with
+                changes =
+                  {
+                    change_id = revision.change;
+                    source_draft = None;
+                    change_author = revision.revision_author;
+                    revisions = [ revision ];
+                    withdrawn = false;
+                  }
+                  :: project.changes;
+              })
+    | Some change -> (
+        if change.withdrawn then Error Unknown_change
+        else
+          match validate_next_revision change revision with
+          | Error error -> Error error
+          | Ok () ->
+              Ok
+                (replace_change project
+                   { change with revisions = revision :: change.revisions }))
 
 let withdraw project ~change:change_id =
   match find_change project change_id with
   | None -> Error Unknown_change
   | Some change ->
       let active = active_draft project in
-      if Option.fold ~none:false ~some:(Change_id.equal change_id) active.shared_change then
-        Error Active_change_withdrawal
+      if
+        Option.fold ~none:false
+          ~some:(Change_id.equal change_id)
+          active.shared_change
+      then Error Active_change_withdrawal
       else Ok (replace_change project { change with withdrawn = true })
 
 let spans_overlap left right =
@@ -435,25 +674,59 @@ let edits_conflict left right =
     Path.is_ancestor ~ancestor:left.edit_path ~descendant:right.edit_path
     || Path.is_ancestor ~ancestor:right.edit_path ~descendant:left.edit_path
 
-let revisions_conflict left right =
-  List.exists
-    (fun left_edit -> List.exists (fun right_edit -> edits_conflict left_edit right_edit) right.edits)
-    left.edits
+let candidates_of_revision revision =
+  List.mapi
+    (fun candidate_edit_index candidate_edit ->
+      { candidate_revision = revision; candidate_edit_index; candidate_edit })
+    revision.edits
 
-let unique_paths revisions =
-  revisions
-  |> List.concat_map
-       (fun revision -> List.map (fun edit -> edit.edit_path) revision.edits)
+let reference_of_candidate candidate =
+  {
+    referenced_revision = candidate.candidate_revision.revision;
+    referenced_edit_index = candidate.candidate_edit_index;
+  }
+
+let same_reference left right =
+  Revision_id.equal left.referenced_revision right.referenced_revision
+  && Int.equal left.referenced_edit_index right.referenced_edit_index
+
+let candidates_conflict left right =
+  edits_conflict left.candidate_edit right.candidate_edit
+
+let compare_candidates left right =
+  let change_order =
+    Change_id.compare left.candidate_revision.change
+      right.candidate_revision.change
+  in
+  if change_order <> 0 then change_order
+  else
+    let revision_order =
+      Revision_id.compare left.candidate_revision.revision
+        right.candidate_revision.revision
+    in
+    if revision_order <> 0 then revision_order
+    else Int.compare left.candidate_edit_index right.candidate_edit_index
+
+let unique_paths candidates =
+  candidates
+  |> List.map (fun candidate -> candidate.candidate_edit.edit_path)
   |> List.sort_uniq Path.compare
 
 let decision_id kind candidates =
-  let kind = match kind with Stale_base -> "stale" | Edit_overlap -> "overlap" in
-  let revisions =
+  let kind =
+    match kind with Stale_base -> "stale" | Edit_overlap -> "overlap"
+  in
+  let edits =
     candidates
-    |> List.map (fun candidate -> Revision_id.to_string candidate.revision)
+    |> List.map (fun candidate ->
+        Revision_id.to_string candidate.candidate_revision.revision
+        ^ "."
+        ^ string_of_int candidate.candidate_edit_index)
     |> List.sort String.compare
   in
-  match Decision_id.of_string ("decision:" ^ kind ^ ":" ^ String.concat ":" revisions) with
+  match
+    Decision_id.of_string ("decision:" ^ kind ^ ":" ^ String.concat ":" edits)
+  with
   | Ok id -> id
   | Error _ -> invalid_arg "generated V4 decision identifier is invalid"
 
@@ -470,37 +743,161 @@ let ordered_visible_changes project =
   |> List.filter (fun (change : shared_change) -> not change.withdrawn)
   |> List.map latest_revision
   |> List.sort (fun left right ->
-         let change_order = Change_id.compare left.change right.change in
-         if change_order <> 0 then change_order else Revision_id.compare left.revision right.revision)
+      let change_order = Change_id.compare left.change right.change in
+      if change_order <> 0 then change_order
+      else Revision_id.compare left.revision right.revision)
+
+let suppressed_candidate project candidate =
+  let reference = reference_of_candidate candidate in
+  List.exists
+    (fun resolution ->
+      List.exists
+        (fun suppressed -> same_reference suppressed reference)
+        resolution.suppressed_edits)
+    project.resolutions
+
+let resolution_revisions project =
+  List.map
+    (fun resolution -> resolution.replacement_revision)
+    project.resolutions
+
+let revisions_from_candidates candidates =
+  candidates
+  |> List.sort compare_candidates
+  |> List.fold_left
+       (fun revisions candidate ->
+         if
+           List.exists
+             (fun revision ->
+               Revision_id.equal revision.revision
+                 candidate.candidate_revision.revision)
+             revisions
+         then revisions
+         else candidate.candidate_revision :: revisions)
+       []
+  |> List.rev
+
+let stale_components candidates =
+  let rec gather current_revision current rest components =
+    match rest with
+    | [] -> List.rev (List.rev current :: components)
+    | candidate :: rest ->
+        if
+          Revision_id.equal current_revision
+            candidate.candidate_revision.revision
+        then gather current_revision (candidate :: current) rest components
+        else
+          gather candidate.candidate_revision.revision [ candidate ] rest
+            (List.rev current :: components)
+  in
+  match List.sort compare_candidates candidates with
+  | [] -> []
+  | candidate :: rest ->
+      gather candidate.candidate_revision.revision [ candidate ] rest []
+
+let overlap_components candidates =
+  let add_candidate components candidate =
+    let connected, disconnected =
+      List.partition
+        (fun component ->
+          List.exists
+            (fun existing -> candidates_conflict existing candidate)
+            component)
+        components
+    in
+    (candidate :: List.concat connected) :: disconnected
+  in
+  candidates
+  |> List.sort compare_candidates
+  |> List.fold_left add_candidate []
+  |> List.map (List.sort compare_candidates)
+  |> List.sort (fun left right ->
+      match (left, right) with
+      | left_candidate :: _, right_candidate :: _ ->
+          compare_candidates left_candidate right_candidate
+      | [], [] -> 0
+      | [], _ -> -1
+      | _, [] -> 1)
 
 let projection project =
-  let rec compose applied decisions = function
-    | [] ->
-        {
-          projection_baseline = project.baseline;
-          applied = List.rev applied;
-          decisions = List.rev decisions;
-        }
-    | revision :: rest ->
-        if not (Snapshot_id.equal revision.base_snapshot project.baseline) then
-          compose applied (make_decision Stale_base [ revision ] :: decisions) rest
-        else
-          let conflicts = List.filter (fun existing -> revisions_conflict existing revision) applied in
-          if conflicts = [] then compose (revision :: applied) decisions rest
-          else compose applied (make_decision Edit_overlap (revision :: conflicts) :: decisions) rest
+  let visible =
+    ordered_visible_changes project @ resolution_revisions project
+    |> List.concat_map candidates_of_revision
+    |> List.filter (fun candidate ->
+        not (suppressed_candidate project candidate))
+    |> List.sort compare_candidates
   in
-  compose [] [] (ordered_visible_changes project)
+  let stale, current =
+    List.partition
+      (fun candidate ->
+        not
+          (Snapshot_id.equal candidate.candidate_revision.base_snapshot
+             project.baseline))
+      visible
+  in
+  let components = overlap_components current in
+  let applied_edits, overlap_decisions =
+    List.fold_left
+      (fun (applied, decisions) component ->
+        match component with
+        | [ candidate ] -> (candidate :: applied, decisions)
+        | _ -> (applied, make_decision Edit_overlap component :: decisions))
+      ([], []) components
+  in
+  let decisions =
+    List.map (make_decision Stale_base) (stale_components stale)
+    @ List.rev overlap_decisions
+    |> List.sort (fun left right ->
+        Decision_id.compare left.decision_id right.decision_id)
+  in
+  let applied_edits = List.rev applied_edits in
+  {
+    projection_baseline = project.baseline;
+    applied = revisions_from_candidates applied_edits;
+    applied_edits;
+    decisions;
+  }
 
 let resolve project ~decision:decision_id ~replacement =
-  let current = projection project in
-  match
-    List.find_opt
-      (fun (decision : decision) ->
-        Decision_id.equal decision.decision_id decision_id)
-      current.decisions
-  with
-  | None -> Error Unknown_decision
-  | Some _ -> receive project replacement
+  if
+    List.exists
+      (fun resolution ->
+        Decision_id.equal resolution.resolved_decision decision_id)
+      project.resolutions
+  then Error Decision_already_resolved
+  else if revision_exists project replacement.revision then
+    Error Duplicate_revision
+  else if Option.is_some (find_change project replacement.change) then
+    Error Duplicate_change
+  else if not (Snapshot_id.equal replacement.base_snapshot project.baseline)
+  then Error Resolution_base_mismatch
+  else
+    match replacement.parent with
+    | Some _ -> Error Initial_revision_has_parent
+    | None -> (
+        let current = projection project in
+        match
+          List.find_opt
+            (fun (decision : decision) ->
+              Decision_id.equal decision.decision_id decision_id)
+            current.decisions
+        with
+        | None -> Error Unknown_decision
+        | Some resolved ->
+            let suppressed_edits =
+              List.map reference_of_candidate resolved.candidates
+            in
+            Ok
+              {
+                project with
+                resolutions =
+                  {
+                    resolved_decision = decision_id;
+                    suppressed_edits;
+                    replacement_revision = replacement;
+                  }
+                  :: project.resolutions;
+              })
 
 let contains_duplicate identifiers equal =
   let rec loop seen = function
@@ -511,44 +908,68 @@ let contains_duplicate identifiers equal =
   in
   loop [] identifiers
 
-let deliver project ~id ~author ~snapshot ~included ~next_draft ~next_title ~created_at =
+let deliver project ~id ~author ~snapshot ~included ~next_draft ~next_title
+    ~created_at =
   if
     List.exists
       (fun (delivery : delivery) -> Delivery_id.equal delivery.delivery_id id)
       project.deliveries
-  then
-    Error Duplicate_delivery
+  then Error Duplicate_delivery
   else if not (nonempty_title next_title) then Error Empty_title
   else if
     List.exists
       (fun (draft : draft) -> Draft_id.equal draft.draft_id next_draft)
       project.drafts
-  then
-    Error Duplicate_draft
-  else if (projection project).decisions <> [] then Error Delivery_has_open_decisions
-  else if contains_duplicate included Revision_id.equal then Error Delivery_includes_duplicate_revision
+  then Error Duplicate_draft
+  else if (projection project).decisions <> [] then
+    Error Delivery_has_open_decisions
+  else if contains_duplicate included Revision_id.equal then
+    Error Delivery_includes_duplicate_revision
   else
     let visible = (projection project).applied in
-    let includes revision = List.exists (fun id -> Revision_id.equal id revision.revision) included in
+    let includes revision =
+      List.exists (fun id -> Revision_id.equal id revision.revision) included
+    in
     if
       not
         (List.for_all
            (fun revision_id ->
-             List.exists (fun revision -> Revision_id.equal revision.revision revision_id) visible)
+             List.exists
+               (fun revision -> Revision_id.equal revision.revision revision_id)
+               visible)
            included)
-    then
-      Error Delivery_includes_unknown_revision
+    then Error Delivery_includes_unknown_revision
     else
       let active = active_draft project in
       match active.shared_change with
       | None -> Error Delivery_requires_shared_active_draft
       | Some active_change -> (
           match find_change project active_change with
-          | None -> invalid_arg "active draft refers to a missing V4 shared change"
+          | None ->
+              invalid_arg "active draft refers to a missing V4 shared change"
           | Some change ->
-              if not (includes (latest_revision change)) then Error Delivery_omits_active_change
+              let active_revision = latest_revision change in
+              let active_is_represented candidate =
+                includes candidate.candidate_revision
+                || List.exists
+                     (fun resolution ->
+                       includes resolution.replacement_revision
+                       && List.exists
+                            (fun suppressed ->
+                              same_reference suppressed
+                                (reference_of_candidate candidate))
+                            resolution.suppressed_edits)
+                     project.resolutions
+              in
+              if
+                not
+                  (List.for_all active_is_represented
+                     (candidates_of_revision active_revision))
+              then Error Delivery_omits_active_change
               else
-                let selected (change : shared_change) = includes (latest_revision change) in
+                let selected (change : shared_change) =
+                  includes (latest_revision change)
+                in
                 let closed = { active with state = Closed } in
                 let next =
                   {
@@ -577,7 +998,8 @@ let deliver project ~id ~author ~snapshot ~included ~next_draft ~next_title ~cre
                       next
                       :: List.map
                            (fun (draft : draft) ->
-                             if Draft_id.equal draft.draft_id closed.draft_id then closed
+                             if Draft_id.equal draft.draft_id closed.draft_id
+                             then closed
                              else draft)
                            project.drafts;
                     changes =

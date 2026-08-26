@@ -16,9 +16,10 @@ let text_edit components start_byte end_byte =
   let span = V4.make_span ~start_byte ~end_byte |> require_ok in
   V4.{ edit_path = path components; edit_kind = Text span }
 
-let revision_record ?parent ~change_id ~revision_id ~author ~base ~result edits =
-  V4.make_change_revision ~change:change_id ~revision:revision_id ~parent ~author
-    ~base ~result ~edits
+let revision_record ?parent ~change_id ~revision_id ~author ~base ~result edits
+    =
+  V4.make_change_revision ~change:change_id ~revision:revision_id ~parent
+    ~author ~base ~result ~edits
   |> require_ok
 
 let initial_project () =
@@ -32,57 +33,66 @@ let one_active_draft_and_checkpoints () =
   let project = V4.checkpoint project ~snapshot:(snapshot "snapshot-edit") in
   Alcotest.(check string)
     "checkpoint belongs to active draft" "snapshot-edit"
-    (V4.active_draft project |> fun active ->
-     V4.Snapshot_id.to_string active.V4.latest_checkpoint);
-  let project = V4.new_draft project ~id:(draft "draft-two") ~title:"second task" |> require_ok in
+    ( V4.active_draft project |> fun active ->
+      V4.Snapshot_id.to_string active.V4.latest_checkpoint );
+  let project =
+    V4.new_draft project ~id:(draft "draft-two") ~title:"second task"
+    |> require_ok
+  in
   Alcotest.(check string)
     "new draft is active" "draft-two"
-    (V4.active_draft project |> fun active ->
-     V4.Draft_id.to_string active.V4.draft_id);
+    ( V4.active_draft project |> fun active ->
+      V4.Draft_id.to_string active.V4.draft_id );
   let previous =
     V4.drafts project
     |> List.find (fun candidate ->
-           V4.Draft_id.equal candidate.V4.draft_id (draft "draft-one"))
+        V4.Draft_id.equal candidate.V4.draft_id (draft "draft-one"))
   in
-  Alcotest.(check bool) "previous draft is closed" true
+  Alcotest.(check bool)
+    "previous draft is closed" true
     (match previous.V4.state with V4.Closed -> true | V4.Active -> false)
 
 let sharing_requires_a_linear_revision_chain () =
   let base = snapshot "snapshot-base" in
   let project = initial_project () in
   let first =
-    revision_record ~change_id:(change "change-a") ~revision_id:(revision "revision-a1")
-      ~author:(device "device-alice") ~base ~result:(snapshot "snapshot-a1")
+    revision_record ~change_id:(change "change-a")
+      ~revision_id:(revision "revision-a1") ~author:(device "device-alice")
+      ~base ~result:(snapshot "snapshot-a1")
       [ text_edit [ "main.ml" ] 0 4 ]
   in
   let project = V4.share_active project first |> require_ok in
   let wrong_parent =
-    revision_record ~parent:(revision "revision-other") ~change_id:(change "change-a")
-      ~revision_id:(revision "revision-a2") ~author:(device "device-alice")
-      ~base ~result:(snapshot "snapshot-a2") [ text_edit [ "main.ml" ] 8 12 ]
+    revision_record
+      ~parent:(revision "revision-other")
+      ~change_id:(change "change-a") ~revision_id:(revision "revision-a2")
+      ~author:(device "device-alice") ~base ~result:(snapshot "snapshot-a2")
+      [ text_edit [ "main.ml" ] 8 12 ]
   in
   (match V4.amend_active project wrong_parent with
   | Error error ->
       Alcotest.(check string)
         "non-linear active revision is rejected"
-        "revision parent is not the current revision"
-        (V4.error_to_string error)
+        "revision parent is not the current revision" (V4.error_to_string error)
   | Ok _ -> Alcotest.fail "accepted a non-linear active revision");
   let second =
-    revision_record ~parent:(revision "revision-a1") ~change_id:(change "change-a")
-      ~revision_id:(revision "revision-a2") ~author:(device "device-alice")
-      ~base ~result:(snapshot "snapshot-a2") [ text_edit [ "main.ml" ] 8 12 ]
+    revision_record ~parent:(revision "revision-a1")
+      ~change_id:(change "change-a") ~revision_id:(revision "revision-a2")
+      ~author:(device "device-alice") ~base ~result:(snapshot "snapshot-a2")
+      [ text_edit [ "main.ml" ] 8 12 ]
   in
   let project = V4.amend_active project second |> require_ok in
   let shared = List.hd (V4.shared_changes project) in
-  Alcotest.(check int) "two immutable revisions retained" 2
+  Alcotest.(check int)
+    "two immutable revisions retained" 2
     (List.length shared.V4.revisions)
 
 let disjoint_revisions_compose_in_a_stable_order () =
   let base = snapshot "snapshot-base" in
   let remote change_id revision_id file =
-    revision_record ~change_id:(change change_id) ~revision_id:(revision revision_id)
-      ~author:(device "device-bob") ~base ~result:(snapshot ("snapshot-" ^ revision_id))
+    revision_record ~change_id:(change change_id)
+      ~revision_id:(revision revision_id) ~author:(device "device-bob") ~base
+      ~result:(snapshot ("snapshot-" ^ revision_id))
       [ text_edit [ file ] 0 2 ]
   in
   let alpha = remote "change-alpha" "revision-alpha" "alpha.ml" in
@@ -96,48 +106,141 @@ let disjoint_revisions_compose_in_a_stable_order () =
   let left = apply [ alpha; beta ] in
   let right = apply [ beta; alpha ] in
   let ids projection =
-    List.map (fun revision -> V4.Revision_id.to_string revision.V4.revision) projection.V4.applied
+    List.map
+      (fun revision -> V4.Revision_id.to_string revision.V4.revision)
+      projection.V4.applied
   in
   Alcotest.(check (list string)) "canonical change order" (ids left) (ids right);
-  Alcotest.(check int) "no decision for disjoint paths" 0 (List.length left.V4.decisions)
+  Alcotest.(check int)
+    "no decision for disjoint paths" 0
+    (List.length left.V4.decisions)
 
 let overlap_is_a_decision_without_mutating_the_active_draft () =
   let base = snapshot "snapshot-base" in
   let local =
-    revision_record ~change_id:(change "change-alpha") ~revision_id:(revision "revision-alpha")
-      ~author:(device "device-bob") ~base ~result:(snapshot "snapshot-alpha")
+    revision_record ~change_id:(change "change-alpha")
+      ~revision_id:(revision "revision-alpha")
+      ~author:(device "device-bob") ~base
+      ~result:(snapshot "snapshot-alpha")
       [ text_edit [ "same.ml" ] 0 4 ]
   in
   let conflicting =
-    revision_record ~change_id:(change "change-beta") ~revision_id:(revision "revision-beta")
-      ~author:(device "device-carol") ~base ~result:(snapshot "snapshot-beta")
+    revision_record ~change_id:(change "change-beta")
+      ~revision_id:(revision "revision-beta") ~author:(device "device-carol")
+      ~base ~result:(snapshot "snapshot-beta")
       [ text_edit [ "same.ml" ] 2 6 ]
   in
   let independent =
-    revision_record ~change_id:(change "change-gamma") ~revision_id:(revision "revision-gamma")
-      ~author:(device "device-dan") ~base ~result:(snapshot "snapshot-gamma")
+    revision_record ~change_id:(change "change-gamma")
+      ~revision_id:(revision "revision-gamma")
+      ~author:(device "device-dan") ~base
+      ~result:(snapshot "snapshot-gamma")
       [ text_edit [ "other.ml" ] 0 3 ]
   in
   let project =
-    initial_project ()
-    |> fun project -> V4.receive project local |> require_ok
-    |> fun project -> V4.receive project conflicting |> require_ok
-    |> fun project -> V4.receive project independent |> require_ok
+    initial_project () |> fun project ->
+    V4.receive project local |> require_ok |> fun project ->
+    V4.receive project conflicting |> require_ok |> fun project ->
+    V4.receive project independent |> require_ok
   in
   let projection = V4.projection project in
-  Alcotest.(check int) "one durable decision" 1 (List.length projection.V4.decisions);
-  Alcotest.(check int) "independent work still composes" 2 (List.length projection.V4.applied);
+  Alcotest.(check int)
+    "one durable decision" 1
+    (List.length projection.V4.decisions);
+  Alcotest.(check int)
+    "only independent work composes without choosing a conflict" 1
+    (List.length projection.V4.applied);
   Alcotest.(check string)
     "active draft remains on its local checkpoint" "snapshot-base"
-    (V4.active_draft project |> fun active ->
-     V4.Snapshot_id.to_string active.V4.latest_checkpoint)
+    ( V4.active_draft project |> fun active ->
+      V4.Snapshot_id.to_string active.V4.latest_checkpoint )
+
+let an_independent_edit_inside_a_conflicting_revision_still_composes () =
+  let base = snapshot "snapshot-base" in
+  let mixed =
+    revision_record ~change_id:(change "change-alpha")
+      ~revision_id:(revision "revision-alpha")
+      ~author:(device "device-bob") ~base
+      ~result:(snapshot "snapshot-alpha")
+      [ text_edit [ "same.ml" ] 0 4; text_edit [ "other.ml" ] 0 4 ]
+  in
+  let conflicting =
+    revision_record ~change_id:(change "change-beta")
+      ~revision_id:(revision "revision-beta") ~author:(device "device-carol")
+      ~base ~result:(snapshot "snapshot-beta")
+      [ text_edit [ "same.ml" ] 2 6 ]
+  in
+  let project =
+    initial_project () |> fun project ->
+    V4.receive project mixed |> require_ok |> fun project ->
+    V4.receive project conflicting |> require_ok
+  in
+  let projection = V4.projection project in
+  Alcotest.(check int)
+    "the overlapping edit is a decision" 1
+    (List.length projection.V4.decisions);
+  Alcotest.(check int)
+    "the disjoint edit remains available" 1
+    (List.length projection.V4.applied_edits);
+  Alcotest.(check (list string))
+    "the contributing revision remains inspectable" [ "revision-alpha" ]
+    (List.map
+       (fun revision -> V4.Revision_id.to_string revision.V4.revision)
+       projection.V4.applied)
+
+let resolution_replaces_only_the_decided_alternatives () =
+  let base = snapshot "snapshot-base" in
+  let local =
+    revision_record ~change_id:(change "change-alpha")
+      ~revision_id:(revision "revision-alpha")
+      ~author:(device "device-bob") ~base
+      ~result:(snapshot "snapshot-alpha")
+      [ text_edit [ "same.ml" ] 0 4 ]
+  in
+  let conflicting =
+    revision_record ~change_id:(change "change-beta")
+      ~revision_id:(revision "revision-beta") ~author:(device "device-carol")
+      ~base ~result:(snapshot "snapshot-beta")
+      [ text_edit [ "same.ml" ] 2 6 ]
+  in
+  let project =
+    initial_project () |> fun project ->
+    V4.receive project local |> require_ok |> fun project ->
+    V4.receive project conflicting |> require_ok
+  in
+  let decision = List.hd (V4.projection project).V4.decisions in
+  let replacement =
+    revision_record
+      ~change_id:(change "change-resolution")
+      ~revision_id:(revision "revision-resolution")
+      ~author:(device "device-alice") ~base
+      ~result:(snapshot "snapshot-resolution")
+      [ text_edit [ "same.ml" ] 0 6 ]
+  in
+  let project =
+    V4.resolve project ~decision:decision.V4.decision_id ~replacement
+    |> require_ok
+  in
+  let projection = V4.projection project in
+  Alcotest.(check int)
+    "resolution removes the open decision" 0
+    (List.length projection.V4.decisions);
+  Alcotest.(check (list string))
+    "resolution is the visible replacement" [ "revision-resolution" ]
+    (List.map
+       (fun revision -> V4.Revision_id.to_string revision.V4.revision)
+       projection.V4.applied);
+  Alcotest.(check int)
+    "resolution remains inspectable" 1
+    (List.length (V4.resolutions project))
 
 let withdrawal_never_erases_the_active_shared_change () =
   let base = snapshot "snapshot-base" in
   let project = initial_project () in
   let shared =
-    revision_record ~change_id:(change "change-a") ~revision_id:(revision "revision-a")
-      ~author:(device "device-alice") ~base ~result:(snapshot "snapshot-a")
+    revision_record ~change_id:(change "change-a")
+      ~revision_id:(revision "revision-a") ~author:(device "device-alice") ~base
+      ~result:(snapshot "snapshot-a")
       [ text_edit [ "a.ml" ] 0 1 ]
   in
   let project = V4.share_active project shared |> require_ok in
@@ -148,34 +251,46 @@ let withdrawal_never_erases_the_active_shared_change () =
         "close the active draft before withdrawing its shared change"
         (V4.error_to_string error)
   | Ok _ -> Alcotest.fail "withdrew the active shared change");
-  let project = V4.new_draft project ~id:(draft "draft-two") ~title:"follow-up" |> require_ok in
+  let project =
+    V4.new_draft project ~id:(draft "draft-two") ~title:"follow-up"
+    |> require_ok
+  in
   let project = V4.withdraw project ~change:(change "change-a") |> require_ok in
-  Alcotest.(check int) "withdrawn change leaves the projection" 0
-    (V4.projection project |> fun projection -> List.length projection.V4.applied)
+  Alcotest.(check int)
+    "withdrawn change leaves the projection" 0
+    ( V4.projection project |> fun projection ->
+      List.length projection.V4.applied )
 
 let manual_delivery_requires_a_decision_free_shared_active_draft () =
   let base = snapshot "snapshot-base" in
   let project = initial_project () in
   let shared =
-    revision_record ~change_id:(change "change-a") ~revision_id:(revision "revision-a")
-      ~author:(device "device-alice") ~base ~result:(snapshot "snapshot-a")
+    revision_record ~change_id:(change "change-a")
+      ~revision_id:(revision "revision-a") ~author:(device "device-alice") ~base
+      ~result:(snapshot "snapshot-a")
       [ text_edit [ "a.ml" ] 0 1 ]
   in
   let project = V4.share_active project shared |> require_ok in
   let project =
-    V4.deliver project ~id:(delivery "delivery-one") ~author:(device "device-alice")
-      ~snapshot:(snapshot "snapshot-delivered") ~included:[ revision "revision-a" ]
-      ~next_draft:(draft "draft-after-delivery") ~next_title:"after delivery"
-      ~created_at:1L
+    V4.deliver project ~id:(delivery "delivery-one")
+      ~author:(device "device-alice")
+      ~snapshot:(snapshot "snapshot-delivered")
+      ~included:[ revision "revision-a" ]
+      ~next_draft:(draft "draft-after-delivery")
+      ~next_title:"after delivery" ~created_at:1L
     |> require_ok
   in
-  Alcotest.(check string) "delivery becomes the new baseline" "snapshot-delivered"
-    (V4.projection project |> fun projection ->
-     V4.Snapshot_id.to_string projection.V4.projection_baseline);
-  Alcotest.(check int) "delivery is inspectable" 1 (List.length (V4.deliveries project));
-  Alcotest.(check string) "delivery starts a new active draft" "draft-after-delivery"
-    (V4.active_draft project |> fun active ->
-     V4.Draft_id.to_string active.V4.draft_id)
+  Alcotest.(check string)
+    "delivery becomes the new baseline" "snapshot-delivered"
+    ( V4.projection project |> fun projection ->
+      V4.Snapshot_id.to_string projection.V4.projection_baseline );
+  Alcotest.(check int)
+    "delivery is inspectable" 1
+    (List.length (V4.deliveries project));
+  Alcotest.(check string)
+    "delivery starts a new active draft" "draft-after-delivery"
+    ( V4.active_draft project |> fun active ->
+      V4.Draft_id.to_string active.V4.draft_id )
 
 let () =
   Alcotest.run "V4 model"
@@ -191,14 +306,19 @@ let () =
         [
           Alcotest.test_case "disjoint revisions compose in stable order" `Quick
             disjoint_revisions_compose_in_a_stable_order;
-          Alcotest.test_case "overlap creates a decision without local mutation" `Quick
-            overlap_is_a_decision_without_mutating_the_active_draft;
-          Alcotest.test_case "withdrawal protects the active shared change" `Quick
-            withdrawal_never_erases_the_active_shared_change;
+          Alcotest.test_case "overlap creates a decision without local mutation"
+            `Quick overlap_is_a_decision_without_mutating_the_active_draft;
+          Alcotest.test_case
+            "an independent edit survives another edit's conflict" `Quick
+            an_independent_edit_inside_a_conflicting_revision_still_composes;
+          Alcotest.test_case "resolution replaces decided alternatives" `Quick
+            resolution_replaces_only_the_decided_alternatives;
+          Alcotest.test_case "withdrawal protects the active shared change"
+            `Quick withdrawal_never_erases_the_active_shared_change;
         ] );
       ( "delivery",
         [
-          Alcotest.test_case "manual delivery has a shared decision-free input" `Quick
-            manual_delivery_requires_a_decision_free_shared_active_draft;
+          Alcotest.test_case "manual delivery has a shared decision-free input"
+            `Quick manual_delivery_requires_a_decision_free_shared_active_draft;
         ] );
     ]

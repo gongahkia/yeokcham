@@ -10,14 +10,16 @@ let path value = V4.Path.of_components [ value ] |> require_ok
 
 let revision_with_span ~change_id ~revision_id ~author ~start_byte ~end_byte =
   let span = V4.make_span ~start_byte ~end_byte |> require_ok in
-  V4.make_change_revision ~change:(change change_id) ~revision:(revision revision_id)
-    ~parent:None ~author:(device author) ~base:(snapshot "snapshot-base")
+  V4.make_change_revision ~change:(change change_id)
+    ~revision:(revision revision_id) ~parent:None ~author:(device author)
+    ~base:(snapshot "snapshot-base")
     ~result:(snapshot ("snapshot-" ^ revision_id))
     ~edits:[ V4.{ edit_path = path "same.ml"; edit_kind = Text span } ]
   |> require_ok
 
 let project () =
-  V4.init ~creator:(device "device-alice") ~initial_snapshot:(snapshot "snapshot-base")
+  V4.init ~creator:(device "device-alice")
+    ~initial_snapshot:(snapshot "snapshot-base")
     ~initial_draft:(draft "draft-one") ~title:"property"
 
 let disjoint_text_spans_are_order_independent =
@@ -29,8 +31,9 @@ let disjoint_text_spans_are_order_independent =
       let second_start = first_end + 1 in
       let second_end = second_start + width in
       let first =
-        revision_with_span ~change_id:"change-alpha" ~revision_id:"revision-alpha"
-          ~author:"device-bob" ~start_byte ~end_byte:first_end
+        revision_with_span ~change_id:"change-alpha"
+          ~revision_id:"revision-alpha" ~author:"device-bob" ~start_byte
+          ~end_byte:first_end
       in
       let second =
         revision_with_span ~change_id:"change-beta" ~revision_id:"revision-beta"
@@ -46,12 +49,18 @@ let disjoint_text_spans_are_order_independent =
       let right = compose [ second; first ] in
       List.length left.V4.decisions = 0
       && List.length left.V4.applied = 2
-      && List.map (fun revision -> V4.Revision_id.to_string revision.V4.revision) left.V4.applied
-         = List.map (fun revision -> V4.Revision_id.to_string revision.V4.revision) right.V4.applied)
+      && List.map
+           (fun revision -> V4.Revision_id.to_string revision.V4.revision)
+           left.V4.applied
+         = List.map
+             (fun revision -> V4.Revision_id.to_string revision.V4.revision)
+             right.V4.applied)
 
 let () =
   Alcotest.run "V4 model properties"
     [
       ( "composition",
-        [ QCheck_alcotest.to_alcotest disjoint_text_spans_are_order_independent ] );
+        [
+          QCheck_alcotest.to_alcotest disjoint_text_spans_are_order_independent;
+        ] );
     ]

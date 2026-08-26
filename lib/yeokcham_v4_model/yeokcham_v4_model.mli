@@ -2,7 +2,7 @@
 
     This module deliberately models the user-visible V4 concepts without a
     filesystem, storage engine, clock, random source, signature implementation,
-    or transport.  Adapters provide those effects after these transitions have
+    or transport. Adapters provide those effects after these transitions have
     been verified. *)
 
 type error =
@@ -13,11 +13,14 @@ type error =
   | Invalid_span of { start_byte : int; end_byte : int }
   | Empty_edits
   | Empty_title
+  | Invalid_project_state of string
   | Duplicate_draft
   | Duplicate_change
+  | Duplicate_revision
   | Duplicate_delivery
   | Unknown_change
   | Unknown_decision
+  | Decision_already_resolved
   | Unknown_revision
   | Active_draft_already_shared
   | Active_draft_not_shared
@@ -26,6 +29,7 @@ type error =
   | Revision_parent_mismatch
   | Initial_revision_has_parent
   | Received_revision_missing_parent
+  | Resolution_base_mismatch
   | Active_change_withdrawal
   | Delivery_has_open_decisions
   | Delivery_includes_unknown_revision
@@ -110,16 +114,28 @@ type shared_change = {
 
 type decision_kind = Stale_base | Edit_overlap
 
+type edit_reference = {
+  referenced_revision : Revision_id.t;
+  referenced_edit_index : int;
+}
+
+type edit_candidate = {
+  candidate_revision : change_revision;
+  candidate_edit_index : int;
+  candidate_edit : edit;
+}
+
 type decision = {
   decision_id : Decision_id.t;
   decision_kind : decision_kind;
   decision_paths : Path.t list;
-  candidates : change_revision list;
+  candidates : edit_candidate list;
 }
 
 type projection = {
   projection_baseline : Snapshot_id.t;
   applied : change_revision list;
+  applied_edits : edit_candidate list;
   decisions : decision list;
 }
 
@@ -129,6 +145,22 @@ type delivery = {
   delivery_snapshot : Snapshot_id.t;
   included : Revision_id.t list;
   created_at : int64;
+}
+
+type resolution = {
+  resolved_decision : Decision_id.t;
+  suppressed_edits : edit_reference list;
+  replacement_revision : change_revision;
+}
+
+type state = {
+  state_creator : Device_id.t;
+  state_baseline : Snapshot_id.t;
+  state_active_draft : Draft_id.t;
+  state_drafts : draft list;
+  state_changes : shared_change list;
+  state_resolutions : resolution list;
+  state_deliveries : delivery list;
 }
 
 type project
@@ -144,20 +176,18 @@ val creator : project -> Device_id.t
 val active_draft : project -> draft
 val drafts : project -> draft list
 val shared_changes : project -> shared_change list
+val resolutions : project -> resolution list
 val deliveries : project -> delivery list
 val projection : project -> projection
-
+val export : project -> state
+val import : state -> (project, error) result
 val checkpoint : project -> snapshot:Snapshot_id.t -> project
 
 val new_draft :
   project -> id:Draft_id.t -> title:string -> (project, error) result
 
-val share_active :
-  project -> change_revision -> (project, error) result
-
-val amend_active :
-  project -> change_revision -> (project, error) result
-
+val share_active : project -> change_revision -> (project, error) result
+val amend_active : project -> change_revision -> (project, error) result
 val receive : project -> change_revision -> (project, error) result
 val withdraw : project -> change:Change_id.t -> (project, error) result
 
