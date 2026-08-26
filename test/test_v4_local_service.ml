@@ -42,7 +42,9 @@ let init_captures_the_initial_tree_and_save_observes_no_change () =
       let initialized = initialize root in
       Alcotest.(check bool)
         "initial checkpoint identity is nonempty" true
-        (String.length (Model.Snapshot_id.to_string initialized.Service.checkpoint) > 0);
+        (String.length
+           (Model.Snapshot_id.to_string initialized.Service.checkpoint)
+        > 0);
       match Service.save ~root |> require_ok Service.error_to_string with
       | Service.Unchanged status ->
           Alcotest.(check string)
@@ -85,8 +87,8 @@ let () =
     [
       ( "saved work",
         [
-          Alcotest.test_case "init captures and unchanged save is a no-op" `Quick
-            init_captures_the_initial_tree_and_save_observes_no_change;
+          Alcotest.test_case "init captures and unchanged save is a no-op"
+            `Quick init_captures_the_initial_tree_and_save_observes_no_change;
           Alcotest.test_case "changed save creates a checkpoint" `Quick
             changed_save_creates_a_new_checkpoint;
           Alcotest.test_case "new draft retains saved state" `Quick
