@@ -4,6 +4,16 @@
  (libraries alcotest qcheck-core qcheck-alcotest))
 
 (test
+ (name test_v4_model)
+ (modules test_v4_model)
+ (libraries alcotest yeokcham_v4_model))
+
+(test
+ (name v4_model_property_test)
+ (modules v4_model_property_test)
+ (libraries alcotest qcheck-core qcheck-alcotest yeokcham_v4_model))
+
+(test
  (name test_cli_progress)
  (modules test_cli_progress)
  (libraries alcotest yeokcham_cli_progress unix))

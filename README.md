@@ -11,6 +11,11 @@ Yeokcham is a portfolio and research prototype, not a production Git
 replacement. Exact file bytes are canonical; semantic analysis is optional,
 bounded evidence rather than source-of-truth history.
 
+The next product track is [V4](docs/V4_PRODUCT_CONTRACT.md): a side-by-side
+small-team change composer built around saved, shared, needs-a-decision, and
+delivered. V3 remains the implemented prototype while V4's functional core is
+developed and tested independently.
+
 ## Start here
 
 The supported product direction is macOS, Linux, and WSL. The checked-in

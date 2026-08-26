@@ -1,0 +1,179 @@
+(** Pure V4 product transitions.
+
+    This module deliberately models the user-visible V4 concepts without a
+    filesystem, storage engine, clock, random source, signature implementation,
+    or transport.  Adapters provide those effects after these transitions have
+    been verified. *)
+
+type error =
+  | Empty_identifier of string
+  | Invalid_identifier of string
+  | Empty_path
+  | Unsafe_path_component of string
+  | Invalid_span of { start_byte : int; end_byte : int }
+  | Empty_edits
+  | Empty_title
+  | Duplicate_draft
+  | Duplicate_change
+  | Duplicate_delivery
+  | Unknown_change
+  | Unknown_decision
+  | Unknown_revision
+  | Active_draft_already_shared
+  | Active_draft_not_shared
+  | Revision_change_mismatch
+  | Revision_author_mismatch
+  | Revision_parent_mismatch
+  | Initial_revision_has_parent
+  | Received_revision_missing_parent
+  | Active_change_withdrawal
+  | Delivery_has_open_decisions
+  | Delivery_includes_unknown_revision
+  | Delivery_includes_duplicate_revision
+  | Delivery_omits_active_change
+  | Delivery_requires_shared_active_draft
+
+val error_to_string : error -> string
+
+module type Identifier = sig
+  type t
+
+  val of_string : string -> (t, error) result
+  val to_string : t -> string
+  val equal : t -> t -> bool
+  val compare : t -> t -> int
+end
+
+module Snapshot_id : Identifier
+module Draft_id : Identifier
+module Change_id : Identifier
+module Revision_id : Identifier
+module Decision_id : Identifier
+module Delivery_id : Identifier
+module Device_id : Identifier
+
+module Path : sig
+  type t
+
+  val of_components : string list -> (t, error) result
+  val components : t -> string list
+  val compare : t -> t -> int
+  val equal : t -> t -> bool
+  val is_ancestor : ancestor:t -> descendant:t -> bool
+  val to_string : t -> string
+end
+
+type span = { start_byte : int; end_byte : int }
+
+val make_span : start_byte:int -> end_byte:int -> (span, error) result
+
+type edit_kind = Text of span | Whole_path
+type edit = { path : Path.t; kind : edit_kind }
+
+type change_revision = {
+  change : Change_id.t;
+  revision : Revision_id.t;
+  parent : Revision_id.t option;
+  author : Device_id.t;
+  base : Snapshot_id.t;
+  result : Snapshot_id.t;
+  edits : edit list;
+}
+
+val make_change_revision :
+  change:Change_id.t ->
+  revision:Revision_id.t ->
+  parent:Revision_id.t option ->
+  author:Device_id.t ->
+  base:Snapshot_id.t ->
+  result:Snapshot_id.t ->
+  edits:edit list ->
+  (change_revision, error) result
+
+type draft_state = Active | Closed
+
+type draft = {
+  id : Draft_id.t;
+  title : string;
+  state : draft_state;
+  latest_checkpoint : Snapshot_id.t;
+  shared_change : Change_id.t option;
+}
+
+type shared_change = {
+  id : Change_id.t;
+  draft : Draft_id.t option;
+  author : Device_id.t;
+  revisions : change_revision list;
+  withdrawn : bool;
+}
+
+type decision_kind = Stale_base | Edit_overlap
+
+type decision = {
+  id : Decision_id.t;
+  kind : decision_kind;
+  paths : Path.t list;
+  candidates : change_revision list;
+}
+
+type projection = {
+  baseline : Snapshot_id.t;
+  applied : change_revision list;
+  decisions : decision list;
+}
+
+type delivery = {
+  id : Delivery_id.t;
+  author : Device_id.t;
+  snapshot : Snapshot_id.t;
+  included : Revision_id.t list;
+  created_at : int64;
+}
+
+type project
+
+val init :
+  creator:Device_id.t ->
+  initial_snapshot:Snapshot_id.t ->
+  initial_draft:Draft_id.t ->
+  title:string ->
+  project
+
+val creator : project -> Device_id.t
+val active_draft : project -> draft
+val drafts : project -> draft list
+val shared_changes : project -> shared_change list
+val deliveries : project -> delivery list
+val projection : project -> projection
+
+val checkpoint : project -> snapshot:Snapshot_id.t -> project
+
+val new_draft :
+  project -> id:Draft_id.t -> title:string -> (project, error) result
+
+val share_active :
+  project -> change_revision -> (project, error) result
+
+val amend_active :
+  project -> change_revision -> (project, error) result
+
+val receive : project -> change_revision -> (project, error) result
+val withdraw : project -> change:Change_id.t -> (project, error) result
+
+val resolve :
+  project ->
+  decision:Decision_id.t ->
+  replacement:change_revision ->
+  (project, error) result
+
+val deliver :
+  project ->
+  id:Delivery_id.t ->
+  author:Device_id.t ->
+  snapshot:Snapshot_id.t ->
+  included:Revision_id.t list ->
+  next_draft:Draft_id.t ->
+  next_title:string ->
+  created_at:int64 ->
+  (project, error) result

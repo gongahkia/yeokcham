@@ -4,6 +4,72 @@ This document defines the conceptual model before implementation details.
 
 Notation is descriptive rather than a complete mechanised proof.
 
+## V4 side-by-side model
+
+ADR-079 introduces a new native format and user model.  It does not change the
+meaning of the V1–V3 records specified below.  Until a V4 persistence adapter
+exists, these types are pure transition records defined by
+`Yeokcham_v4_model` and are intentionally not Envelope-1 objects.
+
+```ocaml
+type v4_snapshot_id
+type v4_draft_id
+type v4_change_id
+type v4_revision_id
+type v4_decision_id
+type v4_delivery_id
+type v4_device_id
+
+type v4_draft = {
+  id : v4_draft_id;
+  title : string;
+  state : [ `Active | `Closed ];
+  latest_checkpoint : v4_snapshot_id;
+  shared_change : v4_change_id option;
+}
+
+type v4_change_revision = {
+  change : v4_change_id;
+  revision : v4_revision_id;
+  parent : v4_revision_id option;
+  author : v4_device_id;
+  base : v4_snapshot_id;
+  result : v4_snapshot_id;
+  edits : v4_edit list;
+}
+
+type v4_decision = {
+  id : v4_decision_id;
+  candidates : v4_change_revision list;
+  paths : path list;
+}
+
+type v4_delivery = {
+  id : v4_delivery_id;
+  snapshot : v4_snapshot_id;
+  included : v4_revision_id list;
+}
+```
+
+V4 invariants are:
+
+- Exactly one draft is active in a project.
+- A shared change has an immutable, linear revision chain with one author.
+- A received revision either starts a new change with no parent or extends the
+  current revision of an existing change.
+- A projection applies only revisions based on its current delivery baseline.
+- Disjoint text spans may compose; all uncertain or structural overlap is a
+  decision containing every candidate, not an implicit rewrite.
+- An unresolved decision never changes the materialized project directory.
+- A delivery names only currently visible decision-free revisions and starts a
+  fresh active draft.
+- Withdrawal changes future projection selection only; it does not erase an
+  immutable replicated revision.
+
+The persistent V4 format must version each record, canonically order all
+collections, reject unknown mandatory features, retain old-format fixtures,
+and never mutate its only copy in place.
+
 ## 1. Primitive identities
 
 ```ocaml
