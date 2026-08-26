@@ -14,7 +14,7 @@ let path components = V4.Path.of_components components |> require_ok
 
 let text_edit components start_byte end_byte =
   let span = V4.make_span ~start_byte ~end_byte |> require_ok in
-  V4.{ path = path components; kind = Text span }
+  V4.{ edit_path = path components; edit_kind = Text span }
 
 let revision_record ?parent ~change_id ~revision_id ~author ~base ~result edits =
   V4.make_change_revision ~change:change_id ~revision:revision_id ~parent ~author
@@ -37,10 +37,12 @@ let one_active_draft_and_checkpoints () =
   let project = V4.new_draft project ~id:(draft "draft-two") ~title:"second task" |> require_ok in
   Alcotest.(check string)
     "new draft is active" "draft-two"
-    (V4.active_draft project |> fun active -> V4.Draft_id.to_string active.V4.id);
+    (V4.active_draft project |> fun active ->
+     V4.Draft_id.to_string active.V4.draft_id);
   let previous =
     V4.drafts project
-    |> List.find (fun candidate -> V4.Draft_id.equal candidate.V4.id (draft "draft-one"))
+    |> List.find (fun candidate ->
+           V4.Draft_id.equal candidate.V4.draft_id (draft "draft-one"))
   in
   Alcotest.(check bool) "previous draft is closed" true
     (match previous.V4.state with V4.Closed -> true | V4.Active -> false)
@@ -60,8 +62,11 @@ let sharing_requires_a_linear_revision_chain () =
       ~base ~result:(snapshot "snapshot-a2") [ text_edit [ "main.ml" ] 8 12 ]
   in
   (match V4.amend_active project wrong_parent with
-  | Error V4.Revision_parent_mismatch -> ()
-  | Error error -> Alcotest.fail (V4.error_to_string error)
+  | Error error ->
+      Alcotest.(check string)
+        "non-linear active revision is rejected"
+        "revision parent is not the current revision"
+        (V4.error_to_string error)
   | Ok _ -> Alcotest.fail "accepted a non-linear active revision");
   let second =
     revision_record ~parent:(revision "revision-a1") ~change_id:(change "change-a")
@@ -137,8 +142,11 @@ let withdrawal_never_erases_the_active_shared_change () =
   in
   let project = V4.share_active project shared |> require_ok in
   (match V4.withdraw project ~change:(change "change-a") with
-  | Error V4.Active_change_withdrawal -> ()
-  | Error error -> Alcotest.fail (V4.error_to_string error)
+  | Error error ->
+      Alcotest.(check string)
+        "active shared change cannot be withdrawn"
+        "close the active draft before withdrawing its shared change"
+        (V4.error_to_string error)
   | Ok _ -> Alcotest.fail "withdrew the active shared change");
   let project = V4.new_draft project ~id:(draft "draft-two") ~title:"follow-up" |> require_ok in
   let project = V4.withdraw project ~change:(change "change-a") |> require_ok in
@@ -162,10 +170,12 @@ let manual_delivery_requires_a_decision_free_shared_active_draft () =
     |> require_ok
   in
   Alcotest.(check string) "delivery becomes the new baseline" "snapshot-delivered"
-    (V4.projection project |> fun projection -> V4.Snapshot_id.to_string projection.V4.baseline);
+    (V4.projection project |> fun projection ->
+     V4.Snapshot_id.to_string projection.V4.projection_baseline);
   Alcotest.(check int) "delivery is inspectable" 1 (List.length (V4.deliveries project));
   Alcotest.(check string) "delivery starts a new active draft" "draft-after-delivery"
-    (V4.active_draft project |> fun active -> V4.Draft_id.to_string active.V4.id)
+    (V4.active_draft project |> fun active ->
+     V4.Draft_id.to_string active.V4.draft_id)
 
 let () =
   Alcotest.run "V4 model"

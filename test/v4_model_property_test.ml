@@ -13,7 +13,7 @@ let revision_with_span ~change_id ~revision_id ~author ~start_byte ~end_byte =
   V4.make_change_revision ~change:(change change_id) ~revision:(revision revision_id)
     ~parent:None ~author:(device author) ~base:(snapshot "snapshot-base")
     ~result:(snapshot ("snapshot-" ^ revision_id))
-    ~edits:[ V4.{ path = path "same.ml"; kind = Text span } ]
+    ~edits:[ V4.{ edit_path = path "same.ml"; edit_kind = Text span } ]
   |> require_ok
 
 let project () =

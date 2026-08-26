@@ -2295,6 +2295,7 @@
    rust_retarget_fixture_property_test.exe)
   (:git_property_test git_property_test.exe)
   (:peer_property_test peer_property_test.exe)
+  (:v4_model_property_test v4_model_property_test.exe)
   (source_tree golden)
   (source_tree fixtures/encoding))
  (action
@@ -2380,4 +2381,5 @@
    (run %{rust_adapter_property_test})
    (run %{rust_retarget_fixture_property_test})
    (run %{git_property_test})
-   (run %{peer_property_test}))))
+   (run %{peer_property_test})
+   (run %{v4_model_property_test}))))

@@ -68,15 +68,15 @@ type span = { start_byte : int; end_byte : int }
 val make_span : start_byte:int -> end_byte:int -> (span, error) result
 
 type edit_kind = Text of span | Whole_path
-type edit = { path : Path.t; kind : edit_kind }
+type edit = { edit_path : Path.t; edit_kind : edit_kind }
 
 type change_revision = {
   change : Change_id.t;
   revision : Revision_id.t;
   parent : Revision_id.t option;
-  author : Device_id.t;
-  base : Snapshot_id.t;
-  result : Snapshot_id.t;
+  revision_author : Device_id.t;
+  base_snapshot : Snapshot_id.t;
+  result_snapshot : Snapshot_id.t;
   edits : edit list;
 }
 
@@ -93,7 +93,7 @@ val make_change_revision :
 type draft_state = Active | Closed
 
 type draft = {
-  id : Draft_id.t;
+  draft_id : Draft_id.t;
   title : string;
   state : draft_state;
   latest_checkpoint : Snapshot_id.t;
@@ -101,9 +101,9 @@ type draft = {
 }
 
 type shared_change = {
-  id : Change_id.t;
-  draft : Draft_id.t option;
-  author : Device_id.t;
+  change_id : Change_id.t;
+  source_draft : Draft_id.t option;
+  change_author : Device_id.t;
   revisions : change_revision list;
   withdrawn : bool;
 }
@@ -111,22 +111,22 @@ type shared_change = {
 type decision_kind = Stale_base | Edit_overlap
 
 type decision = {
-  id : Decision_id.t;
-  kind : decision_kind;
-  paths : Path.t list;
+  decision_id : Decision_id.t;
+  decision_kind : decision_kind;
+  decision_paths : Path.t list;
   candidates : change_revision list;
 }
 
 type projection = {
-  baseline : Snapshot_id.t;
+  projection_baseline : Snapshot_id.t;
   applied : change_revision list;
   decisions : decision list;
 }
 
 type delivery = {
-  id : Delivery_id.t;
-  author : Device_id.t;
-  snapshot : Snapshot_id.t;
+  delivery_id : Delivery_id.t;
+  delivery_author : Device_id.t;
+  delivery_snapshot : Snapshot_id.t;
   included : Revision_id.t list;
   created_at : int64;
 }
