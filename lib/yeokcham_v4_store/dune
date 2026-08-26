@@ -1,0 +1,8 @@
+(library
+ (name yeokcham_v4_store)
+ (libraries
+  yeokcham_encoding
+  yeokcham_envelope
+  yeokcham_store
+  yeokcham_v4_model
+  yeokcham_v4_record))

@@ -401,7 +401,8 @@ let snapshot_storage_type = function
   | Envelope.Git_archive | Envelope.Git_adoption | Envelope.Peer_publication
   | Envelope.Peer_integration | Envelope.Git_lineage_node | Envelope.Git_lineage
   | Envelope.Peer_identity | Envelope.Peer_contact | Envelope.Peer_advertisement
-  | Envelope.Peer_sync_node | Envelope.Peer_sync_conflict ->
+  | Envelope.Peer_sync_node | Envelope.Peer_sync_conflict
+  | Envelope.V4_project_state ->
       false
 
 let collect_content store seen content =

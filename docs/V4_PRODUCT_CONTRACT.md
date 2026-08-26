@@ -12,16 +12,31 @@ The current milestone is the V4 functional core: exact local recovery,
 explicit drafts and sharing, conservative composition, durable decisions, and
 manual delivery.  The completed first vertical slice is an in-memory model with
 generated tests.  The active vertical slice is a versioned canonical model-state
-record: model state can be encoded, decoded, and rejected when malformed before
-a V4 persistent adapter, watcher, CLI, or transport implementation is added.
+record, local immutable state head, and command-triggered exact capture: model
+state can be encoded, decoded, written as an immutable object, published only
+through a compare-and-swap head, and bound to an exact snapshot before watcher,
+CLI, or transport implementation is added.
 
 The record slice owns these types: `state`, `draft`, `shared_change`,
 `change_revision`, `edit`, `resolution`, and `delivery`.  Its invariants are
 one active draft, unique identities, linear immutable revision chains, a
 resolution based on the current delivery baseline, and canonical field/list
 ordering.  It requires round-trip, noncanonical-byte, malformed-state, and
-golden-byte tests.  ADR-079 remains applicable; no new architecture decision is
-needed because this is the already-approved persistent-adapter boundary.
+golden-byte tests.  The local adapter adds a `V4_project_state` object and one
+`v4-project-state` mutable head.  Initialization refuses a pre-existing
+`.yeokcham` directory, so it cannot reinterpret or add V4 records to an
+existing repository.  Saves write the immutable object before the head changes;
+stale writers receive a compare-and-swap error.  Tests require first-write,
+reopen, stale-writer, and corrupt/wrong-type failure coverage. ADR-079 remains
+applicable; no new architecture decision is needed because this is the
+already-approved persistent-adapter boundary.
+
+The command-triggered capture adapter owns `init`, `save`, `status`, and
+`draft new` transitions. It captures an exact tree through the existing
+byte-correct scanner, maps the stored snapshot identity into the V4 model, and
+does not write a new head when the snapshot is unchanged. It needs init/scan,
+unchanged save, changed save, and draft-lifecycle tests. Automatic watcher
+capture remains a later slice.
 
 ## Product promise
 

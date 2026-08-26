@@ -49,6 +49,7 @@ type object_type =
   | Peer_advertisement
   | Peer_sync_node
   | Peer_sync_conflict
+  | V4_project_state
 
 let object_type_code = function
   | Content -> 1
@@ -90,6 +91,7 @@ let object_type_code = function
   | Peer_advertisement -> 37
   | Peer_sync_node -> 38
   | Peer_sync_conflict -> 39
+  | V4_project_state -> 40
 
 let object_type_of_code = function
   | 1 -> Some Content
@@ -131,6 +133,7 @@ let object_type_of_code = function
   | 37 -> Some Peer_advertisement
   | 38 -> Some Peer_sync_node
   | 39 -> Some Peer_sync_conflict
+  | 40 -> Some V4_project_state
   | _ -> None
 
 type creation_error =

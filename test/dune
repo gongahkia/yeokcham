@@ -21,6 +21,23 @@
   (source_tree golden)))
 
 (test
+ (name test_v4_store)
+ (modules test_v4_store)
+ (libraries
+  alcotest
+  unix
+  yeokcham_encoding
+  yeokcham_envelope
+  yeokcham_store
+  yeokcham_v4_model
+  yeokcham_v4_store))
+
+(test
+ (name test_v4_local_service)
+ (modules test_v4_local_service)
+ (libraries alcotest unix yeokcham_v4_local_service yeokcham_v4_model))
+
+(test
  (name test_cli_progress)
  (modules test_cli_progress)
  (libraries alcotest yeokcham_cli_progress unix))

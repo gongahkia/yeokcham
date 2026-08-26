@@ -186,7 +186,7 @@ let no_scratch_objects store =
         | Envelope.Peer_integration | Envelope.Git_lineage_node
         | Envelope.Git_lineage | Envelope.Peer_identity | Envelope.Peer_contact
         | Envelope.Peer_advertisement | Envelope.Peer_sync_node
-        | Envelope.Peer_sync_conflict ->
+        | Envelope.Peer_sync_conflict | Envelope.V4_project_state ->
             false))
 
 let only_projection_objects store =
@@ -214,7 +214,7 @@ let only_projection_objects store =
         | Envelope.Git_lineage_node | Envelope.Git_lineage
         | Envelope.Peer_identity | Envelope.Peer_contact
         | Envelope.Peer_advertisement | Envelope.Peer_sync_node
-        | Envelope.Peer_sync_conflict ->
+        | Envelope.Peer_sync_conflict | Envelope.V4_project_state ->
             true))
 
 let capsule_publication_transfers_only_snapshot_closure () =

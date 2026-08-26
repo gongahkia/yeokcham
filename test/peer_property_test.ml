@@ -77,7 +77,7 @@ let no_scratch_objects store =
       | Yeokcham_envelope.Git_lineage | Yeokcham_envelope.Peer_identity
       | Yeokcham_envelope.Peer_contact | Yeokcham_envelope.Peer_advertisement
       | Yeokcham_envelope.Peer_sync_node | Yeokcham_envelope.Peer_sync_conflict
-        ->
+      | Yeokcham_envelope.V4_project_state ->
           true)
 
 let generated_capsule_projection_is_missing_only_and_scratch_free =

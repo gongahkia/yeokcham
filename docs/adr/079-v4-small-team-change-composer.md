@@ -25,6 +25,11 @@ do not define the V4 core model.  Transport is an adapter boundary; trusted,
 direct, managed, and end-to-end encrypted delivery of the same signed change
 records are supported without changing source-control semantics.
 
+The first V4 persistent adapter uses the proven immutable object store only as
+a storage substrate. It reserves `V4_project_state` and one `v4-project-state`
+compare-and-swap head. V4 initialization refuses an existing `.yeokcham`
+directory, so a V4 command never treats a previous Yeokcham format as V4 state.
+
 ## Consequences
 
 The V4 core starts as pure OCaml transitions and generated tests.  Persistent
