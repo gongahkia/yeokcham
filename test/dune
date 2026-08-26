@@ -14,6 +14,13 @@
  (libraries alcotest qcheck-core qcheck-alcotest yeokcham_v4_model))
 
 (test
+ (name test_v4_record)
+ (modules test_v4_record)
+ (libraries alcotest yeokcham_testkit yeokcham_v4_model yeokcham_v4_record)
+ (deps
+  (source_tree golden)))
+
+(test
  (name test_cli_progress)
  (modules test_cli_progress)
  (libraries alcotest yeokcham_cli_progress unix))

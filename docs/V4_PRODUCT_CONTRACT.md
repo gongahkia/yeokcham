@@ -10,8 +10,18 @@ V3 repositories.
 
 The current milestone is the V4 functional core: exact local recovery,
 explicit drafts and sharing, conservative composition, durable decisions, and
-manual delivery.  The first vertical slice is an in-memory model with generated
-tests before a V4 persistent adapter, watcher, CLI, or transport implementation.
+manual delivery.  The completed first vertical slice is an in-memory model with
+generated tests.  The active vertical slice is a versioned canonical model-state
+record: model state can be encoded, decoded, and rejected when malformed before
+a V4 persistent adapter, watcher, CLI, or transport implementation is added.
+
+The record slice owns these types: `state`, `draft`, `shared_change`,
+`change_revision`, `edit`, `resolution`, and `delivery`.  Its invariants are
+one active draft, unique identities, linear immutable revision chains, a
+resolution based on the current delivery baseline, and canonical field/list
+ordering.  It requires round-trip, noncanonical-byte, malformed-state, and
+golden-byte tests.  ADR-079 remains applicable; no new architecture decision is
+needed because this is the already-approved persistent-adapter boundary.
 
 ## Product promise
 
