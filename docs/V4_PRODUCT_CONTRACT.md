@@ -15,18 +15,25 @@ canonical model-state record with a compare-and-swap `v4-project-state` head,
 command-triggered exact capture, the local four-fact CLI, in-place
 journaled restore with a retained safety checkpoint, bounded checkpoint
 retention with explicit pins, and Linux watcher capture that reuses command
-`save`. Transport and signing remain later slices.
+`save`. The inotify quiet-window loop is implemented but was **not** executed
+on the Darwin development host; run `dune exec test/test_v4_watch.exe` on
+Linux (see [ADR-082](adr/082-v4-linux-command-capture.md)). Transport and
+signing remain later slices.
 
 The record slice owns these types: `state`, `checkpoint`, `draft`,
-`shared_change`, `change_revision`, `edit`, `resolution`, and `delivery`. Its
+`shared_change`, `change_revision`, `edit`, `resolution`, `delivery`, and
+`username_registration`. Its
 invariants are one active draft, unique identities, linear immutable revision
 chains, a resolution based on the current delivery baseline, retained unique
-checkpoints, and canonical field/list ordering. A delivery that includes a
+checkpoints, a one-to-one device-to-local-username registration, and canonical
+field/list ordering. A delivery that includes a
 resolution consumes the resolved shared changes and drops resolutions bound to
 the previous baseline. It requires round-trip, noncanonical-byte,
-malformed-state, and golden-byte tests. Project-state schema version 3 retains
-the V1 and V2 fixture decoders. Version 2 decodes as an empty pin list.
-Version 3 appends canonical pins. The local adapter adds a
+malformed-state, and golden-byte tests. Project-state schema version 4 retains
+the V1, V2, and V3 fixture decoders. Version 2 decodes as an empty pin list,
+version 3 appends canonical pins, and older records decode as an empty local
+username-registration list rather than manufacturing a label. Version 4
+appends canonical username registrations. The local adapter adds a
 `V4_project_state` object and one `v4-project-state` mutable head.  Initialization refuses a pre-existing
 `.yeokcham` directory, so it cannot reinterpret or add V4 records to an
 existing repository.  Saves write the immutable object before the head changes;
@@ -35,8 +42,8 @@ reopen, stale-writer, and corrupt/wrong-type failure coverage. ADR-079 remains
 applicable; no new architecture decision is needed because this is the
 already-approved persistent-adapter boundary.
 
-The command-triggered capture adapter owns `init`, `save`, `status`,
-`draft new`, `share`, `withdraw`, `resolve`, and `deliver`. It captures an
+The command-triggered capture adapter owns `init`, `save`, `status`, `user
+register`, `draft new`, `share`, `withdraw`, `resolve`, and `deliver`. It captures an
 exact tree through the existing byte-correct scanner, maps the stored snapshot
 identity into the V4 model, and does not write a new head when a save observes
 an unchanged snapshot. `save` remains recovery-only: a later checkpoint becomes
@@ -46,12 +53,20 @@ a shared revision only when `share` is run again. Shared revisions record
 same capture path after a one-second quiet period, with a thirty-second maximum
 delay during sustained writes. macOS and WSL watchers are not implemented.
 
-The inspectable CLI is `yeokcham-v4 init`, `save`, `status`, `timeline`,
-`restore`, `draft new`, `share`, `withdraw`, `resolve`, `deliver`, `pin`,
+The inspectable CLI is `yeokcham-v4 init`, `save`, `status`, `user register`,
+`timeline`, `restore`, `draft new`, `share`, `withdraw`, `resolve`, `decision show`,
+`decision materialize`, `deliver`, `pin`,
 `unpin`, `compact`, and `watch`.
 `status` renders the four facts, lists shared-change, decision, and
-delivery identities where they exist, and reports `capture command` plus
-whether the tree has uncaptured edits. `compact` drops unnamed scratch
+delivery identities where they exist, lists local username registrations, and
+reports `capture command` plus whether the tree has uncaptured edits. `decision
+show` and `decision materialize` copy or list exact candidate snapshots without
+rewriting the project directory. Candidate directories are generated direct
+children such as `alice-001`, in canonical candidate order; a raw revision ID
+is never used as a filesystem path. The output keeps the canonical author
+device ID beside its optional local display username.
+`resolve --tree PATH` uses that isolated tree as the resolution snapshot.
+`compact` drops unnamed scratch
 checkpoints under a count-based extra-keep policy; it does not delete object
 bytes. `watch` is Linux-only. The command rejects unsupported V4
 actions instead of routing them through V3 or Git behaviour. CLI journey tests
@@ -106,6 +121,14 @@ Every project has exactly one active draft.  It is created at project
 initialisation.  `draft new <title>` closes it and begins another draft.  The
 tool does not infer task boundaries.
 
+`init --device DEVICE --username NAME` registers the creator's local display
+name. `user register --device DEVICE --username NAME` records or corrects one
+safe display handle for another device. A username is a lowercase ASCII handle
+of at most 32 characters (`[a-z0-9][a-z0-9_-]*`); registrations are unique by
+both device and handle. This is readable local metadata, not a claimed person
+identity, membership record, enrollment, or authorization decision. The
+canonical device ID remains the author identity shown by decision inspection.
+
 `share` publishes the complete active draft to the project.  Later checkpoints
 amend that shared draft by publishing immutable signed revisions.  Closing or
 delivering the shared draft freezes its latest revision.  A user who needs to
@@ -150,6 +173,9 @@ application, and case-path collisions.
 A decision stores the base, every candidate, author provenance, and affected
 paths.  It does not modify active files or convert a conflict into a process
 error.  A resolution is a new ordinary revision, not an overwrite of history.
+Materialising candidates requires an existing empty destination and creates
+only generated safe child names from the registered display handle plus a
+rank. It never derives a child filesystem path from a revision identifier.
 
 ## Trust and transport contract
 
@@ -178,7 +204,7 @@ than emulate part of another VCS model.
 ## Required types and invariants
 
 The core defines `snapshot`, `checkpoint`, `draft`, `shared_change`,
-`change_revision`, `projection`, `decision`, `delivery`, `membership`, and
+`change_revision`, `projection`, `decision`, `delivery`, `username_registration`, `membership`, and
 `transport_envelope` as distinct types.  Stable identities are canonical and
 versioned at the persistent adapter boundary.  A draft is never a delivery; a
 delivery is never an implicit approval; a decision is never a failed process;
@@ -190,6 +216,8 @@ and semantic sidecars are never canonical source.
   composition, decisions, and delivery;
 - exact snapshot/materialization and restore-failure tests;
 - canonical persistent-format golden fixtures before a V4 record is written;
+- duplicate-registration, generated-registration, legacy-record, and
+  candidate-path-containment tests for local usernames and decision views;
 - duplicate, reordered, corrupt, unauthorized, and offline exchange tests;
 - end-to-end group epoch, enrollment, removal, and key-rotation tests;
 - CLI journey tests for saved work, two drafts, sharing, conflict resolution,

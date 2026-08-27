@@ -886,3 +886,31 @@ turn timing into a correctness gate.
 - `hyperfine` where appropriate.
 - Golden fixtures for CLI and encodings.
 - Git plumbing commands for bridge verification.
+
+## 12. V4 Linux watcher loop (other-machine proof)
+
+Darwin CLI tests only cover `yeokcham-v4 watch` exiting 2 with
+`Linux watcher capture is not supported on this system`. The real inotify
+loop lives in `test/test_v4_watch.ml` and did not run on the Darwin
+development host.
+
+On a Linux machine with the same opam switch:
+
+```sh
+uname -s
+opam exec -- dune exec test/test_v4_watch.exe
+```
+
+`uname` must print `Linux`. Pass is a successful Alcotest run of “watch
+records a checkpoint after quiet edits” (the test writes a file, waits
+through the 1s quiet window with bounded retries, and checks that `status`
+shows a new checkpoint). Optional dogfood: `yeokcham-v4 watch --root PATH`
+on a real tree.
+
+GitHub Actions `test` already runs `dune runtest` on `ubuntu-latest`. That
+is Linux, but it is not a recorded field trial until the job that includes
+this test has been observed green. Failures worth logging: `inotify` watch
+limits, debounce timing, and leftover `watch` processes if the test is
+killed.
+
+macOS and WSL automatic capture remain out of V4 scope.

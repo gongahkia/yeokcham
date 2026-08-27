@@ -67,6 +67,20 @@ Not applicable. No new record is written.
 - CLI status warning;
 - non-Linux CLI refusal of `watch`.
 
+The inotify loop test is `test/test_v4_watch.ml` (`build_if linux`, Alcotest
+`Slow`). It was not run on the Darwin development host. Proof on another
+machine:
+
+```sh
+uname -s   # must print Linux
+opam exec -- dune exec test/test_v4_watch.exe
+```
+
+Pass is Alcotest success for “watch records a checkpoint after quiet edits”.
+`dune runtest` on Ubuntu (including `.github/workflows/ci.yml`) is the
+intended automated path; do not treat this ADR as field-trial evidence until
+that test has actually passed on Linux.
+
 ## CLI and user impact
 
 `yeokcham-v4 status` always names command capture. `yeokcham-v4 watch` is the

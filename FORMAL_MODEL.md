@@ -20,6 +20,12 @@ type v4_revision_id
 type v4_decision_id
 type v4_delivery_id
 type v4_device_id
+type v4_username
+
+type v4_username_registration = {
+  device : v4_device_id;
+  username : v4_username;
+}
 
 type v4_draft = {
   id : v4_draft_id;
@@ -87,6 +93,14 @@ V4 invariants are:
 - Disjoint text spans may compose; all uncertain or structural overlap is a
   decision containing every candidate, not an implicit rewrite.
 - An unresolved decision never changes the materialized project directory.
+- A local username registration assigns at most one safe display handle to a
+  device, and no handle to more than one device. It is display metadata only;
+  it does not authenticate, enroll, or authorize the device.
+- Decision materialisation derives a direct child directory only from a safe
+  local display handle (or the fixed fallback `device`) and a canonical rank.
+  It never derives a filesystem child path from a revision identifier.
+- Resolution bytes may come from an isolated tree (`resolve --tree`); that scan
+  does not rewrite the live project directory.
 - A delivery names only currently visible decision-free revisions, consumes
   shared changes represented by those revisions or by included resolutions,
   drops resolutions bound to the previous baseline, and starts a fresh active
