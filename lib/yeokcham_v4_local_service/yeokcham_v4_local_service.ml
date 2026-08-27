@@ -225,8 +225,7 @@ let status ~root =
       let* observed = capture ~root (Store.underlying_store repository) in
       let active = Model.active_draft loaded.Store.project in
       let uncaptured =
-        not
-          (Model.Snapshot_id.equal active.Model.latest_checkpoint observed)
+        not (Model.Snapshot_id.equal active.Model.latest_checkpoint observed)
       in
       Ok (status_of_project ~uncaptured loaded.Store.project))
 
@@ -562,7 +561,8 @@ let published_journal_ids ~root =
         let prior = List.assoc_opt (Journal.operation_id journal) latest in
         match prior with
         | Some current
-          when Int64.compare (Journal.generation current)
+          when Int64.compare
+                 (Journal.generation current)
                  (Journal.generation journal)
                >= 0 ->
             latest
@@ -574,8 +574,10 @@ let published_journal_ids ~root =
   in
   Ok
     (latest
-    |> List.filter (fun (_, journal) -> Journal.phase journal = Journal.Published)
-    |> List.map fst |> List.sort_uniq String.compare)
+    |> List.filter (fun (_, journal) ->
+        Journal.phase journal = Journal.Published)
+    |> List.map fst
+    |> List.sort_uniq String.compare)
 
 let compact ~root ~keep_recent ~dry_run =
   with_repository ~root (fun repository loaded ->

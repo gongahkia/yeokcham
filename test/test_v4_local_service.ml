@@ -79,7 +79,8 @@ let status_warns_about_uncaptured_edits () =
       ignore (initialize root);
       write_file root "main.ml" "let version = 2\n";
       let status = Service.status ~root |> require_ok Service.error_to_string in
-      Alcotest.(check bool) "uncaptured edit is visible" true status.Service.uncaptured;
+      Alcotest.(check bool)
+        "uncaptured edit is visible" true status.Service.uncaptured;
       ignore (Service.save ~root |> require_ok Service.error_to_string);
       let status = Service.status ~root |> require_ok Service.error_to_string in
       Alcotest.(check bool)

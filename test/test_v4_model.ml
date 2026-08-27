@@ -356,8 +356,7 @@ let compact_drops_unprotected_checkpoints_and_keeps_named_roots () =
   let first =
     revision_record ~change_id:(change "change-a")
       ~revision_id:(revision "revision-a1") ~author:(device "device-alice")
-      ~base:(snapshot "snapshot-base")
-      ~result:(snapshot "snapshot-a1")
+      ~base:(snapshot "snapshot-base") ~result:(snapshot "snapshot-a1")
       [ text_edit [ "main.ml" ] 0 4 ]
   in
   let project = V4.share_active project first |> require_ok in
@@ -383,7 +382,9 @@ let compact_drops_unprotected_checkpoints_and_keeps_named_roots () =
   in
   Alcotest.(check (list string))
     "named roots stay and extra scratch drops"
-    [ "snapshot-scratch-3"; "snapshot-scratch-2"; "snapshot-a1"; "snapshot-base" ]
+    [
+      "snapshot-scratch-3"; "snapshot-scratch-2"; "snapshot-a1"; "snapshot-base";
+    ]
     retained;
   Alcotest.(check (list string))
     "only unprotected scratch is dropped" [ "snapshot-scratch-1" ]
@@ -399,9 +400,12 @@ let compact_drops_unprotected_checkpoints_and_keeps_named_roots () =
 
 let pin_rejects_unknown_checkpoints () =
   match V4.pin (initial_project ()) ~snapshot:(snapshot "snapshot-missing") with
-  | Error V4.Unknown_checkpoint -> ()
-  | Error error -> Alcotest.fail (V4.error_to_string error)
   | Ok _ -> Alcotest.fail "pinned a checkpoint that is not retained"
+  | Error error ->
+      Alcotest.(check string)
+        "unknown checkpoint"
+        (V4.error_to_string V4.Unknown_checkpoint)
+        (V4.error_to_string error)
 
 let () =
   Alcotest.run "V4 model"

@@ -104,7 +104,7 @@ let state_round_trips_with_shared_change () =
 let malformed_model_state_is_rejected_before_encoding () =
   let state = Model.export (fixture_project ()) in
   let malformed =
-    (Model.{ state with state_drafts = state.state_drafts @ state.state_drafts })
+    Model.{ state with state_drafts = state.state_drafts @ state.state_drafts }
   in
   match Record.encode_state malformed with
   | Error error ->

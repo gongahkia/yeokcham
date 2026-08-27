@@ -120,6 +120,10 @@ let command_journey_reports_saved_work_and_drafts () =
       let output, errors, status = run [ "save"; "--root"; root ] in
       require_success "changed save" status errors;
       expect_output_contains "changed save is explicit" "save recorded" output;
+      let output, errors, status = run [ "status"; "--root"; root ] in
+      require_success "status after save" status errors;
+      expect_output_contains "saved tree has no uncaptured edits"
+        "uncaptured no" output;
       let output, errors, status = run [ "timeline"; "--root"; root ] in
       require_success "timeline" status errors;
       expect_output_contains "timeline includes initial checkpoint"
@@ -168,10 +172,10 @@ let command_journey_reports_saved_work_and_drafts () =
       expect_output_contains "status renders no decisions" "needs-decision 0"
         output;
       expect_output_contains "status renders no deliveries" "delivered 0" output;
-      expect_output_contains "command capture mode is explicit" "capture command"
-        output;
-      expect_output_contains "status reports no uncaptured edits" "uncaptured no"
-        output)
+      expect_output_contains "command capture mode is explicit"
+        "capture command" output;
+      expect_output_contains "restore into the tree is uncaptured work"
+        "uncaptured yes" output)
 
 let command_journey_shares_resolves_withdraws_and_delivers () =
   with_directory "yeokcham-v4-cli-share-" (fun root ->
@@ -342,7 +346,7 @@ let command_journey_compacts_and_reports_uncaptured_edits () =
       let output, errors, status = run [ "save"; "--root"; root ] in
       require_success "save" status errors;
       let extra = saved_checkpoint output in
-      let output, errors, status =
+      let _output, errors, status =
         run [ "pin"; "--root"; root; "--checkpoint"; extra ]
       in
       require_success "pin" status errors;
@@ -353,7 +357,8 @@ let command_journey_compacts_and_reports_uncaptured_edits () =
         run [ "compact"; "--root"; root; "--keep"; "0"; "--explain" ]
       in
       require_success "compact" status errors;
-      expect_output_contains "explain names the pin" ("keep " ^ extra ^ " ")
+      expect_output_contains "explain names the pin"
+        ("keep " ^ extra ^ " ")
         output;
       ignore initial)
 
@@ -374,7 +379,8 @@ let watch_is_linux_only () =
         | Unix.WEXITED 2 ->
             expect_output_contains "non-Linux watch is refused"
               "Linux watcher capture is not supported" errors
-        | _ -> require_success "watch" status errors)
+        | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
+            require_success "watch" status errors)
 
 let () =
   Alcotest.run "V4 CLI"

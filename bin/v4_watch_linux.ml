@@ -7,9 +7,7 @@ let ignorable request =
   | Watcher.Whole_root -> false
   | Watcher.Paths paths ->
       List.for_all
-        (function
-          | ".git" :: _ | ".yeokcham" :: _ -> true
-          | _ -> false)
+        (function ".git" :: _ | ".yeokcham" :: _ -> true | _ -> false)
         paths
 
 let lost request =

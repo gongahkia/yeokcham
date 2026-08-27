@@ -1,7 +1,8 @@
 (** Local V4 saved-work transitions.
 
-    This adapter has no watcher, transport, or semantic merge behaviour. It
-    scans exact snapshots only when a user invokes a command. *)
+    This adapter has no transport or semantic merge behaviour. Command `status`
+    and `save` scan exact snapshots when invoked. Linux `watch` lives in the CLI
+    and only calls `save` after debounce; it is not part of this module. *)
 
 type error =
   | Store_error of Yeokcham_v4_store.error

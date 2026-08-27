@@ -117,9 +117,12 @@ let compact_never_drops_named_roots =
             |> List.map (fun checkpoint -> checkpoint.V4.checkpoint_snapshot)
           in
           let active = V4.active_draft compacted.V4.project in
-          List.exists (V4.Snapshot_id.equal active.V4.latest_checkpoint) retained
+          List.exists
+            (V4.Snapshot_id.equal active.V4.latest_checkpoint)
+            retained
           && List.exists
-               (V4.Snapshot_id.equal (V4.export compacted.V4.project).V4.state_baseline)
+               (V4.Snapshot_id.equal
+                  (V4.export compacted.V4.project).V4.state_baseline)
                retained
           && List.length compacted.V4.dropped
              = List.length (V4.checkpoints project) - List.length retained)

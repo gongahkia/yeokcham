@@ -51,9 +51,11 @@
  (libraries
   yeokcham_v4_local_service
   yeokcham_v4_model
-  (select v4_watch.ml from
-    (yeokcham_linux_watcher -> v4_watch_linux.ml)
-    (-> v4_watch_unavailable.ml))))
+  (select
+   v4_watch.ml
+   from
+   (yeokcham_linux_watcher -> v4_watch_linux.ml)
+   (-> v4_watch_unavailable.ml))))
 
 (executable
  (name workspace_base_v1)

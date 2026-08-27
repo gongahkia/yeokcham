@@ -112,7 +112,9 @@ let published_journals_are_pruned () =
         Journal.prune_published ~root |> require_ok Journal.error_to_string
       in
       Alcotest.(check (list string))
-        "published operation is reported" [ String.make 64 'a' ] pruned;
+        "published operation is reported"
+        [ String.make 64 'a' ]
+        pruned;
       Alcotest.(check int)
         "journal directory is empty after prune" 0
         (Journal.scan ~root |> require_ok Journal.error_to_string |> List.length))

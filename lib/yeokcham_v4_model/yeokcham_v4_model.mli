@@ -207,7 +207,10 @@ type protection_reason =
 
 val protection_reason_to_string : protection_reason -> string
 
-type compact_keep = { snapshot : Snapshot_id.t; reasons : protection_reason list }
+type compact_keep = {
+  snapshot : Snapshot_id.t;
+  reasons : protection_reason list;
+}
 
 type compact_result = {
   project : project;

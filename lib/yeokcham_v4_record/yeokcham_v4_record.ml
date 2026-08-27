@@ -397,7 +397,8 @@ let encode_state_value ~version ~checkpoints ~pins state =
   let* pins =
     match pins with
     | None -> Ok None
-    | Some pins -> encode_list encode_snapshot (sort_pins pins) |> Result.map Option.some
+    | Some pins ->
+        encode_list encode_snapshot (sort_pins pins) |> Result.map Option.some
   in
   match (checkpoints, pins) with
   | None, None ->

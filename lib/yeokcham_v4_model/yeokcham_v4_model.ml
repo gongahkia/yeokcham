@@ -508,8 +508,7 @@ let import state =
     not
       (List.exists
          (fun checkpoint ->
-           Snapshot_id.equal checkpoint.checkpoint_snapshot
-             state.state_baseline)
+           Snapshot_id.equal checkpoint.checkpoint_snapshot state.state_baseline)
          state.state_checkpoints)
   then invalid "delivery baseline is not retained"
   else if
@@ -652,33 +651,33 @@ let import state =
                 named_revision_snapshots
             then invalid "named history snapshot is not retained"
             else
-            let project =
-              {
-                creator = state.state_creator;
-                baseline = state.state_baseline;
-                active = state.state_active_draft;
-                drafts = state.state_drafts;
-                checkpoints = state.state_checkpoints;
-                changes = state.state_changes;
-                resolutions = state.state_resolutions;
-                deliveries = state.state_deliveries;
-                pins = state.state_pins;
-              }
-            in
-            let active = active_draft project in
-            let active_link_valid =
-              match active.shared_change with
-              | None -> true
-              | Some change_id -> (
-                  match find_change project change_id with
-                  | Some change ->
-                      Option.fold ~none:false
-                        ~some:(Draft_id.equal active.draft_id)
-                        change.source_draft
-                  | None -> false)
-            in
-            if active_link_valid then Ok project
-            else invalid "active draft refers to a missing shared change"
+              let project =
+                {
+                  creator = state.state_creator;
+                  baseline = state.state_baseline;
+                  active = state.state_active_draft;
+                  drafts = state.state_drafts;
+                  checkpoints = state.state_checkpoints;
+                  changes = state.state_changes;
+                  resolutions = state.state_resolutions;
+                  deliveries = state.state_deliveries;
+                  pins = state.state_pins;
+                }
+              in
+              let active = active_draft project in
+              let active_link_valid =
+                match active.shared_change with
+                | None -> true
+                | Some change_id -> (
+                    match find_change project change_id with
+                    | Some change ->
+                        Option.fold ~none:false
+                          ~some:(Draft_id.equal active.draft_id)
+                          change.source_draft
+                    | None -> false)
+              in
+              if active_link_valid then Ok project
+              else invalid "active draft refers to a missing shared change"
     | [] -> invalid "project has no active draft"
     | _ -> invalid "project has more than one active draft"
 
@@ -1144,7 +1143,8 @@ let deliver project ~id ~author ~snapshot ~included ~next_draft ~next_title
 
 let retained checkpoints snapshot =
   List.exists
-    (fun checkpoint -> Snapshot_id.equal checkpoint.checkpoint_snapshot snapshot)
+    (fun checkpoint ->
+      Snapshot_id.equal checkpoint.checkpoint_snapshot snapshot)
     checkpoints
 
 let pin project ~snapshot =
@@ -1187,7 +1187,10 @@ let protection_reason_to_string = function
   | Restore_journal -> "restore-safety"
   | Recent -> "recent"
 
-type compact_keep = { snapshot : Snapshot_id.t; reasons : protection_reason list }
+type compact_keep = {
+  snapshot : Snapshot_id.t;
+  reasons : protection_reason list;
+}
 
 type compact_result = {
   project : project;
@@ -1309,9 +1312,7 @@ let compact project ~keep_recent ~journal_snapshots =
       {
         project with
         checkpoints =
-          List.map
-            (fun keep -> { checkpoint_snapshot = keep.snapshot })
-            kept;
+          List.map (fun keep -> { checkpoint_snapshot = keep.snapshot }) kept;
       }
     in
     match import (export project) with

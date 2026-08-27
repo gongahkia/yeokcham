@@ -43,7 +43,8 @@ val append : root:string -> t -> (unit, error) result
 val scan : root:string -> (t list, error) result
 val latest_pending : root:string -> (t option, error) result
 
-val pending_snapshots : root:string -> (Yeokcham_v4_model.Snapshot_id.t list, error) result
+val pending_snapshots :
+  root:string -> (Yeokcham_v4_model.Snapshot_id.t list, error) result
 (** Safety and target snapshots named by an incomplete restore operation. *)
 
 val prune_published : root:string -> (string list, error) result

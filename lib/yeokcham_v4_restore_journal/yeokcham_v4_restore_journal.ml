@@ -248,8 +248,10 @@ let is_record_name name =
 let scan ~root =
   let directory = journal_directory root in
   let names =
-    try Ok (Sys.readdir directory |> Array.to_list |> List.sort String.compare)
-    with Sys_error _ when not (Sys.file_exists directory) -> Ok []
+    try
+      Ok (Sys.readdir directory |> Array.to_list |> List.sort String.compare)
+    with
+    | Sys_error _ when not (Sys.file_exists directory) -> Ok []
     | Sys_error message ->
         Error (Io_error { operation = "readdir"; path = directory; message })
   in
@@ -327,7 +329,8 @@ let latest_by_operation journals =
 let latest_pending ~root =
   let* journals = scan ~root in
   match
-    latest_by_operation journals |> List.map snd
+    latest_by_operation journals
+    |> List.map snd
     |> List.filter (fun journal -> journal.phase <> Published)
   with
   | [] -> Ok None
@@ -352,7 +355,7 @@ let prune_published ~root =
   in
   let rec loop pruned = function
     | [] -> Ok (List.rev pruned)
-    | journal :: rest ->
+    | journal :: rest -> (
         if not (List.exists (String.equal journal.operation_id) published) then
           loop pruned rest
         else
@@ -362,7 +365,8 @@ let prune_published ~root =
             loop (journal.operation_id :: pruned) rest
           with
           | Unix.Unix_error (Unix.ENOENT, _, _) -> loop pruned rest
-          | Unix.Unix_error (error, _, _) -> Error (io_error "unlink" path error)
+          | Unix.Unix_error (error, _, _) ->
+              Error (io_error "unlink" path error))
   in
   let* pruned = loop [] journals in
   Ok (List.sort_uniq String.compare pruned)

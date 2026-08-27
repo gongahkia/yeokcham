@@ -317,7 +317,8 @@ let parse_pin arguments =
   let rec loop root checkpoint = function
     | [] -> (
         match checkpoint with
-        | Some checkpoint -> (Option.value root ~default:default_root, checkpoint)
+        | Some checkpoint ->
+            (Option.value root ~default:default_root, checkpoint)
         | None -> usage ())
     | "--root" :: value :: rest when Option.is_none root ->
         loop (Some value) checkpoint rest
