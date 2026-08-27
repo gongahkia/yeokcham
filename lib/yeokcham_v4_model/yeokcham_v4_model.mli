@@ -36,6 +36,9 @@ type error =
   | Delivery_includes_duplicate_revision
   | Delivery_omits_active_change
   | Delivery_requires_shared_active_draft
+  | Unknown_checkpoint
+  | Not_pinned
+  | Invalid_keep_recent
 
 val error_to_string : error -> string
 
@@ -164,6 +167,7 @@ type state = {
   state_changes : shared_change list;
   state_resolutions : resolution list;
   state_deliveries : delivery list;
+  state_pins : Snapshot_id.t list;
 }
 
 type project
@@ -179,6 +183,7 @@ val creator : project -> Device_id.t
 val active_draft : project -> draft
 val drafts : project -> draft list
 val checkpoints : project -> checkpoint list
+val pins : project -> Snapshot_id.t list
 val shared_changes : project -> shared_change list
 val resolutions : project -> resolution list
 val deliveries : project -> delivery list
@@ -186,6 +191,37 @@ val projection : project -> projection
 val export : project -> state
 val import : state -> (project, error) result
 val checkpoint : project -> snapshot:Snapshot_id.t -> project
+val pin : project -> snapshot:Snapshot_id.t -> (project, error) result
+val unpin : project -> snapshot:Snapshot_id.t -> (project, error) result
+
+type protection_reason =
+  | Baseline
+  | Draft
+  | Shared_revision
+  | Delivery
+  | Resolution
+  | Open_decision
+  | Pin
+  | Restore_journal
+  | Recent
+
+val protection_reason_to_string : protection_reason -> string
+
+type compact_keep = { snapshot : Snapshot_id.t; reasons : protection_reason list }
+
+type compact_result = {
+  project : project;
+  kept : compact_keep list;
+  dropped : Snapshot_id.t list;
+}
+
+val default_keep_recent : int
+
+val compact :
+  project ->
+  keep_recent:int ->
+  journal_snapshots:Snapshot_id.t list ->
+  (compact_result, error) result
 
 val new_draft :
   project -> id:Draft_id.t -> title:string -> (project, error) result

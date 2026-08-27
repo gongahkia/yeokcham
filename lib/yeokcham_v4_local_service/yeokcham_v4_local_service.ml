@@ -28,9 +28,46 @@ type status = {
   deliveries : Model.delivery list;
   delivery_count : int;
   checkpoints : Model.checkpoint list;
+  uncaptured : bool;
 }
 
 type save_outcome = Unchanged of status | Saved of status
+
+type compact_report = {
+  kept : Model.compact_keep list;
+  dropped : Model.Snapshot_id.t list;
+  pruned_journals : string list;
+  status : status;
+}
+
+module Capture_window = struct
+  type t = { first : float option; last : float option }
+
+  let empty = { first = None; last = None }
+  let quiet_seconds = 1.0
+  let max_seconds = 30.0
+  let clear = empty
+
+  let observe window ~now =
+    match window.first with
+    | None -> { first = Some now; last = Some now }
+    | Some first -> { first = Some first; last = Some now }
+
+  let due window ~now =
+    match (window.first, window.last) with
+    | Some first, Some last ->
+        now -. last >= quiet_seconds || now -. first >= max_seconds
+    | Some _, None | None, Some _ | None, None -> false
+
+  let timeout window ~now =
+    match (window.first, window.last) with
+    | Some first, Some last ->
+        Float.max 0.0
+          (Float.min
+             (quiet_seconds -. (now -. last))
+             (max_seconds -. (now -. first)))
+    | Some _, None | None, Some _ | None, None -> 60.0
+end
 
 type in_place_restore = {
   safety_checkpoint : Model.Snapshot_id.t;
@@ -68,7 +105,7 @@ let capture ~root store =
   in
   snapshot_id identity
 
-let status_of_project project =
+let status_of_project ?(uncaptured = false) project =
   let active_draft = Model.active_draft project in
   let projection = Model.projection project in
   let shared_changes = Model.shared_changes project in
@@ -82,6 +119,7 @@ let status_of_project project =
     deliveries;
     delivery_count = List.length deliveries;
     checkpoints = Model.checkpoints project;
+    uncaptured;
   }
 
 let load_snapshot store snapshot =
@@ -183,8 +221,14 @@ let init ~root ~creator ~initial_draft ~title =
   |> Result.map_error (fun error -> Store_error error)
 
 let status ~root =
-  with_repository ~root (fun _ loaded ->
-      Ok (status_of_project loaded.Store.project))
+  with_repository ~root (fun repository loaded ->
+      let* observed = capture ~root (Store.underlying_store repository) in
+      let active = Model.active_draft loaded.Store.project in
+      let uncaptured =
+        not
+          (Model.Snapshot_id.equal active.Model.latest_checkpoint observed)
+      in
+      Ok (status_of_project ~uncaptured loaded.Store.project))
 
 let save ~root =
   with_repository ~root (fun repository loaded ->

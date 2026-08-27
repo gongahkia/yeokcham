@@ -309,26 +309,59 @@ let scan ~root =
   in
   Ok journals
 
+let latest_by_operation journals =
+  List.fold_left
+    (fun latest journal ->
+      let prior = List.assoc_opt journal.operation_id latest in
+      match prior with
+      | Some current
+        when Int64.compare current.generation journal.generation >= 0 ->
+          latest
+      | Some _ ->
+          (journal.operation_id, journal)
+          :: List.remove_assoc journal.operation_id latest
+      | None -> (journal.operation_id, journal) :: latest)
+    [] journals
+
 let latest_pending ~root =
   let* journals = scan ~root in
-  let latest_by_operation =
-    List.fold_left
-      (fun latest journal ->
-        let prior = List.assoc_opt journal.operation_id latest in
-        match prior with
-        | Some current
-          when Int64.compare current.generation journal.generation >= 0 ->
-            latest
-        | Some _ ->
-            (journal.operation_id, journal)
-            :: List.remove_assoc journal.operation_id latest
-        | None -> (journal.operation_id, journal) :: latest)
-      [] journals
-  in
   match
-    latest_by_operation |> List.map snd
+    latest_by_operation journals |> List.map snd
     |> List.filter (fun journal -> journal.phase <> Published)
   with
   | [] -> Ok None
   | [ journal ] -> Ok (Some journal)
   | _ -> Error (Invalid_schema "multiple restore operations remain incomplete")
+
+let pending_snapshots ~root =
+  let* pending = latest_pending ~root in
+  match pending with
+  | None -> Ok []
+  | Some journal ->
+      Ok
+        (List.sort_uniq Model.Snapshot_id.compare
+           [ journal.safety; journal.target ])
+
+let prune_published ~root =
+  let* journals = scan ~root in
+  let published =
+    latest_by_operation journals
+    |> List.filter (fun (_, journal) -> journal.phase = Published)
+    |> List.map fst
+  in
+  let rec loop pruned = function
+    | [] -> Ok (List.rev pruned)
+    | journal :: rest ->
+        if not (List.exists (String.equal journal.operation_id) published) then
+          loop pruned rest
+        else
+          let path = path root journal in
+          try
+            Unix.unlink path;
+            loop (journal.operation_id :: pruned) rest
+          with
+          | Unix.Unix_error (Unix.ENOENT, _, _) -> loop pruned rest
+          | Unix.Unix_error (error, _, _) -> Error (io_error "unlink" path error)
+  in
+  let* pruned = loop [] journals in
+  Ok (List.sort_uniq String.compare pruned)

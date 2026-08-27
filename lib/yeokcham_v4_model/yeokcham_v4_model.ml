@@ -70,6 +70,9 @@ let error_to_string = function
        draft"
   | Delivery_requires_shared_active_draft ->
       "delivery requires an active shared draft"
+  | Unknown_checkpoint -> "checkpoint is not retained by this project"
+  | Not_pinned -> "checkpoint is not pinned"
+  | Invalid_keep_recent -> "compaction keep-recent count must be nonnegative"
 
 module type Identifier = sig
   type t
@@ -271,6 +274,7 @@ type state = {
   state_changes : shared_change list;
   state_resolutions : resolution list;
   state_deliveries : delivery list;
+  state_pins : Snapshot_id.t list;
 }
 
 type project = {
@@ -282,6 +286,7 @@ type project = {
   changes : shared_change list;
   resolutions : resolution list;
   deliveries : delivery list;
+  pins : Snapshot_id.t list;
 }
 
 let nonempty_title title = String.length (String.trim title) > 0
@@ -306,11 +311,13 @@ let init ~creator ~initial_snapshot ~initial_draft ~title =
     checkpoints = [ { checkpoint_snapshot = initial_snapshot } ];
     resolutions = [];
     deliveries = [];
+    pins = [];
   }
 
 let creator project = project.creator
 let drafts project = project.drafts
 let checkpoints project = project.checkpoints
+let pins project = project.pins
 let shared_changes project = project.changes
 let resolutions project = project.resolutions
 let deliveries project = project.deliveries
@@ -325,6 +332,7 @@ let export project =
     state_changes = project.changes;
     state_resolutions = project.resolutions;
     state_deliveries = project.deliveries;
+    state_pins = project.pins;
   }
 
 let find_draft project draft_id =
@@ -476,6 +484,26 @@ let import state =
          (fun checkpoint -> checkpoint.checkpoint_snapshot)
          state.state_checkpoints)
   then invalid "checkpoint snapshots are not unique"
+  else if has_duplicate Snapshot_id.equal state.state_pins then
+    invalid "pinned snapshots are not unique"
+  else if
+    List.exists
+      (fun pin ->
+        not
+          (List.exists
+             (fun checkpoint ->
+               Snapshot_id.equal checkpoint.checkpoint_snapshot pin)
+             state.state_checkpoints))
+      state.state_pins
+  then invalid "pinned snapshot is not retained"
+  else if
+    not
+      (List.exists
+         (fun checkpoint ->
+           Snapshot_id.equal checkpoint.checkpoint_snapshot
+             state.state_baseline)
+         state.state_checkpoints)
+  then invalid "delivery baseline is not retained"
   else if
     List.exists
       (fun (draft : draft) ->
@@ -585,6 +613,37 @@ let import state =
               state.state_resolutions
           then invalid "resolution is malformed"
           else
+            let named_revision_snapshots =
+              List.concat_map
+                (fun (change : shared_change) ->
+                  List.concat_map
+                    (fun revision ->
+                      [ revision.base_snapshot; revision.result_snapshot ])
+                    change.revisions)
+                state.state_changes
+              @ List.concat_map
+                  (fun resolution ->
+                    [
+                      resolution.replacement_revision.base_snapshot;
+                      resolution.replacement_revision.result_snapshot;
+                    ])
+                  state.state_resolutions
+              @ List.map
+                  (fun (delivery : delivery) -> delivery.delivery_snapshot)
+                  state.state_deliveries
+            in
+            if
+              List.exists
+                (fun snapshot ->
+                  not
+                    (List.exists
+                       (fun checkpoint ->
+                         Snapshot_id.equal checkpoint.checkpoint_snapshot
+                           snapshot)
+                       state.state_checkpoints))
+                named_revision_snapshots
+            then invalid "named history snapshot is not retained"
+            else
             let project =
               {
                 creator = state.state_creator;
@@ -595,6 +654,7 @@ let import state =
                 changes = state.state_changes;
                 resolutions = state.state_resolutions;
                 deliveries = state.state_deliveries;
+                pins = state.state_pins;
               }
             in
             let active = active_draft project in
@@ -1065,3 +1125,179 @@ let deliver project ~id ~author ~snapshot ~included ~next_draft ~next_title
                     resolutions = [];
                     deliveries = delivery :: project.deliveries;
                   })
+
+let retained checkpoints snapshot =
+  List.exists
+    (fun checkpoint -> Snapshot_id.equal checkpoint.checkpoint_snapshot snapshot)
+    checkpoints
+
+let pin project ~snapshot =
+  if not (retained project.checkpoints snapshot) then Error Unknown_checkpoint
+  else if List.exists (Snapshot_id.equal snapshot) project.pins then Ok project
+  else Ok { project with pins = snapshot :: project.pins }
+
+let unpin project ~snapshot =
+  if not (List.exists (Snapshot_id.equal snapshot) project.pins) then
+    Error Not_pinned
+  else
+    Ok
+      {
+        project with
+        pins =
+          List.filter
+            (fun pinned -> not (Snapshot_id.equal pinned snapshot))
+            project.pins;
+      }
+
+type protection_reason =
+  | Baseline
+  | Draft
+  | Shared_revision
+  | Delivery
+  | Resolution
+  | Open_decision
+  | Pin
+  | Restore_journal
+  | Recent
+
+let protection_reason_to_string = function
+  | Baseline -> "baseline"
+  | Draft -> "draft"
+  | Shared_revision -> "share"
+  | Delivery -> "delivery"
+  | Resolution -> "resolution"
+  | Open_decision -> "decision"
+  | Pin -> "pin"
+  | Restore_journal -> "restore-safety"
+  | Recent -> "recent"
+
+type compact_keep = { snapshot : Snapshot_id.t; reasons : protection_reason list }
+
+type compact_result = {
+  project : project;
+  kept : compact_keep list;
+  dropped : Snapshot_id.t list;
+}
+
+let default_keep_recent = 32
+
+let reason_order = function
+  | Baseline -> 0
+  | Draft -> 1
+  | Shared_revision -> 2
+  | Delivery -> 3
+  | Resolution -> 4
+  | Open_decision -> 5
+  | Pin -> 6
+  | Restore_journal -> 7
+  | Recent -> 8
+
+let sort_reasons reasons =
+  List.sort_uniq
+    (fun left right -> Int.compare (reason_order left) (reason_order right))
+    reasons
+
+module Snapshot_map = Map.Make (struct
+  type t = Snapshot_id.t
+
+  let compare = Snapshot_id.compare
+end)
+
+let add_reason table snapshot reason =
+  Snapshot_map.update snapshot
+    (function
+      | None -> Some [ reason ]
+      | Some reasons ->
+          if List.exists (fun existing -> existing = reason) reasons then
+            Some reasons
+          else Some (reason :: reasons))
+    table
+
+let add_revision_snapshots table revision reason =
+  add_reason
+    (add_reason table revision.base_snapshot reason)
+    revision.result_snapshot reason
+
+let named_protection_table project journal_snapshots =
+  let table = add_reason Snapshot_map.empty project.baseline Baseline in
+  let table =
+    List.fold_left
+      (fun table (draft : draft) ->
+        add_reason table draft.latest_checkpoint Draft)
+      table project.drafts
+  in
+  let table =
+    List.fold_left
+      (fun table (change : shared_change) ->
+        List.fold_left
+          (fun table revision ->
+            add_revision_snapshots table revision Shared_revision)
+          table change.revisions)
+      table project.changes
+  in
+  let table =
+    List.fold_left
+      (fun table (delivery : delivery) ->
+        add_reason table delivery.delivery_snapshot Delivery)
+      table project.deliveries
+  in
+  let table =
+    List.fold_left
+      (fun table (resolution : resolution) ->
+        add_revision_snapshots table resolution.replacement_revision Resolution)
+      table project.resolutions
+  in
+  let table =
+    List.fold_left
+      (fun table (decision : decision) ->
+        List.fold_left
+          (fun table candidate ->
+            add_revision_snapshots table candidate.candidate_revision
+              Open_decision)
+          table decision.candidates)
+      table (projection project).decisions
+  in
+  let table =
+    List.fold_left
+      (fun table snapshot -> add_reason table snapshot Pin)
+      table project.pins
+  in
+  List.fold_left
+    (fun table snapshot -> add_reason table snapshot Restore_journal)
+    table journal_snapshots
+
+let compact project ~keep_recent ~journal_snapshots =
+  if keep_recent < 0 then Error Invalid_keep_recent
+  else
+    let protected = named_protection_table project journal_snapshots in
+    let kept_rev, dropped_rev, _remaining_recent =
+      List.fold_left
+        (fun (kept, dropped, remaining_recent) checkpoint ->
+          let snapshot = checkpoint.checkpoint_snapshot in
+          match Snapshot_map.find_opt snapshot protected with
+          | Some reasons ->
+              ( { snapshot; reasons = sort_reasons reasons } :: kept,
+                dropped,
+                remaining_recent )
+          | None ->
+              if remaining_recent > 0 then
+                ( { snapshot; reasons = [ Recent ] } :: kept,
+                  dropped,
+                  remaining_recent - 1 )
+              else (kept, snapshot :: dropped, remaining_recent))
+        ([], [], keep_recent) project.checkpoints
+    in
+    let kept = List.rev kept_rev in
+    let dropped = List.rev dropped_rev in
+    let project =
+      {
+        project with
+        checkpoints =
+          List.map
+            (fun keep -> { checkpoint_snapshot = keep.snapshot })
+            kept;
+      }
+    in
+    match import (export project) with
+    | Error error -> Error error
+    | Ok project -> Ok { project; kept; dropped }

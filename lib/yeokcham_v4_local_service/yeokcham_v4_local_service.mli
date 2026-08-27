@@ -22,9 +22,29 @@ type status = {
   deliveries : Yeokcham_v4_model.delivery list;
   delivery_count : int;
   checkpoints : Yeokcham_v4_model.checkpoint list;
+  uncaptured : bool;
 }
 
 type save_outcome = Unchanged of status | Saved of status
+
+type compact_report = {
+  kept : Yeokcham_v4_model.compact_keep list;
+  dropped : Yeokcham_v4_model.Snapshot_id.t list;
+  pruned_journals : string list;
+  status : status;
+}
+
+module Capture_window : sig
+  type t
+
+  val empty : t
+  val quiet_seconds : float
+  val max_seconds : float
+  val observe : t -> now:float -> t
+  val due : t -> now:float -> bool
+  val timeout : t -> now:float -> float
+  val clear : t
+end
 
 type in_place_restore = {
   safety_checkpoint : Yeokcham_v4_model.Snapshot_id.t;
@@ -56,6 +76,22 @@ val restore_in_place :
   (in_place_restore, error) result
 
 val recover_in_place : root:string -> (in_place_restore option, error) result
+
+val pin :
+  root:string ->
+  checkpoint:Yeokcham_v4_model.Snapshot_id.t ->
+  (status, error) result
+
+val unpin :
+  root:string ->
+  checkpoint:Yeokcham_v4_model.Snapshot_id.t ->
+  (status, error) result
+
+val compact :
+  root:string ->
+  keep_recent:int ->
+  dry_run:bool ->
+  (compact_report, error) result
 
 val new_draft :
   root:string ->
