@@ -12,6 +12,7 @@ let draft value = id Model.Draft_id.of_string value
 let change value = id Model.Change_id.of_string value
 let revision value = id Model.Revision_id.of_string value
 let device value = id Model.Device_id.of_string value
+let username value = id Model.Username.of_string value
 
 let text_edit path start_byte end_byte =
   let edit_path = Model.Path.of_components [ path ] |> Result.get_ok in
@@ -19,7 +20,7 @@ let text_edit path start_byte end_byte =
   Model.{ edit_path; edit_kind = Text span }
 
 let fixture_project () =
-  Model.init ~creator:(device "device-alice")
+  Model.init ~creator:(device "device-alice") ~username:(username "alice")
     ~initial_snapshot:(snapshot "snapshot-base")
     ~initial_draft:(draft "draft-one") ~title:"fixture"
 
@@ -48,7 +49,7 @@ let current_golden_state_bytes_are_stable () =
     fixture_project () |> Record.encode_project
     |> require_ok Record.error_to_string
   in
-  let expected = read_golden "v4/state-v3.cbor.hex" in
+  let expected = read_golden "v4/state-v4.cbor.hex" in
   Alcotest.(check string) "initial state bytes" expected actual;
   let decoded =
     Record.decode_project expected |> require_ok Record.error_to_string
@@ -69,7 +70,7 @@ let legacy_v1_fixture_remains_decodable () =
        (Model.active_draft decoded).Model.latest_checkpoint);
   Alcotest.(check string)
     "legacy state upgrades to the current canonical record"
-    (read_golden "v4/state-v3.cbor.hex")
+    (read_golden "v4/state-v4-legacy.cbor.hex")
     (Record.encode_project decoded |> require_ok Record.error_to_string)
 
 let legacy_v2_fixture_remains_decodable () =
@@ -83,7 +84,21 @@ let legacy_v2_fixture_remains_decodable () =
     (List.length (Model.pins decoded));
   Alcotest.(check string)
     "legacy V2 state upgrades to the current canonical record"
-    (read_golden "v4/state-v3.cbor.hex")
+    (read_golden "v4/state-v4-legacy.cbor.hex")
+    (Record.encode_project decoded |> require_ok Record.error_to_string)
+
+let legacy_v3_fixture_remains_decodable () =
+  let decoded =
+    read_golden "v4/state-v3.cbor.hex"
+    |> Record.decode_project
+    |> require_ok Record.error_to_string
+  in
+  Alcotest.(check int)
+    "legacy V3 state has no username registrations" 0
+    (List.length (Model.usernames decoded));
+  Alcotest.(check string)
+    "legacy V3 state upgrades to the current canonical record"
+    (read_golden "v4/state-v4-legacy.cbor.hex")
     (Record.encode_project decoded |> require_ok Record.error_to_string)
 
 let state_round_trips_with_shared_change () =
@@ -114,19 +129,35 @@ let malformed_model_state_is_rejected_before_encoding () =
            (Record.error_to_string error))
   | Ok _ -> Alcotest.fail "encoded duplicate drafts"
 
+let duplicate_username_registration_is_rejected_before_encoding () =
+  let state = Model.export (fixture_project ()) in
+  let duplicated =
+    Model.{ username_device = device "device-bob"; username = username "alice" }
+  in
+  let malformed =
+    Model.{ state with state_usernames = duplicated :: state.state_usernames }
+  in
+  match Record.encode_state malformed with
+  | Error error ->
+      Alcotest.(check string)
+        "duplicate username is reported by the model invariant"
+        "invalid persisted project state: usernames are not unique"
+        (Record.error_to_string error)
+  | Ok _ -> Alcotest.fail "encoded a duplicate username registration"
+
 let noncanonical_cbor_is_rejected () =
   let canonical =
     fixture_project () |> Record.encode_project
     |> require_ok Record.error_to_string
   in
   let nonminimal_array =
-    "\x98\x0a" ^ String.sub canonical 1 (String.length canonical - 1)
+    "\x98\x0b" ^ String.sub canonical 1 (String.length canonical - 1)
   in
   match Record.decode_project nonminimal_array with
   | Error error ->
       Alcotest.(check bool)
         "canonical decoder reports the non-minimal length" true
-        (String.ends_with ~suffix:"non-minimal argument: 10"
+        (String.ends_with ~suffix:"non-minimal argument: 11"
            (Record.error_to_string error))
   | Ok _ -> Alcotest.fail "accepted non-minimal CBOR array length"
 
@@ -141,10 +172,14 @@ let () =
             legacy_v1_fixture_remains_decodable;
           Alcotest.test_case "legacy V2 fixture remains decodable" `Quick
             legacy_v2_fixture_remains_decodable;
+          Alcotest.test_case "legacy V3 fixture remains decodable" `Quick
+            legacy_v3_fixture_remains_decodable;
           Alcotest.test_case "shared state round trips" `Quick
             state_round_trips_with_shared_change;
           Alcotest.test_case "malformed model state is rejected" `Quick
             malformed_model_state_is_rejected_before_encoding;
+          Alcotest.test_case "duplicate username registration is rejected"
+            `Quick duplicate_username_registration_is_rejected_before_encoding;
           Alcotest.test_case "noncanonical CBOR is rejected" `Quick
             noncanonical_cbor_is_rejected;
         ] );

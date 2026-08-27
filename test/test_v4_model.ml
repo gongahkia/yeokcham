@@ -10,6 +10,7 @@ let change value = V4.Change_id.of_string value |> require_ok
 let revision value = V4.Revision_id.of_string value |> require_ok
 let delivery value = V4.Delivery_id.of_string value |> require_ok
 let device value = V4.Device_id.of_string value |> require_ok
+let username value = V4.Username.of_string value |> require_ok
 let path components = V4.Path.of_components components |> require_ok
 
 let text_edit components start_byte end_byte =
@@ -25,8 +26,8 @@ let revision_record ?parent ~change_id ~revision_id ~author ~base ~result edits
 let initial_project () =
   let creator = device "device-alice" in
   let base = snapshot "snapshot-base" in
-  V4.init ~creator ~initial_snapshot:base ~initial_draft:(draft "draft-one")
-    ~title:"first task"
+  V4.init ~creator ~username:(username "alice") ~initial_snapshot:base
+    ~initial_draft:(draft "draft-one") ~title:"first task"
 
 let one_active_draft_and_checkpoints () =
   let project = initial_project () in
@@ -407,6 +408,44 @@ let pin_rejects_unknown_checkpoints () =
         (V4.error_to_string V4.Unknown_checkpoint)
         (V4.error_to_string error)
 
+let username_registrations_are_unique_local_display_metadata () =
+  let project = initial_project () in
+  Alcotest.(check string)
+    "the creator receives the requested local display handle" "alice"
+    (V4.username_for_device project ~device:(device "device-alice")
+    |> Option.map V4.Username.to_string
+    |> Option.value ~default:"missing");
+  let project =
+    V4.register_username project ~device:(device "device-bob")
+      ~username:(username "bob")
+    |> require_ok
+  in
+  (match
+     V4.register_username project ~device:(device "device-carol")
+       ~username:(username "bob")
+   with
+  | Error error ->
+      Alcotest.(check string)
+        "a username cannot name two devices"
+        "username is already registered to a device" (V4.error_to_string error)
+  | Ok _ -> Alcotest.fail "registered one local username to two devices");
+  let project =
+    V4.register_username project ~device:(device "device-bob")
+      ~username:(username "robert")
+    |> require_ok
+  in
+  Alcotest.(check string)
+    "a device can correct its local display handle" "robert"
+    (V4.username_for_device project ~device:(device "device-bob")
+    |> Option.map V4.Username.to_string
+    |> Option.value ~default:"missing");
+  match V4.Username.of_string "Alice" with
+  | Error error ->
+      Alcotest.(check string)
+        "unsafe username is rejected" "invalid username: Alice"
+        (V4.error_to_string error)
+  | Ok _ -> Alcotest.fail "accepted an unsafe username"
+
 let () =
   Alcotest.run "V4 model"
     [
@@ -444,5 +483,10 @@ let () =
             compact_drops_unprotected_checkpoints_and_keeps_named_roots;
           Alcotest.test_case "pin rejects unknown checkpoints" `Quick
             pin_rejects_unknown_checkpoints;
+        ] );
+      ( "local display metadata",
+        [
+          Alcotest.test_case "username registrations are unique and editable"
+            `Quick username_registrations_are_unique_local_display_metadata;
         ] );
     ]

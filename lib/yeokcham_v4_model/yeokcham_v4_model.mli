@@ -39,6 +39,9 @@ type error =
   | Unknown_checkpoint
   | Not_pinned
   | Invalid_keep_recent
+  | Empty_username
+  | Invalid_username of string
+  | Username_already_registered
 
 val error_to_string : error -> string
 
@@ -58,6 +61,18 @@ module Revision_id : Identifier
 module Decision_id : Identifier
 module Delivery_id : Identifier
 module Device_id : Identifier
+
+(** A local display handle. Usernames are deliberately distinct from device
+    identifiers: they make local views readable but do not authenticate an
+    author or enrol a peer. *)
+module Username : sig
+  type t
+
+  val of_string : string -> (t, error) result
+  val to_string : t -> string
+  val equal : t -> t -> bool
+  val compare : t -> t -> int
+end
 
 module Path : sig
   type t
@@ -158,6 +173,11 @@ type resolution = {
   replacement_revision : change_revision;
 }
 
+type username_registration = {
+  username_device : Device_id.t;
+  username : Username.t;
+}
+
 type state = {
   state_creator : Device_id.t;
   state_baseline : Snapshot_id.t;
@@ -168,12 +188,14 @@ type state = {
   state_resolutions : resolution list;
   state_deliveries : delivery list;
   state_pins : Snapshot_id.t list;
+  state_usernames : username_registration list;
 }
 
 type project
 
 val init :
   creator:Device_id.t ->
+  username:Username.t ->
   initial_snapshot:Snapshot_id.t ->
   initial_draft:Draft_id.t ->
   title:string ->
@@ -187,12 +209,20 @@ val pins : project -> Snapshot_id.t list
 val shared_changes : project -> shared_change list
 val resolutions : project -> resolution list
 val deliveries : project -> delivery list
+val usernames : project -> username_registration list
+val username_for_device : project -> device:Device_id.t -> Username.t option
 val projection : project -> projection
 val export : project -> state
 val import : state -> (project, error) result
 val checkpoint : project -> snapshot:Snapshot_id.t -> project
 val pin : project -> snapshot:Snapshot_id.t -> (project, error) result
 val unpin : project -> snapshot:Snapshot_id.t -> (project, error) result
+
+val register_username :
+  project ->
+  device:Device_id.t ->
+  username:Username.t ->
+  (project, error) result
 
 type protection_reason =
   | Baseline

@@ -20,7 +20,8 @@ let error_to_string = function
 
 let legacy_schema_version = 1L
 let v2_schema_version = 2L
-let schema_version = 3L
+let v3_schema_version = 3L
+let schema_version = 4L
 let ( let* ) = Result.bind
 
 let construction value =
@@ -90,6 +91,7 @@ let encode_revision_id id = text (Model.Revision_id.to_string id)
 let encode_decision_id id = text (Model.Decision_id.to_string id)
 let encode_delivery_id id = text (Model.Delivery_id.to_string id)
 let encode_device_id id = text (Model.Device_id.to_string id)
+let encode_username username = text (Model.Username.to_string username)
 
 let decode_snapshot value =
   let* value = decoded_text "snapshot identifier" value in
@@ -118,6 +120,10 @@ let decode_delivery_id value =
 let decode_device_id value =
   let* value = decoded_text "device identifier" value in
   Model.Device_id.of_string value |> model
+
+let decode_username value =
+  let* value = decoded_text "username" value in
+  Model.Username.of_string value |> model
 
 let encode_path path = Model.Path.components path |> encode_list text
 
@@ -352,6 +358,20 @@ let decode_delivery value =
           }
   | _ -> assert false
 
+let encode_username_registration registration =
+  let* device = encode_device_id registration.Model.username_device in
+  let* username = encode_username registration.Model.username in
+  array [ device; username ]
+
+let decode_username_registration value =
+  let* fields = exact_array "username registration" 2 value in
+  match fields with
+  | [ device; username ] ->
+      let* username_device = decode_device_id device in
+      let* username = decode_username username in
+      Ok Model.{ username_device; username }
+  | _ -> assert false
+
 let sort_drafts =
   List.sort (fun left right ->
       Model.Draft_id.compare left.Model.draft_id right.Model.draft_id)
@@ -371,7 +391,12 @@ let sort_deliveries =
 
 let sort_pins = List.sort_uniq Model.Snapshot_id.compare
 
-let encode_state_value ~version ~checkpoints ~pins state =
+let sort_usernames =
+  List.sort (fun left right ->
+      Model.Device_id.compare left.Model.username_device
+        right.Model.username_device)
+
+let encode_state_value ~version ~checkpoints ~pins ~usernames state =
   let* creator = encode_device_id state.Model.state_creator in
   let* baseline = encode_snapshot state.Model.state_baseline in
   let* active = encode_draft_id state.Model.state_active_draft in
@@ -400,8 +425,15 @@ let encode_state_value ~version ~checkpoints ~pins state =
     | Some pins ->
         encode_list encode_snapshot (sort_pins pins) |> Result.map Option.some
   in
-  match (checkpoints, pins) with
-  | None, None ->
+  let* usernames =
+    match usernames with
+    | None -> Ok None
+    | Some usernames ->
+        encode_list encode_username_registration (sort_usernames usernames)
+        |> Result.map Option.some
+  in
+  match (checkpoints, pins, usernames) with
+  | None, None, None ->
       array
         [
           Encoding.integer version;
@@ -413,7 +445,7 @@ let encode_state_value ~version ~checkpoints ~pins state =
           resolutions;
           deliveries;
         ]
-  | Some checkpoints, None ->
+  | Some checkpoints, None, None ->
       array
         [
           Encoding.integer version;
@@ -426,7 +458,7 @@ let encode_state_value ~version ~checkpoints ~pins state =
           resolutions;
           deliveries;
         ]
-  | Some checkpoints, Some pins ->
+  | Some checkpoints, Some pins, None ->
       array
         [
           Encoding.integer version;
@@ -440,20 +472,45 @@ let encode_state_value ~version ~checkpoints ~pins state =
           deliveries;
           pins;
         ]
-  | None, Some _ -> Error (Invalid_schema "legacy V4 state cannot encode pins")
+  | Some checkpoints, Some pins, Some usernames ->
+      array
+        [
+          Encoding.integer version;
+          creator;
+          baseline;
+          active;
+          drafts;
+          checkpoints;
+          changes;
+          resolutions;
+          deliveries;
+          pins;
+          usernames;
+        ]
+  | None, Some _, _ ->
+      Error (Invalid_schema "legacy V4 state cannot encode pins")
+  | _, _, Some _ ->
+      Error (Invalid_schema "legacy V4 state cannot encode usernames")
 
 let encode_current_state_value state =
   encode_state_value ~version:schema_version
     ~checkpoints:(Some state.Model.state_checkpoints)
-    ~pins:(Some state.Model.state_pins) state
+    ~pins:(Some state.Model.state_pins)
+    ~usernames:(Some state.Model.state_usernames) state
+
+let encode_v3_state_value state =
+  encode_state_value ~version:v3_schema_version
+    ~checkpoints:(Some state.Model.state_checkpoints)
+    ~pins:(Some state.Model.state_pins) ~usernames:None state
 
 let encode_v2_state_value state =
   encode_state_value ~version:v2_schema_version
-    ~checkpoints:(Some state.Model.state_checkpoints) ~pins:None state
+    ~checkpoints:(Some state.Model.state_checkpoints) ~pins:None ~usernames:None
+    state
 
 let encode_legacy_state_value state =
   encode_state_value ~version:legacy_schema_version ~checkpoints:None ~pins:None
-    state
+    ~usernames:None state
 
 let legacy_checkpoints baseline drafts =
   baseline
@@ -464,7 +521,7 @@ let legacy_checkpoints baseline drafts =
   |> List.map (fun checkpoint_snapshot -> Model.{ checkpoint_snapshot })
 
 let decode_state_components ~creator ~baseline ~active ~drafts ~checkpoints
-    ~changes ~resolutions ~deliveries ~pins =
+    ~changes ~resolutions ~deliveries ~pins ~usernames =
   let* state_creator = decode_device_id creator in
   let* state_baseline = decode_snapshot baseline in
   let* state_active_draft = decode_draft_id active in
@@ -485,6 +542,13 @@ let decode_state_components ~creator ~baseline ~active ~drafts ~checkpoints
     | Some pins -> decode_list "pins" decode_snapshot pins
     | None -> Ok []
   in
+  let* state_usernames =
+    match usernames with
+    | Some usernames ->
+        decode_list "username registrations" decode_username_registration
+          usernames
+    | None -> Ok []
+  in
   Ok
     Model.
       {
@@ -497,6 +561,7 @@ let decode_state_components ~creator ~baseline ~active ~drafts ~checkpoints
         state_resolutions;
         state_deliveries;
         state_pins;
+        state_usernames;
       }
 
 let decode_state_value value =
@@ -513,6 +578,7 @@ let decode_state_value value =
    resolutions;
    deliveries;
    pins;
+   usernames;
   ] ->
       let* version = decoded_integer "V4 state schema version" version in
       if not (Int64.equal version schema_version) then
@@ -520,7 +586,27 @@ let decode_state_value value =
       else
         decode_state_components ~creator ~baseline ~active ~drafts
           ~checkpoints:(Some checkpoints) ~changes ~resolutions ~deliveries
-          ~pins:(Some pins)
+          ~pins:(Some pins) ~usernames:(Some usernames)
+        |> Result.map (fun state -> (version, state))
+  | [
+   version;
+   creator;
+   baseline;
+   active;
+   drafts;
+   checkpoints;
+   changes;
+   resolutions;
+   deliveries;
+   pins;
+  ] ->
+      let* version = decoded_integer "V4 state schema version" version in
+      if not (Int64.equal version v3_schema_version) then
+        Error (Unsupported_schema_version version)
+      else
+        decode_state_components ~creator ~baseline ~active ~drafts
+          ~checkpoints:(Some checkpoints) ~changes ~resolutions ~deliveries
+          ~pins:(Some pins) ~usernames:None
         |> Result.map (fun state -> (version, state))
   | [
    version;
@@ -539,7 +625,7 @@ let decode_state_value value =
       else
         decode_state_components ~creator ~baseline ~active ~drafts
           ~checkpoints:(Some checkpoints) ~changes ~resolutions ~deliveries
-          ~pins:None
+          ~pins:None ~usernames:None
         |> Result.map (fun state -> (version, state))
   | [
    version; creator; baseline; active; drafts; changes; resolutions; deliveries;
@@ -550,6 +636,7 @@ let decode_state_value value =
       else
         decode_state_components ~creator ~baseline ~active ~drafts
           ~checkpoints:None ~changes ~resolutions ~deliveries ~pins:None
+          ~usernames:None
         |> Result.map (fun state -> (version, state))
   | _ -> Error (Invalid_schema "V4 state has an unsupported field count")
 
@@ -570,6 +657,8 @@ let decode_state encoded =
       encode_legacy_state_value state
     else if Int64.equal version v2_schema_version then
       encode_v2_state_value state
+    else if Int64.equal version v3_schema_version then
+      encode_v3_state_value state
     else encode_current_state_value state
   in
   let canonical = Encoding.encode canonical_value in

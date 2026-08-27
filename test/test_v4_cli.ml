@@ -103,6 +103,8 @@ let command_journey_reports_saved_work_and_drafts () =
             root;
             "--device";
             "device-alice";
+            "--username";
+            "alice";
             "--draft";
             "draft-one";
             "--title";
@@ -111,7 +113,25 @@ let command_journey_reports_saved_work_and_drafts () =
       in
       require_success "init" status errors;
       expect_output_contains "init reports a saved checkpoint" "saved " output;
+      expect_output_contains "init records the local username"
+        "user device-alice alice" output;
       let initial_checkpoint = saved_checkpoint output in
+      let output, errors, status =
+        run
+          [
+            "user";
+            "register";
+            "--root";
+            root;
+            "--device";
+            "device-bob";
+            "--username";
+            "bob";
+          ]
+      in
+      require_success "username registration" status errors;
+      expect_output_contains "registered username is inspectable"
+        "user device-bob bob" output;
       let output, errors, status = run [ "save"; "--root"; root ] in
       require_success "unchanged save" status errors;
       expect_output_contains "unchanged save is explicit" "save unchanged"
@@ -188,6 +208,8 @@ let command_journey_shares_resolves_withdraws_and_delivers () =
             root;
             "--device";
             "device-alice";
+            "--username";
+            "alice";
             "--draft";
             "draft-one";
             "--title";
@@ -285,6 +307,122 @@ let command_journey_shares_resolves_withdraws_and_delivers () =
       expect_output_contains "delivery starts the next draft"
         "draft draft-three" output)
 
+let command_journey_materializes_and_resolves_from_an_isolated_tree () =
+  with_directory "yeokcham-v4-cli-isolated-" (fun root ->
+      write_file root "main.ml" "let version = 1\n";
+      let _output, errors, status =
+        run
+          [
+            "init";
+            "--root";
+            root;
+            "--device";
+            "device-alice";
+            "--username";
+            "alice";
+            "--draft";
+            "draft-one";
+            "--title";
+            "isolated-work";
+          ]
+      in
+      require_success "init" status errors;
+      write_file root "main.ml" "let version = 2\n";
+      let _output, errors, status =
+        run
+          [
+            "share";
+            "--root";
+            root;
+            "--change";
+            "change-a";
+            "--revision";
+            "revision-a";
+          ]
+      in
+      require_success "share" status errors;
+      let _output, errors, status =
+        run
+          [
+            "draft";
+            "new";
+            "--root";
+            root;
+            "--id";
+            "draft-two";
+            "--title";
+            "second-work";
+          ]
+      in
+      require_success "second draft" status errors;
+      write_file root "main.ml" "let version = 3\n";
+      let output, errors, status =
+        run
+          [
+            "share";
+            "--root";
+            root;
+            "--change";
+            "change-b";
+            "--revision";
+            "revision-b";
+          ]
+      in
+      require_success "overlapping share" status errors;
+      let decision = first_prefixed_value "decision " output in
+      let output, errors, status =
+        run [ "decision"; "show"; "--root"; root; "--decision"; decision ]
+      in
+      require_success "decision show" status errors;
+      expect_output_contains "show names the decision" ("decision " ^ decision)
+        output;
+      expect_output_contains "show lists a candidate" "candidate revision-"
+        output;
+      let destination = Filename.concat root "isolated" in
+      Unix.mkdir destination 0o700;
+      let output, errors, status =
+        run
+          [
+            "decision";
+            "materialize";
+            "--root";
+            root;
+            "--decision";
+            decision;
+            "--destination";
+            destination;
+          ]
+      in
+      require_success "materialize" status errors;
+      expect_output_contains "first candidate tree" "materialized revision-a"
+        output;
+      expect_output_contains "second candidate tree" "materialized revision-b"
+        output;
+      let tree = Filename.concat destination "alice-001" in
+      let output, errors, status =
+        run
+          [
+            "resolve";
+            "--root";
+            root;
+            "--decision";
+            decision;
+            "--change";
+            "change-resolution";
+            "--revision";
+            "revision-resolution";
+            "--tree";
+            tree;
+          ]
+      in
+      require_success "isolated resolve" status errors;
+      expect_output_contains "decision is cleared" "needs-decision 0" output;
+      Alcotest.(check string)
+        "live tree is unchanged" "let version = 3\n"
+        (In_channel.with_open_bin
+           (Filename.concat root "main.ml")
+           In_channel.input_all))
+
 let command_journey_restores_in_place_with_a_safety_checkpoint () =
   with_directory "yeokcham-v4-cli-in-place-" (fun root ->
       write_file root "main.ml" "let version = 1\n";
@@ -296,6 +434,8 @@ let command_journey_restores_in_place_with_a_safety_checkpoint () =
             root;
             "--device";
             "device-alice";
+            "--username";
+            "alice";
             "--draft";
             "draft-one";
             "--title";
@@ -330,6 +470,8 @@ let command_journey_compacts_and_reports_uncaptured_edits () =
             root;
             "--device";
             "device-alice";
+            "--username";
+            "alice";
             "--draft";
             "draft-one";
             "--title";
@@ -391,6 +533,8 @@ let () =
             command_journey_reports_saved_work_and_drafts;
           Alcotest.test_case "share resolve withdraw and deliver" `Quick
             command_journey_shares_resolves_withdraws_and_delivers;
+          Alcotest.test_case "isolated materialize and resolve" `Quick
+            command_journey_materializes_and_resolves_from_an_isolated_tree;
           Alcotest.test_case "in-place restore retains a safety checkpoint"
             `Quick command_journey_restores_in_place_with_a_safety_checkpoint;
           Alcotest.test_case "compact pin and uncaptured status" `Quick

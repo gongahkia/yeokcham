@@ -32,6 +32,9 @@ type error =
   | Unknown_checkpoint
   | Not_pinned
   | Invalid_keep_recent
+  | Empty_username
+  | Invalid_username of string
+  | Username_already_registered
 
 let error_to_string = function
   | Empty_identifier kind -> "empty " ^ kind ^ " identifier"
@@ -76,6 +79,9 @@ let error_to_string = function
   | Unknown_checkpoint -> "checkpoint is not retained by this project"
   | Not_pinned -> "checkpoint is not pinned"
   | Invalid_keep_recent -> "compaction keep-recent count must be nonnegative"
+  | Empty_username -> "username must not be empty"
+  | Invalid_username value -> "invalid username: " ^ value
+  | Username_already_registered -> "username is already registered to a device"
 
 module type Identifier = sig
   type t
@@ -132,6 +138,30 @@ end)
 module Device_id = Make_identifier (struct
   let value = "device"
 end)
+
+module Username = struct
+  type t = string
+
+  let valid_first = function 'a' .. 'z' | '0' .. '9' -> true | _ -> false
+
+  let valid_rest = function
+    | 'a' .. 'z' | '0' .. '9' | '-' | '_' -> true
+    | _ -> false
+
+  let of_string value =
+    let length = String.length value in
+    if length = 0 then Error Empty_username
+    else if
+      length > 32
+      || (not (valid_first value.[0]))
+      || not (String.for_all valid_rest value)
+    then Error (Invalid_username value)
+    else Ok value
+
+  let to_string value = value
+  let equal = String.equal
+  let compare = String.compare
+end
 
 module Path = struct
   type t = string list
@@ -268,6 +298,11 @@ type resolution = {
   replacement_revision : change_revision;
 }
 
+type username_registration = {
+  username_device : Device_id.t;
+  username : Username.t;
+}
+
 type state = {
   state_creator : Device_id.t;
   state_baseline : Snapshot_id.t;
@@ -278,6 +313,7 @@ type state = {
   state_resolutions : resolution list;
   state_deliveries : delivery list;
   state_pins : Snapshot_id.t list;
+  state_usernames : username_registration list;
 }
 
 type project = {
@@ -290,11 +326,12 @@ type project = {
   resolutions : resolution list;
   deliveries : delivery list;
   pins : Snapshot_id.t list;
+  usernames : username_registration list;
 }
 
 let nonempty_title title = String.length (String.trim title) > 0
 
-let init ~creator ~initial_snapshot ~initial_draft ~title =
+let init ~creator ~username ~initial_snapshot ~initial_draft ~title =
   let title = if nonempty_title title then title else "untitled draft" in
   {
     creator;
@@ -315,6 +352,7 @@ let init ~creator ~initial_snapshot ~initial_draft ~title =
     resolutions = [];
     deliveries = [];
     pins = [];
+    usernames = [ { username_device = creator; username } ];
   }
 
 let creator project = project.creator
@@ -324,6 +362,15 @@ let pins project = project.pins
 let shared_changes project = project.changes
 let resolutions project = project.resolutions
 let deliveries project = project.deliveries
+let usernames project = project.usernames
+
+let username_for_device project ~device =
+  List.find_map
+    (fun registration ->
+      if Device_id.equal registration.username_device device then
+        Some registration.username
+      else None)
+    project.usernames
 
 let export project =
   {
@@ -336,6 +383,7 @@ let export project =
     state_resolutions = project.resolutions;
     state_deliveries = project.deliveries;
     state_pins = project.pins;
+    state_usernames = project.usernames;
   }
 
 let find_draft project draft_id =
@@ -478,12 +526,53 @@ let has_duplicate equal values =
   in
   loop [] values
 
+let register_username project ~device ~username =
+  match
+    List.find_opt
+      (fun registration ->
+        Username.equal registration.username username
+        && not (Device_id.equal registration.username_device device))
+      project.usernames
+  with
+  | Some _ -> Error Username_already_registered
+  | None ->
+      let replacement = { username_device = device; username } in
+      let present =
+        List.exists
+          (fun registration ->
+            Device_id.equal registration.username_device device)
+          project.usernames
+      in
+      let usernames =
+        if present then
+          List.map
+            (fun registration ->
+              if Device_id.equal registration.username_device device then
+                replacement
+              else registration)
+            project.usernames
+        else replacement :: project.usernames
+      in
+      Ok { project with usernames }
+
 let import state =
   let invalid detail = Error (Invalid_project_state detail) in
   if
     has_duplicate Draft_id.equal
       (List.map (fun (draft : draft) -> draft.draft_id) state.state_drafts)
   then invalid "draft identifiers are not unique"
+  else if
+    has_duplicate Device_id.equal
+      (List.map
+         (fun registration -> registration.username_device)
+         state.state_usernames)
+  then invalid "username devices are not unique"
+  else if
+    has_duplicate Username.equal
+      (List.map
+         (fun registration -> registration.username)
+         state.state_usernames)
+  then invalid "usernames are not unique"
   else if state.state_checkpoints = [] then
     invalid "project has no saved checkpoint"
   else if
@@ -662,6 +751,7 @@ let import state =
                   resolutions = state.state_resolutions;
                   deliveries = state.state_deliveries;
                   pins = state.state_pins;
+                  usernames = state.state_usernames;
                 }
               in
               let active = active_draft project in

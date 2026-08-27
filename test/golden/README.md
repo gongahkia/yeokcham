@@ -82,9 +82,12 @@ generation-zero record. It binds distinct exact safety and target snapshot IDs
 to one operation and the `Prepared` phase. Later generations are immutable
 successors; no record stores source paths or file bytes.
 
-`v4/state-v1.cbor.hex` and `v4/state-v2.cbor.hex` are retained V4 project-state
-decoders. `v4/state-v3.cbor.hex` is the current canonical initial project,
-including an empty pin array.
+`v4/state-v1.cbor.hex`, `v4/state-v2.cbor.hex`, and `v4/state-v3.cbor.hex` are
+retained V4 project-state decoders. `v4/state-v4.cbor.hex` is the current
+canonical initial project, including its canonical device-to-local-username
+display registration. `v4/state-v4-legacy.cbor.hex` is the current record
+produced when a retained V1–V3 project is decoded: it deliberately has an
+empty username-registration array rather than inventing a label for old state.
 
 `v2-local-bootstrap-v2.cbor.hex` is ADR-053's canonical signed public local
 bootstrap record. It binds one repository ID, device ID, opaque local key

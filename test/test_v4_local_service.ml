@@ -37,10 +37,12 @@ let draft value = id Model.Draft_id.of_string value
 let change value = id Model.Change_id.of_string value
 let revision value = id Model.Revision_id.of_string value
 let delivery value = id Model.Delivery_id.of_string value
+let username value = id Model.Username.of_string value
 
 let initialize root =
   Service.init ~root ~creator:(device "device-alice")
-    ~initial_draft:(draft "draft-one") ~title:"first work"
+    ~username:(username "alice") ~initial_draft:(draft "draft-one")
+    ~title:"first work"
   |> require_ok Service.error_to_string
 
 let init_captures_the_initial_tree_and_save_observes_no_change () =
@@ -59,6 +61,31 @@ let init_captures_the_initial_tree_and_save_observes_no_change () =
             (Model.Snapshot_id.to_string initialized.Service.checkpoint)
             (Model.Snapshot_id.to_string status.Service.checkpoint)
       | Service.Saved _ -> Alcotest.fail "unchanged tree created a state write")
+
+let username_registration_persists_across_a_repository_reload () =
+  with_directory "yeokcham-v4-service-usernames-" (fun root ->
+      write_file root "main.ml" "let version = 1\n";
+      ignore (initialize root);
+      let registered =
+        Service.register_username ~root ~device:(device "device-bob")
+          ~username:(username "bob")
+        |> require_ok Service.error_to_string
+      in
+      Alcotest.(check int)
+        "registration is visible after its immutable state save" 2
+        (List.length registered.Service.usernames);
+      let reloaded =
+        Service.status ~root |> require_ok Service.error_to_string
+      in
+      Alcotest.(check (list string))
+        "the local display registry survives reopening the repository"
+        [ "device-alice:alice"; "device-bob:bob" ]
+        (reloaded.Service.usernames
+        |> List.map (fun registration ->
+            Model.Device_id.to_string registration.Model.username_device
+            ^ ":"
+            ^ Model.Username.to_string registration.Model.username)
+        |> List.sort String.compare))
 
 let changed_save_creates_a_new_checkpoint () =
   with_directory "yeokcham-v4-service-save-" (fun root ->
@@ -331,7 +358,7 @@ let overlapping_shared_drafts_are_a_decision () =
       write_file root "main.ml" "let version = 2\n";
       ignore
         (Service.share ~root ~change:(change "change-a")
-           ~revision:(revision "revision-a")
+           ~revision:(revision "../outside")
         |> require_ok Service.error_to_string);
       ignore
         (Service.new_draft ~root ~id:(draft "draft-two") ~title:"second work"
@@ -352,6 +379,68 @@ let overlapping_shared_drafts_are_a_decision () =
         "active checkpoint remains the captured tree" false
         (Model.Snapshot_id.equal initial.Service.checkpoint
            overlapping.Service.checkpoint))
+
+let isolated_resolve_does_not_rewrite_the_live_tree () =
+  with_directory "yeokcham-v4-service-isolated-" (fun root ->
+      write_file root "main.ml" "let version = 1\n";
+      ignore (initialize root);
+      write_file root "main.ml" "let version = 2\n";
+      ignore
+        (Service.share ~root ~change:(change "change-a")
+           ~revision:(revision "../outside")
+        |> require_ok Service.error_to_string);
+      ignore
+        (Service.new_draft ~root ~id:(draft "draft-two") ~title:"second work"
+        |> require_ok Service.error_to_string);
+      write_file root "main.ml" "let version = 3\n";
+      let overlapping =
+        Service.share ~root ~change:(change "change-b")
+          ~revision:(revision "revision-b")
+        |> require_ok Service.error_to_string
+      in
+      let decision = List.hd overlapping.Service.open_decisions in
+      let destination = Filename.concat root "isolated" in
+      Unix.mkdir destination 0o700;
+      let candidates =
+        Service.materialize_decision ~root ~decision:decision.Model.decision_id
+          ~destination
+        |> require_ok Service.error_to_string
+      in
+      Alcotest.(check int) "two candidate trees" 2 (List.length candidates);
+      Alcotest.(check (list string))
+        "candidate directories use safe display handles"
+        [ "alice-001"; "alice-002" ]
+        (List.map
+           (fun candidate -> Filename.basename candidate.Service.directory)
+           candidates);
+      Alcotest.(check string)
+        "logical revision identifier remains inspectable" "../outside"
+        (Model.Revision_id.to_string (List.hd candidates).Service.revision);
+      Alcotest.(check bool)
+        "revision identifier cannot escape the requested destination" false
+        (Sys.file_exists (Filename.concat root "outside"));
+      let occupied = Filename.concat root "occupied" in
+      Unix.mkdir occupied 0o700;
+      write_file occupied "stale" "not empty\n";
+      (match
+         Service.materialize_decision ~root ~decision:decision.Model.decision_id
+           ~destination:occupied
+       with
+      | Error _ -> ()
+      | Ok _ -> Alcotest.fail "materialized into a nonempty destination");
+      let chosen = (List.hd candidates).Service.directory in
+      let resolved =
+        Service.resolve ~root ~decision:decision.Model.decision_id
+          ~change:(change "change-resolution")
+          ~revision:(revision "revision-resolution")
+          ~tree:(Some chosen)
+        |> require_ok Service.error_to_string
+      in
+      Alcotest.(check int)
+        "isolated resolve clears the decision" 0
+        (List.length resolved.Service.open_decisions);
+      Alcotest.(check string)
+        "live tree is unchanged" "let version = 3\n" (read_file root "main.ml"))
 
 let withdraw_protects_the_active_shared_change () =
   with_directory "yeokcham-v4-service-withdraw-" (fun root ->
@@ -406,6 +495,7 @@ let resolve_clears_the_open_decision () =
         Service.resolve ~root ~decision:decision.Model.decision_id
           ~change:(change "change-resolution")
           ~revision:(revision "revision-resolution")
+          ~tree:None
         |> require_ok Service.error_to_string
       in
       Alcotest.(check int)
@@ -445,6 +535,7 @@ let deliver_requires_a_decision_free_shared_draft () =
         (Service.resolve ~root ~decision:decision.Model.decision_id
            ~change:(change "change-resolution")
            ~revision:(revision "revision-resolution")
+           ~tree:None
         |> require_ok Service.error_to_string);
       let delivered =
         Service.deliver ~root ~id:(delivery "delivery-one")
@@ -464,6 +555,8 @@ let () =
         [
           Alcotest.test_case "init captures and unchanged save is a no-op"
             `Quick init_captures_the_initial_tree_and_save_observes_no_change;
+          Alcotest.test_case "username registration survives repository reload"
+            `Quick username_registration_persists_across_a_repository_reload;
           Alcotest.test_case "changed save creates a checkpoint" `Quick
             changed_save_creates_a_new_checkpoint;
           Alcotest.test_case "status warns about uncaptured edits" `Quick
@@ -496,6 +589,8 @@ let () =
             share_without_a_tree_delta_fails;
           Alcotest.test_case "overlapping drafts become a decision" `Quick
             overlapping_shared_drafts_are_a_decision;
+          Alcotest.test_case "isolated resolve does not rewrite the live tree"
+            `Quick isolated_resolve_does_not_rewrite_the_live_tree;
           Alcotest.test_case "withdraw protects the active shared change" `Quick
             withdraw_protects_the_active_shared_change;
           Alcotest.test_case "resolve clears the open decision" `Quick

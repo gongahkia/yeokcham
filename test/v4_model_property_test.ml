@@ -6,6 +6,7 @@ let draft value = V4.Draft_id.of_string value |> require_ok
 let change value = V4.Change_id.of_string value |> require_ok
 let revision value = V4.Revision_id.of_string value |> require_ok
 let device value = V4.Device_id.of_string value |> require_ok
+let username value = V4.Username.of_string value |> require_ok
 let path value = V4.Path.of_components [ value ] |> require_ok
 
 let revision_with_span ~change_id ~revision_id ~author ~start_byte ~end_byte =
@@ -18,7 +19,7 @@ let revision_with_span ~change_id ~revision_id ~author ~start_byte ~end_byte =
   |> require_ok
 
 let project () =
-  V4.init ~creator:(device "device-alice")
+  V4.init ~creator:(device "device-alice") ~username:(username "alice")
     ~initial_snapshot:(snapshot "snapshot-base")
     ~initial_draft:(draft "draft-one") ~title:"property"
 
@@ -127,6 +128,37 @@ let compact_never_drops_named_roots =
           && List.length compacted.V4.dropped
              = List.length (V4.checkpoints project) - List.length retained)
 
+let username_registrations_remain_a_unique_local_bijection =
+  QCheck2.Test.make ~count:200
+    ~name:"V4 username registration keeps one safe display handle per device"
+    QCheck2.Gen.(list_size (int_range 0 80) (int_range 0 20))
+    (fun values ->
+      let project =
+        List.fold_left
+          (fun project value ->
+            V4.register_username project
+              ~device:(device ("device-user-" ^ string_of_int value))
+              ~username:(username ("user-" ^ string_of_int value))
+            |> require_ok)
+          (project ()) values
+      in
+      let registrations = V4.usernames project in
+      let devices =
+        List.map
+          (fun registration ->
+            V4.Device_id.to_string registration.V4.username_device)
+          registrations
+      in
+      let usernames =
+        List.map
+          (fun registration -> V4.Username.to_string registration.V4.username)
+          registrations
+      in
+      let unique values = List.sort_uniq String.compare values in
+      List.length devices = List.length (unique devices)
+      && List.length usernames = List.length (unique usernames)
+      && Result.is_ok (V4.import (V4.export project)))
+
 let () =
   Alcotest.run "V4 model properties"
     [
@@ -136,5 +168,7 @@ let () =
           QCheck_alcotest.to_alcotest
             checkpoint_history_is_unique_and_newest_first;
           QCheck_alcotest.to_alcotest compact_never_drops_named_roots;
+          QCheck_alcotest.to_alcotest
+            username_registrations_remain_a_unique_local_bijection;
         ] );
     ]

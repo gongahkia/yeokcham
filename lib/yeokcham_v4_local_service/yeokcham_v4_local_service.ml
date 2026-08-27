@@ -28,7 +28,15 @@ type status = {
   deliveries : Model.delivery list;
   delivery_count : int;
   checkpoints : Model.checkpoint list;
+  usernames : Model.username_registration list;
   uncaptured : bool;
+}
+
+type materialized_candidate = {
+  revision : Model.Revision_id.t;
+  author : Model.Device_id.t;
+  username : Model.Username.t option;
+  directory : string;
 }
 
 type save_outcome = Unchanged of status | Saved of status
@@ -119,6 +127,7 @@ let status_of_project ?(uncaptured = false) project =
     deliveries;
     delivery_count = List.length deliveries;
     checkpoints = Model.checkpoints project;
+    usernames = Model.usernames project;
     uncaptured;
   }
 
@@ -207,13 +216,14 @@ let with_repository ~root f =
   in
   f repository loaded
 
-let init ~root ~creator ~initial_draft ~title =
+let init ~root ~creator ~username ~initial_draft ~title =
   let* repository =
     Store.init_with ~root ~bootstrap:(fun underlying_store ->
         let* initial_snapshot =
           capture ~root underlying_store |> Result.map_error error_to_string
         in
-        Ok (Model.init ~creator ~initial_snapshot ~initial_draft ~title))
+        Ok
+          (Model.init ~creator ~username ~initial_snapshot ~initial_draft ~title))
     |> Result.map_error (fun error -> Store_error error)
   in
   Store.load repository
@@ -228,6 +238,14 @@ let status ~root =
         not (Model.Snapshot_id.equal active.Model.latest_checkpoint observed)
       in
       Ok (status_of_project ~uncaptured loaded.Store.project))
+
+let register_username ~root ~device ~username =
+  with_repository ~root (fun repository loaded ->
+      let* project =
+        Model.register_username loaded.Store.project ~device ~username
+        |> Result.map_error (fun error -> Model_error error)
+      in
+      persist repository loaded project)
 
 let save ~root =
   with_repository ~root (fun repository loaded ->
@@ -487,18 +505,133 @@ let withdraw ~root ~change =
       in
       persist repository loaded project)
 
-let resolve ~root ~decision ~change ~revision =
+let find_open_decision project decision =
+  List.find_opt
+    (fun candidate ->
+      Model.Decision_id.equal candidate.Model.decision_id decision)
+    (Model.projection project).Model.decisions
+
+let require_empty_directory destination =
+  try
+    if (Unix.lstat destination).Unix.st_kind <> Unix.S_DIR then
+      Error
+        (Materialize_error
+           (Snapshot.Materialize.Destination_not_directory destination))
+    else if Array.length (Sys.readdir destination) <> 0 then
+      Error
+        (Materialize_error
+           (Snapshot.Materialize.Destination_not_empty destination))
+    else Ok ()
+  with Unix.Unix_error (error, operation, _) ->
+    Error
+      (Materialize_error
+         (Snapshot.Materialize.Io_error
+            {
+              path = destination;
+              operation;
+              message = Unix.error_message error;
+            }))
+
+let mkdir_exclusive path =
+  try
+    Unix.mkdir path 0o700;
+    Ok ()
+  with Unix.Unix_error (error, operation, _) ->
+    Error
+      (Materialize_error
+         (Snapshot.Materialize.Io_error
+            { path; operation; message = Unix.error_message error }))
+
+let unique_candidate_revisions (decision : Model.decision) =
+  decision.Model.candidates
+  |> List.map (fun candidate -> candidate.Model.candidate_revision)
+  |> List.sort_uniq (fun left right ->
+      Model.Revision_id.compare left.Model.revision right.Model.revision)
+
+let candidate_directory_name ~username ~index =
+  let handle =
+    match username with
+    | Some username -> Model.Username.to_string username
+    | None -> "device"
+  in
+  Printf.sprintf "%s-%03d" handle (index + 1)
+
+let contained_child ~destination ~name =
+  if
+    String.length name = 0
+    || String.equal name "." || String.equal name ".."
+    || not (String.equal (Filename.basename name) name)
+  then
+    Error
+      (Materialize_error
+         (Snapshot.Materialize.Io_error
+            {
+              path = destination;
+              operation = "derive candidate directory";
+              message =
+                "candidate directory name is not a single path component";
+            }))
+  else Ok (Filename.concat destination name)
+
+let open_decision ~root ~decision =
+  with_repository ~root (fun _ loaded ->
+      match find_open_decision loaded.Store.project decision with
+      | Some found -> Ok found
+      | None -> Error (Model_error Model.Unknown_decision))
+
+let materialize_decision ~root ~decision ~destination =
+  with_repository ~root (fun repository loaded ->
+      match find_open_decision loaded.Store.project decision with
+      | None -> Error (Model_error Model.Unknown_decision)
+      | Some found ->
+          let* () = require_empty_directory destination in
+          let store = Store.underlying_store repository in
+          let revisions = unique_candidate_revisions found in
+          let rec write index remaining materialized =
+            match remaining with
+            | [] -> Ok (List.rev materialized)
+            | revision :: rest ->
+                let username =
+                  Model.username_for_device loaded.Store.project
+                    ~device:revision.Model.revision_author
+                in
+                let* child =
+                  contained_child ~destination
+                    ~name:(candidate_directory_name ~username ~index)
+                in
+                let* () = mkdir_exclusive child in
+                let* snapshot =
+                  load_snapshot store revision.Model.result_snapshot
+                in
+                let* () =
+                  Snapshot.Materialize.write ~destination:child store snapshot
+                  |> Result.map_error (fun error -> Materialize_error error)
+                in
+                write (index + 1) rest
+                  ({
+                     revision = revision.Model.revision;
+                     author = revision.Model.revision_author;
+                     username;
+                     directory = child;
+                   }
+                  :: materialized)
+          in
+          write 0 revisions [])
+
+let resolve ~root ~decision ~change ~revision ~tree =
   with_repository ~root (fun repository loaded ->
       let store = Store.underlying_store repository in
-      let* observed = capture ~root store in
-      let project = checkpoint_observed loaded.Store.project observed in
+      let* project, observed =
+        match tree with
+        | None ->
+            let* observed = capture ~root store in
+            Ok (checkpoint_observed loaded.Store.project observed, observed)
+        | Some path ->
+            let* observed = capture ~root:path store in
+            Ok (loaded.Store.project, observed)
+      in
       let projection = Model.projection project in
-      match
-        List.find_opt
-          (fun candidate ->
-            Model.Decision_id.equal candidate.Model.decision_id decision)
-          projection.Model.decisions
-      with
+      match find_open_decision project decision with
       | None -> Error (Model_error Model.Unknown_decision)
       | Some resolved ->
           let* edits =

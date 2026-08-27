@@ -23,8 +23,19 @@ type status = {
   deliveries : Yeokcham_v4_model.delivery list;
   delivery_count : int;
   checkpoints : Yeokcham_v4_model.checkpoint list;
+  usernames : Yeokcham_v4_model.username_registration list;
   uncaptured : bool;
 }
+
+type materialized_candidate = {
+  revision : Yeokcham_v4_model.Revision_id.t;
+  author : Yeokcham_v4_model.Device_id.t;
+  username : Yeokcham_v4_model.Username.t option;
+  directory : string;
+}
+(** A read-only candidate tree created for an open decision. [directory] is a
+    generated child of the requested destination, not an identifier-derived
+    path. *)
 
 type save_outcome = Unchanged of status | Saved of status
 
@@ -58,12 +69,19 @@ val error_to_string : error -> string
 val init :
   root:string ->
   creator:Yeokcham_v4_model.Device_id.t ->
+  username:Yeokcham_v4_model.Username.t ->
   initial_draft:Yeokcham_v4_model.Draft_id.t ->
   title:string ->
   (status, error) result
 
 val save : root:string -> (save_outcome, error) result
 val status : root:string -> (status, error) result
+
+val register_username :
+  root:string ->
+  device:Yeokcham_v4_model.Device_id.t ->
+  username:Yeokcham_v4_model.Username.t ->
+  (status, error) result
 
 val restore :
   root:string ->
@@ -114,7 +132,19 @@ val resolve :
   decision:Yeokcham_v4_model.Decision_id.t ->
   change:Yeokcham_v4_model.Change_id.t ->
   revision:Yeokcham_v4_model.Revision_id.t ->
+  tree:string option ->
   (status, error) result
+
+val open_decision :
+  root:string ->
+  decision:Yeokcham_v4_model.Decision_id.t ->
+  (Yeokcham_v4_model.decision, error) result
+
+val materialize_decision :
+  root:string ->
+  decision:Yeokcham_v4_model.Decision_id.t ->
+  destination:string ->
+  (materialized_candidate list, error) result
 
 val deliver :
   root:string ->

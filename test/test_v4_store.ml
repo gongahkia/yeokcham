@@ -31,6 +31,7 @@ let id parser value = parser value |> Result.get_ok
 let project () =
   Model.init
     ~creator:(id Model.Device_id.of_string "device-alice")
+    ~username:(id Model.Username.of_string "alice")
     ~initial_snapshot:(id Model.Snapshot_id.of_string "snapshot-base")
     ~initial_draft:(id Model.Draft_id.of_string "draft-one")
     ~title:"fixture"
