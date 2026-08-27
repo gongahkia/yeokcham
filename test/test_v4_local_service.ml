@@ -442,6 +442,74 @@ let isolated_resolve_does_not_rewrite_the_live_tree () =
       Alcotest.(check string)
         "live tree is unchanged" "let version = 3\n" (read_file root "main.ml"))
 
+let isolated_inspection_compares_exact_candidate_snapshots () =
+  with_directory "yeokcham-v4-service-inspect-" (fun root ->
+      write_file root "main.ml" "let version = 1\n";
+      ignore (initialize root);
+      write_file root "main.ml" "let version = 2\n";
+      ignore
+        (Service.share ~root ~change:(change "change-a")
+           ~revision:(revision "revision-a")
+        |> require_ok Service.error_to_string);
+      ignore
+        (Service.new_draft ~root ~id:(draft "draft-two") ~title:"second work"
+        |> require_ok Service.error_to_string);
+      write_file root "main.ml" "let version = 3\n";
+      let overlapping =
+        Service.share ~root ~change:(change "change-b")
+          ~revision:(revision "revision-b")
+        |> require_ok Service.error_to_string
+      in
+      let decision = List.hd overlapping.Service.open_decisions in
+      let before = Service.status ~root |> require_ok Service.error_to_string in
+      let inspection =
+        Service.inspect_decision ~root ~decision:decision.Model.decision_id
+        |> require_ok Service.error_to_string
+      in
+      Alcotest.(check (list string))
+        "inspection includes canonical local display names" [ "alice"; "alice" ]
+        (List.map
+           (fun candidate ->
+             candidate.Service.inspected_username
+             |> Option.map Model.Username.to_string
+             |> Option.value ~default:"missing")
+           inspection.Service.inspected_candidates);
+      let comparison =
+        Service.compare_decision ~root ~decision:decision.Model.decision_id
+          ~candidate:(revision "revision-b")
+          ~against:(Service.Candidate (revision "revision-a"))
+        |> require_ok Service.error_to_string
+      in
+      Alcotest.(check int)
+        "candidate comparison reports the exact changed file" 1
+        (List.length comparison.Service.differences);
+      let difference = List.hd comparison.Service.differences in
+      Alcotest.(check string)
+        "difference names the changed path" "main.ml"
+        (Model.Path.to_string difference.Service.path);
+      Alcotest.(check bool)
+        "comparison has both snapshot states" true
+        (Option.is_some difference.Service.before
+        && Option.is_some difference.Service.after);
+      let after = Service.status ~root |> require_ok Service.error_to_string in
+      Alcotest.(check string)
+        "inspection does not publish a state transition"
+        (Model.Snapshot_id.to_string before.Service.checkpoint)
+        (Model.Snapshot_id.to_string after.Service.checkpoint);
+      Alcotest.(check string)
+        "inspection does not rewrite live bytes" "let version = 3\n"
+        (read_file root "main.ml");
+      match
+        Service.compare_decision ~root ~decision:decision.Model.decision_id
+          ~candidate:(revision "not-a-candidate")
+          ~against:Service.Baseline
+      with
+      | Error error ->
+          Alcotest.(check string)
+            "inspection rejects a non-candidate revision" "unknown revision"
+            (Service.error_to_string error)
+      | Ok _ -> Alcotest.fail "inspection accepted a non-candidate revision")
+
 let withdraw_protects_the_active_shared_change () =
   with_directory "yeokcham-v4-service-withdraw-" (fun root ->
       write_file root "main.ml" "let version = 1\n";
@@ -591,6 +659,9 @@ let () =
             overlapping_shared_drafts_are_a_decision;
           Alcotest.test_case "isolated resolve does not rewrite the live tree"
             `Quick isolated_resolve_does_not_rewrite_the_live_tree;
+          Alcotest.test_case
+            "isolated inspection compares candidate snapshots without mutation"
+            `Quick isolated_inspection_compares_exact_candidate_snapshots;
           Alcotest.test_case "withdraw protects the active shared change" `Quick
             withdraw_protects_the_active_shared_change;
           Alcotest.test_case "resolve clears the open decision" `Quick

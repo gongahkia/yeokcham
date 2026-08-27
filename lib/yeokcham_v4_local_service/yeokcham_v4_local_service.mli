@@ -37,6 +37,47 @@ type materialized_candidate = {
     generated child of the requested destination, not an identifier-derived
     path. *)
 
+type snapshot_entry_kind = File | Directory
+
+type snapshot_entry = {
+  kind : snapshot_entry_kind;
+  mode : Yeokcham_snapshot.file_mode option;
+  content : string option;
+}
+(** A byte-safe description of one path in an exact snapshot. [content] is the
+    canonical object identity of a file's bytes; it is absent for directories.
+    No textual diff is attempted, so binary files remain inspectable. *)
+
+type path_difference = {
+  path : Yeokcham_v4_model.Path.t;
+  before : snapshot_entry option;
+  after : snapshot_entry option;
+}
+
+type comparison_target =
+  | Baseline
+  | Candidate of Yeokcham_v4_model.Revision_id.t
+
+type decision_comparison = {
+  compared_decision : Yeokcham_v4_model.decision;
+  compared_candidate : Yeokcham_v4_model.change_revision;
+  against : Yeokcham_v4_model.Snapshot_id.t;
+  differences : path_difference list;
+}
+(** An entirely read-only comparison between an open decision candidate and
+    either the current projection baseline or another candidate in the same
+    decision. *)
+
+type inspected_candidate = {
+  inspected_revision : Yeokcham_v4_model.change_revision;
+  inspected_username : Yeokcham_v4_model.Username.t option;
+}
+
+type decision_inspection = {
+  inspected_decision : Yeokcham_v4_model.decision;
+  inspected_candidates : inspected_candidate list;
+}
+
 type save_outcome = Unchanged of status | Saved of status
 
 type compact_report = {
@@ -145,6 +186,18 @@ val materialize_decision :
   decision:Yeokcham_v4_model.Decision_id.t ->
   destination:string ->
   (materialized_candidate list, error) result
+
+val inspect_decision :
+  root:string ->
+  decision:Yeokcham_v4_model.Decision_id.t ->
+  (decision_inspection, error) result
+
+val compare_decision :
+  root:string ->
+  decision:Yeokcham_v4_model.Decision_id.t ->
+  candidate:Yeokcham_v4_model.Revision_id.t ->
+  against:comparison_target ->
+  (decision_comparison, error) result
 
 val deliver :
   root:string ->

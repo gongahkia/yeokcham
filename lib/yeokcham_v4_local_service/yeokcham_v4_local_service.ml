@@ -39,6 +39,39 @@ type materialized_candidate = {
   directory : string;
 }
 
+type snapshot_entry_kind = File | Directory
+
+type snapshot_entry = {
+  kind : snapshot_entry_kind;
+  mode : Snapshot.file_mode option;
+  content : string option;
+}
+
+type path_difference = {
+  path : Model.Path.t;
+  before : snapshot_entry option;
+  after : snapshot_entry option;
+}
+
+type comparison_target = Baseline | Candidate of Model.Revision_id.t
+
+type decision_comparison = {
+  compared_decision : Model.decision;
+  compared_candidate : Model.change_revision;
+  against : Model.Snapshot_id.t;
+  differences : path_difference list;
+}
+
+type inspected_candidate = {
+  inspected_revision : Model.change_revision;
+  inspected_username : Model.Username.t option;
+}
+
+type decision_inspection = {
+  inspected_decision : Model.decision;
+  inspected_candidates : inspected_candidate list;
+}
+
 type save_outcome = Unchanged of status | Saved of status
 
 type compact_report = {
@@ -162,6 +195,45 @@ let rec collect_leaves store prefix tree_id acc =
 let leaves_of_snapshot store snapshot_id =
   let* snapshot = load_snapshot store snapshot_id in
   collect_leaves store [] (Snapshot.Snapshot.root snapshot) Path_map.empty
+
+let entry_of_tree_entry = function
+  | Snapshot.Tree.File { mode; content } ->
+      {
+        kind = File;
+        mode = Some mode;
+        content =
+          Some
+            (content |> Snapshot.Content.stored_object_id
+           |> Yeokcham_store.Stored_object_id.to_hex);
+      }
+  | Snapshot.Tree.Directory _ ->
+      { kind = Directory; mode = None; content = None }
+
+let rec collect_snapshot_entries store prefix tree_id entries =
+  let* tree =
+    Snapshot.Tree.load store tree_id
+    |> Result.map_error (fun error -> Snapshot_error error)
+  in
+  let rec walk entries = function
+    | [] -> Ok entries
+    | (name, entry) :: rest ->
+        let path = prefix @ [ name ] in
+        let entries = Path_map.add path (entry_of_tree_entry entry) entries in
+        let* entries =
+          match entry with
+          | Snapshot.Tree.File _ -> Ok entries
+          | Snapshot.Tree.Directory child ->
+              collect_snapshot_entries store path child entries
+        in
+        walk entries rest
+  in
+  walk entries (Snapshot.Tree.entries tree)
+
+let snapshot_entries store snapshot_id =
+  let* snapshot = load_snapshot store snapshot_id in
+  collect_snapshot_entries store []
+    (Snapshot.Snapshot.root snapshot)
+    Path_map.empty
 
 let entry_equal (left_mode, left_content) (right_mode, right_content) =
   left_mode = right_mode && Snapshot.Content.equal_id left_content right_content
@@ -578,6 +650,90 @@ let open_decision ~root ~decision =
       match find_open_decision loaded.Store.project decision with
       | Some found -> Ok found
       | None -> Error (Model_error Model.Unknown_decision))
+
+let inspect_decision ~root ~decision =
+  with_repository ~root (fun _ loaded ->
+      match find_open_decision loaded.Store.project decision with
+      | None -> Error (Model_error Model.Unknown_decision)
+      | Some decision ->
+          let candidates =
+            decision.Model.candidates
+            |> List.map (fun candidate -> candidate.Model.candidate_revision)
+            |> List.sort_uniq (fun left right ->
+                Model.Revision_id.compare left.Model.revision
+                  right.Model.revision)
+            |> List.map (fun revision ->
+                {
+                  inspected_revision = revision;
+                  inspected_username =
+                    Model.username_for_device loaded.Store.project
+                      ~device:revision.Model.revision_author;
+                })
+          in
+          Ok
+            { inspected_decision = decision; inspected_candidates = candidates })
+
+let decision_revision decision revision_id =
+  decision.Model.candidates
+  |> List.map (fun candidate -> candidate.Model.candidate_revision)
+  |> List.find_opt (fun candidate ->
+      Model.Revision_id.equal candidate.Model.revision revision_id)
+
+let comparison_differences store ~before ~after =
+  let* before_entries = snapshot_entries store before in
+  let* after_entries = snapshot_entries store after in
+  Path_map.merge
+    (fun components before after ->
+      match (before, after) with
+      | Some left, Some right when left = right -> None
+      | None, None -> None
+      | _ ->
+          let path =
+            Model.Path.of_components components
+            |> Result.map_error (fun error -> Model_error error)
+          in
+          Some (Result.map (fun path -> { path; before; after }) path))
+    before_entries after_entries
+  |> Path_map.bindings
+  |> List.fold_left
+       (fun differences (_, difference) ->
+         let* differences = differences in
+         let* difference = difference in
+         Ok (difference :: differences))
+       (Ok [])
+  |> Result.map List.rev
+
+let compare_decision ~root ~decision ~candidate ~against =
+  with_repository ~root (fun repository loaded ->
+      match find_open_decision loaded.Store.project decision with
+      | None -> Error (Model_error Model.Unknown_decision)
+      | Some found -> (
+          match decision_revision found candidate with
+          | None -> Error (Model_error Model.Unknown_revision)
+          | Some candidate ->
+              let* against =
+                match against with
+                | Baseline ->
+                    Ok
+                      (Model.projection loaded.Store.project)
+                        .Model.projection_baseline
+                | Candidate revision -> (
+                    match decision_revision found revision with
+                    | Some revision -> Ok revision.Model.result_snapshot
+                    | None -> Error (Model_error Model.Unknown_revision))
+              in
+              let store = Store.underlying_store repository in
+              let* differences =
+                comparison_differences store ~before:against
+                  ~after:candidate.Model.result_snapshot
+              in
+              Ok
+                {
+                  compared_decision = found;
+                  compared_candidate = candidate;
+                  against;
+                  differences;
+                }))
 
 let materialize_decision ~root ~decision ~destination =
   with_repository ~root (fun repository loaded ->

@@ -378,6 +378,34 @@ let command_journey_materializes_and_resolves_from_an_isolated_tree () =
         output;
       expect_output_contains "show lists a candidate" "candidate revision-"
         output;
+      expect_output_contains "show includes candidate edit metadata"
+        "edit revision-" output;
+      let output, errors, status =
+        run [ "decision"; "inspect"; "--root"; root; "--decision"; decision ]
+      in
+      require_success "decision inspect" status errors;
+      expect_output_contains "inspection renders the local display label"
+        "username alice" output;
+      let output, errors, status =
+        run
+          [
+            "decision";
+            "diff";
+            "--root";
+            root;
+            "--decision";
+            decision;
+            "--candidate";
+            "revision-b";
+            "--against";
+            "revision-a";
+          ]
+      in
+      require_success "decision diff" status errors;
+      expect_output_contains "diff reports its compared candidate"
+        "candidate revision-b" output;
+      expect_output_contains "diff reports exact changed path" "diff main.ml"
+        output;
       let destination = Filename.concat root "isolated" in
       Unix.mkdir destination 0o700;
       let output, errors, status =

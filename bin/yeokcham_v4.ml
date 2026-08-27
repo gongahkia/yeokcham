@@ -21,6 +21,9 @@ let usage () =
     \  yeokcham-v4 resolve [--root PATH] --decision ID --change ID --revision \
      ID [--tree PATH]\n\
     \  yeokcham-v4 decision show [--root PATH] --decision ID\n\
+    \  yeokcham-v4 decision inspect [--root PATH] --decision ID\n\
+    \  yeokcham-v4 decision diff [--root PATH] --decision ID --candidate REV \
+     [--against base|REV]\n\
     \  yeokcham-v4 decision materialize [--root PATH] --decision ID \
      --destination PATH\n\
     \  yeokcham-v4 deliver [--root PATH] --id ID --draft ID --title TITLE\n\
@@ -322,30 +325,71 @@ let parse_decision_materialize arguments =
   in
   loop None None None arguments
 
+let parse_decision_diff arguments =
+  let rec loop root decision candidate against = function
+    | [] -> (
+        match (decision, candidate) with
+        | Some decision, Some candidate ->
+            ( Option.value root ~default:default_root,
+              decision,
+              candidate,
+              Option.value against ~default:"base" )
+        | None, _ | _, None -> usage ())
+    | "--root" :: value :: rest when Option.is_none root ->
+        loop (Some value) decision candidate against rest
+    | "--decision" :: value :: rest when Option.is_none decision ->
+        loop root (Some value) candidate against rest
+    | "--candidate" :: value :: rest when Option.is_none candidate ->
+        loop root decision (Some value) against rest
+    | "--against" :: value :: rest when Option.is_none against ->
+        loop root decision candidate (Some value) rest
+    | _ -> usage ()
+  in
+  loop None None None None arguments
+
 let decision_kind_name = function
   | Model.Stale_base -> "stale-base"
   | Model.Edit_overlap -> "edit-overlap"
 
-let render_decision (decision : Model.decision) =
+let edit_kind_name = function
+  | Model.Whole_path -> "whole-path"
+  | Model.Text span ->
+      Printf.sprintf "text:%d-%d" span.Model.start_byte span.Model.end_byte
+
+let render_decision (inspection : Service.decision_inspection) =
+  let decision = inspection.Service.inspected_decision in
   Printf.printf "decision %s\n"
     (Model.Decision_id.to_string decision.Model.decision_id);
   Printf.printf "kind %s\n" (decision_kind_name decision.Model.decision_kind);
   List.iter
     (fun path -> Printf.printf "path %s\n" (Model.Path.to_string path))
     decision.Model.decision_paths;
-  List.fold_left
-    (fun seen candidate ->
+  List.iter
+    (fun candidate ->
+      let revision = candidate.Service.inspected_revision in
+      let username =
+        match candidate.Service.inspected_username with
+        | None -> "unregistered"
+        | Some username -> Model.Username.to_string username
+      in
+      Printf.printf
+        "candidate %s change %s author %s username %s base %s snapshot %s\n"
+        (Model.Revision_id.to_string revision.Model.revision)
+        (Model.Change_id.to_string revision.Model.change)
+        (Model.Device_id.to_string revision.Model.revision_author)
+        username
+        (Model.Snapshot_id.to_string revision.Model.base_snapshot)
+        (Model.Snapshot_id.to_string revision.Model.result_snapshot))
+    inspection.Service.inspected_candidates;
+  List.iter
+    (fun candidate ->
       let revision = candidate.Model.candidate_revision in
-      let id = Model.Revision_id.to_string revision.Model.revision in
-      if List.mem id seen then seen
-      else (
-        Printf.printf "candidate %s change %s author %s snapshot %s\n" id
-          (Model.Change_id.to_string revision.Model.change)
-          (Model.Device_id.to_string revision.Model.revision_author)
-          (Model.Snapshot_id.to_string revision.Model.result_snapshot);
-        id :: seen))
-    [] decision.Model.candidates
-  |> ignore
+      Printf.printf "edit %s %d %s %s\n"
+        (Model.Revision_id.to_string revision.Model.revision)
+        candidate.Model.candidate_edit_index
+        (Model.Path.to_string candidate.Model.candidate_edit.Model.edit_path)
+        (edit_kind_name candidate.Model.candidate_edit.Model.edit_kind))
+    decision.Model.candidates
 
 let run_decision_show arguments =
   let root, decision = parse_decision_show arguments in
@@ -353,9 +397,66 @@ let run_decision_show arguments =
     parse_identifier "invalid decision identifier" Model.Decision_id.of_string
       decision
   in
-  Service.open_decision ~root ~decision
+  Service.inspect_decision ~root ~decision
   |> require_ok Service.error_to_string
   |> render_decision
+
+let snapshot_entry_kind_name = function
+  | Service.File -> "file"
+  | Service.Directory -> "directory"
+
+let snapshot_mode_name = function
+  | Yeokcham_snapshot.Regular -> "regular"
+  | Yeokcham_snapshot.Executable -> "executable"
+  | Yeokcham_snapshot.Symlink -> "symlink"
+
+let render_snapshot_entry = function
+  | None -> "missing"
+  | Some entry -> (
+      let kind = snapshot_entry_kind_name entry.Service.kind in
+      let mode = Option.map snapshot_mode_name entry.Service.mode in
+      match (mode, entry.Service.content) with
+      | None, None -> kind
+      | Some mode, Some content -> kind ^ " " ^ mode ^ " " ^ content
+      | Some mode, None -> kind ^ " " ^ mode
+      | None, Some content -> kind ^ " " ^ content)
+
+let run_decision_diff arguments =
+  let root, decision, candidate, against = parse_decision_diff arguments in
+  let decision =
+    parse_identifier "invalid decision identifier" Model.Decision_id.of_string
+      decision
+  in
+  let candidate =
+    parse_identifier "invalid revision identifier" Model.Revision_id.of_string
+      candidate
+  in
+  let against =
+    if String.equal against "base" then Service.Baseline
+    else
+      Service.Candidate
+        (parse_identifier "invalid revision identifier"
+           Model.Revision_id.of_string against)
+  in
+  let comparison =
+    Service.compare_decision ~root ~decision ~candidate ~against
+    |> require_ok Service.error_to_string
+  in
+  Printf.printf "decision %s\n"
+    (Model.Decision_id.to_string
+       comparison.Service.compared_decision.Model.decision_id);
+  Printf.printf "candidate %s\n"
+    (Model.Revision_id.to_string
+       comparison.Service.compared_candidate.Model.revision);
+  Printf.printf "against %s\n"
+    (Model.Snapshot_id.to_string comparison.Service.against);
+  List.iter
+    (fun difference ->
+      Printf.printf "diff %s before %s after %s\n"
+        (Model.Path.to_string difference.Service.path)
+        (render_snapshot_entry difference.Service.before)
+        (render_snapshot_entry difference.Service.after))
+    comparison.Service.differences
 
 let run_decision_materialize arguments =
   let root, decision, destination = parse_decision_materialize arguments in
@@ -559,6 +660,8 @@ let () =
   | _ :: "withdraw" :: arguments -> run_withdraw arguments
   | _ :: "resolve" :: arguments -> run_resolve arguments
   | _ :: "decision" :: "show" :: arguments -> run_decision_show arguments
+  | _ :: "decision" :: "inspect" :: arguments -> run_decision_show arguments
+  | _ :: "decision" :: "diff" :: arguments -> run_decision_diff arguments
   | _ :: "decision" :: "materialize" :: arguments ->
       run_decision_materialize arguments
   | _ :: "deliver" :: arguments -> run_deliver arguments
