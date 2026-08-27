@@ -1008,8 +1008,22 @@ let deliver project ~id ~author ~snapshot ~included ~next_draft ~next_title
                      (candidates_of_revision active_revision))
               then Error Delivery_omits_active_change
               else
-                let selected (change : shared_change) =
-                  includes (latest_revision change)
+                let represented_by_included_resolution candidate =
+                  List.exists
+                    (fun resolution ->
+                      includes resolution.replacement_revision
+                      && List.exists
+                           (fun suppressed ->
+                             same_reference suppressed
+                               (reference_of_candidate candidate))
+                           resolution.suppressed_edits)
+                    project.resolutions
+                in
+                let consumed (change : shared_change) =
+                  let latest = latest_revision change in
+                  includes latest
+                  || List.for_all represented_by_included_resolution
+                       (candidates_of_revision latest)
                 in
                 let closed = { active with state = Closed } in
                 let next =
@@ -1046,7 +1060,8 @@ let deliver project ~id ~author ~snapshot ~included ~next_draft ~next_title
                            project.drafts;
                     changes =
                       List.filter
-                        (fun (change : shared_change) -> not (selected change))
+                        (fun (change : shared_change) -> not (consumed change))
                         project.changes;
+                    resolutions = [];
                     deliveries = delivery :: project.deliveries;
                   })

@@ -77,6 +77,17 @@ let saved_checkpoint output =
   in
   find 0
 
+let first_prefixed_value prefix output =
+  let prefixed_line =
+    output |> String.split_on_char '\n'
+    |> List.find_opt (fun line -> String.starts_with ~prefix line)
+  in
+  match prefixed_line with
+  | None -> Alcotest.fail ("CLI output did not contain " ^ String.trim prefix)
+  | Some line ->
+      String.sub line (String.length prefix)
+        (String.length line - String.length prefix)
+
 let write_file root name contents =
   Out_channel.with_open_bin (Filename.concat root name) (fun channel ->
       Out_channel.output_string channel contents)
@@ -158,6 +169,114 @@ let command_journey_reports_saved_work_and_drafts () =
         output;
       expect_output_contains "status renders no deliveries" "delivered 0" output)
 
+let command_journey_shares_resolves_withdraws_and_delivers () =
+  with_directory "yeokcham-v4-cli-share-" (fun root ->
+      write_file root "main.ml" "let version = 1\n";
+      let output, errors, status =
+        run
+          [
+            "init";
+            "--root";
+            root;
+            "--device";
+            "device-alice";
+            "--draft";
+            "draft-one";
+            "--title";
+            "first-work";
+          ]
+      in
+      require_success "init" status errors;
+      expect_output_contains "init reports a saved checkpoint" "saved " output;
+      write_file root "main.ml" "let version = 2\n";
+      let output, errors, status =
+        run
+          [
+            "share";
+            "--root";
+            root;
+            "--change";
+            "change-a";
+            "--revision";
+            "revision-a";
+          ]
+      in
+      require_success "share" status errors;
+      expect_output_contains "share is visible" "shared 1" output;
+      expect_output_contains "shared change id is listed" "change change-a"
+        output;
+      let _output, errors, status =
+        run
+          [
+            "draft";
+            "new";
+            "--root";
+            root;
+            "--id";
+            "draft-two";
+            "--title";
+            "second-work";
+          ]
+      in
+      require_success "second draft" status errors;
+      write_file root "main.ml" "let version = 3\n";
+      let output, errors, status =
+        run
+          [
+            "share";
+            "--root";
+            root;
+            "--change";
+            "change-b";
+            "--revision";
+            "revision-b";
+          ]
+      in
+      require_success "overlapping share" status errors;
+      expect_output_contains "overlap is a decision" "needs-decision 1" output;
+      let decision = first_prefixed_value "decision " output in
+      let output, errors, status =
+        run
+          [
+            "resolve";
+            "--root";
+            root;
+            "--decision";
+            decision;
+            "--change";
+            "change-resolution";
+            "--revision";
+            "revision-resolution";
+          ]
+      in
+      require_success "resolve" status errors;
+      expect_output_contains "resolution clears the decision" "needs-decision 0"
+        output;
+      let _output, errors, status =
+        run [ "withdraw"; "--root"; root; "--change"; "change-a" ]
+      in
+      require_success "withdraw" status errors;
+      let output, errors, status =
+        run
+          [
+            "deliver";
+            "--root";
+            root;
+            "--id";
+            "delivery-one";
+            "--draft";
+            "draft-three";
+            "--title";
+            "after-delivery";
+          ]
+      in
+      require_success "deliver" status errors;
+      expect_output_contains "delivery is inspectable" "delivered 1" output;
+      expect_output_contains "delivery id is listed" "delivery delivery-one"
+        output;
+      expect_output_contains "delivery starts the next draft"
+        "draft draft-three" output)
+
 let () =
   Alcotest.run "V4 CLI"
     [
@@ -165,5 +284,7 @@ let () =
         [
           Alcotest.test_case "saved work and drafts" `Quick
             command_journey_reports_saved_work_and_drafts;
+          Alcotest.test_case "share resolve withdraw and deliver" `Quick
+            command_journey_shares_resolves_withdraws_and_delivers;
         ] );
     ]

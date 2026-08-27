@@ -10,18 +10,19 @@ V3 repositories.
 
 The current milestone is the V4 functional core: exact local recovery,
 explicit drafts and sharing, conservative composition, durable decisions, and
-manual delivery.  The completed first vertical slice is an in-memory model with
-generated tests.  The active vertical slice is a versioned canonical model-state
-record, local immutable state head, and command-triggered exact capture: model
-state can be encoded, decoded, written as an immutable object, published only
-through a compare-and-swap head, and bound to an exact snapshot before watcher,
-CLI, or transport implementation is added.
+manual delivery. Completed slices are the in-memory model, the versioned
+canonical model-state record with a compare-and-swap `v4-project-state` head,
+command-triggered exact capture, and the local four-fact CLI. Automatic
+watcher capture, in-place journaled restore, compaction, transport, and
+signing remain later slices.
 
 The record slice owns these types: `state`, `checkpoint`, `draft`,
-`shared_change`, `change_revision`, `edit`, `resolution`, and `delivery`. Its invariants are
-one active draft, unique identities, linear immutable revision chains, a
-resolution based on the current delivery baseline, retained unique checkpoints,
-and canonical field/list ordering. It requires round-trip, noncanonical-byte,
+`shared_change`, `change_revision`, `edit`, `resolution`, and `delivery`. Its
+invariants are one active draft, unique identities, linear immutable revision
+chains, a resolution based on the current delivery baseline, retained unique
+checkpoints, and canonical field/list ordering. A delivery that includes a
+resolution consumes the resolved shared changes and drops resolutions bound to
+the previous baseline. It requires round-trip, noncanonical-byte,
 malformed-state, and golden-byte tests. The V2 state schema retains the V1
 fixture decoder and deterministically upgrades its single known checkpoint.
 The local adapter adds a `V4_project_state` object and one
@@ -33,19 +34,23 @@ reopen, stale-writer, and corrupt/wrong-type failure coverage. ADR-079 remains
 applicable; no new architecture decision is needed because this is the
 already-approved persistent-adapter boundary.
 
-The command-triggered capture adapter owns `init`, `save`, `status`, and
-`draft new` transitions. It captures an exact tree through the existing
-byte-correct scanner, maps the stored snapshot identity into the V4 model, and
-does not write a new head when the snapshot is unchanged. It needs init/scan,
-unchanged save, changed save, and draft-lifecycle tests. Automatic watcher
+The command-triggered capture adapter owns `init`, `save`, `status`,
+`draft new`, `share`, `withdraw`, `resolve`, and `deliver`. It captures an
+exact tree through the existing byte-correct scanner, maps the stored snapshot
+identity into the V4 model, and does not write a new head when a save observes
+an unchanged snapshot. `save` remains recovery-only: a later checkpoint becomes
+a shared revision only when `share` is run again. Shared revisions record
+`Whole_path` edits for paths that differ from the current delivery baseline.
+`receive` and signatures are not part of this adapter. Automatic watcher
 capture remains a later slice.
 
-The first inspectable CLI is deliberately small: `yeokcham-v4 init`, `save`,
-`status`, and `draft new`. `status` renders the four facts where they are known:
-the saved checkpoint, active draft, shared-change count, open decision count,
-and delivery count. The command rejects unsupported V4 actions instead of
-routing them through V3 or Git behaviour. CLI journey tests cover init,
-unchanged save, changed save, status, and a new draft.
+The inspectable CLI is `yeokcham-v4 init`, `save`, `status`, `timeline`,
+`restore`, `draft new`, `share`, `withdraw`, `resolve`, and `deliver`.
+`status` renders the four facts and lists shared-change, decision, and
+delivery identities where they exist. The command rejects unsupported V4
+actions instead of routing them through V3 or Git behaviour. CLI journey tests
+cover saved work, two drafts, sharing, overlap decisions, restore, withdrawal,
+and delivery.
 
 `timeline` lists retained saved checkpoints. `restore --checkpoint ID
 --destination PATH` materializes one only into an existing empty directory; it

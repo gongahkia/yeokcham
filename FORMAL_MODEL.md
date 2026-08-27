@@ -7,9 +7,10 @@ Notation is descriptive rather than a complete mechanised proof.
 ## V4 side-by-side model
 
 ADR-079 introduces a new native format and user model.  It does not change the
-meaning of the V1–V3 records specified below.  Until a V4 persistence adapter
-exists, these types are pure transition records defined by
-`Yeokcham_v4_model` and are intentionally not Envelope-1 objects.
+meaning of the V1–V3 records specified below.  V4 project state is persisted as
+a versioned `V4_project_state` envelope object addressed by one
+`v4-project-state` compare-and-swap head.  Pure transitions remain defined by
+`Yeokcham_v4_model`.
 
 ```ocaml
 type v4_snapshot_id
@@ -61,8 +62,10 @@ V4 invariants are:
 - Disjoint text spans may compose; all uncertain or structural overlap is a
   decision containing every candidate, not an implicit rewrite.
 - An unresolved decision never changes the materialized project directory.
-- A delivery names only currently visible decision-free revisions and starts a
-  fresh active draft.
+- A delivery names only currently visible decision-free revisions, consumes
+  shared changes represented by those revisions or by included resolutions,
+  drops resolutions bound to the previous baseline, and starts a fresh active
+  draft.
 - Withdrawal changes future projection selection only; it does not erase an
   immutable replicated revision.
 

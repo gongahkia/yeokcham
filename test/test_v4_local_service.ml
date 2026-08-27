@@ -33,6 +33,9 @@ let read_file root name =
 let id parser value = parser value |> Result.get_ok
 let device value = id Model.Device_id.of_string value
 let draft value = id Model.Draft_id.of_string value
+let change value = id Model.Change_id.of_string value
+let revision value = id Model.Revision_id.of_string value
+let delivery value = id Model.Delivery_id.of_string value
 
 let initialize root =
   Service.init ~root ~creator:(device "device-alice")
@@ -136,6 +139,177 @@ let v4_capture_excludes_git_metadata () =
         "restored snapshot excludes the Git directory" false
         (Sys.file_exists (Filename.concat destination ".git")))
 
+let share_records_a_shared_change_and_amend_appends_a_revision () =
+  with_directory "yeokcham-v4-service-share-" (fun root ->
+      write_file root "main.ml" "let version = 1\n";
+      ignore (initialize root);
+      write_file root "main.ml" "let version = 2\n";
+      let shared =
+        Service.share ~root ~change:(change "change-a")
+          ~revision:(revision "revision-a1")
+        |> require_ok Service.error_to_string
+      in
+      Alcotest.(check int)
+        "first share is visible" 1 shared.Service.shared_change_count;
+      write_file root "main.ml" "let version = 3\n";
+      let amended =
+        Service.share ~root ~change:(change "change-a")
+          ~revision:(revision "revision-a2")
+        |> require_ok Service.error_to_string
+      in
+      let recorded = List.hd amended.Service.shared_changes in
+      Alcotest.(check int)
+        "second share appends an immutable revision" 2
+        (List.length recorded.Model.revisions))
+
+let share_without_a_tree_delta_fails () =
+  with_directory "yeokcham-v4-service-share-empty-" (fun root ->
+      write_file root "main.ml" "let version = 1\n";
+      ignore (initialize root);
+      match
+        Service.share ~root ~change:(change "change-a")
+          ~revision:(revision "revision-a")
+      with
+      | Error error ->
+          Alcotest.(check string)
+            "empty share is an empty-edit failure"
+            "a change revision needs at least one edit"
+            (Service.error_to_string error)
+      | Ok _ -> Alcotest.fail "shared an unchanged tree against the baseline")
+
+let overlapping_shared_drafts_are_a_decision () =
+  with_directory "yeokcham-v4-service-overlap-" (fun root ->
+      write_file root "main.ml" "let version = 1\n";
+      let initial = initialize root in
+      write_file root "main.ml" "let version = 2\n";
+      ignore
+        (Service.share ~root ~change:(change "change-a")
+           ~revision:(revision "revision-a")
+        |> require_ok Service.error_to_string);
+      ignore
+        (Service.new_draft ~root ~id:(draft "draft-two") ~title:"second work"
+        |> require_ok Service.error_to_string);
+      write_file root "main.ml" "let version = 3\n";
+      let overlapping =
+        Service.share ~root ~change:(change "change-b")
+          ~revision:(revision "revision-b")
+        |> require_ok Service.error_to_string
+      in
+      Alcotest.(check int)
+        "overlapping whole-path edits are a decision" 1
+        (List.length overlapping.Service.open_decisions);
+      Alcotest.(check string)
+        "working tree is not rewritten by the decision" "let version = 3\n"
+        (read_file root "main.ml");
+      Alcotest.(check bool)
+        "active checkpoint remains the captured tree" false
+        (Model.Snapshot_id.equal initial.Service.checkpoint
+           overlapping.Service.checkpoint))
+
+let withdraw_protects_the_active_shared_change () =
+  with_directory "yeokcham-v4-service-withdraw-" (fun root ->
+      write_file root "main.ml" "let version = 1\n";
+      ignore (initialize root);
+      write_file root "main.ml" "let version = 2\n";
+      ignore
+        (Service.share ~root ~change:(change "change-a")
+           ~revision:(revision "revision-a")
+        |> require_ok Service.error_to_string);
+      (match Service.withdraw ~root ~change:(change "change-a") with
+      | Error error ->
+          Alcotest.(check string)
+            "active shared change cannot be withdrawn"
+            "close the active draft before withdrawing its shared change"
+            (Service.error_to_string error)
+      | Ok _ -> Alcotest.fail "withdrew the active shared change");
+      ignore
+        (Service.new_draft ~root ~id:(draft "draft-two") ~title:"follow-up"
+        |> require_ok Service.error_to_string);
+      let withdrawn =
+        Service.withdraw ~root ~change:(change "change-a")
+        |> require_ok Service.error_to_string
+      in
+      Alcotest.(check int)
+        "withdrawn change leaves the projection" 0
+        (List.length withdrawn.Service.open_decisions);
+      Alcotest.(check int)
+        "shared change remains inspectable" 1
+        withdrawn.Service.shared_change_count)
+
+let resolve_clears_the_open_decision () =
+  with_directory "yeokcham-v4-service-resolve-" (fun root ->
+      write_file root "main.ml" "let version = 1\n";
+      ignore (initialize root);
+      write_file root "main.ml" "let version = 2\n";
+      ignore
+        (Service.share ~root ~change:(change "change-a")
+           ~revision:(revision "revision-a")
+        |> require_ok Service.error_to_string);
+      ignore
+        (Service.new_draft ~root ~id:(draft "draft-two") ~title:"second work"
+        |> require_ok Service.error_to_string);
+      write_file root "main.ml" "let version = 3\n";
+      let overlapping =
+        Service.share ~root ~change:(change "change-b")
+          ~revision:(revision "revision-b")
+        |> require_ok Service.error_to_string
+      in
+      let decision = List.hd overlapping.Service.open_decisions in
+      let resolved =
+        Service.resolve ~root ~decision:decision.Model.decision_id
+          ~change:(change "change-resolution")
+          ~revision:(revision "revision-resolution")
+        |> require_ok Service.error_to_string
+      in
+      Alcotest.(check int)
+        "resolution removes the open decision" 0
+        (List.length resolved.Service.open_decisions))
+
+let deliver_requires_a_decision_free_shared_draft () =
+  with_directory "yeokcham-v4-service-deliver-" (fun root ->
+      write_file root "main.ml" "let version = 1\n";
+      ignore (initialize root);
+      write_file root "main.ml" "let version = 2\n";
+      ignore
+        (Service.share ~root ~change:(change "change-a")
+           ~revision:(revision "revision-a")
+        |> require_ok Service.error_to_string);
+      ignore
+        (Service.new_draft ~root ~id:(draft "draft-two") ~title:"second work"
+        |> require_ok Service.error_to_string);
+      write_file root "main.ml" "let version = 3\n";
+      let overlapping =
+        Service.share ~root ~change:(change "change-b")
+          ~revision:(revision "revision-b")
+        |> require_ok Service.error_to_string
+      in
+      (match
+         Service.deliver ~root ~id:(delivery "delivery-one")
+           ~next_draft:(draft "draft-after") ~next_title:"after delivery"
+       with
+      | Error error ->
+          Alcotest.(check string)
+            "open decisions block delivery"
+            "cannot deliver while decisions are open"
+            (Service.error_to_string error)
+      | Ok _ -> Alcotest.fail "delivered through an open decision");
+      let decision = List.hd overlapping.Service.open_decisions in
+      ignore
+        (Service.resolve ~root ~decision:decision.Model.decision_id
+           ~change:(change "change-resolution")
+           ~revision:(revision "revision-resolution")
+        |> require_ok Service.error_to_string);
+      let delivered =
+        Service.deliver ~root ~id:(delivery "delivery-one")
+          ~next_draft:(draft "draft-after") ~next_title:"after delivery"
+        |> require_ok Service.error_to_string
+      in
+      Alcotest.(check int)
+        "delivery is inspectable" 1 delivered.Service.delivery_count;
+      Alcotest.(check string)
+        "delivery starts a new active draft" "draft-after"
+        (Model.Draft_id.to_string delivered.Service.active_draft.Model.draft_id))
+
 let () =
   Alcotest.run "V4 local service"
     [
@@ -153,5 +327,20 @@ let () =
             restore_rejects_a_nonempty_destination;
           Alcotest.test_case "capture excludes Git metadata" `Quick
             v4_capture_excludes_git_metadata;
+        ] );
+      ( "shared work",
+        [
+          Alcotest.test_case "share and amend retain linear revisions" `Quick
+            share_records_a_shared_change_and_amend_appends_a_revision;
+          Alcotest.test_case "share without a tree delta fails" `Quick
+            share_without_a_tree_delta_fails;
+          Alcotest.test_case "overlapping drafts become a decision" `Quick
+            overlapping_shared_drafts_are_a_decision;
+          Alcotest.test_case "withdraw protects the active shared change" `Quick
+            withdraw_protects_the_active_shared_change;
+          Alcotest.test_case "resolve clears the open decision" `Quick
+            resolve_clears_the_open_decision;
+          Alcotest.test_case "deliver requires a decision-free shared draft"
+            `Quick deliver_requires_a_decision_free_shared_draft;
         ] );
     ]

@@ -298,6 +298,59 @@ let manual_delivery_requires_a_decision_free_shared_active_draft () =
     ( V4.active_draft project |> fun active ->
       V4.Draft_id.to_string active.V4.draft_id )
 
+let delivery_consumes_resolved_changes_and_advances_the_baseline () =
+  let base = snapshot "snapshot-base" in
+  let local =
+    revision_record ~change_id:(change "change-alpha")
+      ~revision_id:(revision "revision-alpha")
+      ~author:(device "device-alice") ~base
+      ~result:(snapshot "snapshot-alpha")
+      [ text_edit [ "same.ml" ] 0 4 ]
+  in
+  let conflicting =
+    revision_record ~change_id:(change "change-beta")
+      ~revision_id:(revision "revision-beta") ~author:(device "device-carol")
+      ~base ~result:(snapshot "snapshot-beta")
+      [ text_edit [ "same.ml" ] 2 6 ]
+  in
+  let project =
+    initial_project () |> fun project ->
+    V4.share_active project local |> require_ok |> fun project ->
+    V4.receive project conflicting |> require_ok
+  in
+  let decision = List.hd (V4.projection project).V4.decisions in
+  let replacement =
+    revision_record
+      ~change_id:(change "change-resolution")
+      ~revision_id:(revision "revision-resolution")
+      ~author:(device "device-alice") ~base
+      ~result:(snapshot "snapshot-resolution")
+      [ text_edit [ "same.ml" ] 0 6 ]
+  in
+  let project =
+    V4.resolve project ~decision:decision.V4.decision_id ~replacement
+    |> require_ok
+  in
+  let project =
+    V4.deliver project
+      ~id:(delivery "delivery-resolved")
+      ~author:(device "device-alice")
+      ~snapshot:(snapshot "snapshot-delivered")
+      ~included:[ revision "revision-resolution" ]
+      ~next_draft:(draft "draft-after-resolution")
+      ~next_title:"after resolution" ~created_at:2L
+    |> require_ok
+  in
+  Alcotest.(check int)
+    "delivery drops consumed shared changes" 0
+    (List.length (V4.shared_changes project));
+  Alcotest.(check int)
+    "delivery drops resolutions bound to the previous baseline" 0
+    (List.length (V4.resolutions project));
+  Alcotest.(check int)
+    "new baseline is decision-free" 0
+    (List.length (V4.projection project).V4.decisions)
+
 let () =
   Alcotest.run "V4 model"
     [
@@ -326,5 +379,7 @@ let () =
         [
           Alcotest.test_case "manual delivery has a shared decision-free input"
             `Quick manual_delivery_requires_a_decision_free_shared_active_draft;
+          Alcotest.test_case "delivery consumes resolved overlapping changes"
+            `Quick delivery_consumes_resolved_changes_and_advances_the_baseline;
         ] );
     ]

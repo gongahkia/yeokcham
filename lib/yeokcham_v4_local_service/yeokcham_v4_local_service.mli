@@ -10,14 +10,17 @@ type error =
   | Model_error of Yeokcham_v4_model.error
   | Invalid_checkpoint_id of string
   | Unknown_checkpoint of Yeokcham_v4_model.Snapshot_id.t
+  | Unchanged_share of Yeokcham_v4_model.Snapshot_id.t
 
 type save_outcome = Unchanged of status | Saved of status
 
 and status = {
   active_draft : Yeokcham_v4_model.draft;
   checkpoint : Yeokcham_v4_model.Snapshot_id.t;
+  shared_changes : Yeokcham_v4_model.shared_change list;
   shared_change_count : int;
   open_decisions : Yeokcham_v4_model.decision list;
+  deliveries : Yeokcham_v4_model.delivery list;
   delivery_count : int;
   checkpoints : Yeokcham_v4_model.checkpoint list;
 }
@@ -44,4 +47,27 @@ val new_draft :
   root:string ->
   id:Yeokcham_v4_model.Draft_id.t ->
   title:string ->
+  (status, error) result
+
+val share :
+  root:string ->
+  change:Yeokcham_v4_model.Change_id.t ->
+  revision:Yeokcham_v4_model.Revision_id.t ->
+  (status, error) result
+
+val withdraw :
+  root:string -> change:Yeokcham_v4_model.Change_id.t -> (status, error) result
+
+val resolve :
+  root:string ->
+  decision:Yeokcham_v4_model.Decision_id.t ->
+  change:Yeokcham_v4_model.Change_id.t ->
+  revision:Yeokcham_v4_model.Revision_id.t ->
+  (status, error) result
+
+val deliver :
+  root:string ->
+  id:Yeokcham_v4_model.Delivery_id.t ->
+  next_draft:Yeokcham_v4_model.Draft_id.t ->
+  next_title:string ->
   (status, error) result
