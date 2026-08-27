@@ -8,15 +8,21 @@ let fail message =
 let usage () =
   fail
     "usage:\n\
-    \  yeokcham-v4 init [--root PATH] --device ID --draft ID --title TITLE\n\
+    \  yeokcham-v4 init [--root PATH] --device ID --username NAME --draft ID \
+     --title TITLE\n\
     \  yeokcham-v4 save [--root PATH]\n\
     \  yeokcham-v4 status [--root PATH]\n\
+    \  yeokcham-v4 user register [--root PATH] --device ID --username NAME\n\
     \  yeokcham-v4 timeline [--root PATH]\n\
     \  yeokcham-v4 restore [--root PATH] --checkpoint ID [--destination PATH]\n\
     \  yeokcham-v4 draft new [--root PATH] --id ID --title TITLE\n\
     \  yeokcham-v4 share [--root PATH] --change ID --revision ID\n\
     \  yeokcham-v4 withdraw [--root PATH] --change ID\n\
-    \  yeokcham-v4 resolve [--root PATH] --decision ID --change ID --revision ID\n\
+    \  yeokcham-v4 resolve [--root PATH] --decision ID --change ID --revision \
+     ID [--tree PATH]\n\
+    \  yeokcham-v4 decision show [--root PATH] --decision ID\n\
+    \  yeokcham-v4 decision materialize [--root PATH] --decision ID \
+     --destination PATH\n\
     \  yeokcham-v4 deliver [--root PATH] --id ID --draft ID --title TITLE\n\
     \  yeokcham-v4 pin [--root PATH] --checkpoint ID\n\
     \  yeokcham-v4 unpin [--root PATH] --checkpoint ID\n\
@@ -63,28 +69,44 @@ let render_status status =
       Printf.printf "delivery %s\n"
         (Model.Delivery_id.to_string delivery.Model.delivery_id))
     status.Service.deliveries;
+  Printf.printf "users %d\n" (List.length status.Service.usernames);
+  status.Service.usernames
+  |> List.sort (fun left right ->
+      Model.Device_id.compare left.Model.username_device
+        right.Model.username_device)
+  |> List.iter (fun registration ->
+      Printf.printf "user %s %s\n"
+        (Model.Device_id.to_string registration.Model.username_device)
+        (Model.Username.to_string registration.Model.username));
   print_endline "capture command";
   Printf.printf "uncaptured %s\n"
     (if status.Service.uncaptured then "yes" else "no")
 
 let parse_init arguments =
-  let rec loop root creator draft title = function
+  let rec loop root creator username draft title = function
     | [] -> (
-        match (creator, draft, title) with
-        | Some creator, Some draft, Some title ->
-            (Option.value root ~default:default_root, creator, draft, title)
-        | None, _, _ | _, None, _ | _, _, None -> usage ())
+        match (creator, username, draft, title) with
+        | Some creator, Some username, Some draft, Some title ->
+            ( Option.value root ~default:default_root,
+              creator,
+              username,
+              draft,
+              title )
+        | None, _, _, _ | _, None, _, _ | _, _, None, _ | _, _, _, None ->
+            usage ())
     | "--root" :: value :: rest when Option.is_none root ->
-        loop (Some value) creator draft title rest
+        loop (Some value) creator username draft title rest
     | "--device" :: value :: rest when Option.is_none creator ->
-        loop root (Some value) draft title rest
+        loop root (Some value) username draft title rest
+    | "--username" :: value :: rest when Option.is_none username ->
+        loop root creator (Some value) draft title rest
     | "--draft" :: value :: rest when Option.is_none draft ->
-        loop root creator (Some value) title rest
+        loop root creator username (Some value) title rest
     | "--title" :: value :: rest when Option.is_none title ->
-        loop root creator draft (Some value) rest
+        loop root creator username draft (Some value) rest
     | _ -> usage ()
   in
-  loop None None None None arguments
+  loop None None None None None arguments
 
 let parse_new_draft arguments =
   let rec loop root id title = function
@@ -121,7 +143,7 @@ let parse_restore arguments =
   loop None None None arguments
 
 let run_init arguments =
-  let root, creator, draft, title = parse_init arguments in
+  let root, creator, username, draft, title = parse_init arguments in
   let creator =
     parse_identifier "invalid device identifier" Model.Device_id.of_string
       creator
@@ -129,7 +151,40 @@ let run_init arguments =
   let initial_draft =
     parse_identifier "invalid draft identifier" Model.Draft_id.of_string draft
   in
-  Service.init ~root ~creator ~initial_draft ~title
+  let username =
+    parse_identifier "invalid username" Model.Username.of_string username
+  in
+  Service.init ~root ~creator ~username ~initial_draft ~title
+  |> require_ok Service.error_to_string
+  |> render_status
+
+let parse_user_register arguments =
+  let rec loop root device username = function
+    | [] -> (
+        match (device, username) with
+        | Some device, Some username ->
+            (Option.value root ~default:default_root, device, username)
+        | None, _ | _, None -> usage ())
+    | "--root" :: value :: rest when Option.is_none root ->
+        loop (Some value) device username rest
+    | "--device" :: value :: rest when Option.is_none device ->
+        loop root (Some value) username rest
+    | "--username" :: value :: rest when Option.is_none username ->
+        loop root device (Some value) rest
+    | _ -> usage ()
+  in
+  loop None None None arguments
+
+let run_user_register arguments =
+  let root, device, username = parse_user_register arguments in
+  let device =
+    parse_identifier "invalid device identifier" Model.Device_id.of_string
+      device
+  in
+  let username =
+    parse_identifier "invalid username" Model.Username.of_string username
+  in
+  Service.register_username ~root ~device ~username
   |> require_ok Service.error_to_string
   |> render_status
 
@@ -212,23 +267,136 @@ let parse_withdraw arguments =
   loop None None arguments
 
 let parse_resolve arguments =
-  let rec loop root decision change revision = function
+  let rec loop root decision change revision tree = function
     | [] -> (
         match (decision, change, revision) with
         | Some decision, Some change, Some revision ->
-            (Option.value root ~default:default_root, decision, change, revision)
+            ( Option.value root ~default:default_root,
+              decision,
+              change,
+              revision,
+              tree )
         | None, _, _ | _, None, _ | _, _, None -> usage ())
     | "--root" :: value :: rest when Option.is_none root ->
-        loop (Some value) decision change revision rest
+        loop (Some value) decision change revision tree rest
     | "--decision" :: value :: rest when Option.is_none decision ->
-        loop root (Some value) change revision rest
+        loop root (Some value) change revision tree rest
     | "--change" :: value :: rest when Option.is_none change ->
-        loop root decision (Some value) revision rest
+        loop root decision (Some value) revision tree rest
     | "--revision" :: value :: rest when Option.is_none revision ->
-        loop root decision change (Some value) rest
+        loop root decision change (Some value) tree rest
+    | "--tree" :: value :: rest when Option.is_none tree ->
+        loop root decision change revision (Some value) rest
     | _ -> usage ()
   in
-  loop None None None None arguments
+  loop None None None None None arguments
+
+let parse_decision_show arguments =
+  let rec loop root decision = function
+    | [] -> (
+        match decision with
+        | Some decision -> (Option.value root ~default:default_root, decision)
+        | None -> usage ())
+    | "--root" :: value :: rest when Option.is_none root ->
+        loop (Some value) decision rest
+    | "--decision" :: value :: rest when Option.is_none decision ->
+        loop root (Some value) rest
+    | _ -> usage ()
+  in
+  loop None None arguments
+
+let parse_decision_materialize arguments =
+  let rec loop root decision destination = function
+    | [] -> (
+        match (decision, destination) with
+        | Some decision, Some destination ->
+            (Option.value root ~default:default_root, decision, destination)
+        | None, _ | _, None -> usage ())
+    | "--root" :: value :: rest when Option.is_none root ->
+        loop (Some value) decision destination rest
+    | "--decision" :: value :: rest when Option.is_none decision ->
+        loop root (Some value) destination rest
+    | "--destination" :: value :: rest when Option.is_none destination ->
+        loop root decision (Some value) rest
+    | _ -> usage ()
+  in
+  loop None None None arguments
+
+let decision_kind_name = function
+  | Model.Stale_base -> "stale-base"
+  | Model.Edit_overlap -> "edit-overlap"
+
+let render_decision (decision : Model.decision) =
+  Printf.printf "decision %s\n"
+    (Model.Decision_id.to_string decision.Model.decision_id);
+  Printf.printf "kind %s\n" (decision_kind_name decision.Model.decision_kind);
+  List.iter
+    (fun path -> Printf.printf "path %s\n" (Model.Path.to_string path))
+    decision.Model.decision_paths;
+  List.fold_left
+    (fun seen candidate ->
+      let revision = candidate.Model.candidate_revision in
+      let id = Model.Revision_id.to_string revision.Model.revision in
+      if List.mem id seen then seen
+      else (
+        Printf.printf "candidate %s change %s author %s snapshot %s\n" id
+          (Model.Change_id.to_string revision.Model.change)
+          (Model.Device_id.to_string revision.Model.revision_author)
+          (Model.Snapshot_id.to_string revision.Model.result_snapshot);
+        id :: seen))
+    [] decision.Model.candidates
+  |> ignore
+
+let run_decision_show arguments =
+  let root, decision = parse_decision_show arguments in
+  let decision =
+    parse_identifier "invalid decision identifier" Model.Decision_id.of_string
+      decision
+  in
+  Service.open_decision ~root ~decision
+  |> require_ok Service.error_to_string
+  |> render_decision
+
+let run_decision_materialize arguments =
+  let root, decision, destination = parse_decision_materialize arguments in
+  let decision =
+    parse_identifier "invalid decision identifier" Model.Decision_id.of_string
+      decision
+  in
+  let candidates =
+    Service.materialize_decision ~root ~decision ~destination
+    |> require_ok Service.error_to_string
+  in
+  List.iter
+    (fun candidate ->
+      let username =
+        match candidate.Service.username with
+        | Some username -> Model.Username.to_string username
+        | None -> "unregistered"
+      in
+      Printf.printf "materialized %s author %s username %s tree %s\n"
+        (Model.Revision_id.to_string candidate.Service.revision)
+        (Model.Device_id.to_string candidate.Service.author)
+        username candidate.Service.directory)
+    candidates
+
+let run_resolve arguments =
+  let root, decision, change, revision, tree = parse_resolve arguments in
+  let decision =
+    parse_identifier "invalid decision identifier" Model.Decision_id.of_string
+      decision
+  in
+  let change =
+    parse_identifier "invalid change identifier" Model.Change_id.of_string
+      change
+  in
+  let revision =
+    parse_identifier "invalid revision identifier" Model.Revision_id.of_string
+      revision
+  in
+  Service.resolve ~root ~decision ~change ~revision ~tree
+  |> require_ok Service.error_to_string
+  |> render_status
 
 let parse_deliver arguments =
   let rec loop root id draft title = function
@@ -279,24 +447,6 @@ let run_withdraw arguments =
       change
   in
   Service.withdraw ~root ~change
-  |> require_ok Service.error_to_string
-  |> render_status
-
-let run_resolve arguments =
-  let root, decision, change, revision = parse_resolve arguments in
-  let decision =
-    parse_identifier "invalid decision identifier" Model.Decision_id.of_string
-      decision
-  in
-  let change =
-    parse_identifier "invalid change identifier" Model.Change_id.of_string
-      change
-  in
-  let revision =
-    parse_identifier "invalid revision identifier" Model.Revision_id.of_string
-      revision
-  in
-  Service.resolve ~root ~decision ~change ~revision
   |> require_ok Service.error_to_string
   |> render_status
 
@@ -401,12 +551,16 @@ let () =
   | _ :: "init" :: arguments -> run_init arguments
   | _ :: "save" :: arguments -> run_save arguments
   | _ :: "status" :: arguments -> run_status arguments
+  | _ :: "user" :: "register" :: arguments -> run_user_register arguments
   | _ :: "timeline" :: arguments -> run_timeline arguments
   | _ :: "restore" :: arguments -> run_restore arguments
   | _ :: "draft" :: "new" :: arguments -> run_new_draft arguments
   | _ :: "share" :: arguments -> run_share arguments
   | _ :: "withdraw" :: arguments -> run_withdraw arguments
   | _ :: "resolve" :: arguments -> run_resolve arguments
+  | _ :: "decision" :: "show" :: arguments -> run_decision_show arguments
+  | _ :: "decision" :: "materialize" :: arguments ->
+      run_decision_materialize arguments
   | _ :: "deliver" :: arguments -> run_deliver arguments
   | _ :: "pin" :: arguments -> run_pin arguments
   | _ :: "unpin" :: arguments -> run_unpin arguments

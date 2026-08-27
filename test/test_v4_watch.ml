@@ -90,6 +90,8 @@ let watch_records_a_checkpoint_after_quiet_edits () =
             root;
             "--device";
             "device-alice";
+            "--username";
+            "alice";
             "--draft";
             "draft-one";
             "--title";
