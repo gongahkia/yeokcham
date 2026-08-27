@@ -351,6 +351,58 @@ let delivery_consumes_resolved_changes_and_advances_the_baseline () =
     "new baseline is decision-free" 0
     (List.length (V4.projection project).V4.decisions)
 
+let compact_drops_unprotected_checkpoints_and_keeps_named_roots () =
+  let project = initial_project () in
+  let first =
+    revision_record ~change_id:(change "change-a")
+      ~revision_id:(revision "revision-a1") ~author:(device "device-alice")
+      ~base:(snapshot "snapshot-base")
+      ~result:(snapshot "snapshot-a1")
+      [ text_edit [ "main.ml" ] 0 4 ]
+  in
+  let project = V4.share_active project first |> require_ok in
+  let project =
+    V4.checkpoint project ~snapshot:(snapshot "snapshot-scratch-1")
+  in
+  let project =
+    V4.checkpoint project ~snapshot:(snapshot "snapshot-scratch-2")
+  in
+  let project =
+    V4.checkpoint project ~snapshot:(snapshot "snapshot-scratch-3")
+  in
+  let project =
+    V4.pin project ~snapshot:(snapshot "snapshot-scratch-2") |> require_ok
+  in
+  let compacted =
+    V4.compact project ~keep_recent:0 ~journal_snapshots:[] |> require_ok
+  in
+  let retained =
+    compacted.V4.project |> V4.checkpoints
+    |> List.map (fun checkpoint ->
+        V4.Snapshot_id.to_string checkpoint.V4.checkpoint_snapshot)
+  in
+  Alcotest.(check (list string))
+    "named roots stay and extra scratch drops"
+    [ "snapshot-scratch-3"; "snapshot-scratch-2"; "snapshot-a1"; "snapshot-base" ]
+    retained;
+  Alcotest.(check (list string))
+    "only unprotected scratch is dropped" [ "snapshot-scratch-1" ]
+    (List.map V4.Snapshot_id.to_string compacted.V4.dropped);
+  let protected_journal =
+    V4.compact project ~keep_recent:0
+      ~journal_snapshots:[ snapshot "snapshot-scratch-1" ]
+    |> require_ok
+  in
+  Alcotest.(check int)
+    "pending restore-safety is not dropped" 0
+    (List.length protected_journal.V4.dropped)
+
+let pin_rejects_unknown_checkpoints () =
+  match V4.pin (initial_project ()) ~snapshot:(snapshot "snapshot-missing") with
+  | Error V4.Unknown_checkpoint -> ()
+  | Error error -> Alcotest.fail (V4.error_to_string error)
+  | Ok _ -> Alcotest.fail "pinned a checkpoint that is not retained"
+
 let () =
   Alcotest.run "V4 model"
     [
@@ -381,5 +433,12 @@ let () =
             `Quick manual_delivery_requires_a_decision_free_shared_active_draft;
           Alcotest.test_case "delivery consumes resolved overlapping changes"
             `Quick delivery_consumes_resolved_changes_and_advances_the_baseline;
+        ] );
+      ( "compaction",
+        [
+          Alcotest.test_case "named roots stay and extra scratch drops" `Quick
+            compact_drops_unprotected_checkpoints_and_keeps_named_roots;
+          Alcotest.test_case "pin rejects unknown checkpoints" `Quick
+            pin_rejects_unknown_checkpoints;
         ] );
     ]

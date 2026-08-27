@@ -25,13 +25,14 @@ yeokcham-v4 save
 yeokcham-v4 restore --checkpoint <saved-id>
 yeokcham-v4 share --change first-change --revision r1
 yeokcham-v4 draft new --id next-task --title "next task"
+yeokcham-v4 pin --checkpoint <saved-id>
+yeokcham-v4 compact --dry-run --explain
 ```
 
 It currently implements exact command-triggered saving, one explicit draft,
-local share/amend, withdrawal, overlap decisions, resolution, and manual
-delivery. In-place restore first retains the current exact tree as a safety
-checkpoint and resumes interrupted replacement from an immutable journal.
-Watcher capture, compaction, signing, and transport are not exposed yet.
+local share/amend, withdrawal, overlap decisions, resolution, manual
+delivery, in-place journaled restore, bounded checkpoint retention with pins,
+and Linux watcher capture. Signing and transport are not exposed yet.
 
 ## Start here
 

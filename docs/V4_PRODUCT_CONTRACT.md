@@ -12,9 +12,10 @@ The current milestone is the V4 functional core: exact local recovery,
 explicit drafts and sharing, conservative composition, durable decisions, and
 manual delivery. Completed slices are the in-memory model, the versioned
 canonical model-state record with a compare-and-swap `v4-project-state` head,
-command-triggered exact capture, the local four-fact CLI, and in-place
-journaled restore with a retained safety checkpoint. Automatic watcher capture,
-compaction, transport, and signing remain later slices.
+command-triggered exact capture, the local four-fact CLI, in-place
+journaled restore with a retained safety checkpoint, bounded checkpoint
+retention with explicit pins, and Linux watcher capture that reuses command
+`save`. Transport and signing remain later slices.
 
 The record slice owns these types: `state`, `checkpoint`, `draft`,
 `shared_change`, `change_revision`, `edit`, `resolution`, and `delivery`. Its
@@ -23,10 +24,10 @@ chains, a resolution based on the current delivery baseline, retained unique
 checkpoints, and canonical field/list ordering. A delivery that includes a
 resolution consumes the resolved shared changes and drops resolutions bound to
 the previous baseline. It requires round-trip, noncanonical-byte,
-malformed-state, and golden-byte tests. The V2 state schema retains the V1
-fixture decoder and deterministically upgrades its single known checkpoint.
-The local adapter adds a `V4_project_state` object and one
-`v4-project-state` mutable head.  Initialization refuses a pre-existing
+malformed-state, and golden-byte tests. Project-state schema version 3 retains
+the V1 and V2 fixture decoders. Version 2 decodes as an empty pin list.
+Version 3 appends canonical pins. The local adapter adds a
+`V4_project_state` object and one `v4-project-state` mutable head.  Initialization refuses a pre-existing
 `.yeokcham` directory, so it cannot reinterpret or add V4 records to an
 existing repository.  Saves write the immutable object before the head changes;
 stale writers receive a compare-and-swap error.  Tests require first-write,
@@ -41,13 +42,18 @@ identity into the V4 model, and does not write a new head when a save observes
 an unchanged snapshot. `save` remains recovery-only: a later checkpoint becomes
 a shared revision only when `share` is run again. Shared revisions record
 `Whole_path` edits for paths that differ from the current delivery baseline.
-`receive` and signatures are not part of this adapter. Automatic watcher
-capture remains a later slice.
+`receive` and signatures are not part of this adapter. Linux `watch` calls the
+same capture path after a one-second quiet period, with a thirty-second maximum
+delay during sustained writes. macOS and WSL watchers are not implemented.
 
 The inspectable CLI is `yeokcham-v4 init`, `save`, `status`, `timeline`,
-`restore`, `draft new`, `share`, `withdraw`, `resolve`, and `deliver`.
-`status` renders the four facts and lists shared-change, decision, and
-delivery identities where they exist. The command rejects unsupported V4
+`restore`, `draft new`, `share`, `withdraw`, `resolve`, `deliver`, `pin`,
+`unpin`, `compact`, and `watch`.
+`status` renders the four facts, lists shared-change, decision, and
+delivery identities where they exist, and reports `capture command` plus
+whether the tree has uncaptured edits. `compact` drops unnamed scratch
+checkpoints under a count-based extra-keep policy; it does not delete object
+bytes. `watch` is Linux-only. The command rejects unsupported V4
 actions instead of routing them through V3 or Git behaviour. CLI journey tests
 cover saved work, two drafts, sharing, overlap decisions, restore, withdrawal,
 and delivery.
@@ -61,8 +67,11 @@ appends canonical, immutable `Prepared`, `Applying`, `Materialized`, and
 snapshot and repeats replacement idempotently; `.yeokcham` and `.git` are
 preserved. Tests cover prior-byte recovery, rejection of a non-empty
 destination, safety recovery, metadata preservation, and interrupted-apply
-resumption. Compaction remains a later slice and must protect every snapshot
-named by a restore journal.
+resumption. Compaction drops unnamed timeline entries under
+[ADR-081](adr/081-v4-bounded-checkpoint-retention.md) and prunes published
+restore journals. Incomplete restore journals keep their safety and target
+snapshots protected. Linux capture is governed by
+[ADR-082](adr/082-v4-linux-command-capture.md).
 
 The persistent in-place restore boundary is governed by
 [ADR-080](adr/080-v4-in-place-restore-journal.md).

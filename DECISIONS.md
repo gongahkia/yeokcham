@@ -191,3 +191,5 @@ The ADR lifecycle, numbering rules, and template are defined in [`docs/adr/READM
 - [ADR-078 — Native Git lineage and authenticated peer synchronization](docs/adr/078-native-git-lineage-and-authenticated-peer-sync.md) — Accepted.
 - [ADR-079 — V4 small-team change composer](docs/adr/079-v4-small-team-change-composer.md) — Accepted.
 - [ADR-080 — V4 in-place restore journal](docs/adr/080-v4-in-place-restore-journal.md) — Accepted.
+- [ADR-081 — V4 bounded checkpoint retention](docs/adr/081-v4-bounded-checkpoint-retention.md) — Accepted.
+- [ADR-082 — V4 Linux command capture and watcher debounce](docs/adr/082-v4-linux-command-capture.md) — Accepted.

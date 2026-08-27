@@ -45,8 +45,15 @@
 (executable
  (name yeokcham_v4)
  (public_name yeokcham-v4)
- (modules yeokcham_v4)
- (libraries yeokcham_v4_local_service yeokcham_v4_model))
+ (modules yeokcham_v4 v4_watch)
+ (flags
+  (:standard -w -70))
+ (libraries
+  yeokcham_v4_local_service
+  yeokcham_v4_model
+  (select v4_watch.ml from
+    (yeokcham_linux_watcher -> v4_watch_linux.ml)
+    (-> v4_watch_unavailable.ml))))
 
 (executable
  (name workspace_base_v1)

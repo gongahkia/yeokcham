@@ -1,3 +1,8 @@
+(executable
+ (name dump_v4_state)
+ (modules dump_v4_state)
+ (libraries yeokcham_v4_model yeokcham_v4_record))
+
 (test
  (name test_foundation)
  (modules test_foundation)

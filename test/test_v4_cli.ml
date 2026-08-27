@@ -167,7 +167,11 @@ let command_journey_reports_saved_work_and_drafts () =
       expect_output_contains "status renders no shared work" "shared 0" output;
       expect_output_contains "status renders no decisions" "needs-decision 0"
         output;
-      expect_output_contains "status renders no deliveries" "delivered 0" output)
+      expect_output_contains "status renders no deliveries" "delivered 0" output;
+      expect_output_contains "command capture mode is explicit" "capture command"
+        output;
+      expect_output_contains "status reports no uncaptured edits" "uncaptured no"
+        output)
 
 let command_journey_shares_resolves_withdraws_and_delivers () =
   with_directory "yeokcham-v4-cli-share-" (fun root ->
@@ -311,6 +315,67 @@ let command_journey_restores_in_place_with_a_safety_checkpoint () =
            (Filename.concat root "main.ml")
            In_channel.input_all))
 
+let command_journey_compacts_and_reports_uncaptured_edits () =
+  with_directory "yeokcham-v4-cli-compact-" (fun root ->
+      write_file root "main.ml" "let version = 1\n";
+      let output, errors, status =
+        run
+          [
+            "init";
+            "--root";
+            root;
+            "--device";
+            "device-alice";
+            "--draft";
+            "draft-one";
+            "--title";
+            "compact-work";
+          ]
+      in
+      require_success "init" status errors;
+      let initial = saved_checkpoint output in
+      write_file root "main.ml" "let version = 2\n";
+      let output, errors, status = run [ "status"; "--root"; root ] in
+      require_success "uncaptured status" status errors;
+      expect_output_contains "status warns about the unsaved file"
+        "uncaptured yes" output;
+      let output, errors, status = run [ "save"; "--root"; root ] in
+      require_success "save" status errors;
+      let extra = saved_checkpoint output in
+      let output, errors, status =
+        run [ "pin"; "--root"; root; "--checkpoint"; extra ]
+      in
+      require_success "pin" status errors;
+      write_file root "main.ml" "let version = 3\n";
+      let _output, errors, status = run [ "save"; "--root"; root ] in
+      require_success "second save" status errors;
+      let output, errors, status =
+        run [ "compact"; "--root"; root; "--keep"; "0"; "--explain" ]
+      in
+      require_success "compact" status errors;
+      expect_output_contains "explain names the pin" ("keep " ^ extra ^ " ")
+        output;
+      ignore initial)
+
+let watch_is_linux_only () =
+  with_directory "yeokcham-v4-cli-watch-" (fun root ->
+      let uname =
+        try
+          let input = Unix.open_process_in "uname -s" in
+          Fun.protect
+            ~finally:(fun () -> ignore (Unix.close_process_in input))
+            (fun () -> String.trim (input_line input))
+        with _ -> ""
+      in
+      if String.equal uname "Linux" then ()
+      else
+        let _output, errors, status = run [ "watch"; "--root"; root ] in
+        match status with
+        | Unix.WEXITED 2 ->
+            expect_output_contains "non-Linux watch is refused"
+              "Linux watcher capture is not supported" errors
+        | _ -> require_success "watch" status errors)
+
 let () =
   Alcotest.run "V4 CLI"
     [
@@ -322,5 +387,8 @@ let () =
             command_journey_shares_resolves_withdraws_and_delivers;
           Alcotest.test_case "in-place restore retains a safety checkpoint"
             `Quick command_journey_restores_in_place_with_a_safety_checkpoint;
+          Alcotest.test_case "compact pin and uncaptured status" `Quick
+            command_journey_compacts_and_reports_uncaptured_edits;
+          Alcotest.test_case "watch is Linux-only" `Quick watch_is_linux_only;
         ] );
     ]

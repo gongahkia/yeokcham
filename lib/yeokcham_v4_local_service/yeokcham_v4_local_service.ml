@@ -534,3 +534,73 @@ let deliver ~root ~id ~next_draft ~next_title =
         |> Result.map_error (fun error -> Model_error error)
       in
       persist repository loaded project)
+
+let pin ~root ~checkpoint =
+  with_repository ~root (fun repository loaded ->
+      let* project =
+        Model.pin loaded.Store.project ~snapshot:checkpoint
+        |> Result.map_error (fun error -> Model_error error)
+      in
+      persist repository loaded project)
+
+let unpin ~root ~checkpoint =
+  with_repository ~root (fun repository loaded ->
+      let* project =
+        Model.unpin loaded.Store.project ~snapshot:checkpoint
+        |> Result.map_error (fun error -> Model_error error)
+      in
+      persist repository loaded project)
+
+let published_journal_ids ~root =
+  let* journals =
+    Journal.scan ~root
+    |> Result.map_error (fun error -> Restore_journal_error error)
+  in
+  let latest =
+    List.fold_left
+      (fun latest journal ->
+        let prior = List.assoc_opt (Journal.operation_id journal) latest in
+        match prior with
+        | Some current
+          when Int64.compare (Journal.generation current)
+                 (Journal.generation journal)
+               >= 0 ->
+            latest
+        | Some _ ->
+            (Journal.operation_id journal, journal)
+            :: List.remove_assoc (Journal.operation_id journal) latest
+        | None -> (Journal.operation_id journal, journal) :: latest)
+      [] journals
+  in
+  Ok
+    (latest
+    |> List.filter (fun (_, journal) -> Journal.phase journal = Journal.Published)
+    |> List.map fst |> List.sort_uniq String.compare)
+
+let compact ~root ~keep_recent ~dry_run =
+  with_repository ~root (fun repository loaded ->
+      let* journal_snapshots =
+        Journal.pending_snapshots ~root
+        |> Result.map_error (fun error -> Restore_journal_error error)
+      in
+      let* compacted =
+        Model.compact loaded.Store.project ~keep_recent ~journal_snapshots
+        |> Result.map_error (fun error -> Model_error error)
+      in
+      let* status =
+        if dry_run then Ok (status_of_project compacted.Model.project)
+        else persist repository loaded compacted.Model.project
+      in
+      let* pruned_journals =
+        if dry_run then published_journal_ids ~root
+        else
+          Journal.prune_published ~root
+          |> Result.map_error (fun error -> Restore_journal_error error)
+      in
+      Ok
+        {
+          kept = compacted.Model.kept;
+          dropped = compacted.Model.dropped;
+          pruned_journals;
+          status;
+        })

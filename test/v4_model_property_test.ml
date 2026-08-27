@@ -97,6 +97,33 @@ let checkpoint_history_is_unique_and_newest_first =
       && List.for_all2 V4.Snapshot_id.equal expected actual
       && V4.Snapshot_id.equal active.V4.latest_checkpoint expected_active)
 
+let compact_never_drops_named_roots =
+  QCheck2.Test.make ~count:200
+    ~name:"V4 compaction never drops named or pinned checkpoints"
+    QCheck2.Gen.(pair (int_range 0 40) (int_range 0 8))
+    (fun (extra, keep_recent) ->
+      let project =
+        List.init extra (fun index ->
+            snapshot ("snapshot-extra-" ^ string_of_int index))
+        |> List.fold_left
+             (fun project snapshot -> V4.checkpoint project ~snapshot)
+             (project ())
+      in
+      match V4.compact project ~keep_recent ~journal_snapshots:[] with
+      | Error _ -> false
+      | Ok compacted ->
+          let retained =
+            compacted.V4.project |> V4.checkpoints
+            |> List.map (fun checkpoint -> checkpoint.V4.checkpoint_snapshot)
+          in
+          let active = V4.active_draft compacted.V4.project in
+          List.exists (V4.Snapshot_id.equal active.V4.latest_checkpoint) retained
+          && List.exists
+               (V4.Snapshot_id.equal (V4.export compacted.V4.project).V4.state_baseline)
+               retained
+          && List.length compacted.V4.dropped
+             = List.length (V4.checkpoints project) - List.length retained)
+
 let () =
   Alcotest.run "V4 model properties"
     [
@@ -105,5 +132,6 @@ let () =
           QCheck_alcotest.to_alcotest disjoint_text_spans_are_order_independent;
           QCheck_alcotest.to_alcotest
             checkpoint_history_is_unique_and_newest_first;
+          QCheck_alcotest.to_alcotest compact_never_drops_named_roots;
         ] );
     ]

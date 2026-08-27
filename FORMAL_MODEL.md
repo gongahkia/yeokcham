@@ -51,6 +51,17 @@ type v4_delivery = {
   included : v4_revision_id list;
 }
 
+type v4_protection_reason =
+  | Baseline
+  | Draft
+  | Shared_revision
+  | Delivery
+  | Resolution
+  | Open_decision
+  | Pin
+  | Restore_journal
+  | Recent
+
 type v4_restore_phase =
   | Prepared
   | Applying
@@ -91,6 +102,13 @@ V4 invariants are:
   outside replacement.
 - `Published` follows both exact materialization and publication of the target
   as the active draft's current checkpoint. Safety and target snapshots differ.
+- Compaction may drop a checkpoint only when no named protection still
+  references it and it is outside the newest `keep_recent` unprotected entries.
+  It does not delete stored objects. Pins are retained names in project state.
+- Command capture warns when the current exact tree is not the active draft
+  checkpoint. Linux watcher capture may only request that same save after 1s
+  quiet or 30s of sustained writes; overflow or watcher loss requests an
+  immediate whole-tree save.
 
 The persistent V4 format must version each record, canonically order all
 collections, reject unknown mandatory features, retain old-format fixtures,

@@ -249,8 +249,9 @@ let scan ~root =
   let directory = journal_directory root in
   let names =
     try Ok (Sys.readdir directory |> Array.to_list |> List.sort String.compare)
-    with Sys_error message ->
-      Error (Io_error { operation = "readdir"; path = directory; message })
+    with Sys_error _ when not (Sys.file_exists directory) -> Ok []
+    | Sys_error message ->
+        Error (Io_error { operation = "readdir"; path = directory; message })
   in
   let* names = names in
   let rec loop reversed = function

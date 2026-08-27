@@ -29,6 +29,9 @@ type error =
   | Delivery_includes_duplicate_revision
   | Delivery_omits_active_change
   | Delivery_requires_shared_active_draft
+  | Unknown_checkpoint
+  | Not_pinned
+  | Invalid_keep_recent
 
 let error_to_string = function
   | Empty_identifier kind -> "empty " ^ kind ^ " identifier"
@@ -369,6 +372,11 @@ let record_checkpoint project snapshot =
       checkpoints = { checkpoint_snapshot = snapshot } :: project.checkpoints;
     }
 
+let retain_revision project revision =
+  record_checkpoint
+    (record_checkpoint project revision.base_snapshot)
+    revision.result_snapshot
+
 let checkpoint project ~snapshot =
   let active = active_draft project in
   record_checkpoint project snapshot |> fun project ->
@@ -696,7 +704,9 @@ let share_active project revision =
               }
             in
             let project =
-              { project with changes = change :: project.changes }
+              retain_revision
+                { project with changes = change :: project.changes }
+                revision
             in
             Ok
               (replace_draft project
@@ -717,7 +727,8 @@ let amend_active project revision =
             | Error error -> Error error
             | Ok () ->
                 Ok
-                  (replace_change project
+                  (replace_change
+                     (retain_revision project revision)
                      { change with revisions = revision :: change.revisions })))
 
 let receive project revision =
@@ -729,18 +740,20 @@ let receive project revision =
         | Error error -> Error error
         | Ok () ->
             Ok
-              {
-                project with
-                changes =
-                  {
-                    change_id = revision.change;
-                    source_draft = None;
-                    change_author = revision.revision_author;
-                    revisions = [ revision ];
-                    withdrawn = false;
-                  }
-                  :: project.changes;
-              })
+              (retain_revision
+                 {
+                   project with
+                   changes =
+                     {
+                       change_id = revision.change;
+                       source_draft = None;
+                       change_author = revision.revision_author;
+                       revisions = [ revision ];
+                       withdrawn = false;
+                     }
+                     :: project.changes;
+                 }
+                 revision))
     | Some change -> (
         if change.withdrawn then Error Unknown_change
         else
@@ -748,7 +761,8 @@ let receive project revision =
           | Error error -> Error error
           | Ok () ->
               Ok
-                (replace_change project
+                (replace_change
+                   (retain_revision project revision)
                    { change with revisions = revision :: change.revisions }))
 
 let withdraw project ~change:change_id =
@@ -989,16 +1003,18 @@ let resolve project ~decision:decision_id ~replacement =
               List.map reference_of_candidate resolved.candidates
             in
             Ok
-              {
-                project with
-                resolutions =
-                  {
-                    resolved_decision = decision_id;
-                    suppressed_edits;
-                    replacement_revision = replacement;
-                  }
-                  :: project.resolutions;
-              })
+              (retain_revision
+                 {
+                   project with
+                   resolutions =
+                     {
+                       resolved_decision = decision_id;
+                       suppressed_edits;
+                       replacement_revision = replacement;
+                     }
+                     :: project.resolutions;
+                 }
+                 replacement))
 
 let contains_duplicate identifiers equal =
   let rec loop seen = function

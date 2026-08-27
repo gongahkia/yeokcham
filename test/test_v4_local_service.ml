@@ -73,6 +73,64 @@ let changed_save_creates_a_new_checkpoint () =
                status.Service.checkpoint)
       | Service.Unchanged _ -> Alcotest.fail "changed tree did not save")
 
+let status_warns_about_uncaptured_edits () =
+  with_directory "yeokcham-v4-service-uncaptured-" (fun root ->
+      write_file root "main.ml" "let version = 1\n";
+      ignore (initialize root);
+      write_file root "main.ml" "let version = 2\n";
+      let status = Service.status ~root |> require_ok Service.error_to_string in
+      Alcotest.(check bool) "uncaptured edit is visible" true status.Service.uncaptured;
+      ignore (Service.save ~root |> require_ok Service.error_to_string);
+      let status = Service.status ~root |> require_ok Service.error_to_string in
+      Alcotest.(check bool)
+        "save clears the uncaptured warning" false status.Service.uncaptured)
+
+let compact_drops_extra_saves_and_keeps_a_pin () =
+  with_directory "yeokcham-v4-service-compact-" (fun root ->
+      write_file root "main.ml" "let version = 1\n";
+      ignore (initialize root);
+      write_file root "main.ml" "let version = 2\n";
+      let first =
+        match Service.save ~root |> require_ok Service.error_to_string with
+        | Service.Saved status -> status.Service.checkpoint
+        | Service.Unchanged _ -> Alcotest.fail "first save did not record"
+      in
+      write_file root "main.ml" "let version = 3\n";
+      ignore (Service.save ~root |> require_ok Service.error_to_string);
+      write_file root "main.ml" "let version = 4\n";
+      ignore (Service.save ~root |> require_ok Service.error_to_string);
+      ignore
+        (Service.pin ~root ~checkpoint:first
+        |> require_ok Service.error_to_string);
+      let report =
+        Service.compact ~root ~keep_recent:0 ~dry_run:false
+        |> require_ok Service.error_to_string
+      in
+      let retained =
+        report.Service.status.Service.checkpoints
+        |> List.map (fun checkpoint -> checkpoint.Model.checkpoint_snapshot)
+      in
+      Alcotest.(check bool)
+        "pinned checkpoint remains" true
+        (List.exists (Model.Snapshot_id.equal first) retained);
+      Alcotest.(check bool)
+        "compaction dropped at least one scratch checkpoint" true
+        (List.length report.Service.dropped > 0))
+
+let capture_window_uses_quiet_and_max_delay () =
+  let window = Service.Capture_window.empty in
+  let window = Service.Capture_window.observe window ~now:0.0 in
+  Alcotest.(check bool)
+    "quiet period waits" false
+    (Service.Capture_window.due window ~now:0.5);
+  Alcotest.(check bool)
+    "quiet period elapses" true
+    (Service.Capture_window.due window ~now:1.0);
+  let window = Service.Capture_window.observe window ~now:29.5 in
+  Alcotest.(check bool)
+    "max delay captures during sustained writes" true
+    (Service.Capture_window.due window ~now:30.0)
+
 let new_draft_closes_the_previous_draft_without_losing_saved_state () =
   with_directory "yeokcham-v4-service-draft-" (fun root ->
       write_file root "main.ml" "let version = 1\n";
@@ -407,6 +465,12 @@ let () =
             `Quick init_captures_the_initial_tree_and_save_observes_no_change;
           Alcotest.test_case "changed save creates a checkpoint" `Quick
             changed_save_creates_a_new_checkpoint;
+          Alcotest.test_case "status warns about uncaptured edits" `Quick
+            status_warns_about_uncaptured_edits;
+          Alcotest.test_case "compact keeps pins and drops extra saves" `Quick
+            compact_drops_extra_saves_and_keeps_a_pin;
+          Alcotest.test_case "capture window uses quiet and max delay" `Quick
+            capture_window_uses_quiet_and_max_delay;
           Alcotest.test_case "new draft retains saved state" `Quick
             new_draft_closes_the_previous_draft_without_losing_saved_state;
           Alcotest.test_case "restore materializes a prior checkpoint" `Quick

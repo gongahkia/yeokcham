@@ -44,11 +44,11 @@ let read_golden name =
   Golden.read_lower_hex_file (golden_path name) |> require_ok Fun.id
 
 let current_golden_state_bytes_are_stable () =
-  let expected = read_golden "v4/state-v2.cbor.hex" in
   let actual =
     fixture_project () |> Record.encode_project
     |> require_ok Record.error_to_string
   in
+  let expected = read_golden "v4/state-v3.cbor.hex" in
   Alcotest.(check string) "initial state bytes" expected actual;
   let decoded =
     Record.decode_project expected |> require_ok Record.error_to_string
@@ -69,7 +69,21 @@ let legacy_v1_fixture_remains_decodable () =
        (Model.active_draft decoded).Model.latest_checkpoint);
   Alcotest.(check string)
     "legacy state upgrades to the current canonical record"
-    (read_golden "v4/state-v2.cbor.hex")
+    (read_golden "v4/state-v3.cbor.hex")
+    (Record.encode_project decoded |> require_ok Record.error_to_string)
+
+let legacy_v2_fixture_remains_decodable () =
+  let decoded =
+    read_golden "v4/state-v2.cbor.hex"
+    |> Record.decode_project
+    |> require_ok Record.error_to_string
+  in
+  Alcotest.(check int)
+    "legacy V2 state has no pins" 0
+    (List.length (Model.pins decoded));
+  Alcotest.(check string)
+    "legacy V2 state upgrades to the current canonical record"
+    (read_golden "v4/state-v3.cbor.hex")
     (Record.encode_project decoded |> require_ok Record.error_to_string)
 
 let state_round_trips_with_shared_change () =
@@ -90,7 +104,7 @@ let state_round_trips_with_shared_change () =
 let malformed_model_state_is_rejected_before_encoding () =
   let state = Model.export (fixture_project ()) in
   let malformed =
-    Model.{ state with state_drafts = state.state_drafts @ state.state_drafts }
+    (Model.{ state with state_drafts = state.state_drafts @ state.state_drafts })
   in
   match Record.encode_state malformed with
   | Error error ->
@@ -106,13 +120,13 @@ let noncanonical_cbor_is_rejected () =
     |> require_ok Record.error_to_string
   in
   let nonminimal_array =
-    "\x98\x08" ^ String.sub canonical 1 (String.length canonical - 1)
+    "\x98\x0a" ^ String.sub canonical 1 (String.length canonical - 1)
   in
   match Record.decode_project nonminimal_array with
   | Error error ->
       Alcotest.(check bool)
         "canonical decoder reports the non-minimal length" true
-        (String.ends_with ~suffix:"non-minimal argument: 8"
+        (String.ends_with ~suffix:"non-minimal argument: 10"
            (Record.error_to_string error))
   | Ok _ -> Alcotest.fail "accepted non-minimal CBOR array length"
 
@@ -125,6 +139,8 @@ let () =
             current_golden_state_bytes_are_stable;
           Alcotest.test_case "legacy V1 fixture remains decodable" `Quick
             legacy_v1_fixture_remains_decodable;
+          Alcotest.test_case "legacy V2 fixture remains decodable" `Quick
+            legacy_v2_fixture_remains_decodable;
           Alcotest.test_case "shared state round trips" `Quick
             state_round_trips_with_shared_change;
           Alcotest.test_case "malformed model state is rejected" `Quick

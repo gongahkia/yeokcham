@@ -17,7 +17,11 @@ let usage () =
     \  yeokcham-v4 share [--root PATH] --change ID --revision ID\n\
     \  yeokcham-v4 withdraw [--root PATH] --change ID\n\
     \  yeokcham-v4 resolve [--root PATH] --decision ID --change ID --revision ID\n\
-    \  yeokcham-v4 deliver [--root PATH] --id ID --draft ID --title TITLE"
+    \  yeokcham-v4 deliver [--root PATH] --id ID --draft ID --title TITLE\n\
+    \  yeokcham-v4 pin [--root PATH] --checkpoint ID\n\
+    \  yeokcham-v4 unpin [--root PATH] --checkpoint ID\n\
+    \  yeokcham-v4 compact [--root PATH] [--keep N] [--dry-run] [--explain]\n\
+    \  yeokcham-v4 watch [--root PATH]"
 
 let require_ok render = function
   | Ok value -> value
@@ -58,7 +62,10 @@ let render_status status =
     (fun delivery ->
       Printf.printf "delivery %s\n"
         (Model.Delivery_id.to_string delivery.Model.delivery_id))
-    status.Service.deliveries
+    status.Service.deliveries;
+  print_endline "capture command";
+  Printf.printf "uncaptured %s\n"
+    (if status.Service.uncaptured then "yes" else "no")
 
 let parse_init arguments =
   let rec loop root creator draft title = function
@@ -306,6 +313,88 @@ let run_deliver arguments =
   |> require_ok Service.error_to_string
   |> render_status
 
+let parse_pin arguments =
+  let rec loop root checkpoint = function
+    | [] -> (
+        match checkpoint with
+        | Some checkpoint -> (Option.value root ~default:default_root, checkpoint)
+        | None -> usage ())
+    | "--root" :: value :: rest when Option.is_none root ->
+        loop (Some value) checkpoint rest
+    | "--checkpoint" :: value :: rest when Option.is_none checkpoint ->
+        loop root (Some value) rest
+    | _ -> usage ()
+  in
+  loop None None arguments
+
+let parse_compact arguments =
+  let rec loop root keep dry_run explain = function
+    | [] -> (Option.value root ~default:default_root, keep, dry_run, explain)
+    | "--root" :: value :: rest when Option.is_none root ->
+        loop (Some value) keep dry_run explain rest
+    | "--keep" :: value :: rest when Option.is_none keep -> (
+        match int_of_string_opt value with
+        | Some parsed when parsed >= 0 ->
+            loop root (Some parsed) dry_run explain rest
+        | Some _ | None -> usage ())
+    | "--dry-run" :: rest when not dry_run -> loop root keep true explain rest
+    | "--explain" :: rest when not explain -> loop root keep dry_run true rest
+    | _ -> usage ()
+  in
+  loop None None false false arguments
+
+let run_pin arguments =
+  let root, checkpoint = parse_pin arguments in
+  let checkpoint =
+    parse_identifier "invalid checkpoint identifier" Model.Snapshot_id.of_string
+      checkpoint
+  in
+  Service.pin ~root ~checkpoint
+  |> require_ok Service.error_to_string
+  |> render_status
+
+let run_unpin arguments =
+  let root, checkpoint = parse_pin arguments in
+  let checkpoint =
+    parse_identifier "invalid checkpoint identifier" Model.Snapshot_id.of_string
+      checkpoint
+  in
+  Service.unpin ~root ~checkpoint
+  |> require_ok Service.error_to_string
+  |> render_status
+
+let render_compact report explain =
+  if explain then (
+    List.iter
+      (fun keep ->
+        Printf.printf "keep %s %s\n"
+          (Model.Snapshot_id.to_string keep.Model.snapshot)
+          (keep.Model.reasons
+          |> List.map Model.protection_reason_to_string
+          |> String.concat ","))
+      report.Service.kept;
+    List.iter
+      (fun snapshot ->
+        Printf.printf "drop %s\n" (Model.Snapshot_id.to_string snapshot))
+      report.Service.dropped;
+    List.iter
+      (fun operation -> Printf.printf "journal-prune %s\n" operation)
+      report.Service.pruned_journals);
+  Printf.printf "kept %d\n" (List.length report.Service.kept);
+  Printf.printf "dropped %d\n" (List.length report.Service.dropped);
+  render_status report.Service.status
+
+let run_compact arguments =
+  let root, keep, dry_run, explain = parse_compact arguments in
+  let keep_recent = Option.value keep ~default:Model.default_keep_recent in
+  Service.compact ~root ~keep_recent ~dry_run
+  |> require_ok Service.error_to_string
+  |> fun report -> render_compact report explain
+
+let run_watch arguments =
+  let root = parse_root arguments in
+  V4_watch.run ~root
+
 let () =
   match Array.to_list Sys.argv with
   | _ :: "init" :: arguments -> run_init arguments
@@ -318,4 +407,8 @@ let () =
   | _ :: "withdraw" :: arguments -> run_withdraw arguments
   | _ :: "resolve" :: arguments -> run_resolve arguments
   | _ :: "deliver" :: arguments -> run_deliver arguments
+  | _ :: "pin" :: arguments -> run_pin arguments
+  | _ :: "unpin" :: arguments -> run_unpin arguments
+  | _ :: "compact" :: arguments -> run_compact arguments
+  | _ :: "watch" :: arguments -> run_watch arguments
   | _ -> usage ()

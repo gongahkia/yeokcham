@@ -91,6 +91,32 @@ let scan_rejects_a_missing_generation () =
       | Error _ -> ()
       | Ok _ -> Alcotest.fail "accepted a non-contiguous journal chain")
 
+let published_journals_are_pruned () =
+  with_journal_root (fun root ->
+      let rec append_through journal = function
+        | [] -> journal
+        | phase :: rest ->
+            let next =
+              Journal.advance journal phase
+              |> require_ok Journal.error_to_string
+            in
+            Journal.append ~root next |> require_ok Journal.error_to_string;
+            append_through next rest
+      in
+      let prepared = prepared () in
+      Journal.append ~root prepared |> require_ok Journal.error_to_string;
+      ignore
+        (append_through prepared
+           [ Journal.Applying; Journal.Materialized; Journal.Published ]);
+      let pruned =
+        Journal.prune_published ~root |> require_ok Journal.error_to_string
+      in
+      Alcotest.(check (list string))
+        "published operation is reported" [ String.make 64 'a' ] pruned;
+      Alcotest.(check int)
+        "journal directory is empty after prune" 0
+        (Journal.scan ~root |> require_ok Journal.error_to_string |> List.length))
+
 let () =
   Alcotest.run "V4 restore journal"
     [
@@ -102,5 +128,7 @@ let () =
             phases_advance_only_in_order;
           Alcotest.test_case "missing generation is rejected" `Quick
             scan_rejects_a_missing_generation;
+          Alcotest.test_case "published journals can be pruned" `Quick
+            published_journals_are_pruned;
         ] );
     ]
