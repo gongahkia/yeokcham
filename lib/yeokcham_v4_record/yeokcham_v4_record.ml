@@ -664,6 +664,20 @@ let decode_state encoded =
   let canonical = Encoding.encode canonical_value in
   if String.equal encoded canonical then Ok state else Error Noncanonical_bytes
 
+let encode_change_revision revision =
+  let* value = encode_revision revision in
+  Ok (Encoding.encode value)
+
+let decode_change_revision encoded =
+  let* value =
+    Encoding.decode encoded
+    |> Result.map_error (fun error -> Decode_error error)
+  in
+  let* revision = decode_revision value in
+  let* canonical = encode_change_revision revision in
+  if String.equal encoded canonical then Ok revision
+  else Error Noncanonical_bytes
+
 let encode_project project = Model.export project |> encode_state
 
 let decode_project encoded =
