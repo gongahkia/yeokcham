@@ -14,6 +14,18 @@
  (libraries alcotest yeokcham_v4_model yeokcham_v4_record yeokcham_v4_trust))
 
 (test
+ (name test_v4_package)
+ (modules test_v4_package)
+ (libraries
+  alcotest
+  unix
+  yeokcham_snapshot
+  yeokcham_store
+  yeokcham_v4_model
+  yeokcham_v4_package
+  yeokcham_v4_trust))
+
+(test
  (name v4_model_property_test)
  (modules v4_model_property_test)
  (libraries alcotest qcheck-core qcheck-alcotest yeokcham_v4_model))

@@ -1,0 +1,10 @@
+(library
+ (name yeokcham_v4_package)
+ (libraries
+  unix
+  yeokcham_encoding
+  yeokcham_envelope
+  yeokcham_snapshot
+  yeokcham_store
+  yeokcham_v4_model
+  yeokcham_v4_trust))
