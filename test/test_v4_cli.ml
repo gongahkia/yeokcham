@@ -277,6 +277,40 @@ let command_journey_shares_resolves_withdraws_and_delivers () =
       expect_output_contains "delivery starts the next draft"
         "draft draft-three" output)
 
+let command_journey_restores_in_place_with_a_safety_checkpoint () =
+  with_directory "yeokcham-v4-cli-in-place-" (fun root ->
+      write_file root "main.ml" "let version = 1\n";
+      let output, errors, status =
+        run
+          [
+            "init";
+            "--root";
+            root;
+            "--device";
+            "device-alice";
+            "--draft";
+            "draft-one";
+            "--title";
+            "restore-work";
+          ]
+      in
+      require_success "init" status errors;
+      let initial = saved_checkpoint output in
+      write_file root "main.ml" "let unsaved = 2\n";
+      let output, errors, status =
+        run [ "restore"; "--root"; root; "--checkpoint"; initial ]
+      in
+      require_success "in-place restore" status errors;
+      expect_output_contains "safety checkpoint is reported" "safety " output;
+      expect_output_contains "restore is explicitly in-place"
+        ("restored " ^ initial ^ " in-place")
+        output;
+      Alcotest.(check string)
+        "active tree contains target bytes" "let version = 1\n"
+        (In_channel.with_open_bin
+           (Filename.concat root "main.ml")
+           In_channel.input_all))
+
 let () =
   Alcotest.run "V4 CLI"
     [
@@ -286,5 +320,7 @@ let () =
             command_journey_reports_saved_work_and_drafts;
           Alcotest.test_case "share resolve withdraw and deliver" `Quick
             command_journey_shares_resolves_withdraws_and_delivers;
+          Alcotest.test_case "in-place restore retains a safety checkpoint"
+            `Quick command_journey_restores_in_place_with_a_safety_checkpoint;
         ] );
     ]

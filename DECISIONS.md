@@ -190,3 +190,4 @@ The ADR lifecycle, numbering rules, and template are defined in [`docs/adr/READM
 - [ADR-077 — Peer publication projections and explicit integration](docs/adr/077-peer-publication-projections-and-explicit-integration.md) — Accepted.
 - [ADR-078 — Native Git lineage and authenticated peer synchronization](docs/adr/078-native-git-lineage-and-authenticated-peer-sync.md) — Accepted.
 - [ADR-079 — V4 small-team change composer](docs/adr/079-v4-small-team-change-composer.md) — Accepted.
+- [ADR-080 — V4 in-place restore journal](docs/adr/080-v4-in-place-restore-journal.md) — Accepted.

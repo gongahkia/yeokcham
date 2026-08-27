@@ -138,6 +138,16 @@ module Materialize : sig
     Yeokcham_store.repository ->
     Snapshot.t ->
     (unit, error) result
+
+  val write_replacing :
+    destination:string ->
+    preserved_root_names:string list ->
+    Yeokcham_store.repository ->
+    Snapshot.t ->
+    (unit, error) result
+  (** Removes every non-preserved root entry before materializing the exact
+      snapshot. The caller must durably retain a safety snapshot first.
+      Repeating the operation is idempotent after interruption. *)
 end
 
 val scan :

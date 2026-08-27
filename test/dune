@@ -33,9 +33,26 @@
   yeokcham_v4_store))
 
 (test
+ (name test_v4_restore_journal)
+ (modules test_v4_restore_journal)
+ (libraries
+  alcotest
+  unix
+  yeokcham_testkit
+  yeokcham_v4_model
+  yeokcham_v4_restore_journal)
+ (deps
+  (source_tree golden)))
+
+(test
  (name test_v4_local_service)
  (modules test_v4_local_service)
- (libraries alcotest unix yeokcham_v4_local_service yeokcham_v4_model))
+ (libraries
+  alcotest
+  unix
+  yeokcham_v4_local_service
+  yeokcham_v4_model
+  yeokcham_v4_restore_journal))
 
 (test
  (name test_v4_cli)

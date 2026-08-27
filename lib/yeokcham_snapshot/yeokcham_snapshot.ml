@@ -894,9 +894,7 @@ module Materialize = struct
       with Unix.Unix_error (error, _, _) ->
         Error (io_error "symlink" path error)
 
-  let write ~destination repository snapshot =
-    let* () = validate_destination destination in
-    let* actions = plan repository snapshot in
+  let apply_actions ~destination repository actions =
     let rec apply = function
       | [] -> Ok ()
       | action :: rest ->
@@ -923,6 +921,59 @@ module Materialize = struct
           apply rest
     in
     apply actions
+
+  let write ~destination repository snapshot =
+    let* () = validate_destination destination in
+    let* actions = plan repository snapshot in
+    apply_actions ~destination repository actions
+
+  let rec remove_tree path =
+    try
+      match (Unix.lstat path).Unix.st_kind with
+      | Unix.S_DIR -> (
+          let entries =
+            try Ok (Sys.readdir path)
+            with Sys_error message ->
+              Error (Io_error { path; operation = "readdir"; message })
+          in
+          let* entries = entries in
+          let* () =
+            Array.fold_left
+              (fun result name ->
+                let* () = result in
+                remove_tree (Filename.concat path name))
+              (Ok ()) entries
+          in
+          try
+            Unix.rmdir path;
+            Ok ()
+          with Unix.Unix_error (error, _, _) ->
+            Error (io_error "rmdir" path error))
+      | Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO
+      | Unix.S_SOCK -> (
+          try
+            Unix.unlink path;
+            Ok ()
+          with Unix.Unix_error (error, _, _) ->
+            Error (io_error "unlink" path error))
+    with Unix.Unix_error (error, _, _) -> Error (io_error "lstat" path error)
+
+  let write_replacing ~destination ~preserved_root_names repository snapshot =
+    let* actions = plan repository snapshot in
+    let* entries =
+      try Ok (Sys.readdir destination)
+      with Sys_error message ->
+        Error (Io_error { path = destination; operation = "readdir"; message })
+    in
+    let* () =
+      Array.fold_left
+        (fun result name ->
+          let* () = result in
+          if List.exists (String.equal name) preserved_root_names then Ok ()
+          else remove_tree (Filename.concat destination name))
+        (Ok ()) entries
+    in
+    apply_actions ~destination repository actions
 end
 
 let scan_error operation path error =

@@ -1,4 +1,5 @@
 module Model = Yeokcham_v4_model
+module Journal = Yeokcham_v4_restore_journal
 module Snapshot = Yeokcham_snapshot
 module Store = Yeokcham_v4_store
 
@@ -12,14 +13,13 @@ type error =
   | Store_error of Store.error
   | Snapshot_error of Snapshot.error
   | Materialize_error of Snapshot.Materialize.error
+  | Restore_journal_error of Journal.error
   | Model_error of Model.error
   | Invalid_checkpoint_id of string
   | Unknown_checkpoint of Model.Snapshot_id.t
   | Unchanged_share of Model.Snapshot_id.t
 
-type save_outcome = Unchanged of status | Saved of status
-
-and status = {
+type status = {
   active_draft : Model.draft;
   checkpoint : Model.Snapshot_id.t;
   shared_changes : Model.shared_change list;
@@ -30,10 +30,19 @@ and status = {
   checkpoints : Model.checkpoint list;
 }
 
+type save_outcome = Unchanged of status | Saved of status
+
+type in_place_restore = {
+  safety_checkpoint : Model.Snapshot_id.t;
+  restored_checkpoint : Model.Snapshot_id.t;
+  resumed : bool;
+}
+
 let error_to_string = function
   | Store_error error -> Store.error_to_string error
   | Snapshot_error error -> Snapshot.error_to_string error
   | Materialize_error error -> Snapshot.Materialize.error_to_string error
+  | Restore_journal_error error -> Journal.error_to_string error
   | Model_error error -> Model.error_to_string error
   | Invalid_checkpoint_id value ->
       "invalid saved checkpoint identifier: " ^ value
@@ -208,6 +217,152 @@ let restore ~root ~checkpoint ~destination =
           (Store.underlying_store repository)
           snapshot
         |> Result.map_error (fun error -> Materialize_error error))
+
+let retained project checkpoint =
+  List.exists
+    (fun candidate ->
+      Model.Snapshot_id.equal candidate.Model.checkpoint_snapshot checkpoint)
+    (Model.checkpoints project)
+
+let hex_of_raw raw =
+  let alphabet = "0123456789abcdef" in
+  String.init
+    (String.length raw * 2)
+    (fun index ->
+      let byte = Char.code raw.[index / 2] in
+      if index mod 2 = 0 then alphabet.[byte lsr 4]
+      else alphabet.[byte land 0x0f])
+
+let restore_operation_id ~safety ~target =
+  let seed =
+    String.concat ":"
+      [
+        Model.Snapshot_id.to_string safety;
+        Model.Snapshot_id.to_string target;
+        string_of_int (Unix.getpid ());
+        Int64.to_string
+          (Int64.of_float (Unix.gettimeofday () *. 1_000_000_000.));
+      ]
+  in
+  Yeokcham_hash.Sha256.digest_string seed
+  |> Yeokcham_hash.Sha256.to_raw_string |> hex_of_raw
+
+let append_journal ~root journal =
+  Journal.append ~root journal
+  |> Result.map_error (fun error -> Restore_journal_error error)
+
+let advance_journal ~root journal phase =
+  let* next =
+    Journal.advance journal phase
+    |> Result.map_error (fun error -> Restore_journal_error error)
+  in
+  let* () = append_journal ~root next in
+  Ok next
+
+let perform_in_place ~root repository loaded journal ~resumed =
+  let store = Store.underlying_store repository in
+  let* applying =
+    match Journal.phase journal with
+    | Journal.Prepared -> advance_journal ~root journal Journal.Applying
+    | Journal.Applying -> Ok journal
+    | Journal.Materialized | Journal.Published -> Ok journal
+  in
+  let* materialized =
+    match Journal.phase applying with
+    | Journal.Applying ->
+        let* target = load_snapshot store (Journal.target applying) in
+        let* () =
+          Snapshot.Materialize.write_replacing ~destination:root
+            ~preserved_root_names:[ ".yeokcham"; ".git" ] store target
+          |> Result.map_error (fun error -> Materialize_error error)
+        in
+        advance_journal ~root applying Journal.Materialized
+    | Journal.Materialized | Journal.Published -> Ok applying
+    | Journal.Prepared -> assert false
+  in
+  let* () =
+    match Journal.phase materialized with
+    | Journal.Materialized ->
+        let project =
+          Model.checkpoint loaded.Store.project
+            ~snapshot:(Journal.target materialized)
+        in
+        let* _ =
+          Store.save repository ~expected:loaded.Store.head ~project
+          |> Result.map_error (fun error -> Store_error error)
+        in
+        let* _ = advance_journal ~root materialized Journal.Published in
+        Ok ()
+    | Journal.Published -> Ok ()
+    | Journal.Prepared | Journal.Applying -> assert false
+  in
+  Ok
+    {
+      safety_checkpoint = Journal.safety journal;
+      restored_checkpoint = Journal.target journal;
+      resumed;
+    }
+
+let recover_in_place ~root =
+  with_repository ~root (fun repository loaded ->
+      let* pending =
+        Journal.latest_pending ~root
+        |> Result.map_error (fun error -> Restore_journal_error error)
+      in
+      match pending with
+      | None -> Ok None
+      | Some journal ->
+          if
+            (not (retained loaded.Store.project (Journal.safety journal)))
+            || not (retained loaded.Store.project (Journal.target journal))
+          then
+            Error
+              (Restore_journal_error
+                 (Journal.Invalid_schema
+                    "pending restore names an unretained checkpoint"))
+          else
+            perform_in_place ~root repository loaded journal ~resumed:true
+            |> Result.map Option.some)
+
+let restore_in_place ~root ~checkpoint =
+  let* recovered = recover_in_place ~root in
+  match recovered with
+  | Some restored
+    when Model.Snapshot_id.equal restored.restored_checkpoint checkpoint ->
+      Ok restored
+  | Some restored ->
+      Error
+        (Restore_journal_error
+           (Journal.Invalid_schema
+              ("completed pending restore to "
+              ^ Model.Snapshot_id.to_string restored.restored_checkpoint
+              ^ "; rerun the requested restore")))
+  | None ->
+      with_repository ~root (fun repository loaded ->
+          if not (retained loaded.Store.project checkpoint) then
+            Error (Unknown_checkpoint checkpoint)
+          else
+            let store = Store.underlying_store repository in
+            let* safety = capture ~root store in
+            if Model.Snapshot_id.equal safety checkpoint then
+              Error (Restore_journal_error Journal.Identical_snapshots)
+            else
+              let project =
+                Model.checkpoint loaded.Store.project ~snapshot:safety
+              in
+              let* saved =
+                Store.save repository ~expected:loaded.Store.head ~project
+                |> Result.map_error (fun error -> Store_error error)
+              in
+              let operation_id =
+                restore_operation_id ~safety ~target:checkpoint
+              in
+              let* journal =
+                Journal.make_prepared ~operation_id ~safety ~target:checkpoint
+                |> Result.map_error (fun error -> Restore_journal_error error)
+              in
+              let* () = append_journal ~root journal in
+              perform_in_place ~root repository saved journal ~resumed:false)
 
 let new_draft ~root ~id ~title =
   with_repository ~root (fun repository loaded ->

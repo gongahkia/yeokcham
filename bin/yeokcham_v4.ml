@@ -12,7 +12,7 @@ let usage () =
     \  yeokcham-v4 save [--root PATH]\n\
     \  yeokcham-v4 status [--root PATH]\n\
     \  yeokcham-v4 timeline [--root PATH]\n\
-    \  yeokcham-v4 restore [--root PATH] --checkpoint ID --destination PATH\n\
+    \  yeokcham-v4 restore [--root PATH] --checkpoint ID [--destination PATH]\n\
     \  yeokcham-v4 draft new [--root PATH] --id ID --title TITLE\n\
     \  yeokcham-v4 share [--root PATH] --change ID --revision ID\n\
     \  yeokcham-v4 withdraw [--root PATH] --change ID\n\
@@ -99,10 +99,10 @@ let parse_new_draft arguments =
 let parse_restore arguments =
   let rec loop root checkpoint destination = function
     | [] -> (
-        match (checkpoint, destination) with
-        | Some checkpoint, Some destination ->
+        match checkpoint with
+        | Some checkpoint ->
             (Option.value root ~default:default_root, checkpoint, destination)
-        | None, _ | _, None -> usage ())
+        | None -> usage ())
     | "--root" :: value :: rest when Option.is_none root ->
         loop (Some value) checkpoint destination rest
     | "--checkpoint" :: value :: rest when Option.is_none checkpoint ->
@@ -155,11 +155,23 @@ let run_restore arguments =
     parse_identifier "invalid checkpoint identifier" Model.Snapshot_id.of_string
       checkpoint
   in
-  Service.restore ~root ~checkpoint ~destination
-  |> require_ok Service.error_to_string;
-  Printf.printf "restored %s to %s\n"
-    (Model.Snapshot_id.to_string checkpoint)
-    destination
+  match destination with
+  | Some destination ->
+      Service.restore ~root ~checkpoint ~destination
+      |> require_ok Service.error_to_string;
+      Printf.printf "restored %s to %s\n"
+        (Model.Snapshot_id.to_string checkpoint)
+        destination
+  | None ->
+      let restored =
+        Service.restore_in_place ~root ~checkpoint
+        |> require_ok Service.error_to_string
+      in
+      Printf.printf "safety %s\n"
+        (Model.Snapshot_id.to_string restored.Service.safety_checkpoint);
+      Printf.printf "restored %s in-place%s\n"
+        (Model.Snapshot_id.to_string restored.Service.restored_checkpoint)
+        (if restored.Service.resumed then " (resumed)" else "")
 
 let parse_share arguments =
   let rec loop root change revision = function

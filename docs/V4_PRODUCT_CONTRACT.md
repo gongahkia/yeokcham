@@ -12,9 +12,9 @@ The current milestone is the V4 functional core: exact local recovery,
 explicit drafts and sharing, conservative composition, durable decisions, and
 manual delivery. Completed slices are the in-memory model, the versioned
 canonical model-state record with a compare-and-swap `v4-project-state` head,
-command-triggered exact capture, and the local four-fact CLI. Automatic
-watcher capture, in-place journaled restore, compaction, transport, and
-signing remain later slices.
+command-triggered exact capture, the local four-fact CLI, and in-place
+journaled restore with a retained safety checkpoint. Automatic watcher capture,
+compaction, transport, and signing remain later slices.
 
 The record slice owns these types: `state`, `checkpoint`, `draft`,
 `shared_change`, `change_revision`, `edit`, `resolution`, and `delivery`. Its
@@ -53,10 +53,19 @@ cover saved work, two drafts, sharing, overlap decisions, restore, withdrawal,
 and delivery.
 
 `timeline` lists retained saved checkpoints. `restore --checkpoint ID
---destination PATH` materializes one only into an existing empty directory; it
-never replaces the active project tree. Its tests cover recovery of prior bytes
-and rejection of a non-empty destination. In-place restore, its safety journal,
-and compaction remain later slices.
+--destination PATH` materializes one only into an existing empty directory.
+`restore --checkpoint ID` restores in place only after capturing and durably
+publishing the current tree as a retained safety checkpoint. The in-place path
+appends canonical, immutable `Prepared`, `Applying`, `Materialized`, and
+`Published` journal generations. Restart re-derives the target from its exact
+snapshot and repeats replacement idempotently; `.yeokcham` and `.git` are
+preserved. Tests cover prior-byte recovery, rejection of a non-empty
+destination, safety recovery, metadata preservation, and interrupted-apply
+resumption. Compaction remains a later slice and must protect every snapshot
+named by a restore journal.
+
+The persistent in-place restore boundary is governed by
+[ADR-080](adr/080-v4-in-place-restore-journal.md).
 
 ## Product promise
 

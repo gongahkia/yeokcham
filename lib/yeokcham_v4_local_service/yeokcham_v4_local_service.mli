@@ -7,14 +7,13 @@ type error =
   | Store_error of Yeokcham_v4_store.error
   | Snapshot_error of Yeokcham_snapshot.error
   | Materialize_error of Yeokcham_snapshot.Materialize.error
+  | Restore_journal_error of Yeokcham_v4_restore_journal.error
   | Model_error of Yeokcham_v4_model.error
   | Invalid_checkpoint_id of string
   | Unknown_checkpoint of Yeokcham_v4_model.Snapshot_id.t
   | Unchanged_share of Yeokcham_v4_model.Snapshot_id.t
 
-type save_outcome = Unchanged of status | Saved of status
-
-and status = {
+type status = {
   active_draft : Yeokcham_v4_model.draft;
   checkpoint : Yeokcham_v4_model.Snapshot_id.t;
   shared_changes : Yeokcham_v4_model.shared_change list;
@@ -23,6 +22,14 @@ and status = {
   deliveries : Yeokcham_v4_model.delivery list;
   delivery_count : int;
   checkpoints : Yeokcham_v4_model.checkpoint list;
+}
+
+type save_outcome = Unchanged of status | Saved of status
+
+type in_place_restore = {
+  safety_checkpoint : Yeokcham_v4_model.Snapshot_id.t;
+  restored_checkpoint : Yeokcham_v4_model.Snapshot_id.t;
+  resumed : bool;
 }
 
 val error_to_string : error -> string
@@ -42,6 +49,13 @@ val restore :
   checkpoint:Yeokcham_v4_model.Snapshot_id.t ->
   destination:string ->
   (unit, error) result
+
+val restore_in_place :
+  root:string ->
+  checkpoint:Yeokcham_v4_model.Snapshot_id.t ->
+  (in_place_restore, error) result
+
+val recover_in_place : root:string -> (in_place_restore option, error) result
 
 val new_draft :
   root:string ->

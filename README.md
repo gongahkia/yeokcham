@@ -22,14 +22,16 @@ The first V4 local slice is available through `yeokcham-v4`:
 yeokcham-v4 init --device alice --draft first-task --title "first task"
 yeokcham-v4 status
 yeokcham-v4 save
+yeokcham-v4 restore --checkpoint <saved-id>
 yeokcham-v4 share --change first-change --revision r1
 yeokcham-v4 draft new --id next-task --title "next task"
 ```
 
 It currently implements exact command-triggered saving, one explicit draft,
 local share/amend, withdrawal, overlap decisions, resolution, and manual
-delivery. Watcher capture, in-place restore, signing, and transport are not
-exposed by this CLI yet.
+delivery. In-place restore first retains the current exact tree as a safety
+checkpoint and resumes interrupted replacement from an immutable journal.
+Watcher capture, compaction, signing, and transport are not exposed yet.
 
 ## Start here
 

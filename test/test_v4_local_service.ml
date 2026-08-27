@@ -1,4 +1,5 @@
 module Model = Yeokcham_v4_model
+module Journal = Yeokcham_v4_restore_journal
 module Service = Yeokcham_v4_local_service
 
 let require_ok render = function
@@ -138,6 +139,93 @@ let v4_capture_excludes_git_metadata () =
       Alcotest.(check bool)
         "restored snapshot excludes the Git directory" false
         (Sys.file_exists (Filename.concat destination ".git")))
+
+let in_place_restore_retains_and_recovers_unsaved_bytes () =
+  with_directory "yeokcham-v4-service-in-place-" (fun root ->
+      write_file root "main.ml" "let version = 1\n";
+      let initial = initialize root in
+      write_file root "main.ml" "let unsaved = 2\n";
+      let restored =
+        Service.restore_in_place ~root ~checkpoint:initial.Service.checkpoint
+        |> require_ok Service.error_to_string
+      in
+      Alcotest.(check string)
+        "live project contains target bytes" "let version = 1\n"
+        (read_file root "main.ml");
+      let safety_destination = Filename.concat root "safety-copy" in
+      Unix.mkdir safety_destination 0o700;
+      Service.restore ~root ~checkpoint:restored.Service.safety_checkpoint
+        ~destination:safety_destination
+      |> require_ok Service.error_to_string;
+      Alcotest.(check string)
+        "pre-restore unsaved bytes are recoverable" "let unsaved = 2\n"
+        (read_file safety_destination "main.ml");
+      let status = Service.status ~root |> require_ok Service.error_to_string in
+      Alcotest.(check bool)
+        "safety checkpoint remains retained" true
+        (List.exists
+           (fun checkpoint ->
+             Model.Snapshot_id.equal checkpoint.Model.checkpoint_snapshot
+               restored.Service.safety_checkpoint)
+           status.Service.checkpoints))
+
+let in_place_restore_preserves_repository_metadata () =
+  with_directory "yeokcham-v4-service-in-place-metadata-" (fun root ->
+      write_file root "main.ml" "let version = 1\n";
+      let git = Filename.concat root ".git" in
+      Unix.mkdir git 0o700;
+      write_file git "config" "preserve me\n";
+      let initial = initialize root in
+      write_file root "main.ml" "let version = 2\n";
+      ignore
+        (Service.restore_in_place ~root ~checkpoint:initial.Service.checkpoint
+        |> require_ok Service.error_to_string);
+      Alcotest.(check string)
+        "Git metadata is not part of source replacement" "preserve me\n"
+        (read_file git "config");
+      Alcotest.(check bool)
+        "Yeokcham metadata remains present" true
+        (Sys.file_exists (Filename.concat root ".yeokcham")))
+
+let interrupted_applying_restore_is_resumable () =
+  with_directory "yeokcham-v4-service-resume-" (fun root ->
+      write_file root "main.ml" "let version = 1\n";
+      let initial = initialize root in
+      write_file root "main.ml" "let version = 2\n";
+      let saved =
+        match Service.save ~root |> require_ok Service.error_to_string with
+        | Service.Saved status -> status
+        | Service.Unchanged _ -> Alcotest.fail "changed tree was not saved"
+      in
+      let prepared =
+        Journal.make_prepared ~operation_id:(String.make 64 'b')
+          ~safety:saved.Service.checkpoint ~target:initial.Service.checkpoint
+        |> require_ok Journal.error_to_string
+      in
+      Journal.append ~root prepared |> require_ok Journal.error_to_string;
+      let applying =
+        Journal.advance prepared Journal.Applying
+        |> require_ok Journal.error_to_string
+      in
+      Journal.append ~root applying |> require_ok Journal.error_to_string;
+      write_file root "main.ml" "partial restore bytes\n";
+      let recovered =
+        Service.recover_in_place ~root |> require_ok Service.error_to_string
+      in
+      let recovered =
+        match recovered with
+        | Some recovered -> recovered
+        | None -> Alcotest.fail "pending restore was not recovered"
+      in
+      Alcotest.(check bool)
+        "recovery is reported as resumed" true recovered.Service.resumed;
+      Alcotest.(check string)
+        "recovery re-derives the exact target" "let version = 1\n"
+        (read_file root "main.ml");
+      Alcotest.(check bool)
+        "published journal is no longer pending" true
+        (Option.is_none
+           (Service.recover_in_place ~root |> require_ok Service.error_to_string)))
 
 let share_records_a_shared_change_and_amend_appends_a_revision () =
   with_directory "yeokcham-v4-service-share-" (fun root ->
@@ -327,6 +415,13 @@ let () =
             restore_rejects_a_nonempty_destination;
           Alcotest.test_case "capture excludes Git metadata" `Quick
             v4_capture_excludes_git_metadata;
+          Alcotest.test_case
+            "in-place restore retains unsaved bytes as a safety checkpoint"
+            `Quick in_place_restore_retains_and_recovers_unsaved_bytes;
+          Alcotest.test_case "in-place restore preserves repository metadata"
+            `Quick in_place_restore_preserves_repository_metadata;
+          Alcotest.test_case "interrupted applying restore resumes exactly"
+            `Quick interrupted_applying_restore_is_resumable;
         ] );
       ( "shared work",
         [

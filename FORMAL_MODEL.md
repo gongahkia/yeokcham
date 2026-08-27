@@ -50,6 +50,20 @@ type v4_delivery = {
   snapshot : v4_snapshot_id;
   included : v4_revision_id list;
 }
+
+type v4_restore_phase =
+  | Prepared
+  | Applying
+  | Materialized
+  | Published
+
+type v4_restore_journal = {
+  operation_id : bytes32;
+  safety : v4_snapshot_id;
+  target : v4_snapshot_id;
+  generation : int64;
+  phase : v4_restore_phase;
+}
 ```
 
 V4 invariants are:
@@ -68,6 +82,15 @@ V4 invariants are:
   draft.
 - Withdrawal changes future projection selection only; it does not erase an
   immutable replicated revision.
+- In-place restore publishes the current exact tree as a retained checkpoint
+  before `Prepared` exists or any source path is removed.
+- Restore journal generations are create-only and advance exactly through
+  `Prepared -> Applying -> Materialized -> Published`.
+- Repeating `Applying` first removes non-metadata source entries and then
+  re-derives the target from its exact snapshot; `.yeokcham` and `.git` are
+  outside replacement.
+- `Published` follows both exact materialization and publication of the target
+  as the active draft's current checkpoint. Safety and target snapshots differ.
 
 The persistent V4 format must version each record, canonically order all
 collections, reject unknown mandatory features, retain old-format fixtures,
