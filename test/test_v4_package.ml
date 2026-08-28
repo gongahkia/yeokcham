@@ -120,14 +120,20 @@ let setup root =
   (source_root, source, baseline, repository, root_device, membership, signed)
 
 let authority_setup root =
-  let source_root, source, baseline, _repository, root_device, membership, signed =
+  let ( source_root,
+        source,
+        baseline,
+        _repository,
+        root_device,
+        membership,
+        signed ) =
     setup root
   in
   let root_capability = capability 'a' in
   let root_certificate =
     Trust.certificates membership
     |> List.find (fun certificate ->
-           Trust.device_equal (Trust.certificate_subject certificate) root_device)
+        Trust.device_equal (Trust.certificate_subject certificate) root_device)
   in
   let recovery_capability = capability 'r' in
   let recovery_device = device recovery_capability in
@@ -142,9 +148,11 @@ let authority_setup root =
     |> require_ok Trust.error_to_string
   in
   let enrolled_epoch =
-    Trust.successor_epoch root_authority ~parents:[ Trust.epoch_id root_epoch ]
-      ~certificates:(Trust.certificates membership) ~revoked:[] ~frontier:[]
-      ~recovery_device ~issuer:(Trust.certificate_id root_certificate)
+    Trust.successor_epoch root_authority
+      ~parents:[ Trust.epoch_id root_epoch ]
+      ~certificates:(Trust.certificates membership)
+      ~revoked:[] ~frontier:[] ~recovery_device
+      ~issuer:(Trust.certificate_id root_certificate)
       root_capability
     |> require_ok Trust.error_to_string
   in
@@ -153,8 +161,10 @@ let authority_setup root =
     |> require_ok Trust.error_to_string
   in
   let signed =
-    Trust.sign_revision_at authority ~epoch:(Trust.epoch_id enrolled_epoch)
-      ~certificate:(Trust.signed_revision_certificate signed) (capability 'b')
+    Trust.sign_revision_at authority
+      ~epoch:(Trust.epoch_id enrolled_epoch)
+      ~certificate:(Trust.signed_revision_certificate signed)
+      (capability 'b')
       (Trust.signed_revision_value signed)
     |> require_ok Trust.error_to_string
   in
@@ -438,14 +448,17 @@ let late_revision_from_a_revoked_device_requires_current_head_adoption () =
         authority_setup root
       in
       let author =
-        Trust.signed_revision_value signed |> fun revision -> revision.Model.revision_author
+        Trust.signed_revision_value signed |> fun revision ->
+        revision.Model.revision_author
       in
       let current = List.hd (Trust.authority_heads authority) in
       let revoked_epoch =
         Trust.successor_epoch authority ~parents:[ current ]
-          ~certificates:(Trust.certificates (Trust.authority_membership authority))
+          ~certificates:
+            (Trust.certificates (Trust.authority_membership authority))
           ~revoked:[ author ] ~frontier:[] ~recovery_device
-          ~issuer:(Trust.certificate_id root_certificate) root_capability
+          ~issuer:(Trust.certificate_id root_certificate)
+          root_capability
         |> require_ok Trust.error_to_string
       in
       let revoked_authority =
@@ -470,19 +483,21 @@ let late_revision_from_a_revoked_device_requires_current_head_adoption () =
       | Error error ->
           Alcotest.(check string)
             "revocation makes a newly arrived old record require review"
-            "invalid V4 package: late revision from a revoked device requires one current-head adoption"
+            "invalid V4 package: late revision from a revoked device requires \
+             one current-head adoption"
             (Package.error_to_string error)
       | Ok _ -> Alcotest.fail "accepted an unreviewed late revision");
       let object_count =
         Store.list_objects destination
-        |> require_ok Store.error_to_string |> List.length
+        |> require_ok Store.error_to_string
+        |> List.length
       in
       Alcotest.(check int) "review rejection imports no objects" 0 object_count;
       let adoption =
         Trust.make_adoption revoked_authority
           ~epoch:(Trust.epoch_id revoked_epoch)
-          ~issuer:(Trust.certificate_id root_certificate) root_capability
-          ~signed_revision:signed
+          ~issuer:(Trust.certificate_id root_certificate)
+          root_capability ~signed_revision:signed
         |> require_ok Trust.error_to_string
       in
       let adopted_package = Filename.concat root "adopted-package" in
@@ -495,7 +510,8 @@ let late_revision_from_a_revoked_device_requires_current_head_adoption () =
           ~package:adopted_package ~authority ~known_adoptions:[] ~project
         |> require_ok Package.error_to_string
       in
-      Alcotest.(check int) "a current-head adoption accepts exactly that record" 1
+      Alcotest.(check int)
+        "a current-head adoption accepts exactly that record" 1
         (List.length (Model.shared_changes imported)))
 
 let () =

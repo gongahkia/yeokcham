@@ -8,8 +8,10 @@ let certificate_id_domain = "yeokcham:v4:certificate-id:1\000"
 let certificate_signature_domain = "yeokcham:v4:certificate-signature:1\000"
 let revision_signature_domain = "yeokcham:v4:revision-signature:1\000"
 let authority_epoch_id_domain = "yeokcham:v4:authority-epoch-id:1\000"
+
 let authority_epoch_signature_domain =
   "yeokcham:v4:authority-epoch-signature:1\000"
+
 let authorization_signature_domain = "yeokcham:v4:authorization:1\000"
 let adoption_signature_domain = "yeokcham:v4:adoption:1\000"
 let recovery_issuer_prefix = "recovery:"
@@ -179,7 +181,8 @@ let error_to_string = function
   | Invalid_epoch detail -> "invalid V4 authority epoch: " ^ detail
   | Duplicate_epoch -> "duplicate V4 authority epoch"
   | Authority_fork ->
-      "V4 authority fork requires an explicit authority selection or reconciliation"
+      "V4 authority fork requires an explicit authority selection or \
+       reconciliation"
   | Revoked_device -> "V4 device is revoked in this authority epoch"
   | Unauthorized_epoch_issuer ->
       "V4 authority epoch issuer is not an active administrator in every parent"
@@ -326,9 +329,9 @@ let encode_issuer = function None -> Ok Encoding.null | Some id -> text id
 
 let decode_issuer = function
   | Encoding.Null -> Ok None
-  | Encoding.Text value ->
+  | Encoding.Text value -> (
       let* recovery = recovery_issuer_device value in
-      (match recovery with
+      match recovery with
       | Some _ -> Ok (Some value)
       | None when String.length value = 64 -> Ok (Some value)
       | None -> Error (Invalid_record "issuer certificate ID has wrong length"))
@@ -578,9 +581,9 @@ let verify_membership ~repository certificates =
                     certificate
                 in
                 verify (certificate :: verified) rest (certificate :: roots) 0
-          | Some issuer_id ->
+          | Some issuer_id -> (
               let* recovery_issuer = recovery_issuer_device issuer_id in
-              (match recovery_issuer with
+              match recovery_issuer with
               | Some recovery_issuer ->
                   if
                     not
@@ -600,7 +603,8 @@ let verify_membership ~repository certificates =
                       if
                         List.exists
                           (fun candidate ->
-                            String.equal candidate.certificate_id_value issuer_id)
+                            String.equal candidate.certificate_id_value
+                              issuer_id)
                           rest
                       then
                         if deferred + 1 >= List.length pending then
@@ -615,7 +619,8 @@ let verify_membership ~repository certificates =
                         || not
                              (Model.Device_id.equal
                                 certificate.certificate_issuer_device
-                                issuer.certificate_subject_device.device_id_value)
+                                issuer.certificate_subject_device
+                                  .device_id_value)
                       then Error Unauthorized_issuer
                       else
                         let* () =
@@ -692,8 +697,7 @@ let enroll membership ~issuer signing_capability ~subject ~role =
       if
         issuer_certificate.certificate_role_value <> Administrator
         || certificate_is_recovery_issued issuer_certificate
-      then
-        Error Unauthorized_issuer
+      then Error Unauthorized_issuer
       else if Option.is_some (certificate_for_device membership subject) then
         Error Duplicate_device
       else
@@ -714,7 +718,9 @@ let revision_unsigned_bytes ~repository ~certificate ~epoch revision =
   match epoch with
   | None ->
       array
-        [ Encoding.integer 1L; repository; certificate; Encoding.bytes revision ]
+        [
+          Encoding.integer 1L; repository; certificate; Encoding.bytes revision;
+        ]
       |> Result.map Encoding.encode
   | Some epoch ->
       let* epoch = text epoch in
@@ -802,9 +808,11 @@ let decode_signed_revision encoded =
         | Encoding.Array ([ _; _; _; _ ] as fields) -> Ok fields
         | Encoding.Array ([ _; _; _; _; _ ] as fields) -> Ok fields
         | Encoding.Array _ ->
-            Error (Invalid_record "V4 revision unsigned body has the wrong field count")
-        | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _ | Encoding.Map _
-        | Encoding.Bool _ | Encoding.Null ->
+            Error
+              (Invalid_record
+                 "V4 revision unsigned body has the wrong field count")
+        | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _
+        | Encoding.Map _ | Encoding.Bool _ | Encoding.Null ->
             Error (Invalid_record "V4 revision unsigned body must be an array")
       in
       match fields with
@@ -829,7 +837,8 @@ let decode_signed_revision encoded =
                 signed_signature = signature;
               }
             in
-            if String.equal encoded (encode_signed_revision signed) then Ok signed
+            if String.equal encoded (encode_signed_revision signed) then
+              Ok signed
             else Error Noncanonical_record
       | [ version; repository; certificate; epoch; revision ] ->
           let* version = integer_field "revision version" version in
@@ -853,7 +862,8 @@ let decode_signed_revision encoded =
                 signed_signature = signature;
               }
             in
-            if String.equal encoded (encode_signed_revision signed) then Ok signed
+            if String.equal encoded (encode_signed_revision signed) then
+              Ok signed
             else Error Noncanonical_record
       | _ -> assert false)
   | _ -> assert false
@@ -883,8 +893,7 @@ let verify_signed_revision_crypto membership signed =
           let* bytes =
             revision_unsigned_bytes ~repository:signed.signed_repository
               ~certificate:signed.signed_certificate
-              ~epoch:signed.signed_epoch_value
-              signed.signed_revision_value
+              ~epoch:signed.signed_epoch_value signed.signed_revision_value
           in
           match
             Mirage_crypto_ec.Ed25519.pub_of_octets
@@ -905,7 +914,8 @@ let verify_signed_revision_crypto membership signed =
 
 let verify_signed_revision membership signed =
   match signed.signed_epoch_value with
-  | Some _ -> Error (Invalid_epoch "epoch-bound revision needs authority verification")
+  | Some _ ->
+      Error (Invalid_epoch "epoch-bound revision needs authority verification")
   | None -> (
       match
         certificate_by_id membership.membership_certificates
@@ -926,11 +936,8 @@ let map_result f values =
   in
   go [] values
 
-let compare_device_id left right =
-  Model.Device_id.compare left right
-
-let compare_revision_id left right =
-  Model.Revision_id.compare left right
+let compare_device_id left right = Model.Device_id.compare left right
+let compare_revision_id left right = Model.Revision_id.compare left right
 
 let sorted_unique compare values =
   let rec go previous = function
@@ -946,7 +953,8 @@ let decode_text_array name value =
   match value with
   | Encoding.Array values -> map_result (text_field name) values
   | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _ | Encoding.Map _
-  | Encoding.Bool _ | Encoding.Null -> Error (Invalid_record (name ^ " must be an array"))
+  | Encoding.Bool _ | Encoding.Null ->
+      Error (Invalid_record (name ^ " must be an array"))
 
 let encode_text_array values =
   let* values = map_result text values in
@@ -956,7 +964,8 @@ let decode_device_id_array name value =
   match value with
   | Encoding.Array values -> map_result decode_device_id values
   | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _ | Encoding.Map _
-  | Encoding.Bool _ | Encoding.Null -> Error (Invalid_record (name ^ " must be an array"))
+  | Encoding.Bool _ | Encoding.Null ->
+      Error (Invalid_record (name ^ " must be an array"))
 
 let encode_device_id_array values =
   let* values = map_result encode_device_id values in
@@ -965,7 +974,8 @@ let encode_device_id_array values =
 let decode_revision_id value =
   let* value = text_field "revision ID" value in
   Model.Revision_id.of_string value
-  |> Result.map_error (fun error -> Invalid_record (Model.error_to_string error))
+  |> Result.map_error (fun error ->
+      Invalid_record (Model.error_to_string error))
 
 let encode_revision_id value = text (Model.Revision_id.to_string value)
 
@@ -973,7 +983,8 @@ let decode_revision_id_array name value =
   match value with
   | Encoding.Array values -> map_result decode_revision_id values
   | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _ | Encoding.Map _
-  | Encoding.Bool _ | Encoding.Null -> Error (Invalid_record (name ^ " must be an array"))
+  | Encoding.Bool _ | Encoding.Null ->
+      Error (Invalid_record (name ^ " must be an array"))
 
 let encode_revision_id_array values =
   let* values = map_result encode_revision_id values in
@@ -1023,8 +1034,8 @@ let epoch_unsigned_bytes ~repository ~parents ~certificate_ids ~revoked
 let epoch_id_for ~repository ~parents ~certificate_ids ~revoked ~frontier
     ~recovery_device ~issuer =
   let* unsigned =
-    epoch_unsigned_bytes ~repository ~parents ~certificate_ids ~revoked ~frontier
-      ~recovery_device ~issuer
+    epoch_unsigned_bytes ~repository ~parents ~certificate_ids ~revoked
+      ~frontier ~recovery_device ~issuer
   in
   Ok (Repository_id.hex (digest authority_epoch_id_domain unsigned))
 
@@ -1061,9 +1072,10 @@ let validate_epoch_shape epoch =
   let* expected =
     epoch_id_for ~repository:epoch.epoch_repository_value
       ~parents:epoch.epoch_parents_value
-      ~certificate_ids:epoch.epoch_certificate_ids ~revoked:epoch.epoch_revoked_value
-      ~frontier:epoch.epoch_frontier_value
-      ~recovery_device:epoch.epoch_recovery_device_value ~issuer:epoch.epoch_issuer_value
+      ~certificate_ids:epoch.epoch_certificate_ids
+      ~revoked:epoch.epoch_revoked_value ~frontier:epoch.epoch_frontier_value
+      ~recovery_device:epoch.epoch_recovery_device_value
+      ~issuer:epoch.epoch_issuer_value
   in
   if not (String.equal expected epoch.epoch_id_value) then
     Error (Identity_mismatch "authority epoch ID")
@@ -1075,12 +1087,15 @@ let validate_epoch_shape epoch =
     Error (Invalid_epoch "certificates are not strictly sorted")
   else if not (sorted_unique compare_device_id epoch.epoch_revoked_value) then
     Error (Invalid_epoch "revocations are not strictly sorted")
-  else if not (sorted_unique compare_revision_id epoch.epoch_frontier_value) then
-    Error (Invalid_epoch "frontier is not strictly sorted")
+  else if not (sorted_unique compare_revision_id epoch.epoch_frontier_value)
+  then Error (Invalid_epoch "frontier is not strictly sorted")
   else
-    let* _ = map_result (validate_hex_id "authority parent") epoch.epoch_parents_value in
     let* _ =
-      map_result (validate_hex_id "authority certificate")
+      map_result (validate_hex_id "authority parent") epoch.epoch_parents_value
+    in
+    let* _ =
+      map_result
+        (validate_hex_id "authority certificate")
         epoch.epoch_certificate_ids
     in
     validate_epoch_issuer epoch.epoch_issuer_value
@@ -1089,9 +1104,10 @@ let encode_epoch epoch =
   let unsigned =
     epoch_unsigned_value ~repository:epoch.epoch_repository_value
       ~parents:epoch.epoch_parents_value
-      ~certificate_ids:epoch.epoch_certificate_ids ~revoked:epoch.epoch_revoked_value
-      ~frontier:epoch.epoch_frontier_value
-      ~recovery_device:epoch.epoch_recovery_device_value ~issuer:epoch.epoch_issuer_value
+      ~certificate_ids:epoch.epoch_certificate_ids
+      ~revoked:epoch.epoch_revoked_value ~frontier:epoch.epoch_frontier_value
+      ~recovery_device:epoch.epoch_recovery_device_value
+      ~issuer:epoch.epoch_issuer_value
     |> Result.get_ok
   in
   Encoding.array [ unsigned; Encoding.bytes epoch.epoch_signature ]
@@ -1101,34 +1117,50 @@ let decode_epoch encoded =
   let* value =
     Encoding.decode encoded
     |> Result.map_error (fun error ->
-           Invalid_record (Encoding.decode_error_to_string error))
+        Invalid_record (Encoding.decode_error_to_string error))
   in
   let* values = exact_array "V4 authority epoch" 2 value in
   match values with
-  | [ unsigned; signature ] ->
+  | [ unsigned; signature ] -> (
       let* signature = bytes_field "authority epoch signature" signature in
       let* fields = exact_array "V4 authority epoch unsigned body" 9 unsigned in
-      (match fields with
-      | [ version; repository; parents; certificates; revoked; frontier; recovery; issuer; algorithm_value ] ->
+      match fields with
+      | [
+       version;
+       repository;
+       parents;
+       certificates;
+       revoked;
+       frontier;
+       recovery;
+       issuer;
+       algorithm_value;
+      ] ->
           let* version = integer_field "authority epoch version" version in
           let* repository = decode_repository repository in
           let* parents = decode_text_array "authority parents" parents in
           let* certificate_ids =
             decode_text_array "authority certificates" certificates
           in
-          let* revoked = decode_device_id_array "authority revocations" revoked in
-          let* frontier = decode_revision_id_array "authority frontier" frontier in
+          let* revoked =
+            decode_device_id_array "authority revocations" revoked
+          in
+          let* frontier =
+            decode_revision_id_array "authority frontier" frontier
+          in
           let* recovery_device = decode_device recovery in
           let* issuer = text_field "authority issuer" issuer in
-          let* algorithm_value = text_field "authority algorithm" algorithm_value in
+          let* algorithm_value =
+            text_field "authority algorithm" algorithm_value
+          in
           if not (Int64.equal version 1L) then
             Error (Invalid_record "unsupported authority epoch version")
           else if not (String.equal algorithm_value algorithm) then
             Error (Unsupported_algorithm algorithm_value)
           else
             let* id =
-              epoch_id_for ~repository ~parents ~certificate_ids ~revoked ~frontier
-                ~recovery_device ~issuer
+              epoch_id_for ~repository ~parents ~certificate_ids ~revoked
+                ~frontier ~recovery_device ~issuer
             in
             let epoch =
               {
@@ -1150,7 +1182,9 @@ let decode_epoch encoded =
   | _ -> assert false
 
 let certificate_in_epoch epoch certificate =
-  List.exists (String.equal (certificate_id certificate)) epoch.epoch_certificate_ids
+  List.exists
+    (String.equal (certificate_id certificate))
+    epoch.epoch_certificate_ids
 
 let device_revoked epoch device =
   List.exists
@@ -1159,7 +1193,7 @@ let device_revoked epoch device =
 
 let certificate_active membership epoch certificate =
   certificate_in_epoch epoch certificate
-  && not (device_revoked epoch (certificate_subject certificate))
+  && (not (device_revoked epoch (certificate_subject certificate)))
   && Option.is_some
        (certificate_by_id membership.membership_certificates
           (certificate_id certificate))
@@ -1170,7 +1204,8 @@ let administrator_active membership epoch certificate =
 
 let verify_epoch_signature_device device epoch =
   match Mirage_crypto_ec.Ed25519.pub_of_octets (device_public_key device) with
-  | Error _ -> Error (Invalid_public_key (String.length (device_public_key device)))
+  | Error _ ->
+      Error (Invalid_public_key (String.length (device_public_key device)))
   | Ok public_key ->
       if
         Mirage_crypto_ec.Ed25519.verify ~key:public_key epoch.epoch_signature
@@ -1178,11 +1213,13 @@ let verify_epoch_signature_device device epoch =
       then Ok ()
       else Error Signature_verification_failed
 
-let union_sorted compare values =
-  List.sort_uniq compare (List.concat values)
+let union_sorted compare values = List.sort_uniq compare (List.concat values)
 
 let contains_all compare required actual =
-  List.for_all (fun value -> List.exists (fun candidate -> compare value candidate = 0) actual) required
+  List.for_all
+    (fun value ->
+      List.exists (fun candidate -> compare value candidate = 0) actual)
+    required
 
 let verify_authority ~membership epochs =
   let* membership =
@@ -1192,8 +1229,8 @@ let verify_authority ~membership epochs =
   let rec unique seen = function
     | [] -> Ok ()
     | epoch :: rest ->
-        if List.exists (fun id -> String.equal id epoch.epoch_id_value) seen then
-          Error Duplicate_epoch
+        if List.exists (fun id -> String.equal id epoch.epoch_id_value) seen
+        then Error Duplicate_epoch
         else unique (epoch.epoch_id_value :: seen) rest
   in
   let* () = unique [] epochs in
@@ -1247,15 +1284,16 @@ let verify_authority ~membership epochs =
             | Some issuer ->
                 if
                   List.for_all
-                    (fun parent -> administrator_active membership parent issuer)
+                    (fun parent ->
+                      administrator_active membership parent issuer)
                     parent_epochs
                 then Ok (certificate_subject issuer)
                 else Error Unauthorized_epoch_issuer
-            | None ->
+            | None -> (
                 let* recovery_issuer =
                   recovery_issuer_device epoch.epoch_issuer_value
                 in
-                (match recovery_issuer with
+                match recovery_issuer with
                 | None -> Error Unknown_issuer_certificate
                 | Some recovery_issuer ->
                     let recovery_matches parent =
@@ -1289,9 +1327,12 @@ let verify_authority ~membership epochs =
       let* _ =
         map_result
           (fun certificate_id ->
-            match certificate_by_id membership.membership_certificates certificate_id with
+            match
+              certificate_by_id membership.membership_certificates
+                certificate_id
+            with
             | None -> Error Unknown_issuer_certificate
-            | Some certificate ->
+            | Some certificate -> (
                 if parent_epochs = [] then Ok ()
                 else if
                   List.exists
@@ -1300,14 +1341,14 @@ let verify_authority ~membership epochs =
                 then Ok ()
                 else
                   match certificate_issuer certificate with
-                  | Some issuer_id ->
+                  | Some issuer_id -> (
                       let* recovery_issuer = recovery_issuer_device issuer_id in
-                      (match recovery_issuer with
+                      match recovery_issuer with
                       | Some recovery_issuer ->
                           if
-                            not
-                              (Model.Device_id.equal recovery_issuer
-                                 certificate.certificate_issuer_device)
+                            (not
+                               (Model.Device_id.equal recovery_issuer
+                                  certificate.certificate_issuer_device))
                             || not
                                  (List.for_all
                                     (fun parent ->
@@ -1337,7 +1378,7 @@ let verify_authority ~membership epochs =
                               Ok ()
                           | Some _ -> Error Unauthorized_epoch_issuer
                           | None -> Error Unknown_issuer_certificate))
-                  | None -> Error Invalid_root_certificate)
+                  | None -> Error Invalid_root_certificate))
           epoch.epoch_certificate_ids
       in
       let* _ =
@@ -1350,18 +1391,25 @@ let verify_authority ~membership epochs =
                     (device_id (certificate_subject certificate)))
                 membership.membership_certificates
             with
-            | Some certificate when certificate_in_epoch epoch certificate -> Ok ()
-            | Some _ -> Error (Invalid_epoch "revocation names an excluded device")
+            | Some certificate when certificate_in_epoch epoch certificate ->
+                Ok ()
+            | Some _ ->
+                Error (Invalid_epoch "revocation names an excluded device")
             | None -> Error (Invalid_epoch "revocation names an unknown device"))
           epoch.epoch_revoked_value
       in
       Ok (epoch.epoch_id_value :: checked)
   in
   let* checked =
-    List.fold_left (fun result epoch -> let* checked = result in check [] checked epoch)
+    List.fold_left
+      (fun result epoch ->
+        let* checked = result in
+        check [] checked epoch)
       (Ok []) epochs
   in
-  let roots = List.filter (fun epoch -> epoch.epoch_parents_value = []) epochs in
+  let roots =
+    List.filter (fun epoch -> epoch.epoch_parents_value = []) epochs
+  in
   if List.length roots <> 1 || List.length checked <> List.length epochs then
     Error (Invalid_epoch "authority graph must have one complete root")
   else
@@ -1371,35 +1419,47 @@ let verify_authority ~membership epochs =
     let heads =
       epochs
       |> List.filter (fun epoch ->
-             not (List.exists (String.equal epoch.epoch_id_value) parents))
+          not (List.exists (String.equal epoch.epoch_id_value) parents))
       |> List.map epoch_id |> List.sort String.compare
     in
     Ok
       {
         authority_membership_value = membership;
-        authority_epochs_value = List.sort (fun left right -> String.compare (epoch_id left) (epoch_id right)) epochs;
+        authority_epochs_value =
+          List.sort
+            (fun left right -> String.compare (epoch_id left) (epoch_id right))
+            epochs;
         authority_heads_value = heads;
       }
 
-let root_epoch ~membership ~root_certificate ~recovery_device signing_capability =
+let root_epoch ~membership ~root_certificate ~recovery_device signing_capability
+    =
   let* membership =
     verify_membership ~repository:membership.membership_repository
       membership.membership_certificates
   in
   let* certificate =
-    match certificate_by_id membership.membership_certificates root_certificate with
+    match
+      certificate_by_id membership.membership_certificates root_certificate
+    with
     | Some certificate -> Ok certificate
     | None -> Error Unknown_issuer_certificate
   in
-  if certificate_issuer certificate <> None || certificate_role certificate <> Administrator
+  if
+    certificate_issuer certificate <> None
+    || certificate_role certificate <> Administrator
   then Error Invalid_root_certificate
-  else if not (String.equal (signing_public_key signing_capability) (device_public_key (certificate_subject certificate))) then
-    Error Invalid_private_key
+  else if
+    not
+      (String.equal
+         (signing_public_key signing_capability)
+         (device_public_key (certificate_subject certificate)))
+  then Error Invalid_private_key
   else
     let* epoch =
       make_epoch ~repository:membership.membership_repository ~parents:[]
-        ~certificate_ids:[ root_certificate ] ~revoked:[] ~frontier:[] ~recovery_device
-        ~issuer:root_certificate signing_capability
+        ~certificate_ids:[ root_certificate ] ~revoked:[] ~frontier:[]
+        ~recovery_device ~issuer:root_certificate signing_capability
     in
     let* _ = verify_authority ~membership [ epoch ] in
     Ok epoch
@@ -1409,7 +1469,11 @@ let authority_epochs authority = authority.authority_epochs_value
 let authority_heads authority = authority.authority_heads_value
 
 let authority_epoch authority id =
-  match List.find_opt (fun epoch -> String.equal (epoch_id epoch) id) authority.authority_epochs_value with
+  match
+    List.find_opt
+      (fun epoch -> String.equal (epoch_id epoch) id)
+      authority.authority_epochs_value
+  with
   | Some epoch -> Ok epoch
   | None -> Error Unknown_epoch
 
@@ -1417,16 +1481,24 @@ let authority_device_active authority ~epoch device =
   match authority_epoch authority epoch with
   | Error _ -> false
   | Ok epoch -> (
-      match certificate_for_device authority.authority_membership_value device with
-      | Some certificate -> certificate_active authority.authority_membership_value epoch certificate
+      match
+        certificate_for_device authority.authority_membership_value device
+      with
+      | Some certificate ->
+          certificate_active authority.authority_membership_value epoch
+            certificate
       | None -> false)
 
 let authority_device_administrator authority ~epoch device =
   match authority_epoch authority epoch with
   | Error _ -> false
   | Ok epoch -> (
-      match certificate_for_device authority.authority_membership_value device with
-      | Some certificate -> administrator_active authority.authority_membership_value epoch certificate
+      match
+        certificate_for_device authority.authority_membership_value device
+      with
+      | Some certificate ->
+          administrator_active authority.authority_membership_value epoch
+            certificate
       | None -> false)
 
 let authority_epoch_is_head authority epoch =
@@ -1450,7 +1522,8 @@ let requires_late_review authority signed =
   in
   let* certificate =
     match
-      certificate_by_id authority.authority_membership_value.membership_certificates
+      certificate_by_id
+        authority.authority_membership_value.membership_certificates
         signed.signed_certificate
     with
     | Some certificate -> Ok certificate
@@ -1473,7 +1546,8 @@ let extend_authority authority additional =
     | [] -> Ok seen
     | epoch :: rest -> (
         match
-          List.find_opt (fun existing -> String.equal (epoch_id existing) (epoch_id epoch))
+          List.find_opt
+            (fun existing -> String.equal (epoch_id existing) (epoch_id epoch))
             seen
         with
         | None -> add (epoch :: seen) rest
@@ -1485,15 +1559,24 @@ let extend_authority authority additional =
 
 let successor_epoch authority ~parents ~certificates ~revoked ~frontier
     ~recovery_device ~issuer signing_capability =
-  if parents = [] then Error (Invalid_epoch "a successor needs at least one parent")
+  if parents = [] then
+    Error (Invalid_epoch "a successor needs at least one parent")
   else if not (sorted_unique String.compare parents) then
     Error (Invalid_epoch "parents are not strictly sorted")
-  else if not (List.for_all (fun parent -> List.mem parent authority.authority_heads_value) parents) then
+  else if
+    not
+      (List.for_all
+         (fun parent -> List.mem parent authority.authority_heads_value)
+         parents)
+  then
     Error (Invalid_epoch "a successor may only advance current authority heads")
   else
     let* parent_epochs = map_result (authority_epoch authority) parents in
     let* issuer_certificate =
-      match certificate_by_id authority.authority_membership_value.membership_certificates issuer with
+      match
+        certificate_by_id
+          authority.authority_membership_value.membership_certificates issuer
+      with
       | Some certificate -> Ok certificate
       | None -> Error Unknown_issuer_certificate
     in
@@ -1505,8 +1588,12 @@ let successor_epoch authority ~parents ~certificates ~revoked ~frontier
                issuer_certificate)
            parent_epochs)
     then Error Unauthorized_epoch_issuer
-    else if not (String.equal (signing_public_key signing_capability) (device_public_key (certificate_subject issuer_certificate))) then
-      Error Invalid_private_key
+    else if
+      not
+        (String.equal
+           (signing_public_key signing_capability)
+           (device_public_key (certificate_subject issuer_certificate)))
+    then Error Invalid_private_key
     else
       let certificate_ids =
         certificates |> List.map certificate_id |> List.sort String.compare
@@ -1514,7 +1601,8 @@ let successor_epoch authority ~parents ~certificates ~revoked ~frontier
       let revoked = List.sort compare_device_id revoked in
       let frontier = List.sort compare_revision_id frontier in
       let* epoch =
-        make_epoch ~repository:authority.authority_membership_value.membership_repository
+        make_epoch
+          ~repository:authority.authority_membership_value.membership_repository
           ~parents ~certificate_ids ~revoked ~frontier ~recovery_device ~issuer
           signing_capability
       in
@@ -1523,11 +1611,16 @@ let successor_epoch authority ~parents ~certificates ~revoked ~frontier
 
 let recover_epoch authority ~parents ~certificates ~revoked ~frontier
     ~recovery_device signing_capability =
-  if parents = [] then Error (Invalid_epoch "recovery needs at least one parent")
+  if parents = [] then
+    Error (Invalid_epoch "recovery needs at least one parent")
   else if not (sorted_unique String.compare parents) then
     Error (Invalid_epoch "parents are not strictly sorted")
-  else if not (List.for_all (fun parent -> List.mem parent authority.authority_heads_value) parents) then
-    Error (Invalid_epoch "recovery may only advance current authority heads")
+  else if
+    not
+      (List.for_all
+         (fun parent -> List.mem parent authority.authority_heads_value)
+         parents)
+  then Error (Invalid_epoch "recovery may only advance current authority heads")
   else
     let* parent_epochs = map_result (authority_epoch authority) parents in
     match parent_epochs with
@@ -1538,14 +1631,16 @@ let recover_epoch authority ~parents ~certificates ~revoked ~frontier
           not
             (List.for_all
                (fun parent ->
-                 device_equal consumed_recovery parent.epoch_recovery_device_value)
+                 device_equal consumed_recovery
+                   parent.epoch_recovery_device_value)
                other_parents)
         then Error Invalid_recovery_authority
         else if device_equal consumed_recovery recovery_device then
           Error (Invalid_epoch "recovery must rotate the consumed authority")
         else if
           not
-            (String.equal (signing_public_key signing_capability)
+            (String.equal
+               (signing_public_key signing_capability)
                (device_public_key consumed_recovery))
         then Error Invalid_private_key
         else
@@ -1556,19 +1651,28 @@ let recover_epoch authority ~parents ~certificates ~revoked ~frontier
           let frontier = List.sort compare_revision_id frontier in
           let* epoch =
             make_epoch
-              ~repository:authority.authority_membership_value.membership_repository
+              ~repository:
+                authority.authority_membership_value.membership_repository
               ~parents ~certificate_ids ~revoked ~frontier ~recovery_device
-              ~issuer:(recovery_issuer consumed_recovery) signing_capability
+              ~issuer:(recovery_issuer consumed_recovery)
+              signing_capability
           in
           let* _ = extend_authority authority [ epoch ] in
           Ok epoch
 
 let recover_enroll authority ~parents ~subject ~role signing_capability =
-  if parents = [] then Error (Invalid_epoch "recovery enrollment needs a parent")
+  if parents = [] then
+    Error (Invalid_epoch "recovery enrollment needs a parent")
   else if not (sorted_unique String.compare parents) then
     Error (Invalid_epoch "parents are not strictly sorted")
-  else if not (List.for_all (fun parent -> List.mem parent authority.authority_heads_value) parents) then
-    Error (Invalid_epoch "recovery enrollment may only use current authority heads")
+  else if
+    not
+      (List.for_all
+         (fun parent -> List.mem parent authority.authority_heads_value)
+         parents)
+  then
+    Error
+      (Invalid_epoch "recovery enrollment may only use current authority heads")
   else
     let* parent_epochs = map_result (authority_epoch authority) parents in
     match parent_epochs with
@@ -1584,24 +1688,29 @@ let recover_enroll authority ~parents ~subject ~role signing_capability =
         then Error Invalid_recovery_authority
         else if
           not
-            (String.equal (signing_public_key signing_capability)
+            (String.equal
+               (signing_public_key signing_capability)
                (device_public_key recovery_device))
         then Error Invalid_private_key
-        else if Option.is_some (certificate_for_device authority.authority_membership_value subject) then
-          Error Duplicate_device
+        else if
+          Option.is_some
+            (certificate_for_device authority.authority_membership_value subject)
+        then Error Duplicate_device
         else
           sign_certificate
-            ~repository:authority.authority_membership_value.membership_repository
+            ~repository:
+              authority.authority_membership_value.membership_repository
             ~subject ~role
             ~issuer_certificate:(Some (recovery_issuer recovery_device))
-            ~issuer_device:(device_id recovery_device) signing_capability
+            ~issuer_device:(device_id recovery_device)
+            signing_capability
 
 let sign_revision_at authority ~epoch ~certificate signing_capability revision =
   let* authority_epoch = authority_epoch authority epoch in
   let* author_certificate =
     match
-      certificate_by_id authority.authority_membership_value.membership_certificates
-        certificate
+      certificate_by_id
+        authority.authority_membership_value.membership_certificates certificate
     with
     | Some certificate -> Ok certificate
     | None -> Error Unknown_author_certificate
@@ -1613,11 +1722,16 @@ let sign_revision_at authority ~epoch ~certificate signing_capability revision =
   then Error Revoked_device
   else if
     not
-      (Model.Device_id.equal (device_id (certificate_subject author_certificate))
+      (Model.Device_id.equal
+         (device_id (certificate_subject author_certificate))
          revision.Model.revision_author)
   then Error Revision_author_mismatch
-  else if not (String.equal (signing_public_key signing_capability) (device_public_key (certificate_subject author_certificate))) then
-    Error Invalid_private_key
+  else if
+    not
+      (String.equal
+         (signing_public_key signing_capability)
+         (device_public_key (certificate_subject author_certificate)))
+  then Error Invalid_private_key
   else
     let* bytes =
       revision_unsigned_bytes
@@ -1630,7 +1744,8 @@ let sign_revision_at authority ~epoch ~certificate signing_capability revision =
     in
     Ok
       {
-        signed_repository = authority.authority_membership_value.membership_repository;
+        signed_repository =
+          authority.authority_membership_value.membership_repository;
         signed_certificate = certificate;
         signed_epoch_value = Some epoch;
         signed_revision_value = revision;
@@ -1648,13 +1763,15 @@ let verify_signed_revision_at authority signed =
   in
   let* certificate =
     match
-      certificate_by_id authority.authority_membership_value.membership_certificates
+      certificate_by_id
+        authority.authority_membership_value.membership_certificates
         signed.signed_certificate
     with
     | Some certificate -> Ok certificate
     | None -> Error Unknown_author_certificate
   in
-  if certificate_active authority.authority_membership_value epoch certificate then Ok ()
+  if certificate_active authority.authority_membership_value epoch certificate
+  then Ok ()
   else Error Revoked_device
 
 (* Exact, signed exceptions for late records.  They cannot grant a broad
@@ -1669,15 +1786,7 @@ let authorization_unsigned_value ~repository ~epoch ~issuer ~device ~revision
   let* revision = encode_revision_id revision in
   let* change = text (Model.Change_id.to_string change) in
   array
-    [
-      Encoding.integer 1L;
-      repository;
-      epoch;
-      issuer;
-      device;
-      revision;
-      change;
-    ]
+    [ Encoding.integer 1L; repository; epoch; issuer; device; revision; change ]
 
 let authorization_unsigned_bytes ~repository ~epoch ~issuer ~device ~revision
     ~change =
@@ -1685,24 +1794,36 @@ let authorization_unsigned_bytes ~repository ~epoch ~issuer ~device ~revision
     ~change
   |> Result.map Encoding.encode
 
-let authorization_signing_certificate authority ~epoch ~issuer signing_capability =
+let authorization_signing_certificate authority ~epoch ~issuer
+    signing_capability =
   let* epoch = authority_epoch authority epoch in
   let* certificate =
     match
-      certificate_by_id authority.authority_membership_value.membership_certificates issuer
+      certificate_by_id
+        authority.authority_membership_value.membership_certificates issuer
     with
     | Some certificate -> Ok certificate
     | None -> Error Unknown_issuer_certificate
   in
-  if not (administrator_active authority.authority_membership_value epoch certificate) then
-    Error Unauthorized_epoch_issuer
-  else if not (String.equal (signing_public_key signing_capability) (device_public_key (certificate_subject certificate))) then
-    Error Invalid_private_key
+  if
+    not
+      (administrator_active authority.authority_membership_value epoch
+         certificate)
+  then Error Unauthorized_epoch_issuer
+  else if
+    not
+      (String.equal
+         (signing_public_key signing_capability)
+         (device_public_key (certificate_subject certificate)))
+  then Error Invalid_private_key
   else Ok certificate
 
 let make_authorization authority ~epoch ~issuer signing_capability ~device
     ~revision ~change =
-  let* _ = authorization_signing_certificate authority ~epoch ~issuer signing_capability in
+  let* _ =
+    authorization_signing_certificate authority ~epoch ~issuer
+      signing_capability
+  in
   let* unsigned =
     authorization_unsigned_bytes
       ~repository:authority.authority_membership_value.membership_repository
@@ -1714,7 +1835,8 @@ let make_authorization authority ~epoch ~issuer signing_capability ~device
   in
   Ok
     {
-      authorization_repository = authority.authority_membership_value.membership_repository;
+      authorization_repository =
+        authority.authority_membership_value.membership_repository;
       authorization_epoch = epoch;
       authorization_issuer = issuer;
       authorization_device = device;
@@ -1723,32 +1845,38 @@ let make_authorization authority ~epoch ~issuer signing_capability ~device
       authorization_signature = signature;
     }
 
-let authorization_revision authorization = authorization.authorization_revision_value
+let authorization_revision authorization =
+  authorization.authorization_revision_value
+
 let authorization_epoch authorization = authorization.authorization_epoch
 
 let encode_authorization authorization =
   let unsigned =
-    authorization_unsigned_value ~repository:authorization.authorization_repository
-      ~epoch:authorization.authorization_epoch ~issuer:authorization.authorization_issuer
+    authorization_unsigned_value
+      ~repository:authorization.authorization_repository
+      ~epoch:authorization.authorization_epoch
+      ~issuer:authorization.authorization_issuer
       ~device:authorization.authorization_device
       ~revision:authorization.authorization_revision_value
       ~change:authorization.authorization_change
     |> Result.get_ok
   in
-  Encoding.array [ unsigned; Encoding.bytes authorization.authorization_signature ]
+  Encoding.array
+    [ unsigned; Encoding.bytes authorization.authorization_signature ]
   |> Result.get_ok |> Encoding.encode
 
 let decode_authorization encoded =
   let* value =
     Encoding.decode encoded
-    |> Result.map_error (fun error -> Invalid_record (Encoding.decode_error_to_string error))
+    |> Result.map_error (fun error ->
+        Invalid_record (Encoding.decode_error_to_string error))
   in
   let* values = exact_array "V4 authorization" 2 value in
   match values with
-  | [ unsigned; signature ] ->
+  | [ unsigned; signature ] -> (
       let* signature = bytes_field "authorization signature" signature in
       let* fields = exact_array "V4 authorization unsigned body" 7 unsigned in
-      (match fields with
+      match fields with
       | [ version; repository; epoch; issuer; device; revision; change ] ->
           let* version = integer_field "authorization version" version in
           let* repository = decode_repository repository in
@@ -1759,7 +1887,8 @@ let decode_authorization encoded =
           let* change = text_field "authorization change" change in
           let* change =
             Model.Change_id.of_string change
-            |> Result.map_error (fun error -> Invalid_record (Model.error_to_string error))
+            |> Result.map_error (fun error ->
+                Invalid_record (Model.error_to_string error))
           in
           if not (Int64.equal version 1L) then
             Error (Invalid_record "unsupported authorization version")
@@ -1775,7 +1904,8 @@ let decode_authorization encoded =
                 authorization_signature = signature;
               }
             in
-            if String.equal encoded (encode_authorization authorization) then Ok authorization
+            if String.equal encoded (encode_authorization authorization) then
+              Ok authorization
             else Error Noncanonical_record
       | _ -> assert false)
   | _ -> assert false
@@ -1787,30 +1917,43 @@ let verify_authorization authority authorization =
          authority.authority_membership_value.membership_repository)
   then Error Cross_repository_certificate
   else if String.length authorization.authorization_signature <> 64 then
-    Error (Invalid_signature (String.length authorization.authorization_signature))
+    Error
+      (Invalid_signature (String.length authorization.authorization_signature))
   else
     let* epoch = authority_epoch authority authorization.authorization_epoch in
     let* certificate =
       match
-        certificate_by_id authority.authority_membership_value.membership_certificates
+        certificate_by_id
+          authority.authority_membership_value.membership_certificates
           authorization.authorization_issuer
       with
       | Some certificate -> Ok certificate
       | None -> Error Unknown_issuer_certificate
     in
-    if not (administrator_active authority.authority_membership_value epoch certificate) then
-      Error Unauthorized_epoch_issuer
+    if
+      not
+        (administrator_active authority.authority_membership_value epoch
+           certificate)
+    then Error Unauthorized_epoch_issuer
     else
       let* bytes =
-        authorization_unsigned_bytes ~repository:authorization.authorization_repository
+        authorization_unsigned_bytes
+          ~repository:authorization.authorization_repository
           ~epoch:authorization.authorization_epoch
           ~issuer:authorization.authorization_issuer
           ~device:authorization.authorization_device
           ~revision:authorization.authorization_revision_value
           ~change:authorization.authorization_change
       in
-      match Mirage_crypto_ec.Ed25519.pub_of_octets (device_public_key (certificate_subject certificate)) with
-      | Error _ -> Error (Invalid_public_key (String.length (device_public_key (certificate_subject certificate))))
+      match
+        Mirage_crypto_ec.Ed25519.pub_of_octets
+          (device_public_key (certificate_subject certificate))
+      with
+      | Error _ ->
+          Error
+            (Invalid_public_key
+               (String.length
+                  (device_public_key (certificate_subject certificate))))
       | Ok public_key ->
           if
             Mirage_crypto_ec.Ed25519.verify ~key:public_key
@@ -1824,32 +1967,41 @@ let authorization_matches_signed_revision authorization signed =
     (signed_revision_id signed)
   && Model.Change_id.equal authorization.authorization_change
        signed.signed_revision_value.Model.change
-  && Model.Device_id.equal (device_id authorization.authorization_device)
+  && Model.Device_id.equal
+       (device_id authorization.authorization_device)
        signed.signed_revision_value.Model.revision_author
 
 let signed_revision_digest signed =
   Repository_id.hex
-    (digest "yeokcham:v4:signed-revision-digest:1\000" (encode_signed_revision signed))
+    (digest "yeokcham:v4:signed-revision-digest:1\000"
+       (encode_signed_revision signed))
 
-let adoption_unsigned_value ~repository ~epoch ~issuer ~revision ~signed_digest =
+let adoption_unsigned_value ~repository ~epoch ~issuer ~revision ~signed_digest
+    =
   let* repository = encode_repository repository in
   let* epoch = text epoch in
   let* issuer = text issuer in
   let* revision = encode_revision_id revision in
   let* signed_digest = text signed_digest in
-  array [ Encoding.integer 1L; repository; epoch; issuer; revision; signed_digest ]
+  array
+    [ Encoding.integer 1L; repository; epoch; issuer; revision; signed_digest ]
 
-let adoption_unsigned_bytes ~repository ~epoch ~issuer ~revision ~signed_digest =
+let adoption_unsigned_bytes ~repository ~epoch ~issuer ~revision ~signed_digest
+    =
   adoption_unsigned_value ~repository ~epoch ~issuer ~revision ~signed_digest
   |> Result.map Encoding.encode
 
 let make_adoption authority ~epoch ~issuer signing_capability ~signed_revision =
-  let* _ = authorization_signing_certificate authority ~epoch ~issuer signing_capability in
+  let* _ =
+    authorization_signing_certificate authority ~epoch ~issuer
+      signing_capability
+  in
   let* () = verify_signed_revision_at authority signed_revision in
   let* unsigned =
     adoption_unsigned_bytes
       ~repository:authority.authority_membership_value.membership_repository
-      ~epoch ~issuer ~revision:(signed_revision_id signed_revision)
+      ~epoch ~issuer
+      ~revision:(signed_revision_id signed_revision)
       ~signed_digest:(signed_revision_digest signed_revision)
   in
   let signature =
@@ -1858,7 +2010,8 @@ let make_adoption authority ~epoch ~issuer signing_capability ~signed_revision =
   in
   Ok
     {
-      adoption_repository = authority.authority_membership_value.membership_repository;
+      adoption_repository =
+        authority.authority_membership_value.membership_repository;
       adoption_epoch = epoch;
       adoption_issuer = issuer;
       adoption_revision_value = signed_revision_id signed_revision;
@@ -1883,21 +2036,24 @@ let encode_adoption adoption =
 let decode_adoption encoded =
   let* value =
     Encoding.decode encoded
-    |> Result.map_error (fun error -> Invalid_record (Encoding.decode_error_to_string error))
+    |> Result.map_error (fun error ->
+        Invalid_record (Encoding.decode_error_to_string error))
   in
   let* values = exact_array "V4 adoption" 2 value in
   match values with
-  | [ unsigned; signature ] ->
+  | [ unsigned; signature ] -> (
       let* signature = bytes_field "adoption signature" signature in
       let* fields = exact_array "V4 adoption unsigned body" 6 unsigned in
-      (match fields with
+      match fields with
       | [ version; repository; epoch; issuer; revision; signed_digest ] ->
           let* version = integer_field "adoption version" version in
           let* repository = decode_repository repository in
           let* epoch = text_field "adoption epoch" epoch in
           let* issuer = text_field "adoption issuer" issuer in
           let* revision = decode_revision_id revision in
-          let* signed_digest = text_field "adoption signed revision digest" signed_digest in
+          let* signed_digest =
+            text_field "adoption signed revision digest" signed_digest
+          in
           if not (Int64.equal version 1L) then
             Error (Invalid_record "unsupported adoption version")
           else
@@ -1928,14 +2084,18 @@ let verify_adoption authority adoption =
     let* epoch = authority_epoch authority adoption.adoption_epoch in
     let* certificate =
       match
-        certificate_by_id authority.authority_membership_value.membership_certificates
+        certificate_by_id
+          authority.authority_membership_value.membership_certificates
           adoption.adoption_issuer
       with
       | Some certificate -> Ok certificate
       | None -> Error Unknown_issuer_certificate
     in
-    if not (administrator_active authority.authority_membership_value epoch certificate) then
-      Error Unauthorized_epoch_issuer
+    if
+      not
+        (administrator_active authority.authority_membership_value epoch
+           certificate)
+    then Error Unauthorized_epoch_issuer
     else
       let* bytes =
         adoption_unsigned_bytes ~repository:adoption.adoption_repository
@@ -1943,15 +2103,25 @@ let verify_adoption authority adoption =
           ~revision:adoption.adoption_revision_value
           ~signed_digest:adoption.adoption_signed_digest
       in
-      match Mirage_crypto_ec.Ed25519.pub_of_octets (device_public_key (certificate_subject certificate)) with
-      | Error _ -> Error (Invalid_public_key (String.length (device_public_key (certificate_subject certificate))))
+      match
+        Mirage_crypto_ec.Ed25519.pub_of_octets
+          (device_public_key (certificate_subject certificate))
+      with
+      | Error _ ->
+          Error
+            (Invalid_public_key
+               (String.length
+                  (device_public_key (certificate_subject certificate))))
       | Ok public_key ->
           if
-            Mirage_crypto_ec.Ed25519.verify ~key:public_key adoption.adoption_signature
+            Mirage_crypto_ec.Ed25519.verify ~key:public_key
+              adoption.adoption_signature
               ~msg:(adoption_signature_domain ^ bytes)
           then Ok ()
           else Error Signature_verification_failed
 
 let adoption_matches_signed_revision adoption signed =
-  Model.Revision_id.equal adoption.adoption_revision_value (signed_revision_id signed)
-  && String.equal adoption.adoption_signed_digest (signed_revision_digest signed)
+  Model.Revision_id.equal adoption.adoption_revision_value
+    (signed_revision_id signed)
+  && String.equal adoption.adoption_signed_digest
+       (signed_revision_digest signed)

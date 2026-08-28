@@ -105,8 +105,10 @@ let line_after marker output =
   | [] -> Alcotest.fail "CLI output did not contain the requested marker"
   | lines -> (
       match List.find_index (String.equal marker) lines with
-      | Some index when index + 1 < List.length lines -> List.nth lines (index + 1)
-      | Some _ | None -> Alcotest.fail "CLI output did not contain a value after its marker")
+      | Some index when index + 1 < List.length lines ->
+          List.nth lines (index + 1)
+      | Some _ | None ->
+          Alcotest.fail "CLI output did not contain a value after its marker")
 
 let write_file root name contents =
   Out_channel.with_open_bin (Filename.concat root name) (fun channel ->
@@ -717,7 +719,8 @@ let command_joins_only_after_comparing_the_root_phrase () =
       in
       require_success "source init" status errors;
       let phrase =
-        line_after "root-verification-phrase (compare during device join)" output
+        line_after "root-verification-phrase (compare during device join)"
+          output
       in
       let output, errors, status = run [ "device"; "create" ] in
       require_success "member device create" status errors;
@@ -741,8 +744,7 @@ let command_joins_only_after_comparing_the_root_phrase () =
       require_success "member enroll" status errors;
       let package = Filename.concat root "authority-closure" in
       let _output, errors, status =
-        run
-          [ "package"; "create"; "--root"; source; "--destination"; package ]
+        run [ "package"; "create"; "--root"; source; "--destination"; package ]
       in
       require_success "authority package" status errors;
       let output, errors, status =
@@ -766,16 +768,23 @@ let command_joins_only_after_comparing_the_root_phrase () =
           ]
       in
       require_success "phrase-verified join" status errors;
-      expect_output_contains "join reports its deliberately separate receive step"
+      expect_output_contains
+        "join reports its deliberately separate receive step"
         "join verified authority closure" output;
-      let output, errors, status = run [ "device"; "show"; "--root"; destination ] in
+      let output, errors, status =
+        run [ "device"; "show"; "--root"; destination ]
+      in
       require_success "member identity" status errors;
-      expect_output_contains "the joined device is a member" "role member" output;
-      Alcotest.(check string) "join did not materialize incoming source bytes" "let version = 1\n"
-        (In_channel.with_open_bin (Filename.concat destination "main.ml")
+      expect_output_contains "the joined device is a member" "role member"
+        output;
+      Alcotest.(check string)
+        "join did not materialize incoming source bytes" "let version = 1\n"
+        (In_channel.with_open_bin
+           (Filename.concat destination "main.ml")
            In_channel.input_all))
 
-let command_refreshes_an_initial_recovery_package_without_changing_authority () =
+let command_refreshes_an_initial_recovery_package_without_changing_authority ()
+    =
   with_directory "yeokcham-v4-cli-recovery-refresh-" (fun root ->
       write_file root "main.ml" "let version = 1\n";
       let output, errors, status =
@@ -794,7 +803,8 @@ let command_refreshes_an_initial_recovery_package_without_changing_authority () 
       in
       require_success "recovery init" status errors;
       let mnemonic =
-        line_after "recovery-mnemonic (record offline; it is shown only now)" output
+        line_after "recovery-mnemonic (record offline; it is shown only now)"
+          output
       in
       let initial_package =
         Filename.concat (Filename.concat root ".yeokcham") "recovery-v1.cbor"
@@ -817,8 +827,10 @@ let command_refreshes_an_initial_recovery_package_without_changing_authority () 
       in
       require_success "recovery refresh" status errors;
       expect_output_contains "refresh names the exclusively written package"
-        ("recovery-package " ^ refreshed_package) output;
-      Alcotest.(check bool) "refresh writes an additional package" true
+        ("recovery-package " ^ refreshed_package)
+        output;
+      Alcotest.(check bool)
+        "refresh writes an additional package" true
         (Sys.file_exists refreshed_package))
 
 let watch_is_linux_only () =

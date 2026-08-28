@@ -18,14 +18,19 @@
 (test
  (name v4_authority_property_test)
  (modules v4_authority_property_test)
- (libraries alcotest qcheck-core qcheck-alcotest yeokcham_v4_model yeokcham_v4_trust))
+ (libraries
+  alcotest
+  qcheck-core
+  qcheck-alcotest
+  yeokcham_v4_model
+  yeokcham_v4_trust))
 
 (test
  (name test_v4_recovery)
  (modules test_v4_recovery)
  (libraries
   alcotest
- yeokcham_testkit
+  yeokcham_testkit
   yeokcham_v4_mnemonic
   yeokcham_v4_recovery
   yeokcham_v4_trust)

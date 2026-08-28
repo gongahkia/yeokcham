@@ -272,7 +272,9 @@ let manifest_bytes_v2 ~authority ~revisions ~authorizations ~adoptions
         in
         if
           List.length
-            (List.filter (Trust.adoption_matches_signed_revision adoption) revisions)
+            (List.filter
+               (Trust.adoption_matches_signed_revision adoption)
+               revisions)
           = 1
         then verify_adoptions rest
         else
@@ -283,24 +285,38 @@ let manifest_bytes_v2 ~authority ~revisions ~authorizations ~adoptions
   let* () = verify_revisions revisions in
   let* () = verify_authorizations authorizations in
   let* () = verify_adoptions adoptions in
-  let certificates = Trust.certificates membership |> List.map Trust.encode_certificate in
-  let epochs = Trust.authority_epochs authority |> List.map Trust.encode_epoch in
+  let certificates =
+    Trust.certificates membership |> List.map Trust.encode_certificate
+  in
+  let epochs =
+    Trust.authority_epochs authority |> List.map Trust.encode_epoch
+  in
   let revisions =
     revisions
     |> List.sort (fun left right ->
-           Model.Revision_id.compare
-             (Trust.signed_revision_id left)
-             (Trust.signed_revision_id right))
+        Model.Revision_id.compare
+          (Trust.signed_revision_id left)
+          (Trust.signed_revision_id right))
     |> List.map Trust.encode_signed_revision
   in
-  let authorizations = authorizations |> List.map Trust.encode_authorization |> List.sort String.compare in
-  let adoptions = adoptions |> List.map Trust.encode_adoption |> List.sort String.compare in
+  let authorizations =
+    authorizations
+    |> List.map Trust.encode_authorization
+    |> List.sort String.compare
+  in
+  let adoptions =
+    adoptions |> List.map Trust.encode_adoption |> List.sort String.compare
+  in
   let* () = ensure_unique_bytes "authorizations" authorizations in
   let* () = ensure_unique_bytes "adoptions" adoptions in
   let object_ids =
-    object_ids |> List.map Store.Stored_object_id.to_hex |> List.sort String.compare
+    object_ids
+    |> List.map Store.Stored_object_id.to_hex
+    |> List.sort String.compare
   in
-  let* repository = text (Trust.repository membership |> Trust.Repository_id.to_string) in
+  let* repository =
+    text (Trust.repository membership |> Trust.Repository_id.to_string)
+  in
   let* certificates = encode_bytes certificates in
   let* epochs = encode_bytes epochs in
   let* revisions = encode_bytes revisions in
@@ -419,7 +435,8 @@ let decode_manifest bytes =
         | [] -> Ok (List.rev reversed)
         | bytes :: rest ->
             let* epoch =
-              Trust.decode_epoch bytes |> Result.map_error (fun error -> Trust_error error)
+              Trust.decode_epoch bytes
+              |> Result.map_error (fun error -> Trust_error error)
             in
             decode_epochs (epoch :: reversed) rest
       in
@@ -439,7 +456,9 @@ let decode_manifest bytes =
             decode_revisions (revision :: reversed) rest
       in
       let* revisions = decode_revisions [] revisions in
-      let* authorizations = decode_bytes "authorization records" authorizations in
+      let* authorizations =
+        decode_bytes "authorization records" authorizations
+      in
       let rec decode_authorizations reversed = function
         | [] -> Ok (List.rev reversed)
         | bytes :: rest ->
@@ -793,14 +812,12 @@ let verify_and_import ~destination ~package ~membership:expected_membership
   let repository = Trust.repository expected_membership in
   let* manifest = read_file (package_path package manifest_name) in
   let* manifest = decode_manifest manifest in
-  if not (Trust.Repository_id.equal manifest.manifest_repository repository) then
-    Error (Invalid_package "package repository does not match destination")
+  if not (Trust.Repository_id.equal manifest.manifest_repository repository)
+  then Error (Invalid_package "package repository does not match destination")
   else if Option.is_some manifest.manifest_authority then
     Error (Invalid_package "authority package requires authority-aware receive")
   else
-    let* package_membership =
-      Ok manifest.manifest_membership
-    in
+    let* package_membership = Ok manifest.manifest_membership in
     let* membership =
       Trust.extend_membership expected_membership
         (Trust.certificates package_membership)
@@ -861,19 +878,23 @@ let verify_and_import ~destination ~package ~membership:expected_membership
         Ok (verified, project))
 
 let inspect_with_authority ~package ~authority:expected_authority =
-  let repository = Trust.repository (Trust.authority_membership expected_authority) in
+  let repository =
+    Trust.repository (Trust.authority_membership expected_authority)
+  in
   let* manifest = read_file (package_path package manifest_name) in
   let* manifest = decode_manifest manifest in
-  if not (Trust.Repository_id.equal manifest.manifest_repository repository) then
-    Error (Invalid_package "package repository does not match destination")
+  if not (Trust.Repository_id.equal manifest.manifest_repository repository)
+  then Error (Invalid_package "package repository does not match destination")
   else
     let* incoming_authority =
       match manifest.manifest_authority with
       | Some authority -> Ok authority
-      | None -> Error (Invalid_package "legacy package has no authority closure")
+      | None ->
+          Error (Invalid_package "legacy package has no authority closure")
     in
     let* membership =
-      Trust.extend_membership (Trust.authority_membership expected_authority)
+      Trust.extend_membership
+        (Trust.authority_membership expected_authority)
         (Trust.certificates manifest.manifest_membership)
       |> Result.map_error (fun error -> Trust_error error)
     in
@@ -929,7 +950,8 @@ let inspect_with_authority ~package ~authority:expected_authority =
           in
           if
             List.length
-              (List.filter (Trust.adoption_matches_signed_revision adoption)
+              (List.filter
+                 (Trust.adoption_matches_signed_revision adoption)
                  manifest.manifest_revisions)
             = 1
           then verify_adoptions rest
@@ -949,11 +971,14 @@ let inspect_with_authority ~package ~authority:expected_authority =
 
 let verify_and_import_with_authority ~destination ~package
     ~authority:expected_authority ~known_adoptions ~project =
-  let* inspected = inspect_with_authority ~package ~authority:expected_authority in
+  let* inspected =
+    inspect_with_authority ~package ~authority:expected_authority
+  in
   let* authority =
     match inspected.verified_authority with
     | Some authority -> Ok authority
-    | None -> Error (Invalid_package "authority inspection returned no authority")
+    | None ->
+        Error (Invalid_package "authority inspection returned no authority")
   in
   let* manifest = read_file (package_path package manifest_name) in
   let* manifest = decode_manifest manifest in
@@ -967,66 +992,65 @@ let verify_and_import_with_authority ~destination ~package
         verify_known_adoptions rest
   in
   let* () = verify_known_adoptions known_adoptions in
-    let rec require_adoption_for_late_revisions = function
-      | [] -> Ok ()
-      | signed :: rest ->
-          let revision = Trust.signed_revision_value signed in
-          if Option.is_some (existing_revision project revision) then
-            require_adoption_for_late_revisions rest
+  let rec require_adoption_for_late_revisions = function
+    | [] -> Ok ()
+    | signed :: rest ->
+        let revision = Trust.signed_revision_value signed in
+        if Option.is_some (existing_revision project revision) then
+          require_adoption_for_late_revisions rest
+        else
+          let* requires_review =
+            Trust.requires_late_review authority signed
+            |> Result.map_error (fun error -> Trust_error error)
+          in
+          if not requires_review then require_adoption_for_late_revisions rest
           else
-            let* requires_review =
-              Trust.requires_late_review authority signed
-              |> Result.map_error (fun error -> Trust_error error)
+            let adoptions =
+              List.filter
+                (fun adoption ->
+                  Trust.adoption_matches_signed_revision adoption signed
+                  && Trust.authority_epoch_is_head authority
+                       (Trust.adoption_epoch adoption))
+                (known_adoptions @ manifest.manifest_adoptions)
             in
-            if not requires_review then require_adoption_for_late_revisions rest
+            if List.length adoptions = 1 then
+              require_adoption_for_late_revisions rest
             else
-              let adoptions =
-                List.filter
-                  (fun adoption ->
-                    Trust.adoption_matches_signed_revision adoption signed
-                    && Trust.authority_epoch_is_head authority
-                         (Trust.adoption_epoch adoption))
-                  (known_adoptions @ manifest.manifest_adoptions)
-              in
-              if List.length adoptions = 1 then
-                require_adoption_for_late_revisions rest
-              else
-                Error
-                  (Invalid_package
-                     "late revision from a revoked device requires one current-head adoption")
-    in
-    let* () = require_adoption_for_late_revisions manifest.manifest_revisions in
-    let* objects =
-      package_object_bytes package manifest.manifest_object_ids
-    in
-    with_staging (fun staging_root ->
-        let* staging =
-          Store.init ~root:staging_root
-          |> Result.map_error (fun error -> Store_error error)
-        in
-        let rec stage = function
-          | [] -> Ok ()
-          | (_, object_) :: rest ->
-              let* _ =
-                Store.put staging object_
-                |> Result.map_error (fun error -> Store_error error)
-              in
-              stage rest
-        in
-        let* () = stage objects in
-        let* () = verify_closure staging manifest.manifest_revisions in
-        let* project = apply_revisions project inspected in
-        let rec import = function
-          | [] -> Ok ()
-          | (_, object_) :: rest ->
-              let* _ =
-                Store.put destination object_
-                |> Result.map_error (fun error -> Store_error error)
-              in
-              import rest
-        in
-        let* () = import objects in
-        Ok (inspected, project))
+              Error
+                (Invalid_package
+                   "late revision from a revoked device requires one \
+                    current-head adoption")
+  in
+  let* () = require_adoption_for_late_revisions manifest.manifest_revisions in
+  let* objects = package_object_bytes package manifest.manifest_object_ids in
+  with_staging (fun staging_root ->
+      let* staging =
+        Store.init ~root:staging_root
+        |> Result.map_error (fun error -> Store_error error)
+      in
+      let rec stage = function
+        | [] -> Ok ()
+        | (_, object_) :: rest ->
+            let* _ =
+              Store.put staging object_
+              |> Result.map_error (fun error -> Store_error error)
+            in
+            stage rest
+      in
+      let* () = stage objects in
+      let* () = verify_closure staging manifest.manifest_revisions in
+      let* project = apply_revisions project inspected in
+      let rec import = function
+        | [] -> Ok ()
+        | (_, object_) :: rest ->
+            let* _ =
+              Store.put destination object_
+              |> Result.map_error (fun error -> Store_error error)
+            in
+            import rest
+      in
+      let* () = import objects in
+      Ok (inspected, project))
 
 let membership verified = verified.verified_membership
 let authority verified = verified.verified_authority

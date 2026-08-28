@@ -208,7 +208,8 @@ let authority_root () =
     Trust.verify_authority ~membership [ root_epoch ]
     |> require_ok Trust.error_to_string
   in
-  Alcotest.(check string) "root authority epoch retains its golden encoding"
+  Alcotest.(check string)
+    "root authority epoch retains its golden encoding"
     (read_golden "v4/authority-epoch-v1.cbor.hex")
     (Trust.encode_epoch root_epoch);
   ( repository,
@@ -251,9 +252,11 @@ let authority_epochs_are_branch_scoped_and_reconcilable () =
   in
   let certificates = Trust.certificates membership in
   let enrolled_epoch =
-    Trust.successor_epoch root_authority ~parents:[ Trust.epoch_id root_epoch ]
+    Trust.successor_epoch root_authority
+      ~parents:[ Trust.epoch_id root_epoch ]
       ~certificates ~revoked:[] ~frontier:[] ~recovery_device
-      ~issuer:(Trust.certificate_id root_certificate) root_capability
+      ~issuer:(Trust.certificate_id root_certificate)
+      root_capability
     |> require_ok Trust.error_to_string
   in
   let authority =
@@ -261,30 +264,40 @@ let authority_epochs_are_branch_scoped_and_reconcilable () =
     |> require_ok Trust.error_to_string
   in
   let signed =
-    Trust.sign_revision_at authority ~epoch:(Trust.epoch_id enrolled_epoch)
-      ~certificate:(Trust.certificate_id member_certificate) member_capability
+    Trust.sign_revision_at authority
+      ~epoch:(Trust.epoch_id enrolled_epoch)
+      ~certificate:(Trust.certificate_id member_certificate)
+      member_capability
       (sample_revision (Trust.device_id member_device))
     |> require_ok Trust.error_to_string
   in
-  Alcotest.(check (option string)) "new signed record names its authority epoch"
+  Alcotest.(check (option string))
+    "new signed record names its authority epoch"
     (Some (Trust.epoch_id enrolled_epoch))
     (Trust.signed_revision_epoch signed);
-  Alcotest.(check string) "epoch-bound signed record retains its golden encoding"
+  Alcotest.(check string)
+    "epoch-bound signed record retains its golden encoding"
     (read_golden "v4/signed-revision-v2.cbor.hex")
     (Trust.encode_signed_revision signed);
   Trust.verify_signed_revision_at authority signed
   |> require_ok Trust.error_to_string;
   let first_branch =
-    Trust.successor_epoch authority ~parents:[ Trust.epoch_id enrolled_epoch ]
-      ~certificates ~revoked:[] ~frontier:[ revision "revision-one" ]
-      ~recovery_device ~issuer:(Trust.certificate_id root_certificate)
+    Trust.successor_epoch authority
+      ~parents:[ Trust.epoch_id enrolled_epoch ]
+      ~certificates ~revoked:[]
+      ~frontier:[ revision "revision-one" ]
+      ~recovery_device
+      ~issuer:(Trust.certificate_id root_certificate)
       root_capability
     |> require_ok Trust.error_to_string
   in
   let second_branch =
-    Trust.successor_epoch authority ~parents:[ Trust.epoch_id enrolled_epoch ]
-      ~certificates ~revoked:[] ~frontier:[ revision "revision-two" ]
-      ~recovery_device ~issuer:(Trust.certificate_id root_certificate)
+    Trust.successor_epoch authority
+      ~parents:[ Trust.epoch_id enrolled_epoch ]
+      ~certificates ~revoked:[]
+      ~frontier:[ revision "revision-two" ]
+      ~recovery_device
+      ~issuer:(Trust.certificate_id root_certificate)
       root_capability
     |> require_ok Trust.error_to_string
   in
@@ -292,10 +305,13 @@ let authority_epochs_are_branch_scoped_and_reconcilable () =
     Trust.extend_authority authority [ first_branch; second_branch ]
     |> require_ok Trust.error_to_string
   in
-  Alcotest.(check int) "both authority heads remain active until explicit reconciliation"
-    2 (List.length (Trust.authority_heads forked));
-  Alcotest.(check bool) "member remains active in the first branch" true
-    (Trust.authority_device_active forked ~epoch:(Trust.epoch_id first_branch)
+  Alcotest.(check int)
+    "both authority heads remain active until explicit reconciliation" 2
+    (List.length (Trust.authority_heads forked));
+  Alcotest.(check bool)
+    "member remains active in the first branch" true
+    (Trust.authority_device_active forked
+       ~epoch:(Trust.epoch_id first_branch)
        member_device);
   let reconciled =
     Trust.successor_epoch forked
@@ -304,7 +320,8 @@ let authority_epochs_are_branch_scoped_and_reconcilable () =
            [ Trust.epoch_id first_branch; Trust.epoch_id second_branch ])
       ~certificates ~revoked:[]
       ~frontier:[ revision "revision-one"; revision "revision-two" ]
-      ~recovery_device ~issuer:(Trust.certificate_id root_certificate)
+      ~recovery_device
+      ~issuer:(Trust.certificate_id root_certificate)
       root_capability
     |> require_ok Trust.error_to_string
   in
@@ -312,11 +329,14 @@ let authority_epochs_are_branch_scoped_and_reconcilable () =
     Trust.extend_authority forked [ reconciled ]
     |> require_ok Trust.error_to_string
   in
-  Alcotest.(check int) "reconciliation names both parents and closes the fork" 1
+  Alcotest.(check int)
+    "reconciliation names both parents and closes the fork" 1
     (List.length (Trust.authority_heads reconciled_authority));
-  Alcotest.(check bool) "root remains administrator after reconciliation" true
+  Alcotest.(check bool)
+    "root remains administrator after reconciliation" true
     (Trust.authority_device_administrator reconciled_authority
-       ~epoch:(Trust.epoch_id reconciled) root_device);
+       ~epoch:(Trust.epoch_id reconciled)
+       root_device);
   ignore repository
 
 let revocation_recovery_and_exact_exceptions_are_verified () =
@@ -349,9 +369,11 @@ let revocation_recovery_and_exact_exceptions_are_verified () =
   in
   let certificates = Trust.certificates membership in
   let enrolled_epoch =
-    Trust.successor_epoch root_authority ~parents:[ Trust.epoch_id root_epoch ]
+    Trust.successor_epoch root_authority
+      ~parents:[ Trust.epoch_id root_epoch ]
       ~certificates ~revoked:[] ~frontier:[] ~recovery_device
-      ~issuer:(Trust.certificate_id root_certificate) root_capability
+      ~issuer:(Trust.certificate_id root_certificate)
+      root_capability
     |> require_ok Trust.error_to_string
   in
   let authority =
@@ -359,37 +381,47 @@ let revocation_recovery_and_exact_exceptions_are_verified () =
     |> require_ok Trust.error_to_string
   in
   let signed =
-    Trust.sign_revision_at authority ~epoch:(Trust.epoch_id enrolled_epoch)
-      ~certificate:(Trust.certificate_id member_certificate) member_capability
+    Trust.sign_revision_at authority
+      ~epoch:(Trust.epoch_id enrolled_epoch)
+      ~certificate:(Trust.certificate_id member_certificate)
+      member_capability
       (sample_revision (Trust.device_id member_device))
     |> require_ok Trust.error_to_string
   in
   let authorization =
-    Trust.make_authorization authority ~epoch:(Trust.epoch_id enrolled_epoch)
-      ~issuer:(Trust.certificate_id root_certificate) root_capability
-      ~device:member_device ~revision:(Trust.signed_revision_id signed)
+    Trust.make_authorization authority
+      ~epoch:(Trust.epoch_id enrolled_epoch)
+      ~issuer:(Trust.certificate_id root_certificate)
+      root_capability ~device:member_device
+      ~revision:(Trust.signed_revision_id signed)
       ~change:(change "change-one")
     |> require_ok Trust.error_to_string
   in
   Trust.verify_authorization authority authorization
   |> require_ok Trust.error_to_string;
-  Alcotest.(check string) "one-time authorization retains its golden encoding"
+  Alcotest.(check string)
+    "one-time authorization retains its golden encoding"
     (read_golden "v4/authorization-v1.cbor.hex")
     (Trust.encode_authorization authorization);
   let adoption =
-    Trust.make_adoption authority ~epoch:(Trust.epoch_id enrolled_epoch)
-      ~issuer:(Trust.certificate_id root_certificate) root_capability
-      ~signed_revision:signed
+    Trust.make_adoption authority
+      ~epoch:(Trust.epoch_id enrolled_epoch)
+      ~issuer:(Trust.certificate_id root_certificate)
+      root_capability ~signed_revision:signed
     |> require_ok Trust.error_to_string
   in
   Trust.verify_adoption authority adoption |> require_ok Trust.error_to_string;
-  Alcotest.(check string) "one-time adoption retains its golden encoding"
+  Alcotest.(check string)
+    "one-time adoption retains its golden encoding"
     (read_golden "v4/adoption-v1.cbor.hex")
     (Trust.encode_adoption adoption);
   let revoked_epoch =
-    Trust.successor_epoch authority ~parents:[ Trust.epoch_id enrolled_epoch ]
-      ~certificates ~revoked:[ Trust.device_id member_device ] ~frontier:[]
-      ~recovery_device ~issuer:(Trust.certificate_id root_certificate)
+    Trust.successor_epoch authority
+      ~parents:[ Trust.epoch_id enrolled_epoch ]
+      ~certificates
+      ~revoked:[ Trust.device_id member_device ]
+      ~frontier:[] ~recovery_device
+      ~issuer:(Trust.certificate_id root_certificate)
       root_capability
     |> require_ok Trust.error_to_string
   in
@@ -398,14 +430,14 @@ let revocation_recovery_and_exact_exceptions_are_verified () =
     |> require_ok Trust.error_to_string
   in
   Alcotest.(check bool)
-    "a historical record from the now-revoked device needs explicit review"
-    true
+    "a historical record from the now-revoked device needs explicit review" true
     (Trust.requires_late_review revoked_authority signed
     |> require_ok Trust.error_to_string);
   let post_revocation_adoption =
-    Trust.make_adoption revoked_authority ~epoch:(Trust.epoch_id revoked_epoch)
-      ~issuer:(Trust.certificate_id root_certificate) root_capability
-      ~signed_revision:signed
+    Trust.make_adoption revoked_authority
+      ~epoch:(Trust.epoch_id revoked_epoch)
+      ~issuer:(Trust.certificate_id root_certificate)
+      root_capability ~signed_revision:signed
     |> require_ok Trust.error_to_string
   in
   Alcotest.(check bool)
@@ -413,12 +445,15 @@ let revocation_recovery_and_exact_exceptions_are_verified () =
     (Trust.authority_epoch_is_head revoked_authority
        (Trust.adoption_epoch post_revocation_adoption));
   (match
-     Trust.sign_revision_at revoked_authority ~epoch:(Trust.epoch_id revoked_epoch)
-       ~certificate:(Trust.certificate_id member_certificate) member_capability
+     Trust.sign_revision_at revoked_authority
+       ~epoch:(Trust.epoch_id revoked_epoch)
+       ~certificate:(Trust.certificate_id member_certificate)
+       member_capability
        (sample_revision (Trust.device_id member_device))
    with
   | Error error ->
-      Alcotest.(check string) "revoked device cannot sign at a newer epoch"
+      Alcotest.(check string)
+        "revoked device cannot sign at a newer epoch"
         "V4 device is revoked in this authority epoch"
         (Trust.error_to_string error)
   | Ok _ -> Alcotest.fail "revoked device signed at the newer epoch");
@@ -438,7 +473,8 @@ let revocation_recovery_and_exact_exceptions_are_verified () =
     |> require_ok Trust.error_to_string
   in
   let membership =
-    Trust.extend_membership (Trust.authority_membership revoked_authority)
+    Trust.extend_membership
+      (Trust.authority_membership revoked_authority)
       [ recovery_certificate ]
     |> require_ok Trust.error_to_string
   in
@@ -452,10 +488,13 @@ let revocation_recovery_and_exact_exceptions_are_verified () =
        (sample_revision (Trust.device_id replacement_administrator))
    with
   | Error error ->
-      Alcotest.(check string) "recovery certificate is rejected by legacy signing"
-        "V4 authority epoch issuer is not an active administrator in every parent"
+      Alcotest.(check string)
+        "recovery certificate is rejected by legacy signing"
+        "V4 authority epoch issuer is not an active administrator in every \
+         parent"
         (Trust.error_to_string error)
-  | Ok _ -> Alcotest.fail "recovery certificate signed through legacy membership");
+  | Ok _ ->
+      Alcotest.fail "recovery certificate signed through legacy membership");
   let revoked_authority =
     Trust.verify_authority ~membership
       (Trust.authority_epochs revoked_authority)
@@ -468,8 +507,8 @@ let revocation_recovery_and_exact_exceptions_are_verified () =
   in
   let recovered_epoch =
     Trust.recover_epoch revoked_authority
-      ~parents:[ Trust.epoch_id revoked_epoch ] ~certificates
-      ~revoked:final_revocations ~frontier:[]
+      ~parents:[ Trust.epoch_id revoked_epoch ]
+      ~certificates ~revoked:final_revocations ~frontier:[]
       ~recovery_device:replacement_recovery_device recovery_capability
     |> require_ok Trust.error_to_string
   in
@@ -477,24 +516,32 @@ let revocation_recovery_and_exact_exceptions_are_verified () =
     Trust.extend_authority revoked_authority [ recovered_epoch ]
     |> require_ok Trust.error_to_string
   in
-  Alcotest.(check int) "recovery advances the authority graph" 1
+  Alcotest.(check int)
+    "recovery advances the authority graph" 1
     (List.length (Trust.authority_heads recovered_authority));
-  Alcotest.(check bool) "recovery rotates to the replacement key" true
+  Alcotest.(check bool)
+    "recovery rotates to the replacement key" true
     (Trust.device_equal replacement_recovery_device
        (Trust.epoch_recovery_device recovered_epoch));
   Alcotest.(check bool)
-    "recovery can admit a replacement administrator while the old one is revoked"
+    "recovery can admit a replacement administrator while the old one is \
+     revoked"
     true
     (Trust.authority_device_administrator recovered_authority
-       ~epoch:(Trust.epoch_id recovered_epoch) replacement_administrator);
-  Alcotest.(check string) "authorization survives a canonical round trip"
+       ~epoch:(Trust.epoch_id recovered_epoch)
+       replacement_administrator);
+  Alcotest.(check string)
+    "authorization survives a canonical round trip"
     (Trust.encode_authorization authorization)
     (authorization |> Trust.encode_authorization |> Trust.decode_authorization
-    |> require_ok Trust.error_to_string |> Trust.encode_authorization);
-  Alcotest.(check string) "adoption binds the exact signed revision bytes"
+    |> require_ok Trust.error_to_string
+    |> Trust.encode_authorization);
+  Alcotest.(check string)
+    "adoption binds the exact signed revision bytes"
     (Trust.encode_adoption adoption)
     (adoption |> Trust.encode_adoption |> Trust.decode_adoption
-    |> require_ok Trust.error_to_string |> Trust.encode_adoption)
+    |> require_ok Trust.error_to_string
+    |> Trust.encode_adoption)
 
 let () =
   Alcotest.run "V4 trust"
@@ -509,7 +556,7 @@ let () =
             `Quick signed_revision_binds_author_and_membership;
           Alcotest.test_case "authority epochs keep forks explicit" `Quick
             authority_epochs_are_branch_scoped_and_reconcilable;
-          Alcotest.test_case "revocation, recovery, and exact exceptions"
-            `Quick revocation_recovery_and_exact_exceptions_are_verified;
+          Alcotest.test_case "revocation, recovery, and exact exceptions" `Quick
+            revocation_recovery_and_exact_exceptions_are_verified;
         ] );
     ]

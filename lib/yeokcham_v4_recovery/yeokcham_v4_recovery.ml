@@ -4,7 +4,6 @@ module Mnemonic = Yeokcham_v4_mnemonic
 module Trust = Yeokcham_v4_trust
 
 let ( let* ) = Result.bind
-
 let schema_version = 1L
 let algorithm = "chacha20-poly1305"
 let key_domain = "yeokcham:v4:recovery-package-key:1\000"
@@ -44,7 +43,8 @@ let error_to_string = function
   | Invalid_package detail -> "invalid V4 recovery package: " ^ detail
   | Unsupported_version version ->
       Printf.sprintf "unsupported V4 recovery package version: %Ld" version
-  | Unsupported_algorithm value -> "unsupported V4 recovery encryption: " ^ value
+  | Unsupported_algorithm value ->
+      "unsupported V4 recovery encryption: " ^ value
   | Noncanonical_package -> "V4 recovery package is not canonically encoded"
   | Decryption_failed -> "V4 recovery package cannot be decrypted"
   | Trust_error error -> Trust.error_to_string error
@@ -58,24 +58,29 @@ let array values = Encoding.array values |> construction
 
 let exact_array name length = function
   | Encoding.Array values when List.length values = length -> Ok values
-  | Encoding.Array _ -> Error (Invalid_package (name ^ " has the wrong field count"))
+  | Encoding.Array _ ->
+      Error (Invalid_package (name ^ " has the wrong field count"))
   | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _ | Encoding.Map _
-  | Encoding.Bool _ | Encoding.Null -> Error (Invalid_package (name ^ " must be an array"))
+  | Encoding.Bool _ | Encoding.Null ->
+      Error (Invalid_package (name ^ " must be an array"))
 
 let text_field name = function
   | Encoding.Text value -> Ok value
   | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Array _ | Encoding.Map _
-  | Encoding.Bool _ | Encoding.Null -> Error (Invalid_package (name ^ " must be text"))
+  | Encoding.Bool _ | Encoding.Null ->
+      Error (Invalid_package (name ^ " must be text"))
 
 let bytes_field name = function
   | Encoding.Bytes value -> Ok value
   | Encoding.Integer _ | Encoding.Text _ | Encoding.Array _ | Encoding.Map _
-  | Encoding.Bool _ | Encoding.Null -> Error (Invalid_package (name ^ " must be bytes"))
+  | Encoding.Bool _ | Encoding.Null ->
+      Error (Invalid_package (name ^ " must be bytes"))
 
 let integer_field name = function
   | Encoding.Integer value -> Ok value
   | Encoding.Bytes _ | Encoding.Text _ | Encoding.Array _ | Encoding.Map _
-  | Encoding.Bool _ | Encoding.Null -> Error (Invalid_package (name ^ " must be an integer"))
+  | Encoding.Bool _ | Encoding.Null ->
+      Error (Invalid_package (name ^ " must be an integer"))
 
 let digest domain bytes =
   Hash.digest_string (domain ^ bytes) |> Hash.to_raw_string
@@ -97,7 +102,8 @@ let generate_secret () =
 
 let secret_of_mnemonic mnemonic =
   let* secret =
-    Mnemonic.decode mnemonic |> Result.map_error (fun error -> Invalid_mnemonic error)
+    Mnemonic.decode mnemonic
+    |> Result.map_error (fun error -> Invalid_mnemonic error)
   in
   check_secret secret
 
@@ -137,15 +143,18 @@ let decode_device value =
       let* id =
         Yeokcham_v4_model.Device_id.of_string id
         |> Result.map_error (fun error ->
-               Invalid_package (Yeokcham_v4_model.error_to_string error))
+            Invalid_package (Yeokcham_v4_model.error_to_string error))
       in
       let* public_key = bytes_field "recovery public key" public_key in
       let* device =
         Trust.device_of_public_key public_key
         |> Result.map_error (fun error -> Trust_error error)
       in
-      if Yeokcham_v4_model.Device_id.equal id (Trust.device_id device) then Ok device
-      else Error (Invalid_package "recovery device ID is not derived from public key")
+      if Yeokcham_v4_model.Device_id.equal id (Trust.device_id device) then
+        Ok device
+      else
+        Error
+          (Invalid_package "recovery device ID is not derived from public key")
   | _ -> assert false
 
 let map_result f values =
@@ -157,13 +166,13 @@ let map_result f values =
   in
   go [] values
 
-let encode_bytes_array values =
-  values |> List.map Encoding.bytes |> array
+let encode_bytes_array values = values |> List.map Encoding.bytes |> array
 
 let decode_bytes_array name = function
   | Encoding.Array values -> map_result (bytes_field name) values
   | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _ | Encoding.Map _
-  | Encoding.Bool _ | Encoding.Null -> Error (Invalid_package (name ^ " must be an array"))
+  | Encoding.Bool _ | Encoding.Null ->
+      Error (Invalid_package (name ^ " must be an array"))
 
 let header_value package =
   let* repository = encode_repository package.package_repository in
@@ -196,27 +205,35 @@ let decode encoded =
     let* value =
       Encoding.decode encoded
       |> Result.map_error (fun error ->
-             Invalid_package (Encoding.decode_error_to_string error))
+          Invalid_package (Encoding.decode_error_to_string error))
     in
     let* fields = exact_array "V4 recovery package" 2 value in
     match fields with
-    | [ header; ciphertext ] ->
+    | [ header; ciphertext ] -> (
         let* header = exact_array "V4 recovery package header" 5 header in
-        (match header with
+        match header with
         | [ version; repository; device; nonce; algorithm_value ] ->
             let* version = integer_field "recovery package version" version in
             let* repository = decode_repository repository in
             let* recovery_device = decode_device device in
             let* nonce = bytes_field "recovery package nonce" nonce in
-            let* algorithm_value = text_field "recovery package algorithm" algorithm_value in
-            let* ciphertext = bytes_field "recovery package ciphertext" ciphertext in
-            if not (Int64.equal version schema_version) then Error (Unsupported_version version)
+            let* algorithm_value =
+              text_field "recovery package algorithm" algorithm_value
+            in
+            let* ciphertext =
+              bytes_field "recovery package ciphertext" ciphertext
+            in
+            if not (Int64.equal version schema_version) then
+              Error (Unsupported_version version)
             else if not (String.equal algorithm_value algorithm) then
               Error (Unsupported_algorithm algorithm_value)
             else if not (valid_nonce nonce) then
               Error (Invalid_package "nonce must contain 12 bytes")
-            else if String.length ciphertext < Mirage_crypto.Chacha20.tag_size then
-              Error (Invalid_package "ciphertext is shorter than the authentication tag")
+            else if String.length ciphertext < Mirage_crypto.Chacha20.tag_size
+            then
+              Error
+                (Invalid_package
+                   "ciphertext is shorter than the authentication tag")
             else
               let package =
                 {
@@ -249,7 +266,8 @@ let current_recovery_device authority =
               Trust.authority_epoch authority head
               |> Result.map_error (fun error -> Trust_error error)
             in
-            if Trust.device_equal device (Trust.epoch_recovery_device epoch) then Ok ()
+            if Trust.device_equal device (Trust.epoch_recovery_device epoch)
+            then Ok ()
             else Error (Trust_error Trust.Invalid_recovery_authority))
           rest
       in
@@ -260,7 +278,9 @@ let payload_value ~authority ~recovery_capability =
   let certificates =
     Trust.certificates membership |> List.map Trust.encode_certificate
   in
-  let epochs = Trust.authority_epochs authority |> List.map Trust.encode_epoch in
+  let epochs =
+    Trust.authority_epochs authority |> List.map Trust.encode_epoch
+  in
   let* repository = encode_repository (Trust.repository membership) in
   let* certificates = encode_bytes_array certificates in
   let* epochs = encode_bytes_array epochs in
@@ -280,19 +300,22 @@ let encryption_key secret = digest key_domain secret
 
 let make ~secret ~nonce ~authority ~recovery_capability =
   let* secret = check_secret secret in
-  if not (valid_nonce nonce) then Error (Invalid_package "nonce must contain 12 bytes")
+  if not (valid_nonce nonce) then
+    Error (Invalid_package "nonce must contain 12 bytes")
   else
     let* recovery_device = current_recovery_device authority in
     if
       not
-        (String.equal (Trust.signing_public_key recovery_capability)
+        (String.equal
+           (Trust.signing_public_key recovery_capability)
            (Trust.device_public_key recovery_device))
     then Error (Invalid_secret "does not match the active recovery device")
     else
       let* plaintext = payload_bytes ~authority ~recovery_capability in
       let package_without_ciphertext =
         {
-          package_repository = Trust.repository (Trust.authority_membership authority);
+          package_repository =
+            Trust.repository (Trust.authority_membership authority);
           package_recovery_device = recovery_device;
           package_nonce = nonce;
           package_ciphertext = "";
@@ -302,7 +325,8 @@ let make ~secret ~nonce ~authority ~recovery_capability =
       try
         let key = Mirage_crypto.Chacha20.of_secret (encryption_key secret) in
         let ciphertext =
-          Mirage_crypto.Chacha20.authenticate_encrypt ~key ~nonce ~adata:ad plaintext
+          Mirage_crypto.Chacha20.authenticate_encrypt ~key ~nonce ~adata:ad
+            plaintext
         in
         Ok { package_without_ciphertext with package_ciphertext = ciphertext }
       with Invalid_argument detail -> Error (Invalid_package detail)
@@ -323,7 +347,7 @@ let decode_payload bytes =
   let* value =
     Encoding.decode bytes
     |> Result.map_error (fun error ->
-           Invalid_package (Encoding.decode_error_to_string error))
+        Invalid_package (Encoding.decode_error_to_string error))
   in
   let* fields = exact_array "V4 recovery payload" 5 value in
   match fields with
@@ -331,9 +355,12 @@ let decode_payload bytes =
       let* version = integer_field "recovery payload version" version in
       let* repository = decode_repository repository in
       let* private_key = bytes_field "recovery private key" private_key in
-      let* certificates = decode_bytes_array "recovery certificates" certificates in
+      let* certificates =
+        decode_bytes_array "recovery certificates" certificates
+      in
       let* epochs = decode_bytes_array "recovery epochs" epochs in
-      if not (Int64.equal version schema_version) then Error (Unsupported_version version)
+      if not (Int64.equal version schema_version) then
+        Error (Unsupported_version version)
       else
         let* capability =
           Trust.signing_capability_of_private_key private_key
@@ -342,7 +369,8 @@ let decode_payload bytes =
         let* certificates =
           map_result
             (fun bytes ->
-              Trust.decode_certificate bytes |> Result.map_error (fun error -> Trust_error error))
+              Trust.decode_certificate bytes
+              |> Result.map_error (fun error -> Trust_error error))
             certificates
         in
         let* membership =
@@ -351,7 +379,9 @@ let decode_payload bytes =
         in
         let* epochs =
           map_result
-            (fun bytes -> Trust.decode_epoch bytes |> Result.map_error (fun error -> Trust_error error))
+            (fun bytes ->
+              Trust.decode_epoch bytes
+              |> Result.map_error (fun error -> Trust_error error))
             epochs
         in
         let* authority =
@@ -367,23 +397,35 @@ let recover ~mnemonic:phrase ~package =
   try
     let key = Mirage_crypto.Chacha20.of_secret (encryption_key secret) in
     match
-      Mirage_crypto.Chacha20.authenticate_decrypt ~key ~nonce:package.package_nonce
-        ~adata:ad package.package_ciphertext
+      Mirage_crypto.Chacha20.authenticate_decrypt ~key
+        ~nonce:package.package_nonce ~adata:ad package.package_ciphertext
     with
     | None -> Error Decryption_failed
     | Some plaintext ->
         let* repository, capability, authority = decode_payload plaintext in
-        if not (Trust.Repository_id.equal repository package.package_repository) then
-          Error (Invalid_package "payload repository does not match package header")
+        if not (Trust.Repository_id.equal repository package.package_repository)
+        then
+          Error
+            (Invalid_package "payload repository does not match package header")
         else if
           not
-            (String.equal (Trust.signing_public_key capability)
+            (String.equal
+               (Trust.signing_public_key capability)
                (Trust.device_public_key package.package_recovery_device))
-        then Error (Invalid_package "payload recovery key does not match package header")
+        then
+          Error
+            (Invalid_package
+               "payload recovery key does not match package header")
         else
           let* active_recovery = current_recovery_device authority in
-          if not (Trust.device_equal active_recovery package.package_recovery_device) then
-            Error (Invalid_package "package recovery device is not active in authority")
+          if
+            not
+              (Trust.device_equal active_recovery
+                 package.package_recovery_device)
+          then
+            Error
+              (Invalid_package
+                 "package recovery device is not active in authority")
           else
             Ok
               {

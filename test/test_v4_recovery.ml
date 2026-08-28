@@ -55,25 +55,36 @@ let recovery_authority () =
 let bip39_vectors_are_canonical () =
   let twelve_entropy = String.make 16 '\000' in
   let twelve =
-    "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
+    "abandon abandon abandon abandon abandon abandon abandon abandon abandon \
+     abandon abandon about"
   in
-  Alcotest.(check string) "known 12-word BIP-39 vector" twelve
+  Alcotest.(check string)
+    "known 12-word BIP-39 vector" twelve
     (Mnemonic.encode twelve_entropy |> require_ok Mnemonic.error_to_string);
-  Alcotest.(check string) "12-word phrase decodes exactly" twelve_entropy
+  Alcotest.(check string)
+    "12-word phrase decodes exactly" twelve_entropy
     (Mnemonic.decode twelve |> require_ok Mnemonic.error_to_string);
   let twenty_four_entropy = String.make 32 '\000' in
   let twenty_four =
-    "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon art"
+    "abandon abandon abandon abandon abandon abandon abandon abandon abandon \
+     abandon abandon abandon abandon abandon abandon abandon abandon abandon \
+     abandon abandon abandon abandon abandon art"
   in
-  Alcotest.(check string) "known 24-word BIP-39 vector" twenty_four
+  Alcotest.(check string)
+    "known 24-word BIP-39 vector" twenty_four
     (Mnemonic.encode twenty_four_entropy |> require_ok Mnemonic.error_to_string);
-  Alcotest.(check string) "24-word phrase decodes exactly" twenty_four_entropy
+  Alcotest.(check string)
+    "24-word phrase decodes exactly" twenty_four_entropy
     (Mnemonic.decode twenty_four |> require_ok Mnemonic.error_to_string)
 
 let encrypted_recovery_package_restores_only_with_the_mnemonic () =
-  let root_certificate, recovery_capability, authority = recovery_authority () in
+  let root_certificate, recovery_capability, authority =
+    recovery_authority ()
+  in
   let phrase =
-    "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon art"
+    "abandon abandon abandon abandon abandon abandon abandon abandon abandon \
+     abandon abandon abandon abandon abandon abandon abandon abandon abandon \
+     abandon abandon abandon abandon abandon art"
   in
   let secret =
     Recovery.secret_of_mnemonic phrase |> require_ok Recovery.error_to_string
@@ -84,29 +95,39 @@ let encrypted_recovery_package_restores_only_with_the_mnemonic () =
     |> require_ok Recovery.error_to_string
   in
   let encoded = Recovery.encode package in
-  Alcotest.(check string) "recovery package retains its golden encoding"
-    (read_golden "v4/recovery-package-v1.cbor.hex") encoded;
-  let decoded = Recovery.decode encoded |> require_ok Recovery.error_to_string in
+  Alcotest.(check string)
+    "recovery package retains its golden encoding"
+    (read_golden "v4/recovery-package-v1.cbor.hex")
+    encoded;
+  let decoded =
+    Recovery.decode encoded |> require_ok Recovery.error_to_string
+  in
   let recovered =
     Recovery.recover ~mnemonic:phrase ~package:decoded
     |> require_ok Recovery.error_to_string
   in
-  Alcotest.(check (list string)) "the complete authority closure is recovered"
+  Alcotest.(check (list string))
+    "the complete authority closure is recovered"
     (Trust.authority_heads authority)
     (Trust.authority_heads (Recovery.recovered_authority recovered));
-  Alcotest.(check bool) "recovered private capability matches the public authority"
-    true
+  Alcotest.(check bool)
+    "recovered private capability matches the public authority" true
     (String.equal
        (Trust.signing_public_key (Recovery.recovered_capability recovered))
        (Trust.device_public_key (Recovery.recovery_device decoded)));
-  Alcotest.(check int) "root verification phrase has twelve words" 12
-    (List.length (String.split_on_char ' ' (Recovery.verification_phrase root_certificate)));
+  Alcotest.(check int)
+    "root verification phrase has twelve words" 12
+    (List.length
+       (String.split_on_char ' '
+          (Recovery.verification_phrase root_certificate)));
   let wrong_phrase =
-    Mnemonic.encode (String.make 32 '\001') |> require_ok Mnemonic.error_to_string
+    Mnemonic.encode (String.make 32 '\001')
+    |> require_ok Mnemonic.error_to_string
   in
   (match Recovery.recover ~mnemonic:wrong_phrase ~package:decoded with
   | Error error ->
-      Alcotest.(check string) "another valid BIP-39 phrase cannot decrypt"
+      Alcotest.(check string)
+        "another valid BIP-39 phrase cannot decrypt"
         "V4 recovery package cannot be decrypted"
         (Recovery.error_to_string error)
   | Ok _ -> Alcotest.fail "recovery accepted another valid BIP-39 phrase");

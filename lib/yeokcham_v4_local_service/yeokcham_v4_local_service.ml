@@ -346,7 +346,8 @@ let local_device collaboration =
 
 let authority_context_for_parents authority ~parents =
   match parents with
-  | [] -> Error (Trust_error (Trust.Invalid_epoch "authority has no selected head"))
+  | [] ->
+      Error (Trust_error (Trust.Invalid_epoch "authority has no selected head"))
   | first :: rest ->
       let* first =
         Trust.authority_epoch authority first
@@ -360,15 +361,20 @@ let authority_context_for_parents authority ~parents =
               Trust.authority_epoch authority head
               |> Result.map_error (fun error -> Trust_error error)
             in
-            if not (Trust.device_equal recovery_device (Trust.epoch_recovery_device epoch)) then
-              Error (Trust_error Trust.Invalid_recovery_authority)
+            if
+              not
+                (Trust.device_equal recovery_device
+                   (Trust.epoch_recovery_device epoch))
+            then Error (Trust_error Trust.Invalid_recovery_authority)
             else
               gather
                 (Trust.epoch_revoked epoch @ revoked)
                 (Trust.epoch_frontier epoch @ frontier)
                 remaining
       in
-      let* revoked, frontier = gather (Trust.epoch_revoked first) (Trust.epoch_frontier first) rest in
+      let* revoked, frontier =
+        gather (Trust.epoch_revoked first) (Trust.epoch_frontier first) rest
+      in
       Ok
         ( parents,
           recovery_device,
@@ -378,7 +384,8 @@ let authority_context_for_parents authority ~parents =
 let current_authority_context authority =
   match Trust.authority_heads authority with
   | [ head ] -> authority_context_for_parents authority ~parents:[ head ]
-  | [] -> Error (Trust_error (Trust.Invalid_epoch "authority has no active head"))
+  | [] ->
+      Error (Trust_error (Trust.Invalid_epoch "authority has no active head"))
   | _ -> Error (Trust_error Trust.Authority_fork)
 
 let selected_authority_context ?parent authority =
@@ -390,8 +397,9 @@ let advance_authority_with ~authority ~membership ~parents ~recovery_device
     ~revoked ~frontier ~local_certificate ~signing_capability =
   let* epoch =
     Trust.successor_epoch authority ~parents
-      ~certificates:(Trust.certificates membership) ~revoked ~frontier
-      ~recovery_device ~issuer:local_certificate signing_capability
+      ~certificates:(Trust.certificates membership)
+      ~revoked ~frontier ~recovery_device ~issuer:local_certificate
+      signing_capability
     |> Result.map_error (fun error -> Trust_error error)
   in
   Trust.extend_authority authority [ epoch ]
@@ -433,7 +441,8 @@ let write_recovery_package_to_exclusive ~path ceremony =
     Fun.protect
       ~finally:(fun () -> close_out_noerr channel)
       (fun () ->
-        Out_channel.output_string channel (Recovery.encode ceremony.Recovery.package);
+        Out_channel.output_string channel
+          (Recovery.encode ceremony.Recovery.package);
         Out_channel.flush channel);
     Ok ()
   with Unix.Unix_error (error, operation, _) ->
@@ -442,7 +451,9 @@ let write_recovery_package_to_exclusive ~path ceremony =
          operation (Unix.error_message error))
 
 let write_recovery_package_exclusive ~root ceremony =
-  write_recovery_package_to_exclusive ~path:(recovery_package_path root) ceremony
+  write_recovery_package_to_exclusive
+    ~path:(recovery_package_path root)
+    ceremony
 
 let init ~root ~creator ~username ~initial_draft ~title =
   let* repository =
@@ -493,8 +504,8 @@ let init_authority_collaboration ~root ~username ~initial_draft ~title ~device
           capture ~root underlying_store |> Result.map_error error_to_string
         in
         let project =
-          Model.init ~creator:(Trust.device_id device) ~username ~initial_snapshot
-            ~initial_draft ~title
+          Model.init ~creator:(Trust.device_id device) ~username
+            ~initial_snapshot ~initial_draft ~title
         in
         Store.collaboration_with_authority ~authority ~revisions:[]
           ~local_certificate ~authorizations:[] ~adoptions:[]
@@ -550,8 +561,8 @@ let init_signed_with_recovery ~root ~username ~initial_draft ~title ~repository
           capture ~root underlying_store |> Result.map_error error_to_string
         in
         let project =
-          Model.init ~creator:(Trust.device_id device) ~username ~initial_snapshot
-            ~initial_draft ~title
+          Model.init ~creator:(Trust.device_id device) ~username
+            ~initial_snapshot ~initial_draft ~title
         in
         Store.collaboration_with_authority ~authority ~revisions:[]
           ~local_certificate:(Trust.certificate_id root_certificate)
@@ -560,7 +571,9 @@ let init_signed_with_recovery ~root ~username ~initial_draft ~title ~repository
         |> Result.map (fun collaboration -> (project, collaboration)))
     |> Result.map_error (fun error -> Store_error error)
   in
-  let* loaded = Store.load repository |> Result.map_error (fun error -> Store_error error) in
+  let* loaded =
+    Store.load repository |> Result.map_error (fun error -> Store_error error)
+  in
   Ok (status_of_project loaded.Store.project, ceremony)
 
 let status ~root =
@@ -619,7 +632,8 @@ let enroll_device ~parent ~root ~subject ~role ~username ~signing_capability =
             |> Result.map_error (fun error -> Store_error error)
         | Some authority ->
             let* authority =
-              Trust.verify_authority ~membership (Trust.authority_epochs authority)
+              Trust.verify_authority ~membership
+                (Trust.authority_epochs authority)
               |> Result.map_error (fun error -> Trust_error error)
             in
             let* authority =
@@ -644,7 +658,8 @@ let authority_heads ~root =
       | None ->
           Error
             (Trust_error
-               (Trust.Invalid_epoch "legacy collaboration has no authority epochs")))
+               (Trust.Invalid_epoch
+                  "legacy collaboration has no authority epochs")))
 
 let reconcile_authority ~root ~parents ~signing_capability =
   with_repository ~root (fun repository loaded ->
@@ -655,13 +670,15 @@ let reconcile_authority ~root ~parents ~signing_capability =
         | None ->
             Error
               (Trust_error
-                 (Trust.Invalid_epoch "legacy collaboration has no authority epochs"))
+                 (Trust.Invalid_epoch
+                    "legacy collaboration has no authority epochs"))
       in
       if List.length parents < 2 then
         Error
           (Trust_error
              (Trust.Invalid_epoch
-                "a reconciliation must explicitly name at least two authority heads"))
+                "a reconciliation must explicitly name at least two authority \
+                 heads"))
       else if List.sort_uniq String.compare parents <> parents then
         Error
           (Trust_error
@@ -683,8 +700,8 @@ let reconcile_authority ~root ~parents ~signing_capability =
         in
         let* authority =
           advance_authority_with ~authority
-            ~membership:(Store.membership collaboration) ~parents ~recovery_device
-            ~revoked ~frontier
+            ~membership:(Store.membership collaboration)
+            ~parents ~recovery_device ~revoked ~frontier
             ~local_certificate:(Store.local_certificate collaboration)
             ~signing_capability
         in
@@ -696,7 +713,8 @@ let reconcile_authority ~root ~parents ~signing_capability =
             ~adoptions:(Store.adoptions collaboration)
           |> Result.map_error (fun error -> Store_error error)
         in
-        persist_collaborative repository loaded loaded.Store.project collaboration)
+        persist_collaborative repository loaded loaded.Store.project
+          collaboration)
 
 let revoke_device ~parent ~root ~device ~signing_capability =
   with_repository ~root (fun repository loaded ->
@@ -707,15 +725,16 @@ let revoke_device ~parent ~root ~device ~signing_capability =
         | None ->
             Error
               (Trust_error
-                 (Trust.Invalid_epoch "legacy collaboration has no authority epochs"))
+                 (Trust.Invalid_epoch
+                    "legacy collaboration has no authority epochs"))
       in
       let* local = local_device collaboration in
       let* revoked_device =
         match
           Trust.certificates (Store.membership collaboration)
           |> List.find_opt (fun certificate ->
-                 Model.Device_id.equal device
-                   (Trust.device_id (Trust.certificate_subject certificate)))
+              Model.Device_id.equal device
+                (Trust.device_id (Trust.certificate_subject certificate)))
         with
         | Some certificate -> Ok (Trust.certificate_subject certificate)
         | None ->
@@ -727,7 +746,8 @@ let revoke_device ~parent ~root ~device ~signing_capability =
         Error
           (Trust_error
              (Trust.Invalid_epoch
-                "use atomic device rotation instead of revoking this local device"))
+                "use atomic device rotation instead of revoking this local \
+                 device"))
       else
         let* parents, recovery_device, revoked, frontier =
           selected_authority_context ?parent authority
@@ -737,8 +757,8 @@ let revoke_device ~parent ~root ~device ~signing_capability =
         in
         let* authority =
           advance_authority_with ~authority
-            ~membership:(Store.membership collaboration) ~parents ~recovery_device
-            ~revoked ~frontier
+            ~membership:(Store.membership collaboration)
+            ~parents ~recovery_device ~revoked ~frontier
             ~local_certificate:(Store.local_certificate collaboration)
             ~signing_capability
         in
@@ -750,7 +770,8 @@ let revoke_device ~parent ~root ~device ~signing_capability =
             ~adoptions:(Store.adoptions collaboration)
           |> Result.map_error (fun error -> Store_error error)
         in
-        persist_collaborative repository loaded loaded.Store.project collaboration)
+        persist_collaborative repository loaded loaded.Store.project
+          collaboration)
 
 let rotate_local_device ~parent ~root ~replacement ~signing_capability =
   with_repository ~root (fun repository loaded ->
@@ -761,21 +782,27 @@ let rotate_local_device ~parent ~root ~replacement ~signing_capability =
         | None ->
             Error
               (Trust_error
-                 (Trust.Invalid_epoch "legacy collaboration has no authority epochs"))
+                 (Trust.Invalid_epoch
+                    "legacy collaboration has no authority epochs"))
       in
       let* local = local_device collaboration in
       if Trust.device_equal local replacement then
-        Error (Trust_error (Trust.Invalid_epoch "replacement device is already local"))
+        Error
+          (Trust_error
+             (Trust.Invalid_epoch "replacement device is already local"))
       else
         let* old_certificate = local_certificate collaboration in
         let* replacement_certificate =
-          Trust.enroll (Store.membership collaboration)
-            ~issuer:(Store.local_certificate collaboration) signing_capability
-            ~subject:replacement ~role:(Trust.certificate_role old_certificate)
+          Trust.enroll
+            (Store.membership collaboration)
+            ~issuer:(Store.local_certificate collaboration)
+            signing_capability ~subject:replacement
+            ~role:(Trust.certificate_role old_certificate)
           |> Result.map_error (fun error -> Trust_error error)
         in
         let* membership =
-          Trust.extend_membership (Store.membership collaboration)
+          Trust.extend_membership
+            (Store.membership collaboration)
             [ replacement_certificate ]
           |> Result.map_error (fun error -> Trust_error error)
         in
@@ -787,11 +814,12 @@ let rotate_local_device ~parent ~root ~replacement ~signing_capability =
           selected_authority_context ?parent authority
         in
         let revoked =
-          Trust.device_id local :: revoked |> List.sort_uniq Model.Device_id.compare
+          Trust.device_id local :: revoked
+          |> List.sort_uniq Model.Device_id.compare
         in
         let* authority =
-          advance_authority_with ~authority ~membership ~parents ~recovery_device
-            ~revoked ~frontier
+          advance_authority_with ~authority ~membership ~parents
+            ~recovery_device ~revoked ~frontier
             ~local_certificate:(Store.local_certificate collaboration)
             ~signing_capability
         in
@@ -803,11 +831,13 @@ let rotate_local_device ~parent ~root ~replacement ~signing_capability =
             ~adoptions:(Store.adoptions collaboration)
           |> Result.map_error (fun error -> Store_error error)
         in
-        persist_collaborative repository loaded loaded.Store.project collaboration)
+        persist_collaborative repository loaded loaded.Store.project
+          collaboration)
 
 let read_recovery_package path =
   try
-    In_channel.with_open_bin path In_channel.input_all |> Recovery.decode
+    In_channel.with_open_bin path In_channel.input_all
+    |> Recovery.decode
     |> Result.map_error (fun error -> Recovery_error error)
   with Sys_error message ->
     Error (Recovery_error (Recovery.Invalid_package message))
@@ -821,7 +851,8 @@ let recover_authority ~root ~package ~mnemonic ~output ~replacement ~replaced =
         | None ->
             Error
               (Trust_error
-                 (Trust.Invalid_epoch "legacy collaboration has no authority epochs"))
+                 (Trust.Invalid_epoch
+                    "legacy collaboration has no authority epochs"))
       in
       let* package = read_recovery_package package in
       let* recovered =
@@ -835,17 +866,20 @@ let recover_authority ~root ~package ~mnemonic ~output ~replacement ~replaced =
       if
         not
           (String.equal
-             (Trust.signing_public_key (Recovery.recovered_capability recovered))
+             (Trust.signing_public_key
+                (Recovery.recovered_capability recovered))
              (Trust.device_public_key current_recovery))
       then Error (Trust_error Trust.Invalid_recovery_authority)
       else
         let* replacement_certificate =
           Trust.recover_enroll authority ~parents ~subject:replacement
-            ~role:Trust.Administrator (Recovery.recovered_capability recovered)
+            ~role:Trust.Administrator
+            (Recovery.recovered_capability recovered)
           |> Result.map_error (fun error -> Trust_error error)
         in
         let* membership =
-          Trust.extend_membership (Store.membership collaboration)
+          Trust.extend_membership
+            (Store.membership collaboration)
             [ replacement_certificate ]
           |> Result.map_error (fun error -> Trust_error error)
         in
@@ -854,11 +888,11 @@ let recover_authority ~root ~package ~mnemonic ~output ~replacement ~replaced =
           |> Result.map_error (fun error -> Trust_error error)
         in
         let revoked =
-          replaced :: revoked
-          |> List.sort_uniq Model.Device_id.compare
+          replaced :: revoked |> List.sort_uniq Model.Device_id.compare
         in
         let* next_recovery =
-          Trust.generate_device () |> Result.map_error (fun error -> Trust_error error)
+          Trust.generate_device ()
+          |> Result.map_error (fun error -> Trust_error error)
         in
         let next_recovery_device = Trust.generated_identity next_recovery in
         let next_recovery_capability =
@@ -876,16 +910,17 @@ let recover_authority ~root ~package ~mnemonic ~output ~replacement ~replaced =
           |> Result.map_error (fun error -> Trust_error error)
         in
         let* ceremony =
-          Recovery.create ~authority ~recovery_capability:next_recovery_capability
+          Recovery.create ~authority
+            ~recovery_capability:next_recovery_capability
           |> Result.map_error (fun error -> Recovery_error error)
         in
         let* () =
           write_recovery_package_to_exclusive ~path:output ceremony
           |> Result.map_error (fun detail ->
-                 Recovery_error (Recovery.Invalid_package detail))
+              Recovery_error (Recovery.Invalid_package detail))
         in
         let* collaboration =
-            Store.collaboration_with_authority ~authority
+          Store.collaboration_with_authority ~authority
             ~revisions:(Store.signed_revisions collaboration)
             ~local_certificate:(Trust.certificate_id replacement_certificate)
             ~authorizations:(Store.authorizations collaboration)
@@ -893,7 +928,8 @@ let recover_authority ~root ~package ~mnemonic ~output ~replacement ~replaced =
           |> Result.map_error (fun error -> Store_error error)
         in
         let* status =
-          persist_collaborative repository loaded loaded.Store.project collaboration
+          persist_collaborative repository loaded loaded.Store.project
+            collaboration
         in
         Ok (status, ceremony))
 
@@ -906,7 +942,8 @@ let refresh_recovery_package ~root ~package ~mnemonic ~output =
         | None ->
             Error
               (Trust_error
-                 (Trust.Invalid_epoch "legacy collaboration has no authority epochs"))
+                 (Trust.Invalid_epoch
+                    "legacy collaboration has no authority epochs"))
       in
       let* package = read_recovery_package package in
       let* recovered =
@@ -920,7 +957,8 @@ let refresh_recovery_package ~root ~package ~mnemonic ~output =
       if
         not
           (String.equal
-             (Trust.signing_public_key (Recovery.recovered_capability recovered))
+             (Trust.signing_public_key
+                (Recovery.recovered_capability recovered))
              (Trust.device_public_key current_recovery))
       then Error (Trust_error Trust.Invalid_recovery_authority)
       else
@@ -933,10 +971,10 @@ let refresh_recovery_package ~root ~package ~mnemonic ~output =
             ~recovery_capability:(Recovery.recovered_capability recovered)
           |> Result.map_error (fun error -> Recovery_error error)
         in
-        let ceremony = { Recovery.mnemonic = mnemonic; package } in
+        let ceremony = { Recovery.mnemonic; package } in
         write_recovery_package_to_exclusive ~path:output ceremony
         |> Result.map_error (fun detail ->
-               Recovery_error (Recovery.Invalid_package detail)))
+            Recovery_error (Recovery.Invalid_package detail)))
 
 let save ~root =
   with_repository ~root (fun repository loaded ->
@@ -1650,7 +1688,10 @@ let merge_public_records ~encode existing incoming =
     | [] -> Ok known
     | record :: rest ->
         let bytes = encode record in
-        if List.exists (fun existing -> String.equal bytes (encode existing)) known
+        if
+          List.exists
+            (fun existing -> String.equal bytes (encode existing))
+            known
         then add known rest
         else add (record :: known) rest
   in
@@ -1677,7 +1718,8 @@ let review_package ~root ~package =
         | None ->
             Error
               (Trust_error
-                 (Trust.Invalid_epoch "legacy collaboration has no authority epochs"))
+                 (Trust.Invalid_epoch
+                    "legacy collaboration has no authority epochs"))
       in
       let* inspected =
         Package.inspect_with_authority ~package ~authority
@@ -1721,7 +1763,8 @@ let adopt_package_revision ~authority_epoch ~root ~package ~revision
         | None ->
             Error
               (Trust_error
-                 (Trust.Invalid_epoch "legacy collaboration has no authority epochs"))
+                 (Trust.Invalid_epoch
+                    "legacy collaboration has no authority epochs"))
       in
       let* inspected =
         Package.inspect_with_authority ~package ~authority:expected_authority
@@ -1739,7 +1782,7 @@ let adopt_package_revision ~authority_epoch ~root ~package ~revision
       let matching =
         Package.revisions inspected
         |> List.filter (fun signed ->
-               Model.Revision_id.equal (Trust.signed_revision_id signed) revision)
+            Model.Revision_id.equal (Trust.signed_revision_id signed) revision)
       in
       let* signed =
         match matching with
@@ -1763,15 +1806,19 @@ let adopt_package_revision ~authority_epoch ~root ~package ~revision
         Error
           (Package_error
              (Package.Invalid_package
-                "the requested revision does not require a late-arrival adoption"))
+                "the requested revision does not require a late-arrival \
+                 adoption"))
       else
-        let* head = selected_authority_head ~selected:authority_epoch authority in
+        let* head =
+          selected_authority_head ~selected:authority_epoch authority
+        in
         let* local_certificate =
           match
             Trust.certificates (Trust.authority_membership authority)
             |> List.find_opt (fun certificate ->
-                   String.equal (Trust.certificate_id certificate)
-                     (Store.local_certificate existing))
+                String.equal
+                  (Trust.certificate_id certificate)
+                  (Store.local_certificate existing))
           with
           | Some certificate -> Ok certificate
           | None ->
@@ -1781,13 +1828,16 @@ let adopt_package_revision ~authority_epoch ~root ~package ~revision
                       "local certificate is absent from inspected authority"))
         in
         let local_device = Trust.certificate_subject local_certificate in
-        if not (Trust.authority_device_administrator authority ~epoch:head local_device)
+        if
+          not
+            (Trust.authority_device_administrator authority ~epoch:head
+               local_device)
         then Error (Trust_error Trust.Unauthorized_epoch_issuer)
         else
           let* adoption =
             Trust.make_adoption authority ~epoch:head
-              ~issuer:(Store.local_certificate existing) signing_capability
-              ~signed_revision:signed
+              ~issuer:(Store.local_certificate existing)
+              signing_capability ~signed_revision:signed
             |> Result.map_error (fun error -> Trust_error error)
           in
           let* revisions =
@@ -1800,10 +1850,12 @@ let adopt_package_revision ~authority_epoch ~root ~package ~revision
           let* collaboration =
             Store.collaboration_with_authority ~authority ~revisions
               ~local_certificate:(Store.local_certificate existing)
-              ~authorizations:(Store.authorizations existing) ~adoptions
+              ~authorizations:(Store.authorizations existing)
+              ~adoptions
             |> Result.map_error (fun error -> Store_error error)
           in
-          persist_collaborative repository loaded loaded.Store.project collaboration)
+          persist_collaborative repository loaded loaded.Store.project
+            collaboration)
 
 let receive_package ~root ~package =
   with_repository ~root (fun repository loaded ->
@@ -1813,7 +1865,8 @@ let receive_package ~root ~package =
           let* received =
             Package.verify_and_import
               ~destination:(Store.underlying_store repository)
-              ~package ~membership:(Store.membership existing)
+              ~package
+              ~membership:(Store.membership existing)
               ~project:loaded.Store.project
             |> Result.map_error (fun error -> Package_error error)
           in
@@ -1824,8 +1877,10 @@ let receive_package ~root ~package =
               (Package.revisions received)
           in
           let* collaboration =
-            Store.collaboration ~membership:(Package.membership received)
-              ~revisions ~local_certificate:(Store.local_certificate existing)
+            Store.collaboration
+              ~membership:(Package.membership received)
+              ~revisions
+              ~local_certificate:(Store.local_certificate existing)
             |> Result.map_error (fun error -> Store_error error)
           in
           persist_collaborative repository loaded project collaboration
@@ -1854,11 +1909,13 @@ let receive_package ~root ~package =
           in
           let* authorizations =
             merge_public_records ~encode:Trust.encode_authorization
-              (Store.authorizations existing) (Package.authorizations received)
+              (Store.authorizations existing)
+              (Package.authorizations received)
           in
           let* adoptions =
             merge_public_records ~encode:Trust.encode_adoption
-              (Store.adoptions existing) (Package.adoptions received)
+              (Store.adoptions existing)
+              (Package.adoptions received)
           in
           let* collaboration =
             Store.collaboration_with_authority ~authority ~revisions

@@ -95,10 +95,10 @@ type package_review = {
   review_author : Yeokcham_v4_model.Device_id.t;
   requires_adoption : bool;
 }
-(** Public, read-only package review data. A positive [requires_adoption]
-    means a current authority head has revoked the historical signer, so this
-    exact signed record cannot be received without an administrator's later
-    adoption. *)
+(** Public, read-only package review data. A positive [requires_adoption] means
+    a current authority head has revoked the historical signer, so this exact
+    signed record cannot be received without an administrator's later adoption.
+*)
 
 type save_outcome = Unchanged of status | Saved of status
 
@@ -212,9 +212,9 @@ val enroll_device :
   signing_capability:Yeokcham_v4_trust.signing_capability ->
   (status, error) result
 (** An already authorized administrator enrols [subject]. On an authority fork,
-    [parent] must name the single current head this branch-local action advances.
-    The username is only local display registration made alongside, never
-    certificate data. *)
+    [parent] must name the single current head this branch-local action
+    advances. The username is only local display registration made alongside,
+    never certificate data. *)
 
 val revoke_device :
   parent:string option ->
@@ -224,8 +224,8 @@ val revoke_device :
   (status, error) result
 (** Advances one authority head. On a fork, [parent] must explicitly name that
     current head. Historical records remain verifiable; new records by the
-    revoked device do not. A local device must use rotation rather than
-    revoking itself. *)
+    revoked device do not. A local device must use rotation rather than revoking
+    itself. *)
 
 val rotate_local_device :
   parent:string option ->
@@ -273,7 +273,8 @@ val refresh_recovery_package :
 
 val authority_heads : root:string -> (string list, error) result
 
-val review_package : root:string -> package:string -> (package_review list, error) result
+val review_package :
+  root:string -> package:string -> (package_review list, error) result
 (** Verifies a V2 package manifest and reports its signed records without
     importing objects or modifying the model or working tree. *)
 

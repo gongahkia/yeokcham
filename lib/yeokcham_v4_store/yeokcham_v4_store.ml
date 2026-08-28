@@ -214,7 +214,8 @@ let validate_collaboration ~project collaboration =
                   |> Result.map_error (fun error -> Trust_error error)
                 in
                 let matching =
-                  List.filter (Trust.adoption_matches_signed_revision adoption)
+                  List.filter
+                    (Trust.adoption_matches_signed_revision adoption)
                     signed_revisions
                 in
                 if List.length matching = 1 then verify_adoptions rest
@@ -223,7 +224,9 @@ let validate_collaboration ~project collaboration =
                     (Invalid_collaboration_state
                        "adoption must bind exactly one signed revision")
           in
-          let* () = verify_authorizations collaboration.collaboration_authorizations in
+          let* () =
+            verify_authorizations collaboration.collaboration_authorizations
+          in
           verify_adoptions collaboration.collaboration_adoptions
     in
     Ok
@@ -231,7 +234,8 @@ let validate_collaboration ~project collaboration =
         collaboration_membership = membership;
         collaboration_authority = authority;
         collaboration_revisions = signed_revisions;
-        collaboration_authorizations = collaboration.collaboration_authorizations;
+        collaboration_authorizations =
+          collaboration.collaboration_authorizations;
         collaboration_adoptions = collaboration.collaboration_adoptions;
         collaboration_local_certificate = local_certificate_id;
       }
@@ -407,7 +411,9 @@ let collaboration_value ~project collaboration =
           local_certificate;
         ]
   | Some authority ->
-      let epochs = Trust.authority_epochs authority |> List.map Trust.encode_epoch in
+      let epochs =
+        Trust.authority_epochs authority |> List.map Trust.encode_epoch
+      in
       let authorizations =
         collaboration.collaboration_authorizations
         |> List.map Trust.encode_authorization
@@ -627,7 +633,9 @@ let decode_collaborative_state encoded =
         in
         loop [] adoptions
       in
-      let* local_certificate = text_field "local certificate" local_certificate in
+      let* local_certificate =
+        text_field "local certificate" local_certificate
+      in
       let* collaboration =
         collaboration_with_authority ~authority ~revisions ~local_certificate
           ~authorizations ~adoptions

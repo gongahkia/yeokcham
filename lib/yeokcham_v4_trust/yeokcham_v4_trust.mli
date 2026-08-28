@@ -129,9 +129,10 @@ val decode_signed_revision : string -> (signed_revision, error) result
 val verify_signed_revision :
   membership -> signed_revision -> (unit, error) result
 
-(** Branching authority epochs are a public, immutable policy graph.  They are
-    deliberately separate from username registration and private-key custody. *)
 val epoch_id : epoch -> string
+(** Branching authority epochs are a public, immutable policy graph. They are
+    deliberately separate from username registration and private-key custody. *)
+
 val epoch_parents : epoch -> string list
 val epoch_revoked : epoch -> Model.Device_id.t list
 val epoch_frontier : epoch -> Model.Revision_id.t list
@@ -168,9 +169,9 @@ val recover_epoch :
   recovery_device:device ->
   signing_capability ->
   (epoch, error) result
-(** Uses the recovery authority shared by every selected parent.  Recovery
-    replaces that authority atomically, so a consumed recovery key cannot
-    remain active in the resulting epoch. *)
+(** Uses the recovery authority shared by every selected parent. Recovery
+    replaces that authority atomically, so a consumed recovery key cannot remain
+    active in the resulting epoch. *)
 
 val recover_enroll :
   authority ->
@@ -185,6 +186,7 @@ val recover_enroll :
 
 val verify_authority :
   membership:membership -> epoch list -> (authority, error) result
+
 val extend_authority : authority -> epoch list -> (authority, error) result
 val authority_membership : authority -> membership
 val authority_epochs : authority -> epoch list
@@ -193,11 +195,12 @@ val authority_epoch : authority -> string -> (epoch, error) result
 val authority_device_active : authority -> epoch:string -> device -> bool
 val authority_device_administrator : authority -> epoch:string -> device -> bool
 val authority_epoch_is_head : authority -> string -> bool
+
 val requires_late_review : authority -> signed_revision -> (bool, error) result
 (** [requires_late_review] is true when the record was valid in its named
-    historical epoch, but at least one current authority head causally
-    descends from that epoch and revokes its signer. Such a record is never
-    accepted automatically on receive: a current-head adoption is required. *)
+    historical epoch, but at least one current authority head causally descends
+    from that epoch and revokes its signer. Such a record is never accepted
+    automatically on receive: a current-head adoption is required. *)
 
 val sign_revision_at :
   authority ->
@@ -206,8 +209,11 @@ val sign_revision_at :
   signing_capability ->
   Model.change_revision ->
   (signed_revision, error) result
+
 val signed_revision_epoch : signed_revision -> string option
-val verify_signed_revision_at : authority -> signed_revision -> (unit, error) result
+
+val verify_signed_revision_at :
+  authority -> signed_revision -> (unit, error) result
 
 val make_authorization :
   authority ->
@@ -218,12 +224,15 @@ val make_authorization :
   revision:Model.Revision_id.t ->
   change:Model.Change_id.t ->
   (authorization, error) result
+
 val encode_authorization : authorization -> string
 val decode_authorization : string -> (authorization, error) result
 val authorization_revision : authorization -> Model.Revision_id.t
 val authorization_epoch : authorization -> string
 val verify_authorization : authority -> authorization -> (unit, error) result
-val authorization_matches_signed_revision : authorization -> signed_revision -> bool
+
+val authorization_matches_signed_revision :
+  authorization -> signed_revision -> bool
 
 val make_adoption :
   authority ->
@@ -232,6 +241,7 @@ val make_adoption :
   signing_capability ->
   signed_revision:signed_revision ->
   (adoption, error) result
+
 val encode_adoption : adoption -> string
 val decode_adoption : string -> (adoption, error) result
 val adoption_revision : adoption -> Model.Revision_id.t

@@ -38,30 +38,38 @@ let fork_reconciliation_preserves_a_single_explicit_head suffix =
     |> Result.get_ok
   in
   let* first =
-    Trust.successor_epoch authority ~parents:[ Trust.epoch_id root_epoch ]
+    Trust.successor_epoch authority
+      ~parents:[ Trust.epoch_id root_epoch ]
       ~certificates ~revoked:[] ~frontier:[ revision_a ] ~recovery_device
-      ~issuer:(Trust.certificate_id root_certificate) root_capability
+      ~issuer:(Trust.certificate_id root_certificate)
+      root_capability
   in
   let* second =
-    Trust.successor_epoch authority ~parents:[ Trust.epoch_id root_epoch ]
+    Trust.successor_epoch authority
+      ~parents:[ Trust.epoch_id root_epoch ]
       ~certificates ~revoked:[] ~frontier:[ revision_b ] ~recovery_device
-      ~issuer:(Trust.certificate_id root_certificate) root_capability
+      ~issuer:(Trust.certificate_id root_certificate)
+      root_capability
   in
   let* forked = Trust.extend_authority authority [ first; second ] in
   let parents =
     List.sort String.compare [ Trust.epoch_id first; Trust.epoch_id second ]
   in
-  let frontier = List.sort Model.Revision_id.compare [ revision_a; revision_b ] in
+  let frontier =
+    List.sort Model.Revision_id.compare [ revision_a; revision_b ]
+  in
   let* reconciled =
     Trust.successor_epoch forked ~parents ~certificates ~revoked:[] ~frontier
-      ~recovery_device ~issuer:(Trust.certificate_id root_certificate)
+      ~recovery_device
+      ~issuer:(Trust.certificate_id root_certificate)
       root_capability
   in
   let* final_authority = Trust.extend_authority forked [ reconciled ] in
   Ok
     (Trust.authority_heads final_authority = [ Trust.epoch_id reconciled ]
     && Trust.authority_device_administrator final_authority
-         ~epoch:(Trust.epoch_id reconciled) root_device)
+         ~epoch:(Trust.epoch_id reconciled)
+         root_device)
 
 let property =
   QCheck2.Test.make ~count:100
@@ -75,6 +83,5 @@ let property =
 let () =
   Alcotest.run "V4 authority properties"
     [
-      ( "authority",
-        [ QCheck_alcotest.to_alcotest ~speed_level:`Quick property ] );
+      ("authority", [ QCheck_alcotest.to_alcotest ~speed_level:`Quick property ]);
     ]
