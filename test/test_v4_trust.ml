@@ -184,10 +184,11 @@ let signed_revision_binds_author_and_membership () =
       (sample_revision (Trust.device_id author))
     |> require_ok Trust.error_to_string
   in
+  let encoded = Trust.encode_signed_revision signed in
   Alcotest.(check string)
     "signed revision bytes retain their golden encoding"
     (read_golden "v4/signed-revision-v1.cbor.hex")
-    (Trust.encode_signed_revision signed);
+    encoded;
   Trust.verify_signed_revision_at authority signed
   |> require_ok Trust.error_to_string;
   let decoded =
@@ -261,7 +262,7 @@ let signed_resolution_binds_its_target_decision () =
   let encoded = Trust.encode_signed_revision signed in
   Alcotest.(check string)
     "signed resolution bytes retain their golden encoding"
-    (read_golden "v4/signed-resolution-v3.cbor.hex")
+    (read_golden "v4/signed-resolution-v1.cbor.hex")
     encoded;
   Trust.verify_signed_revision_at authority signed
   |> require_ok Trust.error_to_string;
@@ -361,7 +362,7 @@ let authority_epochs_are_branch_scoped_and_reconcilable () =
     (Trust.signed_revision_epoch signed);
   Alcotest.(check string)
     "epoch-bound signed record retains its golden encoding"
-    (read_golden "v4/signed-revision-v2.cbor.hex")
+    (read_golden "v4/signed-revision-v1.cbor.hex")
     (Trust.encode_signed_revision signed);
   Trust.verify_signed_revision_at authority signed
   |> require_ok Trust.error_to_string;

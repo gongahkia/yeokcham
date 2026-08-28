@@ -132,6 +132,8 @@ val sign_revision :
   signing_capability ->
   Model.change_revision ->
   (signed_revision, error) result
+(** Retained only to reject authority-less call paths explicitly. Released V4
+    signed revisions require [sign_revision_at]. *)
 
 val sign_resolution :
   membership ->
@@ -140,8 +142,8 @@ val sign_resolution :
   decision:Model.Decision_id.t ->
   Model.change_revision ->
   (signed_revision, error) result
-(** Signs a decision-specific resolution record. The decision ID is inside the
-    signed canonical body, rather than inferred from an exchange package. *)
+(** Retained only to reject authority-less call paths explicitly. Released V4
+    signed resolutions require [sign_resolution_at]. *)
 
 val signed_revision_id : signed_revision -> Model.Revision_id.t
 val signed_revision_certificate : signed_revision -> string
@@ -152,6 +154,8 @@ val decode_signed_revision : string -> (signed_revision, error) result
 
 val verify_signed_revision :
   membership -> signed_revision -> (unit, error) result
+(** Retained only to reject authority-less call paths explicitly. Released V4
+    signed revisions require [verify_signed_revision_at]. *)
 
 val epoch_id : epoch -> string
 (** Branching authority epochs are a public, immutable policy graph. They are

@@ -73,7 +73,20 @@ let root_authority ~membership ~root_device =
       ~recovery_device (capability 'a')
     |> require_ok Trust.error_to_string
   in
-  Trust.verify_authority ~membership [ root_epoch ]
+  let root_authority =
+    Trust.verify_authority ~membership [ root_epoch ]
+    |> require_ok Trust.error_to_string
+  in
+  let active_epoch =
+    Trust.successor_epoch root_authority
+      ~parents:[ Trust.epoch_id root_epoch ]
+      ~certificates:(Trust.certificates membership) ~revoked:[] ~frontier:[]
+      ~recovery_device
+      ~issuer:(Trust.certificate_id root_certificate)
+      (capability 'a')
+    |> require_ok Trust.error_to_string
+  in
+  Trust.extend_authority root_authority [ active_epoch ]
   |> require_ok Trust.error_to_string
 
 let setup root =

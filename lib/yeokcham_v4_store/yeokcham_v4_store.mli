@@ -31,6 +31,8 @@ val collaboration :
   revisions:Yeokcham_v4_trust.signed_revision list ->
   local_certificate:string ->
   (collaboration, error) result
+(** Retained only to reject authority-less call paths explicitly. Released V4
+    collaboration state always requires [collaboration_with_authority]. *)
 
 val collaboration_with_authority :
   authority:Yeokcham_v4_trust.authority ->

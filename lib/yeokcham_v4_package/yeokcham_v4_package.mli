@@ -54,10 +54,8 @@ val create :
   membership:Trust.membership ->
   revisions:Trust.signed_revision list ->
   (unit, error) result
-(** Writes a new package directory containing the exact immutable snapshot
-    closure required by the verified revisions, plus public
-    identity/certificate/revision records. It never copies private signing
-    material or a mutable project-state head. *)
+(** Retained only to reject authority-less call paths explicitly. Released V4
+    packages require [create_with_authority]. *)
 
 val create_with_authority :
   source:Yeokcham_store.repository ->
@@ -67,21 +65,8 @@ val create_with_authority :
   authorizations:Trust.authorization list ->
   adoptions:Trust.adoption list ->
   (unit, error) result
-(** V2 package creation. The manifest carries the complete public authority
-    closure that verifies its epoch-bound revisions and any exact exception
-    records. *)
-
-val verify_and_import :
-  destination:Yeokcham_store.repository ->
-  package:string ->
-  membership:Trust.membership ->
-  project:Model.project ->
-  (verified * Model.project, error) result
-(** Verifies package bytes, membership continuity, revision signatures, and each
-    received snapshot closure and causal model transition in staging. Only after
-    successful verification are immutable objects copied to [destination]. The
-    supplied membership prevents a package with an unrelated root from joining
-    merely by naming the same repository identifier. No mutable ref changes. *)
+(** Writes a package with the complete public authority closure that verifies
+    its epoch-bound revisions and any exact exception records. *)
 
 val verify_and_import_with_authority :
   destination:Yeokcham_store.repository ->
@@ -90,11 +75,20 @@ val verify_and_import_with_authority :
   known_adoptions:Trust.adoption list ->
   project:Model.project ->
   (verified * Model.project, error) result
-(** The authority-aware V2 counterpart. It extends only from the destination's
-    verified root, validates the imported epoch graph before object import, and
-    keeps authority forks explicit. [known_adoptions] are already verified,
-    destination-local exact review records; they can authorize their matching
-    package revision but are never imported from a mutable head. *)
+(** Extends only from the destination's verified root, validates the imported
+    epoch graph before object import, and keeps authority forks explicit.
+    [known_adoptions] are already verified, destination-local exact review
+    records; they can authorize their matching package revision but are never
+    imported from a mutable head. *)
+
+val verify_and_import :
+  destination:Yeokcham_store.repository ->
+  package:string ->
+  membership:Trust.membership ->
+  project:Model.project ->
+  (verified * Model.project, error) result
+(** Retained only to reject authority-less call paths explicitly. Released V4
+    packages require [verify_and_import_with_authority]. *)
 
 val prepare_with_authority :
   package:string ->
@@ -120,12 +114,12 @@ val authorizations : verified -> Trust.authorization list
 val adoptions : verified -> Trust.adoption list
 
 val inspect_authority : package:string -> (Trust.authority, error) result
-(** Reads and cryptographically validates only a V2 package manifest's public
-    authority closure. It neither imports objects nor changes any project. *)
+(** Reads and cryptographically validates a package manifest's public authority
+    closure. It neither imports objects nor changes any project. *)
 
 val inspect_with_authority :
   package:string -> authority:Trust.authority -> (verified, error) result
-(** Verifies the public V2 manifest, membership continuity, authority graph,
+(** Verifies the public manifest, membership continuity, authority graph,
     revision signatures, and declared exception records without reading package
     objects or changing a project. It is the inspection surface used before an
     administrator records an explicit late-arrival adoption. *)
