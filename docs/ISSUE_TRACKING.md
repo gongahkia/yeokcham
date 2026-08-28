@@ -17,8 +17,11 @@ The active implementation vertical slice is [#246](https://github.com/gongahkia/
 
 The Linux watcher loop passed in the latest local `dune runtest` on Fedora 43;
 that result is recorded in `TESTING_AND_EXPERIMENTS.md` and is not transport
-evidence. Before #246 can close, retain the HTTPS reverse-proxy integration and
-post-receive upload-interruption evidence called out there.
+evidence. #246 now has local HTTPS reverse-proxy and post-receive
+upload-interruption/retry evidence recorded there. It remains open until the
+rest of ADR-085's required verification, including the outstanding malformed
+and multi-replica transport cases, is complete; no local test result alone is a
+deployment claim.
 
 Future feature proposals need a dedicated issue and ADR before coding when they
 change trust, transport, delivery, snapshot retention, or persistent semantics.

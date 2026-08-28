@@ -31,8 +31,20 @@ Transport verification currently covers canonical publication and local-state
 goldens, generated linear-feed validation, create-only relay pagination,
 atomic two-replica receipt, idempotent replay, and a late-revoked record
 entering the review inbox without changing the model. The HTTPS client and HTTP
-relay listener are built with those core adapters. An end-to-end reverse-proxy/
-TLS fixture and an injected post-receive upload interruption test remain
-required before claiming deployment-level relay integration evidence. No
-benchmark, semantic sidecar, Git, or CI delivery result is used as evidence for
-the current model.
+relay listener are built with those core adapters. The transport suite also
+passes an end-to-end HTTPS fixture: OpenSSL generates an ephemeral certificate
+for a loopback `socat` TLS reverse proxy, while the relay remains a separate
+plain-HTTP backend. The production client continues to use its default trust
+store; the fixture's `--cacert` path is available only when the explicit
+`YEOKCHAM_V4_TEST_TRANSPORT=1` switch is set.
+
+The same fixture runs a two-replica `sync` test that injects a test-only failure
+before the first outbound PUT. It proves that received work, its cursor, and
+model state survive the upload error; the failed publication is not marked
+announced; and a subsequent sync uploads and records it. The TLS tests skip
+when either `/usr/bin/openssl` or `/usr/bin/socat` is unavailable, so a skipped
+run is not deployment evidence. The latest local Fedora run had both tools and
+passed them.
+
+No benchmark, semantic sidecar, Git, or CI delivery result is used as evidence
+for the current model.

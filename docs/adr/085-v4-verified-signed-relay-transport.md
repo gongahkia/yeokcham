@@ -84,6 +84,10 @@ Remote aliases/URLs and bearer credentials are local configuration and
 credential-store data. They are not signed, packaged, a trust root, or part of
 the V4 collaboration model. Test-only credential injection requires an
 explicit test switch and is unavailable in normal production invocation.
+The HTTPS fixture can additionally supply an ephemeral test CA, and the
+interruption fixture can fail outbound PUTs. Both require that same explicit
+test switch; neither changes production certificate verification or creates a
+normal-mode network fault path.
 
 ## Persistent-format impact
 
@@ -112,6 +116,11 @@ integration, and working-tree mutation are out of scope.
   post-receive upload-interruption tests;
 - retained V1/V2 and a new V3 state fixture; and
 - `opam exec -- dune build @all` and `opam exec -- dune runtest`.
+
+The local suite now includes the HTTPS reverse-proxy and post-receive
+upload-interruption/retry cases. The checklist remains the closure bar: these
+two results do not substitute for its other malformed-input, resolution,
+feed-fork, and multi-replica cases.
 
 ## References
 
