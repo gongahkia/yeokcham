@@ -27,5 +27,11 @@ the active V4 record schemas. Tests that inspect or receive a package assert
 that invalid input adds neither a destination object nor a state-head update;
 the live working tree remains untouched throughout package review and receive.
 
-No benchmark, transport, semantic sidecar, Git, or CI delivery result is used
-as evidence for the current product model.
+Transport verification adds publication golden/inverse tests, generated feed
+tests, relay route/digest/authentication/pagination failure cases, and a
+two-replica receive-first relay journey. The journey must prove bad
+publication/package/object bytes change neither destination objects nor the
+state head, and that a post-receive upload failure is reported as partial rather
+than a rollback claim. A relay integration result must record exact commit,
+runtime, reverse-proxy/TLS fixture, and client command. No benchmark, semantic
+sidecar, Git, or CI delivery result is used as evidence for the current model.

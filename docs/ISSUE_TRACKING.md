@@ -13,10 +13,12 @@ release-signing, or opam-publication criteria, so do not close them as a
 retirement side effect. Their retired command references need explicit future
 re-scoping before that work begins.
 
-The immediate open verification item is not a substitute issue or a completion
-claim: run `opam exec -- dune exec test/test_v4_watch.exe` on Linux, or record a
-green Ubuntu `dune runtest` that includes it. See
-`TESTING_AND_EXPERIMENTS.md` for what counts as evidence.
+The active implementation vertical slice is [#246](https://github.com/gongahkia/yeokcham/issues/246): V4 signed relay transport. It is governed by ADR-085 and must retain the package staging boundary, authority/decision semantics, and no-working-tree-mutation invariant.
+
+The immediate open watcher verification item is not transport evidence: run
+`opam exec -- dune exec test/test_v4_watch.exe` on Linux, or record a green
+Ubuntu `dune runtest` that includes it. See `TESTING_AND_EXPERIMENTS.md` for
+what counts as evidence.
 
 Future feature proposals need a dedicated issue and ADR before coding when they
 change trust, transport, delivery, snapshot retention, or persistent semantics.

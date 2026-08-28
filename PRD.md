@@ -1,6 +1,6 @@
 # Product requirements
 
-## Current milestone: V4 local collaboration lifecycle
+## Current milestone: V4 verified signed relay synchronization
 
 V4 serves one developer and small, explicitly trusted teams. Its required
 vertical slices are complete only when their model transition, durable format,
@@ -27,13 +27,20 @@ failure behaviour, and CLI surface agree.
    accept it only after an administrator records a current-head, exact adoption.
 8. Never materialise or otherwise mutate the working tree during join, review,
    package receive, authority update, or adoption.
+9. Synchronize already-equivalent replicas through an HTTPS-fronted,
+   bearer-authenticated immutable relay. Signed publication feeds reuse the
+   verified package closure, preserve feed forks, commit valid receipt and
+   local transport bookkeeping together, and report post-receive upload failure
+   as partial success.
 
 ### Explicit non-goals
 
-No network transport, Git bridge, semantic parser or merge, blob GC, durable
+No clone/bootstrap, Git bridge, semantic parser or merge, blob GC, durable
 `capture=`, immortal restore safety after journal prune, hardware keys,
 external signing agent, macOS/WSL watcher, or CI-backed delivery exists in this
-milestone. These are not partial features.
+milestone. The bundled relay is an untrusted byte courier behind an
+operator-managed HTTPS reverse proxy; it is not hosted authority or end-to-end
+encrypted transport. These are not partial features.
 
 ### Acceptance evidence
 
@@ -41,5 +48,7 @@ Every persistent record is versioned canonical CBOR and has a golden fixture.
 Core transitions have unit and generated tests; receipt has corruption,
 causality, and no-partial-import tests; lifecycle has two-repository, rotation,
 recovery, revocation, branch-selection/reconciliation, and exact-adoption
-tests. The real Linux watcher loop is an outstanding platform verification,
-recorded separately rather than claimed from Darwin.
+tests; and transport has canonical-publication, relay-failure, and
+two-replica receive-first evidence. The real Linux watcher loop is an
+outstanding platform verification, recorded separately rather than claimed from
+Darwin.

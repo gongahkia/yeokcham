@@ -18,9 +18,9 @@ does not read, upgrade, or mutate repositories from earlier product tracks.
   tree before an explicit resolution.
 - Local username registrations for display only. Device identity and authority
   are Ed25519 keys and signed authority epochs, never usernames.
-- Offline directory packages with complete snapshot closure verification before
-  any destination object or state-head update. Receive never materialises a
-  working tree.
+- Offline directory packages and signed relay publications with complete
+  snapshot closure verification before any destination object or state-head
+  update. Receive and sync never materialise a working tree.
 - Multi-administrator enrolment, revocation, atomic local-device rotation,
   explicit authority-fork reconciliation, 12-word root comparison during join,
   and ChaCha20-Poly1305 recovery packages protected by a 24-word BIP-39 secret.
@@ -55,9 +55,12 @@ revision. It grants neither general membership nor a broad exception.
 
 Linux `watch` is implemented as advisory capture after debounce. Its real
 inotify loop must still be run on Linux; macOS and WSL watchers are not
-implemented. There is no network transport, Git import/export, semantic
-parsing, CI-backed delivery, signing agent, hardware-key support, or blob GC.
-Those are deliberate future work, not hidden product behaviour.
+implemented. Relay synchronization is available only for already-equivalent
+replicas through an operator-managed HTTPS reverse proxy; the relay is an
+untrusted byte courier and stored payloads are not end-to-end encrypted. There
+is no clone/bootstrap, Git import/export, semantic parsing, CI-backed delivery,
+signing agent, hardware-key support, or blob GC. Those are deliberate future
+work, not hidden product behaviour.
 
 Read [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md) for the philosophy,
 [FORMAL_MODEL.md](FORMAL_MODEL.md) for invariants, and

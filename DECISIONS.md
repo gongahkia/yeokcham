@@ -15,6 +15,9 @@ The active V4 decisions are:
 - [ADR-084](docs/adr/084-v4-branching-authority-epochs-and-recovery.md):
   branching authority epochs, forward-looking revocation, exact adoption, key
   rotation, phrase-checked join, and recovery authority.
+- [ADR-085](docs/adr/085-v4-verified-signed-relay-transport.md): signed relay
+  publication feeds, staged package receipt, local credential custody, and
+  receive-first partial-success semantics.
 
 Earlier product-track ADRs have been removed with their implementations. Git
 history retains their historical record; they are not active architecture.

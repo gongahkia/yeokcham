@@ -4,11 +4,11 @@ V4 is layered so filesystem and platform adapters cannot change the model by
 themselves.
 
 ```
-CLI / Linux watch / platform signer
+CLI / Linux watch / platform signer / HTTPS relay client
               │
        Local_service adapter
               │
- Model ─ Trust ─ Package verification ─ Recovery
+ Model ─ Trust ─ Transport publication/feed ─ Package verification ─ Recovery
               │
  V4 state wrapper / canonical CBOR / immutable object store
               │
@@ -27,6 +27,13 @@ normal device private key.
 pure layers. It captures snapshots, maintains the compare-and-swap state head,
 obtains caller-provided signing capability from a platform adapter, and never
 allows a collaborative wrapper to be stripped by an ordinary save.
+
+`Yeokcham_v4_transport` owns canonical signed courier publications and feed
+validation. The relay owns only bounded bearer-authenticated immutable byte
+storage; reverse-proxy TLS, aliases, URLs, and credentials remain outside the
+V4 project model. The transport client stages relay artifacts and delegates
+receipt solely to `Yeokcham_v4_package`; it has no second model or authority
+path.
 
 The unversioned hash, encoding, envelope, store, snapshot, chunking, testkit,
 and watcher modules are V4 foundations. The Linux watcher emits advisory scan

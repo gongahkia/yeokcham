@@ -76,3 +76,26 @@ authority, certificate, signed-revision, adoption, recovery-package, and
 journal records have a schema version and canonical encoding; unknown mandatory
 features and noncanonical encodings are rejected. Only the mutable
 `v4-project-state` head selects a current immutable state object.
+
+## Transport state
+
+`Transport_publication` is a signed immutable courier record, not a project
+transition. Its body contains a repository, publisher certificate/device,
+sorted parent publication IDs from that device's feed, and one package-manifest
+SHA-256 ID. `publication_id(bytes)` is the SHA-256 of its canonical complete
+record. A valid feed can have several heads; neither relay nor client adds an
+ordering edge or chooses one.
+
+Each local remote has private configuration outside project state and a
+versioned local transport section inside the saved state wrapper: opaque
+discovery cursor, known publication IDs, announced artifact/revision IDs, and
+review-inbox references. It is not package data, authority, or a trust root.
+
+`sync` stages every newly discovered publication package and verifies
+publication, authority, signature, causal, and model transitions as one batch.
+If any item is invalid, no destination object, project state, cursor, announced
+set, or inbox changes. A valid ordinary record applies through `receive`; a
+signed resolution applies through `resolve`; valid late records are inbox
+references without receipt. Receipt never changes the working tree. Only after
+durable receipt does upload begin; upload failure leaves received state intact
+and unacknowledged artifacts eligible for retry.
