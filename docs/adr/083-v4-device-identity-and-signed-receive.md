@@ -88,12 +88,12 @@ alternate root, missing snapshot closure, duplicate revisions, state-wrapper
 preservation, and working-tree preservation. The package verifier performs
 its validation in a temporary store before imports and state-head publication.
 
-Still required before expanding this boundary are RFC 8032 vectors and
-published golden fixtures, generated signing/codec properties, duplicate or
-missing certificate negative cases, parent mismatch and retry/idempotence,
-new-device join with independent root confirmation, and Linux execution of
-the Secret Service provider and watcher test. The present Darwin run is not
-evidence for those Linux behaviours.
+Still required before expanding this boundary are RFC 8032 vectors, a package
+manifest golden fixture, generated signing/codec properties, duplicate or
+missing certificate negative cases, parent mismatch, new-device join with
+independent root confirmation, and Linux execution of the Secret Service
+provider and watcher test. The present Darwin run is not evidence for those
+Linux behaviours.
 
 ## References
 

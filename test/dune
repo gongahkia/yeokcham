@@ -11,7 +11,14 @@
 (test
  (name test_v4_trust)
  (modules test_v4_trust)
- (libraries alcotest yeokcham_v4_model yeokcham_v4_record yeokcham_v4_trust))
+ (libraries
+  alcotest
+  yeokcham_testkit
+  yeokcham_v4_model
+  yeokcham_v4_record
+  yeokcham_v4_trust)
+ (deps
+  (source_tree golden)))
 
 (test
  (name test_v4_package)
@@ -46,9 +53,12 @@
   yeokcham_encoding
   yeokcham_envelope
   yeokcham_store
+  yeokcham_testkit
   yeokcham_v4_model
   yeokcham_v4_store
-  yeokcham_v4_trust))
+  yeokcham_v4_trust)
+ (deps
+  (source_tree golden)))
 
 (test
  (name test_v4_restore_journal)

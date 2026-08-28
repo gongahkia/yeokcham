@@ -502,7 +502,42 @@ let verify_closure staging revisions =
   in
   loop revisions
 
-let verify_and_import ~destination ~package ~membership:expected_membership =
+let existing_revision project incoming =
+  Model.shared_changes project
+  |> List.concat_map (fun change -> change.Model.revisions)
+  |> List.find_opt (fun existing ->
+      Model.Revision_id.equal existing.Model.revision incoming.Model.revision)
+
+let apply_revisions project verified =
+  let pending =
+    verified.verified_revisions
+    |> List.map Trust.signed_revision_value
+    |> List.sort (fun left right ->
+        Model.Revision_id.compare left.Model.revision right.Model.revision)
+  in
+  let rec apply project pending deferred =
+    match pending with
+    | [] -> Ok project
+    | revision :: rest -> (
+        match existing_revision project revision with
+        | Some existing ->
+            if existing = revision then apply project rest 0
+            else
+              Error (Invalid_package "revision ID conflicts with local history")
+        | None -> (
+            match Model.receive project revision with
+            | Ok project -> apply project rest 0
+            | Error error ->
+                if
+                  error = Model.Received_revision_missing_parent
+                  && deferred + 1 < List.length pending
+                then apply project (rest @ [ revision ]) (deferred + 1)
+                else Error (Model_error error)))
+  in
+  apply project pending 0
+
+let verify_and_import ~destination ~package ~membership:expected_membership
+    ~project =
   let repository = Trust.repository expected_membership in
   let* manifest = read_file (package_path package manifest_name) in
   let* package_repository, certificates, revisions, object_ids =
@@ -549,6 +584,13 @@ let verify_and_import ~destination ~package ~membership:expected_membership =
         in
         let* () = stage objects in
         let* () = verify_closure staging revisions in
+        let verified =
+          { verified_membership = membership; verified_revisions = revisions }
+        in
+        (* Apply the causal model transition while every received object is
+           still confined to staging. A missing or incompatible parent must
+           not even add otherwise-valid immutable package objects locally. *)
+        let* project = apply_revisions project verified in
         let rec import = function
           | [] -> Ok ()
           | (_, object_) :: rest ->
@@ -559,41 +601,7 @@ let verify_and_import ~destination ~package ~membership:expected_membership =
               import rest
         in
         let* () = import objects in
-        Ok { verified_membership = membership; verified_revisions = revisions })
+        Ok (verified, project))
 
 let membership verified = verified.verified_membership
 let revisions verified = verified.verified_revisions
-
-let existing_revision project incoming =
-  Model.shared_changes project
-  |> List.concat_map (fun change -> change.Model.revisions)
-  |> List.find_opt (fun existing ->
-      Model.Revision_id.equal existing.Model.revision incoming.Model.revision)
-
-let apply_revisions project verified =
-  let pending =
-    verified.verified_revisions
-    |> List.map Trust.signed_revision_value
-    |> List.sort (fun left right ->
-        Model.Revision_id.compare left.Model.revision right.Model.revision)
-  in
-  let rec apply project pending deferred =
-    match pending with
-    | [] -> Ok project
-    | revision :: rest -> (
-        match existing_revision project revision with
-        | Some existing ->
-            if existing = revision then apply project rest 0
-            else
-              Error (Invalid_package "revision ID conflicts with local history")
-        | None -> (
-            match Model.receive project revision with
-            | Ok project -> apply project rest 0
-            | Error error ->
-                if
-                  error = Model.Received_revision_missing_parent
-                  && deferred + 1 < List.length pending
-                then apply project (rest @ [ revision ]) (deferred + 1)
-                else Error (Model_error error)))
-  in
-  apply project pending 0

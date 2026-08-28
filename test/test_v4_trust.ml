@@ -1,9 +1,17 @@
+module Golden = Yeokcham_testkit.Golden_fixture
 module Model = Yeokcham_v4_model
 module Trust = Yeokcham_v4_trust
 
 let require_ok render = function
   | Ok value -> value
   | Error error -> Alcotest.fail (render error)
+
+let golden_path name =
+  let local = Filename.concat "golden" name in
+  if Sys.file_exists local then local else Filename.concat "test/golden" name
+
+let read_golden name =
+  Golden.read_lower_hex_file (golden_path name) |> require_ok Fun.id
 
 let id parser value = parser value |> Result.get_ok
 let change value = id Model.Change_id.of_string value
@@ -73,7 +81,11 @@ let root_certificate_is_self_certifying () =
   Alcotest.(check string)
     "certificate bytes retain their derived identity"
     (Trust.certificate_id root_certificate)
-    (Trust.certificate_id decoded)
+    (Trust.certificate_id decoded);
+  Alcotest.(check string)
+    "certificate bytes retain their golden encoding"
+    (read_golden "v4/certificate-v1.cbor.hex")
+    (Trust.encode_certificate root_certificate)
 
 let administrator_enrols_a_member_in_causal_order () =
   let repository, root_capability, _, root_certificate, membership =
@@ -142,6 +154,10 @@ let signed_revision_binds_author_and_membership () =
       (sample_revision (Trust.device_id author))
     |> require_ok Trust.error_to_string
   in
+  Alcotest.(check string)
+    "signed revision bytes retain their golden encoding"
+    (read_golden "v4/signed-revision-v1.cbor.hex")
+    (Trust.encode_signed_revision signed);
   Trust.verify_signed_revision membership signed
   |> require_ok Trust.error_to_string;
   let decoded =

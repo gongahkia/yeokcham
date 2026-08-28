@@ -37,12 +37,13 @@ val verify_and_import :
   destination:Yeokcham_store.repository ->
   package:string ->
   membership:Trust.membership ->
-  (verified, error) result
+  project:Model.project ->
+  (verified * Model.project, error) result
 (** Verifies package bytes, membership continuity, revision signatures, and each
-    received snapshot closure in staging. Only after successful verification are
-    immutable objects copied to [destination]. The supplied membership prevents
-    a package with an unrelated root from joining merely by naming the same
-    repository identifier. No mutable ref changes. *)
+    received snapshot closure and causal model transition in staging. Only after
+    successful verification are immutable objects copied to [destination]. The
+    supplied membership prevents a package with an unrelated root from joining
+    merely by naming the same repository identifier. No mutable ref changes. *)
 
 val membership : verified -> Trust.membership
 val revisions : verified -> Trust.signed_revision list

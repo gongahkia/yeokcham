@@ -1,3 +1,4 @@
+module Golden = Yeokcham_testkit.Golden_fixture
 module Encoding = Yeokcham_encoding
 module Envelope = Yeokcham_envelope
 module Model = Yeokcham_v4_model
@@ -8,6 +9,13 @@ module Trust = Yeokcham_v4_trust
 let require_ok render = function
   | Ok value -> value
   | Error error -> Alcotest.fail (render error)
+
+let golden_path name =
+  let local = Filename.concat "golden" name in
+  if Sys.file_exists local then local else Filename.concat "test/golden" name
+
+let read_golden name =
+  Golden.read_lower_hex_file (golden_path name) |> require_ok Fun.id
 
 let rec remove_tree path =
   try
@@ -199,6 +207,17 @@ let collaborative_state_cannot_be_downgraded_to_a_bare_record () =
       Alcotest.(check bool)
         "collaboration is present" true
         (Option.is_some loaded.V4_store.collaboration);
+      let state_bytes =
+        Store.get
+          (V4_store.underlying_store repository)
+          loaded.V4_store.object_id
+        |> require_ok Store.error_to_string
+        |> Envelope.payload |> Encoding.encode
+      in
+      Alcotest.(check string)
+        "collaboration wrapper bytes retain their golden encoding"
+        (read_golden "v4/collaboration-state-v1.cbor.hex")
+        state_bytes;
       match
         V4_store.save repository ~expected:loaded.V4_store.head
           ~project:loaded.V4_store.project

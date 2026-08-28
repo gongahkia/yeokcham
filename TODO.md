@@ -29,7 +29,7 @@ require the stated acceptance criteria and recorded verification evidence.
      macOS Keychain/Linux Secret Service providers, and focused tampering and
      causality tests. Still deferred: an independently confirmed new-device
      join, revocation, epochs, rotation, recovery, external signers, and
-     published golden/RFC-vector fixtures.
+     RFC-vector coverage plus a package-manifest golden fixture.
 
 4. Implement verified offline receive.
    - A versioned directory package carries signed records and complete

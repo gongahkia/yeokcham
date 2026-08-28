@@ -1109,12 +1109,10 @@ let receive_package ~root ~package =
           ~destination:(Store.underlying_store repository)
           ~package
           ~membership:(Store.membership existing)
+          ~project:loaded.Store.project
         |> Result.map_error (fun error -> Package_error error)
       in
-      let* project =
-        Package.apply_revisions loaded.Store.project received
-        |> Result.map_error (fun error -> Package_error error)
-      in
+      let received, project = received in
       let* revisions =
         merge_signed_revisions
           (Store.signed_revisions existing)

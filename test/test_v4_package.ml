@@ -41,6 +41,11 @@ let snapshot_id identity =
   |> Store.Stored_object_id.to_hex |> Model.Snapshot_id.of_string
   |> Result.get_ok
 
+let receiver_project ~creator ~baseline =
+  Model.init ~creator:(Trust.device_id creator) ~username:(username "receiver")
+    ~initial_snapshot:baseline ~initial_draft:(draft "draft-receiver")
+    ~title:"receiver"
+
 let scan root store =
   Snapshot.scan_excluding_root_names ~excluded_root_names:[ ".yeokcham" ] ~root
     ~store
@@ -135,8 +140,9 @@ let package_verifies_before_import_and_preserves_model_visibility () =
       let destination =
         Store.init ~root:destination_root |> require_ok Store.error_to_string
       in
-      let imported =
-        Package.verify_and_import ~destination ~package ~membership
+      let project = receiver_project ~creator:root_device ~baseline in
+      let imported, project =
+        Package.verify_and_import ~destination ~package ~membership ~project
         |> require_ok Package.error_to_string
       in
       Alcotest.(check int)
@@ -147,16 +153,6 @@ let package_verifies_before_import_and_preserves_model_visibility () =
         (In_channel.with_open_bin
            (Filename.concat destination_root "live.txt")
            In_channel.input_all);
-      let project =
-        Model.init
-          ~creator:(Trust.device_id root_device)
-          ~username:(username "root") ~initial_snapshot:baseline
-          ~initial_draft:(draft "draft-one") ~title:"receiver"
-      in
-      let project =
-        Package.apply_revisions project imported
-        |> require_ok Package.error_to_string
-      in
       Alcotest.(check int)
         "receive exposes the imported shared change" 1
         (List.length (Model.shared_changes project));
@@ -166,7 +162,9 @@ let package_verifies_before_import_and_preserves_model_visibility () =
 
 let wrong_repository_is_rejected_before_object_import () =
   with_directory "yeokcham-v4-package-reject-" (fun root ->
-      let _, source, _, _, _, membership, signed = setup root in
+      let _, source, baseline, _, root_device, membership, signed =
+        setup root
+      in
       let package = Filename.concat root "offline-package" in
       Package.create ~source ~destination:package ~membership
         ~revisions:[ signed ]
@@ -192,9 +190,10 @@ let wrong_repository_is_rejected_before_object_import () =
         Trust.verify_membership ~repository:other_repository [ other_root ]
         |> require_ok Trust.error_to_string
       in
+      let project = receiver_project ~creator:root_device ~baseline in
       match
         Package.verify_and_import ~destination ~package
-          ~membership:other_membership
+          ~membership:other_membership ~project
       with
       | Error error ->
           Alcotest.(check string)
@@ -205,7 +204,9 @@ let wrong_repository_is_rejected_before_object_import () =
 
 let alternate_root_for_the_same_repository_is_rejected_before_import () =
   with_directory "yeokcham-v4-package-root-" (fun root ->
-      let _, source, _, repository, _, membership, signed = setup root in
+      let _, source, baseline, repository, root_device, membership, signed =
+        setup root
+      in
       let package = Filename.concat root "offline-package" in
       Package.create ~source ~destination:package ~membership
         ~revisions:[ signed ]
@@ -225,9 +226,10 @@ let alternate_root_for_the_same_repository_is_rejected_before_import () =
         Trust.verify_membership ~repository [ rogue_root ]
         |> require_ok Trust.error_to_string
       in
+      let project = receiver_project ~creator:root_device ~baseline in
       (match
          Package.verify_and_import ~destination ~package
-           ~membership:rogue_membership
+           ~membership:rogue_membership ~project
        with
       | Error error ->
           Alcotest.(check bool)
@@ -244,7 +246,9 @@ let alternate_root_for_the_same_repository_is_rejected_before_import () =
 
 let missing_closure_object_is_rejected_without_importing_a_partial_package () =
   with_directory "yeokcham-v4-package-closure-" (fun root ->
-      let _, source, _, _, _, membership, signed = setup root in
+      let _, source, baseline, _, root_device, membership, signed =
+        setup root
+      in
       let package = Filename.concat root "offline-package" in
       Package.create ~source ~destination:package ~membership
         ~revisions:[ signed ]
@@ -257,7 +261,10 @@ let missing_closure_object_is_rejected_without_importing_a_partial_package () =
       let destination =
         Store.init ~root:destination_root |> require_ok Store.error_to_string
       in
-      (match Package.verify_and_import ~destination ~package ~membership with
+      let project = receiver_project ~creator:root_device ~baseline in
+      (match
+         Package.verify_and_import ~destination ~package ~membership ~project
+       with
       | Error error ->
           Alcotest.(check string)
             "manifest/object mismatch is explicit"
@@ -290,6 +297,84 @@ let duplicate_revision_is_rejected_before_a_package_is_created () =
             "no package directory was created" false (Sys.file_exists package)
       | Ok () -> Alcotest.fail "created a package with duplicate revisions")
 
+let missing_causal_parent_is_rejected_before_object_import () =
+  with_directory "yeokcham-v4-package-parent-" (fun root ->
+      let _, source, baseline, repository, root_device, membership, _ =
+        setup root
+      in
+      let root_capability = capability 'a' in
+      let root_certificate =
+        Trust.root_certificate ~repository ~device:root_device root_capability
+        |> require_ok Trust.error_to_string
+      in
+      let child =
+        Model.make_change_revision ~change:(change "change-one")
+          ~revision:(revision "revision-child")
+          ~parent:(Some (revision "revision-missing"))
+          ~author:(Trust.device_id root_device)
+          ~base:baseline ~result:baseline
+          ~edits:
+            [
+              {
+                Model.edit_path =
+                  Model.Path.of_components [ "main.ml" ] |> Result.get_ok;
+                edit_kind = Model.Whole_path;
+              };
+            ]
+        |> require_ok Model.error_to_string
+      in
+      let signed_child =
+        Trust.sign_revision membership
+          ~certificate:(Trust.certificate_id root_certificate)
+          root_capability child
+        |> require_ok Trust.error_to_string
+      in
+      let package = Filename.concat root "offline-package" in
+      Package.create ~source ~destination:package ~membership
+        ~revisions:[ signed_child ]
+      |> require_ok Package.error_to_string;
+      let local_initial =
+        Model.make_change_revision ~change:(change "change-one")
+          ~revision:(revision "revision-existing")
+          ~parent:None
+          ~author:(Trust.device_id root_device)
+          ~base:baseline ~result:baseline
+          ~edits:
+            [
+              {
+                Model.edit_path =
+                  Model.Path.of_components [ "main.ml" ] |> Result.get_ok;
+                edit_kind = Model.Whole_path;
+              };
+            ]
+        |> require_ok Model.error_to_string
+      in
+      let project =
+        receiver_project ~creator:root_device ~baseline |> fun project ->
+        Model.share_active project local_initial
+        |> require_ok Model.error_to_string
+      in
+      let destination_root = Filename.concat root "destination" in
+      Unix.mkdir destination_root 0o700;
+      let destination =
+        Store.init ~root:destination_root |> require_ok Store.error_to_string
+      in
+      (match
+         Package.verify_and_import ~destination ~package ~membership ~project
+       with
+      | Error error ->
+          Alcotest.(check string)
+            "missing parent is explicit"
+            "revision parent is not the current revision"
+            (Package.error_to_string error)
+      | Ok _ -> Alcotest.fail "imported a revision with a missing parent");
+      let object_count =
+        Store.list_objects destination
+        |> require_ok Store.error_to_string
+        |> List.length
+      in
+      Alcotest.(check int) "missing parent imports no objects" 0 object_count)
+
 let () =
   Alcotest.run "V4 package"
     [
@@ -306,5 +391,7 @@ let () =
             missing_closure_object_is_rejected_without_importing_a_partial_package;
           Alcotest.test_case "duplicate revision is rejected" `Quick
             duplicate_revision_is_rejected_before_a_package_is_created;
+          Alcotest.test_case "missing causal parent is rejected before import"
+            `Quick missing_causal_parent_is_rejected_before_object_import;
         ] );
     ]
