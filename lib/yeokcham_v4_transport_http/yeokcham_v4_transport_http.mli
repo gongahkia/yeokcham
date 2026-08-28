@@ -15,6 +15,7 @@ type error =
   | Unexpected_status of int
   | Response_too_large
   | Invalid_response of string
+  | Test_interrupted_upload
   | Io_error of { path : string; operation : string; message : string }
 
 val error_to_string : error -> string

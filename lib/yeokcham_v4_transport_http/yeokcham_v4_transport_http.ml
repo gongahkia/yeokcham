@@ -18,6 +18,9 @@ type error =
 let max_response_bytes = 64 * 1024 * 1024
 let max_page_size = 128
 let curl = "/usr/bin/curl"
+let test_enabled_environment = "YEOKCHAM_V4_TEST_TRANSPORT"
+let test_ca_bundle_environment = "YEOKCHAM_V4_TEST_TRANSPORT_CA_BUNDLE"
+let test_interrupt_upload_environment = "YEOKCHAM_V4_TEST_TRANSPORT_FAIL_PUT"
 let ( let* ) = Result.bind
 
 let error_to_string = function
@@ -31,6 +34,7 @@ let error_to_string = function
       Printf.sprintf "V4 relay returned unexpected HTTP status %d" status
   | Response_too_large -> "V4 relay response exceeds the configured limit"
   | Invalid_response detail -> "invalid V4 relay response: " ^ detail
+  | Test_interrupted_upload -> "test-only V4 transport upload interruption"
   | Io_error { path; operation; message } ->
       Printf.sprintf "V4 HTTPS transport %s %s: %s" operation path message
 
@@ -54,6 +58,30 @@ let valid_token token =
        (String.exists
           (function '\000' | '\r' | '\n' -> true | _ -> false)
           token)
+
+let test_ca_bundle () =
+  match
+    ( Sys.getenv_opt test_enabled_environment,
+      Sys.getenv_opt test_ca_bundle_environment )
+  with
+  | Some "1", Some path
+    when String.length path > 0
+         && String.length path <= 4096
+         && (not
+               (String.exists
+                  (function '\000' | '\r' | '\n' -> true | _ -> false)
+                  path))
+         && Sys.file_exists path ->
+      Some path
+  | _ -> None
+
+let test_interrupt_upload () =
+  match
+    ( Sys.getenv_opt test_enabled_environment,
+      Sys.getenv_opt test_interrupt_upload_environment )
+  with
+  | Some "1", Some "1" -> true
+  | _ -> false
 
 let create ~url ~token =
   if not (valid_url url) then Error (Invalid_url url)
@@ -175,6 +203,9 @@ let run client ~method_ ~url ~body =
             "--write-out";
             "%{http_code}";
           ]
+          @ (match test_ca_bundle () with
+            | None -> []
+            | Some bundle -> [ "--cacert"; bundle ])
           @ body_argument
         in
         let process =
@@ -231,10 +262,12 @@ let get client ~project ~kind ~id =
   if status = 200 then Ok response else Error (Unexpected_status status)
 
 let put client ~project ~kind ~id ~bytes =
-  let* url = route client ~project ~kind ~id in
-  let* status, _ = run client ~method_:"PUT" ~url ~body:(Some bytes) in
-  if status = 201 || status = 204 then Ok ()
-  else Error (Unexpected_status status)
+  if test_interrupt_upload () then Error Test_interrupted_upload
+  else
+    let* url = route client ~project ~kind ~id in
+    let* status, _ = run client ~method_:"PUT" ~url ~body:(Some bytes) in
+    if status = 201 || status = 204 then Ok ()
+    else Error (Unexpected_status status)
 
 let list_url client ~project ~cursor ~limit =
   let* () = check_id project in
