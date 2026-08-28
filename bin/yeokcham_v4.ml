@@ -191,10 +191,21 @@ let run_init arguments =
   let device, signing_capability =
     V4_signer.create () |> require_ok V4_signer.error_to_string
   in
-  Service.init_signed ~root ~username ~initial_draft ~title ~repository ~device
-    ~signing_capability
-  |> require_ok Service.error_to_string
-  |> render_status
+  let recovery =
+    Trust.generate_device () |> require_ok Trust.error_to_string
+  in
+  let recovery_device = Trust.generated_identity recovery in
+  let recovery_capability = Trust.generated_signing_capability recovery in
+  let status, ceremony =
+    Service.init_signed_with_recovery ~root ~username ~initial_draft ~title
+      ~repository ~device ~signing_capability ~recovery_device
+      ~recovery_capability
+    |> require_ok Service.error_to_string
+  in
+  render_status status;
+  Printf.printf "recovery-package %s\n" (Service.recovery_package_path root);
+  print_endline "recovery-mnemonic (record offline; it is shown only now)";
+  Printf.printf "%s\n" ceremony.Yeokcham_v4_recovery.mnemonic
 
 let local_signing_capability root =
   let status = Service.status ~root |> require_ok Service.error_to_string in

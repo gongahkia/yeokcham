@@ -3,6 +3,7 @@ module Journal = Yeokcham_v4_restore_journal
 module Service = Yeokcham_v4_local_service
 module Store = Yeokcham_v4_store
 module Trust = Yeokcham_v4_trust
+module Recovery = Yeokcham_v4_recovery
 
 let require_ok render = function
   | Ok value -> value
@@ -783,6 +784,90 @@ let administrator_enrollment_persists_a_public_member_and_local_username () =
         "member is present in public membership" true
         (Trust.is_authorized membership member))
 
+let authority_initialized_repositories_exchange_verified_epoch_bound_work () =
+  with_directory "yeokcham-v4-authority-source-" (fun parent ->
+      let source = Filename.concat parent "source" in
+      let destination = Filename.concat parent "destination" in
+      Unix.mkdir source 0o700;
+      Unix.mkdir destination 0o700;
+      write_file source "main.ml" "let version = 1\n";
+      write_file destination "main.ml" "let version = 1\n";
+      let administrator_capability = signing_capability 'a' in
+      let administrator = trust_device administrator_capability in
+      let recovery_capability = signing_capability 'r' in
+      let recovery_device = trust_device recovery_capability in
+      let _status, ceremony =
+        Service.init_signed_with_recovery ~root:source ~username:(username "alice")
+          ~initial_draft:(draft "draft-source") ~title:"source" ~repository
+          ~device:administrator ~signing_capability:administrator_capability
+          ~recovery_device ~recovery_capability
+        |> require_ok Service.error_to_string
+      in
+      let recovery_package =
+        In_channel.with_open_bin (Service.recovery_package_path source)
+          In_channel.input_all
+        |> Recovery.decode |> require_ok Recovery.error_to_string
+      in
+      let recovered =
+        Recovery.recover ~mnemonic:ceremony.Recovery.mnemonic
+          ~package:recovery_package
+        |> require_ok Recovery.error_to_string
+      in
+      Alcotest.(check int) "initial recovery package carries the root closure" 1
+        (List.length
+           (Trust.authority_heads (Recovery.recovered_authority recovered)));
+      let member_capability = signing_capability 'b' in
+      let member = trust_device member_capability in
+      ignore
+        (Service.enroll_device ~root:source ~subject:member ~role:Trust.Member
+           ~username:(username "bob")
+           ~signing_capability:administrator_capability
+        |> require_ok Service.error_to_string);
+      let source_repository =
+        Store.open_repository ~root:source |> require_ok Store.error_to_string
+      in
+      let source_loaded =
+        Store.load source_repository |> require_ok Store.error_to_string
+      in
+      let source_authority =
+        match source_loaded.Store.collaboration with
+        | Some collaboration -> (
+            match Store.authority collaboration with
+            | Some authority -> authority
+            | None -> Alcotest.fail "new signed initialization wrote a legacy state")
+        | None -> Alcotest.fail "new signed initialization lost collaboration state"
+      in
+      ignore
+        (Service.init_authority_collaboration ~root:destination
+           ~username:(username "bob")
+           ~initial_draft:(draft "draft-destination") ~title:"destination"
+           ~device:member ~authority:source_authority
+           ~local_certificate:
+             (Trust.certificates (Trust.authority_membership source_authority)
+             |> List.find (fun certificate ->
+                    Model.Device_id.equal
+                      (Trust.device_id (Trust.certificate_subject certificate))
+                      (Trust.device_id member))
+             |> Trust.certificate_id)
+        |> require_ok Service.error_to_string);
+      write_file source "main.ml" "let version = 2\n";
+      ignore
+        (Service.share_signed ~root:source ~change:(change "change-source")
+           ~revision:(revision "revision-source")
+           ~signing_capability:administrator_capability
+        |> require_ok Service.error_to_string);
+      let package = Filename.concat parent "authority-package" in
+      Service.create_package ~root:source ~destination:package
+      |> require_ok Service.error_to_string;
+      let received =
+        Service.receive_package ~root:destination ~package
+        |> require_ok Service.error_to_string
+      in
+      Alcotest.(check int) "epoch-bound revision becomes visible after receive" 1
+        received.Service.shared_change_count;
+      Alcotest.(check string) "receive does not materialize incoming bytes" "let version = 1\n"
+        (read_file destination "main.ml"))
+
 let () =
   Alcotest.run "V4 local service"
     [
@@ -842,5 +927,9 @@ let () =
             "administrator enrollment persists public membership and username"
             `Quick
             administrator_enrollment_persists_a_public_member_and_local_username;
+          Alcotest.test_case
+            "authority initialization exchanges epoch-bound work and recovery"
+            `Quick
+            authority_initialized_repositories_exchange_verified_epoch_bound_work;
         ] );
     ]

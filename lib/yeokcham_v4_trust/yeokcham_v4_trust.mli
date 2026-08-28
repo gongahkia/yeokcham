@@ -159,6 +159,19 @@ val successor_epoch :
 (** Creates a one-parent lifecycle epoch or an explicit multi-parent
     reconciliation. The issuer must be an administrator in every parent. *)
 
+val recover_epoch :
+  authority ->
+  parents:string list ->
+  certificates:certificate list ->
+  revoked:Model.Device_id.t list ->
+  frontier:Model.Revision_id.t list ->
+  recovery_device:device ->
+  signing_capability ->
+  (epoch, error) result
+(** Uses the recovery authority shared by every selected parent.  Recovery
+    replaces that authority atomically, so a consumed recovery key cannot
+    remain active in the resulting epoch. *)
+
 val verify_authority :
   membership:membership -> epoch list -> (authority, error) result
 val extend_authority : authority -> epoch list -> (authority, error) result
@@ -192,6 +205,7 @@ val encode_authorization : authorization -> string
 val decode_authorization : string -> (authorization, error) result
 val authorization_revision : authorization -> Model.Revision_id.t
 val verify_authorization : authority -> authorization -> (unit, error) result
+val authorization_matches_signed_revision : authorization -> signed_revision -> bool
 
 val make_adoption :
   authority ->
@@ -204,3 +218,4 @@ val encode_adoption : adoption -> string
 val decode_adoption : string -> (adoption, error) result
 val adoption_revision : adoption -> Model.Revision_id.t
 val verify_adoption : authority -> adoption -> (unit, error) result
+val adoption_matches_signed_revision : adoption -> signed_revision -> bool

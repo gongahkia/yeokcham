@@ -41,7 +41,10 @@ type repository = { store : Store.repository }
 
 type collaboration = {
   collaboration_membership : Trust.membership;
+  collaboration_authority : Trust.authority option;
   collaboration_revisions : Trust.signed_revision list;
+  collaboration_authorizations : Trust.authorization list;
+  collaboration_adoptions : Trust.adoption list;
   collaboration_local_certificate : string;
 }
 
@@ -109,12 +112,27 @@ let validate_collaboration ~project collaboration =
             (Invalid_collaboration_state
                "local certificate does not name the project creator")
   in
+  let* authority =
+    match collaboration.collaboration_authority with
+    | None -> Ok None
+    | Some authority ->
+        let* authority =
+          Trust.verify_authority ~membership (Trust.authority_epochs authority)
+          |> Result.map_error (fun error -> Trust_error error)
+        in
+        Ok (Some authority)
+  in
   let rec verify reversed = function
     | [] -> Ok (List.rev reversed)
     | signed :: rest ->
         let* () =
-          Trust.verify_signed_revision membership signed
-          |> Result.map_error (fun error -> Trust_error error)
+          match authority with
+          | None ->
+              Trust.verify_signed_revision membership signed
+              |> Result.map_error (fun error -> Trust_error error)
+          | Some authority ->
+              Trust.verify_signed_revision_at authority signed
+              |> Result.map_error (fun error -> Trust_error error)
         in
         verify (signed :: reversed) rest
   in
@@ -142,10 +160,63 @@ let validate_collaboration ~project collaboration =
          "every current project revision must have exactly one verified signed \
           record")
   else
+    let* () =
+      match authority with
+      | None ->
+          if
+            collaboration.collaboration_authorizations = []
+            && collaboration.collaboration_adoptions = []
+          then Ok ()
+          else
+            Error
+              (Invalid_collaboration_state
+                 "legacy collaboration cannot contain authority exceptions")
+      | Some authority ->
+          let rec verify_authorizations = function
+            | [] -> Ok ()
+            | authorization :: rest ->
+                let* () =
+                  Trust.verify_authorization authority authorization
+                  |> Result.map_error (fun error -> Trust_error error)
+                in
+                let matching =
+                  List.filter
+                    (Trust.authorization_matches_signed_revision authorization)
+                    signed_revisions
+                in
+                if List.length matching = 1 then verify_authorizations rest
+                else
+                  Error
+                    (Invalid_collaboration_state
+                       "authorization must name exactly one signed revision")
+          in
+          let rec verify_adoptions = function
+            | [] -> Ok ()
+            | adoption :: rest ->
+                let* () =
+                  Trust.verify_adoption authority adoption
+                  |> Result.map_error (fun error -> Trust_error error)
+                in
+                let matching =
+                  List.filter (Trust.adoption_matches_signed_revision adoption)
+                    signed_revisions
+                in
+                if List.length matching = 1 then verify_adoptions rest
+                else
+                  Error
+                    (Invalid_collaboration_state
+                       "adoption must bind exactly one signed revision")
+          in
+          let* () = verify_authorizations collaboration.collaboration_authorizations in
+          verify_adoptions collaboration.collaboration_adoptions
+    in
     Ok
       {
         collaboration_membership = membership;
+        collaboration_authority = authority;
         collaboration_revisions = signed_revisions;
+        collaboration_authorizations = collaboration.collaboration_authorizations;
+        collaboration_adoptions = collaboration.collaboration_adoptions;
         collaboration_local_certificate = local_certificate;
       }
 
@@ -182,15 +253,63 @@ let collaboration ~membership ~revisions ~local_certificate =
   Ok
     {
       collaboration_membership = membership;
+      collaboration_authority = None;
       collaboration_revisions = revisions;
+      collaboration_authorizations = [];
+      collaboration_adoptions = [];
       collaboration_local_certificate = local_certificate;
     }
 
 let membership collaboration = collaboration.collaboration_membership
+let authority collaboration = collaboration.collaboration_authority
 let signed_revisions collaboration = collaboration.collaboration_revisions
+let authorizations collaboration = collaboration.collaboration_authorizations
+let adoptions collaboration = collaboration.collaboration_adoptions
 
 let local_certificate collaboration =
   collaboration.collaboration_local_certificate
+
+let collaboration_with_authority ~authority ~revisions ~local_certificate
+    ~authorizations ~adoptions =
+  let collaboration =
+    {
+      collaboration_membership = Trust.authority_membership authority;
+      collaboration_authority = Some authority;
+      collaboration_revisions = revisions;
+      collaboration_authorizations = authorizations;
+      collaboration_adoptions = adoptions;
+      collaboration_local_certificate = local_certificate;
+    }
+  in
+  let membership = Trust.authority_membership authority in
+  let* authority =
+    Trust.verify_authority ~membership (Trust.authority_epochs authority)
+    |> Result.map_error (fun error -> Trust_error error)
+  in
+  let* () =
+    match
+      List.find_opt
+        (fun certificate ->
+          String.equal (Trust.certificate_id certificate) local_certificate)
+        (Trust.certificates membership)
+    with
+    | Some _ -> Ok ()
+    | None ->
+        Error
+          (Invalid_collaboration_state
+             "local certificate is absent from the verified membership")
+  in
+  let rec verify_revisions = function
+    | [] -> Ok ()
+    | revision :: rest ->
+        let* () =
+          Trust.verify_signed_revision_at authority revision
+          |> Result.map_error (fun error -> Trust_error error)
+        in
+        verify_revisions rest
+  in
+  let* () = verify_revisions revisions in
+  Ok { collaboration with collaboration_authority = Some authority }
 
 let construction value =
   value
@@ -200,12 +319,8 @@ let construction value =
 let text value = Encoding.text value |> construction
 let array value = Encoding.array value |> construction
 
-let exact_array name length = function
-  | Encoding.Array values when List.length values = length -> Ok values
-  | Encoding.Array _ ->
-      Error
-        (Invalid_collaboration_state
-           (Printf.sprintf "%s has the wrong field count" name))
+let array_values name = function
+  | Encoding.Array values -> Ok values
   | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _ | Encoding.Map _
   | Encoding.Bool _ | Encoding.Null ->
       Error (Invalid_collaboration_state (name ^ " must be an array"))
@@ -264,15 +379,41 @@ let collaboration_value ~project collaboration =
   let* certificates = bytes_array certificates in
   let* revisions = bytes_array revisions in
   let* local_certificate = text collaboration.collaboration_local_certificate in
-  array
-    [
-      Encoding.integer 1L;
-      Encoding.bytes project;
-      repository;
-      certificates;
-      revisions;
-      local_certificate;
-    ]
+  match collaboration.collaboration_authority with
+  | None ->
+      array
+        [
+          Encoding.integer 1L;
+          Encoding.bytes project;
+          repository;
+          certificates;
+          revisions;
+          local_certificate;
+        ]
+  | Some authority ->
+      let epochs = Trust.authority_epochs authority |> List.map Trust.encode_epoch in
+      let authorizations =
+        collaboration.collaboration_authorizations
+        |> List.map Trust.encode_authorization
+      in
+      let adoptions =
+        collaboration.collaboration_adoptions |> List.map Trust.encode_adoption
+      in
+      let* epochs = bytes_array epochs in
+      let* authorizations = bytes_array authorizations in
+      let* adoptions = bytes_array adoptions in
+      array
+        [
+          Encoding.integer 2L;
+          Encoding.bytes project;
+          repository;
+          certificates;
+          epochs;
+          revisions;
+          authorizations;
+          adoptions;
+          local_certificate;
+        ]
 
 let encode_collaborative_state ~project collaboration =
   collaboration_value ~project collaboration |> Result.map Encoding.encode
@@ -283,7 +424,7 @@ let decode_collaborative_state encoded =
     |> Result.map_error (fun error ->
         Invalid_collaboration_state (Encoding.decode_error_to_string error))
   in
-  let* fields = exact_array "V4 collaborative state" 6 value in
+  let* fields = array_values "V4 collaborative state" value in
   match fields with
   | [ version; project; repository; certificates; revisions; local_certificate ]
     ->
@@ -357,7 +498,134 @@ let decode_collaborative_state encoded =
       else
         Error
           (Invalid_collaboration_state "collaborative state is not canonical")
-  | _ -> assert false
+  | [
+   version;
+   project;
+   repository;
+   certificates;
+   epochs;
+   revisions;
+   authorizations;
+   adoptions;
+   local_certificate;
+  ] ->
+      let* () =
+        match version with
+        | Encoding.Integer value when Int64.equal value 2L -> Ok ()
+        | Encoding.Integer _ ->
+            Error
+              (Invalid_collaboration_state
+                 "unsupported collaborative state version")
+        | Encoding.Bytes _ | Encoding.Text _ | Encoding.Array _ | Encoding.Map _
+        | Encoding.Bool _ | Encoding.Null ->
+            Error
+              (Invalid_collaboration_state
+                 "collaborative state version must be an integer")
+      in
+      let* project =
+        match project with
+        | Encoding.Bytes value ->
+            Record.decode_project value
+            |> Result.map_error (fun error -> Record_error error)
+        | Encoding.Integer _ | Encoding.Text _ | Encoding.Array _
+        | Encoding.Map _ | Encoding.Bool _ | Encoding.Null ->
+            Error (Invalid_collaboration_state "project record must be bytes")
+      in
+      let* repository = text_field "repository ID" repository in
+      let* repository =
+        Trust.Repository_id.of_string repository
+        |> Result.map_error (fun error -> Invalid_collaboration_state error)
+      in
+      let* certificates = decode_bytes_array "certificates" certificates in
+      let* certificates =
+        let rec loop reversed = function
+          | [] -> Ok (List.rev reversed)
+          | encoded :: rest ->
+              let* certificate =
+                Trust.decode_certificate encoded
+                |> Result.map_error (fun error -> Trust_error error)
+              in
+              loop (certificate :: reversed) rest
+        in
+        loop [] certificates
+      in
+      let* membership =
+        Trust.verify_membership ~repository certificates
+        |> Result.map_error (fun error -> Trust_error error)
+      in
+      let* epochs = decode_bytes_array "authority epochs" epochs in
+      let* epochs =
+        let rec loop reversed = function
+          | [] -> Ok (List.rev reversed)
+          | encoded :: rest ->
+              let* epoch =
+                Trust.decode_epoch encoded
+                |> Result.map_error (fun error -> Trust_error error)
+              in
+              loop (epoch :: reversed) rest
+        in
+        loop [] epochs
+      in
+      let* authority =
+        Trust.verify_authority ~membership epochs
+        |> Result.map_error (fun error -> Trust_error error)
+      in
+      let* revisions = decode_bytes_array "signed revisions" revisions in
+      let* revisions =
+        let rec loop reversed = function
+          | [] -> Ok (List.rev reversed)
+          | encoded :: rest ->
+              let* signed =
+                Trust.decode_signed_revision encoded
+                |> Result.map_error (fun error -> Trust_error error)
+              in
+              loop (signed :: reversed) rest
+        in
+        loop [] revisions
+      in
+      let* authorizations =
+        decode_bytes_array "authorizations" authorizations
+      in
+      let* authorizations =
+        let rec loop reversed = function
+          | [] -> Ok (List.rev reversed)
+          | encoded :: rest ->
+              let* authorization =
+                Trust.decode_authorization encoded
+                |> Result.map_error (fun error -> Trust_error error)
+              in
+              loop (authorization :: reversed) rest
+        in
+        loop [] authorizations
+      in
+      let* adoptions = decode_bytes_array "adoptions" adoptions in
+      let* adoptions =
+        let rec loop reversed = function
+          | [] -> Ok (List.rev reversed)
+          | encoded :: rest ->
+              let* adoption =
+                Trust.decode_adoption encoded
+                |> Result.map_error (fun error -> Trust_error error)
+              in
+              loop (adoption :: reversed) rest
+        in
+        loop [] adoptions
+      in
+      let* local_certificate = text_field "local certificate" local_certificate in
+      let* collaboration =
+        collaboration_with_authority ~authority ~revisions ~local_certificate
+          ~authorizations ~adoptions
+      in
+      let* collaboration = validate_collaboration ~project collaboration in
+      let* canonical = encode_collaborative_state ~project collaboration in
+      if String.equal canonical encoded then Ok (project, collaboration)
+      else
+        Error
+          (Invalid_collaboration_state "collaborative state is not canonical")
+  | _ ->
+      Error
+        (Invalid_collaboration_state
+           "V4 collaborative state has the wrong field count")
 
 let payload_for_project project =
   let* encoded =

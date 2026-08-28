@@ -33,6 +33,18 @@ val create :
     identity/certificate/revision records. It never copies private signing
     material or a mutable project-state head. *)
 
+val create_with_authority :
+  source:Yeokcham_store.repository ->
+  destination:string ->
+  authority:Trust.authority ->
+  revisions:Trust.signed_revision list ->
+  authorizations:Trust.authorization list ->
+  adoptions:Trust.adoption list ->
+  (unit, error) result
+(** V2 package creation. The manifest carries the complete public authority
+    closure that verifies its epoch-bound revisions and any exact exception
+    records. *)
+
 val verify_and_import :
   destination:Yeokcham_store.repository ->
   package:string ->
@@ -45,8 +57,25 @@ val verify_and_import :
     supplied membership prevents a package with an unrelated root from joining
     merely by naming the same repository identifier. No mutable ref changes. *)
 
+val verify_and_import_with_authority :
+  destination:Yeokcham_store.repository ->
+  package:string ->
+  authority:Trust.authority ->
+  project:Model.project ->
+  (verified * Model.project, error) result
+(** The authority-aware V2 counterpart. It extends only from the destination's
+    verified root, validates the imported epoch graph before object import, and
+    keeps authority forks explicit. *)
+
 val membership : verified -> Trust.membership
+val authority : verified -> Trust.authority option
 val revisions : verified -> Trust.signed_revision list
+val authorizations : verified -> Trust.authorization list
+val adoptions : verified -> Trust.adoption list
+
+val inspect_authority : package:string -> (Trust.authority, error) result
+(** Reads and cryptographically validates only a V2 package manifest's public
+    authority closure. It neither imports objects nor changes any project. *)
 
 val apply_revisions : Model.project -> verified -> (Model.project, error) result
 (** Adds verified revisions through the pure V4 receive transition in causal

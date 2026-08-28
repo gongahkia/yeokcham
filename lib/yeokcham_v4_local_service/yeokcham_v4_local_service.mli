@@ -117,6 +117,7 @@ type in_place_restore = {
 }
 
 val error_to_string : error -> string
+val recovery_package_path : string -> string
 
 val init :
   root:string ->
@@ -139,6 +140,22 @@ val init_signed :
     administrator and [signing_capability] is supplied by an external local
     signer provider; it is never persisted by this module. *)
 
+val init_signed_with_recovery :
+  root:string ->
+  username:Yeokcham_v4_model.Username.t ->
+  initial_draft:Yeokcham_v4_model.Draft_id.t ->
+  title:string ->
+  repository:Yeokcham_v4_trust.Repository_id.t ->
+  device:Yeokcham_v4_trust.device ->
+  signing_capability:Yeokcham_v4_trust.signing_capability ->
+  recovery_device:Yeokcham_v4_trust.device ->
+  recovery_capability:Yeokcham_v4_trust.signing_capability ->
+  (status * Yeokcham_v4_recovery.ceremony, error) result
+(** Creates the root authority epoch and its initial encrypted recovery package
+    before publishing the first V4 state. The caller must present the returned
+    24-word mnemonic to the user exactly once and persist or export the package
+    through an explicit adapter. *)
+
 val init_collaboration :
   root:string ->
   username:Yeokcham_v4_model.Username.t ->
@@ -151,6 +168,19 @@ val init_collaboration :
 (** Initializes an already enrolled device from public collaboration state. The
     caller keeps the corresponding private signing capability outside V4 project
     objects. *)
+
+val init_authority_collaboration :
+  root:string ->
+  username:Yeokcham_v4_model.Username.t ->
+  initial_draft:Yeokcham_v4_model.Draft_id.t ->
+  title:string ->
+  device:Yeokcham_v4_trust.device ->
+  authority:Yeokcham_v4_trust.authority ->
+  local_certificate:string ->
+  (status, error) result
+(** Initializes an already-enrolled device using a verified V4 authority
+    closure. It is intended for a peer that has compared the root phrase and
+    obtained the public enrollment closure out of band. *)
 
 val save : root:string -> (save_outcome, error) result
 val status : root:string -> (status, error) result

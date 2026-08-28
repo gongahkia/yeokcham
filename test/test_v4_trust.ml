@@ -192,6 +192,238 @@ let signed_revision_binds_author_and_membership () =
         (Trust.error_to_string error)
   | Ok () -> Alcotest.fail "missing author certificate verified a revision"
 
+let authority_root () =
+  let repository, root_capability, root_device, root_certificate, membership =
+    root_and_membership ()
+  in
+  let recovery_capability = capability 'r' in
+  let recovery_device = device_from_capability recovery_capability in
+  let root_epoch =
+    Trust.root_epoch ~membership
+      ~root_certificate:(Trust.certificate_id root_certificate)
+      ~recovery_device root_capability
+    |> require_ok Trust.error_to_string
+  in
+  let authority =
+    Trust.verify_authority ~membership [ root_epoch ]
+    |> require_ok Trust.error_to_string
+  in
+  ( repository,
+    root_capability,
+    root_device,
+    root_certificate,
+    membership,
+    recovery_capability,
+    recovery_device,
+    root_epoch,
+    authority )
+
+let authority_epochs_are_branch_scoped_and_reconcilable () =
+  let ( repository,
+        root_capability,
+        root_device,
+        root_certificate,
+        membership,
+        _,
+        recovery_device,
+        root_epoch,
+        _root_authority ) =
+    authority_root ()
+  in
+  let member_capability = capability 'b' in
+  let member_device = device_from_capability member_capability in
+  let member_certificate =
+    Trust.enroll membership
+      ~issuer:(Trust.certificate_id root_certificate)
+      root_capability ~subject:member_device ~role:Trust.Member
+    |> require_ok Trust.error_to_string
+  in
+  let membership =
+    Trust.extend_membership membership [ member_certificate ]
+    |> require_ok Trust.error_to_string
+  in
+  let root_authority =
+    Trust.verify_authority ~membership [ root_epoch ]
+    |> require_ok Trust.error_to_string
+  in
+  let certificates = Trust.certificates membership in
+  let enrolled_epoch =
+    Trust.successor_epoch root_authority ~parents:[ Trust.epoch_id root_epoch ]
+      ~certificates ~revoked:[] ~frontier:[] ~recovery_device
+      ~issuer:(Trust.certificate_id root_certificate) root_capability
+    |> require_ok Trust.error_to_string
+  in
+  let authority =
+    Trust.extend_authority root_authority [ enrolled_epoch ]
+    |> require_ok Trust.error_to_string
+  in
+  let signed =
+    Trust.sign_revision_at authority ~epoch:(Trust.epoch_id enrolled_epoch)
+      ~certificate:(Trust.certificate_id member_certificate) member_capability
+      (sample_revision (Trust.device_id member_device))
+    |> require_ok Trust.error_to_string
+  in
+  Alcotest.(check (option string)) "new signed record names its authority epoch"
+    (Some (Trust.epoch_id enrolled_epoch))
+    (Trust.signed_revision_epoch signed);
+  Trust.verify_signed_revision_at authority signed
+  |> require_ok Trust.error_to_string;
+  let first_branch =
+    Trust.successor_epoch authority ~parents:[ Trust.epoch_id enrolled_epoch ]
+      ~certificates ~revoked:[] ~frontier:[ revision "revision-one" ]
+      ~recovery_device ~issuer:(Trust.certificate_id root_certificate)
+      root_capability
+    |> require_ok Trust.error_to_string
+  in
+  let second_branch =
+    Trust.successor_epoch authority ~parents:[ Trust.epoch_id enrolled_epoch ]
+      ~certificates ~revoked:[] ~frontier:[ revision "revision-two" ]
+      ~recovery_device ~issuer:(Trust.certificate_id root_certificate)
+      root_capability
+    |> require_ok Trust.error_to_string
+  in
+  let forked =
+    Trust.extend_authority authority [ first_branch; second_branch ]
+    |> require_ok Trust.error_to_string
+  in
+  Alcotest.(check int) "both authority heads remain active until explicit reconciliation"
+    2 (List.length (Trust.authority_heads forked));
+  Alcotest.(check bool) "member remains active in the first branch" true
+    (Trust.authority_device_active forked ~epoch:(Trust.epoch_id first_branch)
+       member_device);
+  let reconciled =
+    Trust.successor_epoch forked
+      ~parents:
+        (List.sort String.compare
+           [ Trust.epoch_id first_branch; Trust.epoch_id second_branch ])
+      ~certificates ~revoked:[]
+      ~frontier:[ revision "revision-one"; revision "revision-two" ]
+      ~recovery_device ~issuer:(Trust.certificate_id root_certificate)
+      root_capability
+    |> require_ok Trust.error_to_string
+  in
+  let reconciled_authority =
+    Trust.extend_authority forked [ reconciled ]
+    |> require_ok Trust.error_to_string
+  in
+  Alcotest.(check int) "reconciliation names both parents and closes the fork" 1
+    (List.length (Trust.authority_heads reconciled_authority));
+  Alcotest.(check bool) "root remains administrator after reconciliation" true
+    (Trust.authority_device_administrator reconciled_authority
+       ~epoch:(Trust.epoch_id reconciled) root_device);
+  ignore repository
+
+let revocation_recovery_and_exact_exceptions_are_verified () =
+  let ( _repository,
+        root_capability,
+        _root_device,
+        root_certificate,
+        membership,
+        recovery_capability,
+        recovery_device,
+        root_epoch,
+        _root_authority ) =
+    authority_root ()
+  in
+  let member_capability = capability 'b' in
+  let member_device = device_from_capability member_capability in
+  let member_certificate =
+    Trust.enroll membership
+      ~issuer:(Trust.certificate_id root_certificate)
+      root_capability ~subject:member_device ~role:Trust.Member
+    |> require_ok Trust.error_to_string
+  in
+  let membership =
+    Trust.extend_membership membership [ member_certificate ]
+    |> require_ok Trust.error_to_string
+  in
+  let root_authority =
+    Trust.verify_authority ~membership [ root_epoch ]
+    |> require_ok Trust.error_to_string
+  in
+  let certificates = Trust.certificates membership in
+  let enrolled_epoch =
+    Trust.successor_epoch root_authority ~parents:[ Trust.epoch_id root_epoch ]
+      ~certificates ~revoked:[] ~frontier:[] ~recovery_device
+      ~issuer:(Trust.certificate_id root_certificate) root_capability
+    |> require_ok Trust.error_to_string
+  in
+  let authority =
+    Trust.extend_authority root_authority [ enrolled_epoch ]
+    |> require_ok Trust.error_to_string
+  in
+  let signed =
+    Trust.sign_revision_at authority ~epoch:(Trust.epoch_id enrolled_epoch)
+      ~certificate:(Trust.certificate_id member_certificate) member_capability
+      (sample_revision (Trust.device_id member_device))
+    |> require_ok Trust.error_to_string
+  in
+  let authorization =
+    Trust.make_authorization authority ~epoch:(Trust.epoch_id enrolled_epoch)
+      ~issuer:(Trust.certificate_id root_certificate) root_capability
+      ~device:member_device ~revision:(Trust.signed_revision_id signed)
+      ~change:(change "change-one")
+    |> require_ok Trust.error_to_string
+  in
+  Trust.verify_authorization authority authorization
+  |> require_ok Trust.error_to_string;
+  let adoption =
+    Trust.make_adoption authority ~epoch:(Trust.epoch_id enrolled_epoch)
+      ~issuer:(Trust.certificate_id root_certificate) root_capability
+      ~signed_revision:signed
+    |> require_ok Trust.error_to_string
+  in
+  Trust.verify_adoption authority adoption |> require_ok Trust.error_to_string;
+  let revoked_epoch =
+    Trust.successor_epoch authority ~parents:[ Trust.epoch_id enrolled_epoch ]
+      ~certificates ~revoked:[ Trust.device_id member_device ] ~frontier:[]
+      ~recovery_device ~issuer:(Trust.certificate_id root_certificate)
+      root_capability
+    |> require_ok Trust.error_to_string
+  in
+  let revoked_authority =
+    Trust.extend_authority authority [ revoked_epoch ]
+    |> require_ok Trust.error_to_string
+  in
+  (match
+     Trust.sign_revision_at revoked_authority ~epoch:(Trust.epoch_id revoked_epoch)
+       ~certificate:(Trust.certificate_id member_certificate) member_capability
+       (sample_revision (Trust.device_id member_device))
+   with
+  | Error error ->
+      Alcotest.(check string) "revoked device cannot sign at a newer epoch"
+        "V4 device is revoked in this authority epoch"
+        (Trust.error_to_string error)
+  | Ok _ -> Alcotest.fail "revoked device signed at the newer epoch");
+  let replacement_recovery_capability = capability 's' in
+  let replacement_recovery_device =
+    device_from_capability replacement_recovery_capability
+  in
+  let recovered_epoch =
+    Trust.recover_epoch revoked_authority
+      ~parents:[ Trust.epoch_id revoked_epoch ] ~certificates
+      ~revoked:[ Trust.device_id member_device ] ~frontier:[]
+      ~recovery_device:replacement_recovery_device recovery_capability
+    |> require_ok Trust.error_to_string
+  in
+  let recovered_authority =
+    Trust.extend_authority revoked_authority [ recovered_epoch ]
+    |> require_ok Trust.error_to_string
+  in
+  Alcotest.(check int) "recovery advances the authority graph" 1
+    (List.length (Trust.authority_heads recovered_authority));
+  Alcotest.(check bool) "recovery rotates to the replacement key" true
+    (Trust.device_equal replacement_recovery_device
+       (Trust.epoch_recovery_device recovered_epoch));
+  Alcotest.(check string) "authorization survives a canonical round trip"
+    (Trust.encode_authorization authorization)
+    (authorization |> Trust.encode_authorization |> Trust.decode_authorization
+    |> require_ok Trust.error_to_string |> Trust.encode_authorization);
+  Alcotest.(check string) "adoption binds the exact signed revision bytes"
+    (Trust.encode_adoption adoption)
+    (adoption |> Trust.encode_adoption |> Trust.decode_adoption
+    |> require_ok Trust.error_to_string |> Trust.encode_adoption)
+
 let () =
   Alcotest.run "V4 trust"
     [
@@ -203,5 +435,9 @@ let () =
             administrator_enrols_a_member_in_causal_order;
           Alcotest.test_case "signed revision binds author and membership"
             `Quick signed_revision_binds_author_and_membership;
+          Alcotest.test_case "authority epochs keep forks explicit" `Quick
+            authority_epochs_are_branch_scoped_and_reconcilable;
+          Alcotest.test_case "revocation, recovery, and exact exceptions"
+            `Quick revocation_recovery_and_exact_exceptions_are_verified;
         ] );
     ]

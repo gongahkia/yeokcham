@@ -4,6 +4,7 @@ module Snapshot = Yeokcham_snapshot
 module Store = Yeokcham_v4_store
 module Trust = Yeokcham_v4_trust
 module Package = Yeokcham_v4_package
+module Recovery = Yeokcham_v4_recovery
 
 module Path_map = Map.Make (struct
   type t = string list
@@ -335,6 +336,51 @@ let local_device collaboration =
   let* certificate = local_certificate collaboration in
   Ok (Trust.certificate_subject certificate)
 
+let current_authority_context authority =
+  match Trust.authority_heads authority with
+  | [] -> Error (Trust_error (Trust.Invalid_epoch "authority has no active head"))
+  | first :: rest ->
+      let* first =
+        Trust.authority_epoch authority first
+        |> Result.map_error (fun error -> Trust_error error)
+      in
+      let recovery_device = Trust.epoch_recovery_device first in
+      let rec gather revoked frontier = function
+        | [] -> Ok (revoked, frontier)
+        | head :: remaining ->
+            let* epoch =
+              Trust.authority_epoch authority head
+              |> Result.map_error (fun error -> Trust_error error)
+            in
+            if not (Trust.device_equal recovery_device (Trust.epoch_recovery_device epoch)) then
+              Error (Trust_error Trust.Invalid_recovery_authority)
+            else
+              gather
+                (Trust.epoch_revoked epoch @ revoked)
+                (Trust.epoch_frontier epoch @ frontier)
+                remaining
+      in
+      let* revoked, frontier = gather (Trust.epoch_revoked first) (Trust.epoch_frontier first) rest in
+      Ok
+        ( Trust.authority_heads authority,
+          recovery_device,
+          List.sort_uniq Model.Device_id.compare revoked,
+          List.sort_uniq Model.Revision_id.compare frontier )
+
+let advance_authority ~authority ~membership ~local_certificate
+    ~signing_capability =
+  let* parents, recovery_device, revoked, frontier =
+    current_authority_context authority
+  in
+  let* epoch =
+    Trust.successor_epoch authority ~parents
+      ~certificates:(Trust.certificates membership) ~revoked ~frontier
+      ~recovery_device ~issuer:local_certificate signing_capability
+    |> Result.map_error (fun error -> Trust_error error)
+  in
+  Trust.extend_authority authority [ epoch ]
+  |> Result.map_error (fun error -> Trust_error error)
+
 let checkpoint_observed project observed =
   let active = Model.active_draft project in
   if Model.Snapshot_id.equal active.Model.latest_checkpoint observed then
@@ -350,6 +396,27 @@ let with_repository ~root f =
     Store.load repository |> Result.map_error (fun error -> Store_error error)
   in
   f repository loaded
+
+let recovery_package_path root =
+  Filename.concat (Filename.concat root ".yeokcham") "recovery-v1.cbor"
+
+let write_recovery_package_exclusive ~root ceremony =
+  let path = recovery_package_path root in
+  try
+    let channel =
+      Unix.openfile path [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_EXCL ] 0o600
+      |> Unix.out_channel_of_descr
+    in
+    Fun.protect
+      ~finally:(fun () -> close_out_noerr channel)
+      (fun () ->
+        Out_channel.output_string channel (Recovery.encode ceremony.Recovery.package);
+        Out_channel.flush channel);
+    Ok ()
+  with Unix.Unix_error (error, operation, _) ->
+    Error
+      (Printf.sprintf "could not write recovery package %s (%s): %s" path
+         operation (Unix.error_message error))
 
 let init ~root ~creator ~username ~initial_draft ~title =
   let* repository =
@@ -387,6 +454,32 @@ let init_collaboration ~root ~username ~initial_draft ~title ~device ~membership
   |> Result.map (fun loaded -> status_of_project loaded.Store.project)
   |> Result.map_error (fun error -> Store_error error)
 
+let init_authority_collaboration ~root ~username ~initial_draft ~title ~device
+    ~authority ~local_certificate =
+  let membership = Trust.authority_membership authority in
+  let* authority =
+    Trust.verify_authority ~membership (Trust.authority_epochs authority)
+    |> Result.map_error (fun error -> Trust_error error)
+  in
+  let* repository =
+    Store.init_collaborative_with ~root ~bootstrap:(fun underlying_store ->
+        let* initial_snapshot =
+          capture ~root underlying_store |> Result.map_error error_to_string
+        in
+        let project =
+          Model.init ~creator:(Trust.device_id device) ~username ~initial_snapshot
+            ~initial_draft ~title
+        in
+        Store.collaboration_with_authority ~authority ~revisions:[]
+          ~local_certificate ~authorizations:[] ~adoptions:[]
+        |> Result.map_error Store.error_to_string
+        |> Result.map (fun collaboration -> (project, collaboration)))
+    |> Result.map_error (fun error -> Store_error error)
+  in
+  Store.load repository
+  |> Result.map (fun loaded -> status_of_project loaded.Store.project)
+  |> Result.map_error (fun error -> Store_error error)
+
 let init_signed ~root ~username ~initial_draft ~title ~repository ~device
     ~signing_capability =
   let* root_certificate =
@@ -399,6 +492,52 @@ let init_signed ~root ~username ~initial_draft ~title ~repository ~device
   in
   init_collaboration ~root ~username ~initial_draft ~title ~device ~membership
     ~local_certificate:(Trust.certificate_id root_certificate)
+
+let init_signed_with_recovery ~root ~username ~initial_draft ~title ~repository
+    ~device ~signing_capability ~recovery_device ~recovery_capability =
+  let* root_certificate =
+    Trust.root_certificate ~repository ~device signing_capability
+    |> Result.map_error (fun error -> Trust_error error)
+  in
+  let* membership =
+    Trust.verify_membership ~repository [ root_certificate ]
+    |> Result.map_error (fun error -> Trust_error error)
+  in
+  let* root_epoch =
+    Trust.root_epoch ~membership
+      ~root_certificate:(Trust.certificate_id root_certificate)
+      ~recovery_device signing_capability
+    |> Result.map_error (fun error -> Trust_error error)
+  in
+  let* authority =
+    Trust.verify_authority ~membership [ root_epoch ]
+    |> Result.map_error (fun error -> Trust_error error)
+  in
+  let* ceremony =
+    Recovery.create ~authority ~recovery_capability
+    |> Result.map_error (fun error ->
+           Trust_error
+             (Trust.Invalid_record ("could not create recovery package: " ^ Recovery.error_to_string error)))
+  in
+  let* repository =
+    Store.init_collaborative_with ~root ~bootstrap:(fun underlying_store ->
+        let* () = write_recovery_package_exclusive ~root ceremony in
+        let* initial_snapshot =
+          capture ~root underlying_store |> Result.map_error error_to_string
+        in
+        let project =
+          Model.init ~creator:(Trust.device_id device) ~username ~initial_snapshot
+            ~initial_draft ~title
+        in
+        Store.collaboration_with_authority ~authority ~revisions:[]
+          ~local_certificate:(Trust.certificate_id root_certificate)
+          ~authorizations:[] ~adoptions:[]
+        |> Result.map_error Store.error_to_string
+        |> Result.map (fun collaboration -> (project, collaboration)))
+    |> Result.map_error (fun error -> Store_error error)
+  in
+  let* loaded = Store.load repository |> Result.map_error (fun error -> Store_error error) in
+  Ok (status_of_project loaded.Store.project, ceremony)
 
 let status ~root =
   with_repository ~root (fun repository loaded ->
@@ -448,10 +587,28 @@ let enroll_device ~root ~subject ~role ~username ~signing_capability =
         |> Result.map_error (fun error -> Model_error error)
       in
       let* collaboration =
-        Store.collaboration ~membership
-          ~revisions:(Store.signed_revisions collaboration)
-          ~local_certificate:(Store.local_certificate collaboration)
-        |> Result.map_error (fun error -> Store_error error)
+        match Store.authority collaboration with
+        | None ->
+            Store.collaboration ~membership
+              ~revisions:(Store.signed_revisions collaboration)
+              ~local_certificate:(Store.local_certificate collaboration)
+            |> Result.map_error (fun error -> Store_error error)
+        | Some authority ->
+            let* authority =
+              Trust.verify_authority ~membership (Trust.authority_epochs authority)
+              |> Result.map_error (fun error -> Trust_error error)
+            in
+            let* authority =
+              advance_authority ~authority ~membership
+                ~local_certificate:(Store.local_certificate collaboration)
+                ~signing_capability
+            in
+            Store.collaboration_with_authority ~authority
+              ~revisions:(Store.signed_revisions collaboration)
+              ~local_certificate:(Store.local_certificate collaboration)
+              ~authorizations:(Store.authorizations collaboration)
+              ~adoptions:(Store.adoptions collaboration)
+            |> Result.map_error (fun error -> Store_error error)
       in
       persist_collaborative repository loaded project collaboration)
 
@@ -706,11 +863,32 @@ let share ~root ~change ~revision =
       persist repository loaded recorded)
 
 let extend_signed_revisions collaboration signed =
-  Store.collaboration
-    ~membership:(Store.membership collaboration)
-    ~revisions:(signed :: Store.signed_revisions collaboration)
-    ~local_certificate:(Store.local_certificate collaboration)
-  |> Result.map_error (fun error -> Store_error error)
+  match Store.authority collaboration with
+  | None ->
+      Store.collaboration
+        ~membership:(Store.membership collaboration)
+        ~revisions:(signed :: Store.signed_revisions collaboration)
+        ~local_certificate:(Store.local_certificate collaboration)
+      |> Result.map_error (fun error -> Store_error error)
+  | Some authority ->
+      Store.collaboration_with_authority ~authority
+        ~revisions:(signed :: Store.signed_revisions collaboration)
+        ~local_certificate:(Store.local_certificate collaboration)
+        ~authorizations:(Store.authorizations collaboration)
+        ~adoptions:(Store.adoptions collaboration)
+      |> Result.map_error (fun error -> Store_error error)
+
+let authority_epoch_for_new_record collaboration =
+  match Store.authority collaboration with
+  | None -> Ok None
+  | Some authority -> (
+      match Trust.authority_heads authority with
+      | [ epoch ] -> Ok (Some (authority, epoch))
+      | [] ->
+          Error
+            (Trust_error
+               (Trust.Invalid_epoch "authority has no active head"))
+      | _ -> Error (Trust_error Trust.Authority_fork))
 
 let share_signed ~root ~change ~revision ~signing_capability =
   with_repository ~root (fun repository loaded ->
@@ -774,12 +952,20 @@ let share_signed ~root ~change ~revision ~signing_capability =
             |> Result.map_error (fun error -> Model_error error)
       in
       let project, recorded = recorded in
+      let* authority_epoch = authority_epoch_for_new_record collaboration in
       let* signed =
-        Trust.sign_revision
-          (Store.membership collaboration)
-          ~certificate:(Store.local_certificate collaboration)
-          signing_capability recorded
-        |> Result.map_error (fun error -> Trust_error error)
+        match authority_epoch with
+        | None ->
+            Trust.sign_revision
+              (Store.membership collaboration)
+              ~certificate:(Store.local_certificate collaboration)
+              signing_capability recorded
+            |> Result.map_error (fun error -> Trust_error error)
+        | Some (authority, epoch) ->
+            Trust.sign_revision_at authority ~epoch
+              ~certificate:(Store.local_certificate collaboration)
+              signing_capability recorded
+            |> Result.map_error (fun error -> Trust_error error)
       in
       let* collaboration = extend_signed_revisions collaboration signed in
       persist_collaborative repository loaded project collaboration)
@@ -1053,12 +1239,20 @@ let resolve_signed ~root ~decision ~change ~revision ~tree ~signing_capability =
             Model.resolve project ~decision ~replacement
             |> Result.map_error (fun error -> Model_error error)
           in
+          let* authority_epoch = authority_epoch_for_new_record collaboration in
           let* signed =
-            Trust.sign_revision
-              (Store.membership collaboration)
-              ~certificate:(Store.local_certificate collaboration)
-              signing_capability replacement
-            |> Result.map_error (fun error -> Trust_error error)
+            match authority_epoch with
+            | None ->
+                Trust.sign_revision
+                  (Store.membership collaboration)
+                  ~certificate:(Store.local_certificate collaboration)
+                  signing_capability replacement
+                |> Result.map_error (fun error -> Trust_error error)
+            | Some (authority, epoch) ->
+                Trust.sign_revision_at authority ~epoch
+                  ~certificate:(Store.local_certificate collaboration)
+                  signing_capability replacement
+                |> Result.map_error (fun error -> Trust_error error)
           in
           let* collaboration = extend_signed_revisions collaboration signed in
           persist_collaborative repository loaded project collaboration)
@@ -1066,12 +1260,22 @@ let resolve_signed ~root ~decision ~change ~revision ~tree ~signing_capability =
 let create_package ~root ~destination =
   with_repository ~root (fun repository loaded ->
       let* collaboration = require_collaboration loaded in
-      Package.create
-        ~source:(Store.underlying_store repository)
-        ~destination
-        ~membership:(Store.membership collaboration)
-        ~revisions:(Store.signed_revisions collaboration)
-      |> Result.map_error (fun error -> Package_error error))
+      match Store.authority collaboration with
+      | None ->
+          Package.create
+            ~source:(Store.underlying_store repository)
+            ~destination
+            ~membership:(Store.membership collaboration)
+            ~revisions:(Store.signed_revisions collaboration)
+          |> Result.map_error (fun error -> Package_error error)
+      | Some authority ->
+          Package.create_with_authority
+            ~source:(Store.underlying_store repository)
+            ~destination ~authority
+            ~revisions:(Store.signed_revisions collaboration)
+            ~authorizations:(Store.authorizations collaboration)
+            ~adoptions:(Store.adoptions collaboration)
+          |> Result.map_error (fun error -> Package_error error))
 
 let merge_signed_revisions existing incoming =
   let rec add known = function
@@ -1101,31 +1305,78 @@ let merge_signed_revisions existing incoming =
   in
   add existing incoming
 
+let merge_public_records ~encode existing incoming =
+  let rec add known = function
+    | [] -> Ok known
+    | record :: rest ->
+        let bytes = encode record in
+        if List.exists (fun existing -> String.equal bytes (encode existing)) known
+        then add known rest
+        else add (record :: known) rest
+  in
+  add existing incoming
+
 let receive_package ~root ~package =
   with_repository ~root (fun repository loaded ->
       let* existing = require_collaboration loaded in
-      let* received =
-        Package.verify_and_import
-          ~destination:(Store.underlying_store repository)
-          ~package
-          ~membership:(Store.membership existing)
-          ~project:loaded.Store.project
-        |> Result.map_error (fun error -> Package_error error)
-      in
-      let received, project = received in
-      let* revisions =
-        merge_signed_revisions
-          (Store.signed_revisions existing)
-          (Package.revisions received)
-      in
-      let* collaboration =
-        Store.collaboration
-          ~membership:(Package.membership received)
-          ~revisions
-          ~local_certificate:(Store.local_certificate existing)
-        |> Result.map_error (fun error -> Store_error error)
-      in
-      persist_collaborative repository loaded project collaboration)
+      match Store.authority existing with
+      | None ->
+          let* received =
+            Package.verify_and_import
+              ~destination:(Store.underlying_store repository)
+              ~package ~membership:(Store.membership existing)
+              ~project:loaded.Store.project
+            |> Result.map_error (fun error -> Package_error error)
+          in
+          let received, project = received in
+          let* revisions =
+            merge_signed_revisions
+              (Store.signed_revisions existing)
+              (Package.revisions received)
+          in
+          let* collaboration =
+            Store.collaboration ~membership:(Package.membership received)
+              ~revisions ~local_certificate:(Store.local_certificate existing)
+            |> Result.map_error (fun error -> Store_error error)
+          in
+          persist_collaborative repository loaded project collaboration
+      | Some authority ->
+          let* received =
+            Package.verify_and_import_with_authority
+              ~destination:(Store.underlying_store repository)
+              ~package ~authority ~project:loaded.Store.project
+            |> Result.map_error (fun error -> Package_error error)
+          in
+          let received, project = received in
+          let* authority =
+            match Package.authority received with
+            | Some authority -> Ok authority
+            | None ->
+                Error
+                  (Package_error
+                     (Package.Invalid_package
+                        "authority-aware receive returned no authority"))
+          in
+          let* revisions =
+            merge_signed_revisions
+              (Store.signed_revisions existing)
+              (Package.revisions received)
+          in
+          let* authorizations =
+            merge_public_records ~encode:Trust.encode_authorization
+              (Store.authorizations existing) (Package.authorizations received)
+          in
+          let* adoptions =
+            merge_public_records ~encode:Trust.encode_adoption
+              (Store.adoptions existing) (Package.adoptions received)
+          in
+          let* collaboration =
+            Store.collaboration_with_authority ~authority ~revisions
+              ~local_certificate:(Store.local_certificate existing)
+              ~authorizations ~adoptions
+            |> Result.map_error (fun error -> Store_error error)
+          in
+          persist_collaborative repository loaded project collaboration)
 
 let deliver ~root ~id ~next_draft ~next_title =
   with_repository ~root (fun repository loaded ->

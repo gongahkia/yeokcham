@@ -8,7 +8,20 @@ module Object_set = Set.Make (String)
 
 type verified = {
   verified_membership : Trust.membership;
+  verified_authority : Trust.authority option;
   verified_revisions : Trust.signed_revision list;
+  verified_authorizations : Trust.authorization list;
+  verified_adoptions : Trust.adoption list;
+}
+
+type manifest = {
+  manifest_repository : Trust.Repository_id.t;
+  manifest_membership : Trust.membership;
+  manifest_authority : Trust.authority option;
+  manifest_revisions : Trust.signed_revision list;
+  manifest_authorizations : Trust.authorization list;
+  manifest_adoptions : Trust.adoption list;
+  manifest_object_ids : Store.Stored_object_id.t list;
 }
 
 type error =
@@ -48,14 +61,6 @@ let construction value =
 
 let text value = Encoding.text value |> construction
 let array values = Encoding.array values |> construction
-
-let exact_array name length = function
-  | Encoding.Array values when List.length values = length -> Ok values
-  | Encoding.Array _ ->
-      Error (Invalid_package (Printf.sprintf "%s has wrong field count" name))
-  | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _ | Encoding.Map _
-  | Encoding.Bool _ | Encoding.Null ->
-      Error (Invalid_package (name ^ " must be an array"))
 
 let array_values name = function
   | Encoding.Array values -> Ok values
@@ -212,13 +217,116 @@ let manifest_bytes ~membership ~revisions ~object_ids =
   array [ Encoding.integer 1L; repository; certificates; revisions; object_ids ]
   |> Result.map Encoding.encode
 
+let ensure_unique_bytes name values =
+  let sorted = List.sort String.compare values in
+  let rec loop = function
+    | [] | [ _ ] -> Ok ()
+    | left :: (right :: _ as rest) ->
+        if String.equal left right then
+          Error (Invalid_package (name ^ " contains a duplicate record"))
+        else loop rest
+  in
+  loop sorted
+
+let manifest_bytes_v2 ~authority ~revisions ~authorizations ~adoptions
+    ~object_ids =
+  let membership = Trust.authority_membership authority in
+  let* authority =
+    Trust.verify_authority ~membership (Trust.authority_epochs authority)
+    |> Result.map_error (fun error -> Trust_error error)
+  in
+  let rec verify_revisions = function
+    | [] -> Ok ()
+    | revision :: rest ->
+        let* () =
+          Trust.verify_signed_revision_at authority revision
+          |> Result.map_error (fun error -> Trust_error error)
+        in
+        verify_revisions rest
+  in
+  let rec verify_authorizations = function
+    | [] -> Ok ()
+    | authorization :: rest ->
+        let* () =
+          Trust.verify_authorization authority authorization
+          |> Result.map_error (fun error -> Trust_error error)
+        in
+        if
+          List.length
+            (List.filter
+               (Trust.authorization_matches_signed_revision authorization)
+               revisions)
+          = 1
+        then verify_authorizations rest
+        else
+          Error
+            (Invalid_package
+               "authorization must name exactly one signed revision")
+  in
+  let rec verify_adoptions = function
+    | [] -> Ok ()
+    | adoption :: rest ->
+        let* () =
+          Trust.verify_adoption authority adoption
+          |> Result.map_error (fun error -> Trust_error error)
+        in
+        if
+          List.length
+            (List.filter (Trust.adoption_matches_signed_revision adoption) revisions)
+          = 1
+        then verify_adoptions rest
+        else
+          Error
+            (Invalid_package "adoption must bind exactly one signed revision")
+  in
+  let* () = ensure_unique_signed_revisions revisions in
+  let* () = verify_revisions revisions in
+  let* () = verify_authorizations authorizations in
+  let* () = verify_adoptions adoptions in
+  let certificates = Trust.certificates membership |> List.map Trust.encode_certificate in
+  let epochs = Trust.authority_epochs authority |> List.map Trust.encode_epoch in
+  let revisions =
+    revisions
+    |> List.sort (fun left right ->
+           Model.Revision_id.compare
+             (Trust.signed_revision_id left)
+             (Trust.signed_revision_id right))
+    |> List.map Trust.encode_signed_revision
+  in
+  let authorizations = authorizations |> List.map Trust.encode_authorization |> List.sort String.compare in
+  let adoptions = adoptions |> List.map Trust.encode_adoption |> List.sort String.compare in
+  let* () = ensure_unique_bytes "authorizations" authorizations in
+  let* () = ensure_unique_bytes "adoptions" adoptions in
+  let object_ids =
+    object_ids |> List.map Store.Stored_object_id.to_hex |> List.sort String.compare
+  in
+  let* repository = text (Trust.repository membership |> Trust.Repository_id.to_string) in
+  let* certificates = encode_bytes certificates in
+  let* epochs = encode_bytes epochs in
+  let* revisions = encode_bytes revisions in
+  let* authorizations = encode_bytes authorizations in
+  let* adoptions = encode_bytes adoptions in
+  let* object_ids = encode_texts object_ids in
+  array
+    [
+      Encoding.integer 2L;
+      repository;
+      certificates;
+      epochs;
+      revisions;
+      authorizations;
+      adoptions;
+      object_ids;
+    ]
+  |> Result.map Encoding.encode
+
 let decode_manifest bytes =
   let* value =
     Encoding.decode bytes
     |> Result.map_error (fun error ->
         Invalid_package (Encoding.decode_error_to_string error))
   in
-  let* fields = exact_array "manifest" 5 value in
+  let* fields = array_values "manifest" value in
   match fields with
   | [ version; repository; certificates; revisions; object_ids ] ->
       let* version = integer_field "manifest version" version in
@@ -264,9 +372,116 @@ let decode_manifest bytes =
         in
         let* canonical = manifest_bytes ~membership ~revisions ~object_ids in
         if String.equal bytes canonical then
-          Ok (repository, certificates, revisions, object_ids)
+          Ok
+            {
+              manifest_repository = repository;
+              manifest_membership = membership;
+              manifest_authority = None;
+              manifest_revisions = revisions;
+              manifest_authorizations = [];
+              manifest_adoptions = [];
+              manifest_object_ids = object_ids;
+            }
         else Error Noncanonical_manifest
-  | _ -> assert false
+  | [
+   version;
+   repository;
+   certificates;
+   epochs;
+   revisions;
+   authorizations;
+   adoptions;
+   object_ids;
+  ] ->
+      let* version = integer_field "manifest version" version in
+      let* repository = text_field "manifest repository" repository in
+      let* repository =
+        Trust.Repository_id.of_string repository
+        |> Result.map_error (fun detail -> Invalid_package detail)
+      in
+      let* certificates = decode_bytes "certificate records" certificates in
+      let rec decode_certificates reversed = function
+        | [] -> Ok (List.rev reversed)
+        | bytes :: rest ->
+            let* certificate =
+              Trust.decode_certificate bytes
+              |> Result.map_error (fun error -> Trust_error error)
+            in
+            decode_certificates (certificate :: reversed) rest
+      in
+      let* certificates = decode_certificates [] certificates in
+      let* membership =
+        Trust.verify_membership ~repository certificates
+        |> Result.map_error (fun error -> Trust_error error)
+      in
+      let* epochs = decode_bytes "authority epoch records" epochs in
+      let rec decode_epochs reversed = function
+        | [] -> Ok (List.rev reversed)
+        | bytes :: rest ->
+            let* epoch =
+              Trust.decode_epoch bytes |> Result.map_error (fun error -> Trust_error error)
+            in
+            decode_epochs (epoch :: reversed) rest
+      in
+      let* epochs = decode_epochs [] epochs in
+      let* authority =
+        Trust.verify_authority ~membership epochs
+        |> Result.map_error (fun error -> Trust_error error)
+      in
+      let* revisions = decode_bytes "revision records" revisions in
+      let rec decode_revisions reversed = function
+        | [] -> Ok (List.rev reversed)
+        | bytes :: rest ->
+            let* revision =
+              Trust.decode_signed_revision bytes
+              |> Result.map_error (fun error -> Trust_error error)
+            in
+            decode_revisions (revision :: reversed) rest
+      in
+      let* revisions = decode_revisions [] revisions in
+      let* authorizations = decode_bytes "authorization records" authorizations in
+      let rec decode_authorizations reversed = function
+        | [] -> Ok (List.rev reversed)
+        | bytes :: rest ->
+            let* authorization =
+              Trust.decode_authorization bytes
+              |> Result.map_error (fun error -> Trust_error error)
+            in
+            decode_authorizations (authorization :: reversed) rest
+      in
+      let* authorizations = decode_authorizations [] authorizations in
+      let* adoptions = decode_bytes "adoption records" adoptions in
+      let rec decode_adoptions reversed = function
+        | [] -> Ok (List.rev reversed)
+        | bytes :: rest ->
+            let* adoption =
+              Trust.decode_adoption bytes
+              |> Result.map_error (fun error -> Trust_error error)
+            in
+            decode_adoptions (adoption :: reversed) rest
+      in
+      let* adoptions = decode_adoptions [] adoptions in
+      let* object_ids = decode_object_ids object_ids in
+      if not (Int64.equal version 2L) then
+        Error (Invalid_package "unsupported manifest version")
+      else
+        let* canonical =
+          manifest_bytes_v2 ~authority ~revisions ~authorizations ~adoptions
+            ~object_ids
+        in
+        if String.equal bytes canonical then
+          Ok
+            {
+              manifest_repository = repository;
+              manifest_membership = membership;
+              manifest_authority = Some authority;
+              manifest_revisions = revisions;
+              manifest_authorizations = authorizations;
+              manifest_adoptions = adoptions;
+              manifest_object_ids = object_ids;
+            }
+        else Error Noncanonical_manifest
+  | _ -> Error (Invalid_package "manifest has wrong field count")
 
 let snapshot_object_id snapshot =
   Model.Snapshot_id.to_string snapshot
@@ -425,6 +640,43 @@ let create ~source ~destination ~membership ~revisions =
     in
     copy object_ids
 
+let create_with_authority ~source ~destination ~authority ~revisions
+    ~authorizations ~adoptions =
+  if Sys.file_exists destination then Error (Destination_exists destination)
+  else
+    let* authority =
+      Trust.verify_authority
+        ~membership:(Trust.authority_membership authority)
+        (Trust.authority_epochs authority)
+      |> Result.map_error (fun error -> Trust_error error)
+    in
+    let* () = ensure_unique_signed_revisions revisions in
+    let* object_ids = source_objects source revisions in
+    let* manifest =
+      manifest_bytes_v2 ~authority ~revisions ~authorizations ~adoptions
+        ~object_ids
+    in
+    let* () = mkdir destination in
+    let* () = mkdir (package_path destination objects_name) in
+    let* () =
+      write_file_exclusive (package_path destination manifest_name) manifest
+    in
+    let rec copy = function
+      | [] -> Ok ()
+      | id :: rest ->
+          let* object_ =
+            Store.get source id
+            |> Result.map_error (fun error -> Store_error error)
+          in
+          let* () =
+            write_file_exclusive
+              (object_path destination (Store.Stored_object_id.to_hex id))
+              (Envelope.encode object_)
+          in
+          copy rest
+    in
+    copy object_ids
+
 let package_object_bytes package object_ids =
   let directory = package_path package objects_name in
   let* names =
@@ -540,15 +792,14 @@ let verify_and_import ~destination ~package ~membership:expected_membership
     ~project =
   let repository = Trust.repository expected_membership in
   let* manifest = read_file (package_path package manifest_name) in
-  let* package_repository, certificates, revisions, object_ids =
-    decode_manifest manifest
-  in
-  if not (Trust.Repository_id.equal package_repository repository) then
+  let* manifest = decode_manifest manifest in
+  if not (Trust.Repository_id.equal manifest.manifest_repository repository) then
     Error (Invalid_package "package repository does not match destination")
+  else if Option.is_some manifest.manifest_authority then
+    Error (Invalid_package "authority package requires authority-aware receive")
   else
     let* package_membership =
-      Trust.verify_membership ~repository certificates
-      |> Result.map_error (fun error -> Trust_error error)
+      Ok manifest.manifest_membership
     in
     let* membership =
       Trust.extend_membership expected_membership
@@ -565,9 +816,9 @@ let verify_and_import ~destination ~package ~membership:expected_membership
             in
             verify rest
       in
-      verify revisions
+      verify manifest.manifest_revisions
     in
-    let* objects = package_object_bytes package object_ids in
+    let* objects = package_object_bytes package manifest.manifest_object_ids in
     with_staging (fun staging_root ->
         let* staging =
           Store.init ~root:staging_root
@@ -583,9 +834,15 @@ let verify_and_import ~destination ~package ~membership:expected_membership
               stage rest
         in
         let* () = stage objects in
-        let* () = verify_closure staging revisions in
+        let* () = verify_closure staging manifest.manifest_revisions in
         let verified =
-          { verified_membership = membership; verified_revisions = revisions }
+          {
+            verified_membership = membership;
+            verified_authority = None;
+            verified_revisions = manifest.manifest_revisions;
+            verified_authorizations = [];
+            verified_adoptions = [];
+          }
         in
         (* Apply the causal model transition while every received object is
            still confined to staging. A missing or incompatible parent must
@@ -603,5 +860,135 @@ let verify_and_import ~destination ~package ~membership:expected_membership
         let* () = import objects in
         Ok (verified, project))
 
+let verify_and_import_with_authority ~destination ~package
+    ~authority:expected_authority ~project =
+  let repository = Trust.repository (Trust.authority_membership expected_authority) in
+  let* manifest = read_file (package_path package manifest_name) in
+  let* manifest = decode_manifest manifest in
+  if not (Trust.Repository_id.equal manifest.manifest_repository repository) then
+    Error (Invalid_package "package repository does not match destination")
+  else
+    let* incoming_authority =
+      match manifest.manifest_authority with
+      | Some authority -> Ok authority
+      | None -> Error (Invalid_package "legacy package has no authority closure")
+    in
+    let* membership =
+      Trust.extend_membership (Trust.authority_membership expected_authority)
+        (Trust.certificates manifest.manifest_membership)
+      |> Result.map_error (fun error -> Trust_error error)
+    in
+    let* expected_authority =
+      Trust.verify_authority ~membership
+        (Trust.authority_epochs expected_authority)
+      |> Result.map_error (fun error -> Trust_error error)
+    in
+    let* incoming_authority =
+      Trust.verify_authority ~membership
+        (Trust.authority_epochs incoming_authority)
+      |> Result.map_error (fun error -> Trust_error error)
+    in
+    let* authority =
+      Trust.extend_authority expected_authority
+        (Trust.authority_epochs incoming_authority)
+      |> Result.map_error (fun error -> Trust_error error)
+    in
+    let rec verify_revisions = function
+      | [] -> Ok ()
+      | revision :: rest ->
+          let* () =
+            Trust.verify_signed_revision_at authority revision
+            |> Result.map_error (fun error -> Trust_error error)
+          in
+          verify_revisions rest
+    in
+    let rec verify_authorizations = function
+      | [] -> Ok ()
+      | authorization :: rest ->
+          let* () =
+            Trust.verify_authorization authority authorization
+            |> Result.map_error (fun error -> Trust_error error)
+          in
+          if
+            List.length
+              (List.filter
+                 (Trust.authorization_matches_signed_revision authorization)
+                 manifest.manifest_revisions)
+            = 1
+          then verify_authorizations rest
+          else
+            Error
+              (Invalid_package
+                 "authorization must name exactly one package revision")
+    in
+    let rec verify_adoptions = function
+      | [] -> Ok ()
+      | adoption :: rest ->
+          let* () =
+            Trust.verify_adoption authority adoption
+            |> Result.map_error (fun error -> Trust_error error)
+          in
+          if
+            List.length
+              (List.filter (Trust.adoption_matches_signed_revision adoption)
+                 manifest.manifest_revisions)
+            = 1
+          then verify_adoptions rest
+          else Error (Invalid_package "adoption must bind one package revision")
+    in
+    let* () = verify_revisions manifest.manifest_revisions in
+    let* () = verify_authorizations manifest.manifest_authorizations in
+    let* () = verify_adoptions manifest.manifest_adoptions in
+    let* objects =
+      package_object_bytes package manifest.manifest_object_ids
+    in
+    with_staging (fun staging_root ->
+        let* staging =
+          Store.init ~root:staging_root
+          |> Result.map_error (fun error -> Store_error error)
+        in
+        let rec stage = function
+          | [] -> Ok ()
+          | (_, object_) :: rest ->
+              let* _ =
+                Store.put staging object_
+                |> Result.map_error (fun error -> Store_error error)
+              in
+              stage rest
+        in
+        let* () = stage objects in
+        let* () = verify_closure staging manifest.manifest_revisions in
+        let verified =
+          {
+            verified_membership = membership;
+            verified_authority = Some authority;
+            verified_revisions = manifest.manifest_revisions;
+            verified_authorizations = manifest.manifest_authorizations;
+            verified_adoptions = manifest.manifest_adoptions;
+          }
+        in
+        let* project = apply_revisions project verified in
+        let rec import = function
+          | [] -> Ok ()
+          | (_, object_) :: rest ->
+              let* _ =
+                Store.put destination object_
+                |> Result.map_error (fun error -> Store_error error)
+              in
+              import rest
+        in
+        let* () = import objects in
+        Ok (verified, project))
+
 let membership verified = verified.verified_membership
+let authority verified = verified.verified_authority
 let revisions verified = verified.verified_revisions
+let authorizations verified = verified.verified_authorizations
+let adoptions verified = verified.verified_adoptions
+
+let inspect_authority ~package =
+  let* manifest = read_file (package_path package manifest_name) in
+  let* manifest = decode_manifest manifest in
+  match manifest.manifest_authority with
+  | Some authority -> Ok authority
+  | None -> Error (Invalid_package "legacy package has no authority closure")
