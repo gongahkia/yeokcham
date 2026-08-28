@@ -810,9 +810,42 @@ let decode_signed_revision encoded =
       in
       match fields with
       | [ version; repository; certificate; revision ] ->
+          let _ = (version, repository, certificate, revision, signature) in
+          Error
+            (Invalid_record
+               "authority-less signed revision encoding was retired before V4 release")
+      | [ version; repository; certificate; epoch; revision ] ->
+          let _ = (version, repository, certificate, epoch, revision, signature) in
+          Error
+            (Invalid_record
+               "pre-release signed revision encoding was retired before V4 release")
+      | [ version; repository; certificate; epoch; decision; revision ] ->
           let* version = integer_field "revision version" version in
           let* repository = decode_repository repository in
           let* certificate = text_field "revision certificate ID" certificate in
+          let* epoch =
+            match epoch with
+            | Encoding.Text epoch -> Ok epoch
+            | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Array _
+            | Encoding.Map _ | Encoding.Bool _ | Encoding.Null ->
+                Error
+                  (Invalid_record
+                     "revision authority epoch must be text")
+          in
+          let* decision =
+            match decision with
+            | Encoding.Null -> Ok None
+            | Encoding.Text decision ->
+                Model.Decision_id.of_string decision
+                |> Result.map_error (fun error ->
+                    Invalid_record (Model.error_to_string error))
+                |> Result.map Option.some
+            | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Array _
+            | Encoding.Map _ | Encoding.Bool _ ->
+                Error
+                  (Invalid_record
+                     "resolution decision must be text or null")
+          in
           let* revision = bytes_field "revision body" revision in
           let* revision =
             Record.decode_change_revision revision
@@ -825,75 +858,8 @@ let decode_signed_revision encoded =
               {
                 signed_repository = repository;
                 signed_certificate = certificate;
-                signed_epoch_value = None;
-                signed_resolution_decision_value = None;
-                signed_revision_value = revision;
-                signed_signature = signature;
-              }
-            in
-            if String.equal encoded (encode_signed_revision signed) then
-              Ok signed
-            else Error Noncanonical_record
-      | [ version; repository; certificate; epoch; revision ] ->
-          let* version = integer_field "revision version" version in
-          let* repository = decode_repository repository in
-          let* certificate = text_field "revision certificate ID" certificate in
-          let* epoch = text_field "revision authority epoch" epoch in
-          let* revision = bytes_field "revision body" revision in
-          let* revision =
-            Record.decode_change_revision revision
-            |> Result.map_error (fun error -> Record_error error)
-          in
-          if not (Int64.equal version 2L) then
-            Error (Invalid_record "unsupported signed revision version")
-          else
-            let signed =
-              {
-                signed_repository = repository;
-                signed_certificate = certificate;
                 signed_epoch_value = Some epoch;
-                signed_resolution_decision_value = None;
-                signed_revision_value = revision;
-                signed_signature = signature;
-              }
-            in
-            if String.equal encoded (encode_signed_revision signed) then
-              Ok signed
-            else Error Noncanonical_record
-      | [ version; repository; certificate; epoch; decision; revision ] ->
-          let* version = integer_field "revision version" version in
-          let* repository = decode_repository repository in
-          let* certificate = text_field "revision certificate ID" certificate in
-          let* epoch =
-            match epoch with
-            | Encoding.Null -> Ok None
-            | Encoding.Text epoch -> Ok (Some epoch)
-            | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Array _
-            | Encoding.Map _ | Encoding.Bool _ ->
-                Error
-                  (Invalid_record
-                     "revision authority epoch must be text or null")
-          in
-          let* decision = text_field "resolution decision ID" decision in
-          let* decision =
-            Model.Decision_id.of_string decision
-            |> Result.map_error (fun error ->
-                Invalid_record (Model.error_to_string error))
-          in
-          let* revision = bytes_field "revision body" revision in
-          let* revision =
-            Record.decode_change_revision revision
-            |> Result.map_error (fun error -> Record_error error)
-          in
-          if not (Int64.equal version 3L) then
-            Error (Invalid_record "unsupported signed revision version")
-          else
-            let signed =
-              {
-                signed_repository = repository;
-                signed_certificate = certificate;
-                signed_epoch_value = epoch;
-                signed_resolution_decision_value = Some decision;
+                signed_resolution_decision_value = decision;
                 signed_revision_value = revision;
                 signed_signature = signature;
               }
@@ -913,6 +879,11 @@ let verify_signed_revision_crypto membership signed =
   else if String.length signed.signed_signature <> 64 then
     Error (Invalid_signature (String.length signed.signed_signature))
   else
+    let* epoch =
+      match signed.signed_epoch_value with
+      | Some epoch -> Ok epoch
+      | None -> Error (Invalid_epoch "V4 signed revision has no authority epoch")
+    in
     match
       certificate_by_id membership.membership_certificates
         signed.signed_certificate
@@ -929,7 +900,7 @@ let verify_signed_revision_crypto membership signed =
           let* bytes =
             revision_unsigned_bytes ~repository:signed.signed_repository
               ~certificate:signed.signed_certificate
-              ~epoch:signed.signed_epoch_value
+              ~epoch
               ~resolution:signed.signed_resolution_decision_value
               signed.signed_revision_value
           in
@@ -951,17 +922,9 @@ let verify_signed_revision_crypto membership signed =
               else Error Signature_verification_failed)
 
 let verify_signed_revision membership signed =
-  match signed.signed_epoch_value with
-  | Some _ ->
-      Error (Invalid_epoch "epoch-bound revision needs authority verification")
-  | None -> (
-      match
-        certificate_by_id membership.membership_certificates
-          signed.signed_certificate
-      with
-      | Some certificate when certificate_is_recovery_issued certificate ->
-          Error Unauthorized_epoch_issuer
-      | Some _ | None -> verify_signed_revision_crypto membership signed)
+  let _ = membership in
+  let _ = signed in
+  Error (Invalid_epoch "V4 signed revisions require authority verification")
 
 (* Authority epochs ------------------------------------------------------- *)
 
@@ -1775,7 +1738,7 @@ let sign_revision_at_with authority ~epoch ~certificate signing_capability
     let* bytes =
       revision_unsigned_bytes
         ~repository:authority.authority_membership_value.membership_repository
-        ~certificate ~epoch:(Some epoch) ~resolution revision
+        ~certificate ~epoch ~resolution revision
     in
     let signature =
       Mirage_crypto_ec.Ed25519.sign ~key:signing_capability

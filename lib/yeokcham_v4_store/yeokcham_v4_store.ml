@@ -409,7 +409,7 @@ let encode_collaborative_state ~project collaboration =
 (* Version 2 has the same authority closure as version 3, but predates the
    local-only transport state.  Keep its encoder solely for canonical decoding
    of retained V2 objects; all new authority-aware saves use V3. *)
-let encode_collaborative_state_v2 ~project collaboration =
+let retired_encode_collaborative_state_v2 ~project collaboration =
   let* value = collaboration_value ~project collaboration in
   match value with
   | Encoding.Array
@@ -446,7 +446,7 @@ let encode_collaborative_state_v2 ~project collaboration =
   | Encoding.Bool _ | Encoding.Null ->
       Error (Invalid_collaboration_state "collaborative state must be an array")
 
-let rec decode_collaborative_state encoded =
+let rec retired_decode_collaborative_state encoded =
   let* value =
     Encoding.decode encoded
     |> Result.map_error (fun error ->
@@ -647,7 +647,9 @@ let rec decode_collaborative_state encoded =
           ~authorizations ~adoptions
       in
       let* collaboration = validate_collaboration ~project collaboration in
-      let* canonical = encode_collaborative_state_v2 ~project collaboration in
+      let* canonical =
+        retired_encode_collaborative_state_v2 ~project collaboration
+      in
       if String.equal canonical encoded then Ok (project, collaboration)
       else
         Error
@@ -701,7 +703,9 @@ let rec decode_collaborative_state encoded =
           ]
         |> Result.get_ok |> Encoding.encode
       in
-      let* project, legacy_collaboration = decode_collaborative_state legacy in
+      let* project, legacy_collaboration =
+        retired_decode_collaborative_state legacy
+      in
       let* authority =
         match authority legacy_collaboration with
         | Some authority -> Ok authority
@@ -716,6 +720,132 @@ let rec decode_collaborative_state encoded =
           ~local_certificate:(local_certificate legacy_collaboration)
           ~authorizations:(authorizations legacy_collaboration)
           ~adoptions:(adoptions legacy_collaboration)
+      in
+      let* canonical = encode_collaborative_state ~project collaboration in
+      if String.equal canonical encoded then Ok (project, collaboration)
+      else
+        Error
+          (Invalid_collaboration_state "collaborative state is not canonical")
+  | _ ->
+      Error
+        (Invalid_collaboration_state
+           "V4 collaborative state has the wrong field count")
+
+let decode_collaboration_records name decode value =
+  let* encoded = decode_bytes_array name value in
+  let rec loop reversed = function
+    | [] -> Ok (List.rev reversed)
+    | bytes :: rest ->
+        let* record = decode bytes in
+        loop (record :: reversed) rest
+  in
+  loop [] encoded
+
+let decode_collaborative_state encoded =
+  let* value =
+    Encoding.decode encoded
+    |> Result.map_error (fun error ->
+        Invalid_collaboration_state (Encoding.decode_error_to_string error))
+  in
+  let* fields = array_values "V4 collaborative state" value in
+  match fields with
+  | [
+   version;
+   project_value;
+   repository;
+   certificates;
+   epochs;
+   revisions;
+   authorizations;
+   adoptions;
+   local_certificate_value;
+   transport_value;
+  ] ->
+      let* version =
+        match version with
+        | Encoding.Integer value when Int64.equal value 1L -> Ok ()
+        | Encoding.Integer _ ->
+            Error
+              (Invalid_collaboration_state
+                 "unsupported collaborative state version")
+        | Encoding.Bytes _ | Encoding.Text _ | Encoding.Array _ | Encoding.Map _
+        | Encoding.Bool _ | Encoding.Null ->
+            Error
+              (Invalid_collaboration_state
+                 "collaborative state version must be an integer")
+      in
+      let* project =
+        match project_value with
+        | Encoding.Bytes value ->
+            Record.decode_project value
+            |> Result.map_error (fun error -> Record_error error)
+        | Encoding.Integer _ | Encoding.Text _ | Encoding.Array _
+        | Encoding.Map _ | Encoding.Bool _ | Encoding.Null ->
+            Error (Invalid_collaboration_state "project record must be bytes")
+      in
+      let* repository = text_field "repository ID" repository in
+      let* repository =
+        Trust.Repository_id.of_string repository
+        |> Result.map_error (fun error -> Invalid_collaboration_state error)
+      in
+      let* certificates =
+        decode_collaboration_records "certificates"
+          (fun bytes ->
+            Trust.decode_certificate bytes
+            |> Result.map_error (fun error -> Trust_error error))
+          certificates
+      in
+      let* membership =
+        Trust.verify_membership ~repository certificates
+        |> Result.map_error (fun error -> Trust_error error)
+      in
+      let* epochs =
+        decode_collaboration_records "authority epochs"
+          (fun bytes ->
+            Trust.decode_epoch bytes
+            |> Result.map_error (fun error -> Trust_error error))
+          epochs
+      in
+      let* authority =
+        Trust.verify_authority ~membership epochs
+        |> Result.map_error (fun error -> Trust_error error)
+      in
+      let* revisions =
+        decode_collaboration_records "signed revisions"
+          (fun bytes ->
+            Trust.decode_signed_revision bytes
+            |> Result.map_error (fun error -> Trust_error error))
+          revisions
+      in
+      let* authorizations =
+        decode_collaboration_records "authorizations"
+          (fun bytes ->
+            Trust.decode_authorization bytes
+            |> Result.map_error (fun error -> Trust_error error))
+          authorizations
+      in
+      let* adoptions =
+        decode_collaboration_records "adoptions"
+          (fun bytes ->
+            Trust.decode_adoption bytes
+            |> Result.map_error (fun error -> Trust_error error))
+          adoptions
+      in
+      let* local_certificate =
+        text_field "local certificate" local_certificate_value
+      in
+      let* transport =
+        match transport_value with
+        | Encoding.Bytes value ->
+            Transport.decode_local_state value
+            |> Result.map_error (fun error -> Transport_error error)
+        | Encoding.Integer _ | Encoding.Text _ | Encoding.Array _
+        | Encoding.Map _ | Encoding.Bool _ | Encoding.Null ->
+            Error (Invalid_collaboration_state "transport state must be bytes")
+      in
+      let* collaboration =
+        collaboration_with_authority_transport ~transport ~authority ~revisions
+          ~local_certificate ~authorizations ~adoptions
       in
       let* canonical = encode_collaborative_state ~project collaboration in
       if String.equal canonical encoded then Ok (project, collaboration)

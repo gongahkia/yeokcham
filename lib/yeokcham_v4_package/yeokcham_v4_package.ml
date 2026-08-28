@@ -202,31 +202,10 @@ let ensure_unique_signed_revisions revisions =
   in
   unique ids
 
-let manifest_bytes ~membership ~revisions ~object_ids =
-  let* repository =
-    text (Trust.repository membership |> Trust.Repository_id.to_string)
-  in
-  let certificates =
-    Trust.certificates membership |> List.map Trust.encode_certificate
-  in
-  let revisions =
-    revisions
-    |> List.sort (fun left right ->
-        Model.Revision_id.compare
-          (Trust.signed_revision_id left)
-          (Trust.signed_revision_id right))
-    |> List.map Trust.encode_signed_revision
-  in
-  let object_ids =
-    object_ids
-    |> List.map Store.Stored_object_id.to_hex
-    |> List.sort String.compare
-  in
-  let* certificates = encode_bytes certificates in
-  let* revisions = encode_bytes revisions in
-  let* object_ids = encode_texts object_ids in
-  array [ Encoding.integer 1L; repository; certificates; revisions; object_ids ]
-  |> Result.map Encoding.encode
+let retired_manifest_bytes ~membership:_ ~revisions:_ ~object_ids:_ =
+  Error
+    (Invalid_package
+       "authority-less package manifests were retired before V4 release")
 
 let ensure_unique_bytes name values =
   let sorted = List.sort String.compare values in
@@ -239,7 +218,7 @@ let ensure_unique_bytes name values =
   in
   loop sorted
 
-let manifest_bytes_v2 ~authority ~revisions ~authorizations ~adoptions
+let manifest_bytes ~authority ~revisions ~authorizations ~adoptions
     ~object_ids =
   let membership = Trust.authority_membership authority in
   let* authority =
@@ -336,7 +315,7 @@ let manifest_bytes_v2 ~authority ~revisions ~authorizations ~adoptions
   let* object_ids = encode_texts object_ids in
   array
     [
-      Encoding.integer 2L;
+      Encoding.integer 1L;
       repository;
       certificates;
       epochs;
@@ -356,60 +335,10 @@ let decode_manifest bytes =
   let* fields = array_values "manifest" value in
   match fields with
   | [ version; repository; certificates; revisions; object_ids ] ->
-      let* version = integer_field "manifest version" version in
-      let* repository = text_field "manifest repository" repository in
-      let* repository =
-        Trust.Repository_id.of_string repository
-        |> Result.map_error (fun detail -> Invalid_package detail)
-      in
-      let* certificates = decode_bytes "certificate records" certificates in
-      let* certificates =
-        let rec loop reversed = function
-          | [] -> Ok (List.rev reversed)
-          | bytes :: rest ->
-              let* certificate =
-                Trust.decode_certificate bytes
-                |> Result.map_error (fun error -> Trust_error error)
-              in
-              loop (certificate :: reversed) rest
-        in
-        loop [] certificates
-      in
-      let* revisions = decode_bytes "revision records" revisions in
-      let* revisions =
-        let rec loop reversed = function
-          | [] -> Ok (List.rev reversed)
-          | bytes :: rest ->
-              let* revision =
-                Trust.decode_signed_revision bytes
-                |> Result.map_error (fun error -> Trust_error error)
-              in
-              loop (revision :: reversed) rest
-        in
-        loop [] revisions
-      in
-      let* object_ids = decode_object_ids object_ids in
-      if not (Int64.equal version 1L) then
-        Error (Invalid_package "unsupported manifest version")
-      else
-        let* () = ensure_unique_signed_revisions revisions in
-        let* membership =
-          Trust.verify_membership ~repository certificates
-          |> Result.map_error (fun error -> Trust_error error)
-        in
-        let* canonical = manifest_bytes ~membership ~revisions ~object_ids in
-        if String.equal bytes canonical then
-          Ok
-            {
-              manifest_repository = repository;
-              manifest_membership = membership;
-              manifest_authority = None;
-              manifest_revisions = revisions;
-              manifest_authorizations = [];
-              manifest_adoptions = [];
-              manifest_object_ids = object_ids;
-            }
-        else Error Noncanonical_manifest
+      let _ = (version, repository, certificates, revisions, object_ids) in
+      Error
+        (Invalid_package
+           "authority-less package manifests were retired before V4 release")
   | [
    version;
    repository;
@@ -492,11 +421,11 @@ let decode_manifest bytes =
       in
       let* adoptions = decode_adoptions [] adoptions in
       let* object_ids = decode_object_ids object_ids in
-      if not (Int64.equal version 2L) then
+      if not (Int64.equal version 1L) then
         Error (Invalid_package "unsupported manifest version")
       else
         let* canonical =
-          manifest_bytes_v2 ~authority ~revisions ~authorizations ~adoptions
+          manifest_bytes ~authority ~revisions ~authorizations ~adoptions
             ~object_ids
         in
         if String.equal bytes canonical then
@@ -629,50 +558,10 @@ let source_objects source signed_revisions =
       Ok (value :: values))
     parsed (Ok [])
 
-let create ~source ~destination ~membership ~revisions =
-  if Sys.file_exists destination then Error (Destination_exists destination)
-  else
-    let* membership =
-      Trust.verify_membership
-        ~repository:(Trust.repository membership)
-        (Trust.certificates membership)
-      |> Result.map_error (fun error -> Trust_error error)
-    in
-    let* () =
-      let rec verify = function
-        | [] -> Ok ()
-        | revision :: rest ->
-            let* () =
-              Trust.verify_signed_revision membership revision
-              |> Result.map_error (fun error -> Trust_error error)
-            in
-            verify rest
-      in
-      verify revisions
-    in
-    let* () = ensure_unique_signed_revisions revisions in
-    let* object_ids = source_objects source revisions in
-    let* manifest = manifest_bytes ~membership ~revisions ~object_ids in
-    let* () = mkdir destination in
-    let* () = mkdir (package_path destination objects_name) in
-    let* () =
-      write_file_exclusive (package_path destination manifest_name) manifest
-    in
-    let rec copy = function
-      | [] -> Ok ()
-      | id :: rest ->
-          let* object_ =
-            Store.get source id
-            |> Result.map_error (fun error -> Store_error error)
-          in
-          let* () =
-            write_file_exclusive
-              (object_path destination (Store.Stored_object_id.to_hex id))
-              (Envelope.encode object_)
-          in
-          copy rest
-    in
-    copy object_ids
+let create ~source:_ ~destination:_ ~membership:_ ~revisions:_ =
+  Error
+    (Invalid_package
+       "authority-less package creation was retired before V4 release")
 
 let create_with_authority ~source ~destination ~authority ~revisions
     ~authorizations ~adoptions =
@@ -687,7 +576,7 @@ let create_with_authority ~source ~destination ~authority ~revisions
     let* () = ensure_unique_signed_revisions revisions in
     let* object_ids = source_objects source revisions in
     let* manifest =
-      manifest_bytes_v2 ~authority ~revisions ~authorizations ~adoptions
+      manifest_bytes ~authority ~revisions ~authorizations ~adoptions
         ~object_ids
     in
     let* () = mkdir destination in
@@ -951,75 +840,10 @@ let apply_revisions project verified =
   in
   apply project pending 0
 
-let verify_and_import ~destination ~package ~membership:expected_membership
-    ~project =
-  let repository = Trust.repository expected_membership in
-  let* manifest = read_file (package_path package manifest_name) in
-  let* manifest = decode_manifest manifest in
-  if not (Trust.Repository_id.equal manifest.manifest_repository repository)
-  then Error (Invalid_package "package repository does not match destination")
-  else if Option.is_some manifest.manifest_authority then
-    Error (Invalid_package "authority package requires authority-aware receive")
-  else
-    let* package_membership = Ok manifest.manifest_membership in
-    let* membership =
-      Trust.extend_membership expected_membership
-        (Trust.certificates package_membership)
-      |> Result.map_error (fun error -> Trust_error error)
-    in
-    let* () =
-      let rec verify = function
-        | [] -> Ok ()
-        | revision :: rest ->
-            let* () =
-              Trust.verify_signed_revision membership revision
-              |> Result.map_error (fun error -> Trust_error error)
-            in
-            verify rest
-      in
-      verify manifest.manifest_revisions
-    in
-    let* objects = package_object_bytes package manifest.manifest_object_ids in
-    with_staging (fun staging_root ->
-        let* staging =
-          Store.init ~root:staging_root
-          |> Result.map_error (fun error -> Store_error error)
-        in
-        let rec stage = function
-          | [] -> Ok ()
-          | (_, object_) :: rest ->
-              let* _ =
-                Store.put staging object_
-                |> Result.map_error (fun error -> Store_error error)
-              in
-              stage rest
-        in
-        let* () = stage objects in
-        let* () = verify_closure staging manifest.manifest_revisions in
-        let verified =
-          {
-            verified_membership = membership;
-            verified_authority = None;
-            verified_revisions = manifest.manifest_revisions;
-            verified_authorizations = [];
-            verified_adoptions = [];
-          }
-        in
-        (* Apply the causal model transition while every received object is
-           still confined to staging. A missing or incompatible parent must
-           not even add otherwise-valid immutable package objects locally. *)
-        let* project = apply_revisions project verified in
-        let rec import = function
-          | [] -> Ok ()
-          | (_, object_) :: rest ->
-              let* _ =
-                Store.put destination object_
-                |> Result.map_error (fun error -> Store_error error)
-              in
-              import rest
-        in
-        let* () = import objects in
-        Ok (verified, project))
+let verify_and_import ~destination:_ ~package:_ ~membership:_ ~project:_ =
+  Error
+    (Invalid_package
+       "authority-less package receive was retired before V4 release")
 
 let inspect_with_authority ~package ~authority:expected_authority =
   let repository =
