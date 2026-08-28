@@ -27,6 +27,18 @@ type v4_username_registration = {
   username : v4_username;
 }
 
+type v4_device
+type v4_certificate
+type v4_membership
+type v4_signed_revision
+
+type v4_collaboration = {
+  repository : bytes32;
+  certificates : v4_certificate list;
+  signed_revisions : v4_signed_revision list;
+  local_certificate : bytes32;
+}
+
 type v4_draft = {
   id : v4_draft_id;
   title : string;
@@ -83,6 +95,12 @@ type v4_restore_journal = {
 }
 ```
 
+A signed project serializes `(project_record, v4_collaboration)` in one
+versioned `V4_project_state` envelope payload. `v4_collaboration` is public
+state: it contains canonical certificate and detached signed-revision bytes,
+never a private capability. Older bare V1--V4 project records stay readable;
+once a state is collaborative, a bare-save transition is invalid.
+
 V4 invariants are:
 
 - Exactly one draft is active in a project.
@@ -96,6 +114,19 @@ V4 invariants are:
 - A local username registration assigns at most one safe display handle to a
   device, and no handle to more than one device. It is display metadata only;
   it does not authenticate, enroll, or authorize the device.
+- A V4 device ID is the domain-separated SHA-256 derivation of exactly one
+  Ed25519 public key. The root certificate is self-signed by an administrator;
+  every later certificate is signed by a causally prior administrator in the
+  same repository. Any administrator may create a member or administrator
+  certificate.
+- A signed revision binds the repository ID, canonical revision fields,
+  author certificate, and author device under a fixed Ed25519 domain. Every
+  visible shared or resolution replacement revision has exactly one verified
+  signed record; no private signing bytes occur in project state or packages.
+- A package extends existing membership only through the same verified root,
+  verifies canonical object IDs and every revision snapshot closure in staging,
+  and advances at most the V4 state head after the pure receive transition. It
+  neither mutates a working tree nor selects a conflict resolution.
 - Decision materialisation derives a direct child directory only from a safe
   local display handle (or the fixed fallback `device`) and a canonical rank.
   It never derives a filesystem child path from a revision identifier.

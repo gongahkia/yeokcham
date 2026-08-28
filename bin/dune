@@ -45,17 +45,24 @@
 (executable
  (name yeokcham_v4)
  (public_name yeokcham-v4)
- (modules yeokcham_v4 v4_watch)
+ (modules yeokcham_v4 v4_watch v4_signer v4_signer_test_file)
  (flags
   (:standard -w -70))
  (libraries
   yeokcham_v4_local_service
   yeokcham_v4_model
+  yeokcham_v4_trust
   (select
    v4_watch.ml
    from
    (yeokcham_linux_watcher -> v4_watch_linux.ml)
-   (-> v4_watch_unavailable.ml))))
+   (-> v4_watch_unavailable.ml))
+  (select
+   v4_signer.ml
+   from
+   (yeokcham_v4_macos_keychain -> v4_signer_macos.ml)
+   (yeokcham_v4_secret_service -> v4_signer_linux.ml)
+   (-> v4_signer_unavailable.ml))))
 
 (executable
  (name workspace_base_v1)

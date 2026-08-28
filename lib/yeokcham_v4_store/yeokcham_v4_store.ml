@@ -3,6 +3,7 @@ module Envelope = Yeokcham_envelope
 module Model = Yeokcham_v4_model
 module Record = Yeokcham_v4_record
 module Store = Yeokcham_store
+module Trust = Yeokcham_v4_trust
 
 type error =
   | Store_error of Store.error
@@ -13,6 +14,9 @@ type error =
   | Missing_state_head
   | Empty_state_head
   | Unexpected_object_type of Envelope.object_type
+  | Trust_error of Trust.error
+  | Invalid_collaboration_state of string
+  | Collaborative_state_requires_collaborative_save
 
 let error_to_string = function
   | Store_error error -> Store.error_to_string error
@@ -26,11 +30,24 @@ let error_to_string = function
   | Unexpected_object_type object_type ->
       Printf.sprintf "V4 project-state head points to object type %d"
         (Envelope.object_type_code object_type)
+  | Trust_error error -> Trust.error_to_string error
+  | Invalid_collaboration_state detail ->
+      "invalid V4 collaborative state: " ^ detail
+  | Collaborative_state_requires_collaborative_save ->
+      "a signed V4 collaboration state must be saved with its verified \
+       collaboration records"
 
 type repository = { store : Store.repository }
 
+type collaboration = {
+  collaboration_membership : Trust.membership;
+  collaboration_revisions : Trust.signed_revision list;
+  collaboration_local_certificate : string;
+}
+
 type loaded = {
   project : Model.project;
+  collaboration : collaboration option;
   head : Store.Mutable_ref.t;
   object_id : Store.Stored_object_id.t;
 }
@@ -40,6 +57,308 @@ let underlying_store repository = repository.store
 let ( let* ) = Result.bind
 let repository_metadata_path root = Filename.concat root ".yeokcham"
 
+let all_project_revisions project =
+  let shared =
+    Model.shared_changes project
+    |> List.concat_map (fun change -> change.Model.revisions)
+  in
+  let replacements =
+    Model.resolutions project
+    |> List.map (fun resolution -> resolution.Model.replacement_revision)
+  in
+  shared @ replacements
+
+let revision_equal left right =
+  Model.Revision_id.equal left.Model.revision right.Model.revision
+  && left = right
+
+let sorted_revisions revisions =
+  List.sort
+    (fun left right ->
+      Model.Revision_id.compare left.Model.revision right.Model.revision)
+    revisions
+
+let validate_collaboration ~project collaboration =
+  let membership = collaboration.collaboration_membership in
+  let* membership =
+    Trust.verify_membership
+      ~repository:(Trust.repository membership)
+      (Trust.certificates membership)
+    |> Result.map_error (fun error -> Trust_error error)
+  in
+  let local_certificate = collaboration.collaboration_local_certificate in
+  let* local_certificate =
+    match
+      List.find_opt
+        (fun certificate ->
+          String.equal (Trust.certificate_id certificate) local_certificate)
+        (Trust.certificates membership)
+    with
+    | None ->
+        Error
+          (Invalid_collaboration_state
+             "local certificate is absent from the verified membership")
+    | Some certificate ->
+        if
+          Model.Device_id.equal
+            (Trust.device_id (Trust.certificate_subject certificate))
+            (Model.creator project)
+        then Ok local_certificate
+        else
+          Error
+            (Invalid_collaboration_state
+               "local certificate does not name the project creator")
+  in
+  let rec verify reversed = function
+    | [] -> Ok (List.rev reversed)
+    | signed :: rest ->
+        let* () =
+          Trust.verify_signed_revision membership signed
+          |> Result.map_error (fun error -> Trust_error error)
+        in
+        verify (signed :: reversed) rest
+  in
+  let* signed_revisions = verify [] collaboration.collaboration_revisions in
+  let project_revisions = all_project_revisions project |> sorted_revisions in
+  let signed_values =
+    signed_revisions |> List.map Trust.signed_revision_value |> sorted_revisions
+  in
+  let signed_ids =
+    signed_values |> List.map (fun revision -> revision.Model.revision)
+  in
+  let unique_signed_ids =
+    List.length signed_ids
+    = List.length (List.sort_uniq Model.Revision_id.compare signed_ids)
+  in
+  let every_current_revision_is_signed =
+    List.for_all
+      (fun revision ->
+        List.exists (fun signed -> revision_equal revision signed) signed_values)
+      project_revisions
+  in
+  if not (unique_signed_ids && every_current_revision_is_signed) then
+    Error
+      (Invalid_collaboration_state
+         "every current project revision must have exactly one verified signed \
+          record")
+  else
+    Ok
+      {
+        collaboration_membership = membership;
+        collaboration_revisions = signed_revisions;
+        collaboration_local_certificate = local_certificate;
+      }
+
+let collaboration ~membership ~revisions ~local_certificate =
+  let* membership =
+    Trust.verify_membership
+      ~repository:(Trust.repository membership)
+      (Trust.certificates membership)
+    |> Result.map_error (fun error -> Trust_error error)
+  in
+  let* () =
+    match
+      List.find_opt
+        (fun certificate ->
+          String.equal (Trust.certificate_id certificate) local_certificate)
+        (Trust.certificates membership)
+    with
+    | Some _ -> Ok ()
+    | None ->
+        Error
+          (Invalid_collaboration_state
+             "local certificate is absent from the verified membership")
+  in
+  let rec verify = function
+    | [] -> Ok ()
+    | signed :: rest ->
+        let* () =
+          Trust.verify_signed_revision membership signed
+          |> Result.map_error (fun error -> Trust_error error)
+        in
+        verify rest
+  in
+  let* () = verify revisions in
+  Ok
+    {
+      collaboration_membership = membership;
+      collaboration_revisions = revisions;
+      collaboration_local_certificate = local_certificate;
+    }
+
+let membership collaboration = collaboration.collaboration_membership
+let signed_revisions collaboration = collaboration.collaboration_revisions
+
+let local_certificate collaboration =
+  collaboration.collaboration_local_certificate
+
+let construction value =
+  value
+  |> Result.map_error (fun error ->
+      Invalid_collaboration_state (Encoding.construction_error_to_string error))
+
+let text value = Encoding.text value |> construction
+let array value = Encoding.array value |> construction
+
+let exact_array name length = function
+  | Encoding.Array values when List.length values = length -> Ok values
+  | Encoding.Array _ ->
+      Error
+        (Invalid_collaboration_state
+           (Printf.sprintf "%s has the wrong field count" name))
+  | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _ | Encoding.Map _
+  | Encoding.Bool _ | Encoding.Null ->
+      Error (Invalid_collaboration_state (name ^ " must be an array"))
+
+let text_field name = function
+  | Encoding.Text value -> Ok value
+  | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Array _ | Encoding.Map _
+  | Encoding.Bool _ | Encoding.Null ->
+      Error (Invalid_collaboration_state (name ^ " must be text"))
+
+let bytes_array values =
+  let rec loop reversed = function
+    | [] -> array (List.rev reversed)
+    | value :: rest -> loop (Encoding.bytes value :: reversed) rest
+  in
+  loop [] values
+
+let decode_bytes_array name = function
+  | Encoding.Array values ->
+      let rec loop reversed = function
+        | [] -> Ok (List.rev reversed)
+        | Encoding.Bytes value :: rest -> loop (value :: reversed) rest
+        | ( Encoding.Integer _ | Encoding.Text _ | Encoding.Array _
+          | Encoding.Map _ | Encoding.Bool _ | Encoding.Null )
+          :: _ ->
+            Error (Invalid_collaboration_state (name ^ " must contain bytes"))
+      in
+      loop [] values
+  | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _ | Encoding.Map _
+  | Encoding.Bool _ | Encoding.Null ->
+      Error (Invalid_collaboration_state (name ^ " must be an array"))
+
+let collaboration_value ~project collaboration =
+  let* collaboration = validate_collaboration ~project collaboration in
+  let* project =
+    Record.encode_project project
+    |> Result.map_error (fun error -> Record_error error)
+  in
+  let* repository =
+    text
+      (Trust.Repository_id.to_string
+         (Trust.repository collaboration.collaboration_membership))
+  in
+  let certificates =
+    collaboration.collaboration_membership |> Trust.certificates
+    |> List.map Trust.encode_certificate
+  in
+  let revisions =
+    collaboration.collaboration_revisions
+    |> List.sort (fun left right ->
+        Model.Revision_id.compare
+          (Trust.signed_revision_id left)
+          (Trust.signed_revision_id right))
+    |> List.map Trust.encode_signed_revision
+  in
+  let* certificates = bytes_array certificates in
+  let* revisions = bytes_array revisions in
+  let* local_certificate = text collaboration.collaboration_local_certificate in
+  array
+    [
+      Encoding.integer 1L;
+      Encoding.bytes project;
+      repository;
+      certificates;
+      revisions;
+      local_certificate;
+    ]
+
+let encode_collaborative_state ~project collaboration =
+  collaboration_value ~project collaboration |> Result.map Encoding.encode
+
+let decode_collaborative_state encoded =
+  let* value =
+    Encoding.decode encoded
+    |> Result.map_error (fun error ->
+        Invalid_collaboration_state (Encoding.decode_error_to_string error))
+  in
+  let* fields = exact_array "V4 collaborative state" 6 value in
+  match fields with
+  | [ version; project; repository; certificates; revisions; local_certificate ]
+    ->
+      let version =
+        match version with
+        | Encoding.Integer value when Int64.equal value 1L -> Ok ()
+        | Encoding.Integer _ ->
+            Error
+              (Invalid_collaboration_state
+                 "unsupported collaborative state version")
+        | Encoding.Bytes _ | Encoding.Text _ | Encoding.Array _ | Encoding.Map _
+        | Encoding.Bool _ | Encoding.Null ->
+            Error
+              (Invalid_collaboration_state
+                 "collaborative state version must be an integer")
+      in
+      let* () = version in
+      let* project =
+        match project with
+        | Encoding.Bytes value ->
+            Record.decode_project value
+            |> Result.map_error (fun error -> Record_error error)
+        | Encoding.Integer _ | Encoding.Text _ | Encoding.Array _
+        | Encoding.Map _ | Encoding.Bool _ | Encoding.Null ->
+            Error (Invalid_collaboration_state "project record must be bytes")
+      in
+      let* repository = text_field "repository ID" repository in
+      let* repository =
+        Trust.Repository_id.of_string repository
+        |> Result.map_error (fun error -> Invalid_collaboration_state error)
+      in
+      let* certificates = decode_bytes_array "certificates" certificates in
+      let* certificates =
+        let rec loop reversed = function
+          | [] -> Ok (List.rev reversed)
+          | encoded :: rest ->
+              let* certificate =
+                Trust.decode_certificate encoded
+                |> Result.map_error (fun error -> Trust_error error)
+              in
+              loop (certificate :: reversed) rest
+        in
+        loop [] certificates
+      in
+      let* revisions = decode_bytes_array "signed revisions" revisions in
+      let* revisions =
+        let rec loop reversed = function
+          | [] -> Ok (List.rev reversed)
+          | encoded :: rest ->
+              let* signed =
+                Trust.decode_signed_revision encoded
+                |> Result.map_error (fun error -> Trust_error error)
+              in
+              loop (signed :: reversed) rest
+        in
+        loop [] revisions
+      in
+      let* local_certificate =
+        text_field "local certificate" local_certificate
+      in
+      let* membership =
+        Trust.verify_membership ~repository certificates
+        |> Result.map_error (fun error -> Trust_error error)
+      in
+      let* collaboration =
+        collaboration ~membership ~revisions ~local_certificate
+      in
+      let* collaboration = validate_collaboration ~project collaboration in
+      let* canonical = encode_collaborative_state ~project collaboration in
+      if String.equal canonical encoded then Ok (project, collaboration)
+      else
+        Error
+          (Invalid_collaboration_state "collaborative state is not canonical")
+  | _ -> assert false
+
 let payload_for_project project =
   let* encoded =
     Record.encode_project project
@@ -48,8 +367,13 @@ let payload_for_project project =
   Encoding.decode encoded
   |> Result.map_error (fun error -> Record_error (Record.Decode_error error))
 
-let store_project store project =
-  let* payload = payload_for_project project in
+let payload_for_collaborative_project project collaboration =
+  let* encoded = encode_collaborative_state ~project collaboration in
+  Encoding.decode encoded
+  |> Result.map_error (fun error ->
+      Invalid_collaboration_state (Encoding.decode_error_to_string error))
+
+let store_payload store payload =
   let* envelope =
     Envelope.create ~object_type:Envelope.V4_project_state
       ~object_format_version:Envelope.current_object_format_version
@@ -57,6 +381,14 @@ let store_project store project =
     |> Result.map_error (fun error -> Envelope_error error)
   in
   Store.put store envelope |> Result.map_error (fun error -> Store_error error)
+
+let store_project store project =
+  let* payload = payload_for_project project in
+  store_payload store payload
+
+let store_collaborative_project store project collaboration =
+  let* payload = payload_for_collaborative_project project collaboration in
+  store_payload store payload
 
 let decode_project_object store object_id =
   let* object_ =
@@ -66,8 +398,18 @@ let decode_project_object store object_id =
   if Envelope.object_type object_ <> Envelope.V4_project_state then
     Error (Unexpected_object_type (Envelope.object_type object_))
   else
-    Envelope.payload object_ |> Encoding.encode |> Record.decode_project
-    |> Result.map_error (fun error -> Record_error error)
+    let encoded = Envelope.payload object_ |> Encoding.encode in
+    match decode_collaborative_state encoded with
+    | Ok (project, collaboration) -> Ok (project, Some collaboration)
+    | Error
+        ( Invalid_collaboration_state _ | Record_error _ | Trust_error _
+        | Store_error _ | Envelope_error _ | Existing_repository _
+        | Bootstrap_error _ | Missing_state_head | Empty_state_head
+        | Unexpected_object_type _
+        | Collaborative_state_requires_collaborative_save ) ->
+        Record.decode_project encoded
+        |> Result.map (fun project -> (project, None))
+        |> Result.map_error (fun error -> Record_error error)
 
 let current_head repository =
   Store.read_ref repository.store ~name:state_head_name
@@ -81,8 +423,10 @@ let load repository =
       match Store.Mutable_ref.target head with
       | None -> Error Empty_state_head
       | Some object_id ->
-          let* project = decode_project_object repository.store object_id in
-          Ok { project; head; object_id })
+          let* project, collaboration =
+            decode_project_object repository.store object_id
+          in
+          Ok { project; collaboration; head; object_id })
 
 let init_with ~root ~bootstrap =
   let metadata = repository_metadata_path root in
@@ -104,6 +448,29 @@ let init_with ~root ~bootstrap =
 
 let init ~root ~project = init_with ~root ~bootstrap:(fun _ -> Ok project)
 
+let init_collaborative_with ~root ~bootstrap =
+  let metadata = repository_metadata_path root in
+  if Sys.file_exists metadata then Error (Existing_repository metadata)
+  else
+    let* store =
+      Store.init ~root |> Result.map_error (fun error -> Store_error error)
+    in
+    let* project, collaboration =
+      bootstrap store |> Result.map_error (fun error -> Bootstrap_error error)
+    in
+    let* collaboration = validate_collaboration ~project collaboration in
+    let* object_id = store_collaborative_project store project collaboration in
+    let* _ =
+      Store.compare_and_swap_ref store ~name:state_head_name ~expected:None
+        ~target:(Some object_id)
+      |> Result.map_error (fun error -> Store_error error)
+    in
+    Ok { store }
+
+let init_collaborative ~root ~project ~collaboration =
+  init_collaborative_with ~root ~bootstrap:(fun _ ->
+      Ok (project, collaboration))
+
 let open_repository ~root =
   let* store =
     Store.open_repository ~root
@@ -114,10 +481,36 @@ let open_repository ~root =
   Ok repository
 
 let save repository ~expected ~project =
+  let* existing_collaboration =
+    match Store.Mutable_ref.target expected with
+    | None -> Error Empty_state_head
+    | Some object_id ->
+        let* _, collaboration =
+          decode_project_object repository.store object_id
+        in
+        Ok collaboration
+  in
+  let* () =
+    match existing_collaboration with
+    | None -> Ok ()
+    | Some _ -> Error Collaborative_state_requires_collaborative_save
+  in
   let* object_id = store_project repository.store project in
   let* head =
     Store.compare_and_swap_ref repository.store ~name:state_head_name
       ~expected:(Some expected) ~target:(Some object_id)
     |> Result.map_error (fun error -> Store_error error)
   in
-  Ok { project; head; object_id }
+  Ok { project; collaboration = None; head; object_id }
+
+let save_collaborative repository ~expected ~project ~collaboration =
+  let* collaboration = validate_collaboration ~project collaboration in
+  let* object_id =
+    store_collaborative_project repository.store project collaboration
+  in
+  let* head =
+    Store.compare_and_swap_ref repository.store ~name:state_head_name
+      ~expected:(Some expected) ~target:(Some object_id)
+    |> Result.map_error (fun error -> Store_error error)
+  in
+  Ok { project; collaboration = Some collaboration; head; object_id }

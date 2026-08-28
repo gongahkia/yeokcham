@@ -2,6 +2,8 @@ module Model = Yeokcham_v4_model
 module Journal = Yeokcham_v4_restore_journal
 module Snapshot = Yeokcham_snapshot
 module Store = Yeokcham_v4_store
+module Trust = Yeokcham_v4_trust
+module Package = Yeokcham_v4_package
 
 module Path_map = Map.Make (struct
   type t = string list
@@ -15,11 +17,15 @@ type error =
   | Materialize_error of Snapshot.Materialize.error
   | Restore_journal_error of Journal.error
   | Model_error of Model.error
+  | Trust_error of Trust.error
+  | Package_error of Package.error
   | Invalid_checkpoint_id of string
   | Unknown_checkpoint of Model.Snapshot_id.t
   | Unchanged_share of Model.Snapshot_id.t
+  | Unsigned_project
 
 type status = {
+  creator : Model.Device_id.t;
   active_draft : Model.draft;
   checkpoint : Model.Snapshot_id.t;
   shared_changes : Model.shared_change list;
@@ -30,6 +36,12 @@ type status = {
   checkpoints : Model.checkpoint list;
   usernames : Model.username_registration list;
   uncaptured : bool;
+}
+
+type identity = {
+  repository : Trust.Repository_id.t;
+  device : Trust.device;
+  role : Trust.role;
 }
 
 type materialized_candidate = {
@@ -122,6 +134,8 @@ let error_to_string = function
   | Materialize_error error -> Snapshot.Materialize.error_to_string error
   | Restore_journal_error error -> Journal.error_to_string error
   | Model_error error -> Model.error_to_string error
+  | Trust_error error -> Trust.error_to_string error
+  | Package_error error -> Package.error_to_string error
   | Invalid_checkpoint_id value ->
       "invalid saved checkpoint identifier: " ^ value
   | Unknown_checkpoint id ->
@@ -130,6 +144,9 @@ let error_to_string = function
   | Unchanged_share snapshot ->
       "share would not publish a new snapshot: "
       ^ Model.Snapshot_id.to_string snapshot
+  | Unsigned_project ->
+      "this V4 project has no signed collaboration state; initialize a signed \
+       project"
 
 let ( let* ) = Result.bind
 
@@ -152,6 +169,7 @@ let status_of_project ?(uncaptured = false) project =
   let shared_changes = Model.shared_changes project in
   let deliveries = Model.deliveries project in
   {
+    creator = Model.creator project;
     active_draft;
     checkpoint = active_draft.Model.latest_checkpoint;
     shared_changes;
@@ -268,9 +286,54 @@ let edits_between store ~baseline ~result =
   differing_paths baseline_leaves result_leaves |> whole_path_edits
 
 let persist repository loaded project =
-  Store.save repository ~expected:loaded.Store.head ~project
+  let saved =
+    match loaded.Store.collaboration with
+    | None -> Store.save repository ~expected:loaded.Store.head ~project
+    | Some collaboration ->
+        Store.save_collaborative repository ~expected:loaded.Store.head ~project
+          ~collaboration
+  in
+  saved
   |> Result.map (fun saved -> status_of_project saved.Store.project)
   |> Result.map_error (fun error -> Store_error error)
+
+let save_project repository loaded project =
+  match loaded.Store.collaboration with
+  | None -> Store.save repository ~expected:loaded.Store.head ~project
+  | Some collaboration ->
+      Store.save_collaborative repository ~expected:loaded.Store.head ~project
+        ~collaboration
+
+let persist_collaborative repository loaded project collaboration =
+  Store.save_collaborative repository ~expected:loaded.Store.head ~project
+    ~collaboration
+  |> Result.map (fun saved -> status_of_project saved.Store.project)
+  |> Result.map_error (fun error -> Store_error error)
+
+let require_collaboration loaded =
+  match loaded.Store.collaboration with
+  | Some collaboration -> Ok collaboration
+  | None -> Error Unsigned_project
+
+let local_certificate collaboration =
+  match
+    List.find_opt
+      (fun certificate ->
+        String.equal
+          (Trust.certificate_id certificate)
+          (Store.local_certificate collaboration))
+      (Trust.certificates (Store.membership collaboration))
+  with
+  | Some certificate -> Ok certificate
+  | None ->
+      Error
+        (Store_error
+           (Store.Invalid_collaboration_state
+              "local certificate is absent from membership"))
+
+let local_device collaboration =
+  let* certificate = local_certificate collaboration in
+  Ok (Trust.certificate_subject certificate)
 
 let checkpoint_observed project observed =
   let active = Model.active_draft project in
@@ -302,6 +365,41 @@ let init ~root ~creator ~username ~initial_draft ~title =
   |> Result.map (fun loaded -> status_of_project loaded.Store.project)
   |> Result.map_error (fun error -> Store_error error)
 
+let init_collaboration ~root ~username ~initial_draft ~title ~device ~membership
+    ~local_certificate =
+  let* repository =
+    Store.init_collaborative_with ~root ~bootstrap:(fun underlying_store ->
+        let* initial_snapshot =
+          capture ~root underlying_store |> Result.map_error error_to_string
+        in
+        let project =
+          Model.init ~creator:(Trust.device_id device) ~username
+            ~initial_snapshot ~initial_draft ~title
+        in
+        let* collaboration =
+          Store.collaboration ~membership ~revisions:[] ~local_certificate
+          |> Result.map_error Store.error_to_string
+        in
+        Ok (project, collaboration))
+    |> Result.map_error (fun error -> Store_error error)
+  in
+  Store.load repository
+  |> Result.map (fun loaded -> status_of_project loaded.Store.project)
+  |> Result.map_error (fun error -> Store_error error)
+
+let init_signed ~root ~username ~initial_draft ~title ~repository ~device
+    ~signing_capability =
+  let* root_certificate =
+    Trust.root_certificate ~repository ~device signing_capability
+    |> Result.map_error (fun error -> Trust_error error)
+  in
+  let* membership =
+    Trust.verify_membership ~repository [ root_certificate ]
+    |> Result.map_error (fun error -> Trust_error error)
+  in
+  init_collaboration ~root ~username ~initial_draft ~title ~device ~membership
+    ~local_certificate:(Trust.certificate_id root_certificate)
+
 let status ~root =
   with_repository ~root (fun repository loaded ->
       let* observed = capture ~root (Store.underlying_store repository) in
@@ -311,6 +409,17 @@ let status ~root =
       in
       Ok (status_of_project ~uncaptured loaded.Store.project))
 
+let identity ~root =
+  with_repository ~root (fun _ loaded ->
+      let* collaboration = require_collaboration loaded in
+      let* certificate = local_certificate collaboration in
+      Ok
+        {
+          repository = Trust.repository (Store.membership collaboration);
+          device = Trust.certificate_subject certificate;
+          role = Trust.certificate_role certificate;
+        })
+
 let register_username ~root ~device ~username =
   with_repository ~root (fun repository loaded ->
       let* project =
@@ -318,6 +427,33 @@ let register_username ~root ~device ~username =
         |> Result.map_error (fun error -> Model_error error)
       in
       persist repository loaded project)
+
+let enroll_device ~root ~subject ~role ~username ~signing_capability =
+  with_repository ~root (fun repository loaded ->
+      let* collaboration = require_collaboration loaded in
+      let* certificate =
+        Trust.enroll
+          (Store.membership collaboration)
+          ~issuer:(Store.local_certificate collaboration)
+          signing_capability ~subject ~role
+        |> Result.map_error (fun error -> Trust_error error)
+      in
+      let* membership =
+        Trust.extend_membership (Store.membership collaboration) [ certificate ]
+        |> Result.map_error (fun error -> Trust_error error)
+      in
+      let* project =
+        Model.register_username loaded.Store.project
+          ~device:(Trust.device_id subject) ~username
+        |> Result.map_error (fun error -> Model_error error)
+      in
+      let* collaboration =
+        Store.collaboration ~membership
+          ~revisions:(Store.signed_revisions collaboration)
+          ~local_certificate:(Store.local_certificate collaboration)
+        |> Result.map_error (fun error -> Store_error error)
+      in
+      persist_collaborative repository loaded project collaboration)
 
 let save ~root =
   with_repository ~root (fun repository loaded ->
@@ -421,7 +557,7 @@ let perform_in_place ~root repository loaded journal ~resumed =
             ~snapshot:(Journal.target materialized)
         in
         let* _ =
-          Store.save repository ~expected:loaded.Store.head ~project
+          save_project repository loaded project
           |> Result.map_error (fun error -> Store_error error)
         in
         let* _ = advance_journal ~root materialized Journal.Published in
@@ -484,7 +620,7 @@ let restore_in_place ~root ~checkpoint =
                 Model.checkpoint loaded.Store.project ~snapshot:safety
               in
               let* saved =
-                Store.save repository ~expected:loaded.Store.head ~project
+                save_project repository loaded project
                 |> Result.map_error (fun error -> Store_error error)
               in
               let operation_id =
@@ -505,9 +641,9 @@ let new_draft ~root ~id ~title =
       in
       persist repository loaded project)
 
-let make_revision project ~change ~revision ~parent ~base ~result ~edits =
-  Model.make_change_revision ~change ~revision ~parent
-    ~author:(Model.creator project) ~base ~result ~edits
+let make_revision ~author ~change ~revision ~parent ~base ~result ~edits =
+  Model.make_change_revision ~change ~revision ~parent ~author ~base ~result
+    ~edits
   |> Result.map_error (fun error -> Model_error error)
 
 let share ~root ~change ~revision =
@@ -541,8 +677,8 @@ let share ~root ~change ~revision =
         match active.Model.shared_change with
         | None ->
             let* recorded =
-              make_revision project ~change ~revision ~parent:None
-                ~base:baseline ~result:observed ~edits
+              make_revision ~author:(Model.creator project) ~change ~revision
+                ~parent:None ~base:baseline ~result:observed ~edits
             in
             Model.share_active project recorded
             |> Result.map_error (fun error -> Model_error error)
@@ -561,13 +697,92 @@ let share ~root ~change ~revision =
               | None -> None
             in
             let* recorded =
-              make_revision project ~change ~revision ~parent ~base:baseline
-                ~result:observed ~edits
+              make_revision ~author:(Model.creator project) ~change ~revision
+                ~parent ~base:baseline ~result:observed ~edits
             in
             Model.amend_active project recorded
             |> Result.map_error (fun error -> Model_error error)
       in
       persist repository loaded recorded)
+
+let extend_signed_revisions collaboration signed =
+  Store.collaboration
+    ~membership:(Store.membership collaboration)
+    ~revisions:(signed :: Store.signed_revisions collaboration)
+    ~local_certificate:(Store.local_certificate collaboration)
+  |> Result.map_error (fun error -> Store_error error)
+
+let share_signed ~root ~change ~revision ~signing_capability =
+  with_repository ~root (fun repository loaded ->
+      let* collaboration = require_collaboration loaded in
+      let* author = local_device collaboration in
+      let store = Store.underlying_store repository in
+      let* observed = capture ~root store in
+      let project = checkpoint_observed loaded.Store.project observed in
+      let baseline = (Model.projection project).Model.projection_baseline in
+      let active = Model.active_draft project in
+      let* () =
+        match active.Model.shared_change with
+        | None -> Ok ()
+        | Some change_id -> (
+            match
+              List.find_opt
+                (fun candidate ->
+                  Model.Change_id.equal candidate.Model.change_id change_id)
+                (Model.shared_changes project)
+            with
+            | None -> Ok ()
+            | Some shared -> (
+                match shared.Model.revisions with
+                | latest :: _
+                  when Model.Snapshot_id.equal latest.Model.result_snapshot
+                         observed ->
+                    Error (Unchanged_share observed)
+                | _ -> Ok ()))
+      in
+      let* edits = edits_between store ~baseline ~result:observed in
+      let* recorded =
+        match active.Model.shared_change with
+        | None ->
+            let* recorded =
+              make_revision ~author:(Trust.device_id author) ~change ~revision
+                ~parent:None ~base:baseline ~result:observed ~edits
+            in
+            Model.share_active project recorded
+            |> Result.map (fun project -> (project, recorded))
+            |> Result.map_error (fun error -> Model_error error)
+        | Some change_id ->
+            let parent =
+              match
+                List.find_opt
+                  (fun candidate ->
+                    Model.Change_id.equal candidate.Model.change_id change_id)
+                  (Model.shared_changes project)
+              with
+              | Some shared -> (
+                  match shared.Model.revisions with
+                  | latest :: _ -> Some latest.Model.revision
+                  | [] -> None)
+              | None -> None
+            in
+            let* recorded =
+              make_revision ~author:(Trust.device_id author) ~change ~revision
+                ~parent ~base:baseline ~result:observed ~edits
+            in
+            Model.amend_active project recorded
+            |> Result.map (fun project -> (project, recorded))
+            |> Result.map_error (fun error -> Model_error error)
+      in
+      let project, recorded = recorded in
+      let* signed =
+        Trust.sign_revision
+          (Store.membership collaboration)
+          ~certificate:(Store.local_certificate collaboration)
+          signing_capability recorded
+        |> Result.map_error (fun error -> Trust_error error)
+      in
+      let* collaboration = extend_signed_revisions collaboration signed in
+      persist_collaborative repository loaded project collaboration)
 
 let withdraw ~root ~change =
   with_repository ~root (fun repository loaded ->
@@ -796,14 +1011,123 @@ let resolve ~root ~decision ~change ~revision ~tree =
             |> whole_path_edits
           in
           let* replacement =
-            make_revision project ~change ~revision ~parent:None
-              ~base:projection.Model.projection_baseline ~result:observed ~edits
+            make_revision ~author:(Model.creator project) ~change ~revision
+              ~parent:None ~base:projection.Model.projection_baseline
+              ~result:observed ~edits
           in
           let* project =
             Model.resolve project ~decision ~replacement
             |> Result.map_error (fun error -> Model_error error)
           in
           persist repository loaded project)
+
+let resolve_signed ~root ~decision ~change ~revision ~tree ~signing_capability =
+  with_repository ~root (fun repository loaded ->
+      let* collaboration = require_collaboration loaded in
+      let* author = local_device collaboration in
+      let store = Store.underlying_store repository in
+      let* project, observed =
+        match tree with
+        | None ->
+            let* observed = capture ~root store in
+            Ok (checkpoint_observed loaded.Store.project observed, observed)
+        | Some path ->
+            let* observed = capture ~root:path store in
+            Ok (loaded.Store.project, observed)
+      in
+      let projection = Model.projection project in
+      match find_open_decision project decision with
+      | None -> Error (Model_error Model.Unknown_decision)
+      | Some resolved ->
+          let* edits =
+            resolved.Model.decision_paths
+            |> List.map Model.Path.components
+            |> whole_path_edits
+          in
+          let* replacement =
+            make_revision ~author:(Trust.device_id author) ~change ~revision
+              ~parent:None ~base:projection.Model.projection_baseline
+              ~result:observed ~edits
+          in
+          let* project =
+            Model.resolve project ~decision ~replacement
+            |> Result.map_error (fun error -> Model_error error)
+          in
+          let* signed =
+            Trust.sign_revision
+              (Store.membership collaboration)
+              ~certificate:(Store.local_certificate collaboration)
+              signing_capability replacement
+            |> Result.map_error (fun error -> Trust_error error)
+          in
+          let* collaboration = extend_signed_revisions collaboration signed in
+          persist_collaborative repository loaded project collaboration)
+
+let create_package ~root ~destination =
+  with_repository ~root (fun repository loaded ->
+      let* collaboration = require_collaboration loaded in
+      Package.create
+        ~source:(Store.underlying_store repository)
+        ~destination
+        ~membership:(Store.membership collaboration)
+        ~revisions:(Store.signed_revisions collaboration)
+      |> Result.map_error (fun error -> Package_error error))
+
+let merge_signed_revisions existing incoming =
+  let rec add known = function
+    | [] -> Ok known
+    | signed :: rest -> (
+        let revision = Trust.signed_revision_value signed in
+        match
+          List.find_opt
+            (fun candidate ->
+              Model.Revision_id.equal
+                (Trust.signed_revision_id candidate)
+                revision.Model.revision)
+            known
+        with
+        | None -> add (signed :: known) rest
+        | Some candidate ->
+            if
+              Trust.encode_signed_revision candidate
+              = Trust.encode_signed_revision signed
+            then add known rest
+            else
+              Error
+                (Package_error
+                   (Package.Invalid_package
+                      "revision identity conflicts with a local signed record"))
+        )
+  in
+  add existing incoming
+
+let receive_package ~root ~package =
+  with_repository ~root (fun repository loaded ->
+      let* existing = require_collaboration loaded in
+      let* received =
+        Package.verify_and_import
+          ~destination:(Store.underlying_store repository)
+          ~package
+          ~membership:(Store.membership existing)
+        |> Result.map_error (fun error -> Package_error error)
+      in
+      let* project =
+        Package.apply_revisions loaded.Store.project received
+        |> Result.map_error (fun error -> Package_error error)
+      in
+      let* revisions =
+        merge_signed_revisions
+          (Store.signed_revisions existing)
+          (Package.revisions received)
+      in
+      let* collaboration =
+        Store.collaboration
+          ~membership:(Package.membership received)
+          ~revisions
+          ~local_certificate:(Store.local_certificate existing)
+        |> Result.map_error (fun error -> Store_error error)
+      in
+      persist_collaborative repository loaded project collaboration)
 
 let deliver ~root ~id ~next_draft ~next_title =
   with_repository ~root (fun repository loaded ->

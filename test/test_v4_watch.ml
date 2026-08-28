@@ -23,7 +23,15 @@ let with_directory prefix run =
   let root = Filename.temp_file prefix "" in
   Unix.unlink root;
   Unix.mkdir root 0o700;
-  Fun.protect ~finally:(fun () -> remove_tree root) (fun () -> run root)
+  let signer_directory = Filename.temp_file (prefix ^ "signer-") "" in
+  Unix.unlink signer_directory;
+  Unix.mkdir signer_directory 0o700;
+  Unix.putenv "YEOKCHAM_V4_TEST_SIGNER_DIRECTORY" signer_directory;
+  Fun.protect
+    ~finally:(fun () ->
+      remove_tree root;
+      remove_tree signer_directory)
+    (fun () -> run root)
 
 let executable () =
   let from_test_binary =
@@ -88,8 +96,6 @@ let watch_records_a_checkpoint_after_quiet_edits () =
             "init";
             "--root";
             root;
-            "--device";
-            "device-alice";
             "--username";
             "alice";
             "--draft";

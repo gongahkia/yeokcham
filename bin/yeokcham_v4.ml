@@ -1,5 +1,6 @@
 module Model = Yeokcham_v4_model
 module Service = Yeokcham_v4_local_service
+module Trust = Yeokcham_v4_trust
 
 let fail message =
   prerr_endline message;
@@ -8,10 +9,13 @@ let fail message =
 let usage () =
   fail
     "usage:\n\
-    \  yeokcham-v4 init [--root PATH] --device ID --username NAME --draft ID \
-     --title TITLE\n\
+    \  yeokcham-v4 init [--root PATH] --username NAME --draft ID --title TITLE\n\
     \  yeokcham-v4 save [--root PATH]\n\
     \  yeokcham-v4 status [--root PATH]\n\
+    \  yeokcham-v4 device create\n\
+    \  yeokcham-v4 device show [--root PATH]\n\
+    \  yeokcham-v4 device enroll [--root PATH] --device ID --public-key HEX \
+     --username NAME [--administrator]\n\
     \  yeokcham-v4 user register [--root PATH] --device ID --username NAME\n\
     \  yeokcham-v4 timeline [--root PATH]\n\
     \  yeokcham-v4 restore [--root PATH] --checkpoint ID [--destination PATH]\n\
@@ -26,6 +30,8 @@ let usage () =
      [--against base|REV]\n\
     \  yeokcham-v4 decision materialize [--root PATH] --decision ID \
      --destination PATH\n\
+    \  yeokcham-v4 package create [--root PATH] --destination PATH\n\
+    \  yeokcham-v4 receive [--root PATH] --from PATH\n\
     \  yeokcham-v4 deliver [--root PATH] --id ID --draft ID --title TITLE\n\
     \  yeokcham-v4 pin [--root PATH] --checkpoint ID\n\
     \  yeokcham-v4 unpin [--root PATH] --checkpoint ID\n\
@@ -47,7 +53,38 @@ let parse_identifier name parser value =
   parser value
   |> require_ok (fun error -> name ^ ": " ^ Model.error_to_string error)
 
+let hex_of_bytes bytes =
+  let alphabet = "0123456789abcdef" in
+  String.init
+    (String.length bytes * 2)
+    (fun index ->
+      let value = Char.code bytes.[index / 2] in
+      if index mod 2 = 0 then alphabet.[value lsr 4]
+      else alphabet.[value land 0x0f])
+
+let bytes_of_hex value =
+  let nibble = function
+    | '0' .. '9' as character -> Some (Char.code character - Char.code '0')
+    | 'a' .. 'f' as character -> Some (Char.code character - Char.code 'a' + 10)
+    | _ -> None
+  in
+  if String.length value mod 2 <> 0 then
+    fail "public key must be lowercase hexadecimal"
+  else
+    let bytes = Bytes.create (String.length value / 2) in
+    let rec decode offset =
+      if offset = String.length value then Bytes.unsafe_to_string bytes
+      else
+        match (nibble value.[offset], nibble value.[offset + 1]) with
+        | Some high, Some low ->
+            Bytes.set bytes (offset / 2) (Char.chr ((high lsl 4) lor low));
+            decode (offset + 2)
+        | None, _ | _, None -> fail "public key must be lowercase hexadecimal"
+    in
+    decode 0
+
 let render_status status =
+  Printf.printf "device %s\n" (Model.Device_id.to_string status.Service.creator);
   Printf.printf "saved %s\n"
     (Model.Snapshot_id.to_string status.Service.checkpoint);
   Printf.printf "draft %s %s\n"
@@ -86,30 +123,23 @@ let render_status status =
     (if status.Service.uncaptured then "yes" else "no")
 
 let parse_init arguments =
-  let rec loop root creator username draft title = function
+  let rec loop root username draft title = function
     | [] -> (
-        match (creator, username, draft, title) with
-        | Some creator, Some username, Some draft, Some title ->
-            ( Option.value root ~default:default_root,
-              creator,
-              username,
-              draft,
-              title )
-        | None, _, _, _ | _, None, _, _ | _, _, None, _ | _, _, _, None ->
-            usage ())
+        match (username, draft, title) with
+        | Some username, Some draft, Some title ->
+            (Option.value root ~default:default_root, username, draft, title)
+        | None, _, _ | _, None, _ | _, _, None -> usage ())
     | "--root" :: value :: rest when Option.is_none root ->
-        loop (Some value) creator username draft title rest
-    | "--device" :: value :: rest when Option.is_none creator ->
-        loop root (Some value) username draft title rest
+        loop (Some value) username draft title rest
     | "--username" :: value :: rest when Option.is_none username ->
-        loop root creator (Some value) draft title rest
+        loop root (Some value) draft title rest
     | "--draft" :: value :: rest when Option.is_none draft ->
-        loop root creator username (Some value) title rest
+        loop root username (Some value) title rest
     | "--title" :: value :: rest when Option.is_none title ->
-        loop root creator username draft (Some value) rest
+        loop root username draft (Some value) rest
     | _ -> usage ()
   in
-  loop None None None None None arguments
+  loop None None None None arguments
 
 let parse_new_draft arguments =
   let rec loop root id title = function
@@ -146,20 +176,29 @@ let parse_restore arguments =
   loop None None None arguments
 
 let run_init arguments =
-  let root, creator, username, draft, title = parse_init arguments in
-  let creator =
-    parse_identifier "invalid device identifier" Model.Device_id.of_string
-      creator
-  in
+  let root, username, draft, title = parse_init arguments in
   let initial_draft =
     parse_identifier "invalid draft identifier" Model.Draft_id.of_string draft
   in
   let username =
     parse_identifier "invalid username" Model.Username.of_string username
   in
-  Service.init ~root ~creator ~username ~initial_draft ~title
+  let repository =
+    Trust.Repository_id.generate ()
+    |> require_ok (fun error ->
+        "could not generate V4 repository identity: " ^ error)
+  in
+  let device, signing_capability =
+    V4_signer.create () |> require_ok V4_signer.error_to_string
+  in
+  Service.init_signed ~root ~username ~initial_draft ~title ~repository ~device
+    ~signing_capability
   |> require_ok Service.error_to_string
   |> render_status
+
+let local_signing_capability root =
+  let status = Service.status ~root |> require_ok Service.error_to_string in
+  V4_signer.load status.Service.creator |> require_ok V4_signer.error_to_string
 
 let parse_user_register arguments =
   let rec loop root device username = function
@@ -204,6 +243,80 @@ let run_save arguments =
 let run_status arguments =
   let root = parse_root arguments in
   Service.status ~root |> require_ok Service.error_to_string |> render_status
+
+let run_device_create arguments =
+  match arguments with
+  | [] ->
+      let device, _ =
+        V4_signer.create () |> require_ok V4_signer.error_to_string
+      in
+      Printf.printf "device %s\n"
+        (Model.Device_id.to_string (Trust.device_id device));
+      Printf.printf "public-key %s\n"
+        (hex_of_bytes (Trust.device_public_key device))
+  | _ -> usage ()
+
+let run_device_show arguments =
+  let root = parse_root arguments in
+  let identity = Service.identity ~root |> require_ok Service.error_to_string in
+  Printf.printf "repository %s\n"
+    (Trust.Repository_id.to_string identity.Service.repository);
+  Printf.printf "device %s\n"
+    (Model.Device_id.to_string (Trust.device_id identity.Service.device));
+  Printf.printf "public-key %s\n"
+    (hex_of_bytes (Trust.device_public_key identity.Service.device));
+  Printf.printf "role %s\n"
+    (match identity.Service.role with
+    | Trust.Member -> "member"
+    | Trust.Administrator -> "administrator")
+
+let parse_device_enroll arguments =
+  let rec loop root device public_key username administrator = function
+    | [] -> (
+        match (device, public_key, username) with
+        | Some device, Some public_key, Some username ->
+            ( Option.value root ~default:default_root,
+              device,
+              public_key,
+              username,
+              administrator )
+        | None, _, _ | _, None, _ | _, _, None -> usage ())
+    | "--root" :: value :: rest when Option.is_none root ->
+        loop (Some value) device public_key username administrator rest
+    | "--device" :: value :: rest when Option.is_none device ->
+        loop root (Some value) public_key username administrator rest
+    | "--public-key" :: value :: rest when Option.is_none public_key ->
+        loop root device (Some value) username administrator rest
+    | "--username" :: value :: rest when Option.is_none username ->
+        loop root device public_key (Some value) administrator rest
+    | "--administrator" :: rest when not administrator ->
+        loop root device public_key username true rest
+    | _ -> usage ()
+  in
+  loop None None None None false arguments
+
+let run_device_enroll arguments =
+  let root, device, public_key, username, administrator =
+    parse_device_enroll arguments
+  in
+  let expected =
+    parse_identifier "invalid device identifier" Model.Device_id.of_string
+      device
+  in
+  let subject =
+    bytes_of_hex public_key |> Trust.device_of_public_key
+    |> require_ok Trust.error_to_string
+  in
+  if not (Model.Device_id.equal expected (Trust.device_id subject)) then
+    fail "device identifier does not match public key";
+  let username =
+    parse_identifier "invalid username" Model.Username.of_string username
+  in
+  let signing_capability = local_signing_capability root in
+  let role = if administrator then Trust.Administrator else Trust.Member in
+  Service.enroll_device ~root ~subject ~role ~username ~signing_capability
+  |> require_ok Service.error_to_string
+  |> render_status
 
 let run_timeline arguments =
   let root = parse_root arguments in
@@ -495,7 +608,9 @@ let run_resolve arguments =
     parse_identifier "invalid revision identifier" Model.Revision_id.of_string
       revision
   in
-  Service.resolve ~root ~decision ~change ~revision ~tree
+  let signing_capability = local_signing_capability root in
+  Service.resolve_signed ~root ~decision ~change ~revision ~tree
+    ~signing_capability
   |> require_ok Service.error_to_string
   |> render_status
 
@@ -537,7 +652,49 @@ let run_share arguments =
     parse_identifier "invalid revision identifier" Model.Revision_id.of_string
       revision
   in
-  Service.share ~root ~change ~revision
+  let signing_capability = local_signing_capability root in
+  Service.share_signed ~root ~change ~revision ~signing_capability
+  |> require_ok Service.error_to_string
+  |> render_status
+
+let parse_package_create arguments =
+  let rec loop root destination = function
+    | [] -> (
+        match destination with
+        | Some destination ->
+            (Option.value root ~default:default_root, destination)
+        | None -> usage ())
+    | "--root" :: value :: rest when Option.is_none root ->
+        loop (Some value) destination rest
+    | "--destination" :: value :: rest when Option.is_none destination ->
+        loop root (Some value) rest
+    | _ -> usage ()
+  in
+  loop None None arguments
+
+let run_package_create arguments =
+  let root, destination = parse_package_create arguments in
+  Service.create_package ~root ~destination
+  |> require_ok Service.error_to_string;
+  Printf.printf "package %s\n" destination
+
+let parse_receive arguments =
+  let rec loop root package = function
+    | [] -> (
+        match package with
+        | Some package -> (Option.value root ~default:default_root, package)
+        | None -> usage ())
+    | "--root" :: value :: rest when Option.is_none root ->
+        loop (Some value) package rest
+    | "--from" :: value :: rest when Option.is_none package ->
+        loop root (Some value) rest
+    | _ -> usage ()
+  in
+  loop None None arguments
+
+let run_receive arguments =
+  let root, package = parse_receive arguments in
+  Service.receive_package ~root ~package
   |> require_ok Service.error_to_string
   |> render_status
 
@@ -652,6 +809,9 @@ let () =
   | _ :: "init" :: arguments -> run_init arguments
   | _ :: "save" :: arguments -> run_save arguments
   | _ :: "status" :: arguments -> run_status arguments
+  | _ :: "device" :: "create" :: arguments -> run_device_create arguments
+  | _ :: "device" :: "show" :: arguments -> run_device_show arguments
+  | _ :: "device" :: "enroll" :: arguments -> run_device_enroll arguments
   | _ :: "user" :: "register" :: arguments -> run_user_register arguments
   | _ :: "timeline" :: arguments -> run_timeline arguments
   | _ :: "restore" :: arguments -> run_restore arguments
@@ -664,6 +824,8 @@ let () =
   | _ :: "decision" :: "diff" :: arguments -> run_decision_diff arguments
   | _ :: "decision" :: "materialize" :: arguments ->
       run_decision_materialize arguments
+  | _ :: "package" :: "create" :: arguments -> run_package_create arguments
+  | _ :: "receive" :: arguments -> run_receive arguments
   | _ :: "deliver" :: arguments -> run_deliver arguments
   | _ :: "pin" :: arguments -> run_pin arguments
   | _ :: "unpin" :: arguments -> run_unpin arguments

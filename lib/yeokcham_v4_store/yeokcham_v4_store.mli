@@ -12,13 +12,32 @@ type error =
   | Missing_state_head
   | Empty_state_head
   | Unexpected_object_type of Yeokcham_envelope.object_type
+  | Trust_error of Yeokcham_v4_trust.error
+  | Invalid_collaboration_state of string
+  | Collaborative_state_requires_collaborative_save
 
 val error_to_string : error -> string
 
 type repository
 
+type collaboration
+(** Public collaboration state carried atomically with a V4 project. It holds
+    only public certificates and detached signed revision records. Local signing
+    capabilities deliberately do not belong here. *)
+
+val collaboration :
+  membership:Yeokcham_v4_trust.membership ->
+  revisions:Yeokcham_v4_trust.signed_revision list ->
+  local_certificate:string ->
+  (collaboration, error) result
+
+val membership : collaboration -> Yeokcham_v4_trust.membership
+val signed_revisions : collaboration -> Yeokcham_v4_trust.signed_revision list
+val local_certificate : collaboration -> string
+
 type loaded = {
   project : Yeokcham_v4_model.project;
+  collaboration : collaboration option;
   head : Yeokcham_store.Mutable_ref.t;
   object_id : Yeokcham_store.Stored_object_id.t;
 }
@@ -28,6 +47,21 @@ val underlying_store : repository -> Yeokcham_store.repository
 
 val init :
   root:string -> project:Yeokcham_v4_model.project -> (repository, error) result
+
+val init_collaborative :
+  root:string ->
+  project:Yeokcham_v4_model.project ->
+  collaboration:collaboration ->
+  (repository, error) result
+
+val init_collaborative_with :
+  root:string ->
+  bootstrap:
+    (Yeokcham_store.repository ->
+    (Yeokcham_v4_model.project * collaboration, string) result) ->
+  (repository, error) result
+(** The collaboration-aware counterpart to [init_with]. It makes initial
+    snapshot capture possible without ever publishing an unsigned state head. *)
 
 val init_with :
   root:string ->
@@ -46,4 +80,13 @@ val save :
   repository ->
   expected:Yeokcham_store.Mutable_ref.t ->
   project:Yeokcham_v4_model.project ->
+  (loaded, error) result
+(** Refuses to discard the public signed-collaboration wrapper of the expected
+    head. Use [save_collaborative] to preserve and validate that state. *)
+
+val save_collaborative :
+  repository ->
+  expected:Yeokcham_store.Mutable_ref.t ->
+  project:Yeokcham_v4_model.project ->
+  collaboration:collaboration ->
   (loaded, error) result

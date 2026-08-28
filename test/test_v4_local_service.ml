@@ -1,6 +1,8 @@
 module Model = Yeokcham_v4_model
 module Journal = Yeokcham_v4_restore_journal
 module Service = Yeokcham_v4_local_service
+module Store = Yeokcham_v4_store
+module Trust = Yeokcham_v4_trust
 
 let require_ok render = function
   | Ok value -> value
@@ -38,6 +40,20 @@ let change value = id Model.Change_id.of_string value
 let revision value = id Model.Revision_id.of_string value
 let delivery value = id Model.Delivery_id.of_string value
 let username value = id Model.Username.of_string value
+
+let signing_capability byte =
+  String.make 32 byte |> Trust.signing_capability_of_private_key
+  |> require_ok Trust.error_to_string
+
+let trust_device signing_capability =
+  Trust.signing_public_key signing_capability
+  |> Trust.device_of_public_key
+  |> require_ok Trust.error_to_string
+
+let repository =
+  Trust.Repository_id.of_string
+    "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+  |> Result.get_ok
 
 let initialize root =
   Service.init ~root ~creator:(device "device-alice")
@@ -616,6 +632,157 @@ let deliver_requires_a_decision_free_shared_draft () =
         "delivery starts a new active draft" "draft-after"
         (Model.Draft_id.to_string delivered.Service.active_draft.Model.draft_id))
 
+let signed_offline_receive_is_atomic_and_preserves_the_live_tree () =
+  with_directory "yeokcham-v4-signed-receive-" (fun root ->
+      let source = Filename.concat root "source" in
+      let destination = Filename.concat root "destination" in
+      Unix.mkdir source 0o700;
+      Unix.mkdir destination 0o700;
+      write_file source "main.ml" "let version = 1\n";
+      write_file destination "main.ml" "let version = 1\n";
+      let administrator_capability = signing_capability 'a' in
+      let administrator = trust_device administrator_capability in
+      ignore
+        (Service.init_signed ~root:source ~username:(username "alice")
+           ~initial_draft:(draft "draft-source") ~title:"source" ~repository
+           ~device:administrator ~signing_capability:administrator_capability
+        |> require_ok Service.error_to_string);
+      write_file source "main.ml" "let version = 2\n";
+      ignore
+        (Service.share_signed ~root:source ~change:(change "change-source")
+           ~revision:(revision "revision-source")
+           ~signing_capability:administrator_capability
+        |> require_ok Service.error_to_string);
+      let package = Filename.concat root "source-package" in
+      Service.create_package ~root:source ~destination:package
+      |> require_ok Service.error_to_string;
+      let member_capability = signing_capability 'b' in
+      let member = trust_device member_capability in
+      let root_certificate =
+        Trust.root_certificate ~repository ~device:administrator
+          administrator_capability
+        |> require_ok Trust.error_to_string
+      in
+      let root_membership =
+        Trust.verify_membership ~repository [ root_certificate ]
+        |> require_ok Trust.error_to_string
+      in
+      let member_certificate =
+        Trust.enroll root_membership
+          ~issuer:(Trust.certificate_id root_certificate)
+          administrator_capability ~subject:member ~role:Trust.Member
+        |> require_ok Trust.error_to_string
+      in
+      let membership =
+        Trust.verify_membership ~repository
+          [ root_certificate; member_certificate ]
+        |> require_ok Trust.error_to_string
+      in
+      ignore
+        (Service.init_collaboration ~root:destination ~username:(username "bob")
+           ~initial_draft:(draft "draft-destination")
+           ~title:"destination" ~device:member ~membership
+           ~local_certificate:(Trust.certificate_id member_certificate)
+        |> require_ok Service.error_to_string);
+      let received =
+        Service.receive_package ~root:destination ~package
+        |> require_ok Service.error_to_string
+      in
+      Alcotest.(check int)
+        "verified receive makes the shared change visible" 1
+        received.Service.shared_change_count;
+      Alcotest.(check string)
+        "receive leaves the receiver working tree untouched" "let version = 1\n"
+        (read_file destination "main.ml");
+      let repeated =
+        Service.receive_package ~root:destination ~package
+        |> require_ok Service.error_to_string
+      in
+      Alcotest.(check int)
+        "repeating receive is model-idempotent" 1
+        repeated.Service.shared_change_count;
+      write_file destination "main.ml" "let version = 3\n";
+      let after_member_share =
+        Service.share_signed ~root:destination ~change:(change "change-member")
+          ~revision:(revision "revision-member")
+          ~signing_capability:member_capability
+        |> require_ok Service.error_to_string
+      in
+      Alcotest.(check int)
+        "an enrolled local device can author its own signed revision" 2
+        after_member_share.Service.shared_change_count;
+      let destination_repository =
+        Store.open_repository ~root:destination
+        |> require_ok Store.error_to_string
+      in
+      let destination_state =
+        Store.load destination_repository |> require_ok Store.error_to_string
+      in
+      let signed_member_revision =
+        match destination_state.Store.collaboration with
+        | None ->
+            Alcotest.fail "signed destination lost its collaboration state"
+        | Some collaboration -> (
+            Store.signed_revisions collaboration
+            |> List.find_opt (fun signed ->
+                Model.Revision_id.equal
+                  (Trust.signed_revision_id signed)
+                  (revision "revision-member"))
+            |> function
+            | Some signed -> signed
+            | None -> Alcotest.fail "member revision is unsigned")
+      in
+      Alcotest.(check bool)
+        "the signature binds the enrolled device" true
+        (Model.Device_id.equal
+           (Trust.signed_revision_value signed_member_revision)
+             .Model.revision_author (Trust.device_id member));
+      let forwarded = Filename.concat root "forwarded-package" in
+      Service.create_package ~root:destination ~destination:forwarded
+      |> require_ok Service.error_to_string;
+      Alcotest.(check bool)
+        "a receiver retains signed proof for later offline forwarding" true
+        (Sys.file_exists (Filename.concat forwarded "manifest.cbor")))
+
+let administrator_enrollment_persists_a_public_member_and_local_username () =
+  with_directory "yeokcham-v4-enrollment-" (fun root ->
+      write_file root "main.ml" "let version = 1\n";
+      let administrator_capability = signing_capability 'a' in
+      let administrator = trust_device administrator_capability in
+      ignore
+        (Service.init_signed ~root ~username:(username "alice")
+           ~initial_draft:(draft "draft-one") ~title:"admin" ~repository
+           ~device:administrator ~signing_capability:administrator_capability
+        |> require_ok Service.error_to_string);
+      let member = trust_device (signing_capability 'b') in
+      let enrolled =
+        Service.enroll_device ~root ~subject:member ~role:Trust.Member
+          ~username:(username "bob")
+          ~signing_capability:administrator_capability
+        |> require_ok Service.error_to_string
+      in
+      Alcotest.(check (list string))
+        "the local username registry records the new display name" [ "bob" ]
+        (enrolled.Service.usernames
+        |> List.filter_map (fun registration ->
+            if
+              Model.Device_id.equal registration.Model.username_device
+                (Trust.device_id member)
+            then Some (Model.Username.to_string registration.Model.username)
+            else None));
+      let repository =
+        Store.open_repository ~root |> require_ok Store.error_to_string
+      in
+      let loaded = Store.load repository |> require_ok Store.error_to_string in
+      let membership =
+        match loaded.Store.collaboration with
+        | Some collaboration -> Store.membership collaboration
+        | None -> Alcotest.fail "signed project lost collaboration state"
+      in
+      Alcotest.(check bool)
+        "member is present in public membership" true
+        (Trust.is_authorized membership member))
+
 let () =
   Alcotest.run "V4 local service"
     [
@@ -668,5 +835,12 @@ let () =
             resolve_clears_the_open_decision;
           Alcotest.test_case "deliver requires a decision-free shared draft"
             `Quick deliver_requires_a_decision_free_shared_draft;
+          Alcotest.test_case
+            "signed offline receive advances state without touching live files"
+            `Quick signed_offline_receive_is_atomic_and_preserves_the_live_tree;
+          Alcotest.test_case
+            "administrator enrollment persists public membership and username"
+            `Quick
+            administrator_enrollment_persists_a_public_member_and_local_username;
         ] );
     ]

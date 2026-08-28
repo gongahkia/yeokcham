@@ -3,6 +3,7 @@ module Envelope = Yeokcham_envelope
 module Model = Yeokcham_v4_model
 module Store = Yeokcham_store
 module V4_store = Yeokcham_v4_store
+module Trust = Yeokcham_v4_trust
 
 let require_ok render = function
   | Ok value -> value
@@ -37,6 +38,43 @@ let project () =
     ~title:"fixture"
 
 let snapshot value = id Model.Snapshot_id.of_string value
+
+let capability byte =
+  String.make 32 byte |> Trust.signing_capability_of_private_key
+  |> require_ok Trust.error_to_string
+
+let collaborative_project () =
+  let repository =
+    Trust.Repository_id.of_string
+      "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    |> Result.get_ok
+  in
+  let signing_capability = capability 'a' in
+  let device =
+    signing_capability |> Trust.signing_public_key |> Trust.device_of_public_key
+    |> require_ok Trust.error_to_string
+  in
+  let certificate =
+    Trust.root_certificate ~repository ~device signing_capability
+    |> require_ok Trust.error_to_string
+  in
+  let membership =
+    Trust.verify_membership ~repository [ certificate ]
+    |> require_ok Trust.error_to_string
+  in
+  let project =
+    Model.init ~creator:(Trust.device_id device)
+      ~username:(id Model.Username.of_string "alice")
+      ~initial_snapshot:(snapshot "snapshot-base")
+      ~initial_draft:(id Model.Draft_id.of_string "draft-one")
+      ~title:"fixture"
+  in
+  let collaboration =
+    V4_store.collaboration ~membership ~revisions:[]
+      ~local_certificate:(Trust.certificate_id certificate)
+    |> require_ok V4_store.error_to_string
+  in
+  (project, collaboration)
 
 let initialization_writes_and_reopens_an_immutable_state () =
   with_directory "yeokcham-v4-store-" (fun root ->
@@ -148,6 +186,31 @@ let initialization_refuses_existing_repositories () =
                (V4_store.error_to_string error))
       | Ok _ -> Alcotest.fail "initialized V4 over an existing repository")
 
+let collaborative_state_cannot_be_downgraded_to_a_bare_record () =
+  with_directory "yeokcham-v4-collaboration-save-" (fun root ->
+      let project, collaboration = collaborative_project () in
+      let repository =
+        V4_store.init_collaborative ~root ~project ~collaboration
+        |> require_ok V4_store.error_to_string
+      in
+      let loaded =
+        V4_store.load repository |> require_ok V4_store.error_to_string
+      in
+      Alcotest.(check bool)
+        "collaboration is present" true
+        (Option.is_some loaded.V4_store.collaboration);
+      match
+        V4_store.save repository ~expected:loaded.V4_store.head
+          ~project:loaded.V4_store.project
+      with
+      | Error error ->
+          Alcotest.(check string)
+            "bare save is rejected"
+            "a signed V4 collaboration state must be saved with its verified \
+             collaboration records"
+            (V4_store.error_to_string error)
+      | Ok _ -> Alcotest.fail "bare save discarded signed collaboration state")
+
 let () =
   Alcotest.run "V4 store"
     [
@@ -161,5 +224,8 @@ let () =
             wrong_object_type_is_rejected_at_the_state_head;
           Alcotest.test_case "initialization refuses an existing repository"
             `Quick initialization_refuses_existing_repositories;
+          Alcotest.test_case
+            "collaborative state requires collaboration-aware save" `Quick
+            collaborative_state_cannot_be_downgraded_to_a_bare_record;
         ] );
     ]

@@ -19,9 +19,8 @@ developed and tested independently.
 The first V4 local slice is available through `yeokcham-v4`:
 
 ```sh
-yeokcham-v4 init --device device-alice --username alice --draft first-task --title "first task"
+yeokcham-v4 init --username alice --draft first-task --title "first task"
 yeokcham-v4 status
-yeokcham-v4 user register --device device-bob --username bob
 yeokcham-v4 save
 yeokcham-v4 restore --checkpoint <saved-id>
 yeokcham-v4 share --change first-change --revision r1
@@ -31,14 +30,24 @@ yeokcham-v4 decision materialize --decision <decision-id> --destination isolated
 yeokcham-v4 resolve --decision <decision-id> --change r --revision r1 --tree isolated/alice-001
 yeokcham-v4 pin --checkpoint <saved-id>
 yeokcham-v4 compact --dry-run --explain
+yeokcham-v4 package create --destination ../outgoing-v4-package
+yeokcham-v4 receive --from ../incoming-v4-package
 ```
 
 It currently implements exact command-triggered saving, one explicit draft,
 local share/amend, withdrawal, overlap decisions, an isolated decision view,
 resolution, manual delivery, in-place journaled restore, bounded checkpoint
-retention with pins, local device-to-username display registrations, and Linux
-watcher capture. Usernames are local readable labels, not signing, enrollment,
-or trust. Signing and transport are not exposed yet.
+retention with pins, device-to-username display registrations, and Linux watcher
+capture. V4 projects initialise with an Ed25519 device held by the platform
+signer provider (macOS Keychain or Linux Secret Service), a self-signed
+administrator certificate, and signed shared/resolution revisions. An
+administrator can enrol a device after it has created a key and supplied its
+public identity. `package create` and `receive` exchange a verified local
+directory package; receive verifies it before one state-head update and never
+rewrites the working tree. Usernames are readable display metadata, never
+signing identity, enrollment authority, or trust. Network transport, device
+join with an independently confirmed root fingerprint, revocation, rotation,
+and macOS/WSL watchers remain out of scope.
 
 ## Start here
 

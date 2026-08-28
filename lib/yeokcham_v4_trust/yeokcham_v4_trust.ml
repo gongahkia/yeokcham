@@ -289,6 +289,8 @@ let signing_public_key signing_capability =
   signing_capability |> Mirage_crypto_ec.Ed25519.pub_of_priv
   |> Mirage_crypto_ec.Ed25519.pub_to_octets
 
+let signing_private_key_bytes = Mirage_crypto_ec.Ed25519.priv_to_octets
+
 let sign_certificate ~repository ~subject ~role ~issuer_certificate
     ~issuer_device signing_capability =
   let* id =
@@ -525,6 +527,29 @@ let verify_membership ~repository certificates =
                     verify (certificate :: verified) rest roots 0))
   in
   verify [] certificates [] 0
+
+let extend_membership membership additional =
+  let* _ =
+    verify_membership ~repository:membership.membership_repository
+      membership.membership_certificates
+  in
+  let rec add seen = function
+    | [] -> Ok seen
+    | certificate :: rest -> (
+        match
+          List.find_opt
+            (fun existing ->
+              String.equal existing.certificate_id_value
+                certificate.certificate_id_value)
+            seen
+        with
+        | None -> add (certificate :: seen) rest
+        | Some existing ->
+            if existing = certificate then add seen rest
+            else Error Duplicate_certificate)
+  in
+  let* certificates = add membership.membership_certificates additional in
+  verify_membership ~repository:membership.membership_repository certificates
 
 let certificates membership =
   List.sort

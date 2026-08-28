@@ -47,7 +47,8 @@
   yeokcham_envelope
   yeokcham_store
   yeokcham_v4_model
-  yeokcham_v4_store))
+  yeokcham_v4_store
+  yeokcham_v4_trust))
 
 (test
  (name test_v4_restore_journal)
@@ -69,12 +70,19 @@
   unix
   yeokcham_v4_local_service
   yeokcham_v4_model
-  yeokcham_v4_restore_journal))
+  yeokcham_v4_restore_journal
+  yeokcham_v4_store
+  yeokcham_v4_trust))
 
 (test
  (name test_v4_cli)
  (modules test_v4_cli)
- (libraries alcotest unix)
+ (libraries
+  alcotest
+  unix
+  yeokcham_v4_local_service
+  yeokcham_v4_model
+  yeokcham_v4_trust)
  (deps ../bin/yeokcham_v4.exe))
 
 (test

@@ -1,3 +1,7 @@
+module Model = Yeokcham_v4_model
+module Service = Yeokcham_v4_local_service
+module Trust = Yeokcham_v4_trust
+
 let require_success name status stderr =
   match status with
   | Unix.WEXITED 0 -> ()
@@ -23,7 +27,15 @@ let with_directory prefix run =
   let root = Filename.temp_file prefix "" in
   Unix.unlink root;
   Unix.mkdir root 0o700;
-  Fun.protect ~finally:(fun () -> remove_tree root) (fun () -> run root)
+  let signer_directory = Filename.temp_file (prefix ^ "signer-") "" in
+  Unix.unlink signer_directory;
+  Unix.mkdir signer_directory 0o700;
+  Unix.putenv "YEOKCHAM_V4_TEST_SIGNER_DIRECTORY" signer_directory;
+  Fun.protect
+    ~finally:(fun () ->
+      remove_tree root;
+      remove_tree signer_directory)
+    (fun () -> run root)
 
 let executable () =
   let from_test_binary =
@@ -92,6 +104,26 @@ let write_file root name contents =
   Out_channel.with_open_bin (Filename.concat root name) (fun channel ->
       Out_channel.output_string channel contents)
 
+let require_ok render = function
+  | Ok value -> value
+  | Error error -> Alcotest.fail (render error)
+
+let model_id parser value = parser value |> Result.get_ok
+
+let signing_capability byte =
+  String.make 32 byte |> Trust.signing_capability_of_private_key
+  |> require_ok Trust.error_to_string
+
+let trust_device signing_capability =
+  Trust.signing_public_key signing_capability
+  |> Trust.device_of_public_key
+  |> require_ok Trust.error_to_string
+
+let repository =
+  Trust.Repository_id.of_string
+    "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+  |> Result.get_ok
+
 let command_journey_reports_saved_work_and_drafts () =
   with_directory "yeokcham-v4-cli-" (fun root ->
       write_file root "main.ml" "let version = 1\n";
@@ -101,8 +133,6 @@ let command_journey_reports_saved_work_and_drafts () =
             "init";
             "--root";
             root;
-            "--device";
-            "device-alice";
             "--username";
             "alice";
             "--draft";
@@ -113,8 +143,7 @@ let command_journey_reports_saved_work_and_drafts () =
       in
       require_success "init" status errors;
       expect_output_contains "init reports a saved checkpoint" "saved " output;
-      expect_output_contains "init records the local username"
-        "user device-alice alice" output;
+      expect_output_contains "init records the local username" " alice" output;
       let initial_checkpoint = saved_checkpoint output in
       let output, errors, status =
         run
@@ -206,8 +235,6 @@ let command_journey_shares_resolves_withdraws_and_delivers () =
             "init";
             "--root";
             root;
-            "--device";
-            "device-alice";
             "--username";
             "alice";
             "--draft";
@@ -316,8 +343,6 @@ let command_journey_materializes_and_resolves_from_an_isolated_tree () =
             "init";
             "--root";
             root;
-            "--device";
-            "device-alice";
             "--username";
             "alice";
             "--draft";
@@ -460,8 +485,6 @@ let command_journey_restores_in_place_with_a_safety_checkpoint () =
             "init";
             "--root";
             root;
-            "--device";
-            "device-alice";
             "--username";
             "alice";
             "--draft";
@@ -496,8 +519,6 @@ let command_journey_compacts_and_reports_uncaptured_edits () =
             "init";
             "--root";
             root;
-            "--device";
-            "device-alice";
             "--username";
             "alice";
             "--draft";
@@ -531,6 +552,138 @@ let command_journey_compacts_and_reports_uncaptured_edits () =
         ("keep " ^ extra ^ " ")
         output;
       ignore initial)
+
+let command_receives_a_verified_offline_package_without_materializing_it () =
+  with_directory "yeokcham-v4-cli-receive-" (fun root ->
+      let source = Filename.concat root "source" in
+      let destination = Filename.concat root "destination" in
+      Unix.mkdir source 0o700;
+      Unix.mkdir destination 0o700;
+      write_file source "main.ml" "let version = 1\n";
+      write_file destination "main.ml" "let version = 1\n";
+      let administrator_capability = signing_capability 'a' in
+      let administrator = trust_device administrator_capability in
+      ignore
+        (Service.init_signed ~root:source
+           ~username:(model_id Model.Username.of_string "alice")
+           ~initial_draft:(model_id Model.Draft_id.of_string "draft-source")
+           ~title:"source" ~repository ~device:administrator
+           ~signing_capability:administrator_capability
+        |> require_ok Service.error_to_string);
+      write_file source "main.ml" "let version = 2\n";
+      ignore
+        (Service.share_signed ~root:source
+           ~change:(model_id Model.Change_id.of_string "change-source")
+           ~revision:(model_id Model.Revision_id.of_string "revision-source")
+           ~signing_capability:administrator_capability
+        |> require_ok Service.error_to_string);
+      let package = Filename.concat root "incoming" in
+      Service.create_package ~root:source ~destination:package
+      |> require_ok Service.error_to_string;
+      let member_capability = signing_capability 'b' in
+      let member = trust_device member_capability in
+      let root_certificate =
+        Trust.root_certificate ~repository ~device:administrator
+          administrator_capability
+        |> require_ok Trust.error_to_string
+      in
+      let root_membership =
+        Trust.verify_membership ~repository [ root_certificate ]
+        |> require_ok Trust.error_to_string
+      in
+      let member_certificate =
+        Trust.enroll root_membership
+          ~issuer:(Trust.certificate_id root_certificate)
+          administrator_capability ~subject:member ~role:Trust.Member
+        |> require_ok Trust.error_to_string
+      in
+      let membership =
+        Trust.verify_membership ~repository
+          [ root_certificate; member_certificate ]
+        |> require_ok Trust.error_to_string
+      in
+      ignore
+        (Service.init_collaboration ~root:destination
+           ~username:(model_id Model.Username.of_string "bob")
+           ~initial_draft:
+             (model_id Model.Draft_id.of_string "draft-destination")
+           ~title:"destination" ~device:member ~membership
+           ~local_certificate:(Trust.certificate_id member_certificate)
+        |> require_ok Service.error_to_string);
+      let output, errors, status =
+        run [ "receive"; "--root"; destination; "--from"; package ]
+      in
+      require_success "verified receive" status errors;
+      expect_output_contains "receive shows the imported change" "shared 1"
+        output;
+      Alcotest.(check string)
+        "receive does not materialize incoming content into the live tree"
+        "let version = 1\n"
+        (In_channel.with_open_bin
+           (Filename.concat destination "main.ml")
+           In_channel.input_all);
+      let forwarded = Filename.concat root "forwarded" in
+      let output, errors, status =
+        run
+          [
+            "package";
+            "create";
+            "--root";
+            destination;
+            "--destination";
+            forwarded;
+          ]
+      in
+      require_success "package create" status errors;
+      expect_output_contains "package creation reports its destination"
+        ("package " ^ forwarded) output)
+
+let command_creates_and_enrols_a_second_device_without_using_its_username_as_identity
+    () =
+  with_directory "yeokcham-v4-cli-enroll-" (fun root ->
+      write_file root "main.ml" "let version = 1\n";
+      let _output, errors, status =
+        run
+          [
+            "init";
+            "--root";
+            root;
+            "--username";
+            "alice";
+            "--draft";
+            "draft-one";
+            "--title";
+            "admin";
+          ]
+      in
+      require_success "signed init" status errors;
+      let output, errors, status = run [ "device"; "create" ] in
+      require_success "device create" status errors;
+      let device = first_prefixed_value "device " output in
+      let public_key = first_prefixed_value "public-key " output in
+      let output, errors, status =
+        run
+          [
+            "device";
+            "enroll";
+            "--root";
+            root;
+            "--device";
+            device;
+            "--public-key";
+            public_key;
+            "--username";
+            "bob";
+          ]
+      in
+      require_success "device enroll" status errors;
+      expect_output_contains "enrollment records only a local display label"
+        ("user " ^ device ^ " bob")
+        output;
+      let output, errors, status = run [ "device"; "show"; "--root"; root ] in
+      require_success "device show" status errors;
+      expect_output_contains "the original local device remains administrator"
+        "role administrator" output)
 
 let watch_is_linux_only () =
   with_directory "yeokcham-v4-cli-watch-" (fun root ->
@@ -567,6 +720,12 @@ let () =
             `Quick command_journey_restores_in_place_with_a_safety_checkpoint;
           Alcotest.test_case "compact pin and uncaptured status" `Quick
             command_journey_compacts_and_reports_uncaptured_edits;
+          Alcotest.test_case
+            "receive verifies a package without materializing it" `Quick
+            command_receives_a_verified_offline_package_without_materializing_it;
+          Alcotest.test_case
+            "device enrollment separates public identity from username" `Quick
+            command_creates_and_enrols_a_second_device_without_using_its_username_as_identity;
           Alcotest.test_case "watch is Linux-only" `Quick watch_is_linux_only;
         ] );
     ]

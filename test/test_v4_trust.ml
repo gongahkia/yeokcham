@@ -97,6 +97,13 @@ let administrator_enrols_a_member_in_causal_order () =
   Alcotest.(check bool)
     "member is not silently an administrator" false
     (Trust.is_administrator verified member_device);
+  let extended =
+    Trust.extend_membership membership [ member_certificate ]
+    |> require_ok Trust.error_to_string
+  in
+  Alcotest.(check bool)
+    "a causal certificate extends an existing membership" true
+    (Trust.is_authorized extended member_device);
   let replay =
     Trust.enroll verified
       ~issuer:(Trust.certificate_id member_certificate)
@@ -143,6 +150,20 @@ let signed_revision_binds_author_and_membership () =
   in
   Trust.verify_signed_revision membership decoded
   |> require_ok Trust.error_to_string;
+  let tampered_bytes = Bytes.of_string (Trust.encode_signed_revision decoded) in
+  let last = Bytes.length tampered_bytes - 1 in
+  Bytes.set tampered_bytes last
+    (Char.chr (Char.code (Bytes.get tampered_bytes last) lxor 1));
+  let tampered =
+    Trust.decode_signed_revision (Bytes.to_string tampered_bytes)
+    |> require_ok Trust.error_to_string
+  in
+  (match Trust.verify_signed_revision membership tampered with
+  | Error error ->
+      Alcotest.(check string)
+        "tampered signature is rejected" "V4 Ed25519 signature is invalid"
+        (Trust.error_to_string error)
+  | Ok () -> Alcotest.fail "tampered signed revision verified");
   let root_only =
     Trust.verify_membership ~repository [ root_certificate ]
     |> require_ok Trust.error_to_string

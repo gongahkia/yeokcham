@@ -914,3 +914,20 @@ limits, debounce timing, and leftover `watch` processes if the test is
 killed.
 
 macOS and WSL automatic capture remain out of V4 scope.
+
+## 13. V4 signed offline package (Darwin implementation check)
+
+The focused V4 trust, store, package, local-service, and CLI tests run on the
+Darwin development host. They exercise canonical certificate/revision records,
+signature tampering, causal multi-administrator enrollment, exact package
+closure, alternate-root rejection, a repeated receive, preservation of the
+signed state wrapper, and the guarantee that `receive` does not materialize
+the working tree. CLI tests select the explicit test signer through
+`YEOKCHAM_V4_TEST_SIGNER_DIRECTORY`; this validates the provider boundary but
+does not claim an interactive Keychain or Secret Service integration test.
+
+The macOS Keychain provider compiles on Darwin. Linux Secret Service code and
+the Linux inotify test remain unexecuted until a Linux host or a GitHub Actions
+job actually reaches its test steps. Record those as platform evidence only
+after an observed successful Linux run; a Darwin test result is not a
+substitute.

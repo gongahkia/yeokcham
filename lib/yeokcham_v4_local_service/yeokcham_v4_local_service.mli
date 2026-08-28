@@ -1,8 +1,9 @@
-(** Local V4 saved-work transitions.
+(** Local V4 saved-work transitions and verified offline-package receive.
 
-    This adapter has no transport or semantic merge behaviour. Command `status`
-    and `save` scan exact snapshots when invoked. Linux `watch` lives in the CLI
-    and only calls `save` after debounce; it is not part of this module. *)
+    This adapter has no network transport or semantic merge behaviour. Command
+    `status` and `save` scan exact snapshots when invoked. Linux `watch` lives
+    in the CLI and only calls `save` after debounce; it is not part of this
+    module. *)
 
 type error =
   | Store_error of Yeokcham_v4_store.error
@@ -10,11 +11,15 @@ type error =
   | Materialize_error of Yeokcham_snapshot.Materialize.error
   | Restore_journal_error of Yeokcham_v4_restore_journal.error
   | Model_error of Yeokcham_v4_model.error
+  | Trust_error of Yeokcham_v4_trust.error
+  | Package_error of Yeokcham_v4_package.error
   | Invalid_checkpoint_id of string
   | Unknown_checkpoint of Yeokcham_v4_model.Snapshot_id.t
   | Unchanged_share of Yeokcham_v4_model.Snapshot_id.t
+  | Unsigned_project
 
 type status = {
+  creator : Yeokcham_v4_model.Device_id.t;
   active_draft : Yeokcham_v4_model.draft;
   checkpoint : Yeokcham_v4_model.Snapshot_id.t;
   shared_changes : Yeokcham_v4_model.shared_change list;
@@ -25,6 +30,12 @@ type status = {
   checkpoints : Yeokcham_v4_model.checkpoint list;
   usernames : Yeokcham_v4_model.username_registration list;
   uncaptured : bool;
+}
+
+type identity = {
+  repository : Yeokcham_v4_trust.Repository_id.t;
+  device : Yeokcham_v4_trust.device;
+  role : Yeokcham_v4_trust.role;
 }
 
 type materialized_candidate = {
@@ -115,14 +126,51 @@ val init :
   title:string ->
   (status, error) result
 
+val init_signed :
+  root:string ->
+  username:Yeokcham_v4_model.Username.t ->
+  initial_draft:Yeokcham_v4_model.Draft_id.t ->
+  title:string ->
+  repository:Yeokcham_v4_trust.Repository_id.t ->
+  device:Yeokcham_v4_trust.device ->
+  signing_capability:Yeokcham_v4_trust.signing_capability ->
+  (status, error) result
+(** Initializes a collaboration-capable V4 state. [device] is the initial
+    administrator and [signing_capability] is supplied by an external local
+    signer provider; it is never persisted by this module. *)
+
+val init_collaboration :
+  root:string ->
+  username:Yeokcham_v4_model.Username.t ->
+  initial_draft:Yeokcham_v4_model.Draft_id.t ->
+  title:string ->
+  device:Yeokcham_v4_trust.device ->
+  membership:Yeokcham_v4_trust.membership ->
+  local_certificate:string ->
+  (status, error) result
+(** Initializes an already enrolled device from public collaboration state. The
+    caller keeps the corresponding private signing capability outside V4 project
+    objects. *)
+
 val save : root:string -> (save_outcome, error) result
 val status : root:string -> (status, error) result
+val identity : root:string -> (identity, error) result
 
 val register_username :
   root:string ->
   device:Yeokcham_v4_model.Device_id.t ->
   username:Yeokcham_v4_model.Username.t ->
   (status, error) result
+
+val enroll_device :
+  root:string ->
+  subject:Yeokcham_v4_trust.device ->
+  role:Yeokcham_v4_trust.role ->
+  username:Yeokcham_v4_model.Username.t ->
+  signing_capability:Yeokcham_v4_trust.signing_capability ->
+  (status, error) result
+(** An already authorized administrator enrols [subject]. The username is only a
+    local display registration made alongside, never certificate data. *)
 
 val restore :
   root:string ->
@@ -165,6 +213,13 @@ val share :
   revision:Yeokcham_v4_model.Revision_id.t ->
   (status, error) result
 
+val share_signed :
+  root:string ->
+  change:Yeokcham_v4_model.Change_id.t ->
+  revision:Yeokcham_v4_model.Revision_id.t ->
+  signing_capability:Yeokcham_v4_trust.signing_capability ->
+  (status, error) result
+
 val withdraw :
   root:string -> change:Yeokcham_v4_model.Change_id.t -> (status, error) result
 
@@ -175,6 +230,22 @@ val resolve :
   revision:Yeokcham_v4_model.Revision_id.t ->
   tree:string option ->
   (status, error) result
+
+val resolve_signed :
+  root:string ->
+  decision:Yeokcham_v4_model.Decision_id.t ->
+  change:Yeokcham_v4_model.Change_id.t ->
+  revision:Yeokcham_v4_model.Revision_id.t ->
+  tree:string option ->
+  signing_capability:Yeokcham_v4_trust.signing_capability ->
+  (status, error) result
+
+val create_package : root:string -> destination:string -> (unit, error) result
+
+val receive_package : root:string -> package:string -> (status, error) result
+(** Imports only verified immutable objects and then atomically advances the
+    collaborative V4 state. It does not materialize or otherwise touch the
+    working tree. *)
 
 val open_decision :
   root:string ->

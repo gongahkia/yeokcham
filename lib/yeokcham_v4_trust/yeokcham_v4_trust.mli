@@ -50,6 +50,10 @@ val device_of_public_key : string -> (device, error) result
 val signing_capability_of_private_key :
   string -> (signing_capability, error) result
 
+val signing_private_key_bytes : signing_capability -> string
+(** Available only to signer-provider adapters for transfer into an OS secret
+    store. Callers must never persist, render, package, or log these bytes. *)
+
 val signing_public_key : signing_capability -> string
 val generated_identity : generated_device -> device
 val generated_signing_capability : generated_device -> signing_capability
@@ -75,6 +79,12 @@ val verify_membership :
   repository:Repository_id.t -> certificate list -> (membership, error) result
 (** Verifies all certificate identities, signatures, and causal administrator
     authority. There must be exactly one self-signed administrator root. *)
+
+val extend_membership :
+  membership -> certificate list -> (membership, error) result
+(** Extends a verified membership only with certificates compatible with its
+    existing causal root. Exact repeats are harmless; a conflicting record or an
+    alternate root is rejected. *)
 
 val enroll :
   membership ->

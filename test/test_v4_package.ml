@@ -119,7 +119,7 @@ let package_verifies_before_import_and_preserves_model_visibility () =
       let ( source_root,
             source,
             baseline,
-            repository,
+            _repository,
             root_device,
             membership,
             signed ) =
@@ -136,7 +136,7 @@ let package_verifies_before_import_and_preserves_model_visibility () =
         Store.init ~root:destination_root |> require_ok Store.error_to_string
       in
       let imported =
-        Package.verify_and_import ~destination ~package ~repository
+        Package.verify_and_import ~destination ~package ~membership
         |> require_ok Package.error_to_string
       in
       Alcotest.(check int)
@@ -181,9 +181,20 @@ let wrong_repository_is_rejected_before_object_import () =
           "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
         |> Result.get_ok
       in
+      let other_capability = capability 'c' in
+      let other_device = device other_capability in
+      let other_root =
+        Trust.root_certificate ~repository:other_repository ~device:other_device
+          other_capability
+        |> require_ok Trust.error_to_string
+      in
+      let other_membership =
+        Trust.verify_membership ~repository:other_repository [ other_root ]
+        |> require_ok Trust.error_to_string
+      in
       match
         Package.verify_and_import ~destination ~package
-          ~repository:other_repository
+          ~membership:other_membership
       with
       | Error error ->
           Alcotest.(check string)
@@ -191,6 +202,93 @@ let wrong_repository_is_rejected_before_object_import () =
             "invalid V4 package: package repository does not match destination"
             (Package.error_to_string error)
       | Ok _ -> Alcotest.fail "wrong repository package was imported")
+
+let alternate_root_for_the_same_repository_is_rejected_before_import () =
+  with_directory "yeokcham-v4-package-root-" (fun root ->
+      let _, source, _, repository, _, membership, signed = setup root in
+      let package = Filename.concat root "offline-package" in
+      Package.create ~source ~destination:package ~membership
+        ~revisions:[ signed ]
+      |> require_ok Package.error_to_string;
+      let destination_root = Filename.concat root "destination" in
+      Unix.mkdir destination_root 0o700;
+      let destination =
+        Store.init ~root:destination_root |> require_ok Store.error_to_string
+      in
+      let rogue_capability = capability 'c' in
+      let rogue_device = device rogue_capability in
+      let rogue_root =
+        Trust.root_certificate ~repository ~device:rogue_device rogue_capability
+        |> require_ok Trust.error_to_string
+      in
+      let rogue_membership =
+        Trust.verify_membership ~repository [ rogue_root ]
+        |> require_ok Trust.error_to_string
+      in
+      (match
+         Package.verify_and_import ~destination ~package
+           ~membership:rogue_membership
+       with
+      | Error error ->
+          Alcotest.(check bool)
+            "a second root cannot join a repository merely by using its ID" true
+            (String.starts_with ~prefix:"V4 root certificate"
+               (Package.error_to_string error))
+      | Ok _ -> Alcotest.fail "package introduced a second repository root");
+      let object_count =
+        Store.list_objects destination
+        |> require_ok Store.error_to_string
+        |> List.length
+      in
+      Alcotest.(check int) "rejected package imports no objects" 0 object_count)
+
+let missing_closure_object_is_rejected_without_importing_a_partial_package () =
+  with_directory "yeokcham-v4-package-closure-" (fun root ->
+      let _, source, _, _, _, membership, signed = setup root in
+      let package = Filename.concat root "offline-package" in
+      Package.create ~source ~destination:package ~membership
+        ~revisions:[ signed ]
+      |> require_ok Package.error_to_string;
+      let object_directory = Filename.concat package "objects" in
+      let victim = Sys.readdir object_directory |> Array.to_list |> List.hd in
+      Unix.unlink (Filename.concat object_directory victim);
+      let destination_root = Filename.concat root "destination" in
+      Unix.mkdir destination_root 0o700;
+      let destination =
+        Store.init ~root:destination_root |> require_ok Store.error_to_string
+      in
+      (match Package.verify_and_import ~destination ~package ~membership with
+      | Error error ->
+          Alcotest.(check string)
+            "manifest/object mismatch is explicit"
+            "invalid V4 package: object files differ from manifest"
+            (Package.error_to_string error)
+      | Ok _ -> Alcotest.fail "accepted a package with a missing closure object");
+      let object_count =
+        Store.list_objects destination
+        |> require_ok Store.error_to_string
+        |> List.length
+      in
+      Alcotest.(check int)
+        "failed verification imports no objects" 0 object_count)
+
+let duplicate_revision_is_rejected_before_a_package_is_created () =
+  with_directory "yeokcham-v4-package-duplicate-" (fun root ->
+      let _, source, _, _, _, membership, signed = setup root in
+      let package = Filename.concat root "offline-package" in
+      match
+        Package.create ~source ~destination:package ~membership
+          ~revisions:[ signed; signed ]
+      with
+      | Error error ->
+          Alcotest.(check string)
+            "duplicate revision is explicit"
+            "invalid V4 package: manifest contains the same revision more than \
+             once"
+            (Package.error_to_string error);
+          Alcotest.(check bool)
+            "no package directory was created" false (Sys.file_exists package)
+      | Ok () -> Alcotest.fail "created a package with duplicate revisions")
 
 let () =
   Alcotest.run "V4 package"
@@ -201,5 +299,12 @@ let () =
             package_verifies_before_import_and_preserves_model_visibility;
           Alcotest.test_case "wrong repository is rejected before import" `Quick
             wrong_repository_is_rejected_before_object_import;
+          Alcotest.test_case "alternate root is rejected before import" `Quick
+            alternate_root_for_the_same_repository_is_rejected_before_import;
+          Alcotest.test_case "missing closure object is rejected before import"
+            `Quick
+            missing_closure_object_is_rejected_without_importing_a_partial_package;
+          Alcotest.test_case "duplicate revision is rejected" `Quick
+            duplicate_revision_is_rejected_before_a_package_is_created;
         ] );
     ]

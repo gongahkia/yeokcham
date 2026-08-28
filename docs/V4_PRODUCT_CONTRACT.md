@@ -17,8 +17,13 @@ journaled restore with a retained safety checkpoint, bounded checkpoint
 retention with explicit pins, and Linux watcher capture that reuses command
 `save`. The inotify quiet-window loop is implemented but was **not** executed
 on the Darwin development host; run `dune exec test/test_v4_watch.exe` on
-Linux (see [ADR-082](adr/082-v4-linux-command-capture.md)). Transport and
-signing remain later slices.
+Linux (see [ADR-082](adr/082-v4-linux-command-capture.md)). The signed offline
+collaboration slice is also implemented: the CLI creates a device through the
+native signer provider, initialises a self-signed administrator certificate,
+signs shared and resolution revisions, lets any current administrator enrol a
+device, and imports a verified directory package without materialising it.
+This is an offline package adapter, not a network transport or a complete
+new-device join workflow.
 
 The record slice owns these types: `state`, `checkpoint`, `draft`,
 `shared_change`, `change_revision`, `edit`, `resolution`, `delivery`, and
@@ -42,18 +47,30 @@ reopen, stale-writer, and corrupt/wrong-type failure coverage. ADR-079 remains
 applicable; no new architecture decision is needed because this is the
 already-approved persistent-adapter boundary.
 
+Signed projects place a versioned collaboration wrapper around that canonical
+V4 project record in the same `V4_project_state` object. The wrapper carries a
+repository ID, canonical public certificate set, detached signed revision
+records, and the local certificate ID; it carries no private key. Every
+currently visible shared or resolution replacement revision has exactly one
+verified signed record. Historical signed records may remain after the model no
+longer displays their revisions. A bare save is refused when its expected head
+is collaborative, so a caller cannot silently strip this wrapper. Existing
+bare V1--V4 project records remain decodable. ADR-083 governs this extension.
+
 The command-triggered capture adapter owns `init`, `save`, `status`, `user
-register`, `draft new`, `share`, `withdraw`, `resolve`, and `deliver`. It captures an
+register`, `draft new`, `share`, `withdraw`, `resolve`, `deliver`, `device`,
+`package create`, and `receive`. It captures an
 exact tree through the existing byte-correct scanner, maps the stored snapshot
 identity into the V4 model, and does not write a new head when a save observes
 an unchanged snapshot. `save` remains recovery-only: a later checkpoint becomes
 a shared revision only when `share` is run again. Shared revisions record
-`Whole_path` edits for paths that differ from the current delivery baseline.
-`receive` and signatures are not part of this adapter. Linux `watch` calls the
+`Whole_path` edits for paths that differ from the current delivery baseline and
+are signed in a collaborative project. Linux `watch` calls the
 same capture path after a one-second quiet period, with a thirty-second maximum
 delay during sustained writes. macOS and WSL watchers are not implemented.
 
-The inspectable CLI is `yeokcham-v4 init`, `save`, `status`, `user register`,
+The inspectable CLI is `yeokcham-v4 init`, `save`, `status`, `device create`,
+`device show`, `device enroll`, `user register`,
 `timeline`, `restore`, `draft new`, `share`, `withdraw`, `resolve`, `decision show`,
 `decision materialize`, `deliver`, `pin`,
 `unpin`, `compact`, and `watch`.
@@ -71,7 +88,7 @@ checkpoints under a count-based extra-keep policy; it does not delete object
 bytes. `watch` is Linux-only. The command rejects unsupported V4
 actions instead of routing them through V3 or Git behaviour. CLI journey tests
 cover saved work, two drafts, sharing, overlap decisions, restore, withdrawal,
-and delivery.
+delivery, enrollment, and offline receive.
 
 `timeline` lists retained saved checkpoints. `restore --checkpoint ID
 --destination PATH` materializes one only into an existing empty directory.
@@ -121,9 +138,15 @@ Every project has exactly one active draft.  It is created at project
 initialisation.  `draft new <title>` closes it and begins another draft.  The
 tool does not infer task boundaries.
 
-`init --device DEVICE --username NAME` registers the creator's local display
-name. `user register --device DEVICE --username NAME` records or corrects one
-safe display handle for another device. A username is a lowercase ASCII handle
+`init --username NAME` creates a repository ID and a platform-custodied Ed25519
+device, makes it the self-signed administrator, and registers the creator's
+display name. `device create` provisions an additional platform-custodied
+device and prints its opaque device ID and public key. An administrator uses
+`device enroll --device ID --public-key HEX --username NAME` to issue its
+certificate; `--administrator` delegates equivalent enrolment authority.
+`device show` identifies the current repository's local certificate and role.
+`user register --device DEVICE --username NAME` records or corrects one safe
+display handle for another device. A username is a lowercase ASCII handle
 of at most 32 characters (`[a-z0-9][a-z0-9_-]*`); registrations are unique by
 both device and handle. This is readable local metadata, not a claimed person
 identity, membership record, enrollment, or authorization decision. The
@@ -142,6 +165,17 @@ unchanged until the user resolves that decision in an isolated resolver view.
 `deliver` selects explicit shared revisions from a decision-free projection and
 records an immutable baseline.  It accepts no unresolved decision and never
 claims validation evidence that was not supplied.
+
+`package create --destination PATH` writes a versioned directory package of
+the exact immutable snapshot closure needed by its signed revisions and public
+certificate records. `receive --from PATH` first verifies package canonical
+bytes, repository continuity from its current root, certificate causality,
+revision signatures/parents, and every snapshot, tree, content, manifest, and
+chunk reference in a temporary store. Only then does it add immutable objects
+and advance the V4 state head. It neither scans, changes, nor resolves the live
+tree. A freshly enrolled device still needs a future explicit join command
+with independent root-fingerprint confirmation; receiving assumes an existing
+V4 project with an established membership root.
 
 ## File and recovery contract
 
@@ -179,19 +213,25 @@ rank. It never derives a child filesystem path from a revision identifier.
 
 ## Trust and transport contract
 
-Each device has a signing key.  The project creator is V4's only membership
-administrator; named administrators and a shared management interface are
-deferred.  An existing device approves enrollment of a new device.  Every
-shared revision, withdrawal, resolution, membership record, and delivery is
-signed.
+V4 device IDs are deterministically derived from Ed25519 public keys. The
+repository begins with a self-signed administrator certificate; every later
+certificate is signed by an earlier administrator. Any administrator may enrol
+a member or administrator. A certificate and a signed revision bind the
+repository ID and canonical payload, so they cannot be reassigned to another
+repository, device, or revision. Shared revisions and resolution replacement
+revisions are signed. Withdrawal, delivery, and local display registration are
+ordinary V4 model transitions and are not represented as signed records.
 
-The change protocol is transport-neutral.  V4 supports a self-hosted trusted
-relay, LAN/direct exchange, and a managed relay through one verified immutable
-exchange interface.  The default trusted-relay mode encrypts transport and
-signs content, while trusting the relay with project bytes.  End-to-end mode
-encrypts payloads before relay transport and uses explicit group epochs,
-enrollment, removal, and rotation.  It does not promise to hide membership or
-traffic metadata.
+Private signing bytes live outside V4 state and packages. macOS stores them in
+Keychain and Linux uses Secret Service; the explicit test provider is enabled
+only by `YEOKCHAM_V4_TEST_SIGNER_DIRECTORY`. No claims are made for hardware
+keys, a signing agent, non-exportable signing, remote custody, revocation,
+epochs, device recovery, or key rotation.
+
+The only V4 exchange adapter is the verified local directory package described
+above. There is no relay, LAN, SSH, HTTP, or managed transport; encryption of
+transport or package contents is also not implemented. A future transport must
+reuse this verification boundary rather than introduce another receive path.
 
 ## Explicit exclusions
 
@@ -204,8 +244,9 @@ than emulate part of another VCS model.
 ## Required types and invariants
 
 The core defines `snapshot`, `checkpoint`, `draft`, `shared_change`,
-`change_revision`, `projection`, `decision`, `delivery`, `username_registration`, `membership`, and
-`transport_envelope` as distinct types.  Stable identities are canonical and
+`change_revision`, `projection`, `decision`, `delivery`, `username_registration`,
+`device`, `certificate`, `membership`, `signed_revision`, and offline `package`
+as distinct types. Stable identities are canonical and
 versioned at the persistent adapter boundary.  A draft is never a delivery; a
 delivery is never an implicit approval; a decision is never a failed process;
 and semantic sidecars are never canonical source.
@@ -218,7 +259,10 @@ and semantic sidecars are never canonical source.
 - canonical persistent-format golden fixtures before a V4 record is written;
 - duplicate-registration, generated-registration, legacy-record, and
   candidate-path-containment tests for local usernames and decision views;
-- duplicate, reordered, corrupt, unauthorized, and offline exchange tests;
-- end-to-end group epoch, enrollment, removal, and key-rotation tests;
+- canonical certificate/revision round trips, signature tampering,
+  unauthorized-enrollment, membership-continuity, duplicate-record, object
+  closure, and working-tree-preservation tests for offline exchange;
+- future join, removal, and key-rotation tests before those features are
+  implemented;
 - CLI journey tests for saved work, two drafts, sharing, conflict resolution,
-  restore, withdrawal, and delivery.
+  restore, withdrawal, delivery, enrollment, and receive.

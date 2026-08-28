@@ -39,11 +39,11 @@ revision consequently cannot be transplanted into another repository or
 re-associated with another device or certificate.
 
 Private keys are behind a V4 signer-provider interface. The first production
-providers use macOS Keychain and Linux Secret Service through opaque local
-handles. Private bytes are not V4 state, immutable objects, package entries,
-diagnostics, or fixtures. Tests may use an in-memory Ed25519 capability. The
-provider interface allows an external signer/agent later without changing
-signed bytes.
+providers use macOS Keychain and Linux Secret Service. Private bytes are not
+V4 state, immutable objects, package entries, diagnostics, or fixtures. The
+test-only file provider requires the explicit
+`YEOKCHAM_V4_TEST_SIGNER_DIRECTORY` environment variable. The provider
+interface allows an external signer/agent later without changing signed bytes.
 
 Revocation and administrator/device key rotation require a causal epoch
 successor and are specified as future record kinds. This tranche does not
@@ -82,13 +82,18 @@ epoch successor slice is implemented, so V4 does not promise revocation yet.
 
 ## Verification
 
-- RFC 8032 Ed25519 test vectors plus generated sign/verify tests.
-- Golden canonical identity, certificate, revision-envelope, and package
-  manifests; inverse decoders reject reordering and unknown mandatory fields.
-- Tests for signature tampering, wrong repository, duplicate/missing
-  certificate, unauthorized issuer, invalid causal order, wrong author,
-  missing snapshot closure, parent mismatch, retry/idempotence, and
-  working-tree preservation.
+Implemented focused tests cover certificate/revision canonical round trips,
+signature tampering, causal administrator enrollment, wrong repository,
+alternate root, missing snapshot closure, duplicate revisions, state-wrapper
+preservation, and working-tree preservation. The package verifier performs
+its validation in a temporary store before imports and state-head publication.
+
+Still required before expanding this boundary are RFC 8032 vectors and
+published golden fixtures, generated signing/codec properties, duplicate or
+missing certificate negative cases, parent mismatch and retry/idempotence,
+new-device join with independent root confirmation, and Linux execution of
+the Secret Service provider and watcher test. The present Darwin run is not
+evidence for those Linux behaviours.
 
 ## References
 

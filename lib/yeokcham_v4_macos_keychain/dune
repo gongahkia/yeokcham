@@ -1,0 +1,10 @@
+(library
+ (name yeokcham_v4_macos_keychain)
+ (enabled_if
+  (= %{system} macosx))
+ (libraries yeokcham_v4_model yeokcham_v4_trust)
+ (foreign_stubs
+  (language c)
+  (names yeokcham_v4_macos_keychain_stubs))
+ (c_library_flags
+  (-framework Security -framework CoreFoundation)))

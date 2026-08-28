@@ -4,6 +4,7 @@ module Store = Yeokcham_store
 module Envelope = Yeokcham_envelope
 module Snapshot = Yeokcham_snapshot
 module Encoding = Yeokcham_encoding
+module Object_set = Set.Make (String)
 
 type verified = {
   verified_membership : Trust.membership;
@@ -168,6 +169,23 @@ let decode_object_ids value =
   in
   loop [] values
 
+let ensure_unique_signed_revisions revisions =
+  let ids =
+    revisions
+    |> List.map Trust.signed_revision_id
+    |> List.sort Model.Revision_id.compare
+  in
+  let rec unique = function
+    | [] | [ _ ] -> Ok ()
+    | first :: (second :: _ as rest) ->
+        if Model.Revision_id.equal first second then
+          Error
+            (Invalid_package
+               "manifest contains the same revision more than once")
+        else unique rest
+  in
+  unique ids
+
 let manifest_bytes ~membership ~revisions ~object_ids =
   let* repository =
     text (Trust.repository membership |> Trust.Repository_id.to_string)
@@ -239,6 +257,7 @@ let decode_manifest bytes =
       if not (Int64.equal version 1L) then
         Error (Invalid_package "unsupported manifest version")
       else
+        let* () = ensure_unique_signed_revisions revisions in
         let* membership =
           Trust.verify_membership ~repository certificates
           |> Result.map_error (fun error -> Trust_error error)
@@ -249,10 +268,117 @@ let decode_manifest bytes =
         else Error Noncanonical_manifest
   | _ -> assert false
 
-let source_objects source =
-  Store.list_objects source
-  |> Result.map_error (fun error -> Store_error error)
-  |> Result.map (List.map (fun info -> info.Store.id))
+let snapshot_object_id snapshot =
+  Model.Snapshot_id.to_string snapshot
+  |> Store.Stored_object_id.of_hex
+  |> Result.map_error (fun _ ->
+      Invalid_package "revision snapshot ID is invalid")
+
+let add_id set id = Object_set.add (Store.Stored_object_id.to_hex id) set
+
+let rec collect_tree_closure source set tree_id =
+  let tree_key =
+    Store.Stored_object_id.to_hex (Snapshot.Tree.stored_object_id tree_id)
+  in
+  if Object_set.mem tree_key set then Ok set
+  else
+    let set = Object_set.add tree_key set in
+    let* tree =
+      Snapshot.Tree.load source tree_id
+      |> Result.map_error (fun error -> Snapshot_error error)
+    in
+    let rec entries set = function
+      | [] -> Ok set
+      | (_, Snapshot.Tree.Directory child) :: rest ->
+          let* set = collect_tree_closure source set child in
+          entries set rest
+      | (_, Snapshot.Tree.File { content; _ }) :: rest ->
+          let* set = collect_content_closure source set content in
+          entries set rest
+    in
+    entries set (Snapshot.Tree.entries tree)
+
+and collect_content_closure source set content_id =
+  let stored_id = Snapshot.Content.stored_object_id content_id in
+  let content_key = Store.Stored_object_id.to_hex stored_id in
+  if Object_set.mem content_key set then Ok set
+  else
+    let set = Object_set.add content_key set in
+    let* object_ =
+      Store.get source stored_id
+      |> Result.map_error (fun error -> Store_error error)
+    in
+    if Envelope.object_type object_ = Envelope.Content then
+      let* _ =
+        Snapshot.Content.load source content_id
+        |> Result.map_error (fun error -> Snapshot_error error)
+      in
+      Ok set
+    else if Envelope.object_type object_ = Envelope.File_manifest then
+      let* manifest =
+        Snapshot.Manifest.load source
+          (Snapshot.Manifest.of_stored_object_id stored_id)
+        |> Result.map_error (fun error -> Snapshot_error error)
+      in
+      let rec chunks set = function
+        | [] -> Ok set
+        | (chunk, _) :: rest ->
+            let chunk_id = Snapshot.Chunk.stored_object_id chunk in
+            let set = add_id set chunk_id in
+            let* _ =
+              Snapshot.Chunk.load source chunk
+              |> Result.map_error (fun error -> Snapshot_error error)
+            in
+            chunks set rest
+      in
+      chunks set (Snapshot.Manifest.chunks manifest)
+    else
+      let* _ =
+        Snapshot.Content.load source content_id
+        |> Result.map_error (fun error -> Snapshot_error error)
+      in
+      Ok set
+
+let collect_snapshot_closure source set snapshot =
+  let* stored_id = snapshot_object_id snapshot in
+  let key = Store.Stored_object_id.to_hex stored_id in
+  if Object_set.mem key set then Ok set
+  else
+    let set = Object_set.add key set in
+    let* snapshot =
+      Snapshot.Snapshot.load source
+        (Snapshot.Snapshot.of_stored_object_id stored_id)
+      |> Result.map_error (fun error -> Snapshot_error error)
+    in
+    collect_tree_closure source set (Snapshot.Snapshot.root snapshot)
+
+let source_objects source signed_revisions =
+  let rec collect set = function
+    | [] -> Ok set
+    | signed :: rest ->
+        let revision = Trust.signed_revision_value signed in
+        let* set =
+          collect_snapshot_closure source set revision.Model.base_snapshot
+        in
+        let* set =
+          collect_snapshot_closure source set revision.Model.result_snapshot
+        in
+        collect set rest
+  in
+  let* objects = collect Object_set.empty signed_revisions in
+  let parsed =
+    Object_set.elements objects
+    |> List.map (fun id ->
+        Store.Stored_object_id.of_hex id
+        |> Result.map_error (fun _ ->
+            Invalid_package "invalid collected object ID"))
+  in
+  List.fold_right
+    (fun result accumulated ->
+      let* value = result in
+      let* values = accumulated in
+      Ok (value :: values))
+    parsed (Ok [])
 
 let create ~source ~destination ~membership ~revisions =
   if Sys.file_exists destination then Error (Destination_exists destination)
@@ -275,7 +401,8 @@ let create ~source ~destination ~membership ~revisions =
       in
       verify revisions
     in
-    let* object_ids = source_objects source in
+    let* () = ensure_unique_signed_revisions revisions in
+    let* object_ids = source_objects source revisions in
     let* manifest = manifest_bytes ~membership ~revisions ~object_ids in
     let* () = mkdir destination in
     let* () = mkdir (package_path destination objects_name) in
@@ -375,7 +502,8 @@ let verify_closure staging revisions =
   in
   loop revisions
 
-let verify_and_import ~destination ~package ~repository =
+let verify_and_import ~destination ~package ~membership:expected_membership =
+  let repository = Trust.repository expected_membership in
   let* manifest = read_file (package_path package manifest_name) in
   let* package_repository, certificates, revisions, object_ids =
     decode_manifest manifest
@@ -383,8 +511,13 @@ let verify_and_import ~destination ~package ~repository =
   if not (Trust.Repository_id.equal package_repository repository) then
     Error (Invalid_package "package repository does not match destination")
   else
-    let* membership =
+    let* package_membership =
       Trust.verify_membership ~repository certificates
+      |> Result.map_error (fun error -> Trust_error error)
+    in
+    let* membership =
+      Trust.extend_membership expected_membership
+        (Trust.certificates package_membership)
       |> Result.map_error (fun error -> Trust_error error)
     in
     let* () =
