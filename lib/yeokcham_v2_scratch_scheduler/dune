@@ -1,3 +1,0 @@
-(library
- (name yeokcham_v2_scratch_scheduler)
- (libraries yeokcham_watcher))

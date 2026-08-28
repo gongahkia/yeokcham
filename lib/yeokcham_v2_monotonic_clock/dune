@@ -1,5 +1,0 @@
-(library
- (name yeokcham_v2_monotonic_clock)
- (foreign_stubs
-  (language c)
-  (names monotonic_clock_stubs)))

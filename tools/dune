@@ -1,3 +1,0 @@
-(executable
- (name generate_fixture)
- (libraries yeokcham_testkit))

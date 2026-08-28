@@ -650,7 +650,7 @@ let signed_offline_receive_is_atomic_and_preserves_the_live_tree () =
         |> require_ok Service.error_to_string);
       write_file source "main.ml" "let version = 2\n";
       ignore
-        (Service.share_signed ~root:source ~change:(change "change-source")
+        (Service.share_signed ~authority_epoch:None ~root:source ~change:(change "change-source")
            ~revision:(revision "revision-source")
            ~signing_capability:administrator_capability
         |> require_ok Service.error_to_string);
@@ -704,7 +704,7 @@ let signed_offline_receive_is_atomic_and_preserves_the_live_tree () =
         repeated.Service.shared_change_count;
       write_file destination "main.ml" "let version = 3\n";
       let after_member_share =
-        Service.share_signed ~root:destination ~change:(change "change-member")
+        Service.share_signed ~authority_epoch:None ~root:destination ~change:(change "change-member")
           ~revision:(revision "revision-member")
           ~signing_capability:member_capability
         |> require_ok Service.error_to_string
@@ -757,7 +757,7 @@ let administrator_enrollment_persists_a_public_member_and_local_username () =
         |> require_ok Service.error_to_string);
       let member = trust_device (signing_capability 'b') in
       let enrolled =
-        Service.enroll_device ~root ~subject:member ~role:Trust.Member
+        Service.enroll_device ~parent:None ~root ~subject:member ~role:Trust.Member
           ~username:(username "bob")
           ~signing_capability:administrator_capability
         |> require_ok Service.error_to_string
@@ -819,7 +819,7 @@ let authority_initialized_repositories_exchange_verified_epoch_bound_work () =
       let member_capability = signing_capability 'b' in
       let member = trust_device member_capability in
       ignore
-        (Service.enroll_device ~root:source ~subject:member ~role:Trust.Member
+        (Service.enroll_device ~parent:None ~root:source ~subject:member ~role:Trust.Member
            ~username:(username "bob")
            ~signing_capability:administrator_capability
         |> require_ok Service.error_to_string);
@@ -852,7 +852,7 @@ let authority_initialized_repositories_exchange_verified_epoch_bound_work () =
         |> require_ok Service.error_to_string);
       write_file source "main.ml" "let version = 2\n";
       ignore
-        (Service.share_signed ~root:source ~change:(change "change-source")
+        (Service.share_signed ~authority_epoch:None ~root:source ~change:(change "change-source")
            ~revision:(revision "revision-source")
            ~signing_capability:administrator_capability
         |> require_ok Service.error_to_string);
@@ -885,12 +885,12 @@ let authority_lifecycle_revokes_rotates_and_recovers_a_replacement_device () =
       let member_capability = signing_capability 'b' in
       let member = trust_device member_capability in
       ignore
-        (Service.enroll_device ~root ~subject:member ~role:Trust.Member
+        (Service.enroll_device ~parent:None ~root ~subject:member ~role:Trust.Member
            ~username:(username "bob")
            ~signing_capability:administrator_capability
         |> require_ok Service.error_to_string);
       ignore
-        (Service.revoke_device ~root ~device:(Trust.device_id member)
+        (Service.revoke_device ~parent:None ~root ~device:(Trust.device_id member)
            ~signing_capability:administrator_capability
         |> require_ok Service.error_to_string);
       let replacement_capability = signing_capability 'c' in
@@ -942,7 +942,7 @@ let authority_lifecycle_revokes_rotates_and_recovers_a_replacement_device () =
         (Trust.authority_heads (Recovery.recovered_authority recovered));
       write_file root "main.ml" "let version = 2\n";
       ignore
-        (Service.share_signed ~root ~change:(change "change-recovered")
+        (Service.share_signed ~authority_epoch:None ~root ~change:(change "change-recovered")
            ~revision:(revision "revision-recovered")
            ~signing_capability:replacement_capability
         |> require_ok Service.error_to_string))
@@ -963,7 +963,7 @@ let normal_device_rotation_replaces_the_local_signing_identity_atomically () =
       let replacement_capability = signing_capability 'c' in
       let replacement = trust_device replacement_capability in
       ignore
-        (Service.rotate_local_device ~root ~replacement
+        (Service.rotate_local_device ~parent:None ~root ~replacement
            ~signing_capability:administrator_capability
         |> require_ok Service.error_to_string);
       let identity = Service.identity ~root |> require_ok Service.error_to_string in
@@ -993,10 +993,150 @@ let normal_device_rotation_replaces_the_local_signing_identity_atomically () =
         (Trust.authority_device_active authority ~epoch:head replacement);
       write_file root "main.ml" "let version = 2\n";
       ignore
-        (Service.share_signed ~root ~change:(change "change-rotated")
+        (Service.share_signed ~authority_epoch:None ~root ~change:(change "change-rotated")
            ~revision:(revision "revision-rotated")
            ~signing_capability:replacement_capability
         |> require_ok Service.error_to_string))
+
+let authority_forks_require_named_branch_actions_and_explicit_reconciliation () =
+  with_directory "yeokcham-v4-authority-fork-" (fun root ->
+      write_file root "main.ml" "let version = 1\n";
+      let administrator_capability = signing_capability 'a' in
+      let administrator = trust_device administrator_capability in
+      let recovery_capability = signing_capability 'r' in
+      let recovery_device = trust_device recovery_capability in
+      ignore
+        (Service.init_signed_with_recovery ~root ~username:(username "alice")
+           ~initial_draft:(draft "draft-one") ~title:"authority" ~repository
+           ~device:administrator ~signing_capability:administrator_capability
+           ~recovery_device ~recovery_capability
+        |> require_ok Service.error_to_string);
+      let repository_store =
+        Store.open_repository ~root |> require_ok Store.error_to_string
+      in
+      let loaded = Store.load repository_store |> require_ok Store.error_to_string in
+      let collaboration =
+        match loaded.Store.collaboration with
+        | Some collaboration -> collaboration
+        | None -> Alcotest.fail "authority state was not retained"
+      in
+      let authority =
+        match Store.authority collaboration with
+        | Some authority -> authority
+        | None -> Alcotest.fail "authority state was downgraded to legacy"
+      in
+      let root_head =
+        match Trust.authority_heads authority with
+        | [ head ] -> head
+        | _ -> Alcotest.fail "initial authority did not have one head"
+      in
+      let certificates = Trust.certificates (Trust.authority_membership authority) in
+      let left =
+        Trust.successor_epoch authority ~parents:[ root_head ] ~certificates
+          ~revoked:[] ~frontier:[ revision "frontier-left" ] ~recovery_device
+          ~issuer:(Store.local_certificate collaboration) administrator_capability
+        |> require_ok Trust.error_to_string
+      in
+      let right =
+        Trust.successor_epoch authority ~parents:[ root_head ] ~certificates
+          ~revoked:[] ~frontier:[ revision "frontier-right" ] ~recovery_device
+          ~issuer:(Store.local_certificate collaboration) administrator_capability
+        |> require_ok Trust.error_to_string
+      in
+      let forked =
+        Trust.extend_authority authority [ left; right ]
+        |> require_ok Trust.error_to_string
+      in
+      let forked_collaboration =
+        Store.collaboration_with_authority ~authority:forked
+          ~revisions:(Store.signed_revisions collaboration)
+          ~local_certificate:(Store.local_certificate collaboration)
+          ~authorizations:(Store.authorizations collaboration)
+          ~adoptions:(Store.adoptions collaboration)
+        |> require_ok Store.error_to_string
+      in
+      ignore
+        (Store.save_collaborative repository_store ~expected:loaded.Store.head
+           ~project:loaded.Store.project ~collaboration:forked_collaboration
+        |> require_ok Store.error_to_string);
+      let member = trust_device (signing_capability 'b') in
+      (match
+         Service.enroll_device ~parent:None ~root ~subject:member
+           ~role:Trust.Member ~username:(username "bob")
+           ~signing_capability:administrator_capability
+       with
+      | Error error ->
+          Alcotest.(check string) "an unselected fork refuses lifecycle work"
+            "V4 authority fork requires an explicit authority selection or reconciliation"
+            (Service.error_to_string error)
+      | Ok _ -> Alcotest.fail "forked enrollment chose authority heads implicitly");
+      write_file root "main.ml" "let version = 2\n";
+      (match
+         Service.share_signed ~authority_epoch:None ~root
+           ~change:(change "change-forked") ~revision:(revision "revision-forked")
+           ~signing_capability:administrator_capability
+       with
+      | Error error ->
+          Alcotest.(check string) "an unselected fork refuses signed work"
+            "V4 authority fork requires an explicit authority selection or reconciliation"
+            (Service.error_to_string error)
+      | Ok _ -> Alcotest.fail "forked share chose an authority head implicitly");
+      ignore
+        (Service.share_signed ~authority_epoch:(Some (Trust.epoch_id left)) ~root
+           ~change:(change "change-forked") ~revision:(revision "revision-forked")
+           ~signing_capability:administrator_capability
+        |> require_ok Service.error_to_string);
+      ignore
+        (Service.enroll_device ~parent:(Some (Trust.epoch_id left)) ~root
+           ~subject:member ~role:Trust.Member ~username:(username "bob")
+           ~signing_capability:administrator_capability
+        |> require_ok Service.error_to_string);
+      let before_reconciliation =
+        Service.authority_heads ~root |> require_ok Service.error_to_string
+      in
+      Alcotest.(check int) "selected branch advancement leaves the other head active"
+        2 (List.length before_reconciliation);
+      Alcotest.(check bool) "the unselected branch remains a head" true
+        (List.mem (Trust.epoch_id right) before_reconciliation);
+      (match
+         Service.reconcile_authority ~root
+           ~parents:(List.rev before_reconciliation)
+           ~signing_capability:administrator_capability
+       with
+      | Error error ->
+          Alcotest.(check string)
+            "reconciliation rejects a noncanonical parent selection"
+            "invalid V4 authority epoch: reconciliation parent heads must be strictly sorted and unique"
+            (Service.error_to_string error)
+      | Ok _ -> Alcotest.fail "reconciliation silently reordered explicit parents");
+      ignore
+        (Service.reconcile_authority ~root ~parents:before_reconciliation
+           ~signing_capability:administrator_capability
+        |> require_ok Service.error_to_string);
+      let heads = Service.authority_heads ~root |> require_ok Service.error_to_string in
+      let head =
+        match heads with
+        | [ head ] -> head
+        | _ -> Alcotest.fail "explicit reconciliation did not close its fork"
+      in
+      let repository_store =
+        Store.open_repository ~root |> require_ok Store.error_to_string
+      in
+      let loaded = Store.load repository_store |> require_ok Store.error_to_string in
+      let authority =
+        match loaded.Store.collaboration with
+        | Some collaboration -> (
+            match Store.authority collaboration with
+            | Some authority -> authority
+            | None -> Alcotest.fail "reconciliation downgraded authority state")
+        | None -> Alcotest.fail "reconciliation lost authority state"
+      in
+      let reconciled =
+        Trust.authority_epoch authority head |> require_ok Trust.error_to_string
+      in
+      Alcotest.(check (list string))
+        "the durable reconciliation names exactly the selected heads"
+        before_reconciliation (Trust.epoch_parents reconciled))
 
 let late_package_review_adopts_one_exact_record_before_receive () =
   with_directory "yeokcham-v4-late-package-review-" (fun parent ->
@@ -1019,7 +1159,7 @@ let late_package_review_adopts_one_exact_record_before_receive () =
       let reviewer_capability = signing_capability 'b' in
       let reviewer = trust_device reviewer_capability in
       ignore
-        (Service.enroll_device ~root:source ~subject:reviewer
+        (Service.enroll_device ~parent:None ~root:source ~subject:reviewer
            ~role:Trust.Administrator ~username:(username "bob")
            ~signing_capability:root_capability
         |> require_ok Service.error_to_string);
@@ -1053,7 +1193,7 @@ let late_package_review_adopts_one_exact_record_before_receive () =
         |> require_ok Service.error_to_string);
       write_file source "main.ml" "let version = 2\n";
       ignore
-        (Service.share_signed ~root:source ~change:(change "change-late")
+        (Service.share_signed ~authority_epoch:None ~root:source ~change:(change "change-late")
            ~revision:(revision "revision-late") ~signing_capability:root_capability
         |> require_ok Service.error_to_string);
       let source_loaded =
@@ -1103,7 +1243,7 @@ let late_package_review_adopts_one_exact_record_before_receive () =
             Model.Revision_id.to_string review.Service.review_revision ^ ":"
             ^ string_of_bool review.Service.requires_adoption));
       ignore
-        (Service.adopt_package_revision ~root:destination ~package
+        (Service.adopt_package_revision ~authority_epoch:None ~root:destination ~package
            ~revision:(revision "revision-late")
            ~signing_capability:reviewer_capability
         |> require_ok Service.error_to_string);
@@ -1185,6 +1325,10 @@ let () =
           Alcotest.test_case
             "normal device rotation atomically replaces local authority" `Quick
             normal_device_rotation_replaces_the_local_signing_identity_atomically;
+          Alcotest.test_case
+            "forks require named branch actions and explicit reconciliation"
+            `Quick
+            authority_forks_require_named_branch_actions_and_explicit_reconciliation;
           Alcotest.test_case
             "late package review adopts exactly one record before receive" `Quick
             late_package_review_adopts_one_exact_record_before_receive;

@@ -1,164 +1,43 @@
-# Project Context
+# Project context
 
-## Why yeokcham exists
+Yeokcham explores whether version control can make the everyday recovery loop
+simple without pretending that every edit is shared intent or every shared
+change is a release. The product is local-first: exact local state and its
+proof do not depend on a server.
 
-Git combines several different human needs into a commit graph:
+## The model boundary
 
-- Temporary safety and undo.
-- Communicating logical changes.
-- Producing release and deployment history.
-- Sharing work.
-- Reviewing work.
-- Integrating concurrent edits.
+Scratch checkpoints answer “can I get my bytes back?” They are automatic,
+bounded, and may compact subject to pins and other named protections.
 
-This creates pressure to use one object, the commit, for incompatible purposes.
+A shared change answers “what do I want another person to consider?” It is an
+explicit immutable revision with a signed author and an authority epoch.
 
-Developers often create low-value safety commits, squash them later, rebase them into a reviewable stack, and then merge them into a release history. The workflow works, but the system requires users to manage the boundaries manually.
+A decision answers “which incompatible proposal should apply?” It is durable
+and inspectable, never a process error or an automatic merge. A resolution is
+a new revision, not a mutation of a candidate.
 
-Modern tools have improved parts of this experience:
+Delivery answers “what did this repository publish as delivered?” It remains a
+separate model transition. Signing, review, transport, and CI do not silently
+mean delivery.
 
-- Jujutsu provides a more fluid change model, stable change identity, and an operation log.
-- Pijul treats changes and conflicts as first-class graph concepts.
-- GitButler allows multiple virtual branches in one workspace.
-- Sapling and stacked-change tools improve large-repository and review workflows.
-- Unison demonstrates how content-addressed semantic code can change programming workflows.
-- Irmin demonstrates branchable and mergeable persistent data structures in OCaml.
+## Trust boundary
 
-yeokcham must not claim that stable change identities, operation logs, virtual branches, graph-based changes, or content-addressing are individually new.
+Device IDs are derived from Ed25519 public keys. Usernames are local display
+metadata and have no authority. A public immutable authority-epoch graph makes
+enrolment, revocation, recovery, and concurrent administrator changes visible.
+There is no trust-on-first-use join: peers compare the root certificate’s
+12-word phrase independently.
 
-Its differentiated thesis is the deliberate separation of:
+Revocation is forward-looking. A record remains cryptographically historical at
+the epoch where it was valid. If it arrives after a current descendant head has
+revoked that signer, receive requires a current-head adoption of exactly that
+signed record. This is deliberate human review, not an implicit permission
+merge.
 
-1. Bounded, automatic recovery history.
-2. Human-curated intent history.
-3. Immutable release history.
+## Product posture
 
-## Core problem statement
-
-A developer should not need to decide, during every edit, whether a state deserves permanent collaborative history.
-
-The VCS should:
-
-- Save local work automatically.
-- Let the developer recover and inspect prior states.
-- Let the developer later define the logical change.
-- Preserve stable change identity while its implementation is revised.
-- Compose several logical changes in one workspace.
-- Keep unresolved conflicts explicit without globally blocking work.
-- Produce reproducible releases, preserve selected Git history for migration,
-  and exchange selected Yeokcham history directly with a peer.
-
-## Product thesis
-
-yeokcham is:
-
-> A local-first VCS where automatic scratch checkpoints are compactable, change capsules represent human intent, workspaces are compositions of capsules, and releases are immutable snapshots.
-
-## Primary user
-
-Initially:
-
-- A technically sophisticated individual developer.
-- Comfortable trying a new CLI.
-- Interested in local-first workflows and version-control research.
-- Working in repositories where TypeScript or Rust semantic experiments are useful.
-- Willing to use an explicit Git migration boundary while Yeokcham's native
-  peer workflow matures.
-
-The long-term aspiration is ordinary software development through Yeokcham's
-own repository and peer model. The current implementation remains experimental
-and must not pretend broad adoption or production readiness exists.
-
-## Core concepts
-
-### Scratch checkpoint
-
-An automatic recoverable state. It may be short-lived and compacted under retention rules.
-
-### Change capsule
-
-A durable logical unit of work with stable identity, description, dependencies, tests, and one or more immutable revisions.
-
-### Capsule revision
-
-An immutable representation of a capsule at one point in its development.
-
-### Workspace
-
-A base release plus an ordered composition of selected capsule revisions.
-
-### Conflict value
-
-A persistent object representing an application ambiguity or incompatibility.
-
-### Release
-
-An immutable, reproducible snapshot with a declared capsule composition.
-Production release signing is deferred; the current deterministic attestation is
-test-only and does not authenticate a release.
-
-### Semantic sidecar
-
-Structured metadata that helps replay or inspect a change while exact bytes remain authoritative.
-
-## Product principles
-
-### Exact bytes remain authoritative
-
-yeokcham may understand syntax and symbols, but must preserve arbitrary files, comments, formatting, generated output, invalid intermediate source, and unknown formats.
-
-### Automatic history is bounded
-
-The system should preserve useful recovery states without making every transient state permanent forever.
-
-### Intent is curated after the fact
-
-Users can work messily and later define the logical capsule.
-
-### Conflicts are data
-
-A conflict should be inspectable, shareable, and localised rather than a global exceptional mode.
-
-### Change identity survives revision
-
-A capsule has a stable logical ID. Each materialisation or retargeting produces a new immutable revision ID.
-
-### Release history is immutable
-
-A release records exactly which capsule revisions and content snapshot produced it.
-
-### Uncertainty must be visible
-
-Semantic replay may be wrong. yeokcham should expose confidence and require validation rather than silently claiming correctness.
-
-### Git is a migration and exit format
-
-Git import and export are valuable, but yeokcham should not redesign itself
-around Git's internal graph. A selected Git history is preserved as foreign
-provenance; users explicitly adopt chosen work into Yeokcham concepts and can
-export an ordinary Git projection when they leave.
-
-### Peer exchange is selective publication
-
-Native collaboration transfers explicitly published capsule revisions and
-releases. Scratch checkpoints remain local unless a future explicit policy says
-otherwise. A received publication is a proposal or divergence, never an
-implicit workspace mutation.
-
-## Project relationship to Relay
-
-Relay is the Git-compatible, production-oriented project.
-
-yeokcham is the experimental model.
-
-They may eventually share:
-
-- Research on chunking.
-- Benchmark fixtures.
-- General storage lessons.
-- Cryptographic and segment-format concepts.
-
-They should not share a codebase initially because:
-
-- Relay is Rust and compatibility constrained.
-- yeokcham is OCaml and model constrained.
-- Premature shared formats would weaken both projects.
+V4 is the only active product track. Earlier tracks are available only in Git
+history and have no compatibility or migration path. The codebase retains the
+unversioned hashing, canonical CBOR, envelope, object store, snapshot,
+chunking, testkit, and advisory Linux-watcher foundations because V4 uses them.

@@ -11,44 +11,48 @@ let fail message =
 let usage () =
   fail
     "usage:\n\
-    \  yeokcham-v4 init [--root PATH] --username NAME --draft ID --title TITLE\n\
-    \  yeokcham-v4 join [--root PATH] --username NAME --draft ID --title TITLE \\
+    \  yeokcham init [--root PATH] --username NAME --draft ID --title TITLE\n\
+    \  yeokcham join [--root PATH] --username NAME --draft ID --title TITLE \\
      --device ID --from PATH --verify-phrase \"TWELVE WORDS\"\n\
-    \  yeokcham-v4 save [--root PATH]\n\
-    \  yeokcham-v4 status [--root PATH]\n\
-    \  yeokcham-v4 device create\n\
-    \  yeokcham-v4 device show [--root PATH]\n\
-    \  yeokcham-v4 device enroll [--root PATH] --device ID --public-key HEX \
-     --username NAME [--administrator]\n\
-    \  yeokcham-v4 device revoke [--root PATH] --device ID\n\
-    \  yeokcham-v4 device rotate [--root PATH] --device ID --public-key HEX\n\
-    \  yeokcham-v4 authority heads [--root PATH]\n\
-    \  yeokcham-v4 recovery use [--root PATH] --package PATH --mnemonic \
+    \  yeokcham save [--root PATH]\n\
+    \  yeokcham status [--root PATH]\n\
+    \  yeokcham device create\n\
+    \  yeokcham device show [--root PATH]\n\
+    \  yeokcham device enroll [--root PATH] --device ID --public-key HEX \
+     --username NAME [--administrator] [--parent EPOCH]\n\
+    \  yeokcham device revoke [--root PATH] --device ID [--parent EPOCH]\n\
+    \  yeokcham device rotate [--root PATH] --device ID --public-key HEX \
+     [--parent EPOCH]\n\
+    \  yeokcham authority heads [--root PATH]\n\
+    \  yeokcham authority reconcile [--root PATH] --parents EPOCH,EPOCH[,EPOCH]\n\
+    \  yeokcham recovery use [--root PATH] --package PATH --mnemonic \
      \"TWENTY FOUR WORDS\" --replacement ID --replaced ID --output PATH\n\
-    \  yeokcham-v4 recovery refresh [--root PATH] --package PATH --mnemonic \
+    \  yeokcham recovery refresh [--root PATH] --package PATH --mnemonic \
      \"TWENTY FOUR WORDS\" --output PATH\n\
-    \  yeokcham-v4 user register [--root PATH] --device ID --username NAME\n\
-    \  yeokcham-v4 timeline [--root PATH]\n\
-    \  yeokcham-v4 restore [--root PATH] --checkpoint ID [--destination PATH]\n\
-    \  yeokcham-v4 draft new [--root PATH] --id ID --title TITLE\n\
-    \  yeokcham-v4 share [--root PATH] --change ID --revision ID\n\
-    \  yeokcham-v4 withdraw [--root PATH] --change ID\n\
-    \  yeokcham-v4 resolve [--root PATH] --decision ID --change ID --revision \
-     ID [--tree PATH]\n\
-    \  yeokcham-v4 decision show [--root PATH] --decision ID\n\
-    \  yeokcham-v4 decision inspect [--root PATH] --decision ID\n\
-    \  yeokcham-v4 decision diff [--root PATH] --decision ID --candidate REV \
+    \  yeokcham user register [--root PATH] --device ID --username NAME\n\
+    \  yeokcham timeline [--root PATH]\n\
+    \  yeokcham restore [--root PATH] --checkpoint ID [--destination PATH]\n\
+    \  yeokcham draft new [--root PATH] --id ID --title TITLE\n\
+    \  yeokcham share [--root PATH] --change ID --revision ID \
+     [--authority EPOCH]\n\
+    \  yeokcham withdraw [--root PATH] --change ID\n\
+    \  yeokcham resolve [--root PATH] --decision ID --change ID --revision \
+     ID [--tree PATH] [--authority EPOCH]\n\
+    \  yeokcham decision show [--root PATH] --decision ID\n\
+    \  yeokcham decision inspect [--root PATH] --decision ID\n\
+    \  yeokcham decision diff [--root PATH] --decision ID --candidate REV \
      [--against base|REV]\n\
-    \  yeokcham-v4 decision materialize [--root PATH] --decision ID \
+    \  yeokcham decision materialize [--root PATH] --decision ID \
      --destination PATH\n\
-    \  yeokcham-v4 package create [--root PATH] --destination PATH\n\
-    \  yeokcham-v4 package adopt [--root PATH] --from PATH --revision ID\n\
-    \  yeokcham-v4 receive [--root PATH] --from PATH [--review]\n\
-    \  yeokcham-v4 deliver [--root PATH] --id ID --draft ID --title TITLE\n\
-    \  yeokcham-v4 pin [--root PATH] --checkpoint ID\n\
-    \  yeokcham-v4 unpin [--root PATH] --checkpoint ID\n\
-    \  yeokcham-v4 compact [--root PATH] [--keep N] [--dry-run] [--explain]\n\
-    \  yeokcham-v4 watch [--root PATH]"
+    \  yeokcham package create [--root PATH] --destination PATH\n\
+    \  yeokcham package adopt [--root PATH] --from PATH --revision ID \
+     [--authority EPOCH]\n\
+    \  yeokcham receive [--root PATH] --from PATH [--review]\n\
+    \  yeokcham deliver [--root PATH] --id ID --draft ID --title TITLE\n\
+    \  yeokcham pin [--root PATH] --checkpoint ID\n\
+    \  yeokcham unpin [--root PATH] --checkpoint ID\n\
+    \  yeokcham compact [--root PATH] [--keep N] [--dry-run] [--explain]\n\
+    \  yeokcham watch [--root PATH]"
 
 let require_ok render = function
   | Ok value -> value
@@ -374,7 +378,7 @@ let run_device_show arguments =
     | Trust.Administrator -> "administrator")
 
 let parse_device_enroll arguments =
-  let rec loop root device public_key username administrator = function
+  let rec loop root device public_key username administrator parent = function
     | [] -> (
         match (device, public_key, username) with
         | Some device, Some public_key, Some username ->
@@ -382,24 +386,27 @@ let parse_device_enroll arguments =
               device,
               public_key,
               username,
-              administrator )
+              administrator,
+              parent )
         | None, _, _ | _, None, _ | _, _, None -> usage ())
     | "--root" :: value :: rest when Option.is_none root ->
-        loop (Some value) device public_key username administrator rest
+        loop (Some value) device public_key username administrator parent rest
     | "--device" :: value :: rest when Option.is_none device ->
-        loop root (Some value) public_key username administrator rest
+        loop root (Some value) public_key username administrator parent rest
     | "--public-key" :: value :: rest when Option.is_none public_key ->
-        loop root device (Some value) username administrator rest
+        loop root device (Some value) username administrator parent rest
     | "--username" :: value :: rest when Option.is_none username ->
-        loop root device public_key (Some value) administrator rest
+        loop root device public_key (Some value) administrator parent rest
     | "--administrator" :: rest when not administrator ->
-        loop root device public_key username true rest
+        loop root device public_key username true parent rest
+    | "--parent" :: value :: rest when Option.is_none parent ->
+        loop root device public_key username administrator (Some value) rest
     | _ -> usage ()
   in
-  loop None None None None false arguments
+  loop None None None None false None arguments
 
 let run_device_enroll arguments =
-  let root, device, public_key, username, administrator =
+  let root, device, public_key, username, administrator, parent =
     parse_device_enroll arguments
   in
   let expected =
@@ -417,52 +424,56 @@ let run_device_enroll arguments =
   in
   let signing_capability = local_signing_capability root in
   let role = if administrator then Trust.Administrator else Trust.Member in
-  Service.enroll_device ~root ~subject ~role ~username ~signing_capability
+  Service.enroll_device ~parent ~root ~subject ~role ~username ~signing_capability
   |> require_ok Service.error_to_string
   |> render_status
 
 let parse_device_only arguments =
-  let rec loop root device = function
+  let rec loop root device parent = function
     | [] -> (
         match device with
-        | Some device -> (Option.value root ~default:default_root, device)
+        | Some device -> (Option.value root ~default:default_root, device, parent)
         | None -> usage ())
     | "--root" :: value :: rest when Option.is_none root ->
-        loop (Some value) device rest
+        loop (Some value) device parent rest
     | "--device" :: value :: rest when Option.is_none device ->
-        loop root (Some value) rest
-    | _ -> usage ()
-  in
-  loop None None arguments
-
-let run_device_revoke arguments =
-  let root, device = parse_device_only arguments in
-  let device =
-    parse_identifier "invalid device identifier" Model.Device_id.of_string device
-  in
-  let signing_capability = local_signing_capability root in
-  Service.revoke_device ~root ~device ~signing_capability
-  |> require_ok Service.error_to_string |> render_status
-
-let parse_device_key arguments =
-  let rec loop root device public_key = function
-    | [] -> (
-        match (device, public_key) with
-        | Some device, Some public_key ->
-            (Option.value root ~default:default_root, device, public_key)
-        | _ -> usage ())
-    | "--root" :: value :: rest when Option.is_none root ->
-        loop (Some value) device public_key rest
-    | "--device" :: value :: rest when Option.is_none device ->
-        loop root (Some value) public_key rest
-    | "--public-key" :: value :: rest when Option.is_none public_key ->
+        loop root (Some value) parent rest
+    | "--parent" :: value :: rest when Option.is_none parent ->
         loop root device (Some value) rest
     | _ -> usage ()
   in
   loop None None None arguments
 
+let run_device_revoke arguments =
+  let root, device, parent = parse_device_only arguments in
+  let device =
+    parse_identifier "invalid device identifier" Model.Device_id.of_string device
+  in
+  let signing_capability = local_signing_capability root in
+  Service.revoke_device ~parent ~root ~device ~signing_capability
+  |> require_ok Service.error_to_string |> render_status
+
+let parse_device_key arguments =
+  let rec loop root device public_key parent = function
+    | [] -> (
+        match (device, public_key) with
+        | Some device, Some public_key ->
+            (Option.value root ~default:default_root, device, public_key, parent)
+        | _ -> usage ())
+    | "--root" :: value :: rest when Option.is_none root ->
+        loop (Some value) device public_key parent rest
+    | "--device" :: value :: rest when Option.is_none device ->
+        loop root (Some value) public_key parent rest
+    | "--public-key" :: value :: rest when Option.is_none public_key ->
+        loop root device (Some value) parent rest
+    | "--parent" :: value :: rest when Option.is_none parent ->
+        loop root device public_key (Some value) rest
+    | _ -> usage ()
+  in
+  loop None None None None arguments
+
 let run_device_rotate arguments =
-  let root, device, public_key = parse_device_key arguments in
+  let root, device, public_key, parent = parse_device_key arguments in
   let expected =
     parse_identifier "invalid device identifier" Model.Device_id.of_string device
   in
@@ -473,13 +484,37 @@ let run_device_rotate arguments =
   if not (Model.Device_id.equal expected (Trust.device_id replacement)) then
     fail "device identifier does not match public key";
   let signing_capability = local_signing_capability root in
-  Service.rotate_local_device ~root ~replacement ~signing_capability
+  Service.rotate_local_device ~parent ~root ~replacement ~signing_capability
   |> require_ok Service.error_to_string |> render_status
 
 let run_authority_heads arguments =
   let root = parse_root arguments in
   Service.authority_heads ~root |> require_ok Service.error_to_string
   |> List.iter (fun epoch -> Printf.printf "authority-head %s\n" epoch)
+
+let parse_authority_reconcile arguments =
+  let rec loop root parents = function
+    | [] -> (
+        match parents with
+        | Some parents -> (Option.value root ~default:default_root, parents)
+        | None -> usage ())
+    | "--root" :: value :: rest when Option.is_none root ->
+        loop (Some value) parents rest
+    | "--parents" :: value :: rest when Option.is_none parents ->
+        loop root (Some value) rest
+    | _ -> usage ()
+  in
+  loop None None arguments
+
+let run_authority_reconcile arguments =
+  let root, parents = parse_authority_reconcile arguments in
+  let parents =
+    if String.equal parents "" then fail "--parents must name at least two authority heads"
+    else String.split_on_char ',' parents
+  in
+  let signing_capability = local_signing_capability root in
+  Service.reconcile_authority ~root ~parents ~signing_capability
+  |> require_ok Service.error_to_string |> render_status
 
 let parse_recovery_use arguments =
   let rec loop root package mnemonic replacement replaced output = function
@@ -597,21 +632,23 @@ let run_restore arguments =
         (if restored.Service.resumed then " (resumed)" else "")
 
 let parse_share arguments =
-  let rec loop root change revision = function
+  let rec loop root change revision authority = function
     | [] -> (
         match (change, revision) with
         | Some change, Some revision ->
-            (Option.value root ~default:default_root, change, revision)
+            (Option.value root ~default:default_root, change, revision, authority)
         | None, _ | _, None -> usage ())
     | "--root" :: value :: rest when Option.is_none root ->
-        loop (Some value) change revision rest
+        loop (Some value) change revision authority rest
     | "--change" :: value :: rest when Option.is_none change ->
-        loop root (Some value) revision rest
+        loop root (Some value) revision authority rest
     | "--revision" :: value :: rest when Option.is_none revision ->
-        loop root change (Some value) rest
+        loop root change (Some value) authority rest
+    | "--authority" :: value :: rest when Option.is_none authority ->
+        loop root change revision (Some value) rest
     | _ -> usage ()
   in
-  loop None None None arguments
+  loop None None None None arguments
 
 let parse_withdraw arguments =
   let rec loop root change = function
@@ -628,7 +665,7 @@ let parse_withdraw arguments =
   loop None None arguments
 
 let parse_resolve arguments =
-  let rec loop root decision change revision tree = function
+  let rec loop root decision change revision tree authority = function
     | [] -> (
         match (decision, change, revision) with
         | Some decision, Some change, Some revision ->
@@ -636,21 +673,24 @@ let parse_resolve arguments =
               decision,
               change,
               revision,
-              tree )
+              tree,
+              authority )
         | None, _, _ | _, None, _ | _, _, None -> usage ())
     | "--root" :: value :: rest when Option.is_none root ->
-        loop (Some value) decision change revision tree rest
+        loop (Some value) decision change revision tree authority rest
     | "--decision" :: value :: rest when Option.is_none decision ->
-        loop root (Some value) change revision tree rest
+        loop root (Some value) change revision tree authority rest
     | "--change" :: value :: rest when Option.is_none change ->
-        loop root decision (Some value) revision tree rest
+        loop root decision (Some value) revision tree authority rest
     | "--revision" :: value :: rest when Option.is_none revision ->
-        loop root decision change (Some value) tree rest
+        loop root decision change (Some value) tree authority rest
     | "--tree" :: value :: rest when Option.is_none tree ->
-        loop root decision change revision (Some value) rest
+        loop root decision change revision (Some value) authority rest
+    | "--authority" :: value :: rest when Option.is_none authority ->
+        loop root decision change revision tree (Some value) rest
     | _ -> usage ()
   in
-  loop None None None None None arguments
+  loop None None None None None None arguments
 
 let parse_decision_show arguments =
   let rec loop root decision = function
@@ -840,7 +880,9 @@ let run_decision_materialize arguments =
     candidates
 
 let run_resolve arguments =
-  let root, decision, change, revision, tree = parse_resolve arguments in
+  let root, decision, change, revision, tree, authority_epoch =
+    parse_resolve arguments
+  in
   let decision =
     parse_identifier "invalid decision identifier" Model.Decision_id.of_string
       decision
@@ -854,7 +896,7 @@ let run_resolve arguments =
       revision
   in
   let signing_capability = local_signing_capability root in
-  Service.resolve_signed ~root ~decision ~change ~revision ~tree
+  Service.resolve_signed ~authority_epoch ~root ~decision ~change ~revision ~tree
     ~signing_capability
   |> require_ok Service.error_to_string
   |> render_status
@@ -888,7 +930,7 @@ let run_new_draft arguments =
   |> render_status
 
 let run_share arguments =
-  let root, change, revision = parse_share arguments in
+  let root, change, revision, authority_epoch = parse_share arguments in
   let change =
     parse_identifier "invalid change identifier" Model.Change_id.of_string
       change
@@ -898,7 +940,7 @@ let run_share arguments =
       revision
   in
   let signing_capability = local_signing_capability root in
-  Service.share_signed ~root ~change ~revision ~signing_capability
+  Service.share_signed ~authority_epoch ~root ~change ~revision ~signing_capability
   |> require_ok Service.error_to_string
   |> render_status
 
@@ -924,24 +966,65 @@ let run_package_create arguments =
   Printf.printf "package %s\n" destination
 
 let parse_receive arguments =
-  let rec loop root package = function
+  let rec loop root package review = function
     | [] -> (
         match package with
-        | Some package -> (Option.value root ~default:default_root, package)
+        | Some package ->
+            (Option.value root ~default:default_root, package, review)
         | None -> usage ())
     | "--root" :: value :: rest when Option.is_none root ->
-        loop (Some value) package rest
+        loop (Some value) package review rest
     | "--from" :: value :: rest when Option.is_none package ->
-        loop root (Some value) rest
+        loop root (Some value) review rest
+    | "--review" :: rest when not review -> loop root package true rest
     | _ -> usage ()
   in
-  loop None None arguments
+  loop None None false arguments
 
 let run_receive arguments =
-  let root, package = parse_receive arguments in
-  Service.receive_package ~root ~package
-  |> require_ok Service.error_to_string
-  |> render_status
+  let root, package, review = parse_receive arguments in
+  if review then
+    Service.review_package ~root ~package
+    |> require_ok Service.error_to_string
+    |> List.iter (fun candidate ->
+           Printf.printf "review %s author %s adoption %s\n"
+             (Model.Revision_id.to_string candidate.Service.review_revision)
+             (Model.Device_id.to_string candidate.Service.review_author)
+             (if candidate.Service.requires_adoption then "required" else "not-required"))
+  else
+    Service.receive_package ~root ~package
+    |> require_ok Service.error_to_string
+    |> render_status
+
+let parse_package_adopt arguments =
+  let rec loop root package revision authority = function
+    | [] -> (
+        match (package, revision) with
+        | Some package, Some revision ->
+            (Option.value root ~default:default_root, package, revision, authority)
+        | _ -> usage ())
+    | "--root" :: value :: rest when Option.is_none root ->
+        loop (Some value) package revision authority rest
+    | "--from" :: value :: rest when Option.is_none package ->
+        loop root (Some value) revision authority rest
+    | "--revision" :: value :: rest when Option.is_none revision ->
+        loop root package (Some value) authority rest
+    | "--authority" :: value :: rest when Option.is_none authority ->
+        loop root package revision (Some value) rest
+    | _ -> usage ()
+  in
+  loop None None None None arguments
+
+let run_package_adopt arguments =
+  let root, package, revision, authority_epoch = parse_package_adopt arguments in
+  let revision =
+    parse_identifier "invalid revision identifier" Model.Revision_id.of_string
+      revision
+  in
+  let signing_capability = local_signing_capability root in
+  Service.adopt_package_revision ~authority_epoch ~root ~package ~revision
+    ~signing_capability
+  |> require_ok Service.error_to_string |> render_status
 
 let run_withdraw arguments =
   let root, change = parse_withdraw arguments in
@@ -1061,7 +1144,10 @@ let () =
   | _ :: "device" :: "revoke" :: arguments -> run_device_revoke arguments
   | _ :: "device" :: "rotate" :: arguments -> run_device_rotate arguments
   | _ :: "authority" :: "heads" :: arguments -> run_authority_heads arguments
+  | _ :: "authority" :: "reconcile" :: arguments ->
+      run_authority_reconcile arguments
   | _ :: "recovery" :: "use" :: arguments -> run_recovery_use arguments
+  | _ :: "recovery" :: "refresh" :: arguments -> run_recovery_refresh arguments
   | _ :: "user" :: "register" :: arguments -> run_user_register arguments
   | _ :: "timeline" :: arguments -> run_timeline arguments
   | _ :: "restore" :: arguments -> run_restore arguments
@@ -1075,6 +1161,7 @@ let () =
   | _ :: "decision" :: "materialize" :: arguments ->
       run_decision_materialize arguments
   | _ :: "package" :: "create" :: arguments -> run_package_create arguments
+  | _ :: "package" :: "adopt" :: arguments -> run_package_adopt arguments
   | _ :: "receive" :: arguments -> run_receive arguments
   | _ :: "deliver" :: arguments -> run_deliver arguments
   | _ :: "pin" :: arguments -> run_pin arguments

@@ -1,2 +1,0 @@
-#!/bin/sh
-printf '%s\n' '{"protocolVersion":1,"status":"ok","result":{"snapshotId":"1111111111111111111111111111111111111111111111111111111111111111","adapterVersion":"0.1.0","treeSitterVersion":"0.26.11","rustGrammarVersion":"0.24.2","parserComplete":true,"textualFallbackRequired":true,"fallbackFacts":[{"path":"src/a.rs","startByte":99,"endByte":100,"syntaxKind":"macro-invocation","status":"textual-fallback-required"}]}}'

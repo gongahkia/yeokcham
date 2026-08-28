@@ -178,7 +178,8 @@ let error_to_string = function
   | Unknown_epoch -> "V4 authority epoch is unknown"
   | Invalid_epoch detail -> "invalid V4 authority epoch: " ^ detail
   | Duplicate_epoch -> "duplicate V4 authority epoch"
-  | Authority_fork -> "V4 authority fork requires explicit reconciliation"
+  | Authority_fork ->
+      "V4 authority fork requires an explicit authority selection or reconciliation"
   | Revoked_device -> "V4 device is revoked in this authority epoch"
   | Unauthorized_epoch_issuer ->
       "V4 authority epoch issuer is not an active administrator in every parent"

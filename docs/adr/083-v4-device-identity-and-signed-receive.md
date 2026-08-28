@@ -11,9 +11,9 @@ revision, whether that author is allowed in this repository, or whether all
 referenced snapshot objects arrived intact. Usernames improve local
 readability, but must not become identity or authority.
 
-V2 and V3 contain authority, MLS, and peer protocols. They do not define the
-smaller V4 source-control model. Reusing their cryptographic primitive is
-appropriate; importing their authority graph, encrypted state, or transport
+Earlier product tracks contained authority and peer protocols. They do not
+define the smaller V4 source-control model. Reusing a cryptographic primitive
+is appropriate; importing prior authority graphs, encrypted state, or transport
 semantics is not.
 
 ## Decision
@@ -45,10 +45,11 @@ test-only file provider requires the explicit
 `YEOKCHAM_V4_TEST_SIGNER_DIRECTORY` environment variable. The provider
 interface allows an external signer/agent later without changing signed bytes.
 
-Revocation and administrator/device key rotation require a causal epoch
-successor and are specified as future record kinds. This tranche does not
-implement them. Readers reject unsupported revocation or epoch records rather
-than accepting a permanently-authorized interpretation.
+ADR-084 extends this certificate and receive boundary with causal authority
+epochs, forward-looking revocation, exact late-arrival adoption, device
+rotation, recovery, and phrase-checked join. It is the authoritative lifecycle
+decision; this ADR remains the identity, signing, signer-custody, and baseline
+offline-receive decision.
 
 Offline exchange is a versioned directory package with canonical manifest,
 signed identity/certificate/revision records, and immutable object files named
@@ -77,8 +78,7 @@ working tree, draft, delivery, or existing resolution.
 
 V4 gains explicit, inspectable authorship and offline collaboration without
 introducing trust-on-first-use, a hosted service, automatic merge, or automatic
-delivery. Key loss/removal recovery remains deliberately incomplete until the
-epoch successor slice is implemented, so V4 does not promise revocation yet.
+delivery. Lifecycle consequences are specified and tested in ADR-084.
 
 ## Verification
 
@@ -88,12 +88,9 @@ alternate root, missing snapshot closure, duplicate revisions, state-wrapper
 preservation, and working-tree preservation. The package verifier performs
 its validation in a temporary store before imports and state-head publication.
 
-Still required before expanding this boundary are RFC 8032 vectors, a package
-manifest golden fixture, generated signing/codec properties, duplicate or
-missing certificate negative cases, parent mismatch, new-device join with
-independent root confirmation, and Linux execution of the Secret Service
-provider and watcher test. The present Darwin run is not evidence for those
-Linux behaviours.
+The remaining platform evidence is Linux execution of the real watcher loop;
+the Darwin run is not evidence for that behaviour. Further signer providers and
+transport require separate decisions.
 
 ## References
 

@@ -1,3 +1,0 @@
-(library
- (name yeokcham_local_daemon)
- (libraries mirage-crypto-rng.unix unix yeokcham_cutover yeokcham_hash))

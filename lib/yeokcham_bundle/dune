@@ -1,8 +1,0 @@
-(library
- (name yeokcham_bundle)
- (libraries
-  mirage-crypto
-  yeokcham_encoding
-  yeokcham_envelope
-  yeokcham_hash
-  yeokcham_store))

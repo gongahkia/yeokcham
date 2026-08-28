@@ -204,33 +204,49 @@ val register_username :
   (status, error) result
 
 val enroll_device :
+  parent:string option ->
   root:string ->
   subject:Yeokcham_v4_trust.device ->
   role:Yeokcham_v4_trust.role ->
   username:Yeokcham_v4_model.Username.t ->
   signing_capability:Yeokcham_v4_trust.signing_capability ->
   (status, error) result
-(** An already authorized administrator enrols [subject]. The username is only a
-    local display registration made alongside, never certificate data. *)
+(** An already authorized administrator enrols [subject]. On an authority fork,
+    [parent] must name the single current head this branch-local action advances.
+    The username is only local display registration made alongside, never
+    certificate data. *)
 
 val revoke_device :
+  parent:string option ->
   root:string ->
   device:Yeokcham_v4_model.Device_id.t ->
   signing_capability:Yeokcham_v4_trust.signing_capability ->
   (status, error) result
-(** Advances every current authority head only when the local device is a
-    common active administrator. Historical records remain verifiable; new
-    records by the revoked device do not. A local device must use rotation
-    rather than revoking itself. *)
+(** Advances one authority head. On a fork, [parent] must explicitly name that
+    current head. Historical records remain verifiable; new records by the
+    revoked device do not. A local device must use rotation rather than
+    revoking itself. *)
 
 val rotate_local_device :
+  parent:string option ->
   root:string ->
   replacement:Yeokcham_v4_trust.device ->
   signing_capability:Yeokcham_v4_trust.signing_capability ->
   (status, error) result
 (** Atomically enrolls [replacement], revokes the current local device, and
-    changes the local certificate. The replacement private key must already be
-    in the platform signer. *)
+    changes the local certificate in one selected branch. On a fork, [parent]
+    must name that current head. The replacement private key must already be in
+    the platform signer. *)
+
+val reconcile_authority :
+  root:string ->
+  parents:string list ->
+  signing_capability:Yeokcham_v4_trust.signing_capability ->
+  (status, error) result
+(** Explicitly creates a multi-parent authority successor. [parents] must be a
+    strictly sorted, duplicate-free list of at least two current heads. It
+    leaves every unselected concurrent head active. The local device must be an
+    administrator active in every named parent. *)
 
 val recover_authority :
   root:string ->
@@ -262,15 +278,17 @@ val review_package : root:string -> package:string -> (package_review list, erro
     importing objects or modifying the model or working tree. *)
 
 val adopt_package_revision :
+  authority_epoch:string option ->
   root:string ->
   package:string ->
   revision:Yeokcham_v4_model.Revision_id.t ->
   signing_capability:Yeokcham_v4_trust.signing_capability ->
   (status, error) result
 (** Records a current-head administrator's one-time adoption for one exact,
-    currently review-required package record. The record and authority closure
-    are persisted, but package objects and model revisions are not imported;
-    call [receive_package] afterwards. *)
+    currently review-required package record. On an authority fork,
+    [authority_epoch] must select the current head issuing the adoption. The
+    record and authority closure are persisted, but package objects and model
+    revisions are not imported; call [receive_package] afterwards. *)
 
 val restore :
   root:string ->
@@ -314,11 +332,14 @@ val share :
   (status, error) result
 
 val share_signed :
+  authority_epoch:string option ->
   root:string ->
   change:Yeokcham_v4_model.Change_id.t ->
   revision:Yeokcham_v4_model.Revision_id.t ->
   signing_capability:Yeokcham_v4_trust.signing_capability ->
   (status, error) result
+(** When authority has multiple current heads, [authority_epoch] must select the
+    current head recorded in the revision signature. *)
 
 val withdraw :
   root:string -> change:Yeokcham_v4_model.Change_id.t -> (status, error) result
@@ -332,6 +353,7 @@ val resolve :
   (status, error) result
 
 val resolve_signed :
+  authority_epoch:string option ->
   root:string ->
   decision:Yeokcham_v4_model.Decision_id.t ->
   change:Yeokcham_v4_model.Change_id.t ->
@@ -339,6 +361,8 @@ val resolve_signed :
   tree:string option ->
   signing_capability:Yeokcham_v4_trust.signing_capability ->
   (status, error) result
+(** When authority has multiple current heads, [authority_epoch] must select the
+    current head recorded in the resolution signature. *)
 
 val create_package : root:string -> destination:string -> (unit, error) result
 

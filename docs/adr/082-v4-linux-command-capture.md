@@ -15,8 +15,8 @@ activity. macOS and WSL watchers are out of scope.
 ## Decision drivers
 
 - Keep exact scan as authority; the watcher only requests a save.
-- Use the existing Linux inotify adapter as a generic substrate, not V2 daemon
-  semantics.
+- Use the existing Linux inotify adapter as a generic substrate, not prior
+  daemon semantics.
 - Honor the contract: 1s quiet, 30s maximum delay; failed scans keep the
   previous checkpoint.
 - Fail clearly on non-Linux hosts.
@@ -25,7 +25,7 @@ activity. macOS and WSL watchers are out of scope.
 
 ### Platform-specific capture daemons
 
-Rejected for this slice. They import V2 product behaviour and macOS/WSL work
+Rejected for this slice. They import prior product behaviour and macOS/WSL work
 the contract excludes.
 
 ### Status warning plus Linux `watch` calling `save`
@@ -38,7 +38,7 @@ Linux process that debounces inotify and invokes the same capture path.
 `status` scans the current tree and prints `capture command` plus
 `uncaptured yes|no`.
 
-`yeokcham-v4 watch` exists only where `yeokcham_linux_watcher` links. It
+`yeokcham watch` exists only where `yeokcham_linux_watcher` links. It
 debounces path changes for one quiet second, captures after thirty seconds of
 sustained writes, captures immediately on overflow or watcher loss, then
 restarts the watcher. `.git` and `.yeokcham` events do not schedule a save.
@@ -83,5 +83,5 @@ that test has actually passed on Linux.
 
 ## CLI and user impact
 
-`yeokcham-v4 status` always names command capture. `yeokcham-v4 watch` is the
+`yeokcham status` always names command capture. `yeokcham watch` is the
 Linux automatic-capture loop.

@@ -1,6 +1,0 @@
-(library
- (name yeokcham_cli_progress)
- (foreign_stubs
-  (language c)
-  (names terminal_width_stubs))
- (libraries threads unix))

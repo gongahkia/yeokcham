@@ -89,5 +89,5 @@ decodes as empty pins and re-encodes to v3. Version 1 still decodes. Fixture
 
 ## CLI and user impact
 
-`yeokcham-v4 pin`, `unpin`, and `compact [--keep N] [--dry-run] [--explain]`.
+`yeokcham pin`, `unpin`, and `compact [--keep N] [--dry-run] [--explain]`.
 Compaction does not capture the working tree.

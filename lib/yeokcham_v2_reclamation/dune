@@ -1,7 +1,0 @@
-(library
- (name yeokcham_v2_reclamation)
- (libraries
-  yeokcham_encoding
-  yeokcham_hash
-  yeokcham_v2_model
-  yeokcham_v2_object))

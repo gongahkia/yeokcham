@@ -1,3 +1,0 @@
-(library
- (name yeokcham_exchange_store)
- (libraries yeokcham_envelope yeokcham_exchange yeokcham_store))

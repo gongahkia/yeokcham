@@ -16,8 +16,6 @@ jobs:
         with:
           ocaml-compiler: "5.5.0"
           dune-cache: true
-      - run: npm ci --ignore-scripts --no-audit --no-fund
-        working-directory: tools/yeokcham-typescript-adapter
       - run: opam install . --deps-only --with-test
       - run: opam exec -- dune build @lint @all
       - run: opam exec -- dune runtest

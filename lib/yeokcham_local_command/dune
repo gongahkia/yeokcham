@@ -1,7 +1,0 @@
-(library
- (name yeokcham_local_command)
- (libraries
-  yeokcham_inspection
-  yeokcham_local_service
-  yeokcham_scratch
-  yeokcham_store))

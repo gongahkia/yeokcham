@@ -1,3 +1,0 @@
-(library
- (name yeokcham_device_store)
- (libraries yeokcham_device yeokcham_envelope yeokcham_store))

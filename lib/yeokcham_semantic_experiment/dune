@@ -1,7 +1,0 @@
-(library
- (name yeokcham_semantic_experiment)
- (libraries
-  yeokcham_semantic_fixtures
-  yeokcham_semantic_retarget
-  yeokcham_textual_patch
-  unix))

@@ -1,3 +1,0 @@
-(library
- (name yeokcham_v2_retention)
- (libraries yeokcham_encoding yeokcham_v2_ledger yeokcham_v2_model))

@@ -5,7 +5,7 @@ Yeokcham is a model-first research prototype. Contributions must preserve the se
 ## Before changing code
 
 1. Read the documents listed in `AGENTS.md` in order.
-2. Select an eligible open GitHub issue from `docs/ISSUE_TRACKING.md`, inspect its dependencies, and stay within one milestone.
+2. Inspect the relevant live GitHub issue and its dependencies, and stay within one milestone.
 3. Record the active vertical slice, types, invariants, tests, and ADR impact in the linked issue.
 4. Open or amend an ADR before implementing an architectural or persistent-format decision.
 
@@ -28,7 +28,7 @@ Use OCaml 5.5.0 and Dune 3.23 or newer.
 
 ```bash
 make setup
-make check
+make ci
 ```
 
 Use `make format` to apply formatting. Generated `yeokcham.opam` changes must be produced from `dune-project` and applied with `dune promote`.
@@ -38,7 +38,7 @@ Use `make format` to apply formatting. Generated `yeokcham.opam` changes must be
 - Keep each commit limited to one model change or linked issue.
 - Include the invariant and tests in the commit or pull-request description.
 - Update or close the linked GitHub issue; update the formal model when semantics change.
-- Add golden fixtures for persistent-format changes and retain old-format fixtures.
+- Add canonical golden fixtures for persistent-format changes.
 - Record experiment results separately from product claims.
 - Do not use OCaml `Marshal` for persistent data.
 - Do not overstate unmeasured or uncertain behavior.

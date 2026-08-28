@@ -1,8 +1,0 @@
-(library
- (name yeokcham_ref_event)
- (libraries
-  mirage-crypto-ec
-  yeokcham_encoding
-  yeokcham_hash
-  yeokcham_id
-  yeokcham_store))

@@ -1,3 +1,0 @@
-(library
- (name yeokcham_typescript_adapter)
- (libraries unix yeokcham_hash yeokcham_snapshot yeokcham_store))

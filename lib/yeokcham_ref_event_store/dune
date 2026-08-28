@@ -1,3 +1,0 @@
-(library
- (name yeokcham_ref_event_store)
- (libraries yeokcham_envelope yeokcham_ref_event yeokcham_store))

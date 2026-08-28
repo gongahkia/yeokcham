@@ -5,10 +5,9 @@
 
 ## Context
 
-Yeokcham V3 separates scratch, capsules, workspaces, and releases.  That is a
-useful research model, but it exposes too many daily concepts for the target
-audience: solo developers and small multidisciplinary teams that want recovery
-and collaboration without Git procedure.
+Earlier Yeokcham experiments separated more concepts than the daily V4 user
+model needs. V4 targets solo developers and small multidisciplinary teams that
+want recovery and collaboration without Git procedure.
 
 ## Decision
 
@@ -20,10 +19,9 @@ non-overlap composition, durable decisions, and manual delivery.
 
 Exact snapshots, canonical storage, guarded restore, retention, Linux watcher
 normalisation, and property-test practices may be retained behind V4
-interfaces.  Capsules, workspaces, Git interchange, and V2 ledger/MLS records
-do not define the V4 core model.  Transport is an adapter boundary; trusted,
-direct, managed, and end-to-end encrypted delivery of the same signed change
-records are supported without changing source-control semantics.
+interfaces. Capsules, workspaces, Git interchange, and prior ledger/MLS
+records do not define the V4 core model. Transport is a future adapter boundary;
+V4 currently supports only verified local directory packages.
 
 The first V4 persistent adapter uses the proven immutable object store only as
 a storage substrate. It reserves `V4_project_state` and one `v4-project-state`

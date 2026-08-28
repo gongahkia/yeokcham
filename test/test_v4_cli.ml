@@ -580,7 +580,7 @@ let command_receives_a_verified_offline_package_without_materializing_it () =
         |> require_ok Service.error_to_string);
       write_file source "main.ml" "let version = 2\n";
       ignore
-        (Service.share_signed ~root:source
+        (Service.share_signed ~authority_epoch:None ~root:source
            ~change:(model_id Model.Change_id.of_string "change-source")
            ~revision:(model_id Model.Revision_id.of_string "revision-source")
            ~signing_capability:administrator_capability
@@ -775,6 +775,52 @@ let command_joins_only_after_comparing_the_root_phrase () =
         (In_channel.with_open_bin (Filename.concat destination "main.ml")
            In_channel.input_all))
 
+let command_refreshes_an_initial_recovery_package_without_changing_authority () =
+  with_directory "yeokcham-v4-cli-recovery-refresh-" (fun root ->
+      write_file root "main.ml" "let version = 1\n";
+      let output, errors, status =
+        run
+          [
+            "init";
+            "--root";
+            root;
+            "--username";
+            "alice";
+            "--draft";
+            "draft-one";
+            "--title";
+            "recovery";
+          ]
+      in
+      require_success "recovery init" status errors;
+      let mnemonic =
+        line_after "recovery-mnemonic (record offline; it is shown only now)" output
+      in
+      let initial_package =
+        Filename.concat (Filename.concat root ".yeokcham") "recovery-v1.cbor"
+      in
+      let refreshed_package = Filename.concat root "recovery-copy.cbor" in
+      let output, errors, status =
+        run
+          [
+            "recovery";
+            "refresh";
+            "--root";
+            root;
+            "--package";
+            initial_package;
+            "--mnemonic";
+            mnemonic;
+            "--output";
+            refreshed_package;
+          ]
+      in
+      require_success "recovery refresh" status errors;
+      expect_output_contains "refresh names the exclusively written package"
+        ("recovery-package " ^ refreshed_package) output;
+      Alcotest.(check bool) "refresh writes an additional package" true
+        (Sys.file_exists refreshed_package))
+
 let watch_is_linux_only () =
   with_directory "yeokcham-v4-cli-watch-" (fun root ->
       let uname =
@@ -818,6 +864,9 @@ let () =
             command_creates_and_enrols_a_second_device_without_using_its_username_as_identity;
           Alcotest.test_case "join requires a compared root phrase" `Quick
             command_joins_only_after_comparing_the_root_phrase;
+          Alcotest.test_case
+            "recovery refresh writes an additional encrypted package" `Quick
+            command_refreshes_an_initial_recovery_package_without_changing_authority;
           Alcotest.test_case "watch is Linux-only" `Quick watch_is_linux_only;
         ] );
     ]
