@@ -25,6 +25,13 @@ device, and imports a verified directory package without materialising it.
 This is an offline package adapter, not a network transport or a complete
 new-device join workflow.
 
+The next V4 vertical slice is ADR-084 authority lifecycle: branch-scoped,
+signed authority epochs; explicit reconciliation; revocation frontiers;
+late-work review/adoption; one-use authorisations; atomic rotation; a
+twelve-word root comparison at fresh-device join; and an optional encrypted
+24-word-mnemonic recovery package. This is deliberately separate from content
+decisions and does not change the meaning of `delivered`.
+
 The record slice owns these types: `state`, `checkpoint`, `draft`,
 `shared_change`, `change_revision`, `edit`, `resolution`, `delivery`, and
 `username_registration`. Its

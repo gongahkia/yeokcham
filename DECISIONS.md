@@ -194,3 +194,4 @@ The ADR lifecycle, numbering rules, and template are defined in [`docs/adr/READM
 - [ADR-081 — V4 bounded checkpoint retention](docs/adr/081-v4-bounded-checkpoint-retention.md) — Accepted.
 - [ADR-082 — V4 Linux command capture and watcher debounce](docs/adr/082-v4-linux-command-capture.md) — Accepted.
 - [ADR-083 — V4 device identity, signatures, and verified receive](docs/adr/083-v4-device-identity-and-signed-receive.md) — Accepted.
+- [ADR-084 — V4 branching authority epochs and recovery](docs/adr/084-v4-branching-authority-epochs-and-recovery.md) — Accepted.

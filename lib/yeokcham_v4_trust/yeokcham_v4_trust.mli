@@ -19,6 +19,10 @@ type generated_device
 type certificate
 type membership
 type signed_revision
+type epoch
+type authority
+type authorization
+type adoption
 type role = Member | Administrator
 
 type error =
@@ -40,6 +44,16 @@ type error =
   | Duplicate_device
   | Unknown_author_certificate
   | Revision_author_mismatch
+  | Unknown_epoch
+  | Invalid_epoch of string
+  | Duplicate_epoch
+  | Authority_fork
+  | Revoked_device
+  | Unauthorized_epoch_issuer
+  | Invalid_recovery_authority
+  | Unknown_authorization
+  | Authorization_mismatch
+  | Duplicate_authorization
   | Record_error of Yeokcham_v4_record.error
 
 val error_to_string : error -> string
@@ -114,3 +128,79 @@ val decode_signed_revision : string -> (signed_revision, error) result
 
 val verify_signed_revision :
   membership -> signed_revision -> (unit, error) result
+
+(** Branching authority epochs are a public, immutable policy graph.  They are
+    deliberately separate from username registration and private-key custody. *)
+val epoch_id : epoch -> string
+val epoch_parents : epoch -> string list
+val epoch_revoked : epoch -> Model.Device_id.t list
+val epoch_frontier : epoch -> Model.Revision_id.t list
+val epoch_recovery_device : epoch -> device
+val encode_epoch : epoch -> string
+val decode_epoch : string -> (epoch, error) result
+
+val root_epoch :
+  membership:membership ->
+  root_certificate:string ->
+  recovery_device:device ->
+  signing_capability ->
+  (epoch, error) result
+
+val successor_epoch :
+  authority ->
+  parents:string list ->
+  certificates:certificate list ->
+  revoked:Model.Device_id.t list ->
+  frontier:Model.Revision_id.t list ->
+  recovery_device:device ->
+  issuer:string ->
+  signing_capability ->
+  (epoch, error) result
+(** Creates a one-parent lifecycle epoch or an explicit multi-parent
+    reconciliation. The issuer must be an administrator in every parent. *)
+
+val verify_authority :
+  membership:membership -> epoch list -> (authority, error) result
+val extend_authority : authority -> epoch list -> (authority, error) result
+val authority_membership : authority -> membership
+val authority_epochs : authority -> epoch list
+val authority_heads : authority -> string list
+val authority_epoch : authority -> string -> (epoch, error) result
+val authority_device_active : authority -> epoch:string -> device -> bool
+val authority_device_administrator : authority -> epoch:string -> device -> bool
+
+val sign_revision_at :
+  authority ->
+  epoch:string ->
+  certificate:string ->
+  signing_capability ->
+  Model.change_revision ->
+  (signed_revision, error) result
+val signed_revision_epoch : signed_revision -> string option
+val verify_signed_revision_at : authority -> signed_revision -> (unit, error) result
+
+val make_authorization :
+  authority ->
+  epoch:string ->
+  issuer:string ->
+  signing_capability ->
+  device:device ->
+  revision:Model.Revision_id.t ->
+  change:Model.Change_id.t ->
+  (authorization, error) result
+val encode_authorization : authorization -> string
+val decode_authorization : string -> (authorization, error) result
+val authorization_revision : authorization -> Model.Revision_id.t
+val verify_authorization : authority -> authorization -> (unit, error) result
+
+val make_adoption :
+  authority ->
+  epoch:string ->
+  issuer:string ->
+  signing_capability ->
+  signed_revision:signed_revision ->
+  (adoption, error) result
+val encode_adoption : adoption -> string
+val decode_adoption : string -> (adoption, error) result
+val adoption_revision : adoption -> Model.Revision_id.t
+val verify_adoption : authority -> adoption -> (unit, error) result

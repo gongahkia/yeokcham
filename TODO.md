@@ -1,7 +1,28 @@
 # V4 roadmap
 
-This file is the local source of truth for V4 slice tracking. Completion claims
-require the stated acceptance criteria and recorded verification evidence.
+This file is the local source of truth for the V4 replacement track. Completion
+claims require the stated acceptance criteria and recorded verification
+evidence.
+
+1. Complete branch-safe device lifecycle and recovery (ADR-084).
+   - Add pure canonical authority epochs, branch-scoped signed revisions,
+     causal revocation frontiers, durable authority review/adoption, one-use
+     authorisations, atomic rotation, and a human reconciliation path.
+   - Add a safe fresh-device join that verifies a twelve-word root phrase and
+     imports a full authority closure without touching the working tree.
+   - Add optional creation and one-time use of a 24-word-mnemonic encrypted
+     recovery package. A successful use revokes the replaced device and rotates
+     recovery authority.
+   - Every new record needs canonical/legacy decoder, golden, unit, generated,
+     package-failure, and two-repository tests.
+
+2. Retire the V1--V3 product tracks after the lifecycle tests pass.
+   - Promote V4 as the sole `yeokcham` executable. Remove old commands, product
+     code, fixtures, documentation, and V1--V3 issues from `main`; no migration
+     or compatibility alias is required because there are no current users.
+   - Retain unversioned encoding, envelope, object-store, snapshot, hashing,
+     chunking, testkit, and Linux watcher modules as V4 foundations.
+   - Close #242, #243, and #244 with the documented retirement disposition.
 
 1. Seal the current local slice.
    - The committed CLI and model APIs agree; the Linux watcher test supplies

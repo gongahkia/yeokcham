@@ -8,6 +8,16 @@ Each core claim should map to an invariant, generated test, benchmark, or compar
 
 Yeokcham is a local VCS and persistent-data-model project. Testing is limited to repository correctness and checked-in local fixtures; external security analysis is outside scope. Bounds checks, corruption detection, atomic writes, and malformed-input handling remain required storage-system behavior.
 
+### V4 authority lifecycle evidence
+
+ADR-084 requires deterministic unit and generated tests for epoch graph
+causality, parent-order independence, fork visibility, common-administrator
+reconciliation, revocation frontiers, one-time adoption/authorisation, rotation,
+join phrase mismatch, recovery package tampering/rotation, and two-repository
+working-tree preservation. Canonical authority, recovery, package, and state
+records require exact golden fixtures; RFC 8032 vectors verify the Ed25519
+primitive boundary.
+
 ## 2. Test layers
 
 ### Unit tests

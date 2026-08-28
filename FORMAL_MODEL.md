@@ -31,11 +31,17 @@ type v4_device
 type v4_certificate
 type v4_membership
 type v4_signed_revision
+type v4_authority_epoch
+type v4_authority_review
+type v4_recovery_package
 
 type v4_collaboration = {
   repository : bytes32;
   certificates : v4_certificate list;
+  authority_epochs : v4_authority_epoch list;
+  authority_heads : bytes32 list;
   signed_revisions : v4_signed_revision list;
+  authority_reviews : v4_authority_review list;
   local_certificate : bytes32;
 }
 
@@ -127,6 +133,17 @@ V4 invariants are:
   verifies canonical object IDs and every revision snapshot closure in staging,
   and advances at most the V4 state head after the pure receive transition. It
   neither mutates a working tree nor selects a conflict resolution.
+- Authority epochs are immutable, signed, and may have multiple named heads.
+  A revision names one authority branch; concurrent authority state does not
+  imply a union of permissions or a global work freeze. An epoch reconciliation
+  must be signed by an administrator active in every selected parent branch.
+- Revocation carries a causal revision frontier. Work arriving beyond a revoked
+  device's known frontier is retained for explicit authority review, not applied
+  as ordinary shared work. A signed adoption or one-use authorisation binds only
+  the exact reviewed revision it names.
+- Rotation atomically adds a replacement device and revokes the old one. An
+  optional recovery package stores a distinct recovery capability encrypted by
+  a 24-word secret; it never stores an ordinary device private key.
 - Decision materialisation derives a direct child directory only from a safe
   local display handle (or the fixed fallback `device`) and a canonical rank.
   It never derives a filesystem child path from a revision identifier.
