@@ -18,10 +18,7 @@ let error_to_string = function
   | Model_error error -> Model.error_to_string error
   | Noncanonical_bytes -> "V4 state record is not canonically encoded"
 
-let legacy_schema_version = 1L
-let v2_schema_version = 2L
-let v3_schema_version = 3L
-let schema_version = 4L
+let schema_version = 1L
 let ( let* ) = Result.bind
 
 let construction value =
@@ -396,7 +393,7 @@ let sort_usernames =
       Model.Device_id.compare left.Model.username_device
         right.Model.username_device)
 
-let encode_state_value ~version ~checkpoints ~pins ~usernames state =
+let encode_state_value state =
   let* creator = encode_device_id state.Model.state_creator in
   let* baseline = encode_snapshot state.Model.state_baseline in
   let* active = encode_draft_id state.Model.state_active_draft in
@@ -404,10 +401,7 @@ let encode_state_value ~version ~checkpoints ~pins ~usernames state =
     encode_list encode_draft (sort_drafts state.Model.state_drafts)
   in
   let* checkpoints =
-    match checkpoints with
-    | None -> Ok None
-    | Some checkpoints ->
-        encode_list encode_checkpoint checkpoints |> Result.map Option.some
+    encode_list encode_checkpoint state.Model.state_checkpoints
   in
   let* changes =
     encode_list encode_change (sort_changes state.Model.state_changes)
@@ -419,106 +413,24 @@ let encode_state_value ~version ~checkpoints ~pins ~usernames state =
   let* deliveries =
     encode_list encode_delivery (sort_deliveries state.Model.state_deliveries)
   in
-  let* pins =
-    match pins with
-    | None -> Ok None
-    | Some pins ->
-        encode_list encode_snapshot (sort_pins pins) |> Result.map Option.some
-  in
+  let* pins = encode_list encode_snapshot (sort_pins state.Model.state_pins) in
   let* usernames =
-    match usernames with
-    | None -> Ok None
-    | Some usernames ->
-        encode_list encode_username_registration (sort_usernames usernames)
-        |> Result.map Option.some
+    encode_list encode_username_registration (sort_usernames state.Model.state_usernames)
   in
-  match (checkpoints, pins, usernames) with
-  | None, None, None ->
-      array
-        [
-          Encoding.integer version;
-          creator;
-          baseline;
-          active;
-          drafts;
-          changes;
-          resolutions;
-          deliveries;
-        ]
-  | Some checkpoints, None, None ->
-      array
-        [
-          Encoding.integer version;
-          creator;
-          baseline;
-          active;
-          drafts;
-          checkpoints;
-          changes;
-          resolutions;
-          deliveries;
-        ]
-  | Some checkpoints, Some pins, None ->
-      array
-        [
-          Encoding.integer version;
-          creator;
-          baseline;
-          active;
-          drafts;
-          checkpoints;
-          changes;
-          resolutions;
-          deliveries;
-          pins;
-        ]
-  | Some checkpoints, Some pins, Some usernames ->
-      array
-        [
-          Encoding.integer version;
-          creator;
-          baseline;
-          active;
-          drafts;
-          checkpoints;
-          changes;
-          resolutions;
-          deliveries;
-          pins;
-          usernames;
-        ]
-  | None, Some _, _ ->
-      Error (Invalid_schema "legacy V4 state cannot encode pins")
-  | _, _, Some _ ->
-      Error (Invalid_schema "legacy V4 state cannot encode usernames")
-
-let encode_current_state_value state =
-  encode_state_value ~version:schema_version
-    ~checkpoints:(Some state.Model.state_checkpoints)
-    ~pins:(Some state.Model.state_pins)
-    ~usernames:(Some state.Model.state_usernames) state
-
-let encode_v3_state_value state =
-  encode_state_value ~version:v3_schema_version
-    ~checkpoints:(Some state.Model.state_checkpoints)
-    ~pins:(Some state.Model.state_pins) ~usernames:None state
-
-let encode_v2_state_value state =
-  encode_state_value ~version:v2_schema_version
-    ~checkpoints:(Some state.Model.state_checkpoints) ~pins:None ~usernames:None
-    state
-
-let encode_legacy_state_value state =
-  encode_state_value ~version:legacy_schema_version ~checkpoints:None ~pins:None
-    ~usernames:None state
-
-let legacy_checkpoints baseline drafts =
-  baseline
-  :: List.map
-       (fun (draft : Model.draft) -> draft.Model.latest_checkpoint)
-       drafts
-  |> List.sort_uniq Model.Snapshot_id.compare
-  |> List.map (fun checkpoint_snapshot -> Model.{ checkpoint_snapshot })
+  array
+    [
+      Encoding.integer schema_version;
+      creator;
+      baseline;
+      active;
+      drafts;
+      checkpoints;
+      changes;
+      resolutions;
+      deliveries;
+      pins;
+      usernames;
+    ]
 
 let decode_state_components ~creator ~baseline ~active ~drafts ~checkpoints
     ~changes ~resolutions ~deliveries ~pins ~usernames =
@@ -526,28 +438,15 @@ let decode_state_components ~creator ~baseline ~active ~drafts ~checkpoints
   let* state_baseline = decode_snapshot baseline in
   let* state_active_draft = decode_draft_id active in
   let* state_drafts = decode_list "drafts" decode_draft drafts in
-  let* state_checkpoints =
-    match checkpoints with
-    | Some checkpoints ->
-        decode_list "checkpoints" decode_checkpoint checkpoints
-    | None -> Ok (legacy_checkpoints state_baseline state_drafts)
-  in
+  let* state_checkpoints = decode_list "checkpoints" decode_checkpoint checkpoints in
   let* state_changes = decode_list "shared changes" decode_change changes in
   let* state_resolutions =
     decode_list "resolutions" decode_resolution resolutions
   in
   let* state_deliveries = decode_list "deliveries" decode_delivery deliveries in
-  let* state_pins =
-    match pins with
-    | Some pins -> decode_list "pins" decode_snapshot pins
-    | None -> Ok []
-  in
+  let* state_pins = decode_list "pins" decode_snapshot pins in
   let* state_usernames =
-    match usernames with
-    | Some usernames ->
-        decode_list "username registrations" decode_username_registration
-          usernames
-    | None -> Ok []
+    decode_list "username registrations" decode_username_registration usernames
   in
   Ok
     Model.
@@ -585,64 +484,13 @@ let decode_state_value value =
         Error (Unsupported_schema_version version)
       else
         decode_state_components ~creator ~baseline ~active ~drafts
-          ~checkpoints:(Some checkpoints) ~changes ~resolutions ~deliveries
-          ~pins:(Some pins) ~usernames:(Some usernames)
-        |> Result.map (fun state -> (version, state))
-  | [
-   version;
-   creator;
-   baseline;
-   active;
-   drafts;
-   checkpoints;
-   changes;
-   resolutions;
-   deliveries;
-   pins;
-  ] ->
-      let* version = decoded_integer "V4 state schema version" version in
-      if not (Int64.equal version v3_schema_version) then
-        Error (Unsupported_schema_version version)
-      else
-        decode_state_components ~creator ~baseline ~active ~drafts
-          ~checkpoints:(Some checkpoints) ~changes ~resolutions ~deliveries
-          ~pins:(Some pins) ~usernames:None
-        |> Result.map (fun state -> (version, state))
-  | [
-   version;
-   creator;
-   baseline;
-   active;
-   drafts;
-   checkpoints;
-   changes;
-   resolutions;
-   deliveries;
-  ] ->
-      let* version = decoded_integer "V4 state schema version" version in
-      if not (Int64.equal version v2_schema_version) then
-        Error (Unsupported_schema_version version)
-      else
-        decode_state_components ~creator ~baseline ~active ~drafts
-          ~checkpoints:(Some checkpoints) ~changes ~resolutions ~deliveries
-          ~pins:None ~usernames:None
-        |> Result.map (fun state -> (version, state))
-  | [
-   version; creator; baseline; active; drafts; changes; resolutions; deliveries;
-  ] ->
-      let* version = decoded_integer "V4 state schema version" version in
-      if not (Int64.equal version legacy_schema_version) then
-        Error (Unsupported_schema_version version)
-      else
-        decode_state_components ~creator ~baseline ~active ~drafts
-          ~checkpoints:None ~changes ~resolutions ~deliveries ~pins:None
-          ~usernames:None
+          ~checkpoints ~changes ~resolutions ~deliveries ~pins ~usernames
         |> Result.map (fun state -> (version, state))
   | _ -> Error (Invalid_schema "V4 state has an unsupported field count")
 
 let encode_state state =
   let* _ = Model.import state |> model in
-  let* value = encode_current_state_value state in
+  let* value = encode_state_value state in
   Ok (Encoding.encode value)
 
 let decode_state encoded =
@@ -652,15 +500,7 @@ let decode_state encoded =
   in
   let* version, state = decode_state_value value in
   let* _ = Model.import state |> model in
-  let* canonical_value =
-    if Int64.equal version legacy_schema_version then
-      encode_legacy_state_value state
-    else if Int64.equal version v2_schema_version then
-      encode_v2_state_value state
-    else if Int64.equal version v3_schema_version then
-      encode_v3_state_value state
-    else encode_current_state_value state
-  in
+  let* canonical_value = encode_state_value state in
   let canonical = Encoding.encode canonical_value in
   if String.equal encoded canonical then Ok state else Error Noncanonical_bytes
 
