@@ -17,6 +17,8 @@ type error =
   | Io_error of { path : string; operation : string; message : string }
 
 val error_to_string : error -> string
+val is_missing : error -> bool
+val is_immutable_conflict : error -> bool
 val max_body_bytes : int
 val max_page_size : int
 

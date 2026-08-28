@@ -31,6 +31,12 @@ let error_to_string = function
   | Io_error { path; operation; message } ->
       Printf.sprintf "V4 relay %s %s: %s" operation path message
 
+let[@warning "-4"] is_missing = function Missing _ -> true | _ -> false
+
+let[@warning "-4"] is_immutable_conflict = function
+  | Already_exists_with_different_bytes _ -> true
+  | _ -> false
+
 let valid_hex value =
   String.length value = 64
   && String.for_all

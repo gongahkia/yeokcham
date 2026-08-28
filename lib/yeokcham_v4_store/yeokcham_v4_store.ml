@@ -476,6 +476,37 @@ let collaboration_value ~project collaboration =
 let encode_collaborative_state ~project collaboration =
   collaboration_value ~project collaboration |> Result.map Encoding.encode
 
+(* Version 2 has the same authority closure as version 3, but predates the
+   local-only transport state.  Keep its encoder solely for canonical decoding
+   of retained V2 objects; all new authority-aware saves use V3. *)
+let encode_collaborative_state_v2 ~project collaboration =
+  let* value = collaboration_value ~project collaboration in
+  match value with
+  | Encoding.Array
+      [ _; project; repository; certificates; epochs; revisions; authorizations;
+        adoptions; local_certificate; _transport ] ->
+      array
+        [
+          Encoding.integer 2L;
+          project;
+          repository;
+          certificates;
+          epochs;
+          revisions;
+          authorizations;
+          adoptions;
+          local_certificate;
+        ]
+      |> Result.map Encoding.encode
+  | Encoding.Array _ ->
+      Error
+        (Invalid_collaboration_state
+           "version 2 requires authority-aware collaboration")
+  | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _ | Encoding.Map _
+  | Encoding.Bool _ | Encoding.Null ->
+      Error
+        (Invalid_collaboration_state "collaborative state must be an array")
+
 let rec decode_collaborative_state encoded =
   let* value =
     Encoding.decode encoded
@@ -677,7 +708,7 @@ let rec decode_collaborative_state encoded =
           ~authorizations ~adoptions
       in
       let* collaboration = validate_collaboration ~project collaboration in
-      let* canonical = encode_collaborative_state ~project collaboration in
+      let* canonical = encode_collaborative_state_v2 ~project collaboration in
       if String.equal canonical encoded then Ok (project, collaboration)
       else
         Error
