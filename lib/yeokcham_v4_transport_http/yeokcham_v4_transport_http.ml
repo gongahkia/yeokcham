@@ -13,6 +13,7 @@ type error =
   | Unexpected_status of int
   | Response_too_large
   | Invalid_response of string
+  | Test_interrupted_upload
   | Io_error of { path : string; operation : string; message : string }
 
 let max_response_bytes = 64 * 1024 * 1024

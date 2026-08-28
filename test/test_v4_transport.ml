@@ -8,7 +8,8 @@ module Transport_http = Yeokcham_v4_transport_http
 module Transport_config = Yeokcham_v4_transport_config
 module Service = Yeokcham_v4_local_service
 module Package = Yeokcham_v4_package
-module Store = Yeokcham_store
+module Store = Yeokcham_v4_store
+module Object_store = Yeokcham_store
 
 let require_ok render = function
   | Ok value -> value
@@ -217,7 +218,7 @@ let with_https_relay run =
   let openssl = "/usr/bin/openssl" in
   let socat = "/usr/bin/socat" in
   if not (Sys.file_exists openssl && Sys.file_exists socat) then
-    Alcotest.skip "requires local openssl and socat";
+    Alcotest.skip ();
   with_directory "yeokcham-v4-https-relay-" (fun root ->
       let certificate = Filename.concat root "relay.crt" in
       let private_key = Filename.concat root "relay.key" in
@@ -282,38 +283,36 @@ let with_https_relay run =
           in
           let project = Trust.Repository_id.to_string (repository ()) in
           wait_for_https_relay client project 100;
-          run client project
-            ("https://127.0.0.1:" ^ string_of_int proxy_port)))
+          run client project ("https://127.0.0.1:" ^ string_of_int proxy_port)))
 
 let https_client_reaches_relay_through_tls_reverse_proxy () =
   with_https_relay (fun client project _url ->
-          let object_bytes = "TLS reverse proxy object" in
-          let object_id = Transport.sha256 object_bytes in
-          Transport_http.put client ~project ~kind:Transport_http.Object
-            ~id:object_id ~bytes:object_bytes
-          |> require_ok Transport_http.error_to_string;
-          let retrieved =
-            Transport_http.get client ~project ~kind:Transport_http.Object
-              ~id:object_id
-            |> require_ok Transport_http.error_to_string
-          in
-          Alcotest.(check string)
-            "the TLS proxy preserves relay object bytes" object_bytes retrieved;
-          let publication = "TLS reverse proxy publication" in
-          let publication_id = Transport.sha256 publication in
-          Transport_http.put client ~project ~kind:Transport_http.Publication
-            ~id:publication_id ~bytes:publication
-          |> require_ok Transport_http.error_to_string;
-          let publications, cursor =
-            Transport_http.list_publications client ~project ~cursor:None
-              ~limit:1
-            |> require_ok Transport_http.error_to_string
-          in
-          Alcotest.(check (list string))
-            "publication discovery crosses the TLS proxy" [ publication_id ]
-            publications;
-          Alcotest.(check (option string))
-            "one publication has no next page" None cursor)
+      let manifest_bytes = "TLS reverse proxy manifest" in
+      let manifest_id = Transport.sha256 manifest_bytes in
+      Transport_http.put client ~project ~kind:Transport_http.Manifest
+        ~id:manifest_id ~bytes:manifest_bytes
+      |> require_ok Transport_http.error_to_string;
+      let retrieved =
+        Transport_http.get client ~project ~kind:Transport_http.Manifest
+          ~id:manifest_id
+        |> require_ok Transport_http.error_to_string
+      in
+      Alcotest.(check string)
+        "the TLS proxy preserves relay manifest bytes" manifest_bytes retrieved;
+      let publication = "TLS reverse proxy publication" in
+      let publication_id = Transport.sha256 publication in
+      Transport_http.put client ~project ~kind:Transport_http.Publication
+        ~id:publication_id ~bytes:publication
+      |> require_ok Transport_http.error_to_string;
+      let publications, cursor =
+        Transport_http.list_publications client ~project ~cursor:None ~limit:1
+        |> require_ok Transport_http.error_to_string
+      in
+      Alcotest.(check (list string))
+        "publication discovery crosses the TLS proxy" [ publication_id ]
+        publications;
+      Alcotest.(check (option string))
+        "one publication has no next page" None cursor)
 
 let executable () =
   let from_test_binary =
@@ -426,7 +425,9 @@ let source_and_destination parent =
   let source_repository =
     Store.open_repository ~root:source |> require_ok Store.error_to_string
   in
-  let source_loaded = Store.load source_repository |> require_ok Store.error_to_string in
+  let source_loaded =
+    Store.load source_repository |> require_ok Store.error_to_string
+  in
   let authority =
     match source_loaded.Store.collaboration with
     | Some collaboration -> (
@@ -455,29 +456,36 @@ let upload_artifact client ~project artifact publication =
   Package.artifact_objects artifact
   |> List.iter (fun (id, bytes) ->
       Transport_http.put client ~project ~kind:Transport_http.Object
-        ~id:(Store.Stored_object_id.to_hex id) ~bytes
+        ~id:(Object_store.Stored_object_id.to_hex id)
+        ~bytes
       |> require_ok Transport_http.error_to_string);
   let manifest = Package.artifact_manifest artifact in
   Transport_http.put client ~project ~kind:Transport_http.Manifest
-    ~id:(Transport.sha256 manifest) ~bytes:manifest
+    ~id:(Transport.sha256 manifest)
+    ~bytes:manifest
   |> require_ok Transport_http.error_to_string;
   let bytes = Transport.encode_publication publication in
   Transport_http.put client ~project ~kind:Transport_http.Publication
-    ~id:(Transport.publication_id publication) ~bytes
+    ~id:(Transport.publication_id publication)
+    ~bytes
   |> require_ok Transport_http.error_to_string
 
 let interrupted_upload_leaves_received_work_durable () =
   with_https_relay (fun client project url ->
       with_directory "yeokcham-v4-interrupted-sync-" (fun parent ->
           with_test_signer (fun signer_directory ->
-              let source, destination, administrator_capability, member_capability =
+              let ( source,
+                    destination,
+                    administrator_capability,
+                    member_capability ) =
                 source_and_destination parent
               in
               Out_channel.with_open_bin (Filename.concat source "main.ml")
                 (fun channel ->
                   Out_channel.output_string channel "let version = 2\n");
               Service.share_signed ~authority_epoch:None ~root:source
-                ~change:(Model.Change_id.of_string "change-transport" |> Result.get_ok)
+                ~change:
+                  (Model.Change_id.of_string "change-transport" |> Result.get_ok)
                 ~revision:
                   (Model.Revision_id.of_string "revision-transport"
                   |> Result.get_ok)
@@ -492,12 +500,12 @@ let interrupted_upload_leaves_received_work_durable () =
               let outbound =
                 match outbound with
                 | Some outbound -> outbound
-                | None -> Alcotest.fail "source has no outbound transport package"
+                | None ->
+                    Alcotest.fail "source has no outbound transport package"
               in
               upload_artifact client ~project outbound.Service.outbound_artifact
                 outbound.Service.outbound_publication;
-              Transport_config.add ~root:destination ~name:"team"
-                ~url
+              Transport_config.add ~root:destination ~name:"team" ~url
               |> require_ok Transport_config.error_to_string;
               store_test_signer signer_directory member_capability;
               Unix.putenv "YEOKCHAM_V4_TEST_TRANSPORT_TOKEN" "test-relay-token";
@@ -509,19 +517,38 @@ let interrupted_upload_leaves_received_work_durable () =
               expect_output_contains "sync reports durable receipt"
                 "received publications 1" output;
               expect_output_contains "sync reports the interrupted upload"
-                "upload pending test-only V4 transport upload interruption" output;
+                "upload pending test-only V4 transport upload interruption"
+                output;
               let received =
-                Service.status ~root:destination |> require_ok Service.error_to_string
-              in
-              Alcotest.(check int) "received revision persists after upload failure"
-                1 received.Service.shared_change_count;
-              let retry =
-                Service.prepare_transport_outbound ~root:destination ~remote:"team"
-                  ~signing_capability:member_capability
+                Service.status ~root:destination
                 |> require_ok Service.error_to_string
               in
-              Alcotest.(check bool) "failed upload is not marked announced" true
-                (Option.is_some retry))))
+              Alcotest.(check int)
+                "received revision persists after upload failure" 1
+                received.Service.shared_change_count;
+              let retry =
+                Service.prepare_transport_outbound ~root:destination
+                  ~remote:"team" ~signing_capability:member_capability
+                |> require_ok Service.error_to_string
+              in
+              Alcotest.(check bool)
+                "failed upload is not marked announced" true
+                (Option.is_some retry);
+              Unix.putenv "YEOKCHAM_V4_TEST_TRANSPORT_FAIL_PUT" "";
+              let output, errors, status =
+                run_cli [ "sync"; "--root"; destination; "team" ]
+              in
+              require_cli_success "retry sync" errors status;
+              expect_output_contains "retry uploads the retained work"
+                "uploaded artifacts " output;
+              let after_retry =
+                Service.prepare_transport_outbound ~root:destination
+                  ~remote:"team" ~signing_capability:member_capability
+                |> require_ok Service.error_to_string
+              in
+              Alcotest.(check bool)
+                "acknowledged retry is marked announced" false
+                (Option.is_some after_retry))))
 
 let relay_is_create_only_and_paginated () =
   with_directory "yeokcham-v4-relay-" (fun root ->
@@ -584,5 +611,8 @@ let () =
             relay_is_create_only_and_paginated;
           Alcotest.test_case "HTTPS reverse proxy reaches the relay" `Slow
             https_client_reaches_relay_through_tls_reverse_proxy;
+          Alcotest.test_case
+            "interrupted upload retains received work for retry" `Slow
+            interrupted_upload_leaves_received_work_durable;
         ] );
     ]
