@@ -7,6 +7,8 @@ module Model = Yeokcham_v4_model
 module Trust = Yeokcham_v4_trust
 
 type verified
+type artifact
+type prepared
 
 type error =
   | Io_error of { path : string; operation : string; message : string }
@@ -21,6 +23,19 @@ type error =
   | Model_error of Model.error
 
 val error_to_string : error -> string
+
+val manifest_object_ids : string -> (Yeokcham_store.Stored_object_id.t list, error) result
+(** Parses and canonicality-checks a manifest without reading its object files. *)
+
+val read_artifact : package:string -> (artifact, error) result
+val artifact_manifest : artifact -> string
+val artifact_objects : artifact -> (Yeokcham_store.Stored_object_id.t * string) list
+
+val materialize_artifact :
+  destination:string -> artifact -> (unit, error) result
+(** Writes a verified manifest/object byte set as an exclusive temporary
+    directory package. The normal package receiver still performs all trust,
+    closure, and model checks before import. *)
 
 val create :
   source:Yeokcham_store.repository ->
@@ -69,6 +84,24 @@ val verify_and_import_with_authority :
     keeps authority forks explicit. [known_adoptions] are already verified,
     destination-local exact review records; they can authorize their matching
     package revision but are never imported from a mutable head. *)
+
+val prepare_with_authority :
+  package:string ->
+  authority:Trust.authority ->
+  known_adoptions:Trust.adoption list ->
+  project:Model.project ->
+  (prepared, error) result
+(** Verifies all untrusted package bytes in an isolated store and applies the
+    pure model transition, but does not import a destination object. Callers
+    can validate a whole relay-discovery batch before importing any member. *)
+
+val import_prepared :
+  destination:Yeokcham_store.repository ->
+  prepared ->
+  (verified * Model.project, error) result
+
+val prepared_verified : prepared -> verified
+val prepared_project : prepared -> Model.project
 
 val membership : verified -> Trust.membership
 val authority : verified -> Trust.authority option

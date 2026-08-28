@@ -50,6 +50,16 @@
   yeokcham_v4_trust))
 
 (test
+ (name test_v4_transport)
+ (modules test_v4_transport)
+ (libraries
+  alcotest
+  unix
+  yeokcham_v4_relay
+  yeokcham_v4_transport
+  yeokcham_v4_trust))
+
+(test
  (name v4_model_property_test)
  (modules v4_model_property_test)
  (libraries alcotest qcheck-core qcheck-alcotest yeokcham_v4_model))

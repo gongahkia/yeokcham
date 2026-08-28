@@ -14,6 +14,17 @@ type verified = {
   verified_adoptions : Trust.adoption list;
 }
 
+type artifact = {
+  artifact_manifest_value : string;
+  artifact_objects_value : (Store.Stored_object_id.t * string) list;
+}
+
+type prepared = {
+  prepared_verified_value : verified;
+  prepared_project_value : Model.project;
+  prepared_objects_value : (Store.Stored_object_id.t * Envelope.t) list;
+}
+
 type manifest = {
   manifest_repository : Trust.Repository_id.t;
   manifest_membership : Trust.membership;
@@ -502,6 +513,9 @@ let decode_manifest bytes =
         else Error Noncanonical_manifest
   | _ -> Error (Invalid_package "manifest has wrong field count")
 
+let manifest_object_ids bytes =
+  decode_manifest bytes |> Result.map (fun manifest -> manifest.manifest_object_ids)
+
 let snapshot_object_id snapshot =
   Model.Snapshot_id.to_string snapshot
   |> Store.Stored_object_id.of_hex
@@ -728,6 +742,64 @@ let package_object_bytes package object_ids =
           else read ((id, object_) :: reversed) rest
     in
     read [] object_ids
+
+let read_artifact ~package =
+  let* manifest_bytes = read_file (package_path package manifest_name) in
+  let* manifest = decode_manifest manifest_bytes in
+  let* objects = package_object_bytes package manifest.manifest_object_ids in
+  Ok
+    {
+      artifact_manifest_value = manifest_bytes;
+      artifact_objects_value =
+        List.map (fun (id, object_) -> (id, Envelope.encode object_)) objects;
+    }
+
+let artifact_manifest artifact = artifact.artifact_manifest_value
+let artifact_objects artifact = artifact.artifact_objects_value
+
+let materialize_artifact ~destination artifact =
+  if Sys.file_exists destination then Error (Destination_exists destination)
+  else
+    let* manifest = decode_manifest artifact.artifact_manifest_value in
+    let expected =
+      List.map Store.Stored_object_id.to_hex manifest.manifest_object_ids
+      |> List.sort String.compare
+    in
+    let actual =
+      List.map (fun (id, _) -> Store.Stored_object_id.to_hex id)
+        artifact.artifact_objects_value
+      |> List.sort String.compare
+    in
+    if expected <> actual then
+      Error (Invalid_package "artifact object files differ from manifest")
+    else
+      let* () = mkdir destination in
+      let* () = mkdir (package_path destination objects_name) in
+      let* () =
+        write_file_exclusive (package_path destination manifest_name)
+          artifact.artifact_manifest_value
+      in
+      let rec write = function
+        | [] -> Ok ()
+        | (id, bytes) :: rest ->
+            let* object_ =
+              Envelope.decode bytes
+              |> Result.map_error (fun error -> Envelope_error error)
+            in
+            if not (String.equal bytes (Envelope.encode object_)) then
+              Error (Invalid_package "artifact object bytes are not canonical")
+            else if
+              not (Store.Stored_object_id.equal id (Store.id_of_envelope object_))
+            then Error (Object_identity_mismatch (Store.Stored_object_id.to_hex id))
+            else
+              let* () =
+                write_file_exclusive
+                  (object_path destination (Store.Stored_object_id.to_hex id))
+                  bytes
+              in
+              write rest
+      in
+      write artifact.artifact_objects_value
 
 let rec validate_tree store tree_id =
   let* tree =
@@ -996,8 +1068,8 @@ let inspect_with_authority ~package ~authority:expected_authority =
         verified_adoptions = manifest.manifest_adoptions;
       }
 
-let verify_and_import_with_authority ~destination ~package
-    ~authority:expected_authority ~known_adoptions ~project =
+let prepare_with_authority ~package ~authority:expected_authority
+    ~known_adoptions ~project =
   let* inspected =
     inspect_with_authority ~package ~authority:expected_authority
   in
@@ -1067,23 +1139,41 @@ let verify_and_import_with_authority ~destination ~package
       let* () = stage objects in
       let* () = verify_closure staging manifest.manifest_revisions in
       let* project = apply_revisions project inspected in
-      let rec import = function
-        | [] -> Ok ()
-        | (_, object_) :: rest ->
-            let* _ =
-              Store.put destination object_
-              |> Result.map_error (fun error -> Store_error error)
-            in
-            import rest
-      in
-      let* () = import objects in
-      Ok (inspected, project))
+      Ok
+        {
+          prepared_verified_value = inspected;
+          prepared_project_value = project;
+          prepared_objects_value = objects;
+        })
+
+let import_prepared ~destination prepared =
+  let rec import = function
+    | [] -> Ok ()
+    | (_, object_) :: rest ->
+        let* _ =
+          Store.put destination object_
+          |> Result.map_error (fun error -> Store_error error)
+        in
+        import rest
+  in
+  let* () = import prepared.prepared_objects_value in
+  Ok (prepared.prepared_verified_value, prepared.prepared_project_value)
+
+let verify_and_import_with_authority ~destination ~package
+    ~authority:expected_authority ~known_adoptions ~project =
+  let* prepared =
+    prepare_with_authority ~package ~authority:expected_authority
+      ~known_adoptions ~project
+  in
+  import_prepared ~destination prepared
 
 let membership verified = verified.verified_membership
 let authority verified = verified.verified_authority
 let revisions verified = verified.verified_revisions
 let authorizations verified = verified.verified_authorizations
 let adoptions verified = verified.verified_adoptions
+let prepared_verified prepared = prepared.prepared_verified_value
+let prepared_project prepared = prepared.prepared_project_value
 
 let inspect_authority ~package =
   let* manifest = read_file (package_path package manifest_name) in
