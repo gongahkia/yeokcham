@@ -648,10 +648,11 @@ let signed_offline_receive_is_atomic_and_preserves_the_live_tree () =
       let recovery_capability = signing_capability 'r' in
       let recovery_device = trust_device recovery_capability in
       ignore
-        (Service.init_signed_with_recovery ~root:source ~username:(username "alice")
-           ~initial_draft:(draft "draft-source") ~title:"source" ~repository
-           ~device:administrator ~signing_capability:administrator_capability
-           ~recovery_device ~recovery_capability
+        (Service.init_signed_with_recovery ~root:source
+           ~username:(username "alice") ~initial_draft:(draft "draft-source")
+           ~title:"source" ~repository ~device:administrator
+           ~signing_capability:administrator_capability ~recovery_device
+           ~recovery_capability
         |> require_ok Service.error_to_string);
       write_file source "main.ml" "let version = 2\n";
       ignore
@@ -698,8 +699,8 @@ let signed_offline_receive_is_atomic_and_preserves_the_live_tree () =
       let member_epoch =
         Trust.successor_epoch root_authority
           ~parents:[ Trust.epoch_id root_epoch ]
-          ~certificates:(Trust.certificates membership) ~revoked:[] ~frontier:[]
-          ~recovery_device
+          ~certificates:(Trust.certificates membership)
+          ~revoked:[] ~frontier:[] ~recovery_device
           ~issuer:(Trust.certificate_id root_certificate)
           administrator_capability
         |> require_ok Trust.error_to_string
@@ -710,7 +711,8 @@ let signed_offline_receive_is_atomic_and_preserves_the_live_tree () =
       in
       ignore
         (Service.init_authority_collaboration ~root:destination
-           ~username:(username "bob") ~initial_draft:(draft "draft-destination")
+           ~username:(username "bob")
+           ~initial_draft:(draft "draft-destination")
            ~title:"destination" ~device:member ~authority
            ~local_certificate:(Trust.certificate_id member_certificate)
         |> require_ok Service.error_to_string);
@@ -1428,7 +1430,7 @@ let authority_forks_require_named_branch_actions_and_explicit_reconciliation ()
         before_reconciliation
         (Trust.epoch_parents reconciled))
 
-let late_package_review_adopts_one_exact_record_before_receive () =
+let late_package_review_retains_feed_forks_across_retry_before_adoption () =
   with_directory "yeokcham-v4-late-package-review-" (fun parent ->
       let source = Filename.concat parent "source" in
       let destination = Filename.concat parent "destination" in
@@ -1530,27 +1532,49 @@ let late_package_review_adopts_one_exact_record_before_receive () =
       let artifact =
         Package.read_artifact ~package |> require_ok Package.error_to_string
       in
-      let publication =
+      let root_publication =
         Transport.create_publication ~repository ~publisher:reviewer
           ~certificate:reviewer_certificate ~parents:[]
           ~manifest:(Transport.sha256 (Package.artifact_manifest artifact))
           ~signing_capability:reviewer_capability
         |> require_ok Transport.error_to_string
       in
+      let child_publication () =
+        Transport.create_publication ~repository ~publisher:reviewer
+          ~certificate:reviewer_certificate
+          ~parents:[ Transport.publication_id root_publication ]
+          ~manifest:(Transport.sha256 (Package.artifact_manifest artifact))
+          ~signing_capability:reviewer_capability
+        |> require_ok Transport.error_to_string
+      in
+      let left_publication = child_publication () in
+      let right_publication = child_publication () in
+      let arrivals =
+        [
+          { Service.publication = root_publication; package };
+          { Service.publication = left_publication; package };
+          { Service.publication = right_publication; package };
+        ]
+      in
+      let publication_ids =
+        List.map
+          (fun arrival -> Transport.publication_id arrival.Service.publication)
+          arrivals
+        |> List.sort String.compare
+      in
       let deferred =
         Service.receive_transport_batch ~root:destination ~remote:"team"
-          ~cursor:(Some (Transport.publication_id publication))
-          [ { Service.publication; package } ]
+          ~cursor:(Some (Transport.publication_id right_publication)) arrivals
         |> require_ok Service.error_to_string
       in
       Alcotest.(check int)
-        "late relay publication is recorded" 1
+        "all late relay publications are recorded" 3
         deferred.Service.discovered_publications;
       Alcotest.(check int)
         "late relay revision is not applied" 0
         deferred.Service.received_revisions;
       Alcotest.(check int)
-        "late relay publication is deferred for review" 1
+        "late relay feed fork is deferred for review" 3
         deferred.Service.deferred_publications;
       Alcotest.(check int)
         "late relay record leaves shared model unchanged" 0
@@ -1575,9 +1599,27 @@ let late_package_review_adopts_one_exact_record_before_receive () =
         | None -> Alcotest.fail "deferred relay record lost collaboration"
       in
       Alcotest.(check (list string))
-        "late relay ID enters review inbox"
-        [ Transport.publication_id publication ]
+        "the root and both feed forks enter review inbox" publication_ids
         review_inbox;
+      let retry =
+        Service.receive_transport_batch ~root:destination ~remote:"team"
+          ~cursor:(Some (Transport.publication_id right_publication)) arrivals
+        |> require_ok Service.error_to_string
+      in
+      Alcotest.(check int)
+        "retry revisits every deferred fork rather than selecting a head" 3
+        retry.Service.discovered_publications;
+      Alcotest.(check int) "retry still applies no late revision" 0
+        retry.Service.received_revisions;
+      Alcotest.(check int) "retry keeps every fork deferred" 3
+        retry.Service.deferred_publications;
+      Alcotest.(check int)
+        "retry preserves the shared model" 0
+        retry.Service.transport_status.Service.shared_change_count;
+      Alcotest.(check string)
+        "receive-first retry leaves the working tree untouched"
+        "let version = 1\n"
+        (read_file destination "main.ml");
       let reviewed =
         Service.review_package ~root:destination ~package
         |> require_ok Service.error_to_string
@@ -1686,7 +1728,8 @@ let () =
             `Quick
             authority_forks_require_named_branch_actions_and_explicit_reconciliation;
           Alcotest.test_case
-            "late package review adopts exactly one record before receive"
-            `Quick late_package_review_adopts_one_exact_record_before_receive;
+            "late review retains feed forks across retry before adoption"
+            `Quick
+            late_package_review_retains_feed_forks_across_retry_before_adoption;
         ] );
     ]

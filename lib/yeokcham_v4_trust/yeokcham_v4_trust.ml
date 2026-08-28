@@ -726,7 +726,8 @@ let enroll membership ~issuer signing_capability ~subject ~role =
             issuer_certificate.certificate_subject_device.device_id_value
           signing_capability
 
-let revision_unsigned_bytes ~repository ~certificate ~epoch ~resolution revision =
+let revision_unsigned_bytes ~repository ~certificate ~epoch ~resolution revision
+    =
   let* repository = encode_repository repository in
   let* certificate = text certificate in
   let* epoch = text epoch in
@@ -813,12 +814,16 @@ let decode_signed_revision encoded =
           let _ = (version, repository, certificate, revision, signature) in
           Error
             (Invalid_record
-               "authority-less signed revision encoding was retired before V4 release")
+               "authority-less signed revision encoding was retired before V4 \
+                release")
       | [ version; repository; certificate; epoch; revision ] ->
-          let _ = (version, repository, certificate, epoch, revision, signature) in
+          let _ =
+            (version, repository, certificate, epoch, revision, signature)
+          in
           Error
             (Invalid_record
-               "pre-release signed revision encoding was retired before V4 release")
+               "pre-release signed revision encoding was retired before V4 \
+                release")
       | [ version; repository; certificate; epoch; decision; revision ] ->
           let* version = integer_field "revision version" version in
           let* repository = decode_repository repository in
@@ -828,9 +833,7 @@ let decode_signed_revision encoded =
             | Encoding.Text epoch -> Ok epoch
             | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Array _
             | Encoding.Map _ | Encoding.Bool _ | Encoding.Null ->
-                Error
-                  (Invalid_record
-                     "revision authority epoch must be text")
+                Error (Invalid_record "revision authority epoch must be text")
           in
           let* decision =
             match decision with
@@ -843,8 +846,7 @@ let decode_signed_revision encoded =
             | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Array _
             | Encoding.Map _ | Encoding.Bool _ ->
                 Error
-                  (Invalid_record
-                     "resolution decision must be text or null")
+                  (Invalid_record "resolution decision must be text or null")
           in
           let* revision = bytes_field "revision body" revision in
           let* revision =
@@ -882,7 +884,8 @@ let verify_signed_revision_crypto membership signed =
     let* epoch =
       match signed.signed_epoch_value with
       | Some epoch -> Ok epoch
-      | None -> Error (Invalid_epoch "V4 signed revision has no authority epoch")
+      | None ->
+          Error (Invalid_epoch "V4 signed revision has no authority epoch")
     in
     match
       certificate_by_id membership.membership_certificates
@@ -899,8 +902,7 @@ let verify_signed_revision_crypto membership signed =
         else
           let* bytes =
             revision_unsigned_bytes ~repository:signed.signed_repository
-              ~certificate:signed.signed_certificate
-              ~epoch
+              ~certificate:signed.signed_certificate ~epoch
               ~resolution:signed.signed_resolution_decision_value
               signed.signed_revision_value
           in

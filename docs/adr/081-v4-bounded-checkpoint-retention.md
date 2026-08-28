@@ -4,7 +4,8 @@
 - Date: 2026-08-27
 - Deciders: maintainers
 - Supersedes: None
-- Superseded by: None
+- Superseded by: ADR-085, for its pre-release V4 persistence-version and
+  migration clauses only
 
 ## Context and problem statement
 
@@ -18,7 +19,7 @@ expiry cannot be represented honestly.
 ## Decision drivers
 
 - Keep named recovery roots while dropping anonymous scratch checkpoints.
-- Version the pin list; keep V1 and V2 state fixtures decodable.
+- Keep pins in the one final V4 project-state schema.
 - Prune only completed restore journals.
 - Do not claim blob garbage collection.
 
@@ -73,18 +74,18 @@ store GC slice.
 revision snapshots they name. Import rejects pins or named history snapshots
 that are missing from the checkpoint list. Compact must re-import successfully.
 
-## Persistent-format and migration impact
+## Persistent-format impact
 
-`V4_project_state` schema version 3 appends a canonical pin array. Version 2
-decodes as empty pins and re-encodes to v3. Version 1 still decodes. Fixture
-`v4/state-v2.cbor.hex` is retained.
+The final `V4_project_state` version-1 schema includes the canonical pin array.
+ADR-085 supersedes the earlier pre-release V4 decoder/migration proposal:
+older encodings are rejected rather than read or re-saved.
 
 ## Verification
 
 - unit tests that named roots and pins survive `keep_recent=0`;
 - property tests that compact never drops the active draft or baseline;
 - journal prune of a published chain;
-- golden v3 bytes plus legacy v1/v2 decode;
+- final version-1 golden bytes plus pre-release encoding rejection;
 - CLI `--explain` and `pin` journey.
 
 ## CLI and user impact

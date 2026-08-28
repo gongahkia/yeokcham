@@ -92,10 +92,10 @@ normal-mode network fault path.
 ## Persistent-format impact
 
 `transport-publication-v1` and transport-local state are independently
-versioned canonical CBOR. Collaborative-state version 3 appends its local
-transport section to version 2; version 1 and version 2 records remain
-decodable and re-save as version 3 with empty transport state. No package
-exports this section and no only copy is mutated in place.
+versioned canonical CBOR. The released authority-backed collaboration state,
+signed revision, and package manifest each use their final version-1 schema;
+pre-release V4 schema variants are rejected and have no migration path. No
+package exports local transport state and no only copy is mutated in place.
 
 ## Non-goals
 
@@ -114,13 +114,14 @@ integration, and working-tree mutation are out of scope.
   decisions, feed forks, late-review inboxes, retries, and no tree mutation;
 - corrupt, incomplete, wrong-repository, wrong-route, causal-failure, and
   post-receive upload-interruption tests;
-- retained V1/V2 and a new V3 state fixture; and
+- final version-1 goldens plus explicit rejection tests for retired pre-release
+  encodings; and
 - `opam exec -- dune build @all` and `opam exec -- dune runtest`.
 
-The local suite now includes the HTTPS reverse-proxy and post-receive
-upload-interruption/retry cases. The checklist remains the closure bar: these
-two results do not substitute for its other malformed-input, resolution,
-feed-fork, and multi-replica cases.
+The local suite includes HTTPS reverse-proxy, post-receive upload-interruption,
+feed-fork, signed-resolution, and incomplete-closure cases. The remaining
+malformed-input and late-review/retry combinations remain closure criteria for
+the issue.
 
 ## References
 

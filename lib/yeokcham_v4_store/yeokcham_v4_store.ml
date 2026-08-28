@@ -374,7 +374,9 @@ let collaboration_value ~project collaboration =
     | Some authority -> authority
     | None -> assert false
   in
-  let epochs = Trust.authority_epochs authority |> List.map Trust.encode_epoch in
+  let epochs =
+    Trust.authority_epochs authority |> List.map Trust.encode_epoch
+  in
   let authorizations =
     collaboration.collaboration_authorizations
     |> List.map Trust.encode_authorization

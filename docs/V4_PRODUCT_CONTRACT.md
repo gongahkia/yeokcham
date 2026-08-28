@@ -143,12 +143,13 @@ working tree.
 ## Persistent-format rules
 
 All records use canonical CBOR and explicit schema versions. Object identity is
-derived from exact canonical envelope bytes. Unknown mandatory features and
-noncanonical encodings are rejected. Authority-aware collaboration state version
-3 additionally carries local transport receipt data; version 1 and version 2
-remain readable. An immutable object is written before the single
-`v4-project-state` compare-and-swap head changes. No state transition mutates
-the only copy in place.
+derived from exact canonical envelope bytes. The released V4 project record,
+authority-backed collaboration state, signed revision, and package manifest
+each have one final schema tagged version 1. Pre-release V4 encodings are
+rejected; they are not migration inputs and are never silently re-saved. Unknown
+mandatory features and noncanonical encodings are rejected. An immutable object
+is written before the single `v4-project-state` compare-and-swap head changes.
+No state transition mutates the only copy in place.
 
 ## Exclusions
 

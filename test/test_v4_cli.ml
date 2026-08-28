@@ -580,8 +580,8 @@ let command_receives_a_verified_offline_package_without_materializing_it () =
            ~username:(model_id Model.Username.of_string "alice")
            ~initial_draft:(model_id Model.Draft_id.of_string "draft-source")
            ~title:"source" ~repository ~device:administrator
-           ~signing_capability:administrator_capability
-           ~recovery_device ~recovery_capability
+           ~signing_capability:administrator_capability ~recovery_device
+           ~recovery_capability
         |> require_ok Service.error_to_string);
       write_file source "main.ml" "let version = 2\n";
       ignore
@@ -628,8 +628,8 @@ let command_receives_a_verified_offline_package_without_materializing_it () =
       let member_epoch =
         Trust.successor_epoch root_authority
           ~parents:[ Trust.epoch_id root_epoch ]
-          ~certificates:(Trust.certificates membership) ~revoked:[] ~frontier:[]
-          ~recovery_device
+          ~certificates:(Trust.certificates membership)
+          ~revoked:[] ~frontier:[] ~recovery_device
           ~issuer:(Trust.certificate_id root_certificate)
           administrator_capability
         |> require_ok Trust.error_to_string

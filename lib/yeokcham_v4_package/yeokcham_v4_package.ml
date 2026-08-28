@@ -213,8 +213,8 @@ let ensure_unique_bytes name values =
   in
   loop sorted
 
-let manifest_bytes ~authority ~revisions ~authorizations ~adoptions
-    ~object_ids =
+let manifest_bytes ~authority ~revisions ~authorizations ~adoptions ~object_ids
+    =
   let membership = Trust.authority_membership authority in
   let* authority =
     Trust.verify_authority ~membership (Trust.authority_epochs authority)

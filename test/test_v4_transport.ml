@@ -343,6 +343,11 @@ let http_listener_rejects_untrusted_requests_and_preserves_immutability () =
         "oversized body is rejected" 413
         (response_status (raw_http ~port oversized));
       Alcotest.(check int)
+        "malformed digest route is rejected" 400
+        (response_status
+           (raw_http ~port
+              (raw_request "GET" (path "manifests" "not-a-digest"))));
+      Alcotest.(check int)
         "invalid page limit is rejected" 400
         (response_status
            (raw_http ~port
@@ -925,6 +930,16 @@ let incomplete_remote_closure_leaves_the_replica_unchanged () =
                 Service.status ~root:destination
                 |> require_ok Service.error_to_string
               in
+              let destination_repository =
+                Store.open_repository ~root:destination
+                |> require_ok Store.error_to_string
+              in
+              let before_objects =
+                Object_store.list_objects
+                  (Store.underlying_store destination_repository)
+                |> require_ok Object_store.error_to_string
+                |> List.length
+              in
               let before_cursor =
                 Service.transport_cursor ~root:destination ~remote:"team"
                 |> require_ok Service.error_to_string
@@ -937,6 +952,12 @@ let incomplete_remote_closure_leaves_the_replica_unchanged () =
                 Service.status ~root:destination
                 |> require_ok Service.error_to_string
               in
+              let after_objects =
+                Object_store.list_objects
+                  (Store.underlying_store destination_repository)
+                |> require_ok Object_store.error_to_string
+                |> List.length
+              in
               let after_cursor =
                 Service.transport_cursor ~root:destination ~remote:"team"
                 |> require_ok Service.error_to_string
@@ -948,6 +969,9 @@ let incomplete_remote_closure_leaves_the_replica_unchanged () =
               Alcotest.(check (option string))
                 "incomplete closure changes no cursor" before_cursor
                 after_cursor;
+              Alcotest.(check int)
+                "incomplete closure imports no destination object"
+                before_objects after_objects;
               Alcotest.(check string)
                 "sync never rewrites the working tree" "let version = 1\n"
                 (In_channel.with_open_bin

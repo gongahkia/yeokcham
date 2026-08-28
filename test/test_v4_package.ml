@@ -80,8 +80,8 @@ let root_authority ~membership ~root_device =
   let active_epoch =
     Trust.successor_epoch root_authority
       ~parents:[ Trust.epoch_id root_epoch ]
-      ~certificates:(Trust.certificates membership) ~revoked:[] ~frontier:[]
-      ~recovery_device
+      ~certificates:(Trust.certificates membership)
+      ~revoked:[] ~frontier:[] ~recovery_device
       ~issuer:(Trust.certificate_id root_certificate)
       (capability 'a')
     |> require_ok Trust.error_to_string
@@ -505,7 +505,8 @@ let alternate_root_for_the_same_repository_is_rejected_before_import () =
       let rogue_epoch =
         Trust.root_epoch ~membership:rogue_membership
           ~root_certificate:(Trust.certificate_id rogue_root)
-          ~recovery_device:(device (capability 'r')) rogue_capability
+          ~recovery_device:(device (capability 'r'))
+          rogue_capability
         |> require_ok Trust.error_to_string
       in
       let rogue_authority =

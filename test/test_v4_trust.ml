@@ -222,8 +222,7 @@ let signed_revision_binds_author_and_membership () =
   match Trust.verify_signed_revision_at root_only_authority decoded with
   | Error error ->
       Alcotest.(check string)
-        "missing author certificate is rejected"
-        "V4 authority epoch is unknown"
+        "missing author certificate is rejected" "V4 authority epoch is unknown"
         (Trust.error_to_string error)
   | Ok () -> Alcotest.fail "missing author certificate verified a revision"
 
@@ -575,7 +574,8 @@ let revocation_recovery_and_exact_exceptions_are_verified () =
   | Error error ->
       Alcotest.(check string)
         "recovery certificate cannot use a retired signing path"
-        "invalid V4 authority epoch: V4 signed revisions require an authority epoch"
+        "invalid V4 authority epoch: V4 signed revisions require an authority \
+         epoch"
         (Trust.error_to_string error)
   | Ok _ ->
       Alcotest.fail "recovery certificate signed through legacy membership");

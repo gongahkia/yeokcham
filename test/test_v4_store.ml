@@ -72,7 +72,8 @@ let collaborative_project () =
   in
   let recovery_capability = capability 'r' in
   let recovery_device =
-    recovery_capability |> Trust.signing_public_key |> Trust.device_of_public_key
+    recovery_capability |> Trust.signing_public_key
+    |> Trust.device_of_public_key
     |> require_ok Trust.error_to_string
   in
   let epoch =
@@ -94,8 +95,8 @@ let collaborative_project () =
   in
   let collaboration =
     V4_store.collaboration_with_authority ~authority ~revisions:[]
-      ~local_certificate:(Trust.certificate_id certificate) ~authorizations:[]
-      ~adoptions:[]
+      ~local_certificate:(Trust.certificate_id certificate)
+      ~authorizations:[] ~adoptions:[]
     |> require_ok V4_store.error_to_string
   in
   (project, collaboration)
