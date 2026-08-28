@@ -60,6 +60,22 @@ let device capability =
   capability |> Trust.signing_public_key |> Trust.device_of_public_key
   |> require_ok Trust.error_to_string
 
+let root_authority ~membership ~root_device =
+  let root_certificate =
+    Trust.certificates membership
+    |> List.find (fun certificate ->
+        Trust.device_equal (Trust.certificate_subject certificate) root_device)
+  in
+  let recovery_device = device (capability 'r') in
+  let root_epoch =
+    Trust.root_epoch ~membership
+      ~root_certificate:(Trust.certificate_id root_certificate)
+      ~recovery_device (capability 'a')
+    |> require_ok Trust.error_to_string
+  in
+  Trust.verify_authority ~membership [ root_epoch ]
+  |> require_ok Trust.error_to_string
+
 let setup root =
   let source_root = Filename.concat root "source" in
   Unix.mkdir source_root 0o700;
@@ -111,8 +127,10 @@ let setup root =
         ]
     |> require_ok Model.error_to_string
   in
+  let authority = root_authority ~membership ~root_device in
   let signed =
-    Trust.sign_revision membership
+    Trust.sign_revision_at authority
+      ~epoch:(List.hd (Trust.authority_heads authority))
       ~certificate:(Trust.certificate_id author_certificate)
       author_capability revision
     |> require_ok Trust.error_to_string
@@ -189,9 +207,10 @@ let package_verifies_before_import_and_preserves_model_visibility () =
             signed ) =
         setup root
       in
+      let authority = root_authority ~membership ~root_device in
       let package = Filename.concat root "offline-package" in
-      Package.create ~source ~destination:package ~membership
-        ~revisions:[ signed ]
+      Package.create_with_authority ~source ~destination:package ~authority
+        ~revisions:[ signed ] ~authorizations:[] ~adoptions:[]
       |> require_ok Package.error_to_string;
       let destination_root = Filename.concat root "destination" in
       Unix.mkdir destination_root 0o700;
@@ -201,7 +220,8 @@ let package_verifies_before_import_and_preserves_model_visibility () =
       in
       let project = receiver_project ~creator:root_device ~baseline in
       let imported, project =
-        Package.verify_and_import ~destination ~package ~membership ~project
+        Package.verify_and_import_with_authority ~destination ~package
+          ~authority ~known_adoptions:[] ~project
         |> require_ok Package.error_to_string
       in
       Alcotest.(check int)
@@ -395,9 +415,10 @@ let wrong_repository_is_rejected_before_object_import () =
       let _, source, baseline, _, root_device, membership, signed =
         setup root
       in
+      let authority = root_authority ~membership ~root_device in
       let package = Filename.concat root "offline-package" in
-      Package.create ~source ~destination:package ~membership
-        ~revisions:[ signed ]
+      Package.create_with_authority ~source ~destination:package ~authority
+        ~revisions:[ signed ] ~authorizations:[] ~adoptions:[]
       |> require_ok Package.error_to_string;
       let destination_root = Filename.concat root "destination" in
       Unix.mkdir destination_root 0o700;
@@ -420,10 +441,21 @@ let wrong_repository_is_rejected_before_object_import () =
         Trust.verify_membership ~repository:other_repository [ other_root ]
         |> require_ok Trust.error_to_string
       in
+      let other_recovery = device (capability 'r') in
+      let other_epoch =
+        Trust.root_epoch ~membership:other_membership
+          ~root_certificate:(Trust.certificate_id other_root)
+          ~recovery_device:other_recovery other_capability
+        |> require_ok Trust.error_to_string
+      in
+      let other_authority =
+        Trust.verify_authority ~membership:other_membership [ other_epoch ]
+        |> require_ok Trust.error_to_string
+      in
       let project = receiver_project ~creator:root_device ~baseline in
       match
-        Package.verify_and_import ~destination ~package
-          ~membership:other_membership ~project
+        Package.verify_and_import_with_authority ~destination ~package
+          ~authority:other_authority ~known_adoptions:[] ~project
       with
       | Error error ->
           Alcotest.(check string)
@@ -437,9 +469,10 @@ let alternate_root_for_the_same_repository_is_rejected_before_import () =
       let _, source, baseline, repository, root_device, membership, signed =
         setup root
       in
+      let authority = root_authority ~membership ~root_device in
       let package = Filename.concat root "offline-package" in
-      Package.create ~source ~destination:package ~membership
-        ~revisions:[ signed ]
+      Package.create_with_authority ~source ~destination:package ~authority
+        ~revisions:[ signed ] ~authorizations:[] ~adoptions:[]
       |> require_ok Package.error_to_string;
       let destination_root = Filename.concat root "destination" in
       Unix.mkdir destination_root 0o700;
@@ -456,10 +489,20 @@ let alternate_root_for_the_same_repository_is_rejected_before_import () =
         Trust.verify_membership ~repository [ rogue_root ]
         |> require_ok Trust.error_to_string
       in
+      let rogue_epoch =
+        Trust.root_epoch ~membership:rogue_membership
+          ~root_certificate:(Trust.certificate_id rogue_root)
+          ~recovery_device:(device (capability 'r')) rogue_capability
+        |> require_ok Trust.error_to_string
+      in
+      let rogue_authority =
+        Trust.verify_authority ~membership:rogue_membership [ rogue_epoch ]
+        |> require_ok Trust.error_to_string
+      in
       let project = receiver_project ~creator:root_device ~baseline in
       (match
-         Package.verify_and_import ~destination ~package
-           ~membership:rogue_membership ~project
+         Package.verify_and_import_with_authority ~destination ~package
+           ~authority:rogue_authority ~known_adoptions:[] ~project
        with
       | Error error ->
           Alcotest.(check bool)
@@ -479,9 +522,10 @@ let missing_closure_object_is_rejected_without_importing_a_partial_package () =
       let _, source, baseline, _, root_device, membership, signed =
         setup root
       in
+      let authority = root_authority ~membership ~root_device in
       let package = Filename.concat root "offline-package" in
-      Package.create ~source ~destination:package ~membership
-        ~revisions:[ signed ]
+      Package.create_with_authority ~source ~destination:package ~authority
+        ~revisions:[ signed ] ~authorizations:[] ~adoptions:[]
       |> require_ok Package.error_to_string;
       let object_directory = Filename.concat package "objects" in
       let victim = Sys.readdir object_directory |> Array.to_list |> List.hd in
@@ -493,7 +537,8 @@ let missing_closure_object_is_rejected_without_importing_a_partial_package () =
       in
       let project = receiver_project ~creator:root_device ~baseline in
       (match
-         Package.verify_and_import ~destination ~package ~membership ~project
+         Package.verify_and_import_with_authority ~destination ~package
+           ~authority ~known_adoptions:[] ~project
        with
       | Error error ->
           Alcotest.(check string)
@@ -511,11 +556,12 @@ let missing_closure_object_is_rejected_without_importing_a_partial_package () =
 
 let duplicate_revision_is_rejected_before_a_package_is_created () =
   with_directory "yeokcham-v4-package-duplicate-" (fun root ->
-      let _, source, _, _, _, membership, signed = setup root in
+      let _, source, _, _, root_device, membership, signed = setup root in
+      let authority = root_authority ~membership ~root_device in
       let package = Filename.concat root "offline-package" in
       match
-        Package.create ~source ~destination:package ~membership
-          ~revisions:[ signed; signed ]
+        Package.create_with_authority ~source ~destination:package ~authority
+          ~revisions:[ signed; signed ] ~authorizations:[] ~adoptions:[]
       with
       | Error error ->
           Alcotest.(check string)
@@ -532,6 +578,7 @@ let missing_causal_parent_is_rejected_before_object_import () =
       let _, source, baseline, repository, root_device, membership, _ =
         setup root
       in
+      let authority = root_authority ~membership ~root_device in
       let root_capability = capability 'a' in
       let root_certificate =
         Trust.root_certificate ~repository ~device:root_device root_capability
@@ -554,14 +601,15 @@ let missing_causal_parent_is_rejected_before_object_import () =
         |> require_ok Model.error_to_string
       in
       let signed_child =
-        Trust.sign_revision membership
+        Trust.sign_revision_at authority
+          ~epoch:(List.hd (Trust.authority_heads authority))
           ~certificate:(Trust.certificate_id root_certificate)
           root_capability child
         |> require_ok Trust.error_to_string
       in
       let package = Filename.concat root "offline-package" in
-      Package.create ~source ~destination:package ~membership
-        ~revisions:[ signed_child ]
+      Package.create_with_authority ~source ~destination:package ~authority
+        ~revisions:[ signed_child ] ~authorizations:[] ~adoptions:[]
       |> require_ok Package.error_to_string;
       let local_initial =
         Model.make_change_revision ~change:(change "change-one")
@@ -590,7 +638,8 @@ let missing_causal_parent_is_rejected_before_object_import () =
         Store.init ~root:destination_root |> require_ok Store.error_to_string
       in
       (match
-         Package.verify_and_import ~destination ~package ~membership ~project
+         Package.verify_and_import_with_authority ~destination ~package
+           ~authority ~known_adoptions:[] ~project
        with
       | Error error ->
           Alcotest.(check string)

@@ -645,10 +645,13 @@ let signed_offline_receive_is_atomic_and_preserves_the_live_tree () =
       write_file destination "main.ml" "let version = 1\n";
       let administrator_capability = signing_capability 'a' in
       let administrator = trust_device administrator_capability in
+      let recovery_capability = signing_capability 'r' in
+      let recovery_device = trust_device recovery_capability in
       ignore
-        (Service.init_signed ~root:source ~username:(username "alice")
+        (Service.init_signed_with_recovery ~root:source ~username:(username "alice")
            ~initial_draft:(draft "draft-source") ~title:"source" ~repository
            ~device:administrator ~signing_capability:administrator_capability
+           ~recovery_device ~recovery_capability
         |> require_ok Service.error_to_string);
       write_file source "main.ml" "let version = 2\n";
       ignore
@@ -682,10 +685,33 @@ let signed_offline_receive_is_atomic_and_preserves_the_live_tree () =
           [ root_certificate; member_certificate ]
         |> require_ok Trust.error_to_string
       in
+      let root_epoch =
+        Trust.root_epoch ~membership
+          ~root_certificate:(Trust.certificate_id root_certificate)
+          ~recovery_device administrator_capability
+        |> require_ok Trust.error_to_string
+      in
+      let root_authority =
+        Trust.verify_authority ~membership [ root_epoch ]
+        |> require_ok Trust.error_to_string
+      in
+      let member_epoch =
+        Trust.successor_epoch root_authority
+          ~parents:[ Trust.epoch_id root_epoch ]
+          ~certificates:(Trust.certificates membership) ~revoked:[] ~frontier:[]
+          ~recovery_device
+          ~issuer:(Trust.certificate_id root_certificate)
+          administrator_capability
+        |> require_ok Trust.error_to_string
+      in
+      let authority =
+        Trust.extend_authority root_authority [ member_epoch ]
+        |> require_ok Trust.error_to_string
+      in
       ignore
-        (Service.init_collaboration ~root:destination ~username:(username "bob")
-           ~initial_draft:(draft "draft-destination")
-           ~title:"destination" ~device:member ~membership
+        (Service.init_authority_collaboration ~root:destination
+           ~username:(username "bob") ~initial_draft:(draft "draft-destination")
+           ~title:"destination" ~device:member ~authority
            ~local_certificate:(Trust.certificate_id member_certificate)
         |> require_ok Service.error_to_string);
       let received =
@@ -754,10 +780,13 @@ let administrator_enrollment_persists_a_public_member_and_local_username () =
       write_file root "main.ml" "let version = 1\n";
       let administrator_capability = signing_capability 'a' in
       let administrator = trust_device administrator_capability in
+      let recovery_capability = signing_capability 'r' in
+      let recovery_device = trust_device recovery_capability in
       ignore
-        (Service.init_signed ~root ~username:(username "alice")
+        (Service.init_signed_with_recovery ~root ~username:(username "alice")
            ~initial_draft:(draft "draft-one") ~title:"admin" ~repository
            ~device:administrator ~signing_capability:administrator_capability
+           ~recovery_device ~recovery_capability
         |> require_ok Service.error_to_string);
       let member = trust_device (signing_capability 'b') in
       let enrolled =

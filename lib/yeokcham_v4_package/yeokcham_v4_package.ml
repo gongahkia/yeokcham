@@ -202,11 +202,6 @@ let ensure_unique_signed_revisions revisions =
   in
   unique ids
 
-let retired_manifest_bytes ~membership:_ ~revisions:_ ~object_ids:_ =
-  Error
-    (Invalid_package
-       "authority-less package manifests were retired before V4 release")
-
 let ensure_unique_bytes name values =
   let sorted = List.sort String.compare values in
   let rec loop = function

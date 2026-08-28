@@ -70,6 +70,21 @@ let collaborative_project () =
     Trust.verify_membership ~repository [ certificate ]
     |> require_ok Trust.error_to_string
   in
+  let recovery_capability = capability 'r' in
+  let recovery_device =
+    recovery_capability |> Trust.signing_public_key |> Trust.device_of_public_key
+    |> require_ok Trust.error_to_string
+  in
+  let epoch =
+    Trust.root_epoch ~membership
+      ~root_certificate:(Trust.certificate_id certificate)
+      ~recovery_device signing_capability
+    |> require_ok Trust.error_to_string
+  in
+  let authority =
+    Trust.verify_authority ~membership [ epoch ]
+    |> require_ok Trust.error_to_string
+  in
   let project =
     Model.init ~creator:(Trust.device_id device)
       ~username:(id Model.Username.of_string "alice")
@@ -78,8 +93,9 @@ let collaborative_project () =
       ~title:"fixture"
   in
   let collaboration =
-    V4_store.collaboration ~membership ~revisions:[]
-      ~local_certificate:(Trust.certificate_id certificate)
+    V4_store.collaboration_with_authority ~authority ~revisions:[]
+      ~local_certificate:(Trust.certificate_id certificate) ~authorizations:[]
+      ~adoptions:[]
     |> require_ok V4_store.error_to_string
   in
   (project, collaboration)

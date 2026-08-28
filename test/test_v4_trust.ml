@@ -59,6 +59,33 @@ let root_and_membership () =
   in
   (repository, root_capability, root_device, root_certificate, membership)
 
+let authority_for_membership ~membership ~root_capability ~root_certificate =
+  let recovery_device = device_from_capability (capability 'r') in
+  let root_epoch =
+    Trust.root_epoch ~membership
+      ~root_certificate:(Trust.certificate_id root_certificate)
+      ~recovery_device root_capability
+    |> require_ok Trust.error_to_string
+  in
+  let root_authority =
+    Trust.verify_authority ~membership [ root_epoch ]
+    |> require_ok Trust.error_to_string
+  in
+  let active_epoch =
+    Trust.successor_epoch root_authority
+      ~parents:[ Trust.epoch_id root_epoch ]
+      ~certificates:(Trust.certificates membership)
+      ~revoked:[] ~frontier:[] ~recovery_device
+      ~issuer:(Trust.certificate_id root_certificate)
+      root_capability
+    |> require_ok Trust.error_to_string
+  in
+  let authority =
+    Trust.extend_authority root_authority [ active_epoch ]
+    |> require_ok Trust.error_to_string
+  in
+  (authority, Trust.epoch_id active_epoch)
+
 let root_certificate_is_self_certifying () =
   let repository, _, root_device, root_certificate, membership =
     root_and_membership ()
@@ -147,8 +174,11 @@ let signed_revision_binds_author_and_membership () =
     Trust.verify_membership ~repository [ root_certificate; author_certificate ]
     |> require_ok Trust.error_to_string
   in
+  let authority, epoch =
+    authority_for_membership ~membership ~root_capability ~root_certificate
+  in
   let signed =
-    Trust.sign_revision membership
+    Trust.sign_revision_at authority ~epoch
       ~certificate:(Trust.certificate_id author_certificate)
       author_capability
       (sample_revision (Trust.device_id author))
@@ -158,13 +188,13 @@ let signed_revision_binds_author_and_membership () =
     "signed revision bytes retain their golden encoding"
     (read_golden "v4/signed-revision-v1.cbor.hex")
     (Trust.encode_signed_revision signed);
-  Trust.verify_signed_revision membership signed
+  Trust.verify_signed_revision_at authority signed
   |> require_ok Trust.error_to_string;
   let decoded =
     signed |> Trust.encode_signed_revision |> Trust.decode_signed_revision
     |> require_ok Trust.error_to_string
   in
-  Trust.verify_signed_revision membership decoded
+  Trust.verify_signed_revision_at authority decoded
   |> require_ok Trust.error_to_string;
   let tampered_bytes = Bytes.of_string (Trust.encode_signed_revision decoded) in
   let last = Bytes.length tampered_bytes - 1 in
@@ -174,7 +204,7 @@ let signed_revision_binds_author_and_membership () =
     Trust.decode_signed_revision (Bytes.to_string tampered_bytes)
     |> require_ok Trust.error_to_string
   in
-  (match Trust.verify_signed_revision membership tampered with
+  (match Trust.verify_signed_revision_at authority tampered with
   | Error error ->
       Alcotest.(check string)
         "tampered signature is rejected" "V4 Ed25519 signature is invalid"
@@ -184,11 +214,15 @@ let signed_revision_binds_author_and_membership () =
     Trust.verify_membership ~repository [ root_certificate ]
     |> require_ok Trust.error_to_string
   in
-  match Trust.verify_signed_revision root_only decoded with
+  let root_only_authority, _ =
+    authority_for_membership ~membership:root_only ~root_capability
+      ~root_certificate
+  in
+  match Trust.verify_signed_revision_at root_only_authority decoded with
   | Error error ->
       Alcotest.(check string)
         "missing author certificate is rejected"
-        "V4 revision author certificate is unknown"
+        "V4 authority epoch is unknown"
         (Trust.error_to_string error)
   | Ok () -> Alcotest.fail "missing author certificate verified a revision"
 
@@ -208,9 +242,12 @@ let signed_resolution_binds_its_target_decision () =
     Trust.verify_membership ~repository [ root_certificate; author_certificate ]
     |> require_ok Trust.error_to_string
   in
+  let authority, epoch =
+    authority_for_membership ~membership ~root_capability ~root_certificate
+  in
   let decision = id Model.Decision_id.of_string "decision-resolution" in
   let signed =
-    Trust.sign_resolution membership
+    Trust.sign_resolution_at authority ~epoch
       ~certificate:(Trust.certificate_id author_certificate)
       author_capability ~decision
       (sample_revision (Trust.device_id author))
@@ -226,7 +263,7 @@ let signed_resolution_binds_its_target_decision () =
     "signed resolution bytes retain their golden encoding"
     (read_golden "v4/signed-resolution-v3.cbor.hex")
     encoded;
-  Trust.verify_signed_revision membership signed
+  Trust.verify_signed_revision_at authority signed
   |> require_ok Trust.error_to_string;
   let decoded =
     encoded |> Trust.decode_signed_revision |> require_ok Trust.error_to_string
@@ -236,7 +273,7 @@ let signed_resolution_binds_its_target_decision () =
     (Some (Model.Decision_id.to_string decision))
     (Trust.signed_revision_resolution decoded
     |> Option.map Model.Decision_id.to_string);
-  Trust.verify_signed_revision membership decoded
+  Trust.verify_signed_revision_at authority decoded
   |> require_ok Trust.error_to_string
 
 let authority_root () =
@@ -536,9 +573,8 @@ let revocation_recovery_and_exact_exceptions_are_verified () =
    with
   | Error error ->
       Alcotest.(check string)
-        "recovery certificate is rejected by legacy signing"
-        "V4 authority epoch issuer is not an active administrator in every \
-         parent"
+        "recovery certificate cannot use a retired signing path"
+        "invalid V4 authority epoch: V4 signed revisions require an authority epoch"
         (Trust.error_to_string error)
   | Ok _ ->
       Alcotest.fail "recovery certificate signed through legacy membership");

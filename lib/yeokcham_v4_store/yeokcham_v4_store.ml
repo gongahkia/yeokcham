@@ -731,6 +731,8 @@ let rec retired_decode_collaborative_state encoded =
         (Invalid_collaboration_state
            "V4 collaborative state has the wrong field count")
 
+let _ = retired_decode_collaborative_state
+
 let decode_collaboration_records name decode value =
   let* encoded = decode_bytes_array name value in
   let rec loop reversed = function
@@ -761,7 +763,7 @@ let decode_collaborative_state encoded =
    local_certificate_value;
    transport_value;
   ] ->
-      let* version =
+      let* () =
         match version with
         | Encoding.Integer value when Int64.equal value 1L -> Ok ()
         | Encoding.Integer _ ->

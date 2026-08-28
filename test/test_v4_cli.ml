@@ -573,12 +573,15 @@ let command_receives_a_verified_offline_package_without_materializing_it () =
       write_file destination "main.ml" "let version = 1\n";
       let administrator_capability = signing_capability 'a' in
       let administrator = trust_device administrator_capability in
+      let recovery_capability = signing_capability 'r' in
+      let recovery_device = trust_device recovery_capability in
       ignore
-        (Service.init_signed ~root:source
+        (Service.init_signed_with_recovery ~root:source
            ~username:(model_id Model.Username.of_string "alice")
            ~initial_draft:(model_id Model.Draft_id.of_string "draft-source")
            ~title:"source" ~repository ~device:administrator
            ~signing_capability:administrator_capability
+           ~recovery_device ~recovery_capability
         |> require_ok Service.error_to_string);
       write_file source "main.ml" "let version = 2\n";
       ignore
@@ -612,12 +615,35 @@ let command_receives_a_verified_offline_package_without_materializing_it () =
           [ root_certificate; member_certificate ]
         |> require_ok Trust.error_to_string
       in
+      let root_epoch =
+        Trust.root_epoch ~membership
+          ~root_certificate:(Trust.certificate_id root_certificate)
+          ~recovery_device administrator_capability
+        |> require_ok Trust.error_to_string
+      in
+      let root_authority =
+        Trust.verify_authority ~membership [ root_epoch ]
+        |> require_ok Trust.error_to_string
+      in
+      let member_epoch =
+        Trust.successor_epoch root_authority
+          ~parents:[ Trust.epoch_id root_epoch ]
+          ~certificates:(Trust.certificates membership) ~revoked:[] ~frontier:[]
+          ~recovery_device
+          ~issuer:(Trust.certificate_id root_certificate)
+          administrator_capability
+        |> require_ok Trust.error_to_string
+      in
+      let authority =
+        Trust.extend_authority root_authority [ member_epoch ]
+        |> require_ok Trust.error_to_string
+      in
       ignore
-        (Service.init_collaboration ~root:destination
+        (Service.init_authority_collaboration ~root:destination
            ~username:(model_id Model.Username.of_string "bob")
            ~initial_draft:
              (model_id Model.Draft_id.of_string "draft-destination")
-           ~title:"destination" ~device:member ~membership
+           ~title:"destination" ~device:member ~authority
            ~local_certificate:(Trust.certificate_id member_certificate)
         |> require_ok Service.error_to_string);
       let output, errors, status =
