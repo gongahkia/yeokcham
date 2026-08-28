@@ -379,6 +379,21 @@ let signing_public_key signing_capability =
 
 let signing_private_key_bytes = Mirage_crypto_ec.Ed25519.priv_to_octets
 
+let sign_detached signing_capability ~domain bytes =
+  Mirage_crypto_ec.Ed25519.sign ~key:signing_capability (domain ^ bytes)
+
+let verify_detached ~device ~domain ~signature bytes =
+  if String.length signature <> 64 then Error (Invalid_signature (String.length signature))
+  else
+    match Mirage_crypto_ec.Ed25519.pub_of_octets (device_public_key device) with
+    | Error _ -> Error (Invalid_public_key (String.length (device_public_key device)))
+    | Ok public_key ->
+        if
+          Mirage_crypto_ec.Ed25519.verify ~key:public_key signature
+            ~msg:(domain ^ bytes)
+        then Ok ()
+        else Error Signature_verification_failed
+
 let sign_certificate ~repository ~subject ~role ~issuer_certificate
     ~issuer_device signing_capability =
   let* id =

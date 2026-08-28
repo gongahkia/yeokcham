@@ -1,0 +1,7 @@
+(library
+ (name yeokcham_v4_transport)
+ (libraries
+  yeokcham_encoding
+  yeokcham_hash
+  yeokcham_v4_model
+  yeokcham_v4_trust))

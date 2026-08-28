@@ -13,6 +13,7 @@ type error =
   | Empty_state_head
   | Unexpected_object_type of Yeokcham_envelope.object_type
   | Trust_error of Yeokcham_v4_trust.error
+  | Transport_error of Yeokcham_v4_transport.error
   | Invalid_collaboration_state of string
   | Collaborative_state_requires_collaborative_save
 
@@ -42,11 +43,21 @@ val collaboration_with_authority :
     authority epoch; exceptional late arrivals must carry one exact signed
     authorization or adoption record. *)
 
+val collaboration_with_authority_transport :
+  transport:Yeokcham_v4_transport.local_state ->
+  authority:Yeokcham_v4_trust.authority ->
+  revisions:Yeokcham_v4_trust.signed_revision list ->
+  local_certificate:string ->
+  authorizations:Yeokcham_v4_trust.authorization list ->
+  adoptions:Yeokcham_v4_trust.adoption list ->
+  (collaboration, error) result
+
 val membership : collaboration -> Yeokcham_v4_trust.membership
 val authority : collaboration -> Yeokcham_v4_trust.authority option
 val signed_revisions : collaboration -> Yeokcham_v4_trust.signed_revision list
 val authorizations : collaboration -> Yeokcham_v4_trust.authorization list
 val adoptions : collaboration -> Yeokcham_v4_trust.adoption list
+val transport : collaboration -> Yeokcham_v4_transport.local_state
 val local_certificate : collaboration -> string
 
 type loaded = {

@@ -4,6 +4,7 @@ module Model = Yeokcham_v4_model
 module Record = Yeokcham_v4_record
 module Store = Yeokcham_store
 module Trust = Yeokcham_v4_trust
+module Transport = Yeokcham_v4_transport
 
 type error =
   | Store_error of Store.error
@@ -15,6 +16,7 @@ type error =
   | Empty_state_head
   | Unexpected_object_type of Envelope.object_type
   | Trust_error of Trust.error
+  | Transport_error of Transport.error
   | Invalid_collaboration_state of string
   | Collaborative_state_requires_collaborative_save
 
@@ -31,6 +33,7 @@ let error_to_string = function
       Printf.sprintf "V4 project-state head points to object type %d"
         (Envelope.object_type_code object_type)
   | Trust_error error -> Trust.error_to_string error
+  | Transport_error error -> Transport.error_to_string error
   | Invalid_collaboration_state detail ->
       "invalid V4 collaborative state: " ^ detail
   | Collaborative_state_requires_collaborative_save ->
@@ -45,6 +48,7 @@ type collaboration = {
   collaboration_revisions : Trust.signed_revision list;
   collaboration_authorizations : Trust.authorization list;
   collaboration_adoptions : Trust.adoption list;
+  collaboration_transport : Transport.local_state;
   collaboration_local_certificate : string;
 }
 
@@ -255,6 +259,7 @@ let validate_collaboration ~project collaboration =
         collaboration_authorizations =
           collaboration.collaboration_authorizations;
         collaboration_adoptions = collaboration.collaboration_adoptions;
+        collaboration_transport = collaboration.collaboration_transport;
         collaboration_local_certificate = local_certificate_id;
       }
 
@@ -295,6 +300,7 @@ let collaboration ~membership ~revisions ~local_certificate =
       collaboration_revisions = revisions;
       collaboration_authorizations = [];
       collaboration_adoptions = [];
+      collaboration_transport = Transport.empty_local_state;
       collaboration_local_certificate = local_certificate;
     }
 
@@ -303,12 +309,13 @@ let authority collaboration = collaboration.collaboration_authority
 let signed_revisions collaboration = collaboration.collaboration_revisions
 let authorizations collaboration = collaboration.collaboration_authorizations
 let adoptions collaboration = collaboration.collaboration_adoptions
+let transport collaboration = collaboration.collaboration_transport
 
 let local_certificate collaboration =
   collaboration.collaboration_local_certificate
 
-let collaboration_with_authority ~authority ~revisions ~local_certificate
-    ~authorizations ~adoptions =
+let collaboration_with_authority_transport ~transport ~authority ~revisions
+    ~local_certificate ~authorizations ~adoptions =
   let collaboration =
     {
       collaboration_membership = Trust.authority_membership authority;
@@ -316,6 +323,7 @@ let collaboration_with_authority ~authority ~revisions ~local_certificate
       collaboration_revisions = revisions;
       collaboration_authorizations = authorizations;
       collaboration_adoptions = adoptions;
+      collaboration_transport = transport;
       collaboration_local_certificate = local_certificate;
     }
   in
@@ -348,6 +356,11 @@ let collaboration_with_authority ~authority ~revisions ~local_certificate
   in
   let* () = verify_revisions revisions in
   Ok { collaboration with collaboration_authority = Some authority }
+
+let collaboration_with_authority ~authority ~revisions ~local_certificate
+    ~authorizations ~adoptions =
+  collaboration_with_authority_transport ~transport:Transport.empty_local_state
+    ~authority ~revisions ~local_certificate ~authorizations ~adoptions
 
 let construction value =
   value
@@ -442,9 +455,13 @@ let collaboration_value ~project collaboration =
       let* epochs = bytes_array epochs in
       let* authorizations = bytes_array authorizations in
       let* adoptions = bytes_array adoptions in
+      let* transport =
+        Transport.encode_local_state collaboration.collaboration_transport
+        |> Result.map_error (fun error -> Transport_error error)
+      in
       array
         [
-          Encoding.integer 2L;
+          Encoding.integer 3L;
           Encoding.bytes project;
           repository;
           certificates;
@@ -453,12 +470,13 @@ let collaboration_value ~project collaboration =
           authorizations;
           adoptions;
           local_certificate;
+          Encoding.bytes transport;
         ]
 
 let encode_collaborative_state ~project collaboration =
   collaboration_value ~project collaboration |> Result.map Encoding.encode
 
-let decode_collaborative_state encoded =
+let rec decode_collaborative_state encoded =
   let* value =
     Encoding.decode encoded
     |> Result.map_error (fun error ->
@@ -547,7 +565,7 @@ let decode_collaborative_state encoded =
    revisions;
    authorizations;
    adoptions;
-   local_certificate;
+   local_certificate_value;
   ] ->
       let* () =
         match version with
@@ -652,13 +670,83 @@ let decode_collaborative_state encoded =
         loop [] adoptions
       in
       let* local_certificate =
-        text_field "local certificate" local_certificate
+        text_field "local certificate" local_certificate_value
       in
       let* collaboration =
         collaboration_with_authority ~authority ~revisions ~local_certificate
           ~authorizations ~adoptions
       in
       let* collaboration = validate_collaboration ~project collaboration in
+      let* canonical = encode_collaborative_state ~project collaboration in
+      if String.equal canonical encoded then Ok (project, collaboration)
+      else
+        Error
+          (Invalid_collaboration_state "collaborative state is not canonical")
+  | [
+   version;
+   project_value;
+   repository;
+   certificates;
+   epochs;
+   revisions;
+   authorizations_value;
+   adoptions_value;
+   local_certificate_value;
+   transport;
+  ] ->
+      let* () =
+        match version with
+        | Encoding.Integer value when Int64.equal value 3L -> Ok ()
+        | Encoding.Integer _ ->
+            Error
+              (Invalid_collaboration_state
+                 "unsupported collaborative state version")
+        | Encoding.Bytes _ | Encoding.Text _ | Encoding.Array _ | Encoding.Map _
+        | Encoding.Bool _ | Encoding.Null ->
+            Error
+              (Invalid_collaboration_state
+                 "collaborative state version must be an integer")
+      in
+      let* transport =
+        match transport with
+        | Encoding.Bytes value ->
+            Transport.decode_local_state value
+            |> Result.map_error (fun error -> Transport_error error)
+        | Encoding.Integer _ | Encoding.Text _ | Encoding.Array _
+        | Encoding.Map _ | Encoding.Bool _ | Encoding.Null ->
+            Error (Invalid_collaboration_state "transport state must be bytes")
+      in
+      let legacy =
+        Encoding.array
+          [
+            Encoding.integer 2L;
+            project_value;
+            repository;
+            certificates;
+            epochs;
+            revisions;
+            authorizations_value;
+            adoptions_value;
+            local_certificate_value;
+          ]
+        |> Result.get_ok |> Encoding.encode
+      in
+      let* project, legacy_collaboration = decode_collaborative_state legacy in
+      let* authority =
+        match authority legacy_collaboration with
+        | Some authority -> Ok authority
+        | None ->
+            Error
+              (Invalid_collaboration_state
+                 "transport state requires authority-aware collaboration")
+      in
+      let* collaboration =
+        collaboration_with_authority_transport ~transport ~authority
+          ~revisions:(signed_revisions legacy_collaboration)
+          ~local_certificate:(local_certificate legacy_collaboration)
+          ~authorizations:(authorizations legacy_collaboration)
+          ~adoptions:(adoptions legacy_collaboration)
+      in
       let* canonical = encode_collaborative_state ~project collaboration in
       if String.equal canonical encoded then Ok (project, collaboration)
       else
@@ -713,6 +801,7 @@ let decode_project_object store object_id =
     | Ok (project, collaboration) -> Ok (project, Some collaboration)
     | Error
         ( Invalid_collaboration_state _ | Record_error _ | Trust_error _
+        | Transport_error _
         | Store_error _ | Envelope_error _ | Existing_repository _
         | Bootstrap_error _ | Missing_state_head | Empty_state_head
         | Unexpected_object_type _
