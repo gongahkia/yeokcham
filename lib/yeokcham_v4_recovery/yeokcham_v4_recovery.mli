@@ -44,6 +44,14 @@ val create :
   authority:Trust.authority ->
   recovery_capability:Trust.signing_capability ->
   (ceremony, error) result
+val refresh :
+  secret:secret ->
+  authority:Trust.authority ->
+  recovery_capability:Trust.signing_capability ->
+  (package, error) result
+(** Re-encrypts the current authority closure with a fresh nonce while keeping
+    the supplied 24-word recovery secret and active recovery device.  This is
+    for making an additional offline copy; it does not change authority. *)
 
 val encode : package -> string
 val decode : string -> (package, error) result

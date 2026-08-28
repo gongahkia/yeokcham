@@ -172,6 +172,17 @@ val recover_epoch :
     replaces that authority atomically, so a consumed recovery key cannot
     remain active in the resulting epoch. *)
 
+val recover_enroll :
+  authority ->
+  parents:string list ->
+  subject:device ->
+  role:role ->
+  signing_capability ->
+  (certificate, error) result
+(** Creates a replacement device certificate signed by the recovery authority
+    shared by [parents]. It has no effect until the same recovery successor
+    epoch explicitly includes it. *)
+
 val verify_authority :
   membership:membership -> epoch list -> (authority, error) result
 val extend_authority : authority -> epoch list -> (authority, error) result
@@ -181,6 +192,12 @@ val authority_heads : authority -> string list
 val authority_epoch : authority -> string -> (epoch, error) result
 val authority_device_active : authority -> epoch:string -> device -> bool
 val authority_device_administrator : authority -> epoch:string -> device -> bool
+val authority_epoch_is_head : authority -> string -> bool
+val requires_late_review : authority -> signed_revision -> (bool, error) result
+(** [requires_late_review] is true when the record was valid in its named
+    historical epoch, but at least one current authority head causally
+    descends from that epoch and revokes its signer. Such a record is never
+    accepted automatically on receive: a current-head adoption is required. *)
 
 val sign_revision_at :
   authority ->
@@ -204,6 +221,7 @@ val make_authorization :
 val encode_authorization : authorization -> string
 val decode_authorization : string -> (authorization, error) result
 val authorization_revision : authorization -> Model.Revision_id.t
+val authorization_epoch : authorization -> string
 val verify_authorization : authority -> authorization -> (unit, error) result
 val authorization_matches_signed_revision : authorization -> signed_revision -> bool
 
@@ -217,5 +235,6 @@ val make_adoption :
 val encode_adoption : adoption -> string
 val decode_adoption : string -> (adoption, error) result
 val adoption_revision : adoption -> Model.Revision_id.t
+val adoption_epoch : adoption -> string
 val verify_adoption : authority -> adoption -> (unit, error) result
 val adoption_matches_signed_revision : adoption -> signed_revision -> bool

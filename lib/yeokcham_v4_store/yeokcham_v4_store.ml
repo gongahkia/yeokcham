@@ -89,28 +89,19 @@ let validate_collaboration ~project collaboration =
       (Trust.certificates membership)
     |> Result.map_error (fun error -> Trust_error error)
   in
-  let local_certificate = collaboration.collaboration_local_certificate in
+  let local_certificate_id = collaboration.collaboration_local_certificate in
   let* local_certificate =
     match
       List.find_opt
         (fun certificate ->
-          String.equal (Trust.certificate_id certificate) local_certificate)
+          String.equal (Trust.certificate_id certificate) local_certificate_id)
         (Trust.certificates membership)
     with
     | None ->
         Error
           (Invalid_collaboration_state
              "local certificate is absent from the verified membership")
-    | Some certificate ->
-        if
-          Model.Device_id.equal
-            (Trust.device_id (Trust.certificate_subject certificate))
-            (Model.creator project)
-        then Ok local_certificate
-        else
-          Error
-            (Invalid_collaboration_state
-               "local certificate does not name the project creator")
+    | Some certificate -> Ok certificate
   in
   let* authority =
     match collaboration.collaboration_authority with
@@ -121,6 +112,31 @@ let validate_collaboration ~project collaboration =
           |> Result.map_error (fun error -> Trust_error error)
         in
         Ok (Some authority)
+  in
+  let* () =
+    match authority with
+    | None ->
+        if
+          Model.Device_id.equal
+            (Trust.device_id (Trust.certificate_subject local_certificate))
+            (Model.creator project)
+        then Ok ()
+        else
+          Error
+            (Invalid_collaboration_state
+               "legacy local certificate does not name the project creator")
+    | Some authority ->
+        if
+          List.exists
+            (fun epoch ->
+              Trust.authority_device_active authority ~epoch
+                (Trust.certificate_subject local_certificate))
+            (Trust.authority_heads authority)
+        then Ok ()
+        else
+          Error
+            (Invalid_collaboration_state
+               "local certificate is not active in any authority head")
   in
   let rec verify reversed = function
     | [] -> Ok (List.rev reversed)
@@ -217,7 +233,7 @@ let validate_collaboration ~project collaboration =
         collaboration_revisions = signed_revisions;
         collaboration_authorizations = collaboration.collaboration_authorizations;
         collaboration_adoptions = collaboration.collaboration_adoptions;
-        collaboration_local_certificate = local_certificate;
+        collaboration_local_certificate = local_certificate_id;
       }
 
 let collaboration ~membership ~revisions ~local_certificate =

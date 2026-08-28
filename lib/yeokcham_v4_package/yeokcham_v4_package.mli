@@ -61,11 +61,14 @@ val verify_and_import_with_authority :
   destination:Yeokcham_store.repository ->
   package:string ->
   authority:Trust.authority ->
+  known_adoptions:Trust.adoption list ->
   project:Model.project ->
   (verified * Model.project, error) result
 (** The authority-aware V2 counterpart. It extends only from the destination's
     verified root, validates the imported epoch graph before object import, and
-    keeps authority forks explicit. *)
+    keeps authority forks explicit. [known_adoptions] are already verified,
+    destination-local exact review records; they can authorize their matching
+    package revision but are never imported from a mutable head. *)
 
 val membership : verified -> Trust.membership
 val authority : verified -> Trust.authority option
@@ -76,6 +79,13 @@ val adoptions : verified -> Trust.adoption list
 val inspect_authority : package:string -> (Trust.authority, error) result
 (** Reads and cryptographically validates only a V2 package manifest's public
     authority closure. It neither imports objects nor changes any project. *)
+
+val inspect_with_authority :
+  package:string -> authority:Trust.authority -> (verified, error) result
+(** Verifies the public V2 manifest, membership continuity, authority graph,
+    revision signatures, and declared exception records without reading package
+    objects or changing a project. It is the inspection surface used before an
+    administrator records an explicit late-arrival adoption. *)
 
 val apply_revisions : Model.project -> verified -> (Model.project, error) result
 (** Adds verified revisions through the pure V4 receive transition in causal

@@ -266,6 +266,21 @@ let generated_signing_capability generated =
 let device_id device = device.device_id_value
 let device_public_key device = device.public_key
 
+let recovery_issuer device =
+  recovery_issuer_prefix ^ Model.Device_id.to_string (device_id device)
+
+let recovery_issuer_device issuer =
+  let prefix_length = String.length recovery_issuer_prefix in
+  if
+    String.length issuer > prefix_length
+    && String.sub issuer 0 prefix_length = recovery_issuer_prefix
+  then
+    String.sub issuer prefix_length (String.length issuer - prefix_length)
+    |> Model.Device_id.of_string
+    |> Result.map_error (fun _ -> Invalid_recovery_authority)
+    |> Result.map Option.some
+  else Ok None
+
 let device_equal left right =
   Model.Device_id.equal left.device_id_value right.device_id_value
   && String.equal left.public_key right.public_key
@@ -310,9 +325,12 @@ let encode_issuer = function None -> Ok Encoding.null | Some id -> text id
 
 let decode_issuer = function
   | Encoding.Null -> Ok None
-  | Encoding.Text value when String.length value = 64 -> Ok (Some value)
-  | Encoding.Text _ ->
-      Error (Invalid_record "issuer certificate ID has wrong length")
+  | Encoding.Text value ->
+      let* recovery = recovery_issuer_device value in
+      (match recovery with
+      | Some _ -> Ok (Some value)
+      | None when String.length value = 64 -> Ok (Some value)
+      | None -> Error (Invalid_record "issuer certificate ID has wrong length"))
   | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Array _ | Encoding.Map _
   | Encoding.Bool _ ->
       Error (Invalid_record "issuer certificate ID must be null or text")
@@ -559,37 +577,53 @@ let verify_membership ~repository certificates =
                     certificate
                 in
                 verify (certificate :: verified) rest (certificate :: roots) 0
-          | Some issuer_id -> (
-              match certificate_by_id verified issuer_id with
-              | None ->
+          | Some issuer_id ->
+              let* recovery_issuer = recovery_issuer_device issuer_id in
+              (match recovery_issuer with
+              | Some recovery_issuer ->
                   if
-                    List.exists
-                      (fun candidate ->
-                        String.equal candidate.certificate_id_value issuer_id)
-                      rest
-                  then
-                    if deferred + 1 >= List.length pending then
-                      Error Unknown_issuer_certificate
-                    else
-                      verify verified (rest @ [ certificate ]) roots
-                        (deferred + 1)
-                  else Error Unknown_issuer_certificate
-              | Some issuer ->
-                  if
-                    issuer.certificate_role_value <> Administrator
-                    || not
-                         (Model.Device_id.equal
-                            certificate.certificate_issuer_device
-                            issuer.certificate_subject_device.device_id_value)
-                  then Error Unauthorized_issuer
+                    not
+                      (Model.Device_id.equal recovery_issuer
+                         certificate.certificate_issuer_device)
+                  then Error Invalid_recovery_authority
                   else
-                    let* () =
-                      verify_certificate_crypto
-                        ~issuer_public_key:
-                          issuer.certificate_subject_device.public_key
-                        certificate
-                    in
-                    verify (certificate :: verified) rest roots 0))
+                    (* This record becomes authorized only when an authority
+                       epoch proves this recovery key was current. Membership
+                       verification can check its derived identity now, but
+                       intentionally cannot treat it as ordinary authority. *)
+                    let* () = validate_certificate certificate in
+                    verify (certificate :: verified) rest roots 0
+              | None -> (
+                  match certificate_by_id verified issuer_id with
+                  | None ->
+                      if
+                        List.exists
+                          (fun candidate ->
+                            String.equal candidate.certificate_id_value issuer_id)
+                          rest
+                      then
+                        if deferred + 1 >= List.length pending then
+                          Error Unknown_issuer_certificate
+                        else
+                          verify verified (rest @ [ certificate ]) roots
+                            (deferred + 1)
+                      else Error Unknown_issuer_certificate
+                  | Some issuer ->
+                      if
+                        issuer.certificate_role_value <> Administrator
+                        || not
+                             (Model.Device_id.equal
+                                certificate.certificate_issuer_device
+                                issuer.certificate_subject_device.device_id_value)
+                      then Error Unauthorized_issuer
+                      else
+                        let* () =
+                          verify_certificate_crypto
+                            ~issuer_public_key:
+                              issuer.certificate_subject_device.public_key
+                            certificate
+                        in
+                        verify (certificate :: verified) rest roots 0)))
   in
   verify [] certificates [] 0
 
@@ -630,19 +664,34 @@ let certificate_for_device membership device =
       device_equal certificate.certificate_subject_device device)
     membership.membership_certificates
 
+let certificate_is_recovery_issued certificate =
+  match certificate.certificate_issuer_id with
+  | None -> false
+  | Some issuer ->
+      String.length issuer >= String.length recovery_issuer_prefix
+      && String.sub issuer 0 (String.length recovery_issuer_prefix)
+         = recovery_issuer_prefix
+
 let is_authorized membership device =
-  Option.is_some (certificate_for_device membership device)
+  match certificate_for_device membership device with
+  | Some certificate -> not (certificate_is_recovery_issued certificate)
+  | None -> false
 
 let is_administrator membership device =
   match certificate_for_device membership device with
-  | Some { certificate_role_value = Administrator; _ } -> true
-  | Some { certificate_role_value = Member; _ } | None -> false
+  | Some certificate ->
+      certificate.certificate_role_value = Administrator
+      && not (certificate_is_recovery_issued certificate)
+  | None -> false
 
 let enroll membership ~issuer signing_capability ~subject ~role =
   match certificate_by_id membership.membership_certificates issuer with
   | None -> Error Unknown_issuer_certificate
   | Some issuer_certificate ->
-      if issuer_certificate.certificate_role_value <> Administrator then
+      if
+        issuer_certificate.certificate_role_value <> Administrator
+        || certificate_is_recovery_issued issuer_certificate
+      then
         Error Unauthorized_issuer
       else if Option.is_some (certificate_for_device membership subject) then
         Error Duplicate_device
@@ -682,7 +731,9 @@ let sign_revision membership ~certificate signing_capability revision =
   match certificate_by_id membership.membership_certificates certificate with
   | None -> Error Unknown_author_certificate
   | Some author_certificate ->
-      if
+      if certificate_is_recovery_issued author_certificate then
+        Error Unauthorized_epoch_issuer
+      else if
         not
           (Model.Device_id.equal
              author_certificate.certificate_subject_device.device_id_value
@@ -806,7 +857,7 @@ let decode_signed_revision encoded =
       | _ -> assert false)
   | _ -> assert false
 
-let verify_signed_revision membership signed =
+let verify_signed_revision_crypto membership signed =
   if
     not
       (Repository_id.equal membership.membership_repository
@@ -850,6 +901,18 @@ let verify_signed_revision membership signed =
                   ~msg:(revision_signature_domain ^ bytes)
               then Ok ()
               else Error Signature_verification_failed)
+
+let verify_signed_revision membership signed =
+  match signed.signed_epoch_value with
+  | Some _ -> Error (Invalid_epoch "epoch-bound revision needs authority verification")
+  | None -> (
+      match
+        certificate_by_id membership.membership_certificates
+          signed.signed_certificate
+      with
+      | Some certificate when certificate_is_recovery_issued certificate ->
+          Error Unauthorized_epoch_issuer
+      | Some _ | None -> verify_signed_revision_crypto membership signed)
 
 (* Authority epochs ------------------------------------------------------- *)
 
@@ -918,21 +981,6 @@ let encode_revision_id_array values =
 let validate_hex_id name value =
   Repository_id.of_string value
   |> Result.map_error (fun _ -> Invalid_epoch (name ^ " must be lowercase hex"))
-
-let recovery_issuer device =
-  recovery_issuer_prefix ^ Model.Device_id.to_string (device_id device)
-
-let recovery_issuer_device issuer =
-  let prefix_length = String.length recovery_issuer_prefix in
-  if
-    String.length issuer > prefix_length
-    && String.sub issuer 0 prefix_length = recovery_issuer_prefix
-  then
-    String.sub issuer prefix_length (String.length issuer - prefix_length)
-    |> Model.Device_id.of_string
-    |> Result.map_error (fun _ -> Invalid_recovery_authority)
-    |> Result.map Option.some
-  else Ok None
 
 let validate_epoch_issuer issuer =
   let* recovery_device = recovery_issuer_device issuer in
@@ -1251,19 +1299,43 @@ let verify_authority ~membership epochs =
                 then Ok ()
                 else
                   match certificate_issuer certificate with
-                  | Some issuer_id -> (
-                      match
-                        certificate_by_id membership.membership_certificates issuer_id
-                      with
-                      | Some enrollment_issuer
-                        when List.for_all
-                               (fun parent ->
-                                 administrator_active membership parent
-                                   enrollment_issuer)
-                               parent_epochs ->
-                          Ok ()
-                      | Some _ -> Error Unauthorized_epoch_issuer
-                      | None -> Error Unknown_issuer_certificate)
+                  | Some issuer_id ->
+                      let* recovery_issuer = recovery_issuer_device issuer_id in
+                      (match recovery_issuer with
+                      | Some recovery_issuer ->
+                          if
+                            not
+                              (Model.Device_id.equal recovery_issuer
+                                 certificate.certificate_issuer_device)
+                            || not
+                                 (List.for_all
+                                    (fun parent ->
+                                      Model.Device_id.equal recovery_issuer
+                                        (device_id
+                                           parent.epoch_recovery_device_value))
+                                    parent_epochs)
+                          then Error Invalid_recovery_authority
+                          else
+                            verify_certificate_crypto
+                              ~issuer_public_key:
+                                (device_public_key
+                                   (List.hd parent_epochs)
+                                     .epoch_recovery_device_value)
+                              certificate
+                      | None -> (
+                          match
+                            certificate_by_id membership.membership_certificates
+                              issuer_id
+                          with
+                          | Some enrollment_issuer
+                            when List.for_all
+                                   (fun parent ->
+                                     administrator_active membership parent
+                                       enrollment_issuer)
+                                   parent_epochs ->
+                              Ok ()
+                          | Some _ -> Error Unauthorized_epoch_issuer
+                          | None -> Error Unknown_issuer_certificate))
                   | None -> Error Invalid_root_certificate)
           epoch.epoch_certificate_ids
       in
@@ -1355,6 +1427,45 @@ let authority_device_administrator authority ~epoch device =
       match certificate_for_device authority.authority_membership_value device with
       | Some certificate -> administrator_active authority.authority_membership_value epoch certificate
       | None -> false)
+
+let authority_epoch_is_head authority epoch =
+  List.exists (String.equal epoch) authority.authority_heads_value
+
+let rec epoch_descends_from authority ~ancestor epoch =
+  if String.equal ancestor epoch.epoch_id_value then true
+  else
+    List.exists
+      (fun parent ->
+        match authority_epoch authority parent with
+        | Error _ -> false
+        | Ok parent -> epoch_descends_from authority ~ancestor parent)
+      epoch.epoch_parents_value
+
+let requires_late_review authority signed =
+  let* signed_epoch =
+    match signed.signed_epoch_value with
+    | Some epoch -> authority_epoch authority epoch
+    | None -> Error (Invalid_epoch "legacy revision has no authority epoch")
+  in
+  let* certificate =
+    match
+      certificate_by_id authority.authority_membership_value.membership_certificates
+        signed.signed_certificate
+    with
+    | Some certificate -> Ok certificate
+    | None -> Error Unknown_author_certificate
+  in
+  let signer = certificate_subject certificate in
+  Ok
+    (List.exists
+       (fun head_id ->
+         match authority_epoch authority head_id with
+         | Error _ -> false
+         | Ok head ->
+             epoch_descends_from authority ~ancestor:signed_epoch.epoch_id_value
+               head
+             && device_revoked head signer)
+       authority.authority_heads_value)
 
 let extend_authority authority additional =
   let rec add seen = function
@@ -1451,6 +1562,39 @@ let recover_epoch authority ~parents ~certificates ~revoked ~frontier
           let* _ = extend_authority authority [ epoch ] in
           Ok epoch
 
+let recover_enroll authority ~parents ~subject ~role signing_capability =
+  if parents = [] then Error (Invalid_epoch "recovery enrollment needs a parent")
+  else if not (sorted_unique String.compare parents) then
+    Error (Invalid_epoch "parents are not strictly sorted")
+  else if not (List.for_all (fun parent -> List.mem parent authority.authority_heads_value) parents) then
+    Error (Invalid_epoch "recovery enrollment may only use current authority heads")
+  else
+    let* parent_epochs = map_result (authority_epoch authority) parents in
+    match parent_epochs with
+    | [] -> assert false
+    | first_parent :: other_parents ->
+        let recovery_device = first_parent.epoch_recovery_device_value in
+        if
+          not
+            (List.for_all
+               (fun parent ->
+                 device_equal recovery_device parent.epoch_recovery_device_value)
+               other_parents)
+        then Error Invalid_recovery_authority
+        else if
+          not
+            (String.equal (signing_public_key signing_capability)
+               (device_public_key recovery_device))
+        then Error Invalid_private_key
+        else if Option.is_some (certificate_for_device authority.authority_membership_value subject) then
+          Error Duplicate_device
+        else
+          sign_certificate
+            ~repository:authority.authority_membership_value.membership_repository
+            ~subject ~role
+            ~issuer_certificate:(Some (recovery_issuer recovery_device))
+            ~issuer_device:(device_id recovery_device) signing_capability
+
 let sign_revision_at authority ~epoch ~certificate signing_capability revision =
   let* authority_epoch = authority_epoch authority epoch in
   let* author_certificate =
@@ -1498,7 +1642,9 @@ let verify_signed_revision_at authority signed =
     | Some epoch -> authority_epoch authority epoch
     | None -> Error (Invalid_epoch "legacy revision has no authority epoch")
   in
-  let* () = verify_signed_revision authority.authority_membership_value signed in
+  let* () =
+    verify_signed_revision_crypto authority.authority_membership_value signed
+  in
   let* certificate =
     match
       certificate_by_id authority.authority_membership_value.membership_certificates
@@ -1577,6 +1723,7 @@ let make_authorization authority ~epoch ~issuer signing_capability ~device
     }
 
 let authorization_revision authorization = authorization.authorization_revision_value
+let authorization_epoch authorization = authorization.authorization_epoch
 
 let encode_authorization authorization =
   let unsigned =
@@ -1719,6 +1866,7 @@ let make_adoption authority ~epoch ~issuer signing_capability ~signed_revision =
     }
 
 let adoption_revision adoption = adoption.adoption_revision_value
+let adoption_epoch adoption = adoption.adoption_epoch
 
 let encode_adoption adoption =
   let unsigned =

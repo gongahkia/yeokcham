@@ -13,6 +13,7 @@ type error =
   | Model_error of Yeokcham_v4_model.error
   | Trust_error of Yeokcham_v4_trust.error
   | Package_error of Yeokcham_v4_package.error
+  | Recovery_error of Yeokcham_v4_recovery.error
   | Invalid_checkpoint_id of string
   | Unknown_checkpoint of Yeokcham_v4_model.Snapshot_id.t
   | Unchanged_share of Yeokcham_v4_model.Snapshot_id.t
@@ -88,6 +89,16 @@ type decision_inspection = {
   inspected_decision : Yeokcham_v4_model.decision;
   inspected_candidates : inspected_candidate list;
 }
+
+type package_review = {
+  review_revision : Yeokcham_v4_model.Revision_id.t;
+  review_author : Yeokcham_v4_model.Device_id.t;
+  requires_adoption : bool;
+}
+(** Public, read-only package review data. A positive [requires_adoption]
+    means a current authority head has revoked the historical signer, so this
+    exact signed record cannot be received without an administrator's later
+    adoption. *)
 
 type save_outcome = Unchanged of status | Saved of status
 
@@ -201,6 +212,65 @@ val enroll_device :
   (status, error) result
 (** An already authorized administrator enrols [subject]. The username is only a
     local display registration made alongside, never certificate data. *)
+
+val revoke_device :
+  root:string ->
+  device:Yeokcham_v4_model.Device_id.t ->
+  signing_capability:Yeokcham_v4_trust.signing_capability ->
+  (status, error) result
+(** Advances every current authority head only when the local device is a
+    common active administrator. Historical records remain verifiable; new
+    records by the revoked device do not. A local device must use rotation
+    rather than revoking itself. *)
+
+val rotate_local_device :
+  root:string ->
+  replacement:Yeokcham_v4_trust.device ->
+  signing_capability:Yeokcham_v4_trust.signing_capability ->
+  (status, error) result
+(** Atomically enrolls [replacement], revokes the current local device, and
+    changes the local certificate. The replacement private key must already be
+    in the platform signer. *)
+
+val recover_authority :
+  root:string ->
+  package:string ->
+  mnemonic:string ->
+  output:string ->
+  replacement:Yeokcham_v4_trust.device ->
+  replaced:Yeokcham_v4_model.Device_id.t ->
+  (status * Yeokcham_v4_recovery.ceremony, error) result
+(** Uses an encrypted recovery package to enroll [replacement] as an
+    administrator, revoke [replaced], and rotate recovery material in one
+    recovery successor epoch. [output] is written exclusively before the state
+    head advances; callers must store the returned mnemonic offline. *)
+
+val refresh_recovery_package :
+  root:string ->
+  package:string ->
+  mnemonic:string ->
+  output:string ->
+  (unit, error) result
+(** Produces an additional, exclusively-created encrypted recovery package for
+    the current authority closure without rotating identity or authority. The
+    existing 24-word mnemonic is required and remains unchanged. *)
+
+val authority_heads : root:string -> (string list, error) result
+
+val review_package : root:string -> package:string -> (package_review list, error) result
+(** Verifies a V2 package manifest and reports its signed records without
+    importing objects or modifying the model or working tree. *)
+
+val adopt_package_revision :
+  root:string ->
+  package:string ->
+  revision:Yeokcham_v4_model.Revision_id.t ->
+  signing_capability:Yeokcham_v4_trust.signing_capability ->
+  (status, error) result
+(** Records a current-head administrator's one-time adoption for one exact,
+    currently review-required package record. The record and authority closure
+    are persisted, but package objects and model revisions are not imported;
+    call [receive_package] afterwards. *)
 
 val restore :
   root:string ->

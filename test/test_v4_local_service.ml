@@ -868,6 +868,254 @@ let authority_initialized_repositories_exchange_verified_epoch_bound_work () =
       Alcotest.(check string) "receive does not materialize incoming bytes" "let version = 1\n"
         (read_file destination "main.ml"))
 
+let authority_lifecycle_revokes_rotates_and_recovers_a_replacement_device () =
+  with_directory "yeokcham-v4-authority-lifecycle-" (fun root ->
+      write_file root "main.ml" "let version = 1\n";
+      let administrator_capability = signing_capability 'a' in
+      let administrator = trust_device administrator_capability in
+      let recovery_capability = signing_capability 'r' in
+      let recovery_device = trust_device recovery_capability in
+      let _status, first_ceremony =
+        Service.init_signed_with_recovery ~root ~username:(username "alice")
+          ~initial_draft:(draft "draft-one") ~title:"authority" ~repository
+          ~device:administrator ~signing_capability:administrator_capability
+          ~recovery_device ~recovery_capability
+        |> require_ok Service.error_to_string
+      in
+      let member_capability = signing_capability 'b' in
+      let member = trust_device member_capability in
+      ignore
+        (Service.enroll_device ~root ~subject:member ~role:Trust.Member
+           ~username:(username "bob")
+           ~signing_capability:administrator_capability
+        |> require_ok Service.error_to_string);
+      ignore
+        (Service.revoke_device ~root ~device:(Trust.device_id member)
+           ~signing_capability:administrator_capability
+        |> require_ok Service.error_to_string);
+      let replacement_capability = signing_capability 'c' in
+      let replacement = trust_device replacement_capability in
+      let output = Filename.concat root "rotated-recovery.cbor" in
+      let _status, second_ceremony =
+        Service.recover_authority ~root
+          ~package:(Service.recovery_package_path root)
+          ~mnemonic:first_ceremony.Recovery.mnemonic ~output
+          ~replacement ~replaced:(Trust.device_id administrator)
+        |> require_ok Service.error_to_string
+      in
+      let repository_store =
+        Store.open_repository ~root |> require_ok Store.error_to_string
+      in
+      let loaded = Store.load repository_store |> require_ok Store.error_to_string in
+      let collaboration =
+        match loaded.Store.collaboration with
+        | Some collaboration -> collaboration
+        | None -> Alcotest.fail "authority state was not retained"
+      in
+      let authority =
+        match Store.authority collaboration with
+        | Some authority -> authority
+        | None -> Alcotest.fail "authority state was downgraded to legacy"
+      in
+      let head =
+        match Trust.authority_heads authority with
+        | [ head ] -> head
+        | _ -> Alcotest.fail "recovery did not leave one current authority head"
+      in
+      Alcotest.(check bool) "recovered replacement is an administrator" true
+        (Trust.authority_device_administrator authority ~epoch:head replacement);
+      Alcotest.(check bool) "replaced administrator is revoked" false
+        (Trust.authority_device_active authority ~epoch:head administrator);
+      Alcotest.(check bool) "ordinary member remains revoked" false
+        (Trust.authority_device_active authority ~epoch:head member);
+      let recovery_package =
+        In_channel.with_open_bin output In_channel.input_all |> Recovery.decode
+        |> require_ok Recovery.error_to_string
+      in
+      let recovered =
+        Recovery.recover ~mnemonic:second_ceremony.Recovery.mnemonic
+          ~package:recovery_package
+        |> require_ok Recovery.error_to_string
+      in
+      Alcotest.(check (list string)) "rotated package holds the successor closure"
+        [ head ]
+        (Trust.authority_heads (Recovery.recovered_authority recovered));
+      write_file root "main.ml" "let version = 2\n";
+      ignore
+        (Service.share_signed ~root ~change:(change "change-recovered")
+           ~revision:(revision "revision-recovered")
+           ~signing_capability:replacement_capability
+        |> require_ok Service.error_to_string))
+
+let normal_device_rotation_replaces_the_local_signing_identity_atomically () =
+  with_directory "yeokcham-v4-device-rotation-" (fun root ->
+      write_file root "main.ml" "let version = 1\n";
+      let administrator_capability = signing_capability 'a' in
+      let administrator = trust_device administrator_capability in
+      let recovery_capability = signing_capability 'r' in
+      let recovery_device = trust_device recovery_capability in
+      ignore
+        (Service.init_signed_with_recovery ~root ~username:(username "alice")
+           ~initial_draft:(draft "draft-one") ~title:"authority" ~repository
+           ~device:administrator ~signing_capability:administrator_capability
+           ~recovery_device ~recovery_capability
+        |> require_ok Service.error_to_string);
+      let replacement_capability = signing_capability 'c' in
+      let replacement = trust_device replacement_capability in
+      ignore
+        (Service.rotate_local_device ~root ~replacement
+           ~signing_capability:administrator_capability
+        |> require_ok Service.error_to_string);
+      let identity = Service.identity ~root |> require_ok Service.error_to_string in
+      Alcotest.(check bool) "the local certificate switches to the replacement"
+        true (Trust.device_equal identity.Service.device replacement);
+      let heads = Service.authority_heads ~root |> require_ok Service.error_to_string in
+      let head =
+        match heads with
+        | [ head ] -> head
+        | _ -> Alcotest.fail "rotation did not leave one authority head"
+      in
+      let repository_store =
+        Store.open_repository ~root |> require_ok Store.error_to_string
+      in
+      let loaded = Store.load repository_store |> require_ok Store.error_to_string in
+      let authority =
+        match loaded.Store.collaboration with
+        | Some collaboration -> (
+            match Store.authority collaboration with
+            | Some authority -> authority
+            | None -> Alcotest.fail "rotation downgraded the authority state")
+        | None -> Alcotest.fail "rotation lost collaboration state"
+      in
+      Alcotest.(check bool) "old local device is revoked" false
+        (Trust.authority_device_active authority ~epoch:head administrator);
+      Alcotest.(check bool) "replacement is active" true
+        (Trust.authority_device_active authority ~epoch:head replacement);
+      write_file root "main.ml" "let version = 2\n";
+      ignore
+        (Service.share_signed ~root ~change:(change "change-rotated")
+           ~revision:(revision "revision-rotated")
+           ~signing_capability:replacement_capability
+        |> require_ok Service.error_to_string))
+
+let late_package_review_adopts_one_exact_record_before_receive () =
+  with_directory "yeokcham-v4-late-package-review-" (fun parent ->
+      let source = Filename.concat parent "source" in
+      let destination = Filename.concat parent "destination" in
+      Unix.mkdir source 0o700;
+      Unix.mkdir destination 0o700;
+      write_file source "main.ml" "let version = 1\n";
+      write_file destination "main.ml" "let version = 1\n";
+      let root_capability = signing_capability 'a' in
+      let root_device = trust_device root_capability in
+      let recovery_capability = signing_capability 'r' in
+      let recovery_device = trust_device recovery_capability in
+      ignore
+        (Service.init_signed_with_recovery ~root:source ~username:(username "alice")
+           ~initial_draft:(draft "draft-source") ~title:"source" ~repository
+           ~device:root_device ~signing_capability:root_capability
+           ~recovery_device ~recovery_capability
+        |> require_ok Service.error_to_string);
+      let reviewer_capability = signing_capability 'b' in
+      let reviewer = trust_device reviewer_capability in
+      ignore
+        (Service.enroll_device ~root:source ~subject:reviewer
+           ~role:Trust.Administrator ~username:(username "bob")
+           ~signing_capability:root_capability
+        |> require_ok Service.error_to_string);
+      let source_repository =
+        Store.open_repository ~root:source |> require_ok Store.error_to_string
+      in
+      let source_loaded =
+        Store.load source_repository |> require_ok Store.error_to_string
+      in
+      let source_collaboration =
+        match source_loaded.Store.collaboration with
+        | Some collaboration -> collaboration
+        | None -> Alcotest.fail "authority source lost collaboration state"
+      in
+      let authority =
+        match Store.authority source_collaboration with
+        | Some authority -> authority
+        | None -> Alcotest.fail "authority source wrote a legacy state"
+      in
+      let reviewer_certificate =
+        Trust.certificates (Trust.authority_membership authority)
+        |> List.find (fun certificate ->
+               Trust.device_equal (Trust.certificate_subject certificate) reviewer)
+        |> Trust.certificate_id
+      in
+      ignore
+        (Service.init_authority_collaboration ~root:destination
+           ~username:(username "bob") ~initial_draft:(draft "draft-destination")
+           ~title:"destination" ~device:reviewer ~authority
+           ~local_certificate:reviewer_certificate
+        |> require_ok Service.error_to_string);
+      write_file source "main.ml" "let version = 2\n";
+      ignore
+        (Service.share_signed ~root:source ~change:(change "change-late")
+           ~revision:(revision "revision-late") ~signing_capability:root_capability
+        |> require_ok Service.error_to_string);
+      let source_loaded =
+        Store.load source_repository |> require_ok Store.error_to_string
+      in
+      let source_collaboration =
+        match source_loaded.Store.collaboration with
+        | Some collaboration -> collaboration
+        | None -> Alcotest.fail "source lost collaboration state after sharing"
+      in
+      let authority =
+        match Store.authority source_collaboration with
+        | Some authority -> authority
+        | None -> Alcotest.fail "source authority was removed after sharing"
+      in
+      let parent_head =
+        match Trust.authority_heads authority with
+        | [ head ] -> head
+        | _ -> Alcotest.fail "source has an unexpected authority fork"
+      in
+      let revoked_epoch =
+        Trust.successor_epoch authority ~parents:[ parent_head ]
+          ~certificates:(Trust.certificates (Trust.authority_membership authority))
+          ~revoked:[ Trust.device_id root_device ] ~frontier:[] ~recovery_device
+          ~issuer:reviewer_certificate reviewer_capability
+        |> require_ok Trust.error_to_string
+      in
+      let revoked_authority =
+        Trust.extend_authority authority [ revoked_epoch ]
+        |> require_ok Trust.error_to_string
+      in
+      let package = Filename.concat parent "late-record" in
+      Yeokcham_v4_package.create_with_authority
+        ~source:(Store.underlying_store source_repository) ~destination:package
+        ~authority:revoked_authority
+        ~revisions:(Store.signed_revisions source_collaboration)
+        ~authorizations:[] ~adoptions:[]
+      |> require_ok Yeokcham_v4_package.error_to_string;
+      let reviewed =
+        Service.review_package ~root:destination ~package
+        |> require_ok Service.error_to_string
+      in
+      Alcotest.(check (list string)) "the isolated review names the late revision"
+        [ "revision-late:true" ]
+        (reviewed
+        |> List.map (fun review ->
+            Model.Revision_id.to_string review.Service.review_revision ^ ":"
+            ^ string_of_bool review.Service.requires_adoption));
+      ignore
+        (Service.adopt_package_revision ~root:destination ~package
+           ~revision:(revision "revision-late")
+           ~signing_capability:reviewer_capability
+        |> require_ok Service.error_to_string);
+      let received =
+        Service.receive_package ~root:destination ~package
+        |> require_ok Service.error_to_string
+      in
+      Alcotest.(check int) "only the adopted record enters the local model" 1
+        received.Service.shared_change_count;
+      Alcotest.(check string) "review and receive do not materialize package bytes"
+        "let version = 1\n" (read_file destination "main.ml"))
+
 let () =
   Alcotest.run "V4 local service"
     [
@@ -931,5 +1179,14 @@ let () =
             "authority initialization exchanges epoch-bound work and recovery"
             `Quick
             authority_initialized_repositories_exchange_verified_epoch_bound_work;
+          Alcotest.test_case
+            "authority lifecycle revokes and recovery replaces control" `Quick
+            authority_lifecycle_revokes_rotates_and_recovers_a_replacement_device;
+          Alcotest.test_case
+            "normal device rotation atomically replaces local authority" `Quick
+            normal_device_rotation_replaces_the_local_signing_identity_atomically;
+          Alcotest.test_case
+            "late package review adopts exactly one record before receive" `Quick
+            late_package_review_adopts_one_exact_record_before_receive;
         ] );
     ]

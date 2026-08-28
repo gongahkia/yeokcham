@@ -307,13 +307,16 @@ let make ~secret ~nonce ~authority ~recovery_capability =
         Ok { package_without_ciphertext with package_ciphertext = ciphertext }
       with Invalid_argument detail -> Error (Invalid_package detail)
 
-let create ~authority ~recovery_capability =
+let rec create ~authority ~recovery_capability =
   let* secret = generate_secret () in
+  let* package = refresh ~secret ~authority ~recovery_capability in
+  Ok { mnemonic = mnemonic secret; package }
+
+and refresh ~secret ~authority ~recovery_capability =
   try
     Mirage_crypto_rng_unix.use_default ();
     let nonce = Mirage_crypto_rng.generate 12 in
-    let* package = make ~secret ~nonce ~authority ~recovery_capability in
-    Ok { mnemonic = mnemonic secret; package }
+    make ~secret ~nonce ~authority ~recovery_capability
   with _ -> Error Entropy_failure
 
 let decode_payload bytes =

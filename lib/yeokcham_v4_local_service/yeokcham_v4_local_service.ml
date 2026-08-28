@@ -20,6 +20,7 @@ type error =
   | Model_error of Model.error
   | Trust_error of Trust.error
   | Package_error of Package.error
+  | Recovery_error of Recovery.error
   | Invalid_checkpoint_id of string
   | Unknown_checkpoint of Model.Snapshot_id.t
   | Unchanged_share of Model.Snapshot_id.t
@@ -85,6 +86,12 @@ type decision_inspection = {
   inspected_candidates : inspected_candidate list;
 }
 
+type package_review = {
+  review_revision : Model.Revision_id.t;
+  review_author : Model.Device_id.t;
+  requires_adoption : bool;
+}
+
 type save_outcome = Unchanged of status | Saved of status
 
 type compact_report = {
@@ -137,6 +144,7 @@ let error_to_string = function
   | Model_error error -> Model.error_to_string error
   | Trust_error error -> Trust.error_to_string error
   | Package_error error -> Package.error_to_string error
+  | Recovery_error error -> Recovery.error_to_string error
   | Invalid_checkpoint_id value ->
       "invalid saved checkpoint identifier: " ^ value
   | Unknown_checkpoint id ->
@@ -367,11 +375,8 @@ let current_authority_context authority =
           List.sort_uniq Model.Device_id.compare revoked,
           List.sort_uniq Model.Revision_id.compare frontier )
 
-let advance_authority ~authority ~membership ~local_certificate
-    ~signing_capability =
-  let* parents, recovery_device, revoked, frontier =
-    current_authority_context authority
-  in
+let advance_authority_with ~authority ~membership ~parents ~recovery_device
+    ~revoked ~frontier ~local_certificate ~signing_capability =
   let* epoch =
     Trust.successor_epoch authority ~parents
       ~certificates:(Trust.certificates membership) ~revoked ~frontier
@@ -380,6 +385,14 @@ let advance_authority ~authority ~membership ~local_certificate
   in
   Trust.extend_authority authority [ epoch ]
   |> Result.map_error (fun error -> Trust_error error)
+
+let advance_authority ~authority ~membership ~local_certificate
+    ~signing_capability =
+  let* parents, recovery_device, revoked, frontier =
+    current_authority_context authority
+  in
+  advance_authority_with ~authority ~membership ~parents ~recovery_device
+    ~revoked ~frontier ~local_certificate ~signing_capability
 
 let checkpoint_observed project observed =
   let active = Model.active_draft project in
@@ -400,8 +413,7 @@ let with_repository ~root f =
 let recovery_package_path root =
   Filename.concat (Filename.concat root ".yeokcham") "recovery-v1.cbor"
 
-let write_recovery_package_exclusive ~root ceremony =
-  let path = recovery_package_path root in
+let write_recovery_package_to_exclusive ~path ceremony =
   try
     let channel =
       Unix.openfile path [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_EXCL ] 0o600
@@ -417,6 +429,9 @@ let write_recovery_package_exclusive ~root ceremony =
     Error
       (Printf.sprintf "could not write recovery package %s (%s): %s" path
          operation (Unix.error_message error))
+
+let write_recovery_package_exclusive ~root ceremony =
+  write_recovery_package_to_exclusive ~path:(recovery_package_path root) ceremony
 
 let init ~root ~creator ~username ~initial_draft ~title =
   let* repository =
@@ -515,9 +530,7 @@ let init_signed_with_recovery ~root ~username ~initial_draft ~title ~repository
   in
   let* ceremony =
     Recovery.create ~authority ~recovery_capability
-    |> Result.map_error (fun error ->
-           Trust_error
-             (Trust.Invalid_record ("could not create recovery package: " ^ Recovery.error_to_string error)))
+    |> Result.map_error (fun error -> Recovery_error error)
   in
   let* repository =
     Store.init_collaborative_with ~root ~bootstrap:(fun underlying_store ->
@@ -611,6 +624,252 @@ let enroll_device ~root ~subject ~role ~username ~signing_capability =
             |> Result.map_error (fun error -> Store_error error)
       in
       persist_collaborative repository loaded project collaboration)
+
+let authority_heads ~root =
+  with_repository ~root (fun _ loaded ->
+      let* collaboration = require_collaboration loaded in
+      match Store.authority collaboration with
+      | Some authority -> Ok (Trust.authority_heads authority)
+      | None ->
+          Error
+            (Trust_error
+               (Trust.Invalid_epoch "legacy collaboration has no authority epochs")))
+
+let revoke_device ~root ~device ~signing_capability =
+  with_repository ~root (fun repository loaded ->
+      let* collaboration = require_collaboration loaded in
+      let* authority =
+        match Store.authority collaboration with
+        | Some authority -> Ok authority
+        | None ->
+            Error
+              (Trust_error
+                 (Trust.Invalid_epoch "legacy collaboration has no authority epochs"))
+      in
+      let* local = local_device collaboration in
+      let* revoked_device =
+        match
+          Trust.certificates (Store.membership collaboration)
+          |> List.find_opt (fun certificate ->
+                 Model.Device_id.equal device
+                   (Trust.device_id (Trust.certificate_subject certificate)))
+        with
+        | Some certificate -> Ok (Trust.certificate_subject certificate)
+        | None ->
+            Error
+              (Trust_error
+                 (Trust.Invalid_epoch "revocation names an unknown device"))
+      in
+      if Trust.device_equal local revoked_device then
+        Error
+          (Trust_error
+             (Trust.Invalid_epoch
+                "use atomic device rotation instead of revoking this local device"))
+      else
+        let* parents, recovery_device, revoked, frontier =
+          current_authority_context authority
+        in
+        let revoked =
+          device :: revoked |> List.sort_uniq Model.Device_id.compare
+        in
+        let* authority =
+          advance_authority_with ~authority
+            ~membership:(Store.membership collaboration) ~parents ~recovery_device
+            ~revoked ~frontier
+            ~local_certificate:(Store.local_certificate collaboration)
+            ~signing_capability
+        in
+        let* collaboration =
+          Store.collaboration_with_authority ~authority
+            ~revisions:(Store.signed_revisions collaboration)
+            ~local_certificate:(Store.local_certificate collaboration)
+            ~authorizations:(Store.authorizations collaboration)
+            ~adoptions:(Store.adoptions collaboration)
+          |> Result.map_error (fun error -> Store_error error)
+        in
+        persist_collaborative repository loaded loaded.Store.project collaboration)
+
+let rotate_local_device ~root ~replacement ~signing_capability =
+  with_repository ~root (fun repository loaded ->
+      let* collaboration = require_collaboration loaded in
+      let* authority =
+        match Store.authority collaboration with
+        | Some authority -> Ok authority
+        | None ->
+            Error
+              (Trust_error
+                 (Trust.Invalid_epoch "legacy collaboration has no authority epochs"))
+      in
+      let* local = local_device collaboration in
+      if Trust.device_equal local replacement then
+        Error (Trust_error (Trust.Invalid_epoch "replacement device is already local"))
+      else
+        let* old_certificate = local_certificate collaboration in
+        let* replacement_certificate =
+          Trust.enroll (Store.membership collaboration)
+            ~issuer:(Store.local_certificate collaboration) signing_capability
+            ~subject:replacement ~role:(Trust.certificate_role old_certificate)
+          |> Result.map_error (fun error -> Trust_error error)
+        in
+        let* membership =
+          Trust.extend_membership (Store.membership collaboration)
+            [ replacement_certificate ]
+          |> Result.map_error (fun error -> Trust_error error)
+        in
+        let* authority =
+          Trust.verify_authority ~membership (Trust.authority_epochs authority)
+          |> Result.map_error (fun error -> Trust_error error)
+        in
+        let* parents, recovery_device, revoked, frontier =
+          current_authority_context authority
+        in
+        let revoked =
+          Trust.device_id local :: revoked |> List.sort_uniq Model.Device_id.compare
+        in
+        let* authority =
+          advance_authority_with ~authority ~membership ~parents ~recovery_device
+            ~revoked ~frontier
+            ~local_certificate:(Store.local_certificate collaboration)
+            ~signing_capability
+        in
+        let* collaboration =
+          Store.collaboration_with_authority ~authority
+            ~revisions:(Store.signed_revisions collaboration)
+            ~local_certificate:(Trust.certificate_id replacement_certificate)
+            ~authorizations:(Store.authorizations collaboration)
+            ~adoptions:(Store.adoptions collaboration)
+          |> Result.map_error (fun error -> Store_error error)
+        in
+        persist_collaborative repository loaded loaded.Store.project collaboration)
+
+let read_recovery_package path =
+  try
+    In_channel.with_open_bin path In_channel.input_all |> Recovery.decode
+    |> Result.map_error (fun error -> Recovery_error error)
+  with Sys_error message ->
+    Error (Recovery_error (Recovery.Invalid_package message))
+
+let recover_authority ~root ~package ~mnemonic ~output ~replacement ~replaced =
+  with_repository ~root (fun repository loaded ->
+      let* collaboration = require_collaboration loaded in
+      let* authority =
+        match Store.authority collaboration with
+        | Some authority -> Ok authority
+        | None ->
+            Error
+              (Trust_error
+                 (Trust.Invalid_epoch "legacy collaboration has no authority epochs"))
+      in
+      let* package = read_recovery_package package in
+      let* recovered =
+        Recovery.recover ~mnemonic ~package
+        |> Result.map_error (fun error -> Recovery_error error)
+      in
+      let* parents, current_recovery, revoked, frontier =
+        current_authority_context authority
+      in
+      if
+        not
+          (String.equal
+             (Trust.signing_public_key (Recovery.recovered_capability recovered))
+             (Trust.device_public_key current_recovery))
+      then Error (Trust_error Trust.Invalid_recovery_authority)
+      else
+        let* replacement_certificate =
+          Trust.recover_enroll authority ~parents ~subject:replacement
+            ~role:Trust.Administrator (Recovery.recovered_capability recovered)
+          |> Result.map_error (fun error -> Trust_error error)
+        in
+        let* membership =
+          Trust.extend_membership (Store.membership collaboration)
+            [ replacement_certificate ]
+          |> Result.map_error (fun error -> Trust_error error)
+        in
+        let* authority =
+          Trust.verify_authority ~membership (Trust.authority_epochs authority)
+          |> Result.map_error (fun error -> Trust_error error)
+        in
+        let revoked =
+          replaced :: revoked
+          |> List.sort_uniq Model.Device_id.compare
+        in
+        let* next_recovery =
+          Trust.generate_device () |> Result.map_error (fun error -> Trust_error error)
+        in
+        let next_recovery_device = Trust.generated_identity next_recovery in
+        let next_recovery_capability =
+          Trust.generated_signing_capability next_recovery
+        in
+        let* epoch =
+          Trust.recover_epoch authority ~parents
+            ~certificates:(Trust.certificates membership)
+            ~revoked ~frontier ~recovery_device:next_recovery_device
+            (Recovery.recovered_capability recovered)
+          |> Result.map_error (fun error -> Trust_error error)
+        in
+        let* authority =
+          Trust.extend_authority authority [ epoch ]
+          |> Result.map_error (fun error -> Trust_error error)
+        in
+        let* ceremony =
+          Recovery.create ~authority ~recovery_capability:next_recovery_capability
+          |> Result.map_error (fun error -> Recovery_error error)
+        in
+        let* () =
+          write_recovery_package_to_exclusive ~path:output ceremony
+          |> Result.map_error (fun detail ->
+                 Recovery_error (Recovery.Invalid_package detail))
+        in
+        let* collaboration =
+            Store.collaboration_with_authority ~authority
+            ~revisions:(Store.signed_revisions collaboration)
+            ~local_certificate:(Trust.certificate_id replacement_certificate)
+            ~authorizations:(Store.authorizations collaboration)
+            ~adoptions:(Store.adoptions collaboration)
+          |> Result.map_error (fun error -> Store_error error)
+        in
+        let* status =
+          persist_collaborative repository loaded loaded.Store.project collaboration
+        in
+        Ok (status, ceremony))
+
+let refresh_recovery_package ~root ~package ~mnemonic ~output =
+  with_repository ~root (fun _ loaded ->
+      let* collaboration = require_collaboration loaded in
+      let* authority =
+        match Store.authority collaboration with
+        | Some authority -> Ok authority
+        | None ->
+            Error
+              (Trust_error
+                 (Trust.Invalid_epoch "legacy collaboration has no authority epochs"))
+      in
+      let* package = read_recovery_package package in
+      let* recovered =
+        Recovery.recover ~mnemonic ~package
+        |> Result.map_error (fun error -> Recovery_error error)
+      in
+      let* _, current_recovery, _, _ = current_authority_context authority in
+      if
+        not
+          (String.equal
+             (Trust.signing_public_key (Recovery.recovered_capability recovered))
+             (Trust.device_public_key current_recovery))
+      then Error (Trust_error Trust.Invalid_recovery_authority)
+      else
+        let* secret =
+          Recovery.secret_of_mnemonic mnemonic
+          |> Result.map_error (fun error -> Recovery_error error)
+        in
+        let* package =
+          Recovery.refresh ~secret ~authority
+            ~recovery_capability:(Recovery.recovered_capability recovered)
+          |> Result.map_error (fun error -> Recovery_error error)
+        in
+        let ceremony = { Recovery.mnemonic = mnemonic; package } in
+        write_recovery_package_to_exclusive ~path:output ceremony
+        |> Result.map_error (fun detail ->
+               Recovery_error (Recovery.Invalid_package detail)))
 
 let save ~root =
   with_repository ~root (fun repository loaded ->
@@ -1316,6 +1575,147 @@ let merge_public_records ~encode existing incoming =
   in
   add existing incoming
 
+let one_authority_head authority =
+  match Trust.authority_heads authority with
+  | [ head ] -> Ok head
+  | _ -> Error (Trust_error Trust.Authority_fork)
+
+let review_package ~root ~package =
+  with_repository ~root (fun _ loaded ->
+      let* collaboration = require_collaboration loaded in
+      let* authority =
+        match Store.authority collaboration with
+        | Some authority -> Ok authority
+        | None ->
+            Error
+              (Trust_error
+                 (Trust.Invalid_epoch "legacy collaboration has no authority epochs"))
+      in
+      let* inspected =
+        Package.inspect_with_authority ~package ~authority
+        |> Result.map_error (fun error -> Package_error error)
+      in
+      let* authority =
+        match Package.authority inspected with
+        | Some authority -> Ok authority
+        | None ->
+            Error
+              (Package_error
+                 (Package.Invalid_package
+                    "authority inspection returned no authority"))
+      in
+      let rec reviews reversed = function
+        | [] -> Ok (List.rev reversed)
+        | signed :: rest ->
+            let revision = Trust.signed_revision_value signed in
+            let* requires_adoption =
+              Trust.requires_late_review authority signed
+              |> Result.map_error (fun error -> Trust_error error)
+            in
+            reviews
+              ({
+                 review_revision = revision.Model.revision;
+                 review_author = revision.Model.revision_author;
+                 requires_adoption;
+               }
+              :: reversed)
+              rest
+      in
+      reviews [] (Package.revisions inspected))
+
+let adopt_package_revision ~root ~package ~revision ~signing_capability =
+  with_repository ~root (fun repository loaded ->
+      let* existing = require_collaboration loaded in
+      let* expected_authority =
+        match Store.authority existing with
+        | Some authority -> Ok authority
+        | None ->
+            Error
+              (Trust_error
+                 (Trust.Invalid_epoch "legacy collaboration has no authority epochs"))
+      in
+      let* inspected =
+        Package.inspect_with_authority ~package ~authority:expected_authority
+        |> Result.map_error (fun error -> Package_error error)
+      in
+      let* authority =
+        match Package.authority inspected with
+        | Some authority -> Ok authority
+        | None ->
+            Error
+              (Package_error
+                 (Package.Invalid_package
+                    "authority inspection returned no authority"))
+      in
+      let matching =
+        Package.revisions inspected
+        |> List.filter (fun signed ->
+               Model.Revision_id.equal (Trust.signed_revision_id signed) revision)
+      in
+      let* signed =
+        match matching with
+        | [ signed ] -> Ok signed
+        | [] ->
+            Error
+              (Package_error
+                 (Package.Invalid_package
+                    "the requested revision is absent from the package"))
+        | _ ->
+            Error
+              (Package_error
+                 (Package.Invalid_package
+                    "the package names the requested revision more than once"))
+      in
+      let* requires_adoption =
+        Trust.requires_late_review authority signed
+        |> Result.map_error (fun error -> Trust_error error)
+      in
+      if not requires_adoption then
+        Error
+          (Package_error
+             (Package.Invalid_package
+                "the requested revision does not require a late-arrival adoption"))
+      else
+        let* head = one_authority_head authority in
+        let* local_certificate =
+          match
+            Trust.certificates (Trust.authority_membership authority)
+            |> List.find_opt (fun certificate ->
+                   String.equal (Trust.certificate_id certificate)
+                     (Store.local_certificate existing))
+          with
+          | Some certificate -> Ok certificate
+          | None ->
+              Error
+                (Store_error
+                   (Store.Invalid_collaboration_state
+                      "local certificate is absent from inspected authority"))
+        in
+        let local_device = Trust.certificate_subject local_certificate in
+        if not (Trust.authority_device_administrator authority ~epoch:head local_device)
+        then Error (Trust_error Trust.Unauthorized_epoch_issuer)
+        else
+          let* adoption =
+            Trust.make_adoption authority ~epoch:head
+              ~issuer:(Store.local_certificate existing) signing_capability
+              ~signed_revision:signed
+            |> Result.map_error (fun error -> Trust_error error)
+          in
+          let* revisions =
+            merge_signed_revisions (Store.signed_revisions existing) [ signed ]
+          in
+          let* adoptions =
+            merge_public_records ~encode:Trust.encode_adoption
+              (Store.adoptions existing) [ adoption ]
+          in
+          let* collaboration =
+            Store.collaboration_with_authority ~authority ~revisions
+              ~local_certificate:(Store.local_certificate existing)
+              ~authorizations:(Store.authorizations existing) ~adoptions
+            |> Result.map_error (fun error -> Store_error error)
+          in
+          persist_collaborative repository loaded loaded.Store.project collaboration)
+
 let receive_package ~root ~package =
   with_repository ~root (fun repository loaded ->
       let* existing = require_collaboration loaded in
@@ -1344,7 +1744,8 @@ let receive_package ~root ~package =
           let* received =
             Package.verify_and_import_with_authority
               ~destination:(Store.underlying_store repository)
-              ~package ~authority ~project:loaded.Store.project
+              ~package ~authority ~known_adoptions:(Store.adoptions existing)
+              ~project:loaded.Store.project
             |> Result.map_error (fun error -> Package_error error)
           in
           let received, project = received in

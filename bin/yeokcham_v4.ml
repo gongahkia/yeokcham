@@ -1,6 +1,8 @@
 module Model = Yeokcham_v4_model
 module Service = Yeokcham_v4_local_service
 module Trust = Yeokcham_v4_trust
+module Package = Yeokcham_v4_package
+module Recovery = Yeokcham_v4_recovery
 
 let fail message =
   prerr_endline message;
@@ -10,12 +12,21 @@ let usage () =
   fail
     "usage:\n\
     \  yeokcham-v4 init [--root PATH] --username NAME --draft ID --title TITLE\n\
+    \  yeokcham-v4 join [--root PATH] --username NAME --draft ID --title TITLE \\
+     --device ID --from PATH --verify-phrase \"TWELVE WORDS\"\n\
     \  yeokcham-v4 save [--root PATH]\n\
     \  yeokcham-v4 status [--root PATH]\n\
     \  yeokcham-v4 device create\n\
     \  yeokcham-v4 device show [--root PATH]\n\
     \  yeokcham-v4 device enroll [--root PATH] --device ID --public-key HEX \
      --username NAME [--administrator]\n\
+    \  yeokcham-v4 device revoke [--root PATH] --device ID\n\
+    \  yeokcham-v4 device rotate [--root PATH] --device ID --public-key HEX\n\
+    \  yeokcham-v4 authority heads [--root PATH]\n\
+    \  yeokcham-v4 recovery use [--root PATH] --package PATH --mnemonic \
+     \"TWENTY FOUR WORDS\" --replacement ID --replaced ID --output PATH\n\
+    \  yeokcham-v4 recovery refresh [--root PATH] --package PATH --mnemonic \
+     \"TWENTY FOUR WORDS\" --output PATH\n\
     \  yeokcham-v4 user register [--root PATH] --device ID --username NAME\n\
     \  yeokcham-v4 timeline [--root PATH]\n\
     \  yeokcham-v4 restore [--root PATH] --checkpoint ID [--destination PATH]\n\
@@ -31,7 +42,8 @@ let usage () =
     \  yeokcham-v4 decision materialize [--root PATH] --decision ID \
      --destination PATH\n\
     \  yeokcham-v4 package create [--root PATH] --destination PATH\n\
-    \  yeokcham-v4 receive [--root PATH] --from PATH\n\
+    \  yeokcham-v4 package adopt [--root PATH] --from PATH --revision ID\n\
+    \  yeokcham-v4 receive [--root PATH] --from PATH [--review]\n\
     \  yeokcham-v4 deliver [--root PATH] --id ID --draft ID --title TITLE\n\
     \  yeokcham-v4 pin [--root PATH] --checkpoint ID\n\
     \  yeokcham-v4 unpin [--root PATH] --checkpoint ID\n\
@@ -196,6 +208,10 @@ let run_init arguments =
   in
   let recovery_device = Trust.generated_identity recovery in
   let recovery_capability = Trust.generated_signing_capability recovery in
+  let root_certificate =
+    Trust.root_certificate ~repository ~device signing_capability
+    |> require_ok Trust.error_to_string
+  in
   let status, ceremony =
     Service.init_signed_with_recovery ~root ~username ~initial_draft ~title
       ~repository ~device ~signing_capability ~recovery_device
@@ -203,13 +219,89 @@ let run_init arguments =
     |> require_ok Service.error_to_string
   in
   render_status status;
+  print_endline "root-verification-phrase (compare during device join)";
+  Printf.printf "%s\n" (Recovery.verification_phrase root_certificate);
   Printf.printf "recovery-package %s\n" (Service.recovery_package_path root);
   print_endline "recovery-mnemonic (record offline; it is shown only now)";
   Printf.printf "%s\n" ceremony.Yeokcham_v4_recovery.mnemonic
 
+let parse_join arguments =
+  let rec loop root username draft title device package phrase = function
+    | [] -> (
+        match (username, draft, title, device, package, phrase) with
+        | Some username, Some draft, Some title, Some device, Some package, Some phrase ->
+            ( Option.value root ~default:default_root,
+              username,
+              draft,
+              title,
+              device,
+              package,
+              phrase )
+        | _ -> usage ())
+    | "--root" :: value :: rest when Option.is_none root ->
+        loop (Some value) username draft title device package phrase rest
+    | "--username" :: value :: rest when Option.is_none username ->
+        loop root (Some value) draft title device package phrase rest
+    | "--draft" :: value :: rest when Option.is_none draft ->
+        loop root username (Some value) title device package phrase rest
+    | "--title" :: value :: rest when Option.is_none title ->
+        loop root username draft (Some value) device package phrase rest
+    | "--device" :: value :: rest when Option.is_none device ->
+        loop root username draft title (Some value) package phrase rest
+    | "--from" :: value :: rest when Option.is_none package ->
+        loop root username draft title device (Some value) phrase rest
+    | "--verify-phrase" :: value :: rest when Option.is_none phrase ->
+        loop root username draft title device package (Some value) rest
+    | _ -> usage ()
+  in
+  loop None None None None None None None arguments
+
+let run_join arguments =
+  let root, username, draft, title, device, package, phrase = parse_join arguments in
+  let username = parse_identifier "invalid username" Model.Username.of_string username in
+  let initial_draft = parse_identifier "invalid draft identifier" Model.Draft_id.of_string draft in
+  let device_id = parse_identifier "invalid device identifier" Model.Device_id.of_string device in
+  let authority =
+    Package.inspect_authority ~package |> require_ok Package.error_to_string
+  in
+  let root_certificate =
+    match
+      Trust.certificates (Trust.authority_membership authority)
+      |> List.find_opt (fun certificate -> Trust.certificate_issuer certificate = None)
+    with
+    | Some certificate -> certificate
+    | None -> fail "authority closure has no root certificate"
+  in
+  if not (String.equal phrase (Recovery.verification_phrase root_certificate)) then
+    fail "root verification phrase does not match the authority closure";
+  let signing_capability =
+    V4_signer.load device_id |> require_ok V4_signer.error_to_string
+  in
+  let local_device =
+    Trust.signing_public_key signing_capability |> Trust.device_of_public_key
+    |> require_ok Trust.error_to_string
+  in
+  if not (Model.Device_id.equal device_id (Trust.device_id local_device)) then
+    fail "local signing capability does not match --device";
+  let local_certificate =
+    match
+      Trust.certificates (Trust.authority_membership authority)
+      |> List.find_opt (fun certificate ->
+             Model.Device_id.equal
+               (Trust.device_id (Trust.certificate_subject certificate)) device_id)
+    with
+    | Some certificate -> Trust.certificate_id certificate
+    | None -> fail "device is not enrolled in the authority closure"
+  in
+  Service.init_authority_collaboration ~root ~username ~initial_draft ~title
+    ~device:local_device ~authority ~local_certificate
+  |> require_ok Service.error_to_string |> render_status;
+  print_endline "join verified authority closure; receive the package separately"
+
 let local_signing_capability root =
-  let status = Service.status ~root |> require_ok Service.error_to_string in
-  V4_signer.load status.Service.creator |> require_ok V4_signer.error_to_string
+  let identity = Service.identity ~root |> require_ok Service.error_to_string in
+  V4_signer.load (Trust.device_id identity.Service.device)
+  |> require_ok V4_signer.error_to_string
 
 let parse_user_register arguments =
   let rec loop root device username = function
@@ -328,6 +420,148 @@ let run_device_enroll arguments =
   Service.enroll_device ~root ~subject ~role ~username ~signing_capability
   |> require_ok Service.error_to_string
   |> render_status
+
+let parse_device_only arguments =
+  let rec loop root device = function
+    | [] -> (
+        match device with
+        | Some device -> (Option.value root ~default:default_root, device)
+        | None -> usage ())
+    | "--root" :: value :: rest when Option.is_none root ->
+        loop (Some value) device rest
+    | "--device" :: value :: rest when Option.is_none device ->
+        loop root (Some value) rest
+    | _ -> usage ()
+  in
+  loop None None arguments
+
+let run_device_revoke arguments =
+  let root, device = parse_device_only arguments in
+  let device =
+    parse_identifier "invalid device identifier" Model.Device_id.of_string device
+  in
+  let signing_capability = local_signing_capability root in
+  Service.revoke_device ~root ~device ~signing_capability
+  |> require_ok Service.error_to_string |> render_status
+
+let parse_device_key arguments =
+  let rec loop root device public_key = function
+    | [] -> (
+        match (device, public_key) with
+        | Some device, Some public_key ->
+            (Option.value root ~default:default_root, device, public_key)
+        | _ -> usage ())
+    | "--root" :: value :: rest when Option.is_none root ->
+        loop (Some value) device public_key rest
+    | "--device" :: value :: rest when Option.is_none device ->
+        loop root (Some value) public_key rest
+    | "--public-key" :: value :: rest when Option.is_none public_key ->
+        loop root device (Some value) rest
+    | _ -> usage ()
+  in
+  loop None None None arguments
+
+let run_device_rotate arguments =
+  let root, device, public_key = parse_device_key arguments in
+  let expected =
+    parse_identifier "invalid device identifier" Model.Device_id.of_string device
+  in
+  let replacement =
+    bytes_of_hex public_key |> Trust.device_of_public_key
+    |> require_ok Trust.error_to_string
+  in
+  if not (Model.Device_id.equal expected (Trust.device_id replacement)) then
+    fail "device identifier does not match public key";
+  let signing_capability = local_signing_capability root in
+  Service.rotate_local_device ~root ~replacement ~signing_capability
+  |> require_ok Service.error_to_string |> render_status
+
+let run_authority_heads arguments =
+  let root = parse_root arguments in
+  Service.authority_heads ~root |> require_ok Service.error_to_string
+  |> List.iter (fun epoch -> Printf.printf "authority-head %s\n" epoch)
+
+let parse_recovery_use arguments =
+  let rec loop root package mnemonic replacement replaced output = function
+    | [] -> (
+        match (package, mnemonic, replacement, replaced, output) with
+        | Some package, Some mnemonic, Some replacement, Some replaced, Some output ->
+            ( Option.value root ~default:default_root,
+              package,
+              mnemonic,
+              replacement,
+              replaced,
+              output )
+        | _ -> usage ())
+    | "--root" :: value :: rest when Option.is_none root ->
+        loop (Some value) package mnemonic replacement replaced output rest
+    | "--package" :: value :: rest when Option.is_none package ->
+        loop root (Some value) mnemonic replacement replaced output rest
+    | "--mnemonic" :: value :: rest when Option.is_none mnemonic ->
+        loop root package (Some value) replacement replaced output rest
+    | "--replacement" :: value :: rest when Option.is_none replacement ->
+        loop root package mnemonic (Some value) replaced output rest
+    | "--replaced" :: value :: rest when Option.is_none replaced ->
+        loop root package mnemonic replacement (Some value) output rest
+    | "--output" :: value :: rest when Option.is_none output ->
+        loop root package mnemonic replacement replaced (Some value) rest
+    | _ -> usage ()
+  in
+  loop None None None None None None arguments
+
+let run_recovery_use arguments =
+  let root, package, mnemonic, replacement, replaced, output =
+    parse_recovery_use arguments
+  in
+  let replacement_id =
+    parse_identifier "invalid replacement device identifier" Model.Device_id.of_string
+      replacement
+  in
+  let replaced =
+    parse_identifier "invalid replaced device identifier" Model.Device_id.of_string
+      replaced
+  in
+  let replacement_capability =
+    V4_signer.load replacement_id |> require_ok V4_signer.error_to_string
+  in
+  let replacement_device =
+    Trust.signing_public_key replacement_capability |> Trust.device_of_public_key
+    |> require_ok Trust.error_to_string
+  in
+  let status, ceremony =
+    Service.recover_authority ~root ~package ~mnemonic ~output
+      ~replacement:replacement_device ~replaced
+    |> require_ok Service.error_to_string
+  in
+  render_status status;
+  Printf.printf "recovery-package %s\n" output;
+  print_endline "recovery-mnemonic (record offline; it is shown only now)";
+  Printf.printf "%s\n" ceremony.Recovery.mnemonic
+
+let parse_recovery_refresh arguments =
+  let rec loop root package mnemonic output = function
+    | [] -> (
+        match (package, mnemonic, output) with
+        | Some package, Some mnemonic, Some output ->
+            (Option.value root ~default:default_root, package, mnemonic, output)
+        | _ -> usage ())
+    | "--root" :: value :: rest when Option.is_none root ->
+        loop (Some value) package mnemonic output rest
+    | "--package" :: value :: rest when Option.is_none package ->
+        loop root (Some value) mnemonic output rest
+    | "--mnemonic" :: value :: rest when Option.is_none mnemonic ->
+        loop root package (Some value) output rest
+    | "--output" :: value :: rest when Option.is_none output ->
+        loop root package mnemonic (Some value) rest
+    | _ -> usage ()
+  in
+  loop None None None None arguments
+
+let run_recovery_refresh arguments =
+  let root, package, mnemonic, output = parse_recovery_refresh arguments in
+  Service.refresh_recovery_package ~root ~package ~mnemonic ~output
+  |> require_ok Service.error_to_string;
+  Printf.printf "recovery-package %s\n" output
 
 let run_timeline arguments =
   let root = parse_root arguments in
@@ -818,11 +1052,16 @@ let run_watch arguments =
 let () =
   match Array.to_list Sys.argv with
   | _ :: "init" :: arguments -> run_init arguments
+  | _ :: "join" :: arguments -> run_join arguments
   | _ :: "save" :: arguments -> run_save arguments
   | _ :: "status" :: arguments -> run_status arguments
   | _ :: "device" :: "create" :: arguments -> run_device_create arguments
   | _ :: "device" :: "show" :: arguments -> run_device_show arguments
   | _ :: "device" :: "enroll" :: arguments -> run_device_enroll arguments
+  | _ :: "device" :: "revoke" :: arguments -> run_device_revoke arguments
+  | _ :: "device" :: "rotate" :: arguments -> run_device_rotate arguments
+  | _ :: "authority" :: "heads" :: arguments -> run_authority_heads arguments
+  | _ :: "recovery" :: "use" :: arguments -> run_recovery_use arguments
   | _ :: "user" :: "register" :: arguments -> run_user_register arguments
   | _ :: "timeline" :: arguments -> run_timeline arguments
   | _ :: "restore" :: arguments -> run_restore arguments

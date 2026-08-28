@@ -860,8 +860,7 @@ let verify_and_import ~destination ~package ~membership:expected_membership
         let* () = import objects in
         Ok (verified, project))
 
-let verify_and_import_with_authority ~destination ~package
-    ~authority:expected_authority ~project =
+let inspect_with_authority ~package ~authority:expected_authority =
   let repository = Trust.repository (Trust.authority_membership expected_authority) in
   let* manifest = read_file (package_path package manifest_name) in
   let* manifest = decode_manifest manifest in
@@ -939,6 +938,64 @@ let verify_and_import_with_authority ~destination ~package
     let* () = verify_revisions manifest.manifest_revisions in
     let* () = verify_authorizations manifest.manifest_authorizations in
     let* () = verify_adoptions manifest.manifest_adoptions in
+    Ok
+      {
+        verified_membership = membership;
+        verified_authority = Some authority;
+        verified_revisions = manifest.manifest_revisions;
+        verified_authorizations = manifest.manifest_authorizations;
+        verified_adoptions = manifest.manifest_adoptions;
+      }
+
+let verify_and_import_with_authority ~destination ~package
+    ~authority:expected_authority ~known_adoptions ~project =
+  let* inspected = inspect_with_authority ~package ~authority:expected_authority in
+  let* authority =
+    match inspected.verified_authority with
+    | Some authority -> Ok authority
+    | None -> Error (Invalid_package "authority inspection returned no authority")
+  in
+  let* manifest = read_file (package_path package manifest_name) in
+  let* manifest = decode_manifest manifest in
+  let rec verify_known_adoptions = function
+    | [] -> Ok ()
+    | adoption :: rest ->
+        let* () =
+          Trust.verify_adoption authority adoption
+          |> Result.map_error (fun error -> Trust_error error)
+        in
+        verify_known_adoptions rest
+  in
+  let* () = verify_known_adoptions known_adoptions in
+    let rec require_adoption_for_late_revisions = function
+      | [] -> Ok ()
+      | signed :: rest ->
+          let revision = Trust.signed_revision_value signed in
+          if Option.is_some (existing_revision project revision) then
+            require_adoption_for_late_revisions rest
+          else
+            let* requires_review =
+              Trust.requires_late_review authority signed
+              |> Result.map_error (fun error -> Trust_error error)
+            in
+            if not requires_review then require_adoption_for_late_revisions rest
+            else
+              let adoptions =
+                List.filter
+                  (fun adoption ->
+                    Trust.adoption_matches_signed_revision adoption signed
+                    && Trust.authority_epoch_is_head authority
+                         (Trust.adoption_epoch adoption))
+                  (known_adoptions @ manifest.manifest_adoptions)
+              in
+              if List.length adoptions = 1 then
+                require_adoption_for_late_revisions rest
+              else
+                Error
+                  (Invalid_package
+                     "late revision from a revoked device requires one current-head adoption")
+    in
+    let* () = require_adoption_for_late_revisions manifest.manifest_revisions in
     let* objects =
       package_object_bytes package manifest.manifest_object_ids
     in
@@ -958,16 +1015,7 @@ let verify_and_import_with_authority ~destination ~package
         in
         let* () = stage objects in
         let* () = verify_closure staging manifest.manifest_revisions in
-        let verified =
-          {
-            verified_membership = membership;
-            verified_authority = Some authority;
-            verified_revisions = manifest.manifest_revisions;
-            verified_authorizations = manifest.manifest_authorizations;
-            verified_adoptions = manifest.manifest_adoptions;
-          }
-        in
-        let* project = apply_revisions project verified in
+        let* project = apply_revisions project inspected in
         let rec import = function
           | [] -> Ok ()
           | (_, object_) :: rest ->
@@ -978,7 +1026,7 @@ let verify_and_import_with_authority ~destination ~package
               import rest
         in
         let* () = import objects in
-        Ok (verified, project))
+        Ok (inspected, project))
 
 let membership verified = verified.verified_membership
 let authority verified = verified.verified_authority

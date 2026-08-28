@@ -51,6 +51,8 @@
  (libraries
   yeokcham_v4_local_service
   yeokcham_v4_model
+  yeokcham_v4_package
+  yeokcham_v4_recovery
   yeokcham_v4_trust
   (select
    v4_watch.ml

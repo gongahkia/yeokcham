@@ -1,10 +1,18 @@
 module Mnemonic = Yeokcham_v4_mnemonic
 module Recovery = Yeokcham_v4_recovery
 module Trust = Yeokcham_v4_trust
+module Golden = Yeokcham_testkit.Golden_fixture
 
 let require_ok render = function
   | Ok value -> value
   | Error error -> Alcotest.fail (render error)
+
+let golden_path name =
+  let local = Filename.concat "golden" name in
+  if Sys.file_exists local then local else Filename.concat "test/golden" name
+
+let read_golden name =
+  Golden.read_lower_hex_file (golden_path name) |> require_ok Fun.id
 
 let capability byte =
   String.make 32 byte |> Trust.signing_capability_of_private_key
@@ -76,6 +84,8 @@ let encrypted_recovery_package_restores_only_with_the_mnemonic () =
     |> require_ok Recovery.error_to_string
   in
   let encoded = Recovery.encode package in
+  Alcotest.(check string) "recovery package retains its golden encoding"
+    (read_golden "v4/recovery-package-v1.cbor.hex") encoded;
   let decoded = Recovery.decode encoded |> require_ok Recovery.error_to_string in
   let recovered =
     Recovery.recover ~mnemonic:phrase ~package:decoded
@@ -99,7 +109,19 @@ let encrypted_recovery_package_restores_only_with_the_mnemonic () =
       Alcotest.(check string) "another valid BIP-39 phrase cannot decrypt"
         "V4 recovery package cannot be decrypted"
         (Recovery.error_to_string error)
-  | Ok _ -> Alcotest.fail "recovery accepted another valid BIP-39 phrase")
+  | Ok _ -> Alcotest.fail "recovery accepted another valid BIP-39 phrase");
+  let refreshed =
+    Recovery.refresh ~secret ~authority ~recovery_capability
+    |> require_ok Recovery.error_to_string
+  in
+  let refreshed_recovered =
+    Recovery.recover ~mnemonic:phrase ~package:refreshed
+    |> require_ok Recovery.error_to_string
+  in
+  Alcotest.(check (list string))
+    "a refreshed copy preserves the complete authority closure"
+    (Trust.authority_heads authority)
+    (Trust.authority_heads (Recovery.recovered_authority refreshed_recovered))
 
 let () =
   Alcotest.run "V4 recovery"

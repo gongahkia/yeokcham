@@ -100,6 +100,14 @@ let first_prefixed_value prefix output =
       String.sub line (String.length prefix)
         (String.length line - String.length prefix)
 
+let line_after marker output =
+  match String.split_on_char '\n' output with
+  | [] -> Alcotest.fail "CLI output did not contain the requested marker"
+  | lines -> (
+      match List.find_index (String.equal marker) lines with
+      | Some index when index + 1 < List.length lines -> List.nth lines (index + 1)
+      | Some _ | None -> Alcotest.fail "CLI output did not contain a value after its marker")
+
 let write_file root name contents =
   Out_channel.with_open_bin (Filename.concat root name) (fun channel ->
       Out_channel.output_string channel contents)
@@ -685,6 +693,88 @@ let command_creates_and_enrols_a_second_device_without_using_its_username_as_ide
       expect_output_contains "the original local device remains administrator"
         "role administrator" output)
 
+let command_joins_only_after_comparing_the_root_phrase () =
+  with_directory "yeokcham-v4-cli-join-" (fun root ->
+      let source = Filename.concat root "source" in
+      let destination = Filename.concat root "destination" in
+      Unix.mkdir source 0o700;
+      Unix.mkdir destination 0o700;
+      write_file source "main.ml" "let version = 1\n";
+      write_file destination "main.ml" "let version = 1\n";
+      let output, errors, status =
+        run
+          [
+            "init";
+            "--root";
+            source;
+            "--username";
+            "alice";
+            "--draft";
+            "draft-source";
+            "--title";
+            "source";
+          ]
+      in
+      require_success "source init" status errors;
+      let phrase =
+        line_after "root-verification-phrase (compare during device join)" output
+      in
+      let output, errors, status = run [ "device"; "create" ] in
+      require_success "member device create" status errors;
+      let device = first_prefixed_value "device " output in
+      let public_key = first_prefixed_value "public-key " output in
+      let _output, errors, status =
+        run
+          [
+            "device";
+            "enroll";
+            "--root";
+            source;
+            "--device";
+            device;
+            "--public-key";
+            public_key;
+            "--username";
+            "bob";
+          ]
+      in
+      require_success "member enroll" status errors;
+      let package = Filename.concat root "authority-closure" in
+      let _output, errors, status =
+        run
+          [ "package"; "create"; "--root"; source; "--destination"; package ]
+      in
+      require_success "authority package" status errors;
+      let output, errors, status =
+        run
+          [
+            "join";
+            "--root";
+            destination;
+            "--username";
+            "bob";
+            "--draft";
+            "draft-destination";
+            "--title";
+            "destination";
+            "--device";
+            device;
+            "--from";
+            package;
+            "--verify-phrase";
+            phrase;
+          ]
+      in
+      require_success "phrase-verified join" status errors;
+      expect_output_contains "join reports its deliberately separate receive step"
+        "join verified authority closure" output;
+      let output, errors, status = run [ "device"; "show"; "--root"; destination ] in
+      require_success "member identity" status errors;
+      expect_output_contains "the joined device is a member" "role member" output;
+      Alcotest.(check string) "join did not materialize incoming source bytes" "let version = 1\n"
+        (In_channel.with_open_bin (Filename.concat destination "main.ml")
+           In_channel.input_all))
+
 let watch_is_linux_only () =
   with_directory "yeokcham-v4-cli-watch-" (fun root ->
       let uname =
@@ -726,6 +816,8 @@ let () =
           Alcotest.test_case
             "device enrollment separates public identity from username" `Quick
             command_creates_and_enrols_a_second_device_without_using_its_username_as_identity;
+          Alcotest.test_case "join requires a compared root phrase" `Quick
+            command_joins_only_after_comparing_the_root_phrase;
           Alcotest.test_case "watch is Linux-only" `Quick watch_is_linux_only;
         ] );
     ]

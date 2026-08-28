@@ -119,6 +119,55 @@ let setup root =
   in
   (source_root, source, baseline, repository, root_device, membership, signed)
 
+let authority_setup root =
+  let source_root, source, baseline, _repository, root_device, membership, signed =
+    setup root
+  in
+  let root_capability = capability 'a' in
+  let root_certificate =
+    Trust.certificates membership
+    |> List.find (fun certificate ->
+           Trust.device_equal (Trust.certificate_subject certificate) root_device)
+  in
+  let recovery_capability = capability 'r' in
+  let recovery_device = device recovery_capability in
+  let root_epoch =
+    Trust.root_epoch ~membership
+      ~root_certificate:(Trust.certificate_id root_certificate)
+      ~recovery_device root_capability
+    |> require_ok Trust.error_to_string
+  in
+  let root_authority =
+    Trust.verify_authority ~membership [ root_epoch ]
+    |> require_ok Trust.error_to_string
+  in
+  let enrolled_epoch =
+    Trust.successor_epoch root_authority ~parents:[ Trust.epoch_id root_epoch ]
+      ~certificates:(Trust.certificates membership) ~revoked:[] ~frontier:[]
+      ~recovery_device ~issuer:(Trust.certificate_id root_certificate)
+      root_capability
+    |> require_ok Trust.error_to_string
+  in
+  let authority =
+    Trust.extend_authority root_authority [ enrolled_epoch ]
+    |> require_ok Trust.error_to_string
+  in
+  let signed =
+    Trust.sign_revision_at authority ~epoch:(Trust.epoch_id enrolled_epoch)
+      ~certificate:(Trust.signed_revision_certificate signed) (capability 'b')
+      (Trust.signed_revision_value signed)
+    |> require_ok Trust.error_to_string
+  in
+  ( source_root,
+    source,
+    baseline,
+    root_device,
+    root_capability,
+    root_certificate,
+    recovery_device,
+    authority,
+    signed )
+
 let package_verifies_before_import_and_preserves_model_visibility () =
   with_directory "yeokcham-v4-package-" (fun root ->
       let ( source_root,
@@ -375,6 +424,80 @@ let missing_causal_parent_is_rejected_before_object_import () =
       in
       Alcotest.(check int) "missing parent imports no objects" 0 object_count)
 
+let late_revision_from_a_revoked_device_requires_current_head_adoption () =
+  with_directory "yeokcham-v4-package-late-revision-" (fun root ->
+      let ( _source_root,
+            source,
+            baseline,
+            root_device,
+            root_capability,
+            root_certificate,
+            recovery_device,
+            authority,
+            signed ) =
+        authority_setup root
+      in
+      let author =
+        Trust.signed_revision_value signed |> fun revision -> revision.Model.revision_author
+      in
+      let current = List.hd (Trust.authority_heads authority) in
+      let revoked_epoch =
+        Trust.successor_epoch authority ~parents:[ current ]
+          ~certificates:(Trust.certificates (Trust.authority_membership authority))
+          ~revoked:[ author ] ~frontier:[] ~recovery_device
+          ~issuer:(Trust.certificate_id root_certificate) root_capability
+        |> require_ok Trust.error_to_string
+      in
+      let revoked_authority =
+        Trust.extend_authority authority [ revoked_epoch ]
+        |> require_ok Trust.error_to_string
+      in
+      let rejected_package = Filename.concat root "unreviewed-package" in
+      Package.create_with_authority ~source ~destination:rejected_package
+        ~authority:revoked_authority ~revisions:[ signed ] ~authorizations:[]
+        ~adoptions:[]
+      |> require_ok Package.error_to_string;
+      let destination_root = Filename.concat root "destination" in
+      Unix.mkdir destination_root 0o700;
+      let destination =
+        Store.init ~root:destination_root |> require_ok Store.error_to_string
+      in
+      let project = receiver_project ~creator:root_device ~baseline in
+      (match
+         Package.verify_and_import_with_authority ~destination
+           ~package:rejected_package ~authority ~known_adoptions:[] ~project
+       with
+      | Error error ->
+          Alcotest.(check string)
+            "revocation makes a newly arrived old record require review"
+            "invalid V4 package: late revision from a revoked device requires one current-head adoption"
+            (Package.error_to_string error)
+      | Ok _ -> Alcotest.fail "accepted an unreviewed late revision");
+      let object_count =
+        Store.list_objects destination
+        |> require_ok Store.error_to_string |> List.length
+      in
+      Alcotest.(check int) "review rejection imports no objects" 0 object_count;
+      let adoption =
+        Trust.make_adoption revoked_authority
+          ~epoch:(Trust.epoch_id revoked_epoch)
+          ~issuer:(Trust.certificate_id root_certificate) root_capability
+          ~signed_revision:signed
+        |> require_ok Trust.error_to_string
+      in
+      let adopted_package = Filename.concat root "adopted-package" in
+      Package.create_with_authority ~source ~destination:adopted_package
+        ~authority:revoked_authority ~revisions:[ signed ] ~authorizations:[]
+        ~adoptions:[ adoption ]
+      |> require_ok Package.error_to_string;
+      let _, imported =
+        Package.verify_and_import_with_authority ~destination
+          ~package:adopted_package ~authority ~known_adoptions:[] ~project
+        |> require_ok Package.error_to_string
+      in
+      Alcotest.(check int) "a current-head adoption accepts exactly that record" 1
+        (List.length (Model.shared_changes imported)))
+
 let () =
   Alcotest.run "V4 package"
     [
@@ -393,5 +516,8 @@ let () =
             duplicate_revision_is_rejected_before_a_package_is_created;
           Alcotest.test_case "missing causal parent is rejected before import"
             `Quick missing_causal_parent_is_rejected_before_object_import;
+          Alcotest.test_case
+            "late revoked revision needs a current-head adoption" `Quick
+            late_revision_from_a_revoked_device_requires_current_head_adoption;
         ] );
     ]
