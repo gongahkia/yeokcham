@@ -1529,8 +1529,34 @@ let late_package_review_retains_feed_forks_across_retry_before_adoption () =
         ~revisions:(Store.signed_revisions source_collaboration)
         ~authorizations:[] ~adoptions:[]
       |> require_ok Yeokcham_v4_package.error_to_string;
+      write_file source "main.ml" "let version = 3\n";
+      ignore
+        (Service.share_signed ~authority_epoch:None ~root:source
+           ~change:(change "change-late-second")
+           ~revision:(revision "revision-late-second")
+           ~signing_capability:root_capability
+        |> require_ok Service.error_to_string);
+      let source_loaded =
+        Store.load source_repository |> require_ok Store.error_to_string
+      in
+      let source_collaboration =
+        match source_loaded.Store.collaboration with
+        | Some collaboration -> collaboration
+        | None -> Alcotest.fail "source lost collaboration for second package"
+      in
+      let second_package = Filename.concat parent "late-record-second" in
+      Yeokcham_v4_package.create_with_authority
+        ~source:(Store.underlying_store source_repository)
+        ~destination:second_package ~authority:revoked_authority
+        ~revisions:(Store.signed_revisions source_collaboration)
+        ~authorizations:[] ~adoptions:[]
+      |> require_ok Yeokcham_v4_package.error_to_string;
       let artifact =
         Package.read_artifact ~package |> require_ok Package.error_to_string
+      in
+      let second_artifact =
+        Package.read_artifact ~package:second_package
+        |> require_ok Package.error_to_string
       in
       let root_publication =
         Transport.create_publication ~repository ~publisher:reviewer
@@ -1539,7 +1565,7 @@ let late_package_review_retains_feed_forks_across_retry_before_adoption () =
           ~signing_capability:reviewer_capability
         |> require_ok Transport.error_to_string
       in
-      let child_publication () =
+      let child_publication ~artifact =
         Transport.create_publication ~repository ~publisher:reviewer
           ~certificate:reviewer_certificate
           ~parents:[ Transport.publication_id root_publication ]
@@ -1547,13 +1573,15 @@ let late_package_review_retains_feed_forks_across_retry_before_adoption () =
           ~signing_capability:reviewer_capability
         |> require_ok Transport.error_to_string
       in
-      let left_publication = child_publication () in
-      let right_publication = child_publication () in
+      let left_publication = child_publication ~artifact in
+      let right_publication =
+        child_publication ~artifact:second_artifact
+      in
       let arrivals =
         [
           { Service.publication = root_publication; package };
           { Service.publication = left_publication; package };
-          { Service.publication = right_publication; package };
+          { Service.publication = right_publication; package = second_package };
         ]
       in
       let publication_ids =
