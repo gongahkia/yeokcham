@@ -109,50 +109,36 @@ let validate_collaboration ~project collaboration =
   in
   let* authority =
     match collaboration.collaboration_authority with
-    | None -> Ok None
+    | None ->
+        Error
+          (Invalid_collaboration_state
+             "V4 collaborative state requires an authority closure")
     | Some authority ->
         let* authority =
           Trust.verify_authority ~membership (Trust.authority_epochs authority)
           |> Result.map_error (fun error -> Trust_error error)
         in
-        Ok (Some authority)
+        Ok authority
   in
   let* () =
-    match authority with
-    | None ->
-        if
-          Model.Device_id.equal
-            (Trust.device_id (Trust.certificate_subject local_certificate))
-            (Model.creator project)
-        then Ok ()
-        else
-          Error
-            (Invalid_collaboration_state
-               "legacy local certificate does not name the project creator")
-    | Some authority ->
-        if
-          List.exists
-            (fun epoch ->
-              Trust.authority_device_active authority ~epoch
-                (Trust.certificate_subject local_certificate))
-            (Trust.authority_heads authority)
-        then Ok ()
-        else
-          Error
-            (Invalid_collaboration_state
-               "local certificate is not active in any authority head")
+    if
+      List.exists
+        (fun epoch ->
+          Trust.authority_device_active authority ~epoch
+            (Trust.certificate_subject local_certificate))
+        (Trust.authority_heads authority)
+    then Ok ()
+    else
+      Error
+        (Invalid_collaboration_state
+           "local certificate is not active in any authority head")
   in
   let rec verify reversed = function
     | [] -> Ok (List.rev reversed)
     | signed :: rest ->
         let* () =
-          match authority with
-          | None ->
-              Trust.verify_signed_revision membership signed
-              |> Result.map_error (fun error -> Trust_error error)
-          | Some authority ->
-              Trust.verify_signed_revision_at authority signed
-              |> Result.map_error (fun error -> Trust_error error)
+          Trust.verify_signed_revision_at authority signed
+          |> Result.map_error (fun error -> Trust_error error)
         in
         verify (signed :: reversed) rest
   in
@@ -199,62 +185,51 @@ let validate_collaboration ~project collaboration =
           record with its matching shared or resolution purpose")
   else
     let* () =
-      match authority with
-      | None ->
-          if
-            collaboration.collaboration_authorizations = []
-            && collaboration.collaboration_adoptions = []
-          then Ok ()
-          else
-            Error
-              (Invalid_collaboration_state
-                 "legacy collaboration cannot contain authority exceptions")
-      | Some authority ->
-          let rec verify_authorizations = function
-            | [] -> Ok ()
-            | authorization :: rest ->
-                let* () =
-                  Trust.verify_authorization authority authorization
-                  |> Result.map_error (fun error -> Trust_error error)
-                in
-                let matching =
-                  List.filter
-                    (Trust.authorization_matches_signed_revision authorization)
-                    signed_revisions
-                in
-                if List.length matching = 1 then verify_authorizations rest
-                else
-                  Error
-                    (Invalid_collaboration_state
-                       "authorization must name exactly one signed revision")
-          in
-          let rec verify_adoptions = function
-            | [] -> Ok ()
-            | adoption :: rest ->
-                let* () =
-                  Trust.verify_adoption authority adoption
-                  |> Result.map_error (fun error -> Trust_error error)
-                in
-                let matching =
-                  List.filter
-                    (Trust.adoption_matches_signed_revision adoption)
-                    signed_revisions
-                in
-                if List.length matching = 1 then verify_adoptions rest
-                else
-                  Error
-                    (Invalid_collaboration_state
-                       "adoption must bind exactly one signed revision")
-          in
-          let* () =
-            verify_authorizations collaboration.collaboration_authorizations
-          in
-          verify_adoptions collaboration.collaboration_adoptions
+      let rec verify_authorizations = function
+        | [] -> Ok ()
+        | authorization :: rest ->
+            let* () =
+              Trust.verify_authorization authority authorization
+              |> Result.map_error (fun error -> Trust_error error)
+            in
+            let matching =
+              List.filter
+                (Trust.authorization_matches_signed_revision authorization)
+                signed_revisions
+            in
+            if List.length matching = 1 then verify_authorizations rest
+            else
+              Error
+                (Invalid_collaboration_state
+                   "authorization must name exactly one signed revision")
+      in
+      let rec verify_adoptions = function
+        | [] -> Ok ()
+        | adoption :: rest ->
+            let* () =
+              Trust.verify_adoption authority adoption
+              |> Result.map_error (fun error -> Trust_error error)
+            in
+            let matching =
+              List.filter
+                (Trust.adoption_matches_signed_revision adoption)
+                signed_revisions
+            in
+            if List.length matching = 1 then verify_adoptions rest
+            else
+              Error
+                (Invalid_collaboration_state
+                   "adoption must bind exactly one signed revision")
+      in
+      let* () =
+        verify_authorizations collaboration.collaboration_authorizations
+      in
+      verify_adoptions collaboration.collaboration_adoptions
     in
     Ok
       {
         collaboration_membership = membership;
-        collaboration_authority = authority;
+        collaboration_authority = Some authority;
         collaboration_revisions = signed_revisions;
         collaboration_authorizations =
           collaboration.collaboration_authorizations;
@@ -263,46 +238,10 @@ let validate_collaboration ~project collaboration =
         collaboration_local_certificate = local_certificate_id;
       }
 
-let collaboration ~membership ~revisions ~local_certificate =
-  let* membership =
-    Trust.verify_membership
-      ~repository:(Trust.repository membership)
-      (Trust.certificates membership)
-    |> Result.map_error (fun error -> Trust_error error)
-  in
-  let* () =
-    match
-      List.find_opt
-        (fun certificate ->
-          String.equal (Trust.certificate_id certificate) local_certificate)
-        (Trust.certificates membership)
-    with
-    | Some _ -> Ok ()
-    | None ->
-        Error
-          (Invalid_collaboration_state
-             "local certificate is absent from the verified membership")
-  in
-  let rec verify = function
-    | [] -> Ok ()
-    | signed :: rest ->
-        let* () =
-          Trust.verify_signed_revision membership signed
-          |> Result.map_error (fun error -> Trust_error error)
-        in
-        verify rest
-  in
-  let* () = verify revisions in
-  Ok
-    {
-      collaboration_membership = membership;
-      collaboration_authority = None;
-      collaboration_revisions = revisions;
-      collaboration_authorizations = [];
-      collaboration_adoptions = [];
-      collaboration_transport = Transport.empty_local_state;
-      collaboration_local_certificate = local_certificate;
-    }
+let collaboration ~membership:_ ~revisions:_ ~local_certificate:_ =
+  Error
+    (Invalid_collaboration_state
+       "authority-less collaboration was retired before V4 release")
 
 let membership collaboration = collaboration.collaboration_membership
 let authority collaboration = collaboration.collaboration_authority
@@ -430,48 +369,39 @@ let collaboration_value ~project collaboration =
   let* certificates = bytes_array certificates in
   let* revisions = bytes_array revisions in
   let* local_certificate = text collaboration.collaboration_local_certificate in
-  match collaboration.collaboration_authority with
-  | None ->
-      array
-        [
-          Encoding.integer 1L;
-          Encoding.bytes project;
-          repository;
-          certificates;
-          revisions;
-          local_certificate;
-        ]
-  | Some authority ->
-      let epochs =
-        Trust.authority_epochs authority |> List.map Trust.encode_epoch
-      in
-      let authorizations =
-        collaboration.collaboration_authorizations
-        |> List.map Trust.encode_authorization
-      in
-      let adoptions =
-        collaboration.collaboration_adoptions |> List.map Trust.encode_adoption
-      in
-      let* epochs = bytes_array epochs in
-      let* authorizations = bytes_array authorizations in
-      let* adoptions = bytes_array adoptions in
-      let* transport =
-        Transport.encode_local_state collaboration.collaboration_transport
-        |> Result.map_error (fun error -> Transport_error error)
-      in
-      array
-        [
-          Encoding.integer 3L;
-          Encoding.bytes project;
-          repository;
-          certificates;
-          epochs;
-          revisions;
-          authorizations;
-          adoptions;
-          local_certificate;
-          Encoding.bytes transport;
-        ]
+  let authority =
+    match collaboration.collaboration_authority with
+    | Some authority -> authority
+    | None -> assert false
+  in
+  let epochs = Trust.authority_epochs authority |> List.map Trust.encode_epoch in
+  let authorizations =
+    collaboration.collaboration_authorizations
+    |> List.map Trust.encode_authorization
+  in
+  let adoptions =
+    collaboration.collaboration_adoptions |> List.map Trust.encode_adoption
+  in
+  let* epochs = bytes_array epochs in
+  let* authorizations = bytes_array authorizations in
+  let* adoptions = bytes_array adoptions in
+  let* transport =
+    Transport.encode_local_state collaboration.collaboration_transport
+    |> Result.map_error (fun error -> Transport_error error)
+  in
+  array
+    [
+      Encoding.integer 1L;
+      Encoding.bytes project;
+      repository;
+      certificates;
+      epochs;
+      revisions;
+      authorizations;
+      adoptions;
+      local_certificate;
+      Encoding.bytes transport;
+    ]
 
 let encode_collaborative_state ~project collaboration =
   collaboration_value ~project collaboration |> Result.map Encoding.encode

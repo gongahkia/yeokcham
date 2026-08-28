@@ -58,48 +58,12 @@ let current_golden_state_bytes_are_stable () =
     "re-encoded fixture is byte-identical" expected
     (Record.encode_project decoded |> require_ok Record.error_to_string)
 
-let legacy_v1_fixture_remains_decodable () =
-  let decoded =
-    read_golden "v4/state-v1.cbor.hex"
-    |> Record.decode_project
-    |> require_ok Record.error_to_string
-  in
-  Alcotest.(check string)
-    "legacy state gains its retained initial checkpoint" "snapshot-base"
-    (Model.Snapshot_id.to_string
-       (Model.active_draft decoded).Model.latest_checkpoint);
-  Alcotest.(check string)
-    "legacy state upgrades to the current canonical record"
-    (read_golden "v4/state-v4-legacy.cbor.hex")
-    (Record.encode_project decoded |> require_ok Record.error_to_string)
-
-let legacy_v2_fixture_remains_decodable () =
-  let decoded =
-    read_golden "v4/state-v2.cbor.hex"
-    |> Record.decode_project
-    |> require_ok Record.error_to_string
-  in
-  Alcotest.(check int)
-    "legacy V2 state has no pins" 0
-    (List.length (Model.pins decoded));
-  Alcotest.(check string)
-    "legacy V2 state upgrades to the current canonical record"
-    (read_golden "v4/state-v4-legacy.cbor.hex")
-    (Record.encode_project decoded |> require_ok Record.error_to_string)
-
-let legacy_v3_fixture_remains_decodable () =
-  let decoded =
-    read_golden "v4/state-v3.cbor.hex"
-    |> Record.decode_project
-    |> require_ok Record.error_to_string
-  in
-  Alcotest.(check int)
-    "legacy V3 state has no username registrations" 0
-    (List.length (Model.usernames decoded));
-  Alcotest.(check string)
-    "legacy V3 state upgrades to the current canonical record"
-    (read_golden "v4/state-v4-legacy.cbor.hex")
-    (Record.encode_project decoded |> require_ok Record.error_to_string)
+let retired_state_encodings_are_rejected () =
+  [ "v4/state-v2.cbor.hex"; "v4/state-v3.cbor.hex" ]
+  |> List.iter (fun fixture ->
+      match read_golden fixture |> Record.decode_project with
+      | Error _ -> ()
+      | Ok _ -> Alcotest.fail ("accepted retired V4 state fixture " ^ fixture))
 
 let state_round_trips_with_shared_change () =
   let project = shared_project () in
@@ -168,12 +132,8 @@ let () =
         [
           Alcotest.test_case "current golden state bytes are stable" `Quick
             current_golden_state_bytes_are_stable;
-          Alcotest.test_case "legacy V1 fixture remains decodable" `Quick
-            legacy_v1_fixture_remains_decodable;
-          Alcotest.test_case "legacy V2 fixture remains decodable" `Quick
-            legacy_v2_fixture_remains_decodable;
-          Alcotest.test_case "legacy V3 fixture remains decodable" `Quick
-            legacy_v3_fixture_remains_decodable;
+          Alcotest.test_case "retired state encodings are rejected" `Quick
+            retired_state_encodings_are_rejected;
           Alcotest.test_case "shared state round trips" `Quick
             state_round_trips_with_shared_change;
           Alcotest.test_case "malformed model state is rejected" `Quick

@@ -726,95 +726,35 @@ let enroll membership ~issuer signing_capability ~subject ~role =
             issuer_certificate.certificate_subject_device.device_id_value
           signing_capability
 
-let revision_unsigned_bytes ~repository ~certificate ~epoch ~resolution revision
-    =
+let revision_unsigned_bytes ~repository ~certificate ~epoch ~resolution revision =
   let* repository = encode_repository repository in
   let* certificate = text certificate in
+  let* epoch = text epoch in
   let* revision =
     Record.encode_change_revision revision
     |> Result.map_error (fun error -> Record_error error)
   in
-  match (epoch, resolution) with
-  | None, None ->
-      array
-        [
-          Encoding.integer 1L; repository; certificate; Encoding.bytes revision;
-        ]
-      |> Result.map Encoding.encode
-  | Some epoch, None ->
-      let* epoch = text epoch in
-      array
-        [
-          Encoding.integer 2L;
-          repository;
-          certificate;
-          epoch;
-          Encoding.bytes revision;
-        ]
-      |> Result.map Encoding.encode
-  | epoch, Some decision ->
-      let* epoch =
-        match epoch with None -> Ok Encoding.null | Some epoch -> text epoch
-      in
-      let* decision = Model.Decision_id.to_string decision |> text in
-      array
-        [
-          Encoding.integer 3L;
-          repository;
-          certificate;
-          epoch;
-          decision;
-          Encoding.bytes revision;
-        ]
-      |> Result.map Encoding.encode
+  let* decision =
+    match resolution with
+    | None -> Ok Encoding.null
+    | Some decision -> Model.Decision_id.to_string decision |> text
+  in
+  array
+    [
+      Encoding.integer 1L;
+      repository;
+      certificate;
+      epoch;
+      decision;
+      Encoding.bytes revision;
+    ]
+  |> Result.map Encoding.encode
 
-let sign_revision_with membership ~certificate signing_capability ~resolution
-    revision =
-  match certificate_by_id membership.membership_certificates certificate with
-  | None -> Error Unknown_author_certificate
-  | Some author_certificate ->
-      if certificate_is_recovery_issued author_certificate then
-        Error Unauthorized_epoch_issuer
-      else if
-        not
-          (Model.Device_id.equal
-             author_certificate.certificate_subject_device.device_id_value
-             revision.Model.revision_author)
-      then Error Revision_author_mismatch
-      else
-        let public_key = signing_public_key signing_capability in
-        if
-          not
-            (String.equal public_key
-               author_certificate.certificate_subject_device.public_key)
-        then Error Invalid_private_key
-        else
-          let* bytes =
-            revision_unsigned_bytes ~repository:membership.membership_repository
-              ~certificate ~epoch:None ~resolution revision
-          in
-          let signature =
-            Mirage_crypto_ec.Ed25519.sign ~key:signing_capability
-              (revision_signature_domain ^ bytes)
-          in
-          Ok
-            {
-              signed_repository = membership.membership_repository;
-              signed_certificate = certificate;
-              signed_epoch_value = None;
-              signed_resolution_decision_value = resolution;
-              signed_revision_value = revision;
-              signed_signature = signature;
-            }
+let sign_revision _ ~certificate:_ _ _ =
+  Error (Invalid_epoch "V4 signed revisions require an authority epoch")
 
-let sign_revision membership ~certificate signing_capability revision =
-  sign_revision_with membership ~certificate signing_capability ~resolution:None
-    revision
-
-let sign_resolution membership ~certificate signing_capability ~decision
-    revision =
-  sign_revision_with membership ~certificate signing_capability
-    ~resolution:(Some decision) revision
+let sign_resolution _ ~certificate:_ _ ~decision:_ _ =
+  Error (Invalid_epoch "V4 signed resolutions require an authority epoch")
 
 let signed_revision_id signed = signed.signed_revision_value.Model.revision
 let signed_revision_certificate signed = signed.signed_certificate
@@ -823,9 +763,14 @@ let signed_revision_epoch signed = signed.signed_epoch_value
 let signed_revision_resolution signed = signed.signed_resolution_decision_value
 
 let encode_signed_revision signed =
+  let epoch =
+    match signed.signed_epoch_value with
+    | Some epoch -> epoch
+    | None -> invalid_arg "V4 signed revisions require an authority epoch"
+  in
   let unsigned =
     revision_unsigned_bytes ~repository:signed.signed_repository
-      ~certificate:signed.signed_certificate ~epoch:signed.signed_epoch_value
+      ~certificate:signed.signed_certificate ~epoch
       ~resolution:signed.signed_resolution_decision_value
       signed.signed_revision_value
     |> Result.get_ok

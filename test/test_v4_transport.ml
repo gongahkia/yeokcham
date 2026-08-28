@@ -107,6 +107,35 @@ let feed_rejects_missing_parent () =
         (Transport.error_to_string error)
   | Ok () -> Alcotest.fail "missing feed parent was accepted"
 
+let feed_preserves_same_publisher_forks () =
+  let repository, capability, publisher, certificate, _ = authority () in
+  let publication manifest parents =
+    Transport.create_publication ~repository ~publisher
+      ~certificate:(Trust.certificate_id certificate)
+      ~parents
+      ~manifest:(Transport.sha256 manifest)
+      ~signing_capability:capability
+    |> require_ok Transport.error_to_string
+  in
+  let parent = publication "fork-parent" [] in
+  let parent_id = Transport.publication_id parent in
+  let left = publication "fork-left" [ parent_id ] in
+  let right = publication "fork-right" [ parent_id ] in
+  Transport.validate_feed ~known:[] [ parent; left; right ]
+  |> require_ok Transport.error_to_string;
+  let ids =
+    [ parent; left; right ]
+    |> List.map Transport.publication_id
+    |> List.sort_uniq String.compare
+  in
+  Alcotest.(check int) "every fork publication is retained" 3 (List.length ids);
+  Alcotest.(check (list string))
+    "both children name the same explicit parent" [ parent_id ]
+    (Transport.publication_parents left);
+  Alcotest.(check (list string))
+    "the other child remains a peer, not a head" [ parent_id ]
+    (Transport.publication_parents right)
+
 let local_state_round_trip () =
   let repository, capability, publisher, certificate, _ = authority () in
   let publication =
@@ -201,6 +230,156 @@ let terminate process =
   (try Unix.kill process Sys.sigterm with Unix.Unix_error _ -> ());
   try ignore (Unix.waitpid [] process) with Unix.Unix_error _ -> ()
 
+let write_all descriptor bytes =
+  let rec loop offset =
+    if offset = String.length bytes then ()
+    else
+      let count =
+        Unix.write_substring descriptor bytes offset
+          (String.length bytes - offset)
+      in
+      if count = 0 then Alcotest.fail "socket write returned zero"
+      else loop (offset + count)
+  in
+  loop 0
+
+let read_all descriptor =
+  let buffer = Buffer.create 256 in
+  let scratch = Bytes.create 4096 in
+  let rec loop () =
+    match Unix.read descriptor scratch 0 (Bytes.length scratch) with
+    | 0 -> Buffer.contents buffer
+    | count ->
+        Buffer.add_subbytes buffer scratch 0 count;
+        loop ()
+  in
+  loop ()
+
+let raw_http ~port request =
+  let descriptor = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
+  Fun.protect
+    ~finally:(fun () -> close_noerr descriptor)
+    (fun () ->
+      Unix.connect descriptor (Unix.ADDR_INET (Unix.inet_addr_loopback, port));
+      write_all descriptor request;
+      Unix.shutdown descriptor Unix.SHUTDOWN_SEND;
+      read_all descriptor)
+
+let response_status response =
+  match String.split_on_char ' ' response with
+  | _http :: status :: _ -> (
+      match int_of_string_opt status with
+      | Some status -> status
+      | None -> Alcotest.fail "relay response did not contain a status")
+  | _ -> Alcotest.fail "relay response did not contain a status line"
+
+let raw_request ?(token = "test-relay-token") ?(body = "") method_ path =
+  method_ ^ " " ^ path
+  ^ " HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer " ^ token
+  ^ "\r\nContent-Length: "
+  ^ string_of_int (String.length body)
+  ^ "\r\n\r\n" ^ body
+
+let with_http_relay run =
+  with_directory "yeokcham-v4-http-relay-" (fun root ->
+      let relay_root = Filename.concat root "relay" in
+      let token_file = Filename.concat root "token" in
+      Out_channel.with_open_bin token_file (fun channel ->
+          Out_channel.output_string channel "test-relay-token\n");
+      let port = available_loopback_port () in
+      let relay =
+        match Unix.fork () with
+        | 0 -> (
+            match
+              Relay_http.serve ~root:relay_root
+                ~listen:("127.0.0.1:" ^ string_of_int port)
+                ~token_file
+            with
+            | Ok () -> exit 0
+            | Error _ -> exit 1)
+        | process -> process
+      in
+      Fun.protect
+        ~finally:(fun () -> terminate relay)
+        (fun () ->
+          let rec ready attempts =
+            try
+              ignore
+                (raw_http ~port
+                   (raw_request ~token:"wrong" "GET" "/not-a-route"));
+              ()
+            with
+            | Unix.Unix_error _ when attempts > 0 ->
+                ignore (Unix.select [] [] [] 0.02);
+                ready (attempts - 1)
+            | Unix.Unix_error _ -> Alcotest.fail "HTTP relay did not start"
+          in
+          ready 100;
+          run ~relay_root ~port))
+
+let http_listener_rejects_untrusted_requests_and_preserves_immutability () =
+  with_http_relay (fun ~relay_root ~port ->
+      let project = Trust.Repository_id.to_string (repository ()) in
+      let path kind id =
+        "/v1/repositories/" ^ project ^ "/" ^ kind ^ "/" ^ id
+      in
+      let unauthorized =
+        raw_http ~port (raw_request ~token:"wrong" "GET" "/not-a-route")
+      in
+      Alcotest.(check int)
+        "wrong bearer token is rejected" 401
+        (response_status unauthorized);
+      let oversized =
+        "PUT "
+        ^ path "manifests" (Transport.sha256 "oversized")
+        ^ " HTTP/1.1\r\n\
+           Host: localhost\r\n\
+           Authorization: Bearer test-relay-token\r\n\
+           Content-Length: "
+        ^ string_of_int (Relay.max_body_bytes + 1)
+        ^ "\r\n\r\n"
+      in
+      Alcotest.(check int)
+        "oversized body is rejected" 413
+        (response_status (raw_http ~port oversized));
+      Alcotest.(check int)
+        "invalid page limit is rejected" 400
+        (response_status
+           (raw_http ~port
+              (raw_request "GET"
+                 ("/v1/repositories/" ^ project ^ "/publications?limit=0"))));
+      let bytes = "listener manifest" in
+      let id = Transport.sha256 bytes in
+      let put = raw_request ~body:bytes "PUT" (path "manifests" id) in
+      Alcotest.(check int)
+        "first immutable create succeeds" 201
+        (response_status (raw_http ~port put));
+      Alcotest.(check int)
+        "identical immutable create is idempotent" 201
+        (response_status (raw_http ~port put));
+      Alcotest.(check int)
+        "a different body cannot overwrite" 400
+        (response_status
+           (raw_http ~port
+              (raw_request ~body:"different" "PUT" (path "manifests" id))));
+      let fetched = raw_http ~port (raw_request "GET" (path "manifests" id)) in
+      Alcotest.(check int)
+        "stored immutable bytes remain readable" 200 (response_status fetched);
+      Alcotest.(check bool)
+        "stored bytes were not overwritten" true
+        (String.ends_with ~suffix:bytes fetched);
+      let relay =
+        Relay.open_repository ~root:relay_root
+        |> require_ok Relay.error_to_string
+      in
+      let pages, _ =
+        Relay.list_publications relay ~project ~cursor:None
+          ~limit:Relay.max_page_size
+        |> require_ok Relay.error_to_string
+      in
+      Alcotest.(check int)
+        "rejected requests created no publications" 0 (List.length pages))
+
 let rec wait_for_https_relay client project attempts =
   match
     Transport_http.list_publications client ~project ~cursor:None ~limit:1
@@ -218,7 +397,8 @@ let with_https_relay run =
   let openssl = "/usr/bin/openssl" in
   let socat = "/usr/bin/socat" in
   if not (Sys.file_exists openssl && Sys.file_exists socat) then
-    Alcotest.skip ();
+    Alcotest.fail
+      "HTTPS transport tests require /usr/bin/openssl and /usr/bin/socat";
   with_directory "yeokcham-v4-https-relay-" (fun root ->
       let certificate = Filename.concat root "relay.crt" in
       let private_key = Filename.concat root "relay.key" in
@@ -268,10 +448,23 @@ let with_https_relay run =
           |]
           Unix.stdin Unix.stdout Unix.stderr
       in
+      let saved_environment =
+        [
+          "YEOKCHAM_V4_TEST_TRANSPORT";
+          "YEOKCHAM_V4_TEST_TRANSPORT_CA_BUNDLE";
+          "YEOKCHAM_V4_TEST_TRANSPORT_TOKEN";
+          "YEOKCHAM_V4_TEST_TRANSPORT_FAIL_PUT";
+        ]
+        |> List.map (fun name -> (name, Sys.getenv_opt name))
+      in
       Fun.protect
         ~finally:(fun () ->
           terminate proxy;
-          terminate backend)
+          terminate backend;
+          List.iter
+            (fun (name, value) ->
+              Unix.putenv name (Option.value ~default:"" value))
+            saved_environment)
         (fun () ->
           Unix.putenv "YEOKCHAM_V4_TEST_TRANSPORT" "1";
           Unix.putenv "YEOKCHAM_V4_TEST_TRANSPORT_CA_BUNDLE" certificate;
@@ -344,6 +537,10 @@ let require_cli_success name stderr = function
       Alcotest.failf "%s was terminated by signal %d: %s" name signal stderr
   | Unix.WSTOPPED signal ->
       Alcotest.failf "%s was stopped by signal %d: %s" name signal stderr
+
+let require_cli_failure name = function
+  | Unix.WEXITED 0 -> Alcotest.fail (name ^ " unexpectedly succeeded")
+  | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> ()
 
 let contains output needle =
   let needle_length = String.length needle in
@@ -550,6 +747,318 @@ let interrupted_upload_leaves_received_work_durable () =
                 "acknowledged retry is marked announced" false
                 (Option.is_some after_retry))))
 
+let sync_retains_all_publications_in_a_feed_fork () =
+  with_https_relay (fun client project url ->
+      with_directory "yeokcham-v4-sync-fork-" (fun parent ->
+          with_test_signer (fun signer_directory ->
+              let ( source,
+                    destination,
+                    administrator_capability,
+                    member_capability ) =
+                source_and_destination parent
+              in
+              Out_channel.with_open_bin (Filename.concat source "main.ml")
+                (fun channel ->
+                  Out_channel.output_string channel "let fork = 1\n");
+              Service.share_signed ~authority_epoch:None ~root:source
+                ~change:
+                  (Model.Change_id.of_string "change-fork" |> Result.get_ok)
+                ~revision:
+                  (Model.Revision_id.of_string "revision-fork" |> Result.get_ok)
+                ~signing_capability:administrator_capability
+              |> require_ok Service.error_to_string
+              |> ignore;
+              let outbound =
+                Service.prepare_transport_outbound ~root:source ~remote:"team"
+                  ~signing_capability:administrator_capability
+                |> require_ok Service.error_to_string
+              in
+              let outbound =
+                match outbound with
+                | Some outbound -> outbound
+                | None -> Alcotest.fail "fork source has no transport package"
+              in
+              let root_publication = outbound.Service.outbound_publication in
+              let identity =
+                Service.identity ~root:source
+                |> require_ok Service.error_to_string
+              in
+              let manifest = Transport.publication_manifest root_publication in
+              let child manifest =
+                Transport.create_publication ~repository:(repository ())
+                  ~publisher:identity.Service.device
+                  ~certificate:
+                    (Transport.publication_certificate root_publication)
+                  ~parents:[ Transport.publication_id root_publication ]
+                  ~manifest ~signing_capability:administrator_capability
+                |> require_ok Transport.error_to_string
+              in
+              let left = child manifest in
+              let source_repository =
+                Store.open_repository ~root:source
+                |> require_ok Store.error_to_string
+              in
+              let source_loaded =
+                Store.load source_repository |> require_ok Store.error_to_string
+              in
+              let source_authority =
+                match source_loaded.Store.collaboration with
+                | Some collaboration -> (
+                    match Store.authority collaboration with
+                    | Some authority -> authority
+                    | None -> Alcotest.fail "fork source has no authority")
+                | None -> Alcotest.fail "fork source lost collaboration"
+              in
+              let empty_package = Filename.concat parent "fork-empty-package" in
+              Package.create_with_authority
+                ~source:(Store.underlying_store source_repository)
+                ~destination:empty_package ~authority:source_authority
+                ~revisions:[] ~authorizations:[] ~adoptions:[]
+              |> require_ok Package.error_to_string;
+              let empty_artifact =
+                Package.read_artifact ~package:empty_package
+                |> require_ok Package.error_to_string
+              in
+              let right =
+                child
+                  (Transport.sha256 (Package.artifact_manifest empty_artifact))
+              in
+              upload_artifact client ~project outbound.Service.outbound_artifact
+                root_publication;
+              let left_bytes = Transport.encode_publication left in
+              Transport_http.put client ~project
+                ~kind:Transport_http.Publication
+                ~id:(Transport.publication_id left)
+                ~bytes:left_bytes
+              |> require_ok Transport_http.error_to_string;
+              upload_artifact client ~project empty_artifact right;
+              Transport_config.add ~root:destination ~name:"team" ~url
+              |> require_ok Transport_config.error_to_string;
+              store_test_signer signer_directory member_capability;
+              Unix.putenv "YEOKCHAM_V4_TEST_TRANSPORT_TOKEN" "test-relay-token";
+              Unix.putenv "YEOKCHAM_V4_TEST_TRANSPORT_FAIL_PUT" "1";
+              let output, errors, status =
+                run_cli [ "sync"; "--root"; destination; "team" ]
+              in
+              require_cli_success "fork sync" errors status;
+              expect_output_contains "all fork publications are discovered"
+                "received publications 3" output;
+              let repository =
+                Store.open_repository ~root:destination
+                |> require_ok Store.error_to_string
+              in
+              let loaded =
+                Store.load repository |> require_ok Store.error_to_string
+              in
+              let known =
+                match loaded.Store.collaboration with
+                | Some collaboration -> (
+                    match
+                      Transport.find_remote
+                        (Store.transport collaboration)
+                        ~name:"team"
+                    with
+                    | Some remote -> Transport.remote_known_publications remote
+                    | None -> Alcotest.fail "fork sync did not save its remote")
+                | None -> Alcotest.fail "fork sync lost collaboration"
+              in
+              Alcotest.(check int)
+                "fork references retain both children and parent" 3
+                (List.length known))))
+
+let incomplete_remote_closure_leaves_the_replica_unchanged () =
+  with_https_relay (fun client project url ->
+      with_directory "yeokcham-v4-incomplete-sync-" (fun parent ->
+          with_test_signer (fun signer_directory ->
+              let ( source,
+                    destination,
+                    administrator_capability,
+                    member_capability ) =
+                source_and_destination parent
+              in
+              Out_channel.with_open_bin (Filename.concat source "main.ml")
+                (fun channel ->
+                  Out_channel.output_string channel "let remote = 2\n");
+              Service.share_signed ~authority_epoch:None ~root:source
+                ~change:
+                  (Model.Change_id.of_string "change-incomplete"
+                  |> Result.get_ok)
+                ~revision:
+                  (Model.Revision_id.of_string "revision-incomplete"
+                  |> Result.get_ok)
+                ~signing_capability:administrator_capability
+              |> require_ok Service.error_to_string
+              |> ignore;
+              let outbound =
+                Service.prepare_transport_outbound ~root:source ~remote:"team"
+                  ~signing_capability:administrator_capability
+                |> require_ok Service.error_to_string
+              in
+              let outbound =
+                match outbound with
+                | Some outbound -> outbound
+                | None -> Alcotest.fail "incomplete source has no package"
+              in
+              let manifest =
+                Package.artifact_manifest outbound.Service.outbound_artifact
+              in
+              Transport_http.put client ~project ~kind:Transport_http.Manifest
+                ~id:(Transport.sha256 manifest)
+                ~bytes:manifest
+              |> require_ok Transport_http.error_to_string;
+              let publication =
+                Transport.encode_publication
+                  outbound.Service.outbound_publication
+              in
+              Transport_http.put client ~project
+                ~kind:Transport_http.Publication
+                ~id:
+                  (Transport.publication_id
+                     outbound.Service.outbound_publication)
+                ~bytes:publication
+              |> require_ok Transport_http.error_to_string;
+              Transport_config.add ~root:destination ~name:"team" ~url
+              |> require_ok Transport_config.error_to_string;
+              store_test_signer signer_directory member_capability;
+              Unix.putenv "YEOKCHAM_V4_TEST_TRANSPORT_TOKEN" "test-relay-token";
+              let before =
+                Service.status ~root:destination
+                |> require_ok Service.error_to_string
+              in
+              let before_cursor =
+                Service.transport_cursor ~root:destination ~remote:"team"
+                |> require_ok Service.error_to_string
+              in
+              let _output, _errors, status =
+                run_cli [ "sync"; "--root"; destination; "team" ]
+              in
+              require_cli_failure "incomplete relay sync" status;
+              let after =
+                Service.status ~root:destination
+                |> require_ok Service.error_to_string
+              in
+              let after_cursor =
+                Service.transport_cursor ~root:destination ~remote:"team"
+                |> require_ok Service.error_to_string
+              in
+              Alcotest.(check int)
+                "incomplete closure changes no shared work"
+                before.Service.shared_change_count
+                after.Service.shared_change_count;
+              Alcotest.(check (option string))
+                "incomplete closure changes no cursor" before_cursor
+                after_cursor;
+              Alcotest.(check string)
+                "sync never rewrites the working tree" "let version = 1\n"
+                (In_channel.with_open_bin
+                   (Filename.concat destination "main.ml")
+                   In_channel.input_all))))
+
+let sync_receives_signed_resolutions_as_decision_resolutions () =
+  with_https_relay (fun client project url ->
+      with_directory "yeokcham-v4-resolution-sync-" (fun parent ->
+          with_test_signer (fun signer_directory ->
+              let ( source,
+                    destination,
+                    administrator_capability,
+                    member_capability ) =
+                source_and_destination parent
+              in
+              let change value =
+                Model.Change_id.of_string value |> Result.get_ok
+              in
+              let revision value =
+                Model.Revision_id.of_string value |> Result.get_ok
+              in
+              let draft value =
+                Model.Draft_id.of_string value |> Result.get_ok
+              in
+              Out_channel.with_open_bin (Filename.concat source "main.ml")
+                (fun channel ->
+                  Out_channel.output_string channel "let version = 2\n");
+              Service.share_signed ~authority_epoch:None ~root:source
+                ~change:(change "change-resolution-a")
+                ~revision:(revision "revision-resolution-a")
+                ~signing_capability:administrator_capability
+              |> require_ok Service.error_to_string
+              |> ignore;
+              Service.new_draft ~root:source
+                ~id:(draft "draft-resolution-two")
+                ~title:"conflicting work"
+              |> require_ok Service.error_to_string
+              |> ignore;
+              Out_channel.with_open_bin (Filename.concat source "main.ml")
+                (fun channel ->
+                  Out_channel.output_string channel "let version = 3\n");
+              let conflicting =
+                Service.share_signed ~authority_epoch:None ~root:source
+                  ~change:(change "change-resolution-b")
+                  ~revision:(revision "revision-resolution-b")
+                  ~signing_capability:administrator_capability
+                |> require_ok Service.error_to_string
+              in
+              let decision = List.hd conflicting.Service.open_decisions in
+              Service.resolve_signed ~authority_epoch:None ~root:source
+                ~decision:decision.Model.decision_id
+                ~change:(change "change-resolution-final")
+                ~revision:(revision "revision-resolution-final")
+                ~tree:None ~signing_capability:administrator_capability
+              |> require_ok Service.error_to_string
+              |> ignore;
+              let outbound =
+                Service.prepare_transport_outbound ~root:source ~remote:"team"
+                  ~signing_capability:administrator_capability
+                |> require_ok Service.error_to_string
+              in
+              let outbound =
+                match outbound with
+                | Some outbound -> outbound
+                | None -> Alcotest.fail "resolution source has no package"
+              in
+              upload_artifact client ~project outbound.Service.outbound_artifact
+                outbound.Service.outbound_publication;
+              Transport_config.add ~root:destination ~name:"team" ~url
+              |> require_ok Transport_config.error_to_string;
+              store_test_signer signer_directory member_capability;
+              Unix.putenv "YEOKCHAM_V4_TEST_TRANSPORT_TOKEN" "test-relay-token";
+              Unix.putenv "YEOKCHAM_V4_TEST_TRANSPORT_FAIL_PUT" "1";
+              let output, errors, status =
+                run_cli [ "sync"; "--root"; destination; "team" ]
+              in
+              require_cli_success "resolution sync" errors status;
+              expect_output_contains "resolution publication is received"
+                "received publications 1" output;
+              let received =
+                Service.status ~root:destination
+                |> require_ok Service.error_to_string
+              in
+              Alcotest.(check int)
+                "the received resolution closes its decision" 0
+                (List.length received.Service.open_decisions);
+              let repository =
+                Store.open_repository ~root:destination
+                |> require_ok Store.error_to_string
+              in
+              let loaded =
+                Store.load repository |> require_ok Store.error_to_string
+              in
+              let signed_resolution =
+                match loaded.Store.collaboration with
+                | Some collaboration ->
+                    Store.signed_revisions collaboration
+                    |> List.find_opt (fun signed ->
+                        Option.is_some (Trust.signed_revision_resolution signed))
+                | None -> None
+              in
+              Alcotest.(check bool)
+                "resolution stays purpose-bound in transport" true
+                (Option.is_some signed_resolution);
+              Alcotest.(check string)
+                "sync leaves the working tree untouched" "let version = 1\n"
+                (In_channel.with_open_bin
+                   (Filename.concat destination "main.ml")
+                   In_channel.input_all))))
+
 let relay_is_create_only_and_paginated () =
   with_directory "yeokcham-v4-relay-" (fun root ->
       let relay =
@@ -602,6 +1111,8 @@ let () =
             publication_round_trip;
           Alcotest.test_case "feed rejects missing parent" `Quick
             feed_rejects_missing_parent;
+          Alcotest.test_case "same-publisher feed forks are retained" `Quick
+            feed_preserves_same_publisher_forks;
           Alcotest.test_case "local state is canonical" `Quick
             local_state_round_trip;
         ] );
@@ -609,10 +1120,18 @@ let () =
         [
           Alcotest.test_case "create-only storage and pagination" `Quick
             relay_is_create_only_and_paginated;
+          Alcotest.test_case "HTTP listener rejects invalid requests" `Quick
+            http_listener_rejects_untrusted_requests_and_preserves_immutability;
           Alcotest.test_case "HTTPS reverse proxy reaches the relay" `Slow
             https_client_reaches_relay_through_tls_reverse_proxy;
           Alcotest.test_case
             "interrupted upload retains received work for retry" `Slow
             interrupted_upload_leaves_received_work_durable;
+          Alcotest.test_case "sync retains every publication in a feed fork"
+            `Slow sync_retains_all_publications_in_a_feed_fork;
+          Alcotest.test_case "incomplete relay closure cannot mutate a replica"
+            `Slow incomplete_remote_closure_leaves_the_replica_unchanged;
+          Alcotest.test_case "sync preserves signed resolution purpose" `Slow
+            sync_receives_signed_resolutions_as_decision_resolutions;
         ] );
     ]

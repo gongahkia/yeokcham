@@ -415,7 +415,8 @@ let encode_state_value state =
   in
   let* pins = encode_list encode_snapshot (sort_pins state.Model.state_pins) in
   let* usernames =
-    encode_list encode_username_registration (sort_usernames state.Model.state_usernames)
+    encode_list encode_username_registration
+      (sort_usernames state.Model.state_usernames)
   in
   array
     [
@@ -438,7 +439,9 @@ let decode_state_components ~creator ~baseline ~active ~drafts ~checkpoints
   let* state_baseline = decode_snapshot baseline in
   let* state_active_draft = decode_draft_id active in
   let* state_drafts = decode_list "drafts" decode_draft drafts in
-  let* state_checkpoints = decode_list "checkpoints" decode_checkpoint checkpoints in
+  let* state_checkpoints =
+    decode_list "checkpoints" decode_checkpoint checkpoints
+  in
   let* state_changes = decode_list "shared changes" decode_change changes in
   let* state_resolutions =
     decode_list "resolutions" decode_resolution resolutions
@@ -483,8 +486,8 @@ let decode_state_value value =
       if not (Int64.equal version schema_version) then
         Error (Unsupported_schema_version version)
       else
-        decode_state_components ~creator ~baseline ~active ~drafts
-          ~checkpoints ~changes ~resolutions ~deliveries ~pins ~usernames
+        decode_state_components ~creator ~baseline ~active ~drafts ~checkpoints
+          ~changes ~resolutions ~deliveries ~pins ~usernames
         |> Result.map (fun state -> (version, state))
   | _ -> Error (Invalid_schema "V4 state has an unsupported field count")
 
@@ -498,7 +501,7 @@ let decode_state encoded =
     Encoding.decode encoded
     |> Result.map_error (fun error -> Decode_error error)
   in
-  let* version, state = decode_state_value value in
+  let* _, state = decode_state_value value in
   let* _ = Model.import state |> model in
   let* canonical_value = encode_state_value state in
   let canonical = Encoding.encode canonical_value in
