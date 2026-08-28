@@ -164,17 +164,35 @@ let validate_collaboration ~project collaboration =
     List.length signed_ids
     = List.length (List.sort_uniq Model.Revision_id.compare signed_ids)
   in
-  let every_current_revision_is_signed =
+  let signed_record_describes_project signed =
+    let revision = Trust.signed_revision_value signed in
+    match Trust.signed_revision_resolution signed with
+    | None ->
+        Model.shared_changes project
+        |> List.concat_map (fun change -> change.Model.revisions)
+        |> List.exists (fun existing -> revision_equal existing revision)
+    | Some decision ->
+        Model.resolutions project
+        |> List.exists (fun resolution ->
+            Model.Decision_id.equal resolution.Model.resolved_decision decision
+            && revision_equal resolution.Model.replacement_revision revision)
+  in
+  let every_current_revision_has_matching_signed_record =
     List.for_all
       (fun revision ->
-        List.exists (fun signed -> revision_equal revision signed) signed_values)
+        List.exists
+          (fun signed ->
+            revision_equal revision (Trust.signed_revision_value signed)
+            && signed_record_describes_project signed)
+          signed_revisions)
       project_revisions
   in
-  if not (unique_signed_ids && every_current_revision_is_signed) then
+  if not (unique_signed_ids && every_current_revision_has_matching_signed_record)
+  then
     Error
       (Invalid_collaboration_state
          "every current project revision must have exactly one verified signed \
-          record")
+          record with its matching shared or resolution purpose")
   else
     let* () =
       match authority with

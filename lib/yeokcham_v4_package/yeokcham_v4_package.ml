@@ -774,35 +774,62 @@ let verify_closure staging revisions =
   loop revisions
 
 let existing_revision project incoming =
-  Model.shared_changes project
-  |> List.concat_map (fun change -> change.Model.revisions)
+  (Model.shared_changes project
+  |> List.concat_map (fun change -> change.Model.revisions))
+  @ (Model.resolutions project
+    |> List.map (fun resolution -> resolution.Model.replacement_revision))
   |> List.find_opt (fun existing ->
       Model.Revision_id.equal existing.Model.revision incoming.Model.revision)
+
+let existing_revision_has_signed_purpose project signed =
+  let revision = Trust.signed_revision_value signed in
+  match Trust.signed_revision_resolution signed with
+  | None ->
+      Model.shared_changes project
+      |> List.concat_map (fun change -> change.Model.revisions)
+      |> List.exists (fun existing -> existing = revision)
+  | Some decision ->
+      Model.resolutions project
+      |> List.exists (fun resolution ->
+          Model.Decision_id.equal resolution.Model.resolved_decision decision
+          && resolution.Model.replacement_revision = revision)
 
 let apply_revisions project verified =
   let pending =
     verified.verified_revisions
-    |> List.map Trust.signed_revision_value
     |> List.sort (fun left right ->
-        Model.Revision_id.compare left.Model.revision right.Model.revision)
+        Model.Revision_id.compare
+          (Trust.signed_revision_id left)
+          (Trust.signed_revision_id right))
   in
   let rec apply project pending deferred =
     match pending with
     | [] -> Ok project
-    | revision :: rest -> (
+    | signed :: rest -> (
+        let revision = Trust.signed_revision_value signed in
         match existing_revision project revision with
         | Some existing ->
-            if existing = revision then apply project rest 0
+            if
+              existing = revision
+              && existing_revision_has_signed_purpose project signed
+            then apply project rest 0
             else
               Error (Invalid_package "revision ID conflicts with local history")
         | None -> (
-            match Model.receive project revision with
+            let transition =
+              match Trust.signed_revision_resolution signed with
+              | None -> Model.receive project revision
+              | Some decision ->
+                  Model.resolve project ~decision ~replacement:revision
+            in
+            match transition with
             | Ok project -> apply project rest 0
             | Error error ->
                 if
-                  error = Model.Received_revision_missing_parent
+                  (error = Model.Received_revision_missing_parent
+                  || error = Model.Unknown_decision)
                   && deferred + 1 < List.length pending
-                then apply project (rest @ [ revision ]) (deferred + 1)
+                then apply project (rest @ [ signed ]) (deferred + 1)
                 else Error (Model_error error)))
   in
   apply project pending 0

@@ -120,9 +120,20 @@ val sign_revision :
   Model.change_revision ->
   (signed_revision, error) result
 
+val sign_resolution :
+  membership ->
+  certificate:string ->
+  signing_capability ->
+  decision:Model.Decision_id.t ->
+  Model.change_revision ->
+  (signed_revision, error) result
+(** Signs a decision-specific resolution record. The decision ID is inside the
+    signed canonical body, rather than inferred from an exchange package. *)
+
 val signed_revision_id : signed_revision -> Model.Revision_id.t
 val signed_revision_certificate : signed_revision -> string
 val signed_revision_value : signed_revision -> Model.change_revision
+val signed_revision_resolution : signed_revision -> Model.Decision_id.t option
 val encode_signed_revision : signed_revision -> string
 val decode_signed_revision : string -> (signed_revision, error) result
 
@@ -207,6 +218,15 @@ val sign_revision_at :
   epoch:string ->
   certificate:string ->
   signing_capability ->
+  Model.change_revision ->
+  (signed_revision, error) result
+
+val sign_resolution_at :
+  authority ->
+  epoch:string ->
+  certificate:string ->
+  signing_capability ->
+  decision:Model.Decision_id.t ->
   Model.change_revision ->
   (signed_revision, error) result
 

@@ -35,6 +35,12 @@ for the multi-parent operation. Signed shared work, signed resolution, and
 one-time adoption use `--authority EPOCH` when more than one current authority
 head exists.
 
+A signed change record additionally carries one of two signed purposes:
+ordinary shared work, or an exact decision ID for a resolution replacement.
+Package receipt dispatches through the matching pure model transition. An
+unsigned manifest field may never reclassify work as a resolution, and a
+resolution record may never be received as a new shared change.
+
 A revocation contains its known sorted revision frontier. A record signed under
 an older epoch remains historical proof. If it is new to a receiver and a
 current head causally descends from that epoch while revoking its signer, it is
@@ -71,8 +77,9 @@ package exchange carry the complete authority closure.
    is valid only from an administrator active in all of them. No branch produces
    an implicit union of roles.
 3. A signed revision names exactly one verified epoch and its author is active
-   in that epoch. A late revision from a signer revoked by a current descendant
-   head additionally needs exactly one current-head adoption before receipt.
+   in that epoch and signs whether it is shared work or a named resolution. A
+   late revision from a signer revoked by a current descendant head additionally
+   needs exactly one current-head adoption before receipt.
 4. Revocation changes future ordinary acceptance only. It neither rewrites
    historical signed records nor silently discards late work.
 5. Authority review, adoption, and one-use authorisation are durable,

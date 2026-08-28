@@ -32,11 +32,12 @@ earlier administrator certificate. Any active administrator may enrol either a
 member or another administrator. Certificates are additive and causal; an
 incoming order is never treated as authorization.
 
-Each shared V4 revision has a canonical signed envelope. Its signature binds
-the repository ID, the complete canonical revision fields, the author's
-certificate ID, its author device ID, and fixed signature domain. A verified
-revision consequently cannot be transplanted into another repository or
-re-associated with another device or certificate.
+Each V4 work record has a canonical signed envelope. Its signature binds the
+repository ID, the complete canonical revision fields, the author's certificate
+ID, its author device ID, fixed signature domain, and whether the record is
+ordinary shared work or a resolution of one exact decision. A verified record
+consequently cannot be transplanted into another repository, re-associated with
+another device or certificate, or reclassified by a package manifest.
 
 Private keys are behind a V4 signer-provider interface. The first production
 providers use macOS Keychain and Linux Secret Service. Private bytes are not
@@ -55,9 +56,9 @@ Offline exchange is a versioned directory package with canonical manifest,
 signed identity/certificate/revision records, and immutable object files named
 only by object identity. Receive verifies package bytes in staging, including
 repository binding, certificate causality, signatures, revision parents, and
-snapshot/tree/content closure. It then publishes verified revisions and
-derived open decisions in one V4 state-head update. It never modifies a
-working tree, draft, delivery, or existing resolution.
+snapshot/tree/content closure. It then publishes verified shared work or applies
+verified decision-specific resolutions, plus any derived open decisions, in one
+V4 state-head update. It never modifies a working tree, draft, or delivery.
 
 ## Invariants
 
@@ -69,9 +70,12 @@ working tree, draft, delivery, or existing resolution.
    domain; unsupported algorithms/features fail closed.
 5. A received revision has a valid author certificate, matching author,
    repository, and complete causal revision-parent chain.
-6. A received closure names only canonical immutable objects whose identities
+6. A signed resolution binds exactly one decision ID and is received only
+   through the pure resolution transition; it cannot become ordinary shared
+   work.
+7. A received closure names only canonical immutable objects whose identities
    and recursive snapshot references verify.
-7. A failed package never advances the V4 state head or mutates the working
+8. A failed package never advances the V4 state head or mutates the working
    directory.
 
 ## Consequences
@@ -83,10 +87,11 @@ delivery. Lifecycle consequences are specified and tested in ADR-084.
 ## Verification
 
 Implemented focused tests cover certificate/revision canonical round trips,
-signature tampering, causal administrator enrollment, wrong repository,
-alternate root, missing snapshot closure, duplicate revisions, state-wrapper
-preservation, and working-tree preservation. The package verifier performs
-its validation in a temporary store before imports and state-head publication.
+resolution-purpose binding, signature tampering, causal administrator
+enrollment, wrong repository, alternate root, missing snapshot closure,
+duplicate revisions, state-wrapper preservation, and working-tree preservation.
+The package verifier performs its validation in a temporary store before
+imports and state-head publication.
 
 The remaining platform evidence is Linux execution of the real watcher loop;
 the Darwin run is not evidence for that behaviour. Further signer providers and

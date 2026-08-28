@@ -5,7 +5,10 @@ local verification commands. The suite covers V4 model transitions, generated
 model and authority properties, canonical goldens, store compare-and-swap,
 restore journal recovery, package object closure and causal checks, device
 rotation, branch-scoped authority actions and explicit reconciliation, recovery,
-phrase-checked join, and no-working-tree-mutation receive.
+phrase-checked join, signed resolution purpose, and no-working-tree-mutation
+receive. The package resolution test delivers conflicting shared work and its
+signed resolution in an order requiring deferral, then proves it recreates a
+resolved decision rather than a third shared change.
 
 The current Darwin implementation check is green for the focused suite. This
 does **not** prove the Linux watcher. On a Linux host, run:

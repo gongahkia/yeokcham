@@ -16,7 +16,10 @@ not an identity claim.
 Each change revision names its change ID, revision ID, parent revision if any,
 author device ID, base snapshot, result snapshot, and exact edits. A delivery
 uses the model’s current projection only after all relevant decisions are
-resolved.
+resolved. Its signed wrapper is either `Shared` or `Resolution(decision)`;
+the latter binds the exact decision ID as well as the replacement revision.
+This category is part of the signed bytes, not package metadata supplied by an
+untrusted copier.
 
 ## Authority state
 
@@ -54,6 +57,8 @@ adoption issued at a current head when `late` holds.
   selected current head for the signature.
 - `receive` applies validated revisions through the pure causal model
   transition, delaying missing-parent revisions only to establish valid order.
+  A signed `Resolution(decision)` instead applies through `resolve`; it never
+  becomes a shared change merely because it arrived in a package.
 - `revoke`, `enrol`, and `rotate` create a single-parent successor epoch;
   rotation adds the replacement certificate and revokes the old device
   atomically. On a fork they require an explicitly selected current parent.

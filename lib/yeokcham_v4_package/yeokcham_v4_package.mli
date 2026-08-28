@@ -88,5 +88,7 @@ val inspect_with_authority :
     administrator records an explicit late-arrival adoption. *)
 
 val apply_revisions : Model.project -> verified -> (Model.project, error) result
-(** Adds verified revisions through the pure V4 receive transition in causal
-    order. This pure operation neither persists nor materializes a tree. *)
+(** Adds verified shared records through the pure V4 receive transition and
+    verified resolution records through the pure [resolve] transition, deferring
+    only missing parents or not-yet-derived decisions. This pure operation
+    neither persists nor materializes a tree. *)

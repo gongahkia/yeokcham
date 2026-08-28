@@ -15,7 +15,8 @@ failure behaviour, and CLI surface agree.
 3. Let users inspect and materialise decision candidates outside the live tree;
    resolving must be explicit and must not select a candidate by accident.
 4. Sign shared and resolution revisions with an active Ed25519 device bound to
-   one immutable authority epoch.
+   one immutable authority epoch. The signed record itself must distinguish a
+   shared revision from a decision-specific resolution.
 5. Support administrator enrolment, revocation, atomic local-device rotation,
    branch-scoped lifecycle actions, explicit authority-fork reconciliation,
    root-phrase-checked device join, and one-time recovery authority rotation.

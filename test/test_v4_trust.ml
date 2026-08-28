@@ -192,6 +192,53 @@ let signed_revision_binds_author_and_membership () =
         (Trust.error_to_string error)
   | Ok () -> Alcotest.fail "missing author certificate verified a revision"
 
+let signed_resolution_binds_its_target_decision () =
+  let repository, root_capability, _, root_certificate, membership =
+    root_and_membership ()
+  in
+  let author_capability = capability 'b' in
+  let author = device_from_capability author_capability in
+  let author_certificate =
+    Trust.enroll membership
+      ~issuer:(Trust.certificate_id root_certificate)
+      root_capability ~subject:author ~role:Trust.Member
+    |> require_ok Trust.error_to_string
+  in
+  let membership =
+    Trust.verify_membership ~repository [ root_certificate; author_certificate ]
+    |> require_ok Trust.error_to_string
+  in
+  let decision = id Model.Decision_id.of_string "decision-resolution" in
+  let signed =
+    Trust.sign_resolution membership
+      ~certificate:(Trust.certificate_id author_certificate)
+      author_capability ~decision
+      (sample_revision (Trust.device_id author))
+    |> require_ok Trust.error_to_string
+  in
+  Alcotest.(check (option string))
+    "the signed record carries its resolution decision"
+    (Some (Model.Decision_id.to_string decision))
+    (Trust.signed_revision_resolution signed
+    |> Option.map Model.Decision_id.to_string);
+  let encoded = Trust.encode_signed_revision signed in
+  Alcotest.(check string)
+    "signed resolution bytes retain their golden encoding"
+    (read_golden "v4/signed-resolution-v3.cbor.hex")
+    encoded;
+  Trust.verify_signed_revision membership signed
+  |> require_ok Trust.error_to_string;
+  let decoded =
+    encoded |> Trust.decode_signed_revision |> require_ok Trust.error_to_string
+  in
+  Alcotest.(check (option string))
+    "the resolution decision survives a canonical round trip"
+    (Some (Model.Decision_id.to_string decision))
+    (Trust.signed_revision_resolution decoded
+    |> Option.map Model.Decision_id.to_string);
+  Trust.verify_signed_revision membership decoded
+  |> require_ok Trust.error_to_string
+
 let authority_root () =
   let repository, root_capability, root_device, root_certificate, membership =
     root_and_membership ()
@@ -554,6 +601,8 @@ let () =
             administrator_enrols_a_member_in_causal_order;
           Alcotest.test_case "signed revision binds author and membership"
             `Quick signed_revision_binds_author_and_membership;
+          Alcotest.test_case "signed resolution binds its target decision"
+            `Quick signed_resolution_binds_its_target_decision;
           Alcotest.test_case "authority epochs keep forks explicit" `Quick
             authority_epochs_are_branch_scoped_and_reconcilable;
           Alcotest.test_case "revocation, recovery, and exact exceptions" `Quick

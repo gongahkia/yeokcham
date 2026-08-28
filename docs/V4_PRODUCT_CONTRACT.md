@@ -96,7 +96,9 @@ working tree; run `receive` separately.
 membership/authority closure, signatures, causal parents, and exact object
 closure in a temporary store. Only then can it import immutable objects and
 publish one state-head update. It never scans, resolves, or writes the working
-tree.
+tree. A signed resolution carries its target decision in its own signed bytes;
+receipt applies it only as that decision's resolution, never as ordinary shared
+work.
 
 Revocation is forward-looking. A revision signed under its historical active
 epoch remains valid proof. If it is new to the receiving project and any current

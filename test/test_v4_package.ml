@@ -219,6 +219,177 @@ let package_verifies_before_import_and_preserves_model_visibility () =
         "source working tree remains unchanged" true
         (Sys.file_exists (Filename.concat source_root "main.ml")))
 
+let signed_resolution_receives_as_a_resolution_not_shared_work () =
+  with_directory "yeokcham-v4-package-resolution-" (fun root ->
+      let ( source_root,
+            source,
+            baseline,
+            root_device,
+            _root_capability,
+            _root_certificate,
+            _recovery_device,
+            authority,
+            first_signed ) =
+        authority_setup root
+      in
+      let first = Trust.signed_revision_value first_signed in
+      let author_capability = capability 'b' in
+      let author = device author_capability in
+      let second =
+        Model.make_change_revision ~change:(change "change-two")
+          ~revision:(revision "revision-two") ~parent:None
+          ~author:(Trust.device_id author) ~base:baseline
+          ~result:first.Model.result_snapshot
+          ~edits:
+            [
+              {
+                Model.edit_path =
+                  Model.Path.of_components [ "main.ml" ] |> Result.get_ok;
+                edit_kind = Model.Whole_path;
+              };
+            ]
+        |> require_ok Model.error_to_string
+      in
+      let authority_epoch = List.hd (Trust.authority_heads authority) in
+      let second_signed =
+        Trust.sign_revision_at authority ~epoch:authority_epoch
+          ~certificate:(Trust.signed_revision_certificate first_signed)
+          author_capability second
+        |> require_ok Trust.error_to_string
+      in
+      let source_project =
+        receiver_project ~creator:root_device ~baseline |> fun project ->
+        Model.receive project first |> require_ok Model.error_to_string
+        |> fun project ->
+        Model.receive project second |> require_ok Model.error_to_string
+      in
+      let decision =
+        Model.projection source_project |> fun projection ->
+        List.hd projection.Model.decisions
+      in
+      let replacement =
+        Model.make_change_revision
+          ~change:(change "change-resolution")
+          ~revision:(revision "revision-resolution")
+          ~parent:None ~author:(Trust.device_id author) ~base:baseline
+          ~result:first.Model.result_snapshot
+          ~edits:
+            [
+              {
+                Model.edit_path =
+                  Model.Path.of_components [ "main.ml" ] |> Result.get_ok;
+                edit_kind = Model.Whole_path;
+              };
+            ]
+        |> require_ok Model.error_to_string
+      in
+      let signed_resolution =
+        Trust.sign_resolution_at authority ~epoch:authority_epoch
+          ~certificate:(Trust.signed_revision_certificate first_signed)
+          author_capability ~decision:decision.Model.decision_id replacement
+        |> require_ok Trust.error_to_string
+      in
+      let package = Filename.concat root "resolution-package" in
+      Package.create_with_authority ~source ~destination:package ~authority
+        ~revisions:[ first_signed; second_signed; signed_resolution ]
+        ~authorizations:[] ~adoptions:[]
+      |> require_ok Package.error_to_string;
+      let destination_root = Filename.concat root "destination" in
+      Unix.mkdir destination_root 0o700;
+      let destination =
+        Store.init ~root:destination_root |> require_ok Store.error_to_string
+      in
+      let _, received =
+        Package.verify_and_import_with_authority ~destination ~package
+          ~authority ~known_adoptions:[]
+          ~project:(receiver_project ~creator:root_device ~baseline)
+        |> require_ok Package.error_to_string
+      in
+      Alcotest.(check int)
+        "only the two incoming shared changes are shared work" 2
+        (List.length (Model.shared_changes received));
+      Alcotest.(check int)
+        "the decision has one explicit resolution" 1
+        (List.length (Model.resolutions received));
+      Alcotest.(check int)
+        "receipt leaves no open conflict decision" 0
+        (List.length (Model.projection received).Model.decisions);
+      let resolved = List.hd (Model.resolutions received) in
+      Alcotest.(check string)
+        "the signed record binds receipt to the original decision"
+        (Model.Decision_id.to_string decision.Model.decision_id)
+        (Model.Decision_id.to_string resolved.Model.resolved_decision);
+      Alcotest.(check bool)
+        "package source remains a local immutable object store" true
+        (Sys.file_exists (Filename.concat source_root "main.ml")))
+
+let signed_resolution_without_its_target_decision_is_rejected_atomically () =
+  with_directory "yeokcham-v4-package-orphan-resolution-" (fun root ->
+      let ( _source_root,
+            source,
+            baseline,
+            root_device,
+            _root_capability,
+            _root_certificate,
+            _recovery_device,
+            authority,
+            first_signed ) =
+        authority_setup root
+      in
+      let first = Trust.signed_revision_value first_signed in
+      let author_capability = capability 'b' in
+      let author = device author_capability in
+      let replacement =
+        Model.make_change_revision
+          ~change:(change "change-resolution")
+          ~revision:(revision "revision-resolution")
+          ~parent:None ~author:(Trust.device_id author) ~base:baseline
+          ~result:first.Model.result_snapshot
+          ~edits:
+            [
+              {
+                Model.edit_path =
+                  Model.Path.of_components [ "main.ml" ] |> Result.get_ok;
+                edit_kind = Model.Whole_path;
+              };
+            ]
+        |> require_ok Model.error_to_string
+      in
+      let signed_resolution =
+        Trust.sign_resolution_at authority
+          ~epoch:(List.hd (Trust.authority_heads authority))
+          ~certificate:(Trust.signed_revision_certificate first_signed)
+          author_capability
+          ~decision:(id Model.Decision_id.of_string "decision-absent")
+          replacement
+        |> require_ok Trust.error_to_string
+      in
+      let package = Filename.concat root "orphan-resolution-package" in
+      Package.create_with_authority ~source ~destination:package ~authority
+        ~revisions:[ signed_resolution ] ~authorizations:[] ~adoptions:[]
+      |> require_ok Package.error_to_string;
+      let destination_root = Filename.concat root "destination" in
+      Unix.mkdir destination_root 0o700;
+      let destination =
+        Store.init ~root:destination_root |> require_ok Store.error_to_string
+      in
+      (match
+         Package.verify_and_import_with_authority ~destination ~package
+           ~authority ~known_adoptions:[]
+           ~project:(receiver_project ~creator:root_device ~baseline)
+       with
+      | Error error ->
+          Alcotest.(check string)
+            "an orphaned signed resolution is not received as shared work"
+            "unknown decision"
+            (Package.error_to_string error)
+      | Ok _ -> Alcotest.fail "received a resolution with no target decision");
+      Alcotest.(check int)
+        "rejected resolution imports no immutable objects" 0
+        (Store.list_objects destination
+        |> require_ok Store.error_to_string
+        |> List.length))
+
 let wrong_repository_is_rejected_before_object_import () =
   with_directory "yeokcham-v4-package-reject-" (fun root ->
       let _, source, baseline, _, root_device, membership, signed =
@@ -521,6 +692,12 @@ let () =
         [
           Alcotest.test_case "verified package is model-visible only" `Quick
             package_verifies_before_import_and_preserves_model_visibility;
+          Alcotest.test_case
+            "signed resolution receives as a resolution, not shared work" `Quick
+            signed_resolution_receives_as_a_resolution_not_shared_work;
+          Alcotest.test_case
+            "signed resolution without its target decision is rejected" `Quick
+            signed_resolution_without_its_target_decision_is_rejected_atomically;
           Alcotest.test_case "wrong repository is rejected before import" `Quick
             wrong_repository_is_rejected_before_object_import;
           Alcotest.test_case "alternate root is rejected before import" `Quick

@@ -879,6 +879,66 @@ let authority_initialized_repositories_exchange_verified_epoch_bound_work () =
         "receive does not materialize incoming bytes" "let version = 1\n"
         (read_file destination "main.ml"))
 
+let signed_resolution_is_persisted_with_its_decision_purpose () =
+  with_directory "yeokcham-v4-signed-resolution-" (fun root ->
+      write_file root "main.ml" "let version = 1\n";
+      let administrator_capability = signing_capability 'a' in
+      let administrator = trust_device administrator_capability in
+      let recovery_capability = signing_capability 'r' in
+      let recovery_device = trust_device recovery_capability in
+      ignore
+        (Service.init_signed_with_recovery ~root ~username:(username "alice")
+           ~initial_draft:(draft "draft-one") ~title:"authority" ~repository
+           ~device:administrator ~signing_capability:administrator_capability
+           ~recovery_device ~recovery_capability
+        |> require_ok Service.error_to_string);
+      write_file root "main.ml" "let version = 2\n";
+      ignore
+        (Service.share_signed ~authority_epoch:None ~root
+           ~change:(change "change-a") ~revision:(revision "revision-a")
+           ~signing_capability:administrator_capability
+        |> require_ok Service.error_to_string);
+      ignore
+        (Service.new_draft ~root ~id:(draft "draft-two") ~title:"second work"
+        |> require_ok Service.error_to_string);
+      write_file root "main.ml" "let version = 3\n";
+      let conflicting =
+        Service.share_signed ~authority_epoch:None ~root
+          ~change:(change "change-b") ~revision:(revision "revision-b")
+          ~signing_capability:administrator_capability
+        |> require_ok Service.error_to_string
+      in
+      let decision = List.hd conflicting.Service.open_decisions in
+      ignore
+        (Service.resolve_signed ~authority_epoch:None ~root
+           ~decision:decision.Model.decision_id
+           ~change:(change "change-resolution")
+           ~revision:(revision "revision-resolution")
+           ~tree:None ~signing_capability:administrator_capability
+        |> require_ok Service.error_to_string);
+      let repository =
+        Store.open_repository ~root |> require_ok Store.error_to_string
+      in
+      let loaded = Store.load repository |> require_ok Store.error_to_string in
+      let collaboration =
+        match loaded.Store.collaboration with
+        | Some collaboration -> collaboration
+        | None -> Alcotest.fail "signed resolution lost collaboration state"
+      in
+      let signed_resolution =
+        Store.signed_revisions collaboration
+        |> List.find_opt (fun signed ->
+            Option.is_some (Trust.signed_revision_resolution signed))
+      in
+      match signed_resolution with
+      | Some signed ->
+          Alcotest.(check (option string))
+            "persisted signed resolution names its exact decision"
+            (Some (Model.Decision_id.to_string decision.Model.decision_id))
+            (Trust.signed_revision_resolution signed
+            |> Option.map Model.Decision_id.to_string)
+      | None -> Alcotest.fail "resolution was persisted as ordinary shared work")
+
 let authority_lifecycle_revokes_rotates_and_recovers_a_replacement_device () =
   with_directory "yeokcham-v4-authority-lifecycle-" (fun root ->
       write_file root "main.ml" "let version = 1\n";
@@ -1386,6 +1446,9 @@ let () =
             "authority initialization exchanges epoch-bound work and recovery"
             `Quick
             authority_initialized_repositories_exchange_verified_epoch_bound_work;
+          Alcotest.test_case
+            "signed resolution is persisted with its decision purpose" `Quick
+            signed_resolution_is_persisted_with_its_decision_purpose;
           Alcotest.test_case
             "authority lifecycle revokes and recovery replaces control" `Quick
             authority_lifecycle_revokes_rotates_and_recovers_a_replacement_device;

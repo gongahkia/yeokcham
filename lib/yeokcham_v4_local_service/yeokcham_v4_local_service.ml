@@ -1621,15 +1621,15 @@ let resolve_signed ~authority_epoch ~root ~decision ~change ~revision ~tree
           let* signed =
             match authority_epoch with
             | None ->
-                Trust.sign_revision
+                Trust.sign_resolution
                   (Store.membership collaboration)
                   ~certificate:(Store.local_certificate collaboration)
-                  signing_capability replacement
+                  signing_capability ~decision replacement
                 |> Result.map_error (fun error -> Trust_error error)
             | Some (authority, epoch) ->
-                Trust.sign_revision_at authority ~epoch
+                Trust.sign_resolution_at authority ~epoch
                   ~certificate:(Store.local_certificate collaboration)
-                  signing_capability replacement
+                  signing_capability ~decision replacement
                 |> Result.map_error (fun error -> Trust_error error)
           in
           let* collaboration = extend_signed_revisions collaboration signed in

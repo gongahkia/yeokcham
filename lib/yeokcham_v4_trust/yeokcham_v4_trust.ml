@@ -79,6 +79,7 @@ type signed_revision = {
   signed_repository : Repository_id.t;
   signed_certificate : string;
   signed_epoch_value : string option;
+  signed_resolution_decision_value : Model.Decision_id.t option;
   signed_revision_value : Model.change_revision;
   signed_signature : string;
 }
@@ -708,21 +709,22 @@ let enroll membership ~issuer signing_capability ~subject ~role =
             issuer_certificate.certificate_subject_device.device_id_value
           signing_capability
 
-let revision_unsigned_bytes ~repository ~certificate ~epoch revision =
+let revision_unsigned_bytes ~repository ~certificate ~epoch ~resolution revision
+    =
   let* repository = encode_repository repository in
   let* certificate = text certificate in
   let* revision =
     Record.encode_change_revision revision
     |> Result.map_error (fun error -> Record_error error)
   in
-  match epoch with
-  | None ->
+  match (epoch, resolution) with
+  | None, None ->
       array
         [
           Encoding.integer 1L; repository; certificate; Encoding.bytes revision;
         ]
       |> Result.map Encoding.encode
-  | Some epoch ->
+  | Some epoch, None ->
       let* epoch = text epoch in
       array
         [
@@ -733,8 +735,24 @@ let revision_unsigned_bytes ~repository ~certificate ~epoch revision =
           Encoding.bytes revision;
         ]
       |> Result.map Encoding.encode
+  | epoch, Some decision ->
+      let* epoch =
+        match epoch with None -> Ok Encoding.null | Some epoch -> text epoch
+      in
+      let* decision = Model.Decision_id.to_string decision |> text in
+      array
+        [
+          Encoding.integer 3L;
+          repository;
+          certificate;
+          epoch;
+          decision;
+          Encoding.bytes revision;
+        ]
+      |> Result.map Encoding.encode
 
-let sign_revision membership ~certificate signing_capability revision =
+let sign_revision_with membership ~certificate signing_capability ~resolution
+    revision =
   match certificate_by_id membership.membership_certificates certificate with
   | None -> Error Unknown_author_certificate
   | Some author_certificate ->
@@ -756,7 +774,7 @@ let sign_revision membership ~certificate signing_capability revision =
         else
           let* bytes =
             revision_unsigned_bytes ~repository:membership.membership_repository
-              ~certificate ~epoch:None revision
+              ~certificate ~epoch:None ~resolution revision
           in
           let signature =
             Mirage_crypto_ec.Ed25519.sign ~key:signing_capability
@@ -767,19 +785,31 @@ let sign_revision membership ~certificate signing_capability revision =
               signed_repository = membership.membership_repository;
               signed_certificate = certificate;
               signed_epoch_value = None;
+              signed_resolution_decision_value = resolution;
               signed_revision_value = revision;
               signed_signature = signature;
             }
+
+let sign_revision membership ~certificate signing_capability revision =
+  sign_revision_with membership ~certificate signing_capability ~resolution:None
+    revision
+
+let sign_resolution membership ~certificate signing_capability ~decision
+    revision =
+  sign_revision_with membership ~certificate signing_capability
+    ~resolution:(Some decision) revision
 
 let signed_revision_id signed = signed.signed_revision_value.Model.revision
 let signed_revision_certificate signed = signed.signed_certificate
 let signed_revision_value signed = signed.signed_revision_value
 let signed_revision_epoch signed = signed.signed_epoch_value
+let signed_revision_resolution signed = signed.signed_resolution_decision_value
 
 let encode_signed_revision signed =
   let unsigned =
     revision_unsigned_bytes ~repository:signed.signed_repository
       ~certificate:signed.signed_certificate ~epoch:signed.signed_epoch_value
+      ~resolution:signed.signed_resolution_decision_value
       signed.signed_revision_value
     |> Result.get_ok
   in
@@ -807,6 +837,7 @@ let decode_signed_revision encoded =
         match unsigned_value with
         | Encoding.Array ([ _; _; _; _ ] as fields) -> Ok fields
         | Encoding.Array ([ _; _; _; _; _ ] as fields) -> Ok fields
+        | Encoding.Array ([ _; _; _; _; _; _ ] as fields) -> Ok fields
         | Encoding.Array _ ->
             Error
               (Invalid_record
@@ -833,6 +864,7 @@ let decode_signed_revision encoded =
                 signed_repository = repository;
                 signed_certificate = certificate;
                 signed_epoch_value = None;
+                signed_resolution_decision_value = None;
                 signed_revision_value = revision;
                 signed_signature = signature;
               }
@@ -858,6 +890,48 @@ let decode_signed_revision encoded =
                 signed_repository = repository;
                 signed_certificate = certificate;
                 signed_epoch_value = Some epoch;
+                signed_resolution_decision_value = None;
+                signed_revision_value = revision;
+                signed_signature = signature;
+              }
+            in
+            if String.equal encoded (encode_signed_revision signed) then
+              Ok signed
+            else Error Noncanonical_record
+      | [ version; repository; certificate; epoch; decision; revision ] ->
+          let* version = integer_field "revision version" version in
+          let* repository = decode_repository repository in
+          let* certificate = text_field "revision certificate ID" certificate in
+          let* epoch =
+            match epoch with
+            | Encoding.Null -> Ok None
+            | Encoding.Text epoch -> Ok (Some epoch)
+            | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Array _
+            | Encoding.Map _ | Encoding.Bool _ ->
+                Error
+                  (Invalid_record
+                     "revision authority epoch must be text or null")
+          in
+          let* decision = text_field "resolution decision ID" decision in
+          let* decision =
+            Model.Decision_id.of_string decision
+            |> Result.map_error (fun error ->
+                Invalid_record (Model.error_to_string error))
+          in
+          let* revision = bytes_field "revision body" revision in
+          let* revision =
+            Record.decode_change_revision revision
+            |> Result.map_error (fun error -> Record_error error)
+          in
+          if not (Int64.equal version 3L) then
+            Error (Invalid_record "unsupported signed revision version")
+          else
+            let signed =
+              {
+                signed_repository = repository;
+                signed_certificate = certificate;
+                signed_epoch_value = epoch;
+                signed_resolution_decision_value = Some decision;
                 signed_revision_value = revision;
                 signed_signature = signature;
               }
@@ -893,7 +967,9 @@ let verify_signed_revision_crypto membership signed =
           let* bytes =
             revision_unsigned_bytes ~repository:signed.signed_repository
               ~certificate:signed.signed_certificate
-              ~epoch:signed.signed_epoch_value signed.signed_revision_value
+              ~epoch:signed.signed_epoch_value
+              ~resolution:signed.signed_resolution_decision_value
+              signed.signed_revision_value
           in
           match
             Mirage_crypto_ec.Ed25519.pub_of_octets
@@ -1705,7 +1781,8 @@ let recover_enroll authority ~parents ~subject ~role signing_capability =
             ~issuer_device:(device_id recovery_device)
             signing_capability
 
-let sign_revision_at authority ~epoch ~certificate signing_capability revision =
+let sign_revision_at_with authority ~epoch ~certificate signing_capability
+    ~resolution revision =
   let* authority_epoch = authority_epoch authority epoch in
   let* author_certificate =
     match
@@ -1736,7 +1813,7 @@ let sign_revision_at authority ~epoch ~certificate signing_capability revision =
     let* bytes =
       revision_unsigned_bytes
         ~repository:authority.authority_membership_value.membership_repository
-        ~certificate ~epoch:(Some epoch) revision
+        ~certificate ~epoch:(Some epoch) ~resolution revision
     in
     let signature =
       Mirage_crypto_ec.Ed25519.sign ~key:signing_capability
@@ -1748,9 +1825,19 @@ let sign_revision_at authority ~epoch ~certificate signing_capability revision =
           authority.authority_membership_value.membership_repository;
         signed_certificate = certificate;
         signed_epoch_value = Some epoch;
+        signed_resolution_decision_value = resolution;
         signed_revision_value = revision;
         signed_signature = signature;
       }
+
+let sign_revision_at authority ~epoch ~certificate signing_capability revision =
+  sign_revision_at_with authority ~epoch ~certificate signing_capability
+    ~resolution:None revision
+
+let sign_resolution_at authority ~epoch ~certificate signing_capability
+    ~decision revision =
+  sign_revision_at_with authority ~epoch ~certificate signing_capability
+    ~resolution:(Some decision) revision
 
 let verify_signed_revision_at authority signed =
   let* epoch =
