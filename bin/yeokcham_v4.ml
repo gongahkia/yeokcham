@@ -3,6 +3,11 @@ module Service = Yeokcham_v4_local_service
 module Trust = Yeokcham_v4_trust
 module Package = Yeokcham_v4_package
 module Recovery = Yeokcham_v4_recovery
+module Transport = Yeokcham_v4_transport
+module Transport_config = Yeokcham_v4_transport_config
+module Transport_credential = Yeokcham_v4_transport_credential
+module Transport_http = Yeokcham_v4_transport_http
+module Relay_http = Yeokcham_v4_relay_http
 
 let fail message =
   prerr_endline message;
@@ -48,6 +53,12 @@ let usage () =
     \  yeokcham package adopt [--root PATH] --from PATH --revision ID \
      [--authority EPOCH]\n\
     \  yeokcham receive [--root PATH] --from PATH [--review]\n\
+    \  yeokcham remote add [--root PATH] NAME URL\n\
+    \  yeokcham remote remove [--root PATH] NAME\n\
+    \  yeokcham remote login [--root PATH] NAME\n\
+    \  yeokcham sync [--root PATH] NAME\n\
+    \  yeokcham relay serve --storage PATH --listen ADDRESS:PORT --token-file \
+     PATH\n\
     \  yeokcham deliver [--root PATH] --id ID --draft ID --title TITLE\n\
     \  yeokcham pin [--root PATH] --checkpoint ID\n\
     \  yeokcham unpin [--root PATH] --checkpoint ID\n\
@@ -59,6 +70,7 @@ let require_ok render = function
   | Error error -> fail (render error)
 
 let default_root = Sys.getcwd ()
+let ( let* ) = Result.bind
 
 let parse_root = function
   | [] -> default_root
@@ -1170,6 +1182,322 @@ let run_compact arguments =
   |> require_ok Service.error_to_string
   |> fun report -> render_compact report explain
 
+let parse_remote_add arguments =
+  let rec loop root values = function
+    | [] -> (
+        match List.rev values with
+        | [ name; url ] -> (Option.value root ~default:default_root, name, url)
+        | _ -> usage ())
+    | "--root" :: value :: rest when Option.is_none root ->
+        loop (Some value) values rest
+    | value :: rest -> loop root (value :: values) rest
+  in
+  loop None [] arguments
+
+let parse_remote_name arguments =
+  let rec loop root name = function
+    | [] -> (
+        match name with
+        | Some name -> (Option.value root ~default:default_root, name)
+        | None -> usage ())
+    | "--root" :: value :: rest when Option.is_none root ->
+        loop (Some value) name rest
+    | value :: rest when Option.is_none name -> loop root (Some value) rest
+    | _ -> usage ()
+  in
+  loop None None arguments
+
+let run_remote_add arguments =
+  let root, name, url = parse_remote_add arguments in
+  Transport_config.add ~root ~name ~url
+  |> require_ok Transport_config.error_to_string;
+  Printf.printf "remote %s %s\n" name url
+
+let run_remote_remove arguments =
+  let root, name = parse_remote_name arguments in
+  Transport_config.remove ~root ~name
+  |> require_ok Transport_config.error_to_string;
+  Printf.printf "remote removed %s\n" name
+
+let read_bearer_token () =
+  let attributes =
+    try Unix.tcgetattr Unix.stdin
+    with Unix.Unix_error _ ->
+      fail "remote login requires an interactive terminal"
+  in
+  let hidden = { attributes with Unix.c_echo = false } in
+  print_string "relay bearer token: ";
+  flush stdout;
+  let token =
+    Fun.protect
+      ~finally:(fun () ->
+        (try Unix.tcsetattr Unix.stdin Unix.TCSANOW attributes
+         with Unix.Unix_error _ -> ());
+        print_newline ())
+      (fun () ->
+        Unix.tcsetattr Unix.stdin Unix.TCSANOW hidden;
+        try Ok (read_line ()) with End_of_file -> Error ())
+  in
+  match token with
+  | Ok token -> token
+  | Error () -> fail "no relay bearer token was provided"
+
+let run_remote_login arguments =
+  let root, name = parse_remote_name arguments in
+  let _ =
+    Transport_config.find ~root ~name
+    |> require_ok Transport_config.error_to_string
+  in
+  let token = read_bearer_token () in
+  Transport_credential.save ~remote:name ~token
+  |> require_ok Transport_credential.error_to_string;
+  Printf.printf "credential saved for remote %s\n" name
+
+let parse_relay_serve arguments =
+  let rec loop storage listen token_file = function
+    | [] -> (
+        match (storage, listen, token_file) with
+        | Some storage, Some listen, Some token_file ->
+            (storage, listen, token_file)
+        | _ -> usage ())
+    | "--storage" :: value :: rest when Option.is_none storage ->
+        loop (Some value) listen token_file rest
+    | "--listen" :: value :: rest when Option.is_none listen ->
+        loop storage (Some value) token_file rest
+    | "--token-file" :: value :: rest when Option.is_none token_file ->
+        loop storage listen (Some value) rest
+    | _ -> usage ()
+  in
+  loop None None None arguments
+
+let run_relay_serve arguments =
+  let storage, listen, token_file = parse_relay_serve arguments in
+  Relay_http.serve ~root:storage ~listen ~token_file
+  |> require_ok Relay_http.error_to_string
+
+let relay_project identity =
+  Trust.Repository_id.to_string identity.Service.repository
+
+let fetch_publication_ids client ~project ~cursor =
+  let rec loop cursor seen collected last =
+    let ids, next =
+      Transport_http.list_publications client ~project ~cursor ~limit:128
+      |> require_ok Transport_http.error_to_string
+    in
+    let last = match List.rev ids with [] -> last | id :: _ -> Some id in
+    match next with
+    | None -> (collected @ ids, last)
+    | Some next ->
+        if List.mem next seen || ids = [] then
+          fail "relay publication pagination did not make progress"
+        else loop (Some next) (next :: seen) (collected @ ids) last
+  in
+  loop cursor (Option.to_list cursor) [] cursor
+
+let fetch_publication client ~project id =
+  let bytes =
+    Transport_http.get client ~project ~kind:Transport_http.Publication ~id
+    |> require_ok Transport_http.error_to_string
+  in
+  let publication =
+    Transport.decode_publication bytes |> require_ok Transport.error_to_string
+  in
+  if not (String.equal id (Transport.publication_id publication)) then
+    fail "relay publication route ID does not match its canonical bytes";
+  publication
+
+let fetch_artifact client ~project publication =
+  let manifest_id = Transport.publication_manifest publication in
+  let manifest =
+    Transport_http.get client ~project ~kind:Transport_http.Manifest
+      ~id:manifest_id
+    |> require_ok Transport_http.error_to_string
+  in
+  let object_ids =
+    Package.manifest_object_ids manifest |> require_ok Package.error_to_string
+  in
+  let objects =
+    object_ids
+    |> List.map (fun id ->
+        let id_text = Yeokcham_store.Stored_object_id.to_hex id in
+        let bytes =
+          Transport_http.get client ~project ~kind:Transport_http.Object
+            ~id:id_text
+          |> require_ok Transport_http.error_to_string
+        in
+        (id, bytes))
+  in
+  Package.artifact_of_bytes ~manifest ~objects
+  |> require_ok Package.error_to_string
+
+let sort_feed publications =
+  let compare_publication left right =
+    String.compare
+      (Transport.publication_id left)
+      (Transport.publication_id right)
+  in
+  let rec loop ordered pending =
+    match pending with
+    | [] -> ordered
+    | _ ->
+        let pending_ids = List.map Transport.publication_id pending in
+        let ready, waiting =
+          List.partition
+            (fun publication ->
+              Transport.publication_parents publication
+              |> List.for_all (fun parent -> not (List.mem parent pending_ids)))
+            pending
+        in
+        let ready = List.sort compare_publication ready in
+        if ready = [] then ordered @ List.sort compare_publication waiting
+        else loop (ordered @ ready) waiting
+  in
+  loop [] publications
+
+let remove_staged_package destination =
+  let objects = Filename.concat destination "objects" in
+  (try
+     Sys.readdir objects
+     |> Array.iter (fun name ->
+         try Unix.unlink (Filename.concat objects name)
+         with Unix.Unix_error _ -> ());
+     Unix.rmdir objects
+   with Unix.Unix_error _ | Sys_error _ -> ());
+  (try Unix.unlink (Filename.concat destination "manifest.cbor")
+   with Unix.Unix_error _ -> ());
+  try Unix.rmdir destination with Unix.Unix_error _ -> ()
+
+let with_transport_staging ~root run =
+  try
+    let staging =
+      Filename.temp_file ~temp_dir:root ".yeokcham-v4-transport-receive-" ".tmp"
+    in
+    Unix.unlink staging;
+    Unix.mkdir staging 0o700;
+    Fun.protect
+      ~finally:(fun () ->
+        try
+          Sys.readdir staging
+          |> Array.iter (fun name ->
+              remove_staged_package (Filename.concat staging name));
+          Unix.rmdir staging
+        with Unix.Unix_error _ | Sys_error _ -> ())
+      (fun () -> run staging)
+  with Unix.Unix_error (error, operation, _) ->
+    Error
+      (Printf.sprintf "transport staging %s %s: %s" operation root
+         (Unix.error_message error))
+
+let receive_transport ~root ~remote ~cursor publications artifacts =
+  with_transport_staging ~root (fun staging ->
+      let rec materialize reversed = function
+        | [] -> Ok (List.rev reversed)
+        | (publication, artifact) :: rest ->
+            let destination =
+              Filename.concat staging (Transport.publication_id publication)
+            in
+            let* () =
+              Package.materialize_artifact ~destination artifact
+              |> Result.map_error Package.error_to_string
+            in
+            materialize
+              ({ Service.publication; package = destination } :: reversed)
+              rest
+      in
+      let* arrivals = materialize [] (List.combine publications artifacts) in
+      Service.receive_transport_batch ~root ~remote ~cursor arrivals
+      |> Result.map_error Service.error_to_string)
+
+let upload_outbound client ~project ~root ~remote identity =
+  match V4_signer.load (Trust.device_id identity.Service.device) with
+  | Error error -> Error (V4_signer.error_to_string error)
+  | Ok signing_capability -> (
+      let* outbound =
+        Service.prepare_transport_outbound ~root ~remote ~signing_capability
+        |> Result.map_error Service.error_to_string
+      in
+      match outbound with
+      | None -> Ok 0
+      | Some outbound ->
+          let rec objects count = function
+            | [] -> Ok count
+            | (id, bytes) :: rest ->
+                let id = Yeokcham_store.Stored_object_id.to_hex id in
+                let* () =
+                  Transport_http.put client ~project ~kind:Transport_http.Object
+                    ~id ~bytes
+                  |> Result.map_error Transport_http.error_to_string
+                in
+                objects (count + 1) rest
+          in
+          let artifact = outbound.Service.outbound_artifact in
+          let* uploaded = objects 0 (Package.artifact_objects artifact) in
+          let manifest = Package.artifact_manifest artifact in
+          let manifest_id = Transport.sha256 manifest in
+          let* () =
+            Transport_http.put client ~project ~kind:Transport_http.Manifest
+              ~id:manifest_id ~bytes:manifest
+            |> Result.map_error Transport_http.error_to_string
+          in
+          let publication = outbound.Service.outbound_publication in
+          let publication_bytes = Transport.encode_publication publication in
+          let* () =
+            Transport_http.put client ~project ~kind:Transport_http.Publication
+              ~id:(Transport.publication_id publication)
+              ~bytes:publication_bytes
+            |> Result.map_error Transport_http.error_to_string
+          in
+          let* () =
+            Service.record_transport_outbound ~root ~remote ~publication
+              ~revisions:outbound.Service.outbound_revisions
+            |> Result.map_error Service.error_to_string
+          in
+          Ok (uploaded + 2))
+
+let run_sync arguments =
+  let root, remote_name = parse_remote_name arguments in
+  let remote =
+    Transport_config.find ~root ~name:remote_name
+    |> require_ok Transport_config.error_to_string
+  in
+  let token =
+    Transport_credential.load ~remote:remote_name
+    |> require_ok Transport_credential.error_to_string
+  in
+  let client =
+    Transport_http.create ~url:remote.Transport_config.url ~token
+    |> require_ok Transport_http.error_to_string
+  in
+  let identity = Service.identity ~root |> require_ok Service.error_to_string in
+  let project = relay_project identity in
+  let cursor =
+    Service.transport_cursor ~root ~remote:remote_name
+    |> require_ok Service.error_to_string
+  in
+  let publication_ids, next_cursor =
+    fetch_publication_ids client ~project ~cursor
+  in
+  let publications =
+    publication_ids |> List.map (fetch_publication client ~project) |> sort_feed
+  in
+  let artifacts = List.map (fetch_artifact client ~project) publications in
+  let received =
+    receive_transport ~root ~remote:remote_name ~cursor:next_cursor publications
+      artifacts
+    |> require_ok Fun.id
+  in
+  Printf.printf "received publications %d\n"
+    received.Service.discovered_publications;
+  Printf.printf "received revisions %d\n" received.Service.received_revisions;
+  Printf.printf "deferred publications %d\n"
+    received.Service.deferred_publications;
+  Printf.printf "created decisions %d\n" received.Service.created_decisions;
+  match upload_outbound client ~project ~root ~remote:remote_name identity with
+  | Ok uploaded -> Printf.printf "uploaded artifacts %d\n" uploaded
+  | Error detail ->
+      Printf.printf "upload pending %s\n" detail;
+      print_endline "receive completed; rerun sync to retry upload"
+
 let run_watch arguments =
   let root = parse_root arguments in
   V4_watch.run ~root
@@ -1205,6 +1533,11 @@ let () =
   | _ :: "package" :: "create" :: arguments -> run_package_create arguments
   | _ :: "package" :: "adopt" :: arguments -> run_package_adopt arguments
   | _ :: "receive" :: arguments -> run_receive arguments
+  | _ :: "remote" :: "add" :: arguments -> run_remote_add arguments
+  | _ :: "remote" :: "remove" :: arguments -> run_remote_remove arguments
+  | _ :: "remote" :: "login" :: arguments -> run_remote_login arguments
+  | _ :: "sync" :: arguments -> run_sync arguments
+  | _ :: "relay" :: "serve" :: arguments -> run_relay_serve arguments
   | _ :: "deliver" :: arguments -> run_deliver arguments
   | _ :: "pin" :: arguments -> run_pin arguments
   | _ :: "unpin" :: arguments -> run_unpin arguments

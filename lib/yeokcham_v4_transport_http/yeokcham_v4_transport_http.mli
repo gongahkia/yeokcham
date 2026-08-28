@@ -19,11 +19,21 @@ type error =
 
 val error_to_string : error -> string
 val create : url:string -> token:string -> (client, error) result
-val get : client -> project:string -> kind:kind -> id:string -> (string, error) result
-val put : client -> project:string -> kind:kind -> id:string -> bytes:string -> (unit, error) result
+
+val get :
+  client -> project:string -> kind:kind -> id:string -> (string, error) result
+
+val put :
+  client ->
+  project:string ->
+  kind:kind ->
+  id:string ->
+  bytes:string ->
+  (unit, error) result
+
 val list_publications :
   client ->
   project:string ->
   cursor:string option ->
   limit:int ->
-  ((string list * string option), error) result
+  (string list * string option, error) result

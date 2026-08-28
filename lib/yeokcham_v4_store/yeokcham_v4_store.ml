@@ -483,8 +483,18 @@ let encode_collaborative_state_v2 ~project collaboration =
   let* value = collaboration_value ~project collaboration in
   match value with
   | Encoding.Array
-      [ _; project; repository; certificates; epochs; revisions; authorizations;
-        adoptions; local_certificate; _transport ] ->
+      [
+        _;
+        project;
+        repository;
+        certificates;
+        epochs;
+        revisions;
+        authorizations;
+        adoptions;
+        local_certificate;
+        _transport;
+      ] ->
       array
         [
           Encoding.integer 2L;
@@ -504,8 +514,7 @@ let encode_collaborative_state_v2 ~project collaboration =
            "version 2 requires authority-aware collaboration")
   | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _ | Encoding.Map _
   | Encoding.Bool _ | Encoding.Null ->
-      Error
-        (Invalid_collaboration_state "collaborative state must be an array")
+      Error (Invalid_collaboration_state "collaborative state must be an array")
 
 let rec decode_collaborative_state encoded =
   let* value =
@@ -832,10 +841,9 @@ let decode_project_object store object_id =
     | Ok (project, collaboration) -> Ok (project, Some collaboration)
     | Error
         ( Invalid_collaboration_state _ | Record_error _ | Trust_error _
-        | Transport_error _
-        | Store_error _ | Envelope_error _ | Existing_repository _
-        | Bootstrap_error _ | Missing_state_head | Empty_state_head
-        | Unexpected_object_type _
+        | Transport_error _ | Store_error _ | Envelope_error _
+        | Existing_repository _ | Bootstrap_error _ | Missing_state_head
+        | Empty_state_head | Unexpected_object_type _
         | Collaborative_state_requires_collaborative_save ) ->
         Record.decode_project encoded
         |> Result.map (fun project -> (project, None))

@@ -833,6 +833,45 @@ let command_refreshes_an_initial_recovery_package_without_changing_authority ()
         "refresh writes an additional package" true
         (Sys.file_exists refreshed_package))
 
+let remote_alias_commands_persist_only_local_configuration () =
+  with_directory "yeokcham-v4-cli-remote-" (fun root ->
+      write_file root "main.ml" "let version = 1\n";
+      let _output, errors, status =
+        run
+          [
+            "init";
+            "--root";
+            root;
+            "--username";
+            "alice";
+            "--draft";
+            "draft-one";
+            "--title";
+            "remote";
+          ]
+      in
+      require_success "remote init" status errors;
+      let output, errors, status =
+        run
+          [
+            "remote";
+            "add";
+            "--root";
+            root;
+            "team";
+            "https://relay.example.test";
+          ]
+      in
+      require_success "remote add" status errors;
+      expect_output_contains "remote add names its alias"
+        "remote team https://relay.example.test" output;
+      let output, errors, status =
+        run [ "remote"; "remove"; "--root"; root; "team" ]
+      in
+      require_success "remote remove" status errors;
+      expect_output_contains "remote remove names its alias"
+        "remote removed team" output)
+
 let watch_is_linux_only () =
   with_directory "yeokcham-v4-cli-watch-" (fun root ->
       let uname =
@@ -879,6 +918,8 @@ let () =
           Alcotest.test_case
             "recovery refresh writes an additional encrypted package" `Quick
             command_refreshes_an_initial_recovery_package_without_changing_authority;
+          Alcotest.test_case "remote aliases persist as local configuration"
+            `Quick remote_alias_commands_persist_only_local_configuration;
           Alcotest.test_case "watch is Linux-only" `Quick watch_is_linux_only;
         ] );
     ]

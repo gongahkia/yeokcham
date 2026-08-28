@@ -383,10 +383,12 @@ let sign_detached signing_capability ~domain bytes =
   Mirage_crypto_ec.Ed25519.sign ~key:signing_capability (domain ^ bytes)
 
 let verify_detached ~device ~domain ~signature bytes =
-  if String.length signature <> 64 then Error (Invalid_signature (String.length signature))
+  if String.length signature <> 64 then
+    Error (Invalid_signature (String.length signature))
   else
     match Mirage_crypto_ec.Ed25519.pub_of_octets (device_public_key device) with
-    | Error _ -> Error (Invalid_public_key (String.length (device_public_key device)))
+    | Error _ ->
+        Error (Invalid_public_key (String.length (device_public_key device)))
     | Ok public_key ->
         if
           Mirage_crypto_ec.Ed25519.verify ~key:public_key signature

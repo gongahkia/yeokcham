@@ -55,7 +55,20 @@
  (libraries
   alcotest
   unix
+  yeokcham_testkit
   yeokcham_v4_relay
+  yeokcham_v4_transport
+  yeokcham_v4_trust)
+ (deps
+  (source_tree golden)))
+
+(test
+ (name v4_transport_property_test)
+ (modules v4_transport_property_test)
+ (libraries
+  alcotest
+  qcheck-core
+  qcheck-alcotest
   yeokcham_v4_transport
   yeokcham_v4_trust))
 
@@ -110,6 +123,8 @@
   yeokcham_v4_recovery
   yeokcham_v4_restore_journal
   yeokcham_v4_store
+  yeokcham_v4_package
+  yeokcham_v4_transport
   yeokcham_v4_trust))
 
 (test

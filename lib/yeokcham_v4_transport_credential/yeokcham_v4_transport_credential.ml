@@ -16,10 +16,16 @@ let error_to_string = function
 let valid_token token =
   String.length token > 0
   && String.length token <= 4096
-  && not (String.exists (function '\000' | '\r' | '\n' -> true | _ -> false) token)
+  && not
+       (String.exists
+          (function '\000' | '\r' | '\n' -> true | _ -> false)
+          token)
 
 let test_token () =
-  match (Sys.getenv_opt test_enabled_environment, Sys.getenv_opt test_token_environment) with
+  match
+    ( Sys.getenv_opt test_enabled_environment,
+      Sys.getenv_opt test_token_environment )
+  with
   | Some "1", Some token when valid_token token -> Some token
   | _ -> None
 
@@ -31,7 +37,10 @@ let write_all descriptor bytes =
     if offset = String.length bytes then Ok ()
     else
       try
-        let count = Unix.write_substring descriptor bytes offset (String.length bytes - offset) in
+        let count =
+          Unix.write_substring descriptor bytes offset
+            (String.length bytes - offset)
+        in
         if count = 0 then Error () else loop (offset + count)
       with Unix.Unix_error _ -> Error ()
   in
@@ -44,7 +53,8 @@ let command arguments stdin =
     let stdout_read, stdout_write = Unix.pipe () in
     try
       let process =
-        Unix.create_process secret_tool (Array.of_list (secret_tool :: arguments))
+        Unix.create_process secret_tool
+          (Array.of_list (secret_tool :: arguments))
           stdin_read stdout_write Unix.stderr
       in
       close_noerr stdin_read;
@@ -67,12 +77,13 @@ let command arguments stdin =
       let result = read () in
       close_noerr stdout_read;
       let _, status = Unix.waitpid [] process in
-      (match (input, result) with
+      match (input, result) with
       | Ok (), Ok () -> (
           match status with
           | Unix.WEXITED code -> Ok (code, Buffer.contents output)
           | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> Error Unavailable)
-      | Ok (), Error () | Error (), Ok () | Error (), Error () -> Error Unavailable)
+      | Ok (), Error () | Error (), Ok () | Error (), Error () ->
+          Error Unavailable
     with Unix.Unix_error _ ->
       close_noerr stdin_read;
       close_noerr stdin_write;
@@ -84,7 +95,8 @@ let attributes remote =
   [ "application"; application; "schema"; schema; "remote"; remote ]
 
 let trim_newline value =
-  if String.ends_with ~suffix:"\n" value then String.sub value 0 (String.length value - 1)
+  if String.ends_with ~suffix:"\n" value then
+    String.sub value 0 (String.length value - 1)
   else value
 
 let load ~remote =
@@ -105,7 +117,12 @@ let save ~remote ~token =
     match test_token () with
     | Some _ -> Ok ()
     | None -> (
-        match command ("store" :: "--label=Yeokcham V4 relay credential" :: attributes remote) token with
+        match
+          command
+            ("store" :: "--label=Yeokcham V4 relay credential"
+           :: attributes remote)
+            token
+        with
         | Ok (0, _) -> Ok ()
         | Ok _ -> Error Rejected
         | Error error -> Error error)

@@ -32,7 +32,7 @@ let rec start_watcher root =
       Unix.sleep 1;
       start_watcher root
 
-let rec loop root watcher window =
+let[@warning "-4"] rec loop root watcher window =
   let now = Unix.gettimeofday () in
   let timeout = Service.Capture_window.timeout window ~now in
   match Linux_watcher.poll watcher ~timeout with

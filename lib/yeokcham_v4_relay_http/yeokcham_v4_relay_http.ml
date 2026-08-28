@@ -25,23 +25,39 @@ let constant_time_equal left right =
   let length = max (String.length left) (String.length right) in
   let difference = ref (String.length left lxor String.length right) in
   for index = 0 to length - 1 do
-    let left_byte = if index < String.length left then Char.code left.[index] else 0 in
-    let right_byte = if index < String.length right then Char.code right.[index] else 0 in
+    let left_byte =
+      if index < String.length left then Char.code left.[index] else 0
+    in
+    let right_byte =
+      if index < String.length right then Char.code right.[index] else 0
+    in
     difference := !difference lor (left_byte lxor right_byte)
   done;
   !difference = 0
 
 let trim_one_newline value =
-  if String.ends_with ~suffix:"\n" value then String.sub value 0 (String.length value - 1)
+  if String.ends_with ~suffix:"\n" value then
+    String.sub value 0 (String.length value - 1)
   else value
 
 let token_from_file path =
   try
     let info = Unix.lstat path in
-    if info.Unix.st_kind <> Unix.S_REG || info.Unix.st_size <= 0 || info.Unix.st_size > max_token_bytes then Error (Invalid_token_file path)
+    if
+      info.Unix.st_kind <> Unix.S_REG
+      || info.Unix.st_size <= 0
+      || info.Unix.st_size > max_token_bytes
+    then Error (Invalid_token_file path)
     else
-      let token = In_channel.with_open_bin path In_channel.input_all |> trim_one_newline in
-      if String.length token = 0 || String.exists (function '\000' | '\r' | '\n' -> true | _ -> false) token then Error (Invalid_token_file path)
+      let token =
+        In_channel.with_open_bin path In_channel.input_all |> trim_one_newline
+      in
+      if
+        String.length token = 0
+        || String.exists
+             (function '\000' | '\r' | '\n' -> true | _ -> false)
+             token
+      then Error (Invalid_token_file path)
       else Ok token
   with Unix.Unix_error _ | Sys_error _ -> Error (Invalid_token_file path)
 
@@ -50,7 +66,8 @@ let parse_listen value =
   | [ host; port ] -> (
       match int_of_string_opt port with
       | Some port when port > 0 && port <= 65535 -> (
-          try Ok (Unix.inet_addr_of_string host, port) with Failure _ -> Error (Invalid_listen value))
+          try Ok (Unix.inet_addr_of_string host, port)
+          with Failure _ -> Error (Invalid_listen value))
       | _ -> Error (Invalid_listen value))
   | _ -> Error (Invalid_listen value)
 
@@ -101,7 +118,8 @@ let parse_headers header =
             | Some index ->
                 Some
                   ( String.sub field 0 index |> String.lowercase_ascii,
-                    String.sub field (index + 1) (String.length field - index - 1)
+                    String.sub field (index + 1)
+                      (String.length field - index - 1)
                     |> String.trim ))
           fields
       in
@@ -131,7 +149,10 @@ let write_all descriptor bytes =
     if offset = String.length bytes then ()
     else
       try
-        let count = Unix.write_substring descriptor bytes offset (String.length bytes - offset) in
+        let count =
+          Unix.write_substring descriptor bytes offset
+            (String.length bytes - offset)
+        in
         if count > 0 then loop (offset + count)
       with Unix.Unix_error _ -> ()
   in
@@ -152,7 +173,13 @@ let response descriptor status body =
     | _ -> "Internal Server Error"
   in
   let header =
-    Printf.sprintf "HTTP/1.1 %d %s\r\nContent-Length: %d\r\nConnection: close\r\nContent-Type: application/cbor\r\n\r\n" status reason (String.length body)
+    Printf.sprintf
+      "HTTP/1.1 %d %s\r\n\
+       Content-Length: %d\r\n\
+       Connection: close\r\n\
+       Content-Type: application/cbor\r\n\
+       \r\n"
+      status reason (String.length body)
   in
   write_all descriptor header;
   write_all descriptor body
@@ -173,12 +200,18 @@ let request_path target =
 
 let route target =
   let path, query = request_path target in
-  let segments = path |> String.split_on_char '/' |> List.filter (fun value -> value <> "") in
+  let segments =
+    path |> String.split_on_char '/' |> List.filter (fun value -> value <> "")
+  in
   match segments with
-  | [ "v1"; "repositories"; project; "objects"; id ] -> Ok (project, Relay.Object, id, query)
-  | [ "v1"; "repositories"; project; "manifests"; id ] -> Ok (project, Relay.Manifest, id, query)
-  | [ "v1"; "repositories"; project; "publications"; id ] -> Ok (project, Relay.Publication, id, query)
-  | [ "v1"; "repositories"; project; "publications" ] -> Ok (project, Relay.Publication, "", query)
+  | [ "v1"; "repositories"; project; "objects"; id ] ->
+      Ok (project, Relay.Object, id, query)
+  | [ "v1"; "repositories"; project; "manifests"; id ] ->
+      Ok (project, Relay.Manifest, id, query)
+  | [ "v1"; "repositories"; project; "publications"; id ] ->
+      Ok (project, Relay.Publication, id, query)
+  | [ "v1"; "repositories"; project; "publications" ] ->
+      Ok (project, Relay.Publication, "", query)
   | _ -> Error ()
 
 let encode_list ids cursor =
@@ -188,19 +221,21 @@ let encode_list ids cursor =
     |> Encoding.array |> Result.get_ok
   in
   let cursor =
-    match cursor with None -> Encoding.null | Some value -> Encoding.text value |> Result.get_ok
+    match cursor with
+    | None -> Encoding.null
+    | Some value -> Encoding.text value |> Result.get_ok
   in
   Encoding.array [ ids; cursor ] |> Result.get_ok |> Encoding.encode
 
 let handle relay token descriptor =
   match read_request descriptor with
   | Error () -> response descriptor 400 ""
-  | Ok (header_bytes, remainder) ->
-      (match parse_headers header_bytes with
+  | Ok (header_bytes, remainder) -> (
+      match parse_headers header_bytes with
       | Error () -> response descriptor 400 ""
-      | Ok (request_line, headers) ->
+      | Ok (request_line, headers) -> (
           match request_line with
-          | [ method_; target; "HTTP/1.1" ] ->
+          | [ method_; target; "HTTP/1.1" ] -> (
               let authorized =
                 match header headers "authorization" with
                 | Some value when String.starts_with ~prefix:"Bearer " value ->
@@ -217,54 +252,61 @@ let handle relay token descriptor =
               else if Option.is_some (header headers "transfer-encoding") then
                 response descriptor 400 ""
               else
-                (match (route target, content_length) with
+                match (route target, content_length) with
                 | _, None -> response descriptor 400 ""
                 | _, Some length when length < 0 -> response descriptor 400 ""
                 | _, Some length when length > Relay.max_body_bytes ->
                     response descriptor 413 ""
                 | Error (), Some _ -> response descriptor 404 ""
-                | Ok (project, kind, id, query), Some length ->
-                    (match method_ with
-                    | "PUT" when id <> "" ->
-                        (match body descriptor remainder length with
+                | Ok (project, kind, id, query), Some length -> (
+                    match method_ with
+                    | "PUT" when id <> "" -> (
+                        match body descriptor remainder length with
                         | Error () -> response descriptor 400 ""
-                        | Ok bytes ->
-                            (match Relay.create relay ~project ~kind ~id ~bytes with
+                        | Ok bytes -> (
+                            match
+                              Relay.create relay ~project ~kind ~id ~bytes
+                            with
                             | Ok () -> response descriptor 201 ""
                             | Error error ->
                                 if Relay.is_immutable_conflict error then
                                   response descriptor 409 ""
                                 else response descriptor 400 ""))
-                    | "GET" when id <> "" && length = 0 ->
-                        (match Relay.get relay ~project ~kind ~id with
+                    | "GET" when id <> "" && length = 0 -> (
+                        match Relay.get relay ~project ~kind ~id with
                         | Ok bytes -> response descriptor 200 bytes
                         | Error error ->
-                            if Relay.is_missing error then response descriptor 404 ""
+                            if Relay.is_missing error then
+                              response descriptor 404 ""
                             else response descriptor 400 "")
                     | "GET"
-                      when kind = Relay.Publication && id = "" && length = 0 ->
+                      when kind = Relay.Publication && id = "" && length = 0
+                      -> (
                         let cursor = List.assoc_opt "cursor" query in
                         let limit =
                           match List.assoc_opt "limit" query with
                           | None -> Some Relay.max_page_size
                           | Some value -> int_of_string_opt value
                         in
-                        (match limit with
+                        match limit with
                         | None -> response descriptor 400 ""
-                        | Some limit ->
-                            (match
-                               Relay.list_publications relay ~project ~cursor
-                                 ~limit
-                             with
+                        | Some limit -> (
+                            match
+                              Relay.list_publications relay ~project ~cursor
+                                ~limit
+                            with
                             | Ok (ids, cursor) ->
                                 response descriptor 200 (encode_list ids cursor)
                             | Error _ -> response descriptor 400 ""))
                     | "GET" | "PUT" -> response descriptor 405 ""
                     | _ -> response descriptor 405 ""))
-          | _ -> response descriptor 400 "")
+          | _ -> response descriptor 400 ""))
 
 let serve ~root ~listen ~token_file =
-  let* relay = Relay.open_repository ~root |> Result.map_error (fun error -> Relay_error error) in
+  let* relay =
+    Relay.open_repository ~root
+    |> Result.map_error (fun error -> Relay_error error)
+  in
   let* address, port = parse_listen listen in
   let* token = token_from_file token_file in
   try
@@ -278,9 +320,12 @@ let serve ~root ~listen ~token_file =
         while true do
           try
             let client, _ = Unix.accept listener in
-            Fun.protect ~finally:(fun () -> close_noerr client) (fun () -> handle relay token client)
+            Fun.protect
+              ~finally:(fun () -> close_noerr client)
+              (fun () -> handle relay token client)
           with Unix.Unix_error _ -> ()
         done;
         Ok ())
   with Unix.Unix_error (error, operation, _) ->
-    Error (Io_error { path = listen; operation; message = Unix.error_message error })
+    Error
+      (Io_error { path = listen; operation; message = Unix.error_message error })

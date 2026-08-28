@@ -57,11 +57,13 @@ let error_to_string = function
   | Invalid_publication detail -> "invalid V4 transport publication: " ^ detail
   | Noncanonical_bytes -> "V4 transport record is not canonically encoded"
   | Duplicate_publication id -> "duplicate V4 transport publication: " ^ id
-  | Missing_feed_parent id -> "V4 transport publication is missing feed parent: " ^ id
+  | Missing_feed_parent id ->
+      "V4 transport publication is missing feed parent: " ^ id
   | Cross_publisher_parent id ->
       "V4 transport publication parent has another publisher: " ^ id
   | Feed_cycle id -> "V4 transport publication feed has a cycle at: " ^ id
-  | Repository_mismatch -> "V4 transport publication belongs to another repository"
+  | Repository_mismatch ->
+      "V4 transport publication belongs to another repository"
   | Unknown_publisher_certificate ->
       "V4 transport publication names an unknown publisher certificate"
   | Publisher_certificate_mismatch ->
@@ -74,12 +76,15 @@ let error_to_string = function
 
 let hex_of_bytes bytes =
   let alphabet = "0123456789abcdef" in
-  String.init (String.length bytes * 2) (fun index ->
+  String.init
+    (String.length bytes * 2)
+    (fun index ->
       let value = Char.code bytes.[index / 2] in
       if index mod 2 = 0 then alphabet.[value lsr 4]
       else alphabet.[value land 15])
 
-let sha256 bytes = Hash.digest_string bytes |> Hash.to_raw_string |> hex_of_bytes
+let sha256 bytes =
+  Hash.digest_string bytes |> Hash.to_raw_string |> hex_of_bytes
 
 let valid_digest value =
   String.length value = 64
@@ -121,7 +126,8 @@ let integer_field name = function
   | Encoding.Bool _ | Encoding.Null ->
       Error (Invalid_publication (name ^ " must be an integer"))
 
-let check_digest value = if valid_digest value then Ok () else Error (Invalid_digest value)
+let check_digest value =
+  if valid_digest value then Ok () else Error (Invalid_digest value)
 
 let strictly_sorted name compare values =
   let rec loop = function
@@ -156,7 +162,13 @@ let check_certificate value = check_digest value
 let unsigned_value ~repository ~publisher ~certificate ~parents ~manifest =
   let* () = check_certificate certificate in
   let* () = check_digest manifest in
-  let* () = List.fold_left (fun result parent -> let* () = result in check_digest parent) (Ok ()) parents in
+  let* () =
+    List.fold_left
+      (fun result parent ->
+        let* () = result in
+        check_digest parent)
+      (Ok ()) parents
+  in
   let* () = strictly_sorted "publication parents" String.compare parents in
   let* repository = text (Trust.Repository_id.to_string repository) in
   let* publisher = text (Model.Device_id.to_string publisher) in
@@ -201,12 +213,13 @@ let create_publication ~repository ~publisher ~certificate ~parents ~manifest
     Error (Invalid_publication "signing capability does not match publisher")
   else
     let* unsigned =
-      unsigned_bytes ~repository ~publisher:(Trust.device_id publisher)
+      unsigned_bytes ~repository
+        ~publisher:(Trust.device_id publisher)
         ~certificate ~parents ~manifest
     in
     let signature =
-      Trust.sign_detached signing_capability ~domain:publication_signature_domain
-        unsigned
+      Trust.sign_detached signing_capability
+        ~domain:publication_signature_domain unsigned
     in
     let provisional =
       {
@@ -223,16 +236,23 @@ let create_publication ~repository ~publisher ~certificate ~parents ~manifest
     Ok { provisional with publication_id_value }
 
 let publication_id publication = publication.publication_id_value
-let publication_repository publication = publication.publication_repository_value
+
+let publication_repository publication =
+  publication.publication_repository_value
+
 let publication_publisher publication = publication.publication_publisher_value
-let publication_certificate publication = publication.publication_certificate_value
+
+let publication_certificate publication =
+  publication.publication_certificate_value
+
 let publication_parents publication = publication.publication_parents_value
 let publication_manifest publication = publication.publication_manifest_value
 let encode_publication = publication_bytes
 
 let decode_device_id value =
   Model.Device_id.of_string value
-  |> Result.map_error (fun error -> Invalid_publication (Model.error_to_string error))
+  |> Result.map_error (fun error ->
+      Invalid_publication (Model.error_to_string error))
 
 let decode_publication bytes =
   let* value =
@@ -240,34 +260,72 @@ let decode_publication bytes =
   in
   let* fields = exact_array "transport publication" 2 value in
   match fields with
-  | [ unsigned; signature ] ->
-      let* unsigned = exact_array "transport publication unsigned body" 7 unsigned in
-      let* signature = bytes_field "transport publication signature" signature in
-      if String.length signature <> 64 then Error (Trust_error (Trust.Invalid_signature (String.length signature)))
-      else (
+  | [ unsigned; signature ] -> (
+      let* unsigned =
+        exact_array "transport publication unsigned body" 7 unsigned
+      in
+      let* signature =
+        bytes_field "transport publication signature" signature
+      in
+      if String.length signature <> 64 then
+        Error (Trust_error (Trust.Invalid_signature (String.length signature)))
+      else
         match unsigned with
-        | [ version; repository; publisher; certificate; parents; manifest; algorithm ] ->
-            let* version = integer_field "transport publication version" version in
+        | [
+         version;
+         repository;
+         publisher;
+         certificate;
+         parents;
+         manifest;
+         algorithm;
+        ] ->
+            let* version =
+              integer_field "transport publication version" version
+            in
             if not (Int64.equal version publication_schema_version) then
-              Error (Invalid_publication "unsupported transport publication version")
+              Error
+                (Invalid_publication "unsupported transport publication version")
             else
-              let* repository = text_field "transport publication repository" repository in
+              let* repository =
+                text_field "transport publication repository" repository
+              in
               let* repository =
                 Trust.Repository_id.of_string repository
                 |> Result.map_error (fun error -> Invalid_publication error)
               in
-              let* publisher = text_field "transport publication publisher" publisher in
+              let* publisher =
+                text_field "transport publication publisher" publisher
+              in
               let* publisher = decode_device_id publisher in
-              let* certificate = text_field "transport publication certificate" certificate in
+              let* certificate =
+                text_field "transport publication certificate" certificate
+              in
               let* () = check_certificate certificate in
-              let* parents = decode_texts "transport publication parents" parents in
-              let* () = List.fold_left (fun result parent -> let* () = result in check_digest parent) (Ok ()) parents in
-              let* () = strictly_sorted "publication parents" String.compare parents in
-              let* manifest = text_field "transport publication manifest" manifest in
+              let* parents =
+                decode_texts "transport publication parents" parents
+              in
+              let* () =
+                List.fold_left
+                  (fun result parent ->
+                    let* () = result in
+                    check_digest parent)
+                  (Ok ()) parents
+              in
+              let* () =
+                strictly_sorted "publication parents" String.compare parents
+              in
+              let* manifest =
+                text_field "transport publication manifest" manifest
+              in
               let* () = check_digest manifest in
-              let* algorithm = text_field "transport publication algorithm" algorithm in
+              let* algorithm =
+                text_field "transport publication algorithm" algorithm
+              in
               if not (String.equal algorithm Trust.algorithm) then
-                Error (Invalid_publication "unsupported transport signature algorithm")
+                Error
+                  (Invalid_publication
+                     "unsupported transport signature algorithm")
               else
                 let* canonical_unsigned =
                   unsigned_bytes ~repository ~publisher ~certificate ~parents
@@ -276,12 +334,13 @@ let decode_publication bytes =
                 let canonical =
                   Encoding.array
                     [
-                      (Encoding.decode canonical_unsigned |> Result.get_ok);
+                      Encoding.decode canonical_unsigned |> Result.get_ok;
                       Encoding.bytes signature;
                     ]
                   |> Result.get_ok |> Encoding.encode
                 in
-                if not (String.equal canonical bytes) then Error Noncanonical_bytes
+                if not (String.equal canonical bytes) then
+                  Error Noncanonical_bytes
                 else
                   Ok
                     {
@@ -300,13 +359,17 @@ let verify_publication ~authority publication =
   let expected_repository =
     Trust.repository (Trust.authority_membership authority)
   in
-  if not (Trust.Repository_id.equal expected_repository publication.publication_repository_value)
+  if
+    not
+      (Trust.Repository_id.equal expected_repository
+         publication.publication_repository_value)
   then Error Repository_mismatch
   else
     let certificate =
       Trust.certificates (Trust.authority_membership authority)
       |> List.find_opt (fun certificate ->
-          String.equal (Trust.certificate_id certificate)
+          String.equal
+            (Trust.certificate_id certificate)
             publication.publication_certificate_value)
     in
     match certificate with
@@ -321,7 +384,8 @@ let verify_publication ~authority publication =
         else if
           not
             (List.exists
-               (fun epoch -> Trust.authority_device_active authority ~epoch device)
+               (fun epoch ->
+                 Trust.authority_device_active authority ~epoch device)
                (Trust.authority_heads authority))
         then Error Publisher_not_active
         else
@@ -349,7 +413,8 @@ let reference_certificate reference = reference.reference_certificate_value
 
 let validate_references references =
   let references =
-    List.sort (fun left right ->
+    List.sort
+      (fun left right ->
         String.compare left.reference_id_value right.reference_id_value)
       references
   in
@@ -372,10 +437,17 @@ let validate_feed ~known publications =
       Hashtbl.add by_id id publication;
       Ok ())
   in
-  let* () = List.fold_left (fun result publication -> let* () = result in add publication) (Ok ()) publications in
+  let* () =
+    List.fold_left
+      (fun result publication ->
+        let* () = result in
+        add publication)
+      (Ok ()) publications
+  in
   let known_by_id = Hashtbl.create (List.length known) in
   List.iter
-    (fun reference -> Hashtbl.add known_by_id reference.reference_id_value reference)
+    (fun reference ->
+      Hashtbl.add known_by_id reference.reference_id_value reference)
     known;
   let parent_reference parent =
     match Hashtbl.find_opt by_id parent with
@@ -400,8 +472,10 @@ let validate_feed ~known publications =
             let* () = result in
             let* publisher, certificate = parent_reference parent in
             if
-              Model.Device_id.equal publisher publication.publication_publisher_value
-              && String.equal certificate publication.publication_certificate_value
+              Model.Device_id.equal publisher
+                publication.publication_publisher_value
+              && String.equal certificate
+                   publication.publication_certificate_value
             then Ok ()
             else Error (Cross_publisher_parent parent))
           (Ok ()) publication.publication_parents_value)
@@ -439,15 +513,19 @@ let valid_remote_character = function
   | _ -> false
 
 let validate_remote_name name =
-  if String.length name = 0 || String.length name > 64
-     || not (String.for_all valid_remote_character name)
+  if
+    String.length name = 0
+    || String.length name > 64
+    || not (String.for_all valid_remote_character name)
   then Error (Invalid_remote_name name)
   else Ok ()
 
 let strictly_sorted_digests name values =
   let* () =
     List.fold_left
-      (fun result value -> let* () = result in check_digest value)
+      (fun result value ->
+        let* () = result in
+        check_digest value)
       (Ok ()) values
   in
   strictly_sorted name String.compare values
@@ -458,7 +536,8 @@ let remote_state ~name ~cursor ~known ~announced_manifests ~announced_revisions
   let* () = validate_references known in
   let known =
     List.sort
-      (fun left right -> String.compare left.reference_id_value right.reference_id_value)
+      (fun left right ->
+        String.compare left.reference_id_value right.reference_id_value)
       known
   in
   let* () = strictly_sorted_digests "announced manifests" announced_manifests in
@@ -485,19 +564,27 @@ let remote_announced_manifests remote = remote.remote_announced_manifests_value
 let remote_announced_revisions remote = remote.remote_announced_revisions_value
 let remote_review_inbox remote = remote.remote_review_inbox_value
 let remotes state = state.local_remotes
+
 let find_remote state ~name =
-  List.find_opt (fun remote -> String.equal remote.remote_name_value name)
+  List.find_opt
+    (fun remote -> String.equal remote.remote_name_value name)
     state.local_remotes
 
 let with_remote state remote =
   let rec insert reversed = function
     | [] -> Ok { local_remotes = List.rev (remote :: reversed) }
     | current :: rest ->
-        let compared = String.compare remote.remote_name_value current.remote_name_value in
+        let compared =
+          String.compare remote.remote_name_value current.remote_name_value
+        in
         if compared = 0 then
           Ok { local_remotes = List.rev_append reversed (remote :: rest) }
         else if compared < 0 then
-          Ok { local_remotes = List.rev_append reversed (remote :: current :: rest) }
+          Ok
+            {
+              local_remotes =
+                List.rev_append reversed (remote :: current :: rest);
+            }
         else insert (current :: reversed) rest
   in
   insert [] state.local_remotes
@@ -505,13 +592,16 @@ let with_remote state remote =
 let remove_remote state ~name =
   {
     local_remotes =
-      List.filter (fun remote -> not (String.equal remote.remote_name_value name))
+      List.filter
+        (fun remote -> not (String.equal remote.remote_name_value name))
         state.local_remotes;
   }
 
 let encode_reference reference =
   let* id = text reference.reference_id_value in
-  let* publisher = text (Model.Device_id.to_string reference.reference_publisher_value) in
+  let* publisher =
+    text (Model.Device_id.to_string reference.reference_publisher_value)
+  in
   let* certificate = text reference.reference_certificate_value in
   array [ id; publisher; certificate ]
 
@@ -561,7 +651,9 @@ let decode_reference value =
       let* () = check_digest id in
       let* publisher = text_field "transport reference publisher" publisher in
       let* publisher = decode_device_id publisher in
-      let* certificate = text_field "transport reference certificate" certificate in
+      let* certificate =
+        text_field "transport reference certificate" certificate
+      in
       let* () = check_certificate certificate in
       Ok
         {
@@ -588,7 +680,8 @@ let decode_revisions value =
     | value :: rest ->
         let* revision =
           Model.Revision_id.of_string value
-          |> Result.map_error (fun error -> Invalid_publication (Model.error_to_string error))
+          |> Result.map_error (fun error ->
+              Invalid_publication (Model.error_to_string error))
         in
         loop (revision :: reversed) rest
   in
@@ -598,7 +691,8 @@ let decode_option_text name = function
   | Encoding.Null -> Ok None
   | Encoding.Text value -> Ok (Some value)
   | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Array _ | Encoding.Map _
-  | Encoding.Bool _ -> Error (Invalid_publication (name ^ " must be text or null"))
+  | Encoding.Bool _ ->
+      Error (Invalid_publication (name ^ " must be text or null"))
 
 let decode_remote value =
   let* fields = exact_array "transport remote" 6 value in
@@ -636,12 +730,18 @@ let decode_local_state bytes =
         let rec sorted = function
           | [] | [ _ ] -> Ok ()
           | left :: (right :: _ as rest) ->
-              if String.compare left.remote_name_value right.remote_name_value < 0 then
-                sorted rest
-              else Error (Invalid_publication "transport remotes must be sorted and unique")
+              if
+                String.compare left.remote_name_value right.remote_name_value
+                < 0
+              then sorted rest
+              else
+                Error
+                  (Invalid_publication
+                     "transport remotes must be sorted and unique")
         in
         let* () = sorted remotes in
         let state = { local_remotes = remotes } in
         let* canonical = encode_local_state state in
-        if String.equal canonical bytes then Ok state else Error Noncanonical_bytes
+        if String.equal canonical bytes then Ok state
+        else Error Noncanonical_bytes
   | _ -> assert false

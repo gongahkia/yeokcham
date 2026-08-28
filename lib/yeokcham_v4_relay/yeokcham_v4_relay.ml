@@ -23,7 +23,8 @@ let error_to_string = function
   | Invalid_repository value -> "invalid V4 relay repository ID: " ^ value
   | Invalid_identifier value -> "invalid V4 relay object ID: " ^ value
   | Invalid_cursor value -> "invalid V4 relay continuation cursor: " ^ value
-  | Invalid_limit value -> Printf.sprintf "invalid V4 relay page limit: %d" value
+  | Invalid_limit value ->
+      Printf.sprintf "invalid V4 relay page limit: %d" value
   | Invalid_object detail -> "invalid V4 relay immutable bytes: " ^ detail
   | Already_exists_with_different_bytes id ->
       "V4 relay immutable ID already has different bytes: " ^ id
@@ -43,7 +44,9 @@ let valid_hex value =
        (function '0' .. '9' | 'a' .. 'f' -> true | _ -> false)
        value
 
-let check_project project = if valid_hex project then Ok () else Error (Invalid_repository project)
+let check_project project =
+  if valid_hex project then Ok () else Error (Invalid_repository project)
+
 let check_id id = if valid_hex id then Ok () else Error (Invalid_identifier id)
 
 let kind_name = function
@@ -52,8 +55,12 @@ let kind_name = function
   | Publication -> "publications"
 
 let project_path repository project = Filename.concat repository.root project
-let kind_path repository project kind = Filename.concat (project_path repository project) (kind_name kind)
-let item_path repository project kind id = Filename.concat (kind_path repository project kind) id
+
+let kind_path repository project kind =
+  Filename.concat (project_path repository project) (kind_name kind)
+
+let item_path repository project kind id =
+  Filename.concat (kind_path repository project kind) id
 
 let mkdir path =
   try
@@ -68,9 +75,13 @@ let open_repository ~root =
   if Sys.file_exists root then
     try
       if (Unix.lstat root).Unix.st_kind = Unix.S_DIR then Ok { root }
-      else Error (Io_error { path = root; operation = "open"; message = "not a directory" })
+      else
+        Error
+          (Io_error
+             { path = root; operation = "open"; message = "not a directory" })
     with Unix.Unix_error (error, operation, _) ->
-      Error (Io_error { path = root; operation; message = Unix.error_message error })
+      Error
+        (Io_error { path = root; operation; message = Unix.error_message error })
   else
     let* () = mkdir root in
     Ok { root }
@@ -84,7 +95,8 @@ let read_limited path =
       Error (Invalid_object "stored relay entry exceeds body limit")
     else In_channel.with_open_bin path In_channel.input_all |> Result.ok
   with
-  | Unix.Unix_error (Unix.ENOENT, _, _) -> Error (Missing (Filename.basename path))
+  | Unix.Unix_error (Unix.ENOENT, _, _) ->
+      Error (Missing (Filename.basename path))
   | Unix.Unix_error (error, operation, _) ->
       Error (Io_error { path; operation; message = Unix.error_message error })
   | Sys_error message -> Error (Io_error { path; operation = "read"; message })
@@ -106,7 +118,9 @@ let validate_bytes kind id bytes =
         if not (String.equal bytes (Envelope.encode object_)) then
           Error (Invalid_object "object bytes are not canonical")
         else
-          let actual = Store.id_of_envelope object_ |> Store.Stored_object_id.to_hex in
+          let actual =
+            Store.id_of_envelope object_ |> Store.Stored_object_id.to_hex
+          in
           if String.equal actual id then Ok ()
           else Error (Invalid_object "route ID does not match object identity")
 
@@ -123,14 +137,22 @@ let write_exclusive path bytes =
       if offset = String.length bytes then Ok ()
       else
         try
-          let count = Unix.write_substring descriptor bytes offset (String.length bytes - offset) in
-          if count = 0 then Error (Io_error { path; operation = "write"; message = "write returned zero" })
+          let count =
+            Unix.write_substring descriptor bytes offset
+              (String.length bytes - offset)
+          in
+          if count = 0 then
+            Error
+              (Io_error
+                 { path; operation = "write"; message = "write returned zero" })
           else write (offset + count)
         with Unix.Unix_error (error, operation, _) ->
-          Error (Io_error { path; operation; message = Unix.error_message error })
+          Error
+            (Io_error { path; operation; message = Unix.error_message error })
     in
     Fun.protect
-      ~finally:(fun () -> try Unix.close descriptor with Unix.Unix_error _ -> ())
+      ~finally:(fun () ->
+        try Unix.close descriptor with Unix.Unix_error _ -> ())
       (fun () -> write 0)
   with Unix.Unix_error (error, operation, _) ->
     Error (Io_error { path; operation; message = Unix.error_message error })
@@ -169,26 +191,30 @@ let list_publications repository ~project ~cursor ~limit =
     let* () =
       match cursor with
       | None -> Ok ()
-      | Some cursor -> if valid_hex cursor then Ok () else Error (Invalid_cursor cursor)
+      | Some cursor ->
+          if valid_hex cursor then Ok () else Error (Invalid_cursor cursor)
     in
     let directory = kind_path repository project Publication in
     let names =
       try Ok (Sys.readdir directory |> Array.to_list |> List.sort String.compare)
-      with
-      | Sys_error _ -> Ok []
+      with Sys_error _ -> Ok []
     in
     let* names = names in
     let* () =
       List.fold_left
         (fun result id ->
           let* () = result in
-          if valid_hex id then Ok () else Error (Invalid_object "relay publication directory contains unsafe name"))
+          if valid_hex id then Ok ()
+          else
+            Error
+              (Invalid_object "relay publication directory contains unsafe name"))
         (Ok ()) names
     in
     let after_cursor =
       match cursor with
       | None -> names
-      | Some cursor -> List.filter (fun id -> String.compare id cursor > 0) names
+      | Some cursor ->
+          List.filter (fun id -> String.compare id cursor > 0) names
     in
     let rec take remaining reversed = function
       | [] -> List.rev reversed

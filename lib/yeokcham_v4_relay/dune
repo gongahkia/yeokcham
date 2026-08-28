@@ -1,7 +1,3 @@
 (library
  (name yeokcham_v4_relay)
- (libraries
-  unix
-  yeokcham_envelope
-  yeokcham_store
-  yeokcham_v4_transport))
+ (libraries unix yeokcham_envelope yeokcham_store yeokcham_v4_transport))

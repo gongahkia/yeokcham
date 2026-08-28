@@ -89,7 +89,7 @@ explicit test switch and is unavailable in normal production invocation.
 
 `transport-publication-v1` and transport-local state are independently
 versioned canonical CBOR. Collaborative-state version 3 appends its local
-transport section to version 2; version 1 and version 2 fixtures remain
+transport section to version 2; version 1 and version 2 records remain
 decodable and re-save as version 3 with empty transport state. No package
 exports this section and no only copy is mutated in place.
 
@@ -100,7 +100,7 @@ process, end-to-end payload encryption, relay-side authorisation policy, online
 authority consensus, automatic merge, daemon scheduling, delivery/CI
 integration, and working-tree mutation are out of scope.
 
-## Verification
+## Required verification before issue closure
 
 - golden/inverse/canonical-ID/signature/parent/publisher-certificate/feed-fork
   tests plus generated feed validation;

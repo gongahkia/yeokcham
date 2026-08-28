@@ -33,6 +33,9 @@ yeokcham status
 yeokcham save
 yeokcham share --change first-change --revision r1
 yeokcham package create --destination ../outgoing
+yeokcham remote add team https://relay.example.invalid
+yeokcham remote login team
+yeokcham sync team
 ```
 
 `init` prints a 12-word public root-verification phrase and a 24-word recovery
@@ -50,6 +53,12 @@ yeokcham receive --from ../incoming
 
 The adoption is a durable, domain-separated approval for that exact signed
 revision. It grants neither general membership nor a broad exception.
+
+For synchronization, run `yeokcham relay serve --storage PATH --listen
+127.0.0.1:8080 --token-file PATH` behind an operator-managed HTTPS reverse
+proxy. The relay is only an immutable byte courier; `sync` verifies received
+packages before updating local state and reports upload failures as pending
+retry work.
 
 ## Boundaries
 

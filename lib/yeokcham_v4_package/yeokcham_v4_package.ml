@@ -514,7 +514,8 @@ let decode_manifest bytes =
   | _ -> Error (Invalid_package "manifest has wrong field count")
 
 let manifest_object_ids bytes =
-  decode_manifest bytes |> Result.map (fun manifest -> manifest.manifest_object_ids)
+  decode_manifest bytes
+  |> Result.map (fun manifest -> manifest.manifest_object_ids)
 
 let snapshot_object_id snapshot =
   Model.Snapshot_id.to_string snapshot
@@ -757,6 +758,45 @@ let read_artifact ~package =
 let artifact_manifest artifact = artifact.artifact_manifest_value
 let artifact_objects artifact = artifact.artifact_objects_value
 
+let artifact_of_bytes ~manifest ~objects =
+  let* decoded_manifest = decode_manifest manifest in
+  let expected =
+    List.map Store.Stored_object_id.to_hex decoded_manifest.manifest_object_ids
+    |> List.sort String.compare
+  in
+  let actual =
+    List.map (fun (id, _) -> Store.Stored_object_id.to_hex id) objects
+    |> List.sort String.compare
+  in
+  if expected <> actual then
+    Error (Invalid_package "artifact object files differ from manifest")
+  else
+    let rec verify = function
+      | [] -> Ok ()
+      | (id, bytes) :: rest ->
+          let* object_ =
+            Envelope.decode bytes
+            |> Result.map_error (fun error -> Envelope_error error)
+          in
+          if not (String.equal bytes (Envelope.encode object_)) then
+            Error (Invalid_package "artifact object bytes are not canonical")
+          else if
+            not (Store.Stored_object_id.equal id (Store.id_of_envelope object_))
+          then
+            Error (Object_identity_mismatch (Store.Stored_object_id.to_hex id))
+          else verify rest
+    in
+    let* () = verify objects in
+    Ok
+      {
+        artifact_manifest_value = manifest;
+        artifact_objects_value =
+          List.sort
+            (fun (left, _) (right, _) ->
+              Store.Stored_object_id.compare left right)
+            objects;
+      }
+
 let materialize_artifact ~destination artifact =
   if Sys.file_exists destination then Error (Destination_exists destination)
   else
@@ -766,7 +806,8 @@ let materialize_artifact ~destination artifact =
       |> List.sort String.compare
     in
     let actual =
-      List.map (fun (id, _) -> Store.Stored_object_id.to_hex id)
+      List.map
+        (fun (id, _) -> Store.Stored_object_id.to_hex id)
         artifact.artifact_objects_value
       |> List.sort String.compare
     in
@@ -776,7 +817,8 @@ let materialize_artifact ~destination artifact =
       let* () = mkdir destination in
       let* () = mkdir (package_path destination objects_name) in
       let* () =
-        write_file_exclusive (package_path destination manifest_name)
+        write_file_exclusive
+          (package_path destination manifest_name)
           artifact.artifact_manifest_value
       in
       let rec write = function
@@ -789,8 +831,11 @@ let materialize_artifact ~destination artifact =
             if not (String.equal bytes (Envelope.encode object_)) then
               Error (Invalid_package "artifact object bytes are not canonical")
             else if
-              not (Store.Stored_object_id.equal id (Store.id_of_envelope object_))
-            then Error (Object_identity_mismatch (Store.Stored_object_id.to_hex id))
+              not
+                (Store.Stored_object_id.equal id (Store.id_of_envelope object_))
+            then
+              Error
+                (Object_identity_mismatch (Store.Stored_object_id.to_hex id))
             else
               let* () =
                 write_file_exclusive
@@ -1067,6 +1112,31 @@ let inspect_with_authority ~package ~authority:expected_authority =
         verified_authorizations = manifest.manifest_authorizations;
         verified_adoptions = manifest.manifest_adoptions;
       }
+
+let validate_with_authority ~package ~authority:expected_authority =
+  let* inspected =
+    inspect_with_authority ~package ~authority:expected_authority
+  in
+  let* manifest = read_file (package_path package manifest_name) in
+  let* manifest = decode_manifest manifest in
+  let* objects = package_object_bytes package manifest.manifest_object_ids in
+  with_staging (fun staging_root ->
+      let* staging =
+        Store.init ~root:staging_root
+        |> Result.map_error (fun error -> Store_error error)
+      in
+      let rec stage = function
+        | [] -> Ok ()
+        | (_, object_) :: rest ->
+            let* _ =
+              Store.put staging object_
+              |> Result.map_error (fun error -> Store_error error)
+            in
+            stage rest
+      in
+      let* () = stage objects in
+      let* () = verify_closure staging inspected.verified_revisions in
+      Ok inspected)
 
 let prepare_with_authority ~package ~authority:expected_authority
     ~known_adoptions ~project =

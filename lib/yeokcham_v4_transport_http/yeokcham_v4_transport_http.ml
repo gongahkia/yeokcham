@@ -25,8 +25,10 @@ let error_to_string = function
   | Invalid_token -> "invalid V4 transport bearer credential"
   | Invalid_identifier id -> "invalid V4 transport route identifier: " ^ id
   | Missing_curl -> "the V4 HTTPS transport client requires /usr/bin/curl"
-  | Command_failed code -> Printf.sprintf "V4 HTTPS transport request failed with curl exit %d" code
-  | Unexpected_status status -> Printf.sprintf "V4 relay returned unexpected HTTP status %d" status
+  | Command_failed code ->
+      Printf.sprintf "V4 HTTPS transport request failed with curl exit %d" code
+  | Unexpected_status status ->
+      Printf.sprintf "V4 relay returned unexpected HTTP status %d" status
   | Response_too_large -> "V4 relay response exceeds the configured limit"
   | Invalid_response detail -> "invalid V4 relay response: " ^ detail
   | Io_error { path; operation; message } ->
@@ -35,13 +37,23 @@ let error_to_string = function
 let valid_url url =
   String.starts_with ~prefix:"https://" url
   && String.length url > String.length "https://"
-  && not (String.exists (function '\000' | '\r' | '\n' | ' ' | '\t' -> true | _ -> false) url)
-  && not (String.exists (fun character -> character = '@' || character = '?' || character = '#') url)
+  && (not
+        (String.exists
+           (function '\000' | '\r' | '\n' | ' ' | '\t' -> true | _ -> false)
+           url))
+  && not
+       (String.exists
+          (fun character ->
+            character = '@' || character = '?' || character = '#')
+          url)
 
 let valid_token token =
   String.length token > 0
   && String.length token <= 4096
-  && not (String.exists (function '\000' | '\r' | '\n' -> true | _ -> false) token)
+  && not
+       (String.exists
+          (function '\000' | '\r' | '\n' -> true | _ -> false)
+          token)
 
 let create ~url ~token =
   if not (valid_url url) then Error (Invalid_url url)
@@ -50,24 +62,39 @@ let create ~url ~token =
   else Ok { url; token }
 
 let valid_id value = Transport.valid_digest value
-let check_id value = if valid_id value then Ok () else Error (Invalid_identifier value)
-let kind_name = function Object -> "objects" | Manifest -> "manifests" | Publication -> "publications"
+
+let check_id value =
+  if valid_id value then Ok () else Error (Invalid_identifier value)
+
+let kind_name = function
+  | Object -> "objects"
+  | Manifest -> "manifests"
+  | Publication -> "publications"
 
 let close_noerr descriptor =
   try Unix.close descriptor with Unix.Unix_error _ -> ()
 
 let write_file path bytes =
   try
-    let descriptor = Unix.openfile path [ Unix.O_WRONLY; Unix.O_TRUNC ] 0o600 in
+    let descriptor =
+      Unix.openfile path [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_TRUNC ] 0o600
+    in
     let rec write offset =
       if offset = String.length bytes then Ok ()
       else
         try
-          let count = Unix.write_substring descriptor bytes offset (String.length bytes - offset) in
-          if count = 0 then Error (Io_error { path; operation = "write"; message = "write returned zero" })
+          let count =
+            Unix.write_substring descriptor bytes offset
+              (String.length bytes - offset)
+          in
+          if count = 0 then
+            Error
+              (Io_error
+                 { path; operation = "write"; message = "write returned zero" })
           else write (offset + count)
         with Unix.Unix_error (error, operation, _) ->
-          Error (Io_error { path; operation; message = Unix.error_message error })
+          Error
+            (Io_error { path; operation; message = Unix.error_message error })
     in
     Fun.protect ~finally:(fun () -> close_noerr descriptor) (fun () -> write 0)
   with Unix.Unix_error (error, operation, _) ->
@@ -84,19 +111,18 @@ let read_file_limited path =
   | Sys_error message -> Error (Io_error { path; operation = "read"; message })
 
 let curl_escape value =
-  value
-  |> String.split_on_char '\\'
-  |> String.concat "\\\\"
-  |> String.split_on_char '"'
-  |> String.concat "\\\""
+  value |> String.split_on_char '\\' |> String.concat "\\\\"
+  |> String.split_on_char '"' |> String.concat "\\\""
 
 let with_temporary_directory run =
   let root = Filename.temp_file "yeokcham-v4-https-" "" in
   Unix.unlink root;
   Unix.mkdir root 0o700;
   let remove () =
-    Sys.readdir root |> Array.iter (fun name ->
-        try Unix.unlink (Filename.concat root name) with Unix.Unix_error _ -> ());
+    Sys.readdir root
+    |> Array.iter (fun name ->
+        try Unix.unlink (Filename.concat root name)
+        with Unix.Unix_error _ -> ());
     try Unix.rmdir root with Unix.Unix_error _ -> ()
   in
   Fun.protect ~finally:remove (fun () -> run root)
@@ -124,7 +150,6 @@ let run client ~method_ ~url ~body =
             Ok [ "--data-binary"; "@" ^ body_path ]
       in
       let stdout_read, stdout_write = Unix.pipe () in
-      let stderr_read, stderr_write = Unix.pipe () in
       try
         let arguments =
           [
@@ -153,42 +178,52 @@ let run client ~method_ ~url ~body =
           @ body_argument
         in
         let process =
-          Unix.create_process curl (Array.of_list arguments) Unix.stdin stdout_write stderr_write
+          Unix.create_process curl (Array.of_list arguments) Unix.stdin
+            stdout_write Unix.stderr
         in
         close_noerr stdout_write;
-        close_noerr stderr_write;
         let read_status () =
-          let buffer = Bytes.create 16 in
-          let count = Unix.read stdout_read buffer 0 (Bytes.length buffer) in
-          if count = Bytes.length buffer then Error (Invalid_response "curl status output is oversized")
-          else Ok (Bytes.sub_string buffer 0 count)
+          let buffer = Buffer.create 4 in
+          let scratch = Bytes.create 16 in
+          let rec loop () =
+            match Unix.read stdout_read scratch 0 (Bytes.length scratch) with
+            | 0 -> Ok (Buffer.contents buffer)
+            | count ->
+                if Buffer.length buffer + count > 15 then
+                  Error (Invalid_response "curl status output is oversized")
+                else (
+                  Buffer.add_subbytes buffer scratch 0 count;
+                  loop ())
+          in
+          loop ()
         in
         let status_output =
           Fun.protect ~finally:(fun () -> close_noerr stdout_read) read_status
         in
-        close_noerr stderr_read;
         let _, process_status = Unix.waitpid [] process in
         let* status_output = status_output in
         let* status = status_of_output status_output in
-        (match process_status with
+        match process_status with
         | Unix.WEXITED 0 ->
             let* response = read_file_limited response in
             Ok (status, response)
         | Unix.WEXITED code ->
-            if status >= 400 then Ok (status, "") else Error (Command_failed code)
-        | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> Error (Command_failed 128))
+            if status >= 400 then Ok (status, "")
+            else Error (Command_failed code)
+        | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> Error (Command_failed 128)
       with Unix.Unix_error (error, operation, _) ->
         close_noerr stdout_read;
         close_noerr stdout_write;
-        close_noerr stderr_read;
-        close_noerr stderr_write;
-        Error (Io_error { path = curl; operation; message = Unix.error_message error }))
+        Error
+          (Io_error
+             { path = curl; operation; message = Unix.error_message error }))
 
 let route client ~project ~kind ~id =
   let* () = check_id project in
   let* () = check_id id in
   Ok
-    (client.url ^ "/v1/repositories/" ^ project ^ "/" ^ kind_name kind ^ "/" ^ id)
+    (client.url ^ "/v1/repositories/" ^ project ^ "/" ^ kind_name kind ^ "/"
+   ^ id)
 
 let get client ~project ~kind ~id =
   let* url = route client ~project ~kind ~id in
@@ -198,11 +233,13 @@ let get client ~project ~kind ~id =
 let put client ~project ~kind ~id ~bytes =
   let* url = route client ~project ~kind ~id in
   let* status, _ = run client ~method_:"PUT" ~url ~body:(Some bytes) in
-  if status = 201 || status = 204 then Ok () else Error (Unexpected_status status)
+  if status = 201 || status = 204 then Ok ()
+  else Error (Unexpected_status status)
 
 let list_url client ~project ~cursor ~limit =
   let* () = check_id project in
-  if limit <= 0 || limit > max_page_size then Error (Invalid_response "invalid page limit")
+  if limit <= 0 || limit > max_page_size then
+    Error (Invalid_response "invalid page limit")
   else
     let* () =
       match cursor with None -> Ok () | Some value -> check_id value
@@ -221,7 +258,8 @@ let list_publications client ~project ~cursor ~limit =
   else
     let* value =
       Encoding.decode response
-      |> Result.map_error (fun error -> Invalid_response (Encoding.decode_error_to_string error))
+      |> Result.map_error (fun error ->
+          Invalid_response (Encoding.decode_error_to_string error))
     in
     match value with
     | Encoding.Array [ Encoding.Array ids; cursor ] ->
@@ -239,9 +277,10 @@ let list_publications client ~project ~cursor ~limit =
         let cursor =
           match cursor with
           | Encoding.Null -> Ok None
-          | Encoding.Text value when Transport.valid_digest value -> Ok (Some value)
-          | Encoding.Text _ | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Array _
-          | Encoding.Map _ | Encoding.Bool _ ->
+          | Encoding.Text value when Transport.valid_digest value ->
+              Ok (Some value)
+          | Encoding.Text _ | Encoding.Integer _ | Encoding.Bytes _
+          | Encoding.Array _ | Encoding.Map _ | Encoding.Bool _ ->
               Error (Invalid_response "publication cursor is invalid")
         in
         let* cursor = cursor in

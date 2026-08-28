@@ -69,13 +69,19 @@ val signing_private_key_bytes : signing_capability -> string
     store. Callers must never persist, render, package, or log these bytes. *)
 
 val signing_public_key : signing_capability -> string
+
 (* Signs protocol-owned, domain-separated bytes without exposing private key
    material. Callers must use a fixed protocol domain, never user input. *)
 val sign_detached : signing_capability -> domain:string -> string -> string
 
 (* Verifies a detached protocol signature against an explicit public device. *)
 val verify_detached :
-  device:device -> domain:string -> signature:string -> string -> (unit, error) result
+  device:device ->
+  domain:string ->
+  signature:string ->
+  string ->
+  (unit, error) result
+
 val generated_identity : generated_device -> device
 val generated_signing_capability : generated_device -> signing_capability
 val device_id : device -> Model.Device_id.t

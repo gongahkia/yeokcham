@@ -4,6 +4,8 @@ module Service = Yeokcham_v4_local_service
 module Store = Yeokcham_v4_store
 module Trust = Yeokcham_v4_trust
 module Recovery = Yeokcham_v4_recovery
+module Package = Yeokcham_v4_package
+module Transport = Yeokcham_v4_transport
 
 let require_ok render = function
   | Ok value -> value
@@ -879,6 +881,147 @@ let authority_initialized_repositories_exchange_verified_epoch_bound_work () =
         "receive does not materialize incoming bytes" "let version = 1\n"
         (read_file destination "main.ml"))
 
+let signed_transport_receive_is_atomic_and_idempotent () =
+  with_directory "yeokcham-v4-transport-receive-" (fun parent ->
+      let source = Filename.concat parent "source" in
+      let destination = Filename.concat parent "destination" in
+      Unix.mkdir source 0o700;
+      Unix.mkdir destination 0o700;
+      write_file source "main.ml" "let version = 1\n";
+      write_file destination "main.ml" "let version = 1\n";
+      let administrator_capability = signing_capability 'a' in
+      let administrator = trust_device administrator_capability in
+      let recovery_capability = signing_capability 'r' in
+      let recovery_device = trust_device recovery_capability in
+      ignore
+        (Service.init_signed_with_recovery ~root:source
+           ~username:(username "alice") ~initial_draft:(draft "draft-source")
+           ~title:"source" ~repository ~device:administrator
+           ~signing_capability:administrator_capability ~recovery_device
+           ~recovery_capability
+        |> require_ok Service.error_to_string);
+      let member_capability = signing_capability 'b' in
+      let member = trust_device member_capability in
+      ignore
+        (Service.enroll_device ~parent:None ~root:source ~subject:member
+           ~role:Trust.Member ~username:(username "bob")
+           ~signing_capability:administrator_capability
+        |> require_ok Service.error_to_string);
+      let source_repository =
+        Store.open_repository ~root:source |> require_ok Store.error_to_string
+      in
+      let source_loaded =
+        Store.load source_repository |> require_ok Store.error_to_string
+      in
+      let authority =
+        match source_loaded.Store.collaboration with
+        | Some collaboration -> (
+            match Store.authority collaboration with
+            | Some authority -> authority
+            | None -> Alcotest.fail "transport source has no authority")
+        | None -> Alcotest.fail "transport source lost collaboration"
+      in
+      let member_certificate =
+        Trust.certificates (Trust.authority_membership authority)
+        |> List.find (fun certificate ->
+            Trust.device_equal (Trust.certificate_subject certificate) member)
+        |> Trust.certificate_id
+      in
+      ignore
+        (Service.init_authority_collaboration ~root:destination
+           ~username:(username "bob")
+           ~initial_draft:(draft "draft-destination")
+           ~title:"destination" ~device:member ~authority
+           ~local_certificate:member_certificate
+        |> require_ok Service.error_to_string);
+      write_file source "main.ml" "let version = 2\n";
+      ignore
+        (Service.share_signed ~authority_epoch:None ~root:source
+           ~change:(change "change-transport")
+           ~revision:(revision "revision-transport")
+           ~signing_capability:administrator_capability
+        |> require_ok Service.error_to_string);
+      let outbound =
+        Service.prepare_transport_outbound ~root:source ~remote:"team"
+          ~signing_capability:administrator_capability
+        |> require_ok Service.error_to_string
+      in
+      let outbound =
+        match outbound with
+        | Some outbound -> outbound
+        | None ->
+            Alcotest.fail "new signed revision produced no transport package"
+      in
+      let package = Filename.concat parent "transport-package" in
+      Package.materialize_artifact ~destination:package
+        outbound.Service.outbound_artifact
+      |> require_ok Package.error_to_string;
+      let source_identity =
+        Service.identity ~root:source |> require_ok Service.error_to_string
+      in
+      let mismatched_publication =
+        Transport.create_publication ~repository
+          ~publisher:source_identity.Service.device
+          ~certificate:
+            (Transport.publication_certificate
+               outbound.Service.outbound_publication)
+          ~parents:[]
+          ~manifest:(Transport.sha256 "different manifest")
+          ~signing_capability:administrator_capability
+        |> require_ok Transport.error_to_string
+      in
+      (match
+         Service.receive_transport_batch ~root:destination ~remote:"team"
+           ~cursor:None
+           [ { Service.publication = mismatched_publication; package } ]
+       with
+      | Error error ->
+          Alcotest.(check string)
+            "publication/package binding is explicit"
+            "invalid V4 transport publication: publication manifest does not \
+             match staged package"
+            (Service.error_to_string error)
+      | Ok _ -> Alcotest.fail "transport accepted an unrelated package manifest");
+      let before_receive =
+        Service.status ~root:destination |> require_ok Service.error_to_string
+      in
+      Alcotest.(check int)
+        "mismatched package changes no model state" 0
+        before_receive.Service.shared_change_count;
+      let arrival =
+        { Service.publication = outbound.Service.outbound_publication; package }
+      in
+      let received =
+        Service.receive_transport_batch ~root:destination ~remote:"team"
+          ~cursor:
+            (Some
+               (Yeokcham_v4_transport.publication_id
+                  outbound.Service.outbound_publication))
+          [ arrival ]
+        |> require_ok Service.error_to_string
+      in
+      Alcotest.(check int)
+        "one publication is received" 1 received.Service.discovered_publications;
+      Alcotest.(check int)
+        "one signed revision is received" 1 received.Service.received_revisions;
+      Alcotest.(check int)
+        "shared work appears in the destination model" 1
+        received.Service.transport_status.Service.shared_change_count;
+      Alcotest.(check string)
+        "transport never materializes package bytes" "let version = 1\n"
+        (read_file destination "main.ml");
+      let replay =
+        Service.receive_transport_batch ~root:destination ~remote:"team"
+          ~cursor:None [ arrival ]
+        |> require_ok Service.error_to_string
+      in
+      Alcotest.(check int)
+        "known publication is idempotent" 0
+        replay.Service.discovered_publications;
+      Alcotest.(check int)
+        "idempotent replay does not duplicate work" 1
+        replay.Service.transport_status.Service.shared_change_count)
+
 let signed_resolution_is_persisted_with_its_decision_purpose () =
   with_directory "yeokcham-v4-signed-resolution-" (fun root ->
       write_file root "main.ml" "let version = 1\n";
@@ -1355,6 +1498,57 @@ let late_package_review_adopts_one_exact_record_before_receive () =
         ~revisions:(Store.signed_revisions source_collaboration)
         ~authorizations:[] ~adoptions:[]
       |> require_ok Yeokcham_v4_package.error_to_string;
+      let artifact =
+        Package.read_artifact ~package |> require_ok Package.error_to_string
+      in
+      let publication =
+        Transport.create_publication ~repository ~publisher:reviewer
+          ~certificate:reviewer_certificate ~parents:[]
+          ~manifest:(Transport.sha256 (Package.artifact_manifest artifact))
+          ~signing_capability:reviewer_capability
+        |> require_ok Transport.error_to_string
+      in
+      let deferred =
+        Service.receive_transport_batch ~root:destination ~remote:"team"
+          ~cursor:(Some (Transport.publication_id publication))
+          [ { Service.publication; package } ]
+        |> require_ok Service.error_to_string
+      in
+      Alcotest.(check int)
+        "late relay publication is recorded" 1
+        deferred.Service.discovered_publications;
+      Alcotest.(check int)
+        "late relay revision is not applied" 0
+        deferred.Service.received_revisions;
+      Alcotest.(check int)
+        "late relay publication is deferred for review" 1
+        deferred.Service.deferred_publications;
+      Alcotest.(check int)
+        "late relay record leaves shared model unchanged" 0
+        deferred.Service.transport_status.Service.shared_change_count;
+      let destination_repository =
+        Store.open_repository ~root:destination
+        |> require_ok Store.error_to_string
+      in
+      let destination_loaded =
+        Store.load destination_repository |> require_ok Store.error_to_string
+      in
+      let review_inbox =
+        match destination_loaded.Store.collaboration with
+        | Some collaboration -> (
+            match
+              Transport.find_remote (Store.transport collaboration) ~name:"team"
+            with
+            | Some state -> Transport.remote_review_inbox state
+            | None ->
+                Alcotest.fail
+                  "deferred relay record did not create remote state")
+        | None -> Alcotest.fail "deferred relay record lost collaboration"
+      in
+      Alcotest.(check (list string))
+        "late relay ID enters review inbox"
+        [ Transport.publication_id publication ]
+        review_inbox;
       let reviewed =
         Service.review_package ~root:destination ~package
         |> require_ok Service.error_to_string
@@ -1446,6 +1640,9 @@ let () =
             "authority initialization exchanges epoch-bound work and recovery"
             `Quick
             authority_initialized_repositories_exchange_verified_epoch_bound_work;
+          Alcotest.test_case
+            "signed transport receives atomically and idempotently" `Quick
+            signed_transport_receive_is_atomic_and_idempotent;
           Alcotest.test_case
             "signed resolution is persisted with its decision purpose" `Quick
             signed_resolution_is_persisted_with_its_decision_purpose;

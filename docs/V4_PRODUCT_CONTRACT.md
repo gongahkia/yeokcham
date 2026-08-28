@@ -29,8 +29,9 @@ replays the exact target; `.git` and `.yeokcham` are outside source replacement.
 
 `watch` is Linux-only advisory capture. After a one-second quiet period (or
 thirty-second sustained-write maximum) it calls the same exact `save` path.
-Unsupported systems fail explicitly. The real Linux watcher-loop test remains
-an outstanding proof described in `TESTING_AND_EXPERIMENTS.md`.
+Unsupported systems fail explicitly. The real Linux watcher-loop test is part
+of the active suite; platform-specific evidence is recorded in
+`TESTING_AND_EXPERIMENTS.md`.
 
 ## Identity and authority
 
@@ -110,18 +111,50 @@ adoption and the record’s public authority closure, still without importing th
 package. A later `receive` accepts only that adopted record. The adoption does
 not grant membership, a general exception, or delivery.
 
+## Relay synchronization
+
+Relay synchronization is only for already-equivalent V4 replicas. An operator
+starts the byte-only backend with `relay serve --storage PATH --listen
+ADDRESS:PORT --token-file PATH` and terminates TLS in a separate HTTPS reverse
+proxy. The relay has no signing capability, authority state, model state, or
+working-tree access; it stores readable immutable package bytes only.
+
+`remote add NAME HTTPS_URL` stores a local alias under `.yeokcham`; `remote
+login NAME` reads a bearer credential with terminal echo disabled and stores it
+in the Linux Secret Service. Neither aliases nor credentials are signed,
+packaged, exported, or authority data. `remote remove NAME` removes the alias.
+
+`sync NAME` uses only HTTPS. It fetches signed publication records, manifests,
+and their declared immutable object closure into temporary package directories.
+It verifies the entire feed batch, package authority closure, signatures,
+canonical bytes, and snapshot closure before importing any destination object
+or advancing the state head. Receipt stores the remote cursor and verified
+publication references with the V4 collaboration state. A late record from a
+now-revoked signer is verified into the local review inbox and reported as a
+deferred publication; it is not automatically applied.
+
+After durable receipt, `sync` publishes locally unannounced work as an exact
+package closure: objects first, then the manifest, then its signed publication.
+The publication is marked announced only after the relay acknowledges it. An
+upload failure is reported as pending work; it does not roll back received
+records or claim cross-machine atomicity. Sync never materialises or scans the
+working tree.
+
 ## Persistent-format rules
 
 All records use canonical CBOR and explicit schema versions. Object identity is
 derived from exact canonical envelope bytes. Unknown mandatory features and
-noncanonical encodings are rejected. An immutable object is written before the
-single `v4-project-state` compare-and-swap head changes. No state transition
-mutates the only copy in place.
+noncanonical encodings are rejected. Authority-aware collaboration state version
+3 additionally carries local transport receipt data; version 1 and version 2
+remain readable. An immutable object is written before the single
+`v4-project-state` compare-and-swap head changes. No state transition mutates
+the only copy in place.
 
 ## Exclusions
 
-There is no blob GC, durable `capture=`, immortal restore safety after journal
-prune, network/SSH/HTTP transport, Git bridge, semantic parser or merge,
+There is no clone/bootstrap protocol, blob GC, durable `capture=`, immortal
+restore safety after journal prune, Git bridge, semantic parser or merge,
+end-to-end payload encryption, relay-side authorization policy,
 hardware/non-exportable signer, signing agent, macOS/WSL watcher, or CI-backed
 delivery. These are separate design work and must reuse the current model and
 receipt boundaries when introduced.

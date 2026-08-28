@@ -24,12 +24,23 @@ type error =
 
 val error_to_string : error -> string
 
-val manifest_object_ids : string -> (Yeokcham_store.Stored_object_id.t list, error) result
-(** Parses and canonicality-checks a manifest without reading its object files. *)
+val manifest_object_ids :
+  string -> (Yeokcham_store.Stored_object_id.t list, error) result
+(** Parses and canonicality-checks a manifest without reading its object files.
+*)
 
 val read_artifact : package:string -> (artifact, error) result
 val artifact_manifest : artifact -> string
-val artifact_objects : artifact -> (Yeokcham_store.Stored_object_id.t * string) list
+
+val artifact_objects :
+  artifact -> (Yeokcham_store.Stored_object_id.t * string) list
+
+val artifact_of_bytes :
+  manifest:string ->
+  objects:(Yeokcham_store.Stored_object_id.t * string) list ->
+  (artifact, error) result
+(** Validates an in-memory package payload before it is materialized for the
+    normal staged verifier. No object or project state is persisted. *)
 
 val materialize_artifact :
   destination:string -> artifact -> (unit, error) result
@@ -92,8 +103,8 @@ val prepare_with_authority :
   project:Model.project ->
   (prepared, error) result
 (** Verifies all untrusted package bytes in an isolated store and applies the
-    pure model transition, but does not import a destination object. Callers
-    can validate a whole relay-discovery batch before importing any member. *)
+    pure model transition, but does not import a destination object. Callers can
+    validate a whole relay-discovery batch before importing any member. *)
 
 val import_prepared :
   destination:Yeokcham_store.repository ->
@@ -102,7 +113,6 @@ val import_prepared :
 
 val prepared_verified : prepared -> verified
 val prepared_project : prepared -> Model.project
-
 val membership : verified -> Trust.membership
 val authority : verified -> Trust.authority option
 val revisions : verified -> Trust.signed_revision list
@@ -119,6 +129,12 @@ val inspect_with_authority :
     revision signatures, and declared exception records without reading package
     objects or changing a project. It is the inspection surface used before an
     administrator records an explicit late-arrival adoption. *)
+
+val validate_with_authority :
+  package:string -> authority:Trust.authority -> (verified, error) result
+(** Performs authority inspection and exact object/snapshot closure validation
+    in staging without applying a model transition or importing an object. It is
+    used for a review-deferred relay package. *)
 
 val apply_revisions : Model.project -> verified -> (Model.project, error) result
 (** Adds verified shared records through the pure V4 receive transition and

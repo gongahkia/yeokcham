@@ -1,9 +1,8 @@
 (** Canonical V4 relay-publication records and local transport bookkeeping.
 
-    A publication is a signed courier statement.  It is not a revision,
-    authority action, decision, or delivery record.  Network and filesystem
-    adapters use this pure module before handing package bytes to the V4 package
-    verifier. *)
+    A publication is a signed courier statement. It is not a revision, authority
+    action, decision, or delivery record. Network and filesystem adapters use
+    this pure module before handing package bytes to the V4 package verifier. *)
 
 module Model = Yeokcham_v4_model
 module Trust = Yeokcham_v4_trust
@@ -33,7 +32,6 @@ type error =
 val error_to_string : error -> string
 val publication_schema_version : int64
 val local_state_schema_version : int64
-
 val sha256 : string -> string
 val valid_digest : string -> bool
 
@@ -68,10 +66,11 @@ val reference_certificate : publication_reference -> string
 val validate_feed :
   known:publication_reference list -> publication list -> (unit, error) result
 (** Verifies parent availability, publisher continuity, duplicate IDs, and
-    acyclicity.  A known reference must have been cryptographically verified
+    acyclicity. A known reference must have been cryptographically verified
     before it is persisted. *)
 
 val empty_local_state : local_state
+
 val remote_state :
   name:string ->
   cursor:string option ->
@@ -91,6 +90,5 @@ val remotes : local_state -> remote_state list
 val find_remote : local_state -> name:string -> remote_state option
 val with_remote : local_state -> remote_state -> (local_state, error) result
 val remove_remote : local_state -> name:string -> local_state
-
 val encode_local_state : local_state -> (string, error) result
 val decode_local_state : string -> (local_state, error) result

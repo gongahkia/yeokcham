@@ -15,10 +15,10 @@ re-scoping before that work begins.
 
 The active implementation vertical slice is [#246](https://github.com/gongahkia/yeokcham/issues/246): V4 signed relay transport. It is governed by ADR-085 and must retain the package staging boundary, authority/decision semantics, and no-working-tree-mutation invariant.
 
-The immediate open watcher verification item is not transport evidence: run
-`opam exec -- dune exec test/test_v4_watch.exe` on Linux, or record a green
-Ubuntu `dune runtest` that includes it. See `TESTING_AND_EXPERIMENTS.md` for
-what counts as evidence.
+The Linux watcher loop passed in the latest local `dune runtest` on Fedora 43;
+that result is recorded in `TESTING_AND_EXPERIMENTS.md` and is not transport
+evidence. Before #246 can close, retain the HTTPS reverse-proxy integration and
+post-receive upload-interruption evidence called out there.
 
 Future feature proposals need a dedicated issue and ADR before coding when they
 change trust, transport, delivery, snapshot retention, or persistent semantics.

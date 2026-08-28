@@ -9,6 +9,11 @@
   yeokcham_v4_model
   yeokcham_v4_package
   yeokcham_v4_recovery
+  yeokcham_v4_transport
+  yeokcham_v4_transport_config
+  yeokcham_v4_transport_credential
+  yeokcham_v4_transport_http
+  yeokcham_v4_relay_http
   yeokcham_v4_trust
   (select
    v4_watch.ml

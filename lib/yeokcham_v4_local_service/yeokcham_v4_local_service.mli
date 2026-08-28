@@ -118,8 +118,15 @@ type transport_arrival = {
 type transport_receive = {
   discovered_publications : int;
   received_revisions : int;
+  deferred_publications : int;
   created_decisions : int;
   transport_status : status;
+}
+
+type transport_outbound = {
+  outbound_publication : Yeokcham_v4_transport.publication;
+  outbound_artifact : Yeokcham_v4_package.artifact;
+  outbound_revisions : Yeokcham_v4_model.Revision_id.t list;
 }
 
 module Capture_window : sig
@@ -394,6 +401,29 @@ val receive_transport_batch :
 (** Receives a fully fetched relay batch. Every publication/feed/package is
     validated before any immutable destination object or state update. This
     adapter has no network I/O and never mutates the working tree. *)
+
+val prepare_transport_outbound :
+  root:string ->
+  remote:string ->
+  signing_capability:Yeokcham_v4_trust.signing_capability ->
+  (transport_outbound option, error) result
+(** Builds a verified immutable package and its signed publication without
+    changing local transport state. The caller uploads objects, then the
+    manifest, then the publication; only an acknowledged publication may be
+    recorded with [record_transport_outbound]. *)
+
+val record_transport_outbound :
+  root:string ->
+  remote:string ->
+  publication:Yeokcham_v4_transport.publication ->
+  revisions:Yeokcham_v4_model.Revision_id.t list ->
+  (unit, error) result
+(** Atomically records a relay-acknowledged publication and its announced
+    revision identities with the V4 collaborative state. *)
+
+val transport_cursor :
+  root:string -> remote:string -> (string option, error) result
+(** Returns the last fully received publication cursor for a local remote. *)
 
 val open_decision :
   root:string ->

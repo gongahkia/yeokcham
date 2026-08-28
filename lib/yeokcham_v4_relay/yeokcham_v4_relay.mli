@@ -1,7 +1,7 @@
 (** Bounded immutable byte storage for the V4 HTTP relay.
 
-    The relay validates identities and idempotent create semantics but has no
-    V4 authority, model, package, or working-tree behaviour. *)
+    The relay validates identities and idempotent create semantics but has no V4
+    authority, model, package, or working-tree behaviour. *)
 
 type repository
 type kind = Object | Manifest | Publication
@@ -21,8 +21,8 @@ val is_missing : error -> bool
 val is_immutable_conflict : error -> bool
 val max_body_bytes : int
 val max_page_size : int
-
 val open_repository : root:string -> (repository, error) result
+
 val create :
   repository ->
   project:string ->
@@ -33,10 +33,16 @@ val create :
 (** Repeating identical content succeeds. A different body for an existing ID
     fails and never overwrites the first immutable body. *)
 
-val get : repository -> project:string -> kind:kind -> id:string -> (string, error) result
+val get :
+  repository ->
+  project:string ->
+  kind:kind ->
+  id:string ->
+  (string, error) result
+
 val list_publications :
   repository ->
   project:string ->
   cursor:string option ->
   limit:int ->
-  ((string list * string option), error) result
+  (string list * string option, error) result

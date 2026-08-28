@@ -111,8 +111,15 @@ type transport_arrival = {
 type transport_receive = {
   discovered_publications : int;
   received_revisions : int;
+  deferred_publications : int;
   created_decisions : int;
   transport_status : status;
+}
+
+type transport_outbound = {
+  outbound_publication : Transport.publication;
+  outbound_artifact : Package.artifact;
+  outbound_revisions : Model.Revision_id.t list;
 }
 
 module Capture_window = struct
@@ -1959,42 +1966,138 @@ let receive_transport_batch ~root ~remote ~cursor arrivals =
         | None -> []
         | Some state -> Transport.remote_known_publications state
       in
+      let review_inbox =
+        match prior_remote with
+        | None -> []
+        | Some state -> Transport.remote_review_inbox state
+      in
       let known_ids = List.map Transport.reference_id known in
       let arrivals =
         List.filter
           (fun arrival ->
-            not
-              (List.mem (Transport.publication_id arrival.publication) known_ids))
+            let publication_id = Transport.publication_id arrival.publication in
+            (not (List.mem publication_id known_ids))
+            || List.mem publication_id review_inbox)
           arrivals
       in
       let rec inspect_publications authority reversed = function
-        | [] -> Ok (List.rev reversed)
+        | [] -> Ok (List.rev reversed, authority)
         | arrival :: rest ->
-            let* inspected =
-              Package.inspect_with_authority ~package:arrival.package ~authority
+            let* artifact =
+              Package.read_artifact ~package:arrival.package
               |> Result.map_error (fun error -> Package_error error)
             in
-            let* package_authority =
-              match Package.authority inspected with
-              | Some authority -> Ok authority
-              | None ->
-                  Error
-                    (Package_error
-                       (Package.Invalid_package
-                          "transport package lacks authority closure"))
-            in
-            let* () =
-              Transport.verify_publication ~authority:package_authority
-                arrival.publication
-              |> Result.map_error (fun error -> Transport_error error)
-            in
-            inspect_publications package_authority (arrival :: reversed) rest
+            if
+              not
+                (String.equal
+                   (Transport.sha256 (Package.artifact_manifest artifact))
+                   (Transport.publication_manifest arrival.publication))
+            then
+              Error
+                (Transport_error
+                   (Transport.Invalid_publication
+                      "publication manifest does not match staged package"))
+            else
+              let* inspected =
+                Package.inspect_with_authority ~package:arrival.package
+                  ~authority
+                |> Result.map_error (fun error -> Package_error error)
+              in
+              let* package_authority =
+                match Package.authority inspected with
+                | Some authority -> Ok authority
+                | None ->
+                    Error
+                      (Package_error
+                         (Package.Invalid_package
+                            "transport package lacks authority closure"))
+              in
+              let* () =
+                Transport.verify_publication ~authority:package_authority
+                  arrival.publication
+                |> Result.map_error (fun error -> Transport_error error)
+              in
+              inspect_publications package_authority
+                ((arrival, inspected) :: reversed)
+                rest
       in
-      let* arrivals = inspect_publications initial_authority [] arrivals in
+      let* inspected_arrivals, inspected_authority =
+        inspect_publications initial_authority [] arrivals
+      in
       let* () =
         Transport.validate_feed ~known
-          (List.map (fun arrival -> arrival.publication) arrivals)
+          (List.map
+             (fun (arrival, _) -> arrival.publication)
+             inspected_arrivals)
         |> Result.map_error (fun error -> Transport_error error)
+      in
+      let existing_signed_purpose signed =
+        let revision = Trust.signed_revision_value signed in
+        match Trust.signed_revision_resolution signed with
+        | None ->
+            Model.shared_changes loaded.Store.project
+            |> List.concat_map (fun change -> change.Model.revisions)
+            |> List.exists (fun existing -> existing = revision)
+        | Some decision ->
+            Model.resolutions loaded.Store.project
+            |> List.exists (fun resolution ->
+                Model.Decision_id.equal resolution.Model.resolved_decision
+                  decision
+                && resolution.Model.replacement_revision = revision)
+      in
+      let needs_late_review inspected =
+        let* authority =
+          match Package.authority inspected with
+          | Some authority -> Ok authority
+          | None ->
+              Error
+                (Package_error
+                   (Package.Invalid_package
+                      "transport package lacks authority closure"))
+        in
+        let rec loop = function
+          | [] -> Ok false
+          | signed :: rest ->
+              if existing_signed_purpose signed then loop rest
+              else
+                let* requires_review =
+                  Trust.requires_late_review authority signed
+                  |> Result.map_error (fun error -> Trust_error error)
+                in
+                if not requires_review then loop rest
+                else
+                  let accepted_adoptions =
+                    Store.adoptions existing @ Package.adoptions inspected
+                    |> List.filter (fun adoption ->
+                        Trust.adoption_matches_signed_revision adoption signed
+                        && Trust.authority_epoch_is_head authority
+                             (Trust.adoption_epoch adoption))
+                  in
+                  if List.length accepted_adoptions = 1 then loop rest
+                  else Ok true
+        in
+        loop (Package.revisions inspected)
+      in
+      let rec separate_review reversed_normal reversed_deferred = function
+        | [] -> Ok (List.rev reversed_normal, List.rev reversed_deferred)
+        | (arrival, inspected) :: rest ->
+            let* defer = needs_late_review inspected in
+            if defer then
+              let* _ =
+                Package.validate_with_authority ~package:arrival.package
+                  ~authority:initial_authority
+                |> Result.map_error (fun error -> Package_error error)
+              in
+              separate_review reversed_normal
+                (arrival :: reversed_deferred)
+                rest
+            else
+              separate_review
+                (arrival :: reversed_normal)
+                reversed_deferred rest
+      in
+      let* arrivals, deferred_arrivals =
+        separate_review [] [] inspected_arrivals
       in
       let before_decisions =
         List.length (Model.projection loaded.Store.project).Model.decisions
@@ -2015,21 +2118,27 @@ let receive_transport_batch ~root ~remote ~cursor arrivals =
                   Error
                     (Package_error
                        (Package.Invalid_package
-                          "authority transport preparation returned no authority"))
+                          "authority transport preparation returned no \
+                           authority"))
             in
-            let known_adoptions = known_adoptions @ Package.adoptions verified in
-            prepare authority (Package.prepared_project prepared) known_adoptions
-              (prepared :: reversed) rest
+            let known_adoptions =
+              known_adoptions @ Package.adoptions verified
+            in
+            prepare authority
+              (Package.prepared_project prepared)
+              known_adoptions (prepared :: reversed) rest
       in
-      let* prepared, authority, project, _ =
-        prepare initial_authority loaded.Store.project (Store.adoptions existing)
-          [] arrivals
+      let* prepared, _prepared_authority, project, _ =
+        prepare initial_authority loaded.Store.project
+          (Store.adoptions existing) [] arrivals
       in
+      let authority = inspected_authority in
       let rec import = function
         | [] -> Ok ()
         | prepared :: rest ->
             let* _ =
-              Package.import_prepared ~destination:(Store.underlying_store repository)
+              Package.import_prepared
+                ~destination:(Store.underlying_store repository)
                 prepared
               |> Result.map_error (fun error -> Package_error error)
             in
@@ -2038,7 +2147,8 @@ let receive_transport_batch ~root ~remote ~cursor arrivals =
       let* () = import prepared in
       let verified = List.map Package.prepared_verified prepared in
       let* revisions =
-        merge_signed_revisions (Store.signed_revisions existing)
+        merge_signed_revisions
+          (Store.signed_revisions existing)
           (List.concat_map Package.revisions verified)
       in
       let* authorizations =
@@ -2048,24 +2158,45 @@ let receive_transport_batch ~root ~remote ~cursor arrivals =
       in
       let* adoptions =
         merge_public_records ~encode:Trust.encode_adoption
-          (Store.adoptions existing) (List.concat_map Package.adoptions verified)
+          (Store.adoptions existing)
+          (List.concat_map Package.adoptions verified)
       in
       let incoming_references =
-        List.map (fun arrival -> Transport.publication_reference arrival.publication)
-          arrivals
+        List.map
+          (fun (arrival, _) ->
+            Transport.publication_reference arrival.publication)
+          inspected_arrivals
       in
       let known =
         List.sort_uniq
-          (fun left right -> String.compare (Transport.reference_id left) (Transport.reference_id right))
+          (fun left right ->
+            String.compare
+              (Transport.reference_id left)
+              (Transport.reference_id right))
           (known @ incoming_references)
       in
-      let announced_manifests, announced_revisions, review_inbox =
+      let announced_manifests, announced_revisions, previous_review_inbox =
         match prior_remote with
         | None -> ([], [], [])
         | Some state ->
             ( Transport.remote_announced_manifests state,
               Transport.remote_announced_revisions state,
               Transport.remote_review_inbox state )
+      in
+      let completed_publications =
+        List.map
+          (fun arrival -> Transport.publication_id arrival.publication)
+          arrivals
+      in
+      let deferred_publications =
+        List.map
+          (fun arrival -> Transport.publication_id arrival.publication)
+          deferred_arrivals
+      in
+      let review_inbox =
+        previous_review_inbox @ deferred_publications
+        |> List.filter (fun id -> not (List.mem id completed_publications))
+        |> List.sort_uniq String.compare
       in
       let* remote_state =
         Transport.remote_state ~name:remote ~cursor ~known ~announced_manifests
@@ -2078,7 +2209,8 @@ let receive_transport_batch ~root ~remote ~cursor arrivals =
       in
       let* collaboration =
         Store.collaboration_with_authority_transport ~transport ~authority
-          ~revisions ~local_certificate:(Store.local_certificate existing)
+          ~revisions
+          ~local_certificate:(Store.local_certificate existing)
           ~authorizations ~adoptions
         |> Result.map_error (fun error -> Store_error error)
       in
@@ -2088,14 +2220,245 @@ let receive_transport_batch ~root ~remote ~cursor arrivals =
       in
       Ok
         {
-          discovered_publications = List.length arrivals;
+          discovered_publications = List.length inspected_arrivals;
           received_revisions =
             List.fold_left
-              (fun count verified -> count + List.length (Package.revisions verified))
+              (fun count verified ->
+                count + List.length (Package.revisions verified))
               0 verified;
+          deferred_publications = List.length deferred_arrivals;
           created_decisions = max 0 (after_decisions - before_decisions);
           transport_status = status_of_project project;
         })
+
+let remove_outbound_package destination =
+  let objects = Filename.concat destination "objects" in
+  (try
+     Sys.readdir objects
+     |> Array.iter (fun name ->
+         try Unix.unlink (Filename.concat objects name)
+         with Unix.Unix_error _ -> ());
+     Unix.rmdir objects
+   with Unix.Unix_error _ | Sys_error _ -> ());
+  (try Unix.unlink (Filename.concat destination "manifest.cbor")
+   with Unix.Unix_error _ -> ());
+  try Unix.rmdir destination with Unix.Unix_error _ -> ()
+
+let with_outbound_directory ~root run =
+  try
+    let destination =
+      Filename.temp_file ~temp_dir:root ".yeokcham-v4-outbound-" ".tmp"
+    in
+    Unix.unlink destination;
+    Fun.protect
+      ~finally:(fun () -> remove_outbound_package destination)
+      (fun () -> run destination)
+  with Unix.Unix_error (error, operation, _) ->
+    Error
+      (Package_error
+         (Package.Io_error
+            { path = root; operation; message = Unix.error_message error }))
+
+let revision_ids revisions =
+  revisions
+  |> List.map Trust.signed_revision_id
+  |> List.sort_uniq Model.Revision_id.compare
+
+let revision_is_announced announced signed =
+  List.exists
+    (fun revision ->
+      Model.Revision_id.equal revision (Trust.signed_revision_id signed))
+    announced
+
+let prepare_transport_outbound ~root ~remote ~signing_capability =
+  with_repository ~root (fun repository loaded ->
+      let* existing = require_collaboration loaded in
+      let* authority =
+        match Store.authority existing with
+        | Some authority -> Ok authority
+        | None ->
+            Error
+              (Store_error
+                 (Store.Invalid_collaboration_state
+                    "relay transport requires authority-aware collaboration"))
+      in
+      let transport = Store.transport existing in
+      let prior_remote = Transport.find_remote transport ~name:remote in
+      let announced_manifests, announced_revisions, known =
+        match prior_remote with
+        | None -> ([], [], [])
+        | Some state ->
+            ( Transport.remote_announced_manifests state,
+              Transport.remote_announced_revisions state,
+              Transport.remote_known_publications state )
+      in
+      let unannounced =
+        Store.signed_revisions existing
+        |> List.filter (fun signed ->
+            not (revision_is_announced announced_revisions signed))
+      in
+      (* Repack all revisions when there is no new revision.  This makes a
+         membership or authority-only change observable as a new manifest,
+         while an unchanged full closure is skipped by its recorded digest. *)
+      let packaged_revisions =
+        match unannounced with
+        | [] -> Store.signed_revisions existing
+        | revisions -> revisions
+      in
+      let package_authorizations =
+        Store.authorizations existing
+        |> List.filter (fun authorization ->
+            List.exists
+              (Trust.authorization_matches_signed_revision authorization)
+              packaged_revisions)
+      in
+      let package_adoptions =
+        Store.adoptions existing
+        |> List.filter (fun adoption ->
+            List.exists
+              (Trust.adoption_matches_signed_revision adoption)
+              packaged_revisions)
+      in
+      let* artifact =
+        with_outbound_directory ~root (fun destination ->
+            let* () =
+              Package.create_with_authority
+                ~source:(Store.underlying_store repository)
+                ~destination ~authority ~revisions:packaged_revisions
+                ~authorizations:package_authorizations
+                ~adoptions:package_adoptions
+              |> Result.map_error (fun error -> Package_error error)
+            in
+            Package.read_artifact ~package:destination
+            |> Result.map_error (fun error -> Package_error error))
+      in
+      let manifest = Transport.sha256 (Package.artifact_manifest artifact) in
+      if List.mem manifest announced_manifests then Ok None
+      else
+        let* device = local_device existing in
+        let certificate = Store.local_certificate existing in
+        let parents =
+          known
+          |> List.filter (fun reference ->
+              Model.Device_id.equal
+                (Transport.reference_publisher reference)
+                (Trust.device_id device)
+              && String.equal
+                   (Transport.reference_certificate reference)
+                   certificate)
+          |> List.map Transport.reference_id
+          |> List.sort_uniq String.compare
+        in
+        let* publication =
+          Transport.create_publication
+            ~repository:
+              (Trust.repository (Trust.authority_membership authority))
+            ~publisher:device ~certificate ~parents ~manifest
+            ~signing_capability
+          |> Result.map_error (fun error -> Transport_error error)
+        in
+        Ok
+          (Some
+             {
+               outbound_publication = publication;
+               outbound_artifact = artifact;
+               outbound_revisions = revision_ids packaged_revisions;
+             }))
+
+let record_transport_outbound ~root ~remote ~publication ~revisions =
+  with_repository ~root (fun repository loaded ->
+      let* existing = require_collaboration loaded in
+      let* authority =
+        match Store.authority existing with
+        | Some authority -> Ok authority
+        | None ->
+            Error
+              (Store_error
+                 (Store.Invalid_collaboration_state
+                    "relay transport requires authority-aware collaboration"))
+      in
+      let* () =
+        Transport.verify_publication ~authority publication
+        |> Result.map_error (fun error -> Transport_error error)
+      in
+      let* device = local_device existing in
+      if
+        (not
+           (Model.Device_id.equal
+              (Transport.publication_publisher publication)
+              (Trust.device_id device)))
+        || not
+             (String.equal
+                (Transport.publication_certificate publication)
+                (Store.local_certificate existing))
+      then
+        Error
+          (Transport_error
+             (Transport.Invalid_publication
+                "cannot record a publication owned by another local device"))
+      else
+        let transport = Store.transport existing in
+        let prior_remote = Transport.find_remote transport ~name:remote in
+        let ( cursor,
+              known,
+              announced_manifests,
+              announced_revisions,
+              review_inbox ) =
+          match prior_remote with
+          | None -> (None, [], [], [], [])
+          | Some state ->
+              ( Transport.remote_cursor state,
+                Transport.remote_known_publications state,
+                Transport.remote_announced_manifests state,
+                Transport.remote_announced_revisions state,
+                Transport.remote_review_inbox state )
+        in
+        let known =
+          Transport.publication_reference publication :: known
+          |> List.sort_uniq (fun left right ->
+              String.compare
+                (Transport.reference_id left)
+                (Transport.reference_id right))
+        in
+        let announced_manifests =
+          Transport.publication_manifest publication :: announced_manifests
+          |> List.sort_uniq String.compare
+        in
+        let announced_revisions =
+          revisions @ announced_revisions
+          |> List.sort_uniq Model.Revision_id.compare
+        in
+        let* remote_state =
+          Transport.remote_state ~name:remote ~cursor ~known
+            ~announced_manifests ~announced_revisions ~review_inbox
+          |> Result.map_error (fun error -> Transport_error error)
+        in
+        let* transport =
+          Transport.with_remote transport remote_state
+          |> Result.map_error (fun error -> Transport_error error)
+        in
+        let* collaboration =
+          Store.collaboration_with_authority_transport ~transport ~authority
+            ~revisions:(Store.signed_revisions existing)
+            ~local_certificate:(Store.local_certificate existing)
+            ~authorizations:(Store.authorizations existing)
+            ~adoptions:(Store.adoptions existing)
+          |> Result.map_error (fun error -> Store_error error)
+        in
+        let* _ =
+          persist_collaborative repository loaded loaded.Store.project
+            collaboration
+        in
+        Ok ())
+
+let transport_cursor ~root ~remote =
+  with_repository ~root (fun _ loaded ->
+      let* collaboration = require_collaboration loaded in
+      match
+        Transport.find_remote (Store.transport collaboration) ~name:remote
+      with
+      | None -> Ok None
+      | Some state -> Ok (Transport.remote_cursor state))
 
 let deliver ~root ~id ~next_draft ~next_title =
   with_repository ~root (fun repository loaded ->
@@ -2182,8 +2545,9 @@ let compact ~root ~keep_recent ~dry_run =
       in
       Ok
         ({
-          kept = compacted.Model.kept;
-          dropped = compacted.Model.dropped;
-          pruned_journals;
-          status;
-        } : compact_report))
+           kept = compacted.Model.kept;
+           dropped = compacted.Model.dropped;
+           pruned_journals;
+           status;
+         }
+          : compact_report))
