@@ -14,6 +14,7 @@ type error =
   | Trust_error of Yeokcham_v4_trust.error
   | Package_error of Yeokcham_v4_package.error
   | Recovery_error of Yeokcham_v4_recovery.error
+  | Transport_error of Yeokcham_v4_transport.error
   | Invalid_checkpoint_id of string
   | Unknown_checkpoint of Yeokcham_v4_model.Snapshot_id.t
   | Unchanged_share of Yeokcham_v4_model.Snapshot_id.t
@@ -107,6 +108,18 @@ type compact_report = {
   dropped : Yeokcham_v4_model.Snapshot_id.t list;
   pruned_journals : string list;
   status : status;
+}
+
+type transport_arrival = {
+  publication : Yeokcham_v4_transport.publication;
+  package : string;
+}
+
+type transport_receive = {
+  discovered_publications : int;
+  received_revisions : int;
+  created_decisions : int;
+  transport_status : status;
 }
 
 module Capture_window : sig
@@ -371,6 +384,16 @@ val receive_package : root:string -> package:string -> (status, error) result
 (** Imports only verified immutable objects and then atomically advances the
     collaborative V4 state. It does not materialize or otherwise touch the
     working tree. *)
+
+val receive_transport_batch :
+  root:string ->
+  remote:string ->
+  cursor:string option ->
+  transport_arrival list ->
+  (transport_receive, error) result
+(** Receives a fully fetched relay batch. Every publication/feed/package is
+    validated before any immutable destination object or state update. This
+    adapter has no network I/O and never mutates the working tree. *)
 
 val open_decision :
   root:string ->
