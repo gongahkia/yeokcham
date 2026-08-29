@@ -2,6 +2,7 @@ module Model = Yeokcham_v4_model
 module Service = Yeokcham_v4_local_service
 module Trust = Yeokcham_v4_trust
 module Package = Yeokcham_v4_package
+module Bootstrap = Yeokcham_v4_bootstrap
 module Recovery = Yeokcham_v4_recovery
 module Transport = Yeokcham_v4_transport
 module Transport_config = Yeokcham_v4_transport_config
@@ -53,6 +54,8 @@ let usage () =
     \  yeokcham package adopt [--root PATH] --from PATH --revision ID \
      [--authority EPOCH]\n\
     \  yeokcham receive [--root PATH] --from PATH [--review]\n\
+    \  yeokcham bootstrap publish [--root PATH] REMOTE\n\
+    \  yeokcham bootstrap [--root PATH] --remote NAME --url HTTPS_URL \\\n+    \     --repository ID --basis ID --username NAME --draft ID --title TITLE \\\n+    \     --device ID --verify-phrase \"TWELVE WORDS\"\n\
     \  yeokcham remote add [--root PATH] NAME URL\n\
     \  yeokcham remote remove [--root PATH] NAME\n\
     \  yeokcham remote login [--root PATH] NAME\n\
@@ -1306,8 +1309,7 @@ let fetch_publication client ~project id =
     fail "relay publication route ID does not match its canonical bytes";
   publication
 
-let fetch_artifact client ~project publication =
-  let manifest_id = Transport.publication_manifest publication in
+let fetch_artifact_for_manifest client ~project manifest_id =
   let manifest =
     Transport_http.get client ~project ~kind:Transport_http.Manifest
       ~id:manifest_id
@@ -1329,6 +1331,10 @@ let fetch_artifact client ~project publication =
   in
   Package.artifact_of_bytes ~manifest ~objects
   |> require_ok Package.error_to_string
+
+let fetch_artifact client ~project publication =
+  fetch_artifact_for_manifest client ~project
+    (Transport.publication_manifest publication)
 
 let sort_feed publications =
   let compare_publication left right =

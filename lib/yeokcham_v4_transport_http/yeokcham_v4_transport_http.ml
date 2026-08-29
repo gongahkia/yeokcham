@@ -2,7 +2,7 @@ module Encoding = Yeokcham_encoding
 module Transport = Yeokcham_v4_transport
 
 type client = { url : string; token : string }
-type kind = Object | Manifest | Publication
+type kind = Object | Manifest | Publication | Bootstrap
 
 type error =
   | Invalid_url of string
@@ -99,6 +99,7 @@ let kind_name = function
   | Object -> "objects"
   | Manifest -> "manifests"
   | Publication -> "publications"
+  | Bootstrap -> "bootstraps"
 
 let close_noerr descriptor =
   try Unix.close descriptor with Unix.Unix_error _ -> ()

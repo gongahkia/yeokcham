@@ -4,7 +4,7 @@
     private temporary curl configuration file, never command arguments. *)
 
 type client
-type kind = Object | Manifest | Publication
+type kind = Object | Manifest | Publication | Bootstrap
 
 type error =
   | Invalid_url of string

@@ -565,7 +565,7 @@ let create ~source:_ ~destination:_ ~membership:_ ~revisions:_ =
     (Invalid_package
        "authority-less package creation was retired before V4 release")
 
-let create_with_authority ?(extra_snapshots = []) ~source ~destination
+let create_with_authority_internal ~extra_snapshots ~source ~destination
     ~authority ~revisions ~authorizations ~adoptions =
   if Sys.file_exists destination then Error (Destination_exists destination)
   else
@@ -601,6 +601,16 @@ let create_with_authority ?(extra_snapshots = []) ~source ~destination
           copy rest
     in
     copy object_ids
+
+let create_with_authority ~source ~destination ~authority ~revisions
+    ~authorizations ~adoptions =
+  create_with_authority_internal ~extra_snapshots:[] ~source ~destination
+    ~authority ~revisions ~authorizations ~adoptions
+
+let create_bootstrap_with_authority ~source ~destination ~authority ~revisions
+    ~authorizations ~adoptions ~extra_snapshots =
+  create_with_authority_internal ~extra_snapshots ~source ~destination
+    ~authority ~revisions ~authorizations ~adoptions
 
 let package_object_bytes package object_ids =
   let directory = package_path package objects_name in

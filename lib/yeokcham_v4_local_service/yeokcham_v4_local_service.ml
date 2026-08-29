@@ -4,6 +4,7 @@ module Snapshot = Yeokcham_snapshot
 module Store = Yeokcham_v4_store
 module Trust = Yeokcham_v4_trust
 module Package = Yeokcham_v4_package
+module Bootstrap = Yeokcham_v4_bootstrap
 module Recovery = Yeokcham_v4_recovery
 module Transport = Yeokcham_v4_transport
 
@@ -21,6 +22,7 @@ type error =
   | Model_error of Model.error
   | Trust_error of Trust.error
   | Package_error of Package.error
+  | Bootstrap_error of Bootstrap.error
   | Recovery_error of Recovery.error
   | Transport_error of Transport.error
   | Invalid_checkpoint_id of string
@@ -122,6 +124,11 @@ type transport_outbound = {
   outbound_revisions : Model.Revision_id.t list;
 }
 
+type bootstrap_outbound = {
+  bootstrap_basis : Bootstrap.basis;
+  bootstrap_artifact : Package.artifact;
+}
+
 module Capture_window = struct
   type t = { first : float option; last : float option }
 
@@ -165,6 +172,7 @@ let error_to_string = function
   | Model_error error -> Model.error_to_string error
   | Trust_error error -> Trust.error_to_string error
   | Package_error error -> Package.error_to_string error
+  | Bootstrap_error error -> Bootstrap.error_to_string error
   | Recovery_error error -> Recovery.error_to_string error
   | Transport_error error -> Transport.error_to_string error
   | Invalid_checkpoint_id value ->
@@ -538,6 +546,35 @@ let init_authority_collaboration ~root ~username ~initial_draft ~title ~device
   Store.load repository
   |> Result.map (fun loaded -> status_of_project loaded.Store.project)
   |> Result.map_error (fun error -> Store_error error)
+
+let bootstrap_from_package ~root ~repository ~package ~basis ~verify_phrase
+    ~username ~initial_draft ~title ~device ~local_certificate =
+  let* verified =
+    Bootstrap.verify ~repository ~package ~bytes:basis
+    |> Result.map_error (fun error -> Bootstrap_error error)
+  in
+  let* root_certificate =
+    Bootstrap.root_certificate verified
+    |> Result.map_error (fun error -> Bootstrap_error error)
+  in
+  if
+    not
+      (String.equal verify_phrase
+         (Recovery.verification_phrase root_certificate))
+  then Error (Bootstrap_error (Bootstrap.Invalid_basis "root verification phrase does not match the authority closure"))
+  else
+  let* repository =
+    Store.init_collaborative_with ~root ~bootstrap:(fun underlying_store ->
+        Bootstrap.import ~destination:underlying_store verified
+          ~creator:(Trust.device_id device) ~username ~initial_draft ~title
+          ~local_certificate
+        |> Result.map_error Bootstrap.error_to_string)
+    |> Result.map_error (fun error -> Store_error error)
+  in
+  let* loaded =
+    Store.load repository |> Result.map_error (fun error -> Store_error error)
+  in
+  Ok (status_of_project loaded.Store.project)
 
 let init_signed ~root ~username ~initial_draft ~title ~repository ~device
     ~signing_capability =
@@ -2269,6 +2306,30 @@ let revision_is_announced announced signed =
     (fun revision ->
       Model.Revision_id.equal revision (Trust.signed_revision_id signed))
     announced
+
+let prepare_bootstrap_outbound ~root ~signing_capability =
+  with_repository ~root (fun repository loaded ->
+      let* existing = require_collaboration loaded in
+      let* authority =
+        match Store.authority existing with
+        | Some authority -> Ok authority
+        | None ->
+            Error
+              (Store_error
+                 (Store.Invalid_collaboration_state
+                    "bootstrap requires authority-aware collaboration"))
+      in
+      let* publisher = local_device existing in
+      with_outbound_directory ~root (fun destination ->
+          Bootstrap.create ~source:(Store.underlying_store repository)
+            ~destination ~project:loaded.Store.project ~authority
+            ~revisions:(Store.signed_revisions existing)
+            ~authorizations:(Store.authorizations existing)
+            ~adoptions:(Store.adoptions existing) ~publisher
+            ~certificate:(Store.local_certificate existing) ~signing_capability
+          |> Result.map_error (fun error -> Bootstrap_error error)
+          |> Result.map (fun (bootstrap_basis, bootstrap_artifact) ->
+                 { bootstrap_basis; bootstrap_artifact })))
 
 let prepare_transport_outbound ~root ~remote ~signing_capability =
   with_repository ~root (fun repository loaded ->

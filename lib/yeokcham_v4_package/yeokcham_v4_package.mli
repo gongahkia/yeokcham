@@ -64,10 +64,21 @@ val create_with_authority :
   revisions:Trust.signed_revision list ->
   authorizations:Trust.authorization list ->
   adoptions:Trust.adoption list ->
-  ?extra_snapshots:Model.Snapshot_id.t list ->
   (unit, error) result
 (** Writes a package with the complete public authority closure that verifies
     its epoch-bound revisions and any exact exception records. *)
+
+val create_bootstrap_with_authority :
+  source:Yeokcham_store.repository ->
+  destination:string ->
+  authority:Trust.authority ->
+  revisions:Trust.signed_revision list ->
+  authorizations:Trust.authorization list ->
+  adoptions:Trust.adoption list ->
+  extra_snapshots:Model.Snapshot_id.t list ->
+  (unit, error) result
+(** Creates the unchanged package-manifest-v1 format with additional exact
+    snapshot closure needed by a separately signed bootstrap basis. *)
 
 val verify_and_import_with_authority :
   destination:Yeokcham_store.repository ->

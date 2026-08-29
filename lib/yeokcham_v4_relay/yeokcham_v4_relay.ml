@@ -3,7 +3,7 @@ module Envelope = Yeokcham_envelope
 module Transport = Yeokcham_v4_transport
 
 type repository = { root : string }
-type kind = Object | Manifest | Publication
+type kind = Object | Manifest | Publication | Bootstrap
 
 type error =
   | Invalid_repository of string
@@ -53,6 +53,7 @@ let kind_name = function
   | Object -> "objects"
   | Manifest -> "manifests"
   | Publication -> "publications"
+  | Bootstrap -> "bootstraps"
 
 let project_path repository project = Filename.concat repository.root project
 
@@ -106,7 +107,7 @@ let validate_bytes kind id bytes =
     Error (Invalid_object "request body exceeds relay limit")
   else
     match kind with
-    | Manifest | Publication ->
+    | Manifest | Publication | Bootstrap ->
         if String.equal (Transport.sha256 bytes) id then Ok ()
         else Error (Invalid_object "route ID does not match SHA-256 bytes")
     | Object ->

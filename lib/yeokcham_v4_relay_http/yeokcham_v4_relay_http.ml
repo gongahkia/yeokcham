@@ -210,6 +210,8 @@ let route target =
       Ok (project, Relay.Manifest, id, query)
   | [ "v1"; "repositories"; project; "publications"; id ] ->
       Ok (project, Relay.Publication, id, query)
+  | [ "v1"; "repositories"; project; "bootstraps"; id ] ->
+      Ok (project, Relay.Bootstrap, id, query)
   | [ "v1"; "repositories"; project; "publications" ] ->
       Ok (project, Relay.Publication, "", query)
   | _ -> Error ()

@@ -4,7 +4,7 @@
     authority, model, package, or working-tree behaviour. *)
 
 type repository
-type kind = Object | Manifest | Publication
+type kind = Object | Manifest | Publication | Bootstrap
 
 type error =
   | Invalid_repository of string

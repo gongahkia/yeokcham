@@ -13,6 +13,7 @@ type error =
   | Model_error of Yeokcham_v4_model.error
   | Trust_error of Yeokcham_v4_trust.error
   | Package_error of Yeokcham_v4_package.error
+  | Bootstrap_error of Yeokcham_v4_bootstrap.error
   | Recovery_error of Yeokcham_v4_recovery.error
   | Transport_error of Yeokcham_v4_transport.error
   | Invalid_checkpoint_id of string
@@ -129,6 +130,11 @@ type transport_outbound = {
   outbound_revisions : Yeokcham_v4_model.Revision_id.t list;
 }
 
+type bootstrap_outbound = {
+  bootstrap_basis : Yeokcham_v4_bootstrap.basis;
+  bootstrap_artifact : Yeokcham_v4_package.artifact;
+}
+
 module Capture_window : sig
   type t
 
@@ -212,6 +218,22 @@ val init_authority_collaboration :
 (** Initializes an already-enrolled device using a verified V4 authority
     closure. It is intended for a peer that has compared the root phrase and
     obtained the public enrollment closure out of band. *)
+
+val bootstrap_from_package :
+  root:string ->
+  repository:Yeokcham_v4_trust.Repository_id.t ->
+  package:string ->
+  basis:string ->
+  verify_phrase:string ->
+  username:Yeokcham_v4_model.Username.t ->
+  initial_draft:Yeokcham_v4_model.Draft_id.t ->
+  title:string ->
+  device:Yeokcham_v4_trust.device ->
+  local_certificate:string ->
+  (status, error) result
+(** Verifies an immutable bootstrap basis and creates a fresh local V4 state.
+    It never scans or materializes the working tree. The root phrase is checked
+    before any destination object or state is created. *)
 
 val save : root:string -> (save_outcome, error) result
 val status : root:string -> (status, error) result
@@ -411,6 +433,13 @@ val prepare_transport_outbound :
     changing local transport state. The caller uploads objects, then the
     manifest, then the publication; only an acknowledged publication may be
     recorded with [record_transport_outbound]. *)
+
+val prepare_bootstrap_outbound :
+  root:string ->
+  signing_capability:Yeokcham_v4_trust.signing_capability ->
+  (bootstrap_outbound, error) result
+(** Produces a signed immutable bootstrap basis with the complete verified
+    shared-history closure. It has no working-tree effect. *)
 
 val record_transport_outbound :
   root:string ->
