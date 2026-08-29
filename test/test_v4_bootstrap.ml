@@ -1,4 +1,5 @@
 module Bootstrap = Yeokcham_v4_bootstrap
+module Golden = Yeokcham_testkit.Golden_fixture
 module Model = Yeokcham_v4_model
 module Package = Yeokcham_v4_package
 module Recovery = Yeokcham_v4_recovery
@@ -47,7 +48,8 @@ let capability byte =
   |> require_ok Trust.error_to_string
 
 let device capability =
-  Trust.signing_public_key capability |> Trust.device_of_public_key
+  Trust.signing_public_key capability
+  |> Trust.device_of_public_key
   |> require_ok Trust.error_to_string
 
 let repository =
@@ -55,12 +57,12 @@ let repository =
     "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
   |> Result.get_ok
 
-let lower_hex bytes =
-  let alphabet = "0123456789abcdef" in
-  String.init (String.length bytes * 2) (fun index ->
-      let value = Char.code bytes.[index / 2] in
-      if index mod 2 = 0 then alphabet.[value lsr 4]
-      else alphabet.[value land 0x0f])
+let golden_path name =
+  let local = Filename.concat "golden" name in
+  if Sys.file_exists local then local else Filename.concat "test/golden" name
+
+let read_golden name =
+  Golden.read_lower_hex_file (golden_path name) |> require_ok Fun.id
 
 let root_certificate authority =
   Trust.certificates (Trust.authority_membership authority)
@@ -96,12 +98,15 @@ let bootstrap_imports_shared_delivery_without_source_scratch () =
       write_file source "main.ml" "let version = 2\n";
       ignore
         (Service.share_signed ~authority_epoch:None ~root:source
-           ~change:(change "source-change") ~revision:(revision "source-revision")
+           ~change:(change "source-change")
+           ~revision:(revision "source-revision")
            ~signing_capability:administrator_capability
         |> require_ok Service.error_to_string);
       ignore
-        (Service.deliver ~root:source ~id:(delivery "source-delivery")
-           ~next_draft:(draft "source-after-delivery") ~next_title:"next source work"
+        (Service.deliver ~root:source
+           ~id:(delivery "source-delivery")
+           ~next_draft:(draft "source-after-delivery")
+           ~next_title:"next source work"
         |> require_ok Service.error_to_string);
       let outbound =
         Service.prepare_bootstrap_outbound ~root:source
@@ -129,10 +134,12 @@ let bootstrap_imports_shared_delivery_without_source_scratch () =
       let member_certificate =
         Trust.certificates (Trust.authority_membership source_authority)
         |> List.find (fun certificate ->
-               Trust.device_equal (Trust.certificate_subject certificate) member)
+            Trust.device_equal (Trust.certificate_subject certificate) member)
         |> Trust.certificate_id
       in
-      let phrase = Recovery.verification_phrase (root_certificate source_authority) in
+      let phrase =
+        Recovery.verification_phrase (root_certificate source_authority)
+      in
       (match
          Service.bootstrap_from_package ~root:target ~repository ~package:staged
            ~basis ~verify_phrase:"wrong phrase" ~username:(username "bob")
@@ -151,18 +158,32 @@ let bootstrap_imports_shared_delivery_without_source_scratch () =
           ~device:member ~local_certificate:member_certificate
         |> require_ok Service.error_to_string
       in
-      Alcotest.(check int) "delivery history is imported" 1
-        received.Service.delivery_count;
-      Alcotest.(check int) "source scratch shared change is consumed" 0
+      Alcotest.(check int)
+        "delivery history is imported" 1 received.Service.delivery_count;
+      Alcotest.(check int)
+        "source scratch shared change is consumed" 0
         received.Service.shared_change_count;
-      Alcotest.(check string) "target owns a new active draft" "target-draft"
+      Alcotest.(check string)
+        "target owns a new active draft" "target-draft"
         (Model.Draft_id.to_string received.Service.active_draft.Model.draft_id);
-      Alcotest.(check (list string)) "source usernames are not imported" [ "bob" ]
+      Alcotest.(check (list string))
+        "source usernames are not imported" [ "bob" ]
         (received.Service.usernames
         |> List.map (fun registration ->
-               Model.Username.to_string registration.Model.username));
-      Alcotest.(check string) "bootstrap does not materialize the working tree"
-        "untouched local file\n" (read_file target "keep.txt"))
+            Model.Username.to_string registration.Model.username));
+      Alcotest.(check string)
+        "bootstrap does not materialize the working tree"
+        "untouched local file\n"
+        (read_file target "keep.txt");
+      let restored = Filename.concat target "explicit-restore" in
+      Unix.mkdir restored 0o700;
+      Service.restore ~root:target ~checkpoint:received.Service.checkpoint
+        ~destination:restored
+      |> require_ok Service.error_to_string;
+      Alcotest.(check string)
+        "only an explicit later restore materializes shared history"
+        "let version = 2\n"
+        (read_file restored "main.ml"))
 
 let bootstrap_basis_rejects_a_wrong_repository_before_import () =
   with_directory "yeokcham-v4-bootstrap-repository-" (fun parent ->
@@ -185,9 +206,17 @@ let bootstrap_basis_rejects_a_wrong_repository_before_import () =
           ~signing_capability:administrator_capability
         |> require_ok Service.error_to_string
       in
-      (match Sys.getenv_opt "YEOKCHAM_DEBUG_BOOTSTRAP_GOLDEN" with
-      | Some "1" -> Alcotest.fail (lower_hex (Bootstrap.encode outbound.Service.bootstrap_basis))
-      | Some _ | None -> ());
+      let encoded = Bootstrap.encode outbound.Service.bootstrap_basis in
+      Alcotest.(check string)
+        "bootstrap basis bytes are stable"
+        (read_golden "v4/bootstrap-basis-v1.cbor.hex")
+        encoded;
+      let decoded =
+        Bootstrap.decode encoded |> require_ok Bootstrap.error_to_string
+      in
+      Alcotest.(check string)
+        "bootstrap basis decoder is canonical" encoded
+        (Bootstrap.encode decoded);
       let package = Filename.concat parent "package" in
       Package.materialize_artifact ~destination:package
         outbound.Service.bootstrap_artifact
@@ -202,7 +231,8 @@ let bootstrap_basis_rejects_a_wrong_repository_before_import () =
           ~bytes:(Bootstrap.encode outbound.Service.bootstrap_basis)
       with
       | Error _ -> ()
-      | Ok _ -> Alcotest.fail "bootstrap accepted a package for another repository")
+      | Ok _ ->
+          Alcotest.fail "bootstrap accepted a package for another repository")
 
 let () =
   Alcotest.run "V4 bootstrap"
@@ -210,7 +240,8 @@ let () =
       ( "bootstrap",
         [
           Alcotest.test_case
-            "imports delivery history into a fresh local draft without touching files"
+            "imports delivery history into a fresh local draft without \
+             touching files"
             `Quick bootstrap_imports_shared_delivery_without_source_scratch;
           Alcotest.test_case "rejects wrong repository before import" `Quick
             bootstrap_basis_rejects_a_wrong_repository_before_import;

@@ -231,8 +231,8 @@ val bootstrap_from_package :
   device:Yeokcham_v4_trust.device ->
   local_certificate:string ->
   (status, error) result
-(** Verifies an immutable bootstrap basis and creates a fresh local V4 state.
-    It never scans or materializes the working tree. The root phrase is checked
+(** Verifies an immutable bootstrap basis and creates a fresh local V4 state. It
+    never scans or materializes the working tree. The root phrase is checked
     before any destination object or state is created. *)
 
 val save : root:string -> (save_outcome, error) result

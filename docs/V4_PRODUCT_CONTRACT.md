@@ -162,6 +162,16 @@ dependency and may only validate staged bytes, import verified immutable
 objects, and publish one collaborative state head. Any change to that boundary
 requires an ADR update and working-tree sentinel tests.
 
+### Receipt review checklist
+
+- Does the proposed receive, sync, or bootstrap path call only staged-byte,
+  immutable-object, and collaborative-state APIs?
+- Do ordinary receipt, signed resolution, feed-fork, late-review, malformed
+  input, and retry tests prove the ordinary working tree is byte-for-byte
+  unchanged?
+- If any receipt-time working-tree inspection or materialisation is proposed,
+  stop and create a superseding ADR and a separate issue before implementation.
+
 ## Persistent-format rules
 
 All records use canonical CBOR and explicit schema versions. Object identity is

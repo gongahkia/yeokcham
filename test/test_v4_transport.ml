@@ -1524,6 +1524,38 @@ let relay_is_create_only_and_paginated () =
       Alcotest.(check int)
         "second page contains remaining publication" 1 (List.length second))
 
+let bootstrap_relay_entries_are_create_only_and_sha_bound () =
+  with_directory "yeokcham-v4-bootstrap-relay-" (fun root ->
+      let relay =
+        Relay.open_repository ~root |> require_ok Relay.error_to_string
+      in
+      let project = Trust.Repository_id.to_string (repository ()) in
+      let bytes = "bootstrap basis bytes" in
+      let id = Transport.sha256 bytes in
+      Relay.create relay ~project ~kind:Relay.Bootstrap ~id ~bytes
+      |> require_ok Relay.error_to_string;
+      Relay.create relay ~project ~kind:Relay.Bootstrap ~id ~bytes
+      |> require_ok Relay.error_to_string;
+      Alcotest.(check string)
+        "bootstrap bytes round trip" bytes
+        (Relay.get relay ~project ~kind:Relay.Bootstrap ~id
+        |> require_ok Relay.error_to_string);
+      (match
+         Relay.create relay ~project ~kind:Relay.Bootstrap ~id ~bytes:"other"
+       with
+      | Error _ ->
+          Alcotest.(check string)
+            "bootstrap bytes remain immutable" bytes
+            (Relay.get relay ~project ~kind:Relay.Bootstrap ~id
+            |> require_ok Relay.error_to_string)
+      | Ok () -> Alcotest.fail "bootstrap relay overwrote immutable bytes");
+      match
+        Relay.create relay ~project ~kind:Relay.Bootstrap
+          ~id:(Transport.sha256 "other") ~bytes
+      with
+      | Error _ -> ()
+      | Ok () -> Alcotest.fail "bootstrap relay accepted a wrong route digest")
+
 let () =
   Alcotest.run "V4 transport"
     [
@@ -1542,6 +1574,8 @@ let () =
         [
           Alcotest.test_case "create-only storage and pagination" `Quick
             relay_is_create_only_and_paginated;
+          Alcotest.test_case "bootstrap storage is create-only and SHA-bound"
+            `Quick bootstrap_relay_entries_are_create_only_and_sha_bound;
           Alcotest.test_case "HTTP listener rejects invalid requests" `Quick
             http_listener_rejects_untrusted_requests_and_preserves_immutability;
           Alcotest.test_case "HTTPS reverse proxy reaches the relay" `Slow

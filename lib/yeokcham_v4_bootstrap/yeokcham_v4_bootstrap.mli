@@ -3,8 +3,7 @@
     A basis is a signed, immutable courier artifact for a new replica. It is
     intentionally separate from ordinary package-manifest-v1 transport: it
     imports verified shared history into a fresh local draft and never imports
-    another replica's scratch state, credentials, or mutable transport state.
-*)
+    another replica's scratch state, credentials, or mutable transport state. *)
 
 module Model = Yeokcham_v4_model
 module Package = Yeokcham_v4_package
@@ -41,8 +40,8 @@ val create :
   certificate:string ->
   signing_capability:Trust.signing_capability ->
   (basis * Package.artifact, error) result
-(** Creates one directory package with every shared-history object and returns
-    a separately signed basis bound to that exact manifest. *)
+(** Creates one directory package with every shared-history object and returns a
+    separately signed basis bound to that exact manifest. *)
 
 val encode : basis -> string
 val decode : string -> (basis, error) result

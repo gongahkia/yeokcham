@@ -562,20 +562,24 @@ let bootstrap_from_package ~root ~repository ~package ~basis ~verify_phrase
     not
       (String.equal verify_phrase
          (Recovery.verification_phrase root_certificate))
-  then Error (Bootstrap_error (Bootstrap.Invalid_basis "root verification phrase does not match the authority closure"))
+  then
+    Error
+      (Bootstrap_error
+         (Bootstrap.Invalid_basis
+            "root verification phrase does not match the authority closure"))
   else
-  let* repository =
-    Store.init_collaborative_with ~root ~bootstrap:(fun underlying_store ->
-        Bootstrap.import ~destination:underlying_store verified
-          ~creator:(Trust.device_id device) ~username ~initial_draft ~title
-          ~local_certificate
-        |> Result.map_error Bootstrap.error_to_string)
-    |> Result.map_error (fun error -> Store_error error)
-  in
-  let* loaded =
-    Store.load repository |> Result.map_error (fun error -> Store_error error)
-  in
-  Ok (status_of_project loaded.Store.project)
+    let* repository =
+      Store.init_collaborative_with ~root ~bootstrap:(fun underlying_store ->
+          Bootstrap.import ~destination:underlying_store verified
+            ~creator:(Trust.device_id device) ~username ~initial_draft ~title
+            ~local_certificate
+          |> Result.map_error Bootstrap.error_to_string)
+      |> Result.map_error (fun error -> Store_error error)
+    in
+    let* loaded =
+      Store.load repository |> Result.map_error (fun error -> Store_error error)
+    in
+    Ok (status_of_project loaded.Store.project)
 
 let init_signed ~root ~username ~initial_draft ~title ~repository ~device
     ~signing_capability =
@@ -2301,19 +2305,22 @@ let receive_transport_batch ~root ~remote ~cursor arrivals =
   let arrivals : Receipt.transport_arrival list =
     List.map
       (fun (arrival : transport_arrival) ->
-        ({ Receipt.publication = arrival.publication; package = arrival.package }
+        ({
+           Receipt.publication = arrival.publication;
+           package = arrival.package;
+         }
           : Receipt.transport_arrival))
       arrivals
   in
   Receipt.receive_transport_batch ~root ~remote ~cursor arrivals
   |> Result.map (fun received ->
-         {
-           discovered_publications = received.Receipt.discovered_publications;
-           received_revisions = received.Receipt.received_revisions;
-           deferred_publications = received.Receipt.deferred_publications;
-           created_decisions = received.Receipt.created_decisions;
-           transport_status = status_of_receipt received.Receipt.transport_status;
-         })
+      {
+        discovered_publications = received.Receipt.discovered_publications;
+        received_revisions = received.Receipt.received_revisions;
+        deferred_publications = received.Receipt.deferred_publications;
+        created_decisions = received.Receipt.created_decisions;
+        transport_status = status_of_receipt received.Receipt.transport_status;
+      })
   |> Result.map_error error_of_receipt
 
 let remove_outbound_package destination =
@@ -2369,15 +2376,17 @@ let prepare_bootstrap_outbound ~root ~signing_capability =
       in
       let* publisher = local_device existing in
       with_outbound_directory ~root (fun destination ->
-          Bootstrap.create ~source:(Store.underlying_store repository)
+          Bootstrap.create
+            ~source:(Store.underlying_store repository)
             ~destination ~project:loaded.Store.project ~authority
             ~revisions:(Store.signed_revisions existing)
             ~authorizations:(Store.authorizations existing)
             ~adoptions:(Store.adoptions existing) ~publisher
-            ~certificate:(Store.local_certificate existing) ~signing_capability
+            ~certificate:(Store.local_certificate existing)
+            ~signing_capability
           |> Result.map_error (fun error -> Bootstrap_error error)
           |> Result.map (fun (bootstrap_basis, bootstrap_artifact) ->
-                 { bootstrap_basis; bootstrap_artifact })))
+              { bootstrap_basis; bootstrap_artifact })))
 
 let prepare_transport_outbound ~root ~remote ~signing_capability =
   with_repository ~root (fun repository loaded ->

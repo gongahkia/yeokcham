@@ -41,6 +41,7 @@ type transport_receive = {
 
 val error_to_string : error -> string
 val receive_package : root:string -> package:string -> (status, error) result
+
 val receive_transport_batch :
   root:string ->
   remote:string ->

@@ -48,7 +48,8 @@ let error_to_string = function
   | Package_error error -> Package.error_to_string error
   | Transport_error error -> Transport.error_to_string error
   | Unsigned_project ->
-      "this V4 project has no signed collaboration state; initialize a signed project"
+      "this V4 project has no signed collaboration state; initialize a signed \
+       project"
 
 let status_of_project project =
   let active_draft = Model.active_draft project in
@@ -71,9 +72,12 @@ let status_of_project project =
 
 let with_repository ~root f =
   let* repository =
-    Store.open_repository ~root |> Result.map_error (fun error -> Store_error error)
+    Store.open_repository ~root
+    |> Result.map_error (fun error -> Store_error error)
   in
-  let* loaded = Store.load repository |> Result.map_error (fun error -> Store_error error) in
+  let* loaded =
+    Store.load repository |> Result.map_error (fun error -> Store_error error)
+  in
   f repository loaded
 
 let require_collaboration loaded =
@@ -82,31 +86,36 @@ let require_collaboration loaded =
   | None -> Error Unsigned_project
 
 let persist_collaborative repository loaded project collaboration =
-  Store.save_collaborative repository ~expected:loaded.Store.head ~project ~collaboration
+  Store.save_collaborative repository ~expected:loaded.Store.head ~project
+    ~collaboration
   |> Result.map (fun saved -> status_of_project saved.Store.project)
   |> Result.map_error (fun error -> Store_error error)
 
 let merge_signed_revisions existing incoming =
   let rec add known = function
     | [] -> Ok known
-    | signed :: rest ->
+    | signed :: rest -> (
         let revision = Trust.signed_revision_value signed in
-        (match
-           List.find_opt
-             (fun candidate ->
-               Model.Revision_id.equal (Trust.signed_revision_id candidate)
-                 revision.Model.revision)
-             known
-         with
+        match
+          List.find_opt
+            (fun candidate ->
+              Model.Revision_id.equal
+                (Trust.signed_revision_id candidate)
+                revision.Model.revision)
+            known
+        with
         | None -> add (signed :: known) rest
         | Some candidate ->
-            if Trust.encode_signed_revision candidate = Trust.encode_signed_revision signed
+            if
+              Trust.encode_signed_revision candidate
+              = Trust.encode_signed_revision signed
             then add known rest
             else
               Error
                 (Package_error
                    (Package.Invalid_package
-                      "revision identity conflicts with a local signed record")))
+                      "revision identity conflicts with a local signed record"))
+        )
   in
   add existing incoming
 
@@ -115,7 +124,10 @@ let merge_public_records ~encode existing incoming =
     | [] -> Ok known
     | record :: rest ->
         let bytes = encode record in
-        if List.exists (fun existing -> String.equal bytes (encode existing)) known
+        if
+          List.exists
+            (fun existing -> String.equal bytes (encode existing))
+            known
         then add known rest
         else add (record :: known) rest
   in
@@ -128,17 +140,22 @@ let receive_package ~root ~package =
       | None ->
           let* received =
             Package.verify_and_import
-              ~destination:(Store.underlying_store repository) ~package
-              ~membership:(Store.membership existing) ~project:loaded.Store.project
+              ~destination:(Store.underlying_store repository)
+              ~package
+              ~membership:(Store.membership existing)
+              ~project:loaded.Store.project
             |> Result.map_error (fun error -> Package_error error)
           in
           let received, project = received in
           let* revisions =
-            merge_signed_revisions (Store.signed_revisions existing)
+            merge_signed_revisions
+              (Store.signed_revisions existing)
               (Package.revisions received)
           in
           let* collaboration =
-            Store.collaboration ~membership:(Package.membership received) ~revisions
+            Store.collaboration
+              ~membership:(Package.membership received)
+              ~revisions
               ~local_certificate:(Store.local_certificate existing)
             |> Result.map_error (fun error -> Store_error error)
           in
@@ -146,8 +163,9 @@ let receive_package ~root ~package =
       | Some authority ->
           let* received =
             Package.verify_and_import_with_authority
-              ~destination:(Store.underlying_store repository) ~package ~authority
-              ~known_adoptions:(Store.adoptions existing) ~project:loaded.Store.project
+              ~destination:(Store.underlying_store repository)
+              ~package ~authority ~known_adoptions:(Store.adoptions existing)
+              ~project:loaded.Store.project
             |> Result.map_error (fun error -> Package_error error)
           in
           let received, project = received in
@@ -161,16 +179,19 @@ let receive_package ~root ~package =
                         "authority-aware receive returned no authority"))
           in
           let* revisions =
-            merge_signed_revisions (Store.signed_revisions existing)
+            merge_signed_revisions
+              (Store.signed_revisions existing)
               (Package.revisions received)
           in
           let* authorizations =
             merge_public_records ~encode:Trust.encode_authorization
-              (Store.authorizations existing) (Package.authorizations received)
+              (Store.authorizations existing)
+              (Package.authorizations received)
           in
           let* adoptions =
             merge_public_records ~encode:Trust.encode_adoption
-              (Store.adoptions existing) (Package.adoptions received)
+              (Store.adoptions existing)
+              (Package.adoptions received)
           in
           let* collaboration =
             Store.collaboration_with_authority ~authority ~revisions
@@ -231,7 +252,8 @@ let receive_transport_batch ~root ~remote ~cursor arrivals =
                       "publication manifest does not match staged package"))
             else
               let* inspected =
-                Package.inspect_with_authority ~package:arrival.package ~authority
+                Package.inspect_with_authority ~package:arrival.package
+                  ~authority
                 |> Result.map_error (fun error -> Package_error error)
               in
               let* package_authority =
@@ -250,10 +272,14 @@ let receive_transport_batch ~root ~remote ~cursor arrivals =
               in
               inspect package_authority ((arrival, inspected) :: reversed) rest
       in
-      let* inspected_arrivals, inspected_authority = inspect initial_authority [] arrivals in
+      let* inspected_arrivals, inspected_authority =
+        inspect initial_authority [] arrivals
+      in
       let* () =
         Transport.validate_feed ~known
-          (List.map (fun (arrival, _) -> arrival.publication) inspected_arrivals)
+          (List.map
+             (fun (arrival, _) -> arrival.publication)
+             inspected_arrivals)
         |> Result.map_error (fun error -> Transport_error error)
       in
       let existing_signed_purpose signed =
@@ -266,8 +292,9 @@ let receive_transport_batch ~root ~remote ~cursor arrivals =
         | Some decision ->
             Model.resolutions loaded.Store.project
             |> List.exists (fun resolution ->
-                   Model.Decision_id.equal resolution.Model.resolved_decision decision
-                   && resolution.Model.replacement_revision = revision)
+                Model.Decision_id.equal resolution.Model.resolved_decision
+                  decision
+                && resolution.Model.replacement_revision = revision)
       in
       let needs_late_review inspected =
         let* authority =
@@ -276,7 +303,8 @@ let receive_transport_batch ~root ~remote ~cursor arrivals =
           | None ->
               Error
                 (Package_error
-                   (Package.Invalid_package "transport package lacks authority closure"))
+                   (Package.Invalid_package
+                      "transport package lacks authority closure"))
         in
         let rec loop = function
           | [] -> Ok false
@@ -292,11 +320,12 @@ let receive_transport_batch ~root ~remote ~cursor arrivals =
                   let accepted_adoptions =
                     Store.adoptions existing @ Package.adoptions inspected
                     |> List.filter (fun adoption ->
-                           Trust.adoption_matches_signed_revision adoption signed
-                           && Trust.authority_epoch_is_head authority
-                                (Trust.adoption_epoch adoption))
+                        Trust.adoption_matches_signed_revision adoption signed
+                        && Trust.authority_epoch_is_head authority
+                             (Trust.adoption_epoch adoption))
                   in
-                  if List.length accepted_adoptions = 1 then loop rest else Ok true
+                  if List.length accepted_adoptions = 1 then loop rest
+                  else Ok true
         in
         loop (Package.revisions inspected)
       in
@@ -333,20 +362,24 @@ let receive_transport_batch ~root ~remote ~cursor arrivals =
                   Error
                     (Package_error
                        (Package.Invalid_package
-                          "authority transport preparation returned no authority"))
+                          "authority transport preparation returned no \
+                           authority"))
             in
-            prepare authority (Package.prepared_project prepared)
-              (known_adoptions @ Package.adoptions verified) (prepared :: reversed)
-              rest
+            prepare authority
+              (Package.prepared_project prepared)
+              (known_adoptions @ Package.adoptions verified)
+              (prepared :: reversed) rest
       in
       let* prepared, project =
-        prepare initial_authority loaded.Store.project (Store.adoptions existing) [] arrivals
+        prepare initial_authority loaded.Store.project
+          (Store.adoptions existing) [] arrivals
       in
       let rec import = function
         | [] -> Ok ()
         | prepared :: rest ->
             let* _ =
-              Package.import_prepared ~destination:(Store.underlying_store repository)
+              Package.import_prepared
+                ~destination:(Store.underlying_store repository)
                 prepared
               |> Result.map_error (fun error -> Package_error error)
             in
@@ -355,7 +388,8 @@ let receive_transport_batch ~root ~remote ~cursor arrivals =
       let* () = import prepared in
       let verified = List.map Package.prepared_verified prepared in
       let* revisions =
-        merge_signed_revisions (Store.signed_revisions existing)
+        merge_signed_revisions
+          (Store.signed_revisions existing)
           (List.concat_map Package.revisions verified)
       in
       let* authorizations =
@@ -364,17 +398,22 @@ let receive_transport_batch ~root ~remote ~cursor arrivals =
           (List.concat_map Package.authorizations verified)
       in
       let* adoptions =
-        merge_public_records ~encode:Trust.encode_adoption (Store.adoptions existing)
+        merge_public_records ~encode:Trust.encode_adoption
+          (Store.adoptions existing)
           (List.concat_map Package.adoptions verified)
       in
       let incoming_references =
         List.map
-          (fun (arrival, _) -> Transport.publication_reference arrival.publication)
+          (fun (arrival, _) ->
+            Transport.publication_reference arrival.publication)
           inspected_arrivals
       in
       let known =
         List.sort_uniq
-          (fun left right -> String.compare (Transport.reference_id left) (Transport.reference_id right))
+          (fun left right ->
+            String.compare
+              (Transport.reference_id left)
+              (Transport.reference_id right))
           (known @ incoming_references)
       in
       let announced_manifests, announced_revisions, previous_review_inbox =
@@ -385,8 +424,16 @@ let receive_transport_batch ~root ~remote ~cursor arrivals =
               Transport.remote_announced_revisions state,
               Transport.remote_review_inbox state )
       in
-      let completed = List.map (fun arrival -> Transport.publication_id arrival.publication) arrivals in
-      let deferred = List.map (fun arrival -> Transport.publication_id arrival.publication) deferred_arrivals in
+      let completed =
+        List.map
+          (fun arrival -> Transport.publication_id arrival.publication)
+          arrivals
+      in
+      let deferred =
+        List.map
+          (fun arrival -> Transport.publication_id arrival.publication)
+          deferred_arrivals
+      in
       let review_inbox =
         previous_review_inbox @ deferred
         |> List.filter (fun id -> not (List.mem id completed))
@@ -404,17 +451,21 @@ let receive_transport_batch ~root ~remote ~cursor arrivals =
       let* collaboration =
         Store.collaboration_with_authority_transport ~transport
           ~authority:inspected_authority ~revisions
-          ~local_certificate:(Store.local_certificate existing) ~authorizations ~adoptions
+          ~local_certificate:(Store.local_certificate existing)
+          ~authorizations ~adoptions
         |> Result.map_error (fun error -> Store_error error)
       in
       let* _ = persist_collaborative repository loaded project collaboration in
-      let after_decisions = List.length (Model.projection project).Model.decisions in
+      let after_decisions =
+        List.length (Model.projection project).Model.decisions
+      in
       Ok
         {
           discovered_publications = List.length inspected_arrivals;
           received_revisions =
             List.fold_left
-              (fun count verified -> count + List.length (Package.revisions verified))
+              (fun count verified ->
+                count + List.length (Package.revisions verified))
               0 verified;
           deferred_publications = List.length deferred_arrivals;
           created_decisions = max 0 (after_decisions - before_decisions);

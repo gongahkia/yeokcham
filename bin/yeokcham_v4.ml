@@ -55,7 +55,11 @@ let usage () =
      [--authority EPOCH]\n\
     \  yeokcham receive [--root PATH] --from PATH [--review]\n\
     \  yeokcham bootstrap publish [--root PATH] REMOTE\n\
-    \  yeokcham bootstrap [--root PATH] --remote NAME --url HTTPS_URL \\\n+    \     --repository ID --basis ID --username NAME --draft ID --title TITLE \\\n+    \     --device ID --verify-phrase \"TWELVE WORDS\"\n\
+    \  yeokcham bootstrap [--root PATH] --remote NAME --url HTTPS_URL \
+     --repository ID --basis ID --username NAME --draft ID --title TITLE \
+     --device ID --verify-phrase \"TWELVE WORDS\"\n\
+    \  receipt rule: receive, sync, and bootstrap never scan or materialize\n\
+    \     the working tree; restore is explicit\n\
     \  yeokcham remote add [--root PATH] NAME URL\n\
     \  yeokcham remote remove [--root PATH] NAME\n\
     \  yeokcham remote login [--root PATH] NAME\n\
@@ -1439,31 +1443,45 @@ let run_bootstrap_publish arguments =
     | [] -> count
     | (id, bytes) :: rest ->
         let id = Yeokcham_store.Stored_object_id.to_hex id in
-        Transport_http.put client ~project ~kind:Transport_http.Object ~id ~bytes
+        Transport_http.put client ~project ~kind:Transport_http.Object ~id
+          ~bytes
         |> require_ok Transport_http.error_to_string;
         upload_objects (count + 1) rest
   in
   let uploaded =
-    upload_objects 0 (Package.artifact_objects outbound.Service.bootstrap_artifact)
+    upload_objects 0
+      (Package.artifact_objects outbound.Service.bootstrap_artifact)
   in
-  let manifest = Package.artifact_manifest outbound.Service.bootstrap_artifact in
+  let manifest =
+    Package.artifact_manifest outbound.Service.bootstrap_artifact
+  in
   let manifest_id = Transport.sha256 manifest in
   Transport_http.put client ~project ~kind:Transport_http.Manifest
     ~id:manifest_id ~bytes:manifest
   |> require_ok Transport_http.error_to_string;
   let basis = Bootstrap.encode outbound.Service.bootstrap_basis in
   let basis_id = Bootstrap.id outbound.Service.bootstrap_basis in
-  Transport_http.put client ~project ~kind:Transport_http.Bootstrap
-    ~id:basis_id ~bytes:basis
+  Transport_http.put client ~project ~kind:Transport_http.Bootstrap ~id:basis_id
+    ~bytes:basis
   |> require_ok Transport_http.error_to_string;
   Printf.printf "bootstrap basis %s\n" basis_id;
   Printf.printf "uploaded artifacts %d\n" (uploaded + 2)
 
 let parse_bootstrap arguments =
-  let rec loop root remote url repository basis username draft title device phrase =
-    function
+  let rec loop root remote url repository basis username draft title device
+      phrase = function
     | [] -> (
-        match (remote, url, repository, basis, username, draft, title, device, phrase) with
+        match
+          ( remote,
+            url,
+            repository,
+            basis,
+            username,
+            draft,
+            title,
+            device,
+            phrase )
+        with
         | ( Some remote,
             Some url,
             Some repository,
@@ -1485,32 +1503,50 @@ let parse_bootstrap arguments =
               phrase )
         | _ -> usage ())
     | "--root" :: value :: rest when Option.is_none root ->
-        loop (Some value) remote url repository basis username draft title device phrase rest
+        loop (Some value) remote url repository basis username draft title
+          device phrase rest
     | "--remote" :: value :: rest when Option.is_none remote ->
-        loop root (Some value) url repository basis username draft title device phrase rest
+        loop root (Some value) url repository basis username draft title device
+          phrase rest
     | "--url" :: value :: rest when Option.is_none url ->
-        loop root remote (Some value) repository basis username draft title device phrase rest
+        loop root remote (Some value) repository basis username draft title
+          device phrase rest
     | "--repository" :: value :: rest when Option.is_none repository ->
-        loop root remote url (Some value) basis username draft title device phrase rest
+        loop root remote url (Some value) basis username draft title device
+          phrase rest
     | "--basis" :: value :: rest when Option.is_none basis ->
-        loop root remote url repository (Some value) username draft title device phrase rest
+        loop root remote url repository (Some value) username draft title device
+          phrase rest
     | "--username" :: value :: rest when Option.is_none username ->
-        loop root remote url repository basis (Some value) draft title device phrase rest
+        loop root remote url repository basis (Some value) draft title device
+          phrase rest
     | "--draft" :: value :: rest when Option.is_none draft ->
-        loop root remote url repository basis username (Some value) title device phrase rest
+        loop root remote url repository basis username (Some value) title device
+          phrase rest
     | "--title" :: value :: rest when Option.is_none title ->
-        loop root remote url repository basis username draft (Some value) device phrase rest
+        loop root remote url repository basis username draft (Some value) device
+          phrase rest
     | "--device" :: value :: rest when Option.is_none device ->
-        loop root remote url repository basis username draft title (Some value) phrase rest
+        loop root remote url repository basis username draft title (Some value)
+          phrase rest
     | "--verify-phrase" :: value :: rest when Option.is_none phrase ->
-        loop root remote url repository basis username draft title device (Some value) rest
+        loop root remote url repository basis username draft title device
+          (Some value) rest
     | _ -> usage ()
   in
   loop None None None None None None None None None None arguments
 
 let run_bootstrap arguments =
-  let root, remote_name, url, repository, basis_id, username, draft, title,
-      device, phrase =
+  let ( root,
+        remote_name,
+        url,
+        repository,
+        basis_id,
+        username,
+        draft,
+        title,
+        device,
+        phrase ) =
     parse_bootstrap arguments
   in
   let repository =
@@ -1519,25 +1555,35 @@ let run_bootstrap arguments =
   in
   if not (Transport.valid_digest basis_id) then
     fail "invalid bootstrap basis identifier";
-  let username = parse_identifier "invalid username" Model.Username.of_string username in
-  let initial_draft = parse_identifier "invalid draft identifier" Model.Draft_id.of_string draft in
-  let device_id = parse_identifier "invalid device identifier" Model.Device_id.of_string device in
+  let username =
+    parse_identifier "invalid username" Model.Username.of_string username
+  in
+  let initial_draft =
+    parse_identifier "invalid draft identifier" Model.Draft_id.of_string draft
+  in
+  let device_id =
+    parse_identifier "invalid device identifier" Model.Device_id.of_string
+      device
+  in
   let signing_capability =
     V4_signer.load device_id |> require_ok V4_signer.error_to_string
   in
   let local_device =
     Trust.signing_public_key signing_capability
-    |> Trust.device_of_public_key |> require_ok Trust.error_to_string
+    |> Trust.device_of_public_key
+    |> require_ok Trust.error_to_string
   in
   if not (Model.Device_id.equal device_id (Trust.device_id local_device)) then
     fail "local signing capability does not match --device";
   let token = read_bearer_token () in
   let client =
-    Transport_http.create ~url ~token |> require_ok Transport_http.error_to_string
+    Transport_http.create ~url ~token
+    |> require_ok Transport_http.error_to_string
   in
   let project = Trust.Repository_id.to_string repository in
   let basis =
-    Transport_http.get client ~project ~kind:Transport_http.Bootstrap ~id:basis_id
+    Transport_http.get client ~project ~kind:Transport_http.Bootstrap
+      ~id:basis_id
     |> require_ok Transport_http.error_to_string
   in
   if not (String.equal basis_id (Transport.sha256 basis)) then
@@ -1548,7 +1594,8 @@ let run_bootstrap arguments =
   if not (String.equal basis_id (Bootstrap.id decoded_basis)) then
     fail "bootstrap basis ID does not match canonical bytes";
   let artifact =
-    fetch_artifact_for_manifest client ~project (Bootstrap.manifest decoded_basis)
+    fetch_artifact_for_manifest client ~project
+      (Bootstrap.manifest decoded_basis)
   in
   let status =
     with_transport_staging ~root (fun staging ->
@@ -1565,19 +1612,20 @@ let run_bootstrap arguments =
           Trust.certificates
             (Trust.authority_membership (Bootstrap.authority verified))
           |> List.find_opt (fun certificate ->
-                 Model.Device_id.equal
-                   (Trust.device_id (Trust.certificate_subject certificate))
-                   device_id)
+              Model.Device_id.equal
+                (Trust.device_id (Trust.certificate_subject certificate))
+                device_id)
         in
         let* local_certificate =
           match local_certificate with
           | Some certificate -> Ok (Trust.certificate_id certificate)
-          | None -> Error "device is not enrolled in the bootstrap authority closure"
+          | None ->
+              Error "device is not enrolled in the bootstrap authority closure"
         in
         Service.bootstrap_from_package ~root ~repository ~package ~basis
           ~verify_phrase:phrase ~username ~initial_draft ~title
           ~device:local_device ~local_certificate
-          |> Result.map_error Service.error_to_string)
+        |> Result.map_error Service.error_to_string)
     |> require_ok Fun.id
   in
   Transport_config.add ~root ~name:remote_name ~url
@@ -1585,8 +1633,8 @@ let run_bootstrap arguments =
   Transport_credential.save ~remote:remote_name ~token
   |> require_ok Transport_credential.error_to_string;
   render_status status;
-  Printf.printf "bootstrap verified %s; no working-tree materialization occurred\n"
-    basis_id
+  Printf.printf
+    "bootstrap verified %s; no working-tree materialization occurred\n" basis_id
 
 let upload_outbound client ~project ~root ~remote identity =
   match V4_signer.load (Trust.device_id identity.Service.device) with

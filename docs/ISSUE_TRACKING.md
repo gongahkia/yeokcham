@@ -26,17 +26,23 @@ incomplete-closure evidence recorded there. Its malicious-peer matrix and
 late-review feed-fork retry case now cover the remaining ADR-085 acceptance
 criteria. No local test result alone is a deployment claim.
 
-The resulting V4 backlog is split into atomic issues: verified bootstrap
-[#256](https://github.com/gongahkia/yeokcham/issues/256), relay payload
-encryption [#257](https://github.com/gongahkia/yeokcham/issues/257), relay
-access control [#258](https://github.com/gongahkia/yeokcham/issues/258),
-online authority coordination evaluation
-[#259](https://github.com/gongahkia/yeokcham/issues/259), explicit
-decision-proposal assistance [#260](https://github.com/gongahkia/yeokcham/issues/260),
-advisory background runtime [#261](https://github.com/gongahkia/yeokcham/issues/261),
-and the transport no-working-tree-mutation guardrail
-[#262](https://github.com/gongahkia/yeokcham/issues/262). None may reuse
-retired V1–V3 protocol or runtime formats.
+[#256](https://github.com/gongahkia/yeokcham/issues/256), verified bootstrap,
+and [#262](https://github.com/gongahkia/yeokcham/issues/262), the transport
+no-working-tree-mutation guardrail, are complete. Bootstrap accepts a signed,
+immutable basis from an untrusted relay, validates it before creating local
+state, and only materialises a working tree on a later explicit restore. The
+receipt module owns receive and sync receipt without a snapshot or
+materialisation dependency; the product contract includes a review checklist
+for that boundary.
+
+The remaining V4 backlog is relay payload encryption
+[#257](https://github.com/gongahkia/yeokcham/issues/257), relay access control
+[#258](https://github.com/gongahkia/yeokcham/issues/258), online authority
+coordination evaluation [#259](https://github.com/gongahkia/yeokcham/issues/259),
+explicit decision-proposal assistance
+[#260](https://github.com/gongahkia/yeokcham/issues/260), and advisory
+background runtime [#261](https://github.com/gongahkia/yeokcham/issues/261).
+None may reuse retired V1–V3 protocol or runtime formats.
 
 Future feature proposals need a dedicated issue and ADR before coding when they
 change trust, transport, delivery, snapshot retention, or persistent semantics.

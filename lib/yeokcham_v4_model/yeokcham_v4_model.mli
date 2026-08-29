@@ -214,6 +214,7 @@ val username_for_device : project -> device:Device_id.t -> Username.t option
 val projection : project -> projection
 val export : project -> state
 val import : state -> (project, error) result
+
 val bootstrap :
   state ->
   creator:Device_id.t ->
@@ -221,6 +222,7 @@ val bootstrap :
   initial_draft:Draft_id.t ->
   title:string ->
   (project, error) result
+
 val checkpoint : project -> snapshot:Snapshot_id.t -> project
 val pin : project -> snapshot:Snapshot_id.t -> (project, error) result
 val unpin : project -> snapshot:Snapshot_id.t -> (project, error) result

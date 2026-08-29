@@ -36,6 +36,11 @@ and a receive-first late-review batch containing a parent and two feed-fork
 children. That batch is retried before adoption; every publication remains in
 the review inbox and neither retry changes shared state or the working tree.
 The HTTPS client and HTTP relay listener are built with those core adapters.
+Bootstrap verification adds a canonical `bootstrap-basis-v1` fixture and a
+two-replica path from a source repository through an untrusted relay into a
+fresh target. It rejects wrong root phrases before creating target state and
+only materialises the target working tree after an explicit later `restore`.
+The relay test also proves bootstrap entries are SHA-addressed and create-only.
 The transport suite passes an end-to-end HTTPS fixture: OpenSSL generates an
 ephemeral certificate for a loopback `socat` TLS reverse proxy, while the relay
 remains a separate plain-HTTP backend. The production client continues to use
