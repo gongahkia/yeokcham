@@ -74,6 +74,12 @@ A valid batch atomically publishes V4 state with its cursor, seen-publication
 IDs, announced artifact IDs, and inbox references through the existing
 compare-and-swap head.
 
+Receipt is implemented by a dedicated service boundary with no snapshot scan,
+snapshot materialisation, restore-journal, or working-tree API dependency. It
+may stage, validate, import immutable objects, and advance the collaborative
+state head only. Any proposed receipt-time working-tree operation requires a
+new ADR and sentinel tests that prove its exact scope.
+
 `sync NAME` receives first. After receipt is durable it creates a delta package
 for locally unannounced signed work, uploads object closure then manifest then
 signed publication, and marks it announced only after acknowledgement. Upload
@@ -99,7 +105,7 @@ package exports local transport state and no only copy is mutated in place.
 
 ## Non-goals
 
-Clone/bootstrap, Git protocol compatibility, HTTP/TLS termination by the relay
+General clone, Git protocol compatibility, HTTP/TLS termination by the relay
 process, end-to-end payload encryption, relay-side authorisation policy, online
 authority consensus, automatic merge, daemon scheduling, delivery/CI
 integration, and working-tree mutation are out of scope.

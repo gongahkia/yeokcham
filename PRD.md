@@ -1,6 +1,6 @@
 # Product requirements
 
-## Current milestone: V4 verified signed relay synchronization
+## Current milestone: V4 verified receipt and explicit relay bootstrap
 
 V4 serves one developer and small, explicitly trusted teams. Its required
 vertical slices are complete only when their model transition, durable format,
@@ -32,10 +32,14 @@ failure behaviour, and CLI surface agree.
    verified package closure, preserve feed forks, commit valid receipt and
    local transport bookkeeping together, and report post-receive upload failure
    as partial success.
+10. Bootstrap a new enrolled replica only from an explicit immutable signed
+    basis ID. Verify the complete closure and independently compared root phrase
+    before importing shared history into a fresh local draft; source scratch,
+    credentials, aliases, and working-tree bytes never transfer.
 
 ### Explicit non-goals
 
-No clone/bootstrap, Git bridge, semantic parser or merge, blob GC, durable
+No general clone, Git bridge, semantic parser or merge, blob GC, durable
 `capture=`, immortal restore safety after journal prune, hardware keys,
 external signing agent, macOS/WSL watcher, or CI-backed delivery exists in this
 milestone. The bundled relay is an untrusted byte courier behind an

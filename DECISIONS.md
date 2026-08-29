@@ -18,6 +18,8 @@ The active V4 decisions are:
 - [ADR-085](docs/adr/085-v4-verified-signed-relay-transport.md): signed relay
   publication feeds, staged package receipt, local credential custody, and
   receive-first partial-success semantics.
+- [ADR-086](docs/adr/086-v4-verified-relay-bootstrap.md): explicit signed
+  bootstrap bases for fresh replicas, with a separate receipt boundary.
 
 Earlier product-track ADRs have been removed with their implementations. Git
 history retains their historical record; they are not active architecture.

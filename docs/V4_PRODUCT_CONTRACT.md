@@ -93,6 +93,22 @@ authority closure, compares the exact root phrase, and initializes an already
 enrolled local device. It does not receive package objects or materialise a
 working tree; run `receive` separately.
 
+`bootstrap --remote NAME --url HTTPS_URL --repository ID --basis ID
+--verify-phrase "…"` initializes a new enrolled replica from one explicit
+immutable relay basis. The relay ID is only a locator: the client validates the
+signed basis, its unchanged package-manifest-v1 closure, every shared-history
+snapshot, active publisher, and independently compared root phrase before it
+creates `.yeokcham`. It imports shared changes, signed resolutions, and delivery
+history into one fresh local draft; it imports no source draft, scratch
+checkpoint, pin, username, remote alias, credential, or private key. It neither
+scans nor materialises ordinary files. The bearer token is prompted without echo
+and is saved in the OS credential store only after this verification succeeds.
+
+An existing replica publishes such an immutable basis explicitly with
+`bootstrap publish REMOTE`. The command uploads closure objects, then the
+ordinary package manifest, then the separately signed basis. There is no
+implicit latest-basis selection and no general clone command.
+
 `receive --from PACKAGE` validates the repository root, canonical bytes,
 membership/authority closure, signatures, causal parents, and exact object
 closure in a temporary store. Only then can it import immutable objects and
@@ -140,6 +156,12 @@ upload failure is reported as pending work; it does not roll back received
 records or claim cross-machine atomicity. Sync never materialises or scans the
 working tree.
 
+Both offline `receive` and relay-batch receipt execute through the dedicated
+receipt boundary. That component has no snapshot scanning or materialisation
+dependency and may only validate staged bytes, import verified immutable
+objects, and publish one collaborative state head. Any change to that boundary
+requires an ADR update and working-tree sentinel tests.
+
 ## Persistent-format rules
 
 All records use canonical CBOR and explicit schema versions. Object identity is
@@ -153,7 +175,7 @@ No state transition mutates the only copy in place.
 
 ## Exclusions
 
-There is no clone/bootstrap protocol, blob GC, durable `capture=`, immortal
+There is no general clone protocol, blob GC, durable `capture=`, immortal
 restore safety after journal prune, Git bridge, semantic parser or merge,
 end-to-end payload encryption, relay-side authorization policy,
 hardware/non-exportable signer, signing agent, macOS/WSL watcher, or CI-backed

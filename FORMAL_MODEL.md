@@ -99,3 +99,13 @@ signed resolution applies through `resolve`; valid late records are inbox
 references without receipt. Receipt never changes the working tree. Only after
 durable receipt does upload begin; upload failure leaves received state intact
 and unacknowledged artifacts eligible for retry.
+
+`bootstrap` is not `sync` and does not choose a relay head. A caller names an
+immutable `bootstrap-basis-v1` ID and repository ID. The signed basis binds one
+package manifest and a portable projection containing only shared model state,
+signed records, deliveries, and exact reachable snapshots. The root phrase is
+independently checked before destination mutation. The transition replaces
+source creator/drafts/checkpoints/pins/usernames with one fresh local creator,
+active draft, baseline checkpoint, and local username; shared changes,
+resolutions, and deliveries remain distinct. Neither transition scans or
+materialises the working tree.

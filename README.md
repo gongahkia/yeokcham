@@ -18,7 +18,8 @@ does not read, upgrade, or mutate repositories from earlier product tracks.
   tree before an explicit resolution.
 - Local username registrations for display only. Device identity and authority
   are Ed25519 keys and signed authority epochs, never usernames.
-- Offline directory packages and signed relay publications with complete
+- Offline directory packages, signed relay publications, and explicit signed
+  bootstrap bases with complete
   snapshot closure verification before any destination object or state-head
   update. Receive and sync never materialise a working tree.
 - Multi-administrator enrolment, revocation, atomic local-device rotation,
@@ -36,6 +37,7 @@ yeokcham package create --destination ../outgoing
 yeokcham remote add team https://relay.example.invalid
 yeokcham remote login team
 yeokcham sync team
+yeokcham bootstrap publish team
 ```
 
 `init` prints a 12-word public root-verification phrase and a 24-word recovery
@@ -65,9 +67,12 @@ retry work.
 Linux `watch` is implemented as advisory capture after debounce. Its real
 inotify loop must still be run on Linux; macOS and WSL watchers are not
 implemented. Relay synchronization is available only for already-equivalent
-replicas through an operator-managed HTTPS reverse proxy; the relay is an
+replicas through an operator-managed HTTPS reverse proxy. A new replica instead
+needs an explicit immutable bootstrap basis ID, public repository ID, enrolled
+local device, and independently compared root phrase; it starts with fresh
+local scratch state and never materialises its working tree. The relay is an
 untrusted byte courier and stored payloads are not end-to-end encrypted. There
-is no clone/bootstrap, Git import/export, semantic parsing, CI-backed delivery,
+is no general clone, Git import/export, semantic parsing, CI-backed delivery,
 signing agent, hardware-key support, or blob GC. Those are deliberate future
 work, not hidden product behaviour.
 

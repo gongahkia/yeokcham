@@ -6,9 +6,9 @@ themselves.
 ```
 CLI / Linux watch / platform signer / HTTPS relay client
               │
-       Local_service adapter
+       Local_service adapter / Receipt boundary
               │
- Model ─ Trust ─ Transport publication/feed ─ Package verification ─ Recovery
+ Model ─ Trust ─ Transport publication/feed ─ Package verification ─ Bootstrap ─ Recovery
               │
  V4 state wrapper / canonical CBOR / immutable object store
               │
@@ -23,17 +23,22 @@ object store before immutable import. `Yeokcham_v4_recovery` encrypts only the
 active recovery capability and public authority closure; it never stores a
 normal device private key.
 
-`Yeokcham_v4_local_service` is the only persistent adapter that joins those
-pure layers. It captures snapshots, maintains the compare-and-swap state head,
-obtains caller-provided signing capability from a platform adapter, and never
-allows a collaborative wrapper to be stripped by an ordinary save.
+`Yeokcham_v4_receipt` is the persistent receipt adapter for packages and relay
+batches. It depends on model, trust, package, transport, and store only; it has
+no snapshot scanner or materialiser dependency. `Yeokcham_v4_local_service`
+delegates receive surfaces to it and otherwise captures snapshots, maintains
+the compare-and-swap state head, obtains caller-provided signing capability
+from a platform adapter, and never allows a collaborative wrapper to be
+stripped by an ordinary save.
 
 `Yeokcham_v4_transport` owns canonical signed courier publications and feed
 validation. The relay owns only bounded bearer-authenticated immutable byte
 storage; reverse-proxy TLS, aliases, URLs, and credentials remain outside the
 V4 project model. The transport client stages relay artifacts and delegates
-receipt solely to `Yeokcham_v4_package`; it has no second model or authority
-path.
+receipt solely to the receipt boundary; it has no second model or authority
+path. `Yeokcham_v4_bootstrap` adds a separately signed portable-state basis
+bound to an unchanged package-manifest-v1 closure; it is explicit
+initialization, not a clone protocol.
 
 The unversioned hash, encoding, envelope, store, snapshot, chunking, testkit,
 and watcher modules are V4 foundations. The Linux watcher emits advisory scan

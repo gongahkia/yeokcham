@@ -6,6 +6,7 @@ module Trust = Yeokcham_v4_trust
 module Package = Yeokcham_v4_package
 module Bootstrap = Yeokcham_v4_bootstrap
 module Recovery = Yeokcham_v4_recovery
+module Receipt = Yeokcham_v4_receipt
 module Transport = Yeokcham_v4_transport
 
 module Path_map = Map.Make (struct
@@ -1916,7 +1917,7 @@ let adopt_package_revision ~authority_epoch ~root ~package ~revision
           persist_collaborative repository loaded loaded.Store.project
             collaboration)
 
-let receive_package ~root ~package =
+let _receive_package_pre_receipt ~root ~package =
   with_repository ~root (fun repository loaded ->
       let* existing = require_collaboration loaded in
       match Store.authority existing with
@@ -1984,7 +1985,7 @@ let receive_package ~root ~package =
           in
           persist_collaborative repository loaded project collaboration)
 
-let receive_transport_batch ~root ~remote ~cursor arrivals =
+let _receive_transport_batch_pre_receipt ~root ~remote ~cursor arrivals =
   with_repository ~root (fun repository loaded ->
       let* existing = require_collaboration loaded in
       let* initial_authority =
@@ -2267,6 +2268,53 @@ let receive_transport_batch ~root ~remote ~cursor arrivals =
           created_decisions = max 0 (after_decisions - before_decisions);
           transport_status = status_of_project project;
         })
+
+let error_of_receipt = function
+  | Receipt.Store_error error -> Store_error error
+  | Receipt.Model_error error -> Model_error error
+  | Receipt.Trust_error error -> Trust_error error
+  | Receipt.Package_error error -> Package_error error
+  | Receipt.Transport_error error -> Transport_error error
+  | Receipt.Unsigned_project -> Unsigned_project
+
+let status_of_receipt (status : Receipt.status) =
+  {
+    creator = status.Receipt.creator;
+    active_draft = status.Receipt.active_draft;
+    checkpoint = status.Receipt.checkpoint;
+    shared_changes = status.Receipt.shared_changes;
+    shared_change_count = status.Receipt.shared_change_count;
+    open_decisions = status.Receipt.open_decisions;
+    deliveries = status.Receipt.deliveries;
+    delivery_count = status.Receipt.delivery_count;
+    checkpoints = status.Receipt.checkpoints;
+    usernames = status.Receipt.usernames;
+    uncaptured = status.Receipt.uncaptured;
+  }
+
+let receive_package ~root ~package =
+  Receipt.receive_package ~root ~package
+  |> Result.map status_of_receipt
+  |> Result.map_error error_of_receipt
+
+let receive_transport_batch ~root ~remote ~cursor arrivals =
+  let arrivals : Receipt.transport_arrival list =
+    List.map
+      (fun (arrival : transport_arrival) ->
+        ({ Receipt.publication = arrival.publication; package = arrival.package }
+          : Receipt.transport_arrival))
+      arrivals
+  in
+  Receipt.receive_transport_batch ~root ~remote ~cursor arrivals
+  |> Result.map (fun received ->
+         {
+           discovered_publications = received.Receipt.discovered_publications;
+           received_revisions = received.Receipt.received_revisions;
+           deferred_publications = received.Receipt.deferred_publications;
+           created_decisions = received.Receipt.created_decisions;
+           transport_status = status_of_receipt received.Receipt.transport_status;
+         })
+  |> Result.map_error error_of_receipt
 
 let remove_outbound_package destination =
   let objects = Filename.concat destination "objects" in
