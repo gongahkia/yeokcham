@@ -64,6 +64,7 @@ val create_with_authority :
   revisions:Trust.signed_revision list ->
   authorizations:Trust.authorization list ->
   adoptions:Trust.adoption list ->
+  ?extra_snapshots:Model.Snapshot_id.t list ->
   (unit, error) result
 (** Writes a package with the complete public authority closure that verifies
     its epoch-bound revisions and any exact exception records. *)
@@ -129,6 +130,12 @@ val validate_with_authority :
 (** Performs authority inspection and exact object/snapshot closure validation
     in staging without applying a model transition or importing an object. It is
     used for a review-deferred relay package. *)
+
+val validate_snapshot_closure :
+  package:string -> snapshots:Model.Snapshot_id.t list -> (unit, error) result
+(** Validates additional exact snapshot roots against an already versioned
+    package artifact in an isolated store. Bootstrap uses this for delivery
+    snapshots that are intentionally not revision records. *)
 
 val apply_revisions : Model.project -> verified -> (Model.project, error) result
 (** Adds verified shared records through the pure V4 receive transition and

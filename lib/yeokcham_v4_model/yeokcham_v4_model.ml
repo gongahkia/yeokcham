@@ -771,6 +771,36 @@ let import state =
     | [] -> invalid "project has no active draft"
     | _ -> invalid "project has more than one active draft"
 
+let bootstrap state ~creator ~username ~initial_draft ~title =
+  let title = if nonempty_title title then title else "untitled draft" in
+  let erase_source_draft (change : shared_change) =
+    { change with source_draft = None }
+  in
+  let state =
+    {
+      state_creator = creator;
+      state_baseline = state.state_baseline;
+      state_active_draft = initial_draft;
+      state_drafts =
+        [
+          {
+            draft_id = initial_draft;
+            title;
+            state = Active;
+            latest_checkpoint = state.state_baseline;
+            shared_change = None;
+          };
+        ];
+      state_checkpoints = state.state_checkpoints;
+      state_changes = List.map erase_source_draft state.state_changes;
+      state_resolutions = state.state_resolutions;
+      state_deliveries = state.state_deliveries;
+      state_pins = [];
+      state_usernames = [ { username_device = creator; username } ];
+    }
+  in
+  import state
+
 let share_active project revision =
   let active = active_draft project in
   match active.shared_change with

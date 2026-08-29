@@ -214,6 +214,17 @@ val username_for_device : project -> device:Device_id.t -> Username.t option
 val projection : project -> projection
 val export : project -> state
 val import : state -> (project, error) result
+val bootstrap :
+  state ->
+  creator:Device_id.t ->
+  username:Username.t ->
+  initial_draft:Draft_id.t ->
+  title:string ->
+  (project, error) result
+(** Rebuilds a portable shared-history projection as a fresh local project.
+    Source drafts, pins, username registrations, and source-draft links are
+    deliberately discarded. The supplied device owns one new active draft at
+    the imported delivery baseline; no working tree is inspected or changed. *)
 val checkpoint : project -> snapshot:Snapshot_id.t -> project
 val pin : project -> snapshot:Snapshot_id.t -> (project, error) result
 val unpin : project -> snapshot:Snapshot_id.t -> (project, error) result

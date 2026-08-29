@@ -525,7 +525,7 @@ let collect_snapshot_closure source set snapshot =
     in
     collect_tree_closure source set (Snapshot.Snapshot.root snapshot)
 
-let source_objects source signed_revisions =
+let source_objects ?(extra_snapshots = []) source signed_revisions =
   let rec collect set = function
     | [] -> Ok set
     | signed :: rest ->
@@ -539,6 +539,13 @@ let source_objects source signed_revisions =
         collect set rest
   in
   let* objects = collect Object_set.empty signed_revisions in
+  let rec collect_extra objects = function
+    | [] -> Ok objects
+    | snapshot :: rest ->
+        let* objects = collect_snapshot_closure source objects snapshot in
+        collect_extra objects rest
+  in
+  let* objects = collect_extra objects extra_snapshots in
   let parsed =
     Object_set.elements objects
     |> List.map (fun id ->
@@ -558,8 +565,8 @@ let create ~source:_ ~destination:_ ~membership:_ ~revisions:_ =
     (Invalid_package
        "authority-less package creation was retired before V4 release")
 
-let create_with_authority ~source ~destination ~authority ~revisions
-    ~authorizations ~adoptions =
+let create_with_authority ?(extra_snapshots = []) ~source ~destination
+    ~authority ~revisions ~authorizations ~adoptions =
   if Sys.file_exists destination then Error (Destination_exists destination)
   else
     let* authority =
@@ -569,7 +576,7 @@ let create_with_authority ~source ~destination ~authority ~revisions
       |> Result.map_error (fun error -> Trust_error error)
     in
     let* () = ensure_unique_signed_revisions revisions in
-    let* object_ids = source_objects source revisions in
+    let* object_ids = source_objects ~extra_snapshots source revisions in
     let* manifest =
       manifest_bytes ~authority ~revisions ~authorizations ~adoptions
         ~object_ids
@@ -956,6 +963,33 @@ let validate_with_authority ~package ~authority:expected_authority =
       let* () = stage objects in
       let* () = verify_closure staging inspected.verified_revisions in
       Ok inspected)
+
+let validate_snapshot_closure ~package ~snapshots =
+  let* manifest = read_file (package_path package manifest_name) in
+  let* manifest = decode_manifest manifest in
+  let* objects = package_object_bytes package manifest.manifest_object_ids in
+  with_staging (fun staging_root ->
+      let* staging =
+        Store.init ~root:staging_root
+        |> Result.map_error (fun error -> Store_error error)
+      in
+      let rec stage = function
+        | [] -> Ok ()
+        | (_, object_) :: rest ->
+            let* _ =
+              Store.put staging object_
+              |> Result.map_error (fun error -> Store_error error)
+            in
+            stage rest
+      in
+      let* () = stage objects in
+      let rec validate = function
+        | [] -> Ok ()
+        | snapshot :: rest ->
+            let* () = validate_snapshot staging snapshot in
+            validate rest
+      in
+      validate snapshots)
 
 let prepare_with_authority ~package ~authority:expected_authority
     ~known_adoptions ~project =
