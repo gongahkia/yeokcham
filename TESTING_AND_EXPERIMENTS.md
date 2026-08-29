@@ -32,13 +32,22 @@ Transport verification covers canonical publication and local-state goldens,
 generated feed validation, same-publisher feed forks, create-only relay
 pagination and negative listener requests, atomic two-replica receipt,
 idempotent replay, incomplete-closure rejection, signed-resolution receipt,
-and a late-revoked record entering the review inbox without changing the
-model. The HTTPS client and HTTP relay listener are built with those core
-adapters. The transport suite passes an end-to-end HTTPS fixture: OpenSSL
-generates an ephemeral certificate for a loopback `socat` TLS reverse proxy,
-while the relay remains a separate plain-HTTP backend. The production client
-continues to use its default trust store; the fixture's `--cacert` path is
-available only when the explicit `YEOKCHAM_V4_TEST_TRANSPORT=1` switch is set.
+and a receive-first late-review batch containing a parent and two feed-fork
+children. That batch is retried before adoption; every publication remains in
+the review inbox and neither retry changes shared state or the working tree.
+The HTTPS client and HTTP relay listener are built with those core adapters.
+The transport suite passes an end-to-end HTTPS fixture: OpenSSL generates an
+ephemeral certificate for a loopback `socat` TLS reverse proxy, while the relay
+remains a separate plain-HTTP backend. The production client continues to use
+its default trust store; the fixture's `--cacert` path is available only when
+the explicit `YEOKCHAM_V4_TEST_TRANSPORT=1` switch is set.
+
+A separate malicious TLS peer supplies corrupt publication, manifest, and
+object bytes; an absent closure object; a wrong-repository publication; a
+publication under the wrong route ID; and a missing causal parent. Each case
+proves the peer request reached its injected response and leaves the local
+state head, destination object count, transport cursor, and working tree
+unchanged.
 
 The same fixture runs a two-replica `sync` test that injects a test-only failure
 before the first outbound PUT. It proves that received work, its cursor, and

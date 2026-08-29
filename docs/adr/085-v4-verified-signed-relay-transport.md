@@ -118,10 +118,13 @@ integration, and working-tree mutation are out of scope.
   encodings; and
 - `opam exec -- dune build @all` and `opam exec -- dune runtest`.
 
-The local suite includes HTTPS reverse-proxy, post-receive upload-interruption,
-feed-fork, signed-resolution, and incomplete-closure cases. The remaining
-malformed-input and late-review/retry combinations remain closure criteria for
-the issue.
+The local suite includes HTTPS reverse-proxy, post-receive upload interruption
+and retry, feed-fork, signed-resolution, incomplete-closure, and malicious-peer
+cases. The malicious peer serves corrupt publication, manifest, and object
+bytes; a missing closure object; wrong repository and route IDs; and a causal
+parent failure. Each asserts unchanged destination state head, object count,
+cursor, and working tree. A receive-first local-service batch also retains a
+late-review parent and two feed-fork children across a retry before adoption.
 
 ## References
 

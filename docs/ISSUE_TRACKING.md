@@ -19,9 +19,10 @@ The Linux watcher loop passed in the latest local `dune runtest` on Fedora 43;
 that result is recorded in `TESTING_AND_EXPERIMENTS.md` and is not transport
 evidence. #246 has local HTTPS reverse-proxy, post-receive
 upload-interruption/retry, feed-fork, signed-resolution, and
-incomplete-closure evidence recorded there. It remains open until the remaining
-ADR-085 malformed-input and late-review/retry combinations pass; no local test
-result alone is a deployment claim.
+incomplete-closure evidence recorded there. Its malicious-peer matrix and
+late-review feed-fork retry case now cover the remaining ADR-085 acceptance
+criteria; the issue is ready to close after its final documented verification.
+No local test result alone is a deployment claim.
 
 Future feature proposals need a dedicated issue and ADR before coding when they
 change trust, transport, delivery, snapshot retention, or persistent semantics.

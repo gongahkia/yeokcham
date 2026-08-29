@@ -58,6 +58,7 @@
   yeokcham_testkit
   yeokcham_store
   yeokcham_v4_local_service
+  yeokcham_encoding
   yeokcham_v4_package
   yeokcham_v4_relay
   yeokcham_v4_relay_http

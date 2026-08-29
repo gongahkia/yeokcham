@@ -1,4 +1,5 @@
 module Golden = Yeokcham_testkit.Golden_fixture
+module Encoding = Yeokcham_encoding
 module Model = Yeokcham_v4_model
 module Trust = Yeokcham_v4_trust
 module Transport = Yeokcham_v4_transport
@@ -482,6 +483,158 @@ let with_https_relay run =
           let project = Trust.Repository_id.to_string (repository ()) in
           wait_for_https_relay client project 100;
           run client project ("https://127.0.0.1:" ^ string_of_int proxy_port)))
+
+let header_is_complete bytes =
+  let rec loop index =
+    if index + 3 >= String.length bytes then false
+    else if String.sub bytes index 4 = "\r\n\r\n" then true
+    else loop (index + 1)
+  in
+  loop 0
+
+let read_http_headers descriptor =
+  let buffer = Buffer.create 1024 in
+  let scratch = Bytes.create 1024 in
+  let rec loop () =
+    if Buffer.length buffer > 16 * 1024 then None
+    else
+      match Unix.read descriptor scratch 0 (Bytes.length scratch) with
+      | 0 -> None
+      | count ->
+          Buffer.add_subbytes buffer scratch 0 count;
+          let bytes = Buffer.contents buffer in
+          if header_is_complete bytes then Some bytes else loop ()
+  in
+  loop ()
+
+let request_target request =
+  match String.split_on_char '\n' request with
+  | line :: _ -> (
+      match String.trim line |> String.split_on_char ' ' with
+      | _method :: target :: _ -> target
+      | _ -> "")
+  | [] -> ""
+
+let write_http_response descriptor status body =
+  let reason = if status = 200 then "OK" else "Not Found" in
+  write_all descriptor
+    (Printf.sprintf
+       "HTTP/1.1 %d %s\r\nContent-Length: %d\r\nConnection: close\r\n\r\n"
+       status reason (String.length body));
+  write_all descriptor body
+
+let append_request path target =
+  let descriptor =
+    Unix.openfile path [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_APPEND ] 0o600
+  in
+  Fun.protect
+    ~finally:(fun () -> close_noerr descriptor)
+    (fun () -> write_all descriptor (target ^ "\n"))
+
+let serve_malicious_backend ~port ~requests respond =
+  let listener = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
+  Fun.protect
+    ~finally:(fun () -> close_noerr listener)
+    (fun () ->
+      Unix.setsockopt listener Unix.SO_REUSEADDR true;
+      Unix.bind listener (Unix.ADDR_INET (Unix.inet_addr_loopback, port));
+      Unix.listen listener 16;
+      let rec loop remaining =
+        if remaining = 0 then ()
+        else
+          let descriptor, _ = Unix.accept listener in
+          Fun.protect
+            ~finally:(fun () -> close_noerr descriptor)
+            (fun () ->
+              match read_http_headers descriptor with
+              | None -> ()
+              | Some request ->
+                  let target = request_target request in
+                  append_request requests target;
+                  let status, body = respond target in
+                  write_http_response descriptor status body);
+          loop (remaining - 1)
+      in
+      loop max_int)
+
+let with_malicious_https_server ~respond run =
+  let openssl = "/usr/bin/openssl" in
+  let socat = "/usr/bin/socat" in
+  if not (Sys.file_exists openssl && Sys.file_exists socat) then
+    Alcotest.fail
+      "malicious HTTPS transport tests require /usr/bin/openssl and \
+       /usr/bin/socat";
+  with_directory "yeokcham-v4-malicious-https-" (fun root ->
+      let certificate = Filename.concat root "relay.crt" in
+      let private_key = Filename.concat root "relay.key" in
+      command_succeeds openssl
+        [
+          "req";
+          "-x509";
+          "-newkey";
+          "rsa:2048";
+          "-nodes";
+          "-keyout";
+          private_key;
+          "-out";
+          certificate;
+          "-days";
+          "1";
+          "-subj";
+          "/CN=127.0.0.1";
+          "-addext";
+          "subjectAltName=IP:127.0.0.1";
+        ];
+      let backend_port = available_loopback_port () in
+      let proxy_port = available_loopback_port () in
+      let requests = Filename.concat root "requests" in
+      let backend =
+        match Unix.fork () with
+        | 0 ->
+            serve_malicious_backend ~port:backend_port ~requests respond;
+            exit 0
+        | process -> process
+      in
+      let proxy =
+        Unix.create_process socat
+          [|
+            socat;
+            "OPENSSL-LISTEN:" ^ string_of_int proxy_port ^ ",cert="
+            ^ certificate ^ ",key=" ^ private_key ^ ",verify=0,reuseaddr,fork";
+            "TCP:127.0.0.1:" ^ string_of_int backend_port;
+          |]
+          Unix.stdin Unix.stdout Unix.stderr
+      in
+      let saved_environment =
+        [
+          "YEOKCHAM_V4_TEST_TRANSPORT";
+          "YEOKCHAM_V4_TEST_TRANSPORT_CA_BUNDLE";
+          "YEOKCHAM_V4_TEST_TRANSPORT_TOKEN";
+          "YEOKCHAM_V4_TEST_TRANSPORT_FAIL_PUT";
+        ]
+        |> List.map (fun name -> (name, Sys.getenv_opt name))
+      in
+      Fun.protect
+        ~finally:(fun () ->
+          terminate proxy;
+          terminate backend;
+          List.iter
+            (fun (name, value) ->
+              Unix.putenv name (Option.value ~default:"" value))
+            saved_environment)
+        (fun () ->
+          Unix.putenv "YEOKCHAM_V4_TEST_TRANSPORT" "1";
+          Unix.putenv "YEOKCHAM_V4_TEST_TRANSPORT_CA_BUNDLE" certificate;
+          Unix.putenv "YEOKCHAM_V4_TEST_TRANSPORT_TOKEN" "test-relay-token";
+          let client =
+            Transport_http.create
+              ~url:("https://127.0.0.1:" ^ string_of_int proxy_port)
+              ~token:"test-relay-token"
+            |> require_ok Transport_http.error_to_string
+          in
+          let project = Trust.Repository_id.to_string (repository ()) in
+          wait_for_https_relay client project 100;
+          run ~requests ("https://127.0.0.1:" ^ string_of_int proxy_port)))
 
 let https_client_reaches_relay_through_tls_reverse_proxy () =
   with_https_relay (fun client project _url ->
@@ -978,6 +1131,251 @@ let incomplete_remote_closure_leaves_the_replica_unchanged () =
                    (Filename.concat destination "main.ml")
                    In_channel.input_all))))
 
+let malicious_relay_inputs_leave_the_replica_unchanged () =
+  with_directory "yeokcham-v4-malicious-sync-" (fun parent ->
+      with_test_signer (fun signer_directory ->
+          let source, destination, administrator_capability, member_capability =
+            source_and_destination parent
+          in
+          Out_channel.with_open_bin (Filename.concat source "main.ml")
+            (fun channel ->
+              Out_channel.output_string channel "let remote = 2\n");
+          Service.share_signed ~authority_epoch:None ~root:source
+            ~change:
+              (Model.Change_id.of_string "change-malicious" |> Result.get_ok)
+            ~revision:
+              (Model.Revision_id.of_string "revision-malicious" |> Result.get_ok)
+            ~signing_capability:administrator_capability
+          |> require_ok Service.error_to_string
+          |> ignore;
+          let outbound =
+            Service.prepare_transport_outbound ~root:source ~remote:"team"
+              ~signing_capability:administrator_capability
+            |> require_ok Service.error_to_string
+            |> Option.get
+          in
+          let publication = outbound.Service.outbound_publication in
+          let artifact = outbound.Service.outbound_artifact in
+          let source_identity =
+            Service.identity ~root:source |> require_ok Service.error_to_string
+          in
+          let manifest = Package.artifact_manifest artifact in
+          let first_object_id =
+            match Package.artifact_objects artifact with
+            | (id, _) :: _ -> Object_store.Stored_object_id.to_hex id
+            | [] ->
+                Alcotest.fail "transport artifact unexpectedly has no objects"
+          in
+          let project = Trust.Repository_id.to_string (repository ()) in
+          let base = "/v1/repositories/" ^ project in
+          let publication_page id =
+            Encoding.array
+              [
+                Encoding.array [ Encoding.text id |> Result.get_ok ]
+                |> Result.get_ok;
+                Encoding.null;
+              ]
+            |> Result.get_ok |> Encoding.encode
+          in
+          let reply_for_artifact ~listed_id ~publication ~manifest ~object_reply
+              target =
+            if String.starts_with ~prefix:(base ^ "/publications?") target then
+              (200, publication_page listed_id)
+            else if String.equal target (base ^ "/publications/" ^ listed_id)
+            then (200, Transport.encode_publication publication)
+            else if
+              String.equal target
+                (base ^ "/manifests/"
+                ^ Transport.publication_manifest publication)
+            then (200, manifest)
+            else if String.starts_with ~prefix:(base ^ "/objects/") target then
+              object_reply target
+            else (404, "")
+          in
+          let same_publisher ~repository ~parents ~manifest =
+            Transport.create_publication ~repository
+              ~publisher:source_identity.Service.device
+              ~certificate:(Transport.publication_certificate publication)
+              ~parents ~manifest ~signing_capability:administrator_capability
+            |> require_ok Transport.error_to_string
+          in
+          let corrupt_publication = "\255" in
+          let corrupt_manifest = "\255" in
+          let wrong_route_id = Transport.sha256 "announced route ID" in
+          let wrong_repository =
+            Trust.Repository_id.of_string
+              "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+            |> Result.get_ok
+          in
+          let wrong_repository_publication =
+            same_publisher ~repository:wrong_repository ~parents:[]
+              ~manifest:(Transport.publication_manifest publication)
+          in
+          let corrupt_manifest_publication =
+            same_publisher ~repository:(repository ()) ~parents:[]
+              ~manifest:(Transport.sha256 corrupt_manifest)
+          in
+          let causal_parent_publication =
+            same_publisher ~repository:(repository ())
+              ~parents:[ Transport.sha256 "missing causal parent" ]
+              ~manifest:(Transport.publication_manifest publication)
+          in
+          let cases =
+            [
+              ( "corrupt-publication",
+                base ^ "/publications/" ^ Transport.sha256 corrupt_publication,
+                fun target ->
+                  if String.starts_with ~prefix:(base ^ "/publications?") target
+                  then
+                    ( 200,
+                      publication_page (Transport.sha256 corrupt_publication) )
+                  else if
+                    String.equal target
+                      (base ^ "/publications/"
+                      ^ Transport.sha256 corrupt_publication)
+                  then (200, corrupt_publication)
+                  else (404, "") );
+              ( "wrong-publication-route",
+                base ^ "/publications/" ^ wrong_route_id,
+                reply_for_artifact ~listed_id:wrong_route_id ~publication
+                  ~manifest ~object_reply:(fun _ -> (404, "")) );
+              ( "wrong-repository",
+                base ^ "/manifests/"
+                ^ Transport.publication_manifest wrong_repository_publication,
+                reply_for_artifact
+                  ~listed_id:
+                    (Transport.publication_id wrong_repository_publication)
+                  ~publication:wrong_repository_publication ~manifest
+                  ~object_reply:(fun target ->
+                    let id =
+                      String.sub target
+                        (String.length (base ^ "/objects/"))
+                        (String.length target
+                        - String.length (base ^ "/objects/"))
+                    in
+                    match
+                      List.find_opt
+                        (fun (object_id, _) ->
+                          String.equal
+                            (Object_store.Stored_object_id.to_hex object_id)
+                            id)
+                        (Package.artifact_objects artifact)
+                    with
+                    | Some (_, bytes) -> (200, bytes)
+                    | None -> (404, "")) );
+              ( "corrupt-manifest",
+                base ^ "/manifests/"
+                ^ Transport.publication_manifest corrupt_manifest_publication,
+                reply_for_artifact
+                  ~listed_id:
+                    (Transport.publication_id corrupt_manifest_publication)
+                  ~publication:corrupt_manifest_publication
+                  ~manifest:corrupt_manifest ~object_reply:(fun _ -> (404, ""))
+              );
+              ( "corrupt-object",
+                base ^ "/objects/" ^ first_object_id,
+                reply_for_artifact
+                  ~listed_id:(Transport.publication_id publication)
+                  ~publication ~manifest ~object_reply:(fun _ ->
+                    (200, "corrupt object")) );
+              ( "missing-closure-object",
+                base ^ "/objects/" ^ first_object_id,
+                reply_for_artifact
+                  ~listed_id:(Transport.publication_id publication)
+                  ~publication ~manifest ~object_reply:(fun _ -> (404, "")) );
+              ( "causal-parent",
+                base ^ "/objects/" ^ first_object_id,
+                reply_for_artifact
+                  ~listed_id:
+                    (Transport.publication_id causal_parent_publication)
+                  ~publication:causal_parent_publication ~manifest
+                  ~object_reply:(fun target ->
+                    let id =
+                      String.sub target
+                        (String.length (base ^ "/objects/"))
+                        (String.length target
+                        - String.length (base ^ "/objects/"))
+                    in
+                    match
+                      List.find_opt
+                        (fun (object_id, _) ->
+                          String.equal
+                            (Object_store.Stored_object_id.to_hex object_id)
+                            id)
+                        (Package.artifact_objects artifact)
+                    with
+                    | Some (_, bytes) -> (200, bytes)
+                    | None -> (404, "")) );
+            ]
+          in
+          store_test_signer signer_directory member_capability;
+          List.iter
+            (fun (name, expected_request, respond) ->
+              with_malicious_https_server ~respond (fun ~requests url ->
+                  let remote = "malformed-" ^ name in
+                  Transport_config.add ~root:destination ~name:remote ~url
+                  |> require_ok Transport_config.error_to_string;
+                  let destination_repository =
+                    Store.open_repository ~root:destination
+                    |> require_ok Store.error_to_string
+                  in
+                  let before_loaded =
+                    Store.load destination_repository
+                    |> require_ok Store.error_to_string
+                  in
+                  let before_objects =
+                    Object_store.list_objects
+                      (Store.underlying_store destination_repository)
+                    |> require_ok Object_store.error_to_string
+                    |> List.length
+                  in
+                  let before_cursor =
+                    Service.transport_cursor ~root:destination ~remote
+                    |> require_ok Service.error_to_string
+                  in
+                  let _output, _errors, status =
+                    run_cli [ "sync"; "--root"; destination; remote ]
+                  in
+                  require_cli_failure ("malicious relay " ^ name) status;
+                  let after_loaded =
+                    Store.load destination_repository
+                    |> require_ok Store.error_to_string
+                  in
+                  let after_objects =
+                    Object_store.list_objects
+                      (Store.underlying_store destination_repository)
+                    |> require_ok Object_store.error_to_string
+                    |> List.length
+                  in
+                  let after_cursor =
+                    Service.transport_cursor ~root:destination ~remote
+                    |> require_ok Service.error_to_string
+                  in
+                  Alcotest.(check string)
+                    (name ^ " leaves the mutable state head unchanged")
+                    (Object_store.Stored_object_id.to_hex
+                       before_loaded.Store.object_id)
+                    (Object_store.Stored_object_id.to_hex
+                       after_loaded.Store.object_id);
+                  Alcotest.(check int)
+                    (name ^ " imports no destination object")
+                    before_objects after_objects;
+                  Alcotest.(check (option string))
+                    (name ^ " changes no transport cursor")
+                    before_cursor after_cursor;
+                  Alcotest.(check string)
+                    (name ^ " leaves the working tree untouched")
+                    "let version = 1\n"
+                    (In_channel.with_open_bin
+                       (Filename.concat destination "main.ml")
+                       In_channel.input_all);
+                  Alcotest.(check bool)
+                    (name ^ " reaches its malicious relay response")
+                    true
+                    ( In_channel.with_open_bin requests In_channel.input_all
+                    |> fun observed -> contains observed expected_request )))
+            cases))
+
 let sync_receives_signed_resolutions_as_decision_resolutions () =
   with_https_relay (fun client project url ->
       with_directory "yeokcham-v4-resolution-sync-" (fun parent ->
@@ -1155,6 +1553,8 @@ let () =
             `Slow sync_retains_all_publications_in_a_feed_fork;
           Alcotest.test_case "incomplete relay closure cannot mutate a replica"
             `Slow incomplete_remote_closure_leaves_the_replica_unchanged;
+          Alcotest.test_case "malicious relay inputs cannot mutate a replica"
+            `Slow malicious_relay_inputs_leave_the_replica_unchanged;
           Alcotest.test_case "sync preserves signed resolution purpose" `Slow
             sync_receives_signed_resolutions_as_decision_resolutions;
         ] );

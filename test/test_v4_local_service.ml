@@ -1532,7 +1532,7 @@ let late_package_review_retains_feed_forks_across_retry_before_adoption () =
       write_file source "main.ml" "let version = 3\n";
       ignore
         (Service.share_signed ~authority_epoch:None ~root:source
-           ~change:(change "change-late-second")
+           ~change:(change "change-late")
            ~revision:(revision "revision-late-second")
            ~signing_capability:root_capability
         |> require_ok Service.error_to_string);
@@ -1574,9 +1574,7 @@ let late_package_review_retains_feed_forks_across_retry_before_adoption () =
         |> require_ok Transport.error_to_string
       in
       let left_publication = child_publication ~artifact in
-      let right_publication =
-        child_publication ~artifact:second_artifact
-      in
+      let right_publication = child_publication ~artifact:second_artifact in
       let arrivals =
         [
           { Service.publication = root_publication; package };
@@ -1592,7 +1590,8 @@ let late_package_review_retains_feed_forks_across_retry_before_adoption () =
       in
       let deferred =
         Service.receive_transport_batch ~root:destination ~remote:"team"
-          ~cursor:(Some (Transport.publication_id right_publication)) arrivals
+          ~cursor:(Some (Transport.publication_id right_publication))
+          arrivals
         |> require_ok Service.error_to_string
       in
       Alcotest.(check int)
@@ -1631,16 +1630,18 @@ let late_package_review_retains_feed_forks_across_retry_before_adoption () =
         review_inbox;
       let retry =
         Service.receive_transport_batch ~root:destination ~remote:"team"
-          ~cursor:(Some (Transport.publication_id right_publication)) arrivals
+          ~cursor:(Some (Transport.publication_id right_publication))
+          arrivals
         |> require_ok Service.error_to_string
       in
       Alcotest.(check int)
         "retry revisits every deferred fork rather than selecting a head" 3
         retry.Service.discovered_publications;
-      Alcotest.(check int) "retry still applies no late revision" 0
+      Alcotest.(check int)
+        "retry still applies no late revision" 0
         retry.Service.received_revisions;
-      Alcotest.(check int) "retry keeps every fork deferred" 3
-        retry.Service.deferred_publications;
+      Alcotest.(check int)
+        "retry keeps every fork deferred" 3 retry.Service.deferred_publications;
       Alcotest.(check int)
         "retry preserves the shared model" 0
         retry.Service.transport_status.Service.shared_change_count;
@@ -1756,8 +1757,7 @@ let () =
             `Quick
             authority_forks_require_named_branch_actions_and_explicit_reconciliation;
           Alcotest.test_case
-            "late review retains feed forks across retry before adoption"
-            `Quick
+            "late review retains feed forks across retry before adoption" `Quick
             late_package_review_retains_feed_forks_across_retry_before_adoption;
         ] );
     ]
