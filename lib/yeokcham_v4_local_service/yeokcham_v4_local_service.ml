@@ -45,6 +45,13 @@ type status = {
   uncaptured : bool;
 }
 
+type inspection_state = {
+  inspection_project : Model.project;
+  inspection_signed_revisions : Trust.signed_revision list;
+  inspection_authority : Trust.authority option;
+  inspection_review_publications : string list;
+}
+
 type identity = {
   repository : Trust.Repository_id.t;
   device : Trust.device;
@@ -648,6 +655,32 @@ let status ~root =
         not (Model.Snapshot_id.equal active.Model.latest_checkpoint observed)
       in
       Ok (status_of_project ~uncaptured loaded.Store.project))
+
+let inspection_state ~root =
+  with_repository ~root (fun _ loaded ->
+      let ( inspection_signed_revisions,
+            inspection_authority,
+            inspection_review_publications ) =
+        match loaded.Store.collaboration with
+        | None -> ([], None, [])
+        | Some collaboration ->
+            let review_publications =
+              Store.transport collaboration
+              |> Transport.remotes
+              |> List.concat_map Transport.remote_review_inbox
+              |> List.sort_uniq String.compare
+            in
+            ( Store.signed_revisions collaboration,
+              Store.authority collaboration,
+              review_publications )
+      in
+      Ok
+        {
+          inspection_project = loaded.Store.project;
+          inspection_signed_revisions;
+          inspection_authority;
+          inspection_review_publications;
+        })
 
 let identity ~root =
   with_repository ~root (fun _ loaded ->

@@ -3,6 +3,7 @@ module Service = Yeokcham_v4_local_service
 module Trust = Yeokcham_v4_trust
 module Package = Yeokcham_v4_package
 module Bootstrap = Yeokcham_v4_bootstrap
+module Inspection = Yeokcham_v4_inspection
 module Recovery = Yeokcham_v4_recovery
 module Transport = Yeokcham_v4_transport
 module Transport_config = Yeokcham_v4_transport_config
@@ -23,6 +24,8 @@ let usage () =
     \     --device ID --from PATH --verify-phrase \"TWELVE WORDS\"\n\
     \  yeokcham save [--root PATH]\n\
     \  yeokcham status [--root PATH]\n\
+    \  yeokcham log [--root PATH]\n\
+    \  yeokcham graph [--root PATH] [--authority]\n\
     \  yeokcham device create\n\
     \  yeokcham device show [--root PATH]\n\
     \  yeokcham device enroll [--root PATH] --device ID --public-key HEX \
@@ -392,6 +395,46 @@ let run_save arguments =
 let run_status arguments =
   let root = parse_root arguments in
   Service.status ~root |> require_ok Service.error_to_string |> render_status
+
+let inspection_width () =
+  match Option.bind (Sys.getenv_opt "COLUMNS") int_of_string_opt with
+  | Some width when width >= 40 -> width
+  | Some _ | None -> 80
+
+let inspection_state root =
+  let state =
+    Service.inspection_state ~root |> require_ok Service.error_to_string
+  in
+  Inspection.state ~project:state.Service.inspection_project
+    ~signed_revisions:state.Service.inspection_signed_revisions
+    ~authority:state.Service.inspection_authority
+    ~review_publications:state.Service.inspection_review_publications
+
+let run_log arguments =
+  let root = parse_root arguments in
+  inspection_state root
+  |> Inspection.render_log ~width:(inspection_width ())
+  |> print_string
+
+let parse_graph arguments =
+  let rec loop root authority = function
+    | [] -> (Option.value root ~default:default_root, authority)
+    | "--root" :: value :: rest when Option.is_none root ->
+        loop (Some value) authority rest
+    | "--authority" :: rest when not authority -> loop root true rest
+    | _ -> usage ()
+  in
+  loop None false arguments
+
+let run_graph arguments =
+  let root, authority = parse_graph arguments in
+  let state = inspection_state root in
+  let width = inspection_width () in
+  if authority then
+    match Inspection.render_authority_graph ~width state with
+    | Some output -> print_string output
+    | None -> fail "authority graph requires signed authority state"
+  else Inspection.render_work_graph ~width state |> print_string
 
 let run_device_create arguments =
   match arguments with
@@ -1932,6 +1975,8 @@ let () =
   | _ :: "join" :: arguments -> run_join arguments
   | _ :: "save" :: arguments -> run_save arguments
   | _ :: "status" :: arguments -> run_status arguments
+  | _ :: "log" :: arguments -> run_log arguments
+  | _ :: "graph" :: arguments -> run_graph arguments
   | _ :: "device" :: "create" :: arguments -> run_device_create arguments
   | _ :: "device" :: "show" :: arguments -> run_device_show arguments
   | _ :: "device" :: "enroll" :: arguments -> run_device_enroll arguments

@@ -1,0 +1,12 @@
+delivery delivery-one
+  author-device device-alice
+  display-username "alice"
+  created-at 10
+  snapshot snapshot-delivery-one
+  includes revision-alpha
+delivery delivery-two
+  author-device device-alice
+  display-username "alice"
+  created-at 20
+  snapshot snapshot-delivery-two
+  includes revision-beta

@@ -38,6 +38,12 @@ for that boundary. Scoped relay access uses operator-local repository read/write
 credentials with finite lifetime, rotation, and revocation; it does not change
 authority, package, publication, or receipt semantics.
 
+[#255](https://github.com/gongahkia/yeokcham/issues/255), honest V4 terminal
+inspection, is complete. `log` and `graph` are pure projections of persisted
+work; `graph --authority` renders the epoch DAG separately. Their stable plain
+text output exposes unresolved decisions and concurrent heads without creating
+synthetic delivery ancestry or authority policy.
+
 The remaining V4 backlog is relay payload encryption
 [#257](https://github.com/gongahkia/yeokcham/issues/257), online authority
 coordination evaluation [#259](https://github.com/gongahkia/yeokcham/issues/259),

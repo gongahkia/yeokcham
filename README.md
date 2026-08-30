@@ -16,6 +16,9 @@ does not read, upgrade, or mutate repositories from earlier product tracks.
 - Explicit drafts, shared immutable revisions, conservative composition, and
   conflict records that can be inspected and materialised outside the working
   tree before an explicit resolution.
+- Read-only `log` and `graph` views that keep revisions, unresolved decisions,
+  resolutions, delivery milestones, and concurrent authority heads distinct
+  instead of presenting a synthetic commit history.
 - Local username registrations for display only. Device identity and authority
   are Ed25519 keys and signed authority epochs, never usernames.
 - Offline directory packages, signed relay publications, and explicit signed
@@ -33,6 +36,9 @@ yeokcham init --username alice --draft first-task --title "first task"
 yeokcham status
 yeokcham save
 yeokcham share --change first-change --revision r1
+yeokcham log
+yeokcham graph
+yeokcham graph --authority
 yeokcham package create --destination ../outgoing
 yeokcham remote add team https://relay.example.invalid
 yeokcham remote login team

@@ -1,0 +1,24 @@
+[epoch 261e566c49dcc3c92fccf0c6123529d42871b6d56a1cfc4acba727ad3c41e2b7]
+  current-head yes
+  +-- parent --> [epoch a0688cd2f1b6352e5877f23f1f04cc5c0ead32124f01dc0a9826802dc16eba1c]
+[epoch a0688cd2f1b6352e5877f23f1f04cc5c0ead32124f01dc0a9826802dc16eba1c]
+[epoch be38bee387ea06a12667571dc900a251c151a50a991bf77da5fef1575009e654]
+  current-head yes
+  +-- parent --> [epoch a0688cd2f1b6352e5877f23f1f04cc5c0ead32124f01dc0a9826802dc16eba1c]
+  +-- revokes --> [device 363d14b9ba4e4e2bc519a2aea26917c96944ad87e275990388bb3ab8710bf3cb]
+[certificate 27bf207db7d63f503aaf545e25bd07560c3d3ffc8ef278871348b1d1a2ff7083]
+  device d6f8dddfb4a7cb595b6a33837478eb05e43df0ec442a4fe31c7a4a34caf325f8
+  role administrator
+  issuer root
+  current-head 261e566c49dcc3c92fccf0c6123529d42871b6d56a1cfc4acba727ad3c41e2b7
+    active
+  current-head be38bee387ea06a12667571dc900a251c151a50a991bf77da5fef1575009e654
+    active
+[certificate fae13aaa7107e25da1fafac87252bc6b862b2b58308408118f122ea6990af9ee]
+  device 363d14b9ba4e4e2bc519a2aea26917c96944ad87e275990388bb3ab8710bf3cb
+  role member
+  issuer-certificate 27bf207db7d63f503aaf545e25bd07560c3d3ffc8ef278871348b1d1a2ff7083
+  current-head 261e566c49dcc3c92fccf0c6123529d42871b6d56a1cfc4acba727ad3c41e2b7
+    active
+  current-head be38bee387ea06a12667571dc900a251c151a50a991bf77da5fef1575009e654
+    not-active

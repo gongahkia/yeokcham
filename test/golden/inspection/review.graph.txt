@@ -1,0 +1,2 @@
+[review-pending publication publication-a]
+[review-pending publication publication-z]

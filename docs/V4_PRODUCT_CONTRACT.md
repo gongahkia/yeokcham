@@ -15,6 +15,30 @@ draft, shared changes, open decisions, deliveries, local display registrations,
 capture mode, and uncaptured state. A save is recovery only; it becomes shared
 only through `share`.
 
+`log` and `graph` are read-only projections of persisted V4 work. `log` is a
+stable ledger of current shared revisions and their explicit parent relation,
+open decisions and candidates, signed resolutions and their target decisions,
+delivery milestones, and deferred review-publication references. `graph` shows
+the same domain as typed ASCII nodes and explicit edges; a delivery references
+only the revision IDs stored in its record and never implies new ancestry.
+Neither command scans or materialises the working tree, changes a state head,
+or reads a remote.
+
+`graph --authority` is a separate authority-epoch DAG. It shows epoch parent
+edges, all current heads, multi-parent reconciliation, certificates/devices,
+and epoch-specific revocations. It never combines concurrent authority heads
+into an inferred effective policy. A project without signed authority state
+refuses this view explicitly.
+
+These views use complete identifiers, never prefixes. Their ordering is stable:
+most records sort by their complete identifier, while delivery milestones sort
+by creation time and then delivery ID. User-controlled text is quoted and
+escaped to one terminal line; output has no ANSI controls. The CLI accepts a
+valid `COLUMNS` value of at least 40, otherwise uses 80 columns. A row that
+does not fit renders its kind and full primary ID first, then wraps the
+remaining fields as indented detail rows. A single identifier may exceed the
+width rather than be shortened.
+
 `draft new`, `share`, `withdraw`, `resolve`, and `deliver` follow the pure V4
 model. Overlap or stale base is a durable decision, not an automatic merge.
 `decision show` / `inspect`, `decision diff`, and `decision materialize` are

@@ -39,6 +39,10 @@ failure behaviour, and CLI surface agree.
 11. Limit relay storage access with operator-managed repository-scoped read and
     write secrets. Rotation, revocation, and expiry remain relay-local policy;
     they never grant V4 authority or change receipt semantics.
+12. Render read-only terminal views of current V4 work and the separate
+    authority-epoch DAG. The views must expose decisions and concurrent heads,
+    report unavailable historical relationships rather than inventing them, and
+    never change state or materialise the working tree.
 
 ### Explicit non-goals
 

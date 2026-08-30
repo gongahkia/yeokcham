@@ -86,6 +86,19 @@
   (source_tree golden)))
 
 (test
+ (name test_v4_inspection)
+ (modules test_v4_inspection)
+ (libraries
+  alcotest
+  qcheck-core
+  qcheck-alcotest
+  yeokcham_v4_inspection
+  yeokcham_v4_model
+  yeokcham_v4_trust)
+ (deps
+  (source_tree golden)))
+
+(test
  (name v4_transport_property_test)
  (modules v4_transport_property_test)
  (libraries

@@ -1,0 +1,26 @@
+shared-revision revision-alpha
+  state current
+  change change-alpha
+  parent none
+  author-device d6f8dddfb4a7cb595b6a33837478eb05e43df0ec442a4fe31c7a4a34caf325f8
+  display-username "root"
+  base-snapshot snapshot-base
+  result-snapshot snapshot-alpha
+  edit 0 path "same.ml" text[0,4)
+shared-revision revision-beta
+  state current
+  change change-beta
+  parent none
+  author-device d6f8dddfb4a7cb595b6a33837478eb05e43df0ec442a4fe31c7a4a34caf325f8
+  display-username "root"
+  base-snapshot snapshot-base
+  result-snapshot snapshot-beta
+  edit 0 path "same.ml" text[2,6)
+signed-resolution revision-resolution
+  decision decision:overlap:revision-alpha.0:revision-beta.0
+  change change-resolution
+  parent none
+  author-device d6f8dddfb4a7cb595b6a33837478eb05e43df0ec442a4fe31c7a4a34caf325f8
+  display-username "root"
+  base-snapshot snapshot-base
+  result-snapshot snapshot-resolution

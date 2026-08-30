@@ -1,0 +1,18 @@
+shared-revision revision-alpha
+  state current
+  change change-alpha
+  parent none
+  author-device device-bob
+  display-username unavailable
+  base-snapshot snapshot-base
+  result-snapshot snapshot-alpha
+  edit 0 path "alpha.ml" text[0,1)
+shared-revision revision-beta
+  state current
+  change change-beta
+  parent none
+  author-device device-carol
+  display-username unavailable
+  base-snapshot snapshot-base
+  result-snapshot snapshot-beta
+  edit 0 path "beta.ml" text[0,1)

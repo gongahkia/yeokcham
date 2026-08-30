@@ -1,0 +1,21 @@
+[revision revision-alpha]
+  state current
+  change change-alpha
+  parent none
+  author-device device-bob
+  display-username unavailable
+  base-snapshot snapshot-base
+  result-snapshot snapshot-alpha
+[revision revision-beta]
+  state current
+  change change-beta
+  parent none
+  author-device device-carol
+  display-username unavailable
+  base-snapshot snapshot-base
+  result-snapshot snapshot-beta
+[open-decision decision:overlap:revision-alpha.0:revision-beta.0]
+  kind edit-overlap
+  path "same.ml"
+  +-- candidate edit 0 --> [revision revision-alpha]
+  +-- candidate edit 0 --> [revision revision-beta]

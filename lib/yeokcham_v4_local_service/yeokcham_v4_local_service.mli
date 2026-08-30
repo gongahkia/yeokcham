@@ -35,6 +35,16 @@ type status = {
   uncaptured : bool;
 }
 
+type inspection_state = {
+  inspection_project : Yeokcham_v4_model.project;
+  inspection_signed_revisions : Yeokcham_v4_trust.signed_revision list;
+  inspection_authority : Yeokcham_v4_trust.authority option;
+  inspection_review_publications : string list;
+}
+(** A read-only projection input loaded from the current V4 state. It neither
+    scans nor materialises the working tree. Deferred review references are
+    intentionally opaque publication IDs, not remote status. *)
+
 type identity = {
   repository : Yeokcham_v4_trust.Repository_id.t;
   device : Yeokcham_v4_trust.device;
@@ -237,6 +247,7 @@ val bootstrap_from_package :
 
 val save : root:string -> (save_outcome, error) result
 val status : root:string -> (status, error) result
+val inspection_state : root:string -> (inspection_state, error) result
 val identity : root:string -> (identity, error) result
 
 val register_username :

@@ -28,6 +28,14 @@ compatibility or migration fixtures. Tests that inspect or receive a package ass
 that invalid input adds neither a destination object nor a state-head update;
 the live working tree remains untouched throughout package review and receive.
 
+Inspection verification has textual golden fixtures for empty and linear work,
+open decisions, signed resolutions, delivery milestones, deferred review
+references, narrow-width wrapping, and authority forks, reconciliation, and
+revocation. A generated test permutes model collection order and confirms the
+rendered work graph remains identical while the model export is unchanged. CLI
+coverage confirms `log`, `graph`, and `graph --authority` neither scan unsaved
+working-tree bytes nor change persisted model state.
+
 Transport verification covers canonical publication and local-state goldens,
 generated feed validation, same-publisher feed forks, create-only relay
 pagination and negative listener requests, atomic two-replica receipt,

@@ -927,6 +927,75 @@ let relay_access_issue_refuses_noninteractive_secret_output () =
       expect_output_contains "issuance explains terminal-only secret delivery"
         "require an interactive controlling terminal" errors)
 
+let inspection_commands_are_read_only_and_keep_domains_distinct () =
+  with_directory "yeokcham-v4-cli-inspection-" (fun root ->
+      write_file root "main.ml" "let version = 1\n";
+      let _output, errors, status =
+        run
+          [
+            "init";
+            "--root";
+            root;
+            "--username";
+            "alice";
+            "--draft";
+            "draft-one";
+            "--title";
+            "inspection";
+          ]
+      in
+      require_success "inspection init" status errors;
+      write_file root "main.ml" "let version = 2\n";
+      let _output, errors, status = run [ "save"; "--root"; root ] in
+      require_success "inspection save" status errors;
+      let _output, errors, status =
+        run
+          [
+            "share";
+            "--root";
+            root;
+            "--change";
+            "change-one";
+            "--revision";
+            "revision-one";
+          ]
+      in
+      require_success "inspection share" status errors;
+      write_file root "main.ml" "let unsaved = true\n";
+      let before =
+        Service.inspection_state ~root |> require_ok Service.error_to_string
+      in
+      let before_model = Model.export before.Service.inspection_project in
+      let output, errors, status = run [ "log"; "--root"; root ] in
+      require_success "log" status errors;
+      expect_output_contains "log shows an explicit shared revision"
+        "shared-revision revision-one" output;
+      expect_output_contains "log distinguishes the author device"
+        "author-device " output;
+      let output, errors, status = run [ "graph"; "--root"; root ] in
+      require_success "graph" status errors;
+      expect_output_contains "work graph has a typed revision node"
+        "[revision revision-one]" output;
+      let output, errors, status =
+        run [ "graph"; "--authority"; "--root"; root ]
+      in
+      require_success "authority graph" status errors;
+      expect_output_contains "authority graph has a separate epoch node"
+        "[epoch " output;
+      expect_output_contains "authority graph marks its current head"
+        "current-head yes" output;
+      let after =
+        Service.inspection_state ~root |> require_ok Service.error_to_string
+      in
+      Alcotest.(check bool)
+        "inspection leaves the state model unchanged" true
+        (before_model = Model.export after.Service.inspection_project);
+      Alcotest.(check string)
+        "inspection does not scan or rewrite live bytes" "let unsaved = true\n"
+        (In_channel.with_open_bin
+           (Filename.concat root "main.ml")
+           In_channel.input_all))
+
 let watch_is_linux_only () =
   with_directory "yeokcham-v4-cli-watch-" (fun root ->
       let uname =
@@ -978,6 +1047,8 @@ let () =
           Alcotest.test_case
             "relay access issuance refuses noninteractive secret output" `Quick
             relay_access_issue_refuses_noninteractive_secret_output;
+          Alcotest.test_case "log and graph are read-only V4 projections" `Quick
+            inspection_commands_are_read_only_and_keep_domains_distinct;
           Alcotest.test_case "watch is Linux-only" `Quick watch_is_linux_only;
         ] );
     ]
