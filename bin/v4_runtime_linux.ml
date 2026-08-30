@@ -349,8 +349,8 @@ let start_watcher root =
   | Ok watcher -> Ok watcher
   | Error error -> Error (Linux_watcher.error_to_string error)
 
-let load_signing_capability device =
-  V4_signer.load device |> Result.map_error V4_signer.error_to_string
+let load_signing_capability root device =
+  V4_signer.load ~root device |> Result.map_error V4_signer.error_to_string
 
 let update paths state =
   let state = bounded_state state in
@@ -380,7 +380,8 @@ let handle_request paths state command arguments =
           let state = update paths { state with task = Syncing remote } in
           let response, state =
             match
-              Sync.run ~root:paths.root ~remote ~load_signing_capability
+              Sync.run ~root:paths.root ~remote
+                ~load_signing_capability:(load_signing_capability paths.root)
             with
             | Ok report ->
                 let upload =

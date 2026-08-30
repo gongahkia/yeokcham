@@ -340,7 +340,7 @@ let run_join arguments =
   if not (String.equal phrase (Recovery.verification_phrase root_certificate))
   then fail "root verification phrase does not match the authority closure";
   let signing_capability =
-    V4_signer.load device_id |> require_ok V4_signer.error_to_string
+    V4_signer.load_native device_id |> require_ok V4_signer.error_to_string
   in
   let local_device =
     Trust.signing_public_key signing_capability
@@ -369,7 +369,7 @@ let run_join arguments =
 
 let local_signing_capability root =
   let identity = Service.identity ~root |> require_ok Service.error_to_string in
-  V4_signer.load (Trust.device_id identity.Service.device)
+  V4_signer.load ~root (Trust.device_id identity.Service.device)
   |> require_ok V4_signer.error_to_string
 
 let parse_user_register arguments =
@@ -675,7 +675,7 @@ let run_recovery_use arguments =
       Model.Device_id.of_string replaced
   in
   let replacement_capability =
-    V4_signer.load replacement_id |> require_ok V4_signer.error_to_string
+    V4_signer.load ~root replacement_id |> require_ok V4_signer.error_to_string
   in
   let replacement_device =
     Trust.signing_public_key replacement_capability
@@ -2052,7 +2052,7 @@ let run_bootstrap arguments =
       device
   in
   let signing_capability =
-    V4_signer.load device_id |> require_ok V4_signer.error_to_string
+    V4_signer.load_native device_id |> require_ok V4_signer.error_to_string
   in
   let local_device =
     Trust.signing_public_key signing_capability
@@ -2126,7 +2126,8 @@ let run_sync arguments =
   let root, remote_name = parse_remote_name arguments in
   let report =
     Sync.run ~root ~remote:remote_name ~load_signing_capability:(fun device ->
-        V4_signer.load device |> Result.map_error V4_signer.error_to_string)
+        V4_signer.load ~root device
+        |> Result.map_error V4_signer.error_to_string)
     |> require_ok Sync.error_to_string
   in
   Printf.printf "received publications %d\n" report.Sync.discovered_publications;
