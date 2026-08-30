@@ -16,6 +16,19 @@
   (source_tree golden)))
 
 (test
+ (name test_v4_custody)
+ (modules test_v4_custody)
+ (libraries
+  alcotest
+  unix
+  yeokcham_testkit
+  yeokcham_v4_custody
+  yeokcham_v4_model
+  yeokcham_v4_trust)
+ (deps
+  (source_tree golden)))
+
+(test
  (name v4_authority_property_test)
  (modules v4_authority_property_test)
  (libraries

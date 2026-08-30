@@ -68,6 +68,17 @@ val create_pkcs11 :
 (** Generates an Ed25519 key pair on the selected token with the private key
     marked non-extractable, then writes the local-only profile. *)
 
+val create_pkcs11_with_pin :
+  root:string ->
+  module_path:string ->
+  token_label:string ->
+  key_label:string ->
+  key_id:string ->
+  pin:string ->
+  (Model.Device_id.t, error) result
+(** Disposable-token integration boundary. Production callers use
+    [create_pkcs11], which prompts on the controlling terminal. *)
+
 val load_with_pin :
   root:string -> pin:string -> Model.Device_id.t ->
   (Trust.signing_capability, error) result

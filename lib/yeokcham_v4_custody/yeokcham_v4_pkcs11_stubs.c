@@ -236,8 +236,8 @@ CAMLprim value caml_yeokcham_v4_pkcs11_create(value module_path, value token_lab
     public_template[2] = (CK_ATTRIBUTE){ CKA_PRIVATE, &no, sizeof(no) };
     public_template[3] = (CK_ATTRIBUTE){ CKA_KEY_TYPE, &key_type, sizeof(key_type) };
     public_template[4] = (CK_ATTRIBUTE){ CKA_EC_PARAMS, oid, sizeof(oid) };
-    public_template[5] = (CK_ATTRIBUTE){ CKA_ID, String_val(key_id), caml_string_length(key_id) };
-    public_template[6] = (CK_ATTRIBUTE){ CKA_LABEL, String_val(key_label), caml_string_length(key_label) };
+    public_template[5] = (CK_ATTRIBUTE){ CKA_ID, (void *)String_val(key_id), caml_string_length(key_id) };
+    public_template[6] = (CK_ATTRIBUTE){ CKA_LABEL, (void *)String_val(key_label), caml_string_length(key_label) };
     private_template[0] = (CK_ATTRIBUTE){ CKA_CLASS, &private_class, sizeof(private_class) };
     private_template[1] = (CK_ATTRIBUTE){ CKA_TOKEN, &yes, sizeof(yes) };
     private_template[2] = (CK_ATTRIBUTE){ CKA_PRIVATE, &yes, sizeof(yes) };
@@ -245,8 +245,8 @@ CAMLprim value caml_yeokcham_v4_pkcs11_create(value module_path, value token_lab
     private_template[4] = (CK_ATTRIBUTE){ CKA_SIGN, &yes, sizeof(yes) };
     private_template[5] = (CK_ATTRIBUTE){ CKA_SENSITIVE, &yes, sizeof(yes) };
     private_template[6] = (CK_ATTRIBUTE){ CKA_EXTRACTABLE, &no, sizeof(no) };
-    private_template[7] = (CK_ATTRIBUTE){ CKA_ID, String_val(key_id), caml_string_length(key_id) };
-    private_template[8] = (CK_ATTRIBUTE){ CKA_LABEL, String_val(key_label), caml_string_length(key_label) };
+    private_template[7] = (CK_ATTRIBUTE){ CKA_ID, (void *)String_val(key_id), caml_string_length(key_id) };
+    private_template[8] = (CK_ATTRIBUTE){ CKA_LABEL, (void *)String_val(key_label), caml_string_length(key_label) };
     mechanism.mechanism = CKM_EC_EDWARDS_KEY_PAIR_GEN; mechanism.pParameter = NULL; mechanism.ulParameterLen = 0;
     generate = (C_GenerateKeyPairFn)ctx.f->functions[60];
     rv = generate(ctx.session, &mechanism, public_template, 7, private_template, 9, &public_key, &private_key);

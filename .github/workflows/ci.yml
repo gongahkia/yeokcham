@@ -9,15 +9,38 @@ permissions:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v6
-      - run: sudo apt-get update && sudo apt-get install --yes --no-install-recommends openssl socat
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install --yes --no-install-recommends openssl socat softhsm2
+      - if: runner.os == 'macOS'
+        run: brew install openssl socat softhsm
       - uses: ocaml/setup-ocaml@v3
         with:
           ocaml-compiler: "5.5.0"
           dune-cache: true
       - run: opam install . --deps-only --with-test
+      - name: create disposable PKCS#11 token
+        shell: bash
+        run: |
+          token_root="$RUNNER_TEMP/yeokcham-softhsm"
+          mkdir -p "$token_root/tokens"
+          cat > "$token_root/softhsm2.conf" <<EOF
+          directories.tokendir = $token_root/tokens/
+          objectstore.backend = file
+          log.level = ERROR
+          EOF
+          export SOFTHSM2_CONF="$token_root/softhsm2.conf"
+          softhsm2-util --init-token --free --label yeokcham-v4-test --so-pin 12345678 --pin 1234
+          module_path="$(find /usr/local /opt/homebrew /usr/lib -name libsofthsm2.so -type f 2>/dev/null | head -n 1)"
+          test -n "$module_path"
+          echo "SOFTHSM2_CONF=$SOFTHSM2_CONF" >> "$GITHUB_ENV"
+          echo "YEOKCHAM_V4_TEST_PKCS11_MODULE=$module_path" >> "$GITHUB_ENV"
       - run: opam exec -- dune build @lint @all
       - run: opam exec -- dune runtest
   format:

@@ -371,13 +371,13 @@ let agent_sign ~public_key ~domain bytes =
     Error (Ssh_agent_protocol "agent refused signing")
   else
     match read_ssh_string response 1 with
-    | Some (signature, end_offset) when end_offset = String.length response -> (
-        match read_ssh_string signature 0 with
+    | Some (wire_signature, end_offset) when end_offset = String.length response -> (
+        match read_ssh_string wire_signature 0 with
         | Some (algorithm, offset) when String.equal algorithm "ssh-ed25519" -> (
-            match read_ssh_string signature offset with
-            | Some (signature, end_offset)
-              when end_offset = String.length signature
-                   && String.length signature = 64 -> Ok signature
+            match read_ssh_string wire_signature offset with
+            | Some (raw_signature, end_offset)
+              when end_offset = String.length wire_signature
+                   && String.length raw_signature = 64 -> Ok raw_signature
             | _ -> Error (Ssh_agent_protocol "invalid Ed25519 signature"))
         | _ -> Error (Ssh_agent_protocol "unexpected signature algorithm"))
     | _ -> Error (Ssh_agent_protocol "invalid signature response")
@@ -524,13 +524,13 @@ let read_pin () =
   with Unix.Unix_error (error, _, _) ->
     Error (Pkcs11_unavailable ("cannot read controlling terminal: " ^ Unix.error_message error))
 
-let create_pkcs11 ~root ~module_path ~token_label ~key_label ~key_id =
+let create_pkcs11_with_pin ~root ~module_path ~token_label ~key_label ~key_id
+    ~pin =
   if
     Filename.is_relative module_path || not (valid_plain token_label)
     || not (valid_plain key_label) || String.length key_id = 0
   then Error (Invalid_profile "invalid PKCS#11 creation selector")
   else
-    let* pin = read_pin () in
     let* public_key =
       pkcs11_create_raw module_path token_label key_id key_label pin
       |> pkcs11_result
@@ -539,6 +539,11 @@ let create_pkcs11 ~root ~module_path ~token_label ~key_label ~key_id =
       Error (Pkcs11_unsupported "token generated an invalid Ed25519 public key")
     else
       attach_pkcs11 ~root ~module_path ~token_label ~key_id ~public_key
+
+let create_pkcs11 ~root ~module_path ~token_label ~key_label ~key_id =
+  let* pin = read_pin () in
+  create_pkcs11_with_pin ~root ~module_path ~token_label ~key_label ~key_id
+    ~pin
 
 let signed_result ~public_key ~domain bytes result =
   let* signature = result in
