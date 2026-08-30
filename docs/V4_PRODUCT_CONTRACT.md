@@ -279,8 +279,7 @@ No state transition mutates the only copy in place.
 
 There is no general clone protocol, automatic or relay GC, durable `capture=`, Git bridge,
 semantic parser or merge,
-end-to-end payload encryption (specified but not implemented in ADR-094),
-external relay identity or proof-of-possession,
+end-to-end payload encryption, external relay identity or proof-of-possession,
 macOS/WSL watcher, or CI-backed
 delivery. These are separate design work and must reuse the current model and
 receipt boundaries when introduced.

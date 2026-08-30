@@ -38,9 +38,6 @@ The active V4 decisions are:
 - [ADR-093](docs/adr/093-v4-device-custody-providers.md): explicit local
   native, SSH-agent, and PKCS#11 Ed25519 custody providers without changing
   device identity, authority, or signed record bytes.
-- [ADR-094](docs/adr/094-v4-private-relay-payloads.md): a bounded,
-  identity-private sealed relay-payload format, separate X25519 transport keys,
-  and an explicit audited-HPKE implementation gate.
 
 Earlier product-track ADRs have been removed with their implementations. Git
 history retains their historical record; they are not active architecture.

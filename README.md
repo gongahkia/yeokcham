@@ -145,10 +145,8 @@ replicas through an operator-managed HTTPS reverse proxy. A new replica instead
 needs an explicit immutable bootstrap basis ID, public repository ID, enrolled
 local device, and independently compared root phrase; it starts with fresh
 local scratch state and never materialises its working tree. The relay is an
-untrusted byte courier and current stored payloads are not end-to-end
-encrypted. ADR-094 specifies a separate private-payload design, but V4 will
-not ship it until it has a vetted, independently audited HPKE dependency.
-There is no online authority coordinator, general clone, Git import/export, semantic
+untrusted byte courier and stored payloads are not end-to-end encrypted. There
+is no online authority coordinator, general clone, Git import/export, semantic
 parsing, or CI-backed delivery. There is
 no relay, package, or automatic blob GC; local collection is only the explicit
 quarantine-and-purge workflow above. Those are deliberate boundaries, not

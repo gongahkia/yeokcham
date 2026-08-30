@@ -42,12 +42,6 @@ authority epochs. `Yeokcham_v4_bootstrap` adds a separately signed
 portable-state basis bound to an unchanged package-manifest-v1 closure; it is explicit
 initialization, not a clone protocol.
 
-ADR-094 specifies a future sealed-parcel adapter beside this plaintext relay
-path. It will keep the relay as opaque immutable storage, use a private local
-recipient-key directory, and pass decrypted exact bytes into the same receipt
-boundary. It has no model, authority, key-custody, or working-tree role. No
-such adapter is linked into V4 until its audited-HPKE dependency gate passes.
-
 `Yeokcham_v4_inspection` is a pure terminal projection over a loaded project,
 its signed revision records, deferred review references, and an optional
 authority closure. The local service supplies that input without scanning the
