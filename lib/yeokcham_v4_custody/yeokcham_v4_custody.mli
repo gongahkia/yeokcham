@@ -27,6 +27,7 @@ type error =
   | Ssh_agent_protocol of string
   | Pkcs11_unavailable of string
   | Pkcs11_key_missing
+  | Pkcs11_key_ambiguous
   | Pkcs11_locked
   | Pkcs11_unsupported of string
   | Public_key_mismatch
@@ -89,3 +90,9 @@ val load :
   root:string -> Model.Device_id.t -> (Trust.signing_capability, error) result
 
 val ssh_agent_available : public_key:string -> (unit, error) result
+
+val pkcs11_available :
+  module_path:string -> token_label:string -> key_id:string ->
+  (unit, error) result
+(** Confirms that the selected token currently exposes exactly one matching
+    Ed25519 public key. It does not prompt for a PIN or perform a signature. *)

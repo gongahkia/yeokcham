@@ -60,7 +60,7 @@ typedef CK_RV (*C_SignFn)(CK_SESSION_HANDLE, CK_BYTE *, CK_ULONG, CK_BYTE *, CK_
 typedef CK_RV (*C_GenerateKeyPairFn)(CK_SESSION_HANDLE, CK_MECHANISM *, CK_ATTRIBUTE *, CK_ULONG, CK_ATTRIBUTE *, CK_ULONG, CK_OBJECT_HANDLE *, CK_OBJECT_HANDLE *);
 
 enum { V4_OK = 0, V4_UNAVAILABLE = 1, V4_KEY_MISSING = 2, V4_LOCKED = 3,
-       V4_UNSUPPORTED = 4, V4_INVALID = 5 };
+       V4_UNSUPPORTED = 4, V4_INVALID = 5, V4_KEY_AMBIGUOUS = 6 };
 
 #define CKR_OK 0x00000000UL
 #define CKR_CRYPTOKI_ALREADY_INITIALIZED 0x00000191UL
@@ -70,6 +70,7 @@ enum { V4_OK = 0, V4_UNAVAILABLE = 1, V4_KEY_MISSING = 2, V4_LOCKED = 3,
 #define CKR_USER_NOT_LOGGED_IN 0x00000101UL
 #define CKR_MECHANISM_INVALID 0x00000070UL
 #define CKR_KEY_TYPE_INCONSISTENT 0x00000063UL
+#define CKF_RW_SESSION 0x00000002UL
 #define CKF_SERIAL_SESSION 0x00000004UL
 #define CKU_USER 1UL
 #define CKO_PUBLIC_KEY 2UL
@@ -156,7 +157,9 @@ static int open_session(struct ctx *ctx, const char *label, const char *pin) {
   C_OpenSessionFn open = (C_OpenSessionFn)ctx->f->functions[12];
   C_LoginFn login = (C_LoginFn)ctx->f->functions[18]; CK_SLOT_ID slot; CK_RV rv; int status;
   status = selected_slot(ctx, label, &slot); if (status != V4_OK) return status;
-  rv = open(slot, CKF_SERIAL_SESSION, NULL, NULL, &ctx->session);
+  /* Key generation changes token state and therefore needs a read/write
+     session. It is also valid for the read-only operations used here. */
+  rv = open(slot, CKF_SERIAL_SESSION | CKF_RW_SESSION, NULL, NULL, &ctx->session);
   if (rv != CKR_OK) return status_for(rv);
   ctx->session_open = 1;
   if (pin == NULL) return V4_OK;
@@ -169,13 +172,15 @@ static int find_key(struct ctx *ctx, CK_ULONG class_, const char *key_id, size_t
   C_FindObjectsInitFn init = (C_FindObjectsInitFn)ctx->f->functions[26];
   C_FindObjectsFn find = (C_FindObjectsFn)ctx->f->functions[27];
   C_FindObjectsFinalFn finish = (C_FindObjectsFinalFn)ctx->f->functions[28];
-  CK_ATTRIBUTE attrs[2]; CK_ULONG count = 0; CK_RV rv;
+  CK_ATTRIBUTE attrs[2]; CK_OBJECT_HANDLE found[2]; CK_ULONG count = 0; CK_RV rv;
   attrs[0].type = CKA_CLASS; attrs[0].pValue = &class_; attrs[0].ulValueLen = sizeof(class_);
   attrs[1].type = CKA_ID; attrs[1].pValue = (void *)key_id; attrs[1].ulValueLen = (CK_ULONG)key_id_len;
   rv = init(ctx->session, attrs, 2); if (rv != CKR_OK) return status_for(rv);
-  rv = find(ctx->session, out, 1, &count); finish(ctx->session);
+  rv = find(ctx->session, found, 2, &count); finish(ctx->session);
   if (rv != CKR_OK) return status_for(rv);
-  return count == 1 ? V4_OK : V4_KEY_MISSING;
+  if (count == 0) return V4_KEY_MISSING;
+  if (count != 1) return V4_KEY_AMBIGUOUS;
+  *out = found[0]; return V4_OK;
 }
 
 static int public_key_for(struct ctx *ctx, const char *key_id, size_t key_id_len, char raw[32]) {
@@ -248,7 +253,10 @@ CAMLprim value caml_yeokcham_v4_pkcs11_create(value module_path, value token_lab
     private_template[7] = (CK_ATTRIBUTE){ CKA_ID, (void *)String_val(key_id), caml_string_length(key_id) };
     private_template[8] = (CK_ATTRIBUTE){ CKA_LABEL, (void *)String_val(key_label), caml_string_length(key_label) };
     mechanism.mechanism = CKM_EC_EDWARDS_KEY_PAIR_GEN; mechanism.pParameter = NULL; mechanism.ulParameterLen = 0;
-    generate = (C_GenerateKeyPairFn)ctx.f->functions[60];
+    /* PKCS#11 C_GenerateKeyPair follows C_GenerateKey at slot 59 (zero-based).
+       Slot 60 is C_WrapKey; calling it through this incompatible signature can
+       make a token appear not to support Ed25519 even when it does. */
+    generate = (C_GenerateKeyPairFn)ctx.f->functions[59];
     rv = generate(ctx.session, &mechanism, public_template, 7, private_template, 9, &public_key, &private_key);
     if (rv != CKR_OK) status = status_for(rv);
     else status = public_key_for(&ctx, String_val(key_id), caml_string_length(key_id), raw);

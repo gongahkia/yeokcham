@@ -615,10 +615,14 @@ let run_device_custody arguments =
       | Error error ->
           Printf.printf "availability unavailable: %s\n"
             (Custody.error_to_string error))
-  | Custody.Pkcs11 { public_key; _ } ->
+  | Custody.Pkcs11 { module_path; token_label; key_id; public_key } ->
       print_endline "provider pkcs11";
       Printf.printf "public-key %s\n" (hex_of_bytes public_key);
-      print_endline "availability requires token signing check"
+      (match Custody.pkcs11_available ~module_path ~token_label ~key_id with
+      | Ok () -> print_endline "availability available (public key found; PIN signing is separate)"
+      | Error error ->
+          Printf.printf "availability unavailable: %s\n"
+            (Custody.error_to_string error))
 
 let parse_device_enroll arguments =
   let rec loop root device public_key username administrator parent = function

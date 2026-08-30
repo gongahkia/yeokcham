@@ -46,6 +46,22 @@ let write_file root name contents =
 let read_file root name =
   In_channel.with_open_bin (Filename.concat root name) In_channel.input_all
 
+let rec file_tree root relative =
+  let directory = Filename.concat root relative in
+  Sys.readdir directory
+  |> Array.to_list
+  |> List.sort String.compare
+  |> List.concat_map (fun name ->
+         let child_relative = Filename.concat relative name in
+         let child = Filename.concat root child_relative in
+         match (Unix.lstat child).Unix.st_kind with
+         | Unix.S_DIR -> file_tree root child_relative
+         | Unix.S_REG -> [ child_relative ^ "\000" ^ read_file root child_relative ]
+         | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK ->
+             [ child_relative ])
+
+let repository_tree root = file_tree root ".yeokcham"
+
 let object_path root hex =
   Filename.concat
     (Filename.concat
@@ -1793,6 +1809,43 @@ let normal_device_rotation_replaces_the_local_signing_identity_atomically () =
            ~signing_capability:replacement_capability
         |> require_ok Service.error_to_string))
 
+let denied_external_rotation_leaves_authority_state_unchanged () =
+  with_directory "yeokcham-v4-denied-rotation-" (fun root ->
+      write_file root "main.ml" "let version = 1\n";
+      let administrator_capability = signing_capability 'a' in
+      let administrator = trust_device administrator_capability in
+      let recovery_capability = signing_capability 'r' in
+      let recovery_device = trust_device recovery_capability in
+      ignore
+        (Service.init_signed_with_recovery ~root ~username:(username "alice")
+           ~initial_draft:(draft "draft-one") ~title:"authority" ~repository
+           ~device:administrator ~signing_capability:administrator_capability
+           ~recovery_device ~recovery_capability
+        |> require_ok Service.error_to_string);
+      let replacement = trust_device (signing_capability 'c') in
+      let denied_capability =
+        Trust.signing_capability_of_external_signer
+          ~public_key:(Trust.signing_public_key administrator_capability)
+          ~sign:(fun ~domain:_ _ -> Error "user denied rotation")
+        |> require_ok Trust.error_to_string
+      in
+      let before = repository_tree root in
+      (match
+         Service.rotate_local_device ~parent:None ~root ~replacement
+           ~signing_capability:denied_capability
+       with
+      | Error error ->
+          Alcotest.(check string) "denied rotation is explicit"
+            "V4 signer failed: user denied rotation"
+            (Service.error_to_string error)
+      | Ok _ -> Alcotest.fail "declined signer rotated the local device");
+      Alcotest.(check (list string))
+        "declined rotation leaves every repository byte unchanged" before
+        (repository_tree root);
+      let identity = Service.identity ~root |> require_ok Service.error_to_string in
+      Alcotest.(check bool) "declined rotation retains the local administrator"
+        true (Trust.device_equal identity.Service.device administrator))
+
 let authority_forks_require_named_branch_actions_and_explicit_reconciliation ()
     =
   with_directory "yeokcham-v4-authority-fork-" (fun root ->
@@ -2310,6 +2363,9 @@ let () =
           Alcotest.test_case
             "normal device rotation atomically replaces local authority" `Quick
             normal_device_rotation_replaces_the_local_signing_identity_atomically;
+          Alcotest.test_case
+            "declined external rotation leaves authority bytes unchanged" `Quick
+            denied_external_rotation_leaves_authority_state_unchanged;
           Alcotest.test_case
             "forks require named branch actions and explicit reconciliation"
             `Quick

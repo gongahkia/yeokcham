@@ -23,6 +23,7 @@ type error =
   | Ssh_agent_protocol of string
   | Pkcs11_unavailable of string
   | Pkcs11_key_missing
+  | Pkcs11_key_ambiguous
   | Pkcs11_locked
   | Pkcs11_unsupported of string
   | Public_key_mismatch
@@ -43,6 +44,8 @@ let error_to_string = function
   | Ssh_agent_protocol detail -> "invalid SSH agent response: " ^ detail
   | Pkcs11_unavailable detail -> "V4 PKCS#11 provider is unavailable: " ^ detail
   | Pkcs11_key_missing -> "configured V4 PKCS#11 key is unavailable"
+  | Pkcs11_key_ambiguous ->
+      "configured V4 PKCS#11 key selector matches more than one key"
   | Pkcs11_locked -> "V4 PKCS#11 token is locked or denied signing"
   | Pkcs11_unsupported detail -> "unsupported V4 PKCS#11 capability: " ^ detail
   | Public_key_mismatch -> "custody provider public key does not match device"
@@ -191,6 +194,14 @@ let write_all descriptor path bytes =
   in
   loop 0
 
+let write_and_sync descriptor path bytes =
+  let* () = write_all descriptor path bytes in
+  try
+    Unix.fsync descriptor;
+    Ok ()
+  with Unix.Unix_error (error, operation, _) ->
+    Error (Io_error { path; operation; message = Unix.error_message error })
+
 let save ~root profile =
   let* actual =
     Trust.device_of_public_key (provider_public_key profile.provider)
@@ -211,15 +222,26 @@ let save ~root profile =
         let result =
           Fun.protect
             ~finally:(fun () -> try Unix.close descriptor with Unix.Unix_error _ -> ())
-            (fun () -> write_all descriptor temporary contents)
+            (fun () -> write_and_sync descriptor temporary contents)
         in
         match result with
         | Error error ->
             (try Unix.unlink temporary with Unix.Unix_error _ -> ());
             Error error
         | Ok () ->
-            Unix.rename temporary target;
-            Ok ()
+            (try
+               Unix.link temporary target;
+               Unix.unlink temporary;
+               Ok ()
+             with
+            | Unix.Unix_error (Unix.EEXIST, _, _) ->
+                (try Unix.unlink temporary with Unix.Unix_error _ -> ());
+                Error Profile_exists
+            | Unix.Unix_error (error, operation, _) ->
+                (try Unix.unlink temporary with Unix.Unix_error _ -> ());
+                Error
+                  (Io_error
+                     { path = target; operation; message = Unix.error_message error }))
     with Unix.Unix_error (error, operation, _) ->
       Error (Io_error { path = target; operation; message = Unix.error_message error })
 
@@ -231,6 +253,10 @@ let find ~root device =
       let info = Unix.lstat target in
       if info.Unix.st_kind <> Unix.S_REG then
         Error (Invalid_profile "profile path is not a regular file")
+      else if info.Unix.st_size > 4096 then
+        Error (Invalid_profile "profile exceeds the 4096-byte limit")
+      else if info.Unix.st_perm land 0o077 <> 0 then
+        Error (Invalid_profile "profile has unsafe permissions")
       else
         let* profile = In_channel.with_open_bin target In_channel.input_all |> decode in
         if Model.Device_id.equal profile.device device then Ok profile
@@ -460,6 +486,7 @@ let pkcs11_result = function
   | 0, Some bytes -> Ok bytes
   | 1, _ -> Error (Pkcs11_unavailable "module or token could not be opened")
   | 2, _ -> Error Pkcs11_key_missing
+  | 6, _ -> Error Pkcs11_key_ambiguous
   | 3, _ -> Error Pkcs11_locked
   | 4, _ -> Error (Pkcs11_unsupported "token does not support Ed25519 signing")
   | 5, _ -> Error (Pkcs11_unsupported "token returned invalid Ed25519 bytes")
@@ -469,6 +496,9 @@ let pkcs11_public_key ~module_path ~token_label ~key_id =
   let* public_key = pkcs11_public_raw module_path token_label key_id |> pkcs11_result in
   if String.length public_key = 32 then Ok public_key
   else Error (Pkcs11_unsupported "public key does not contain 32 bytes")
+
+let pkcs11_available ~module_path ~token_label ~key_id =
+  pkcs11_public_key ~module_path ~token_label ~key_id |> Result.map (fun _ -> ())
 
 let attach_pkcs11 ~root ~module_path ~token_label ~key_id ~public_key =
   if Filename.is_relative module_path || not (valid_plain token_label) || String.length key_id = 0 then

@@ -193,10 +193,13 @@ let pkcs11_signs_every_v4_action () =
       with_repository (fun root ->
           let pin = "1234" in
           let token_label = "yeokcham-v4-test" in
-          let key_id = "\001\002\003\004" in
+          let key_id =
+            "yeokcham-v4-custody-" ^ string_of_int (Unix.getpid ())
+          in
           let device_id =
             Custody.create_pkcs11_with_pin ~root ~module_path ~token_label
-              ~key_label:"yeokcham-v4-test-key" ~key_id ~pin
+              ~key_label:("yeokcham-v4-test-key-" ^ string_of_int (Unix.getpid ()))
+              ~key_id ~pin
             |> require_ok Custody.error_to_string
           in
           let capability =
@@ -258,7 +261,49 @@ let pkcs11_signs_every_v4_action () =
             ~issuer:(Trust.certificate_id root_certificate) capability
             ~signed_revision:signed
           |> require_ok Trust.error_to_string
-          |> ignore)
+          |> ignore;
+          let profile_path = Custody.profile_path ~root device_id in
+          let before = In_channel.with_open_bin profile_path In_channel.input_all in
+          let denied_capability =
+            Custody.load_with_pin ~root ~pin:"wrong-pin" device_id
+            |> require_ok Custody.error_to_string
+          in
+          (match Trust.root_certificate ~repository ~device:root_device denied_capability with
+          | Error error ->
+              Alcotest.(check string) "wrong token PIN crosses no signing boundary"
+                "V4 signer failed: V4 PKCS#11 token is locked or denied signing"
+                (Trust.error_to_string error)
+          | Ok _ -> Alcotest.fail "wrong token PIN created a root certificate");
+          let after = In_channel.with_open_bin profile_path In_channel.input_all in
+          Alcotest.(check string) "PIN denial leaves local custody profile unchanged"
+            before after;
+          let mismatched_public_key = String.make 32 'x' in
+          let mismatched_device =
+            Trust.device_of_public_key mismatched_public_key
+            |> require_ok Trust.error_to_string
+          in
+          (match
+             Custody.attach_pkcs11 ~root ~module_path ~token_label ~key_id
+               ~public_key:mismatched_public_key
+           with
+          | Error error ->
+              Alcotest.(check string) "token key mismatch is explicit"
+                "custody provider public key does not match device"
+                (Custody.error_to_string error)
+          | Ok _ -> Alcotest.fail "mismatched PKCS#11 public key was attached");
+          Alcotest.(check bool) "mismatched key creates no local profile" false
+            (Sys.file_exists
+               (Custody.profile_path ~root (Trust.device_id mismatched_device)));
+          (match
+             Custody.attach_pkcs11 ~root
+               ~module_path:"/definitely/not/a/yeokcham-pkcs11-module.so"
+               ~token_label ~key_id ~public_key:(Trust.device_public_key root_device)
+           with
+          | Error error ->
+              Alcotest.(check string) "absent provider is explicit"
+                "V4 PKCS#11 provider is unavailable: module or token could not be opened"
+                (Custody.error_to_string error)
+          | Ok _ -> Alcotest.fail "unavailable PKCS#11 provider was attached"))
 
 let () =
   Alcotest.run "V4 custody"
