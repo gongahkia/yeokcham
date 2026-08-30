@@ -86,9 +86,9 @@ needs an explicit immutable bootstrap basis ID, public repository ID, enrolled
 local device, and independently compared root phrase; it starts with fresh
 local scratch state and never materialises its working tree. The relay is an
 untrusted byte courier and stored payloads are not end-to-end encrypted. There
-is no general clone, Git import/export, semantic parsing, CI-backed delivery,
-signing agent, hardware-key support, or blob GC. Those are deliberate future
-work, not hidden product behaviour.
+is no online authority coordinator, general clone, Git import/export, semantic
+parsing, CI-backed delivery, signing agent, hardware-key support, or blob GC.
+Those are deliberate future work, not hidden product behaviour.
 
 Read [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md) for the philosophy,
 [FORMAL_MODEL.md](FORMAL_MODEL.md) for invariants, and

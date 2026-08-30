@@ -51,7 +51,8 @@ No general clone, Git bridge, semantic parser or merge, blob GC, durable
 external signing agent, macOS/WSL watcher, or CI-backed delivery exists in this
 milestone. The bundled relay is an untrusted byte courier behind an
 operator-managed HTTPS reverse proxy; it is not hosted authority or end-to-end
-encrypted transport. These are not partial features.
+encrypted transport. No online coordinator, quorum, or witness service can
+select or gate V4 authority. These are not partial features.
 
 ### Acceptance evidence
 

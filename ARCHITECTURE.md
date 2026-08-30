@@ -37,8 +37,9 @@ immutable byte storage; its versioned local access registry, reverse-proxy TLS,
 aliases, URLs, and credentials remain outside the V4 project model. The
 transport client stages relay artifacts and delegates
 receipt solely to the receipt boundary; it has no second model or authority
-path. `Yeokcham_v4_bootstrap` adds a separately signed portable-state basis
-bound to an unchanged package-manifest-v1 closure; it is explicit
+path. A relay or any future network service cannot coordinate, select, or gate
+authority epochs. `Yeokcham_v4_bootstrap` adds a separately signed
+portable-state basis bound to an unchanged package-manifest-v1 closure; it is explicit
 initialization, not a clone protocol.
 
 `Yeokcham_v4_inspection` is a pure terminal projection over a loaded project,

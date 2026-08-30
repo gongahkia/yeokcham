@@ -98,6 +98,13 @@ a command argument can expose it in shell history or process listings; use an
 appropriate protected execution environment until a dedicated stdin/provider
 interface exists.
 
+V4 has no online authority coordination. An administrator active in a locally
+verified current epoch may enrol, revoke, rotate, recover, share, resolve, or
+adopt while disconnected. Relay state, a coordinator response, quorum,
+threshold signature, lease, timestamp, witness, or remote observation cannot
+approve, order, reject, select, or make those actions unavailable. Concurrent
+epochs remain explicit until a valid reconciliation names selected heads.
+
 An authority epoch is a canonical signed DAG node. Concurrent administrator
 epochs remain separate heads. A normal successor has one explicitly selected
 parent. An explicit reconciliation names two or more selected current parents

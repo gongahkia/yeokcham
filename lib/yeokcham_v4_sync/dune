@@ -1,0 +1,12 @@
+(library
+ (name yeokcham_v4_sync)
+ (libraries
+  unix
+  yeokcham_store
+  yeokcham_v4_local_service
+  yeokcham_v4_package
+  yeokcham_v4_transport
+  yeokcham_v4_transport_config
+  yeokcham_v4_transport_credential
+  yeokcham_v4_transport_http
+  yeokcham_v4_trust))

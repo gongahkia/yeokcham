@@ -38,6 +38,12 @@ current heads and requires an administrator active in every selected parent;
 unselected heads remain active. No role or revocation state is inferred by
 unioning divergent heads.
 
+Authority validity has no online input. Network reachability, relay state,
+quorum response, timestamp, lease, witness receipt, and remote observation do
+not authorize, select, reject, or order an epoch. An administrator active at a
+locally verified current epoch may act while disconnected; concurrent results
+remain heads until an explicit valid reconciliation.
+
 An epoch-bound `Signed_revision` binds one revision and its author certificate
 to one authority epoch. It verifies only when the certificate was active in
 that named epoch. Revocation does not invalidate that historical proof.

@@ -35,6 +35,11 @@ revoked that signer, receive requires a current-head adoption of exactly that
 signed record. This is deliberate human review, not an implicit permission
 merge.
 
+Authority is not coordinated online. An active administrator may act while
+disconnected; concurrent authority epochs remain visible until an explicit
+signed reconciliation. A relay, quorum, lease, witness, timestamp, or remote
+observation cannot choose, approve, or invalidate authority state.
+
 ## Product posture
 
 V4 is the only active product track. Earlier tracks are available only in Git

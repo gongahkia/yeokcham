@@ -44,12 +44,16 @@ work; `graph --authority` renders the epoch DAG separately. Their stable plain
 text output exposes unresolved decisions and concurrent heads without creating
 synthetic delivery ancestry or authority policy.
 
+[#259](https://github.com/gongahkia/yeokcham/issues/259), online authority
+coordination evaluation, is complete. ADR-088 rejects coordinators, quorums,
+leases, threshold authority, and witness receipts as V4 authority inputs. An
+active administrator may act while disconnected; concurrent epochs remain
+explicit until a valid reconciliation.
+
 The remaining V4 backlog is relay payload encryption
-[#257](https://github.com/gongahkia/yeokcham/issues/257), online authority
-coordination evaluation [#259](https://github.com/gongahkia/yeokcham/issues/259),
-explicit decision-proposal assistance
-[#260](https://github.com/gongahkia/yeokcham/issues/260), and advisory
-background runtime [#261](https://github.com/gongahkia/yeokcham/issues/261).
+[#257](https://github.com/gongahkia/yeokcham/issues/257), explicit
+decision-proposal assistance [#260](https://github.com/gongahkia/yeokcham/issues/260),
+and advisory background runtime [#261](https://github.com/gongahkia/yeokcham/issues/261).
 None may reuse retired V1–V3 protocol or runtime formats.
 
 Future feature proposals need a dedicated issue and ADR before coding when they

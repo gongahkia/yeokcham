@@ -22,6 +22,9 @@ The active V4 decisions are:
   bootstrap bases for fresh replicas, with a separate receipt boundary.
 - [ADR-087](docs/adr/087-v4-scoped-relay-access.md): operator-local,
   repository-scoped relay access with rotation and revocation.
+- [ADR-088](docs/adr/088-v4-reject-online-authority-coordination.md): rejects
+  online authority coordination; disconnected administrator actions remain
+  valid and concurrent authority epochs remain explicit until reconciled.
 
 Earlier product-track ADRs have been removed with their implementations. Git
 history retains their historical record; they are not active architecture.

@@ -1,16 +1,18 @@
 (executable
  (name yeokcham_v4)
  (public_name yeokcham)
- (modules yeokcham_v4 v4_watch v4_signer v4_signer_test_file)
+ (modules yeokcham_v4 v4_runtime v4_watch v4_signer v4_signer_test_file)
  (flags
   (:standard -w -70))
  (libraries
   yeokcham_v4_local_service
   yeokcham_v4_bootstrap
   yeokcham_v4_inspection
+  yeokcham_hash
   yeokcham_v4_model
   yeokcham_v4_package
   yeokcham_v4_recovery
+  yeokcham_v4_sync
   yeokcham_v4_transport
   yeokcham_v4_transport_config
   yeokcham_v4_transport_credential
@@ -23,6 +25,11 @@
    from
    (yeokcham_linux_watcher -> v4_watch_linux.ml)
    (-> v4_watch_unavailable.ml))
+  (select
+   v4_runtime.ml
+   from
+   (yeokcham_linux_watcher -> v4_runtime_linux.ml)
+   (-> v4_runtime_unavailable.ml))
   (select
    v4_signer.ml
    from
