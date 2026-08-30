@@ -64,6 +64,16 @@ local-only restore proof for both snapshots of every explicit in-place restore.
 Compaction validates those roots and only prunes a completed journal after a
 matching proof exists; explicit `restore forget` is the sole removal path.
 
+[#248](https://github.com/gongahkia/yeokcham/issues/248), explicit retention
+roots and safe local object collection, is complete. ADR-091 defines a pure
+reachability plan over every named checkpoint closure, durable restore roots,
+and the current V4 state head. `storage gc --dry-run --explain` shows every
+retain/collect decision; `--apply` only stages a local canonical quarantine;
+`restore`, `resume`, and revalidated `purge` make interruption explicit. The
+collector neither changes the working tree nor touches package or relay
+storage. Tests cover chunk manifests, shared work, empty worktrees, corrupt or
+missing closure, a state-head change after staging, and purge recovery.
+
 The remaining V4 backlog is relay payload encryption
 [#257](https://github.com/gongahkia/yeokcham/issues/257) and explicit
 decision-proposal assistance [#260](https://github.com/gongahkia/yeokcham/issues/260).
