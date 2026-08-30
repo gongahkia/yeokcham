@@ -445,10 +445,38 @@ let attach_ssh_agent ~root ~public_key =
   let* () = save ~root profile in
   Ok profile.device
 
+external pkcs11_public_raw : string -> string -> string -> int * string option
+  = "caml_yeokcham_v4_pkcs11_public"
+
+external pkcs11_sign_raw :
+  string -> string -> string -> string -> string -> int * string option
+  = "caml_yeokcham_v4_pkcs11_sign"
+
+external pkcs11_create_raw :
+  string -> string -> string -> string -> string -> int * string option
+  = "caml_yeokcham_v4_pkcs11_create"
+
+let pkcs11_result = function
+  | 0, Some bytes -> Ok bytes
+  | 1, _ -> Error (Pkcs11_unavailable "module or token could not be opened")
+  | 2, _ -> Error Pkcs11_key_missing
+  | 3, _ -> Error Pkcs11_locked
+  | 4, _ -> Error (Pkcs11_unsupported "token does not support Ed25519 signing")
+  | 5, _ -> Error (Pkcs11_unsupported "token returned invalid Ed25519 bytes")
+  | _, _ -> Error (Pkcs11_unavailable "unknown provider status")
+
+let pkcs11_public_key ~module_path ~token_label ~key_id =
+  let* public_key = pkcs11_public_raw module_path token_label key_id |> pkcs11_result in
+  if String.length public_key = 32 then Ok public_key
+  else Error (Pkcs11_unsupported "public key does not contain 32 bytes")
+
 let attach_pkcs11 ~root ~module_path ~token_label ~key_id ~public_key =
   if Filename.is_relative module_path || not (valid_plain token_label) || String.length key_id = 0 then
     Error (Invalid_profile "invalid PKCS#11 selector")
   else
+    let* discovered = pkcs11_public_key ~module_path ~token_label ~key_id in
+    if not (String.equal discovered public_key) then Error Public_key_mismatch
+    else
     let* device =
       Trust.device_of_public_key public_key
       |> Result.map_error (fun error -> Trust_error error)
@@ -462,25 +490,83 @@ let attach_pkcs11 ~root ~module_path ~token_label ~key_id ~public_key =
     let* () = save ~root profile in
     Ok profile.device
 
-(* The direct PKCS#11 binding is supplied by the platform adapter.  Keeping this
-   dispatch point here prevents a token label or module path from reaching V4
-   trust or persistent collaboration state. *)
-let pkcs11_sign ~module_path:_ ~token_label:_ ~key_id:_ ~public_key:_ ~domain:_ _ =
-  Error (Pkcs11_unsupported "direct PKCS#11 adapter is not linked")
+let read_pin () =
+  let path = "/dev/tty" in
+  try
+    let descriptor = Unix.openfile path [ Unix.O_RDWR ] 0 in
+    Fun.protect
+      ~finally:(fun () -> try Unix.close descriptor with Unix.Unix_error _ -> ())
+      (fun () ->
+        let attributes = Unix.tcgetattr descriptor in
+        let noecho = { attributes with Unix.c_echo = false } in
+        Unix.tcsetattr descriptor Unix.TCSADRAIN noecho;
+        Fun.protect
+          ~finally:(fun () ->
+            Unix.tcsetattr descriptor Unix.TCSADRAIN attributes)
+          (fun () ->
+            ignore (Unix.write_substring descriptor "PKCS#11 PIN: " 0 13);
+            let byte = Bytes.create 1 in
+            let value = Buffer.create 32 in
+            let rec loop () =
+              match Unix.read descriptor byte 0 1 with
+              | 0 -> Error (Pkcs11_unavailable "controlling terminal closed")
+              | _ ->
+                  let character = Bytes.get byte 0 in
+                  if character = '\n' || character = '\r' then (
+                    ignore (Unix.write_substring descriptor "\n" 0 1);
+                    if Buffer.length value = 0 then Error Pkcs11_locked
+                    else Ok (Buffer.contents value))
+                  else (
+                    Buffer.add_char value character;
+                    loop ())
+            in
+            loop ()))
+  with Unix.Unix_error (error, _, _) ->
+    Error (Pkcs11_unavailable ("cannot read controlling terminal: " ^ Unix.error_message error))
 
-let load ~root device =
+let create_pkcs11 ~root ~module_path ~token_label ~key_label ~key_id =
+  if
+    Filename.is_relative module_path || not (valid_plain token_label)
+    || not (valid_plain key_label) || String.length key_id = 0
+  then Error (Invalid_profile "invalid PKCS#11 creation selector")
+  else
+    let* pin = read_pin () in
+    let* public_key =
+      pkcs11_create_raw module_path token_label key_id key_label pin
+      |> pkcs11_result
+    in
+    if String.length public_key <> 32 then
+      Error (Pkcs11_unsupported "token generated an invalid Ed25519 public key")
+    else
+      attach_pkcs11 ~root ~module_path ~token_label ~key_id ~public_key
+
+let signed_result ~public_key ~domain bytes result =
+  let* signature = result in
+  let* device =
+    Trust.device_of_public_key public_key
+    |> Result.map_error (fun error -> Trust_error error)
+  in
+  Trust.verify_detached ~device ~domain ~signature bytes
+  |> Result.map_error (fun error -> Trust_error error)
+  |> Result.map (fun () -> signature)
+
+let load_with_pin ~root ~pin device =
   let* profile = find ~root device in
   let* capability =
     match profile.provider with
     | Ssh_agent { public_key } ->
         Trust.signing_capability_of_external_signer ~public_key
           ~sign:(fun ~domain bytes ->
-            agent_sign ~public_key ~domain bytes |> Result.map_error error_to_string)
+            signed_result ~public_key ~domain bytes
+              (agent_sign ~public_key ~domain bytes)
+            |> Result.map_error error_to_string)
         |> Result.map_error (fun error -> Trust_error error)
     | Pkcs11 { module_path; token_label; key_id; public_key } ->
         Trust.signing_capability_of_external_signer ~public_key
           ~sign:(fun ~domain bytes ->
-            pkcs11_sign ~module_path ~token_label ~key_id ~public_key ~domain bytes
+            signed_result ~public_key ~domain bytes
+              (pkcs11_sign_raw module_path token_label key_id pin (domain ^ bytes)
+              |> pkcs11_result)
             |> Result.map_error error_to_string)
         |> Result.map_error (fun error -> Trust_error error)
   in
@@ -490,3 +576,11 @@ let load ~root device =
   in
   if Model.Device_id.equal device (Trust.device_id actual) then Ok capability
   else Error Public_key_mismatch
+
+let load ~root device =
+  let* profile = find ~root device in
+  match profile.provider with
+  | Ssh_agent _ -> load_with_pin ~root ~pin:"" device
+  | Pkcs11 _ ->
+      let* pin = read_pin () in
+      load_with_pin ~root ~pin device

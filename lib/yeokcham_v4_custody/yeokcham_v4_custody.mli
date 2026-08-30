@@ -58,6 +58,22 @@ val attach_pkcs11 :
   public_key:string ->
   (Model.Device_id.t, error) result
 
+val create_pkcs11 :
+  root:string ->
+  module_path:string ->
+  token_label:string ->
+  key_label:string ->
+  key_id:string ->
+  (Model.Device_id.t, error) result
+(** Generates an Ed25519 key pair on the selected token with the private key
+    marked non-extractable, then writes the local-only profile. *)
+
+val load_with_pin :
+  root:string -> pin:string -> Model.Device_id.t ->
+  (Trust.signing_capability, error) result
+(** Test and controlled integration boundary. Production commands use a
+    controlling-terminal PIN prompt and never persist this argument. *)
+
 val load :
   root:string -> Model.Device_id.t -> (Trust.signing_capability, error) result
 
