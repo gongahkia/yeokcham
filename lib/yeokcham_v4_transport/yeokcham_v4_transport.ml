@@ -217,9 +217,10 @@ let create_publication ~repository ~publisher ~certificate ~parents ~manifest
         ~publisher:(Trust.device_id publisher)
         ~certificate ~parents ~manifest
     in
-    let signature =
+    let* signature =
       Trust.sign_detached signing_capability
         ~domain:publication_signature_domain unsigned
+      |> Result.map_error (fun error -> Trust_error error)
     in
     let provisional =
       {

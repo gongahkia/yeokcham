@@ -754,7 +754,8 @@ let store_test_signer directory capability =
   in
   Out_channel.with_open_bin path (fun channel ->
       Out_channel.output_string channel
-        (Trust.signing_private_key_bytes capability))
+        (Trust.signing_private_key_bytes capability
+        |> require_ok Trust.error_to_string))
 
 let source_and_destination parent =
   let source = Filename.concat parent "source" in

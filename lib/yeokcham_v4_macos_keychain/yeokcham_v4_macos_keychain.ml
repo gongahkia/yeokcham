@@ -56,11 +56,18 @@ let lookup device =
   | _, None -> Error Keychain_unavailable
 
 let store_new device capability =
-  let bytes = Trust.signing_private_key_bytes capability in
+  let* bytes =
+    Trust.signing_private_key_bytes capability
+    |> Result.map_error (fun _ -> Invalid_keychain_material)
+  in
   match lookup_raw service_name (account device) with
   | 0, Some existing ->
       let* existing = capability_for_device device existing in
-      if String.equal (Trust.signing_private_key_bytes existing) bytes then
+      let* existing =
+        Trust.signing_private_key_bytes existing
+        |> Result.map_error (fun _ -> Invalid_keychain_material)
+      in
+      if String.equal existing bytes then
         Ok ()
       else Error Keychain_item_conflict
   | 0, None | 3, None | _, Some _ -> Error Keychain_unavailable
@@ -70,8 +77,11 @@ let store_new device capability =
       | 1 -> (
           match lookup device with
           | Ok existing ->
-              if String.equal (Trust.signing_private_key_bytes existing) bytes
-              then Ok ()
+              let* existing =
+                Trust.signing_private_key_bytes existing
+                |> Result.map_error (fun _ -> Invalid_keychain_material)
+              in
+              if String.equal existing bytes then Ok ()
               else Error Keychain_item_conflict
           | Error error -> Error error)
       | 2 -> Error Keychain_locked

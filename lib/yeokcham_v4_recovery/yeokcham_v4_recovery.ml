@@ -284,11 +284,16 @@ let payload_value ~authority ~recovery_capability =
   let* repository = encode_repository (Trust.repository membership) in
   let* certificates = encode_bytes_array certificates in
   let* epochs = encode_bytes_array epochs in
+  let* recovery_private_key =
+    Trust.signing_private_key_bytes recovery_capability
+    |> Result.map_error (fun _ ->
+           Invalid_secret "recovery capability must be exportable")
+  in
   array
     [
       Encoding.integer schema_version;
       repository;
-      Encoding.bytes (Trust.signing_private_key_bytes recovery_capability);
+      Encoding.bytes recovery_private_key;
       certificates;
       epochs;
     ]

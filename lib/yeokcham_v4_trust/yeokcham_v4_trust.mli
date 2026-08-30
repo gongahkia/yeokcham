@@ -54,6 +54,8 @@ type error =
   | Unknown_authorization
   | Authorization_mismatch
   | Duplicate_authorization
+  | Signing_failed of string
+  | Private_key_unavailable
   | Record_error of Yeokcham_v4_record.error
 
 val error_to_string : error -> string
@@ -64,15 +66,24 @@ val device_of_public_key : string -> (device, error) result
 val signing_capability_of_private_key :
   string -> (signing_capability, error) result
 
-val signing_private_key_bytes : signing_capability -> string
-(** Available only to signer-provider adapters for transfer into an OS secret
-    store. Callers must never persist, render, package, or log these bytes. *)
+val signing_capability_of_external_signer :
+  public_key:string ->
+  sign:(domain:string -> string -> (string, string) result) ->
+  (signing_capability, error) result
+(** Creates a capability for a local provider that never reveals private key
+    bytes. The callback receives fixed V4 signing domains only. *)
+
+val signing_private_key_bytes : signing_capability -> (string, error) result
+(** Available only to exportable native/test custody adapters. Non-exportable
+    providers return [Private_key_unavailable]. Callers must never persist,
+    render, package, or log these bytes. *)
 
 val signing_public_key : signing_capability -> string
 
 (* Signs protocol-owned, domain-separated bytes without exposing private key
    material. Callers must use a fixed protocol domain, never user input. *)
-val sign_detached : signing_capability -> domain:string -> string -> string
+val sign_detached :
+  signing_capability -> domain:string -> string -> (string, error) result
 
 (* Verifies a detached protocol signature against an explicit public device. *)
 val verify_detached :

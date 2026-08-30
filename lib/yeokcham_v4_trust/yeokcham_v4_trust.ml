@@ -52,7 +52,15 @@ module Repository_id = struct
 end
 
 type device = { device_id_value : Model.Device_id.t; public_key : string }
-type signing_capability = Mirage_crypto_ec.Ed25519.priv
+
+(* A capability is an opaque local signing operation.  In particular, an
+   external token or agent never needs to reveal private material to the V4
+   process. *)
+type signing_capability = {
+  signing_public_key_value : string;
+  signing_private_key_value : string option;
+  signing_operation : domain:string -> string -> (string, string) result;
+}
 
 type generated_device = {
   generated_identity : device;
@@ -150,6 +158,8 @@ type error =
   | Unknown_authorization
   | Authorization_mismatch
   | Duplicate_authorization
+  | Signing_failed of string
+  | Private_key_unavailable
   | Record_error of Record.error
 
 let error_to_string = function
@@ -191,6 +201,9 @@ let error_to_string = function
   | Unknown_authorization -> "V4 one-time authorization is unknown"
   | Authorization_mismatch -> "V4 authorization does not match this revision"
   | Duplicate_authorization -> "V4 authorization was already consumed"
+  | Signing_failed detail -> "V4 signer failed: " ^ detail
+  | Private_key_unavailable ->
+      "V4 signer is non-exportable and cannot provide private key bytes"
   | Record_error error -> Record.error_to_string error
 
 let construction =
@@ -244,24 +257,47 @@ let make_device public_key =
   let* id = device_id_of_public_key public_key in
   Ok { device_id_value = id; public_key }
 
-let generate_device () =
-  try
-    Mirage_crypto_rng_unix.use_default ();
-    let private_key, _ = Mirage_crypto_ec.Ed25519.generate () in
-    let public_key =
-      private_key |> Mirage_crypto_ec.Ed25519.pub_of_priv
-      |> Mirage_crypto_ec.Ed25519.pub_to_octets
-    in
-    let* generated_identity = make_device public_key in
-    Ok { generated_identity; generated_signing_capability = private_key }
-  with _ -> Error Entropy_failure
-
 let device_of_public_key = make_device
 
 let signing_capability_of_private_key bytes =
   match Mirage_crypto_ec.Ed25519.priv_of_octets bytes with
-  | Ok capability -> Ok capability
   | Error _ -> Error Invalid_private_key
+  | Ok private_key ->
+      let public_key =
+        private_key |> Mirage_crypto_ec.Ed25519.pub_of_priv
+        |> Mirage_crypto_ec.Ed25519.pub_to_octets
+      in
+      Ok
+        {
+          signing_public_key_value = public_key;
+          signing_private_key_value = Some bytes;
+          signing_operation =
+            (fun ~domain bytes ->
+              Ok
+                (Mirage_crypto_ec.Ed25519.sign ~key:private_key
+                   (domain ^ bytes)));
+        }
+
+let signing_capability_of_external_signer ~public_key ~sign =
+  let* _ = make_device public_key in
+  Ok
+    {
+      signing_public_key_value = public_key;
+      signing_private_key_value = None;
+      signing_operation = sign;
+    }
+
+let generate_device () =
+  try
+    Mirage_crypto_rng_unix.use_default ();
+    let private_key, _ = Mirage_crypto_ec.Ed25519.generate () in
+    let bytes = Mirage_crypto_ec.Ed25519.priv_to_octets private_key in
+    let* generated_signing_capability = signing_capability_of_private_key bytes in
+    let* generated_identity =
+      make_device generated_signing_capability.signing_public_key_value
+    in
+    Ok { generated_identity; generated_signing_capability }
+  with _ -> Error Entropy_failure
 
 let generated_identity generated = generated.generated_identity
 
@@ -374,13 +410,16 @@ let certificate_id_for ~repository ~subject ~role ~issuer_certificate
   Ok (Repository_id.hex (digest certificate_id_domain unsigned))
 
 let signing_public_key signing_capability =
-  signing_capability |> Mirage_crypto_ec.Ed25519.pub_of_priv
-  |> Mirage_crypto_ec.Ed25519.pub_to_octets
+  signing_capability.signing_public_key_value
 
-let signing_private_key_bytes = Mirage_crypto_ec.Ed25519.priv_to_octets
+let signing_private_key_bytes signing_capability =
+  match signing_capability.signing_private_key_value with
+  | Some bytes -> Ok bytes
+  | None -> Error Private_key_unavailable
 
 let sign_detached signing_capability ~domain bytes =
-  Mirage_crypto_ec.Ed25519.sign ~key:signing_capability (domain ^ bytes)
+  signing_capability.signing_operation ~domain bytes
+  |> Result.map_error (fun detail -> Signing_failed detail)
 
 let verify_detached ~device ~domain ~signature bytes =
   if String.length signature <> 64 then
@@ -407,9 +446,8 @@ let sign_certificate ~repository ~subject ~role ~issuer_certificate
   if not (Model.Device_id.equal issuer.device_id_value issuer_device) then
     Error Invalid_private_key
   else
-    let signature =
-      Mirage_crypto_ec.Ed25519.sign ~key:signing_capability
-        (certificate_signature_domain ^ id)
+    let* signature =
+      sign_detached signing_capability ~domain:certificate_signature_domain id
     in
     Ok
       {
@@ -1048,9 +1086,8 @@ let make_epoch ~repository ~parents ~certificate_ids ~revoked ~frontier
     epoch_id_for ~repository ~parents ~certificate_ids ~revoked ~frontier
       ~recovery_device ~issuer
   in
-  let signature =
-    Mirage_crypto_ec.Ed25519.sign ~key:signing_capability
-      (authority_epoch_signature_domain ^ id)
+  let* signature =
+    sign_detached signing_capability ~domain:authority_epoch_signature_domain id
   in
   Ok
     {
@@ -1742,9 +1779,8 @@ let sign_revision_at_with authority ~epoch ~certificate signing_capability
         ~repository:authority.authority_membership_value.membership_repository
         ~certificate ~epoch ~resolution revision
     in
-    let signature =
-      Mirage_crypto_ec.Ed25519.sign ~key:signing_capability
-        (revision_signature_domain ^ bytes)
+    let* signature =
+      sign_detached signing_capability ~domain:revision_signature_domain bytes
     in
     Ok
       {
@@ -1843,9 +1879,9 @@ let make_authorization authority ~epoch ~issuer signing_capability ~device
       ~repository:authority.authority_membership_value.membership_repository
       ~epoch ~issuer ~device ~revision ~change
   in
-  let signature =
-    Mirage_crypto_ec.Ed25519.sign ~key:signing_capability
-      (authorization_signature_domain ^ unsigned)
+  let* signature =
+    sign_detached signing_capability ~domain:authorization_signature_domain
+      unsigned
   in
   Ok
     {
@@ -2018,9 +2054,8 @@ let make_adoption authority ~epoch ~issuer signing_capability ~signed_revision =
       ~revision:(signed_revision_id signed_revision)
       ~signed_digest:(signed_revision_digest signed_revision)
   in
-  let signature =
-    Mirage_crypto_ec.Ed25519.sign ~key:signing_capability
-      (adoption_signature_domain ^ unsigned)
+  let* signature =
+    sign_detached signing_capability ~domain:adoption_signature_domain unsigned
   in
   Ok
     {

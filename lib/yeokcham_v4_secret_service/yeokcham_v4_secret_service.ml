@@ -214,7 +214,9 @@ let preflight () =
   | Ok _ | Error () -> Error Secret_service_unavailable
 
 let encoded_secret capability =
-  secret_prefix ^ hex (Trust.signing_private_key_bytes capability)
+  Trust.signing_private_key_bytes capability
+  |> Result.map (fun bytes -> secret_prefix ^ hex bytes)
+  |> Result.map_error (fun _ -> Invalid_secret_material)
 
 let capability_for_device device secret =
   let secret = trim_one_newline secret in
@@ -253,7 +255,7 @@ let load device =
 
 let store_new device capability =
   let* () = preflight () in
-  let secret = encoded_secret capability in
+  let* secret = encoded_secret capability in
   match
     command ~program:secret_tool
       ~arguments:("lookup" :: attributes device)

@@ -417,8 +417,9 @@ let create ~source ~destination ~project ~authority ~revisions ~authorizations
         ~publisher:(Trust.device_id publisher)
         ~certificate
     in
-    let signature =
+    let* signature =
       Trust.sign_detached signing_capability ~domain:signature_domain unsigned
+      |> Result.map_error (fun error -> Trust_error error)
     in
     let provisional =
       {

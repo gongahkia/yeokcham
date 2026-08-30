@@ -55,7 +55,10 @@ let load device =
 let store_new device capability =
   let* directory = directory () in
   let path = private_key_path directory device in
-  let bytes = Trust.signing_private_key_bytes capability in
+  let* bytes =
+    Trust.signing_private_key_bytes capability
+    |> Result.map_error Trust.error_to_string
+  in
   try
     let channel =
       Unix.openfile path [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_EXCL ] 0o600
@@ -71,8 +74,11 @@ let store_new device capability =
   | Unix.Unix_error (Unix.EEXIST, _, _) -> (
       match load device with
       | Ok existing ->
-          if String.equal (Trust.signing_private_key_bytes existing) bytes then
-            Ok ()
+          let* existing =
+            Trust.signing_private_key_bytes existing
+            |> Result.map_error Trust.error_to_string
+          in
+          if String.equal existing bytes then Ok ()
           else Error "V4 test signer device item already contains another key"
       | Error error -> Error error)
   | Unix.Unix_error (error, operation, _) ->
