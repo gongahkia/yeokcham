@@ -9,6 +9,7 @@ module Transport_config = Yeokcham_v4_transport_config
 module Transport_credential = Yeokcham_v4_transport_credential
 module Transport_http = Yeokcham_v4_transport_http
 module Relay_http = Yeokcham_v4_relay_http
+module Relay_access = Yeokcham_v4_relay_access
 
 let fail message =
   prerr_endline message;
@@ -64,8 +65,13 @@ let usage () =
     \  yeokcham remote remove [--root PATH] NAME\n\
     \  yeokcham remote login [--root PATH] NAME\n\
     \  yeokcham sync [--root PATH] NAME\n\
-    \  yeokcham relay serve --storage PATH --listen ADDRESS:PORT --token-file \
-     PATH\n\
+    \  yeokcham relay serve --storage PATH --listen ADDRESS:PORT\n\
+    \  yeokcham relay access issue --storage PATH --repository ID --scope \
+     read,write [--expires-in SECONDS]\n\
+    \  yeokcham relay access rotate --storage PATH --id ID [--expires-in \
+     SECONDS]\n\
+    \  yeokcham relay access revoke --storage PATH --id ID\n\
+    \  yeokcham relay access list --storage PATH [--repository ID]\n\
     \  yeokcham deliver [--root PATH] --id ID --draft ID --title TITLE\n\
     \  yeokcham pin [--root PATH] --checkpoint ID\n\
     \  yeokcham unpin [--root PATH] --checkpoint ID\n\
@@ -1233,7 +1239,7 @@ let read_bearer_token () =
       fail "remote login requires an interactive terminal"
   in
   let hidden = { attributes with Unix.c_echo = false } in
-  print_string "relay bearer token: ";
+  print_string "relay access secret: ";
   flush stdout;
   let token =
     Fun.protect
@@ -1247,7 +1253,7 @@ let read_bearer_token () =
   in
   match token with
   | Ok token -> token
-  | Error () -> fail "no relay bearer token was provided"
+  | Error () -> fail "no relay access secret was provided"
 
 let run_remote_login arguments =
   let root, name = parse_remote_name arguments in
@@ -1261,26 +1267,216 @@ let run_remote_login arguments =
   Printf.printf "credential saved for remote %s\n" name
 
 let parse_relay_serve arguments =
-  let rec loop storage listen token_file = function
+  let rec loop storage listen = function
     | [] -> (
-        match (storage, listen, token_file) with
-        | Some storage, Some listen, Some token_file ->
-            (storage, listen, token_file)
+        match (storage, listen) with
+        | Some storage, Some listen -> (storage, listen)
         | _ -> usage ())
     | "--storage" :: value :: rest when Option.is_none storage ->
-        loop (Some value) listen token_file rest
+        loop (Some value) listen rest
     | "--listen" :: value :: rest when Option.is_none listen ->
-        loop storage (Some value) token_file rest
-    | "--token-file" :: value :: rest when Option.is_none token_file ->
-        loop storage listen (Some value) rest
+        loop storage (Some value) rest
+    | _ -> usage ()
+  in
+  loop None None arguments
+
+let run_relay_serve arguments =
+  let storage, listen = parse_relay_serve arguments in
+  Relay_http.serve ~root:storage ~listen
+  |> require_ok Relay_http.error_to_string
+
+let relay_now () = Int64.of_float (Unix.gettimeofday ())
+
+let parse_relay_repository value =
+  Trust.Repository_id.of_string value
+  |> require_ok (fun error -> "invalid relay repository ID: " ^ error)
+  |> Trust.Repository_id.to_string
+
+let parse_relay_access_scope value =
+  let scopes =
+    value |> String.split_on_char ','
+    |> List.map (function
+      | "read" -> Relay_access.Read
+      | "write" -> Relay_access.Write
+      | _ -> fail "relay access scope must contain only read and write")
+  in
+  if scopes = [] then fail "relay access scope must not be empty" else scopes
+
+let parse_relay_access_lifetime = function
+  | None -> Relay_access.default_lifetime_seconds
+  | Some value -> (
+      match Int64.of_string_opt value with
+      | Some value
+        when Int64.compare value 0L > 0
+             && Int64.compare value Relay_access.max_lifetime_seconds <= 0 ->
+          value
+      | _ ->
+          fail
+            "relay access lifetime must be a positive number of seconds no \
+             greater than one year")
+
+let with_controlling_tty run =
+  try
+    let descriptor = Unix.openfile "/dev/tty" [ Unix.O_WRONLY ] 0 in
+    Fun.protect
+      ~finally:(fun () ->
+        try Unix.close descriptor with Unix.Unix_error _ -> ())
+      (fun () -> run descriptor)
+  with Unix.Unix_error _ ->
+    fail
+      "relay access issue and rotate require an interactive controlling \
+       terminal"
+
+let write_tty descriptor value =
+  let rec loop offset =
+    if offset <> String.length value then
+      try
+        let count =
+          Unix.write_substring descriptor value offset
+            (String.length value - offset)
+        in
+        if count = 0 then fail "could not display relay access secret"
+        else loop (offset + count)
+      with Unix.Unix_error _ -> fail "could not display relay access secret"
+  in
+  loop 0
+
+let display_relay_access_secret descriptor grant =
+  write_tty descriptor
+    ("relay access secret (record now; shown once): "
+   ^ grant.Relay_access.grant_secret ^ "\n")
+
+let parse_relay_access_issue arguments =
+  let rec loop storage repository scope expires_in = function
+    | [] -> (
+        match (storage, repository, scope) with
+        | Some storage, Some repository, Some scope ->
+            (storage, repository, scope, parse_relay_access_lifetime expires_in)
+        | _ -> usage ())
+    | "--storage" :: value :: rest when Option.is_none storage ->
+        loop (Some value) repository scope expires_in rest
+    | "--repository" :: value :: rest when Option.is_none repository ->
+        loop storage (Some value) scope expires_in rest
+    | "--scope" :: value :: rest when Option.is_none scope ->
+        loop storage repository (Some value) expires_in rest
+    | "--expires-in" :: value :: rest when Option.is_none expires_in ->
+        loop storage repository scope (Some value) rest
+    | _ -> usage ()
+  in
+  loop None None None None arguments
+
+let run_relay_access_issue arguments =
+  let storage, repository, scope, expires_in =
+    parse_relay_access_issue arguments
+  in
+  let repository = parse_relay_repository repository in
+  let scopes = parse_relay_access_scope scope in
+  with_controlling_tty (fun tty ->
+      let grant =
+        Relay_access.update ~root:storage (fun registry ->
+            Relay_access.issue ~now:(relay_now ()) ~repository ~scopes
+              ~expires_in registry)
+        |> require_ok Relay_access.error_to_string
+      in
+      Printf.printf "credential %s\n" grant.Relay_access.grant_credential_id;
+      Printf.printf "expires-at %Ld\n" grant.Relay_access.grant_expires_at;
+      display_relay_access_secret tty grant)
+
+let parse_relay_access_rotate arguments =
+  let rec loop storage credential_id expires_in = function
+    | [] -> (
+        match (storage, credential_id) with
+        | Some storage, Some credential_id ->
+            (storage, credential_id, parse_relay_access_lifetime expires_in)
+        | _ -> usage ())
+    | "--storage" :: value :: rest when Option.is_none storage ->
+        loop (Some value) credential_id expires_in rest
+    | "--id" :: value :: rest when Option.is_none credential_id ->
+        loop storage (Some value) expires_in rest
+    | "--expires-in" :: value :: rest when Option.is_none expires_in ->
+        loop storage credential_id (Some value) rest
     | _ -> usage ()
   in
   loop None None None arguments
 
-let run_relay_serve arguments =
-  let storage, listen, token_file = parse_relay_serve arguments in
-  Relay_http.serve ~root:storage ~listen ~token_file
-  |> require_ok Relay_http.error_to_string
+let run_relay_access_rotate arguments =
+  let storage, credential_id, expires_in =
+    parse_relay_access_rotate arguments
+  in
+  with_controlling_tty (fun tty ->
+      let grant =
+        Relay_access.update ~root:storage (fun registry ->
+            Relay_access.rotate ~now:(relay_now ()) ~credential_id ~expires_in
+              registry)
+        |> require_ok Relay_access.error_to_string
+      in
+      Printf.printf "credential %s\n" grant.Relay_access.grant_credential_id;
+      Printf.printf "expires-at %Ld\n" grant.Relay_access.grant_expires_at;
+      display_relay_access_secret tty grant)
+
+let parse_relay_access_revoke arguments =
+  let rec loop storage credential_id = function
+    | [] -> (
+        match (storage, credential_id) with
+        | Some storage, Some credential_id -> (storage, credential_id)
+        | _ -> usage ())
+    | "--storage" :: value :: rest when Option.is_none storage ->
+        loop (Some value) credential_id rest
+    | "--id" :: value :: rest when Option.is_none credential_id ->
+        loop storage (Some value) rest
+    | _ -> usage ()
+  in
+  loop None None arguments
+
+let run_relay_access_revoke arguments =
+  let storage, credential_id = parse_relay_access_revoke arguments in
+  Relay_access.update ~root:storage (fun registry ->
+      Relay_access.revoke ~now:(relay_now ()) ~credential_id registry
+      |> Result.map (fun registry -> (registry, ())))
+  |> require_ok Relay_access.error_to_string;
+  Printf.printf "credential revoked %s\n" credential_id
+
+let parse_relay_access_list arguments =
+  let rec loop storage repository = function
+    | [] -> (
+        match storage with
+        | Some storage -> (storage, repository)
+        | None -> usage ())
+    | "--storage" :: value :: rest when Option.is_none storage ->
+        loop (Some value) repository rest
+    | "--repository" :: value :: rest when Option.is_none repository ->
+        loop storage (Some value) rest
+    | _ -> usage ()
+  in
+  loop None None arguments
+
+let run_relay_access_list arguments =
+  let storage, repository = parse_relay_access_list arguments in
+  let repository = Option.map parse_relay_repository repository in
+  Relay_access.load ~root:storage
+  |> require_ok Relay_access.error_to_string
+  |> Relay_access.credentials
+  |> List.filter (fun credential ->
+      Option.fold ~none:true
+        ~some:(String.equal (Relay_access.credential_repository credential))
+        repository)
+  |> List.iter (fun credential ->
+      let status =
+        match Relay_access.credential_status credential with
+        | Relay_access.Active -> "active"
+        | Relay_access.Revoked -> "revoked"
+      in
+      Printf.printf "credential %s\n" (Relay_access.credential_id credential);
+      Printf.printf "repository %s\n"
+        (Relay_access.credential_repository credential);
+      Printf.printf "scope %s\n"
+        (Relay_access.scopes_to_string
+           (Relay_access.credential_scopes credential));
+      Printf.printf "issued-at %Ld\n"
+        (Relay_access.credential_issued_at credential);
+      Printf.printf "expires-at %Ld\n"
+        (Relay_access.credential_expires_at credential);
+      Printf.printf "status %s\n" status)
 
 let relay_project identity =
   Trust.Repository_id.to_string identity.Service.repository
@@ -1768,6 +1964,14 @@ let () =
   | _ :: "remote" :: "remove" :: arguments -> run_remote_remove arguments
   | _ :: "remote" :: "login" :: arguments -> run_remote_login arguments
   | _ :: "sync" :: arguments -> run_sync arguments
+  | _ :: "relay" :: "access" :: "issue" :: arguments ->
+      run_relay_access_issue arguments
+  | _ :: "relay" :: "access" :: "rotate" :: arguments ->
+      run_relay_access_rotate arguments
+  | _ :: "relay" :: "access" :: "revoke" :: arguments ->
+      run_relay_access_revoke arguments
+  | _ :: "relay" :: "access" :: "list" :: arguments ->
+      run_relay_access_list arguments
   | _ :: "relay" :: "serve" :: arguments -> run_relay_serve arguments
   | _ :: "deliver" :: arguments -> run_deliver arguments
   | _ :: "pin" :: arguments -> run_pin arguments

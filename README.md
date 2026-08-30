@@ -56,11 +56,19 @@ yeokcham receive --from ../incoming
 The adoption is a durable, domain-separated approval for that exact signed
 revision. It grants neither general membership nor a broad exception.
 
-For synchronization, run `yeokcham relay serve --storage PATH --listen
-127.0.0.1:8080 --token-file PATH` behind an operator-managed HTTPS reverse
-proxy. The relay is only an immutable byte courier; `sync` verifies received
-packages before updating local state and reports upload failures as pending
-retry work.
+For synchronization, an operator first issues a repository-scoped access
+secret, then runs the relay behind an operator-managed HTTPS reverse proxy:
+
+```sh
+yeokcham relay access issue --storage PATH --repository REPOSITORY_ID \
+  --scope read,write
+yeokcham relay serve --storage PATH --listen 127.0.0.1:8080
+```
+
+The issue command shows the secret only once through the controlling terminal;
+the client enters it with `remote login`. The relay is only an immutable byte
+courier; `sync` verifies received packages before updating local state and
+reports upload failures as pending retry work.
 
 ## Boundaries
 

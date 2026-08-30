@@ -898,6 +898,35 @@ let remote_alias_commands_persist_only_local_configuration () =
       expect_output_contains "remote remove names its alias"
         "remote removed team" output)
 
+let relay_access_issue_refuses_noninteractive_secret_output () =
+  with_directory "yeokcham-v4-cli-relay-access-" (fun root ->
+      let repository =
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+      in
+      let output, errors, status =
+        run
+          [
+            "relay";
+            "access";
+            "issue";
+            "--storage";
+            root;
+            "--repository";
+            repository;
+            "--scope";
+            "read,write";
+          ]
+      in
+      (match status with
+      | Unix.WEXITED 2 -> ()
+      | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
+          Alcotest.fail
+            "noninteractive relay access issue unexpectedly succeeded");
+      Alcotest.(check string)
+        "issuance writes no secret to standard output" "" output;
+      expect_output_contains "issuance explains terminal-only secret delivery"
+        "require an interactive controlling terminal" errors)
+
 let watch_is_linux_only () =
   with_directory "yeokcham-v4-cli-watch-" (fun root ->
       let uname =
@@ -946,6 +975,9 @@ let () =
             command_refreshes_an_initial_recovery_package_without_changing_authority;
           Alcotest.test_case "remote aliases persist as local configuration"
             `Quick remote_alias_commands_persist_only_local_configuration;
+          Alcotest.test_case
+            "relay access issuance refuses noninteractive secret output" `Quick
+            relay_access_issue_refuses_noninteractive_secret_output;
           Alcotest.test_case "watch is Linux-only" `Quick watch_is_linux_only;
         ] );
     ]

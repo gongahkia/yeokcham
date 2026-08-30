@@ -41,6 +41,10 @@ two-replica path from a source repository through an untrusted relay into a
 fresh target. It rejects wrong root phrases before creating target state and
 only materialises the target working tree after an explicit later `restore`.
 The relay test also proves bootstrap entries are SHA-addressed and create-only.
+Relay access verification adds a canonical local policy registry fixture and
+unit tests for scope, expiry, revocation, rotation, and verifier-only storage.
+The listener matrix checks read-only, write-only, cross-repository, expired,
+revoked, and rotated-old credentials before immutable storage is called.
 The transport suite passes an end-to-end HTTPS fixture: OpenSSL generates an
 ephemeral certificate for a loopback `socat` TLS reverse proxy, while the relay
 remains a separate plain-HTTP backend. The production client continues to use

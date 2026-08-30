@@ -32,9 +32,10 @@ from a platform adapter, and never allows a collaborative wrapper to be
 stripped by an ordinary save.
 
 `Yeokcham_v4_transport` owns canonical signed courier publications and feed
-validation. The relay owns only bounded bearer-authenticated immutable byte
-storage; reverse-proxy TLS, aliases, URLs, and credentials remain outside the
-V4 project model. The transport client stages relay artifacts and delegates
+validation. The relay owns only bounded, repository-scoped bearer access and
+immutable byte storage; its versioned local access registry, reverse-proxy TLS,
+aliases, URLs, and credentials remain outside the V4 project model. The
+transport client stages relay artifacts and delegates
 receipt solely to the receipt boundary; it has no second model or authority
 path. `Yeokcham_v4_bootstrap` adds a separately signed portable-state basis
 bound to an unchanged package-manifest-v1 closure; it is explicit

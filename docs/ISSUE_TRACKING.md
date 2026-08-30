@@ -27,17 +27,19 @@ late-review feed-fork retry case now cover the remaining ADR-085 acceptance
 criteria. No local test result alone is a deployment claim.
 
 [#256](https://github.com/gongahkia/yeokcham/issues/256), verified bootstrap,
+[#258](https://github.com/gongahkia/yeokcham/issues/258), scoped relay access,
 and [#262](https://github.com/gongahkia/yeokcham/issues/262), the transport
 no-working-tree-mutation guardrail, are complete. Bootstrap accepts a signed,
 immutable basis from an untrusted relay, validates it before creating local
 state, and only materialises a working tree on a later explicit restore. The
 receipt module owns receive and sync receipt without a snapshot or
 materialisation dependency; the product contract includes a review checklist
-for that boundary.
+for that boundary. Scoped relay access uses operator-local repository read/write
+credentials with finite lifetime, rotation, and revocation; it does not change
+authority, package, publication, or receipt semantics.
 
 The remaining V4 backlog is relay payload encryption
-[#257](https://github.com/gongahkia/yeokcham/issues/257), relay access control
-[#258](https://github.com/gongahkia/yeokcham/issues/258), online authority
+[#257](https://github.com/gongahkia/yeokcham/issues/257), online authority
 coordination evaluation [#259](https://github.com/gongahkia/yeokcham/issues/259),
 explicit decision-proposal assistance
 [#260](https://github.com/gongahkia/yeokcham/issues/260), and advisory

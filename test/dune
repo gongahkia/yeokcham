@@ -61,6 +61,7 @@
   yeokcham_encoding
   yeokcham_v4_package
   yeokcham_v4_relay
+  yeokcham_v4_relay_access
   yeokcham_v4_relay_http
   yeokcham_v4_store
   yeokcham_v4_transport
@@ -69,6 +70,19 @@
   yeokcham_v4_trust)
  (deps
   ../bin/yeokcham_v4.exe
+  (source_tree golden)))
+
+(test
+ (name test_v4_relay_access)
+ (modules test_v4_relay_access)
+ (libraries
+  alcotest
+  qcheck-core
+  qcheck-alcotest
+  unix
+  yeokcham_testkit
+  yeokcham_v4_relay_access)
+ (deps
   (source_tree golden)))
 
 (test

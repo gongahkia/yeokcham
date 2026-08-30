@@ -15,6 +15,7 @@
   yeokcham_v4_transport_credential
   yeokcham_v4_transport_http
   yeokcham_v4_relay_http
+  yeokcham_v4_relay_access
   yeokcham_v4_trust
   (select
    v4_watch.ml

@@ -131,12 +131,22 @@ not grant membership, a general exception, or delivery.
 
 Relay synchronization is only for already-equivalent V4 replicas. An operator
 starts the byte-only backend with `relay serve --storage PATH --listen
-ADDRESS:PORT --token-file PATH` and terminates TLS in a separate HTTPS reverse
-proxy. The relay has no signing capability, authority state, model state, or
-working-tree access; it stores readable immutable package bytes only.
+ADDRESS:PORT` and terminates TLS in a separate HTTPS reverse proxy. Before use,
+the operator issues a repository-scoped `read`, `write`, or `read,write` access
+secret with `relay access issue --storage PATH --repository ID --scope SCOPE`.
+Secrets expire after thirty days unless `--expires-in SECONDS` says otherwise;
+`relay access rotate` replaces one by safe credential ID and `relay access
+revoke` disables one without restart. Issue and rotation require a controlling
+terminal and display the secret there once, never on standard output.
+
+The relay access registry is local operator policy. It stores only verifiers,
+safe IDs, scope, repository, timing, and status; it is not V4 authority,
+membership, model state, package, publication, or a trust root. The relay has
+no signing capability, authority state, model state, or working-tree access;
+it stores readable immutable package bytes only.
 
 `remote add NAME HTTPS_URL` stores a local alias under `.yeokcham`; `remote
-login NAME` reads a bearer credential with terminal echo disabled and stores it
+login NAME` reads a relay access secret with terminal echo disabled and stores it
 in the Linux Secret Service. Neither aliases nor credentials are signed,
 packaged, exported, or authority data. `remote remove NAME` removes the alias.
 
@@ -187,7 +197,7 @@ No state transition mutates the only copy in place.
 
 There is no general clone protocol, blob GC, durable `capture=`, immortal
 restore safety after journal prune, Git bridge, semantic parser or merge,
-end-to-end payload encryption, relay-side authorization policy,
+end-to-end payload encryption, external relay identity or proof-of-possession,
 hardware/non-exportable signer, signing agent, macOS/WSL watcher, or CI-backed
 delivery. These are separate design work and must reuse the current model and
 receipt boundaries when introduced.

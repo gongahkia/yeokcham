@@ -1,3 +1,7 @@
 (library
  (name yeokcham_v4_relay_http)
- (libraries unix yeokcham_encoding yeokcham_v4_relay))
+ (libraries
+  unix
+  yeokcham_encoding
+  yeokcham_v4_relay
+  yeokcham_v4_relay_access))

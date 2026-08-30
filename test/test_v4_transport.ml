@@ -4,6 +4,7 @@ module Model = Yeokcham_v4_model
 module Trust = Yeokcham_v4_trust
 module Transport = Yeokcham_v4_transport
 module Relay = Yeokcham_v4_relay
+module Relay_access = Yeokcham_v4_relay_access
 module Relay_http = Yeokcham_v4_relay_http
 module Transport_http = Yeokcham_v4_transport_http
 module Transport_config = Yeokcham_v4_transport_config
@@ -36,6 +37,11 @@ let repository () =
   Trust.Repository_id.of_string
     "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
   |> Result.get_ok
+
+let relay_test_token () =
+  match Sys.getenv_opt "YEOKCHAM_V4_TEST_TRANSPORT_TOKEN" with
+  | Some token -> token
+  | None -> Alcotest.fail "relay access test token is unavailable"
 
 let authority () =
   let repository = repository () in
@@ -274,7 +280,8 @@ let response_status response =
       | None -> Alcotest.fail "relay response did not contain a status")
   | _ -> Alcotest.fail "relay response did not contain a status line"
 
-let raw_request ?(token = "test-relay-token") ?(body = "") method_ path =
+let raw_request ?(token = "wrong-relay-access-secret") ?(body = "") method_ path
+    =
   method_ ^ " " ^ path
   ^ " HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer " ^ token
   ^ "\r\nContent-Length: "
@@ -284,9 +291,15 @@ let raw_request ?(token = "test-relay-token") ?(body = "") method_ path =
 let with_http_relay run =
   with_directory "yeokcham-v4-http-relay-" (fun root ->
       let relay_root = Filename.concat root "relay" in
-      let token_file = Filename.concat root "token" in
-      Out_channel.with_open_bin token_file (fun channel ->
-          Out_channel.output_string channel "test-relay-token\n");
+      let project = Trust.Repository_id.to_string (repository ()) in
+      let now = Int64.of_float (Unix.gettimeofday ()) in
+      let grant =
+        Relay_access.update ~root:relay_root (fun registry ->
+            Relay_access.issue ~now ~repository:project
+              ~scopes:[ Relay_access.Read; Relay_access.Write ]
+              ~expires_in:Relay_access.default_lifetime_seconds registry)
+        |> require_ok Relay_access.error_to_string
+      in
       let port = available_loopback_port () in
       let relay =
         match Unix.fork () with
@@ -294,7 +307,6 @@ let with_http_relay run =
             match
               Relay_http.serve ~root:relay_root
                 ~listen:("127.0.0.1:" ^ string_of_int port)
-                ~token_file
             with
             | Ok () -> exit 0
             | Error _ -> exit 1)
@@ -316,16 +328,18 @@ let with_http_relay run =
             | Unix.Unix_error _ -> Alcotest.fail "HTTP relay did not start"
           in
           ready 100;
-          run ~relay_root ~port))
+          run ~relay_root ~port ~token:grant.Relay_access.grant_secret))
 
 let http_listener_rejects_untrusted_requests_and_preserves_immutability () =
-  with_http_relay (fun ~relay_root ~port ->
+  with_http_relay (fun ~relay_root ~port ~token ->
       let project = Trust.Repository_id.to_string (repository ()) in
       let path kind id =
         "/v1/repositories/" ^ project ^ "/" ^ kind ^ "/" ^ id
       in
       let unauthorized =
-        raw_http ~port (raw_request ~token:"wrong" "GET" "/not-a-route")
+        raw_http ~port
+          (raw_request ~token:"wrong" "GET"
+             (path "manifests" (Transport.sha256 "untrusted")))
       in
       Alcotest.(check int)
         "wrong bearer token is rejected" 401
@@ -333,10 +347,8 @@ let http_listener_rejects_untrusted_requests_and_preserves_immutability () =
       let oversized =
         "PUT "
         ^ path "manifests" (Transport.sha256 "oversized")
-        ^ " HTTP/1.1\r\n\
-           Host: localhost\r\n\
-           Authorization: Bearer test-relay-token\r\n\
-           Content-Length: "
+        ^ " HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer " ^ token
+        ^ "\r\nContent-Length: "
         ^ string_of_int (Relay.max_body_bytes + 1)
         ^ "\r\n\r\n"
       in
@@ -347,16 +359,16 @@ let http_listener_rejects_untrusted_requests_and_preserves_immutability () =
         "malformed digest route is rejected" 400
         (response_status
            (raw_http ~port
-              (raw_request "GET" (path "manifests" "not-a-digest"))));
+              (raw_request ~token "GET" (path "manifests" "not-a-digest"))));
       Alcotest.(check int)
         "invalid page limit is rejected" 400
         (response_status
            (raw_http ~port
-              (raw_request "GET"
+              (raw_request ~token "GET"
                  ("/v1/repositories/" ^ project ^ "/publications?limit=0"))));
       let bytes = "listener manifest" in
       let id = Transport.sha256 bytes in
-      let put = raw_request ~body:bytes "PUT" (path "manifests" id) in
+      let put = raw_request ~token ~body:bytes "PUT" (path "manifests" id) in
       Alcotest.(check int)
         "first immutable create succeeds" 201
         (response_status (raw_http ~port put));
@@ -367,8 +379,10 @@ let http_listener_rejects_untrusted_requests_and_preserves_immutability () =
         "a different body cannot overwrite" 400
         (response_status
            (raw_http ~port
-              (raw_request ~body:"different" "PUT" (path "manifests" id))));
-      let fetched = raw_http ~port (raw_request "GET" (path "manifests" id)) in
+              (raw_request ~token ~body:"different" "PUT" (path "manifests" id))));
+      let fetched =
+        raw_http ~port (raw_request ~token "GET" (path "manifests" id))
+      in
       Alcotest.(check int)
         "stored immutable bytes remain readable" 200 (response_status fetched);
       Alcotest.(check bool)
@@ -427,9 +441,15 @@ let with_https_relay run =
           "subjectAltName=IP:127.0.0.1";
         ];
       let relay_root = Filename.concat root "relay" in
-      let token_file = Filename.concat root "token" in
-      Out_channel.with_open_bin token_file (fun channel ->
-          Out_channel.output_string channel "test-relay-token\n");
+      let project = Trust.Repository_id.to_string (repository ()) in
+      let now = Int64.of_float (Unix.gettimeofday ()) in
+      let grant =
+        Relay_access.update ~root:relay_root (fun registry ->
+            Relay_access.issue ~now ~repository:project
+              ~scopes:[ Relay_access.Read; Relay_access.Write ]
+              ~expires_in:Relay_access.default_lifetime_seconds registry)
+        |> require_ok Relay_access.error_to_string
+      in
       let backend_port = available_loopback_port () in
       let proxy_port = available_loopback_port () in
       let backend =
@@ -438,7 +458,6 @@ let with_https_relay run =
             match
               Relay_http.serve ~root:relay_root
                 ~listen:("127.0.0.1:" ^ string_of_int backend_port)
-                ~token_file
             with
             | Ok () -> exit 0
             | Error _ -> exit 1)
@@ -474,13 +493,14 @@ let with_https_relay run =
         (fun () ->
           Unix.putenv "YEOKCHAM_V4_TEST_TRANSPORT" "1";
           Unix.putenv "YEOKCHAM_V4_TEST_TRANSPORT_CA_BUNDLE" certificate;
+          Unix.putenv "YEOKCHAM_V4_TEST_TRANSPORT_TOKEN"
+            grant.Relay_access.grant_secret;
           let client =
             Transport_http.create
               ~url:("https://127.0.0.1:" ^ string_of_int proxy_port)
-              ~token:"test-relay-token"
+              ~token:grant.Relay_access.grant_secret
             |> require_ok Transport_http.error_to_string
           in
-          let project = Trust.Repository_id.to_string (repository ()) in
           wait_for_https_relay client project 100;
           run client project ("https://127.0.0.1:" ^ string_of_int proxy_port)))
 
@@ -863,7 +883,8 @@ let interrupted_upload_leaves_received_work_durable () =
               Transport_config.add ~root:destination ~name:"team" ~url
               |> require_ok Transport_config.error_to_string;
               store_test_signer signer_directory member_capability;
-              Unix.putenv "YEOKCHAM_V4_TEST_TRANSPORT_TOKEN" "test-relay-token";
+              Unix.putenv "YEOKCHAM_V4_TEST_TRANSPORT_TOKEN"
+                (relay_test_token ());
               Unix.putenv "YEOKCHAM_V4_TEST_TRANSPORT_FAIL_PUT" "1";
               let output, errors, status =
                 run_cli [ "sync"; "--root"; destination; "team" ]
@@ -993,7 +1014,8 @@ let sync_retains_all_publications_in_a_feed_fork () =
               Transport_config.add ~root:destination ~name:"team" ~url
               |> require_ok Transport_config.error_to_string;
               store_test_signer signer_directory member_capability;
-              Unix.putenv "YEOKCHAM_V4_TEST_TRANSPORT_TOKEN" "test-relay-token";
+              Unix.putenv "YEOKCHAM_V4_TEST_TRANSPORT_TOKEN"
+                (relay_test_token ());
               Unix.putenv "YEOKCHAM_V4_TEST_TRANSPORT_FAIL_PUT" "1";
               let output, errors, status =
                 run_cli [ "sync"; "--root"; destination; "team" ]
@@ -1078,7 +1100,8 @@ let incomplete_remote_closure_leaves_the_replica_unchanged () =
               Transport_config.add ~root:destination ~name:"team" ~url
               |> require_ok Transport_config.error_to_string;
               store_test_signer signer_directory member_capability;
-              Unix.putenv "YEOKCHAM_V4_TEST_TRANSPORT_TOKEN" "test-relay-token";
+              Unix.putenv "YEOKCHAM_V4_TEST_TRANSPORT_TOKEN"
+                (relay_test_token ());
               let before =
                 Service.status ~root:destination
                 |> require_ok Service.error_to_string
@@ -1442,7 +1465,8 @@ let sync_receives_signed_resolutions_as_decision_resolutions () =
               Transport_config.add ~root:destination ~name:"team" ~url
               |> require_ok Transport_config.error_to_string;
               store_test_signer signer_directory member_capability;
-              Unix.putenv "YEOKCHAM_V4_TEST_TRANSPORT_TOKEN" "test-relay-token";
+              Unix.putenv "YEOKCHAM_V4_TEST_TRANSPORT_TOKEN"
+                (relay_test_token ());
               Unix.putenv "YEOKCHAM_V4_TEST_TRANSPORT_FAIL_PUT" "1";
               let output, errors, status =
                 run_cli [ "sync"; "--root"; destination; "team" ]
@@ -1556,6 +1580,119 @@ let bootstrap_relay_entries_are_create_only_and_sha_bound () =
       | Error _ -> ()
       | Ok () -> Alcotest.fail "bootstrap relay accepted a wrong route digest")
 
+let relay_access_scopes_rotation_and_expiry_are_enforced () =
+  with_http_relay (fun ~relay_root ~port ~token:_ ->
+      let project = Trust.Repository_id.to_string (repository ()) in
+      let other_project =
+        "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
+      in
+      let now = Int64.of_float (Unix.gettimeofday ()) in
+      let issue ~repository ~scopes ~now ~expires_in =
+        Relay_access.update ~root:relay_root (fun registry ->
+            Relay_access.issue ~now ~repository ~scopes ~expires_in registry)
+        |> require_ok Relay_access.error_to_string
+      in
+      let path project kind id =
+        "/v1/repositories/" ^ project ^ "/" ^ kind ^ "/" ^ id
+      in
+      let list project = "/v1/repositories/" ^ project ^ "/publications" in
+      let bytes = "access denied write" in
+      let id = Transport.sha256 bytes in
+      let read_only =
+        issue ~repository:project ~scopes:[ Relay_access.Read ] ~now
+          ~expires_in:Relay_access.default_lifetime_seconds
+      in
+      Alcotest.(check int)
+        "read-only secret may list publications" 200
+        (response_status
+           (raw_http ~port
+              (raw_request ~token:read_only.Relay_access.grant_secret "GET"
+                 (list project))));
+      Alcotest.(check int)
+        "read-only secret cannot upload" 403
+        (response_status
+           (raw_http ~port
+              (raw_request ~token:read_only.Relay_access.grant_secret
+                 ~body:bytes "PUT"
+                 (path project "manifests" id))));
+      let write_only =
+        issue ~repository:project ~scopes:[ Relay_access.Write ] ~now
+          ~expires_in:Relay_access.default_lifetime_seconds
+      in
+      Alcotest.(check int)
+        "write-only secret cannot list publications" 403
+        (response_status
+           (raw_http ~port
+              (raw_request ~token:write_only.Relay_access.grant_secret "GET"
+                 (list project))));
+      let other_repository =
+        issue ~repository:other_project
+          ~scopes:[ Relay_access.Read; Relay_access.Write ]
+          ~now ~expires_in:Relay_access.default_lifetime_seconds
+      in
+      Alcotest.(check int)
+        "cross-repository secret is denied" 403
+        (response_status
+           (raw_http ~port
+              (raw_request ~token:other_repository.Relay_access.grant_secret
+                 "GET" (list project))));
+      let expired =
+        issue ~repository:project ~scopes:[ Relay_access.Read ]
+          ~now:(Int64.sub now 2L) ~expires_in:1L
+      in
+      Alcotest.(check int)
+        "expired secret is unauthenticated" 401
+        (response_status
+           (raw_http ~port
+              (raw_request ~token:expired.Relay_access.grant_secret "GET"
+                 (list project))));
+      let replaced =
+        issue ~repository:project ~scopes:[ Relay_access.Read ] ~now
+          ~expires_in:Relay_access.default_lifetime_seconds
+      in
+      let replacement =
+        Relay_access.update ~root:relay_root (fun registry ->
+            Relay_access.rotate ~now
+              ~credential_id:replaced.Relay_access.grant_credential_id
+              ~expires_in:Relay_access.default_lifetime_seconds registry)
+        |> require_ok Relay_access.error_to_string
+      in
+      Alcotest.(check int)
+        "rotated old secret is rejected on replay" 401
+        (response_status
+           (raw_http ~port
+              (raw_request ~token:replaced.Relay_access.grant_secret "GET"
+                 (list project))));
+      Alcotest.(check int)
+        "rotated replacement remains usable" 200
+        (response_status
+           (raw_http ~port
+              (raw_request ~token:replacement.Relay_access.grant_secret "GET"
+                 (list project))));
+      let revoked =
+        issue ~repository:project ~scopes:[ Relay_access.Read ] ~now
+          ~expires_in:Relay_access.default_lifetime_seconds
+      in
+      Relay_access.update ~root:relay_root (fun registry ->
+          Relay_access.revoke ~now
+            ~credential_id:revoked.Relay_access.grant_credential_id registry
+          |> Result.map (fun registry -> (registry, ())))
+      |> require_ok Relay_access.error_to_string;
+      Alcotest.(check int)
+        "revoked secret is unauthenticated" 401
+        (response_status
+           (raw_http ~port
+              (raw_request ~token:revoked.Relay_access.grant_secret "GET"
+                 (list project))));
+      let relay =
+        Relay.open_repository ~root:relay_root
+        |> require_ok Relay.error_to_string
+      in
+      match Relay.get relay ~project ~kind:Relay.Manifest ~id with
+      | Error error when Relay.is_missing error -> ()
+      | Ok _ -> Alcotest.fail "denied upload wrote an immutable relay object"
+      | Error error -> Alcotest.fail (Relay.error_to_string error))
+
 let () =
   Alcotest.run "V4 transport"
     [
@@ -1578,6 +1715,10 @@ let () =
             `Quick bootstrap_relay_entries_are_create_only_and_sha_bound;
           Alcotest.test_case "HTTP listener rejects invalid requests" `Quick
             http_listener_rejects_untrusted_requests_and_preserves_immutability;
+          Alcotest.test_case
+            "scoped access rejects expiry, revocation, replay, and \
+             cross-project use"
+            `Quick relay_access_scopes_rotation_and_expiry_are_enforced;
           Alcotest.test_case "HTTPS reverse proxy reaches the relay" `Slow
             https_client_reaches_relay_through_tls_reverse_proxy;
           Alcotest.test_case

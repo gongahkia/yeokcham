@@ -1,65 +1,23 @@
 module Relay = Yeokcham_v4_relay
 module Encoding = Yeokcham_encoding
+module Access = Yeokcham_v4_relay_access
 
 type error =
   | Invalid_listen of string
-  | Invalid_token_file of string
   | Io_error of { path : string; operation : string; message : string }
   | Relay_error of Relay.error
 
 let max_header_bytes = 16 * 1024
-let max_token_bytes = 4096
 let ( let* ) = Result.bind
 
 let error_to_string = function
   | Invalid_listen value -> "invalid V4 relay listen address: " ^ value
-  | Invalid_token_file path -> "invalid V4 relay token file: " ^ path
   | Io_error { path; operation; message } ->
       Printf.sprintf "V4 relay HTTP %s %s: %s" operation path message
   | Relay_error error -> Relay.error_to_string error
 
 let close_noerr descriptor =
   try Unix.close descriptor with Unix.Unix_error _ -> ()
-
-let constant_time_equal left right =
-  let length = max (String.length left) (String.length right) in
-  let difference = ref (String.length left lxor String.length right) in
-  for index = 0 to length - 1 do
-    let left_byte =
-      if index < String.length left then Char.code left.[index] else 0
-    in
-    let right_byte =
-      if index < String.length right then Char.code right.[index] else 0
-    in
-    difference := !difference lor (left_byte lxor right_byte)
-  done;
-  !difference = 0
-
-let trim_one_newline value =
-  if String.ends_with ~suffix:"\n" value then
-    String.sub value 0 (String.length value - 1)
-  else value
-
-let token_from_file path =
-  try
-    let info = Unix.lstat path in
-    if
-      info.Unix.st_kind <> Unix.S_REG
-      || info.Unix.st_size <= 0
-      || info.Unix.st_size > max_token_bytes
-    then Error (Invalid_token_file path)
-    else
-      let token =
-        In_channel.with_open_bin path In_channel.input_all |> trim_one_newline
-      in
-      if
-        String.length token = 0
-        || String.exists
-             (function '\000' | '\r' | '\n' -> true | _ -> false)
-             token
-      then Error (Invalid_token_file path)
-      else Ok token
-  with Unix.Unix_error _ | Sys_error _ -> Error (Invalid_token_file path)
 
 let parse_listen value =
   match String.split_on_char ':' value with
@@ -166,10 +124,12 @@ let response descriptor status body =
     | 204 -> "No Content"
     | 400 -> "Bad Request"
     | 401 -> "Unauthorized"
+    | 403 -> "Forbidden"
     | 404 -> "Not Found"
     | 405 -> "Method Not Allowed"
     | 409 -> "Conflict"
     | 413 -> "Payload Too Large"
+    | 503 -> "Service Unavailable"
     | _ -> "Internal Server Error"
   in
   let header =
@@ -229,7 +189,40 @@ let encode_list ids cursor =
   in
   Encoding.array [ ids; cursor ] |> Result.get_ok |> Encoding.encode
 
-let handle relay token descriptor =
+let bearer headers =
+  match header headers "authorization" with
+  | Some value when String.starts_with ~prefix:"Bearer " value ->
+      Some (String.sub value 7 (String.length value - 7))
+  | _ -> None
+
+let required_scope method_ id kind =
+  match method_ with
+  | "PUT" when id <> "" -> Some Access.Write
+  | "GET" when id <> "" -> Some Access.Read
+  | "GET" when kind = Relay.Publication && id = "" -> Some Access.Read
+  | _ -> None
+
+let authorize ~root headers ~project scope =
+  match bearer headers with
+  | None -> Error `Unauthenticated
+  | Some secret -> (
+      match Access.load ~root with
+      | Error _ -> Error `Unavailable
+      | Ok registry -> (
+          match
+            Access.authorize
+              ~now:(Int64.of_float (Unix.gettimeofday ()))
+              ~secret ~repository:project ~scope registry
+          with
+          | Ok () -> Ok ()
+          | Error
+              ( Access.Invalid_secret | Access.Unknown_secret
+              | Access.Expired_secret | Access.Revoked_secret ) ->
+              Error `Unauthenticated
+          | Error (Access.Wrong_repository | Access.Insufficient_scope) ->
+              Error `Forbidden))
+
+let handle relay ~access_root descriptor =
   match read_request descriptor with
   | Error () -> response descriptor 400 ""
   | Ok (header_bytes, remainder) -> (
@@ -238,20 +231,12 @@ let handle relay token descriptor =
       | Ok (request_line, headers) -> (
           match request_line with
           | [ method_; target; "HTTP/1.1" ] -> (
-              let authorized =
-                match header headers "authorization" with
-                | Some value when String.starts_with ~prefix:"Bearer " value ->
-                    constant_time_equal token
-                      (String.sub value 7 (String.length value - 7))
-                | _ -> false
-              in
               let content_length =
                 match header headers "content-length" with
                 | None -> Some 0
                 | Some value -> int_of_string_opt value
               in
-              if not authorized then response descriptor 401 ""
-              else if Option.is_some (header headers "transfer-encoding") then
+              if Option.is_some (header headers "transfer-encoding") then
                 response descriptor 400 ""
               else
                 match (route target, content_length) with
@@ -261,56 +246,67 @@ let handle relay token descriptor =
                     response descriptor 413 ""
                 | Error (), Some _ -> response descriptor 404 ""
                 | Ok (project, kind, id, query), Some length -> (
-                    match method_ with
-                    | "PUT" when id <> "" -> (
-                        match body descriptor remainder length with
-                        | Error () -> response descriptor 400 ""
-                        | Ok bytes -> (
-                            match
-                              Relay.create relay ~project ~kind ~id ~bytes
-                            with
-                            | Ok () -> response descriptor 201 ""
-                            | Error error ->
-                                if Relay.is_immutable_conflict error then
-                                  response descriptor 409 ""
-                                else response descriptor 400 ""))
-                    | "GET" when id <> "" && length = 0 -> (
-                        match Relay.get relay ~project ~kind ~id with
-                        | Ok bytes -> response descriptor 200 bytes
-                        | Error error ->
-                            if Relay.is_missing error then
-                              response descriptor 404 ""
-                            else response descriptor 400 "")
-                    | "GET"
-                      when kind = Relay.Publication && id = "" && length = 0
-                      -> (
-                        let cursor = List.assoc_opt "cursor" query in
-                        let limit =
-                          match List.assoc_opt "limit" query with
-                          | None -> Some Relay.max_page_size
-                          | Some value -> int_of_string_opt value
-                        in
-                        match limit with
-                        | None -> response descriptor 400 ""
-                        | Some limit -> (
-                            match
-                              Relay.list_publications relay ~project ~cursor
-                                ~limit
-                            with
-                            | Ok (ids, cursor) ->
-                                response descriptor 200 (encode_list ids cursor)
-                            | Error _ -> response descriptor 400 ""))
-                    | "GET" | "PUT" -> response descriptor 405 ""
-                    | _ -> response descriptor 405 ""))
+                    match required_scope method_ id kind with
+                    | None -> response descriptor 405 ""
+                    | Some scope -> (
+                        match
+                          authorize ~root:access_root headers ~project scope
+                        with
+                        | Error `Unauthenticated -> response descriptor 401 ""
+                        | Error `Forbidden -> response descriptor 403 ""
+                        | Error `Unavailable -> response descriptor 503 ""
+                        | Ok () -> (
+                            match method_ with
+                            | "PUT" when id <> "" -> (
+                                match body descriptor remainder length with
+                                | Error () -> response descriptor 400 ""
+                                | Ok bytes -> (
+                                    match
+                                      Relay.create relay ~project ~kind ~id
+                                        ~bytes
+                                    with
+                                    | Ok () -> response descriptor 201 ""
+                                    | Error error ->
+                                        if Relay.is_immutable_conflict error
+                                        then response descriptor 409 ""
+                                        else response descriptor 400 ""))
+                            | "GET" when id <> "" && length = 0 -> (
+                                match Relay.get relay ~project ~kind ~id with
+                                | Ok bytes -> response descriptor 200 bytes
+                                | Error error ->
+                                    if Relay.is_missing error then
+                                      response descriptor 404 ""
+                                    else response descriptor 400 "")
+                            | "GET"
+                              when kind = Relay.Publication && id = ""
+                                   && length = 0 -> (
+                                let cursor = List.assoc_opt "cursor" query in
+                                let limit =
+                                  match List.assoc_opt "limit" query with
+                                  | None -> Some Relay.max_page_size
+                                  | Some value -> int_of_string_opt value
+                                in
+                                match limit with
+                                | None -> response descriptor 400 ""
+                                | Some limit -> (
+                                    match
+                                      Relay.list_publications relay ~project
+                                        ~cursor ~limit
+                                    with
+                                    | Ok (ids, cursor) ->
+                                        response descriptor 200
+                                          (encode_list ids cursor)
+                                    | Error _ -> response descriptor 400 ""))
+                            | "GET" | "PUT" -> response descriptor 405 ""
+                            | _ -> response descriptor 405 ""))))
           | _ -> response descriptor 400 ""))
 
-let serve ~root ~listen ~token_file =
+let serve ~root ~listen =
   let* relay =
     Relay.open_repository ~root
     |> Result.map_error (fun error -> Relay_error error)
   in
   let* address, port = parse_listen listen in
-  let* token = token_from_file token_file in
   try
     let listener = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
     Unix.setsockopt listener Unix.SO_REUSEADDR true;
@@ -324,7 +320,7 @@ let serve ~root ~listen ~token_file =
             let client, _ = Unix.accept listener in
             Fun.protect
               ~finally:(fun () -> close_noerr client)
-              (fun () -> handle relay token client)
+              (fun () -> handle relay ~access_root:root client)
           with Unix.Unix_error _ -> ()
         done;
         Ok ())

@@ -36,6 +36,9 @@ failure behaviour, and CLI surface agree.
     basis ID. Verify the complete closure and independently compared root phrase
     before importing shared history into a fresh local draft; source scratch,
     credentials, aliases, and working-tree bytes never transfer.
+11. Limit relay storage access with operator-managed repository-scoped read and
+    write secrets. Rotation, revocation, and expiry remain relay-local policy;
+    they never grant V4 authority or change receipt semantics.
 
 ### Explicit non-goals
 
