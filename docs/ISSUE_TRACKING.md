@@ -98,9 +98,14 @@ Focused tests cover the canonical profile, live SSH agent, disposable SoftHSM
 token, all V4 signing purposes, non-exportability, unavailable/locked/mismatched
 providers, and declined rotation without a repository or working-tree write.
 
-The remaining V4 backlog is relay payload encryption
-[#257](https://github.com/gongahkia/yeokcham/issues/257). It may not reuse
-retired V1–V3 protocol or runtime formats.
+[#257](https://github.com/gongahkia/yeokcham/issues/257), private relay
+payloads, has its V4 boundary specified by ADR-094: opaque immutable parcels,
+bounded anonymous recipient envelopes, separate device-signed X25519 key
+records, and explicit encrypted bootstrap for selected old history. It does
+not reuse V1–V3 formats or change authority, recovery, receipt, or the working
+tree model. It remains open and implementation-blocked until a maintained,
+independently audited OCaml HPKE dependency passes the ADR-094 review and
+vector gate; current relay payloads remain plaintext.
 
 Future feature proposals need a dedicated issue and ADR before coding when they
 change trust, transport, delivery, snapshot retention, or persistent semantics.

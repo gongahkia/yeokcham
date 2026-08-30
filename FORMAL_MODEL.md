@@ -158,6 +158,18 @@ active draft, baseline checkpoint, and local username; shared changes,
 resolutions, and deliveries remain distinct. Neither transition scans or
 materialises the working tree.
 
+### Deferred private transport
+
+ADR-094 specifies `transport-sealed-parcel-v1` and its private
+`transport-key-record-v1` recipient directory. They are not active V4 record
+types or transitions until an audited HPKE dependency passes the ADR's
+implementation gate. Current relay publications, manifests, and objects remain
+plaintext courier bytes. When implemented, a sealed parcel will be a courier
+wrapper around exact signed-publication and package bytes, not a revision,
+authority epoch, membership grant, acceptance, delivery, or project-model
+transition. Its local recipient-key directory will be private transport state
+only; it cannot select authority or alter a working tree.
+
 ## Advisory runtime state
 
 `Runtime_state` is disposable process observability, not `Project` state. A

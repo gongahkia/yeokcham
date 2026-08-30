@@ -120,5 +120,15 @@ announced; and a subsequent sync uploads and records it. TLS tests require
 `/usr/bin/openssl` and `/usr/bin/socat`; CI installs both, and missing tools
 fail the test rather than producing a skip.
 
+ADR-094 private relay payloads have no implementation result to report. The
+current relay fixture remains intentionally plaintext. Before #257 can claim
+private transport, it must first record a vetted, independently audited HPKE
+dependency and reproduce its pinned RFC 9180 vectors. Its future evidence must
+cover canonical sealed-parcel/key-record fixtures, anonymous recipient-envelope
+ordering and bounds, two-replica encrypted receipt and bootstrap, key rotation,
+replay/retry, and malformed-key/header/envelope/ciphertext/route/closure cases
+that leave destination objects, project state, transport state, and the working
+tree unchanged.
+
 No benchmark, semantic sidecar, Git, or CI delivery result is used as evidence
 for the current model.

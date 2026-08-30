@@ -73,8 +73,10 @@ failure behaviour, and CLI surface agree.
 No general clone, Git bridge, semantic parser or merge, automatic or remote GC, durable
 `capture=`, macOS/WSL watcher, or CI-backed delivery exists in this
 milestone. The bundled relay is an untrusted byte courier behind an
-operator-managed HTTPS reverse proxy; it is not hosted authority or end-to-end
-encrypted transport. No online coordinator, quorum, or witness service can
+operator-managed HTTPS reverse proxy; it is not hosted authority and current
+payloads are not end-to-end encrypted. ADR-094 specifies private transport but
+blocks its implementation on a vetted, independently audited HPKE dependency.
+No online coordinator, quorum, or witness service can
 select or gate V4 authority. These are not partial features.
 
 ### Acceptance evidence
