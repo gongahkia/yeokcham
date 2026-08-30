@@ -92,6 +92,30 @@ canonical encoding; unknown mandatory features and noncanonical encodings are
 rejected. Only the mutable
 `v4-project-state` head selects a current immutable state object.
 
+## Local collection state
+
+Collection is not a `Project` transition. A pure local plan classifies every
+canonical object in the object store as retained or candidate. Its roots are
+the object selected by `v4-project-state` and the complete snapshot closure of
+every checkpoint still named by the current `Project`. The model compaction
+projection supplies the explanatory reasons for baseline, draft, shared,
+delivery, resolution, open-decision, pin, restore-journal, and restore-proof
+roots; ordinary named checkpoints remain roots even when they have no special
+reason. Snapshot closure includes snapshot, tree, content, manifest, and chunk
+objects. An unreachable object type outside the V4 collection set is retained
+rather than guessed safe to remove.
+
+`gc-transaction-v1 = [1, state_head, sorted(candidate_id, type, bytes)]` is a
+local canonical, create-only quarantine receipt. It is not project history,
+package content, transport data, a trust root, or an authority record.
+Applying a plan moves candidates into the receipt directory; it does not
+unlink them. Restore moves them back while no purge marker exists. Purge
+revalidates the current plan, durably marks each object, then unlinks its
+quarantined copy. A marker makes an interrupted purge restartable but
+irreversible; a later model state that needs any candidate aborts purge before
+another unlink. No collection transition scans or materialises the working
+tree or contacts a relay.
+
 ## Transport state
 
 `Transport_publication` is a signed immutable courier record, not a project

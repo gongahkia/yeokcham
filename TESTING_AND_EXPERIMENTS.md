@@ -17,6 +17,16 @@ service test proves a completed journal may be pruned only after its safety and
 target snapshots are explained by a durable proof, and proves a corrupt proof
 does not advance the project-state head.
 
+Local collection verification adds a canonical `gc-transaction-v1` fixture,
+pure generated root classification, and integration tests for quarantining an
+orphan, explicit restore, explicit purge, a purge restart after its durable
+marker, retained large chunk-manifest and shared-revision closures, an empty
+worktree, retained restore-proof closure, a state-head change after quarantine,
+and corrupt or missing reachable objects. The CLI journey compacts old
+checkpoints, reviews the dry-run explanation, stages a transaction, inspects
+it, restores it, then explicitly stages and purges it. This is local storage
+evidence only; it does not claim relay, package, or automatic cleanup.
+
 The Linux watcher loop passed on Linux 7.1.9-100.fc43.x86_64 during the latest
 full local suite. On a Linux host, rerun:
 

@@ -42,6 +42,8 @@ type transaction_progress = {
   progress_transaction : transaction;
   staged_objects : Store.Stored_object_id.t list;
   active_objects : Store.Stored_object_id.t list;
+  purged_objects : Store.Stored_object_id.t list;
+  purge_started : bool;
 }
 
 type error =
@@ -75,7 +77,9 @@ let root_reason_to_string = function
   | Checkpoint { snapshot; reasons = [] } ->
       "checkpoint " ^ Model.Snapshot_id.to_string snapshot
   | Checkpoint { snapshot; reasons } ->
-      "checkpoint " ^ Model.Snapshot_id.to_string snapshot ^ " ("
+      "checkpoint "
+      ^ Model.Snapshot_id.to_string snapshot
+      ^ " ("
       ^ String.concat "," (List.map Model.protection_reason_to_string reasons)
       ^ ")"
   | Unsupported_object_type object_type ->
@@ -93,7 +97,8 @@ let error_to_string = function
   | Missing_reachable_object id ->
       "V4 GC reachable object is missing: " ^ Store.Stored_object_id.to_hex id
   | Duplicate_object id ->
-      "V4 GC object list contains a duplicate: " ^ Store.Stored_object_id.to_hex id
+      "V4 GC object list contains a duplicate: "
+      ^ Store.Stored_object_id.to_hex id
   | Invalid_schema detail -> "invalid V4 GC transaction: " ^ detail
   | Unsupported_schema_version version ->
       Printf.sprintf "unsupported V4 GC transaction version: %Ld" version
@@ -105,7 +110,8 @@ let error_to_string = function
   | Incomplete_transaction id ->
       "V4 GC transaction needs explicit resume, restore, or purge: " ^ id
   | Stale_transaction_object id ->
-      "V4 GC transaction object is now reachable: " ^ Store.Stored_object_id.to_hex id
+      "V4 GC transaction object is now reachable: "
+      ^ Store.Stored_object_id.to_hex id
   | Transaction_object_missing id ->
       "V4 GC transaction object is absent from active and quarantine storage: "
       ^ Store.Stored_object_id.to_hex id
@@ -157,33 +163,37 @@ let add_reasons object_id reasons table =
 
 let is_collectible_type = function
   | Envelope.Content | Envelope.Tree | Envelope.Snapshot | Envelope.Chunk
-  | Envelope.File_manifest | Envelope.V4_project_state -> true
+  | Envelope.File_manifest | Envelope.V4_project_state ->
+      true
   | Envelope.Scratch_event | Envelope.Checkpoint | Envelope.Capsule
   | Envelope.Capsule_revision | Envelope.Release | Envelope.Conflict
   | Envelope.Validation | Envelope.Resolution | Envelope.Repository_config
   | Envelope.Retention_change | Envelope.Scratch_generation_segment
   | Envelope.Scratch_generation | Envelope.Scratch_cleanup_manifest
-  | Envelope.Workspace | Envelope.Workspace_revision | Envelope.Workspace_attempt
-  | Envelope.Release_attestation | Envelope.Git_mapping | Envelope.Imported_transition
-  | Envelope.Imported_tag | Envelope.Ref_event | Envelope.Device_identity
-  | Envelope.Divergent_ref_set | Envelope.Git_archive | Envelope.Git_adoption
-  | Envelope.Peer_publication | Envelope.Peer_integration | Envelope.Git_lineage_node
-  | Envelope.Git_lineage | Envelope.Peer_identity | Envelope.Peer_contact
-  | Envelope.Peer_advertisement | Envelope.Peer_sync_node
-  | Envelope.Peer_sync_conflict -> false
+  | Envelope.Workspace | Envelope.Workspace_revision
+  | Envelope.Workspace_attempt | Envelope.Release_attestation
+  | Envelope.Git_mapping | Envelope.Imported_transition | Envelope.Imported_tag
+  | Envelope.Ref_event | Envelope.Device_identity | Envelope.Divergent_ref_set
+  | Envelope.Git_archive | Envelope.Git_adoption | Envelope.Peer_publication
+  | Envelope.Peer_integration | Envelope.Git_lineage_node | Envelope.Git_lineage
+  | Envelope.Peer_identity | Envelope.Peer_contact | Envelope.Peer_advertisement
+  | Envelope.Peer_sync_node | Envelope.Peer_sync_conflict ->
+      false
 
 let classify ~state_head ~objects ~reachable =
   let rec object_table table = function
     | [] -> Ok table
     | info :: rest ->
-        if Object_map.mem info.Store.id table then Error (Duplicate_object info.Store.id)
+        if Object_map.mem info.Store.id table then
+          Error (Duplicate_object info.Store.id)
         else object_table (Object_map.add info.Store.id info table) rest
   in
   let* object_table = object_table Object_map.empty objects in
   let reachable =
     List.fold_left
       (fun table (object_id, reasons) -> add_reasons object_id reasons table)
-      Object_map.empty ((state_head, [ State_head ]) :: reachable)
+      Object_map.empty
+      ((state_head, [ State_head ]) :: reachable)
   in
   let* () =
     Object_map.fold
@@ -230,13 +240,16 @@ let text value = Encoding.text value |> construction
 let array value = Encoding.array value |> construction
 
 let encode_transaction_payload transaction =
-  let* state_head = text (Store.Stored_object_id.to_hex transaction.transaction_state_head) in
+  let* state_head =
+    text (Store.Stored_object_id.to_hex transaction.transaction_state_head)
+  in
   let rec encode_objects reversed = function
     | [] -> array (List.rev reversed)
     | object_ :: rest ->
         let* id = text (Store.Stored_object_id.to_hex object_.object_id) in
         let object_type =
-          Encoding.integer (Int64.of_int (Envelope.object_type_code object_.object_type))
+          Encoding.integer
+            (Int64.of_int (Envelope.object_type_code object_.object_type))
         in
         let bytes = Encoding.integer (Int64.of_int object_.stored_bytes) in
         let* record = array [ id; object_type; bytes ] in
@@ -275,16 +288,19 @@ let decode_object = function
       in
       let* object_type = decoded_integer "object type" object_type in
       let* object_type =
-        if Int64.compare object_type 0L < 0 || Int64.compare object_type 255L > 0 then
-          Error (Invalid_schema "object type is out of range")
+        if
+          Int64.compare object_type 0L < 0 || Int64.compare object_type 255L > 0
+        then Error (Invalid_schema "object type is out of range")
         else
           match Envelope.object_type_of_code (Int64.to_int object_type) with
           | Some object_type -> Ok object_type
           | None -> Error (Invalid_schema "unknown object type")
       in
       let* stored_bytes = decoded_integer "stored bytes" bytes in
-      if Int64.compare stored_bytes 0L < 0 || Int64.compare stored_bytes (Int64.of_int max_int) > 0 then
-        Error (Invalid_schema "stored bytes are out of range")
+      if
+        Int64.compare stored_bytes 0L < 0
+        || Int64.compare stored_bytes (Int64.of_int max_int) > 0
+      then Error (Invalid_schema "stored bytes are out of range")
       else
         Ok
           {
@@ -330,7 +346,8 @@ let decode_transaction bytes =
         let* state_head = decoded_text "state head" state_head in
         let* transaction_state_head =
           Store.Stored_object_id.of_hex state_head
-          |> Result.map_error (fun _ -> Invalid_schema "state head is not SHA-256")
+          |> Result.map_error (fun _ ->
+              Invalid_schema "state head is not SHA-256")
         in
         let* objects = decoded_array "objects" objects in
         let rec decode_objects reversed = function
@@ -341,19 +358,22 @@ let decode_transaction bytes =
               decode_objects (object_ :: reversed) rest
         in
         let* transaction_objects = decode_objects [] objects in
-        if transaction_objects = [] then Error (Invalid_schema "objects must not be empty")
+        if transaction_objects = [] then
+          Error (Invalid_schema "objects must not be empty")
         else
           let ordered =
             List.sort
-              (fun left right -> Store.Stored_object_id.compare left.object_id right.object_id)
+              (fun left right ->
+                Store.Stored_object_id.compare left.object_id right.object_id)
               transaction_objects
           in
           if ordered <> transaction_objects then
             Error (Invalid_schema "objects must be strictly sorted")
           else
             let rec unique = function
-              | left :: (right :: _)
-                when Store.Stored_object_id.equal left.object_id right.object_id ->
+              | left :: right :: _
+                when Store.Stored_object_id.equal left.object_id right.object_id
+                ->
                   Error (Invalid_schema "objects must not repeat an ID")
               | _ :: rest -> unique rest
               | [] -> Ok ()
@@ -369,19 +389,27 @@ let decode_transaction bytes =
             let* canonical = encode_transaction provisional in
             if not (String.equal canonical bytes) then Error Noncanonical_bytes
             else
-              Ok { provisional with transaction_id = transaction_digest canonical }
+              Ok
+                {
+                  provisional with
+                  transaction_id = transaction_digest canonical;
+                }
   | _ -> Error (Invalid_schema "record must contain three fields")
 
 let snapshot_object_id snapshot =
   let value = Model.Snapshot_id.to_string snapshot in
-  Store.Stored_object_id.of_hex value |> Result.map_error (fun _ -> Invalid_snapshot_id value)
+  Store.Stored_object_id.of_hex value
+  |> Result.map_error (fun _ -> Invalid_snapshot_id value)
 
 let latest_journals journals =
   List.fold_left
     (fun latest journal ->
       match List.assoc_opt (Journal.operation_id journal) latest with
       | Some current
-        when Int64.compare (Journal.generation current) (Journal.generation journal) >= 0 ->
+        when Int64.compare
+               (Journal.generation current)
+               (Journal.generation journal)
+             >= 0 ->
           latest
       | Some _ ->
           (Journal.operation_id journal, journal)
@@ -395,21 +423,30 @@ let proof_matches_journal proof journal =
   && Model.Snapshot_id.equal (Proof.target proof) (Journal.target journal)
 
 let retention_snapshots ~root project =
-  let* journals = Journal.scan ~root |> Result.map_error (fun error -> Journal_error error) in
-  let* proofs = Proof.scan ~root |> Result.map_error (fun error -> Proof_error error) in
+  let* journals =
+    Journal.scan ~root |> Result.map_error (fun error -> Journal_error error)
+  in
+  let* proofs =
+    Proof.scan ~root |> Result.map_error (fun error -> Proof_error error)
+  in
   let latest = latest_journals journals |> List.map snd in
   let journal_snapshots =
     latest
     |> List.filter (fun journal ->
         Journal.phase journal <> Journal.Published
-        || not (List.exists (fun proof -> proof_matches_journal proof journal) proofs))
-    |> List.concat_map (fun journal -> [ Journal.safety journal; Journal.target journal ])
+        || not
+             (List.exists
+                (fun proof -> proof_matches_journal proof journal)
+                proofs))
+    |> List.concat_map (fun journal ->
+        [ Journal.safety journal; Journal.target journal ])
     |> List.sort_uniq Model.Snapshot_id.compare
   in
   let proof_snapshots = Proof.snapshots proofs in
   let retained snapshot =
     List.exists
-      (fun checkpoint -> Model.Snapshot_id.equal checkpoint.Model.checkpoint_snapshot snapshot)
+      (fun checkpoint ->
+        Model.Snapshot_id.equal checkpoint.Model.checkpoint_snapshot snapshot)
       (Model.checkpoints project)
   in
   let* () =
@@ -417,8 +454,11 @@ let retention_snapshots ~root project =
       (fun result snapshot ->
         let* () = result in
         if retained snapshot then Ok ()
-        else Error (Invalid_schema "journal or proof names an unretained checkpoint"))
-      (Ok ()) (journal_snapshots @ proof_snapshots)
+        else
+          Error
+            (Invalid_schema "journal or proof names an unretained checkpoint"))
+      (Ok ())
+      (journal_snapshots @ proof_snapshots)
   in
   Ok (journal_snapshots, proof_snapshots)
 
@@ -440,17 +480,25 @@ let checkpoint_roots project ~journal_snapshots ~proof_snapshots =
     | checkpoint :: rest ->
         let snapshot = checkpoint.Model.checkpoint_snapshot in
         let* object_id = snapshot_object_id snapshot in
-        let reasons = Option.value (Object_map.find_opt object_id named) ~default:[] in
-        roots ((object_id, [ Checkpoint { snapshot; reasons } ]) :: reversed) rest
+        let reasons =
+          Option.value (Object_map.find_opt object_id named) ~default:[]
+        in
+        roots
+          ((object_id, [ Checkpoint { snapshot; reasons } ]) :: reversed)
+          rest
   in
   roots [] (Model.checkpoints project)
 
-let add_reachable object_id reasons reachable = add_reasons object_id reasons reachable
+let add_reachable object_id reasons reachable =
+  add_reasons object_id reasons reachable
 
 let traverse_content store reasons content_id reachable =
   let object_id = Snapshot.Content.stored_object_id content_id in
   let reachable = add_reachable object_id reasons reachable in
-  let* object_ = Store.get store object_id |> Result.map_error (fun error -> Store_error error) in
+  let* object_ =
+    Store.get store object_id
+    |> Result.map_error (fun error -> Store_error error)
+  in
   match Envelope.object_type object_ with
   | Envelope.Content ->
       let* _ =
@@ -484,11 +532,12 @@ let traverse_content store reasons content_id reachable =
     | Envelope.Scratch_generation | Envelope.Scratch_cleanup_manifest
     | Envelope.Workspace | Envelope.Workspace_revision
     | Envelope.Workspace_attempt | Envelope.Release_attestation
-    | Envelope.Git_mapping | Envelope.Imported_transition | Envelope.Imported_tag
-    | Envelope.Ref_event | Envelope.Device_identity | Envelope.Divergent_ref_set
-    | Envelope.Git_archive | Envelope.Git_adoption | Envelope.Peer_publication
-    | Envelope.Peer_integration | Envelope.Git_lineage_node | Envelope.Git_lineage
-    | Envelope.Peer_identity | Envelope.Peer_contact | Envelope.Peer_advertisement
+    | Envelope.Git_mapping | Envelope.Imported_transition
+    | Envelope.Imported_tag | Envelope.Ref_event | Envelope.Device_identity
+    | Envelope.Divergent_ref_set | Envelope.Git_archive | Envelope.Git_adoption
+    | Envelope.Peer_publication | Envelope.Peer_integration
+    | Envelope.Git_lineage_node | Envelope.Git_lineage | Envelope.Peer_identity
+    | Envelope.Peer_contact | Envelope.Peer_advertisement
     | Envelope.Peer_sync_node | Envelope.Peer_sync_conflict
     | Envelope.V4_project_state ) as object_type ->
       Error
@@ -500,7 +549,8 @@ let rec traverse_tree store reasons tree_id reachable =
   let object_id = Snapshot.Tree.stored_object_id tree_id in
   let reachable = add_reachable object_id reasons reachable in
   let* tree =
-    Snapshot.Tree.load store tree_id |> Result.map_error (fun error -> Snapshot_error error)
+    Snapshot.Tree.load store tree_id
+    |> Result.map_error (fun error -> Snapshot_error error)
   in
   let rec entries reachable = function
     | [] -> Ok reachable
@@ -523,7 +573,9 @@ let traverse_snapshot store reasons snapshot_id reachable =
   traverse_tree store reasons (Snapshot.Snapshot.root snapshot) reachable
 
 let plan_from_loaded ~root store loaded =
-  let* journal_snapshots, proof_snapshots = retention_snapshots ~root loaded.V4_store.project in
+  let* journal_snapshots, proof_snapshots =
+    retention_snapshots ~root loaded.V4_store.project
+  in
   let* roots =
     checkpoint_roots loaded.V4_store.project ~journal_snapshots ~proof_snapshots
   in
@@ -535,19 +587,29 @@ let plan_from_loaded ~root store loaded =
         traverse_snapshot store reasons snapshot_id reachable)
       (Ok Object_map.empty) roots
   in
-  let* objects = Store.list_objects store |> Result.map_error (fun error -> Store_error error) in
+  let* objects =
+    Store.list_objects store
+    |> Result.map_error (fun error -> Store_error error)
+  in
   classify ~state_head:loaded.V4_store.object_id ~objects
     ~reachable:(Object_map.bindings reachable)
 
 let with_consistent_repository ~root action =
-  let* repository = V4_store.open_repository ~root |> Result.map_error (fun error -> V4_store_error error) in
+  let* repository =
+    V4_store.open_repository ~root
+    |> Result.map_error (fun error -> V4_store_error error)
+  in
   let store = V4_store.underlying_store repository in
-  Store.with_lock store ~name:"restore-retention" ~on_error:(fun error -> Store_error error)
+  Store.with_lock store ~name:"restore-retention"
+    ~on_error:(fun error -> Store_error error)
     (fun () ->
       Store.with_lock store ~name:V4_store.state_head_name
         ~on_error:(fun error -> Store_error error)
         (fun () ->
-          let* loaded = V4_store.load repository |> Result.map_error (fun error -> V4_store_error error) in
+          let* loaded =
+            V4_store.load repository
+            |> Result.map_error (fun error -> V4_store_error error)
+          in
           action repository store loaded))
 
 let plan ~root =
@@ -555,20 +617,40 @@ let plan ~root =
       plan_from_loaded ~root store loaded)
 
 let gc_directory root = Filename.concat (Filename.concat root ".yeokcham") "gc"
-let transaction_directory root id = Filename.concat (gc_directory root) ("v4-gc-" ^ id)
-let manifest_path root id = Filename.concat (transaction_directory root id) "transaction.cbor"
+
+let transaction_directory root id =
+  Filename.concat (gc_directory root) ("v4-gc-" ^ id)
+
+let manifest_path root id =
+  Filename.concat (transaction_directory root id) "transaction.cbor"
+
 let staged_path root transaction object_id =
-  Filename.concat (transaction_directory root transaction.transaction_id)
+  Filename.concat
+    (transaction_directory root transaction.transaction_id)
+    (Store.Stored_object_id.to_hex object_id)
+
+let purge_directory root transaction =
+  Filename.concat
+    (transaction_directory root transaction.transaction_id)
+    "purged"
+
+let purge_marker_path root transaction object_id =
+  Filename.concat
+    (purge_directory root transaction)
     (Store.Stored_object_id.to_hex object_id)
 
 let fsync_directory directory =
   try
     let descriptor = Unix.openfile directory [ Unix.O_RDONLY ] 0 in
-    Fun.protect ~finally:(fun () -> Unix.close descriptor) (fun () -> Unix.fsync descriptor);
+    Fun.protect
+      ~finally:(fun () -> Unix.close descriptor)
+      (fun () -> Unix.fsync descriptor);
     Ok ()
   with
-  | Unix.Unix_error ((Unix.EINVAL | Unix.ENOSYS | Unix.EOPNOTSUPP), _, _) -> Ok ()
-  | Unix.Unix_error (error, _, _) -> Error (io_error "fsync directory" directory error)
+  | Unix.Unix_error ((Unix.EINVAL | Unix.ENOSYS | Unix.EOPNOTSUPP), _, _) ->
+      Ok ()
+  | Unix.Unix_error (error, _, _) ->
+      Error (io_error "fsync directory" directory error)
 
 let lstat_or_missing path =
   try Ok (Some (Unix.lstat path)) with
@@ -581,13 +663,13 @@ let ensure_directory directory =
     | Error error -> Error error
     | Ok (Some stat) when stat.Unix.st_kind = Unix.S_DIR -> Ok ()
     | Ok (Some _) -> Error (Quarantine_collision path)
-    | Ok None ->
+    | Ok None -> (
         let parent = Filename.dirname path in
         let* () = create parent in
-        (try
-           Unix.mkdir path 0o700;
-           fsync_directory parent
-         with
+        try
+          Unix.mkdir path 0o700;
+          fsync_directory parent
+        with
         | Unix.Unix_error (Unix.EEXIST, _, _) -> create path
         | Unix.Unix_error (error, _, _) -> Error (io_error "mkdir" path error))
   in
@@ -598,22 +680,29 @@ let read_regular_file ~limit path =
     match lstat_or_missing path with
     | Ok (Some stat) when stat.Unix.st_kind = Unix.S_REG -> Ok stat
     | Ok (Some _) -> Error (Quarantine_collision path)
-    | Ok None -> Error (Io_error { operation = "read"; path; message = "missing" })
+    | Ok None ->
+        Error (Io_error { operation = "read"; path; message = "missing" })
     | Error error -> Error error
   in
   if stat.Unix.st_size > limit then
     Error (Invalid_schema "quarantine record exceeds its byte limit")
   else
     try Ok (In_channel.with_open_bin path In_channel.input_all)
-    with Sys_error message -> Error (Io_error { operation = "read"; path; message })
+    with Sys_error message ->
+      Error (Io_error { operation = "read"; path; message })
 
 let write_exclusive path bytes =
   try
-    let descriptor = Unix.openfile path [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_EXCL ] 0o600 in
+    let descriptor =
+      Unix.openfile path [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_EXCL ] 0o600
+    in
     let channel = Unix.out_channel_of_descr descriptor in
     Fun.protect
       ~finally:(fun () -> close_out_noerr channel)
-      (fun () -> Out_channel.output_string channel bytes; Out_channel.flush channel; Unix.fsync descriptor);
+      (fun () ->
+        Out_channel.output_string channel bytes;
+        Out_channel.flush channel;
+        Unix.fsync descriptor);
     fsync_directory (Filename.dirname path)
   with
   | Unix.Unix_error (error, _, _) -> Error (io_error "create" path error)
@@ -624,11 +713,12 @@ let write_transaction ~root transaction =
   let directory = transaction_directory root transaction.transaction_id in
   let* () =
     match lstat_or_missing directory with
-    | Ok None ->
-        (try
-           Unix.mkdir directory 0o700;
-           fsync_directory (gc_directory root)
-         with Unix.Unix_error (error, _, _) -> Error (io_error "mkdir" directory error))
+    | Ok None -> (
+        try
+          Unix.mkdir directory 0o700;
+          fsync_directory (gc_directory root)
+        with Unix.Unix_error (error, _, _) ->
+          Error (io_error "mkdir" directory error))
     | Ok (Some stat) when stat.Unix.st_kind = Unix.S_DIR -> Ok ()
     | Ok (Some _) -> Error (Quarantine_collision directory)
     | Error error -> Error error
@@ -640,7 +730,8 @@ let write_transaction ~root transaction =
   | Ok None -> write_exclusive path bytes
   | Ok (Some _) ->
       let* existing = read_regular_file ~limit:max_transaction_bytes path in
-      if String.equal existing bytes then Ok () else Error (Transaction_collision path)
+      if String.equal existing bytes then Ok ()
+      else Error (Transaction_collision path)
 
 let read_transaction ~root ~id =
   if not (valid_transaction_id id) then Error (Transaction_not_found id)
@@ -653,18 +744,26 @@ let read_transaction ~root ~id =
         let* bytes = read_regular_file ~limit:max_transaction_bytes path in
         let* transaction = decode_transaction bytes in
         if String.equal transaction.transaction_id id then Ok transaction
-        else Error (Invalid_schema "transaction directory does not match its record")
+        else
+          Error
+            (Invalid_schema "transaction directory does not match its record")
 
-let verify_staged_file path expected =
+let verify_staged_file path object_ =
   let* bytes = read_regular_file ~limit:Store.max_object_bytes path in
-  let* envelope =
-    Envelope.decode bytes
-    |> Result.map_error (fun error ->
-        Invalid_schema (Envelope.decode_error_to_string error))
-  in
-  let actual = Store.id_of_envelope envelope in
-  if Store.Stored_object_id.equal expected actual then Ok ()
-  else Error (Quarantine_collision path)
+  if String.length bytes <> object_.stored_bytes then
+    Error (Quarantine_collision path)
+  else
+    let* envelope =
+      Envelope.decode bytes
+      |> Result.map_error (fun error ->
+          Invalid_schema (Envelope.decode_error_to_string error))
+    in
+    let actual = Store.id_of_envelope envelope in
+    if
+      Store.Stored_object_id.equal object_.object_id actual
+      && Envelope.object_type envelope = object_.object_type
+    then Ok ()
+    else Error (Quarantine_collision path)
 
 let verify_active_object store object_ =
   let path = Store.object_path store object_.object_id in
@@ -675,46 +774,91 @@ let verify_active_object store object_ =
     | Ok None -> Error (Transaction_object_missing object_.object_id)
     | Error error -> Error error
   in
-  if stat.Unix.st_size <> object_.stored_bytes then Error (Quarantine_collision path)
+  if stat.Unix.st_size <> object_.stored_bytes then
+    Error (Quarantine_collision path)
   else
-    let* envelope = Store.get store object_.object_id |> Result.map_error (fun error -> Store_error error) in
+    let* envelope =
+      Store.get store object_.object_id
+      |> Result.map_error (fun error -> Store_error error)
+    in
     if Envelope.object_type envelope = object_.object_type then Ok ()
     else Error (Quarantine_collision path)
 
+let purge_marker_exists path =
+  match lstat_or_missing path with
+  | Error error -> Error error
+  | Ok None -> Ok false
+  | Ok (Some stat) when stat.Unix.st_kind <> Unix.S_REG ->
+      Error (Quarantine_collision path)
+  | Ok (Some stat) when stat.Unix.st_size <> 0 ->
+      Error (Quarantine_collision path)
+  | Ok (Some _) -> Ok true
+
 let progress_of_transaction ~root store transaction =
-  let rec loop staged active = function
-    | [] -> Ok { progress_transaction = transaction; staged_objects = List.rev staged; active_objects = List.rev active }
-    | object_ :: rest ->
+  let rec loop staged active purged purge_started = function
+    | [] ->
+        Ok
+          {
+            progress_transaction = transaction;
+            staged_objects = List.rev staged;
+            active_objects = List.rev active;
+            purged_objects = List.rev purged;
+            purge_started;
+          }
+    | object_ :: rest -> (
         let staged_path = staged_path root transaction object_.object_id in
         let active_path = Store.object_path store object_.object_id in
         let* staged_exists = lstat_or_missing staged_path in
         let* active_exists = lstat_or_missing active_path in
-        (match (staged_exists, active_exists) with
-        | Some _, Some _ -> Error (Quarantine_collision staged_path)
-        | Some _, None ->
-            let* () = verify_staged_file staged_path object_.object_id in
-            loop (object_.object_id :: staged) active rest
-        | None, Some _ ->
+        let* purge_marker =
+          purge_marker_exists
+            (purge_marker_path root transaction object_.object_id)
+        in
+        match (staged_exists, active_exists, purge_marker) with
+        | Some _, Some _, false ->
+            let* () = verify_staged_file staged_path object_ in
             let* () = verify_active_object store object_ in
-            loop staged (object_.object_id :: active) rest
-        | None, None -> Error (Transaction_object_missing object_.object_id))
+            loop
+              (object_.object_id :: staged)
+              (object_.object_id :: active)
+              purged purge_started rest
+        | Some _, Some _, true -> Error (Quarantine_collision staged_path)
+        | Some _, None, purge_marker ->
+            let* () = verify_staged_file staged_path object_ in
+            loop
+              (object_.object_id :: staged)
+              active purged
+              (purge_started || purge_marker)
+              rest
+        | None, Some _, false ->
+            let* () = verify_active_object store object_ in
+            loop staged (object_.object_id :: active) purged purge_started rest
+        | None, Some _, true -> Error (Quarantine_collision active_path)
+        | None, None, true ->
+            loop staged active (object_.object_id :: purged) true rest
+        | None, None, false ->
+            Error (Transaction_object_missing object_.object_id))
   in
-  loop [] [] transaction.transaction_objects
+  loop [] [] [] false transaction.transaction_objects
 
 let transactions_unlocked ~root store =
   let directory = gc_directory root in
   match lstat_or_missing directory with
   | Error error -> Error error
   | Ok None -> Ok []
-  | Ok (Some stat) when stat.Unix.st_kind <> Unix.S_DIR -> Error (Quarantine_collision directory)
+  | Ok (Some stat) when stat.Unix.st_kind <> Unix.S_DIR ->
+      Error (Quarantine_collision directory)
   | Ok (Some _) ->
       let* names =
-        try Ok (Sys.readdir directory |> Array.to_list |> List.sort String.compare)
-        with Sys_error message -> Error (Io_error { operation = "readdir"; path = directory; message })
+        try
+          Ok (Sys.readdir directory |> Array.to_list |> List.sort String.compare)
+        with Sys_error message ->
+          Error (Io_error { operation = "readdir"; path = directory; message })
       in
       let rec loop reversed = function
         | [] -> Ok (List.rev reversed)
-        | name :: rest when String.starts_with ~prefix:"." name -> loop reversed rest
+        | name :: rest when String.starts_with ~prefix:"." name ->
+            loop reversed rest
         | name :: _ when not (String.starts_with ~prefix:"v4-gc-" name) ->
             Error (Invalid_schema "unknown entry in V4 GC directory")
         | name :: rest ->
@@ -733,41 +877,57 @@ let ensure_collectible_now plan transaction =
   List.fold_left
     (fun result object_ ->
       let* () = result in
-      match List.find_opt (fun planned -> Store.Stored_object_id.equal planned.object_id object_.object_id) plan.objects with
+      match
+        List.find_opt
+          (fun planned ->
+            Store.Stored_object_id.equal planned.object_id object_.object_id)
+          plan.objects
+      with
       | Some { disposition = Collect; _ } | None -> Ok ()
-      | Some { disposition = Retain _; _ } -> Error (Stale_transaction_object object_.object_id))
+      | Some { disposition = Retain _; _ } ->
+          Error (Stale_transaction_object object_.object_id))
     (Ok ()) transaction.transaction_objects
 
 let move_to_quarantine ~root store transaction progress =
   let rec stage = function
     | [] -> progress_of_transaction ~root store transaction
-    | object_id :: rest ->
+    | object_id :: rest -> (
         let object_ =
-          List.find (fun object_ -> Store.Stored_object_id.equal object_.object_id object_id)
+          List.find
+            (fun object_ ->
+              Store.Stored_object_id.equal object_.object_id object_id)
             transaction.transaction_objects
         in
         let source = Store.object_path store object_id in
         let destination = staged_path root transaction object_id in
         let* destination_exists = lstat_or_missing destination in
-        (match destination_exists with
+        match destination_exists with
         | Some _ -> Error (Quarantine_collision destination)
-        | None ->
+        | None -> (
             let* () = verify_active_object store object_ in
-            (try
-               Unix.rename source destination;
-               let* () = fsync_directory (Filename.dirname source) in
-               let* () = fsync_directory (Filename.dirname destination) in
-               stage rest
-             with Unix.Unix_error (error, _, _) -> Error (io_error "rename" destination error)))
+            try
+              Unix.rename source destination;
+              let* () = fsync_directory (Filename.dirname source) in
+              let* () = fsync_directory (Filename.dirname destination) in
+              stage rest
+            with Unix.Unix_error (error, _, _) ->
+              Error (io_error "rename" destination error)))
   in
   stage progress.active_objects
 
 let apply ~root =
   with_consistent_repository ~root (fun _repository store loaded ->
       let* existing = transactions_unlocked ~root store in
-      match existing with
-      | progress :: _ -> Error (Incomplete_transaction progress.progress_transaction.transaction_id)
-      | [] ->
+      match
+        List.find_opt
+          (fun progress ->
+            progress.staged_objects <> [] || progress.active_objects <> [])
+          existing
+      with
+      | Some progress ->
+          Error
+            (Incomplete_transaction progress.progress_transaction.transaction_id)
+      | None ->
           let* plan = plan_from_loaded ~root store loaded in
           let* transaction = make_transaction plan in
           let* () = write_transaction ~root transaction in
@@ -780,7 +940,8 @@ let resume ~root ~id =
       let* plan = plan_from_loaded ~root store loaded in
       let* () = ensure_collectible_now plan transaction in
       let* progress = progress_of_transaction ~root store transaction in
-      move_to_quarantine ~root store transaction progress)
+      if progress.purge_started then Error (Incomplete_transaction id)
+      else move_to_quarantine ~root store transaction progress)
 
 let unlink path =
   try
@@ -792,37 +953,51 @@ let restore ~root ~id =
   with_consistent_repository ~root (fun _repository store _loaded ->
       let* transaction = read_transaction ~root ~id in
       let* progress = progress_of_transaction ~root store transaction in
-      let rec move_back = function
-        | [] -> Ok ()
-        | object_id :: rest ->
-            let staged = staged_path root transaction object_id in
-            let active = Store.object_path store object_id in
-            let* active_exists = lstat_or_missing active in
-            (match active_exists with
-            | None ->
-                (try
-                   Unix.rename staged active;
-                   let* () = fsync_directory (Filename.dirname staged) in
-                   let* () = fsync_directory (Filename.dirname active) in
-                   move_back rest
-                 with Unix.Unix_error (error, _, _) -> Error (io_error "rename" active error))
-            | Some _ ->
-                let* () = verify_staged_file staged object_id in
-                let* object_ =
-                  Store.get store object_id |> Result.map_error (fun error -> Store_error error)
-                in
-                if Store.Stored_object_id.equal object_id (Store.id_of_envelope object_) then
-                  let* () = unlink staged in
-                  move_back rest
-                else Error (Quarantine_collision active))
-      in
-      let* () = move_back progress.staged_objects in
-      let* () = unlink (manifest_path root id) in
-      let directory = transaction_directory root id in
-      try
-        Unix.rmdir directory;
-        fsync_directory (gc_directory root)
-      with Unix.Unix_error (error, _, _) -> Error (io_error "rmdir" directory error))
+      if progress.purge_started then Error (Incomplete_transaction id)
+      else
+        let rec move_back = function
+          | [] -> Ok ()
+          | object_id :: rest -> (
+              let staged = staged_path root transaction object_id in
+              let active = Store.object_path store object_id in
+              let* active_exists = lstat_or_missing active in
+              match active_exists with
+              | None -> (
+                  try
+                    Unix.rename staged active;
+                    let* () = fsync_directory (Filename.dirname staged) in
+                    let* () = fsync_directory (Filename.dirname active) in
+                    move_back rest
+                  with Unix.Unix_error (error, _, _) ->
+                    Error (io_error "rename" active error))
+              | Some _ ->
+                  let staged_object =
+                    List.find
+                      (fun object_ ->
+                        Store.Stored_object_id.equal object_.object_id object_id)
+                      transaction.transaction_objects
+                  in
+                  let* () = verify_staged_file staged staged_object in
+                  let* object_ =
+                    Store.get store object_id
+                    |> Result.map_error (fun error -> Store_error error)
+                  in
+                  if
+                    Store.Stored_object_id.equal object_id
+                      (Store.id_of_envelope object_)
+                  then
+                    let* () = unlink staged in
+                    move_back rest
+                  else Error (Quarantine_collision active))
+        in
+        let* () = move_back progress.staged_objects in
+        let* () = unlink (manifest_path root id) in
+        let directory = transaction_directory root id in
+        try
+          Unix.rmdir directory;
+          fsync_directory (gc_directory root)
+        with Unix.Unix_error (error, _, _) ->
+          Error (io_error "rmdir" directory error))
 
 let purge ~root ~id =
   with_consistent_repository ~root (fun _repository store loaded ->
@@ -833,19 +1008,26 @@ let purge ~root ~id =
       if progress.active_objects <> [] then Error (Incomplete_transaction id)
       else
         let reclaimed =
-          List.fold_left (fun total object_ -> total + object_.stored_bytes) 0 transaction.transaction_objects
+          List.fold_left
+            (fun total object_id ->
+              let object_ =
+                List.find
+                  (fun object_ ->
+                    Store.Stored_object_id.equal object_.object_id object_id)
+                  transaction.transaction_objects
+              in
+              total + object_.stored_bytes)
+            0 progress.staged_objects
         in
+        let* () = ensure_directory (purge_directory root transaction) in
         let* () =
           List.fold_left
             (fun result object_id ->
               let* () = result in
+              let marker = purge_marker_path root transaction object_id in
+              let* marked = purge_marker_exists marker in
+              let* () = if marked then Ok () else write_exclusive marker "" in
               unlink (staged_path root transaction object_id))
             (Ok ()) progress.staged_objects
         in
-        let* () = unlink (manifest_path root id) in
-        let directory = transaction_directory root id in
-        try
-          Unix.rmdir directory;
-          let* () = fsync_directory (gc_directory root) in
-          Ok reclaimed
-        with Unix.Unix_error (error, _, _) -> Error (io_error "rmdir" directory error))
+        Ok reclaimed)

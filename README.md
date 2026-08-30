@@ -13,6 +13,9 @@ does not read, upgrade, or mutate repositories from earlier product tracks.
 - Exact byte, mode, directory, and symlink snapshots; `save`, `timeline`,
   pins, bounded checkpoint retention, and journaled in-place restore with a
   local durable safety/target proof that remains until explicit forget.
+- Inspectable local object collection: `storage gc --dry-run --explain` shows
+  retained closure and candidates, `--apply` moves candidates into a local
+  quarantine, and only an explicit `purge` unlinks them.
 - Explicit drafts, shared immutable revisions, conservative composition, and
   conflict records that can be inspected and materialised outside the working
   tree before an explicit resolution.
@@ -79,6 +82,23 @@ a `restore-proof` operation ID. Its pre-restore and target snapshots remain
 recoverable across compaction until `restore forget --operation ID`; use
 `restore proofs` and `storage roots` to inspect those local recovery roots.
 
+After checkpoint compaction, storage collection is deliberately a separate
+local operation. Review it first, then choose whether to quarantine, restore,
+or irreversibly purge its exact transaction:
+
+```sh
+yeokcham storage gc --dry-run --explain
+yeokcham storage gc --apply
+yeokcham storage gc status
+yeokcham storage gc restore --id TRANSACTION_ID  # before purge begins
+yeokcham storage gc purge --id TRANSACTION_ID
+```
+
+The collector never contacts a relay or edits the working tree. `--apply` does
+not reclaim space; it only moves immutable unreachable bytes into a local,
+recoverable quarantine. `purge` first rechecks current roots. Once purge has
+durably begun, a restart can finish it but cannot restore that transaction.
+
 For synchronization, an operator first issues a repository-scoped access
 secret, then runs the relay behind an operator-managed HTTPS reverse proxy:
 
@@ -104,8 +124,10 @@ local device, and independently compared root phrase; it starts with fresh
 local scratch state and never materialises its working tree. The relay is an
 untrusted byte courier and stored payloads are not end-to-end encrypted. There
 is no online authority coordinator, general clone, Git import/export, semantic
-parsing, CI-backed delivery, signing agent, hardware-key support, or blob GC.
-Those are deliberate future work, not hidden product behaviour.
+parsing, CI-backed delivery, signing agent, or hardware-key support. There is
+no relay, package, or automatic blob GC; local collection is only the explicit
+quarantine-and-purge workflow above. Those are deliberate boundaries, not
+hidden product behaviour.
 
 Read [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md) for the philosophy,
 [FORMAL_MODEL.md](FORMAL_MODEL.md) for invariants, and

@@ -24,13 +24,16 @@ The collector has three explicit phases:
 2. `storage gc --apply` re-derives that plan while holding the restore-retention
    and project-state locks, then atomically moves only candidates into a local
    durable quarantine transaction.
-3. `storage gc purge --id ID` revalidates current reachability before unlinking
-   a complete transaction. `storage gc restore --id ID` moves its objects back
-   instead. An interrupted transaction is visible and must be resumed,
-   restored, or purged explicitly; it is never silently discarded.
+3. `storage gc purge --id ID` revalidates current reachability before recording
+   one durable per-object marker and unlinking its quarantined copy.
+   `storage gc restore --id ID` moves its objects back instead, but only before
+   purge starts. An interrupted transaction is visible and must be resumed,
+   restored, or purged explicitly; it is never silently discarded. Once a
+   purge marker exists, an explicit later purge can finish the unlink sequence
+   but restore is deliberately refused.
 
 The canonical `gc-transaction-v1` record contains the state-head object ID and
-the exact sorted candidate object IDs and sizes. It is create-only and stored
+the exact sorted candidate object IDs, types, and sizes. It is create-only and stored
 locally below `.yeokcham/gc/`; it never enters a project state, package,
 bootstrap basis, relay, authority record, or delivery.
 
@@ -56,7 +59,9 @@ local retention promises.
 
 Any malformed root, missing closure object, corrupt state/object, unsupported
 unreachable object category, stale transaction, or lock failure stops the
-operation before it moves or deletes another object. Unsupported object
+operation before collection starts. A later filesystem failure leaves the
+create-only transaction and any already moved objects inspectable and
+restartable; it is never treated as a completed collection. Unsupported object
 categories remain retained rather than being guessed safe to collect.
 
 Object moves use same-filesystem rename plus fsync of both affected directories.
@@ -80,10 +85,11 @@ explicit and inspectable rather than accidental.
 
 ## Verification
 
-- pure deterministic classification and generated shared-closure tests;
-- canonical transaction fixture and malformed/old-version rejection;
-- empty-store, retained checkpoint, pin, shared/delivery/decision, journal,
-  proof, manifest/chunk, and prior-state candidate coverage;
-- race/stale-head, interrupted quarantine, corrupt object, missing closure,
-  restore, and purge no-partial-state tests;
-- CLI dry-run explanation and explicit apply/restore/purge journeys.
+- pure deterministic classification and generated declared-root retention test;
+- canonical transaction fixture;
+- retained checkpoint, shared-revision, restore proof, manifest/chunk,
+  prior-state candidate, empty-worktree, corrupt-object, and missing-closure
+  coverage;
+- quarantine restore, explicit purge, and interrupted-purge-marker recovery;
+- a state-head change after quarantine that blocks purge and remains restorable;
+- CLI dry-run explanation and explicit apply/status/restore/purge journey.

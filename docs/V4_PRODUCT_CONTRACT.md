@@ -59,6 +59,24 @@ all non-recent roots. `restore retain --operation ID` creates a proof for a
 legacy completed journal. These records never enter package, bootstrap, relay,
 authority, shared-change, or delivery state.
 
+`storage gc --dry-run --explain` is a read-only object-store projection. It
+lists every retained V4 object with the checkpoint or state-head reason that
+reaches it, and lists only unreachable V4 snapshot/tree/content/manifest/chunk
+and prior-state objects as candidates. Every checkpoint still named by current
+state is retained, even when it has no special compaction reason. Unsupported
+unreachable object categories are retained rather than collected.
+
+`storage gc --apply` recomputes under the restore-retention and state-head
+locks, then moves exact candidates into a local `gc-transaction-v1`
+quarantine. It neither unlinks objects nor changes project state. `storage gc
+status` makes transactions inspectable, `resume --id` completes interrupted
+quarantine staging, and `restore --id` returns staged bytes before purge has
+started. `purge --id` recomputes reachability before recording a durable marker
+and unlinking each staged object. An interrupted purge is finishable on a
+later explicit purge but intentionally cannot be restored: the marker records
+the start of irreversible deletion. These commands do not scan or materialise
+the working tree and never send, delete, or retain relay/package bytes.
+
 `watch` is Linux-only advisory capture. After a one-second quiet period (or
 thirty-second sustained-write maximum) it calls the same exact `save` path.
 Unsupported systems fail explicitly. The real Linux watcher-loop test is part
@@ -253,7 +271,7 @@ No state transition mutates the only copy in place.
 
 ## Exclusions
 
-There is no general clone protocol, blob GC, durable `capture=`, Git bridge,
+There is no general clone protocol, automatic or relay GC, durable `capture=`, Git bridge,
 semantic parser or merge,
 end-to-end payload encryption, external relay identity or proof-of-possession,
 hardware/non-exportable signer, signing agent, macOS/WSL watcher, or CI-backed

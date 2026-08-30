@@ -1,6 +1,6 @@
 # Product requirements
 
-## Current milestone: V4 verified receipt, explicit relay bootstrap, advisory runtime, and durable restore proofs
+## Current milestone: V4 verified receipt, explicit relay bootstrap, advisory runtime, durable restore proofs, and local recoverable collection
 
 V4 serves one developer and small, explicitly trusted teams. Its required
 vertical slices are complete only when their model transition, durable format,
@@ -52,10 +52,16 @@ failure behaviour, and CLI surface agree.
     snapshot as a local durable recovery proof until the user explicitly
     forgets that proof. Compaction must validate and explain that root before
     changing the state head.
+15. Collect only local immutable bytes outside the closure of the current V4
+    state and every retained checkpoint. Collection must first provide a
+    deterministic explanation, then quarantine candidates in a recoverable
+    local transaction. It may unlink only after an explicit, revalidated purge;
+    relay, package, transport, authority, project history, and working-tree
+    state must remain untouched.
 
 ### Explicit non-goals
 
-No general clone, Git bridge, semantic parser or merge, blob GC, durable
+No general clone, Git bridge, semantic parser or merge, automatic or remote GC, durable
 `capture=`, hardware keys,
 external signing agent, macOS/WSL watcher, or CI-backed delivery exists in this
 milestone. The bundled relay is an untrusted byte courier behind an
@@ -70,6 +76,8 @@ Core transitions have unit and generated tests; receipt has corruption,
 causality, and no-partial-import tests; lifecycle has two-repository, rotation,
 recovery, revocation, branch-selection/reconciliation, and exact-adoption
 tests; and transport has canonical-publication, relay-failure, and
-two-replica receive-first evidence. The real Linux watcher loop is an
+two-replica receive-first evidence. Collection has canonical transaction,
+closure, corruption, interrupted-quarantine/purge, and explicit CLI journey
+evidence. The real Linux watcher loop is an
 outstanding platform verification, recorded separately rather than claimed from
 Darwin.

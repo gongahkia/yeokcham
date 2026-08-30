@@ -4,6 +4,7 @@ module Trust = Yeokcham_v4_trust
 module Package = Yeokcham_v4_package
 module Bootstrap = Yeokcham_v4_bootstrap
 module Inspection = Yeokcham_v4_inspection
+module Gc = Yeokcham_v4_gc
 module Recovery = Yeokcham_v4_recovery
 module Runtime = V4_runtime
 module Sync = Yeokcham_v4_sync
@@ -89,6 +90,10 @@ let usage () =
     \  yeokcham unpin [--root PATH] --checkpoint ID\n\
     \  yeokcham compact [--root PATH] [--keep N] [--dry-run] [--explain]\n\
     \  yeokcham storage roots [--root PATH]\n\
+    \  yeokcham storage gc [--root PATH] [--dry-run] [--explain]\n\
+    \  yeokcham storage gc --root PATH --apply\n\
+    \  yeokcham storage gc status [--root PATH]\n\
+    \  yeokcham storage gc resume|restore|purge [--root PATH] --id ID\n\
     \  yeokcham watch [--root PATH]"
 
 let require_ok render = function
@@ -790,6 +795,101 @@ let run_storage_roots arguments =
         (root.Service.root_reasons
         |> List.map Model.protection_reason_to_string
         |> String.concat ","))
+
+let render_gc_plan plan explain =
+  if explain then
+    List.iter
+      (fun object_ ->
+        let object_id =
+          Yeokcham_store.Stored_object_id.to_hex object_.Gc.object_id
+        in
+        match object_.Gc.disposition with
+        | Gc.Retain reasons ->
+            Printf.printf "retain %s type:%d bytes:%d %s\n" object_id
+              (Yeokcham_envelope.object_type_code object_.Gc.object_type)
+              object_.Gc.stored_bytes
+              (reasons |> List.map Gc.root_reason_to_string |> String.concat ",")
+        | Gc.Collect ->
+            Printf.printf "collect %s type:%d bytes:%d\n" object_id
+              (Yeokcham_envelope.object_type_code object_.Gc.object_type)
+              object_.Gc.stored_bytes)
+      plan.Gc.objects;
+  let retained_objects =
+    List.length
+      (List.filter
+         (fun object_ ->
+           match object_.Gc.disposition with
+           | Gc.Retain _ -> true
+           | Gc.Collect -> false)
+         plan.Gc.objects)
+  in
+  let collectible_objects = List.length plan.Gc.objects - retained_objects in
+  Printf.printf "retain-objects %d\n" retained_objects;
+  Printf.printf "retain-bytes %d\n" plan.Gc.retained_bytes;
+  Printf.printf "collect-objects %d\n" collectible_objects;
+  Printf.printf "collect-bytes %d\n" plan.Gc.collectible_bytes
+
+let parse_storage_gc arguments =
+  let rec loop root dry_run apply explain = function
+    | [] ->
+        if dry_run && apply then usage ()
+        else (Option.value root ~default:default_root, apply, explain)
+    | "--root" :: value :: rest when Option.is_none root ->
+        loop (Some value) dry_run apply explain rest
+    | "--dry-run" :: rest when not dry_run -> loop root true apply explain rest
+    | "--apply" :: rest when not apply -> loop root dry_run true explain rest
+    | "--explain" :: rest when not explain -> loop root dry_run apply true rest
+    | _ -> usage ()
+  in
+  loop None false false false arguments
+
+let parse_storage_gc_id arguments =
+  let rec loop root id = function
+    | [] -> (
+        match id with
+        | Some id -> (Option.value root ~default:default_root, id)
+        | None -> usage ())
+    | "--root" :: value :: rest when Option.is_none root ->
+        loop (Some value) id rest
+    | "--id" :: value :: rest when Option.is_none id ->
+        loop root (Some value) rest
+    | _ -> usage ()
+  in
+  loop None None arguments
+
+let render_gc_progress progress =
+  let transaction = progress.Gc.progress_transaction in
+  Printf.printf "gc-transaction %s\n" (Gc.transaction_id transaction);
+  Printf.printf "staged-objects %d\n" (List.length progress.Gc.staged_objects);
+  Printf.printf "active-objects %d\n" (List.length progress.Gc.active_objects);
+  Printf.printf "purged-objects %d\n" (List.length progress.Gc.purged_objects);
+  Printf.printf "purge-started %s\n"
+    (if progress.Gc.purge_started then "yes" else "no")
+
+let run_storage_gc = function
+  | "status" :: arguments ->
+      Gc.transactions ~root:(parse_root arguments)
+      |> require_ok Gc.error_to_string
+      |> List.iter render_gc_progress
+  | "resume" :: arguments ->
+      let root, id = parse_storage_gc_id arguments in
+      Gc.resume ~root ~id |> require_ok Gc.error_to_string |> render_gc_progress
+  | "restore" :: arguments ->
+      let root, id = parse_storage_gc_id arguments in
+      Gc.restore ~root ~id |> require_ok Gc.error_to_string;
+      Printf.printf "gc-restored %s\n" id
+  | "purge" :: arguments ->
+      let root, id = parse_storage_gc_id arguments in
+      let reclaimed = Gc.purge ~root ~id |> require_ok Gc.error_to_string in
+      Printf.printf "gc-purged %s bytes:%d\n" id reclaimed
+  | arguments ->
+      let root, apply, explain = parse_storage_gc arguments in
+      if apply then (
+        if explain then usage ();
+        Gc.apply ~root |> require_ok Gc.error_to_string |> render_gc_progress)
+      else
+        Gc.plan ~root |> require_ok Gc.error_to_string |> fun plan ->
+        render_gc_plan plan explain
 
 let parse_share arguments =
   let rec loop root change revision authority = function
@@ -1958,6 +2058,7 @@ let () =
   | _ :: "pin" :: arguments -> run_pin arguments
   | _ :: "unpin" :: arguments -> run_unpin arguments
   | _ :: "compact" :: arguments -> run_compact arguments
+  | _ :: "storage" :: "gc" :: arguments -> run_storage_gc arguments
   | _ :: "storage" :: "roots" :: arguments -> run_storage_roots arguments
   | _ :: "watch" :: arguments -> run_watch arguments
   | _ -> usage ()

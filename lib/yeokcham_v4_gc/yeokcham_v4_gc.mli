@@ -39,6 +39,8 @@ type transaction_progress = {
   progress_transaction : transaction;
   staged_objects : Yeokcham_store.Stored_object_id.t list;
   active_objects : Yeokcham_store.Stored_object_id.t list;
+  purged_objects : Yeokcham_store.Stored_object_id.t list;
+  purge_started : bool;
 }
 
 type error
@@ -48,7 +50,6 @@ val root_reason_to_string : root_reason -> string
 val transaction_id : transaction -> string
 val transaction_state_head : transaction -> Yeokcham_store.Stored_object_id.t
 val transaction_objects : transaction -> planned_object list
-
 val make_transaction : plan -> (transaction, error) result
 val encode_transaction : transaction -> (string, error) result
 val decode_transaction : string -> (transaction, error) result
@@ -71,6 +72,9 @@ val apply : root:string -> (transaction_progress, error) result
 val transactions : root:string -> (transaction_progress list, error) result
 val resume : root:string -> id:string -> (transaction_progress, error) result
 val restore : root:string -> id:string -> (unit, error) result
+
 val purge : root:string -> id:string -> (int, error) result
-(** [purge] revalidates that all quarantined objects are still unreachable,
-    then unlinks them. The returned value is reclaimed stored bytes. *)
+(** [purge] revalidates that all quarantined objects are still unreachable, then
+    durably marks and unlinks them. A transaction with a purge marker must be
+    finished by [purge], not restored. The returned value is reclaimed stored
+    bytes. *)

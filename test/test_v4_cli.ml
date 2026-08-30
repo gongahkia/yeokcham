@@ -537,6 +537,12 @@ let command_journey_restores_in_place_with_a_safety_checkpoint () =
         ("root " ^ safety ^ " restore-proof")
         output;
       let output, errors, status =
+        run [ "storage"; "gc"; "--root"; root; "--dry-run"; "--explain" ]
+      in
+      require_success "GC dry-run after restore" status errors;
+      expect_output_contains "GC retains the durable restore proof closure"
+        "restore-proof" output;
+      let output, errors, status =
         run [ "restore"; "forget"; "--root"; root; "--operation"; operation ]
       in
       require_success "restore forget" status errors;
@@ -591,6 +597,75 @@ let command_journey_compacts_and_reports_uncaptured_edits () =
         ("keep " ^ extra ^ " ")
         output;
       ignore initial)
+
+let command_journey_collects_only_through_an_explicit_quarantine () =
+  with_directory "yeokcham-v4-cli-gc-" (fun root ->
+      write_file root "main.ml" "let version = 1\n";
+      let _output, errors, status =
+        run
+          [
+            "init";
+            "--root";
+            root;
+            "--username";
+            "alice";
+            "--draft";
+            "draft-one";
+            "--title";
+            "gc-work";
+          ]
+      in
+      require_success "init" status errors;
+      write_file root "main.ml" "let version = 2\n";
+      let _output, errors, status = run [ "save"; "--root"; root ] in
+      require_success "second checkpoint" status errors;
+      write_file root "main.ml" "let version = 3\n";
+      let _output, errors, status = run [ "save"; "--root"; root ] in
+      require_success "third checkpoint" status errors;
+      let _output, errors, status =
+        run [ "compact"; "--root"; root; "--keep"; "0" ]
+      in
+      require_success "compact" status errors;
+      let output, errors, status =
+        run [ "storage"; "gc"; "--root"; root; "--dry-run"; "--explain" ]
+      in
+      require_success "GC dry-run" status errors;
+      expect_output_contains "GC plan keeps current storage" "retain " output;
+      expect_output_contains "GC plan identifies unreachable storage" "collect "
+        output;
+      let output, errors, status =
+        run [ "storage"; "gc"; "--root"; root; "--apply" ]
+      in
+      require_success "GC quarantine" status errors;
+      let transaction = first_prefixed_value "gc-transaction " output in
+      expect_output_contains "apply stages rather than purges" "staged-objects "
+        output;
+      let output, errors, status =
+        run [ "storage"; "gc"; "status"; "--root"; root ]
+      in
+      require_success "GC status" status errors;
+      expect_output_contains "status makes the transaction inspectable"
+        ("gc-transaction " ^ transaction)
+        output;
+      let output, errors, status =
+        run [ "storage"; "gc"; "restore"; "--root"; root; "--id"; transaction ]
+      in
+      require_success "GC restore" status errors;
+      expect_output_contains "restore reports the transaction"
+        ("gc-restored " ^ transaction)
+        output;
+      let output, errors, status =
+        run [ "storage"; "gc"; "--root"; root; "--apply" ]
+      in
+      require_success "second GC quarantine" status errors;
+      let transaction = first_prefixed_value "gc-transaction " output in
+      let output, errors, status =
+        run [ "storage"; "gc"; "purge"; "--root"; root; "--id"; transaction ]
+      in
+      require_success "explicit GC purge" status errors;
+      expect_output_contains "purge reports recovered space"
+        ("gc-purged " ^ transaction ^ " bytes:")
+        output)
 
 let command_receives_a_verified_offline_package_without_materializing_it () =
   with_directory "yeokcham-v4-cli-receive-" (fun root ->
@@ -1060,6 +1135,8 @@ let () =
             `Quick command_journey_restores_in_place_with_a_safety_checkpoint;
           Alcotest.test_case "compact pin and uncaptured status" `Quick
             command_journey_compacts_and_reports_uncaptured_edits;
+          Alcotest.test_case "GC requires a reviewable quarantine journey"
+            `Quick command_journey_collects_only_through_an_explicit_quarantine;
           Alcotest.test_case
             "receive verifies a package without materializing it" `Quick
             command_receives_a_verified_offline_package_without_materializing_it;

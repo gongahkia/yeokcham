@@ -56,6 +56,16 @@ creating it and serializes proof, retain, forget, and compaction operations
 under a repository-local lock. Neither module participates in package export,
 bootstrap, receipt, relay transport, authority, or the project-state schema.
 
+`Yeokcham_v4_gc` is a storage adapter, not a model or receipt adapter. It
+loads one lock-consistent V4 state, derives a pure object-reachability plan,
+and treats every named checkpoint closure as retained. It serializes after
+restore retention and before the project-state head, writes only local
+canonical quarantine receipts, and moves same-filesystem object paths with
+directory sync. It has no package, relay, transport, authority, scanner, or
+materialiser dependency. An explicit purge rechecks current reachability;
+purge markers make an interrupted unlink sequence restartable rather than
+silently treating missing quarantine files as safe.
+
 The unversioned hash, encoding, envelope, store, snapshot, chunking, testkit,
 and watcher modules are V4 foundations. The Linux watcher emits advisory scan
 requests and delegates all capture semantics to `save`; it is not a source of
