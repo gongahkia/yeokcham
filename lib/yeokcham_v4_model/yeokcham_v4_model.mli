@@ -242,6 +242,7 @@ type protection_reason =
   | Open_decision
   | Pin
   | Restore_journal
+  | Restore_proof
   | Recent
 
 val protection_reason_to_string : protection_reason -> string
@@ -263,6 +264,7 @@ val compact :
   project ->
   keep_recent:int ->
   journal_snapshots:Snapshot_id.t list ->
+  proof_snapshots:Snapshot_id.t list ->
   (compact_result, error) result
 
 val new_draft :

@@ -50,11 +50,24 @@ leases, threshold authority, and witness receipts as V4 authority inputs. An
 active administrator may act while disconnected; concurrent epochs remain
 explicit until a valid reconciliation.
 
+[#261](https://github.com/gongahkia/yeokcham/issues/261), the V4 advisory
+background runtime, is complete. ADR-089 defines a Linux-only private XDG
+runtime with a kernel-backed single-owner lock, local control socket,
+disposable bounded observability, crash restart, and no service-unit or
+autostart policy. It schedules only existing debounced scratch capture by
+default; `daemon sync` is explicit and reuses the ordinary staged,
+receive-first transport path without working-tree mutation.
+
+[#247](https://github.com/gongahkia/yeokcham/issues/247), durable restore
+recovery after journal pruning, is complete. ADR-090 adds a canonical,
+local-only restore proof for both snapshots of every explicit in-place restore.
+Compaction validates those roots and only prunes a completed journal after a
+matching proof exists; explicit `restore forget` is the sole removal path.
+
 The remaining V4 backlog is relay payload encryption
-[#257](https://github.com/gongahkia/yeokcham/issues/257), explicit
-decision-proposal assistance [#260](https://github.com/gongahkia/yeokcham/issues/260),
-and advisory background runtime [#261](https://github.com/gongahkia/yeokcham/issues/261).
-None may reuse retired V1–V3 protocol or runtime formats.
+[#257](https://github.com/gongahkia/yeokcham/issues/257) and explicit
+decision-proposal assistance [#260](https://github.com/gongahkia/yeokcham/issues/260).
+Neither may reuse retired V1–V3 protocol or runtime formats.
 
 Future feature proposals need a dedicated issue and ADR before coding when they
 change trust, transport, delivery, snapshot retention, or persistent semantics.

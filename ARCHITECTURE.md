@@ -4,7 +4,7 @@ V4 is layered so filesystem and platform adapters cannot change the model by
 themselves.
 
 ```
-CLI / inspection projection / Linux watch / platform signer / HTTPS relay client
+CLI / inspection projection / Linux watch / Linux runtime / platform signer / HTTPS relay client
               │
        Local_service adapter / Receipt boundary
               │
@@ -48,8 +48,19 @@ authority closure. The local service supplies that input without scanning the
 working tree. It stores no layout, follows no remote, and cannot turn delivery
 milestones or concurrent authority heads into inferred history or policy.
 
+`Yeokcham_v4_restore_journal` records restartable destructive materialisation.
+`Yeokcham_v4_restore_proof` is a separate local, canonical, create-only record
+that keeps the exact safety and target snapshots reachable after a completed
+journal is pruned. The local service validates both snapshot closures before
+creating it and serializes proof, retain, forget, and compaction operations
+under a repository-local lock. Neither module participates in package export,
+bootstrap, receipt, relay transport, authority, or the project-state schema.
+
 The unversioned hash, encoding, envelope, store, snapshot, chunking, testkit,
 and watcher modules are V4 foundations. The Linux watcher emits advisory scan
 requests and delegates all capture semantics to `save`; it is not a source of
-canonical history. macOS and Linux signer adapters are custody boundaries, not
-authority systems.
+canonical history. The Linux runtime gives that watcher a private disposable
+process lifetime and delegates explicit `daemon sync` requests to the same
+transport orchestration as foreground `sync`; it owns no model, authority,
+receipt, or working-tree-materialisation path. macOS and Linux signer adapters
+are custody boundaries, not authority systems.

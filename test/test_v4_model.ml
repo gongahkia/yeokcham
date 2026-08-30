@@ -374,7 +374,8 @@ let compact_drops_unprotected_checkpoints_and_keeps_named_roots () =
     V4.pin project ~snapshot:(snapshot "snapshot-scratch-2") |> require_ok
   in
   let compacted =
-    V4.compact project ~keep_recent:0 ~journal_snapshots:[] |> require_ok
+    V4.compact project ~keep_recent:0 ~journal_snapshots:[] ~proof_snapshots:[]
+    |> require_ok
   in
   let retained =
     compacted.V4.project |> V4.checkpoints
@@ -393,11 +394,20 @@ let compact_drops_unprotected_checkpoints_and_keeps_named_roots () =
   let protected_journal =
     V4.compact project ~keep_recent:0
       ~journal_snapshots:[ snapshot "snapshot-scratch-1" ]
+      ~proof_snapshots:[]
     |> require_ok
   in
   Alcotest.(check int)
     "pending restore-safety is not dropped" 0
-    (List.length protected_journal.V4.dropped)
+    (List.length protected_journal.V4.dropped);
+  let protected_proof =
+    V4.compact project ~keep_recent:0 ~journal_snapshots:[]
+      ~proof_snapshots:[ snapshot "snapshot-scratch-1" ]
+    |> require_ok
+  in
+  Alcotest.(check int)
+    "durable restore-proof is not dropped" 0
+    (List.length protected_proof.V4.dropped)
 
 let pin_rejects_unknown_checkpoints () =
   match V4.pin (initial_project ()) ~snapshot:(snapshot "snapshot-missing") with

@@ -5,7 +5,7 @@
 - Deciders: maintainers
 - Supersedes: None
 - Superseded by: ADR-085, for its pre-release V4 persistence-version and
-  migration clauses only
+  migration clauses only; ADR-090 for completed in-place restore retention
 
 ## Context and problem statement
 
@@ -54,19 +54,18 @@ Protected snapshots are:
 - explicit pins;
 - safety and target snapshots named by an incomplete restore journal.
 
-Published restore journals are deleted after a successful compact persist.
-Those snapshots then remain only if another protection still names them.
-Pending journals are not pruned.
+ADR-090 supersedes this completed-restore rule. Published journals are deleted
+only after a matching durable local restore proof exists. Both snapshots named
+by that proof remain protected until explicit `restore forget`. Pending
+journals are not pruned.
 
 `keep_recent` must be nonnegative. `--dry-run --explain` reports keep reasons
 without writing state.
 
 ## Consequences
 
-Repeated `save` no longer grows the inspectable timeline without bound. Restore
-safety from a completed operation can drop on the same compact that prunes its
-journal unless pinned or still recent. Object bytes may remain until a later
-store GC slice.
+Repeated `save` no longer grows the inspectable timeline without bound. Object
+bytes may remain until a later store GC slice.
 
 ## Model and invariant impact
 

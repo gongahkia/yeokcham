@@ -25,6 +25,13 @@ The active V4 decisions are:
 - [ADR-088](docs/adr/088-v4-reject-online-authority-coordination.md): rejects
   online authority coordination; disconnected administrator actions remain
   valid and concurrent authority epochs remain explicit until reconciled.
+- [ADR-089](docs/adr/089-v4-linux-advisory-background-runtime.md): Linux-only
+  managed advisory capture with explicit receipt-bound synchronization and
+  disposable private runtime state.
+- [ADR-090](docs/adr/090-v4-durable-restore-proofs.md): local durable recovery
+  proof for each explicit in-place restore, retained until explicit forget.
+- [ADR-091](docs/adr/091-v4-local-recoverable-garbage-collection.md): local
+  reachability planning and explicit recoverable object collection.
 
 Earlier product-track ADRs have been removed with their implementations. Git
 history retains their historical record; they are not active architecture.

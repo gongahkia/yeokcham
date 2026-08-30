@@ -77,10 +77,19 @@ adoption issued at a current head when `late` holds.
 - `resolve` produces a new revision and clears only the selected decision. Its
   signed form likewise requires an explicit current head on a fork.
 
-Snapshot identities are exact immutable object references. Persistent model,
-authority, certificate, signed-revision, adoption, recovery-package, and
-journal records have a schema version and canonical encoding; unknown mandatory
-features and noncanonical encodings are rejected. Only the mutable
+Snapshot identities are exact immutable object references. An explicit
+in-place restore first records `{operation, safety, target}` in an immutable
+journal. Before its terminal `Published` phase it writes a local
+`Restore_proof = [1, operation, safety, target]`, after verifying both exact
+snapshot closures. A proof is a compaction root for both snapshots until an
+explicit forget transition deletes that proof; a published journal without a
+matching proof is itself retained. Neither record is project history, package
+content, transport state, or semantic intent.
+
+Persistent model, authority, certificate, signed-revision, adoption,
+recovery-package, journal, and restore-proof records have a schema version and
+canonical encoding; unknown mandatory features and noncanonical encodings are
+rejected. Only the mutable
 `v4-project-state` head selects a current immutable state object.
 
 ## Transport state
@@ -115,3 +124,20 @@ source creator/drafts/checkpoints/pins/usernames with one fresh local creator,
 active draft, baseline checkpoint, and local username; shared changes,
 resolutions, and deliveries remain distinct. Neither transition scans or
 materialises the working tree.
+
+## Advisory runtime state
+
+`Runtime_state` is disposable process observability, not `Project` state. A
+Linux daemon may retain only a canonical repository-root reference, process
+nonce, watcher condition, explicit task label, and bounded diagnostic result in
+private `runtime-state-v1` bytes. It has no edge into checkpoints, shared
+changes, decisions, deliveries, authority epochs, transport cursor, package,
+or credential state.
+
+The automatic runtime transition is exactly `save`; it therefore creates a
+checkpoint only for an observed byte change. Its only network transition is an
+explicit operator `daemon sync(remote)` request, which is observationally
+equivalent to the existing `sync(remote)` receipt and upload orchestration. It
+cannot select a feed or authority head, scan or materialise a working tree
+during receipt, or cause an authority transition. Losing runtime state or the
+runtime process changes no V4 model state.

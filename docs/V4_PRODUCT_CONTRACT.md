@@ -47,15 +47,38 @@ empty destination and uses a generated display-handle/rank child name, never a
 raw revision identifier. `resolve --tree` references that isolated result; it
 does not rewrite the live tree while deciding.
 
-In-place restore first publishes a retained safety checkpoint then follows a
-canonical Prepared → Applying → Materialized → Published journal. Restart
-replays the exact target; `.git` and `.yeokcham` are outside source replacement.
+In-place restore first captures a safety checkpoint then follows a canonical
+Prepared → Applying → Materialized → Published journal. Before `Published`, it
+writes one create-only local `restore-proof-v1` naming the exact safety and
+target snapshots and verifies both closures. Restart replays the exact target
+or completes that proof; `.git` and `.yeokcham` are outside source replacement.
+Compaction can prune a published journal only after the matching proof exists.
+The proof remains a named storage root until `restore forget --operation ID`.
+`restore proofs` lists those records; `storage roots` validates and explains
+all non-recent roots. `restore retain --operation ID` creates a proof for a
+legacy completed journal. These records never enter package, bootstrap, relay,
+authority, shared-change, or delivery state.
 
 `watch` is Linux-only advisory capture. After a one-second quiet period (or
 thirty-second sustained-write maximum) it calls the same exact `save` path.
 Unsupported systems fail explicitly. The real Linux watcher-loop test is part
 of the active suite; platform-specific evidence is recorded in
 `TESTING_AND_EXPERIMENTS.md`.
+
+`daemon start`, `status`, and `stop` provide that same capture behaviour with a
+managed Linux process lifetime. There is at most one daemon per canonical
+repository root. It requires a user-private, absolute `XDG_RUNTIME_DIR` and
+keeps only disposable private lock, socket, log, and bounded `runtime-state-v1`
+observability there; no runtime file is a project, authority, transport, or
+credential record. A crash releases the owning kernel lock, so a later start
+can safely replace a stale socket. There is no service-unit installation,
+autostart, persistent scheduling configuration, or non-Linux fallback.
+
+The daemon does not follow remotes. `daemon sync NAME` is an explicit request
+using exactly the ordinary receive-first `sync` orchestration. It is serialized
+with local capture, reports unavailable remotes, and never scans or
+materialises the working tree during receipt. It does not select a publication
+or authority head, retry by itself, or make authority depend on network state.
 
 ## Identity and authority
 
@@ -190,6 +213,10 @@ publication references with the V4 collaboration state. A late record from a
 now-revoked signer is verified into the local review inbox and reported as a
 deferred publication; it is not automatically applied.
 
+`daemon sync NAME` has the same transport and receipt semantics as `sync NAME`;
+the difference is solely that the already-running local Linux daemon owns the
+explicit request. The daemon never synchronizes unless that command is issued.
+
 After durable receipt, `sync` publishes locally unannounced work as an exact
 package closure: objects first, then the manifest, then its signed publication.
 The publication is marked announced only after the relay acknowledges it. An
@@ -226,8 +253,8 @@ No state transition mutates the only copy in place.
 
 ## Exclusions
 
-There is no general clone protocol, blob GC, durable `capture=`, immortal
-restore safety after journal prune, Git bridge, semantic parser or merge,
+There is no general clone protocol, blob GC, durable `capture=`, Git bridge,
+semantic parser or merge,
 end-to-end payload encryption, external relay identity or proof-of-possession,
 hardware/non-exportable signer, signing agent, macOS/WSL watcher, or CI-backed
 delivery. These are separate design work and must reuse the current model and

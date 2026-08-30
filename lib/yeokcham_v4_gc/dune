@@ -1,0 +1,13 @@
+(library
+ (name yeokcham_v4_gc)
+ (libraries
+  unix
+  yeokcham_encoding
+  yeokcham_envelope
+  yeokcham_hash
+  yeokcham_snapshot
+  yeokcham_store
+  yeokcham_v4_model
+  yeokcham_v4_restore_journal
+  yeokcham_v4_restore_proof
+  yeokcham_v4_store))

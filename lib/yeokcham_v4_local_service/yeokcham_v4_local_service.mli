@@ -10,6 +10,7 @@ type error =
   | Snapshot_error of Yeokcham_snapshot.error
   | Materialize_error of Yeokcham_snapshot.Materialize.error
   | Restore_journal_error of Yeokcham_v4_restore_journal.error
+  | Restore_proof_error of Yeokcham_v4_restore_proof.error
   | Model_error of Yeokcham_v4_model.error
   | Trust_error of Yeokcham_v4_trust.error
   | Package_error of Yeokcham_v4_package.error
@@ -121,6 +122,17 @@ type compact_report = {
   status : status;
 }
 
+type restore_proof = {
+  proof_operation : string;
+  proof_safety : Yeokcham_v4_model.Snapshot_id.t;
+  proof_target : Yeokcham_v4_model.Snapshot_id.t;
+}
+
+type storage_root = {
+  root_snapshot : Yeokcham_v4_model.Snapshot_id.t;
+  root_reasons : Yeokcham_v4_model.protection_reason list;
+}
+
 type transport_arrival = {
   publication : Yeokcham_v4_transport.publication;
   package : string;
@@ -158,6 +170,7 @@ module Capture_window : sig
 end
 
 type in_place_restore = {
+  restore_operation : string;
   safety_checkpoint : Yeokcham_v4_model.Snapshot_id.t;
   restored_checkpoint : Yeokcham_v4_model.Snapshot_id.t;
   resumed : bool;
@@ -356,6 +369,21 @@ val restore_in_place :
   (in_place_restore, error) result
 
 val recover_in_place : root:string -> (in_place_restore option, error) result
+
+val restore_proofs : root:string -> (restore_proof list, error) result
+(** Lists local durable recovery records without touching the working tree. *)
+
+val retain_restore_proof :
+  root:string -> operation:string -> (restore_proof, error) result
+(** Explicitly creates a durable proof for a legacy published journal after
+    validating its two exact snapshot closures. *)
+
+val forget_restore_proof :
+  root:string -> operation:string -> (unit, error) result
+(** The sole operation that removes a restore's durable compaction root. *)
+
+val storage_roots : root:string -> (storage_root list, error) result
+(** Validates and explains every non-recent compaction root. *)
 
 val pin :
   root:string ->

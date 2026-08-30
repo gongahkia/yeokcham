@@ -1,5 +1,6 @@
 module Model = Yeokcham_v4_model
 module Journal = Yeokcham_v4_restore_journal
+module Restore_proof = Yeokcham_v4_restore_proof
 module Snapshot = Yeokcham_snapshot
 module Store = Yeokcham_v4_store
 module Trust = Yeokcham_v4_trust
@@ -20,6 +21,7 @@ type error =
   | Snapshot_error of Snapshot.error
   | Materialize_error of Snapshot.Materialize.error
   | Restore_journal_error of Journal.error
+  | Restore_proof_error of Restore_proof.error
   | Model_error of Model.error
   | Trust_error of Trust.error
   | Package_error of Package.error
@@ -113,6 +115,17 @@ type compact_report = {
   status : status;
 }
 
+type restore_proof = {
+  proof_operation : string;
+  proof_safety : Model.Snapshot_id.t;
+  proof_target : Model.Snapshot_id.t;
+}
+
+type storage_root = {
+  root_snapshot : Model.Snapshot_id.t;
+  root_reasons : Model.protection_reason list;
+}
+
 type transport_arrival = {
   publication : Transport.publication;
   package : string;
@@ -167,6 +180,7 @@ module Capture_window = struct
 end
 
 type in_place_restore = {
+  restore_operation : string;
   safety_checkpoint : Model.Snapshot_id.t;
   restored_checkpoint : Model.Snapshot_id.t;
   resumed : bool;
@@ -177,6 +191,7 @@ let error_to_string = function
   | Snapshot_error error -> Snapshot.error_to_string error
   | Materialize_error error -> Snapshot.Materialize.error_to_string error
   | Restore_journal_error error -> Journal.error_to_string error
+  | Restore_proof_error error -> Restore_proof.error_to_string error
   | Model_error error -> Model.error_to_string error
   | Trust_error error -> Trust.error_to_string error
   | Package_error error -> Package.error_to_string error
@@ -1146,6 +1161,94 @@ let advance_journal ~root journal phase =
   let* () = append_journal ~root next in
   Ok next
 
+let validate_snapshot_closure store snapshot_id =
+  let* leaves = leaves_of_snapshot store snapshot_id in
+  Path_map.bindings leaves
+  |> List.fold_left
+       (fun result (_, (_, content)) ->
+         let* () = result in
+         Snapshot.Content.load store content
+         |> Result.map (fun _ -> ())
+         |> Result.map_error (fun error -> Snapshot_error error))
+       (Ok ())
+
+let ensure_retained project snapshot =
+  if retained project snapshot then Ok ()
+  else Error (Unknown_checkpoint snapshot)
+
+let ensure_restore_proof ~root store journal =
+  let* () = validate_snapshot_closure store (Journal.safety journal) in
+  let* () = validate_snapshot_closure store (Journal.target journal) in
+  let* proof =
+    Restore_proof.make
+      ~operation_id:(Journal.operation_id journal)
+      ~safety:(Journal.safety journal) ~target:(Journal.target journal)
+    |> Result.map_error (fun error -> Restore_proof_error error)
+  in
+  Restore_proof.append ~root proof
+  |> Result.map_error (fun error -> Restore_proof_error error)
+
+let latest_journals journals =
+  List.fold_left
+    (fun latest journal ->
+      match List.assoc_opt (Journal.operation_id journal) latest with
+      | Some current
+        when Int64.compare
+               (Journal.generation current)
+               (Journal.generation journal)
+             >= 0 ->
+          latest
+      | Some _ ->
+          (Journal.operation_id journal, journal)
+          :: List.remove_assoc (Journal.operation_id journal) latest
+      | None -> (Journal.operation_id journal, journal) :: latest)
+    [] journals
+
+let proof_matches_journal proof journal =
+  String.equal (Restore_proof.operation_id proof) (Journal.operation_id journal)
+  && Model.Snapshot_id.equal
+       (Restore_proof.safety proof)
+       (Journal.safety journal)
+  && Model.Snapshot_id.equal
+       (Restore_proof.target proof)
+       (Journal.target journal)
+
+let retention_inputs ~root =
+  let* journals =
+    Journal.scan ~root
+    |> Result.map_error (fun error -> Restore_journal_error error)
+  in
+  let* proofs =
+    Restore_proof.scan ~root
+    |> Result.map_error (fun error -> Restore_proof_error error)
+  in
+  let latest = latest_journals journals |> List.map snd in
+  let journal_roots =
+    latest
+    |> List.filter (fun journal ->
+        Journal.phase journal <> Journal.Published
+        || not
+             (List.exists
+                (fun proof -> proof_matches_journal proof journal)
+                proofs))
+    |> List.concat_map (fun journal ->
+        [ Journal.safety journal; Journal.target journal ])
+    |> List.sort_uniq Model.Snapshot_id.compare
+  in
+  Ok (latest, proofs, journal_roots)
+
+let validate_retention_inputs ~store ~project ~journal_roots proofs =
+  let roots =
+    List.sort_uniq Model.Snapshot_id.compare
+      (journal_roots @ Restore_proof.snapshots proofs)
+  in
+  List.fold_left
+    (fun result snapshot ->
+      let* () = result in
+      let* () = ensure_retained project snapshot in
+      validate_snapshot_closure store snapshot)
+    (Ok ()) roots
+
 let perform_in_place ~root repository loaded journal ~resumed =
   let store = Store.underlying_store repository in
   let* applying =
@@ -1178,6 +1281,11 @@ let perform_in_place ~root repository loaded journal ~resumed =
           save_project repository loaded project
           |> Result.map_error (fun error -> Store_error error)
         in
+        let* () =
+          Yeokcham_store.with_lock store ~name:"restore-retention"
+            ~on_error:(fun error -> Store_error (Store.Store_error error))
+            (fun () -> ensure_restore_proof ~root store materialized)
+        in
         let* _ = advance_journal ~root materialized Journal.Published in
         Ok ()
     | Journal.Published -> Ok ()
@@ -1185,6 +1293,7 @@ let perform_in_place ~root repository loaded journal ~resumed =
   in
   Ok
     {
+      restore_operation = Journal.operation_id journal;
       safety_checkpoint = Journal.safety journal;
       restored_checkpoint = Journal.target journal;
       resumed;
@@ -2645,60 +2754,127 @@ let unpin ~root ~checkpoint =
       in
       persist repository loaded project)
 
-let published_journal_ids ~root =
-  let* journals =
-    Journal.scan ~root
-    |> Result.map_error (fun error -> Restore_journal_error error)
-  in
-  let latest =
-    List.fold_left
-      (fun latest journal ->
-        let prior = List.assoc_opt (Journal.operation_id journal) latest in
-        match prior with
-        | Some current
-          when Int64.compare
-                 (Journal.generation current)
-                 (Journal.generation journal)
-               >= 0 ->
-            latest
-        | Some _ ->
-            (Journal.operation_id journal, journal)
-            :: List.remove_assoc (Journal.operation_id journal) latest
-        | None -> (Journal.operation_id journal, journal) :: latest)
-      [] journals
-  in
-  Ok
-    (latest
-    |> List.filter (fun (_, journal) ->
-        Journal.phase journal = Journal.Published)
-    |> List.map fst
-    |> List.sort_uniq String.compare)
+let restore_proof_of_record proof =
+  {
+    proof_operation = Restore_proof.operation_id proof;
+    proof_safety = Restore_proof.safety proof;
+    proof_target = Restore_proof.target proof;
+  }
+
+let restore_proofs ~root =
+  Restore_proof.scan ~root
+  |> Result.map (List.map restore_proof_of_record)
+  |> Result.map_error (fun error -> Restore_proof_error error)
+
+let retain_restore_proof ~root ~operation =
+  with_repository ~root (fun repository loaded ->
+      let store = Store.underlying_store repository in
+      Yeokcham_store.with_lock store ~name:"restore-retention"
+        ~on_error:(fun error -> Store_error (Store.Store_error error))
+        (fun () ->
+          let* journals =
+            Journal.scan ~root
+            |> Result.map_error (fun error -> Restore_journal_error error)
+          in
+          match List.assoc_opt operation (latest_journals journals) with
+          | None ->
+              Error
+                (Restore_journal_error
+                   (Journal.Invalid_schema "restore operation has no journal"))
+          | Some journal when Journal.phase journal <> Journal.Published ->
+              Error
+                (Restore_journal_error
+                   (Journal.Invalid_schema
+                      "only a completed restore journal can be retained"))
+          | Some journal ->
+              let* () =
+                ensure_retained loaded.Store.project (Journal.safety journal)
+              in
+              let* () =
+                ensure_retained loaded.Store.project (Journal.target journal)
+              in
+              let* () = ensure_restore_proof ~root store journal in
+              let* proof =
+                Restore_proof.find ~root ~operation_id:operation
+                |> Result.map_error (fun error -> Restore_proof_error error)
+              in
+              Ok (restore_proof_of_record proof)))
+
+let forget_restore_proof ~root ~operation =
+  with_repository ~root (fun repository _loaded ->
+      let store = Store.underlying_store repository in
+      Yeokcham_store.with_lock store ~name:"restore-retention"
+        ~on_error:(fun error -> Store_error (Store.Store_error error))
+        (fun () ->
+          Restore_proof.forget ~root ~operation_id:operation
+          |> Result.map_error (fun error -> Restore_proof_error error)))
+
+let storage_roots ~root =
+  with_repository ~root (fun repository loaded ->
+      let store = Store.underlying_store repository in
+      Yeokcham_store.with_lock store ~name:"restore-retention"
+        ~on_error:(fun error -> Store_error (Store.Store_error error))
+        (fun () ->
+          let* _latest, proofs, journal_roots = retention_inputs ~root in
+          let* () =
+            validate_retention_inputs ~store ~project:loaded.Store.project
+              ~journal_roots proofs
+          in
+          Model.compact loaded.Store.project ~keep_recent:0
+            ~journal_snapshots:journal_roots
+            ~proof_snapshots:(Restore_proof.snapshots proofs)
+          |> Result.map (fun compacted ->
+              List.map
+                (fun keep ->
+                  {
+                    root_snapshot = keep.Model.snapshot;
+                    root_reasons = keep.Model.reasons;
+                  })
+                compacted.Model.kept)
+          |> Result.map_error (fun error -> Model_error error)))
 
 let compact ~root ~keep_recent ~dry_run =
   with_repository ~root (fun repository loaded ->
-      let* journal_snapshots =
-        Journal.pending_snapshots ~root
-        |> Result.map_error (fun error -> Restore_journal_error error)
-      in
-      let* compacted =
-        Model.compact loaded.Store.project ~keep_recent ~journal_snapshots
-        |> Result.map_error (fun error -> Model_error error)
-      in
-      let* status =
-        if dry_run then Ok (status_of_project compacted.Model.project)
-        else persist repository loaded compacted.Model.project
-      in
-      let* pruned_journals =
-        if dry_run then published_journal_ids ~root
-        else
-          Journal.prune_published ~root
-          |> Result.map_error (fun error -> Restore_journal_error error)
-      in
-      Ok
-        ({
-           kept = compacted.Model.kept;
-           dropped = compacted.Model.dropped;
-           pruned_journals;
-           status;
-         }
-          : compact_report))
+      let store = Store.underlying_store repository in
+      Yeokcham_store.with_lock store ~name:"restore-retention"
+        ~on_error:(fun error -> Store_error (Store.Store_error error))
+        (fun () ->
+          let* latest, proofs, journal_roots = retention_inputs ~root in
+          let* () =
+            validate_retention_inputs ~store ~project:loaded.Store.project
+              ~journal_roots proofs
+          in
+          let* compacted =
+            Model.compact loaded.Store.project ~keep_recent
+              ~journal_snapshots:journal_roots
+              ~proof_snapshots:(Restore_proof.snapshots proofs)
+            |> Result.map_error (fun error -> Model_error error)
+          in
+          let matching_published =
+            latest
+            |> List.filter (fun journal ->
+                Journal.phase journal = Journal.Published
+                && List.exists
+                     (fun proof -> proof_matches_journal proof journal)
+                     proofs)
+            |> List.map Journal.operation_id
+            |> List.sort_uniq String.compare
+          in
+          let* status =
+            if dry_run then Ok (status_of_project compacted.Model.project)
+            else persist repository loaded compacted.Model.project
+          in
+          let* pruned_journals =
+            if dry_run then Ok matching_published
+            else
+              Journal.prune_published ~root ~operations:matching_published
+              |> Result.map_error (fun error -> Restore_journal_error error)
+          in
+          Ok
+            ({
+               kept = compacted.Model.kept;
+               dropped = compacted.Model.dropped;
+               pruned_journals;
+               status;
+             }
+              : compact_report)))

@@ -12,7 +12,7 @@ does not read, upgrade, or mutate repositories from earlier product tracks.
 
 - Exact byte, mode, directory, and symlink snapshots; `save`, `timeline`,
   pins, bounded checkpoint retention, and journaled in-place restore with a
-  retained safety checkpoint.
+  local durable safety/target proof that remains until explicit forget.
 - Explicit drafts, shared immutable revisions, conservative composition, and
   conflict records that can be inspected and materialised outside the working
   tree before an explicit resolution.
@@ -46,6 +46,18 @@ yeokcham sync team
 yeokcham bootstrap publish team
 ```
 
+On Linux, automatic scratch capture can run independently of the terminal:
+
+```sh
+yeokcham daemon start
+yeokcham daemon status
+yeokcham daemon sync team  # explicit; the daemon never polls remotes itself
+yeokcham daemon stop
+```
+
+The runtime uses a private, disposable `XDG_RUNTIME_DIR`; it is not a service
+unit, a persistent project format, or an authority mechanism.
+
 `init` prints a 12-word public root-verification phrase and a 24-word recovery
 mnemonic. Compare the phrase with a prospective device owner over an
 independent channel. Record the mnemonic offline; it decrypts the recovery
@@ -61,6 +73,11 @@ yeokcham receive --from ../incoming
 
 The adoption is a durable, domain-separated approval for that exact signed
 revision. It grants neither general membership nor a broad exception.
+
+An in-place restore (`restore --checkpoint ID` without `--destination`) prints
+a `restore-proof` operation ID. Its pre-restore and target snapshots remain
+recoverable across compaction until `restore forget --operation ID`; use
+`restore proofs` and `storage roots` to inspect those local recovery roots.
 
 For synchronization, an operator first issues a repository-scoped access
 secret, then runs the relay behind an operator-managed HTTPS reverse proxy:
@@ -78,9 +95,9 @@ reports upload failures as pending retry work.
 
 ## Boundaries
 
-Linux `watch` is implemented as advisory capture after debounce. Its real
-inotify loop must still be run on Linux; macOS and WSL watchers are not
-implemented. Relay synchronization is available only for already-equivalent
+Linux `watch` and `daemon` are implemented as advisory capture after debounce.
+`daemon` is Linux-only and requires a private `XDG_RUNTIME_DIR`; macOS and WSL
+watchers/runtimes are not implemented. Relay synchronization is available only for already-equivalent
 replicas through an operator-managed HTTPS reverse proxy. A new replica instead
 needs an explicit immutable bootstrap basis ID, public repository ID, enrolled
 local device, and independently compared root phrase; it starts with fresh

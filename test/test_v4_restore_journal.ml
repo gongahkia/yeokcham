@@ -109,7 +109,8 @@ let published_journals_are_pruned () =
         (append_through prepared
            [ Journal.Applying; Journal.Materialized; Journal.Published ]);
       let pruned =
-        Journal.prune_published ~root |> require_ok Journal.error_to_string
+        Journal.prune_published ~root ~operations:[ String.make 64 'a' ]
+        |> require_ok Journal.error_to_string
       in
       Alcotest.(check (list string))
         "published operation is reported"

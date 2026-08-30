@@ -48,6 +48,9 @@ let usage () =
     \  yeokcham user register [--root PATH] --device ID --username NAME\n\
     \  yeokcham timeline [--root PATH]\n\
     \  yeokcham restore [--root PATH] --checkpoint ID [--destination PATH]\n\
+    \  yeokcham restore proofs [--root PATH]\n\
+    \  yeokcham restore retain [--root PATH] --operation ID\n\
+    \  yeokcham restore forget [--root PATH] --operation ID\n\
     \  yeokcham draft new [--root PATH] --id ID --title TITLE\n\
     \  yeokcham share [--root PATH] --change ID --revision ID [--authority \
      EPOCH]\n\
@@ -85,6 +88,7 @@ let usage () =
     \  yeokcham pin [--root PATH] --checkpoint ID\n\
     \  yeokcham unpin [--root PATH] --checkpoint ID\n\
     \  yeokcham compact [--root PATH] [--keep N] [--dry-run] [--explain]\n\
+    \  yeokcham storage roots [--root PATH]\n\
     \  yeokcham watch [--root PATH]"
 
 let require_ok render = function
@@ -730,11 +734,62 @@ let run_restore arguments =
         Service.restore_in_place ~root ~checkpoint
         |> require_ok Service.error_to_string
       in
+      Printf.printf "restore-proof %s\n" restored.Service.restore_operation;
       Printf.printf "safety %s\n"
         (Model.Snapshot_id.to_string restored.Service.safety_checkpoint);
       Printf.printf "restored %s in-place%s\n"
         (Model.Snapshot_id.to_string restored.Service.restored_checkpoint)
         (if restored.Service.resumed then " (resumed)" else "")
+
+let parse_restore_operation arguments =
+  let rec loop root operation = function
+    | [] -> (
+        match operation with
+        | Some operation -> (Option.value root ~default:default_root, operation)
+        | None -> usage ())
+    | "--root" :: value :: rest when Option.is_none root ->
+        loop (Some value) operation rest
+    | "--operation" :: value :: rest when Option.is_none operation ->
+        loop root (Some value) rest
+    | _ -> usage ()
+  in
+  loop None None arguments
+
+let run_restore_proofs arguments =
+  Service.restore_proofs ~root:(parse_root arguments)
+  |> require_ok Service.error_to_string
+  |> List.iter (fun proof ->
+      Printf.printf "restore-proof %s safety %s target %s\n"
+        proof.Service.proof_operation
+        (Model.Snapshot_id.to_string proof.Service.proof_safety)
+        (Model.Snapshot_id.to_string proof.Service.proof_target))
+
+let run_restore_retain arguments =
+  let root, operation = parse_restore_operation arguments in
+  let proof =
+    Service.retain_restore_proof ~root ~operation
+    |> require_ok Service.error_to_string
+  in
+  Printf.printf "restore-proof %s safety %s target %s\n"
+    proof.Service.proof_operation
+    (Model.Snapshot_id.to_string proof.Service.proof_safety)
+    (Model.Snapshot_id.to_string proof.Service.proof_target)
+
+let run_restore_forget arguments =
+  let root, operation = parse_restore_operation arguments in
+  Service.forget_restore_proof ~root ~operation
+  |> require_ok Service.error_to_string;
+  Printf.printf "restore-proof forgotten %s\n" operation
+
+let run_storage_roots arguments =
+  Service.storage_roots ~root:(parse_root arguments)
+  |> require_ok Service.error_to_string
+  |> List.iter (fun root ->
+      Printf.printf "root %s %s\n"
+        (Model.Snapshot_id.to_string root.Service.root_snapshot)
+        (root.Service.root_reasons
+        |> List.map Model.protection_reason_to_string
+        |> String.concat ","))
 
 let parse_share arguments =
   let rec loop root change revision authority = function
@@ -1555,8 +1610,8 @@ let remove_staged_package destination =
   (try
      Sys.readdir objects
      |> Array.iter (fun name ->
-            try Unix.unlink (Filename.concat objects name)
-            with Unix.Unix_error _ -> ());
+         try Unix.unlink (Filename.concat objects name)
+         with Unix.Unix_error _ -> ());
      Unix.rmdir objects
    with Unix.Unix_error _ | Sys_error _ -> ());
   (try Unix.unlink (Filename.concat destination "manifest.cbor")
@@ -1575,7 +1630,7 @@ let with_transport_staging ~root run =
         try
           Sys.readdir staging
           |> Array.iter (fun name ->
-                 remove_staged_package (Filename.concat staging name));
+              remove_staged_package (Filename.concat staging name));
           Unix.rmdir staging
         with Unix.Unix_error _ | Sys_error _ -> ())
       (fun () -> run staging)
@@ -1805,16 +1860,13 @@ let run_bootstrap arguments =
 let run_sync arguments =
   let root, remote_name = parse_remote_name arguments in
   let report =
-    Sync.run ~root ~remote:remote_name
-      ~load_signing_capability:(fun device ->
+    Sync.run ~root ~remote:remote_name ~load_signing_capability:(fun device ->
         V4_signer.load device |> Result.map_error V4_signer.error_to_string)
     |> require_ok Sync.error_to_string
   in
-  Printf.printf "received publications %d\n"
-    report.Sync.discovered_publications;
+  Printf.printf "received publications %d\n" report.Sync.discovered_publications;
   Printf.printf "received revisions %d\n" report.Sync.received_revisions;
-  Printf.printf "deferred publications %d\n"
-    report.Sync.deferred_publications;
+  Printf.printf "deferred publications %d\n" report.Sync.deferred_publications;
   Printf.printf "created decisions %d\n" report.Sync.created_decisions;
   match report.Sync.upload with
   | Sync.Uploaded uploaded -> Printf.printf "uploaded artifacts %d\n" uploaded
@@ -1870,6 +1922,9 @@ let () =
   | _ :: "recovery" :: "refresh" :: arguments -> run_recovery_refresh arguments
   | _ :: "user" :: "register" :: arguments -> run_user_register arguments
   | _ :: "timeline" :: arguments -> run_timeline arguments
+  | _ :: "restore" :: "proofs" :: arguments -> run_restore_proofs arguments
+  | _ :: "restore" :: "retain" :: arguments -> run_restore_retain arguments
+  | _ :: "restore" :: "forget" :: arguments -> run_restore_forget arguments
   | _ :: "restore" :: arguments -> run_restore arguments
   | _ :: "draft" :: "new" :: arguments -> run_new_draft arguments
   | _ :: "share" :: arguments -> run_share arguments
@@ -1903,5 +1958,6 @@ let () =
   | _ :: "pin" :: arguments -> run_pin arguments
   | _ :: "unpin" :: arguments -> run_unpin arguments
   | _ :: "compact" :: arguments -> run_compact arguments
+  | _ :: "storage" :: "roots" :: arguments -> run_storage_roots arguments
   | _ :: "watch" :: arguments -> run_watch arguments
   | _ -> usage ()

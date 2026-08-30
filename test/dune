@@ -149,6 +149,18 @@
   (source_tree golden)))
 
 (test
+ (name test_v4_restore_proof)
+ (modules test_v4_restore_proof)
+ (libraries
+  alcotest
+  unix
+  yeokcham_testkit
+  yeokcham_v4_model
+  yeokcham_v4_restore_proof)
+ (deps
+  (source_tree golden)))
+
+(test
  (name test_v4_local_service)
  (modules test_v4_local_service)
  (libraries
@@ -158,6 +170,8 @@
   yeokcham_v4_model
   yeokcham_v4_recovery
   yeokcham_v4_restore_journal
+  yeokcham_v4_restore_proof
+  yeokcham_store
   yeokcham_v4_store
   yeokcham_v4_package
   yeokcham_v4_transport
@@ -194,6 +208,14 @@
 (test
  (name test_v4_watch)
  (modules test_v4_watch)
+ (build_if
+  (= %{system} linux))
+ (libraries alcotest unix)
+ (deps ../bin/yeokcham_v4.exe))
+
+(test
+ (name test_v4_runtime)
+ (modules test_v4_runtime)
  (build_if
   (= %{system} linux))
  (libraries alcotest unix)

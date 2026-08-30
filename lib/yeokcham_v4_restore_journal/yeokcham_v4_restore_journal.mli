@@ -47,5 +47,8 @@ val pending_snapshots :
   root:string -> (Yeokcham_v4_model.Snapshot_id.t list, error) result
 (** Safety and target snapshots named by an incomplete restore operation. *)
 
-val prune_published : root:string -> (string list, error) result
-(** Delete create-only records whose latest generation is [Published]. *)
+val prune_published :
+  root:string -> operations:string list -> (string list, error) result
+(** Deletes only named operations whose latest generation is [Published]. The
+    caller must first establish that another durable root names their snapshots.
+*)

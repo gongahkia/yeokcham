@@ -1,0 +1,3 @@
+(library
+ (name yeokcham_v4_restore_proof)
+ (libraries unix yeokcham_encoding yeokcham_v4_model))

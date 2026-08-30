@@ -10,6 +10,12 @@ proof do not depend on a server.
 Scratch checkpoints answer “can I get my bytes back?” They are automatic,
 bounded, and may compact subject to pins and other named protections.
 
+An in-place restore is different: it deliberately replaces live bytes. Its
+pre-restore and target snapshots receive a local durable recovery proof. That
+proof remains until the person who initiated recovery explicitly forgets it; it
+is neither shared intent nor a release, and never leaves the repository in a
+package or relay transfer.
+
 A shared change answers “what do I want another person to consider?” It is an
 explicit immutable revision with a signed author and an authority epoch.
 
@@ -45,4 +51,6 @@ observation cannot choose, approve, or invalidate authority state.
 V4 is the only active product track. Earlier tracks are available only in Git
 history and have no compatibility or migration path. The codebase retains the
 unversioned hashing, canonical CBOR, envelope, object store, snapshot,
-chunking, testkit, and advisory Linux-watcher foundations because V4 uses them.
+chunking, testkit, advisory Linux-watcher, and disposable Linux-runtime
+foundations because V4 uses them. The runtime may preserve scratch capture, but
+it cannot infer shared intent, schedule a remote, or become a source of trust.

@@ -1,5 +1,6 @@
 module Model = Yeokcham_v4_model
 module Journal = Yeokcham_v4_restore_journal
+module Proof = Yeokcham_v4_restore_proof
 module Service = Yeokcham_v4_local_service
 module Store = Yeokcham_v4_store
 module Trust = Yeokcham_v4_trust
@@ -273,6 +274,202 @@ let in_place_restore_retains_and_recovers_unsaved_bytes () =
              Model.Snapshot_id.equal checkpoint.Model.checkpoint_snapshot
                restored.Service.safety_checkpoint)
            status.Service.checkpoints))
+
+let restore_proof_survives_journal_pruning_until_explicit_forget () =
+  with_directory "yeokcham-v4-service-restore-proof-" (fun root ->
+      write_file root "main.ml" "let version = 1\n";
+      let initial = initialize root in
+      write_file root "main.ml" "let unsaved = 2\n";
+      let restored =
+        Service.restore_in_place ~root ~checkpoint:initial.Service.checkpoint
+        |> require_ok Service.error_to_string
+      in
+      let compacted =
+        Service.compact ~root ~keep_recent:0 ~dry_run:false
+        |> require_ok Service.error_to_string
+      in
+      Alcotest.(check (list string))
+        "the completed journal is pruned"
+        [ restored.Service.restore_operation ]
+        compacted.Service.pruned_journals;
+      Alcotest.(check int)
+        "one durable restore proof remains" 1
+        (Service.restore_proofs ~root
+        |> require_ok Service.error_to_string
+        |> List.length);
+      Alcotest.(check int)
+        "published journal is gone only after proof exists" 0
+        (Journal.scan ~root |> require_ok Journal.error_to_string |> List.length);
+      let roots =
+        Service.storage_roots ~root |> require_ok Service.error_to_string
+      in
+      Alcotest.(check bool)
+        "safety root is explained as a restore proof" true
+        (List.exists
+           (fun root ->
+             Model.Snapshot_id.equal root.Service.root_snapshot
+               restored.Service.safety_checkpoint
+             && List.mem Model.Restore_proof root.Service.root_reasons)
+           roots);
+      let retained =
+        Service.status ~root |> require_ok Service.error_to_string
+        |> fun status -> status.Service.checkpoints
+      in
+      Alcotest.(check bool)
+        "safety survives bounded scratch compaction" true
+        (List.exists
+           (fun checkpoint ->
+             Model.Snapshot_id.equal checkpoint.Model.checkpoint_snapshot
+               restored.Service.safety_checkpoint)
+           retained);
+      Service.forget_restore_proof ~root
+        ~operation:restored.Service.restore_operation
+      |> require_ok Service.error_to_string;
+      ignore
+        (Service.compact ~root ~keep_recent:0 ~dry_run:false
+        |> require_ok Service.error_to_string);
+      let retained =
+        Service.status ~root |> require_ok Service.error_to_string
+        |> fun status -> status.Service.checkpoints
+      in
+      Alcotest.(check bool)
+        "forget permits later scratch compaction" false
+        (List.exists
+           (fun checkpoint ->
+             Model.Snapshot_id.equal checkpoint.Model.checkpoint_snapshot
+               restored.Service.safety_checkpoint)
+           retained))
+
+let legacy_published_journal_remains_a_root_until_explicit_retain () =
+  with_directory "yeokcham-v4-service-legacy-restore-" (fun root ->
+      write_file root "main.ml" "let version = 1\n";
+      let initial = initialize root in
+      write_file root "main.ml" "let version = 2\n";
+      let saved =
+        match Service.save ~root |> require_ok Service.error_to_string with
+        | Service.Saved status -> status
+        | Service.Unchanged _ -> Alcotest.fail "changed tree was not saved"
+      in
+      let prepared =
+        Journal.make_prepared ~operation_id:(String.make 64 'c')
+          ~safety:saved.Service.checkpoint ~target:initial.Service.checkpoint
+        |> require_ok Journal.error_to_string
+      in
+      let materialized =
+        Journal.advance prepared Journal.Applying
+        |> require_ok Journal.error_to_string
+        |> fun applying ->
+        Journal.advance applying Journal.Materialized
+        |> require_ok Journal.error_to_string
+      in
+      let published =
+        Journal.advance materialized Journal.Published
+        |> require_ok Journal.error_to_string
+      in
+      List.iter
+        (fun journal ->
+          Journal.append ~root journal |> require_ok Journal.error_to_string)
+        [
+          prepared;
+          Journal.advance prepared Journal.Applying
+          |> require_ok Journal.error_to_string;
+          materialized;
+          published;
+        ];
+      let compacted =
+        Service.compact ~root ~keep_recent:0 ~dry_run:false
+        |> require_ok Service.error_to_string
+      in
+      Alcotest.(check (list string))
+        "unproven legacy journal is not pruned" []
+        compacted.Service.pruned_journals;
+      Alcotest.(check int)
+        "journal remains available for explicit retain" 4
+        (Journal.scan ~root |> require_ok Journal.error_to_string |> List.length);
+      let proof =
+        Service.retain_restore_proof ~root ~operation:(String.make 64 'c')
+        |> require_ok Service.error_to_string
+      in
+      Alcotest.(check string)
+        "retain names the legacy operation" (String.make 64 'c')
+        proof.Service.proof_operation;
+      let compacted =
+        Service.compact ~root ~keep_recent:0 ~dry_run:false
+        |> require_ok Service.error_to_string
+      in
+      Alcotest.(check (list string))
+        "verified legacy journal is now pruned"
+        [ String.make 64 'c' ]
+        compacted.Service.pruned_journals)
+
+let corrupt_restore_proof_blocks_compaction_before_state_change () =
+  with_directory "yeokcham-v4-service-corrupt-proof-" (fun root ->
+      write_file root "main.ml" "let version = 1\n";
+      let initial = initialize root in
+      write_file root "main.ml" "let unsaved = 2\n";
+      let restored =
+        Service.restore_in_place ~root ~checkpoint:initial.Service.checkpoint
+        |> require_ok Service.error_to_string
+      in
+      let path =
+        Filename.concat
+          (Filename.concat (Filename.concat root ".yeokcham") "restore-proofs")
+          ("v4-restore-proof-" ^ restored.Service.restore_operation ^ ".cbor")
+      in
+      let before =
+        Store.open_repository ~root |> require_ok Store.error_to_string
+        |> fun repository ->
+        Store.load repository |> require_ok Store.error_to_string
+        |> fun loaded -> loaded.Store.object_id
+      in
+      Out_channel.with_open_bin path (fun channel ->
+          Out_channel.output_string channel "bad");
+      (match Service.compact ~root ~keep_recent:0 ~dry_run:false with
+      | Error _ -> ()
+      | Ok _ ->
+          Alcotest.fail "compaction accepted corrupt durable recovery proof");
+      let after =
+        Store.open_repository ~root |> require_ok Store.error_to_string
+        |> fun repository ->
+        Store.load repository |> require_ok Store.error_to_string
+        |> fun loaded -> loaded.Store.object_id
+      in
+      Alcotest.(check string)
+        "rejected proof leaves the state head unchanged"
+        (Yeokcham_store.Stored_object_id.to_hex before)
+        (Yeokcham_store.Stored_object_id.to_hex after))
+
+let missing_restore_proof_object_blocks_compaction_before_state_change () =
+  with_directory "yeokcham-v4-service-missing-proof-object-" (fun root ->
+      write_file root "main.ml" "let version = 1\n";
+      let initial = initialize root in
+      let repository =
+        Store.open_repository ~root |> require_ok Store.error_to_string
+      in
+      let loaded = Store.load repository |> require_ok Store.error_to_string in
+      let missing =
+        Model.Snapshot_id.of_string "snapshot-missing" |> Result.get_ok
+      in
+      let project = Model.checkpoint loaded.Store.project ~snapshot:missing in
+      let saved =
+        Store.save repository ~expected:loaded.Store.head ~project
+        |> require_ok Store.error_to_string
+      in
+      let proof =
+        Proof.make ~operation_id:(String.make 64 'd') ~safety:missing
+          ~target:initial.Service.checkpoint
+        |> require_ok Proof.error_to_string
+      in
+      Proof.append ~root proof |> require_ok Proof.error_to_string;
+      (match Service.compact ~root ~keep_recent:0 ~dry_run:false with
+      | Error _ -> ()
+      | Ok _ ->
+          Alcotest.fail "compaction accepted a proof naming a missing snapshot");
+      let after = Store.load repository |> require_ok Store.error_to_string in
+      Alcotest.(check string)
+        "missing proof object leaves the state head unchanged"
+        (Yeokcham_store.Stored_object_id.to_hex saved.Store.object_id)
+        (Yeokcham_store.Stored_object_id.to_hex after.Store.object_id))
 
 let in_place_restore_preserves_repository_metadata () =
   with_directory "yeokcham-v4-service-in-place-metadata-" (fun root ->
@@ -1705,6 +1902,20 @@ let () =
           Alcotest.test_case
             "in-place restore retains unsaved bytes as a safety checkpoint"
             `Quick in_place_restore_retains_and_recovers_unsaved_bytes;
+          Alcotest.test_case
+            "restore proof remains after journal pruning until explicit forget"
+            `Quick restore_proof_survives_journal_pruning_until_explicit_forget;
+          Alcotest.test_case
+            "legacy published restore is retained until explicit proof creation"
+            `Quick legacy_published_journal_remains_a_root_until_explicit_retain;
+          Alcotest.test_case
+            "corrupt restore proof blocks compaction without a state write"
+            `Quick corrupt_restore_proof_blocks_compaction_before_state_change;
+          Alcotest.test_case
+            "missing restore proof object blocks compaction without a state \
+             write"
+            `Quick
+            missing_restore_proof_object_blocks_compaction_before_state_change;
           Alcotest.test_case "in-place restore preserves repository metadata"
             `Quick in_place_restore_preserves_repository_metadata;
           Alcotest.test_case "interrupted applying restore resumes exactly"

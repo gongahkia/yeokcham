@@ -510,9 +510,38 @@ let command_journey_restores_in_place_with_a_safety_checkpoint () =
         run [ "restore"; "--root"; root; "--checkpoint"; initial ]
       in
       require_success "in-place restore" status errors;
+      let operation = first_prefixed_value "restore-proof " output in
+      let safety = first_prefixed_value "safety " output in
       expect_output_contains "safety checkpoint is reported" "safety " output;
+      expect_output_contains "durable recovery proof is reported"
+        "restore-proof " output;
       expect_output_contains "restore is explicitly in-place"
         ("restored " ^ initial ^ " in-place")
+        output;
+      let output, errors, status =
+        run [ "restore"; "proofs"; "--root"; root ]
+      in
+      require_success "restore proofs" status errors;
+      expect_output_contains "proof list includes restore operation" operation
+        output;
+      let output, errors, status =
+        run [ "compact"; "--root"; root; "--keep"; "0"; "--explain" ]
+      in
+      require_success "compact after restore" status errors;
+      expect_output_contains "compact prunes only the journal"
+        ("journal-prune " ^ operation)
+        output;
+      let output, errors, status = run [ "storage"; "roots"; "--root"; root ] in
+      require_success "storage roots" status errors;
+      expect_output_contains "storage explains durable restore root"
+        ("root " ^ safety ^ " restore-proof")
+        output;
+      let output, errors, status =
+        run [ "restore"; "forget"; "--root"; root; "--operation"; operation ]
+      in
+      require_success "restore forget" status errors;
+      expect_output_contains "forget reports exact operation"
+        ("restore-proof forgotten " ^ operation)
         output;
       Alcotest.(check string)
         "active tree contains target bytes" "let version = 1\n"

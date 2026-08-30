@@ -10,6 +10,13 @@ receive. The package resolution test delivers conflicting shared work and its
 signed resolution in an order requiring deferral, then proves it recreates a
 resolved decision rather than a third shared change.
 
+Restore-proof verification adds a canonical `restore-proof-v1` fixture,
+malformed-record rejection, explicit forget, interrupted/restarted restore,
+legacy published-journal retain, and corruption-before-compaction tests. The
+service test proves a completed journal may be pruned only after its safety and
+target snapshots are explained by a durable proof, and proves a corrupt proof
+does not advance the project-state head.
+
 The Linux watcher loop passed on Linux 7.1.9-100.fc43.x86_64 during the latest
 full local suite. On a Linux host, rerun:
 
@@ -21,6 +28,21 @@ Pass requires the real inotify process loop to observe a file change, debounce,
 call V4 capture, and produce a new checkpoint. This one-host result does not
 establish macOS or WSL watcher support. Record host, kernel, inotify limits,
 timing, and any leaked watcher process with future results.
+
+The Linux background-runtime executable test passed on Linux
+7.1.9-100.fc43.x86_64 during the latest local suite. On a Linux host, rerun:
+
+```sh
+opam exec -- dune exec test/test_v4_runtime.exe
+```
+
+It starts a real detached daemon in a fresh mode-0700 `XDG_RUNTIME_DIR`, checks
+its private versioned state and duplicate-start refusal, observes a debounced
+checkpoint after a file edit, hard-kills and restarts it, rejects a missing XDG
+runtime directory, and proves a failed explicit sync leaves ordinary file bytes
+and the checkpoint unchanged. This is Linux-only lifecycle evidence, not a
+claim that a system service, another platform, or a remote scheduler was
+tested.
 
 Persistent fixtures under `test/golden/v4/` are commitments for the single,
 released V4 schemas. Retired pre-release encodings are rejection inputs, not

@@ -23,7 +23,9 @@ let error_to_string (Sync_error detail) = detail
 let ( let* ) = Result.bind
 let sync_error value = Sync_error value
 let detail value = Result.Error (sync_error value)
-let relay_project identity = Trust.Repository_id.to_string identity.Service.repository
+
+let relay_project identity =
+  Trust.Repository_id.to_string identity.Service.repository
 
 let fetch_publication_ids client ~project ~cursor =
   let rec loop cursor seen collected last =
@@ -50,7 +52,8 @@ let fetch_publication client ~project id =
   in
   let* publication =
     Transport.decode_publication bytes
-    |> Result.map_error (fun error -> sync_error (Transport.error_to_string error))
+    |> Result.map_error (fun error ->
+        sync_error (Transport.error_to_string error))
   in
   if String.equal id (Transport.publication_id publication) then Ok publication
   else detail "relay publication route ID does not match its canonical bytes"
@@ -64,7 +67,8 @@ let fetch_artifact_for_manifest client ~project manifest_id =
   in
   let* object_ids =
     Package.manifest_object_ids manifest
-    |> Result.map_error (fun error -> sync_error (Package.error_to_string error))
+    |> Result.map_error (fun error ->
+        sync_error (Package.error_to_string error))
   in
   let rec objects reversed = function
     | [] -> Ok (List.rev reversed)
@@ -115,8 +119,8 @@ let remove_staged_package destination =
   (try
      Sys.readdir objects
      |> Array.iter (fun name ->
-            try Unix.unlink (Filename.concat objects name)
-            with Unix.Unix_error _ -> ());
+         try Unix.unlink (Filename.concat objects name)
+         with Unix.Unix_error _ -> ());
      Unix.rmdir objects
    with Unix.Unix_error _ | Sys_error _ -> ());
   (try Unix.unlink (Filename.concat destination "manifest.cbor")
@@ -135,7 +139,7 @@ let with_transport_staging ~root run =
         try
           Sys.readdir staging
           |> Array.iter (fun name ->
-                 remove_staged_package (Filename.concat staging name));
+              remove_staged_package (Filename.concat staging name));
           Unix.rmdir staging
         with Unix.Unix_error _ | Sys_error _ -> ())
       (fun () -> run staging)
@@ -174,7 +178,8 @@ let upload_outbound client ~project ~root ~remote identity
   in
   let* outbound =
     Service.prepare_transport_outbound ~root ~remote ~signing_capability
-    |> Result.map_error (fun error -> sync_error (Service.error_to_string error))
+    |> Result.map_error (fun error ->
+        sync_error (Service.error_to_string error))
   in
   match outbound with
   | None -> Ok 0
@@ -184,8 +189,8 @@ let upload_outbound client ~project ~root ~remote identity
         | (id, bytes) :: rest ->
             let id = Store.Stored_object_id.to_hex id in
             let* () =
-              Transport_http.put client ~project ~kind:Transport_http.Object
-                ~id ~bytes
+              Transport_http.put client ~project ~kind:Transport_http.Object ~id
+                ~bytes
               |> Result.map_error (fun error ->
                   sync_error (Transport_http.error_to_string error))
             in
@@ -236,12 +241,14 @@ let run ~root ~remote ~load_signing_capability =
   in
   let* identity =
     Service.identity ~root
-    |> Result.map_error (fun error -> sync_error (Service.error_to_string error))
+    |> Result.map_error (fun error ->
+        sync_error (Service.error_to_string error))
   in
   let project = relay_project identity in
   let* cursor =
     Service.transport_cursor ~root ~remote
-    |> Result.map_error (fun error -> sync_error (Service.error_to_string error))
+    |> Result.map_error (fun error ->
+        sync_error (Service.error_to_string error))
   in
   let* publication_ids, next_cursor =
     fetch_publication_ids client ~project ~cursor

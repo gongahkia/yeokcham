@@ -47,7 +47,9 @@ let fail message =
 let hex_of_digest digest =
   let raw = Hash.to_raw_string digest in
   let alphabet = "0123456789abcdef" in
-  String.init (String.length raw * 2) (fun index ->
+  String.init
+    (String.length raw * 2)
+    (fun index ->
       let byte = Char.code raw.[index / 2] in
       if index mod 2 = 0 then alphabet.[byte lsr 4]
       else alphabet.[byte land 0x0f])
@@ -80,7 +82,8 @@ let mkdir_private path =
   | Unix.Unix_error (Unix.EEXIST, _, _) -> (
       try
         let info = Unix.stat path in
-        if info.Unix.st_kind <> Unix.S_DIR then Error (path ^ " is not a directory")
+        if info.Unix.st_kind <> Unix.S_DIR then
+          Error (path ^ " is not a directory")
         else if info.Unix.st_uid <> Unix.getuid () then
           Error (path ^ " is not owned by this user")
         else if info.Unix.st_perm land 0o077 <> 0 then
@@ -104,7 +107,9 @@ let paths ~root =
         (Printf.sprintf "canonicalize repository root %s: %s" operation
            (Unix.error_message error))
   in
-  let* () = mkdir_private (Filename.concat runtime_root runtime_directory_name) in
+  let* () =
+    mkdir_private (Filename.concat runtime_root runtime_directory_name)
+  in
   let digest =
     Hash.digest_string ("yeokcham-v4-runtime-root-v1\\000" ^ root)
     |> hex_of_digest
@@ -112,7 +117,9 @@ let paths ~root =
   let directory_prefix = Filename.concat runtime_root runtime_directory_name in
   let available =
     max_unix_socket_path_bytes
-    - String.length directory_prefix - 1 - String.length socket_file_name
+    - String.length directory_prefix
+    - 1 - 1
+    - String.length socket_file_name
   in
   let key_length = Int.min 40 available in
   let* key =
@@ -123,9 +130,7 @@ let paths ~root =
            runtime_environment)
     else Ok (String.sub digest 0 key_length)
   in
-  let directory =
-    Filename.concat directory_prefix key
-  in
+  let directory = Filename.concat directory_prefix key in
   let* () = mkdir_private directory in
   Ok
     {
@@ -151,7 +156,9 @@ let bounded_state state =
 
 let escape value = Printf.sprintf "%S" (truncate value)
 
-let task_name = function Idle -> "idle" | Syncing remote -> "sync " ^ escape remote
+let task_name = function
+  | Idle -> "idle"
+  | Syncing remote -> "sync " ^ escape remote
 
 let encode_state state =
   String.concat "\n"
@@ -172,7 +179,8 @@ let write_all descriptor bytes =
     else
       try
         let count =
-          Unix.write_substring descriptor bytes offset (String.length bytes - offset)
+          Unix.write_substring descriptor bytes offset
+            (String.length bytes - offset)
         in
         if count = 0 then Error "runtime state write returned zero"
         else loop (offset + count)
@@ -184,7 +192,9 @@ let write_all descriptor bytes =
   loop 0
 
 let write_state paths state =
-  let temporary = Filename.temp_file ~temp_dir:paths.directory ".runtime-state-" ".tmp" in
+  let temporary =
+    Filename.temp_file ~temp_dir:paths.directory ".runtime-state-" ".tmp"
+  in
   try
     let descriptor =
       Unix.openfile temporary [ Unix.O_WRONLY; Unix.O_TRUNC ] 0o600
@@ -192,7 +202,8 @@ let write_state paths state =
     Fun.protect
       ~finally:(fun () ->
         (try Unix.close descriptor with Unix.Unix_error _ -> ());
-        try Unix.unlink temporary with Unix.Unix_error (Unix.ENOENT, _, _) -> ())
+        try Unix.unlink temporary
+        with Unix.Unix_error (Unix.ENOENT, _, _) -> ())
       (fun () ->
         let* () = write_all descriptor (encode_state state) in
         Unix.fsync descriptor;
@@ -211,7 +222,8 @@ let write_state paths state =
 let read_limited path =
   try
     let info = Unix.stat path in
-    if info.Unix.st_size > max_response_bytes then Error "runtime response is too large"
+    if info.Unix.st_size > max_response_bytes then
+      Error "runtime response is too large"
     else In_channel.with_open_bin path In_channel.input_all |> Result.ok
   with
   | Unix.Unix_error (error, operation, _) ->
@@ -232,8 +244,10 @@ let read_request descriptor =
     try
       let count = Unix.read descriptor bytes 0 max_request_bytes in
       if count = 0 then Error "runtime request is empty"
-      else if count = max_request_bytes || not (String.contains (Bytes.sub_string bytes 0 count) '\n') then
-        Error "runtime request is too large or incomplete"
+      else if
+        count = max_request_bytes
+        || not (String.contains (Bytes.sub_string bytes 0 count) '\n')
+      then Error "runtime request is too large or incomplete"
       else
         let value = Bytes.sub_string bytes 0 count |> String.trim in
         match String.split_on_char ' ' value with
@@ -319,7 +333,8 @@ let ignorable request =
 
 let lost request =
   match request.Watcher.reason with
-  | Watcher.Overflow | Watcher.Watcher_lost | Watcher.Path_budget_exceeded -> true
+  | Watcher.Overflow | Watcher.Watcher_lost | Watcher.Path_budget_exceeded ->
+      true
   | Watcher.Initial_scan | Watcher.Path_change | Watcher.Rename -> false
 
 let capture root =
@@ -364,14 +379,17 @@ let handle_request paths state command arguments =
       | Idle ->
           let state = update paths { state with task = Syncing remote } in
           let response, state =
-            match Sync.run ~root:paths.root ~remote ~load_signing_capability with
+            match
+              Sync.run ~root:paths.root ~remote ~load_signing_capability
+            with
             | Ok report ->
                 let upload =
                   match report.Sync.upload with
                   | Sync.Uploaded count -> "uploaded " ^ string_of_int count
                   | Sync.Pending detail -> "upload-pending " ^ truncate detail
                 in
-                ( "ok received " ^ string_of_int report.Sync.received_revisions
+                ( "ok received "
+                  ^ string_of_int report.Sync.received_revisions
                   ^ " " ^ upload,
                   {
                     state with
@@ -404,7 +422,9 @@ let poll_control listener paths state =
             ignore (write_response descriptor ("error " ^ truncate detail));
             (`Continue, state)
         | Ok (command, arguments) ->
-            let action, state, response = handle_request paths state command arguments in
+            let action, state, response =
+              handle_request paths state command arguments
+            in
             ignore (write_response descriptor response);
             (action, state))
 
@@ -416,10 +436,11 @@ let run ~root =
     |> Result.fold ~ok:(fun _ -> ()) ~error:fail);
   let lock = acquire_lock paths.lock |> Result.fold ~ok:Fun.id ~error:fail in
   Fun.protect
-    ~finally:(fun () ->
-      try Unix.close lock with Unix.Unix_error _ -> ())
+    ~finally:(fun () -> try Unix.close lock with Unix.Unix_error _ -> ())
     (fun () ->
-      let listener = open_listener paths |> Result.fold ~ok:Fun.id ~error:fail in
+      let listener =
+        open_listener paths |> Result.fold ~ok:Fun.id ~error:fail
+      in
       Fun.protect
         ~finally:(fun () ->
           (try Unix.close listener with Unix.Unix_error _ -> ());
@@ -443,62 +464,98 @@ let run ~root =
             }
             |> update paths
           in
-          let watcher = start_watcher paths.root |> Result.fold ~ok:Fun.id ~error:fail in
+          let watcher =
+            start_watcher paths.root |> Result.fold ~ok:Fun.id ~error:fail
+          in
           let[@warning "-4"] rec loop watcher window state =
             let control, state = poll_control listener paths state in
             match control with
             | `Stop -> ()
             | `Continue -> (
                 match Linux_watcher.poll watcher ~timeout:0.2 with
-                | Error Linux_watcher.Needs_restart | Error Linux_watcher.Closed ->
+                | Error Linux_watcher.Needs_restart | Error Linux_watcher.Closed
+                  -> (
                     Linux_watcher.close watcher;
                     let state =
-                      { state with watcher = "restarting"; last_result = capture paths.root }
+                      {
+                        state with
+                        watcher = "restarting";
+                        last_result = capture paths.root;
+                      }
                       |> update paths
                     in
-                    (match start_watcher paths.root with
-                    | Ok watcher -> loop watcher Service.Capture_window.clear state
+                    match start_watcher paths.root with
+                    | Ok watcher ->
+                        loop watcher Service.Capture_window.clear state
                     | Error detail ->
                         Unix.sleep 1;
                         loop watcher window
-                          ({ state with watcher = "retrying"; last_result = detail }
+                          ({
+                             state with
+                             watcher = "retrying";
+                             last_result = detail;
+                           }
                           |> update paths))
                 | Error error ->
                     Unix.sleepf 0.2;
                     loop watcher window
-                      ({ state with watcher = "degraded"; last_result = Linux_watcher.error_to_string error }
+                      ({
+                         state with
+                         watcher = "degraded";
+                         last_result = Linux_watcher.error_to_string error;
+                       }
                       |> update paths)
                 | Ok None ->
                     let now = Unix.gettimeofday () in
                     if Service.Capture_window.due window ~now then
                       loop watcher Service.Capture_window.clear
-                        ({ state with watcher = "watching"; last_result = capture paths.root }
+                        ({
+                           state with
+                           watcher = "watching";
+                           last_result = capture paths.root;
+                         }
                         |> update paths)
                     else loop watcher window state
-                | Ok (Some request) when ignorable request -> loop watcher window state
-                | Ok (Some request) when lost request ->
+                | Ok (Some request) when ignorable request ->
+                    loop watcher window state
+                | Ok (Some request) when lost request -> (
                     Linux_watcher.close watcher;
                     let state =
-                      { state with watcher = "restarting"; last_result = capture paths.root }
+                      {
+                        state with
+                        watcher = "restarting";
+                        last_result = capture paths.root;
+                      }
                       |> update paths
                     in
-                    (match start_watcher paths.root with
-                    | Ok watcher -> loop watcher Service.Capture_window.clear state
+                    match start_watcher paths.root with
+                    | Ok watcher ->
+                        loop watcher Service.Capture_window.clear state
                     | Error detail ->
                         Unix.sleep 1;
                         loop watcher window
-                          ({ state with watcher = "retrying"; last_result = detail }
+                          ({
+                             state with
+                             watcher = "retrying";
+                             last_result = detail;
+                           }
                           |> update paths))
                 | Ok (Some _) ->
                     let now = Unix.gettimeofday () in
                     let window = Service.Capture_window.observe window ~now in
                     if Service.Capture_window.due window ~now then
                       loop watcher Service.Capture_window.clear
-                        ({ state with watcher = "watching"; last_result = capture paths.root }
+                        ({
+                           state with
+                           watcher = "watching";
+                           last_result = capture paths.root;
+                         }
                         |> update paths)
                     else loop watcher window state)
           in
-          Fun.protect ~finally:(fun () -> Linux_watcher.close watcher) (fun () ->
+          Fun.protect
+            ~finally:(fun () -> Linux_watcher.close watcher)
+            (fun () ->
               loop watcher Service.Capture_window.empty
                 ({ state with watcher = "watching" } |> update paths))))
 
@@ -506,7 +563,8 @@ let wait_until_ready paths =
   let deadline = Unix.gettimeofday () +. start_timeout_seconds in
   let rec loop () =
     match connect paths "status" with
-    | Ok response when String.starts_with ~prefix:(protocol ^ " ok") response -> Ok ()
+    | Ok response when String.starts_with ~prefix:(protocol ^ " ok") response ->
+        Ok ()
     | Ok _ | Error _ ->
         if Unix.gettimeofday () >= deadline then
           Error "runtime did not become ready within five seconds"
@@ -522,9 +580,14 @@ let start ~root =
   | Ok _ -> fail "V4 runtime is already running"
   | Error _ ->
       let executable =
-        try Unix.realpath Sys.executable_name with Unix.Unix_error _ -> Sys.executable_name
+        try Unix.realpath Sys.executable_name
+        with Unix.Unix_error _ -> Sys.executable_name
       in
-      let log = Unix.openfile paths.log [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_APPEND ] 0o600 in
+      let log =
+        Unix.openfile paths.log
+          [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_APPEND ]
+          0o600
+      in
       let null = Unix.openfile "/dev/null" [ Unix.O_RDONLY ] 0o600 in
       let launcher = Unix.fork () in
       if launcher = 0 then (
@@ -543,8 +606,16 @@ let start ~root =
         Unix.close null;
         Unix.close log;
         ignore (Unix.waitpid [] launcher);
-        wait_until_ready paths |> Result.fold ~ok:(fun () ->
-            print_endline "runtime started") ~error:fail)
+        wait_until_ready paths
+        |> Result.fold
+             ~ok:(fun () -> print_endline "runtime started")
+             ~error:(fun detail ->
+               let detail =
+                 match read_limited paths.log with
+                 | Ok "" | Error _ -> detail
+                 | Ok log -> detail ^ "\nruntime log:\n" ^ log
+               in
+               fail detail))
 
 let status ~root =
   let paths = paths ~root |> Result.fold ~ok:Fun.id ~error:fail in
@@ -561,8 +632,7 @@ let stop ~root =
 
 let sync ~root ~remote =
   let paths = paths ~root |> Result.fold ~ok:Fun.id ~error:fail in
-  if not (valid_remote_name remote) then
-    fail "invalid runtime remote name";
+  if not (valid_remote_name remote) then fail "invalid runtime remote name";
   connect paths ("sync " ^ remote)
   |> Result.fold
        ~ok:(fun response ->

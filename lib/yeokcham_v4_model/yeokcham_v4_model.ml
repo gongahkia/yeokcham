@@ -1294,6 +1294,7 @@ type protection_reason =
   | Open_decision
   | Pin
   | Restore_journal
+  | Restore_proof
   | Recent
 
 let protection_reason_to_string = function
@@ -1305,6 +1306,7 @@ let protection_reason_to_string = function
   | Open_decision -> "decision"
   | Pin -> "pin"
   | Restore_journal -> "restore-safety"
+  | Restore_proof -> "restore-proof"
   | Recent -> "recent"
 
 type compact_keep = {
@@ -1329,7 +1331,8 @@ let reason_order = function
   | Open_decision -> 5
   | Pin -> 6
   | Restore_journal -> 7
-  | Recent -> 8
+  | Restore_proof -> 8
+  | Recent -> 9
 
 let sort_reasons reasons =
   List.sort_uniq
@@ -1357,7 +1360,7 @@ let add_revision_snapshots table revision reason =
     (add_reason table revision.base_snapshot reason)
     revision.result_snapshot reason
 
-let named_protection_table project journal_snapshots =
+let named_protection_table project ~journal_snapshots ~proof_snapshots =
   let table = add_reason Snapshot_map.empty project.baseline Baseline in
   let table =
     List.fold_left
@@ -1401,14 +1404,21 @@ let named_protection_table project journal_snapshots =
       (fun table snapshot -> add_reason table snapshot Pin)
       table project.pins
   in
+  let table =
+    List.fold_left
+      (fun table snapshot -> add_reason table snapshot Restore_journal)
+      table journal_snapshots
+  in
   List.fold_left
-    (fun table snapshot -> add_reason table snapshot Restore_journal)
-    table journal_snapshots
+    (fun table snapshot -> add_reason table snapshot Restore_proof)
+    table proof_snapshots
 
-let compact project ~keep_recent ~journal_snapshots =
+let compact project ~keep_recent ~journal_snapshots ~proof_snapshots =
   if keep_recent < 0 then Error Invalid_keep_recent
   else
-    let protected = named_protection_table project journal_snapshots in
+    let protected =
+      named_protection_table project ~journal_snapshots ~proof_snapshots
+    in
     let kept_rev, dropped_rev, _remaining_recent =
       List.fold_left
         (fun (kept, dropped, remaining_recent) checkpoint ->

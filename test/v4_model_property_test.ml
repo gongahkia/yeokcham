@@ -100,17 +100,23 @@ let checkpoint_history_is_unique_and_newest_first =
 
 let compact_never_drops_named_roots =
   QCheck2.Test.make ~count:200
-    ~name:"V4 compaction never drops named or pinned checkpoints"
-    QCheck2.Gen.(pair (int_range 0 40) (int_range 0 8))
-    (fun (extra, keep_recent) ->
-      let project =
+    ~name:"V4 compaction never drops named, pinned, or restore-proof roots"
+    QCheck2.Gen.(triple (int_range 1 40) (int_range 0 8) bool)
+    (fun (extra, keep_recent, retain_proof) ->
+      let extras =
         List.init extra (fun index ->
             snapshot ("snapshot-extra-" ^ string_of_int index))
+      in
+      let project =
+        extras
         |> List.fold_left
              (fun project snapshot -> V4.checkpoint project ~snapshot)
              (project ())
       in
-      match V4.compact project ~keep_recent ~journal_snapshots:[] with
+      let proof_snapshots = if retain_proof then [ List.hd extras ] else [] in
+      match
+        V4.compact project ~keep_recent ~journal_snapshots:[] ~proof_snapshots
+      with
       | Error _ -> false
       | Ok compacted ->
           let retained =
@@ -125,6 +131,9 @@ let compact_never_drops_named_roots =
                (V4.Snapshot_id.equal
                   (V4.export compacted.V4.project).V4.state_baseline)
                retained
+          && List.for_all
+               (fun proof -> List.exists (V4.Snapshot_id.equal proof) retained)
+               proof_snapshots
           && List.length compacted.V4.dropped
              = List.length (V4.checkpoints project) - List.length retained)
 

@@ -206,6 +206,19 @@ let path root journal =
 let io_error operation path error =
   Io_error { operation; path; message = Unix.error_message error }
 
+let fsync_directory directory =
+  try
+    let descriptor = Unix.openfile directory [ Unix.O_RDONLY ] 0 in
+    Fun.protect
+      ~finally:(fun () -> Unix.close descriptor)
+      (fun () -> Unix.fsync descriptor);
+    Ok ()
+  with
+  | Unix.Unix_error ((Unix.EINVAL | Unix.ENOSYS | Unix.EOPNOTSUPP), _, _) ->
+      Ok ()
+  | Unix.Unix_error (error, _, _) ->
+      Error (io_error "fsync directory" directory error)
+
 let read_file path =
   try
     if (Unix.lstat path).Unix.st_kind <> Unix.S_REG then
@@ -227,7 +240,7 @@ let write_exclusive path bytes =
         output_string output bytes;
         flush output;
         Unix.fsync descriptor);
-    Ok ()
+    fsync_directory (Filename.dirname path)
   with
   | Unix.Unix_error (error, _, _) -> Error (io_error "create" path error)
   | Sys_error message -> Error (Io_error { operation = "write"; path; message })
@@ -346,12 +359,14 @@ let pending_snapshots ~root =
         (List.sort_uniq Model.Snapshot_id.compare
            [ journal.safety; journal.target ])
 
-let prune_published ~root =
+let prune_published ~root ~operations =
   let* journals = scan ~root in
   let published =
     latest_by_operation journals
     |> List.filter (fun (_, journal) -> journal.phase = Published)
     |> List.map fst
+    |> List.filter (fun operation ->
+        List.exists (String.equal operation) operations)
   in
   let rec loop pruned = function
     | [] -> Ok (List.rev pruned)
@@ -362,6 +377,7 @@ let prune_published ~root =
           let path = path root journal in
           try
             Unix.unlink path;
+            let* () = fsync_directory (journal_directory root) in
             loop (journal.operation_id :: pruned) rest
           with
           | Unix.Unix_error (Unix.ENOENT, _, _) -> loop pruned rest

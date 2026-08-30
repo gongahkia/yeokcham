@@ -1,6 +1,6 @@
 # Product requirements
 
-## Current milestone: V4 verified receipt and explicit relay bootstrap
+## Current milestone: V4 verified receipt, explicit relay bootstrap, advisory runtime, and durable restore proofs
 
 V4 serves one developer and small, explicitly trusted teams. Its required
 vertical slices are complete only when their model transition, durable format,
@@ -43,11 +43,20 @@ failure behaviour, and CLI surface agree.
     authority-epoch DAG. The views must expose decisions and concurrent heads,
     report unavailable historical relationships rather than inventing them, and
     never change state or materialise the working tree.
+13. On Linux, manage one private disposable background runtime per repository.
+    It may perform debounced exact scratch capture; transport work is only an
+    explicit `daemon sync` request through the existing receive-first boundary.
+    Runtime loss, remote failure, and duplicate-start refusal must not change
+    the working tree or add a new authority, history, or project-state model.
+14. An explicit in-place restore must preserve both its previous and target
+    snapshot as a local durable recovery proof until the user explicitly
+    forgets that proof. Compaction must validate and explain that root before
+    changing the state head.
 
 ### Explicit non-goals
 
 No general clone, Git bridge, semantic parser or merge, blob GC, durable
-`capture=`, immortal restore safety after journal prune, hardware keys,
+`capture=`, hardware keys,
 external signing agent, macOS/WSL watcher, or CI-backed delivery exists in this
 milestone. The bundled relay is an untrusted byte courier behind an
 operator-managed HTTPS reverse proxy; it is not hosted authority or end-to-end
