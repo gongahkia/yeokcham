@@ -43,8 +43,10 @@ Private keys are behind a V4 signer-provider interface. The first production
 providers use macOS Keychain and Linux Secret Service. Private bytes are not
 V4 state, immutable objects, package entries, diagnostics, or fixtures. The
 test-only file provider requires the explicit
-`YEOKCHAM_V4_TEST_SIGNER_DIRECTORY` environment variable. The provider
-interface allows an external signer/agent later without changing signed bytes.
+`YEOKCHAM_V4_TEST_SIGNER_DIRECTORY` environment variable. ADR-093 extends the
+same record-compatible boundary to explicit SSH-agent and non-exportable
+PKCS#11 custody; it is authoritative for local provider configuration and
+failure semantics.
 
 ADR-084 extends this certificate and receive boundary with causal authority
 epochs, forward-looking revocation, exact late-arrival adoption, device

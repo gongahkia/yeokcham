@@ -87,6 +87,17 @@ competing-pair enumeration, stale inputs, byte-exact file/mode/symlink/binary
 output, conflict/refusal, missing closure, destination isolation, and the
 later explicit resolution journey.
 
+[#252](https://github.com/gongahkia/yeokcham/issues/252), V4 device custody,
+is complete. ADR-093 keeps an opaque signing capability outside the V4 model
+and records. Existing native signers remain the default; a person may explicitly
+attach one `ssh-ed25519` SSH-agent key or create/attach one PKCS#11 Ed25519
+token key. Local canonical custody profiles select only the provider and exact
+public key; they contain no PIN or private material and grant no authority.
+Changing an active device still uses the ordinary explicit signed rotation.
+Focused tests cover the canonical profile, live SSH agent, disposable SoftHSM
+token, all V4 signing purposes, non-exportability, unavailable/locked/mismatched
+providers, and declined rotation without a repository or working-tree write.
+
 The remaining V4 backlog is relay payload encryption
 [#257](https://github.com/gongahkia/yeokcham/issues/257). It may not reuse
 retired V1–V3 protocol or runtime formats.

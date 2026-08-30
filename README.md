@@ -31,6 +31,9 @@ does not read, upgrade, or mutate repositories from earlier product tracks.
 - Multi-administrator enrolment, revocation, atomic local-device rotation,
   explicit authority-fork reconciliation, 12-word root comparison during join,
   and ChaCha20-Poly1305 recovery packages protected by a 24-word BIP-39 secret.
+- Explicit local device custody: existing platform stores, one exact
+  `ssh-ed25519` SSH-agent key, or an Ed25519 PKCS#11 token key. Provider
+  metadata is never authority or shared history.
 
 ## Fast start
 
@@ -60,6 +63,26 @@ yeokcham daemon stop
 
 The runtime uses a private, disposable `XDG_RUNTIME_DIR`; it is not a service
 unit, a persistent project format, or an authority mechanism.
+
+To move an existing device to a token, create its local custody profile, inspect
+the public device ID, then use the ordinary explicit authority rotation. The
+token alone grants nothing:
+
+```sh
+yeokcham device create --provider pkcs11 --root . --module /path/to/pkcs11.so \
+  --token-label TEAM --key-label yeokcham-alice --key-id 01a2
+yeokcham device custody --root . --device NEW_DEVICE_ID
+yeokcham device rotate --root . --device NEW_DEVICE_ID --public-key PUBLIC_KEY_HEX
+```
+
+An SSH-agent key is attached rather than generated:
+
+```sh
+yeokcham device attach --root . --provider ssh-agent --public-key ~/.ssh/yeokcham.pub
+```
+
+The local profile stores no PIN or private key. Use a dedicated agent key and
+avoid SSH agent forwarding where it would let another host request signatures.
 
 `init` prints a 12-word public root-verification phrase and a 24-word recovery
 mnemonic. Compare the phrase with a prospective device owner over an
@@ -124,7 +147,7 @@ local device, and independently compared root phrase; it starts with fresh
 local scratch state and never materialises its working tree. The relay is an
 untrusted byte courier and stored payloads are not end-to-end encrypted. There
 is no online authority coordinator, general clone, Git import/export, semantic
-parsing, CI-backed delivery, signing agent, or hardware-key support. There is
+parsing, or CI-backed delivery. There is
 no relay, package, or automatic blob GC; local collection is only the explicit
 quarantine-and-purge workflow above. Those are deliberate boundaries, not
 hidden product behaviour.

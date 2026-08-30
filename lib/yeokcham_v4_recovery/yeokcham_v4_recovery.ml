@@ -287,7 +287,7 @@ let payload_value ~authority ~recovery_capability =
   let* recovery_private_key =
     Trust.signing_private_key_bytes recovery_capability
     |> Result.map_error (fun _ ->
-           Invalid_secret "recovery capability must be exportable")
+        Invalid_secret "recovery capability must be exportable")
   in
   array
     [

@@ -67,8 +67,7 @@ let store_new device capability =
         Trust.signing_private_key_bytes existing
         |> Result.map_error (fun _ -> Invalid_keychain_material)
       in
-      if String.equal existing bytes then
-        Ok ()
+      if String.equal existing bytes then Ok ()
       else Error Keychain_item_conflict
   | 0, None | 3, None | _, Some _ -> Error Keychain_unavailable
   | 1, None -> (

@@ -55,6 +55,15 @@ is a membership grant. For a record not already in the receiver’s project,
 record epoch and revokes its signer. Receipt requires exactly one matching
 adoption issued at a current head when `late` holds.
 
+A `Signing_capability` is local input to a transition, not model state. It
+contains an exact Ed25519 public key and may sign the trust core's
+domain-separated bytes without exposing private bytes. Device identity is
+derived only from that public key. Its provider, token selector, OS account,
+agent socket, PIN, availability, and refusal reason are outside `Project`,
+`Membership`, `Authority_epoch`, packages, relay data, bootstrap, and recovery.
+Changing a capability never changes authority; replacing a current device still
+requires the explicit `rotate` transition.
+
 ## Transitions and invariants
 
 - `save` adds an exact checkpoint only when the observed snapshot changed.

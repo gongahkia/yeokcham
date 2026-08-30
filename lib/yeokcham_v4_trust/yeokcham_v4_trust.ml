@@ -274,8 +274,7 @@ let signing_capability_of_private_key bytes =
           signing_operation =
             (fun ~domain bytes ->
               Ok
-                (Mirage_crypto_ec.Ed25519.sign ~key:private_key
-                   (domain ^ bytes)));
+                (Mirage_crypto_ec.Ed25519.sign ~key:private_key (domain ^ bytes)));
         }
 
 let signing_capability_of_external_signer ~public_key ~sign =
@@ -292,7 +291,9 @@ let generate_device () =
     Mirage_crypto_rng_unix.use_default ();
     let private_key, _ = Mirage_crypto_ec.Ed25519.generate () in
     let bytes = Mirage_crypto_ec.Ed25519.priv_to_octets private_key in
-    let* generated_signing_capability = signing_capability_of_private_key bytes in
+    let* generated_signing_capability =
+      signing_capability_of_private_key bytes
+    in
     let* generated_identity =
       make_device generated_signing_capability.signing_public_key_value
     in

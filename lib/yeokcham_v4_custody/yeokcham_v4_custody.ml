@@ -51,7 +51,8 @@ let error_to_string = function
   | Public_key_mismatch -> "custody provider public key does not match device"
   | Trust_error error -> Trust.error_to_string error
 
-let profile_directory root = Filename.concat (Filename.concat root ".yeokcham") directory_name
+let profile_directory root =
+  Filename.concat (Filename.concat root ".yeokcham") directory_name
 
 let profile_path ~root device =
   Filename.concat (profile_directory root)
@@ -62,14 +63,14 @@ let configured ~root device = Sys.file_exists (profile_path ~root device)
 let text value =
   Encoding.text value
   |> Result.map_error (fun error ->
-         Invalid_profile (Encoding.construction_error_to_string error))
+      Invalid_profile (Encoding.construction_error_to_string error))
 
 let bytes value = Ok (Encoding.bytes value)
 
 let array values =
   Encoding.array values
   |> Result.map_error (fun error ->
-         Invalid_profile (Encoding.construction_error_to_string error))
+      Invalid_profile (Encoding.construction_error_to_string error))
 
 let provider_public_key = function
   | Ssh_agent { public_key } | Pkcs11 { public_key; _ } -> public_key
@@ -90,7 +91,8 @@ let encode_provider = function
       let* token_label = text token_label in
       let* key_id = bytes key_id in
       let* public_key = bytes public_key in
-      array [ Encoding.integer 2L; module_path; token_label; key_id; public_key ]
+      array
+        [ Encoding.integer 2L; module_path; token_label; key_id; public_key ]
 
 let encode profile =
   let* device = text (Model.Device_id.to_string profile.device) in
@@ -150,7 +152,7 @@ let decode bytes =
   let* value =
     Encoding.decode bytes
     |> Result.map_error (fun error ->
-           Invalid_profile (Encoding.decode_error_to_string error))
+        Invalid_profile (Encoding.decode_error_to_string error))
   in
   let* fields = array_fields "custody profile" value in
   match fields with
@@ -183,14 +185,17 @@ let write_all descriptor path bytes =
     if offset = String.length bytes then Ok ()
     else
       try
-        let count = Unix.write_substring descriptor bytes offset (String.length bytes - offset) in
+        let count =
+          Unix.write_substring descriptor bytes offset
+            (String.length bytes - offset)
+        in
         if count = 0 then
-          Error (Io_error { path; operation = "write"; message = "write returned zero" })
+          Error
+            (Io_error
+               { path; operation = "write"; message = "write returned zero" })
         else loop (offset + count)
       with Unix.Unix_error (error, operation, _) ->
-        Error
-          (Io_error
-             { path; operation; message = Unix.error_message error })
+        Error (Io_error { path; operation; message = Unix.error_message error })
   in
   loop 0
 
@@ -217,23 +222,28 @@ let save ~root profile =
       if not (Sys.file_exists directory) then Unix.mkdir directory 0o700;
       if Sys.file_exists target then Error Profile_exists
       else
-        let temporary = Filename.temp_file ~temp_dir:directory ".custody-" ".tmp" in
-        let descriptor = Unix.openfile temporary [ Unix.O_WRONLY; Unix.O_TRUNC ] 0o600 in
+        let temporary =
+          Filename.temp_file ~temp_dir:directory ".custody-" ".tmp"
+        in
+        let descriptor =
+          Unix.openfile temporary [ Unix.O_WRONLY; Unix.O_TRUNC ] 0o600
+        in
         let result =
           Fun.protect
-            ~finally:(fun () -> try Unix.close descriptor with Unix.Unix_error _ -> ())
+            ~finally:(fun () ->
+              try Unix.close descriptor with Unix.Unix_error _ -> ())
             (fun () -> write_and_sync descriptor temporary contents)
         in
         match result with
         | Error error ->
             (try Unix.unlink temporary with Unix.Unix_error _ -> ());
             Error error
-        | Ok () ->
-            (try
-               Unix.link temporary target;
-               Unix.unlink temporary;
-               Ok ()
-             with
+        | Ok () -> (
+            try
+              Unix.link temporary target;
+              Unix.unlink temporary;
+              Ok ()
+            with
             | Unix.Unix_error (Unix.EEXIST, _, _) ->
                 (try Unix.unlink temporary with Unix.Unix_error _ -> ());
                 Error Profile_exists
@@ -241,9 +251,15 @@ let save ~root profile =
                 (try Unix.unlink temporary with Unix.Unix_error _ -> ());
                 Error
                   (Io_error
-                     { path = target; operation; message = Unix.error_message error }))
+                     {
+                       path = target;
+                       operation;
+                       message = Unix.error_message error;
+                     }))
     with Unix.Unix_error (error, operation, _) ->
-      Error (Io_error { path = target; operation; message = Unix.error_message error })
+      Error
+        (Io_error
+           { path = target; operation; message = Unix.error_message error })
 
 let find ~root device =
   let target = profile_path ~root device in
@@ -258,13 +274,18 @@ let find ~root device =
       else if info.Unix.st_perm land 0o077 <> 0 then
         Error (Invalid_profile "profile has unsafe permissions")
       else
-        let* profile = In_channel.with_open_bin target In_channel.input_all |> decode in
+        let* profile =
+          In_channel.with_open_bin target In_channel.input_all |> decode
+        in
         if Model.Device_id.equal profile.device device then Ok profile
         else Error Public_key_mismatch
   with
   | Unix.Unix_error (error, operation, _) ->
-      Error (Io_error { path = target; operation; message = Unix.error_message error })
-  | Sys_error message -> Error (Io_error { path = target; operation = "read"; message })
+      Error
+        (Io_error
+           { path = target; operation; message = Unix.error_message error })
+  | Sys_error message ->
+      Error (Io_error { path = target; operation = "read"; message })
 
 let inspect = find
 
@@ -289,10 +310,15 @@ let rec write_all_socket descriptor bytes offset =
   if offset = String.length bytes then Ok ()
   else
     try
-      let count = Unix.write_substring descriptor bytes offset (String.length bytes - offset) in
-      if count = 0 then Error (Ssh_agent_unavailable "socket write returned zero")
+      let count =
+        Unix.write_substring descriptor bytes offset
+          (String.length bytes - offset)
+      in
+      if count = 0 then
+        Error (Ssh_agent_unavailable "socket write returned zero")
       else write_all_socket descriptor bytes (offset + count)
-    with Unix.Unix_error (error, _, _) -> Error (Ssh_agent_unavailable (Unix.error_message error))
+    with Unix.Unix_error (error, _, _) ->
+      Error (Ssh_agent_unavailable (Unix.error_message error))
 
 let read_exact descriptor length =
   let bytes = Bytes.create length in
@@ -303,7 +329,8 @@ let read_exact descriptor length =
         let count = Unix.read descriptor bytes offset (length - offset) in
         if count = 0 then Error (Ssh_agent_unavailable "socket closed")
         else loop (offset + count)
-      with Unix.Unix_error (error, _, _) -> Error (Ssh_agent_unavailable (Unix.error_message error))
+      with Unix.Unix_error (error, _, _) ->
+        Error (Ssh_agent_unavailable (Unix.error_message error))
   in
   loop 0
 
@@ -311,15 +338,21 @@ let agent_request payload =
   match Sys.getenv_opt "SSH_AUTH_SOCK" with
   | None -> Error (Ssh_agent_unavailable "SSH_AUTH_SOCK is unset")
   | Some socket_path ->
-      if String.length socket_path = 0 then Error (Ssh_agent_unavailable "SSH_AUTH_SOCK is empty")
+      if String.length socket_path = 0 then
+        Error (Ssh_agent_unavailable "SSH_AUTH_SOCK is empty")
       else
         let descriptor = Unix.socket Unix.PF_UNIX Unix.SOCK_STREAM 0 in
         Fun.protect
-          ~finally:(fun () -> try Unix.close descriptor with Unix.Unix_error _ -> ())
+          ~finally:(fun () ->
+            try Unix.close descriptor with Unix.Unix_error _ -> ())
           (fun () ->
             try
               Unix.connect descriptor (Unix.ADDR_UNIX socket_path);
-              let* () = write_all_socket descriptor (u32 (String.length payload) ^ payload) 0 in
+              let* () =
+                write_all_socket descriptor
+                  (u32 (String.length payload) ^ payload)
+                  0
+              in
               let* length_bytes = read_exact descriptor 4 in
               match read_u32 length_bytes 0 with
               | None -> Error (Ssh_agent_protocol "invalid response length")
@@ -332,7 +365,8 @@ let agent_request payload =
 let read_ssh_string bytes offset =
   match read_u32 bytes offset with
   | None -> None
-  | Some length when length < 0 || offset + 4 + length > String.length bytes -> None
+  | Some length when length < 0 || offset + 4 + length > String.length bytes ->
+      None
   | Some length ->
       Some (String.sub bytes (offset + 4) length, offset + 4 + length)
 
@@ -365,7 +399,8 @@ let raw_ed25519_public_key ssh_key =
   | Some (algorithm, offset) when String.equal algorithm "ssh-ed25519" -> (
       match read_ssh_string ssh_key offset with
       | Some (public_key, end_offset)
-        when end_offset = String.length ssh_key && String.length public_key = 32 ->
+        when end_offset = String.length ssh_key && String.length public_key = 32
+        ->
           Ok public_key
       | _ -> Error (Ssh_agent_protocol "invalid Ed25519 public key"))
   | _ -> Error (Ssh_agent_protocol "key is not ssh-ed25519")
@@ -391,19 +426,24 @@ let agent_sign ~public_key ~domain bytes =
         | Ok _ | Error _ -> select rest)
   in
   let* identity = select identities in
-  let payload = "\013" ^ ssh_string identity ^ ssh_string (domain ^ bytes) ^ u32 0 in
+  let payload =
+    "\013" ^ ssh_string identity ^ ssh_string (domain ^ bytes) ^ u32 0
+  in
   let* response = agent_request payload in
   if String.length response < 1 || Char.code response.[0] <> 14 then
     Error (Ssh_agent_protocol "agent refused signing")
   else
     match read_ssh_string response 1 with
-    | Some (wire_signature, end_offset) when end_offset = String.length response -> (
+    | Some (wire_signature, end_offset) when end_offset = String.length response
+      -> (
         match read_ssh_string wire_signature 0 with
-        | Some (algorithm, offset) when String.equal algorithm "ssh-ed25519" -> (
+        | Some (algorithm, offset) when String.equal algorithm "ssh-ed25519"
+          -> (
             match read_ssh_string wire_signature offset with
             | Some (raw_signature, end_offset)
               when end_offset = String.length wire_signature
-                   && String.length raw_signature = 64 -> Ok raw_signature
+                   && String.length raw_signature = 64 ->
+                Ok raw_signature
             | _ -> Error (Ssh_agent_protocol "invalid Ed25519 signature"))
         | _ -> Error (Ssh_agent_protocol "unexpected signature algorithm"))
     | _ -> Error (Ssh_agent_protocol "invalid signature response")
@@ -422,7 +462,7 @@ let decode_base64 input =
   if String.length input = 0 || String.length input mod 4 <> 0 then
     Error (Invalid_profile "invalid SSH public-key base64")
   else
-    let output = Buffer.create ((String.length input / 4) * 3) in
+    let output = Buffer.create (String.length input / 4 * 3) in
     let rec loop offset =
       if offset = String.length input then Ok (Buffer.contents output)
       else
@@ -436,10 +476,12 @@ let decode_base64 input =
           when first >= 0 && second >= 0 && third >= -1 && fourth >= -1 ->
             if third = -1 && fourth <> -1 then
               Error (Invalid_profile "invalid SSH public-key base64 padding")
-            else if (third = -1 || fourth = -1) && offset + 4 <> String.length input then
-              Error (Invalid_profile "invalid SSH public-key base64 padding")
+            else if
+              (third = -1 || fourth = -1) && offset + 4 <> String.length input
+            then Error (Invalid_profile "invalid SSH public-key base64 padding")
             else (
-              Buffer.add_char output (Char.chr ((first lsl 2) lor (second lsr 4)));
+              Buffer.add_char output
+                (Char.chr ((first lsl 2) lor (second lsr 4)));
               if third >= 0 then
                 Buffer.add_char output
                   (Char.chr (((second land 15) lsl 4) lor (third lsr 2)));
@@ -453,13 +495,17 @@ let decode_base64 input =
 
 let ssh_public_key_file path =
   try
-    let fields = In_channel.with_open_bin path In_channel.input_all |> String.split_on_char ' ' in
+    let fields =
+      In_channel.with_open_bin path In_channel.input_all
+      |> String.split_on_char ' '
+    in
     match List.filter (fun value -> String.length value > 0) fields with
     | "ssh-ed25519" :: encoded :: _ ->
         let* wire = decode_base64 encoded in
         raw_ed25519_public_key wire
     | _ -> Error (Invalid_profile "public key must be one ssh-ed25519 line")
-  with Sys_error message -> Error (Io_error { path; operation = "read"; message })
+  with Sys_error message ->
+    Error (Io_error { path; operation = "read"; message })
 
 let attach_ssh_agent ~root ~public_key =
   let* () = ssh_agent_available ~public_key in
@@ -467,7 +513,9 @@ let attach_ssh_agent ~root ~public_key =
     Trust.device_of_public_key public_key
     |> Result.map_error (fun error -> Trust_error error)
   in
-  let profile = { device = Trust.device_id device; provider = Ssh_agent { public_key } } in
+  let profile =
+    { device = Trust.device_id device; provider = Ssh_agent { public_key } }
+  in
   let* () = save ~root profile in
   Ok profile.device
 
@@ -490,42 +538,53 @@ let pkcs11_result = function
   | 3, _ -> Error Pkcs11_locked
   | 4, _ -> Error (Pkcs11_unsupported "token does not support Ed25519 signing")
   | 5, _ -> Error (Pkcs11_unsupported "token returned invalid Ed25519 bytes")
+  | 7, _ ->
+      Error
+        (Pkcs11_unsupported
+           "token did not retain a sensitive non-extractable Ed25519 key")
   | _, _ -> Error (Pkcs11_unavailable "unknown provider status")
 
 let pkcs11_public_key ~module_path ~token_label ~key_id =
-  let* public_key = pkcs11_public_raw module_path token_label key_id |> pkcs11_result in
+  let* public_key =
+    pkcs11_public_raw module_path token_label key_id |> pkcs11_result
+  in
   if String.length public_key = 32 then Ok public_key
   else Error (Pkcs11_unsupported "public key does not contain 32 bytes")
 
 let pkcs11_available ~module_path ~token_label ~key_id =
-  pkcs11_public_key ~module_path ~token_label ~key_id |> Result.map (fun _ -> ())
+  pkcs11_public_key ~module_path ~token_label ~key_id
+  |> Result.map (fun _ -> ())
 
 let attach_pkcs11 ~root ~module_path ~token_label ~key_id ~public_key =
-  if Filename.is_relative module_path || not (valid_plain token_label) || String.length key_id = 0 then
-    Error (Invalid_profile "invalid PKCS#11 selector")
+  if
+    Filename.is_relative module_path
+    || (not (valid_plain token_label))
+    || String.length key_id = 0
+  then Error (Invalid_profile "invalid PKCS#11 selector")
   else
     let* discovered = pkcs11_public_key ~module_path ~token_label ~key_id in
     if not (String.equal discovered public_key) then Error Public_key_mismatch
     else
-    let* device =
-      Trust.device_of_public_key public_key
-      |> Result.map_error (fun error -> Trust_error error)
-    in
-    let profile =
-      {
-        device = Trust.device_id device;
-        provider = Pkcs11 { module_path; token_label; key_id; public_key };
-      }
-    in
-    let* () = save ~root profile in
-    Ok profile.device
+      let* device =
+        Trust.device_of_public_key public_key
+        |> Result.map_error (fun error -> Trust_error error)
+      in
+      let profile =
+        {
+          device = Trust.device_id device;
+          provider = Pkcs11 { module_path; token_label; key_id; public_key };
+        }
+      in
+      let* () = save ~root profile in
+      Ok profile.device
 
 let read_pin () =
   let path = "/dev/tty" in
   try
     let descriptor = Unix.openfile path [ Unix.O_RDWR ] 0 in
     Fun.protect
-      ~finally:(fun () -> try Unix.close descriptor with Unix.Unix_error _ -> ())
+      ~finally:(fun () ->
+        try Unix.close descriptor with Unix.Unix_error _ -> ())
       (fun () ->
         let attributes = Unix.tcgetattr descriptor in
         let noecho = { attributes with Unix.c_echo = false } in
@@ -552,13 +611,17 @@ let read_pin () =
             in
             loop ()))
   with Unix.Unix_error (error, _, _) ->
-    Error (Pkcs11_unavailable ("cannot read controlling terminal: " ^ Unix.error_message error))
+    Error
+      (Pkcs11_unavailable
+         ("cannot read controlling terminal: " ^ Unix.error_message error))
 
 let create_pkcs11_with_pin ~root ~module_path ~token_label ~key_label ~key_id
     ~pin =
   if
-    Filename.is_relative module_path || not (valid_plain token_label)
-    || not (valid_plain key_label) || String.length key_id = 0
+    Filename.is_relative module_path
+    || (not (valid_plain token_label))
+    || (not (valid_plain key_label))
+    || String.length key_id = 0
   then Error (Invalid_profile "invalid PKCS#11 creation selector")
   else
     let* public_key =
@@ -567,13 +630,11 @@ let create_pkcs11_with_pin ~root ~module_path ~token_label ~key_label ~key_id
     in
     if String.length public_key <> 32 then
       Error (Pkcs11_unsupported "token generated an invalid Ed25519 public key")
-    else
-      attach_pkcs11 ~root ~module_path ~token_label ~key_id ~public_key
+    else attach_pkcs11 ~root ~module_path ~token_label ~key_id ~public_key
 
 let create_pkcs11 ~root ~module_path ~token_label ~key_label ~key_id =
   let* pin = read_pin () in
-  create_pkcs11_with_pin ~root ~module_path ~token_label ~key_label ~key_id
-    ~pin
+  create_pkcs11_with_pin ~root ~module_path ~token_label ~key_label ~key_id ~pin
 
 let signed_result ~public_key ~domain bytes result =
   let* signature = result in
@@ -600,7 +661,8 @@ let load_with_pin ~root ~pin device =
         Trust.signing_capability_of_external_signer ~public_key
           ~sign:(fun ~domain bytes ->
             signed_result ~public_key ~domain bytes
-              (pkcs11_sign_raw module_path token_label key_id pin (domain ^ bytes)
+              (pkcs11_sign_raw module_path token_label key_id pin
+                 (domain ^ bytes)
               |> pkcs11_result)
             |> Result.map_error error_to_string)
         |> Result.map_error (fun error -> Trust_error error)

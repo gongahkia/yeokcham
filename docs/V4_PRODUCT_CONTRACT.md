@@ -101,8 +101,14 @@ or authority head, retry by itself, or make authority depend on network state.
 ## Identity and authority
 
 `device create` creates an Ed25519 key in the selected platform signer
-provider. Device IDs derive from public keys. `user register` and the username
-accepted by enrolment are local display metadata only.
+provider. `device create --provider pkcs11` instead creates a sensitive,
+non-extractable Ed25519 key on an explicitly selected token and saves a
+local-only custody profile; `device attach --provider ssh-agent` selects one
+already-loaded `ssh-ed25519` key. `device custody --device ID` reports the
+local selector and provider availability. None of these commands enrols,
+authorizes, revokes, or rotates a device. Device IDs derive from public keys.
+`user register` and the username accepted by enrolment are local display
+metadata only.
 
 `init` creates a self-signed root administrator certificate, a root authority
 epoch, a distinct recovery device, and an encrypted recovery package at
@@ -274,6 +280,6 @@ No state transition mutates the only copy in place.
 There is no general clone protocol, automatic or relay GC, durable `capture=`, Git bridge,
 semantic parser or merge,
 end-to-end payload encryption, external relay identity or proof-of-possession,
-hardware/non-exportable signer, signing agent, macOS/WSL watcher, or CI-backed
+macOS/WSL watcher, or CI-backed
 delivery. These are separate design work and must reuse the current model and
 receipt boundaries when introduced.

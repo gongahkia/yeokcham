@@ -10,6 +10,21 @@ receive. The package resolution test delivers conflicting shared work and its
 signed resolution in an order requiring deferral, then proves it recreates a
 resolved decision rather than a third shared change.
 
+Custody verification adds a canonical local `custody-v1` fixture, restrictive
+file-mode and create-only checks, an actual temporary OpenSSH agent with one
+selected Ed25519 key, and an opaque-provider denial path. It also includes a
+disposable-token integration test when
+`YEOKCHAM_V4_TEST_PKCS11_MODULE` names a SoftHSM-compatible PKCS#11 module.
+That test creates a sensitive non-extractable Ed25519 key, proves private bytes
+are unavailable to V4, and signs a certificate, authority epoch, shared
+revision, decision resolution, authorization, and adoption. It separately
+checks wrong-PIN denial, unavailable provider, discovered-public-key mismatch,
+and an external-signature refusal during rotation while comparing the complete
+repository byte tree before and after. The current Fedora 43 local run used a
+disposable SoftHSM 2.6.1 token; it is software-token interface evidence, not a
+claim of physical-token coverage. CI creates an equivalent disposable token on
+Linux and macOS; its results remain the CI record rather than a local claim.
+
 Restore-proof verification adds a canonical `restore-proof-v1` fixture,
 malformed-record rejection, explicit forget, interrupted/restarted restore,
 legacy published-journal retain, and corruption-before-compaction tests. The

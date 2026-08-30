@@ -2,7 +2,10 @@ module Native = Yeokcham_v4_secret_service
 module Test_file = V4_signer_test_file
 module Custody = Yeokcham_v4_custody
 
-type error = Native of Native.error | Test of string | Custody of Custody.error
+type error =
+  | Native of Native.error
+  | Test of string
+  | Custody of Custody.error
 
 let error_to_string = function
   | Native error -> Native.error_to_string error

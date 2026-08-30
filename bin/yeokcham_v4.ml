@@ -36,11 +36,11 @@ let usage () =
     \  yeokcham daemon stop [--root PATH]\n\
     \  yeokcham daemon sync [--root PATH] REMOTE\n\
     \  yeokcham device create [--provider native]\n\
-    \  yeokcham device create --provider pkcs11 --root PATH --module PATH \\
-     --token-label LABEL --key-label LABEL --key-id HEX\n\
+    \  yeokcham device create --provider pkcs11 --root PATH --module PATH \\\n\
+    \     --token-label LABEL --key-label LABEL --key-id HEX\n\
     \  yeokcham device attach --root PATH --provider ssh-agent --public-key FILE\n\
-    \  yeokcham device attach --root PATH --provider pkcs11 --module PATH \\
-     --token-label LABEL --key-id HEX --public-key HEX\n\
+    \  yeokcham device attach --root PATH --provider pkcs11 --module PATH \\\n\
+    \     --token-label LABEL --key-id HEX --public-key HEX\n\
     \  yeokcham device custody [--root PATH] --device ID\n\
     \  yeokcham device show [--root PATH]\n\
     \  yeokcham device enroll [--root PATH] --device ID --public-key HEX \
@@ -465,7 +465,13 @@ let run_graph arguments =
 
 let parse_device_create arguments =
   let rec loop root provider module_path token_label key_label key_id = function
-    | [] -> (root, Option.value provider ~default:"native", module_path, token_label, key_label, key_id)
+    | [] ->
+        ( root,
+          Option.value provider ~default:"native",
+          module_path,
+          token_label,
+          key_label,
+          key_id )
     | "--root" :: value :: rest when Option.is_none root ->
         loop (Some value) provider module_path token_label key_label key_id rest
     | "--provider" :: value :: rest when Option.is_none provider ->
@@ -489,14 +495,22 @@ let run_device_create arguments =
   let device =
     match provider with
     | "native" ->
-        if Option.is_some root || Option.is_some module_path || Option.is_some token_label
-           || Option.is_some key_label || Option.is_some key_id
+        if
+          Option.is_some root || Option.is_some module_path
+          || Option.is_some token_label || Option.is_some key_label
+          || Option.is_some key_id
         then usage ();
-        let device, _ = V4_signer.create () |> require_ok V4_signer.error_to_string in
+        let device, _ =
+          V4_signer.create () |> require_ok V4_signer.error_to_string
+        in
         device
     | "pkcs11" -> (
         match (root, module_path, token_label, key_label, key_id) with
-        | Some root, Some module_path, Some token_label, Some key_label, Some key_id ->
+        | ( Some root,
+            Some module_path,
+            Some token_label,
+            Some key_label,
+            Some key_id ) -> (
             Custody.create_pkcs11 ~root ~module_path ~token_label ~key_label
               ~key_id:(bytes_of_hex key_id)
             |> require_ok Custody.error_to_string
@@ -504,7 +518,7 @@ let run_device_create arguments =
             Custody.inspect ~root device_id
             |> require_ok Custody.error_to_string
             |> fun profile ->
-            (match profile.Custody.provider with
+            match profile.Custody.provider with
             | Custody.Pkcs11 { public_key; _ } ->
                 Trust.device_of_public_key public_key
                 |> require_ok Trust.error_to_string
@@ -514,9 +528,11 @@ let run_device_create arguments =
   in
   Printf.printf "device %s\n"
     (Model.Device_id.to_string (Trust.device_id device));
-  Printf.printf "public-key %s\n" (hex_of_bytes (Trust.device_public_key device));
+  Printf.printf "public-key %s\n"
+    (hex_of_bytes (Trust.device_public_key device));
   if String.equal provider "pkcs11" then
-    print_endline "non-extractable token key created; authority remains unchanged"
+    print_endline
+      "non-extractable token key created; authority remains unchanged"
 
 let run_device_show arguments =
   let root = parse_root arguments in
@@ -533,14 +549,16 @@ let run_device_show arguments =
     | Trust.Administrator -> "administrator")
 
 let parse_device_attach arguments =
-  let rec loop root provider public_key module_path token_label key_id = function
+  let rec loop root provider public_key module_path token_label key_id =
+    function
     | [] -> (
         match (root, provider, public_key) with
         | Some root, Some provider, Some public_key ->
             (root, provider, public_key, module_path, token_label, key_id)
         | _ -> usage ())
     | "--root" :: value :: rest when Option.is_none root ->
-        loop (Some value) provider public_key module_path token_label key_id rest
+        loop (Some value) provider public_key module_path token_label key_id
+          rest
     | "--provider" :: value :: rest when Option.is_none provider ->
         loop root (Some value) public_key module_path token_label key_id rest
     | "--public-key" :: value :: rest when Option.is_none public_key ->
@@ -562,8 +580,10 @@ let run_device_attach arguments =
   let device =
     match provider with
     | "ssh-agent" ->
-        if Option.is_some module_path || Option.is_some token_label || Option.is_some key_id then
-          usage ();
+        if
+          Option.is_some module_path || Option.is_some token_label
+          || Option.is_some key_id
+        then usage ();
         let public_key =
           Custody.ssh_public_key_file public_key
           |> require_ok Custody.error_to_string
@@ -604,22 +624,26 @@ let run_device_custody arguments =
     parse_identifier "invalid device identifier" Model.Device_id.of_string
       device
   in
-  let profile = Custody.inspect ~root device |> require_ok Custody.error_to_string in
+  let profile =
+    Custody.inspect ~root device |> require_ok Custody.error_to_string
+  in
   Printf.printf "device %s\n" (Model.Device_id.to_string profile.Custody.device);
   match profile.Custody.provider with
-  | Custody.Ssh_agent { public_key } ->
+  | Custody.Ssh_agent { public_key } -> (
       print_endline "provider ssh-agent";
       Printf.printf "public-key %s\n" (hex_of_bytes public_key);
-      (match Custody.ssh_agent_available ~public_key with
+      match Custody.ssh_agent_available ~public_key with
       | Ok () -> print_endline "availability available"
       | Error error ->
           Printf.printf "availability unavailable: %s\n"
             (Custody.error_to_string error))
-  | Custody.Pkcs11 { module_path; token_label; key_id; public_key } ->
+  | Custody.Pkcs11 { module_path; token_label; key_id; public_key } -> (
       print_endline "provider pkcs11";
       Printf.printf "public-key %s\n" (hex_of_bytes public_key);
-      (match Custody.pkcs11_available ~module_path ~token_label ~key_id with
-      | Ok () -> print_endline "availability available (public key found; PIN signing is separate)"
+      match Custody.pkcs11_available ~module_path ~token_label ~key_id with
+      | Ok () ->
+          print_endline
+            "availability available (public key found; PIN signing is separate)"
       | Error error ->
           Printf.printf "availability unavailable: %s\n"
             (Custody.error_to_string error))

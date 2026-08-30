@@ -48,17 +48,16 @@ let read_file root name =
 
 let rec file_tree root relative =
   let directory = Filename.concat root relative in
-  Sys.readdir directory
-  |> Array.to_list
-  |> List.sort String.compare
+  Sys.readdir directory |> Array.to_list |> List.sort String.compare
   |> List.concat_map (fun name ->
-         let child_relative = Filename.concat relative name in
-         let child = Filename.concat root child_relative in
-         match (Unix.lstat child).Unix.st_kind with
-         | Unix.S_DIR -> file_tree root child_relative
-         | Unix.S_REG -> [ child_relative ^ "\000" ^ read_file root child_relative ]
-         | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK ->
-             [ child_relative ])
+      let child_relative = Filename.concat relative name in
+      let child = Filename.concat root child_relative in
+      match (Unix.lstat child).Unix.st_kind with
+      | Unix.S_DIR -> file_tree root child_relative
+      | Unix.S_REG ->
+          [ child_relative ^ "\000" ^ read_file root child_relative ]
+      | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK ->
+          [ child_relative ])
 
 let repository_tree root = file_tree root ".yeokcham"
 
@@ -1835,16 +1834,20 @@ let denied_external_rotation_leaves_authority_state_unchanged () =
            ~signing_capability:denied_capability
        with
       | Error error ->
-          Alcotest.(check string) "denied rotation is explicit"
+          Alcotest.(check string)
+            "denied rotation is explicit"
             "V4 signer failed: user denied rotation"
             (Service.error_to_string error)
       | Ok _ -> Alcotest.fail "declined signer rotated the local device");
       Alcotest.(check (list string))
         "declined rotation leaves every repository byte unchanged" before
         (repository_tree root);
-      let identity = Service.identity ~root |> require_ok Service.error_to_string in
-      Alcotest.(check bool) "declined rotation retains the local administrator"
-        true (Trust.device_equal identity.Service.device administrator))
+      let identity =
+        Service.identity ~root |> require_ok Service.error_to_string
+      in
+      Alcotest.(check bool)
+        "declined rotation retains the local administrator" true
+        (Trust.device_equal identity.Service.device administrator))
 
 let authority_forks_require_named_branch_actions_and_explicit_reconciliation ()
     =

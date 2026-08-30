@@ -1,6 +1,6 @@
 # Product requirements
 
-## Current milestone: V4 verified receipt, explicit relay bootstrap, advisory runtime, durable restore proofs, local recoverable collection, and exact decision-proposal assistance
+## Current milestone: V4 verified receipt, explicit relay bootstrap, advisory runtime, durable restore proofs, local recoverable collection, exact decision-proposal assistance, and explicit local device custody
 
 V4 serves one developer and small, explicitly trusted teams. Its required
 vertical slices are complete only when their model transition, durable format,
@@ -63,12 +63,15 @@ failure behaviour, and CLI surface agree.
     or a named candidate and explicitly refuses every ambiguous path.  A
     proposal is local convenience information: it cannot resolve a decision,
     record acceptance, select a delivery, or mutate the live working tree.
+17. Permit an explicitly selected SSH-agent key or PKCS#11 Ed25519 key to
+    supply a local signing capability without changing the canonical signed
+    record, device ID, authority rules, or persistent project format. Provider
+    absence, denial, key mismatch, and rotation failure must remain explicit.
 
 ### Explicit non-goals
 
 No general clone, Git bridge, semantic parser or merge, automatic or remote GC, durable
-`capture=`, hardware keys,
-external signing agent, macOS/WSL watcher, or CI-backed delivery exists in this
+`capture=`, macOS/WSL watcher, or CI-backed delivery exists in this
 milestone. The bundled relay is an untrusted byte courier behind an
 operator-managed HTTPS reverse proxy; it is not hosted authority or end-to-end
 encrypted transport. No online coordinator, quorum, or witness service can
@@ -86,3 +89,8 @@ closure, corruption, interrupted-quarantine/purge, and explicit CLI journey
 evidence. The real Linux watcher loop is an
 outstanding platform verification, recorded separately rather than claimed from
 Darwin.
+
+Custody coverage must preserve canonical signed-record fixtures across native
+and opaque capabilities; prove no private bytes escape a non-exportable
+provider; and exercise user denial, unavailable/locked provider, mismatched
+public key, and interrupted rotation without a state or working-tree write.

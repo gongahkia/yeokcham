@@ -60,7 +60,8 @@ typedef CK_RV (*C_SignFn)(CK_SESSION_HANDLE, CK_BYTE *, CK_ULONG, CK_BYTE *, CK_
 typedef CK_RV (*C_GenerateKeyPairFn)(CK_SESSION_HANDLE, CK_MECHANISM *, CK_ATTRIBUTE *, CK_ULONG, CK_ATTRIBUTE *, CK_ULONG, CK_OBJECT_HANDLE *, CK_OBJECT_HANDLE *);
 
 enum { V4_OK = 0, V4_UNAVAILABLE = 1, V4_KEY_MISSING = 2, V4_LOCKED = 3,
-       V4_UNSUPPORTED = 4, V4_INVALID = 5, V4_KEY_AMBIGUOUS = 6 };
+       V4_UNSUPPORTED = 4, V4_INVALID = 5, V4_KEY_AMBIGUOUS = 6,
+       V4_NOT_NONEXTRACTABLE = 7 };
 
 #define CKR_OK 0x00000000UL
 #define CKR_CRYPTOKI_ALREADY_INITIALIZED 0x00000191UL
@@ -199,6 +200,19 @@ static int public_key_for(struct ctx *ctx, const char *key_id, size_t key_id_len
   free(point); return V4_OK;
 }
 
+static int private_key_is_nonextractable(struct ctx *ctx, const char *key_id, size_t key_id_len) {
+  C_GetAttributeValueFn get = (C_GetAttributeValueFn)ctx->f->functions[24];
+  CK_OBJECT_HANDLE object; CK_BBOOL sensitive = 0, extractable = 1;
+  CK_ATTRIBUTE attrs[2]; CK_RV rv; int status;
+  status = find_key(ctx, CKO_PRIVATE_KEY, key_id, key_id_len, &object);
+  if (status != V4_OK) return status;
+  attrs[0] = (CK_ATTRIBUTE){ CKA_SENSITIVE, &sensitive, sizeof(sensitive) };
+  attrs[1] = (CK_ATTRIBUTE){ CKA_EXTRACTABLE, &extractable, sizeof(extractable) };
+  rv = get(ctx->session, object, attrs, 2);
+  if (rv != CKR_OK) return status_for(rv);
+  return sensitive && !extractable ? V4_OK : V4_NOT_NONEXTRACTABLE;
+}
+
 CAMLprim value caml_yeokcham_v4_pkcs11_public(value module_path, value token_label, value key_id) {
   CAMLparam3(module_path, token_label, key_id); struct ctx ctx; char raw[32]; int status;
   status = open_module(String_val(module_path), &ctx);
@@ -259,7 +273,11 @@ CAMLprim value caml_yeokcham_v4_pkcs11_create(value module_path, value token_lab
     generate = (C_GenerateKeyPairFn)ctx.f->functions[59];
     rv = generate(ctx.session, &mechanism, public_template, 7, private_template, 9, &public_key, &private_key);
     if (rv != CKR_OK) status = status_for(rv);
-    else status = public_key_for(&ctx, String_val(key_id), caml_string_length(key_id), raw);
+    else {
+      status = private_key_is_nonextractable(&ctx, String_val(key_id), caml_string_length(key_id));
+      if (status == V4_OK)
+        status = public_key_for(&ctx, String_val(key_id), caml_string_length(key_id), raw);
+    }
   }
   cleanup(&ctx); CAMLreturn(result_for(status, status == V4_OK ? raw : NULL, 32));
 }

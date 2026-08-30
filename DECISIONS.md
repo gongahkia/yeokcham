@@ -35,6 +35,9 @@ The active V4 decisions are:
 - [ADR-092](docs/adr/092-v4-exact-decision-proposal-assistance.md):
   parser-free, exact-source proposal inspection for open decisions, with no
   automatic or durable proposal acceptance.
+- [ADR-093](docs/adr/093-v4-device-custody-providers.md): explicit local
+  native, SSH-agent, and PKCS#11 Ed25519 custody providers without changing
+  device identity, authority, or signed record bytes.
 
 Earlier product-track ADRs have been removed with their implementations. Git
 history retains their historical record; they are not active architecture.

@@ -45,9 +45,7 @@ val ssh_public_key_file : string -> (string, error) result
     bytes. *)
 
 val attach_ssh_agent :
-  root:string ->
-  public_key:string ->
-  (Model.Device_id.t, error) result
+  root:string -> public_key:string -> (Model.Device_id.t, error) result
 (** Confirms the exact key is currently available through [SSH_AUTH_SOCK] and
     saves its local-only profile. *)
 
@@ -81,7 +79,9 @@ val create_pkcs11_with_pin :
     [create_pkcs11], which prompts on the controlling terminal. *)
 
 val load_with_pin :
-  root:string -> pin:string -> Model.Device_id.t ->
+  root:string ->
+  pin:string ->
+  Model.Device_id.t ->
   (Trust.signing_capability, error) result
 (** Test and controlled integration boundary. Production commands use a
     controlling-terminal PIN prompt and never persist this argument. *)
@@ -92,7 +92,9 @@ val load :
 val ssh_agent_available : public_key:string -> (unit, error) result
 
 val pkcs11_available :
-  module_path:string -> token_label:string -> key_id:string ->
+  module_path:string ->
+  token_label:string ->
+  key_id:string ->
   (unit, error) result
 (** Confirms that the selected token currently exposes exactly one matching
     Ed25519 public key. It does not prompt for a PIN or perform a signature. *)

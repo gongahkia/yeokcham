@@ -46,6 +46,13 @@ disconnected; concurrent authority epochs remain visible until an explicit
 signed reconciliation. A relay, quorum, lease, witness, timestamp, or remote
 observation cannot choose, approve, or invalidate authority state.
 
+The local mechanism that holds a device's private key is custody, not identity
+or authority. A platform store, SSH agent, or PKCS#11 token may supply a
+signature for one already-known public key; its name, account, label, PIN,
+presence, or refusal cannot add, remove, or select authority. Moving to a new
+public key is therefore an explicit signed rotation, not an automatic device
+discovery event.
+
 ## Product posture
 
 V4 is the only active product track. Earlier tracks are available only in Git

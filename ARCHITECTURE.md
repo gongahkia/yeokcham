@@ -4,7 +4,7 @@ V4 is layered so filesystem and platform adapters cannot change the model by
 themselves.
 
 ```
-CLI / inspection projection / Linux watch / Linux runtime / platform signer / HTTPS relay client
+CLI / inspection projection / Linux watch / Linux runtime / local custody adapters / HTTPS relay client
               │
        Local_service adapter / Receipt boundary
               │
@@ -66,11 +66,19 @@ materialiser dependency. An explicit purge rechecks current reachability;
 purge markers make an interrupted unlink sequence restartable rather than
 silently treating missing quarantine files as safe.
 
+`Yeokcham_v4_custody` is a local adapter that loads an existing native signer,
+an explicitly selected `ssh-ed25519` SSH-agent key, or an explicitly selected
+PKCS#11 Ed25519 key. Its small canonical local profile contains only the
+selector and public key. It cannot add an authority, alter an existing device
+identity, or enter project state, packages, relay data, bootstrap, recovery,
+or working-tree transitions. The trust core receives an opaque capability and
+continues to construct and verify every domain-separated signed record.
+
 The unversioned hash, encoding, envelope, store, snapshot, chunking, testkit,
 and watcher modules are V4 foundations. The Linux watcher emits advisory scan
 requests and delegates all capture semantics to `save`; it is not a source of
 canonical history. The Linux runtime gives that watcher a private disposable
 process lifetime and delegates explicit `daemon sync` requests to the same
 transport orchestration as foreground `sync`; it owns no model, authority,
-receipt, or working-tree-materialisation path. macOS and Linux signer adapters
-are custody boundaries, not authority systems.
+receipt, or working-tree-materialisation path. macOS and Linux signer and
+custody adapters are custody boundaries, not authority systems.
