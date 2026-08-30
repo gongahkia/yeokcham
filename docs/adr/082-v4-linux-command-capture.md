@@ -10,7 +10,7 @@
 
 Command `save` already exists, but status did not warn about a dirty tree, and
 there was no Linux loop that called that save path after quiet filesystem
-activity. macOS and WSL watchers are out of scope.
+activity. macOS watchers are out of scope and WSL is unsupported.
 
 ## Decision drivers
 
@@ -25,8 +25,8 @@ activity. macOS and WSL watchers are out of scope.
 
 ### Platform-specific capture daemons
 
-Rejected for this slice. They import prior product behaviour and macOS/WSL work
-the contract excludes.
+Rejected for this slice. They import prior product behaviour and macOS watcher
+work the contract excludes; WSL is unsupported.
 
 ### Status warning plus Linux `watch` calling `save`
 
@@ -50,7 +50,8 @@ and exit 2.
 ## Consequences
 
 Unsaved edits are visible without a config file. Automatic capture is Linux-only
-and process-lifetime only; there is still no durable `capture=` setting.
+and process-lifetime only; V4 deliberately has no durable command-metadata
+record.
 
 ## Model and invariant impact
 

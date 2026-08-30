@@ -9,10 +9,9 @@
 
 ## Deliberately later
 
-- Blob GC, durable `capture=`, and immortal restore-safety after journal prune.
+- Blob GC and immortal restore-safety after journal prune.
 - Network transport and any delivery semantics beyond the existing model.
-- Git import/export.
-- macOS and WSL watcher adapters.
+- macOS watcher adapter.
 - Hardware/non-exportable signer integration and CI-backed delivery.
 
 No work is queued for a removed V1–V3 product track.

@@ -139,14 +139,14 @@ reports upload failures as pending retry work.
 ## Boundaries
 
 Linux `watch` and `daemon` are implemented as advisory capture after debounce.
-`daemon` is Linux-only and requires a private `XDG_RUNTIME_DIR`; macOS and WSL
-watchers/runtimes are not implemented. Relay synchronization is available only for already-equivalent
+`daemon` is Linux-only and requires a private `XDG_RUNTIME_DIR`; macOS watchers
+and runtimes are not implemented, and WSL is not a supported platform. Relay synchronization is available only for already-equivalent
 replicas through an operator-managed HTTPS reverse proxy. A new replica instead
 needs an explicit immutable bootstrap basis ID, public repository ID, enrolled
 local device, and independently compared root phrase; it starts with fresh
 local scratch state and never materialises its working tree. The relay is an
 untrusted byte courier and stored payloads are not end-to-end encrypted. There
-is no online authority coordinator, general clone, Git import/export, semantic
+is no online authority coordinator, general clone, Git interchange, semantic
 parsing, or CI-backed delivery. There is
 no relay, package, or automatic blob GC; local collection is only the explicit
 quarantine-and-purge workflow above. Those are deliberate boundaries, not

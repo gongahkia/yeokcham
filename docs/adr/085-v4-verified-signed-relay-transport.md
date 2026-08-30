@@ -105,8 +105,8 @@ package exports local transport state and no only copy is mutated in place.
 
 ## Non-goals
 
-General clone, Git protocol compatibility, HTTP/TLS termination by the relay
-process, end-to-end payload encryption, relay-side authorisation policy, online
+General clone, Git protocol or interchange compatibility, HTTP/TLS termination
+by the relay process, end-to-end payload encryption, relay-side authorisation policy, online
 authority consensus, automatic merge, daemon scheduling, delivery/CI
 integration, and working-tree mutation are out of scope.
 

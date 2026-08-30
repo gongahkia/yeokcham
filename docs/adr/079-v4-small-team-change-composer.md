@@ -20,7 +20,8 @@ non-overlap composition, durable decisions, and manual delivery.
 Exact snapshots, canonical storage, guarded restore, retention, Linux watcher
 normalisation, and property-test practices may be retained behind V4
 interfaces. Capsules, workspaces, Git interchange, and prior ledger/MLS
-records do not define the V4 core model. Transport is a future adapter boundary;
+records do not define the V4 core model; Git interchange is not a V4
+capability. Transport is a future adapter boundary;
 V4 currently supports only verified local directory packages.
 
 The first V4 persistent adapter uses the proven immutable object store only as

@@ -13,6 +13,13 @@ release-signing, or opam-publication criteria, so do not close them as a
 retirement side effect. Their retired command references need explicit future
 re-scoping before that work begins.
 
+[#250](https://github.com/gongahkia/yeokcham/issues/250), Git interchange, and
+[#249](https://github.com/gongahkia/yeokcham/issues/249), durable command
+metadata, are closed as not planned. V4 does not import from, export to, or
+present itself as compatible with Git, and it retains no persistent command
+diary. WSL is not a supported V4 platform; #242 and #251 retain only their
+separate macOS evidence and watcher work.
+
 [#246](https://github.com/gongahkia/yeokcham/issues/246), V4 signed relay
 transport, is complete and closed. ADR-085 records its package staging
 boundary, authority/decision semantics, and no-working-tree-mutation

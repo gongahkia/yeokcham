@@ -70,8 +70,8 @@ failure behaviour, and CLI surface agree.
 
 ### Explicit non-goals
 
-No general clone, Git bridge, semantic parser or merge, automatic or remote GC, durable
-`capture=`, macOS/WSL watcher, or CI-backed delivery exists in this
+No general clone, Git bridge or interchange, semantic parser or merge, automatic or remote GC,
+durable command metadata, macOS watcher, WSL support, or CI-backed delivery exists in this
 milestone. The bundled relay is an untrusted byte courier behind an
 operator-managed HTTPS reverse proxy; it is not hosted authority or end-to-end
 encrypted transport. No online coordinator, quorum, or witness service can
