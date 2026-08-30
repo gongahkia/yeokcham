@@ -17,10 +17,24 @@ type error =
   | Bootstrap_error of Yeokcham_v4_bootstrap.error
   | Recovery_error of Yeokcham_v4_recovery.error
   | Transport_error of Yeokcham_v4_transport.error
+  | Proposal_error of Yeokcham_v4_proposal.tree_error
+  | Proposal_refused of Yeokcham_v4_proposal.refusal list
+  | Stale_proposal of {
+      decision : Yeokcham_v4_model.Decision_id.t;
+      left : Yeokcham_v4_model.Revision_id.t;
+      right : Yeokcham_v4_model.Revision_id.t;
+      reason : proposal_staleness;
+    }
+  | Invalid_proposal_tree of string
+  | Proposal_destination_inside_worktree of string
   | Invalid_checkpoint_id of string
   | Unknown_checkpoint of Yeokcham_v4_model.Snapshot_id.t
   | Unchanged_share of Yeokcham_v4_model.Snapshot_id.t
   | Unsigned_project
+
+and proposal_staleness =
+  | Decision_not_open
+  | Candidate_not_in_decision of Yeokcham_v4_model.Revision_id.t
 
 type status = {
   creator : Yeokcham_v4_model.Device_id.t;
@@ -61,6 +75,17 @@ type materialized_candidate = {
 (** A read-only candidate tree created for an open decision. [directory] is a
     generated child of the requested destination, not an identifier-derived
     path. *)
+
+type decision_proposal = Yeokcham_v4_proposal.t
+(** Ephemeral, parser-free side information for one pair in an open decision. It
+    is never a project-state, resolution, or delivery record. *)
+
+type materialized_proposal = {
+  materialized_proposal : decision_proposal;
+  proposal_directory : string;
+}
+(** A ready proposal materialised directly into the supplied empty directory.
+    This does not resolve the decision or rewrite the live working tree. *)
 
 type snapshot_entry_kind = File | Directory
 
@@ -503,6 +528,36 @@ val materialize_decision :
   decision:Yeokcham_v4_model.Decision_id.t ->
   destination:string ->
   (materialized_candidate list, error) result
+
+val proposal_pairs :
+  root:string ->
+  decision:Yeokcham_v4_model.Decision_id.t ->
+  ( (Yeokcham_v4_model.Revision_id.t * Yeokcham_v4_model.Revision_id.t) list,
+    error )
+  result
+(** Lists canonical revision pairs in a currently open decision. It performs no
+    snapshot comparison and changes no state. *)
+
+val propose_decision :
+  root:string ->
+  decision:Yeokcham_v4_model.Decision_id.t ->
+  left:Yeokcham_v4_model.Revision_id.t ->
+  right:Yeokcham_v4_model.Revision_id.t ->
+  (decision_proposal, error) result
+(** Recomputes one exact proposal from the current open decision. A returned
+    proposal may be refused; refusal is inspectable side information, not an
+    error or a durable rejection. *)
+
+val materialize_decision_proposal :
+  root:string ->
+  decision:Yeokcham_v4_model.Decision_id.t ->
+  left:Yeokcham_v4_model.Revision_id.t ->
+  right:Yeokcham_v4_model.Revision_id.t ->
+  destination:string ->
+  (materialized_proposal, error) result
+(** Recomputes and revalidates a ready exact proposal, then writes it only to an
+    empty supplied destination. It never resolves the decision, records proposal
+    acceptance, or writes the working tree. *)
 
 val inspect_decision :
   root:string ->

@@ -6,6 +6,7 @@ module Store = Yeokcham_v4_store
 module Trust = Yeokcham_v4_trust
 module Package = Yeokcham_v4_package
 module Bootstrap = Yeokcham_v4_bootstrap
+module Proposal = Yeokcham_v4_proposal
 module Recovery = Yeokcham_v4_recovery
 module Receipt = Yeokcham_v4_receipt
 module Transport = Yeokcham_v4_transport
@@ -15,6 +16,8 @@ module Path_map = Map.Make (struct
 
   let compare = List.compare String.compare
 end)
+
+module Name_map = Map.Make (String)
 
 type error =
   | Store_error of Store.error
@@ -28,10 +31,24 @@ type error =
   | Bootstrap_error of Bootstrap.error
   | Recovery_error of Recovery.error
   | Transport_error of Transport.error
+  | Proposal_error of Proposal.tree_error
+  | Proposal_refused of Proposal.refusal list
+  | Stale_proposal of {
+      decision : Model.Decision_id.t;
+      left : Model.Revision_id.t;
+      right : Model.Revision_id.t;
+      reason : proposal_staleness;
+    }
+  | Invalid_proposal_tree of string
+  | Proposal_destination_inside_worktree of string
   | Invalid_checkpoint_id of string
   | Unknown_checkpoint of Model.Snapshot_id.t
   | Unchanged_share of Model.Snapshot_id.t
   | Unsigned_project
+
+and proposal_staleness =
+  | Decision_not_open
+  | Candidate_not_in_decision of Model.Revision_id.t
 
 type status = {
   creator : Model.Device_id.t;
@@ -65,6 +82,13 @@ type materialized_candidate = {
   author : Model.Device_id.t;
   username : Model.Username.t option;
   directory : string;
+}
+
+type decision_proposal = Proposal.t
+
+type materialized_proposal = {
+  materialized_proposal : decision_proposal;
+  proposal_directory : string;
 }
 
 type snapshot_entry_kind = File | Directory
@@ -198,6 +222,32 @@ let error_to_string = function
   | Bootstrap_error error -> Bootstrap.error_to_string error
   | Recovery_error error -> Recovery.error_to_string error
   | Transport_error error -> Transport.error_to_string error
+  | Proposal_error error -> Proposal.tree_error_to_string error
+  | Proposal_refused refusals ->
+      "proposal is refused: "
+      ^ String.concat "; " (List.map Proposal.refusal_to_string refusals)
+  | Stale_proposal { decision; left; right; reason } -> (
+      let pair =
+        Printf.sprintf "%s and %s"
+          (Model.Revision_id.to_string left)
+          (Model.Revision_id.to_string right)
+      in
+      match reason with
+      | Decision_not_open ->
+          Printf.sprintf "proposal is stale: decision %s is no longer open (%s)"
+            (Model.Decision_id.to_string decision)
+            pair
+      | Candidate_not_in_decision revision ->
+          Printf.sprintf
+            "proposal is stale: revision %s is no longer a candidate of \
+             decision %s (%s)"
+            (Model.Revision_id.to_string revision)
+            (Model.Decision_id.to_string decision)
+            pair)
+  | Invalid_proposal_tree detail -> "invalid exact proposal tree: " ^ detail
+  | Proposal_destination_inside_worktree destination ->
+      "proposal destination must be outside the live working tree: "
+      ^ destination
   | Invalid_checkpoint_id value ->
       "invalid saved checkpoint identifier: " ^ value
   | Unknown_checkpoint id ->
@@ -1586,6 +1636,26 @@ let require_empty_directory destination =
               message = Unix.error_message error;
             }))
 
+let require_proposal_destination_outside_worktree ~root ~destination =
+  let realpath path =
+    try Ok (Unix.realpath path)
+    with Unix.Unix_error (error, operation, _) ->
+      Error
+        (Materialize_error
+           (Snapshot.Materialize.Io_error
+              { path; operation; message = Unix.error_message error }))
+  in
+  let* root = realpath root in
+  let* destination = realpath destination in
+  let nested =
+    if String.equal root Filename.dir_sep then
+      String.starts_with ~prefix:Filename.dir_sep destination
+    else String.starts_with ~prefix:(root ^ Filename.dir_sep) destination
+  in
+  if String.equal root destination || nested then
+    Error (Proposal_destination_inside_worktree destination)
+  else Ok ()
+
 let mkdir_exclusive path =
   try
     Unix.mkdir path 0o700;
@@ -1660,6 +1730,280 @@ let decision_revision decision revision_id =
   |> List.map (fun candidate -> candidate.Model.candidate_revision)
   |> List.find_opt (fun candidate ->
       Model.Revision_id.equal candidate.Model.revision revision_id)
+
+type proposal_source = {
+  proposal_tree : Proposal.tree;
+  exact_entries : Snapshot.Tree.entry Path_map.t;
+}
+
+type prepared_decision_proposal = {
+  prepared_proposal : Proposal.t;
+  prepared_base : proposal_source;
+  prepared_left : proposal_source;
+  prepared_right : proposal_source;
+}
+
+let proposal_entry_of_tree_entry = function
+  | Snapshot.Tree.File { mode; content } ->
+      Proposal.File
+        {
+          mode;
+          content =
+            content |> Snapshot.Content.stored_object_id
+            |> Yeokcham_store.Stored_object_id.to_hex;
+        }
+  | Snapshot.Tree.Directory _ -> Proposal.Directory
+
+let rec collect_proposal_source_entries store prefix tree_id entries =
+  let* tree =
+    Snapshot.Tree.load store tree_id
+    |> Result.map_error (fun error -> Snapshot_error error)
+  in
+  let rec walk entries = function
+    | [] -> Ok entries
+    | (name, entry) :: rest ->
+        let path = prefix @ [ name ] in
+        let entries = Path_map.add path entry entries in
+        let* entries =
+          match entry with
+          | Snapshot.Tree.File _ -> Ok entries
+          | Snapshot.Tree.Directory child ->
+              collect_proposal_source_entries store path child entries
+        in
+        walk entries rest
+  in
+  walk entries (Snapshot.Tree.entries tree)
+
+let proposal_tree_of_entries entries =
+  let rec paths reversed = function
+    | [] -> Ok (List.rev reversed)
+    | (components, entry) :: rest ->
+        let* path =
+          Model.Path.of_components components
+          |> Result.map_error (fun error -> Model_error error)
+        in
+        paths ((path, proposal_entry_of_tree_entry entry) :: reversed) rest
+  in
+  let* entries = Path_map.bindings entries |> paths [] in
+  Proposal.tree_of_entries entries
+  |> Result.map_error (fun error -> Proposal_error error)
+
+let proposal_source_of_snapshot store snapshot_id =
+  let* snapshot = load_snapshot store snapshot_id in
+  let* exact_entries =
+    collect_proposal_source_entries store []
+      (Snapshot.Snapshot.root snapshot)
+      Path_map.empty
+  in
+  let* proposal_tree = proposal_tree_of_entries exact_entries in
+  Ok { proposal_tree; exact_entries }
+
+let canonical_proposal_pair left right =
+  if Model.Revision_id.compare left.Model.revision right.Model.revision <= 0
+  then (left, right)
+  else (right, left)
+
+let stale_proposal ~decision ~left ~right reason =
+  Error (Stale_proposal { decision; left; right; reason })
+
+let prepare_decision_proposal repository loaded ~decision ~left ~right =
+  match find_open_decision loaded.Store.project decision with
+  | None -> stale_proposal ~decision ~left ~right Decision_not_open
+  | Some found -> (
+      match (decision_revision found left, decision_revision found right) with
+      | None, _ ->
+          stale_proposal ~decision ~left ~right (Candidate_not_in_decision left)
+      | _, None ->
+          stale_proposal ~decision ~left ~right
+            (Candidate_not_in_decision right)
+      | Some left, Some right ->
+          let left, right = canonical_proposal_pair left right in
+          let store = Store.underlying_store repository in
+          let* prepared_base =
+            proposal_source_of_snapshot store left.Model.base_snapshot
+          in
+          let* prepared_left =
+            proposal_source_of_snapshot store left.Model.result_snapshot
+          in
+          let* prepared_right =
+            proposal_source_of_snapshot store right.Model.result_snapshot
+          in
+          let current_baseline =
+            (Model.projection loaded.Store.project).Model.projection_baseline
+          in
+          let prepared_proposal =
+            Proposal.classify ~decision ~current_baseline ~left ~right
+              ~base:prepared_base.proposal_tree
+              ~left_tree:prepared_left.proposal_tree
+              ~right_tree:prepared_right.proposal_tree
+          in
+          Ok { prepared_proposal; prepared_base; prepared_left; prepared_right }
+      )
+
+let proposal_pairs ~root ~decision =
+  with_repository ~root (fun _ loaded ->
+      match find_open_decision loaded.Store.project decision with
+      | None -> Error (Model_error Model.Unknown_decision)
+      | Some found ->
+          let revisions = unique_candidate_revisions found in
+          let rec pairs reversed = function
+            | [] -> List.rev reversed
+            | left :: rest ->
+                let reversed =
+                  List.fold_left
+                    (fun reversed right ->
+                      (left.Model.revision, right.Model.revision) :: reversed)
+                    reversed rest
+                in
+                pairs reversed rest
+          in
+          Ok (pairs [] revisions))
+
+let propose_decision ~root ~decision ~left ~right =
+  with_repository ~root (fun repository loaded ->
+      prepare_decision_proposal repository loaded ~decision ~left ~right
+      |> Result.map (fun prepared -> prepared.prepared_proposal))
+
+type selected_tree_entry =
+  | Selected_file of Snapshot.file_mode * Snapshot.Content.id
+  | Selected_directory
+
+type selected_tree_group = {
+  direct : selected_tree_entry option;
+  descendants : (string list * selected_tree_entry) list;
+}
+
+let source_entries prepared = function
+  | Proposal.Base -> prepared.prepared_base.exact_entries
+  | Proposal.Left -> prepared.prepared_left.exact_entries
+  | Proposal.Right -> prepared.prepared_right.exact_entries
+
+let selected_tree_entry_of_source source_entry =
+  match source_entry with
+  | Snapshot.Tree.File { mode; content } -> Selected_file (mode, content)
+  | Snapshot.Tree.Directory _ -> Selected_directory
+
+let selected_tree_entries prepared =
+  match Proposal.selected prepared.prepared_proposal with
+  | None ->
+      Error
+        (Proposal_refused
+           (match prepared.prepared_proposal.Proposal.readiness with
+           | Proposal.Ready -> []
+           | Proposal.Refused refusals -> refusals))
+  | Some selected ->
+      List.fold_left
+        (fun entries (path, source, expected) ->
+          let* entries = entries in
+          match expected with
+          | None -> Ok entries
+          | Some expected -> (
+              let components = Model.Path.components path in
+              let exact_entries = source_entries prepared source in
+              match Path_map.find_opt components exact_entries with
+              | None ->
+                  Error
+                    (Invalid_proposal_tree
+                       ("selected source entry disappeared at "
+                      ^ Model.Path.to_string path))
+              | Some source_entry ->
+                  let actual = proposal_entry_of_tree_entry source_entry in
+                  if actual <> expected then
+                    Error
+                      (Invalid_proposal_tree
+                         ("selected source entry changed at "
+                        ^ Model.Path.to_string path))
+                  else
+                    Ok
+                      ((components, selected_tree_entry_of_source source_entry)
+                      :: entries)))
+        (Ok []) selected
+      |> Result.map List.rev
+
+let group_selected_tree_entries entries =
+  List.fold_left
+    (fun groups (components, entry) ->
+      let* groups = groups in
+      match components with
+      | [] -> Error (Invalid_proposal_tree "proposal selected the tree root")
+      | name :: rest ->
+          let group =
+            Option.value
+              (Name_map.find_opt name groups)
+              ~default:{ direct = None; descendants = [] }
+          in
+          let* group =
+            match rest with
+            | [] -> (
+                match group.direct with
+                | None -> Ok { group with direct = Some entry }
+                | Some _ ->
+                    Error
+                      (Invalid_proposal_tree
+                         ("proposal selected a path twice: " ^ name)))
+            | _ ->
+                Ok
+                  {
+                    group with
+                    descendants = (rest, entry) :: group.descendants;
+                  }
+          in
+          Ok (Name_map.add name group groups))
+    (Ok Name_map.empty) entries
+
+let rec store_selected_tree store entries =
+  let* groups = group_selected_tree_entries entries in
+  let rec make_entries reversed = function
+    | [] ->
+        Snapshot.Tree.create (List.rev reversed)
+        |> Result.map_error (fun error -> Snapshot_error error)
+    | (name, group) :: rest ->
+        let* entry =
+          match group.direct with
+          | None ->
+              Error
+                (Invalid_proposal_tree
+                   ("proposal omitted a directory entry for " ^ name))
+          | Some (Selected_file (mode, content)) ->
+              if group.descendants <> [] then
+                Error
+                  (Invalid_proposal_tree
+                     ("proposal selects both a file and descendants at " ^ name))
+              else Ok (Snapshot.Tree.File { mode; content })
+          | Some Selected_directory ->
+              let* child =
+                store_selected_tree store (List.rev group.descendants)
+              in
+              Ok (Snapshot.Tree.Directory child)
+        in
+        make_entries ((name, entry) :: reversed) rest
+  in
+  let* tree = make_entries [] (Name_map.bindings groups) in
+  Snapshot.Tree.store store tree
+  |> Result.map_error (fun error -> Snapshot_error error)
+
+let materialize_decision_proposal ~root ~decision ~left ~right ~destination =
+  with_repository ~root (fun repository loaded ->
+      let* prepared =
+        prepare_decision_proposal repository loaded ~decision ~left ~right
+      in
+      let* entries = selected_tree_entries prepared in
+      let* () = require_empty_directory destination in
+      let* () =
+        require_proposal_destination_outside_worktree ~root ~destination
+      in
+      let store = Store.underlying_store repository in
+      let* root = store_selected_tree store entries in
+      let snapshot = Snapshot.Snapshot.create ~root in
+      let* () =
+        Snapshot.Materialize.write ~destination store snapshot
+        |> Result.map_error (fun error -> Materialize_error error)
+      in
+      Ok
+        {
+          materialized_proposal = prepared.prepared_proposal;
+          proposal_directory = destination;
+        })
 
 let comparison_differences store ~before ~after =
   let* before_entries = snapshot_entries store before in

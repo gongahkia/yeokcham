@@ -5,6 +5,7 @@ module Package = Yeokcham_v4_package
 module Bootstrap = Yeokcham_v4_bootstrap
 module Inspection = Yeokcham_v4_inspection
 module Gc = Yeokcham_v4_gc
+module Proposal = Yeokcham_v4_proposal
 module Recovery = Yeokcham_v4_recovery
 module Runtime = V4_runtime
 module Sync = Yeokcham_v4_sync
@@ -62,6 +63,10 @@ let usage () =
     \  yeokcham decision inspect [--root PATH] --decision ID\n\
     \  yeokcham decision diff [--root PATH] --decision ID --candidate REV \
      [--against base|REV]\n\
+    \  yeokcham decision propose [--root PATH] --decision ID [--left REV \
+     --right REV]\n\
+    \  yeokcham decision materialize-proposal [--root PATH] --decision ID \
+     --left REV --right REV --destination PATH\n\
     \  yeokcham decision materialize [--root PATH] --decision ID --destination \
      PATH\n\
     \  yeokcham package create [--root PATH] --destination PATH\n\
@@ -986,6 +991,55 @@ let parse_decision_materialize arguments =
   in
   loop None None None arguments
 
+let parse_decision_propose arguments =
+  let rec loop root decision left right = function
+    | [] -> (
+        match (decision, left, right) with
+        | Some decision, None, None ->
+            (Option.value root ~default:default_root, decision, None)
+        | Some decision, Some left, Some right ->
+            ( Option.value root ~default:default_root,
+              decision,
+              Some (left, right) )
+        | None, _, _ | Some _, None, Some _ | Some _, Some _, None -> usage ())
+    | "--root" :: value :: rest when Option.is_none root ->
+        loop (Some value) decision left right rest
+    | "--decision" :: value :: rest when Option.is_none decision ->
+        loop root (Some value) left right rest
+    | "--left" :: value :: rest when Option.is_none left ->
+        loop root decision (Some value) right rest
+    | "--right" :: value :: rest when Option.is_none right ->
+        loop root decision left (Some value) rest
+    | _ -> usage ()
+  in
+  loop None None None None arguments
+
+let parse_decision_materialize_proposal arguments =
+  let rec loop root decision left right destination = function
+    | [] -> (
+        match (decision, left, right, destination) with
+        | Some decision, Some left, Some right, Some destination ->
+            ( Option.value root ~default:default_root,
+              decision,
+              left,
+              right,
+              destination )
+        | None, _, _, _ | _, None, _, _ | _, _, None, _ | _, _, _, None ->
+            usage ())
+    | "--root" :: value :: rest when Option.is_none root ->
+        loop (Some value) decision left right destination rest
+    | "--decision" :: value :: rest when Option.is_none decision ->
+        loop root (Some value) left right destination rest
+    | "--left" :: value :: rest when Option.is_none left ->
+        loop root decision (Some value) right destination rest
+    | "--right" :: value :: rest when Option.is_none right ->
+        loop root decision left (Some value) destination rest
+    | "--destination" :: value :: rest when Option.is_none destination ->
+        loop root decision left right (Some value) rest
+    | _ -> usage ()
+  in
+  loop None None None None None arguments
+
 let parse_decision_diff arguments =
   let rec loop root decision candidate against = function
     | [] -> (
@@ -1081,6 +1135,117 @@ let render_snapshot_entry = function
       | Some mode, Some content -> kind ^ " " ^ mode ^ " " ^ content
       | Some mode, None -> kind ^ " " ^ mode
       | None, Some content -> kind ^ " " ^ content)
+
+let render_proposal_entry = function
+  | None -> "missing"
+  | Some Proposal.Directory -> "directory"
+  | Some (Proposal.File { mode; content }) ->
+      "file " ^ snapshot_mode_name mode ^ " " ^ content
+
+let render_decision_proposal (proposal : Proposal.t) =
+  let provenance = proposal.Proposal.provenance in
+  Printf.printf "proposal decision %s\n"
+    (Model.Decision_id.to_string provenance.Proposal.decision);
+  Printf.printf "baseline %s\n"
+    (Model.Snapshot_id.to_string provenance.Proposal.current_baseline);
+  Printf.printf "left revision %s base %s snapshot %s\n"
+    (Model.Revision_id.to_string provenance.Proposal.left_revision)
+    (Model.Snapshot_id.to_string provenance.Proposal.left_base)
+    (Model.Snapshot_id.to_string provenance.Proposal.left_result);
+  Printf.printf "right revision %s base %s snapshot %s\n"
+    (Model.Revision_id.to_string provenance.Proposal.right_revision)
+    (Model.Snapshot_id.to_string provenance.Proposal.right_base)
+    (Model.Snapshot_id.to_string provenance.Proposal.right_result);
+  Printf.printf "confidence %s\n"
+    (match proposal.Proposal.confidence with
+    | Proposal.Exact_source -> "exact-source"
+    | Proposal.No_confidence -> "none");
+  (match proposal.Proposal.readiness with
+  | Proposal.Ready -> Printf.printf "status ready-exact\n"
+  | Proposal.Refused refusals ->
+      Printf.printf "status refused\n";
+      List.iter
+        (fun refusal ->
+          Printf.printf "refusal %s\n" (Proposal.refusal_to_string refusal))
+        refusals);
+  List.iter
+    (fun path ->
+      let outcome =
+        match path.Proposal.outcome with
+        | Proposal.Select { source; _ } ->
+            "select-" ^ Proposal.source_to_string source
+        | Proposal.Conflict conflict ->
+            "conflict-" ^ Proposal.conflict_to_string conflict
+        | Proposal.Unassessed_without_common_base ->
+            "unassessed-without-common-base"
+      in
+      Printf.printf "path %s outcome %s base %s left %s right %s\n"
+        (Model.Path.to_string path.Proposal.path)
+        outcome
+        (render_proposal_entry path.Proposal.base)
+        (render_proposal_entry path.Proposal.left)
+        (render_proposal_entry path.Proposal.right))
+    proposal.Proposal.paths
+
+let run_decision_propose arguments =
+  let root, decision, pair = parse_decision_propose arguments in
+  let decision =
+    parse_identifier "invalid decision identifier" Model.Decision_id.of_string
+      decision
+  in
+  match pair with
+  | None ->
+      let pairs =
+        Service.proposal_pairs ~root ~decision
+        |> require_ok Service.error_to_string
+      in
+      Printf.printf "decision %s\n" (Model.Decision_id.to_string decision);
+      Printf.printf "proposal-pairs %d\n" (List.length pairs);
+      List.iter
+        (fun (left, right) ->
+          Printf.printf "proposal-pair %s %s\n"
+            (Model.Revision_id.to_string left)
+            (Model.Revision_id.to_string right))
+        pairs
+  | Some (left, right) ->
+      let left =
+        parse_identifier "invalid revision identifier"
+          Model.Revision_id.of_string left
+      in
+      let right =
+        parse_identifier "invalid revision identifier"
+          Model.Revision_id.of_string right
+      in
+      Service.propose_decision ~root ~decision ~left ~right
+      |> require_ok Service.error_to_string
+      |> render_decision_proposal
+
+let run_decision_materialize_proposal arguments =
+  let root, decision, left, right, destination =
+    parse_decision_materialize_proposal arguments
+  in
+  let decision =
+    parse_identifier "invalid decision identifier" Model.Decision_id.of_string
+      decision
+  in
+  let left =
+    parse_identifier "invalid revision identifier" Model.Revision_id.of_string
+      left
+  in
+  let right =
+    parse_identifier "invalid revision identifier" Model.Revision_id.of_string
+      right
+  in
+  let materialized =
+    Service.materialize_decision_proposal ~root ~decision ~left ~right
+      ~destination
+    |> require_ok Service.error_to_string
+  in
+  Printf.printf "proposal-materialized %s\n"
+    materialized.Service.proposal_directory;
+  print_endline
+    "proposal remains unaccepted; inspect it, then resolve explicitly if you \
+     choose it"
 
 let run_decision_diff arguments =
   let root, decision, candidate, against = parse_decision_diff arguments in
@@ -2033,6 +2198,9 @@ let () =
   | _ :: "decision" :: "show" :: arguments -> run_decision_show arguments
   | _ :: "decision" :: "inspect" :: arguments -> run_decision_show arguments
   | _ :: "decision" :: "diff" :: arguments -> run_decision_diff arguments
+  | _ :: "decision" :: "propose" :: arguments -> run_decision_propose arguments
+  | _ :: "decision" :: "materialize-proposal" :: arguments ->
+      run_decision_materialize_proposal arguments
   | _ :: "decision" :: "materialize" :: arguments ->
       run_decision_materialize arguments
   | _ :: "package" :: "create" :: arguments -> run_package_create arguments

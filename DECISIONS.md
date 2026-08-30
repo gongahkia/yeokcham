@@ -32,6 +32,9 @@ The active V4 decisions are:
   proof for each explicit in-place restore, retained until explicit forget.
 - [ADR-091](docs/adr/091-v4-local-recoverable-garbage-collection.md): local
   reachability planning and explicit recoverable object collection.
+- [ADR-092](docs/adr/092-v4-exact-decision-proposal-assistance.md):
+  parser-free, exact-source proposal inspection for open decisions, with no
+  automatic or durable proposal acceptance.
 
 Earlier product-track ADRs have been removed with their implementations. Git
 history retains their historical record; they are not active architecture.

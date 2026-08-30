@@ -37,6 +37,14 @@ let with_directory prefix run =
       remove_tree signer_directory)
     (fun () -> run root)
 
+let with_external_directory prefix run =
+  let directory = Filename.temp_file prefix "" in
+  Unix.unlink directory;
+  Unix.mkdir directory 0o700;
+  Fun.protect
+    ~finally:(fun () -> remove_tree directory)
+    (fun () -> run directory)
+
 let executable () =
   let from_test_binary =
     Sys.executable_name |> Filename.dirname |> Filename.dirname
@@ -441,6 +449,67 @@ let command_journey_materializes_and_resolves_from_an_isolated_tree () =
         "candidate revision-b" output;
       expect_output_contains "diff reports exact changed path" "diff main.ml"
         output;
+      let output, errors, status =
+        run [ "decision"; "propose"; "--root"; root; "--decision"; decision ]
+      in
+      require_success "proposal pair overview" status errors;
+      expect_output_contains "proposal overview does not choose a pair"
+        "proposal-pairs 1" output;
+      expect_output_contains "proposal overview names both candidates"
+        "proposal-pair revision-a revision-b" output;
+      let output, errors, status =
+        run
+          [
+            "decision";
+            "propose";
+            "--root";
+            root;
+            "--decision";
+            decision;
+            "--left";
+            "revision-b";
+            "--right";
+            "revision-a";
+          ]
+      in
+      require_success "granular refused proposal" status errors;
+      expect_output_contains "proposal exposes exact provenance"
+        "left revision revision-a" output;
+      expect_output_contains "proposal does not fake confidence"
+        "confidence none" output;
+      expect_output_contains "proposal exposes a durable conflict"
+        "path main.ml outcome conflict-content-mismatch" output;
+      let refused_destination = Filename.concat root "refused-proposal" in
+      Unix.mkdir refused_destination 0o700;
+      let _output, errors, status =
+        run
+          [
+            "decision";
+            "materialize-proposal";
+            "--root";
+            root;
+            "--decision";
+            decision;
+            "--left";
+            "revision-a";
+            "--right";
+            "revision-b";
+            "--destination";
+            refused_destination;
+          ]
+      in
+      (match status with
+      | Unix.WEXITED 2 -> ()
+      | Unix.WEXITED code ->
+          Alcotest.failf "refused proposal exited %d: %s" code errors
+      | Unix.WSIGNALED signal | Unix.WSTOPPED signal ->
+          Alcotest.failf "refused proposal stopped by signal %d: %s" signal
+            errors);
+      expect_output_contains "proposal refusal is explicit"
+        "proposal is refused" errors;
+      Alcotest.(check int)
+        "refused proposal leaves its destination empty" 0
+        (Array.length (Sys.readdir refused_destination));
       let destination = Filename.concat root "isolated" in
       Unix.mkdir destination 0o700;
       let output, errors, status =
@@ -485,6 +554,137 @@ let command_journey_materializes_and_resolves_from_an_isolated_tree () =
         (In_channel.with_open_bin
            (Filename.concat root "main.ml")
            In_channel.input_all))
+
+let command_journey_materializes_an_exact_proposal_without_accepting_it () =
+  with_directory "yeokcham-v4-cli-proposal-" (fun root ->
+      with_external_directory "yeokcham-v4-cli-proposal-output-"
+        (fun output_root ->
+          write_file root "main.ml" "let version = 1\n";
+          write_file root "left.txt" "base-left\n";
+          write_file root "right.txt" "base-right\n";
+          let _output, errors, status =
+            run
+              [
+                "init";
+                "--root";
+                root;
+                "--username";
+                "alice";
+                "--draft";
+                "draft-one";
+                "--title";
+                "proposal-work";
+              ]
+          in
+          require_success "proposal init" status errors;
+          write_file root "main.ml" "let version = 2\n";
+          write_file root "left.txt" "left-change\n";
+          let _output, errors, status =
+            run
+              [
+                "share";
+                "--root";
+                root;
+                "--change";
+                "change-a";
+                "--revision";
+                "revision-a";
+              ]
+          in
+          require_success "first proposal candidate" status errors;
+          let _output, errors, status =
+            run
+              [
+                "draft";
+                "new";
+                "--root";
+                root;
+                "--id";
+                "draft-two";
+                "--title";
+                "second-work";
+              ]
+          in
+          require_success "second proposal draft" status errors;
+          write_file root "left.txt" "base-left\n";
+          write_file root "right.txt" "right-change\n";
+          let output, errors, status =
+            run
+              [
+                "share";
+                "--root";
+                root;
+                "--change";
+                "change-b";
+                "--revision";
+                "revision-b";
+              ]
+          in
+          require_success "second proposal candidate" status errors;
+          let decision = first_prefixed_value "decision " output in
+          let output, errors, status =
+            run
+              [
+                "decision";
+                "propose";
+                "--root";
+                root;
+                "--decision";
+                decision;
+                "--left";
+                "revision-a";
+                "--right";
+                "revision-b";
+              ]
+          in
+          require_success "exact proposal inspection" status errors;
+          expect_output_contains "exact proposal has mechanical confidence"
+            "confidence exact-source" output;
+          expect_output_contains "exact proposal names the left source"
+            "path left.txt outcome select-left" output;
+          expect_output_contains "exact proposal names the right source"
+            "path right.txt outcome select-right" output;
+          let destination = Filename.concat output_root "exact-proposal" in
+          Unix.mkdir destination 0o700;
+          let output, errors, status =
+            run
+              [
+                "decision";
+                "materialize-proposal";
+                "--root";
+                root;
+                "--decision";
+                decision;
+                "--left";
+                "revision-a";
+                "--right";
+                "revision-b";
+                "--destination";
+                destination;
+              ]
+          in
+          require_success "exact proposal materialization" status errors;
+          expect_output_contains "materialization says it is not acceptance"
+            "proposal remains unaccepted" output;
+          Alcotest.(check string)
+            "exact proposal selected left bytes" "left-change\n"
+            (In_channel.with_open_bin
+               (Filename.concat destination "left.txt")
+               In_channel.input_all);
+          Alcotest.(check string)
+            "exact proposal selected right bytes" "right-change\n"
+            (In_channel.with_open_bin
+               (Filename.concat destination "right.txt")
+               In_channel.input_all);
+          let output, errors, status = run [ "status"; "--root"; root ] in
+          require_success "status after proposal materialization" status errors;
+          expect_output_contains "proposal left the decision open"
+            "needs-decision 1" output;
+          Alcotest.(check string)
+            "proposal did not rewrite the live worktree" "base-left\n"
+            (In_channel.with_open_bin
+               (Filename.concat root "left.txt")
+               In_channel.input_all)))
 
 let command_journey_restores_in_place_with_a_safety_checkpoint () =
   with_directory "yeokcham-v4-cli-in-place-" (fun root ->
@@ -1131,6 +1331,9 @@ let () =
             command_journey_shares_resolves_withdraws_and_delivers;
           Alcotest.test_case "isolated materialize and resolve" `Quick
             command_journey_materializes_and_resolves_from_an_isolated_tree;
+          Alcotest.test_case "exact proposal materializes without acceptance"
+            `Quick
+            command_journey_materializes_an_exact_proposal_without_accepting_it;
           Alcotest.test_case "in-place restore retains a safety checkpoint"
             `Quick command_journey_restores_in_place_with_a_safety_checkpoint;
           Alcotest.test_case "compact pin and uncaptured status" `Quick

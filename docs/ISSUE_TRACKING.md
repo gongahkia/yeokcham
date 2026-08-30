@@ -74,10 +74,22 @@ collector neither changes the working tree nor touches package or relay
 storage. Tests cover chunk manifests, shared work, empty worktrees, corrupt or
 missing closure, a state-head change after staging, and purge recovery.
 
+[#260](https://github.com/gongahkia/yeokcham/issues/260), exact
+decision-proposal assistance, is complete. ADR-092 defines a parser-free,
+ephemeral comparison of one named candidate pair. It displays complete
+provenance, every exact path source, and granular refusals; it has no proposal
+acceptance or rejection event. A ready output can be materialised only outside
+the live working tree, and a person must still use the separate explicit
+resolution command to create durable V4 process state. Proposal side
+information is neither stored in the project model nor transferred through
+package, relay, bootstrap, authority, or delivery state. Tests cover
+competing-pair enumeration, stale inputs, byte-exact file/mode/symlink/binary
+output, conflict/refusal, missing closure, destination isolation, and the
+later explicit resolution journey.
+
 The remaining V4 backlog is relay payload encryption
-[#257](https://github.com/gongahkia/yeokcham/issues/257) and explicit
-decision-proposal assistance [#260](https://github.com/gongahkia/yeokcham/issues/260).
-Neither may reuse retired V1–V3 protocol or runtime formats.
+[#257](https://github.com/gongahkia/yeokcham/issues/257). It may not reuse
+retired V1–V3 protocol or runtime formats.
 
 Future feature proposals need a dedicated issue and ADR before coding when they
 change trust, transport, delivery, snapshot retention, or persistent semantics.

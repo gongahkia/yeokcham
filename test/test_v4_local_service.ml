@@ -6,6 +6,7 @@ module Store = Yeokcham_v4_store
 module Trust = Yeokcham_v4_trust
 module Recovery = Yeokcham_v4_recovery
 module Package = Yeokcham_v4_package
+module Proposal = Yeokcham_v4_proposal
 module Transport = Yeokcham_v4_transport
 
 let require_ok render = function
@@ -30,12 +31,27 @@ let with_directory prefix run =
   Unix.mkdir root 0o700;
   Fun.protect ~finally:(fun () -> remove_tree root) (fun () -> run root)
 
+let with_external_directory prefix run =
+  let directory = Filename.temp_file prefix "" in
+  Unix.unlink directory;
+  Unix.mkdir directory 0o700;
+  Fun.protect
+    ~finally:(fun () -> remove_tree directory)
+    (fun () -> run directory)
+
 let write_file root name contents =
   Out_channel.with_open_bin (Filename.concat root name) (fun channel ->
       Out_channel.output_string channel contents)
 
 let read_file root name =
   In_channel.with_open_bin (Filename.concat root name) In_channel.input_all
+
+let object_path root hex =
+  Filename.concat
+    (Filename.concat
+       (Filename.concat (Filename.concat root ".yeokcham") "objects")
+       (String.sub hex 0 2))
+    (Filename.concat (String.sub hex 2 2) (String.sub hex 4 60))
 
 let id parser value = parser value |> Result.get_ok
 let device value = id Model.Device_id.of_string value
@@ -725,6 +741,325 @@ let isolated_inspection_compares_exact_candidate_snapshots () =
             "inspection rejects a non-candidate revision" "unknown revision"
             (Service.error_to_string error)
       | Ok _ -> Alcotest.fail "inspection accepted a non-candidate revision")
+
+let exact_proposal_materializes_without_accepting_or_rewriting () =
+  with_directory "yeokcham-v4-service-proposal-ready-" (fun root ->
+      with_external_directory "yeokcham-v4-proposal-output-" (fun output_root ->
+          write_file root "main.ml" "let version = 1\n";
+          write_file root "left.txt" "base-left\n";
+          write_file root "right.txt" "base-right\n";
+          ignore (initialize root);
+          write_file root "main.ml" "let version = 2\n";
+          write_file root "left.txt" "left-change\n";
+          ignore
+            (Service.share ~root ~change:(change "change-a")
+               ~revision:(revision "revision-a")
+            |> require_ok Service.error_to_string);
+          ignore
+            (Service.new_draft ~root ~id:(draft "draft-two")
+               ~title:"second work"
+            |> require_ok Service.error_to_string);
+          write_file root "left.txt" "base-left\n";
+          write_file root "right.txt" "right-change\n";
+          let conflicting =
+            Service.share ~root ~change:(change "change-b")
+              ~revision:(revision "revision-b")
+            |> require_ok Service.error_to_string
+          in
+          let decision = List.hd conflicting.Service.open_decisions in
+          let pairs =
+            Service.proposal_pairs ~root ~decision:decision.Model.decision_id
+            |> require_ok Service.error_to_string
+          in
+          Alcotest.(check (list (pair string string)))
+            "one canonical candidate pair"
+            [ ("revision-a", "revision-b") ]
+            (List.map
+               (fun (left, right) ->
+                 ( Model.Revision_id.to_string left,
+                   Model.Revision_id.to_string right ))
+               pairs);
+          let proposal =
+            Service.propose_decision ~root ~decision:decision.Model.decision_id
+              ~left:(revision "revision-b") ~right:(revision "revision-a")
+            |> require_ok Service.error_to_string
+          in
+          Alcotest.(check bool)
+            "all unambiguous paths form an exact proposal" true
+            (match proposal.Proposal.readiness with
+            | Proposal.Ready -> true
+            | Proposal.Refused _ -> false);
+          Alcotest.(check (list string))
+            "each source is explicit per path"
+            [ "left.txt:left"; "main.ml:left"; "right.txt:right" ]
+            (Proposal.selected proposal |> Option.get
+            |> List.map (fun (path, source, _) ->
+                Model.Path.to_string path ^ ":"
+                ^ Proposal.source_to_string source));
+          let before =
+            Service.status ~root |> require_ok Service.error_to_string
+          in
+          let inside_worktree = Filename.concat root "forbidden-proposal" in
+          Unix.mkdir inside_worktree 0o700;
+          let[@warning "-4"] reject_inside_worktree = function
+            | Error (Service.Proposal_destination_inside_worktree _) -> ()
+            | Error error ->
+                Alcotest.fail
+                  ("wrong inside-worktree refusal: "
+                  ^ Service.error_to_string error)
+            | Ok _ -> Alcotest.fail "proposal materialized inside the worktree"
+          in
+          reject_inside_worktree
+            (Service.materialize_decision_proposal ~root
+               ~decision:decision.Model.decision_id
+               ~left:(revision "revision-a") ~right:(revision "revision-b")
+               ~destination:inside_worktree);
+          Alcotest.(check int)
+            "inside-worktree rejection wrote no bytes" 0
+            (Array.length (Sys.readdir inside_worktree));
+          let destination = Filename.concat output_root "proposal" in
+          Unix.mkdir destination 0o700;
+          let materialized =
+            Service.materialize_decision_proposal ~root
+              ~decision:decision.Model.decision_id ~left:(revision "revision-a")
+              ~right:(revision "revision-b") ~destination
+            |> require_ok Service.error_to_string
+          in
+          Alcotest.(check string)
+            "proposal is materialized at the requested path" destination
+            materialized.Service.proposal_directory;
+          Alcotest.(check string)
+            "materialized common bytes are exact" "let version = 2\n"
+            (read_file destination "main.ml");
+          Alcotest.(check string)
+            "materialized left selection is exact" "left-change\n"
+            (read_file destination "left.txt");
+          Alcotest.(check string)
+            "materialized right selection is exact" "right-change\n"
+            (read_file destination "right.txt");
+          let after_materialize =
+            Service.status ~root |> require_ok Service.error_to_string
+          in
+          Alcotest.(check int)
+            "proposal did not resolve the decision" 1
+            (List.length after_materialize.Service.open_decisions);
+          Alcotest.(check string)
+            "proposal did not advance the project checkpoint"
+            (Model.Snapshot_id.to_string before.Service.checkpoint)
+            (Model.Snapshot_id.to_string after_materialize.Service.checkpoint);
+          Alcotest.(check string)
+            "proposal did not rewrite live bytes" "base-left\n"
+            (read_file root "left.txt");
+          let resolved =
+            Service.resolve ~root ~decision:decision.Model.decision_id
+              ~change:(change "change-resolution")
+              ~revision:(revision "revision-resolution")
+              ~tree:(Some destination)
+            |> require_ok Service.error_to_string
+          in
+          Alcotest.(check int)
+            "separate explicit resolve records the choice" 0
+            (List.length resolved.Service.open_decisions);
+          let stale_destination =
+            Filename.concat output_root "stale-proposal"
+          in
+          Unix.mkdir stale_destination 0o700;
+          let[@warning "-4"] check_stale = function
+            | Error
+                (Service.Stale_proposal
+                   { reason = Service.Decision_not_open; _ }) ->
+                Alcotest.(check int)
+                  "stale proposal wrote no destination bytes" 0
+                  (Array.length (Sys.readdir stale_destination))
+            | Error error ->
+                Alcotest.fail
+                  ("wrong stale proposal failure: "
+                  ^ Service.error_to_string error)
+            | Ok _ ->
+                Alcotest.fail
+                  "a resolved decision materialized a stale proposal"
+          in
+          check_stale
+            (Service.materialize_decision_proposal ~root
+               ~decision:decision.Model.decision_id
+               ~left:(revision "revision-a") ~right:(revision "revision-b")
+               ~destination:stale_destination)))
+
+let proposal_refusal_and_missing_closure_leave_every_destination_untouched () =
+  with_directory "yeokcham-v4-service-proposal-refusal-" (fun root ->
+      with_external_directory "yeokcham-v4-proposal-output-" (fun output_root ->
+          write_file root "main.ml" "let version = 1\n";
+          ignore (initialize root);
+          write_file root "main.ml" "let version = 2\n";
+          ignore
+            (Service.share ~root ~change:(change "change-a")
+               ~revision:(revision "revision-a")
+            |> require_ok Service.error_to_string);
+          ignore
+            (Service.new_draft ~root ~id:(draft "draft-two")
+               ~title:"second work"
+            |> require_ok Service.error_to_string);
+          write_file root "main.ml" "let version = 3\n";
+          let conflicting =
+            Service.share ~root ~change:(change "change-b")
+              ~revision:(revision "revision-b")
+            |> require_ok Service.error_to_string
+          in
+          let decision = List.hd conflicting.Service.open_decisions in
+          let before =
+            Service.status ~root |> require_ok Service.error_to_string
+          in
+          let refused_destination =
+            Filename.concat output_root "refused-proposal"
+          in
+          Unix.mkdir refused_destination 0o700;
+          let[@warning "-4"] has_conflicting_paths = function
+            | Proposal.Conflicting_paths _ -> true
+            | _ -> false
+          in
+          let[@warning "-4"] check_refusal = function
+            | Error (Service.Proposal_refused refusals) ->
+                Alcotest.(check bool)
+                  "content conflict is named" true
+                  (List.exists has_conflicting_paths refusals)
+            | Error error ->
+                Alcotest.fail
+                  ("wrong proposal refusal: " ^ Service.error_to_string error)
+            | Ok _ -> Alcotest.fail "conflicting proposal was materialized"
+          in
+          check_refusal
+            (Service.materialize_decision_proposal ~root
+               ~decision:decision.Model.decision_id
+               ~left:(revision "revision-a") ~right:(revision "revision-b")
+               ~destination:refused_destination);
+          Alcotest.(check int)
+            "refused proposal wrote no destination bytes" 0
+            (Array.length (Sys.readdir refused_destination));
+          let after_refusal =
+            Service.status ~root |> require_ok Service.error_to_string
+          in
+          Alcotest.(check int)
+            "refusal leaves the decision open" 1
+            (List.length after_refusal.Service.open_decisions);
+          Alcotest.(check string)
+            "refusal leaves live bytes alone" "let version = 3\n"
+            (read_file root "main.ml");
+          Alcotest.(check string)
+            "refusal leaves the state checkpoint alone"
+            (Model.Snapshot_id.to_string before.Service.checkpoint)
+            (Model.Snapshot_id.to_string after_refusal.Service.checkpoint);
+          let candidate =
+            decision.Model.candidates |> List.hd |> fun candidate ->
+            candidate.Model.candidate_revision
+          in
+          Unix.unlink
+            (object_path root
+               (Model.Snapshot_id.to_string candidate.Model.result_snapshot));
+          let missing_destination =
+            Filename.concat output_root "missing-closure"
+          in
+          Unix.mkdir missing_destination 0o700;
+          let[@warning "-4"] check_missing_closure = function
+            | Error (Service.Snapshot_error _) -> ()
+            | Error error ->
+                Alcotest.fail
+                  ("wrong missing-closure failure: "
+                  ^ Service.error_to_string error)
+            | Ok _ -> Alcotest.fail "missing proposal closure was materialized"
+          in
+          check_missing_closure
+            (Service.materialize_decision_proposal ~root
+               ~decision:decision.Model.decision_id
+               ~left:(revision "revision-a") ~right:(revision "revision-b")
+               ~destination:missing_destination);
+          Alcotest.(check int)
+            "missing closure wrote no destination bytes" 0
+            (Array.length (Sys.readdir missing_destination));
+          Alcotest.(check string)
+            "missing closure still did not rewrite live bytes"
+            "let version = 3\n" (read_file root "main.ml")))
+
+let proposal_pair_overview_lists_every_competing_pair_once () =
+  with_directory "yeokcham-v4-service-proposal-pairs-" (fun root ->
+      write_file root "main.ml" "let version = 1\n";
+      ignore (initialize root);
+      write_file root "main.ml" "let version = 2\n";
+      ignore
+        (Service.share ~root ~change:(change "change-a")
+           ~revision:(revision "revision-a")
+        |> require_ok Service.error_to_string);
+      ignore
+        (Service.new_draft ~root ~id:(draft "draft-two") ~title:"second work"
+        |> require_ok Service.error_to_string);
+      write_file root "main.ml" "let version = 3\n";
+      ignore
+        (Service.share ~root ~change:(change "change-b")
+           ~revision:(revision "revision-b")
+        |> require_ok Service.error_to_string);
+      ignore
+        (Service.new_draft ~root ~id:(draft "draft-three") ~title:"third work"
+        |> require_ok Service.error_to_string);
+      write_file root "main.ml" "let version = 4\n";
+      let status =
+        Service.share ~root ~change:(change "change-c")
+          ~revision:(revision "revision-c")
+        |> require_ok Service.error_to_string
+      in
+      let decision = List.hd status.Service.open_decisions in
+      let pairs =
+        Service.proposal_pairs ~root ~decision:decision.Model.decision_id
+        |> require_ok Service.error_to_string
+      in
+      Alcotest.(check (list (pair string string)))
+        "all unordered candidate pairs are listed in canonical order"
+        [
+          ("revision-a", "revision-b");
+          ("revision-a", "revision-c");
+          ("revision-b", "revision-c");
+        ]
+        (List.map
+           (fun (left, right) ->
+             ( Model.Revision_id.to_string left,
+               Model.Revision_id.to_string right ))
+           pairs))
+
+let exact_proposal_preserves_binary_bytes_and_symlink_targets () =
+  with_directory "yeokcham-v4-service-proposal-bytes-" (fun root ->
+      with_external_directory "yeokcham-v4-proposal-output-" (fun output_root ->
+          write_file root "binary.dat" "\000initial\255";
+          Unix.symlink "target-initial" (Filename.concat root "link");
+          ignore (initialize root);
+          write_file root "binary.dat" "\000shared\255";
+          Unix.unlink (Filename.concat root "link");
+          Unix.symlink "target-shared" (Filename.concat root "link");
+          ignore
+            (Service.share ~root ~change:(change "change-a")
+               ~revision:(revision "revision-a")
+            |> require_ok Service.error_to_string);
+          ignore
+            (Service.new_draft ~root ~id:(draft "draft-two")
+               ~title:"second work"
+            |> require_ok Service.error_to_string);
+          let conflicting =
+            Service.share ~root ~change:(change "change-b")
+              ~revision:(revision "revision-b")
+            |> require_ok Service.error_to_string
+          in
+          let decision = List.hd conflicting.Service.open_decisions in
+          let destination = Filename.concat output_root "binary-proposal" in
+          Unix.mkdir destination 0o700;
+          ignore
+            (Service.materialize_decision_proposal ~root
+               ~decision:decision.Model.decision_id
+               ~left:(revision "revision-a") ~right:(revision "revision-b")
+               ~destination
+            |> require_ok Service.error_to_string);
+          Alcotest.(check string)
+            "binary content is not parsed or altered" "\000shared\255"
+            (read_file destination "binary.dat");
+          Alcotest.(check string)
+            "symlink target bytes are exact" "target-shared"
+            (Unix.readlink (Filename.concat destination "link"))))
 
 let withdraw_protects_the_active_shared_change () =
   with_directory "yeokcham-v4-service-withdraw-" (fun root ->
@@ -1934,6 +2269,18 @@ let () =
           Alcotest.test_case
             "isolated inspection compares candidate snapshots without mutation"
             `Quick isolated_inspection_compares_exact_candidate_snapshots;
+          Alcotest.test_case
+            "exact proposal materializes without accepting or rewriting" `Quick
+            exact_proposal_materializes_without_accepting_or_rewriting;
+          Alcotest.test_case
+            "proposal refusal and missing closure do not write destinations"
+            `Quick
+            proposal_refusal_and_missing_closure_leave_every_destination_untouched;
+          Alcotest.test_case "proposal pair overview lists every competing pair"
+            `Quick proposal_pair_overview_lists_every_competing_pair_once;
+          Alcotest.test_case
+            "exact proposal preserves binary bytes and symlink targets" `Quick
+            exact_proposal_preserves_binary_bytes_and_symlink_targets;
           Alcotest.test_case "withdraw protects the active shared change" `Quick
             withdraw_protects_the_active_shared_change;
           Alcotest.test_case "resolve clears the open decision" `Quick

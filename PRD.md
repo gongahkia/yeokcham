@@ -1,6 +1,6 @@
 # Product requirements
 
-## Current milestone: V4 verified receipt, explicit relay bootstrap, advisory runtime, durable restore proofs, and local recoverable collection
+## Current milestone: V4 verified receipt, explicit relay bootstrap, advisory runtime, durable restore proofs, local recoverable collection, and exact decision-proposal assistance
 
 V4 serves one developer and small, explicitly trusted teams. Its required
 vertical slices are complete only when their model transition, durable format,
@@ -58,6 +58,11 @@ failure behaviour, and CLI surface agree.
     local transaction. It may unlink only after an explicit, revalidated purge;
     relay, package, transport, authority, project history, and working-tree
     state must remain untouched.
+16. For a pair of revisions in an open decision, show a parser-free,
+    byte-exact proposal that selects only entries already present in the base
+    or a named candidate and explicitly refuses every ambiguous path.  A
+    proposal is local convenience information: it cannot resolve a decision,
+    record acceptance, select a delivery, or mutate the live working tree.
 
 ### Explicit non-goals
 
