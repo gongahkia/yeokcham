@@ -644,6 +644,9 @@ let command_journey_materializes_an_exact_proposal_without_accepting_it () =
             "path left.txt outcome select-left" output;
           expect_output_contains "exact proposal names the right source"
             "path right.txt outcome select-right" output;
+          expect_output_contains
+            "without an enabled server the exact proposal remains byte-only"
+            "semantic status byte-only-no-matching-enabled-server" output;
           let destination = Filename.concat output_root "exact-proposal" in
           Unix.mkdir destination 0o700;
           let output, errors, status =

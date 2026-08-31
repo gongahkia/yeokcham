@@ -16,6 +16,9 @@ module Transport_credential = Yeokcham_v4_transport_credential
 module Transport_http = Yeokcham_v4_transport_http
 module Relay_http = Yeokcham_v4_relay_http
 module Relay_access = Yeokcham_v4_relay_access
+module Semantic_config = Yeokcham_v4_semantic_config
+
+[@@@warning "-40-42"]
 
 let fail message =
   prerr_endline message;
@@ -71,7 +74,7 @@ let usage () =
     \  yeokcham decision diff [--root PATH] --decision ID --candidate REV \
      [--against base|REV]\n\
     \  yeokcham decision propose [--root PATH] --decision ID [--left REV \
-     --right REV]\n\
+     --right REV] [--semantic-server NAME]\n\
     \  yeokcham decision materialize-proposal [--root PATH] --decision ID \
      --left REV --right REV --destination PATH\n\
     \  yeokcham decision materialize [--root PATH] --decision ID --destination \
@@ -89,6 +92,15 @@ let usage () =
     \  yeokcham remote add [--root PATH] NAME URL\n\
     \  yeokcham remote remove [--root PATH] NAME\n\
     \  yeokcham remote login [--root PATH] NAME\n\
+    \  yeokcham semantic server add [--root PATH] NAME --program ABS_PATH \
+     [--arg VALUE]... [--match extensions|path-globs|all-files] [--extension \
+     EXT]... [--glob PATTERN]... [--overlap \
+     same-symbol|nearby-ranges|references]\n\
+    \  yeokcham semantic server list [--root PATH]\n\
+    \  yeokcham semantic server configure [--root PATH] NAME --match \
+     extensions|path-globs|all-files [--extension EXT]... [--glob PATTERN]... \
+     --overlap same-symbol|nearby-ranges|references\n\
+    \  yeokcham semantic server enable|disable|remove [--root PATH] NAME\n\
     \  yeokcham sync [--root PATH] NAME\n\
     \  yeokcham relay serve --storage PATH --listen ADDRESS:PORT\n\
     \  yeokcham relay access issue --storage PATH --repository ID --scope \
@@ -1158,27 +1170,34 @@ let parse_decision_materialize arguments =
   loop None None None arguments
 
 let parse_decision_propose arguments =
-  let rec loop root decision left right = function
+  let rec loop root decision left right semantic_server = function
     | [] -> (
         match (decision, left, right) with
         | Some decision, None, None ->
-            (Option.value root ~default:default_root, decision, None)
+            ( Option.value root ~default:default_root,
+              decision,
+              None,
+              semantic_server )
         | Some decision, Some left, Some right ->
             ( Option.value root ~default:default_root,
               decision,
-              Some (left, right) )
+              Some (left, right),
+              semantic_server )
         | None, _, _ | Some _, None, Some _ | Some _, Some _, None -> usage ())
     | "--root" :: value :: rest when Option.is_none root ->
-        loop (Some value) decision left right rest
+        loop (Some value) decision left right semantic_server rest
     | "--decision" :: value :: rest when Option.is_none decision ->
-        loop root (Some value) left right rest
+        loop root (Some value) left right semantic_server rest
     | "--left" :: value :: rest when Option.is_none left ->
-        loop root decision (Some value) right rest
+        loop root decision (Some value) right semantic_server rest
     | "--right" :: value :: rest when Option.is_none right ->
-        loop root decision left (Some value) rest
+        loop root decision left (Some value) semantic_server rest
+    | "--semantic-server" :: value :: rest when Option.is_none semantic_server
+      ->
+        loop root decision left right (Some value) rest
     | _ -> usage ()
   in
-  loop None None None None arguments
+  loop None None None None None arguments
 
 let parse_decision_materialize_proposal arguments =
   let rec loop root decision left right destination = function
@@ -1353,8 +1372,71 @@ let render_decision_proposal (proposal : Proposal.t) =
         (render_proposal_entry path.Proposal.right))
     proposal.Proposal.paths
 
+let render_range (range : Yeokcham_v4_lsp_sidecar.range) =
+  Printf.sprintf "%d:%d-%d:%d" range.start.line range.start.character
+    range.end_.line range.end_.character
+
+let render_semantic_advice = function
+  | Service.Semantic_not_configured ->
+      print_endline "semantic status byte-only-no-matching-enabled-server"
+  | Service.Semantic_multiple_servers names ->
+      Printf.printf "semantic status select-server %s\n"
+        (String.concat "," names)
+  | Service.Semantic_report
+      (Yeokcham_v4_lsp_sidecar.Unavailable { server; reason }) ->
+      Printf.printf "semantic status unavailable server %s reason %s\n" server
+        reason
+  | Service.Semantic_report (Yeokcham_v4_lsp_sidecar.Available report) ->
+      let server = report.Yeokcham_v4_lsp_sidecar.server in
+      Printf.printf "semantic status advisory server %s program %s\n"
+        server.configured_name server.program;
+      Printf.printf "semantic server-info name %s version %s capabilities %s\n"
+        (Option.value server.reported_name ~default:"unreported")
+        (Option.value server.reported_version ~default:"unreported")
+        (String.concat "," server.capabilities);
+      List.iter
+        (fun (role, snapshot) ->
+          Printf.printf "semantic snapshot %s %s\n"
+            (Yeokcham_v4_lsp_sidecar.snapshot_role_to_string role)
+            snapshot)
+        report.snapshots;
+      List.iter
+        (fun (symbol : Yeokcham_v4_lsp_sidecar.symbol) ->
+          Printf.printf
+            "semantic symbol snapshot %s snapshot-id %s path %s name %s kind \
+             %s range %s definitions %d references %d workspace-matches %d\n"
+            (Yeokcham_v4_lsp_sidecar.snapshot_role_to_string symbol.snapshot)
+            symbol.snapshot_id symbol.path symbol.name symbol.kind
+            (render_range symbol.range)
+            (List.length symbol.definitions)
+            (List.length symbol.references)
+            (List.length symbol.workspace_matches);
+          let render_locations kind locations =
+            List.iter
+              (fun (path, range) ->
+                Printf.printf
+                  "semantic %s snapshot %s symbol %s path %s range %s\n" kind
+                  symbol.snapshot_id symbol.name path (render_range range))
+              locations
+          in
+          render_locations "definition" symbol.definitions;
+          render_locations "reference" symbol.references;
+          render_locations "workspace-match" symbol.workspace_matches)
+        report.symbols;
+      List.iter
+        (fun (overlap : Yeokcham_v4_lsp_sidecar.possible_overlap) ->
+          Printf.printf
+            "semantic possible-overlap path %s symbol %s evidence %s left %s \
+             right %s\n"
+            overlap.path overlap.symbol
+            (Yeokcham_v4_lsp_sidecar.overlap_evidence_to_string overlap.evidence)
+            overlap.left_snapshot overlap.right_snapshot)
+        report.possible_overlaps
+
 let run_decision_propose arguments =
-  let root, decision, pair = parse_decision_propose arguments in
+  let root, decision, pair, semantic_server =
+    parse_decision_propose arguments
+  in
   let decision =
     parse_identifier "invalid decision identifier" Model.Decision_id.of_string
       decision
@@ -1382,9 +1464,12 @@ let run_decision_propose arguments =
         parse_identifier "invalid revision identifier"
           Model.Revision_id.of_string right
       in
-      Service.propose_decision ~root ~decision ~left ~right
+      Service.inspect_decision_proposal ~root ~decision ~left ~right
+        ~semantic_server
       |> require_ok Service.error_to_string
-      |> render_decision_proposal
+      |> fun inspection ->
+      render_decision_proposal inspection.Service.exact_proposal;
+      render_semantic_advice inspection.semantic_advice
 
 let run_decision_materialize_proposal arguments =
   let root, decision, left, right, destination =
@@ -1766,6 +1851,144 @@ let run_remote_remove arguments =
   Transport_config.remove ~root ~name
   |> require_ok Transport_config.error_to_string;
   Printf.printf "remote removed %s\n" name
+
+let parse_semantic_overlap = function
+  | "same-symbol" -> Semantic_config.Same_symbol
+  | "nearby-ranges" -> Semantic_config.Nearby_ranges
+  | "references" -> Semantic_config.References
+  | _ -> usage ()
+
+let semantic_match_scope mode extensions globs =
+  match mode with
+  | "extensions" ->
+      Semantic_config.Extensions (List.sort_uniq String.compare extensions)
+  | "path-globs" ->
+      Semantic_config.Path_globs (List.sort_uniq String.compare globs)
+  | "all-files" ->
+      if extensions <> [] || globs <> [] then usage ()
+      else Semantic_config.All_files
+  | _ -> usage ()
+
+let parse_semantic_server_add arguments =
+  let rec loop root name program arguments mode extensions globs overlap =
+    function
+    | [] -> (
+        match (name, program) with
+        | Some name, Some program ->
+            ( Option.value root ~default:default_root,
+              {
+                Semantic_config.name;
+                program;
+                arguments = List.rev arguments;
+                enabled = true;
+                match_scope =
+                  semantic_match_scope mode (List.rev extensions)
+                    (List.rev globs);
+                overlap_sensitivity = parse_semantic_overlap overlap;
+              } )
+        | None, _ | _, None -> usage ())
+    | "--root" :: value :: rest when Option.is_none root ->
+        loop (Some value) name program arguments mode extensions globs overlap
+          rest
+    | "--program" :: value :: rest when Option.is_none program ->
+        loop root name (Some value) arguments mode extensions globs overlap rest
+    | "--arg" :: value :: rest ->
+        loop root name program (value :: arguments) mode extensions globs
+          overlap rest
+    | "--match" :: value :: rest ->
+        loop root name program arguments value extensions globs overlap rest
+    | "--extension" :: value :: rest ->
+        loop root name program arguments mode (value :: extensions) globs
+          overlap rest
+    | "--glob" :: value :: rest ->
+        loop root name program arguments mode extensions (value :: globs)
+          overlap rest
+    | "--overlap" :: value :: rest ->
+        loop root name program arguments mode extensions globs value rest
+    | value :: rest when Option.is_none name ->
+        loop root (Some value) program arguments mode extensions globs overlap
+          rest
+    | _ -> usage ()
+  in
+  loop None None None [] "extensions" [] [] "same-symbol" arguments
+
+let parse_semantic_server_configure arguments =
+  let rec loop root name mode extensions globs overlap = function
+    | [] -> (
+        match (name, mode, overlap) with
+        | Some name, Some mode, Some overlap ->
+            ( Option.value root ~default:default_root,
+              name,
+              semantic_match_scope mode (List.rev extensions) (List.rev globs),
+              parse_semantic_overlap overlap )
+        | _ -> usage ())
+    | "--root" :: value :: rest when Option.is_none root ->
+        loop (Some value) name mode extensions globs overlap rest
+    | "--match" :: value :: rest when Option.is_none mode ->
+        loop root name (Some value) extensions globs overlap rest
+    | "--extension" :: value :: rest ->
+        loop root name mode (value :: extensions) globs overlap rest
+    | "--glob" :: value :: rest ->
+        loop root name mode extensions (value :: globs) overlap rest
+    | "--overlap" :: value :: rest when Option.is_none overlap ->
+        loop root name mode extensions globs (Some value) rest
+    | value :: rest when Option.is_none name ->
+        loop root (Some value) mode extensions globs overlap rest
+    | _ -> usage ()
+  in
+  loop None None None [] [] None arguments
+
+let render_semantic_server (server : Semantic_config.server) =
+  let match_values =
+    match server.match_scope with
+    | Semantic_config.Extensions values | Semantic_config.Path_globs values ->
+        String.concat "," values
+    | Semantic_config.All_files -> "*"
+  in
+  Printf.printf
+    "semantic-server %s enabled %b program %s arguments %s match %s values %s \
+     overlap %s\n"
+    server.name server.enabled server.program
+    (String.concat "," server.arguments)
+    (Semantic_config.match_scope_to_string server.match_scope)
+    match_values
+    (Semantic_config.overlap_sensitivity_to_string server.overlap_sensitivity)
+
+let run_semantic_server = function
+  | "list" :: arguments ->
+      Semantic_config.list ~root:(parse_root arguments)
+      |> require_ok Semantic_config.error_to_string
+      |> List.iter render_semantic_server
+  | "add" :: arguments ->
+      let root, server = parse_semantic_server_add arguments in
+      Semantic_config.add ~root ~server
+      |> require_ok Semantic_config.error_to_string;
+      render_semantic_server server
+  | "configure" :: arguments ->
+      let root, name, match_scope, overlap_sensitivity =
+        parse_semantic_server_configure arguments
+      in
+      Semantic_config.configure ~root ~name ~match_scope ~overlap_sensitivity
+      |> require_ok Semantic_config.error_to_string;
+      Semantic_config.find ~root ~name
+      |> require_ok Semantic_config.error_to_string
+      |> render_semantic_server
+  | "enable" :: arguments ->
+      let root, name = parse_remote_name arguments in
+      Semantic_config.set_enabled ~root ~name ~enabled:true
+      |> require_ok Semantic_config.error_to_string;
+      Printf.printf "semantic-server enabled %s\n" name
+  | "disable" :: arguments ->
+      let root, name = parse_remote_name arguments in
+      Semantic_config.set_enabled ~root ~name ~enabled:false
+      |> require_ok Semantic_config.error_to_string;
+      Printf.printf "semantic-server disabled %s\n" name
+  | "remove" :: arguments ->
+      let root, name = parse_remote_name arguments in
+      Semantic_config.remove ~root ~name
+      |> require_ok Semantic_config.error_to_string;
+      Printf.printf "semantic-server removed %s\n" name
+  | _ -> usage ()
 
 let read_bearer_token () =
   let attributes =
@@ -2381,6 +2604,7 @@ let () =
   | _ :: "remote" :: "add" :: arguments -> run_remote_add arguments
   | _ :: "remote" :: "remove" :: arguments -> run_remote_remove arguments
   | _ :: "remote" :: "login" :: arguments -> run_remote_login arguments
+  | _ :: "semantic" :: "server" :: arguments -> run_semantic_server arguments
   | _ :: "sync" :: arguments -> run_sync arguments
   | _ :: "relay" :: "access" :: "issue" :: arguments ->
       run_relay_access_issue arguments

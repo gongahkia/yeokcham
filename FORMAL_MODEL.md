@@ -101,6 +101,22 @@ canonical encoding; unknown mandatory features and noncanonical encodings are
 rejected. Only the mutable
 `v4-project-state` head selects a current immutable state object.
 
+## External semantic observations
+
+An LSP observation is neither `Project` state nor a transition. A local
+`semantic-lsp-v1` configuration selects an optional external executable, but
+that configuration and every response are outside the model, signed bytes,
+object store, package, relay, bootstrap, authority, delivery, and retention
+roots. The observation relation is therefore disposable:
+
+`Observe_lsp(server, base, left, right) -> advisory | unavailable`.
+
+Its inputs are named exact snapshots, and its output may name ranges, symbols,
+and possible overlap evidence only. It has no edge to `resolve`, `share`,
+`deliver`, authority, or a worktree transition. A missing, malformed, or
+untrusted server maps to `unavailable`, never a model error or implicit
+byte-level conclusion.
+
 ## Local collection state
 
 Collection is not a `Project` transition. A pure local plan classifies every

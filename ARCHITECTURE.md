@@ -48,6 +48,14 @@ authority closure. The local service supplies that input without scanning the
 working tree. It stores no layout, follows no remote, and cannot turn delivery
 milestones or concurrent authority heads into inferred history or policy.
 
+`Yeokcham_v4_semantic_config` and `Yeokcham_v4_lsp_sidecar` form a separate
+local advisory boundary. The canonical config selects one external executable;
+the sidecar materialises only named snapshots into disposable directories and
+uses typed bounded LSP/JSON-RPC requests. It returns session-local observations
+or an unavailable result to the local service. It has no dependency on project
+state persistence, package, receipt, relay, bootstrap, authority, delivery, or
+the live worktree, and server requests cannot call back into any V4 mutation.
+
 `Yeokcham_v4_restore_journal` records restartable destructive materialisation.
 `Yeokcham_v4_restore_proof` is a separate local, canonical, create-only record
 that keeps the exact safety and target snapshots reachable after a completed

@@ -106,6 +106,21 @@ Focused tests cover the canonical profile, live SSH agent, disposable SoftHSM
 token, all V4 signing purposes, non-exportability, unavailable/locked/mismatched
 providers, and declined rotation without a repository or working-tree write.
 
+[#254](https://github.com/gongahkia/yeokcham/issues/254), conservative external
+LSP semantic sidecars, is complete. ADR-094 adds an opt-in local configuration
+for one already-installed, named language server and runs it only over three
+disposable exact snapshot materialisations. Its bounded, stdio-only protocol
+session can request symbols, definitions, references, and workspace symbols;
+it refuses server-initiated edits, commands, and configuration. Results are
+session-only, disclosed with their exact snapshot, command, version, and
+capabilities, and can only mark a possible overlap beside the byte-exact
+decision proposal. An absent, ambiguous, incompatible, malformed, slow, or
+over-budget server produces unavailable semantic advice without affecting the
+proposal or any V4 state. The fake-server evidence covers disposable-root
+binding, all three snapshots, both broader sensitivity modes, malicious
+requests, malformed and oversized replies, timeout, and repository-state
+preservation.
+
 [#257](https://github.com/gongahkia/yeokcham/issues/257), relay payload
 encryption, is closed as not planned for the active V4 milestone. V4's small
 trusted-team boundary is the existing HTTPS relay and verified staged receipt;

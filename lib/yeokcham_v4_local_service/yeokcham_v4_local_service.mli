@@ -84,8 +84,8 @@ type semantic_advice =
   | Semantic_not_configured
   | Semantic_multiple_servers of string list
   | Semantic_report of Yeokcham_v4_lsp_sidecar.report
-(** Session-local external-tool observations. They are not a semantic merge,
-    decision transition, or persistent sidecar. *)
+      (** Session-local external-tool observations. They are not a semantic
+          merge, decision transition, or persistent sidecar. *)
 
 type inspected_decision_proposal = {
   exact_proposal : decision_proposal;

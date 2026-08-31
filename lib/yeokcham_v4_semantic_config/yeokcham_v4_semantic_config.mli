@@ -3,7 +3,11 @@
     These records select an already-installed executable. They are never V4
     project state, signed data, package content, or relay input. *)
 
-type match_scope = Extensions of string list | Path_globs of string list | All_files
+type match_scope =
+  | Extensions of string list
+  | Path_globs of string list
+  | All_files
+
 type overlap_sensitivity = Same_symbol | Nearby_ranges | References
 
 type server = {
@@ -29,12 +33,15 @@ type error =
 
 val error_to_string : error -> string
 val path : root:string -> string
+val encode : server list -> (string, error) result
+val decode : string -> (server list, error) result
 val list : root:string -> (server list, error) result
 val find : root:string -> name:string -> (server, error) result
-
 val add : root:string -> server:server -> (unit, error) result
 val remove : root:string -> name:string -> (unit, error) result
-val set_enabled : root:string -> name:string -> enabled:bool -> (unit, error) result
+
+val set_enabled :
+  root:string -> name:string -> enabled:bool -> (unit, error) result
 
 val configure :
   root:string ->

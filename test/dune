@@ -29,6 +29,30 @@
   (source_tree golden)))
 
 (test
+ (name test_v4_semantic_config)
+ (modules test_v4_semantic_config)
+ (libraries alcotest unix yeokcham_testkit yeokcham_v4_semantic_config)
+ (deps
+  (source_tree golden)))
+
+(executable
+ (name fake_lsp_server)
+ (modules fake_lsp_server)
+ (libraries unix yojson))
+
+(test
+ (name test_v4_lsp_sidecar)
+ (modules test_v4_lsp_sidecar)
+ (libraries
+  alcotest
+  unix
+  yeokcham_snapshot
+  yeokcham_store
+  yeokcham_v4_lsp_sidecar
+  yeokcham_v4_semantic_config)
+ (deps fake_lsp_server.exe))
+
+(test
  (name v4_authority_property_test)
  (modules v4_authority_property_test)
  (libraries

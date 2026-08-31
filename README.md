@@ -19,6 +19,9 @@ does not read, upgrade, or mutate repositories from earlier product tracks.
 - Explicit drafts, shared immutable revisions, conservative composition, and
   conflict records that can be inspected and materialised outside the working
   tree before an explicit resolution.
+- Optional configured external-LSP observations for a decision proposal. They
+  inspect disposable named snapshots only, remain untrusted and ephemeral, and
+  can flag possible overlap but cannot merge, resolve, or write source.
 - Read-only `log` and `graph` views that keep revisions, unresolved decisions,
   resolutions, delivery milestones, and concurrent authority heads distinct
   instead of presenting a synthetic commit history.
@@ -84,6 +87,20 @@ yeokcham device attach --root . --provider ssh-agent --public-key ~/.ssh/yeokcha
 The local profile stores no PIN or private key. Use a dedicated agent key and
 avoid SSH agent forwarding where it would let another host request signatures.
 
+To inspect an open decision with an already-installed language server, configure
+it explicitly for this repository. The server receives disposable copies of the
+named snapshots, so do this only when that disclosure is appropriate:
+
+```sh
+yeokcham semantic server add ocaml --program /usr/bin/ocamllsp --arg --stdio \
+  --extension .ml --extension .mli
+yeokcham decision propose --decision DECISION_ID --left LEFT_REV --right RIGHT_REV
+```
+
+The resulting semantic section is advisory only. If more than one configured
+server matches, select one visibly with `--semantic-server NAME`; disabling or
+removing a server restores byte-only proposals.
+
 `init` prints a 12-word public root-verification phrase and a 24-word recovery
 mnemonic. Compare the phrase with a prospective device owner over an
 independent channel. Record the mnemonic offline; it decrypts the recovery
@@ -146,8 +163,10 @@ needs an explicit immutable bootstrap basis ID, public repository ID, enrolled
 local device, and independently compared root phrase; it starts with fresh
 local scratch state and never materialises its working tree. The relay is an
 untrusted byte courier and stored payloads are not end-to-end encrypted. There
-is no online authority coordinator, general clone, Git interchange, semantic
-parsing, or CI-backed delivery. There is
+is no online authority coordinator, general clone, Git interchange, in-process
+semantic parsing or merge, or CI-backed delivery. An explicitly configured
+external LSP server is advisory tooling, not a Yeokcham parser or trust source.
+There is
 no relay, package, or automatic blob GC; local collection is only the explicit
 quarantine-and-purge workflow above. Those are deliberate boundaries, not
 hidden product behaviour.

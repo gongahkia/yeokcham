@@ -51,14 +51,16 @@ type available = {
   possible_overlaps : possible_overlap list;
 }
 
-type report = Available of available | Unavailable of { server : string; reason : string }
+type report =
+  | Available of available
+  | Unavailable of { server : string; reason : string }
 
 val inspect :
   store:Yeokcham_store.repository ->
   server:Yeokcham_v4_semantic_config.server ->
-  base:(string * Yeokcham_snapshot.Snapshot.t) ->
-  left:(string * Yeokcham_snapshot.Snapshot.t) ->
-  right:(string * Yeokcham_snapshot.Snapshot.t) ->
+  base:string * Yeokcham_snapshot.Snapshot.t ->
+  left:string * Yeokcham_snapshot.Snapshot.t ->
+  right:string * Yeokcham_snapshot.Snapshot.t ->
   paths:string list ->
   report
 (** Uses only named exact snapshots. [paths] must be repository-relative paths

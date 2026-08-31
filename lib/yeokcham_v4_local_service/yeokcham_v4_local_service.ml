@@ -1881,15 +1881,18 @@ let propose_decision ~root ~decision ~left ~right =
 let changed_semantic_paths (proposal : Proposal.t) =
   proposal.Proposal.paths
   |> List.filter_map (fun path ->
-         if path.Proposal.base = path.Proposal.left
-            && path.Proposal.base = path.Proposal.right
-         then None
-         else Some (Model.Path.to_string path.Proposal.path))
+      if
+        path.Proposal.base = path.Proposal.left
+        && path.Proposal.base = path.Proposal.right
+      then None
+      else Some (Model.Path.to_string path.Proposal.path))
   |> List.sort_uniq String.compare
 
 let inspect_decision_proposal ~root ~decision ~left ~right ~semantic_server =
   with_repository ~root (fun repository loaded ->
-      let* prepared = prepare_decision_proposal repository loaded ~decision ~left ~right in
+      let* prepared =
+        prepare_decision_proposal repository loaded ~decision ~left ~right
+      in
       let exact_proposal = prepared.prepared_proposal in
       let unavailable reason =
         Semantic_report
@@ -1898,7 +1901,7 @@ let inspect_decision_proposal ~root ~decision ~left ~right ~semantic_server =
       let semantic_advice =
         match Semantic_config.list ~root with
         | Error error -> unavailable (Semantic_config.error_to_string error)
-        | Ok servers ->
+        | Ok servers -> (
             let paths = changed_semantic_paths exact_proposal in
             let matching =
               List.filter
@@ -1916,7 +1919,8 @@ let inspect_decision_proposal ~root ~decision ~left ~right ~semantic_server =
                   | servers ->
                       `Several
                         (List.map
-                           (fun (server : Semantic_config.server) -> server.name)
+                           (fun (server : Semantic_config.server) ->
+                             server.name)
                            servers))
               | Some name -> (
                   match
@@ -1926,7 +1930,8 @@ let inspect_decision_proposal ~root ~decision ~left ~right ~semantic_server =
                       servers
                   with
                   | None -> `Unavailable ("unknown semantic server: " ^ name)
-                  | Some server when not server.enabled -> `Unavailable ("semantic server is disabled: " ^ name)
+                  | Some server when not server.enabled ->
+                      `Unavailable ("semantic server is disabled: " ^ name)
                   | Some server -> `Server server)
             in
             match selected with
@@ -1944,18 +1949,26 @@ let inspect_decision_proposal ~root ~decision ~left ~right ~semantic_server =
                   with
                   | Ok base, Ok left, Ok right ->
                       Lsp_sidecar.inspect ~store ~server
-                        ~base:(Model.Snapshot_id.to_string provenance.left_base, base)
-                        ~left:(Model.Snapshot_id.to_string provenance.left_result, left)
-                        ~right:(Model.Snapshot_id.to_string provenance.right_result, right)
+                        ~base:
+                          ( Model.Snapshot_id.to_string provenance.left_base,
+                            base )
+                        ~left:
+                          ( Model.Snapshot_id.to_string provenance.left_result,
+                            left )
+                        ~right:
+                          ( Model.Snapshot_id.to_string provenance.right_result,
+                            right )
                         ~paths
                   | Error error, _, _ | _, Error error, _ | _, _, Error error ->
                       Lsp_sidecar.Unavailable
                         {
                           server = server.name;
-                          reason = "cannot load named snapshot: " ^ error_to_string error;
+                          reason =
+                            "cannot load named snapshot: "
+                            ^ error_to_string error;
                         }
                 in
-                Semantic_report report
+                Semantic_report report)
       in
       Ok { exact_proposal; semantic_advice })
 

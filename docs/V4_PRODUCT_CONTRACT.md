@@ -47,6 +47,17 @@ empty destination and uses a generated display-handle/rank child name, never a
 raw revision identifier. `resolve --tree` references that isolated result; it
 does not rewrite the live tree while deciding.
 
+`decision propose` remains byte-exact and parser-free. A repository may name an
+already-installed external LSP server with `semantic server add`; with one
+enabled matching server, proposal inspection appends bounded local advice from
+three disposable named snapshot workspaces. With several matches, a person must
+use `--semantic-server NAME`. The server is untrusted and receives snapshot
+bytes, never the live-worktree path. Its symbols, definitions, references, and
+possible-overlap display are ephemeral evidence only: no result can compose
+bytes, accept a proposal, resolve a decision, write a worktree, or enter V4
+state, package, relay, bootstrap, authority, or delivery data. A missing or bad
+server is reported as unavailable and leaves byte-only inspection usable.
+
 In-place restore first captures a safety checkpoint then follows a canonical
 Prepared → Applying → Materialized → Published journal. Before `Published`, it
 writes one create-only local `restore-proof-v1` naming the exact safety and
@@ -278,7 +289,7 @@ No state transition mutates the only copy in place.
 ## Exclusions
 
 There is no general clone protocol, automatic or relay GC, durable command metadata, Git bridge
-or interchange, semantic parser or merge,
+or interchange, in-process semantic parser or merge,
 end-to-end payload encryption, external relay identity or proof-of-possession,
 macOS watcher, WSL support, or CI-backed
 delivery. These are separate design work and must reuse the current model and

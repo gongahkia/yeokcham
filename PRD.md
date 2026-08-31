@@ -1,6 +1,6 @@
 # Product requirements
 
-## Current milestone: V4 verified receipt, explicit relay bootstrap, advisory runtime, durable restore proofs, local recoverable collection, exact decision-proposal assistance, and explicit local device custody
+## Current milestone: V4 verified receipt, explicit relay bootstrap, advisory runtime, durable restore proofs, local recoverable collection, exact decision-proposal assistance, optional external-LSP observations, and explicit local device custody
 
 V4 serves one developer and small, explicitly trusted teams. Its required
 vertical slices are complete only when their model transition, durable format,
@@ -67,10 +67,16 @@ failure behaviour, and CLI surface agree.
     supply a local signing capability without changing the canonical signed
     record, device ID, authority rules, or persistent project format. Provider
     absence, denial, key mismatch, and rotation failure must remain explicit.
+18. Optionally obtain bounded language facts from one explicitly configured
+    external LSP server over disposable named snapshots. Those facts are local
+    review evidence only: they cannot become canonical source, select a
+    candidate, resolve a decision, write a worktree, or enter V4 state,
+    package, relay, bootstrap, authority, or delivery data.
 
 ### Explicit non-goals
 
-No general clone, Git bridge or interchange, semantic parser or merge, automatic or remote GC,
+No general clone, Git bridge or interchange, in-process semantic parser or
+merge, automatic or remote GC,
 durable command metadata, macOS watcher, WSL support, or CI-backed delivery exists in this
 milestone. The bundled relay is an untrusted byte courier behind an
 operator-managed HTTPS reverse proxy; it is not hosted authority or end-to-end

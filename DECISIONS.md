@@ -38,6 +38,9 @@ The active V4 decisions are:
 - [ADR-093](docs/adr/093-v4-device-custody-providers.md): explicit local
   native, SSH-agent, and PKCS#11 Ed25519 custody providers without changing
   device identity, authority, or signed record bytes.
+- [ADR-094](docs/adr/094-v4-external-lsp-semantic-sidecars.md): optional
+  external LSP observations over disposable exact decision snapshots; they are
+  bounded local advice, never a parser, merge engine, trust input, or V4 state.
 
 Earlier product-track ADRs have been removed with their implementations. Git
 history retains their historical record; they are not active architecture.

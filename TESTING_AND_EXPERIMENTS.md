@@ -10,6 +10,16 @@ receive. The package resolution test delivers conflicting shared work and its
 signed resolution in an order requiring deferral, then proves it recreates a
 resolved decision rather than a third shared change.
 
+External-LSP verification adds a canonical `semantic-lsp-v1` local-config
+fixture, restrictive file-mode, duplicate, matcher, and invalid-glob checks.
+A compiled disposable fake server proves that initialization reports its
+declared name/version/capabilities against named temporary snapshot URIs; that
+same-symbol evidence remains advisory; and that `workspace/applyEdit`,
+malformed JSON-RPC, oversized packets, and timeout return unavailable advice
+without modifying repository bytes. The fake server is protocol-boundary
+evidence only, not evidence that a real language server is correct for a
+language or that semantic advice is trustworthy.
+
 Custody verification adds a canonical local `custody-v1` fixture, restrictive
 file-mode and create-only checks, an actual temporary OpenSSH agent with one
 selected Ed25519 key, and an opaque-provider denial path. It also includes a
@@ -121,5 +131,9 @@ announced; and a subsequent sync uploads and records it. TLS tests require
 `/usr/bin/openssl` and `/usr/bin/socat`; CI installs both, and missing tools
 fail the test rather than producing a skip.
 
-No benchmark, semantic sidecar, Git, or CI delivery result is used as evidence
-for the current model.
+No semantic sidecar result is used as evidence for the current model, delivery,
+or authority. The local fake-server results above establish only the adapter
+boundary; future real-server experiments must record language, server/version,
+host, useful observations, unavailable cases, and false or stale suggestions
+separately from product claims. Git and CI delivery results are likewise not
+model evidence.
