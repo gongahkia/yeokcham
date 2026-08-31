@@ -4,6 +4,16 @@
  (libraries alcotest yeokcham_v4_model))
 
 (test
+ (name test_watcher)
+ (modules test_watcher)
+ (libraries alcotest yeokcham_watcher))
+
+(test
+ (name watcher_property_test)
+ (modules watcher_property_test)
+ (libraries alcotest qcheck-core qcheck-alcotest yeokcham_watcher))
+
+(test
  (name test_v4_trust)
  (modules test_v4_trust)
  (libraries
@@ -306,9 +316,18 @@
  (name test_v4_watch)
  (modules test_v4_watch)
  (build_if
-  (= %{system} linux))
+  (or
+   (= %{system} linux)
+   (= %{system} macosx)))
  (libraries alcotest unix)
  (deps ../bin/yeokcham_v4.exe))
+
+(test
+ (name test_v4_macos_watcher)
+ (modules test_v4_macos_watcher)
+ (build_if
+  (= %{system} macosx))
+ (libraries alcotest unix yeokcham_macos_watcher yeokcham_watcher))
 
 (test
  (name test_v4_runtime)

@@ -4,13 +4,14 @@
 - Date: 2026-08-27
 - Deciders: maintainers
 - Supersedes: None
-- Superseded by: None
+- Amended by: ADR-096 for the foreground macOS adapter
 
 ## Context and problem statement
 
 Command `save` already exists, but status did not warn about a dirty tree, and
 there was no Linux loop that called that save path after quiet filesystem
-activity. macOS watchers are out of scope and WSL is unsupported and not
+activity. At this decision's adoption, macOS watchers were out of scope; ADR-096
+later adds a separate foreground macOS adapter. WSL is unsupported and not
 planned.
 
 ## Decision drivers
@@ -45,8 +46,9 @@ sustained writes, captures immediately on overflow or watcher loss, then
 restarts the watcher. `.git` and `.yeokcham` events do not schedule a save.
 Scan failure prints an error and leaves the previous checkpoint current.
 
-Non-Linux builds print `Linux watcher capture is not supported on this system`
-and exit 2.
+At this decision's adoption, non-Linux builds printed `Linux watcher capture is
+not supported on this system` and exited 2. ADR-096 changes that result only
+for macOS; all other unsupported platforms still exit 2.
 
 ## Consequences
 
@@ -67,7 +69,7 @@ Not applicable. No new record is written.
 
 - local-service tests for uncaptured status and the 1s/30s window;
 - CLI status warning;
-- non-Linux CLI refusal of `watch`.
+- CLI refusal of `watch` outside Linux and macOS.
 
 The inotify loop test is `test/test_v4_watch.ml` (`build_if linux`, Alcotest
 `Slow`). It was not run on the Darwin development host. Proof on another

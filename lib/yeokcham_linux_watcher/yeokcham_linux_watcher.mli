@@ -18,6 +18,9 @@ type error =
   | Normalization_error of Watcher.error
 
 val error_to_string : error -> string
+val retry_start : error -> bool
+val restart_error : error -> bool
+val closed_error : error -> bool
 val max_watches : int
 
 val start : root:string -> (t, error) result

@@ -59,5 +59,6 @@ V4 is the only active product track. Earlier tracks are available only in Git
 history and have no compatibility or migration path. The codebase retains the
 unversioned hashing, canonical CBOR, envelope, object store, snapshot,
 chunking, testkit, advisory Linux-watcher, and disposable Linux-runtime
-foundations because V4 uses them. The runtime may preserve scratch capture, but
-it cannot infer shared intent, schedule a remote, or become a source of trust.
+foundations because V4 uses them. Linux and macOS foreground watchers may
+preserve scratch capture, but they cannot infer shared intent, schedule a
+remote, or become a source of trust. The managed runtime remains Linux-only.

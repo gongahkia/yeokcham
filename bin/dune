@@ -1,7 +1,13 @@
 (executable
  (name yeokcham_v4)
  (public_name yeokcham)
- (modules yeokcham_v4 v4_runtime v4_watch v4_signer v4_signer_test_file)
+ (modules
+  yeokcham_v4
+  v4_runtime
+  v4_watch
+  v4_watch_runner
+  v4_signer
+  v4_signer_test_file)
  (flags
   (:standard -w -70))
  (libraries
@@ -28,6 +34,7 @@
    v4_watch.ml
    from
    (yeokcham_linux_watcher -> v4_watch_linux.ml)
+   (yeokcham_macos_watcher -> v4_watch_macos.ml)
    (-> v4_watch_unavailable.ml))
   (select
    v4_runtime.ml

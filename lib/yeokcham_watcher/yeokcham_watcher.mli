@@ -7,6 +7,7 @@ type reason =
   | Initial_scan
   | Path_change
   | Rename
+  | Rescan_required
   | Overflow
   | Watcher_lost
   | Path_budget_exceeded
@@ -35,10 +36,17 @@ module Macos : sig
     | Item_created of path
     | Item_modified of path
     | Item_removed of path
-    | Item_renamed of { source : path; destination : path }
+        (** FSEvents identifies a renamed item but does not provide a
+            trustworthy old/new path pair. The supplied path is therefore only a
+            scan hint. *)
+    | Item_renamed of path
+    | Must_scan_subdirs
     | Kernel_dropped
     | User_dropped
+    | Client_overflow
+    | Event_ids_wrapped
     | Root_changed
+    | Unmounted
 
   val normalize : event list -> (scan_request option, error) result
 end

@@ -335,7 +335,9 @@ let lost request =
   match request.Watcher.reason with
   | Watcher.Overflow | Watcher.Watcher_lost | Watcher.Path_budget_exceeded ->
       true
-  | Watcher.Initial_scan | Watcher.Path_change | Watcher.Rename -> false
+  | Watcher.Initial_scan | Watcher.Path_change | Watcher.Rename
+  | Watcher.Rescan_required ->
+      false
 
 let capture root =
   match Service.save ~root with

@@ -4,6 +4,7 @@ type reason =
   | Initial_scan
   | Path_change
   | Rename
+  | Rescan_required
   | Overflow
   | Watcher_lost
   | Path_budget_exceeded
@@ -32,15 +33,29 @@ let valid_path path =
 type observation =
   | Path_changed of path
   | Renamed of { source : path; destination : path }
+  | Rename_notice of path
+  | Rescan
   | Overflowed
   | Lost
 
+let is_rescan = function
+  | Rescan -> true
+  | Path_changed _ | Renamed _ | Rename_notice _ | Overflowed | Lost -> false
+
+let is_overflow = function
+  | Overflowed -> true
+  | Path_changed _ | Renamed _ | Rename_notice _ | Rescan | Lost -> false
+
+let is_lost = function
+  | Lost -> true
+  | Path_changed _ | Renamed _ | Rename_notice _ | Rescan | Overflowed -> false
+
 let normalize observations =
-  let rec first_full_rescan = function
-    | [] -> None
-    | Overflowed :: _ -> Some Overflow
-    | Lost :: _ -> Some Watcher_lost
-    | Path_changed _ :: rest | Renamed _ :: rest -> first_full_rescan rest
+  let full_rescan_reason observations =
+    if List.exists is_lost observations then Some Watcher_lost
+    else if List.exists is_overflow observations then Some Overflow
+    else if List.exists is_rescan observations then Some Rescan_required
+    else None
   in
   let rec collect saw_rename paths = function
     | [] ->
@@ -63,10 +78,14 @@ let normalize observations =
         else if not (valid_path destination) then
           Error (Invalid_path destination)
         else collect true (source :: destination :: paths) rest
+    | Rename_notice path :: rest ->
+        if valid_path path then collect true (path :: paths) rest
+        else Error (Invalid_path path)
+    | Rescan :: _ -> Ok (Some { reason = Rescan_required; target = Whole_root })
     | Overflowed :: _ -> Ok (Some { reason = Overflow; target = Whole_root })
     | Lost :: _ -> Ok (Some { reason = Watcher_lost; target = Whole_root })
   in
-  match first_full_rescan observations with
+  match full_rescan_reason observations with
   | Some reason -> Ok (Some { reason; target = Whole_root })
   | None -> collect false [] observations
 
@@ -97,10 +116,14 @@ module Macos = struct
     | Item_created of path
     | Item_modified of path
     | Item_removed of path
-    | Item_renamed of { source : path; destination : path }
+    | Item_renamed of path
+    | Must_scan_subdirs
     | Kernel_dropped
     | User_dropped
+    | Client_overflow
+    | Event_ids_wrapped
     | Root_changed
+    | Unmounted
 
   let normalize events =
     let observations =
@@ -108,10 +131,10 @@ module Macos = struct
         (function
           | Item_created path | Item_modified path | Item_removed path ->
               Path_changed path
-          | Item_renamed { source; destination } ->
-              Renamed { source; destination }
-          | Kernel_dropped | User_dropped -> Overflowed
-          | Root_changed -> Lost)
+          | Item_renamed path -> Rename_notice path
+          | Must_scan_subdirs -> Rescan
+          | Kernel_dropped | User_dropped | Client_overflow -> Overflowed
+          | Event_ids_wrapped | Root_changed | Unmounted -> Lost)
         events
     in
     normalize observations

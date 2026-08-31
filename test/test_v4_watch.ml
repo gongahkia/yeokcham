@@ -76,6 +76,30 @@ let write_file root name contents =
   Out_channel.with_open_bin (Filename.concat root name) (fun channel ->
       Out_channel.output_string channel contents)
 
+let occurrences needle haystack =
+  let length = String.length needle in
+  let rec count position total =
+    match String.index_from_opt haystack position needle.[0] with
+    | None -> total
+    | Some index
+      when index + length <= String.length haystack
+           && String.equal needle (String.sub haystack index length) ->
+        count (index + length) (total + 1)
+    | Some index -> count (index + 1) total
+  in
+  if String.equal needle "" then
+    invalid_arg "occurrences needs a nonempty needle"
+  else count 0 0
+
+let rec wait_for_exit pid remaining =
+  if remaining = 0 then Alcotest.fail "watcher did not exit after root loss"
+  else
+    match Unix.waitpid [ Unix.WNOHANG ] pid with
+    | 0, _ ->
+        Unix.sleepf 0.2;
+        wait_for_exit pid (remaining - 1)
+    | _, status -> status
+
 let rec wait_for_new_checkpoint ~root previous remaining =
   if remaining = 0 then Alcotest.fail "watcher did not record a new checkpoint"
   else (
@@ -131,12 +155,110 @@ let watch_records_a_checkpoint_after_quiet_edits () =
             "watch save differs from init" false
             (String.equal recorded initial)))
 
+let watch_debounces_a_rapid_edit_storm () =
+  with_directory "yeokcham-v4-watch-storm-" (fun root ->
+      write_file root "main.ml" "let version = 1\n";
+      let _output, errors, status =
+        run
+          [
+            "init";
+            "--root";
+            root;
+            "--username";
+            "alice";
+            "--draft";
+            "draft-one";
+            "--title";
+            "watch-storm";
+          ]
+      in
+      require_success "init" status errors;
+      let log = Filename.temp_file "yeokcham-v4-watch-storm-log-" "" in
+      let log_fd =
+        Unix.openfile log [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_TRUNC ] 0o600
+      in
+      let exe = executable () in
+      let pid =
+        Unix.create_process exe
+          [| exe; "watch"; "--root"; root |]
+          Unix.stdin log_fd log_fd
+      in
+      Fun.protect
+        ~finally:(fun () ->
+          Unix.close log_fd;
+          (try Unix.kill pid Sys.sigterm
+           with Unix.Unix_error (Unix.ESRCH, _, _) -> ());
+          (try ignore (Unix.waitpid [] pid)
+           with Unix.Unix_error (Unix.ECHILD, _, _) -> ());
+          try Unix.unlink log with Unix.Unix_error (Unix.ENOENT, _, _) -> ())
+        (fun () ->
+          Unix.sleepf 0.3;
+          for version = 2 to 80 do
+            write_file root "main.ml"
+              (Printf.sprintf "let version = %d\n" version)
+          done;
+          Unix.sleepf 2.0;
+          let output = In_channel.with_open_bin log In_channel.input_all in
+          Alcotest.(check int)
+            "one debounced save for the storm" 1
+            (occurrences "save recorded\n" output)))
+
+let watch_exits_after_permanent_root_loss () =
+  with_directory "yeokcham-v4-watch-root-loss-" (fun root ->
+      write_file root "main.ml" "let version = 1\n";
+      let _output, errors, status =
+        run
+          [
+            "init";
+            "--root";
+            root;
+            "--username";
+            "alice";
+            "--draft";
+            "draft-one";
+            "--title";
+            "watch-root-loss";
+          ]
+      in
+      require_success "init" status errors;
+      let log = Filename.temp_file "yeokcham-v4-watch-root-loss-log-" "" in
+      let log_fd =
+        Unix.openfile log [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_TRUNC ] 0o600
+      in
+      let exe = executable () in
+      let pid =
+        Unix.create_process exe
+          [| exe; "watch"; "--root"; root |]
+          Unix.stdin log_fd log_fd
+      in
+      Fun.protect
+        ~finally:(fun () ->
+          Unix.close log_fd;
+          (try Unix.kill pid Sys.sigterm
+           with Unix.Unix_error (Unix.ESRCH, _, _) -> ());
+          (try ignore (Unix.waitpid [] pid)
+           with Unix.Unix_error (Unix.ECHILD, _, _) -> ());
+          try Unix.unlink log with Unix.Unix_error (Unix.ENOENT, _, _) -> ())
+        (fun () ->
+          Unix.sleepf 0.3;
+          remove_tree root;
+          match wait_for_exit pid 30 with
+          | Unix.WEXITED 2 -> ()
+          | Unix.WEXITED code ->
+              Alcotest.failf "watch root-loss exit code was %d" code
+          | Unix.WSIGNALED signal | Unix.WSTOPPED signal ->
+              Alcotest.failf "watch root-loss stopped with signal %d" signal))
+
 let () =
-  Alcotest.run "V4 Linux watch"
+  Alcotest.run "V4 foreground watch"
     [
       ( "capture",
         [
           Alcotest.test_case "watch records a checkpoint after quiet edits"
             `Slow watch_records_a_checkpoint_after_quiet_edits;
+          Alcotest.test_case "watch debounces a rapid edit storm" `Slow
+            watch_debounces_a_rapid_edit_storm;
+          Alcotest.test_case "watch exits after permanent root loss" `Slow
+            watch_exits_after_permanent_root_loss;
         ] );
     ]

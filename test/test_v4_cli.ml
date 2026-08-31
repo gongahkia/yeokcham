@@ -1303,7 +1303,7 @@ let inspection_commands_are_read_only_and_keep_domains_distinct () =
            (Filename.concat root "main.ml")
            In_channel.input_all))
 
-let watch_is_linux_only () =
+let watch_is_available_only_on_supported_platforms () =
   with_directory "yeokcham-v4-cli-watch-" (fun root ->
       let uname =
         try
@@ -1313,13 +1313,13 @@ let watch_is_linux_only () =
             (fun () -> String.trim (input_line input))
         with _ -> ""
       in
-      if String.equal uname "Linux" then ()
+      if String.equal uname "Linux" || String.equal uname "Darwin" then ()
       else
         let _output, errors, status = run [ "watch"; "--root"; root ] in
         match status with
         | Unix.WEXITED 2 ->
-            expect_output_contains "non-Linux watch is refused"
-              "Linux watcher capture is not supported" errors
+            expect_output_contains "unsupported-platform watch is refused"
+              "watcher capture is supported only on Linux and macOS" errors
         | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
             require_success "watch" status errors)
 
@@ -1361,6 +1361,7 @@ let () =
             relay_access_issue_refuses_noninteractive_secret_output;
           Alcotest.test_case "log and graph are read-only V4 projections" `Quick
             inspection_commands_are_read_only_and_keep_domains_distinct;
-          Alcotest.test_case "watch is Linux-only" `Quick watch_is_linux_only;
+          Alcotest.test_case "watch is platform-scoped" `Quick
+            watch_is_available_only_on_supported_platforms;
         ] );
     ]

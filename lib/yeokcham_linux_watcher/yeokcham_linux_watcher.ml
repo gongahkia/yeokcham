@@ -37,6 +37,24 @@ let error_to_string = function
       Printf.sprintf "%s failed for %s: %s" operation path message
   | Normalization_error error -> Watcher.error_to_string error
 
+let retry_start = function
+  | Io_error _ -> true
+  | Root_not_directory _ | Root_is_symlink _ | Invalid_timeout _ | Closed
+  | Needs_restart | Watch_limit_exceeded _ | Normalization_error _ ->
+      false
+
+let restart_error = function
+  | Needs_restart | Io_error _ -> true
+  | Root_not_directory _ | Root_is_symlink _ | Invalid_timeout _ | Closed
+  | Watch_limit_exceeded _ | Normalization_error _ ->
+      false
+
+let closed_error = function
+  | Closed -> true
+  | Root_not_directory _ | Root_is_symlink _ | Invalid_timeout _ | Needs_restart
+  | Watch_limit_exceeded _ | Io_error _ | Normalization_error _ ->
+      false
+
 let ( let* ) = Result.bind
 
 let io_error operation path error =
@@ -197,17 +215,19 @@ let rec watch_directory state path =
 
 let start ~root =
   let* root_stat =
-    try Ok (Unix.lstat root)
-    with Unix.Unix_error (error, _, _) -> Error (io_error "lstat" root error)
+    try Ok (Unix.lstat root) with
+    | Unix.Unix_error (Unix.ENOENT, _, _) -> Error (Root_not_directory root)
+    | Unix.Unix_error (error, _, _) -> Error (io_error "lstat" root error)
   in
   if root_stat.Unix.st_kind = Unix.S_LNK then Error (Root_is_symlink root)
   else if root_stat.Unix.st_kind <> Unix.S_DIR then
     Error (Root_not_directory root)
   else
     let* root =
-      try Ok (Unix.realpath root)
-      with Unix.Unix_error (error, _, _) ->
-        Error (io_error "canonicalize root" root error)
+      try Ok (Unix.realpath root) with
+      | Unix.Unix_error (Unix.ENOENT, _, _) -> Error (Root_not_directory root)
+      | Unix.Unix_error (error, _, _) ->
+          Error (io_error "canonicalize root" root error)
     in
     let* descriptor =
       try Ok (Inotify.create ())

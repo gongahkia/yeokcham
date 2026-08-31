@@ -88,10 +88,16 @@ later explicit purge but intentionally cannot be restored: the marker records
 the start of irreversible deletion. These commands do not scan or materialise
 the working tree and never send, delete, or retain relay/package bytes.
 
-`watch` is Linux-only advisory capture. After a one-second quiet period (or
-thirty-second sustained-write maximum) it calls the same exact `save` path.
-Unsupported systems fail explicitly. The real Linux watcher-loop test is part
-of the active suite; platform-specific evidence is recorded in
+`watch` is advisory foreground capture on Linux and macOS. After a one-second
+quiet period (or thirty-second sustained-write maximum) it calls the same exact
+`save` path. Linux uses inotify; macOS uses FSEvents with file-event and
+root-watch notifications. An FSEvents rename is only a scan hint because it has
+no trustworthy old/new path pair. Coalescing requests a whole-root exact scan;
+dropped, wrapped, unmounted, or lost streams request a whole-root scan and then
+restart. `.git` and `.yeokcham` ordinary events do not schedule capture. A root
+that no longer exists fails plainly instead of retrying forever. Unsupported
+systems fail explicitly. The real platform watcher-loop tests are part of the
+active suite; evidence remains platform-specific in
 `TESTING_AND_EXPERIMENTS.md`.
 
 `daemon start`, `status`, and `stop` provide that same capture behaviour with a
@@ -291,6 +297,6 @@ No state transition mutates the only copy in place.
 There is no general clone protocol, automatic or relay GC, durable command metadata, Git bridge
 or interchange, in-process semantic parser or merge,
 end-to-end payload encryption, external relay identity or proof-of-possession,
-macOS watcher, WSL support (which is not planned), or CI-backed
+macOS daemon/runtime, WSL support (which is not planned), or CI-backed
 delivery. These are separate design work and must reuse the current model and
 receipt boundaries when introduced.

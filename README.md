@@ -67,6 +67,16 @@ yeokcham daemon stop
 The runtime uses a private, disposable `XDG_RUNTIME_DIR`; it is not a service
 unit, a persistent project format, or an authority mechanism.
 
+On macOS, advisory capture is deliberately foreground-only:
+
+```sh
+yeokcham watch
+```
+
+It uses FSEvents only to request the same exact scan/save path. A coalesced or
+lost event stream broadens to an exact scan; it does not create history or
+infer a filesystem operation.
+
 To move an existing device to a token, create its local custody profile, inspect
 the public device ID, then use the ordinary explicit authority rotation. The
 token alone grants nothing:
@@ -155,9 +165,9 @@ reports upload failures as pending retry work.
 
 ## Boundaries
 
-Linux `watch` and `daemon` are implemented as advisory capture after debounce.
-`daemon` is Linux-only and requires a private `XDG_RUNTIME_DIR`; macOS watchers
-and runtimes are not implemented, and WSL is unsupported and not planned. Relay synchronization is available only for already-equivalent
+Linux `watch`, macOS `watch`, and the Linux-only `daemon` are advisory capture
+after debounce. The daemon requires a private `XDG_RUNTIME_DIR`; macOS has no
+daemon or runtime, and WSL is unsupported and not planned. Relay synchronization is available only for already-equivalent
 replicas through an operator-managed HTTPS reverse proxy. A new replica instead
 needs an explicit immutable bootstrap basis ID, public repository ID, enrolled
 local device, and independently compared root phrase; it starts with fresh

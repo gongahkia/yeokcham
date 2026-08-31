@@ -4,7 +4,7 @@ V4 is layered so filesystem and platform adapters cannot change the model by
 themselves.
 
 ```
-CLI / inspection projection / Linux watch / Linux runtime / local custody adapters / HTTPS relay client
+CLI / inspection projection / Linux and macOS watch / Linux runtime / local custody adapters / HTTPS relay client
               │
        Local_service adapter / Receipt boundary
               │
@@ -83,10 +83,10 @@ or working-tree transitions. The trust core receives an opaque capability and
 continues to construct and verify every domain-separated signed record.
 
 The unversioned hash, encoding, envelope, store, snapshot, chunking, testkit,
-and watcher modules are V4 foundations. The Linux watcher emits advisory scan
-requests and delegates all capture semantics to `save`; it is not a source of
-canonical history. The Linux runtime gives that watcher a private disposable
-process lifetime and delegates explicit `daemon sync` requests to the same
+and watcher modules are V4 foundations. Linux inotify and macOS FSEvents
+watchers emit advisory scan requests and delegate all capture semantics to
+`save`; neither is a source of canonical history. The Linux runtime gives its
+watcher a private disposable process lifetime and delegates explicit `daemon sync` requests to the same
 transport orchestration as foreground `sync`; it owns no model, authority,
 receipt, or working-tree-materialisation path. macOS and Linux signer and
 custody adapters are custody boundaries, not authority systems.
