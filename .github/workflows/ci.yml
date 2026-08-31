@@ -17,9 +17,9 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install --yes --no-install-recommends openssl socat softhsm2
+        run: sudo apt-get update && sudo apt-get install --yes --no-install-recommends gnupg openssl socat softhsm2
       - if: runner.os == 'macOS'
-        run: brew install openssl socat softhsm
+        run: brew install gnupg openssl socat softhsm
       - uses: ocaml/setup-ocaml@v3
         with:
           ocaml-compiler: "5.5.0"

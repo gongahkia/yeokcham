@@ -90,3 +90,9 @@ process lifetime and delegates explicit `daemon sync` requests to the same
 transport orchestration as foreground `sync`; it owns no model, authority,
 receipt, or working-tree-materialisation path. macOS and Linux signer and
 custody adapters are custody boundaries, not authority systems.
+
+`tools/verify-v4-source-release.sh` is outside this architecture. It verifies
+an explicitly supplied Git source tag, OpenPGP fingerprint, commit, and archive
+digest for maintainers and consumers. It has no Yeokcham library dependency,
+creates no V4 record, and cannot affect a V4 repository's identity, authority,
+transport, delivery, or working tree.

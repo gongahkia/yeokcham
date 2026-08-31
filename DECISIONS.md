@@ -41,6 +41,10 @@ The active V4 decisions are:
 - [ADR-094](docs/adr/094-v4-external-lsp-semantic-sidecars.md): optional
   external LSP observations over disposable exact decision snapshots; they are
   bounded local advice, never a parser, merge engine, trust input, or V4 state.
+- [ADR-095](docs/adr/095-v4-source-release-verification.md): explicit
+  maintainer/consumer verification of a signed source tag, exact commit,
+  expected OpenPGP fingerprint, and source-archive digest, outside V4 trust
+  and history.
 
 Earlier product-track ADRs have been removed with their implementations. Git
 history retains their historical record; they are not active architecture.

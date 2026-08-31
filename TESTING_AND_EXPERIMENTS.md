@@ -137,3 +137,13 @@ boundary; future real-server experiments must record language, server/version,
 host, useful observations, unavailable cases, and false or stale suggestions
 separately from product claims. Git and CI delivery results are likewise not
 model evidence.
+
+Source-release verification uses an isolated GnuPG home and disposable Git
+repository. It proves a valid annotated signed tag, exact source commit,
+full-fingerprint match, and archive SHA-256 route; it also proves primary and
+signing-subkey fingerprint matching for a subkey signature. It then rejects
+missing input, malformed fingerprints, lightweight and unsigned tags,
+mismatched signers, wrong commits, and changed archives. The fixture creates no
+`.yeokcham` directory. It is supply-chain adapter evidence only: its temporary
+key is not a maintainer key, and passing it does not claim a V4 release, source
+hosting, platform support, or opam publication.

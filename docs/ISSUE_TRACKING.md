@@ -5,13 +5,12 @@ boundary. Inspect live bodies, labels, and blocking relationships before work.
 
 The V4 lifecycle and V4-only cutover have removed earlier product code and
 documentation from `main`; historical evidence remains in Git history. Issues
-[#242](https://github.com/gongahkia/yeokcham/issues/242),
-[#243](https://github.com/gongahkia/yeokcham/issues/243), and
+[#242](https://github.com/gongahkia/yeokcham/issues/242) and
 [#244](https://github.com/gongahkia/yeokcham/issues/244) remain open
-release/distribution work. V4-only cutover does not satisfy their field-trial,
-release-signing, or opam-publication criteria, so do not close them as a
-retirement side effect. Their retired command references need explicit future
-re-scoping before that work begins.
+release/distribution work. V4-only cutover does not satisfy their field-trial
+or opam-publication criteria, so do not close them as a retirement side effect.
+Their retired command references need explicit future re-scoping before that
+work begins.
 
 [#250](https://github.com/gongahkia/yeokcham/issues/250), Git interchange,
 [#249](https://github.com/gongahkia/yeokcham/issues/249), durable command
@@ -120,6 +119,18 @@ proposal or any V4 state. The fake-server evidence covers disposable-root
 binding, all three snapshots, both broader sensitivity modes, malicious
 requests, malformed and oversized replies, timeout, and repository-state
 preservation.
+
+[#243](https://github.com/gongahkia/yeokcham/issues/243), V4 source-tag
+verification tooling, is complete. ADR-095 adds a local, explicit verifier for
+one annotated OpenPGP-signed Git tag, its exact source commit, an independently
+obtained full primary-key or signing-subkey fingerprint, and a local archive's
+SHA-256. It is outside V4 identity, authority, history, package, relay, and
+delivery semantics; it neither downloads keys or archives nor creates a tag,
+release, or project state. Disposable GnuPG/Git evidence covers valid primary
+and signing-subkey paths plus malformed input, lightweight and unsigned tags,
+fingerprint mismatch, wrong commit, changed archive, and no `.yeokcham` write.
+Publishing a real key or source release, recording field evidence, and opam
+submission remain separate maintainer actions.
 
 [#257](https://github.com/gongahkia/yeokcham/issues/257), relay payload
 encryption, is closed as not planned for the active V4 milestone. V4's small

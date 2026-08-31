@@ -4,8 +4,9 @@ DUNE := $(OPAM) exec -- dune
 OCAML_VERSION := 5.5.0
 OCAMLFORMAT_VERSION := 0.29.0
 LOCAL_SWITCH := $(CURDIR)
+RELEASE_REPOSITORY ?= .
 
-.PHONY: setup deps build test lint format ci linux-watch-test
+.PHONY: setup deps build test lint format ci linux-watch-test release-verify release-verify-test
 
 setup:
 	$(OPAM) init --bare --no-setup --yes
@@ -34,3 +35,9 @@ format:
 	$(DUNE) fmt
 
 ci: lint test
+
+release-verify:
+	tools/verify-v4-source-release.sh --repo "$(RELEASE_REPOSITORY)" --tag "$(RELEASE_TAG)" --commit "$(RELEASE_COMMIT)" --fingerprint "$(RELEASE_FINGERPRINT)" --archive "$(RELEASE_ARCHIVE)" --sha256 "$(RELEASE_SHA256)"
+
+release-verify-test:
+	sh test/test_release_verify.sh tools/verify-v4-source-release.sh

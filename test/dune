@@ -35,6 +35,15 @@
  (deps
   (source_tree golden)))
 
+(rule
+ (alias runtest)
+ (deps test_release_verify.sh ../tools/verify-v4-source-release.sh)
+ (action
+  (run
+   sh
+   %{dep:test_release_verify.sh}
+   %{dep:../tools/verify-v4-source-release.sh})))
+
 (executable
  (name fake_lsp_server)
  (modules fake_lsp_server)

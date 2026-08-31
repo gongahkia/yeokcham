@@ -171,6 +171,11 @@ no relay, package, or automatic blob GC; local collection is only the explicit
 quarantine-and-purge workflow above. Those are deliberate boundaries, not
 hidden product behaviour.
 
+Source-release signatures are a separate maintainer/consumer provenance check;
+they do not enter V4 authority or history. See
+[docs/RELEASING.md](docs/RELEASING.md) for the future source-release
+verification procedure.
+
 Read [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md) for the philosophy,
 [FORMAL_MODEL.md](FORMAL_MODEL.md) for invariants, and
 [docs/V4_PRODUCT_CONTRACT.md](docs/V4_PRODUCT_CONTRACT.md) for the command and
