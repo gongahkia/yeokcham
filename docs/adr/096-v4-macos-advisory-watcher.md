@@ -51,10 +51,13 @@ explicit client-overflow observation. No event ID is stored or used to resume a
 stream after process exit.
 
 The adapter converts only safe paths below the canonical source root into the
-existing watcher normalization. Top-level `.yeokcham` and `.git` paths do not
-schedule capture. A normal rename observation names only the path supplied by
-FSEvents; it may be displayed internally as a rename-triggered scan but never
-manufactures an old path or a move pair.
+existing watcher normalization. A precise top-level `.yeokcham` or `.git` path
+does not schedule capture. An event at the root or another ancestor is not
+treated as metadata even when it follows a metadata write: FSEvents has not
+proved that no source path changed, so it requests a whole-root scan. A normal
+rename observation names only the path supplied by FSEvents; it may be
+displayed internally as a rename-triggered scan but never manufactures an old
+path or a move pair.
 
 The following observations request a whole-root exact scan:
 
@@ -93,9 +96,9 @@ state.
 3. Coalescing, overflow, loss, root movement, and path ambiguity broaden to an
    exact whole-root scan; they never create guessed paths, moves, bytes, or
    history.
-4. A platform source excludes `.yeokcham` and `.git` as ordinary event
-   triggers, but a loss condition is never ignored merely because metadata may
-   have changed.
+4. A platform source excludes only precise `.yeokcham` and `.git` ordinary
+   event paths. A root, ancestor, coalesced, or loss signal is never ignored
+   merely because metadata may have changed.
 5. Source close is idempotent. A failed start, permanent root loss, or normal
    cleanup leaves no running stream, queue, file descriptor, process, or
    project-state write.
@@ -113,8 +116,9 @@ None. The adapter has no durable record and changes no canonical V4 bytes.
   rename source;
 - generated tests establishing that normalized safe path requests are
   duplicate-free and that every uncertainty event becomes a whole-root request;
-- macOS-only native tests for create, modify, delete, rename, metadata-only
-  activity, close, root loss, and a rapid rename storm;
+- macOS-only native tests for create, modify, delete, one-sided rename
+  observations, precise and ambiguous metadata activity, close, root loss, and
+  a rapid rename storm;
 - macOS-only CLI evidence that a debounced foreground watcher reaches the
   ordinary exact `save` path; and
 - existing Linux watcher tests plus a root-loss/restart test for the shared

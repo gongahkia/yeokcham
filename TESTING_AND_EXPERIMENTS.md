@@ -61,10 +61,27 @@ opam exec -- dune exec test/test_v4_watch.exe
 
 Pass requires the real inotify process loop to observe a file change, debounce,
 call V4 capture, and produce a new checkpoint. This one-host result does not
-establish macOS watcher support; WSL is unsupported, not planned, and supplies
-no future platform evidence. Record host,
-kernel, inotify limits,
-timing, and any leaked watcher process with future results.
+establish any other platform's watcher support. WSL is unsupported, not
+planned, and supplies no future platform evidence. Record host, kernel, inotify
+limits, timing, and any leaked watcher process with future results.
+
+The macOS FSEvents source and foreground watcher loop passed on macOS 15.7.7
+(24G720), x86_64, on the local APFS data volume on 2026-08-31. The focused
+native source suite (seven tests, 0.77 seconds) observed create, modify, delete,
+and one-sided rename notifications; it verified conservative coalescing/loss
+normalization, idempotent close, root-loss restart, and a 200-rename storm. A
+metadata write was also delivered as an ambiguous root/ancestor event on this
+host, so the adapter correctly widened it to an exact whole-root scan instead
+of claiming it was safe to ignore. The three-test foreground CLI loop took
+4.51 seconds and verified an exact post-debounce checkpoint, one recorded
+checkpoint for a rapid edit storm, and exit status 2 after permanent root loss.
+This is single-host adapter evidence only; it does not establish Linux,
+daemon, WSL, source-release, or release support. Re-run on a macOS host:
+
+```sh
+opam exec -- dune exec test/test_v4_macos_watcher.exe
+opam exec -- dune exec test/test_v4_watch.exe
+```
 
 The Linux background-runtime executable test passed on Linux
 7.1.9-100.fc43.x86_64 during the latest local suite. On a Linux host, rerun:

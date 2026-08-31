@@ -94,10 +94,12 @@ quiet period (or thirty-second sustained-write maximum) it calls the same exact
 root-watch notifications. An FSEvents rename is only a scan hint because it has
 no trustworthy old/new path pair. Coalescing requests a whole-root exact scan;
 dropped, wrapped, unmounted, or lost streams request a whole-root scan and then
-restart. `.git` and `.yeokcham` ordinary events do not schedule capture. A root
-that no longer exists fails plainly instead of retrying forever. Unsupported
-systems fail explicitly. The real platform watcher-loop tests are part of the
-active suite; evidence remains platform-specific in
+restart. Precise `.git` and `.yeokcham` ordinary paths do not schedule capture;
+an ambiguous root or ancestor event still requests a whole-root scan rather
+than assuming it was metadata. A root that no longer exists fails plainly
+instead of retrying forever. Unsupported systems fail explicitly. The real
+platform watcher-loop tests are part of the active suite; evidence remains
+platform-specific in
 `TESTING_AND_EXPERIMENTS.md`.
 
 `daemon start`, `status`, and `stop` provide that same capture behaviour with a

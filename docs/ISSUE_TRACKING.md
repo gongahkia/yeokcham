@@ -22,9 +22,11 @@ neither implementation nor release-gate evidence. #242 and #251 retain only
 their separate macOS evidence and watcher work.
 
 [#251](https://github.com/gongahkia/yeokcham/issues/251), macOS advisory
-capture, is the active platform-adapter slice. ADR-096 permits only a
-foreground FSEvents source that requests existing exact save; it neither adds a
-macOS daemon nor changes V4 model, authority, transport, or persistent bytes.
+capture, is complete. ADR-096 limits it to a foreground FSEvents source that
+requests existing exact save; it adds neither a macOS daemon nor a V4 model,
+authority, transport, or persistent-format change. Its real-host evidence is
+recorded separately in `TESTING_AND_EXPERIMENTS.md`; it does not establish
+Linux, daemon, WSL, or release support.
 
 [#246](https://github.com/gongahkia/yeokcham/issues/246), V4 signed relay
 transport, is complete and closed. ADR-085 records its package staging
