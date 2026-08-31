@@ -80,6 +80,18 @@ type decision_proposal = Yeokcham_v4_proposal.t
 (** Ephemeral, parser-free side information for one pair in an open decision. It
     is never a project-state, resolution, or delivery record. *)
 
+type semantic_advice =
+  | Semantic_not_configured
+  | Semantic_multiple_servers of string list
+  | Semantic_report of Yeokcham_v4_lsp_sidecar.report
+(** Session-local external-tool observations. They are not a semantic merge,
+    decision transition, or persistent sidecar. *)
+
+type inspected_decision_proposal = {
+  exact_proposal : decision_proposal;
+  semantic_advice : semantic_advice;
+}
+
 type materialized_proposal = {
   materialized_proposal : decision_proposal;
   proposal_directory : string;
@@ -547,6 +559,18 @@ val propose_decision :
 (** Recomputes one exact proposal from the current open decision. A returned
     proposal may be refused; refusal is inspectable side information, not an
     error or a durable rejection. *)
+
+val inspect_decision_proposal :
+  root:string ->
+  decision:Yeokcham_v4_model.Decision_id.t ->
+  left:Yeokcham_v4_model.Revision_id.t ->
+  right:Yeokcham_v4_model.Revision_id.t ->
+  semantic_server:string option ->
+  (inspected_decision_proposal, error) result
+(** Recomputes the ordinary byte-exact proposal and, only when exactly one
+    configured server matches or [semantic_server] explicitly selects one,
+    obtains a bounded session-local LSP report from disposable snapshots. A
+    missing, malformed, or failing server leaves the exact proposal usable. *)
 
 val materialize_decision_proposal :
   root:string ->

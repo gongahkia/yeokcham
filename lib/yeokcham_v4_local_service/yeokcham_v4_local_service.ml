@@ -10,6 +10,10 @@ module Proposal = Yeokcham_v4_proposal
 module Recovery = Yeokcham_v4_recovery
 module Receipt = Yeokcham_v4_receipt
 module Transport = Yeokcham_v4_transport
+module Semantic_config = Yeokcham_v4_semantic_config
+module Lsp_sidecar = Yeokcham_v4_lsp_sidecar
+
+[@@@warning "-40-42"]
 
 module Path_map = Map.Make (struct
   type t = string list
@@ -85,6 +89,16 @@ type materialized_candidate = {
 }
 
 type decision_proposal = Proposal.t
+
+type semantic_advice =
+  | Semantic_not_configured
+  | Semantic_multiple_servers of string list
+  | Semantic_report of Lsp_sidecar.report
+
+type inspected_decision_proposal = {
+  exact_proposal : decision_proposal;
+  semantic_advice : semantic_advice;
+}
 
 type materialized_proposal = {
   materialized_proposal : decision_proposal;
@@ -1863,6 +1877,87 @@ let propose_decision ~root ~decision ~left ~right =
   with_repository ~root (fun repository loaded ->
       prepare_decision_proposal repository loaded ~decision ~left ~right
       |> Result.map (fun prepared -> prepared.prepared_proposal))
+
+let changed_semantic_paths (proposal : Proposal.t) =
+  proposal.Proposal.paths
+  |> List.filter_map (fun path ->
+         if path.Proposal.base = path.Proposal.left
+            && path.Proposal.base = path.Proposal.right
+         then None
+         else Some (Model.Path.to_string path.Proposal.path))
+  |> List.sort_uniq String.compare
+
+let inspect_decision_proposal ~root ~decision ~left ~right ~semantic_server =
+  with_repository ~root (fun repository loaded ->
+      let* prepared = prepare_decision_proposal repository loaded ~decision ~left ~right in
+      let exact_proposal = prepared.prepared_proposal in
+      let unavailable reason =
+        Semantic_report
+          (Lsp_sidecar.Unavailable { server = "configuration"; reason })
+      in
+      let semantic_advice =
+        match Semantic_config.list ~root with
+        | Error error -> unavailable (Semantic_config.error_to_string error)
+        | Ok servers ->
+            let paths = changed_semantic_paths exact_proposal in
+            let matching =
+              List.filter
+                (fun (server : Semantic_config.server) ->
+                  server.enabled
+                  && List.exists (Semantic_config.matches_path server) paths)
+                servers
+            in
+            let selected =
+              match semantic_server with
+              | None -> (
+                  match matching with
+                  | [] -> `No_server
+                  | [ server ] -> `Server server
+                  | servers ->
+                      `Several
+                        (List.map
+                           (fun (server : Semantic_config.server) -> server.name)
+                           servers))
+              | Some name -> (
+                  match
+                    List.find_opt
+                      (fun (server : Semantic_config.server) ->
+                        String.equal server.name name)
+                      servers
+                  with
+                  | None -> `Unavailable ("unknown semantic server: " ^ name)
+                  | Some server when not server.enabled -> `Unavailable ("semantic server is disabled: " ^ name)
+                  | Some server -> `Server server)
+            in
+            match selected with
+            | `No_server -> Semantic_not_configured
+            | `Several names -> Semantic_multiple_servers names
+            | `Unavailable reason -> unavailable reason
+            | `Server server ->
+                let store = Store.underlying_store repository in
+                let provenance = exact_proposal.Proposal.provenance in
+                let report =
+                  match
+                    ( load_snapshot store provenance.left_base,
+                      load_snapshot store provenance.left_result,
+                      load_snapshot store provenance.right_result )
+                  with
+                  | Ok base, Ok left, Ok right ->
+                      Lsp_sidecar.inspect ~store ~server
+                        ~base:(Model.Snapshot_id.to_string provenance.left_base, base)
+                        ~left:(Model.Snapshot_id.to_string provenance.left_result, left)
+                        ~right:(Model.Snapshot_id.to_string provenance.right_result, right)
+                        ~paths
+                  | Error error, _, _ | _, Error error, _ | _, _, Error error ->
+                      Lsp_sidecar.Unavailable
+                        {
+                          server = server.name;
+                          reason = "cannot load named snapshot: " ^ error_to_string error;
+                        }
+                in
+                Semantic_report report
+      in
+      Ok { exact_proposal; semantic_advice })
 
 type selected_tree_entry =
   | Selected_file of Snapshot.file_mode * Snapshot.Content.id

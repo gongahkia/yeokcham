@@ -6,6 +6,9 @@ depends: [
   "mirage-crypto-ec" {= "2.2.0"}
   "mirage-crypto-rng" {= "2.2.0"}
   "inotify" {= "2.6" & os = "linux"}
+  "lsp" {= "1.27.0"}
+  "jsonrpc" {= "1.27.0"}
+  "re" {= "1.14.0"}
   "alcotest" {= "1.9.1" & with-test}
   "qcheck-core" {= "0.91" & with-test}
   "qcheck-alcotest" {= "0.91" & with-test}
