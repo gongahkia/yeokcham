@@ -291,6 +291,6 @@ No state transition mutates the only copy in place.
 There is no general clone protocol, automatic or relay GC, durable command metadata, Git bridge
 or interchange, in-process semantic parser or merge,
 end-to-end payload encryption, external relay identity or proof-of-possession,
-macOS watcher, WSL support, or CI-backed
+macOS watcher, WSL support (which is not planned), or CI-backed
 delivery. These are separate design work and must reuse the current model and
 receipt boundaries when introduced.

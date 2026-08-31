@@ -45,6 +45,9 @@ The active V4 decisions are:
   maintainer/consumer verification of a signed source tag, exact commit,
   expected OpenPGP fingerprint, and source-archive digest, outside V4 trust
   and history.
+- [ADR-096](docs/adr/096-v4-macos-advisory-watcher.md): foreground macOS
+  FSEvents capture requests the existing exact save path; it remains advisory,
+  non-persistent, and separate from the Linux-only daemon.
 
 Earlier product-track ADRs have been removed with their implementations. Git
 history retains their historical record; they are not active architecture.

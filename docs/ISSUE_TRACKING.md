@@ -9,16 +9,22 @@ documentation from `main`; historical evidence remains in Git history. Issues
 [#244](https://github.com/gongahkia/yeokcham/issues/244) remain open
 release/distribution work. V4-only cutover does not satisfy their field-trial
 or opam-publication criteria, so do not close them as a retirement side effect.
-Their retired command references need explicit future re-scoping before that
-work begins.
+Their live bodies have been re-scoped to current V4 commands: #242 is macOS
+source-release field evidence and #244 is source-only opam publication.
 
 [#250](https://github.com/gongahkia/yeokcham/issues/250), Git interchange,
 [#249](https://github.com/gongahkia/yeokcham/issues/249), durable command
 metadata, and [#253](https://github.com/gongahkia/yeokcham/issues/253), CI
 attestations, are closed as not planned. V4 does not import from, export to, or
 present itself as compatible with Git; it retains no persistent command diary;
-and CI does not enter the V4 model. WSL is not a supported V4 platform; #242
-and #251 retain only their separate macOS evidence and watcher work.
+and CI does not enter the V4 model. WSL is unsupported and not planned; it is
+neither implementation nor release-gate evidence. #242 and #251 retain only
+their separate macOS evidence and watcher work.
+
+[#251](https://github.com/gongahkia/yeokcham/issues/251), macOS advisory
+capture, is the active platform-adapter slice. ADR-096 permits only a
+foreground FSEvents source that requests existing exact save; it neither adds a
+macOS daemon nor changes V4 model, authority, transport, or persistent bytes.
 
 [#246](https://github.com/gongahkia/yeokcham/issues/246), V4 signed relay
 transport, is complete and closed. ADR-085 records its package staging

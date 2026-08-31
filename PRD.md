@@ -1,6 +1,6 @@
 # Product requirements
 
-## Current milestone: V4 verified receipt, explicit relay bootstrap, advisory runtime, durable restore proofs, local recoverable collection, exact decision-proposal assistance, optional external-LSP observations, and explicit local device custody
+## Current milestone: V4 verified receipt, explicit relay bootstrap, advisory runtime, durable restore proofs, local recoverable collection, exact decision-proposal assistance, optional external-LSP observations, explicit local device custody, and macOS advisory watch capture
 
 V4 serves one developer and small, explicitly trusted teams. Its required
 vertical slices are complete only when their model transition, durable format,
@@ -72,12 +72,16 @@ failure behaviour, and CLI surface agree.
     review evidence only: they cannot become canonical source, select a
     candidate, resolve a decision, write a worktree, or enter V4 state,
     package, relay, bootstrap, authority, or delivery data.
+19. On macOS, provide a foreground FSEvents watcher that only requests the
+    existing debounced exact-save path. Coalescing, loss, and overflow require
+    exact scanning; no observation is canonical history, intent, or a daemon
+    trigger.
 
 ### Explicit non-goals
 
 No general clone, Git bridge or interchange, in-process semantic parser or
 merge, automatic or remote GC,
-durable command metadata, macOS watcher, WSL support, or CI-backed delivery exists in this
+durable command metadata, WSL support (which is not planned), or CI-backed delivery exists in this
 milestone. The bundled relay is an untrusted byte courier behind an
 operator-managed HTTPS reverse proxy; it is not hosted authority or end-to-end
 encrypted transport. No online coordinator, quorum, or witness service can

@@ -10,7 +10,8 @@
 
 Command `save` already exists, but status did not warn about a dirty tree, and
 there was no Linux loop that called that save path after quiet filesystem
-activity. macOS watchers are out of scope and WSL is unsupported.
+activity. macOS watchers are out of scope and WSL is unsupported and not
+planned.
 
 ## Decision drivers
 
@@ -26,7 +27,7 @@ activity. macOS watchers are out of scope and WSL is unsupported.
 ### Platform-specific capture daemons
 
 Rejected for this slice. They import prior product behaviour and macOS watcher
-work the contract excludes; WSL is unsupported.
+work the contract excludes; WSL is unsupported and not planned.
 
 ### Status warning plus Linux `watch` calling `save`
 

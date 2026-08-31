@@ -157,7 +157,7 @@ reports upload failures as pending retry work.
 
 Linux `watch` and `daemon` are implemented as advisory capture after debounce.
 `daemon` is Linux-only and requires a private `XDG_RUNTIME_DIR`; macOS watchers
-and runtimes are not implemented, and WSL is not a supported platform. Relay synchronization is available only for already-equivalent
+and runtimes are not implemented, and WSL is unsupported and not planned. Relay synchronization is available only for already-equivalent
 replicas through an operator-managed HTTPS reverse proxy. A new replica instead
 needs an explicit immutable bootstrap basis ID, public repository ID, enrolled
 local device, and independently compared root phrase; it starts with fresh

@@ -61,7 +61,8 @@ opam exec -- dune exec test/test_v4_watch.exe
 
 Pass requires the real inotify process loop to observe a file change, debounce,
 call V4 capture, and produce a new checkpoint. This one-host result does not
-establish macOS watcher support; WSL is not a supported platform. Record host,
+establish macOS watcher support; WSL is unsupported, not planned, and supplies
+no future platform evidence. Record host,
 kernel, inotify limits,
 timing, and any leaked watcher process with future results.
 

@@ -117,17 +117,19 @@ Do not mix model changes with unrelated CLI redesign.
 ## Suggested initial commands
 
 ```bash
-yeokcham init
-yeokcham scan
+yeokcham init --username alice --draft first-task --title "first task"
+yeokcham status
+yeokcham save
 yeokcham timeline
-yeokcham restore <checkpoint>
-yeokcham pin <checkpoint>
+yeokcham restore --checkpoint CHECKPOINT
+yeokcham pin --checkpoint CHECKPOINT
 yeokcham compact --dry-run --explain
-yeokcham verify
-yeokcham storage stats
+yeokcham storage roots
 ```
 
-Capsule commands come after scratch compaction is correct.
+V4 has no capsule commands, generic scan command, repository `verify` command,
+or storage-stats command. Use the explicit V4 surfaces above; source-release
+verification is the separate `make release-verify` tool.
 
 ## First vertical slice
 
