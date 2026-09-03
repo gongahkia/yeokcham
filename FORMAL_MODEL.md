@@ -103,6 +103,14 @@ rejected. Only the mutable
 
 ## External semantic observations
 
+`changes` is likewise an adapter observation, not a `Project` transition. It
+forms `Observe_working_tree(saved_checkpoint, current_exact_scan) ->
+working_tree_comparison`, whose differences are complete before/after exact
+entries in canonical path order. The scanner may add unreferenced immutable
+objects just as `status` does, but this observation has no edge to `save`,
+`share`, `resolve`, `deliver`, authority, package, relay, or source
+materialisation. An empty comparison is an explicit observation, not intent.
+
 An LSP observation is neither `Project` state nor a transition. A local
 `semantic-lsp-v1` configuration selects an optional external executable, but
 that configuration and every response are outside the model, signed bytes,

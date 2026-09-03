@@ -48,6 +48,9 @@ The active V4 decisions are:
 - [ADR-096](docs/adr/096-v4-macos-advisory-watcher.md): foreground macOS
   FSEvents capture requests the existing exact save path; it remains advisory,
   non-persistent, and separate from the Linux-only daemon.
+- [ADR-097](docs/adr/097-v4-exact-working-tree-inspection.md): exact local
+  current-versus-saved inspection that observes paths and snapshot entries
+  without creating intent or a generic verification surface.
 
 Earlier product-track ADRs have been removed with their implementations. Git
 history retains their historical record; they are not active architecture.

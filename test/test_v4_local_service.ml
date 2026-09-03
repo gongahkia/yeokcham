@@ -96,6 +96,10 @@ let initialize root =
     ~title:"first work"
   |> require_ok Service.error_to_string
 
+let working_tree_differences (comparison : Service.working_tree_comparison) =
+  comparison.Service.differences
+[@@warning "-42"]
+
 let init_captures_the_initial_tree_and_save_observes_no_change () =
   with_directory "yeokcham-v4-service-init-" (fun root ->
       write_file root "main.ml" "let version = 1\n";
@@ -163,6 +167,119 @@ let status_warns_about_uncaptured_edits () =
       let status = Service.status ~root |> require_ok Service.error_to_string in
       Alcotest.(check bool)
         "save clears the uncaptured warning" false status.Service.uncaptured)
+
+let working_tree_inspection_reports_exact_stable_entries_without_state_change ()
+    =
+  let open Service in
+  with_directory "yeokcham-v4-service-changes-" (fun root ->
+      write_file root "main.ml" "let version = 1\n";
+      write_file root "mode.sh" "#!/bin/sh\necho unchanged\n";
+      write_file root "removed.txt" "remove me\n";
+      ignore (initialize root);
+      let before =
+        Service.inspection_state ~root |> require_ok Service.error_to_string
+      in
+      write_file root "main.ml" "let version = 2\n";
+      Unix.chmod (Filename.concat root "mode.sh") 0o755;
+      Unix.unlink (Filename.concat root "removed.txt");
+      let created = Filename.concat root "created" in
+      Unix.mkdir created 0o700;
+      write_file root "created/nested.txt" "new file\n";
+      let comparison : Service.working_tree_comparison =
+        Service.inspect_working_tree ~root |> require_ok Service.error_to_string
+      in
+      let differences = working_tree_differences comparison in
+      Alcotest.(check (list string))
+        "differences are stable canonical path order"
+        [ "created"; "created/nested.txt"; "main.ml"; "mode.sh"; "removed.txt" ]
+        (List.map
+           (fun (difference : Service.path_difference) ->
+             Model.Path.to_string difference.path)
+           differences);
+      let difference path : Service.path_difference =
+        differences
+        |> List.find (fun (difference : Service.path_difference) ->
+            String.equal path (Model.Path.to_string difference.path))
+      in
+      let entry name = function
+        | Some value -> value
+        | None -> Alcotest.fail (name ^ " was unexpectedly absent")
+      in
+      let created = difference "created" in
+      Alcotest.(check bool)
+        "directory is created" true
+        (Option.is_none created.before);
+      let created = entry "created directory" created.after in
+      Alcotest.(check bool)
+        "created entry is a directory" true
+        (created.kind = Service.Directory);
+      Alcotest.(check bool)
+        "directory has no mode" true
+        (Option.is_none created.mode);
+      Alcotest.(check bool)
+        "directory has no content object" true
+        (Option.is_none created.content);
+      let nested = difference "created/nested.txt" in
+      Alcotest.(check bool)
+        "nested file is created" true
+        (Option.is_none nested.before);
+      let nested = entry "nested file" nested.after in
+      Alcotest.(check bool)
+        "nested entry is a file" true
+        (nested.kind = Service.File);
+      Alcotest.(check bool)
+        "nested file has regular mode" true
+        (nested.mode = Some Yeokcham_snapshot.Regular);
+      Alcotest.(check bool)
+        "nested file has a content object" true
+        (Option.is_some nested.content);
+      let main = difference "main.ml" in
+      let main_before = entry "main before entry" main.before in
+      let main_after = entry "main after entry" main.after in
+      Alcotest.(check bool)
+        "content change has distinct object identities" true
+        (main_before.content <> main_after.content);
+      let mode = difference "mode.sh" in
+      let mode_before = entry "mode before entry" mode.before in
+      let mode_after = entry "mode after entry" mode.after in
+      Alcotest.(check bool)
+        "mode change remains a file" true
+        (mode_before.kind = Service.File && mode_after.kind = Service.File);
+      Alcotest.(check bool)
+        "mode before is regular" true
+        (mode_before.mode = Some Yeokcham_snapshot.Regular);
+      Alcotest.(check bool)
+        "mode after is executable" true
+        (mode_after.mode = Some Yeokcham_snapshot.Executable);
+      Alcotest.(check bool)
+        "mode change keeps its content identity" true
+        (mode_before.content = mode_after.content);
+      let removed = difference "removed.txt" in
+      let removed_before = entry "removed before entry" removed.before in
+      Alcotest.(check bool)
+        "deleted entry was a file" true
+        (removed_before.kind = Service.File);
+      Alcotest.(check bool)
+        "deleted entry is absent after scan" true
+        (Option.is_none removed.after);
+      let after =
+        Service.inspection_state ~root |> require_ok Service.error_to_string
+      in
+      Alcotest.(check bool)
+        "inspection does not advance the project state" true
+        (Model.export before.Service.inspection_project
+        = Model.export after.Service.inspection_project);
+      Alcotest.(check string)
+        "inspection does not rewrite working-tree bytes" "let version = 2\n"
+        (read_file root "main.ml");
+      ignore (Service.save ~root |> require_ok Service.error_to_string);
+      let unchanged : Service.working_tree_comparison =
+        Service.inspect_working_tree ~root |> require_ok Service.error_to_string
+      in
+      let unchanged_differences = working_tree_differences unchanged in
+      Alcotest.(check int)
+        "unchanged is an explicit empty comparison" 0
+        (List.length unchanged_differences))
 
 let compact_drops_extra_saves_and_keeps_a_pin () =
   with_directory "yeokcham-v4-service-compact-" (fun root ->
@@ -2278,6 +2395,9 @@ let () =
             changed_save_creates_a_new_checkpoint;
           Alcotest.test_case "status warns about uncaptured edits" `Quick
             status_warns_about_uncaptured_edits;
+          Alcotest.test_case
+            "working-tree inspection is exact and leaves state unchanged" `Quick
+            working_tree_inspection_reports_exact_stable_entries_without_state_change;
           Alcotest.test_case "compact keeps pins and drops extra saves" `Quick
             compact_drops_extra_saves_and_keeps_a_pin;
           Alcotest.test_case "capture window uses quiet and max delay" `Quick

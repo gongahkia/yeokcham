@@ -24,101 +24,525 @@ let fail message =
   prerr_endline message;
   exit 2
 
-let usage () =
-  fail
-    "usage:\n\
-    \  yeokcham init [--root PATH] --username NAME --draft ID --title TITLE\n\
-    \  yeokcham join [--root PATH] --username NAME --draft ID --title TITLE \\\n\
-    \     --device ID --from PATH --verify-phrase \"TWELVE WORDS\"\n\
-    \  yeokcham save [--root PATH]\n\
-    \  yeokcham status [--root PATH]\n\
-    \  yeokcham log [--root PATH]\n\
-    \  yeokcham graph [--root PATH] [--authority]\n\
-    \  yeokcham daemon start [--root PATH]\n\
-    \  yeokcham daemon status [--root PATH]\n\
-    \  yeokcham daemon stop [--root PATH]\n\
-    \  yeokcham daemon sync [--root PATH] REMOTE\n\
-    \  yeokcham device create [--provider native]\n\
-    \  yeokcham device create --provider pkcs11 --root PATH --module PATH \\\n\
-    \     --token-label LABEL --key-label LABEL --key-id HEX\n\
-    \  yeokcham device attach --root PATH --provider ssh-agent --public-key FILE\n\
-    \  yeokcham device attach --root PATH --provider pkcs11 --module PATH \\\n\
-    \     --token-label LABEL --key-id HEX --public-key HEX\n\
-    \  yeokcham device custody [--root PATH] --device ID\n\
-    \  yeokcham device show [--root PATH]\n\
-    \  yeokcham device enroll [--root PATH] --device ID --public-key HEX \
-     --username NAME [--administrator] [--parent EPOCH]\n\
-    \  yeokcham device revoke [--root PATH] --device ID [--parent EPOCH]\n\
-    \  yeokcham device rotate [--root PATH] --device ID --public-key HEX \
-     [--parent EPOCH]\n\
-    \  yeokcham authority heads [--root PATH]\n\
-    \  yeokcham authority reconcile [--root PATH] --parents EPOCH,EPOCH[,EPOCH]\n\
-    \  yeokcham recovery use [--root PATH] --package PATH --mnemonic \"TWENTY \
-     FOUR WORDS\" --replacement ID --replaced ID --output PATH\n\
-    \  yeokcham recovery refresh [--root PATH] --package PATH --mnemonic \
-     \"TWENTY FOUR WORDS\" --output PATH\n\
-    \  yeokcham user register [--root PATH] --device ID --username NAME\n\
-    \  yeokcham timeline [--root PATH]\n\
-    \  yeokcham restore [--root PATH] --checkpoint ID [--destination PATH]\n\
-    \  yeokcham restore proofs [--root PATH]\n\
-    \  yeokcham restore retain [--root PATH] --operation ID\n\
-    \  yeokcham restore forget [--root PATH] --operation ID\n\
-    \  yeokcham draft new [--root PATH] --id ID --title TITLE\n\
-    \  yeokcham share [--root PATH] --change ID --revision ID [--authority \
-     EPOCH]\n\
-    \  yeokcham withdraw [--root PATH] --change ID\n\
-    \  yeokcham resolve [--root PATH] --decision ID --change ID --revision ID \
-     [--tree PATH] [--authority EPOCH]\n\
-    \  yeokcham decision show [--root PATH] --decision ID\n\
-    \  yeokcham decision inspect [--root PATH] --decision ID\n\
-    \  yeokcham decision diff [--root PATH] --decision ID --candidate REV \
-     [--against base|REV]\n\
-    \  yeokcham decision propose [--root PATH] --decision ID [--left REV \
-     --right REV] [--semantic-server NAME]\n\
-    \  yeokcham decision materialize-proposal [--root PATH] --decision ID \
-     --left REV --right REV --destination PATH\n\
-    \  yeokcham decision materialize [--root PATH] --decision ID --destination \
-     PATH\n\
-    \  yeokcham package create [--root PATH] --destination PATH\n\
-    \  yeokcham package adopt [--root PATH] --from PATH --revision ID \
-     [--authority EPOCH]\n\
-    \  yeokcham receive [--root PATH] --from PATH [--review]\n\
-    \  yeokcham bootstrap publish [--root PATH] REMOTE\n\
-    \  yeokcham bootstrap [--root PATH] --remote NAME --url HTTPS_URL \
-     --repository ID --basis ID --username NAME --draft ID --title TITLE \
-     --device ID --verify-phrase \"TWELVE WORDS\"\n\
-    \  receipt rule: receive, sync, and bootstrap never scan or materialize\n\
-    \     the working tree; restore is explicit\n\
-    \  yeokcham remote add [--root PATH] NAME URL\n\
-    \  yeokcham remote remove [--root PATH] NAME\n\
-    \  yeokcham remote login [--root PATH] NAME\n\
-    \  yeokcham semantic server add [--root PATH] NAME --program ABS_PATH \
-     [--arg VALUE]... [--match extensions|path-globs|all-files] [--extension \
-     EXT]... [--glob PATTERN]... [--overlap \
-     same-symbol|nearby-ranges|references]\n\
-    \  yeokcham semantic server list [--root PATH]\n\
-    \  yeokcham semantic server configure [--root PATH] NAME --match \
-     extensions|path-globs|all-files [--extension EXT]... [--glob PATTERN]... \
-     --overlap same-symbol|nearby-ranges|references\n\
-    \  yeokcham semantic server enable|disable|remove [--root PATH] NAME\n\
-    \  yeokcham sync [--root PATH] NAME\n\
-    \  yeokcham relay serve --storage PATH --listen ADDRESS:PORT\n\
-    \  yeokcham relay access issue --storage PATH --repository ID --scope \
-     read,write [--expires-in SECONDS]\n\
-    \  yeokcham relay access rotate --storage PATH --id ID [--expires-in \
-     SECONDS]\n\
-    \  yeokcham relay access revoke --storage PATH --id ID\n\
-    \  yeokcham relay access list --storage PATH [--repository ID]\n\
-    \  yeokcham deliver [--root PATH] --id ID --draft ID --title TITLE\n\
-    \  yeokcham pin [--root PATH] --checkpoint ID\n\
-    \  yeokcham unpin [--root PATH] --checkpoint ID\n\
-    \  yeokcham compact [--root PATH] [--keep N] [--dry-run] [--explain]\n\
-    \  yeokcham storage roots [--root PATH]\n\
-    \  yeokcham storage gc [--root PATH] [--dry-run] [--explain]\n\
-    \  yeokcham storage gc --root PATH --apply\n\
-    \  yeokcham storage gc status [--root PATH]\n\
-    \  yeokcham storage gc resume|restore|purge [--root PATH] --id ID\n\
-    \  yeokcham watch [--root PATH]"
+let usage_text =
+  "usage:\n\
+  \  yeokcham init [--root PATH] --username NAME --draft ID --title TITLE\n\
+  \  yeokcham join [--root PATH] --username NAME --draft ID --title TITLE \\\n\
+  \     --device ID --from PATH --verify-phrase \"TWELVE WORDS\"\n\
+  \  yeokcham save [--root PATH]\n\
+  \  yeokcham status [--root PATH]\n\
+  \  yeokcham changes [--root PATH]\n\
+  \  yeokcham log [--root PATH]\n\
+  \  yeokcham graph [--root PATH] [--authority]\n\
+  \  yeokcham daemon start [--root PATH]\n\
+  \  yeokcham daemon status [--root PATH]\n\
+  \  yeokcham daemon stop [--root PATH]\n\
+  \  yeokcham daemon sync [--root PATH] REMOTE\n\
+  \  yeokcham device create [--provider native]\n\
+  \  yeokcham device create --provider pkcs11 --root PATH --module PATH \\\n\
+  \     --token-label LABEL --key-label LABEL --key-id HEX\n\
+  \  yeokcham device attach --root PATH --provider ssh-agent --public-key FILE\n\
+  \  yeokcham device attach --root PATH --provider pkcs11 --module PATH \\\n\
+  \     --token-label LABEL --key-id HEX --public-key HEX\n\
+  \  yeokcham device custody [--root PATH] --device ID\n\
+  \  yeokcham device show [--root PATH]\n\
+  \  yeokcham device enroll [--root PATH] --device ID --public-key HEX \
+   --username NAME [--administrator] [--parent EPOCH]\n\
+  \  yeokcham device revoke [--root PATH] --device ID [--parent EPOCH]\n\
+  \  yeokcham device rotate [--root PATH] --device ID --public-key HEX \
+   [--parent EPOCH]\n\
+  \  yeokcham authority heads [--root PATH]\n\
+  \  yeokcham authority reconcile [--root PATH] --parents EPOCH,EPOCH[,EPOCH]\n\
+  \  yeokcham recovery use [--root PATH] --package PATH --mnemonic \"TWENTY \
+   FOUR WORDS\" --replacement ID --replaced ID --output PATH\n\
+  \  yeokcham recovery refresh [--root PATH] --package PATH --mnemonic \
+   \"TWENTY FOUR WORDS\" --output PATH\n\
+  \  yeokcham user register [--root PATH] --device ID --username NAME\n\
+  \  yeokcham timeline [--root PATH]\n\
+  \  yeokcham restore [--root PATH] --checkpoint ID [--destination PATH]\n\
+  \  yeokcham restore proofs [--root PATH]\n\
+  \  yeokcham restore retain [--root PATH] --operation ID\n\
+  \  yeokcham restore forget [--root PATH] --operation ID\n\
+  \  yeokcham draft new [--root PATH] --id ID --title TITLE\n\
+  \  yeokcham share [--root PATH] --change ID --revision ID [--authority EPOCH]\n\
+  \  yeokcham withdraw [--root PATH] --change ID\n\
+  \  yeokcham resolve [--root PATH] --decision ID --change ID --revision ID \
+   [--tree PATH] [--authority EPOCH]\n\
+  \  yeokcham decision show [--root PATH] --decision ID\n\
+  \  yeokcham decision inspect [--root PATH] --decision ID\n\
+  \  yeokcham decision diff [--root PATH] --decision ID --candidate REV \
+   [--against base|REV]\n\
+  \  yeokcham decision propose [--root PATH] --decision ID [--left REV --right \
+   REV] [--semantic-server NAME]\n\
+  \  yeokcham decision materialize-proposal [--root PATH] --decision ID --left \
+   REV --right REV --destination PATH\n\
+  \  yeokcham decision materialize [--root PATH] --decision ID --destination \
+   PATH\n\
+  \  yeokcham package create [--root PATH] --destination PATH\n\
+  \  yeokcham package adopt [--root PATH] --from PATH --revision ID \
+   [--authority EPOCH]\n\
+  \  yeokcham receive [--root PATH] --from PATH [--review]\n\
+  \  yeokcham bootstrap publish [--root PATH] REMOTE\n\
+  \  yeokcham bootstrap [--root PATH] --remote NAME --url HTTPS_URL \
+   --repository ID --basis ID --username NAME --draft ID --title TITLE \
+   --device ID --verify-phrase \"TWELVE WORDS\"\n\
+  \  receipt rule: receive, sync, and bootstrap never scan or materialize\n\
+  \     the working tree; restore is explicit\n\
+  \  yeokcham remote add [--root PATH] NAME URL\n\
+  \  yeokcham remote remove [--root PATH] NAME\n\
+  \  yeokcham remote login [--root PATH] NAME\n\
+  \  yeokcham semantic server add [--root PATH] NAME --program ABS_PATH [--arg \
+   VALUE]... [--match extensions|path-globs|all-files] [--extension EXT]... \
+   [--glob PATTERN]... [--overlap same-symbol|nearby-ranges|references]\n\
+  \  yeokcham semantic server list [--root PATH]\n\
+  \  yeokcham semantic server configure [--root PATH] NAME --match \
+   extensions|path-globs|all-files [--extension EXT]... [--glob PATTERN]... \
+   --overlap same-symbol|nearby-ranges|references\n\
+  \  yeokcham semantic server enable|disable|remove [--root PATH] NAME\n\
+  \  yeokcham sync [--root PATH] NAME\n\
+  \  yeokcham relay serve --storage PATH --listen ADDRESS:PORT\n\
+  \  yeokcham relay access issue --storage PATH --repository ID --scope \
+   read,write [--expires-in SECONDS]\n\
+  \  yeokcham relay access rotate --storage PATH --id ID [--expires-in SECONDS]\n\
+  \  yeokcham relay access revoke --storage PATH --id ID\n\
+  \  yeokcham relay access list --storage PATH [--repository ID]\n\
+  \  yeokcham deliver [--root PATH] --id ID --draft ID --title TITLE\n\
+  \  yeokcham pin [--root PATH] --checkpoint ID\n\
+  \  yeokcham unpin [--root PATH] --checkpoint ID\n\
+  \  yeokcham compact [--root PATH] [--keep N] [--dry-run] [--explain]\n\
+  \  yeokcham storage roots [--root PATH]\n\
+  \  yeokcham storage gc [--root PATH] [--dry-run] [--explain]\n\
+  \  yeokcham storage gc --root PATH --apply\n\
+  \  yeokcham storage gc status [--root PATH]\n\
+  \  yeokcham storage gc resume|restore|purge [--root PATH] --id ID\n\
+  \  yeokcham watch [--root PATH]"
+
+let usage () = fail usage_text
+let version_text = "yeokcham V4 source build (unreleased)"
+
+let help_for = function
+  | [] ->
+      Some
+        ("Yeokcham is an experimental, local-first V4 VCS. It keeps local "
+       ^ "checkpoints, explicit shared revisions, unresolved decisions, and "
+       ^ "deliveries distinct.\n\n"
+       ^ "Start with a source build, then read docs/GETTING_STARTED.md. "
+       ^ "There is no published release, Git interchange, or general clone.\n\n"
+       ^ "Use `yeokcham help COMMAND` or `yeokcham COMMAND --help` for one "
+       ^ "supported command. Invalid invocations exit with an error.\n\n"
+       ^ usage_text)
+  | [ "init" ] ->
+      Some
+        "usage: yeokcham init [--root PATH] --username NAME --draft ID --title \
+         TITLE\n\n\
+         Create a new V4 repository and initial local checkpoint. It prints \
+         one public root-verification phrase and one recovery mnemonic; record \
+         the mnemonic offline."
+  | [ "join" ] ->
+      Some
+        "usage: yeokcham join [--root PATH] --username NAME --draft ID --title \
+         TITLE --device ID --from PACKAGE --verify-phrase \"TWELVE WORDS\"\n\n\
+         Initialise an already-enrolled local device after exact package \
+         authority verification and independent phrase comparison. Join \
+         neither imports package objects nor materialises source; run receive \
+         separately."
+  | [ "save" ] ->
+      Some
+        "usage: yeokcham save [--root PATH]\n\n\
+         Create a local checkpoint only if the exact working tree changed. A \
+         save is recovery, not shared intent."
+  | [ "status" ] ->
+      Some
+        "usage: yeokcham status [--root PATH]\n\n\
+         Show local draft and collaboration status plus whether one exact scan \
+         differs from the latest saved checkpoint."
+  | [ "changes" ] ->
+      Some
+        "usage: yeokcham changes [--root PATH]\n\n\
+         Compare the exact current working tree with the active draft's latest \
+         saved checkpoint. It lists stable-order paths with missing, \
+         directory, or file mode/content entries; it never saves, shares, or \
+         writes source. Like status, it can store unreferenced immutable scan \
+         objects."
+  | [ "log" ] ->
+      Some
+        "usage: yeokcham log [--root PATH]\n\n\
+         Render persisted shared revisions, decisions, resolutions, \
+         deliveries, and deferred review references. It does not scan the \
+         working tree or contact a relay."
+  | [ "graph" ] ->
+      Some
+        "usage: yeokcham graph [--root PATH] [--authority]\n\n\
+         Render the persisted work graph, or the separate authority-epoch DAG \
+         with --authority. It never infers policy from concurrent heads."
+  | [ "timeline" ] ->
+      Some
+        "usage: yeokcham timeline [--root PATH]\n\n\
+         List local checkpoints for recovery and their exact snapshot IDs."
+  | [ "restore" ] ->
+      Some
+        "usage: yeokcham restore [--root PATH] --checkpoint ID [--destination \
+         PATH]\n\
+        \       yeokcham restore proofs|retain|forget ...\n\n\
+         Materialise one named checkpoint. With --destination, the destination \
+         must be empty and the live tree is untouched. Without it, restore is \
+         in-place and creates a durable local safety/target proof."
+  | [ "restore"; "proofs" ] ->
+      Some
+        "usage: yeokcham restore proofs [--root PATH]\n\n\
+         List durable local safety/target proofs retained after in-place \
+         restore."
+  | [ "restore"; "retain" ] ->
+      Some
+        "usage: yeokcham restore retain [--root PATH] --operation ID\n\n\
+         Create a durable proof for an eligible legacy completed restore \
+         journal."
+  | [ "restore"; "forget" ] ->
+      Some
+        "usage: yeokcham restore forget [--root PATH] --operation ID\n\n\
+         Explicitly remove one durable local restore proof."
+  | [ "draft" ] ->
+      Some
+        "usage: yeokcham draft new [--root PATH] --id ID --title TITLE\n\n\
+         Start a new local draft. Drafts are local scratch lines, not shared \
+         branches."
+  | [ "draft"; "new" ] ->
+      Some
+        "usage: yeokcham draft new [--root PATH] --id ID --title TITLE\n\n\
+         Start a new local draft from the current local recovery state."
+  | [ "share" ] ->
+      Some
+        "usage: yeokcham share [--root PATH] --change ID --revision ID \
+         [--authority EPOCH]\n\n\
+         Explicitly sign and share the active draft delta as a revision. An \
+         authority fork requires --authority."
+  | [ "withdraw" ] ->
+      Some
+        "usage: yeokcham withdraw [--root PATH] --change ID\n\n\
+         Withdraw an eligible local shared change through the V4 model."
+  | [ "resolve" ] ->
+      Some
+        "usage: yeokcham resolve [--root PATH] --decision ID --change ID \
+         --revision ID [--tree PATH] [--authority EPOCH]\n\n\
+         Explicitly resolve one decision; it does not infer or automatically \
+         merge a conflict."
+  | [ "decision" ] ->
+      Some
+        "usage: yeokcham decision \
+         show|inspect|diff|propose|materialize-proposal|materialize ...\n\n\
+         Inspect unresolved composition explicitly. Proposals and optional LSP \
+         advice are not decisions or persistent acceptance."
+  | [ "decision"; "show" ] | [ "decision"; "inspect" ] ->
+      Some
+        "usage: yeokcham decision show|inspect [--root PATH] --decision ID\n\n\
+         Show one unresolved decision and its candidate revisions."
+  | [ "decision"; "diff" ] ->
+      Some
+        "usage: yeokcham decision diff [--root PATH] --decision ID --candidate \
+         REV --against base|REV\n\n\
+         Compare named decision snapshots by exact paths and entries, without \
+         text diff or mutation."
+  | [ "decision"; "propose" ] ->
+      Some
+        "usage: yeokcham decision propose [--root PATH] --decision ID [--left \
+         REV --right REV] [--semantic-server NAME]\n\n\
+         Produce a byte-exact proposal. A configured external LSP can provide \
+         disposable advisory observations only."
+  | [ "decision"; "materialize-proposal" ] ->
+      Some
+        "usage: yeokcham decision materialize-proposal [--root PATH] \
+         --decision ID --left REV --right REV --destination PATH\n\n\
+         Write a ready exact proposal only to an empty directory outside the \
+         working tree; it remains unaccepted."
+  | [ "decision"; "materialize" ] ->
+      Some
+        "usage: yeokcham decision materialize [--root PATH] --decision ID \
+         --destination PATH\n\n\
+         Materialise candidate trees under an isolated destination for \
+         inspection."
+  | [ "package" ] ->
+      Some
+        "usage: yeokcham package create|adopt ...\n\n\
+         Create an offline public package or explicitly adopt one reviewed \
+         late revision. Packages do not carry private keys or mutable state."
+  | [ "package"; "create" ] ->
+      Some
+        "usage: yeokcham package create [--root PATH] --destination PATH\n\n\
+         Write a new offline package directory with public authority closure, \
+         signed work, and exact objects."
+  | [ "package"; "adopt" ] ->
+      Some
+        "usage: yeokcham package adopt [--root PATH] --from PATH --revision ID \
+         [--authority EPOCH]\n\n\
+         Persist an exact administrator adoption for a reviewed late revision; \
+         it imports no package."
+  | [ "receive" ] ->
+      Some
+        "usage: yeokcham receive [--root PATH] --from PATH [--review]\n\n\
+         Review or verify and receive an offline package. Receipt never scans, \
+         resolves, or materialises the working tree."
+  | [ "bootstrap" ] ->
+      Some
+        "usage: yeokcham bootstrap publish [--root PATH] REMOTE\n\
+        \       yeokcham bootstrap [--root PATH] --remote NAME --url HTTPS_URL \
+         --repository ID --basis ID --username NAME --draft ID --title TITLE \
+         --device ID --verify-phrase \"TWELVE WORDS\"\n\n\
+         Publish or consume one named, verified relay bootstrap basis. This is \
+         explicit initialisation, not clone; it does not materialise source."
+  | [ "bootstrap"; "publish" ] ->
+      Some
+        "usage: yeokcham bootstrap publish [--root PATH] REMOTE\n\n\
+         Explicitly publish one signed immutable bootstrap basis to an already \
+         configured equivalent relay."
+  | [ "remote" ] ->
+      Some
+        "usage: yeokcham remote add|remove|login [--root PATH] ...\n\n\
+         Manage local HTTPS relay aliases and local credential entry. A relay \
+         is an untrusted byte courier."
+  | [ "remote"; "add" ] ->
+      Some
+        "usage: yeokcham remote add [--root PATH] NAME URL\n\n\
+         Save one local HTTPS relay alias. This does not contact the relay."
+  | [ "remote"; "remove" ] ->
+      Some
+        "usage: yeokcham remote remove [--root PATH] NAME\n\n\
+         Remove one local relay alias and its local configuration."
+  | [ "remote"; "login" ] ->
+      Some
+        "usage: yeokcham remote login [--root PATH] NAME\n\n\
+         Prompt for and save one configured relay's local bearer credential \
+         after interactive entry."
+  | [ "semantic" ] ->
+      Some
+        "usage: yeokcham semantic server \
+         add|list|configure|enable|disable|remove ...\n\n\
+         Configure an optional external LSP for disposable decision \
+         observations. It is never a parser, merge engine, or trust input."
+  | [ "semantic"; "server" ] ->
+      Some
+        "usage: yeokcham semantic server \
+         add|list|configure|enable|disable|remove ...\n\n\
+         Manage named local external-LSP configurations."
+  | [ "semantic"; "server"; "add" ] ->
+      Some
+        "usage: yeokcham semantic server add [--root PATH] NAME --program \
+         ABS_PATH [--arg VALUE]... [--match extensions|path-globs|all-files] \
+         [--extension EXT]... [--glob PATTERN]... [--overlap \
+         same-symbol|nearby-ranges|references]\n\n\
+         Add one explicit external-LSP configuration for disposable proposal \
+         observations."
+  | [ "semantic"; "server"; "list" ] ->
+      Some
+        "usage: yeokcham semantic server list [--root PATH]\n\n\
+         List local external-LSP configurations."
+  | [ "semantic"; "server"; "configure" ] ->
+      Some
+        "usage: yeokcham semantic server configure [--root PATH] NAME --match \
+         extensions|path-globs|all-files [--extension EXT]... [--glob \
+         PATTERN]... --overlap same-symbol|nearby-ranges|references\n\n\
+         Change matching and advisory-overlap settings for one named local \
+         server."
+  | [ "semantic"; "server"; ("enable" | "disable" | "remove") ] ->
+      Some
+        "usage: yeokcham semantic server enable|disable|remove [--root PATH] \
+         NAME\n\n\
+         Enable, disable, or remove one named local external-LSP configuration."
+  | [ "sync" ] ->
+      Some
+        "usage: yeokcham sync [--root PATH] NAME\n\n\
+         Use one configured relay alias for staged receive-first \
+         synchronization. It does not materialise source or select authority."
+  | [ "relay" ] ->
+      Some
+        "usage: yeokcham relay serve|access issue|rotate|revoke|list ...\n\n\
+         Operate immutable relay byte storage and repository-scoped access \
+         credentials behind an operator-managed HTTPS proxy."
+  | [ "relay"; "serve" ] ->
+      Some
+        "usage: yeokcham relay serve --storage PATH --listen ADDRESS:PORT\n\n\
+         Run the plain-HTTP relay backend. Put it behind an operator-managed \
+         HTTPS reverse proxy."
+  | [ "relay"; "access" ] ->
+      Some
+        "usage: yeokcham relay access issue|rotate|revoke|list --storage PATH \
+         ...\n\n\
+         Manage repository-scoped relay credentials; this does not change V4 \
+         authority."
+  | [ "relay"; "access"; "issue" ] ->
+      Some
+        "usage: yeokcham relay access issue --storage PATH --repository ID \
+         --scope read,write [--expires-in SECONDS]\n\n\
+         Issue a repository-scoped relay secret and display it once on a \
+         controlling terminal."
+  | [ "relay"; "access"; "rotate" ] ->
+      Some
+        "usage: yeokcham relay access rotate --storage PATH --id ID \
+         [--expires-in SECONDS]\n\n\
+         Replace one relay credential by local credential ID."
+  | [ "relay"; "access"; "revoke" ] ->
+      Some
+        "usage: yeokcham relay access revoke --storage PATH --id ID\n\n\
+         Revoke one relay credential by local credential ID."
+  | [ "relay"; "access"; "list" ] ->
+      Some
+        "usage: yeokcham relay access list --storage PATH [--repository ID]\n\n\
+         List local relay access metadata without exposing bearer secrets."
+  | [ "device" ] ->
+      Some
+        "usage: yeokcham device \
+         create|attach|custody|show|enroll|revoke|rotate ...\n\n\
+         Inspect or manage device custody and explicit authority membership. \
+         Device IDs derive from public keys; usernames are display data."
+  | [ "device"; "create" ] ->
+      Some
+        "usage: yeokcham device create [--provider native]\n\
+        \       yeokcham device create --provider pkcs11 --root PATH --module \
+         PATH --token-label LABEL --key-label LABEL --key-id HEX\n\n\
+         Create local native or PKCS#11 device custody. It grants no authority."
+  | [ "device"; "attach" ] ->
+      Some
+        "usage: yeokcham device attach --root PATH --provider ssh-agent \
+         --public-key FILE\n\
+        \       yeokcham device attach --root PATH --provider pkcs11 --module \
+         PATH --token-label LABEL --key-id HEX --public-key HEX\n\n\
+         Attach an existing local external custody provider; authority remains \
+         unchanged."
+  | [ "device"; "custody" ] ->
+      Some
+        "usage: yeokcham device custody [--root PATH] --device ID\n\n\
+         Show one saved optional custody provider and its local availability."
+  | [ "device"; "show" ] ->
+      Some
+        "usage: yeokcham device show [--root PATH]\n\n\
+         Show current repository, local device public key, and membership role."
+  | [ "device"; "enroll" ] ->
+      Some
+        "usage: yeokcham device enroll [--root PATH] --device ID --public-key \
+         HEX --username NAME [--administrator] [--parent EPOCH]\n\n\
+         Explicitly enroll a device in authority."
+  | [ "device"; "revoke" ] ->
+      Some
+        "usage: yeokcham device revoke [--root PATH] --device ID [--parent \
+         EPOCH]\n\n\
+         Explicitly revoke a device in one named authority branch when \
+         necessary."
+  | [ "device"; "rotate" ] ->
+      Some
+        "usage: yeokcham device rotate [--root PATH] --device ID --public-key \
+         HEX [--parent EPOCH]\n\n\
+         Explicitly replace the current device identity in authority."
+  | [ "authority" ] ->
+      Some
+        "usage: yeokcham authority heads|reconcile [--root PATH] ...\n\n\
+         Inspect concurrent authority heads or explicitly reconcile selected \
+         heads."
+  | [ "authority"; "heads" ] ->
+      Some
+        "usage: yeokcham authority heads [--root PATH]\n\n\
+         List every current authority head without choosing one."
+  | [ "authority"; "reconcile" ] ->
+      Some
+        "usage: yeokcham authority reconcile [--root PATH] --parents \
+         EPOCH,EPOCH[,EPOCH]\n\n\
+         Create an explicit multi-parent reconciliation when the local \
+         administrator is active in each selected head."
+  | [ "recovery" ] ->
+      Some
+        "usage: yeokcham recovery use|refresh ...\n\n\
+         Use or copy the explicit encrypted recovery package. Mnemonics passed \
+         as arguments can appear in shell history or process listings."
+  | [ "recovery"; "use" ] ->
+      Some
+        "usage: yeokcham recovery use [--root PATH] --package PATH --mnemonic \
+         \"TWENTY FOUR WORDS\" --replacement ID --replaced ID --output PATH\n\n\
+         Recover authority through the encrypted package, replacing one device \
+         and writing a new package before state advances."
+  | [ "recovery"; "refresh" ] ->
+      Some
+        "usage: yeokcham recovery refresh [--root PATH] --package PATH \
+         --mnemonic \"TWENTY FOUR WORDS\" --output PATH\n\n\
+         Write a fresh encrypted copy of the current recovery closure without \
+         changing authority."
+  | [ "user" ] ->
+      Some
+        "usage: yeokcham user register [--root PATH] --device ID --username \
+         NAME\n\n\
+         Store local display metadata. A username is not identity or authority."
+  | [ "user"; "register" ] ->
+      Some
+        "usage: yeokcham user register [--root PATH] --device ID --username \
+         NAME\n\n\
+         Associate display-only local username metadata with one public device \
+         ID."
+  | [ "daemon" ] ->
+      Some
+        "usage: yeokcham daemon start|status|stop [--root PATH]\n\
+        \       yeokcham daemon sync [--root PATH] REMOTE\n\n\
+         Run Linux-only advisory capture in a private XDG runtime. It never \
+         follows remotes automatically."
+  | [ "daemon"; ("start" | "status" | "stop") ] ->
+      Some
+        "usage: yeokcham daemon start|status|stop [--root PATH]\n\n\
+         Manage the Linux-only advisory capture process for one repository."
+  | [ "daemon"; "sync" ] ->
+      Some
+        "usage: yeokcham daemon sync [--root PATH] REMOTE\n\n\
+         Request one explicit receive-first synchronization through the \
+         running Linux daemon."
+  | [ "deliver" ] ->
+      Some
+        "usage: yeokcham deliver [--root PATH] --id ID --draft ID --title \
+         TITLE\n\n\
+         Record an explicit delivery milestone and begin the named next draft."
+  | [ "pin" ] | [ "unpin" ] ->
+      Some
+        "usage: yeokcham pin|unpin [--root PATH] --checkpoint ID\n\n\
+         Add or remove explicit local retention for one checkpoint."
+  | [ "compact" ] ->
+      Some
+        "usage: yeokcham compact [--root PATH] [--keep N] [--dry-run] \
+         [--explain]\n\n\
+         Plan or compact local checkpoint retention. Use storage gc separately \
+         for recoverable object collection."
+  | [ "storage" ] ->
+      Some
+        "usage: yeokcham storage roots|gc ...\n\n\
+         Inspect retention roots or use the explicit local \
+         quarantine-and-purge collection workflow."
+  | [ "storage"; "roots" ] ->
+      Some
+        "usage: yeokcham storage roots [--root PATH]\n\n\
+         List and validate the exact non-recent storage roots."
+  | [ "storage"; "gc" ] ->
+      Some
+        "usage: yeokcham storage gc [--root PATH] [--dry-run] [--explain]\n\
+        \       yeokcham storage gc --root PATH --apply\n\
+        \       yeokcham storage gc status|resume|restore|purge [--root PATH] \
+         [--id ID]\n\n\
+         Review a local reachability plan, then explicitly quarantine, \
+         restore, or purge. It never contacts a relay or writes source."
+  | [ "storage"; "gc"; "status" ] ->
+      Some
+        "usage: yeokcham storage gc status [--root PATH]\n\n\
+         List local garbage-collection quarantine transactions."
+  | [ "storage"; "gc"; ("resume" | "restore" | "purge") ] ->
+      Some
+        "usage: yeokcham storage gc resume|restore|purge [--root PATH] --id ID\n\n\
+         Resume staging, return a pre-purge quarantine, or irreversibly purge \
+         one named local transaction."
+  | [ "watch" ] ->
+      Some
+        "usage: yeokcham watch [--root PATH]\n\n\
+         Run foreground advisory capture on Linux or macOS. It requests exact \
+         save after debounce; unsupported platforms fail explicitly."
+  | _ -> None
+
+let print_help path =
+  match help_for path with
+  | Some text -> print_endline text
+  | None ->
+      fail
+        ("unknown help topic: " ^ String.concat " " path ^ "\n\n" ^ usage_text)
 
 let require_ok render = function
   | Ok value -> value
@@ -1320,6 +1744,26 @@ let render_snapshot_entry = function
       | Some mode, Some content -> kind ^ " " ^ mode ^ " " ^ content
       | Some mode, None -> kind ^ " " ^ mode
       | None, Some content -> kind ^ " " ^ content)
+
+let run_changes arguments =
+  let root = parse_root arguments in
+  let comparison =
+    Service.inspect_working_tree ~root |> require_ok Service.error_to_string
+  in
+  Printf.printf "saved %s\n"
+    (Model.Snapshot_id.to_string comparison.Service.saved_checkpoint);
+  Printf.printf "observed %s\n"
+    (Model.Snapshot_id.to_string comparison.Service.observed_snapshot);
+  match comparison.Service.differences with
+  | [] -> print_endline "changes unchanged"
+  | differences ->
+      List.iter
+        (fun difference ->
+          Printf.printf "change %s before %s after %s\n"
+            (Model.Path.to_string difference.Service.path)
+            (render_snapshot_entry difference.Service.before)
+            (render_snapshot_entry difference.Service.after))
+        differences
 
 let render_proposal_entry = function
   | None -> "missing"
@@ -2556,12 +3000,13 @@ let run_daemon = function
   | "run" :: arguments -> Runtime.run ~root:(parse_root arguments)
   | _ -> usage ()
 
-let () =
+let dispatch () =
   match Array.to_list Sys.argv with
   | _ :: "init" :: arguments -> run_init arguments
   | _ :: "join" :: arguments -> run_join arguments
   | _ :: "save" :: arguments -> run_save arguments
   | _ :: "status" :: arguments -> run_status arguments
+  | _ :: "changes" :: arguments -> run_changes arguments
   | _ :: "log" :: arguments -> run_log arguments
   | _ :: "graph" :: arguments -> run_graph arguments
   | _ :: "daemon" :: arguments -> run_daemon arguments
@@ -2623,3 +3068,15 @@ let () =
   | _ :: "storage" :: "roots" :: arguments -> run_storage_roots arguments
   | _ :: "watch" :: arguments -> run_watch arguments
   | _ -> usage ()
+
+let () =
+  match Array.to_list Sys.argv with
+  | _ :: [ "--version" ] -> print_endline version_text
+  | _ :: [ "--help" ] | _ :: [ "-h" ] -> print_help []
+  | _ :: "help" :: path -> print_help path
+  | _ :: arguments -> (
+      match List.rev arguments with
+      | "--help" :: reversed_path | "-h" :: reversed_path ->
+          print_help (List.rev reversed_path)
+      | _ -> dispatch ())
+  | [] -> usage ()

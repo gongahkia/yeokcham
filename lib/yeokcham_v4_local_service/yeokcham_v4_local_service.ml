@@ -119,6 +119,12 @@ type path_difference = {
   after : snapshot_entry option;
 }
 
+type working_tree_comparison = {
+  saved_checkpoint : Model.Snapshot_id.t;
+  observed_snapshot : Model.Snapshot_id.t;
+  differences : path_difference list;
+}
+
 type comparison_target = Baseline | Candidate of Model.Revision_id.t
 
 type decision_comparison = {
@@ -2136,6 +2142,19 @@ let comparison_differences store ~before ~after =
          Ok (difference :: differences))
        (Ok [])
   |> Result.map List.rev
+
+let inspect_working_tree ~root =
+  with_repository ~root (fun repository loaded ->
+      let store = Store.underlying_store repository in
+      let saved_checkpoint =
+        (Model.active_draft loaded.Store.project).Model.latest_checkpoint
+      in
+      let* observed_snapshot = capture ~root store in
+      let* differences =
+        comparison_differences store ~before:saved_checkpoint
+          ~after:observed_snapshot
+      in
+      Ok { saved_checkpoint; observed_snapshot; differences })
 
 let compare_decision ~root ~decision ~candidate ~against =
   with_repository ~root (fun repository loaded ->

@@ -8,11 +8,38 @@ filesystem event, conflict, device name, or CI result into user intent.
 The sole supported command is `yeokcham`. It creates a new V4 repository and
 does not read, upgrade, or mutate repositories from earlier product tracks.
 
+## Start here
+
+Yeokcham has **no published stable release, package-manager distribution, or
+general clone workflow**. Today, the supported evaluation path is a source
+checkout built with the repository's declared toolchain. Read
+[Installation and support](docs/INSTALL.md) before running a command; it says
+what has been checked, how to build the checkout, which platform custody and
+watching paths exist, and what is intentionally unsupported.
+
+Once the command is available, begin with the
+[local recovery tutorial](docs/GETTING_STARTED.md). It uses an empty temporary
+directory, shows an exact saved-versus-current inspection, and has you restore
+a checkpoint into a separate directory before attempting in-place recovery.
+The tutorial contains no real mnemonic or secret. `init` shows a real recovery
+mnemonic exactly once, so record it offline only when you are ready to create a
+repository.
+
+At the terminal, use `yeokcham --help`, `yeokcham help COMMAND`, and
+`yeokcham COMMAND --help` to discover the implemented surface. `--version`
+reports that this is an unreleased V4 source build rather than implying a
+published release.
+
 ## What it has
 
 - Exact byte, mode, directory, and symlink snapshots; `save`, `timeline`,
   pins, bounded checkpoint retention, and journaled in-place restore with a
   local durable safety/target proof that remains until explicit forget.
+- `changes`, an exact stable-order comparison of the working tree against the
+  active draft's latest saved checkpoint. It reports paths and snapshot-entry
+  identities rather than guessing textual intent; like `status`, its scanner
+  can add unreferenced immutable scan objects but never saves, shares, or
+  rewrites source.
 - Inspectable local object collection: `storage gc --dry-run --explain` shows
   retained closure and candidates, `--apply` moves candidates into a local
   quarantine, and only an explicit `purge` unlinks them.
@@ -38,11 +65,15 @@ does not read, upgrade, or mutate repositories from earlier product tracks.
   `ssh-ed25519` SSH-agent key, or an Ed25519 PKCS#11 token key. Provider
   metadata is never authority or shared history.
 
-## Fast start
+## Operational samples
+
+These are command examples for an already-built command, not installation
+instructions. The recovery tutorial is the safe first run.
 
 ```sh
 yeokcham init --username alice --draft first-task --title "first task"
 yeokcham status
+yeokcham changes
 yeokcham save
 yeokcham share --change first-change --revision r1
 yeokcham log
@@ -189,4 +220,9 @@ verification procedure.
 Read [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md) for the philosophy,
 [FORMAL_MODEL.md](FORMAL_MODEL.md) for invariants, and
 [docs/V4_PRODUCT_CONTRACT.md](docs/V4_PRODUCT_CONTRACT.md) for the command and
-trust contract.
+trust contract. For day-to-day use, see the
+[concepts glossary](docs/CONCEPTS.md), [troubleshooting guide](docs/TROUBLESHOOTING.md),
+and [collaboration and relay guide](docs/COLLABORATION.md). Implementers should
+start with [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md), then
+[FORMAL_MODEL.md](FORMAL_MODEL.md), [ARCHITECTURE.md](ARCHITECTURE.md), and the
+active ADRs in [DECISIONS.md](DECISIONS.md).

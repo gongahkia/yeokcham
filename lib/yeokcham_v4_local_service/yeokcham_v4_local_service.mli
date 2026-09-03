@@ -1,9 +1,9 @@
 (** Local V4 saved-work transitions and verified offline-package receive.
 
     This adapter has no network transport or semantic merge behaviour. Command
-    `status` and `save` scan exact snapshots when invoked. Linux `watch` lives
-    in the CLI and only calls `save` after debounce; it is not part of this
-    module. *)
+    `status`, `changes`, and `save` scan exact snapshots when invoked. Linux
+    `watch` lives in the CLI and only calls `save` after debounce; it is not
+    part of this module. *)
 
 type error =
   | Store_error of Yeokcham_v4_store.error
@@ -115,6 +115,17 @@ type path_difference = {
   before : snapshot_entry option;
   after : snapshot_entry option;
 }
+
+type working_tree_comparison = {
+  saved_checkpoint : Yeokcham_v4_model.Snapshot_id.t;
+  observed_snapshot : Yeokcham_v4_model.Snapshot_id.t;
+  differences : path_difference list;
+}
+(** An exact comparison of the active draft's latest saved checkpoint against
+    one current working-tree scan. The scan uses the same `.yeokcham` and `.git`
+    exclusion boundary as [status]. It may store immutable unreferenced scan
+    objects, but it never saves, changes the state head, writes source, signs,
+    shares, resolves, delivers, imports, or contacts a relay. *)
 
 type comparison_target =
   | Baseline
@@ -594,6 +605,9 @@ val compare_decision :
   candidate:Yeokcham_v4_model.Revision_id.t ->
   against:comparison_target ->
   (decision_comparison, error) result
+
+val inspect_working_tree :
+  root:string -> (working_tree_comparison, error) result
 
 val deliver :
   root:string ->

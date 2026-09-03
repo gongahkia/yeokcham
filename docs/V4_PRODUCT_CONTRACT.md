@@ -7,13 +7,33 @@ executable. It refuses an existing `.yeokcham` directory at initialization and
 does not import, mutate, migrate, or provide command aliases for earlier
 product tracks.
 
+## Command discovery
+
+`yeokcham --help`, `yeokcham help`, `yeokcham help COMMAND`, and
+`yeokcham COMMAND --help` are successful documentation paths for the actual V4
+surface. `yeokcham --version` identifies the current artifact as an unreleased
+V4 source build; it does not claim a published release. Invalid invocations and
+unknown help topics fail with status 2 rather than being treated as success.
+
+The command set intentionally has no generic scan or repository `verify`
+command. `changes` is the narrow current-versus-saved working-tree observation;
+the separate `make release-verify` tool verifies a caller-supplied source
+release provenance tuple and is outside V4 repository semantics.
+
 ## Local recovery and composition
 
-`init`, `save`, `status`, `timeline`, `restore`, `pin`, `unpin`, and `compact`
-operate on exact snapshots. `status` reports the saved checkpoint, active
-draft, shared changes, open decisions, deliveries, local display registrations,
-capture mode, and uncaptured state. A save is recovery only; it becomes shared
-only through `share`.
+`init`, `save`, `status`, `changes`, `timeline`, `restore`, `pin`, `unpin`, and
+`compact` operate on exact snapshots. `status` reports the saved checkpoint,
+active draft, shared changes, open decisions, deliveries, local display
+registrations, capture mode, and uncaptured state. `changes` compares the
+active draft's latest saved checkpoint with one current exact scan and reports
+stable-order paths with complete before/after directory or file (mode plus
+content-object ID) entries. Missing sides explicitly mean create/delete; an
+empty list explicitly means unchanged. It does not infer textual edits or
+moves. Like `status`, it may add unreferenced immutable scan objects, but it
+does not advance the state head, create a checkpoint, alter source, sign,
+share, resolve, deliver, import, or contact a relay. A save is recovery only;
+it becomes shared only through `share`.
 
 `log` and `graph` are read-only projections of persisted V4 work. `log` is a
 stable ledger of current shared revisions and their explicit parent relation,

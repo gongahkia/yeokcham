@@ -45,8 +45,12 @@ initialization, not a clone protocol.
 `Yeokcham_v4_inspection` is a pure terminal projection over a loaded project,
 its signed revision records, deferred review references, and an optional
 authority closure. The local service supplies that input without scanning the
-working tree. It stores no layout, follows no remote, and cannot turn delivery
-milestones or concurrent authority heads into inferred history or policy.
+working tree. Its separate `changes` adapter uses the established exact scanner
+and canonical tree comparison against the active saved checkpoint; like
+`status`, that scan may add immutable unreferenced objects but cannot advance
+the state head or write source. Neither view stores layout, follows a remote,
+or turns delivery milestones or concurrent authority heads into inferred
+history or policy.
 
 `Yeokcham_v4_semantic_config` and `Yeokcham_v4_lsp_sidecar` form a separate
 local advisory boundary. The canonical config selects one external executable;

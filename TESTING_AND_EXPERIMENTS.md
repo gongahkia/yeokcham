@@ -10,6 +10,19 @@ receive. The package resolution test delivers conflicting shared work and its
 signed resolution in an order requiring deferral, then proves it recreates a
 resolved decision rather than a third shared change.
 
+On 2026-09-04, the Fedora 43 source-checkout run of `make ci` passed after the
+V4 onboarding and exact-local-inspection slice. The new service case compares
+the active saved checkpoint with a current scan containing a directory create,
+nested file create, file-content change, mode-only change, and deletion; it
+asserts canonical path order, an explicit empty result after save, unchanged
+state-head model, and unchanged live bytes. The CLI cases exercise top-level,
+family, and every documented command-path help; unreleased source version
+output; invalid-invocation failure; and the same exact `changes` output and
+non-mutation boundary. No persistent record or golden fixture changed. The
+separate `make release-verify-test` run also passed. The optional PKCS#11
+integration remained skipped because `YEOKCHAM_V4_TEST_PKCS11_MODULE` was not
+configured; that is not hardware-token evidence.
+
 External-LSP verification adds a canonical `semantic-lsp-v1` local-config
 fixture, restrictive file-mode, duplicate, matcher, and invalid-glob checks.
 A compiled disposable fake server proves that initialization reports its

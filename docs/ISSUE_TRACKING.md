@@ -12,6 +12,17 @@ or opam-publication criteria, so do not close them as a retirement side effect.
 Their live bodies have been re-scoped to current V4 commands: #242 is macOS
 source-release field evidence and #244 is source-only opam publication.
 
+[#263](https://github.com/gongahkia/yeokcham/issues/263), V4 onboarding and
+exact local inspection, is complete and closed. It adds source-only evaluation
+guidance, command discovery, recovery-first material, explicit
+collaboration/relay operation, and `changes`: a current-working-tree versus
+latest-saved-checkpoint exact comparison. It adds no persistent format, generic
+verification command, Git interchange, clone workflow, authority semantics, or
+relay behaviour. On 2026-09-04, `make ci`, `make release-verify-test`, focused
+service/CLI tests, and demo-fixture shell syntax passed; the optional PKCS#11
+integration was skipped because its test module was unset. This is not a
+published-release, installer, field-trial, or cross-platform-support claim.
+
 [#250](https://github.com/gongahkia/yeokcham/issues/250), Git interchange,
 [#249](https://github.com/gongahkia/yeokcham/issues/249), durable command
 metadata, and [#253](https://github.com/gongahkia/yeokcham/issues/253), CI

@@ -122,6 +122,9 @@ let write_file root name contents =
   Out_channel.with_open_bin (Filename.concat root name) (fun channel ->
       Out_channel.output_string channel contents)
 
+let read_file root name =
+  In_channel.with_open_bin (Filename.concat root name) In_channel.input_all
+
 let require_ok render = function
   | Ok value -> value
   | Error error -> Alcotest.fail (render error)
@@ -243,6 +246,199 @@ let command_journey_reports_saved_work_and_drafts () =
         "capture command" output;
       expect_output_contains "restore into the tree is uncaptured work"
         "uncaptured yes" output)
+
+let help_version_and_invalid_invocation_are_distinct () =
+  let output, errors, status = run [ "--help" ] in
+  require_success "top-level help" status errors;
+  expect_output_contains "top-level help names changes" "yeokcham changes"
+    output;
+  expect_output_contains "top-level help explains discovery" "help COMMAND"
+    output;
+  let output, errors, status = run [ "help"; "changes" ] in
+  require_success "help changes" status errors;
+  expect_output_contains "named help describes comparison"
+    "Compare the exact current working tree" output;
+  let output, errors, status = run [ "changes"; "--help" ] in
+  require_success "changes flag help" status errors;
+  expect_output_contains "flag help has exact usage"
+    "usage: yeokcham changes [--root PATH]" output;
+  let output, errors, status = run [ "storage"; "gc"; "--help" ] in
+  require_success "nested command help" status errors;
+  expect_output_contains "nested help names quarantine" "quarantine" output;
+  let output, errors, status = run [ "--version" ] in
+  require_success "version" status errors;
+  Alcotest.(check string)
+    "source build version is honest" "yeokcham V4 source build (unreleased)\n"
+    output;
+  let _output, errors, status = run [ "not-a-command" ] in
+  (match status with
+  | Unix.WEXITED 2 -> ()
+  | Unix.WEXITED code ->
+      Alcotest.failf "invalid invocation exited %d rather than 2" code
+  | Unix.WSIGNALED signal | Unix.WSTOPPED signal ->
+      Alcotest.failf "invalid invocation ended by signal %d" signal);
+  expect_output_contains "invalid invocation remains an error" "usage:" errors
+
+let every_documented_help_path_is_available () =
+  let paths =
+    [
+      [ "init" ];
+      [ "join" ];
+      [ "save" ];
+      [ "status" ];
+      [ "changes" ];
+      [ "log" ];
+      [ "graph" ];
+      [ "timeline" ];
+      [ "restore" ];
+      [ "restore"; "proofs" ];
+      [ "restore"; "retain" ];
+      [ "restore"; "forget" ];
+      [ "draft" ];
+      [ "draft"; "new" ];
+      [ "share" ];
+      [ "withdraw" ];
+      [ "resolve" ];
+      [ "decision" ];
+      [ "decision"; "show" ];
+      [ "decision"; "inspect" ];
+      [ "decision"; "diff" ];
+      [ "decision"; "propose" ];
+      [ "decision"; "materialize-proposal" ];
+      [ "decision"; "materialize" ];
+      [ "package" ];
+      [ "package"; "create" ];
+      [ "package"; "adopt" ];
+      [ "receive" ];
+      [ "bootstrap" ];
+      [ "bootstrap"; "publish" ];
+      [ "remote" ];
+      [ "remote"; "add" ];
+      [ "remote"; "remove" ];
+      [ "remote"; "login" ];
+      [ "semantic" ];
+      [ "semantic"; "server" ];
+      [ "semantic"; "server"; "add" ];
+      [ "semantic"; "server"; "list" ];
+      [ "semantic"; "server"; "configure" ];
+      [ "semantic"; "server"; "enable" ];
+      [ "semantic"; "server"; "disable" ];
+      [ "semantic"; "server"; "remove" ];
+      [ "sync" ];
+      [ "relay" ];
+      [ "relay"; "serve" ];
+      [ "relay"; "access" ];
+      [ "relay"; "access"; "issue" ];
+      [ "relay"; "access"; "rotate" ];
+      [ "relay"; "access"; "revoke" ];
+      [ "relay"; "access"; "list" ];
+      [ "device" ];
+      [ "device"; "create" ];
+      [ "device"; "attach" ];
+      [ "device"; "custody" ];
+      [ "device"; "show" ];
+      [ "device"; "enroll" ];
+      [ "device"; "revoke" ];
+      [ "device"; "rotate" ];
+      [ "authority" ];
+      [ "authority"; "heads" ];
+      [ "authority"; "reconcile" ];
+      [ "recovery" ];
+      [ "recovery"; "use" ];
+      [ "recovery"; "refresh" ];
+      [ "user" ];
+      [ "user"; "register" ];
+      [ "daemon" ];
+      [ "daemon"; "start" ];
+      [ "daemon"; "status" ];
+      [ "daemon"; "stop" ];
+      [ "daemon"; "sync" ];
+      [ "deliver" ];
+      [ "pin" ];
+      [ "unpin" ];
+      [ "compact" ];
+      [ "storage" ];
+      [ "storage"; "roots" ];
+      [ "storage"; "gc" ];
+      [ "storage"; "gc"; "status" ];
+      [ "storage"; "gc"; "resume" ];
+      [ "storage"; "gc"; "restore" ];
+      [ "storage"; "gc"; "purge" ];
+      [ "watch" ];
+    ]
+  in
+  List.iter
+    (fun path ->
+      let output, errors, status = run (path @ [ "--help" ]) in
+      require_success ("help " ^ String.concat " " path) status errors;
+      expect_output_contains
+        ("help output has a usage line for " ^ String.concat " " path)
+        "usage: yeokcham" output)
+    paths
+
+let command_changes_reports_exact_entries_without_saving () =
+  with_directory "yeokcham-v4-cli-changes-" (fun root ->
+      write_file root "main.ml" "let version = 1\n";
+      write_file root "mode.sh" "#!/bin/sh\necho unchanged\n";
+      write_file root "removed.txt" "remove me\n";
+      let output, errors, status =
+        run
+          [
+            "init";
+            "--root";
+            root;
+            "--username";
+            "alice";
+            "--draft";
+            "first-task";
+            "--title";
+            "first task";
+          ]
+      in
+      require_success "init for changes" status errors;
+      let saved = saved_checkpoint output in
+      let before =
+        Service.inspection_state ~root |> require_ok Service.error_to_string
+      in
+      write_file root "main.ml" "let version = 2\n";
+      Unix.chmod (Filename.concat root "mode.sh") 0o755;
+      Unix.unlink (Filename.concat root "removed.txt");
+      Unix.mkdir (Filename.concat root "created") 0o700;
+      write_file root "created/nested.txt" "new file\n";
+      let output, errors, status = run [ "changes"; "--root"; root ] in
+      require_success "changes" status errors;
+      expect_output_contains "comparison names saved checkpoint"
+        ("saved " ^ saved) output;
+      expect_output_contains "directory create is explicit"
+        "change created before missing after directory" output;
+      expect_output_contains "nested file create is explicit"
+        "change created/nested.txt before missing after file regular" output;
+      expect_output_contains "content file comparison is exact"
+        "change main.ml before file regular" output;
+      expect_output_contains "mode-only comparison names both modes"
+        "change mode.sh before file regular" output;
+      expect_output_contains "mode-only comparison names executable after"
+        "after file executable" output;
+      expect_output_contains "delete is explicit"
+        "change removed.txt before file regular" output;
+      expect_output_contains "delete has missing after entry" "after missing"
+        output;
+      let after =
+        Service.inspection_state ~root |> require_ok Service.error_to_string
+      in
+      Alcotest.(check bool)
+        "changes preserves state head" true
+        (Model.export before.Service.inspection_project
+        = Model.export after.Service.inspection_project);
+      Alcotest.(check string)
+        "changes preserves working-tree bytes" "let version = 2\n"
+        (read_file root "main.ml");
+      let _output, errors, status = run [ "save"; "--root"; root ] in
+      require_success "save after changes" status errors;
+      let output, errors, status = run [ "changes"; "--root"; root ] in
+      require_success "unchanged changes" status errors;
+      expect_output_contains "unchanged comparison is explicit"
+        "changes unchanged" output)
 
 let command_journey_shares_resolves_withdraws_and_delivers () =
   with_directory "yeokcham-v4-cli-share-" (fun root ->
@@ -1328,6 +1524,12 @@ let () =
     [
       ( "journey",
         [
+          Alcotest.test_case "help, version, and invalid invocation" `Quick
+            help_version_and_invalid_invocation_are_distinct;
+          Alcotest.test_case "every documented help path exits zero" `Quick
+            every_documented_help_path_is_available;
+          Alcotest.test_case "changes reports exact local differences" `Quick
+            command_changes_reports_exact_entries_without_saving;
           Alcotest.test_case "saved work and drafts" `Quick
             command_journey_reports_saved_work_and_drafts;
           Alcotest.test_case "share resolve withdraw and deliver" `Quick
