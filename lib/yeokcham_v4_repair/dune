@@ -8,4 +8,10 @@
   yeokcham_v4_health_repository
   yeokcham_v4_health_store
   yeokcham_v4_package
-  yeokcham_v4_store))
+  yeokcham_v4_bootstrap
+  yeokcham_v4_store
+  yeokcham_v4_transport
+  yeokcham_v4_transport_config
+  yeokcham_v4_transport_credential
+  yeokcham_v4_transport_http
+  yeokcham_v4_trust))

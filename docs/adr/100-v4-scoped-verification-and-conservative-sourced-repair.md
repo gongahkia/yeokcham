@@ -86,6 +86,15 @@ wrong-ID source produces a refusal or a non-eligible candidate; it never
 becomes a local object. Repair does not synthesise bytes and cannot repair a
 damaged project-state record by copying an unverified replacement state.
 
+For a local bootstrap source, the locator is an existing package directory
+containing a regular `bootstrap-basis-v1.cbor` sibling of the existing
+`manifest.cbor` and `objects/` entries. The basis remains its existing signed
+canonical Bootstrap record and the package remains its existing canonical
+package format; this source layout adds no object, package, or history record.
+The adapter verifies the basis against the target's collaborative repository
+identity and rechecks that its manifest digest names the exact package artifact
+from which it reads a candidate.
+
 ### Repair plans bind approval to a current diagnosis
 
 Because `repair apply` is intentionally a separate process, plans are local

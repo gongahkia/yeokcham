@@ -3,6 +3,12 @@ module Health_repository = Yeokcham_v4_health_repository
 module Health_store = Yeokcham_v4_health_store
 module Gc = Yeokcham_v4_gc
 module Package = Yeokcham_v4_package
+module Bootstrap = Yeokcham_v4_bootstrap
+module Transport_config = Yeokcham_v4_transport_config
+module Transport_credential = Yeokcham_v4_transport_credential
+module Transport_http = Yeokcham_v4_transport_http
+module Trust = Yeokcham_v4_trust
+module Transport = Yeokcham_v4_transport
 module Store = Yeokcham_store
 module V4_store = Yeokcham_v4_store
 
@@ -13,6 +19,12 @@ type error =
   | V4_store_error of V4_store.error
   | Gc_error of Gc.error
   | Package_error of Package.error
+  | Transport_config_error of Transport_config.error
+  | Transport_credential_error of Transport_credential.error
+  | Transport_http_error of Transport_http.error
+  | No_configured_relay_repository
+  | Bootstrap_error of Bootstrap.error
+  | Invalid_bootstrap_artifact of { path : string; detail : string }
   | Missing_state_head
   | Invalid_backup of { path : string; detail : string }
 
@@ -29,6 +41,14 @@ let error_to_string = function
   | V4_store_error error -> V4_store.error_to_string error
   | Gc_error error -> Gc.error_to_string error
   | Package_error error -> Package.error_to_string error
+  | Transport_config_error error -> Transport_config.error_to_string error
+  | Transport_credential_error error -> Transport_credential.error_to_string error
+  | Transport_http_error error -> Transport_http.error_to_string error
+  | No_configured_relay_repository ->
+      "V4 repair relay source requires a collaborative repository identity"
+  | Bootstrap_error error -> Bootstrap.error_to_string error
+  | Invalid_bootstrap_artifact { path; detail } ->
+      Printf.sprintf "invalid V4 repair bootstrap artifact %s: %s" path detail
   | Missing_state_head -> "V4 repair target has no state head"
   | Invalid_backup { path; detail } ->
       Printf.sprintf "invalid V4 repair backup %s: %s" path detail
@@ -139,6 +159,145 @@ let package_candidate ~package ~object_id =
         in
         Ok (Some (candidate, envelope))
 
+let collaborative_repository ~root =
+  let* repository =
+    V4_store.open_repository ~root
+    |> Result.map_error (fun error -> V4_store_error error)
+  in
+  let* loaded =
+    V4_store.load repository |> Result.map_error (fun error -> V4_store_error error)
+  in
+  match loaded.V4_store.collaboration with
+  | None -> Error No_configured_relay_repository
+  | Some collaboration ->
+      let repository = V4_store.membership collaboration |> Trust.repository in
+      Ok repository
+
+let relay_project ~root =
+  let* repository = collaborative_repository ~root in
+  Ok (Trust.Repository_id.to_string repository)
+
+let relay_candidate ~root ~remote ~object_id =
+  let* object_id =
+    Store.Stored_object_id.of_hex object_id
+    |> Result.map_error (fun _ -> Health_error (Health.Invalid_identifier object_id))
+  in
+  let* configured =
+    Transport_config.find ~root ~name:remote
+    |> Result.map_error (fun error -> Transport_config_error error)
+  in
+  let* token =
+    Transport_credential.load ~remote
+    |> Result.map_error (fun error -> Transport_credential_error error)
+  in
+  let* client =
+    Transport_http.create ~url:configured.Transport_config.url ~token
+    |> Result.map_error (fun error -> Transport_http_error error)
+  in
+  let* project = relay_project ~root in
+  let* bytes =
+    Transport_http.get client ~project ~kind:Transport_http.Object
+      ~id:(Store.Stored_object_id.to_hex object_id)
+    |> Result.map_error (fun error -> Transport_http_error error)
+  in
+  let* envelope =
+    Yeokcham_envelope.decode bytes
+    |> Result.map_error (fun error ->
+           Transport_http_error
+             (Transport_http.Invalid_response
+                (Yeokcham_envelope.decode_error_to_string error)))
+  in
+  if not (String.equal bytes (Yeokcham_envelope.encode envelope)) then
+    Error
+      (Transport_http_error
+         (Transport_http.Invalid_response "relay returned noncanonical object"))
+  else
+    let* candidate =
+      candidate_of_envelope ~source:(Health.Configured_relay remote)
+        ~object_id:(Store.Stored_object_id.to_hex object_id) envelope
+    in
+    Ok (Some (candidate, envelope))
+
+let bootstrap_basis_path artifact =
+  Filename.concat artifact "bootstrap-basis-v1.cbor"
+
+let read_bootstrap_basis artifact =
+  let path = bootstrap_basis_path artifact in
+  try
+    let stat = Unix.lstat path in
+    if stat.Unix.st_kind <> Unix.S_REG then
+      Error
+        (Invalid_bootstrap_artifact
+           { path; detail = "basis must be a regular file" })
+    else if stat.Unix.st_size < 0 || stat.Unix.st_size > 1024 * 1024 then
+      Error
+        (Invalid_bootstrap_artifact
+           { path; detail = "basis exceeds the 1 MiB repair-reader bound" })
+    else Ok (In_channel.with_open_bin path In_channel.input_all)
+  with
+  | Unix.Unix_error (error, _, _) ->
+      Error
+        (Invalid_bootstrap_artifact
+           { path; detail = Unix.error_message error })
+  | Sys_error detail -> Error (Invalid_bootstrap_artifact { path; detail })
+
+let candidate_from_artifact ~source ~object_id artifact =
+  match
+    List.find_opt
+      (fun (candidate_id, _) -> Store.Stored_object_id.equal candidate_id object_id)
+      (Package.artifact_objects artifact)
+  with
+  | None -> Ok None
+  | Some (_, bytes) ->
+      let* envelope =
+        Yeokcham_envelope.decode bytes
+        |> Result.map_error (fun error ->
+               Package_error (Package.Envelope_error error))
+      in
+      if not (String.equal bytes (Yeokcham_envelope.encode envelope)) then
+        Error
+          (Package_error
+             (Package.Invalid_package "noncanonical artifact object"))
+      else
+        let* candidate =
+          candidate_of_envelope ~source
+            ~object_id:(Store.Stored_object_id.to_hex object_id) envelope
+        in
+        Ok (Some (candidate, envelope))
+
+let bootstrap_candidate ~root ~artifact ~object_id =
+  let* object_id =
+    Store.Stored_object_id.of_hex object_id
+    |> Result.map_error (fun _ -> Health_error (Health.Invalid_identifier object_id))
+  in
+  let* repository = collaborative_repository ~root in
+  let* bytes = read_bootstrap_basis artifact in
+  let* basis =
+    Bootstrap.decode bytes |> Result.map_error (fun error -> Bootstrap_error error)
+  in
+  let* _ =
+    Bootstrap.verify ~repository ~package:artifact ~bytes
+    |> Result.map_error (fun error -> Bootstrap_error error)
+  in
+  let* package =
+    Package.read_artifact ~package:artifact
+    |> Result.map_error (fun error -> Package_error error)
+  in
+  if
+    not
+      (String.equal (Bootstrap.manifest basis)
+         (Transport.sha256 (Package.artifact_manifest package)))
+  then
+    Error
+      (Invalid_bootstrap_artifact
+         {
+           path = artifact;
+           detail = "basis manifest does not name the reread package artifact";
+         })
+  else
+    candidate_from_artifact ~source:(Health.Bootstrap_artifact artifact)
+      ~object_id package
+
 let[@warning "-4"] missing_object_ids report =
   Health.report_damages report
   |> List.filter_map (fun damage ->
@@ -242,6 +401,17 @@ let[@warning "-4"] plan_from_offline_package ~root ~package ~created_at
     ~read_candidate:(package_candidate ~package)
     ~created_at ~expires_at
 
+let[@warning "-4"] plan_from_configured_relay ~root ~remote ~created_at
+    ~expires_at =
+  plan_from_source ~root ~source:(Health.Configured_relay remote)
+    ~read_candidate:(relay_candidate ~root ~remote) ~created_at ~expires_at
+
+let[@warning "-4"] plan_from_bootstrap_artifact ~root ~artifact ~created_at
+    ~expires_at =
+  plan_from_source ~root ~source:(Health.Bootstrap_artifact artifact)
+    ~read_candidate:(bootstrap_candidate ~root ~artifact) ~created_at
+    ~expires_at
+
 let[@warning "-4"] apply_from_backup ~root ~plan_id ~selection ~now =
   let matches_source = function Health.Backup _ -> true | _ -> false in
   let read_candidate = function
@@ -276,6 +446,39 @@ let[@warning "-4"] apply_from_offline_package ~root ~plan_id ~selection ~now =
   in
   let read_candidate = function
     | Health.Offline_package package -> package_candidate ~package
+    | _ -> fun ~object_id:_ -> Ok None
+  in
+  let* plan =
+    Health_store.find ~root ~id:plan_id
+    |> Result.map_error (fun error -> Health_store_error error)
+  in
+  apply_from_source ~root ~plan_id ~selection ~now ~matches_source
+    ~read_candidate:(read_candidate (Health.plan_source plan))
+
+let[@warning "-4"] apply_from_configured_relay ~root ~plan_id ~selection ~now =
+  let matches_source = function
+    | Health.Configured_relay _ -> true
+    | _ -> false
+  in
+  let read_candidate = function
+    | Health.Configured_relay remote -> relay_candidate ~root ~remote
+    | _ -> fun ~object_id:_ -> Ok None
+  in
+  let* plan =
+    Health_store.find ~root ~id:plan_id
+    |> Result.map_error (fun error -> Health_store_error error)
+  in
+  apply_from_source ~root ~plan_id ~selection ~now ~matches_source
+    ~read_candidate:(read_candidate (Health.plan_source plan))
+
+let[@warning "-4"] apply_from_bootstrap_artifact ~root ~plan_id ~selection
+    ~now =
+  let matches_source = function
+    | Health.Bootstrap_artifact _ -> true
+    | _ -> false
+  in
+  let read_candidate = function
+    | Health.Bootstrap_artifact artifact -> bootstrap_candidate ~root ~artifact
     | _ -> fun ~object_id:_ -> Ok None
   in
   let* plan =

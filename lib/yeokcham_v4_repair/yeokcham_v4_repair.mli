@@ -14,6 +14,12 @@ type error =
   | V4_store_error of Yeokcham_v4_store.error
   | Gc_error of Yeokcham_v4_gc.error
   | Package_error of Yeokcham_v4_package.error
+  | Transport_config_error of Yeokcham_v4_transport_config.error
+  | Transport_credential_error of Yeokcham_v4_transport_credential.error
+  | Transport_http_error of Yeokcham_v4_transport_http.error
+  | No_configured_relay_repository
+  | Bootstrap_error of Yeokcham_v4_bootstrap.error
+  | Invalid_bootstrap_artifact of { path : string; detail : string }
   | Missing_state_head
   | Invalid_backup of { path : string; detail : string }
 
@@ -52,6 +58,27 @@ val plan_from_offline_package :
 (** Reads the existing package manifest and every object through the package's
     canonical artifact reader. It is not package receipt or import. *)
 
+val plan_from_configured_relay :
+  root:string ->
+  remote:string ->
+  created_at:int64 ->
+  expires_at:int64 ->
+  (Yeokcham_v4_health.repair_plan, error) result
+(** Fetches exact raw object bytes only through an existing local relay alias
+    and its custodial credential. It creates neither a receipt nor a transport
+    session, and requires a verified collaborative repository identity. *)
+
+val plan_from_bootstrap_artifact :
+  root:string ->
+  artifact:string ->
+  created_at:int64 ->
+  expires_at:int64 ->
+  (Yeokcham_v4_health.repair_plan, error) result
+(** [artifact] is an existing package directory whose regular
+    [bootstrap-basis-v1.cbor] is a separately signed existing Bootstrap record.
+    Planning verifies the basis and exact package closure but does not perform
+    bootstrap, receipt, project-state, or ordinary-source work. *)
+
 val apply_from_backup :
   root:string ->
   plan_id:string ->
@@ -70,6 +97,20 @@ val apply_from_gc_quarantine :
   (apply_result, error) result
 
 val apply_from_offline_package :
+  root:string ->
+  plan_id:string ->
+  selection:Yeokcham_v4_health.selection ->
+  now:int64 ->
+  (apply_result, error) result
+
+val apply_from_configured_relay :
+  root:string ->
+  plan_id:string ->
+  selection:Yeokcham_v4_health.selection ->
+  now:int64 ->
+  (apply_result, error) result
+
+val apply_from_bootstrap_artifact :
   root:string ->
   plan_id:string ->
   selection:Yeokcham_v4_health.selection ->
