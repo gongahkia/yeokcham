@@ -16,6 +16,7 @@ module Transport_credential = Yeokcham_v4_transport_credential
 module Transport_http = Yeokcham_v4_transport_http
 module Relay_http = Yeokcham_v4_relay_http
 module Relay_access = Yeokcham_v4_relay_access
+module Relay_config = Yeokcham_v4_relay_config
 module Semantic_config = Yeokcham_v4_semantic_config
 module Workspace = Yeokcham_v4_workspace
 
@@ -103,6 +104,7 @@ let usage_text =
    --overlap same-symbol|nearby-ranges|references\n\
   \  yeokcham semantic server enable|disable|remove [--root PATH] NAME\n\
   \  yeokcham sync [--root PATH] NAME\n\
+  \  yeokcham relay serve --config PATH\n\
   \  yeokcham relay serve --storage PATH --listen ADDRESS:PORT\n\
   \  yeokcham relay access issue --storage PATH --repository ID --scope \
    read,write [--expires-in SECONDS]\n\
@@ -380,9 +382,13 @@ let help_for = function
          credentials behind an operator-managed HTTPS proxy."
   | [ "relay"; "serve" ] ->
       Some
-        "usage: yeokcham relay serve --storage PATH --listen ADDRESS:PORT\n\n\
-         Run the plain-HTTP relay backend. Put it behind an operator-managed \
-         HTTPS reverse proxy."
+        "usage: yeokcham relay serve --config PATH\n\
+        \       yeokcham relay serve --storage PATH --listen ADDRESS:PORT\n\n\
+         Run the plain-HTTP relay backend. The explicit relay-config-v1 path \
+         enables separate storage, credential, health, metrics, quota, and \
+         expiry settings with documented YEOKCHAM_RELAY_* overrides. The \
+         legacy storage/listen form has no health or metrics listener. Put \
+         either form behind an operator-managed HTTPS reverse proxy."
   | [ "relay"; "access" ] ->
       Some
         "usage: yeokcham relay access issue|rotate|revoke|list --storage PATH \
@@ -2549,24 +2555,51 @@ let run_remote_login arguments =
   |> require_ok Transport_credential.error_to_string;
   Printf.printf "credential saved for remote %s\n" name
 
+type relay_serve = Config of string | Legacy of string * string
+
 let parse_relay_serve arguments =
-  let rec loop storage listen = function
+  let rec loop config storage listen = function
     | [] -> (
-        match (storage, listen) with
-        | Some storage, Some listen -> (storage, listen)
+        match (config, storage, listen) with
+        | Some path, None, None -> Config path
+        | None, Some storage, Some listen -> Legacy (storage, listen)
         | _ -> usage ())
+    | "--config" :: path :: rest when Option.is_none config ->
+        loop (Some path) storage listen rest
     | "--storage" :: value :: rest when Option.is_none storage ->
-        loop (Some value) listen rest
+        loop config (Some value) listen rest
     | "--listen" :: value :: rest when Option.is_none listen ->
-        loop storage (Some value) rest
+        loop config storage (Some value) rest
     | _ -> usage ()
   in
-  loop None None arguments
+  loop None None None arguments
+
+let relay_environment () =
+  Unix.environment () |> Array.to_list
+  |> List.filter_map (fun binding ->
+      match String.index_opt binding '=' with
+      | None -> None
+      | Some index ->
+          Some
+            ( String.sub binding 0 index,
+              String.sub binding (index + 1) (String.length binding - index - 1)
+            ))
 
 let run_relay_serve arguments =
-  let storage, listen = parse_relay_serve arguments in
-  Relay_http.serve ~root:storage ~listen
-  |> require_ok Relay_http.error_to_string
+  match parse_relay_serve arguments with
+  | Legacy (storage, listen) ->
+      Relay_http.serve ~root:storage ~listen
+      |> require_ok Relay_http.error_to_string
+  | Config path ->
+      let config =
+        Relay_config.load ~path |> require_ok Relay_config.error_to_string
+      in
+      let config =
+        Relay_config.override_environment config (relay_environment ())
+        |> require_ok Relay_config.error_to_string
+      in
+      Relay_http.serve_with_config config
+      |> require_ok Relay_http.error_to_string
 
 let relay_now () = Int64.of_float (Unix.gettimeofday ())
 
