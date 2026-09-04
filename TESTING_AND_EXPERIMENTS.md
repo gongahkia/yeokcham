@@ -21,6 +21,21 @@ OPAM dependency installation were both still live at the timeout. Container
 runtime integration, backup restore, and artifact-publication evidence remain
 unverified on this host.
 
+Later on the same Fedora 43 Docker host, a bounded BuildKit build completed and
+exported local image `yeokcham-relay:relay-container-test` with manifest-list
+digest `sha256:5879c171512cd2a536e151b5ad677f76feb0d1dc11a4fd3a67e12dd7e9727fcc`.
+Its inspected configuration has user `10001:10001`, the sole relay-serving
+entrypoint, and no `Config.Volumes` field. The explicit `RELAY_IMAGE` container
+check then passed. The disposable Docker journey covered the non-root
+read-only relay, non-root read-only TLS proxy, proxy readiness,
+repository-scoped manifest upload/fetch, invalid-token rejection without token
+logging, relay restart persistence, checksum-verified backup, corrupt-backup
+checksum failure, restored-volume read-only fetch, unknown-config rejection,
+no-volume startup refusal, and an unchanged repository status before/after.
+This is local OCI-runtime evidence only. The GitHub artifact workflow has not
+run, no image was published, and no external SBOM/provenance/Cosign
+verification artifact exists yet.
+
 On 2026-09-04, the Fedora 43 source-checkout run of `make ci` passed after the
 V4 onboarding and exact-local-inspection slice. The new service case compares
 the active saved checkpoint with a current scan containing a directory create,

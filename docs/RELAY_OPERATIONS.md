@@ -17,9 +17,16 @@ requires that relay digest and defaults to the immutable Nginx digest pinned in
 `build-inputs.lock`; an `NGINX_IMAGE` override must also be an immutable digest.
 Do not publish the relay's port 8080 directly; publish only the proxy's TLS
 port. Mount the named relay volume with UID/GID 10001 ownership, run the relay
-with a read-only
-root filesystem and dropped capabilities, and keep the metrics listener on the
-private network.
+with a read-only root filesystem and dropped capabilities, and keep the metrics
+listener on the private network. The example proxy runs as the pinned Nginx
+image's UID/GID 101 on internal port 8443; Compose maps host TLS port 443 to
+it. Its two tmpfs directories are owned by that unprivileged account, so it
+also runs with a read-only root filesystem and dropped capabilities.
+
+The relay image intentionally has no Docker `VOLUME` instruction. Docker would
+otherwise create an anonymous writable volume when an operator forgot the named
+mount, hiding a deployment error. With a read-only root filesystem, startup
+refuses unless the operator mounts `/var/lib/yeokcham-relay` explicitly.
 
 `relay-config-v1` is the only service configuration. It has no bearer secret;
 the documented `YEOKCHAM_RELAY_*` overrides are revalidated and unknown

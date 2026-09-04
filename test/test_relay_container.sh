@@ -73,17 +73,35 @@ start_relay() {
 start_relay "$volume"
 openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=localhost \
   -keyout "$scratch/tls.key" -out "$scratch/tls.crt" >/dev/null 2>&1
-docker run --detach --name "$proxy" --network "$network" \
-  --read-only --cap-drop ALL --security-opt no-new-privileges:true \
-  --tmpfs /var/cache/nginx:rw,noexec,nosuid,size=8m \
-  --tmpfs /var/run:rw,noexec,nosuid,size=1m \
-  --publish 127.0.0.1::443 \
-  --volume "$(pwd)/containers/relay/nginx.conf:/etc/nginx/conf.d/default.conf:ro" \
-  --volume "$scratch/tls.crt:/run/tls/tls.crt:ro" \
-  --volume "$scratch/tls.key:/run/tls/tls.key:ro" "$nginx_image" >/dev/null
-port=$(docker port "$proxy" 443/tcp | sed -n 's/.*:\([0-9][0-9]*\)$/\1/p')
-[ -n "$port" ] || fail "could not discover the proxy port"
-base=https://127.0.0.1:$port
+# Rootless Docker must be able to traverse this disposable certificate mount.
+chmod 755 "$scratch"
+chmod 644 "$scratch/tls.crt" "$scratch/tls.key"
+
+resolve_proxy_port() {
+  port=$(docker port "$proxy" 8443/tcp 2>/dev/null \
+    | sed -n 's/.*:\([0-9][0-9]*\)$/\1/p')
+  if [ -z "$port" ]; then
+    docker logs "$proxy" >&2 || true
+    fail "could not discover the proxy port"
+  fi
+  base=https://127.0.0.1:$port
+}
+
+start_proxy() {
+  docker rm --force "$proxy" >/dev/null 2>&1 || true
+  docker run --detach --name "$proxy" --network "$network" \
+    --read-only --user 101:101 --cap-drop ALL \
+    --security-opt no-new-privileges:true \
+    --tmpfs /var/cache/nginx:rw,noexec,nosuid,size=8m,uid=101,gid=101,mode=0700 \
+    --tmpfs /var/run:rw,noexec,nosuid,size=1m,uid=101,gid=101,mode=0755 \
+    --publish 127.0.0.1:0:8443 \
+    --volume "$(pwd)/containers/relay/nginx.conf:/etc/nginx/conf.d/default.conf:ro" \
+    --volume "$scratch/tls.crt:/run/tls/tls.crt:ro" \
+    --volume "$scratch/tls.key:/run/tls/tls.key:ro" "$nginx_image" >/dev/null
+  resolve_proxy_port
+}
+
+start_proxy
 
 wait_ready() {
   attempt=0
@@ -105,7 +123,7 @@ wait_ready
 [ "$(docker inspect --format '{{.HostConfig.ReadonlyRootfs}}' "$relay")" = true ] \
   || fail "relay container root filesystem was writable"
 
-object_url=$base/v1/repositories/$project/objects/$object_id
+object_url=$base/v1/repositories/$project/manifests/$object_id
 status=$(curl --silent --show-error --insecure --output /dev/null --write-out '%{http_code}' \
   --request PUT --header "Authorization: Bearer $secret" \
   --data-binary "$payload" "$object_url")
@@ -120,7 +138,7 @@ if docker logs "$relay" 2>&1 | grep -F "$secret" >/dev/null; then
   fail "relay logs exposed the scoped credential"
 fi
 
-docker restart "$relay" >/dev/null
+docker restart --time 1 "$relay" >/dev/null
 wait_ready
 received=$(curl --silent --show-error --insecure --fail \
   --header "Authorization: Bearer $secret" "$object_url")
@@ -144,7 +162,8 @@ docker run --rm --volume "$restore_volume:/target" --volume "$scratch:/backup:ro
   'tar -xzf /backup/relay-volume.tar.gz -C /target'
 docker rm --force "$relay" >/dev/null
 start_relay "$restore_volume"
-docker restart "$proxy" >/dev/null
+start_proxy
+object_url=$base/v1/repositories/$project/manifests/$object_id
 wait_ready
 received=$(curl --silent --show-error --insecure --fail \
   --header "Authorization: Bearer $secret" "$object_url")

@@ -54,9 +54,11 @@ executable plus its declared runtime shared libraries into a pinned
 digest in a checked-in build-input lock and the published image is recorded and
 deployed by immutable manifest digest, never a mutable tag.
 
-The image uses a fixed unprivileged UID/GID, exposes only the configured plain
-HTTP listener, and declares `/var/lib/yeokcham-relay` as its writable data
-volume. Operators run it with a read-only root filesystem, dropped ambient
+The image uses a fixed unprivileged UID/GID and exposes only the configured
+plain HTTP listener. Operators must mount `/var/lib/yeokcham-relay` as the
+named writable data volume; the image deliberately does not declare Docker
+`VOLUME`, which would silently create an anonymous writable volume when a mount
+is missing. They run it with a read-only root filesystem, dropped ambient
 privileges, no published host port for the plain listener, and a writable
 volume whose ownership is explicitly compatible with the image UID. The
 container may use a bounded `/tmp` tmpfs for process-local files; session data
