@@ -405,6 +405,11 @@ let configured_relay_refuses_session_expiry_above_operator_limit () =
             "configured health listener is ready" 200
             (response_status
                (raw_http ~port:health_port (raw_request "GET" "/readyz")));
+          Alcotest.(check bool)
+            "readiness leaves no probe in relay storage" false
+            (Sys.readdir relay_root
+            |> Array.exists
+                 (String.starts_with ~prefix:".yeokcham-relay-readiness-"));
           let body ~raw_size ~expiry =
             Encoding.array
               [
@@ -456,6 +461,36 @@ let configured_relay_refuses_session_expiry_above_operator_limit () =
             "readiness exposes failed credential registry" 503
             (response_status
                (raw_http ~port:health_port (raw_request "GET" "/readyz")))))
+
+let configured_relay_refuses_nonwritable_storage () =
+  with_directory "yeokcham-v4-readonly-relay-" (fun root ->
+      let relay_root = Filename.concat root "relay" in
+      let registry_root = Filename.concat root "registry" in
+      Unix.mkdir relay_root 0o500;
+      let project = Trust.Repository_id.to_string (repository ()) in
+      let now = Int64.of_float (Unix.gettimeofday ()) in
+      Relay_access.update ~root:registry_root (fun registry ->
+          Relay_access.issue ~now ~repository:project
+            ~scopes:[ Relay_access.Read ]
+            ~expires_in:Relay_access.default_lifetime_seconds registry
+          |> Result.map (fun grant -> (registry, grant)))
+      |> require_ok Relay_access.error_to_string
+      |> ignore;
+      let config =
+        Relay_config.create ~storage_root:relay_root
+          ~credential_registry_root:registry_root ~listen:"127.0.0.1:41080"
+          ~health_listen:"127.0.0.1:41081" ~metrics_listen:"127.0.0.1:41082"
+          ~project_quota_bytes:1 ~session_expiry_seconds:1
+          ~log_level:Relay_config.Info
+        |> require_ok Relay_config.error_to_string
+      in
+      match Relay_http.serve_with_config config with
+      | Error error ->
+          Alcotest.(check string)
+            "nonwritable relay storage is refused before serving"
+            "V4 relay operator storage or credential registry is not ready"
+            (Relay_http.error_to_string error)
+      | Ok () -> Alcotest.fail "nonwritable relay storage started serving")
 
 let http_listener_rejects_untrusted_requests_and_preserves_immutability () =
   with_http_relay (fun ~relay_root ~port ~token ->
@@ -2133,6 +2168,8 @@ let () =
             http_listener_rejects_untrusted_requests_and_preserves_immutability;
           Alcotest.test_case "configured relay caps requested V2 session expiry"
             `Quick configured_relay_refuses_session_expiry_above_operator_limit;
+          Alcotest.test_case "configured relay refuses nonwritable storage"
+            `Quick configured_relay_refuses_nonwritable_storage;
           Alcotest.test_case
             "scoped access rejects expiry, revocation, replay, and \
              cross-project use"

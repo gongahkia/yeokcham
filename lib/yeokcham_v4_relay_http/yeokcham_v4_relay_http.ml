@@ -620,6 +620,16 @@ let handle relay ~access_root ~project_quota_bytes ~session_expiry_seconds
                             | _ -> response descriptor 405 ""))))
           | _ -> response descriptor 400 ""))
 
+let readiness_probe = ref 0
+
+let next_readiness_probe path =
+  let value = !readiness_probe in
+  readiness_probe := value + 1;
+  Filename.concat path
+    (Printf.sprintf ".yeokcham-relay-readiness-%d-%d" (Unix.getpid ()) value)
+
+let remove_probe path = try Unix.unlink path with Unix.Unix_error _ -> ()
+
 let directory_state path =
   try
     let info = Unix.lstat path in
@@ -627,7 +637,17 @@ let directory_state path =
     else
       try
         Unix.access path [ Unix.R_OK; Unix.W_OK; Unix.X_OK ];
-        Ops.Available
+        let probe = next_readiness_probe path in
+        Fun.protect
+          ~finally:(fun () -> remove_probe probe)
+          (fun () ->
+            let descriptor =
+              Unix.openfile probe
+                [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_EXCL ]
+                0o600
+            in
+            Unix.close descriptor;
+            Ops.Available)
       with Unix.Unix_error _ -> Ops.Not_writable
   with
   | Unix.Unix_error (Unix.ENOENT, _, _) -> Ops.Missing

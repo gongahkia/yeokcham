@@ -87,9 +87,11 @@ object identifiers.
 
 `/healthz` is liveness only. `/readyz` verifies that the configured storage and
 credential-registry paths are usable without creating ordinary source files or
-changing V4 state. A separately bound local metrics listener reports only
-bounded aggregate request/status/object/session/quota/expiry/failure counters;
-it contains no repository names, object IDs, credentials, payload sizes per
+changing V4 state. Storage readiness creates then removes a zero-byte probe
+only in the named relay volume, so a mode-writable but read-only mount is not
+reported ready. A separately bound local metrics listener reports only bounded
+aggregate request/status/object/session/quota/expiry/failure counters; it
+contains no repository names, object IDs, credentials, payload sizes per
 object, or source paths. These endpoints do not confer access, selection, or
 receipt authority.
 

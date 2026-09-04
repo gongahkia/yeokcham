@@ -10,6 +10,17 @@ receive. The package resolution test delivers conflicting shared work and its
 signed resolution in an order requiring deferral, then proves it recreates a
 resolved decision rather than a third shared change.
 
+On 2026-09-04, `opam exec -- dune exec test/test_v4_transport.exe -- --color
+never` passed all 20 transport cases in 25.149 seconds after adding the relay
+storage-readiness probe check. The configured-listener cases prove that a
+non-writable storage directory is refused before serving and that a successful
+readiness request leaves no probe file behind. `timeout 120s docker build
+--file containers/relay/Containerfile --tag yeokcham-relay:relay-ops-test .`
+did not produce an image: the concurrent Debian `apt-get update` and locked
+OPAM dependency installation were both still live at the timeout. Container
+runtime integration, backup restore, and artifact-publication evidence remain
+unverified on this host.
+
 On 2026-09-04, the Fedora 43 source-checkout run of `make ci` passed after the
 V4 onboarding and exact-local-inspection slice. The new service case compares
 the active saved checkpoint with a current scan containing a directory create,

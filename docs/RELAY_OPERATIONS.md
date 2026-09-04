@@ -22,9 +22,11 @@ private network.
 `relay-config-v1` is the only service configuration. It has no bearer secret;
 the documented `YEOKCHAM_RELAY_*` overrides are revalidated and unknown
 prefixed names refuse startup. `/healthz` is liveness. `/readyz` returns 200
-only while storage and the credential registry remain usable. `/metrics` emits
-fixed aggregate Prometheus text counters without repository, object, payload,
-credential, or source-path values.
+only while storage and the credential registry remain usable. Its storage
+check creates and removes a zero-byte probe in the relay data volume; it does
+not create a relay object, session, V4 record, or ordinary source file.
+`/metrics` emits fixed aggregate Prometheus text counters without repository,
+object, payload, credential, or source-path values.
 
 ## Backup and restore drill
 
