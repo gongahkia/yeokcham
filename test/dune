@@ -381,6 +381,7 @@
   yeokcham_v4_local_service
   yeokcham_v4_package
   yeokcham_v4_recovery
+  yeokcham_store
   yeokcham_v4_store
   yeokcham_v4_trust
   yeokcham_v4_workspace))
