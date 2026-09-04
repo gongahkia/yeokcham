@@ -16,7 +16,7 @@ The primary contribution is not a new command spelling or a faster Git clone. It
 6. `DECISIONS.md`
 7. `RESEARCH_QUESTIONS.md`
 8. `TESTING_AND_EXPERIMENTS.md`
-9. `docs/ISSUE_TRACKING.md` and the linked open GitHub issue
+9. `ACTIVE-TICKLIST.md` and `docs/ISSUE_TRACKING.md`
 
 ## Working rules
 
@@ -80,7 +80,7 @@ Before coding:
 
 After coding:
 
-- Update or close the linked GitHub issue after its acceptance criteria and verification pass.
+- Update the exact `ACTIVE-TICKLIST.md` item after its acceptance criteria and verification pass.
 - Update formal model if semantics changed.
 - Add golden fixtures for persistent format.
 - Record experiment results separately from claims.
@@ -127,9 +127,10 @@ yeokcham compact --dry-run --explain
 yeokcham storage roots
 ```
 
-V4 has no capsule commands, generic scan command, repository `verify` command,
-or storage-stats command. Use the explicit V4 surfaces above; source-release
-verification is the separate `make release-verify` tool.
+The current V4 CLI has no capsule commands, generic scan command, repository
+`verify` command, or storage-stats command. Do not add a surface outside an
+approved `ACTIVE-TICKLIST.md` milestone; source-release verification remains
+the separate `make release-verify` tool.
 
 ## First vertical slice
 
@@ -153,5 +154,5 @@ A task is done when:
 - Tests cover generated and edge cases.
 - Persistent bytes are versioned.
 - CLI behaviour is inspectable.
-- The linked GitHub issue is updated or closed.
+- The exact `ACTIVE-TICKLIST.md` item is updated with verification evidence.
 - No capability is overstated.

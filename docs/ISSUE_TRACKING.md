@@ -1,16 +1,15 @@
-# GitHub issue tracking
+# Historical GitHub issue record
 
-GitHub Issues is the live backlog; this file records only the active V4
-boundary. Inspect live bodies, labels, and blocking relationships before work.
+As of 2026-09-04, [`ACTIVE-TICKLIST.md`](../ACTIVE-TICKLIST.md) is the sole
+authoritative development tracker. GitHub Issues are not a live backlog and
+must not be used as a prerequisite for work. The historical records below
+preserve former issue scope, accepted V4 evidence, and ADR relationships.
 
-The V4 lifecycle and V4-only cutover have removed earlier product code and
-documentation from `main`; historical evidence remains in Git history. Issues
-[#242](https://github.com/gongahkia/yeokcham/issues/242) and
-[#244](https://github.com/gongahkia/yeokcham/issues/244) remain open
-release/distribution work. V4-only cutover does not satisfy their field-trial
-or opam-publication criteria, so do not close them as a retirement side effect.
-Their live bodies have been re-scoped to current V4 commands: #242 is macOS
-source-release field evidence and #244 is source-only opam publication.
+Issues [#242](https://github.com/gongahkia/yeokcham/issues/242) and
+[#244](https://github.com/gongahkia/yeokcham/issues/244) have been migrated to
+the `MACOS-001` and `DIST-OPAM-001` deferred items in the active ticklist. Their
+closure records a roadmap migration/deferment, not completion of macOS field
+trials or opam publication.
 
 [#263](https://github.com/gongahkia/yeokcham/issues/263), V4 onboarding and
 exact local inspection, is complete and closed. It adds source-only evaluation

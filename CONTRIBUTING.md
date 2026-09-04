@@ -5,8 +5,8 @@ Yeokcham is a model-first research prototype. Contributions must preserve the se
 ## Before changing code
 
 1. Read the documents listed in `AGENTS.md` in order.
-2. Inspect the relevant live GitHub issue and its dependencies, and stay within one milestone.
-3. Record the active vertical slice, types, invariants, tests, and ADR impact in the linked issue.
+2. Inspect the relevant `ACTIVE-TICKLIST.md` milestone and its dependencies, and stay within one milestone.
+3. Record the active vertical slice, types, invariants, tests, and ADR impact in that ticklist item.
 4. Open or amend an ADR before implementing an architectural or persistent-format decision.
 
 ## Implementation order
@@ -35,9 +35,9 @@ Use `make format` to apply formatting. Generated `yeokcham.opam` changes must be
 
 ## Pull requests
 
-- Keep each commit limited to one model change or linked issue.
+- Keep each commit limited to one model change or active ticklist item.
 - Include the invariant and tests in the commit or pull-request description.
-- Update or close the linked GitHub issue; update the formal model when semantics change.
+- Update the active ticklist item; update the formal model when semantics change.
 - Add canonical golden fixtures for persistent-format changes.
 - Record experiment results separately from product claims.
 - Do not use OCaml `Marshal` for persistent data.

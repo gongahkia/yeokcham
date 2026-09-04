@@ -1,0 +1,279 @@
+# Active development ticklist
+
+ACTIVE-TICKLIST.md is Yeokcham's sole authoritative development tracker. It records accepted product boundaries, active work, implementation order, and acceptance evidence. GitHub Issues are historical discussion only; do not open, require, or use them as the source of truth for work.
+
+This is a development roadmap, not a release promise. Yeokcham has no public format-compatibility, migration, support, or availability commitment while it remains in development. An unchecked item is a deliberately unimplemented capability, not a claim that the repository already provides it.
+
+## How to use this file
+
+- Start one unchecked milestone only after every listed dependency is complete and its required ADR exists.
+- Before code, copy the milestone's vertical slice, types, invariants, tests, and ADR impact into the change description or commit series.
+- Check a box only after the listed evidence exists and required verification passes. Add the command and result beside the completed item.
+- Update this file in the same change as implementation. Do not create a parallel tracker or close work merely because a prototype exists.
+- Record measurements in TESTING_AND_EXPERIMENTS.md. Distinguish local test evidence from deployment, performance, security, or release claims.
+
+## Locked product boundary
+
+| Decision | Chosen boundary |
+| --- | --- |
+| Product | A model-first, local-first alternative VCS, not Git-compatible or Git-adjacent. Its defining distinction remains separate scratch, intent, and release history. |
+| Audience | Trusted technical teams of roughly 2–10 people. Initial practical capacity target: 5 GiB repository, 100,000 paths, 100 Mbps link, and 100 ms RTT. These are targets to measure, not current claims. |
+| Intent and conflicts | Never infer intent or auto-merge. Preserve candidate materialisation and require an explicit human resolution. |
+| Workspace | Receiving, synchronising, and bootstrap never change ordinary source files. A later explicit projection activation/update is the only shared-work materialisation path. |
+| Transport security | HTTPS/TLS plus finite, repository-scoped bearer credentials. The relay is trusted with stored payload bytes; end-to-end payload encryption, mTLS, OIDC, and enterprise identity are outside this roadmap. |
+| Transport efficiency | Canonical objects stay byte-identical and uncompressed at rest. Use zstd only on the wire, receiver-aware missing-object negotiation, resumable byte-range transfer, bounded concurrency, and bounded retry. |
+| Platforms | Native Linux client is the implementation target. macOS is experimental/deferred; Windows and WSL are unsupported and unplanned. |
+| Runtime and delivery | Native Linux client; a signed OCI image for the relay only. Development artifacts are a signed RPM, portable archive, and signed relay OCI image. There is no public release or opam publication plan yet. |
+| Operations | Self-hosted single relay node, operator-managed TLS proxy, backups, restore drill, health endpoint, metrics, and quotas. No HA, managed service, or hosted control plane. |
+| CLI automation | Human-readable CLI remains primary. New commands expose stable versioned JSON, shell completions, and local post-operation observer hooks. Hooks cannot change VCS success/failure or state. |
+| Repository health | verify is read-only. Repair is conservative and human-selected: enumerate all candidates, restore only from explicitly named verified sources, never guess, overwrite, or globally block unrelated work. |
+| Interoperability | No Git import/export/bridge. No Subversion, Mercurial, Jujutsu, or other VCS compatibility layer. |
+
+## Cross-cutting invariants
+
+These apply to every milestone below.
+
+- [ ] **Model separation.** Never collapse checkpoint into capsule, capsule into revision, revision into release, conflict into process error, or semantic sidecar into canonical source.
+- [ ] **Exact bytes.** Every source operation has a byte-correct canonical representation or explicit fallback; semantic data stays optional sidecar.
+- [ ] **Explicit materialisation.** Only an explicitly requested materialise, restore, workspace activation, or workspace update may write ordinary source files. Receipt, receive, sync, bootstrap, relay, verify, and repair planning must not do so.
+- [ ] **Immutable publication.** A malformed, partial, unauthenticated, or incorrectly identified object never becomes a canonical local, package, or relay object.
+- [ ] **Failure locality.** Damage blocks only the operation requiring the damaged closure. Users can defer repair and continue unrelated work.
+- [ ] **Persistent discipline.** Every durable record is explicitly versioned, canonically ordered, feature-gated, fixture-covered, and written without mutating the only valid copy in place. No OCaml Marshal.
+- [ ] **Honest interfaces.** Stable JSON has an explicit schema version; unknown mandatory fields/features are rejected; credentials, bearer tokens, and private material are never emitted.
+
+The checkboxes above are verification obligations repeated in each implementation milestone; they do not imply these properties are absent from the current V4 implementation.
+
+## Current milestone — GOV-001: canonical roadmap and tracker migration
+
+**Status:** complete on 2026-09-04. This documentation-only vertical slice established the process required for all subsequent code work. It intentionally changed no V4 model, transport, persistent format, or CLI behaviour. WS-001 is next but must not start until ADR-098 is accepted.
+
+### Scope and invariants
+
+- [x] Make this file the only live work tracker, with enough implementation detail for a coding agent to take one future milestone without reopening the product decisions above.
+- [x] Migrate the remaining open GitHub issue obligations into the deferred section below; close the issues only with a migration comment, never as a claim that their original acceptance criteria were implemented.
+- [x] Change repository contributor instructions from “linked GitHub issue” to “exact active-ticklist item,” while retaining docs/ISSUE_TRACKING.md as a historical record.
+- [x] Preserve old issue numbers and ADR references as history rather than rewriting historical claims.
+
+### Acceptance evidence
+
+- [x] ACTIVE-TICKLIST.md contains the complete accepted boundary, completed governance milestone, ordered planned milestones, exact deferred work, dependencies, interfaces, invariants, and test expectations.
+- [x] AGENTS.md, CONTRIBUTING.md, TODO.md, and docs/ISSUE_TRACKING.md point contributors to this file and make no claim that GitHub Issues are a live backlog.
+- [x] GitHub #242 and #244 have a migration comment and are closed as superseded/deferred roadmap items.
+- [x] git diff --check passed; Markdown links and issue references were reviewed on 2026-09-04.
+
+## Planned milestones
+
+Milestones are strictly ordered. Complete the acceptance evidence of one before starting the next; do not combine them into a broad refactor.
+
+### WS-001 — explicit projection workspace
+
+**Depends on:** GOV-001.
+**Required ADR:** ADR-098, “explicit projection workspace activation and update.” It must state that an activated working tree is a projection of a verified imported basis, not a clone, branch checkout, delivery, or authority selection.
+
+**Goal:** make a newly bootstrapped, verified project usable without violating the receipt boundary. Bootstrap already imports verified shared state and creates a local draft; this slice adds an explicit action that materialises the latest verified projection into an empty ordinary root. It must not revise bootstrap, receive, or sync to materialise implicitly.
+
+**Public command contract:**
+
+~~~
+yeokcham workspace activate [--root PATH]
+yeokcham workspace update [--root PATH] [--replace]
+~~~
+
+- workspace activate resolves only the project’s currently verified projection baseline. It requires an empty destination except for repository metadata created by bootstrap; it materialises exact bytes, modes, and symlinks, then writes a durable projection receipt.
+- It refuses a nonempty destination, missing/corrupt closure, absent verified baseline, unsafe path, or incompatible existing activation. It never contacts a remote, creates a revision, selects authority, or infers a user choice.
+- workspace update is explicit and never called by sync or a daemon. It compares the existing projected worktree with its activation receipt and refuses a dirty tree by default.
+- workspace update --replace first creates a regular durable safety checkpoint/proof of the local tree, then materialises the selected verified projection with existing crash-safe restore mechanics. It prints the saved checkpoint/proof identifiers. If preparation fails, it writes no ordinary source bytes.
+
+**Types and pure transitions first:**
+
+- [ ] Define a Projection_basis that identifies the verified immutable imported basis and exact snapshot/checkpoint being projected; do not reuse a mutable remote alias as identity.
+- [ ] Define a versioned Workspace_projection_receipt containing repository identity, basis identifier, snapshot/checkpoint identifier, canonical tree identifier, activation generation, and source-byte fingerprint/root needed to recognise a clean projected tree. It contains no credential or remote URL.
+- [ ] Define pure activate and plan_update transitions returning a complete materialisation plan or a typed refusal: Nonempty_destination, Dirty_workspace, Missing_closure, No_verified_basis, Receipt_mismatch, or Unsafe_path. They have no filesystem or network dependency.
+- [ ] State and test: a clean projection receipt maps to exactly one verified tree; a receipt never changes authority/shared history; and an update cannot discard uncheckpointed bytes.
+
+**Persistent adapter and CLI:**
+
+- [ ] Add a versioned canonical receipt record and golden fixture under test/golden/v4; reject unknown mandatory features, malformed IDs, version mismatch, and noncanonical bytes.
+- [ ] Build the materialisation plan with Yeokcham_v4_local_service restore primitives rather than a second tree writer. Keep its prepare/publish/recover journal semantics and write the receipt only after completion.
+- [ ] Add workspace parsing and concise text output in bin/yeokcham_v4.ml; preserve bootstrap, receive, and sync semantics.
+- [ ] Add JSON output only when CLI-001 establishes the shared envelope; do not invent a one-off schema.
+
+**Tests and acceptance:**
+
+- [ ] Unit: initial activation, clean update, dirty default refusal, --replace safety checkpoint, empty tree, file/mode/symlink exactness, and all typed refusals.
+- [ ] Generated: random exact snapshots activate then compare byte/mode/symlink trees; replayed activation/update never changes model state beyond the local receipt.
+- [ ] Failure: interrupted materialisation, receipt write failure, missing closure, stale receipt, malicious path traversal, and --replace recovery. Verify no source mutation on every refusal/failure.
+- [ ] CLI journey: bootstrap into an empty directory, explicitly activate, make a local edit, observe default update refusal, use --replace, and restore the printed safety checkpoint.
+- [ ] Run focused tests plus make ci; add measured duration/path-count notes to TESTING_AND_EXPERIMENTS.md without claiming the capacity target unless EVIDENCE-001 measures it.
+
+### TRANSPORT-002 — V2 efficient, resumable object transfer
+
+**Depends on:** WS-001.
+**Required ADR:** ADR-099, “V2 compressed and resumable relay transfer.” It must define raw-object identity, transfer-session lifecycle, quotas, retry classifications, and why per-wire compression has no persistent-format effect.
+
+**Goal:** improve the existing HTTPS relay from whole-object retry to receiver-aware, zstd-compressed, resumable raw-byte transfer while preserving the receive-first, no-working-tree-mutation boundary.
+
+**Protocol decisions that must not be revisited during implementation:**
+
+- Canonical local/package/relay objects remain uncompressed exact bytes. An object ID always names these raw canonical bytes, never a compressed frame.
+- Negotiate a V2 capability document before object transfer. The receiver reports its supported protocol version, zstd support, maximum segment size, maximum in-flight segments, and exact missing object IDs.
+- Use raw **byte-range** resumption, not object-boundary resumption. Each segment is exactly 1 MiB of raw bytes except the final segment; compress each segment independently with zstd for transport.
+- A temporary session is bound to project ID, object ID, raw total size, credential identifier (never its bearer secret), requested scope, expiry, and segment bitmap. It is not a V4 history record and never appears in a package, feed, bootstrap basis, or canonical object store.
+- On upload, the relay decodes each segment into a scoped temporary file, validates claimed raw offset/length and bounded decoded output, and persists progress atomically. Completion revalidates full envelope/canonical bytes and object ID before one atomic immutable publish.
+- On download, the client validates each decompressed segment range and revalidates full canonical bytes/object ID before import. No partial data enters the V4 store.
+- Default parallelism is 4 segments, configurable only down to 1 and up to 8. Retry transient network failures and HTTP 5xx at most four total attempts with bounded delays of 250 ms, 1 s, 4 s, and 10 s. Never retry auth, capability, range, decompression, canonical-byte, or identity failures.
+- V1 remains available in development until V2 has all acceptance evidence; no public compatibility promise follows from retaining it.
+
+**Types and pure transitions first:**
+
+- [ ] Add algebraic types for Capability, Object_offer, Missing_set, Range, Segment, Transfer_session, Session_progress, and typed Transfer_error classifications. Bound all sizes/counts before allocation.
+- [ ] Implement pure capability intersection, missing-object planning, raw range partitioning, legal-progress transition, retry classification, and completion eligibility. Property-test partition coverage, non-overlap, idempotent repeated segment receipt, and monotonic bitmap progress.
+- [ ] Version the relay-only session record and add canonical fixtures. Session records require expiry cleanup, per-project temporary-byte quota, per-credential session cap, and recovery that never publishes a partial object.
+
+**Adapters and boundaries:**
+
+- [ ] Extend Yeokcham_v4_transport, Yeokcham_v4_transport_http, Yeokcham_v4_relay, and Yeokcham_v4_relay_http; keep current V1 routes isolated until V2 evidence is complete.
+- [ ] Use an OCaml zstd binding only after its license, reproducible build, and Linux/RPM implications are recorded. Reject frames exceeding the claimed raw range or configured decompression budget.
+- [ ] Make relay expiration/cleanup explicit and observable without exposing bearer tokens. Cleanup never removes an immutable published object.
+- [ ] Keep sync, receive, bootstrap, and daemon receipt semantics: they may stage/verify objects but never scan, resolve, or materialise source.
+
+**Tests and acceptance:**
+
+- [ ] Golden tests for capability/session encoding and negative decode cases.
+- [ ] Property/fuzz-style tests for arbitrary segment order, duplicates, overlaps, gaps, wrong length, zstd corruption, decompression expansion, and resume after process restart.
+- [ ] HTTPS relay integration tests for missing-set negotiation, interrupted upload/download and resume, expiry, quota rejection, credential revocation, retry/nonretry classifications, and V1 fallback.
+- [ ] Regression guard: every success and failure leaves ordinary source bytes unchanged; incomplete sessions cannot be fetched, fed, bootstrapped, or packaged.
+- [ ] Benchmark a 5 GiB/100,000-path representative fixture or documented scaled equivalent. Record CPU, memory, wall time, wire bytes, resume work avoided, and test hardware/network conditions in TESTING_AND_EXPERIMENTS.md. Do not call the target met without data.
+
+### RELAY-OPS-001 — single-node relay operator product
+
+**Depends on:** TRANSPORT-002.
+**Required ADR:** ADR-102, “development relay packaging and operation.” It preserves a separately operated relay and operator-managed TLS boundary.
+
+**Goal:** provide a reproducible, signed OCI relay image for a small trusted team to operate behind its own HTTPS reverse proxy. The image is for the relay, not the native client.
+
+**Deliverables:**
+
+- [ ] A minimal non-root OCI image that runs only the relay service; document its pinned base/toolchain, exposed listen address, writable data volume, read-only root filesystem expectation, and immutable image digest.
+- [ ] Example Compose/Podman deployment plus Nginx or Caddy TLS proxy example. The relay itself may remain plain HTTP only behind that local proxy; direct public HTTP is not a supported deployment.
+- [ ] Explicit environment/config schema for storage root, listen address, quotas, session expiry, credential registry location, log level, and health listener. Reject unknown required config keys and never log bearer secrets.
+- [ ] /healthz liveness and /readyz storage-writability/readiness endpoints; a bounded metrics endpoint reporting aggregate request, object, session, quota, expiration, and failure counters without repository contents or credentials.
+- [ ] Backup/restore runbook: quiesce or snapshot the volume, checksum the backup, restore to a disposable relay, run read-only verification, then perform a client receive/bootstrap smoke journey. Include an operator retention and restore-drill schedule.
+- [ ] OCI SBOM/provenance and signature generation/verification in the development artifact pipeline. State signing-key handling and trust root before publishing any image.
+
+**Tests and acceptance:**
+
+- [ ] Container integration starts non-root with a mounted empty volume, goes ready through the proxy, performs scoped upload/receive, and persists across restart.
+- [ ] Negative tests cover no writable volume, invalid config, token redaction, quota/session expiry, health failure, and backup restore corruption.
+- [ ] Document that this is single-node/self-hosted only; do not imply HA, managed hosting, replication, or end-to-end payload privacy.
+
+### HEALTH-001 — read-only verification and human-selected repair
+
+**Depends on:** WS-001 and TRANSPORT-002.
+**Required ADR:** ADR-100, “scoped verification and conservative sourced repair.” It must define damage taxonomy, candidate provenance, exact approval binding, and the no-global-block rule.
+
+**Goal:** make local health diagnosable and recoverable without guessed repair or silent loss.
+
+**Public command family:**
+
+~~~
+yeokcham verify [--root PATH] [--format text|json]
+yeokcham repair plan [--root PATH] --from SOURCE [--format text|json]
+yeokcham repair apply [--root PATH] --plan PLAN_ID --select CANDIDATE_ID
+  --approve PLAN_DIGEST [--format text|json]
+yeokcham repair defer [--root PATH] [--format text|json]
+~~~
+
+SOURCE is one explicit trusted candidate source: a local GC quarantine ID, an offline package path, a configured relay alias, a bootstrap artifact, or a backup path. verify never modifies repository or ordinary source bytes. repair plan enumerates every verified candidate and its provenance; it makes no selection. repair apply requires the exact plan digest and candidate ID, revalidates source bytes and current damage immediately before write, and never overwrites a divergent immutable object. repair defer records no repair and leaves unrelated commands usable.
+
+**Types and pure transitions first:**
+
+- [ ] Define Damage with stable machine codes for missing object, malformed envelope, canonical-ID mismatch, dangling reference, unreadable durable record, restore-proof mismatch, and unreachable temporary state. Include affected closure and blocked operations.
+- [ ] Define Repair_source, Repair_candidate, Repair_plan, Selection, and Repair_outcome. A plan is an immutable snapshot of damage, candidate byte identity, source provenance, and expiry/digest.
+- [ ] Implement pure closure verification, candidate matching, and apply eligibility. Invariants: verification has no writes; repair never invents bytes; all source candidates are fully canonical-verified; repair can only add a missing exact object or explicitly quarantine an invalid copy.
+
+**Adapters and behaviour:**
+
+- [ ] Reuse Yeokcham_v4_gc quarantine, Yeokcham_v4_package, relay fetch, bootstrap artifacts, Yeokcham_v4_store, and restore-proof readers through narrow read-only adapters. Do not create an alternate object format.
+- [ ] Persist repair plans only if needed for cross-process apply; version and expire them outside canonical history. A stale plan refuses and requires a fresh repair plan.
+- [ ] Local repair writes stage into a new temporary file, validates byte identity, atomically publishes only if the object is still missing, and preserves invalid originals/quarantine evidence. It never overwrites.
+- [ ] Return structured text and JSON damage/candidate lists. No repair, including a deferred one, may block status, unrelated local saves, inspection of intact history, or work in other repositories.
+
+**Tests and acceptance:**
+
+- [ ] Fixtures for every damage code and plan encoding, plus decode corruption and unknown-feature rejection.
+- [ ] Generated corrupted/missing-closure cases verify stable diagnosis and prove verify produces no file writes.
+- [ ] Integration journeys restore an exact missing object from each permitted source; test all multiple-candidate selections, stale approval, divergent source, source disappearance, write interruption, and defer/continue work.
+- [ ] Assert malformed/mismatched candidates never become visible and source/destination ordinary worktrees remain unchanged throughout.
+
+### CLI-001 — dependable machine interface, completions, and observer hooks
+
+**Depends on:** WS-001 and HEALTH-001 for the new commands it exposes.
+**Required ADR:** ADR-101, “versioned CLI data and post-operation observers.”
+
+**Goal:** make the native CLI dependable in terminals and scripts without letting scripting alter VCS decisions or outcomes.
+
+**CLI contract:**
+
+- [ ] Add --format text|json to every user-facing successful/result command touched by this roadmap, preserving existing text output until its versioned replacement is documented. JSON top-level is a canonical envelope with schema_version, command, ok, result, warnings, and typed error.
+- [ ] Define stable error codes, not parsable prose. JSON goes to stdout; diagnostics remain on stderr; exit status remains the command outcome.
+- [ ] Generate and test Bash, Zsh, and Fish completion scripts from a single command/option specification. Completion never contacts a relay, reads a secret, or mutates a repository.
+- [ ] Provide yeokcham hook add|list|remove|test for local, versioned hook configuration. A hook is a post-operation observer invoked only after a successful eligible local command has committed state. It gets a versioned JSON event on stdin with public identifiers and paths only.
+- [ ] Hooks never run for receive, sync, bootstrap, daemon actions, relay server/access commands, verification, repair planning, or a failed operation. Hook nonzero exit, timeout, malformed output, and signal become a warning and never reverse or change VCS success/state.
+- [ ] Strip bearer tokens, credentials, private keys, secret-service values, passphrases, and raw unredacted configuration from event payloads/logs. Default hook timeout is 30 seconds; run with minimal inherited environment and no shell interpolation.
+
+**Implementation/tests:**
+
+- [ ] Define typed command result/event/error records and one canonical JSON encoder/decoder fixture set. Do not hand-assemble JSON in every parser.
+- [ ] Add parser and completion-generation tests for every command/flag, shell syntax checks, JSON goldens, stdout/stderr/exit-code tests, and text-output regression tests.
+- [ ] Use an argv-list process launcher, not sh -c. Test spaces, quotes, timeout, signal, missing executable, adversarial environment, and secret redaction. Prove no hook invocation on excluded receipt/daemon paths.
+
+### DIST-001 — signed development artifacts
+
+**Depends on:** RELAY-OPS-001 and CLI-001.
+**Required ADR:** ADR-102 amendment or dedicated distribution ADR if artifact trust boundary differs from relay image.
+
+**Goal:** make development builds reproducible enough for trusted Linux testers without representing them as a stable public release.
+
+- [ ] Produce a portable Linux archive and Fedora RPM for the native client; publish a signed OCI relay image separately. Pin/build-record compiler, Dune/OCaml, OS base, dependency-lock inputs, source revision, artifact SHA-256, SBOM, and signer fingerprint.
+- [ ] Decide and document development signing root, rotation/revocation process, signature verification commands, and how test users obtain keys. Do not call a tag, artifact, or format stable merely because it is signed.
+- [ ] Add install/uninstall/smoke verification in clean Fedora containers or VMs. Include init, save, restore, explicit workspace activation, relay sync, and verify journeys. Test that package scripts do not autostart a daemon or alter source outside explicit commands.
+- [ ] Publish operator/client installation, upgrade, downgrade, backup, and uninstall guidance. Downgrade may refuse incompatible development records; that is preferable to guessed conversion because no migration promise exists.
+- [ ] Keep opam publication, public source-release tags, support matrix, and format migration policy deferred until an explicit future product decision.
+
+### EVIDENCE-001 — release-readiness evidence, not a release
+
+**Depends on:** TRANSPORT-002, RELAY-OPS-001, HEALTH-001, CLI-001, and DIST-001.
+**Required ADR:** none unless measurement changes product policy; update TESTING_AND_EXPERIMENTS.md, not product claims, with raw conditions/results.
+
+**Goal:** collect evidence needed to decide whether Yeokcham can leave development-only status. This milestone does not authorize a public release.
+
+- [ ] CI matrix: Linux build/test/format/lint, golden fixture compatibility, package smoke, OCI smoke, protocol fault tests, and a documented optional integration matrix for unavailable hardware/software.
+- [ ] Security review: bearer-token lifetime/revocation, TLS proxy deployment, relay path traversal/object-ID/range/decompression limits, hook redaction, repair provenance, backup exposure, and image supply chain. Track findings as ticklist items; do not silently accept them.
+- [ ] Benchmark WS-001 and TRANSPORT-002 against capacity target with reproducible fixture generation, stated hardware/network, median and tail results, resource consumption, failure/resume behaviour, and V1 comparison. No cross-VCS performance claim without equivalent public workload/methodology.
+- [ ] Run a two-to-ten-person controlled Linux field exercise: bootstrap, activate, concurrent work/explicit resolution, sync interruption, repair/defer, backup restore, credential rotation/revocation, and operator recovery. Record defects/usability observations separately from compatibility or production-support claims.
+- [ ] At the end, make a new explicit decision: continue development, define public compatibility/migration policy, or retire/defer. Do not infer it from passing tests.
+
+## Explicitly deferred or out of scope
+
+| ID | Item | Re-entry condition |
+| --- | --- | --- |
+| DEFER-GIT-001 | Git import, export, bridge, Git hosting integration, or Git-compatible command/format workflow. | Separate product decision and ADR that does not erase Yeokcham's model boundary. |
+| DEFER-MERGE-001 | Automatic merge, semantic merge, conflict auto-resolution, or inferred intent. | New proposal with explicit human-choice preservation; not part of this roadmap. |
+| DEFER-SEC-001 | End-to-end payload encryption, mTLS, OIDC/SSO, enterprise identity, and hardware fleet management. | New threat model, operator model, ADR, and dedicated tests. |
+| DEFER-OPS-001 | HA, replication, managed relay service, hosted control plane, or multi-region operation. | Separate operational product decision and failure model. |
+| DEFER-PLATFORM-001 | macOS product support, Windows, and WSL. | Native-platform design/evidence and explicit support policy. macOS remains experimental only. |
+| DEFER-UI-001 | GUI, TUI, IDE workflow, web UI, or background auto-sync/materialisation. | Stable native CLI/JSON and separate UX/state-safety design. |
+| DIST-OPAM-001 | opam publication and public source package. Migrated from GitHub #244. | Yeokcham adopts public release, source-package, compatibility, and support policy; then re-scope old criteria. |
+| MACOS-001 | macOS source-release field trial. Migrated from GitHub #242. | A real signed public source-release candidate and explicit macOS support decision exist. It is not a release gate while development-only. |
+
+## Migrated GitHub issues
+
+| Historical issue | New tracker item | Disposition |
+| --- | --- | --- |
+| [#242](https://github.com/gongahkia/yeokcham/issues/242) | MACOS-001 | Close after noting that field-trial work is deferred, not completed. Its prior requirement for a real signed source-release candidate is incompatible with current development-only policy. |
+| [#244](https://github.com/gongahkia/yeokcham/issues/244) | DIST-OPAM-001 | Close after noting that opam publication is deferred, not completed. It requires a public signed source release and macOS evidence, neither currently intended. |
+
+## Historical references
+
+docs/ISSUE_TRACKING.md remains a historical map of already closed V4 work and ADR evidence. It is not a queue. Existing ADRs and commit messages may continue to mention historical GitHub issue numbers; do not rewrite history to conceal their origin.
