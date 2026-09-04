@@ -462,10 +462,13 @@ separate measurements, not routine CI tests.
 
 - [ ] CI matrix: Linux build/test/format/lint, golden fixture compatibility, package smoke, OCI smoke, protocol fault tests, and a documented optional integration matrix for unavailable hardware/software.
 - [ ] Security review: bearer-token lifetime/revocation, TLS proxy deployment, relay path traversal/object-ID/range/decompression limits, hook redaction, repair provenance, backup exposure, and image supply chain. Track findings as ticklist items; do not silently accept them.
-- [ ] EVIDENCE-SEC-001: pin every third-party GitHub Action to the reviewed,
+- [x] EVIDENCE-SEC-001: pin every third-party GitHub Action to the reviewed,
   full commit SHA and record its release tag/SHA mapping. GitHub Actions
   references were mutable tags when this review began; no workflow with
   credentials or OIDC may retain a mutable action reference.
+  - Verification (2026-09-04): `make workflow-security-test` passed; Ruby
+    parsed all checked-in workflow YAML files and `make workflow-ci-test`
+    passed after adding the package-and-OCI smoke job.
 - [ ] Benchmark WS-001 and TRANSPORT-002 against capacity target with reproducible fixture generation, stated hardware/network, median and tail results, resource consumption, failure/resume behaviour, and V1 comparison. No cross-VCS performance claim without equivalent public workload/methodology.
 - [ ] Run a two-to-ten-person controlled Linux field exercise: bootstrap, activate, concurrent work/explicit resolution, sync interruption, repair/defer, backup restore, credential rotation/revocation, and operator recovery. Record defects/usability observations separately from compatibility or production-support claims.
 - [ ] At the end, make a new explicit decision: continue development, define public compatibility/migration policy, or retire/defer. Do not infer it from passing tests.
