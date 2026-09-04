@@ -189,6 +189,25 @@ wire-core result; it is explicitly not the 5 GiB/100,000-path capacity target.
 
 **Goal:** provide a reproducible, signed OCI relay image for a small trusted team to operate behind its own HTTPS reverse proxy. The image is for the relay, not the native client.
 
+**Vertical slice:** parse one explicit relay configuration, run one non-root
+single-node relay with a writable volume, expose liveness/readiness and bounded
+aggregate metrics, then back it up and verify a disposable restore. The image
+never becomes a V4 receipt or source-materialisation path.
+
+**Types and invariants:** `relay_config`, `config_refusal`, readiness result,
+and bounded aggregate counters are operator-only values. Unknown/invalid
+configuration fails before serving; non-root runtime writes only its named
+volume; health/metrics/logs omit credentials, repository/object identifiers,
+payloads, and source paths.
+
+**Persistent-format impact:** no V4 object/package/project format changes.
+`relay-config-v1`, if persisted, is local operator configuration; backup and
+artifact metadata are external to V4 history.
+
+**CLI/interface contract:** the image entrypoint runs only `relay serve`.
+Proxy, Compose/Podman, backup, and signature verification are documented
+operator interfaces; no new ordinary source-writing command is authorized.
+
 **Deliverables:**
 
 - [ ] A minimal non-root OCI image that runs only the relay service; document its pinned base/toolchain, exposed listen address, writable data volume, read-only root filesystem expectation, and immutable image digest.

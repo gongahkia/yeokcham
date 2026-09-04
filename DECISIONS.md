@@ -57,6 +57,9 @@ The active V4 decisions are:
 - [ADR-099](docs/adr/099-v2-compressed-resumable-relay-transfer.md): relay V2
   transfers independently compressed raw ranges through quota-bound resumable
   sessions without changing canonical object bytes or receipt boundaries.
+- [ADR-102](docs/adr/102-development-relay-packaging-and-operation.md):
+  development-only single-node relay image, operator configuration, local
+  health/metrics, backup verification, and digest-bound artifact provenance.
 
 Earlier product-track ADRs have been removed with their implementations. Git
 history retains their historical record; they are not active architecture.
