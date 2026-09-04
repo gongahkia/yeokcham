@@ -129,6 +129,17 @@
   (source_tree golden)))
 
 (test
+ (name test_v4_transfer)
+ (modules test_v4_transfer)
+ (libraries
+  alcotest
+  yeokcham_encoding
+  yeokcham_testkit
+  yeokcham_v4_transport)
+ (deps
+  (source_tree golden)))
+
+(test
  (name test_v4_relay_access)
  (modules test_v4_relay_access)
  (libraries
