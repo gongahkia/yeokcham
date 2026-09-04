@@ -60,7 +60,7 @@ esac
 mkdir "$output"
 
 results="$output/workspace-runs.tsv"
-printf 'iteration\tpaths\tlogical_bytes\tinit_s\tprepare_s\tpackage_s\tbootstrap_s\tactivate_s\twall_s\tuser_cpu_s\tsystem_cpu_s\tmax_rss_kib\n' > "$results"
+printf 'iteration\tpaths\tlogical_bytes\tinit_s\tprepare_s\tpackage_s\tbootstrap_s\tactivate_s\twall_s\tuser_cpu_s\tsystem_cpu_s\tmax_rss_kib\tsource_v4_disk_bytes\tpackage_disk_bytes\ttarget_v4_disk_bytes\n' > "$results"
 printf '%s\n' "source_revision=$(git -C "$repository_root" rev-parse HEAD)" > "$output/profile.txt"
 printf '%s\n' "paths=$paths" >> "$output/profile.txt"
 printf '%s\n' "logical_bytes=$bytes" >> "$output/profile.txt"
@@ -85,9 +85,13 @@ while [ "$iteration" -le "$iterations" ]; do
   bootstrap_seconds=$(sed -n 's/^bootstrap_seconds=//p' "$run/scenario.txt")
   activate_seconds=$(sed -n 's/^workspace_activate_seconds=//p' "$run/scenario.txt")
   resources=$(tr -d '\n' < "$run/resources.tsv")
-  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+  source_v4_disk_bytes=$(du -s --block-size=1 "$run/source/.yeokcham" | awk '{ print $1 }')
+  package_disk_bytes=$(du -s --block-size=1 "$run/package" | awk '{ print $1 }')
+  target_v4_disk_bytes=$(du -s --block-size=1 "$run/target/.yeokcham" | awk '{ print $1 }')
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
     "$iteration" "$paths" "$bytes" "$init_seconds" "$prepare_seconds" \
     "$package_seconds" "$bootstrap_seconds" "$activate_seconds" "$resources" \
+    "$source_v4_disk_bytes" "$package_disk_bytes" "$target_v4_disk_bytes" \
     >> "$results"
   rm -r "$run"
   iteration=$((iteration + 1))

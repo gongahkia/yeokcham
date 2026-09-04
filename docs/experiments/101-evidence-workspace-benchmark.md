@@ -37,8 +37,12 @@ tools/run-evidence-workspace-benchmark.sh \
 
 The TSV retains one independently measured run per row: fixture profile,
 source init, bootstrap preparation, package materialisation, bootstrap,
-explicit activation, process wall/user/system CPU time, and maximum RSS. Report
-the median and p95 only after preserving all five rows. Record host CPU,
-memory, filesystem, kernel, free space, and any thermal/power conditions beside
-the raw result. This method has no network leg; Experiment 102 must measure
-TRANSPORT-002 separately under the stated link conditions.
+explicit activation, process wall/user/system CPU time, maximum RSS, and the
+allocated byte count of the source V4 metadata, bootstrap package, and target
+V4 metadata. The size fields use GNU [du] with a one-byte block size; they
+therefore include filesystem allocation for regular files and directories, not
+only apparent file lengths. Report the median and p95 only after preserving all
+five rows. Record host CPU, memory, filesystem, kernel, free space, and any
+thermal/power conditions beside the raw result. This method has no network leg;
+Experiment 102 must measure TRANSPORT-002 separately under the stated link
+conditions.
