@@ -26,6 +26,19 @@
   (source_tree golden)))
 
 (test
+ (name test_v4_health_repository)
+ (modules test_v4_health_repository)
+ (libraries
+  alcotest
+  unix
+  yeokcham_store
+  yeokcham_v4_health
+  yeokcham_v4_health_repository
+  yeokcham_v4_local_service
+  yeokcham_v4_model
+  yeokcham_v4_store))
+
+(test
  (name test_watcher)
  (modules test_watcher)
  (libraries alcotest yeokcham_watcher))

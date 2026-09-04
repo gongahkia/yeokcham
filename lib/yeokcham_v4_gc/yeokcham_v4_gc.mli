@@ -43,7 +43,27 @@ type transaction_progress = {
   purge_started : bool;
 }
 
-type error
+type error =
+  | Store_error of Yeokcham_store.error
+  | V4_store_error of Yeokcham_v4_store.error
+  | Snapshot_error of Yeokcham_snapshot.error
+  | Model_error of Yeokcham_v4_model.error
+  | Journal_error of Yeokcham_v4_restore_journal.error
+  | Proof_error of Yeokcham_v4_restore_proof.error
+  | Invalid_snapshot_id of string
+  | Missing_reachable_object of Yeokcham_store.Stored_object_id.t
+  | Duplicate_object of Yeokcham_store.Stored_object_id.t
+  | Invalid_schema of string
+  | Unsupported_schema_version of int64
+  | Noncanonical_bytes
+  | No_collectible_objects
+  | Transaction_not_found of string
+  | Transaction_collision of string
+  | Incomplete_transaction of string
+  | Stale_transaction_object of Yeokcham_store.Stored_object_id.t
+  | Transaction_object_missing of Yeokcham_store.Stored_object_id.t
+  | Quarantine_collision of string
+  | Io_error of { operation : string; path : string; message : string }
 
 val error_to_string : error -> string
 val root_reason_to_string : root_reason -> string
@@ -64,6 +84,11 @@ val classify :
 
 val plan : root:string -> (plan, error) result
 (** Reads and validates a consistent local V4 state without changing files. *)
+
+val inspect : root:string -> (plan, error) result
+(** Reads and validates the same V4 closure as [plan], but does not acquire an
+    exclusive lock or create a lock file. It is the health-verification path; a
+    later repair must revalidate under its own publication lock. *)
 
 val apply : root:string -> (transaction_progress, error) result
 (** Replans under the same locks, writes a canonical transaction, and moves

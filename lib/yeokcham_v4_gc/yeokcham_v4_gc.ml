@@ -492,9 +492,14 @@ let checkpoint_roots project ~journal_snapshots ~proof_snapshots =
 let add_reachable object_id reasons reachable =
   add_reasons object_id reasons reachable
 
+let ensure_object_present store object_id =
+  if Sys.file_exists (Store.object_path store object_id) then Ok ()
+  else Error (Missing_reachable_object object_id)
+
 let traverse_content store reasons content_id reachable =
   let object_id = Snapshot.Content.stored_object_id content_id in
   let reachable = add_reachable object_id reasons reachable in
+  let* () = ensure_object_present store object_id in
   let* object_ =
     Store.get store object_id
     |> Result.map_error (fun error -> Store_error error)
@@ -517,6 +522,7 @@ let traverse_content store reasons content_id reachable =
         | (chunk, _) :: rest ->
             let chunk_id = Snapshot.Chunk.stored_object_id chunk in
             let reachable = add_reachable chunk_id reasons reachable in
+            let* () = ensure_object_present store chunk_id in
             let* _ =
               Snapshot.Chunk.load store chunk
               |> Result.map_error (fun error -> Snapshot_error error)
@@ -548,6 +554,7 @@ let traverse_content store reasons content_id reachable =
 let rec traverse_tree store reasons tree_id reachable =
   let object_id = Snapshot.Tree.stored_object_id tree_id in
   let reachable = add_reachable object_id reasons reachable in
+  let* () = ensure_object_present store object_id in
   let* tree =
     Snapshot.Tree.load store tree_id
     |> Result.map_error (fun error -> Snapshot_error error)
@@ -566,6 +573,7 @@ let rec traverse_tree store reasons tree_id reachable =
 let traverse_snapshot store reasons snapshot_id reachable =
   let object_id = Snapshot.Snapshot.stored_object_id snapshot_id in
   let reachable = add_reachable object_id reasons reachable in
+  let* () = ensure_object_present store object_id in
   let* snapshot =
     Snapshot.Snapshot.load store snapshot_id
     |> Result.map_error (fun error -> Snapshot_error error)
@@ -615,6 +623,18 @@ let with_consistent_repository ~root action =
 let plan ~root =
   with_consistent_repository ~root (fun _repository store loaded ->
       plan_from_loaded ~root store loaded)
+
+let inspect ~root =
+  let* repository =
+    V4_store.open_repository ~root
+    |> Result.map_error (fun error -> V4_store_error error)
+  in
+  let store = V4_store.underlying_store repository in
+  let* loaded =
+    V4_store.load repository
+    |> Result.map_error (fun error -> V4_store_error error)
+  in
+  plan_from_loaded ~root store loaded
 
 let gc_directory root = Filename.concat (Filename.concat root ".yeokcham") "gc"
 

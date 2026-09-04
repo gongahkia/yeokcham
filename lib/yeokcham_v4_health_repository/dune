@@ -1,0 +1,7 @@
+(library
+ (name yeokcham_v4_health_repository)
+ (libraries
+  yeokcham_store
+  yeokcham_v4_gc
+  yeokcham_v4_health
+  yeokcham_v4_health_store))
