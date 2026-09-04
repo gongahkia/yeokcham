@@ -6,6 +6,7 @@ module Trust = Yeokcham_v4_trust
 module Transport = Yeokcham_v4_transport
 module Relay = Yeokcham_v4_relay
 module Relay_access = Yeokcham_v4_relay_access
+module Relay_config = Yeokcham_v4_relay_config
 module Relay_http = Yeokcham_v4_relay_http
 module Transport_http = Yeokcham_v4_transport_http
 module Transport_http_v2 = Yeokcham_v4_transport_http.V2
@@ -331,6 +332,87 @@ let with_http_relay run =
           in
           ready 100;
           run ~relay_root ~port ~token:grant.Relay_access.grant_secret))
+
+let configured_relay_refuses_session_expiry_above_operator_limit () =
+  with_directory "yeokcham-v4-configured-relay-" (fun root ->
+      let relay_root = Filename.concat root "relay" in
+      let registry_root = Filename.concat root "registry" in
+      let project = Trust.Repository_id.to_string (repository ()) in
+      let now = Int64.of_float (Unix.gettimeofday ()) in
+      let grant =
+        Relay_access.update ~root:registry_root (fun registry ->
+            Relay_access.issue ~now ~repository:project
+              ~scopes:[ Relay_access.Read; Relay_access.Write ]
+              ~expires_in:Relay_access.default_lifetime_seconds registry)
+        |> require_ok Relay_access.error_to_string
+      in
+      let port = available_loopback_port () in
+      let rec distinct_port used =
+        let candidate = available_loopback_port () in
+        if List.mem candidate used then distinct_port used else candidate
+      in
+      let health_port = distinct_port [ port ] in
+      let metrics_port = distinct_port [ port; health_port ] in
+      let config =
+        Relay_config.create ~storage_root:relay_root
+          ~credential_registry_root:registry_root
+          ~listen:("127.0.0.1:" ^ string_of_int port)
+          ~health_listen:("127.0.0.1:" ^ string_of_int health_port)
+          ~metrics_listen:("127.0.0.1:" ^ string_of_int metrics_port)
+          ~project_quota_bytes:1 ~session_expiry_seconds:1
+          ~log_level:Relay_config.Info
+        |> require_ok Relay_config.error_to_string
+      in
+      let relay =
+        match Unix.fork () with
+        | 0 -> (
+            match Relay_http.serve_with_config config with
+            | Ok () -> exit 0
+            | Error _ -> exit 1)
+        | process -> process
+      in
+      Fun.protect
+        ~finally:(fun () -> terminate relay)
+        (fun () ->
+          let rec ready attempts =
+            try
+              ignore
+                (raw_http ~port
+                   (raw_request ~token:"wrong" "GET" "/not-a-route"))
+            with
+            | Unix.Unix_error _ when attempts > 0 ->
+                ignore (Unix.select [] [] [] 0.02);
+                ready (attempts - 1)
+            | Unix.Unix_error _ ->
+                Alcotest.fail "configured HTTP relay did not start"
+          in
+          ready 100;
+          let body ~raw_size ~expiry =
+            Encoding.array
+              [
+                Encoding.text (Transport.sha256 "config-limited-object")
+                |> Result.get_ok;
+                Encoding.integer raw_size;
+                Encoding.integer expiry;
+              ]
+            |> Result.get_ok |> Encoding.encode
+          in
+          Alcotest.(check int)
+            "operator session-expiry limit rejects a larger client request" 400
+            (response_status
+               (raw_http ~port
+                  (raw_request ~token:grant.Relay_access.grant_secret
+                     ~body:(body ~raw_size:1L ~expiry:2L)
+                     "POST"
+                     ("/v2/repositories/" ^ project ^ "/uploads"))));
+          Alcotest.(check int)
+            "operator temporary-byte quota rejects a larger object" 400
+            (response_status
+               (raw_http ~port
+                  (raw_request ~token:grant.Relay_access.grant_secret
+                     ~body:(body ~raw_size:2L ~expiry:1L)
+                     "POST"
+                     ("/v2/repositories/" ^ project ^ "/uploads"))))))
 
 let http_listener_rejects_untrusted_requests_and_preserves_immutability () =
   with_http_relay (fun ~relay_root ~port ~token ->
@@ -2006,6 +2088,8 @@ let () =
             `Quick bootstrap_relay_entries_are_create_only_and_sha_bound;
           Alcotest.test_case "HTTP listener rejects invalid requests" `Quick
             http_listener_rejects_untrusted_requests_and_preserves_immutability;
+          Alcotest.test_case "configured relay caps requested V2 session expiry"
+            `Quick configured_relay_refuses_session_expiry_above_operator_limit;
           Alcotest.test_case
             "scoped access rejects expiry, revocation, replay, and \
              cross-project use"

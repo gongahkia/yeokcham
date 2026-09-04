@@ -1,6 +1,7 @@
 module Relay = Yeokcham_v4_relay
 module Encoding = Yeokcham_encoding
 module Access = Yeokcham_v4_relay_access
+module Config = Yeokcham_v4_relay_config
 module Transfer = Yeokcham_v4_transport.V2
 module Wire = Yeokcham_v4_transport.V2_wire
 
@@ -383,8 +384,9 @@ let v2_project = function
 
 let encode_session session = Transfer.encode_session session
 
-let[@warning "-4"] handle_v2 relay ~access_root descriptor ~headers ~method_
-    ~route ~length ~remainder =
+let[@warning "-4"] handle_v2 relay ~access_root ~project_quota_bytes
+    ~session_expiry_seconds descriptor ~headers ~method_ ~route ~length
+    ~remainder =
   let project = v2_project route in
   match
     authorize_credential ~root:access_root headers ~project (v2_scope route)
@@ -422,18 +424,20 @@ let[@warning "-4"] handle_v2 relay ~access_root descriptor ~headers ~method_
               match decode_upload_start bytes with
               | None -> response descriptor 400 ""
               | Some (object_id, raw_size, expiry) -> (
-                  match
-                    Relay.V2.start_upload relay
-                      ~now:(Int64.of_float (Unix.gettimeofday ()))
-                      ~project ~object_id ~raw_size ~credential_id
-                      ~expires_in:(Int64.of_int expiry)
-                      ~project_quota_bytes:Relay.V2.default_project_quota_bytes
-                  with
-                  | Error _ -> response descriptor 400 ""
-                  | Ok session -> (
-                      match encode_session session with
-                      | Ok bytes -> response descriptor 201 bytes
-                      | Error _ -> response descriptor 500 ""))))
+                  if expiry > session_expiry_seconds then
+                    response descriptor 400 ""
+                  else
+                    match
+                      Relay.V2.start_upload relay
+                        ~now:(Int64.of_float (Unix.gettimeofday ()))
+                        ~project ~object_id ~raw_size ~credential_id
+                        ~expires_in:(Int64.of_int expiry) ~project_quota_bytes
+                    with
+                    | Error _ -> response descriptor 400 ""
+                    | Ok session -> (
+                        match encode_session session with
+                        | Ok bytes -> response descriptor 201 bytes
+                        | Error _ -> response descriptor 500 ""))))
       | Upload (project, session_id), "GET" when length = 0 -> (
           match
             Relay.V2.resume_upload relay
@@ -507,7 +511,8 @@ let[@warning "-4"] handle_v2 relay ~access_root descriptor ~headers ~method_
                       else response descriptor 400 "")))
       | _ -> response descriptor 405 "")
 
-let handle relay ~access_root descriptor =
+let handle relay ~access_root ~project_quota_bytes ~session_expiry_seconds
+    descriptor =
   match read_request descriptor with
   | Error () -> response descriptor 400 ""
   | Ok (header_bytes, remainder) -> (
@@ -532,7 +537,8 @@ let handle relay ~access_root descriptor =
                     response descriptor 413 ""
                 | Error (), Error (), Some _ -> response descriptor 404 ""
                 | Error (), Ok route, Some length ->
-                    handle_v2 relay ~access_root descriptor ~headers ~method_
+                    handle_v2 relay ~access_root ~project_quota_bytes
+                      ~session_expiry_seconds descriptor ~headers ~method_
                       ~route ~length ~remainder
                 | Ok (project, kind, id, query), _, Some length -> (
                     match required_scope method_ id kind with
@@ -590,7 +596,8 @@ let handle relay ~access_root descriptor =
                             | _ -> response descriptor 405 ""))))
           | _ -> response descriptor 400 ""))
 
-let serve ~root ~listen =
+let serve_internal ~root ~listen ~access_root ~project_quota_bytes
+    ~session_expiry_seconds =
   let* relay =
     Relay.open_repository ~root
     |> Result.map_error (fun error -> Relay_error error)
@@ -609,10 +616,25 @@ let serve ~root ~listen =
             let client, _ = Unix.accept listener in
             Fun.protect
               ~finally:(fun () -> close_noerr client)
-              (fun () -> handle relay ~access_root:root client)
+              (fun () ->
+                handle relay ~access_root ~project_quota_bytes
+                  ~session_expiry_seconds client)
           with Unix.Unix_error _ -> ()
         done;
         Ok ())
   with Unix.Unix_error (error, operation, _) ->
     Error
       (Io_error { path = listen; operation; message = Unix.error_message error })
+
+let serve ~root ~listen =
+  serve_internal ~root ~listen ~access_root:root
+    ~project_quota_bytes:Relay.V2.default_project_quota_bytes
+    ~session_expiry_seconds:(Int64.to_int Relay.V2.default_expiry_seconds)
+
+let serve_with_config config =
+  serve_internal
+    ~root:(Config.storage_root config)
+    ~listen:(Config.listen config)
+    ~access_root:(Config.credential_registry_root config)
+    ~project_quota_bytes:(Config.project_quota_bytes config)
+    ~session_expiry_seconds:(Config.session_expiry_seconds config)
