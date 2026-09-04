@@ -39,14 +39,15 @@ object, payload, credential, or source-path values.
 
 ## Reproducible container check
 
-Run `make relay-container-test` from a Docker host. By default it builds the
-local relay image with a 900-second timeout. Set `RELAY_IMAGE` only to test a
-previously built local image; it is a test convenience, not a deployable image
-identity. The check uses a disposable Docker network and volumes, a generated
-one-day TLS certificate, the host-built test CLI with its explicit test signer,
-and the pinned Nginx image. It proves the non-root read-only runtime, proxy
-readiness, scoped immutable upload/fetch, restart persistence, checksum
-rejection of a corrupt backup, and a restored-volume `bootstrap
+Run `make relay-container-test` from a Docker host with `socat` available for
+its disposable client pseudo-terminal. By default it builds the local relay
+image with a 900-second timeout. Set `RELAY_IMAGE` only to test a previously
+built local image; it is a test convenience, not a deployable image identity.
+The check uses a disposable Docker network and volumes, a generated one-day
+TLS certificate, the host-built test CLI with its explicit test signer, and the
+pinned Nginx image. It proves the non-root read-only runtime, proxy readiness,
+scoped immutable upload/fetch, restart persistence, checksum rejection of a
+corrupt backup, and a restored-volume `bootstrap
 publish`/`bootstrap` client journey through the proxy. The target bootstrap
 proves it creates V4 metadata without materialising its source snapshot or
 changing an existing ordinary file. It also refuses an unknown configuration

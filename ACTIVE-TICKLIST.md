@@ -210,18 +210,29 @@ operator interfaces; no new ordinary source-writing command is authorized.
 
 **Deliverables:**
 
-- [ ] A minimal non-root OCI image that runs only the relay service; document its pinned base/toolchain, exposed listen address, writable data volume, read-only root filesystem expectation, and immutable image digest.
-- [ ] Example Compose/Podman deployment plus Nginx or Caddy TLS proxy example. The relay itself may remain plain HTTP only behind that local proxy; direct public HTTP is not a supported deployment.
-- [ ] Explicit environment/config schema for storage root, listen address, quotas, session expiry, credential registry location, log level, and health listener. Reject unknown required config keys and never log bearer secrets.
-- [ ] /healthz liveness and /readyz storage-writability/readiness endpoints; a bounded metrics endpoint reporting aggregate request, object, session, quota, expiration, and failure counters without repository contents or credentials.
-- [ ] Backup/restore runbook: quiesce or snapshot the volume, checksum the backup, restore to a disposable relay, run read-only verification, then perform a client receive/bootstrap smoke journey. Include an operator retention and restore-drill schedule.
-- [ ] OCI SBOM/provenance and signature generation/verification in the development artifact pipeline. State signing-key handling and trust root before publishing any image.
+- [x] A minimal non-root OCI image that runs only the relay service; document its pinned base/toolchain, exposed listen address, writable data volume, read-only root filesystem expectation, and immutable image digest.
+- [x] Example Compose/Podman deployment plus Nginx or Caddy TLS proxy example. The relay itself may remain plain HTTP only behind that local proxy; direct public HTTP is not a supported deployment.
+- [x] Explicit environment/config schema for storage root, listen address, quotas, session expiry, credential registry location, log level, and health listener. Reject unknown required config keys and never log bearer secrets.
+- [x] /healthz liveness and /readyz storage-writability/readiness endpoints; a bounded metrics endpoint reporting aggregate request, object, session, quota, expiration, and failure counters without repository contents or credentials.
+- [x] Backup/restore runbook: quiesce or snapshot the volume, checksum the backup, restore to a disposable relay, run read-only verification, then perform a client receive/bootstrap smoke journey. Include an operator retention and restore-drill schedule.
+- [x] OCI SBOM/provenance and signature generation/verification in the development artifact pipeline. State signing-key handling and trust root before publishing any image.
 
 **Tests and acceptance:**
 
-- [ ] Container integration starts non-root with a mounted empty volume, goes ready through the proxy, performs scoped upload/receive, and persists across restart.
-- [ ] Negative tests cover no writable volume, invalid config, token redaction, quota/session expiry, health failure, and backup restore corruption.
-- [ ] Document that this is single-node/self-hosted only; do not imply HA, managed hosting, replication, or end-to-end payload privacy.
+- [x] Container integration starts non-root with a mounted empty volume, goes ready through the proxy, performs scoped upload/receive, and persists across restart.
+- [x] Negative tests cover no writable volume, invalid config, token redaction, quota/session expiry, health failure, and backup restore corruption.
+- [x] Document that this is single-node/self-hosted only; do not imply HA, managed hosting, replication, or end-to-end payload privacy.
+
+**Verification (2026-09-04):** `opam exec -- dune exec
+test/test_v4_transport.exe -- --color never` passed 20 cases in 28.060 seconds;
+`RELAY_IMAGE=yeokcham-relay:relay-container-test make relay-container-test`
+passed the non-root, proxy, restart, backup-corruption, restored-volume
+bootstrap, and no-source-mutation journey; and `make ci` passed. Ruby parsed
+the artifact workflow YAML and Docker Compose accepted the deployment example
+with disposable required path values and a syntactically valid image digest.
+The GitHub workflow has not run remotely, so published-image, SBOM,
+provenance, and Cosign outputs remain [Unverified]; the checked-in workflow,
+not an unpublished artifact, is the completed development-pipeline deliverable.
 
 ### HEALTH-001 — read-only verification and human-selected repair
 

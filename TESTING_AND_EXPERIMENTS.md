@@ -30,9 +30,17 @@ check then passed. The disposable Docker journey covered the non-root
 read-only relay, non-root read-only TLS proxy, proxy readiness,
 repository-scoped manifest upload/fetch, invalid-token rejection without token
 logging, relay restart persistence, checksum-verified backup, corrupt-backup
-checksum failure, restored-volume read-only fetch, unknown-config rejection,
+checksum failure, restored-volume read-only fetch, a V4 `bootstrap publish`/
+`bootstrap` smoke journey through the restored relay, unknown-config rejection,
 no-volume startup refusal, and an unchanged repository status before/after.
-This is local OCI-runtime evidence only. The GitHub artifact workflow has not
+The bootstrap target retained its ordinary sentinel file and did not receive
+the source snapshot; it created only V4 metadata. On the same checkout,
+`opam exec -- dune exec test/test_v4_transport.exe -- --color never` passed 20
+cases in 28.060 seconds, `RELAY_IMAGE=yeokcham-relay:relay-container-test make
+relay-container-test` passed, and `make ci` passed. Ruby parsed the artifact
+workflow YAML and Docker Compose accepted the example with disposable required
+path values and a syntactically valid image digest. This is local OCI-runtime
+and structural-pipeline evidence only. The GitHub artifact workflow has not
 run, no image was published, and no external SBOM/provenance/Cosign
 verification artifact exists yet.
 
