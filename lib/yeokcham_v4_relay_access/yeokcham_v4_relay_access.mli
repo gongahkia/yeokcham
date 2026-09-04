@@ -91,6 +91,16 @@ val authorize :
   registry ->
   (unit, authorization_error) result
 
+val authorize_credential :
+  now:int64 ->
+  secret:string ->
+  repository:string ->
+  scope:scope ->
+  registry ->
+  (credential, authorization_error) result
+(** Returns only the safe credential record after authorization. Callers must
+    never persist or log [secret]. *)
+
 val load : root:string -> (registry, error) result
 
 val update :

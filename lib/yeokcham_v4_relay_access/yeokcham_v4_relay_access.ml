@@ -419,7 +419,7 @@ let rotate ~now ~credential_id ~expires_in registry =
         issue ~now ~repository:credential.repository ~scopes:credential.scopes
           ~expires_in revoked
 
-let authorize ~now ~secret ~repository ~scope registry =
+let authorize_credential ~now ~secret ~repository ~scope registry =
   if not (valid_secret secret) then Error Invalid_secret
   else
     match find_credential (verifier secret) registry with
@@ -432,7 +432,11 @@ let authorize ~now ~secret ~repository ~scope registry =
         Error Wrong_repository
     | Some credential when not (List.mem scope credential.scopes) ->
         Error Insufficient_scope
-    | Some _ -> Ok ()
+    | Some credential -> Ok credential
+
+let authorize ~now ~secret ~repository ~scope registry =
+  authorize_credential ~now ~secret ~repository ~scope registry
+  |> Result.map (fun _ -> ())
 
 let registry_path root = Filename.concat root registry_name
 let lock_path root = Filename.concat root lock_name

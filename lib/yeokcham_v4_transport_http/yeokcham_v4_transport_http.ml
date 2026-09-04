@@ -323,3 +323,183 @@ let list_publications client ~project ~cursor ~limit =
     | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _ | Encoding.Map _
     | Encoding.Bool _ | Encoding.Null | Encoding.Array _ ->
         Error (Invalid_response "publication list has wrong shape")
+
+let client_error_to_string = error_to_string
+
+module V2 = struct
+  module Transfer = Transport.V2
+  module Wire = Transport.V2_wire
+
+  type error =
+    | V2_unavailable
+    | Http_error of string
+    | Protocol_error of string
+    | Transfer_error of Transfer.error
+    | Wire_error of Wire.error
+
+  let ( let* ) = Result.bind
+
+  let error_to_string = function
+    | V2_unavailable -> "the relay does not provide V2 transfer"
+    | Http_error detail -> "V2 HTTPS request failed: " ^ detail
+    | Protocol_error detail -> "invalid V2 HTTPS response: " ^ detail
+    | Transfer_error error -> Transfer.error_to_string error
+    | Wire_error error -> Wire.error_to_string error
+
+  let http_error error = Http_error (client_error_to_string error)
+
+  let route client ~project suffix =
+    let* () = check_id project |> Result.map_error http_error in
+    Ok (client.url ^ "/v2/repositories/" ^ project ^ suffix)
+
+  let valid_segment ~offset ~length =
+    offset >= 0 && length > 0 && length <= Transfer.segment_bytes
+
+  let encode_capability_offer sender offered =
+    let* encoded =
+      Transfer.encode_capability sender
+      |> Result.map_error (fun error -> Transfer_error error)
+    in
+    let rec encode_offered reversed = function
+      | [] -> Ok (List.rev reversed)
+      | id :: rest ->
+          let* id =
+            Encoding.text id
+            |> Result.map_error (fun _ -> Protocol_error "invalid offered ID")
+          in
+          encode_offered (id :: reversed) rest
+    in
+    let offered = encode_offered [] offered in
+    let* offered = offered in
+    let* offered =
+      Encoding.array offered
+      |> Result.map_error (fun _ ->
+          Protocol_error "capability request is invalid")
+    in
+    Encoding.array [ Encoding.bytes encoded; offered ]
+    |> Result.map_error (fun _ ->
+        Protocol_error "capability request is invalid")
+    |> Result.map Encoding.encode
+
+  let decode_capability bytes =
+    Transfer.decode_capability bytes
+    |> Result.map_error (fun error -> Transfer_error error)
+
+  let encode_start ~object_id ~raw_size ~expires_in =
+    if raw_size < 0 || raw_size > Transfer.max_raw_object_bytes then
+      Error (Protocol_error "raw object size is outside the V2 relay bound")
+    else if expires_in <= 0 || expires_in > 86_400 then
+      Error (Protocol_error "session expiry is outside the V2 bound")
+    else
+      let* object_id =
+        Encoding.text object_id
+        |> Result.map_error (fun _ -> Protocol_error "object ID is invalid")
+      in
+      Encoding.array
+        [
+          object_id;
+          Encoding.integer (Int64.of_int raw_size);
+          Encoding.integer (Int64.of_int expires_in);
+        ]
+      |> Result.map_error (fun _ -> Protocol_error "upload request is invalid")
+      |> Result.map Encoding.encode
+
+  let decode_session bytes =
+    Transfer.decode_session bytes
+    |> Result.map_error (fun error -> Transfer_error error)
+
+  let negotiate_upload client ~project ~sender ~offered =
+    let* body = encode_capability_offer sender offered in
+    let* url = route client ~project "/capabilities" in
+    let* status, response =
+      run client ~method_:"POST" ~url ~body:(Some body)
+      |> Result.map_error http_error
+    in
+    if status = 404 then Error V2_unavailable
+    else if status <> 200 then
+      Error (Http_error (Printf.sprintf "relay returned HTTP %d" status))
+    else decode_capability response
+
+  let start_upload client ~project ~object_id ~raw_size ~expires_in =
+    let* () = check_id object_id |> Result.map_error http_error in
+    let* body = encode_start ~object_id ~raw_size ~expires_in in
+    let* url = route client ~project "/uploads" in
+    let* status, response =
+      run client ~method_:"POST" ~url ~body:(Some body)
+      |> Result.map_error http_error
+    in
+    if status = 404 then Error V2_unavailable
+    else if status <> 201 then
+      Error (Http_error (Printf.sprintf "relay returned HTTP %d" status))
+    else
+      let* session = decode_session response in
+      let offer = Transfer.session_offer session in
+      if
+        String.equal (Transfer.offer_project offer) project
+        && String.equal (Transfer.offer_object_id offer) object_id
+        && Transfer.offer_raw_size offer = raw_size
+      then Ok session
+      else
+        Error (Protocol_error "upload session does not bind the offered object")
+
+  let resume_upload client ~project ~session_id =
+    let* () = check_id session_id |> Result.map_error http_error in
+    let* url = route client ~project ("/uploads/" ^ session_id) in
+    let* status, response =
+      run client ~method_:"GET" ~url ~body:None |> Result.map_error http_error
+    in
+    if status = 404 then Error (Protocol_error "upload session is absent")
+    else if status <> 200 then
+      Error (Http_error (Printf.sprintf "relay returned HTTP %d" status))
+    else decode_session response
+
+  let put_segment client ~project ~session_id ~offset ~raw =
+    let length = String.length raw in
+    if not (valid_segment ~offset ~length) then
+      Error (Transfer_error Transfer.Range_failure)
+    else
+      let* () = check_id session_id |> Result.map_error http_error in
+      let* compressed =
+        Wire.compress raw |> Result.map_error (fun error -> Wire_error error)
+      in
+      let raw_sha256 = Transport.sha256 raw in
+      let suffix =
+        Printf.sprintf "/uploads/%s/segments/%d/%d/%s" session_id offset length
+          raw_sha256
+      in
+      let* url = route client ~project suffix in
+      let* status, _ =
+        run client ~method_:"PUT" ~url ~body:(Some compressed)
+        |> Result.map_error http_error
+      in
+      if status = 204 then Ok ()
+      else Error (Http_error (Printf.sprintf "relay returned HTTP %d" status))
+
+  let complete_upload client ~project ~session_id =
+    let* () = check_id session_id |> Result.map_error http_error in
+    let* url = route client ~project ("/uploads/" ^ session_id ^ "/complete") in
+    let* status, _ =
+      run client ~method_:"POST" ~url ~body:None |> Result.map_error http_error
+    in
+    if status = 201 then Ok ()
+    else Error (Http_error (Printf.sprintf "relay returned HTTP %d" status))
+
+  let get_segment client ~project ~object_id ~offset ~length =
+    if not (valid_segment ~offset ~length) then
+      Error (Transfer_error Transfer.Range_failure)
+    else
+      let* () = check_id object_id |> Result.map_error http_error in
+      let* url =
+        route client ~project
+          (Printf.sprintf "/objects/%s?offset=%d&length=%d" object_id offset
+             length)
+      in
+      let* status, compressed =
+        run client ~method_:"GET" ~url ~body:None |> Result.map_error http_error
+      in
+      if status <> 200 then
+        Error (Http_error (Printf.sprintf "relay returned HTTP %d" status))
+      else
+        Wire.decompress ~raw_length:length compressed
+        |> Result.map_error (fun error -> Wire_error error)
+end

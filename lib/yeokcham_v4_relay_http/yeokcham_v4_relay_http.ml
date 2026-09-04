@@ -1,6 +1,8 @@
 module Relay = Yeokcham_v4_relay
 module Encoding = Yeokcham_encoding
 module Access = Yeokcham_v4_relay_access
+module Transfer = Yeokcham_v4_transport.V2
+module Wire = Yeokcham_v4_transport.V2_wire
 
 type error =
   | Invalid_listen of string
@@ -176,6 +178,56 @@ let route target =
       Ok (project, Relay.Publication, "", query)
   | _ -> Error ()
 
+type v2_route =
+  | Capability of string
+  | Uploads of string
+  | Upload of string * string
+  | Upload_segment of string * string * int * int * string
+  | Upload_complete of string * string
+  | Object_segment of string * string * int * int
+
+let v2_route target =
+  let path, query = request_path target in
+  let segments =
+    path |> String.split_on_char '/' |> List.filter (fun value -> value <> "")
+  in
+  let integer value =
+    match int_of_string_opt value with
+    | Some value when value >= 0 -> Some value
+    | _ -> None
+  in
+  match segments with
+  | [ "v2"; "repositories"; project; "capabilities" ] -> Ok (Capability project)
+  | [ "v2"; "repositories"; project; "uploads" ] -> Ok (Uploads project)
+  | [ "v2"; "repositories"; project; "uploads"; session_id ] ->
+      Ok (Upload (project, session_id))
+  | [ "v2"; "repositories"; project; "uploads"; session_id; "complete" ] ->
+      Ok (Upload_complete (project, session_id))
+  | [
+   "v2";
+   "repositories";
+   project;
+   "uploads";
+   session_id;
+   "segments";
+   offset;
+   length;
+   raw_sha256;
+  ] -> (
+      match (integer offset, integer length) with
+      | Some offset, Some length ->
+          Ok (Upload_segment (project, session_id, offset, length, raw_sha256))
+      | None, _ | _, None -> Error ())
+  | [ "v2"; "repositories"; project; "objects"; object_id ] -> (
+      match (List.assoc_opt "offset" query, List.assoc_opt "length" query) with
+      | Some offset, Some length -> (
+          match (integer offset, integer length) with
+          | Some offset, Some length ->
+              Ok (Object_segment (project, object_id, offset, length))
+          | None, _ | _, None -> Error ())
+      | None, _ | _, None -> Error ())
+  | _ -> Error ()
+
 let encode_list ids cursor =
   let ids =
     ids
@@ -202,7 +254,7 @@ let required_scope method_ id kind =
   | "GET" when kind = Relay.Publication && id = "" -> Some Access.Read
   | _ -> None
 
-let authorize ~root headers ~project scope =
+let authorize_credential ~root headers ~project scope =
   match bearer headers with
   | None -> Error `Unauthenticated
   | Some secret -> (
@@ -210,17 +262,250 @@ let authorize ~root headers ~project scope =
       | Error _ -> Error `Unavailable
       | Ok registry -> (
           match
-            Access.authorize
+            Access.authorize_credential
               ~now:(Int64.of_float (Unix.gettimeofday ()))
               ~secret ~repository:project ~scope registry
           with
-          | Ok () -> Ok ()
+          | Ok credential -> Ok (Access.credential_id credential)
           | Error
               ( Access.Invalid_secret | Access.Unknown_secret
               | Access.Expired_secret | Access.Revoked_secret ) ->
               Error `Unauthenticated
           | Error (Access.Wrong_repository | Access.Insufficient_scope) ->
               Error `Forbidden))
+
+let authorize ~root headers ~project scope =
+  authorize_credential ~root headers ~project scope |> Result.map (fun _ -> ())
+
+let exact_array count = function
+  | Encoding.Array values when List.length values = count -> Some values
+  | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _ | Encoding.Array _
+  | Encoding.Map _ | Encoding.Bool _ | Encoding.Null ->
+      None
+
+let nonnegative_int = function
+  | Encoding.Integer value
+    when Int64.compare value 0L >= 0
+         && Int64.compare value (Int64.of_int max_int) <= 0 ->
+      Some (Int64.to_int value)
+  | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _ | Encoding.Array _
+  | Encoding.Map _ | Encoding.Bool _ | Encoding.Null ->
+      None
+
+let text_values = function
+  | Encoding.Array values ->
+      let rec loop reversed = function
+        | [] -> Some (List.rev reversed)
+        | Encoding.Text value :: rest -> loop (value :: reversed) rest
+        | ( Encoding.Integer _ | Encoding.Bytes _ | Encoding.Array _
+          | Encoding.Map _ | Encoding.Bool _ | Encoding.Null )
+          :: _ ->
+            None
+      in
+      loop [] values
+  | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _ | Encoding.Map _
+  | Encoding.Bool _ | Encoding.Null ->
+      None
+
+let[@warning "-4"] decode_capability_offer bytes =
+  match Encoding.decode bytes with
+  | Ok value -> (
+      match exact_array 2 value with
+      | Some [ first; offered ] -> (
+          match first with
+          | Encoding.Bytes capability -> (
+              match
+                (Transfer.decode_capability capability, text_values offered)
+              with
+              | Ok capability, Some offered -> (
+                  let validator =
+                    Transfer.capability
+                      ~versions:[ Transfer.protocol_version ]
+                      ~zstd:true ~max_segment_bytes:Transfer.segment_bytes
+                      ~max_in_flight:Transfer.default_parallelism ~missing:[]
+                  in
+                  match validator with
+                  | Error _ -> None
+                  | Ok validator ->
+                      if
+                        Result.is_ok
+                          (Transfer.plan_missing ~offered
+                             (Transfer.missing_objects validator))
+                      then Some (capability, offered)
+                      else None)
+              | Error _, _ | _, None -> None)
+          | _ -> None)
+      | Some _ | None -> None)
+  | Error _ -> None
+
+let encode_capability capability = Transfer.encode_capability capability
+
+let[@warning "-4"] decode_upload_start bytes =
+  match Encoding.decode bytes with
+  | Ok value -> (
+      match exact_array 3 value with
+      | Some [ first; raw_size; expiry ] -> (
+          match first with
+          | Encoding.Text object_id -> (
+              match (nonnegative_int raw_size, nonnegative_int expiry) with
+              | Some raw_size, Some expiry -> Some (object_id, raw_size, expiry)
+              | None, _ | _, None -> None)
+          | _ -> None)
+      | Some _ | None -> None)
+  | Error _ -> None
+
+let missing_offers relay ~project offered =
+  let rec loop reversed = function
+    | [] -> Ok (List.rev reversed)
+    | object_id :: rest -> (
+        match Relay.get relay ~project ~kind:Relay.Object ~id:object_id with
+        | Ok _ -> loop reversed rest
+        | Error error when Relay.is_missing error ->
+            loop (object_id :: reversed) rest
+        | Error _ -> Error ())
+  in
+  loop [] offered
+
+let v2_scope = function
+  | Capability _ | Uploads _ | Upload _ | Upload_segment _ | Upload_complete _
+    ->
+      Access.Write
+  | Object_segment _ -> Access.Read
+
+let v2_project = function
+  | Capability project
+  | Uploads project
+  | Upload (project, _)
+  | Upload_segment (project, _, _, _, _)
+  | Upload_complete (project, _)
+  | Object_segment (project, _, _, _) ->
+      project
+
+let encode_session session = Transfer.encode_session session
+
+let[@warning "-4"] handle_v2 relay ~access_root descriptor ~headers ~method_
+    ~route ~length ~remainder =
+  let project = v2_project route in
+  match
+    authorize_credential ~root:access_root headers ~project (v2_scope route)
+  with
+  | Error `Unauthenticated -> response descriptor 401 ""
+  | Error `Forbidden -> response descriptor 403 ""
+  | Error `Unavailable -> response descriptor 503 ""
+  | Ok credential_id -> (
+      match (route, method_) with
+      | Capability _, "POST" -> (
+          match body descriptor remainder length with
+          | Error () -> response descriptor 400 ""
+          | Ok bytes -> (
+              match decode_capability_offer bytes with
+              | None -> response descriptor 400 ""
+              | Some (_, offered) -> (
+                  match missing_offers relay ~project offered with
+                  | Error () -> response descriptor 400 ""
+                  | Ok missing -> (
+                      match
+                        Transfer.capability
+                          ~versions:[ Transfer.protocol_version ]
+                          ~zstd:true ~max_segment_bytes:Transfer.segment_bytes
+                          ~max_in_flight:Transfer.default_parallelism ~missing
+                      with
+                      | Error _ -> response descriptor 400 ""
+                      | Ok capability -> (
+                          match encode_capability capability with
+                          | Ok bytes -> response descriptor 200 bytes
+                          | Error _ -> response descriptor 500 "")))))
+      | Uploads _, "POST" -> (
+          match body descriptor remainder length with
+          | Error () -> response descriptor 400 ""
+          | Ok bytes -> (
+              match decode_upload_start bytes with
+              | None -> response descriptor 400 ""
+              | Some (object_id, raw_size, expiry) -> (
+                  match
+                    Relay.V2.start_upload relay
+                      ~now:(Int64.of_float (Unix.gettimeofday ()))
+                      ~project ~object_id ~raw_size ~credential_id
+                      ~expires_in:(Int64.of_int expiry)
+                      ~project_quota_bytes:Relay.V2.default_project_quota_bytes
+                  with
+                  | Error _ -> response descriptor 400 ""
+                  | Ok session -> (
+                      match encode_session session with
+                      | Ok bytes -> response descriptor 201 bytes
+                      | Error _ -> response descriptor 500 ""))))
+      | Upload (project, session_id), "GET" when length = 0 -> (
+          match
+            Relay.V2.resume_upload relay
+              ~now:(Int64.of_float (Unix.gettimeofday ()))
+              ~project ~session_id ~credential_id
+          with
+          | Ok session -> (
+              match encode_session session with
+              | Ok bytes -> response descriptor 200 bytes
+              | Error _ -> response descriptor 500 "")
+          | Error error when Relay.V2.is_session_missing error ->
+              response descriptor 404 ""
+          | Error _ -> response descriptor 400 "")
+      | ( Upload_segment (project, session_id, offset, raw_length, raw_sha256),
+          "PUT" )
+        when length <= Wire.max_compressed_segment_bytes -> (
+          match body descriptor remainder length with
+          | Error () -> response descriptor 400 ""
+          | Ok compressed -> (
+              match Wire.decompress ~raw_length compressed with
+              | Error _ -> response descriptor 400 ""
+              | Ok raw -> (
+                  match
+                    Relay.V2.receive_upload_segment relay
+                      ~now:(Int64.of_float (Unix.gettimeofday ()))
+                      ~project ~session_id ~credential_id ~offset
+                      ~length:raw_length ~raw_sha256 ~bytes:raw
+                  with
+                  | Ok _ -> response descriptor 204 ""
+                  | Error error when Relay.V2.is_session_missing error ->
+                      response descriptor 404 ""
+                  | Error _ -> response descriptor 400 "")))
+      | Upload_segment _, "PUT" -> response descriptor 413 ""
+      | Upload_complete (project, session_id), "POST" when length = 0 -> (
+          match
+            Relay.V2.complete_upload relay
+              ~now:(Int64.of_float (Unix.gettimeofday ()))
+              ~project ~session_id ~credential_id
+          with
+          | Ok () -> response descriptor 201 ""
+          | Error error when Relay.V2.is_session_missing error ->
+              response descriptor 404 ""
+          | Error _ -> response descriptor 400 "")
+      | Object_segment (_, object_id, offset, raw_length), "GET" when length = 0
+        -> (
+          match Relay.get relay ~project ~kind:Relay.Object ~id:object_id with
+          | Error error when Relay.is_missing error ->
+              response descriptor 404 ""
+          | Error _ -> response descriptor 400 ""
+          | Ok object_bytes -> (
+              match
+                Transfer.object_offer ~project ~object_id
+                  ~raw_size:(String.length object_bytes)
+              with
+              | Error _ -> response descriptor 400 ""
+              | Ok offer -> (
+                  match Transfer.partition offer with
+                  | Error _ -> response descriptor 400 ""
+                  | Ok ranges ->
+                      if
+                        List.exists
+                          (fun range ->
+                            Transfer.range_offset range = offset
+                            && Transfer.range_length range = raw_length)
+                          ranges
+                      then
+                        let raw = String.sub object_bytes offset raw_length in
+                        match Wire.compress raw with
+                        | Ok compressed -> response descriptor 200 compressed
+                        | Error _ -> response descriptor 500 ""
+                      else response descriptor 400 "")))
+      | _ -> response descriptor 405 "")
 
 let handle relay ~access_root descriptor =
   match read_request descriptor with
@@ -239,13 +524,17 @@ let handle relay ~access_root descriptor =
               if Option.is_some (header headers "transfer-encoding") then
                 response descriptor 400 ""
               else
-                match (route target, content_length) with
-                | _, None -> response descriptor 400 ""
-                | _, Some length when length < 0 -> response descriptor 400 ""
-                | _, Some length when length > Relay.max_body_bytes ->
+                match (route target, v2_route target, content_length) with
+                | _, _, None -> response descriptor 400 ""
+                | _, _, Some length when length < 0 ->
+                    response descriptor 400 ""
+                | _, _, Some length when length > Relay.max_body_bytes ->
                     response descriptor 413 ""
-                | Error (), Some _ -> response descriptor 404 ""
-                | Ok (project, kind, id, query), Some length -> (
+                | Error (), Error (), Some _ -> response descriptor 404 ""
+                | Error (), Ok route, Some length ->
+                    handle_v2 relay ~access_root descriptor ~headers ~method_
+                      ~route ~length ~remainder
+                | Ok (project, kind, id, query), _, Some length -> (
                     match required_scope method_ id kind with
                     | None -> response descriptor 405 ""
                     | Some scope -> (

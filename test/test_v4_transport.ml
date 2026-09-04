@@ -1,5 +1,6 @@
 module Golden = Yeokcham_testkit.Golden_fixture
 module Encoding = Yeokcham_encoding
+module Envelope = Yeokcham_envelope
 module Model = Yeokcham_v4_model
 module Trust = Yeokcham_v4_trust
 module Transport = Yeokcham_v4_transport
@@ -7,6 +8,7 @@ module Relay = Yeokcham_v4_relay
 module Relay_access = Yeokcham_v4_relay_access
 module Relay_http = Yeokcham_v4_relay_http
 module Transport_http = Yeokcham_v4_transport_http
+module Transport_http_v2 = Yeokcham_v4_transport_http.V2
 module Transport_config = Yeokcham_v4_transport_config
 module Service = Yeokcham_v4_local_service
 module Package = Yeokcham_v4_package
@@ -684,6 +686,217 @@ let https_client_reaches_relay_through_tls_reverse_proxy () =
         publications;
       Alcotest.(check (option string))
         "one publication has no next page" None cursor)
+
+let v2_capability missing =
+  Transport.V2.capability
+    ~versions:[ Transport.V2.protocol_version ]
+    ~zstd:true ~max_segment_bytes:Transport.V2.segment_bytes ~max_in_flight:4
+    ~missing
+  |> require_ok Transport.V2.error_to_string
+
+let large_v2_object () =
+  let payload =
+    Encoding.bytes (String.make (Transport.V2.segment_bytes + 41) 'x')
+  in
+  let envelope =
+    Envelope.create ~object_type:Envelope.Content
+      ~object_format_version:Envelope.current_object_format_version
+      ~mandatory_features:Envelope.supported_mandatory_features ~payload ()
+    |> Result.get_ok
+  in
+  let bytes = Envelope.encode envelope in
+  let id =
+    Object_store.id_of_envelope envelope |> Object_store.Stored_object_id.to_hex
+  in
+  (bytes, id)
+
+let https_v2_upload_resume_download_and_v1_fallback () =
+  with_https_relay (fun client project url ->
+      let bytes, object_id = large_v2_object () in
+      let receiver =
+        Transport_http_v2.negotiate_upload client ~project
+          ~sender:(v2_capability []) ~offered:[ object_id ]
+        |> require_ok Transport_http_v2.error_to_string
+      in
+      let negotiated =
+        Transport.V2.intersect_capability ~sender:(v2_capability []) ~receiver
+        |> require_ok Transport.V2.error_to_string
+      in
+      Alcotest.(check (list string))
+        "relay reports exactly the offered missing object" [ object_id ]
+        (Transport.V2.missing_ids (Transport.V2.missing_objects negotiated));
+      let session =
+        Transport_http_v2.start_upload client ~project ~object_id
+          ~raw_size:(String.length bytes) ~expires_in:60
+        |> require_ok Transport_http_v2.error_to_string
+      in
+      let ranges =
+        Transport.V2.partition (Transport.V2.session_offer session)
+        |> require_ok Transport.V2.error_to_string
+      in
+      let first = List.hd ranges in
+      let first_bytes =
+        String.sub bytes
+          (Transport.V2.range_offset first)
+          (Transport.V2.range_length first)
+      in
+      let session_id = Transport.V2.session_id session in
+      Transport_http_v2.put_segment client ~project ~session_id
+        ~offset:(Transport.V2.range_offset first)
+        ~raw:first_bytes
+      |> require_ok Transport_http_v2.error_to_string;
+      Alcotest.(check bool)
+        "incomplete V2 session cannot publish" true
+        (Result.is_error
+           (Transport_http_v2.complete_upload client ~project ~session_id));
+      let restarted =
+        Transport_http.create ~url ~token:(relay_test_token ())
+        |> require_ok Transport_http.error_to_string
+      in
+      let resumed =
+        Transport_http_v2.resume_upload restarted ~project ~session_id
+        |> require_ok Transport_http_v2.error_to_string
+      in
+      Alcotest.(check int)
+        "restart sees accepted first segment" 1
+        (List.length
+           (Transport.V2.progress_ranges
+              (Transport.V2.session_progress resumed)));
+      List.tl ranges
+      |> List.iter (fun range ->
+          let raw =
+            String.sub bytes
+              (Transport.V2.range_offset range)
+              (Transport.V2.range_length range)
+          in
+          Transport_http_v2.put_segment restarted ~project ~session_id
+            ~offset:(Transport.V2.range_offset range)
+            ~raw
+          |> require_ok Transport_http_v2.error_to_string);
+      Transport_http_v2.complete_upload restarted ~project ~session_id
+      |> require_ok Transport_http_v2.error_to_string;
+      let downloaded =
+        ranges
+        |> List.map (fun range ->
+            Transport_http_v2.get_segment restarted ~project ~object_id
+              ~offset:(Transport.V2.range_offset range)
+              ~length:(Transport.V2.range_length range)
+            |> require_ok Transport_http_v2.error_to_string)
+        |> String.concat ""
+      in
+      Alcotest.(check string)
+        "download reassembles exact canonical bytes before import" bytes
+        downloaded;
+      let manifest = "V1 remains explicitly available" in
+      Transport_http.put restarted ~project ~kind:Transport_http.Manifest
+        ~id:(Transport.sha256 manifest)
+        ~bytes:manifest
+      |> require_ok Transport_http.error_to_string)
+
+let explicit_v1_fallback_when_v2_is_unavailable () =
+  let empty_publication_page =
+    Encoding.array [ Encoding.array [] |> Result.get_ok; Encoding.null ]
+    |> Result.get_ok |> Encoding.encode
+  in
+  with_malicious_https_server
+    ~respond:(fun target ->
+      if String.starts_with ~prefix:"/v1/repositories/" target then
+        if String.contains target '?' then (200, empty_publication_page)
+        else (201, "")
+      else (404, ""))
+    (fun ~requests:_ url ->
+      let client =
+        Transport_http.create ~url ~token:"test-relay-token"
+        |> require_ok Transport_http.error_to_string
+      in
+      let project = Trust.Repository_id.to_string (repository ()) in
+      Alcotest.(check bool)
+        "V2 absence is explicit, never implicit success" true
+        (Result.is_error
+           (Transport_http_v2.negotiate_upload client ~project
+              ~sender:(v2_capability [])
+              ~offered:[ Transport.sha256 "object" ]));
+      let manifest = "V1 fallback bytes" in
+      Transport_http.put client ~project ~kind:Transport_http.Manifest
+        ~id:(Transport.sha256 manifest)
+        ~bytes:manifest
+      |> require_ok Transport_http.error_to_string)
+
+let response_body response =
+  let rec find offset =
+    if offset + 3 >= String.length response then None
+    else if String.sub response offset 4 = "\r\n\r\n" then Some (offset + 4)
+    else find (offset + 1)
+  in
+  match find 0 with
+  | Some offset -> String.sub response offset (String.length response - offset)
+  | None -> Alcotest.fail "HTTP response has no body boundary"
+
+let v2_http_credential_revocation_refuses_resumed_segment () =
+  with_http_relay (fun ~relay_root ~port ~token ->
+      let project = Trust.Repository_id.to_string (repository ()) in
+      let bytes, object_id = large_v2_object () in
+      let start =
+        Encoding.array
+          [
+            Encoding.text object_id |> Result.get_ok;
+            Encoding.integer (Int64.of_int (String.length bytes));
+            Encoding.integer 60L;
+          ]
+        |> Result.get_ok |> Encoding.encode
+      in
+      let response =
+        raw_http ~port
+          (raw_request ~token ~body:start "POST"
+             ("/v2/repositories/" ^ project ^ "/uploads"))
+      in
+      Alcotest.(check int)
+        "V2 session starts before revocation" 201 (response_status response);
+      let session =
+        Transport.V2.decode_session (response_body response)
+        |> require_ok Transport.V2.error_to_string
+      in
+      let credential_id =
+        Relay_access.load ~root:relay_root
+        |> require_ok Relay_access.error_to_string
+        |> Relay_access.credentials |> List.hd |> Relay_access.credential_id
+      in
+      Relay_access.update ~root:relay_root (fun registry ->
+          Relay_access.revoke
+            ~now:(Int64.of_float (Unix.gettimeofday ()))
+            ~credential_id registry
+          |> Result.map (fun registry -> (registry, ())))
+      |> require_ok Relay_access.error_to_string;
+      let range =
+        Transport.V2.partition (Transport.V2.session_offer session)
+        |> require_ok Transport.V2.error_to_string
+        |> List.hd
+      in
+      let raw =
+        String.sub bytes
+          (Transport.V2.range_offset range)
+          (Transport.V2.range_length range)
+      in
+      let compressed = Transport.V2_wire.compress raw |> Result.get_ok in
+      let route =
+        Printf.sprintf "/v2/repositories/%s/uploads/%s/segments/%d/%d/%s"
+          project
+          (Transport.V2.session_id session)
+          (Transport.V2.range_offset range)
+          (Transport.V2.range_length range)
+          (Transport.sha256 raw)
+      in
+      Alcotest.(check int)
+        "revoked credential cannot add a V2 segment" 401
+        (response_status
+           (raw_http ~port (raw_request ~token ~body:compressed "PUT" route)));
+      Alcotest.(check bool)
+        "revoked V2 session never publishes source bytes" true
+        (Result.is_error
+           (Relay.get
+              (Relay.open_repository ~root:relay_root
+              |> require_ok Relay.error_to_string)
+              ~project ~kind:Relay.Object ~id:object_id)))
 
 let executable () =
   let from_test_binary =
@@ -1722,6 +1935,12 @@ let () =
             `Quick relay_access_scopes_rotation_and_expiry_are_enforced;
           Alcotest.test_case "HTTPS reverse proxy reaches the relay" `Slow
             https_client_reaches_relay_through_tls_reverse_proxy;
+          Alcotest.test_case "V2 HTTPS upload resumes and download stays exact"
+            `Slow https_v2_upload_resume_download_and_v1_fallback;
+          Alcotest.test_case "V2 absence keeps V1 fallback explicit" `Slow
+            explicit_v1_fallback_when_v2_is_unavailable;
+          Alcotest.test_case "V2 revocation rejects a resumed segment" `Quick
+            v2_http_credential_revocation_refuses_resumed_segment;
           Alcotest.test_case
             "interrupted upload retains received work for retry" `Slow
             interrupted_upload_leaves_received_work_durable;

@@ -38,3 +38,54 @@ val list_publications :
   cursor:string option ->
   limit:int ->
   (string list * string option, error) result
+
+module V2 : sig
+  type error =
+    | V2_unavailable
+    | Http_error of string
+    | Protocol_error of string
+    | Transfer_error of Yeokcham_v4_transport.V2.error
+    | Wire_error of Yeokcham_v4_transport.V2_wire.error
+
+  val error_to_string : error -> string
+
+  val negotiate_upload :
+    client ->
+    project:string ->
+    sender:Yeokcham_v4_transport.V2.capability ->
+    offered:string list ->
+    (Yeokcham_v4_transport.V2.capability, error) result
+
+  val start_upload :
+    client ->
+    project:string ->
+    object_id:string ->
+    raw_size:int ->
+    expires_in:int ->
+    (Yeokcham_v4_transport.V2.transfer_session, error) result
+
+  val resume_upload :
+    client ->
+    project:string ->
+    session_id:string ->
+    (Yeokcham_v4_transport.V2.transfer_session, error) result
+
+  val put_segment :
+    client ->
+    project:string ->
+    session_id:string ->
+    offset:int ->
+    raw:string ->
+    (unit, error) result
+
+  val complete_upload :
+    client -> project:string -> session_id:string -> (unit, error) result
+
+  val get_segment :
+    client ->
+    project:string ->
+    object_id:string ->
+    offset:int ->
+    length:int ->
+    (string, error) result
+end
