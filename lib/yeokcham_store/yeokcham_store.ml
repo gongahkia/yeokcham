@@ -246,7 +246,8 @@ let error_to_string = function
         (Stored_object_id.to_hex expected)
         (Stored_object_id.to_hex actual)
   | Object_integrity_error { id; error } ->
-      Printf.sprintf "object %s is malformed: %s" (Stored_object_id.to_hex id)
+      Printf.sprintf "object %s is malformed: %s"
+        (Stored_object_id.to_hex id)
         (Envelope.decode_error_to_string error)
   | Collision_or_corruption { id; detail } ->
       Printf.sprintf "existing object %s is divergent or corrupt: %s"

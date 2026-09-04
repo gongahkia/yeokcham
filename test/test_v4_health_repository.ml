@@ -93,8 +93,8 @@ let missing_checkpoint_closure_is_typed_without_source_writes () =
         "failed verification writes no source bytes" before
         (tree_fingerprint root))
 
-let malformed_checkpoint_object_is_typed_without_source_writes () =
-  with_directory "v4-health-verify-malformed-" (fun root ->
+let mismatched_checkpoint_object_is_typed_without_source_writes () =
+  with_directory "v4-health-verify-mismatch-" (fun root ->
       write_file root "main.ml" "let version = 1\n";
       let status = initialize root in
       let repository =
@@ -116,10 +116,10 @@ let malformed_checkpoint_object_is_typed_without_source_writes () =
             Health.damage_code damage |> Health.damage_code_to_string)
       in
       Alcotest.(check bool)
-        "malformed closure has a typed diagnosis" true
-        (List.mem "malformed-envelope" codes);
+        "mismatched closure has a typed diagnosis" true
+        (List.mem "canonical-id-mismatch" codes);
       Alcotest.(check (list string))
-        "malformed verification writes no source bytes" before
+        "mismatched verification writes no source bytes" before
         (tree_fingerprint root))
 
 let () =
@@ -131,7 +131,7 @@ let () =
             clean_repository_verification_writes_nothing;
           Alcotest.test_case "missing closure is typed and no-write" `Quick
             missing_checkpoint_closure_is_typed_without_source_writes;
-          Alcotest.test_case "malformed closure is typed and no-write" `Quick
-            malformed_checkpoint_object_is_typed_without_source_writes;
+          Alcotest.test_case "mismatched closure is typed and no-write" `Quick
+            mismatched_checkpoint_object_is_typed_without_source_writes;
         ] );
     ]

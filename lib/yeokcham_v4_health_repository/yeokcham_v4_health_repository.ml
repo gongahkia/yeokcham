@@ -6,7 +6,11 @@ module Store = Yeokcham_store
 
 let object_observation object_id status =
   Health.Object_observation
-    { object_id = Store.Stored_object_id.to_hex object_id; status; references = [] }
+    {
+      object_id = Store.Stored_object_id.to_hex object_id;
+      status;
+      references = [];
+    }
 
 let state_head_unreadable =
   Health.Durable_observation
@@ -50,12 +54,13 @@ let observation_of_store_error = function
       object_observation id Health.Malformed
   | Store.Root_not_directory _ | Store.Repository_not_initialized _
   | Store.Repository_incomplete _ | Store.Incompatible_repository_format _
-  | Store.Not_regular_file _ | Store.Object_too_large _ | Store.File_size_changed _
-  | Store.Io_error _ | Store.Collision_or_corruption _
-  | Store.Unsupported_publication _ | Store.Temporary_name_exhausted _
-  | Store.Invalid_ref_name _ | Store.Corrupt_ref _ | Store.Concurrent_ref_update _
-  | Store.Ref_lock_held _ | Store.Ref_generation_exhausted _
-  | Store.Invalid_ref_path _ | Store.Concurrent_ref_file_update _ ->
+  | Store.Not_regular_file _ | Store.Object_too_large _
+  | Store.File_size_changed _ | Store.Io_error _
+  | Store.Collision_or_corruption _ | Store.Unsupported_publication _
+  | Store.Temporary_name_exhausted _ | Store.Invalid_ref_name _
+  | Store.Corrupt_ref _ | Store.Concurrent_ref_update _ | Store.Ref_lock_held _
+  | Store.Ref_generation_exhausted _ | Store.Invalid_ref_path _
+  | Store.Concurrent_ref_file_update _ ->
       state_head_unreadable
 
 let[@warning "-4"] observation_of_gc_error = function
@@ -76,9 +81,9 @@ let[@warning "-4"] observation_of_gc_error = function
       gc_temporary_unreachable
   | Gc.Store_error error -> observation_of_store_error error
   | Gc.V4_store_error _ | Gc.Snapshot_error _ | Gc.Model_error _
-  | Gc.Invalid_snapshot_id _ | Gc.Duplicate_object _
-  | Gc.Invalid_schema _ | Gc.Unsupported_schema_version _
-  | Gc.Noncanonical_bytes | Gc.No_collectible_objects | Gc.Io_error _ ->
+  | Gc.Invalid_snapshot_id _ | Gc.Duplicate_object _ | Gc.Invalid_schema _
+  | Gc.Unsupported_schema_version _ | Gc.Noncanonical_bytes
+  | Gc.No_collectible_objects | Gc.Io_error _ ->
       state_head_unreadable
 
 let repair_plan_unreadable =
