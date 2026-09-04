@@ -70,18 +70,31 @@ cannot publish them.
 When all ranges are complete, the relay rereads the full temporary raw object,
 checks the canonical envelope and raw object ID, and then performs one existing
 immutable create-only publish. It records completion only after that publish.
-Downloads use an independently staged temporary file and make no V4-store
-write until all frames/ranges and the final raw identity validate.
+Downloads retain each bounded compressed response in a private temporary file,
+then return no bytes until every frame/range and the final raw identity
+validate. They make no V4-store write.
 
 ### Retry and concurrency
 
 The client defaults to four in-flight segments and accepts only 1 through 8.
-It makes at most four total attempts for a transient transport failure or HTTP
-5xx, with bounded delays of 250 ms, 1 s, 4 s, and 10 s. Authentication,
+It makes at most four retries after its initial idempotent segment, capability,
+or resume request (five total attempts), with bounded delays of 250 ms, 1 s,
+4 s, and 10 s. Authentication,
 authorisation, capability, range, compression/decompression, canonical-byte,
 identity, quota, and all other 4xx/protocol failures are non-retryable. V1
 routes and behaviour remain isolated and available during development; V2
 fallback is explicit when capability negotiation shows V2 unavailable.
+
+The HTTPS client gives independent V2 range I/O to one external `curl`
+invocation with `--parallel` and a negotiated `--parallel-max` of one through
+eight. It does not create an OCaml Domain: OCaml 5 rejects `Unix.fork` after a
+Domain has been spawned, while this project deliberately uses fork-based local
+relay fixtures and process adapters. The client supplies `--disable` to avoid
+ambient curl configuration and places the bearer secret only in a mode-0600
+temporary curl configuration file, never in command arguments. Requests that
+could create a second session after an indeterminate response remain explicit;
+the caller can resume the returned session instead of treating session creation
+as an idempotent retry.
 
 ### zstd binding and packaging
 
@@ -130,3 +143,5 @@ cross-system performance claim.
 - [Zstandard manual: bounded decompression and frame headers](https://facebook.github.io/zstd/zstd_manual.html)
 - [Zstandard source license](https://github.com/facebook/zstd/blob/dev/LICENSE)
 - [RFC 8878: Zstandard Compression and the application/zstd media type](https://www.rfc-editor.org/rfc/rfc8878.html)
+- [curl man page: `--parallel`, `--parallel-max`, `--next`, and `--config`](https://curl.se/docs/manpage.html)
+- [OCaml Unix API: `fork` and spawned Domains/threads](https://ocaml.org/manual/5.5/api/Unix.html)

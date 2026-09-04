@@ -44,13 +44,21 @@ journal/proof mechanics. Receipt, relay, bootstrap, sync, and daemon modules
 do not depend on this materialisation path.
 
 `Yeokcham_v4_transport` owns canonical signed courier publications and feed
-validation. The relay owns only bounded, repository-scoped bearer access and
-immutable byte storage; its versioned local access registry, reverse-proxy TLS,
-aliases, URLs, and credentials remain outside the V4 project model. The
-transport client stages relay artifacts and delegates
-receipt solely to the receipt boundary; it has no second model or authority
-path. A relay or any future network service cannot coordinate, select, or gate
-authority epochs. `Yeokcham_v4_bootstrap` adds a separately signed
+validation. Its V2 submodel adds capability, raw-range, segment, and relay-only
+session values; session records and temporary raw files are outside objects,
+packages, feeds, bootstrap bases, and the V4 model. The relay owns only bounded,
+repository-scoped bearer access and immutable byte storage; its versioned local
+access registry, reverse-proxy TLS, aliases, URLs, credentials, and V2 session
+cleanup remain outside the V4 project model. The V2 HTTPS adapter independently
+zstd-compresses one-MiB raw ranges and delegates bounded concurrent range I/O
+to one external curl process; canonical object IDs always name the uncompressed
+bytes. It verifies every full download before returning staged bytes and has no
+store-import or materialiser dependency. V1 routes remain isolated; the object
+upload adapter falls back only when V2 capability negotiation is absent. The
+transport client stages relay artifacts and delegates receipt solely to the
+receipt boundary; it has no second model or authority path. A relay or any
+future network service cannot coordinate, select, or gate authority epochs.
+`Yeokcham_v4_bootstrap` adds a separately signed
 portable-state basis bound to an unchanged package-manifest-v1 closure; it is explicit
 initialization, not a clone protocol.
 

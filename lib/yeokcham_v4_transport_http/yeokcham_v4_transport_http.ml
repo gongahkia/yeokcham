@@ -1,4 +1,6 @@
 module Encoding = Yeokcham_encoding
+module Envelope = Yeokcham_envelope
+module Object_store = Yeokcham_store
 module Transport = Yeokcham_v4_transport
 
 type client = { url : string; token : string }
@@ -15,6 +17,8 @@ type error =
   | Invalid_response of string
   | Test_interrupted_upload
   | Io_error of { path : string; operation : string; message : string }
+
+type http_client_error = error
 
 let max_response_bytes = 64 * 1024 * 1024
 let max_page_size = 128
@@ -162,6 +166,28 @@ let status_of_output output =
   | Some status when status >= 100 && status <= 599 -> Ok status
   | _ -> Error (Invalid_response "curl did not emit one HTTP status")
 
+let statuses_of_output ~count output =
+  let lines =
+    String.split_on_char '\n' output
+    |> List.filter (fun line -> String.length (String.trim line) > 0)
+  in
+  if List.length lines <> count then
+    Error (Invalid_response "curl did not emit one status per V2 segment")
+  else
+    let rec decode reversed = function
+      | [] -> Ok (List.rev reversed)
+      | line :: rest ->
+          let* status = status_of_output line in
+          decode (status :: reversed) rest
+    in
+    decode [] lines
+
+type parallel_request = {
+  request_method : string;
+  request_url : string;
+  request_body : string option;
+}
+
 let run client ~method_ ~url ~body =
   with_temporary_directory (fun temporary ->
       let config = Filename.concat temporary "curl.conf" in
@@ -184,6 +210,7 @@ let run client ~method_ ~url ~body =
         let arguments =
           [
             curl;
+            "--disable";
             "--silent";
             "--show-error";
             "--fail-with-body";
@@ -251,6 +278,131 @@ let run client ~method_ ~url ~body =
           (Io_error
              { path = curl; operation; message = Unix.error_message error }))
 
+let run_parallel client ~parallelism requests =
+  with_temporary_directory (fun temporary ->
+      let rec prepare index reversed = function
+        | [] -> Ok (List.rev reversed)
+        | { request_method; request_url; request_body } :: rest ->
+            let config =
+              Filename.concat temporary (Printf.sprintf "curl-%d.conf" index)
+            in
+            let response =
+              Filename.concat temporary (Printf.sprintf "response-%d" index)
+            in
+            let body_path =
+              Filename.concat temporary (Printf.sprintf "body-%d" index)
+            in
+            let config_body =
+              "url = \"" ^ curl_escape request_url
+              ^ "\"\nheader = \"Authorization: Bearer "
+              ^ curl_escape client.token ^ "\"\n"
+            in
+            let* () = write_file config config_body in
+            let* body_arguments =
+              match request_body with
+              | None -> Ok []
+              | Some bytes ->
+                  let* () = write_file body_path bytes in
+                  Ok [ "--data-binary"; "@" ^ body_path ]
+            in
+            let arguments =
+              [
+                "--proto";
+                "=https";
+                "--tlsv1.2";
+                "--connect-timeout";
+                "5";
+                "--max-time";
+                "30";
+                "--max-filesize";
+                string_of_int max_response_bytes;
+                "--fail-with-body";
+                "--request";
+                request_method;
+                "--config";
+                config;
+                "--output";
+                response;
+                "--write-out";
+                "%{http_code}\\n";
+              ]
+              @ (match test_ca_bundle () with
+                | None -> []
+                | Some bundle -> [ "--cacert"; bundle ])
+              @ body_arguments
+            in
+            prepare (index + 1) ((arguments, response) :: reversed) rest
+      in
+      let* prepared = prepare 0 [] requests in
+      let blocks =
+        List.mapi
+          (fun index (arguments, _) ->
+            if index = 0 then arguments else "--next" :: arguments)
+          prepared
+        |> List.concat
+      in
+      let stdout_read, stdout_write = Unix.pipe () in
+      try
+        let arguments =
+          [
+            curl;
+            "--disable";
+            "--silent";
+            "--show-error";
+            "--parallel";
+            "--parallel-max";
+            string_of_int parallelism;
+          ]
+          @ blocks
+        in
+        let process =
+          Unix.create_process curl (Array.of_list arguments) Unix.stdin
+            stdout_write Unix.stderr
+        in
+        close_noerr stdout_write;
+        let read_statuses () =
+          let buffer = Buffer.create 32 in
+          let scratch = Bytes.create 128 in
+          let rec loop () =
+            match Unix.read stdout_read scratch 0 (Bytes.length scratch) with
+            | 0 -> Ok (Buffer.contents buffer)
+            | count ->
+                if Buffer.length buffer + count > 1024 then
+                  Error (Invalid_response "curl V2 status output is oversized")
+                else (
+                  Buffer.add_subbytes buffer scratch 0 count;
+                  loop ())
+          in
+          loop ()
+        in
+        let status_output =
+          Fun.protect ~finally:(fun () -> close_noerr stdout_read) read_statuses
+        in
+        let _, process_status = Unix.waitpid [] process in
+        let* status_output = status_output in
+        let* statuses =
+          statuses_of_output ~count:(List.length prepared) status_output
+        in
+        let* responses =
+          let rec read reversed = function
+            | [] -> Ok (List.rev reversed)
+            | (_, response) :: rest ->
+                let* bytes = read_file_limited response in
+                read (bytes :: reversed) rest
+          in
+          read [] prepared
+        in
+        match process_status with
+        | Unix.WEXITED 0 | Unix.WEXITED _ ->
+            Ok (List.combine statuses responses)
+        | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> Error (Command_failed 128)
+      with Unix.Unix_error (error, operation, _) ->
+        close_noerr stdout_read;
+        close_noerr stdout_write;
+        Error
+          (Io_error
+             { path = curl; operation; message = Unix.error_message error }))
+
 let route client ~project ~kind ~id =
   let* () = check_id project in
   let* () = check_id id in
@@ -263,7 +415,7 @@ let get client ~project ~kind ~id =
   let* status, response = run client ~method_:"GET" ~url ~body:None in
   if status = 200 then Ok response else Error (Unexpected_status status)
 
-let put client ~project ~kind ~id ~bytes =
+let put_v1 client ~project ~kind ~id ~bytes =
   if test_interrupt_upload () then Error Test_interrupted_upload
   else
     let* url = route client ~project ~kind ~id in
@@ -348,6 +500,62 @@ module V2 = struct
 
   let http_error error = Http_error (client_error_to_string error)
 
+  let retryable_client_error (error : http_client_error) =
+    match error with
+    | Command_failed _ -> true
+    | Invalid_url _ | Invalid_token | Invalid_identifier _ | Missing_curl
+    | Unexpected_status _ | Response_too_large | Invalid_response _
+    | Test_interrupted_upload | Io_error _ ->
+        false
+
+  let retry_after ~attempt error =
+    match Transfer.retry ~attempt error with
+    | Transfer.Do_not_retry -> false
+    | Transfer.Retry_after_ms milliseconds ->
+        Unix.sleepf (float_of_int milliseconds /. 1000.0);
+        true
+
+  let rec run_idempotent ~attempt
+      (operation : unit -> (int * string, http_client_error) result) =
+    match operation () with
+    | Ok (status, response) when status >= 500 && status <= 599 ->
+        if retry_after ~attempt (Transfer.Http_server_error status) then
+          run_idempotent ~attempt:(attempt + 1) operation
+        else Ok (status, response)
+    | Ok (status, response) -> Ok (status, response)
+    | Error error ->
+        if
+          retryable_client_error error
+          && retry_after ~attempt Transfer.Transient_network
+        then run_idempotent ~attempt:(attempt + 1) operation
+        else Error error
+
+  let rec run_parallel_idempotent ~attempt
+      (operation : unit -> ((int * string) list, http_client_error) result) =
+    match operation () with
+    | Ok responses ->
+        let has_server_failure =
+          List.exists
+            (fun (status, _) -> status >= 500 && status <= 599)
+            responses
+        in
+        let has_client_failure =
+          List.exists
+            (fun (status, _) -> status >= 400 && status <= 499)
+            responses
+        in
+        if has_server_failure && not has_client_failure then
+          if retry_after ~attempt (Transfer.Http_server_error 500) then
+            run_parallel_idempotent ~attempt:(attempt + 1) operation
+          else Ok responses
+        else Ok responses
+    | Error error ->
+        if
+          retryable_client_error error
+          && retry_after ~attempt Transfer.Transient_network
+        then run_parallel_idempotent ~attempt:(attempt + 1) operation
+        else Error error
+
   let route client ~project suffix =
     let* () = check_id project |> Result.map_error http_error in
     Ok (client.url ^ "/v2/repositories/" ^ project ^ suffix)
@@ -412,7 +620,8 @@ module V2 = struct
     let* body = encode_capability_offer sender offered in
     let* url = route client ~project "/capabilities" in
     let* status, response =
-      run client ~method_:"POST" ~url ~body:(Some body)
+      run_idempotent ~attempt:0 (fun () ->
+          run client ~method_:"POST" ~url ~body:(Some body))
       |> Result.map_error http_error
     in
     if status = 404 then Error V2_unavailable
@@ -446,7 +655,9 @@ module V2 = struct
     let* () = check_id session_id |> Result.map_error http_error in
     let* url = route client ~project ("/uploads/" ^ session_id) in
     let* status, response =
-      run client ~method_:"GET" ~url ~body:None |> Result.map_error http_error
+      run_idempotent ~attempt:0 (fun () ->
+          run client ~method_:"GET" ~url ~body:None)
+      |> Result.map_error http_error
     in
     if status = 404 then Error (Protocol_error "upload session is absent")
     else if status <> 200 then
@@ -457,6 +668,8 @@ module V2 = struct
     let length = String.length raw in
     if not (valid_segment ~offset ~length) then
       Error (Transfer_error Transfer.Range_failure)
+    else if test_interrupt_upload () then
+      Error (Http_error (client_error_to_string Test_interrupted_upload))
     else
       let* () = check_id session_id |> Result.map_error http_error in
       let* compressed =
@@ -469,7 +682,8 @@ module V2 = struct
       in
       let* url = route client ~project suffix in
       let* status, _ =
-        run client ~method_:"PUT" ~url ~body:(Some compressed)
+        run_idempotent ~attempt:0 (fun () ->
+            run client ~method_:"PUT" ~url ~body:(Some compressed))
         |> Result.map_error http_error
       in
       if status = 204 then Ok ()
@@ -495,11 +709,187 @@ module V2 = struct
              length)
       in
       let* status, compressed =
-        run client ~method_:"GET" ~url ~body:None |> Result.map_error http_error
+        run_idempotent ~attempt:0 (fun () ->
+            run client ~method_:"GET" ~url ~body:None)
+        |> Result.map_error http_error
       in
       if status <> 200 then
         Error (Http_error (Printf.sprintf "relay returned HTTP %d" status))
       else
         Wire.decompress ~raw_length:length compressed
         |> Result.map_error (fun error -> Wire_error error)
+
+  let checked_parallelism = function
+    | None -> Ok Transfer.default_parallelism
+    | Some value when value >= 1 && value <= Transfer.max_parallelism ->
+        Ok value
+    | Some _ ->
+        Error (Protocol_error "V2 parallelism must be between one and eight")
+
+  let validate_canonical_object ~object_id bytes =
+    match Envelope.decode bytes with
+    | Error _ -> Error (Transfer_error Transfer.Canonical_bytes_failure)
+    | Ok envelope ->
+        if not (String.equal (Envelope.encode envelope) bytes) then
+          Error (Transfer_error Transfer.Canonical_bytes_failure)
+        else
+          let actual =
+            Object_store.id_of_envelope envelope
+            |> Object_store.Stored_object_id.to_hex
+          in
+          if String.equal actual object_id then Ok ()
+          else Error (Transfer_error Transfer.Identity_failure)
+
+  let upload_ranges client ~parallelism ~project ~session_id ~bytes ranges =
+    if test_interrupt_upload () then
+      Error (Http_error (client_error_to_string Test_interrupted_upload))
+    else
+      let rec requests reversed = function
+        | [] -> Ok (List.rev reversed)
+        | range :: rest ->
+            let raw =
+              String.sub bytes
+                (Transfer.range_offset range)
+                (Transfer.range_length range)
+            in
+            let* compressed =
+              Wire.compress raw
+              |> Result.map_error (fun error -> Wire_error error)
+            in
+            let raw_sha256 = Transport.sha256 raw in
+            let suffix =
+              Printf.sprintf "/uploads/%s/segments/%d/%d/%s" session_id
+                (Transfer.range_offset range)
+                (Transfer.range_length range)
+                raw_sha256
+            in
+            let* url = route client ~project suffix in
+            requests
+              ({
+                 request_method = "PUT";
+                 request_url = url;
+                 request_body = Some compressed;
+               }
+              :: reversed)
+              rest
+      in
+      let* requests = requests [] ranges in
+      let* responses =
+        run_parallel_idempotent ~attempt:0 (fun () ->
+            run_parallel client ~parallelism requests)
+        |> Result.map_error http_error
+      in
+      match List.find_opt (fun (status, _) -> status <> 204) responses with
+      | None -> Ok ()
+      | Some (status, _) ->
+          Error (Http_error (Printf.sprintf "relay returned HTTP %d" status))
+
+  let download_ranges client ~parallelism ~project ~object_id ranges =
+    let rec requests reversed = function
+      | [] -> Ok (List.rev reversed)
+      | range :: rest ->
+          let* url =
+            route client ~project
+              (Printf.sprintf "/objects/%s?offset=%d&length=%d" object_id
+                 (Transfer.range_offset range)
+                 (Transfer.range_length range))
+          in
+          requests
+            (( { request_method = "GET"; request_url = url; request_body = None },
+               Transfer.range_length range )
+            :: reversed)
+            rest
+    in
+    let* requests = requests [] ranges in
+    let requests, lengths = List.split requests in
+    let* responses =
+      run_parallel_idempotent ~attempt:0 (fun () ->
+          run_parallel client ~parallelism requests)
+      |> Result.map_error http_error
+    in
+    let rec decompress reversed = function
+      | [], [] -> Ok (List.rev reversed)
+      | (status, compressed) :: response_rest, length :: length_rest ->
+          if status <> 200 then
+            Error (Http_error (Printf.sprintf "relay returned HTTP %d" status))
+          else
+            let* raw =
+              Wire.decompress ~raw_length:length compressed
+              |> Result.map_error (fun error -> Wire_error error)
+            in
+            decompress (raw :: reversed) (response_rest, length_rest)
+      | _ -> Error (Protocol_error "parallel V2 response count changed")
+    in
+    decompress [] (responses, lengths)
+
+  let upload_object ?parallelism client ~project ~object_id bytes =
+    let* parallelism = checked_parallelism parallelism in
+    let* () = check_id object_id |> Result.map_error http_error in
+    let* () = validate_canonical_object ~object_id bytes in
+    let* sender =
+      Transfer.capability
+        ~versions:[ Transfer.protocol_version ]
+        ~zstd:true ~max_segment_bytes:Transfer.segment_bytes
+        ~max_in_flight:parallelism ~missing:[]
+      |> Result.map_error (fun error -> Transfer_error error)
+    in
+    let* receiver =
+      negotiate_upload client ~project ~sender ~offered:[ object_id ]
+    in
+    let* negotiated =
+      Transfer.intersect_capability ~sender ~receiver
+      |> Result.map_error (fun error -> Transfer_error error)
+    in
+    let parallelism =
+      min parallelism (Transfer.capability_max_in_flight negotiated)
+    in
+    if
+      not
+        (List.mem object_id
+           (Transfer.missing_ids (Transfer.missing_objects negotiated)))
+    then Ok ()
+    else
+      let* session =
+        start_upload client ~project ~object_id ~raw_size:(String.length bytes)
+          ~expires_in:900
+      in
+      let* ranges =
+        Transfer.partition (Transfer.session_offer session)
+        |> Result.map_error (fun error -> Transfer_error error)
+      in
+      let session_id = Transfer.session_id session in
+      let* () =
+        upload_ranges client ~parallelism ~project ~session_id ~bytes ranges
+      in
+      complete_upload client ~project ~session_id
+
+  let download_object ?parallelism client ~project ~object_id ~raw_size =
+    let* parallelism = checked_parallelism parallelism in
+    let* () = check_id object_id |> Result.map_error http_error in
+    let* offer =
+      Transfer.object_offer ~project ~object_id ~raw_size
+      |> Result.map_error (fun error -> Transfer_error error)
+    in
+    let* ranges =
+      Transfer.partition offer
+      |> Result.map_error (fun error -> Transfer_error error)
+    in
+    let* parts =
+      download_ranges client ~parallelism ~project ~object_id ranges
+    in
+    let bytes = String.concat "" parts in
+    let* () = validate_canonical_object ~object_id bytes in
+    Ok bytes
 end
+
+let put client ~project ~kind ~id ~bytes =
+  match kind with
+  | Object -> (
+      match V2.upload_object client ~project ~object_id:id bytes with
+      | Ok () -> Ok ()
+      | Error error ->
+          if error = V2.V2_unavailable then
+            put_v1 client ~project ~kind ~id ~bytes
+          else Error (Invalid_response (V2.error_to_string error)))
+  | Manifest | Publication | Bootstrap ->
+      put_v1 client ~project ~kind ~id ~bytes

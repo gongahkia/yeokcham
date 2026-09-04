@@ -296,6 +296,25 @@ login NAME` reads a relay access secret with terminal echo disabled and stores i
 in the Linux Secret Service. Neither aliases nor credentials are signed,
 packaged, exported, or authority data. `remote remove NAME` removes the alias.
 
+When the relay exposes V2 capability negotiation, canonical object upload first
+receives its exact missing-object set, then transfers independently zstd-framed
+one-MiB raw byte ranges with a bounded one-to-eight range limit (four by
+default). The object ID always names the uncompressed canonical envelope bytes.
+An upload session is relay-local and binds only project, object, raw size, safe
+credential identifier, scope, expiry, and a range bitmap; it contains no bearer
+secret and is not a project, package, publication, feed, bootstrap, or basis
+record. Interrupted sessions can be explicitly resumed. The relay verifies
+every decoded range and publishes an immutable object only after full canonical
+envelope and identity verification. An absent V2 capability endpoint falls back
+to V1 only for object upload; manifests, publications, and bootstrap records
+continue to use their isolated V1 routes during development.
+
+V2 download returns a complete staged object only after range and full-object
+verification. It does not import it, select authority, scan source, resolve a
+decision, or materialise a working tree. Session expiry cleanup reports only
+aggregate sessions and temporary bytes and never removes immutable published
+objects.
+
 `sync NAME` uses only HTTPS. It fetches signed publication records, manifests,
 and their declared immutable object closure into temporary package directories.
 It verifies the entire feed batch, package authority closure, signatures,

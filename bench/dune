@@ -1,0 +1,3 @@
+(executable
+ (name v2_transfer_wire_benchmark)
+ (libraries yeokcham_v4_transport))

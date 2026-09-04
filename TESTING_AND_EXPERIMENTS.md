@@ -162,6 +162,30 @@ announced; and a subsequent sync uploads and records it. TLS tests require
 `/usr/bin/openssl` and `/usr/bin/socat`; CI installs both, and missing tools
 fail the test rather than producing a skip.
 
+## TRANSPORT-002 V2 resumable transfer
+
+On 2026-09-04, the focused V2 core suite passed eight unit cases and the
+generated transport suite passed three properties. They cover canonical
+capability/session fixtures, noncanonical and malformed bitmap rejection,
+missing-set planning, range coverage/non-overlap, arbitrary segment order,
+idempotent duplicates, wrong length/overlap/gap rejection, session restart,
+credential session cap, quota/expiry cleanup accounting, zstd corruption, and
+decompression expansion refusal.
+
+The complete 18-case HTTPS transport suite passed in 22.255 seconds on the
+Fedora 43 host. It includes actual loopback TLS upload/resume/download of a
+multi-range canonical object, default bounded V2 object upload, explicit V1
+fallback when V2 negotiation is unavailable, 5xx retry and 401 non-retry,
+revocation, existing two-replica receipt/sync failure paths, and an ordinary
+source-file sentinel unchanged across V2 success and failure. The fixture uses
+a separate plain HTTP relay behind an ephemeral OpenSSL/socat TLS proxy; it is
+adapter-boundary evidence, not public deployment evidence.
+
+The documented 64 MiB V2 wire-core scaled measurement is in
+[`docs/experiments/099-v2-transfer-wire-benchmark.md`](docs/experiments/099-v2-transfer-wire-benchmark.md).
+It reports CPU, memory, wall time, wire bytes, and resume work avoided. It is
+not the 5 GiB/100,000-path target and makes no capacity claim.
+
 No semantic sidecar result is used as evidence for the current model, delivery,
 or authority. The local fake-server results above establish only the adapter
 boundary; future real-server experiments must record language, server/version,

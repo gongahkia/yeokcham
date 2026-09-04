@@ -454,6 +454,20 @@ module V2 = struct
     |> Result.map_error (fun error ->
         Corrupt_session (Transfer.error_to_string error))
 
+  let check_raw_size path expected =
+    try
+      let info = Unix.lstat path in
+      if info.Unix.st_kind <> Unix.S_REG then
+        Error (Corrupt_session (path ^ " is not a regular file"))
+      else if info.Unix.st_size <> expected then
+        Error (Corrupt_session "temporary raw file has the wrong size")
+      else Ok ()
+    with
+    | Unix.Unix_error (Unix.ENOENT, _, _) ->
+        Error (Session_missing (Filename.basename path))
+    | Unix.Unix_error (error, operation, _) ->
+        Error (io_error path operation error)
+
   let load_session repository ~project ~session_id =
     let* () =
       check_project project
@@ -473,12 +487,11 @@ module V2 = struct
     then Error (Corrupt_session "metadata path and session binding disagree")
     else
       let raw = raw_path repository project session_id in
-      let* raw_bytes = read_file_limited raw Transfer.max_raw_object_bytes in
-      if
-        String.length raw_bytes
-        <> Transfer.offer_raw_size (Transfer.session_offer session)
-      then Error (Corrupt_session "temporary raw file has the wrong size")
-      else Ok session
+      let* () =
+        check_raw_size raw
+          (Transfer.offer_raw_size (Transfer.session_offer session))
+      in
+      Ok session
 
   let list_project_ids repository project =
     let directory = project_directory repository project in
@@ -609,7 +622,8 @@ module V2 = struct
               let result =
                 Transfer.encode_session session
                 |> Result.map_error (fun error -> Transfer_error error)
-                |> fun result -> Result.bind result (write_metadata_new metadata)
+                |> fun result ->
+                Result.bind result (write_metadata_new metadata)
               in
               match result with
               | Ok () -> Ok session

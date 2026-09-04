@@ -123,6 +123,24 @@ fixture path-count note; this is not capacity evidence.
 
 **Goal:** improve the existing HTTPS relay from whole-object retry to receiver-aware, zstd-compressed, resumable raw-byte transfer while preserving the receive-first, no-working-tree-mutation boundary.
 
+**Vertical slice:** one canonical immutable object is capability-negotiated,
+range-transferred, resumed from a relay-only session, fully revalidated, and
+then published or returned as staged bytes. No V2 operation has a source-tree
+adapter, model transition, or materialisation side effect.
+
+**Invariants:** object IDs name raw canonical bytes; ranges cover one exact raw
+object without overlap; progress is monotonic and matching duplicates are
+idempotent; only a complete, canonical, identity-matching object is published
+or returned; cleanup removes temporary session data only.
+
+**Persistent-format impact:** `transfer-session-v1` is a canonical,
+versioned relay-local record with golden bytes. zstd frames are wire-only and
+never alter canonical object/package/relay bytes.
+
+**CLI contract:** no V2 command is added. Existing object upload uses V2 only
+after explicit capability negotiation; V1 remains isolated for an absent V2
+endpoint and for non-object routes.
+
 **Protocol decisions that must not be revisited during implementation:**
 
 - Canonical local/package/relay objects remain uncompressed exact bytes. An object ID always names these raw canonical bytes, never a compressed frame.
@@ -131,29 +149,38 @@ fixture path-count note; this is not capacity evidence.
 - A temporary session is bound to project ID, object ID, raw total size, credential identifier (never its bearer secret), requested scope, expiry, and segment bitmap. It is not a V4 history record and never appears in a package, feed, bootstrap basis, or canonical object store.
 - On upload, the relay decodes each segment into a scoped temporary file, validates claimed raw offset/length and bounded decoded output, and persists progress atomically. Completion revalidates full envelope/canonical bytes and object ID before one atomic immutable publish.
 - On download, the client validates each decompressed segment range and revalidates full canonical bytes/object ID before import. No partial data enters the V4 store.
-- Default parallelism is 4 segments, configurable only down to 1 and up to 8. Retry transient network failures and HTTP 5xx at most four total attempts with bounded delays of 250 ms, 1 s, 4 s, and 10 s. Never retry auth, capability, range, decompression, canonical-byte, or identity failures.
+- Default parallelism is 4 segments, configurable only down to 1 and up to 8. Retry transient network failures and HTTP 5xx at most four times after the initial idempotent request (five total attempts), with bounded delays of 250 ms, 1 s, 4 s, and 10 s. Never retry auth, capability, range, decompression, canonical-byte, or identity failures.
 - V1 remains available in development until V2 has all acceptance evidence; no public compatibility promise follows from retaining it.
 
 **Types and pure transitions first:**
 
-- [ ] Add algebraic types for Capability, Object_offer, Missing_set, Range, Segment, Transfer_session, Session_progress, and typed Transfer_error classifications. Bound all sizes/counts before allocation.
-- [ ] Implement pure capability intersection, missing-object planning, raw range partitioning, legal-progress transition, retry classification, and completion eligibility. Property-test partition coverage, non-overlap, idempotent repeated segment receipt, and monotonic bitmap progress.
-- [ ] Version the relay-only session record and add canonical fixtures. Session records require expiry cleanup, per-project temporary-byte quota, per-credential session cap, and recovery that never publishes a partial object.
+- [x] Add algebraic types for Capability, Object_offer, Missing_set, Range, Segment, Transfer_session, Session_progress, and typed Transfer_error classifications. Bound all sizes/counts before allocation.
+- [x] Implement pure capability intersection, missing-object planning, raw range partitioning, legal-progress transition, retry classification, and completion eligibility. Property-test partition coverage, non-overlap, idempotent repeated segment receipt, and monotonic bitmap progress.
+- [x] Version the relay-only session record and add canonical fixtures. Session records require expiry cleanup, per-project temporary-byte quota, per-credential session cap, and recovery that never publishes a partial object.
 
 **Adapters and boundaries:**
 
-- [ ] Extend Yeokcham_v4_transport, Yeokcham_v4_transport_http, Yeokcham_v4_relay, and Yeokcham_v4_relay_http; keep current V1 routes isolated until V2 evidence is complete.
-- [ ] Use an OCaml zstd binding only after its license, reproducible build, and Linux/RPM implications are recorded. Reject frames exceeding the claimed raw range or configured decompression budget.
-- [ ] Make relay expiration/cleanup explicit and observable without exposing bearer tokens. Cleanup never removes an immutable published object.
-- [ ] Keep sync, receive, bootstrap, and daemon receipt semantics: they may stage/verify objects but never scan, resolve, or materialise source.
+- [x] Extend Yeokcham_v4_transport, Yeokcham_v4_transport_http, Yeokcham_v4_relay, and Yeokcham_v4_relay_http; keep current V1 routes isolated until V2 evidence is complete.
+- [x] Use an OCaml zstd binding only after its license, reproducible build, and Linux/RPM implications are recorded. Reject frames exceeding the claimed raw range or configured decompression budget.
+- [x] Make relay expiration/cleanup explicit and observable without exposing bearer tokens. Cleanup never removes an immutable published object.
+- [x] Keep sync, receive, bootstrap, and daemon receipt semantics: they may stage/verify objects but never scan, resolve, or materialise source.
 
 **Tests and acceptance:**
 
-- [ ] Golden tests for capability/session encoding and negative decode cases.
-- [ ] Property/fuzz-style tests for arbitrary segment order, duplicates, overlaps, gaps, wrong length, zstd corruption, decompression expansion, and resume after process restart.
-- [ ] HTTPS relay integration tests for missing-set negotiation, interrupted upload/download and resume, expiry, quota rejection, credential revocation, retry/nonretry classifications, and V1 fallback.
-- [ ] Regression guard: every success and failure leaves ordinary source bytes unchanged; incomplete sessions cannot be fetched, fed, bootstrapped, or packaged.
-- [ ] Benchmark a 5 GiB/100,000-path representative fixture or documented scaled equivalent. Record CPU, memory, wall time, wire bytes, resume work avoided, and test hardware/network conditions in TESTING_AND_EXPERIMENTS.md. Do not call the target met without data.
+- [x] Golden tests for capability/session encoding and negative decode cases.
+- [x] Property/fuzz-style tests for arbitrary segment order, duplicates, overlaps, gaps, wrong length, zstd corruption, decompression expansion, and resume after process restart.
+- [x] HTTPS relay integration tests for missing-set negotiation, interrupted upload/download and resume, expiry, quota rejection, credential revocation, retry/nonretry classifications, and V1 fallback.
+- [x] Regression guard: every success and failure leaves ordinary source bytes unchanged; incomplete sessions cannot be fetched, fed, bootstrapped, or packaged.
+- [x] Benchmark a 5 GiB/100,000-path representative fixture or documented scaled equivalent. Record CPU, memory, wall time, wire bytes, resume work avoided, and test hardware/network conditions in TESTING_AND_EXPERIMENTS.md. Do not call the target met without data.
+
+**Verification (2026-09-04):** `opam exec -- dune build @opam`,
+`opam lint yeokcham.opam`, `opam exec -- dune build @fmt @lint @all`,
+`opam exec -- dune exec test/test_v4_transfer.exe`,
+`opam exec -- dune exec test/v4_transport_property_test.exe`, and
+`opam exec -- dune exec test/test_v4_transport.exe -- --color never` passed.
+The latter ran 18 HTTPS transport cases in 22.255 seconds. `make ci` passed.
+`bench/v2_transfer_wire_benchmark.exe` recorded the documented 64 MiB scaled
+wire-core result; it is explicitly not the 5 GiB/100,000-path capacity target.
 
 ### RELAY-OPS-001 — single-node relay operator product
 

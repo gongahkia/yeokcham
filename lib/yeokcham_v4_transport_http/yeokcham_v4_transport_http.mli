@@ -88,4 +88,25 @@ module V2 : sig
     offset:int ->
     length:int ->
     (string, error) result
+
+  val upload_object :
+    ?parallelism:int ->
+    client ->
+    project:string ->
+    object_id:string ->
+    string ->
+    (unit, error) result
+  (** Negotiates first. A V2-capable receiver reports exact missing object IDs;
+      only a missing object starts a resumable upload. [parallelism] defaults to
+      four and accepts one through eight. *)
+
+  val download_object :
+    ?parallelism:int ->
+    client ->
+    project:string ->
+    object_id:string ->
+    raw_size:int ->
+    (string, error) result
+  (** Returns only a fully reassembled, canonical, identity-checked object. It
+      does not import the bytes into a V4 store. *)
 end

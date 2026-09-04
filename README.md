@@ -26,6 +26,10 @@ It includes:
   complete snapshot-closure verification; receiving never materialises a
   working tree, while an explicit workspace action can materialise a verified
   bootstrap basis.
+- Receiver-aware V2 relay object transfer: independently zstd-compressed,
+  resumable raw ranges with bounded concurrency and full canonical-byte and
+  identity checks before an immutable publish or staged download. V2 sessions
+  are relay-local temporary state, never history or source materialisation.
 - Explicit multi-administrator authority, device enrolment and revocation,
   recovery packages, and local device custody through platform stores,
   SSH-agent keys, or PKCS#11 tokens.

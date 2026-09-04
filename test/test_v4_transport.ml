@@ -694,9 +694,9 @@ let v2_capability missing =
     ~missing
   |> require_ok Transport.V2.error_to_string
 
-let large_v2_object () =
+let large_v2_object ?(fill = 'x') () =
   let payload =
-    Encoding.bytes (String.make (Transport.V2.segment_bytes + 41) 'x')
+    Encoding.bytes (String.make (Transport.V2.segment_bytes + 41) fill)
   in
   let envelope =
     Envelope.create ~object_type:Envelope.Content
@@ -711,87 +711,106 @@ let large_v2_object () =
   (bytes, id)
 
 let https_v2_upload_resume_download_and_v1_fallback () =
-  with_https_relay (fun client project url ->
-      let bytes, object_id = large_v2_object () in
-      let receiver =
-        Transport_http_v2.negotiate_upload client ~project
-          ~sender:(v2_capability []) ~offered:[ object_id ]
-        |> require_ok Transport_http_v2.error_to_string
-      in
-      let negotiated =
-        Transport.V2.intersect_capability ~sender:(v2_capability []) ~receiver
-        |> require_ok Transport.V2.error_to_string
-      in
-      Alcotest.(check (list string))
-        "relay reports exactly the offered missing object" [ object_id ]
-        (Transport.V2.missing_ids (Transport.V2.missing_objects negotiated));
-      let session =
-        Transport_http_v2.start_upload client ~project ~object_id
-          ~raw_size:(String.length bytes) ~expires_in:60
-        |> require_ok Transport_http_v2.error_to_string
-      in
-      let ranges =
-        Transport.V2.partition (Transport.V2.session_offer session)
-        |> require_ok Transport.V2.error_to_string
-      in
-      let first = List.hd ranges in
-      let first_bytes =
-        String.sub bytes
-          (Transport.V2.range_offset first)
-          (Transport.V2.range_length first)
-      in
-      let session_id = Transport.V2.session_id session in
-      Transport_http_v2.put_segment client ~project ~session_id
-        ~offset:(Transport.V2.range_offset first)
-        ~raw:first_bytes
-      |> require_ok Transport_http_v2.error_to_string;
-      Alcotest.(check bool)
-        "incomplete V2 session cannot publish" true
-        (Result.is_error
-           (Transport_http_v2.complete_upload client ~project ~session_id));
-      let restarted =
-        Transport_http.create ~url ~token:(relay_test_token ())
-        |> require_ok Transport_http.error_to_string
-      in
-      let resumed =
-        Transport_http_v2.resume_upload restarted ~project ~session_id
-        |> require_ok Transport_http_v2.error_to_string
-      in
-      Alcotest.(check int)
-        "restart sees accepted first segment" 1
-        (List.length
-           (Transport.V2.progress_ranges
-              (Transport.V2.session_progress resumed)));
-      List.tl ranges
-      |> List.iter (fun range ->
-          let raw =
-            String.sub bytes
-              (Transport.V2.range_offset range)
-              (Transport.V2.range_length range)
+  with_directory "yeokcham-v4-v2-source-boundary-" (fun source_root ->
+      let source_file = Filename.concat source_root "ordinary-source.txt" in
+      Out_channel.with_open_bin source_file (fun channel ->
+          Out_channel.output_string channel
+            "ordinary source is not relay data\n");
+      with_https_relay (fun client project url ->
+          let bytes, object_id = large_v2_object () in
+          let receiver =
+            Transport_http_v2.negotiate_upload client ~project
+              ~sender:(v2_capability []) ~offered:[ object_id ]
+            |> require_ok Transport_http_v2.error_to_string
           in
-          Transport_http_v2.put_segment restarted ~project ~session_id
-            ~offset:(Transport.V2.range_offset range)
-            ~raw
-          |> require_ok Transport_http_v2.error_to_string);
-      Transport_http_v2.complete_upload restarted ~project ~session_id
-      |> require_ok Transport_http_v2.error_to_string;
-      let downloaded =
-        ranges
-        |> List.map (fun range ->
-            Transport_http_v2.get_segment restarted ~project ~object_id
-              ~offset:(Transport.V2.range_offset range)
-              ~length:(Transport.V2.range_length range)
-            |> require_ok Transport_http_v2.error_to_string)
-        |> String.concat ""
-      in
+          let negotiated =
+            Transport.V2.intersect_capability ~sender:(v2_capability [])
+              ~receiver
+            |> require_ok Transport.V2.error_to_string
+          in
+          Alcotest.(check (list string))
+            "relay reports exactly the offered missing object" [ object_id ]
+            (Transport.V2.missing_ids (Transport.V2.missing_objects negotiated));
+          let session =
+            Transport_http_v2.start_upload client ~project ~object_id
+              ~raw_size:(String.length bytes) ~expires_in:60
+            |> require_ok Transport_http_v2.error_to_string
+          in
+          let ranges =
+            Transport.V2.partition (Transport.V2.session_offer session)
+            |> require_ok Transport.V2.error_to_string
+          in
+          let first = List.hd ranges in
+          let first_bytes =
+            String.sub bytes
+              (Transport.V2.range_offset first)
+              (Transport.V2.range_length first)
+          in
+          let session_id = Transport.V2.session_id session in
+          Transport_http_v2.put_segment client ~project ~session_id
+            ~offset:(Transport.V2.range_offset first)
+            ~raw:first_bytes
+          |> require_ok Transport_http_v2.error_to_string;
+          Alcotest.(check bool)
+            "incomplete V2 session cannot publish" true
+            (Result.is_error
+               (Transport_http_v2.complete_upload client ~project ~session_id));
+          let restarted =
+            Transport_http.create ~url ~token:(relay_test_token ())
+            |> require_ok Transport_http.error_to_string
+          in
+          let resumed =
+            Transport_http_v2.resume_upload restarted ~project ~session_id
+            |> require_ok Transport_http_v2.error_to_string
+          in
+          Alcotest.(check int)
+            "restart sees accepted first segment" 1
+            (List.length
+               (Transport.V2.progress_ranges
+                  (Transport.V2.session_progress resumed)));
+          List.tl ranges
+          |> List.iter (fun range ->
+              let raw =
+                String.sub bytes
+                  (Transport.V2.range_offset range)
+                  (Transport.V2.range_length range)
+              in
+              Transport_http_v2.put_segment restarted ~project ~session_id
+                ~offset:(Transport.V2.range_offset range)
+                ~raw
+              |> require_ok Transport_http_v2.error_to_string);
+          Transport_http_v2.complete_upload restarted ~project ~session_id
+          |> require_ok Transport_http_v2.error_to_string;
+          let downloaded =
+            Transport_http_v2.download_object restarted ~project ~object_id
+              ~raw_size:(String.length bytes)
+            |> require_ok Transport_http_v2.error_to_string
+          in
+          Alcotest.(check string)
+            "download reassembles exact canonical bytes before import" bytes
+            downloaded;
+          let automatic_bytes, automatic_id = large_v2_object ~fill:'y' () in
+          Transport_http.put restarted ~project ~kind:Transport_http.Object
+            ~id:automatic_id ~bytes:automatic_bytes
+          |> require_ok Transport_http.error_to_string;
+          let automatic_download =
+            Transport_http_v2.download_object restarted ~project
+              ~object_id:automatic_id
+              ~raw_size:(String.length automatic_bytes)
+            |> require_ok Transport_http_v2.error_to_string
+          in
+          Alcotest.(check string)
+            "the default V2 upload transfers and publishes every range"
+            automatic_bytes automatic_download;
+          let manifest = "V1 remains explicitly available" in
+          Transport_http.put restarted ~project ~kind:Transport_http.Manifest
+            ~id:(Transport.sha256 manifest)
+            ~bytes:manifest
+          |> require_ok Transport_http.error_to_string);
       Alcotest.(check string)
-        "download reassembles exact canonical bytes before import" bytes
-        downloaded;
-      let manifest = "V1 remains explicitly available" in
-      Transport_http.put restarted ~project ~kind:Transport_http.Manifest
-        ~id:(Transport.sha256 manifest)
-        ~bytes:manifest
-      |> require_ok Transport_http.error_to_string)
+        "V2 transfer never writes an ordinary source path"
+        "ordinary source is not relay data\n"
+        (In_channel.with_open_bin source_file In_channel.input_all))
 
 let explicit_v1_fallback_when_v2_is_unavailable () =
   let empty_publication_page =
@@ -816,11 +835,69 @@ let explicit_v1_fallback_when_v2_is_unavailable () =
            (Transport_http_v2.negotiate_upload client ~project
               ~sender:(v2_capability [])
               ~offered:[ Transport.sha256 "object" ]));
+      let object_bytes, object_id = large_v2_object () in
+      Transport_http.put client ~project ~kind:Transport_http.Object
+        ~id:object_id ~bytes:object_bytes
+      |> require_ok Transport_http.error_to_string;
       let manifest = "V1 fallback bytes" in
       Transport_http.put client ~project ~kind:Transport_http.Manifest
         ~id:(Transport.sha256 manifest)
         ~bytes:manifest
       |> require_ok Transport_http.error_to_string)
+
+let v2_retries_only_transient_server_failures () =
+  let empty_publication_page =
+    Encoding.array [ Encoding.array [] |> Result.get_ok; Encoding.null ]
+    |> Result.get_ok |> Encoding.encode
+  in
+  let raw = String.make 4096 'r' in
+  let compressed =
+    Transport.V2_wire.compress raw
+    |> require_ok Transport.V2_wire.error_to_string
+  in
+  let project = Trust.Repository_id.to_string (repository ()) in
+  let retry_id = Transport.sha256 raw in
+  let authentication_id = Transport.sha256 "authentication is terminal" in
+  let retry_path = "/v2/repositories/" ^ project ^ "/objects/" ^ retry_id in
+  let authentication_path =
+    "/v2/repositories/" ^ project ^ "/objects/" ^ authentication_id
+  in
+  let retry_attempts = ref 0 in
+  with_malicious_https_server
+    ~respond:(fun target ->
+      if String.starts_with ~prefix:"/v1/repositories/" target then
+        if String.contains target '?' then (200, empty_publication_page)
+        else (201, "")
+      else if String.starts_with ~prefix:retry_path target then (
+        incr retry_attempts;
+        if !retry_attempts = 1 then (503, "temporary") else (200, compressed))
+      else if String.starts_with ~prefix:authentication_path target then
+        (401, "denied")
+      else (404, ""))
+    (fun ~requests url ->
+      let client =
+        Transport_http.create ~url ~token:"test-relay-token"
+        |> require_ok Transport_http.error_to_string
+      in
+      Transport_http_v2.get_segment client ~project ~object_id:retry_id
+        ~offset:0 ~length:(String.length raw)
+      |> require_ok Transport_http_v2.error_to_string
+      |> Alcotest.(check string) "a transient V2 response is retried" raw;
+      Alcotest.(check bool)
+        "authentication failure is not retried" true
+        (Result.is_error
+           (Transport_http_v2.get_segment client ~project
+              ~object_id:authentication_id ~offset:0 ~length:(String.length raw)));
+      let request_count prefix =
+        In_channel.with_open_bin requests In_channel.input_lines
+        |> List.filter (String.starts_with ~prefix)
+        |> List.length
+      in
+      Alcotest.(check int)
+        "one 5xx causes one bounded retry" 2 (request_count retry_path);
+      Alcotest.(check int)
+        "authentication is attempted once" 1
+        (request_count authentication_path))
 
 let response_body response =
   let rec find offset =
@@ -1939,6 +2016,8 @@ let () =
             `Slow https_v2_upload_resume_download_and_v1_fallback;
           Alcotest.test_case "V2 absence keeps V1 fallback explicit" `Slow
             explicit_v1_fallback_when_v2_is_unavailable;
+          Alcotest.test_case "V2 retries only transient server failures" `Slow
+            v2_retries_only_transient_server_failures;
           Alcotest.test_case "V2 revocation rejects a resumed segment" `Quick
             v2_http_credential_revocation_refuses_resumed_segment;
           Alcotest.test_case

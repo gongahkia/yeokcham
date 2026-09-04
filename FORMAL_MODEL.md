@@ -101,6 +101,32 @@ canonical encoding; unknown mandatory features and noncanonical encodings are
 rejected. Only the mutable
 `v4-project-state` head selects a current immutable state object.
 
+## Relay V2 transfer boundary
+
+`Capability`, `Object_offer`, `Missing_set`, `Range`, `Segment`,
+`Transfer_session`, and `Session_progress` are transfer values, not `Project`
+values. Capability intersection has an exact receiver-declared missing set.
+For one raw canonical object, `partition` yields contiguous one-MiB ranges,
+except possibly the final range; progress accepts only an offered range and is
+monotonic. A matching duplicate is idempotent. Completion is eligible only
+when every range is present.
+
+`Transfer_session = { project, object_id, raw_size, credential_safe_id, scope,
+expiry, range_bitmap }` is a versioned, relay-local temporary record. It binds
+no bearer secret and has no edge to checkpoints, capsules, revisions, releases,
+packages, feeds, bootstrap bases, authority, or semantic sidecars. Relay
+receipt maps a separately compressed frame to its exact claimed raw range,
+persists a successful bitmap transition atomically, and may publish one
+immutable object only after full raw envelope canonicality and object identity
+validate. Expiration removes only temporary session data.
+
+`V2_download(project, object_id, ranges)` returns staged raw bytes only if every
+independently decompressed range and the final canonical envelope/object ID
+validate. It has no import or source-materialisation transition. Thus V2
+receive, sync, bootstrap, relay, verification, and repair remain byte-courier
+operations until their separately named existing receipt or workspace boundary
+is invoked.
+
 ## External semantic observations
 
 `changes` is likewise an adapter observation, not a `Project` transition. It

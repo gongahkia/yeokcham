@@ -138,7 +138,24 @@ let decoders_reject_version_mismatch_noncanonical_and_bad_bitmap () =
   let encoded = V2.encode_session (session ()) |> require_ok in
   Alcotest.(check bool)
     "session trailing bytes are rejected" true
-    (Result.is_error (V2.decode_session (encoded ^ "\000")))
+    (Result.is_error (V2.decode_session (encoded ^ "\000")));
+  let initial = session () in
+  let first =
+    V2.partition (V2.session_offer initial) |> require_ok |> List.hd
+  in
+  let progressed =
+    V2.receive_segment ~now:1L ~session:initial
+      (V2.segment ~range:first ~raw_sha256:(digest 'e') |> require_ok)
+    |> require_ok
+  in
+  let malformed_bitmap =
+    Bytes.of_string (V2.encode_session progressed |> require_ok)
+  in
+  Bytes.set malformed_bitmap (Bytes.length malformed_bitmap - 1) (Char.chr 24);
+  Alcotest.(check bool)
+    "out-of-range canonical bitmap index is rejected" true
+    (Result.is_error
+       (V2.decode_session (Bytes.unsafe_to_string malformed_bitmap)))
 
 let negotiation_missing_planning_and_retry_boundaries () =
   let receiver = capability () in
@@ -281,6 +298,22 @@ let upload_session_rejects_quota_expiry_and_changed_duplicates () =
         |> Result.get_ok
       in
       let session_id = V2.session_id session in
+      Alcotest.(check bool)
+        "wrong claimed length is rejected before bitmap update" true
+        (Result.is_error
+           (Relay.V2.receive_upload_segment relay ~now:2L ~project ~session_id
+              ~credential_id:(digest 'b') ~offset:0
+              ~length:(String.length bytes - 1)
+              ~raw_sha256:(Transport.sha256 bytes) ~bytes));
+      let overlapping = String.sub bytes 1 (String.length bytes - 1) in
+      Alcotest.(check bool)
+        "overlapping non-offered range is rejected" true
+        (Result.is_error
+           (Relay.V2.receive_upload_segment relay ~now:2L ~project ~session_id
+              ~credential_id:(digest 'b') ~offset:1
+              ~length:(String.length overlapping)
+              ~raw_sha256:(Transport.sha256 overlapping)
+              ~bytes:overlapping));
       Relay.V2.receive_upload_segment relay ~now:2L ~project ~session_id
         ~credential_id:(digest 'b') ~offset:0 ~length:(String.length bytes)
         ~raw_sha256:(Transport.sha256 bytes) ~bytes
@@ -299,6 +332,31 @@ let upload_session_rejects_quota_expiry_and_changed_duplicates () =
         "refusals never publish an incomplete session" true
         (Result.is_error
            (Relay.get relay ~project ~kind:Relay.Object ~id:object_id)))
+
+let session_cap_is_per_safe_credential_and_cleanup_reclaims_allocation () =
+  with_directory "yeokcham-v4-transfer-session-cap-" (fun root ->
+      let relay = Relay.open_repository ~root |> Result.get_ok in
+      let project = digest 'a' in
+      let bytes, object_id = raw_object () in
+      let create () =
+        Relay.V2.start_upload relay ~now:0L ~project ~object_id
+          ~raw_size:(String.length bytes) ~credential_id:(digest 'b')
+          ~expires_in:1L
+          ~project_quota_bytes:Relay.V2.default_project_quota_bytes
+      in
+      List.init V2.max_parallelism (fun _ -> create ())
+      |> List.iter (fun result -> ignore (Result.get_ok result));
+      Alcotest.(check bool)
+        "ninth live session for one credential is refused" true
+        (Result.is_error (create ()));
+      let cleanup = Relay.V2.cleanup_expired relay ~now:1L |> Result.get_ok in
+      Alcotest.(check int)
+        "every expired credential session is observed" V2.max_parallelism
+        cleanup.Relay.V2.expired_sessions;
+      Alcotest.(check bool)
+        "cleanup reports reclaimed temporary bytes" true
+        (cleanup.Relay.V2.reclaimed_bytes
+        >= V2.max_parallelism * String.length bytes))
 
 let () =
   Alcotest.run "V4 transfer core"
@@ -323,6 +381,8 @@ let () =
             `Quick upload_session_persists_resumes_and_publishes_once;
           Alcotest.test_case "refuse quota, expiry, and changed duplicates"
             `Quick upload_session_rejects_quota_expiry_and_changed_duplicates;
+          Alcotest.test_case "credential cap and expiry cleanup" `Quick
+            session_cap_is_per_safe_credential_and_cleanup_reclaims_allocation;
         ] );
       ( "zstd wire adapter",
         [
