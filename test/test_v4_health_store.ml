@@ -8,13 +8,6 @@ let require_ok render = function
 
 let identifier character = String.make 64 character
 
-let hex bytes =
-  let alphabet = "0123456789abcdef" in
-  String.init (String.length bytes * 2) (fun index ->
-      let byte = Char.code bytes.[index / 2] in
-      if index mod 2 = 0 then alphabet.[byte lsr 4]
-      else alphabet.[byte land 15])
-
 let golden_path name =
   let local = Filename.concat "golden" name in
   if Sys.file_exists local then local else Filename.concat "test/golden" name
@@ -86,7 +79,6 @@ let plan_matches_the_canonical_golden_fixture () =
     |> require_ok Fun.id
   in
   let value = plan () in
-  Printf.printf "repair-plan-golden %s\n" (hex (Health.encode_plan value));
   Alcotest.(check string)
     "canonical repair plan bytes" expected (Health.encode_plan value);
   let decoded =
