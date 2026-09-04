@@ -90,7 +90,15 @@ val object_path : repository -> Stored_object_id.t -> string
 val id_of_envelope : Yeokcham_envelope.t -> Stored_object_id.t
 
 val put :
-  repository -> Yeokcham_envelope.t -> (Stored_object_id.t, error) result
+  ?after_staging:(unit -> unit) ->
+  repository ->
+  Yeokcham_envelope.t ->
+  (Stored_object_id.t, error) result
+(** Creates and fsyncs a same-directory temporary object before publication.
+    [after_staging], when supplied, runs after that durable staging point and
+    before the add-if-missing link. It is a fault-injection seam: an exception
+    from it leaves no successful publication result and may leave the staged
+    temporary file for later inspection. *)
 
 val get :
   repository -> Stored_object_id.t -> (Yeokcham_envelope.t, error) result

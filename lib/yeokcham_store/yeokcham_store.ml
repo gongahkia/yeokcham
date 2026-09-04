@@ -861,7 +861,7 @@ let existing_matches repository id expected =
 let id_of_envelope envelope =
   Envelope.encode envelope |> stored_object_id_of_bytes
 
-let put repository envelope =
+let put ?after_staging repository envelope =
   let bytes = Envelope.encode envelope in
   if String.length bytes > max_object_bytes then
     Error
@@ -880,6 +880,7 @@ let put repository envelope =
       create_temporary directory (Filename.basename final)
         (Bytes.of_string bytes)
     in
+    Option.iter (fun after_staging -> after_staging ()) after_staging;
     let link_result = link_without_replace ~temporary ~final in
     match link_result with
     | Error error -> Error error

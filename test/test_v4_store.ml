@@ -211,6 +211,39 @@ let initialization_refuses_existing_repositories () =
                (V4_store.error_to_string error))
       | Ok _ -> Alcotest.fail "initialized V4 over an existing repository")
 
+let interrupted_object_staging_never_publishes_a_partial_object () =
+  with_directory "yeokcham-v4-store-interrupted-put-" (fun root ->
+      let repository = Store.init ~root |> require_ok Store.error_to_string in
+      let envelope =
+        Envelope.create ~object_type:Envelope.Content
+          ~object_format_version:Envelope.current_object_format_version
+          ~mandatory_features:Envelope.supported_mandatory_features
+          ~payload:(Encoding.bytes "interrupted repair staging")
+          ()
+        |> require_ok Envelope.creation_error_to_string
+      in
+      let object_id = Store.id_of_envelope envelope in
+      (try
+         ignore
+           (Store.put ~after_staging:(fun () -> raise Exit) repository envelope);
+         Alcotest.fail "interrupted staging returned a publication result"
+       with Exit -> ());
+      Alcotest.(check bool)
+        "interrupted staging has no visible immutable object" false
+        (Sys.file_exists (Store.object_path repository object_id));
+      let directory =
+        Filename.dirname (Store.object_path repository object_id)
+      in
+      let temporary_prefix =
+        "."
+        ^ Filename.basename (Store.object_path repository object_id)
+        ^ ".tmp-"
+      in
+      Alcotest.(check bool)
+        "interrupted staging retains inspectable temporary evidence" true
+        (Sys.readdir directory
+        |> Array.exists (String.starts_with ~prefix:temporary_prefix)))
+
 let collaborative_state_cannot_be_downgraded_to_a_bare_record () =
   with_directory "yeokcham-v4-collaboration-save-" (fun root ->
       let project, collaboration = collaborative_project () in
@@ -260,6 +293,9 @@ let () =
             wrong_object_type_is_rejected_at_the_state_head;
           Alcotest.test_case "initialization refuses an existing repository"
             `Quick initialization_refuses_existing_repositories;
+          Alcotest.test_case
+            "interrupted object staging never publishes a partial object" `Quick
+            interrupted_object_staging_never_publishes_a_partial_object;
           Alcotest.test_case
             "collaborative state requires collaboration-aware save" `Quick
             collaborative_state_cannot_be_downgraded_to_a_bare_record;
