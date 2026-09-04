@@ -54,6 +54,9 @@ The active V4 decisions are:
 - [ADR-098](docs/adr/098-v4-explicit-projection-workspace.md): verified
   bootstrap-basis projection materialisation is explicit, local, receipt-bound,
   and separate from bootstrap, receipt, authority, and shared history.
+- [ADR-099](docs/adr/099-v2-compressed-resumable-relay-transfer.md): relay V2
+  transfers independently compressed raw ranges through quota-bound resumable
+  sessions without changing canonical object bytes or receipt boundaries.
 
 Earlier product-track ADRs have been removed with their implementations. Git
 history retains their historical record; they are not active architecture.
