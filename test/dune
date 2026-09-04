@@ -4,6 +4,16 @@
  (libraries alcotest yeokcham_v4_model))
 
 (test
+ (name test_v4_health)
+ (modules test_v4_health)
+ (libraries alcotest yeokcham_v4_health))
+
+(test
+ (name v4_health_property_test)
+ (modules v4_health_property_test)
+ (libraries alcotest qcheck-core qcheck-alcotest yeokcham_v4_health))
+
+(test
  (name test_watcher)
  (modules test_watcher)
  (libraries alcotest yeokcham_watcher))
