@@ -2,6 +2,7 @@ module Relay = Yeokcham_v4_relay
 module Encoding = Yeokcham_encoding
 module Access = Yeokcham_v4_relay_access
 module Config = Yeokcham_v4_relay_config
+module Ops = Yeokcham_v4_relay_ops
 module Transfer = Yeokcham_v4_transport.V2
 module Wire = Yeokcham_v4_transport.V2_wire
 
@@ -9,6 +10,7 @@ type error =
   | Invalid_listen of string
   | Io_error of { path : string; operation : string; message : string }
   | Relay_error of Relay.error
+  | Operator_not_ready
 
 let max_header_bytes = 16 * 1024
 let ( let* ) = Result.bind
@@ -18,6 +20,8 @@ let error_to_string = function
   | Io_error { path; operation; message } ->
       Printf.sprintf "V4 relay HTTP %s %s: %s" operation path message
   | Relay_error error -> Relay.error_to_string error
+  | Operator_not_ready ->
+      "V4 relay operator storage or credential registry is not ready"
 
 let close_noerr descriptor =
   try Unix.close descriptor with Unix.Unix_error _ -> ()
@@ -119,7 +123,10 @@ let write_all descriptor bytes =
   in
   loop 0
 
-let response descriptor status body =
+type handled = { status : int; events : Ops.event list }
+
+let response ?(content_type = "application/cbor") ?(events = []) descriptor
+    status body =
   let reason =
     match status with
     | 200 -> "OK"
@@ -140,12 +147,13 @@ let response descriptor status body =
       "HTTP/1.1 %d %s\r\n\
        Content-Length: %d\r\n\
        Connection: close\r\n\
-       Content-Type: application/cbor\r\n\
+       Content-Type: %s\r\n\
        \r\n"
-      status reason (String.length body)
+      status reason (String.length body) content_type
   in
   write_all descriptor header;
-  write_all descriptor body
+  write_all descriptor body;
+  { status; events }
 
 let request_path target =
   match String.split_on_char '?' target with
@@ -433,10 +441,14 @@ let[@warning "-4"] handle_v2 relay ~access_root ~project_quota_bytes
                         ~project ~object_id ~raw_size ~credential_id
                         ~expires_in:(Int64.of_int expiry) ~project_quota_bytes
                     with
+                    | Error (Relay.V2.Transfer_error Transfer.Quota_exceeded) ->
+                        response ~events:[ Ops.Quota_refused ] descriptor 400 ""
                     | Error _ -> response descriptor 400 ""
                     | Ok session -> (
                         match encode_session session with
-                        | Ok bytes -> response descriptor 201 bytes
+                        | Ok bytes ->
+                            response ~events:[ Ops.Session_started ] descriptor
+                              201 bytes
                         | Error _ -> response descriptor 500 ""))))
       | Upload (project, session_id), "GET" when length = 0 -> (
           match
@@ -477,7 +489,10 @@ let[@warning "-4"] handle_v2 relay ~access_root ~project_quota_bytes
               ~now:(Int64.of_float (Unix.gettimeofday ()))
               ~project ~session_id ~credential_id
           with
-          | Ok () -> response descriptor 201 ""
+          | Ok () ->
+              response
+                ~events:[ Ops.Session_completed; Ops.Object_stored ]
+                descriptor 201 ""
           | Error error when Relay.V2.is_session_missing error ->
               response descriptor 404 ""
           | Error _ -> response descriptor 400 "")
@@ -560,7 +575,16 @@ let handle relay ~access_root ~project_quota_bytes ~session_expiry_seconds
                                       Relay.create relay ~project ~kind ~id
                                         ~bytes
                                     with
-                                    | Ok () -> response descriptor 201 ""
+                                    | Ok () ->
+                                        let events =
+                                          match kind with
+                                          | Relay.Object ->
+                                              [ Ops.Object_stored ]
+                                          | Relay.Manifest | Relay.Publication
+                                          | Relay.Bootstrap ->
+                                              []
+                                        in
+                                        response ~events descriptor 201 ""
                                     | Error error ->
                                         if Relay.is_immutable_conflict error
                                         then response descriptor 409 ""
@@ -596,45 +620,216 @@ let handle relay ~access_root ~project_quota_bytes ~session_expiry_seconds
                             | _ -> response descriptor 405 ""))))
           | _ -> response descriptor 400 ""))
 
-let serve_internal ~root ~listen ~access_root ~project_quota_bytes
-    ~session_expiry_seconds =
+let directory_state path =
+  try
+    let info = Unix.lstat path in
+    if info.Unix.st_kind <> Unix.S_DIR then Ops.Not_directory
+    else
+      try
+        Unix.access path [ Unix.R_OK; Unix.W_OK; Unix.X_OK ];
+        Ops.Available
+      with Unix.Unix_error _ -> Ops.Not_writable
+  with
+  | Unix.Unix_error (Unix.ENOENT, _, _) -> Ops.Missing
+  | Unix.Unix_error _ -> Ops.Not_writable
+
+let credential_registry_state root =
+  match directory_state root with
+  | Ops.Available -> (
+      match Access.load ~root with
+      | Ok _ -> Ops.Available
+      | Error _ -> Ops.Invalid)
+  | (Ops.Missing | Ops.Not_directory | Ops.Not_writable | Ops.Invalid) as state
+    ->
+      state
+
+let current_readiness ~root ~access_root =
+  Ops.assess_readiness ~storage:(directory_state root)
+    ~credential_registry:(credential_registry_state access_root)
+
+let require_readiness ~root ~access_root =
+  match current_readiness ~root ~access_root with
+  | Ops.Ready -> Ok ()
+  | Ops.Not_ready _ -> Error Operator_not_ready
+
+let open_listener listen =
+  let* address, port = parse_listen listen in
+  let descriptor = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
+  try
+    Unix.setsockopt descriptor Unix.SO_REUSEADDR true;
+    Unix.bind descriptor (Unix.ADDR_INET (address, port));
+    Unix.listen descriptor 64;
+    Ok descriptor
+  with Unix.Unix_error (error, operation, _) ->
+    close_noerr descriptor;
+    Error
+      (Io_error { path = listen; operation; message = Unix.error_message error })
+
+let endpoint_request descriptor handler =
+  match read_request descriptor with
+  | Error () ->
+      response ~content_type:"text/plain; charset=utf-8" descriptor 400 ""
+  | Ok (header_bytes, remainder) -> (
+      match parse_headers header_bytes with
+      | Error () ->
+          response ~content_type:"text/plain; charset=utf-8" descriptor 400 ""
+      | Ok (request_line, headers) -> (
+          let content_length =
+            match header headers "content-length" with
+            | None -> Some 0
+            | Some value -> int_of_string_opt value
+          in
+          match (request_line, content_length) with
+          | [ "GET"; target; "HTTP/1.1" ], Some 0
+            when Option.is_none (header headers "transfer-encoding") -> (
+              match handler target with
+              | Some handled -> handled
+              | None ->
+                  response ~content_type:"text/plain; charset=utf-8" descriptor
+                    404 "")
+          | _ ->
+              ignore remainder;
+              response ~content_type:"text/plain; charset=utf-8" descriptor 400
+                ""))
+
+let handle_health ~root ~access_root descriptor =
+  endpoint_request descriptor (function
+    | "/healthz" ->
+        Some
+          (response ~content_type:"text/plain; charset=utf-8" descriptor 200
+             "ok\n")
+    | "/readyz" -> (
+        match current_readiness ~root ~access_root with
+        | Ops.Ready ->
+            Some
+              (response ~content_type:"text/plain; charset=utf-8" descriptor 200
+                 "ready\n")
+        | Ops.Not_ready _ ->
+            Some
+              (response ~content_type:"text/plain; charset=utf-8" descriptor 503
+                 "not ready\n"))
+    | _ -> None)
+
+let handle_metrics counters descriptor =
+  endpoint_request descriptor (function
+    | "/metrics" ->
+        Some
+          (response ~content_type:"text/plain; version=0.0.4; charset=utf-8"
+             descriptor 200 (Ops.prometheus !counters))
+    | _ -> None)
+
+let observe counters event =
+  match Ops.record !counters event with
+  | Ok next -> counters := next
+  | Error _ -> ()
+
+let observe_handled counters handled =
+  let request_event =
+    if handled.status >= 200 && handled.status < 400 then Ops.Request_succeeded
+    else if handled.status >= 500 then Ops.Request_failed
+    else Ops.Request_refused
+  in
+  observe counters request_event;
+  List.iter (observe counters) handled.events
+
+let cleanup_expired relay counters =
+  match
+    Relay.V2.cleanup_expired relay ~now:(Int64.of_float (Unix.gettimeofday ()))
+  with
+  | Ok { Relay.V2.expired_sessions; reclaimed_bytes } ->
+      observe counters
+        (Ops.Sessions_expired { count = expired_sessions; reclaimed_bytes })
+  | Error _ -> ()
+
+type listener_kind = Relay_listener | Health_listener | Metrics_listener
+
+let serve_internal ~root ~listen ~health_listen ~metrics_listen ~access_root
+    ~project_quota_bytes ~session_expiry_seconds =
   let* relay =
     Relay.open_repository ~root
     |> Result.map_error (fun error -> Relay_error error)
   in
-  let* address, port = parse_listen listen in
-  try
-    let listener = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
-    Unix.setsockopt listener Unix.SO_REUSEADDR true;
-    Unix.bind listener (Unix.ADDR_INET (address, port));
-    Unix.listen listener 64;
-    Fun.protect
-      ~finally:(fun () -> close_noerr listener)
-      (fun () ->
-        while true do
-          try
-            let client, _ = Unix.accept listener in
-            Fun.protect
-              ~finally:(fun () -> close_noerr client)
-              (fun () ->
-                handle relay ~access_root ~project_quota_bytes
-                  ~session_expiry_seconds client)
-          with Unix.Unix_error _ -> ()
-        done;
-        Ok ())
-  with Unix.Unix_error (error, operation, _) ->
-    Error
-      (Io_error { path = listen; operation; message = Unix.error_message error })
+  let* () = require_readiness ~root ~access_root in
+  let* relay_listener = open_listener listen in
+  let open_optional_listener = function
+    | None -> Ok None
+    | Some listen -> open_listener listen |> Result.map Option.some
+  in
+  match open_optional_listener health_listen with
+  | Error error ->
+      close_noerr relay_listener;
+      Error error
+  | Ok health_listener -> (
+      match open_optional_listener metrics_listen with
+      | Error error ->
+          close_noerr relay_listener;
+          Option.iter close_noerr health_listener;
+          Error error
+      | Ok metrics_listener ->
+          let counters = ref Ops.zero in
+          let listeners =
+            [
+              Some (relay_listener, Relay_listener);
+              Option.map
+                (fun listener -> (listener, Health_listener))
+                health_listener;
+              Option.map
+                (fun listener -> (listener, Metrics_listener))
+                metrics_listener;
+            ]
+            |> List.filter_map Fun.id
+          in
+          Fun.protect
+            ~finally:(fun () ->
+              close_noerr relay_listener;
+              Option.iter close_noerr health_listener;
+              Option.iter close_noerr metrics_listener)
+            (fun () ->
+              while true do
+                cleanup_expired relay counters;
+                let readable, _, _ =
+                  Unix.select (List.map fst listeners) [] [] 1.0
+                in
+                List.iter
+                  (fun listener ->
+                    match
+                      List.find_opt
+                        (fun (value, _) -> value = listener)
+                        listeners
+                    with
+                    | None -> ()
+                    | Some (_, kind) -> (
+                        try
+                          let client, _ = Unix.accept listener in
+                          Fun.protect
+                            ~finally:(fun () -> close_noerr client)
+                            (fun () ->
+                              match kind with
+                              | Relay_listener ->
+                                  handle relay ~access_root ~project_quota_bytes
+                                    ~session_expiry_seconds client
+                                  |> observe_handled counters
+                              | Health_listener ->
+                                  ignore
+                                    (handle_health ~root ~access_root client)
+                              | Metrics_listener ->
+                                  ignore (handle_metrics counters client))
+                        with Unix.Unix_error _ -> ()))
+                  readable
+              done;
+              Ok ()))
 
 let serve ~root ~listen =
-  serve_internal ~root ~listen ~access_root:root
-    ~project_quota_bytes:Relay.V2.default_project_quota_bytes
+  serve_internal ~root ~listen ~health_listen:None ~metrics_listen:None
+    ~access_root:root ~project_quota_bytes:Relay.V2.default_project_quota_bytes
     ~session_expiry_seconds:(Int64.to_int Relay.V2.default_expiry_seconds)
 
 let serve_with_config config =
   serve_internal
     ~root:(Config.storage_root config)
     ~listen:(Config.listen config)
+    ~health_listen:(Some (Config.health_listen config))
+    ~metrics_listen:(Some (Config.metrics_listen config))
     ~access_root:(Config.credential_registry_root config)
     ~project_quota_bytes:(Config.project_quota_bytes config)
     ~session_expiry_seconds:(Config.session_expiry_seconds config)

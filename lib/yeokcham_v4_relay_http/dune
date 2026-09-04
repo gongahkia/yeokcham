@@ -6,4 +6,5 @@
   yeokcham_v4_relay
   yeokcham_v4_relay_access
   yeokcham_v4_relay_config
+  yeokcham_v4_relay_ops
   yeokcham_v4_transport))

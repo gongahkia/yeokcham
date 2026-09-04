@@ -2,7 +2,7 @@
     relay. These values are process-local: they are neither V4 records nor
     persistent relay data. *)
 
-type path_state = Available | Missing | Not_directory | Not_writable
+type path_state = Available | Missing | Not_directory | Not_writable | Invalid
 
 type readiness_failure =
   | Storage of path_state

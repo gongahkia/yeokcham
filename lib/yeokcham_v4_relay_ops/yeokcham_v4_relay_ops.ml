@@ -1,4 +1,4 @@
-type path_state = Available | Missing | Not_directory | Not_writable
+type path_state = Available | Missing | Not_directory | Not_writable | Invalid
 
 type readiness_failure =
   | Storage of path_state
@@ -11,9 +11,10 @@ let assess_readiness ~storage ~credential_registry =
   | Available -> (
       match credential_registry with
       | Available -> Ready
-      | Missing | Not_directory | Not_writable ->
+      | Missing | Not_directory | Not_writable | Invalid ->
           Not_ready (Credential_registry credential_registry))
-  | Missing | Not_directory | Not_writable -> Not_ready (Storage storage)
+  | Missing | Not_directory | Not_writable | Invalid ->
+      Not_ready (Storage storage)
 
 type event =
   | Request_succeeded

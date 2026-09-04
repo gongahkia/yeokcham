@@ -5,6 +5,7 @@ type error =
   | Invalid_listen of string
   | Io_error of { path : string; operation : string; message : string }
   | Relay_error of Yeokcham_v4_relay.error
+  | Operator_not_ready
 
 val error_to_string : error -> string
 val serve : root:string -> listen:string -> (unit, error) result
@@ -12,4 +13,4 @@ val serve : root:string -> listen:string -> (unit, error) result
 val serve_with_config : Yeokcham_v4_relay_config.t -> (unit, error) result
 (** Serves with explicit operator configuration. The configuration controls the
     storage root, access-registry root, V2 temporary-byte quota, and maximum
-    session expiry. Health and metrics listeners are added separately. *)
+    session expiry, plus isolated health and metrics listeners. *)

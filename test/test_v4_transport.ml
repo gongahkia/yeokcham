@@ -283,6 +283,16 @@ let response_status response =
       | None -> Alcotest.fail "relay response did not contain a status")
   | _ -> Alcotest.fail "relay response did not contain a status line"
 
+let has_substring output needle =
+  let needle_length = String.length needle in
+  let rec find index =
+    if index + needle_length > String.length output then false
+    else if String.equal (String.sub output index needle_length) needle then
+      true
+    else find (index + 1)
+  in
+  needle_length > 0 && find 0
+
 let raw_request ?(token = "wrong-relay-access-secret") ?(body = "") method_ path
     =
   method_ ^ " " ^ path
@@ -387,6 +397,14 @@ let configured_relay_refuses_session_expiry_above_operator_limit () =
                 Alcotest.fail "configured HTTP relay did not start"
           in
           ready 100;
+          Alcotest.(check int)
+            "configured health listener is live" 200
+            (response_status
+               (raw_http ~port:health_port (raw_request "GET" "/healthz")));
+          Alcotest.(check int)
+            "configured health listener is ready" 200
+            (response_status
+               (raw_http ~port:health_port (raw_request "GET" "/readyz")));
           let body ~raw_size ~expiry =
             Encoding.array
               [
@@ -412,7 +430,32 @@ let configured_relay_refuses_session_expiry_above_operator_limit () =
                   (raw_request ~token:grant.Relay_access.grant_secret
                      ~body:(body ~raw_size:2L ~expiry:1L)
                      "POST"
-                     ("/v2/repositories/" ^ project ^ "/uploads"))))))
+                     ("/v2/repositories/" ^ project ^ "/uploads"))));
+          let metrics =
+            raw_http ~port:metrics_port (raw_request "GET" "/metrics")
+          in
+          Alcotest.(check int)
+            "metrics listener responds" 200 (response_status metrics);
+          Alcotest.(check bool)
+            "metrics report quota refusals" true
+            (has_substring metrics "yeokcham_relay_quota_refusals_total 1");
+          Alcotest.(check bool)
+            "metrics redact bearer secret" false
+            (has_substring metrics grant.Relay_access.grant_secret);
+          let moved_registry = Filename.concat root "registry-offline" in
+          Unix.rename registry_root moved_registry;
+          let descriptor =
+            Unix.openfile registry_root [ Unix.O_WRONLY; Unix.O_CREAT ] 0o600
+          in
+          Unix.close descriptor;
+          Alcotest.(check int)
+            "liveness survives readiness failure" 200
+            (response_status
+               (raw_http ~port:health_port (raw_request "GET" "/healthz")));
+          Alcotest.(check int)
+            "readiness exposes failed credential registry" 503
+            (response_status
+               (raw_http ~port:health_port (raw_request "GET" "/readyz")))))
 
 let http_listener_rejects_untrusted_requests_and_preserves_immutability () =
   with_http_relay (fun ~relay_root ~port ~token ->
