@@ -779,11 +779,11 @@ let read_staged_file path object_ =
           Invalid_schema (Envelope.decode_error_to_string error))
     in
     let actual = Store.id_of_envelope envelope in
-  if
-    Store.Stored_object_id.equal object_.object_id actual
-    && Envelope.object_type envelope = object_.object_type
-  then Ok envelope
-  else Error (Quarantine_collision path)
+    if
+      Store.Stored_object_id.equal object_.object_id actual
+      && Envelope.object_type envelope = object_.object_type
+    then Ok envelope
+    else Error (Quarantine_collision path)
 
 let verify_staged_file path object_ =
   read_staged_file path object_ |> Result.map (fun _ -> ())
@@ -898,7 +898,8 @@ let transactions ~root =
 
 let quarantined_object ~root ~transaction_id ~object_id =
   let* _ =
-    Store.open_repository ~root |> Result.map_error (fun error -> Store_error error)
+    Store.open_repository ~root
+    |> Result.map_error (fun error -> Store_error error)
   in
   let* transaction = read_transaction ~root ~id:transaction_id in
   match
@@ -907,10 +908,10 @@ let quarantined_object ~root ~transaction_id ~object_id =
       transaction.transaction_objects
   with
   | None -> Ok None
-  | Some object_ ->
+  | Some object_ -> (
       let path = staged_path root transaction object_id in
       let* exists = lstat_or_missing path in
-      (match exists with
+      match exists with
       | None -> Ok None
       | Some stat when stat.Unix.st_kind <> Unix.S_REG ->
           Error (Quarantine_collision path)

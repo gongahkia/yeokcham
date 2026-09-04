@@ -2,6 +2,7 @@ module Health = Yeokcham_v4_health
 module Health_repository = Yeokcham_v4_health_repository
 module Health_store = Yeokcham_v4_health_store
 module Gc = Yeokcham_v4_gc
+module Package = Yeokcham_v4_package
 module Store = Yeokcham_store
 module V4_store = Yeokcham_v4_store
 
@@ -11,6 +12,7 @@ type error =
   | Store_error of Store.error
   | V4_store_error of V4_store.error
   | Gc_error of Gc.error
+  | Package_error of Package.error
   | Missing_state_head
   | Invalid_backup of { path : string; detail : string }
 
@@ -26,6 +28,7 @@ let error_to_string = function
   | Store_error error -> Store.error_to_string error
   | V4_store_error error -> V4_store.error_to_string error
   | Gc_error error -> Gc.error_to_string error
+  | Package_error error -> Package.error_to_string error
   | Missing_state_head -> "V4 repair target has no state head"
   | Invalid_backup { path; detail } ->
       Printf.sprintf "invalid V4 repair backup %s: %s" path detail
@@ -76,14 +79,16 @@ let backup_candidate ~backup ~object_id =
     in
     let* candidate =
       candidate_of_envelope ~source:(Health.Backup backup)
-        ~object_id:(Store.Stored_object_id.to_hex object_id) envelope
+        ~object_id:(Store.Stored_object_id.to_hex object_id)
+        envelope
     in
     Ok (Some (candidate, envelope))
 
 let quarantine_candidate ~root ~transaction_id ~object_id =
   let* object_id =
     Store.Stored_object_id.of_hex object_id
-    |> Result.map_error (fun _ -> Health_error (Health.Invalid_identifier object_id))
+    |> Result.map_error (fun _ ->
+        Health_error (Health.Invalid_identifier object_id))
   in
   let* envelope =
     Gc.quarantined_object ~root ~transaction_id ~object_id
@@ -94,9 +99,45 @@ let quarantine_candidate ~root ~transaction_id ~object_id =
   | Some envelope ->
       let* candidate =
         candidate_of_envelope ~source:(Health.Gc_quarantine transaction_id)
-          ~object_id:(Store.Stored_object_id.to_hex object_id) envelope
+          ~object_id:(Store.Stored_object_id.to_hex object_id)
+          envelope
       in
       Ok (Some (candidate, envelope))
+
+let package_candidate ~package ~object_id =
+  let* object_id =
+    Store.Stored_object_id.of_hex object_id
+    |> Result.map_error (fun _ ->
+        Health_error (Health.Invalid_identifier object_id))
+  in
+  let* artifact =
+    Package.read_artifact ~package
+    |> Result.map_error (fun error -> Package_error error)
+  in
+  match
+    List.find_opt
+      (fun (candidate_id, _) ->
+        Store.Stored_object_id.equal candidate_id object_id)
+      (Package.artifact_objects artifact)
+  with
+  | None -> Ok None
+  | Some (_, bytes) ->
+      let* envelope =
+        Yeokcham_envelope.decode bytes
+        |> Result.map_error (fun error ->
+            Package_error (Package.Envelope_error error))
+      in
+      if not (String.equal bytes (Yeokcham_envelope.encode envelope)) then
+        Error
+          (Package_error
+             (Package.Invalid_package "noncanonical artifact object"))
+      else
+        let* candidate =
+          candidate_of_envelope ~source:(Health.Offline_package package)
+            ~object_id:(Store.Stored_object_id.to_hex object_id)
+            envelope
+        in
+        Ok (Some (candidate, envelope))
 
 let[@warning "-4"] missing_object_ids report =
   Health.report_damages report
@@ -123,8 +164,7 @@ let plan_from_source ~root ~source ~read_candidate ~created_at ~expires_at =
   let report = Health_repository.verify ~root in
   let* candidates = candidates_from ~read_candidate report in
   let* plan =
-    Health.make_plan ~repository:state_head ~state_head
-      ~source
+    Health.make_plan ~repository:state_head ~state_head ~source
       ~damages:(Health.report_damages report)
       ~candidates ~created_at ~expires_at
     |> Result.map_error (fun error -> Health_error error)
@@ -138,8 +178,9 @@ let plan_from_source ~root ~source ~read_candidate ~created_at ~expires_at =
 let selected_object_id plan selection =
   Health.plan_candidates plan
   |> List.find_opt (fun candidate ->
-         String.equal (Health.candidate_id candidate)
-           selection.Health.selection_candidate_id)
+      String.equal
+        (Health.candidate_id candidate)
+        selection.Health.selection_candidate_id)
   |> Option.map Health.candidate_object_id
 
 let apply_from_source ~root ~plan_id ~selection ~now ~matches_source
@@ -153,36 +194,36 @@ let apply_from_source ~root ~plan_id ~selection ~now ~matches_source
         |> Result.map_error (fun error -> Health_store_error error)
       in
       if matches_source (Health.plan_source plan) then
-          let* current_state_head = state_head target in
-          let report = Health_repository.verify ~root in
-          let reread_candidate, envelope =
-            match selected_object_id plan selection with
-            | None -> (None, None)
-            | Some object_id -> (
-                match read_candidate ~object_id with
-                | Ok (Some (candidate, envelope)) ->
-                    (Some candidate, Some envelope)
-                | Ok None | Error _ -> (None, None))
-          in
-          match
-            Health.apply_eligibility ~plan ~selection ~now ~current_state_head
-              ~current:report ~reread_candidate
-          with
-          | Health.Refused refusal -> Ok (Refused refusal)
-          | Health.Eligible candidate -> (
-              match envelope with
-              | None -> Ok (Refused Health.Candidate_changed)
-              | Some envelope ->
-                  let* published =
-                    Store.put target envelope
-                    |> Result.map_error (fun error -> Store_error error)
-                  in
-                  if
-                    String.equal
-                      (Store.Stored_object_id.to_hex published)
-                      (Health.candidate_object_id candidate)
-                  then Ok (Applied candidate)
-                  else Ok (Refused Health.Candidate_changed)))
+        let* current_state_head = state_head target in
+        let report = Health_repository.verify ~root in
+        let reread_candidate, envelope =
+          match selected_object_id plan selection with
+          | None -> (None, None)
+          | Some object_id -> (
+              match read_candidate ~object_id with
+              | Ok (Some (candidate, envelope)) ->
+                  (Some candidate, Some envelope)
+              | Ok None | Error _ -> (None, None))
+        in
+        match
+          Health.apply_eligibility ~plan ~selection ~now ~current_state_head
+            ~current:report ~reread_candidate
+        with
+        | Health.Refused refusal -> Ok (Refused refusal)
+        | Health.Eligible candidate -> (
+            match envelope with
+            | None -> Ok (Refused Health.Candidate_changed)
+            | Some envelope ->
+                let* published =
+                  Store.put target envelope
+                  |> Result.map_error (fun error -> Store_error error)
+                in
+                if
+                  String.equal
+                    (Store.Stored_object_id.to_hex published)
+                    (Health.candidate_object_id candidate)
+                then Ok (Applied candidate)
+                else Ok (Refused Health.Candidate_changed))
       else Ok (Refused Health.Candidate_changed))
 
 let[@warning "-4"] plan_from_backup ~root ~backup ~created_at ~expires_at =
@@ -192,13 +233,18 @@ let[@warning "-4"] plan_from_backup ~root ~backup ~created_at ~expires_at =
 let[@warning "-4"] plan_from_gc_quarantine ~root ~transaction_id ~created_at
     ~expires_at =
   plan_from_source ~root ~source:(Health.Gc_quarantine transaction_id)
-    ~read_candidate:(quarantine_candidate ~root ~transaction_id) ~created_at
-    ~expires_at
+    ~read_candidate:(quarantine_candidate ~root ~transaction_id)
+    ~created_at ~expires_at
+
+let[@warning "-4"] plan_from_offline_package ~root ~package ~created_at
+    ~expires_at =
+  plan_from_source ~root ~source:(Health.Offline_package package)
+    ~read_candidate:(package_candidate ~package)
+    ~created_at ~expires_at
 
 let[@warning "-4"] apply_from_backup ~root ~plan_id ~selection ~now =
   let matches_source = function Health.Backup _ -> true | _ -> false in
-  let read_candidate =
-    function
+  let read_candidate = function
     | Health.Backup backup -> backup_candidate ~backup
     | _ -> fun ~object_id:_ -> Ok None
   in
@@ -211,10 +257,25 @@ let[@warning "-4"] apply_from_backup ~root ~plan_id ~selection ~now =
 
 let[@warning "-4"] apply_from_gc_quarantine ~root ~plan_id ~selection ~now =
   let matches_source = function Health.Gc_quarantine _ -> true | _ -> false in
-  let read_candidate =
-    function
+  let read_candidate = function
     | Health.Gc_quarantine transaction_id ->
         quarantine_candidate ~root ~transaction_id
+    | _ -> fun ~object_id:_ -> Ok None
+  in
+  let* plan =
+    Health_store.find ~root ~id:plan_id
+    |> Result.map_error (fun error -> Health_store_error error)
+  in
+  apply_from_source ~root ~plan_id ~selection ~now ~matches_source
+    ~read_candidate:(read_candidate (Health.plan_source plan))
+
+let[@warning "-4"] apply_from_offline_package ~root ~plan_id ~selection ~now =
+  let matches_source = function
+    | Health.Offline_package _ -> true
+    | _ -> false
+  in
+  let read_candidate = function
+    | Health.Offline_package package -> package_candidate ~package
     | _ -> fun ~object_id:_ -> Ok None
   in
   let* plan =

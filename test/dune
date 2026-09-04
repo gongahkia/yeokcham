@@ -31,7 +31,9 @@
  (libraries
   alcotest
   unix
+  yeokcham_envelope
   yeokcham_store
+  yeokcham_v4_gc
   yeokcham_v4_health
   yeokcham_v4_health_repository
   yeokcham_v4_local_service
@@ -49,8 +51,10 @@
   yeokcham_v4_health_repository
   yeokcham_v4_local_service
   yeokcham_v4_model
+  yeokcham_v4_package
   yeokcham_v4_repair
-  yeokcham_v4_store))
+  yeokcham_v4_store
+  yeokcham_v4_trust))
 
 (test
  (name test_watcher)

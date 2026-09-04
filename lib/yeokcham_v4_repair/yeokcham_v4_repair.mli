@@ -13,6 +13,7 @@ type error =
   | Store_error of Yeokcham_store.error
   | V4_store_error of Yeokcham_v4_store.error
   | Gc_error of Yeokcham_v4_gc.error
+  | Package_error of Yeokcham_v4_package.error
   | Missing_state_head
   | Invalid_backup of { path : string; detail : string }
 
@@ -42,6 +43,15 @@ val plan_from_gc_quarantine :
     transaction. It neither restores, purges, changes, nor creates a GC
     transaction. *)
 
+val plan_from_offline_package :
+  root:string ->
+  package:string ->
+  created_at:int64 ->
+  expires_at:int64 ->
+  (Yeokcham_v4_health.repair_plan, error) result
+(** Reads the existing package manifest and every object through the package's
+    canonical artifact reader. It is not package receipt or import. *)
+
 val apply_from_backup :
   root:string ->
   plan_id:string ->
@@ -53,6 +63,13 @@ val apply_from_backup :
     [Refused]. [Applied] publishes at most the selected immutable object. *)
 
 val apply_from_gc_quarantine :
+  root:string ->
+  plan_id:string ->
+  selection:Yeokcham_v4_health.selection ->
+  now:int64 ->
+  (apply_result, error) result
+
+val apply_from_offline_package :
   root:string ->
   plan_id:string ->
   selection:Yeokcham_v4_health.selection ->

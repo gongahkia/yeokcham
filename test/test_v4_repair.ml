@@ -1,9 +1,13 @@
 module Health = Yeokcham_v4_health
 module Health_repository = Yeokcham_v4_health_repository
+module Envelope = Yeokcham_envelope
+module Gc = Yeokcham_v4_gc
 module Model = Yeokcham_v4_model
+module Package = Yeokcham_v4_package
 module Repair = Yeokcham_v4_repair
 module Service = Yeokcham_v4_local_service
 module Store = Yeokcham_store
+module Trust = Yeokcham_v4_trust
 module V4_store = Yeokcham_v4_store
 
 let require_ok render = function
@@ -31,6 +35,47 @@ let with_directory prefix run =
 let write_file root name contents =
   Out_channel.with_open_bin (Filename.concat root name) (fun output ->
       Out_channel.output_string output contents)
+
+let write_bytes path contents =
+  Out_channel.with_open_bin path (fun output ->
+      Out_channel.output_string output contents)
+
+let capability byte =
+  String.make 32 byte |> Trust.signing_capability_of_private_key
+  |> require_ok Trust.error_to_string
+
+let package_authority () =
+  let repository =
+    Trust.Repository_id.of_string
+      "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    |> Result.get_ok
+  in
+  let root_capability = capability 'a' in
+  let root_device =
+    Trust.signing_public_key root_capability
+    |> Trust.device_of_public_key
+    |> require_ok Trust.error_to_string
+  in
+  let root_certificate =
+    Trust.root_certificate ~repository ~device:root_device root_capability
+    |> require_ok Trust.error_to_string
+  in
+  let membership =
+    Trust.verify_membership ~repository [ root_certificate ]
+    |> require_ok Trust.error_to_string
+  in
+  let recovery_device =
+    capability 'r' |> Trust.signing_public_key |> Trust.device_of_public_key
+    |> require_ok Trust.error_to_string
+  in
+  let root_epoch =
+    Trust.root_epoch ~membership
+      ~root_certificate:(Trust.certificate_id root_certificate)
+      ~recovery_device root_capability
+    |> require_ok Trust.error_to_string
+  in
+  Trust.verify_authority ~membership [ root_epoch ]
+  |> require_ok Trust.error_to_string
 
 let initialize root =
   Service.init ~root
@@ -69,6 +114,56 @@ let candidate plan =
   match Health.plan_candidates plan with
   | [ candidate ] -> candidate
   | _ -> Alcotest.fail "expected one exact repair candidate"
+
+let stage_exact_snapshot_in_quarantine root status =
+  let repository =
+    V4_store.open_repository ~root |> require_ok V4_store.error_to_string
+  in
+  let loaded =
+    V4_store.load repository |> require_ok V4_store.error_to_string
+  in
+  let store = V4_store.underlying_store repository in
+  let snapshot =
+    Model.Snapshot_id.to_string status.Service.checkpoint
+    |> Store.Stored_object_id.of_hex |> Result.get_ok
+  in
+  let envelope = Store.get store snapshot |> require_ok Store.error_to_string in
+  let bytes = Envelope.encode envelope in
+  let state =
+    {
+      Store.id = loaded.V4_store.object_id;
+      object_type = Envelope.V4_project_state;
+      stored_bytes =
+        (Unix.stat (Store.object_path store loaded.V4_store.object_id))
+          .Unix.st_size;
+    }
+  in
+  let object_ =
+    {
+      Store.id = snapshot;
+      object_type = Envelope.object_type envelope;
+      stored_bytes = String.length bytes;
+    }
+  in
+  let plan =
+    Gc.classify ~state_head:loaded.V4_store.object_id
+      ~objects:[ state; object_ ] ~reachable:[]
+    |> require_ok Gc.error_to_string
+  in
+  let transaction = Gc.make_transaction plan |> require_ok Gc.error_to_string in
+  let gc = Filename.concat (Filename.concat root ".yeokcham") "gc" in
+  Unix.mkdir gc 0o700;
+  let directory =
+    Filename.concat gc ("v4-gc-" ^ Gc.transaction_id transaction)
+  in
+  Unix.mkdir directory 0o700;
+  write_bytes
+    (Filename.concat directory "transaction.cbor")
+    (Gc.encode_transaction transaction |> require_ok Gc.error_to_string);
+  write_bytes
+    (Filename.concat directory (Store.Stored_object_id.to_hex snapshot))
+    bytes;
+  Gc.transaction_id transaction
 
 let assert_missing root =
   let report = Health_repository.verify ~root in
@@ -193,6 +288,94 @@ let[@warning "-4"] changed_state_head_refuses_stale_approval () =
       | Repair.Applied _ -> Alcotest.fail "stale plan published an object");
       assert_missing root)
 
+let quarantine_source_is_read_only_and_exact () =
+  initialized_pair (fun root _backup status ->
+      let transaction_id = stage_exact_snapshot_in_quarantine root status in
+      let target_before =
+        In_channel.with_open_bin
+          (Filename.concat root "main.ml")
+          In_channel.input_all
+      in
+      let missing = delete_checkpoint root status in
+      let plan =
+        Repair.plan_from_gc_quarantine ~root ~transaction_id ~created_at:10L
+          ~expires_at:20L
+        |> require_ok Repair.error_to_string
+      in
+      let candidate = candidate plan in
+      Alcotest.(check string)
+        "quarantine candidate names missing object" missing
+        (Health.candidate_object_id candidate);
+      let selection =
+        Health.make_selection plan ~candidate_id:(Health.candidate_id candidate)
+      in
+      let outcome =
+        Repair.apply_from_gc_quarantine ~root ~plan_id:(Health.plan_id plan)
+          ~selection ~now:11L
+        |> require_ok Repair.error_to_string
+      in
+      (match outcome with
+      | Repair.Applied _ -> ()
+      | Repair.Refused refusal ->
+          Alcotest.fail (Health.refusal_to_string refusal));
+      Alcotest.(check string)
+        "quarantine repair never materialises source" target_before
+        (In_channel.with_open_bin
+           (Filename.concat root "main.ml")
+           In_channel.input_all);
+      Alcotest.(check bool)
+        "quarantine candidate repaired closure" true
+        (Health_repository.verify ~root |> Health.report_is_clean))
+
+let offline_package_source_is_verified_without_receipt () =
+  initialized_pair (fun root _backup status ->
+      let store, snapshot = checkpoint_object root status in
+      let package = Filename.concat root "offline-package" in
+      Package.create_bootstrap_with_authority ~source:store ~destination:package
+        ~authority:(package_authority ()) ~revisions:[] ~authorizations:[]
+        ~adoptions:[]
+        ~extra_snapshots:
+          [
+            Model.Snapshot_id.of_string (Store.Stored_object_id.to_hex snapshot)
+            |> Result.get_ok;
+          ]
+      |> require_ok Package.error_to_string;
+      let target_before =
+        In_channel.with_open_bin
+          (Filename.concat root "main.ml")
+          In_channel.input_all
+      in
+      let missing = delete_checkpoint root status in
+      let plan =
+        Repair.plan_from_offline_package ~root ~package ~created_at:10L
+          ~expires_at:20L
+        |> require_ok Repair.error_to_string
+      in
+      let candidate = candidate plan in
+      Alcotest.(check string)
+        "package candidate names missing object" missing
+        (Health.candidate_object_id candidate);
+      let selection =
+        Health.make_selection plan ~candidate_id:(Health.candidate_id candidate)
+      in
+      let outcome =
+        Repair.apply_from_offline_package ~root ~plan_id:(Health.plan_id plan)
+          ~selection ~now:11L
+        |> require_ok Repair.error_to_string
+      in
+      (match outcome with
+      | Repair.Applied _ -> ()
+      | Repair.Refused refusal ->
+          Alcotest.fail (Health.refusal_to_string refusal));
+      Alcotest.(check string)
+        "package repair is not package receipt" target_before
+        (In_channel.with_open_bin
+           (Filename.concat root "main.ml")
+           In_channel.input_all);
+      Alcotest.(check bool)
+        "package candidate repaired closure" true
+        (Health_repository.verify ~root |> Health.report_is_clean))
+
 let () =
   Alcotest.run "V4 repair"
     [
@@ -204,5 +387,9 @@ let () =
             disappearing_backup_refuses_without_publication;
           Alcotest.test_case "changed state head refuses" `Quick
             changed_state_head_refuses_stale_approval;
+          Alcotest.test_case "quarantine source is exact and source-safe" `Quick
+            quarantine_source_is_read_only_and_exact;
+          Alcotest.test_case "offline package source is verified and no-receipt"
+            `Quick offline_package_source_is_verified_without_receipt;
         ] );
     ]
