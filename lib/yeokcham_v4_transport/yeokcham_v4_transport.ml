@@ -413,6 +413,7 @@ module V2 = struct
   let default_parallelism = 4
   let max_parallelism = 8
   let retry_delays_ms = [ 250; 1000; 4000; 10_000 ]
+  let capability_schema_version = 1L
   let session_schema_version = 1L
 
   let error_to_string = function
@@ -428,7 +429,8 @@ module V2 = struct
     | Session_expired -> "V2 transfer session has expired"
     | Session_complete -> "V2 transfer session is already complete"
     | Quota_exceeded -> "V2 transfer temporary-byte quota is exceeded"
-    | Credential_session_limit -> "V2 transfer credential session limit is exceeded"
+    | Credential_session_limit ->
+        "V2 transfer credential session limit is exceeded"
     | Transient_network -> "V2 transfer network failure is retryable"
     | Http_server_error status ->
         Printf.sprintf "V2 transfer server failure (%d) is retryable" status
@@ -461,23 +463,29 @@ module V2 = struct
       || not (sorted_unique_int versions)
     then
       Error (Invalid_capability "versions must be nonempty positive integers")
-    else if max_segment_bytes < segment_bytes then
-      Error (Invalid_capability "maximum segment size is below one MiB")
+    else if
+      max_segment_bytes < segment_bytes
+      || max_segment_bytes > max_raw_object_bytes
+    then
+      Error (Invalid_capability "maximum segment size is outside relay bounds")
     else if max_in_flight < 1 || max_in_flight > max_parallelism then
       Error (Invalid_capability "in-flight limit is outside 1..8")
-    else if List.length missing > max_missing_objects || not (sorted_unique missing)
-    then Error (Invalid_capability "missing IDs must be sorted, unique, and bounded")
+    else if
+      List.length missing > max_missing_objects || not (sorted_unique missing)
+    then
+      Error
+        (Invalid_capability "missing IDs must be sorted, unique, and bounded")
     else if List.exists (fun id -> not (valid_digest id)) missing then
       Error (Invalid_capability "missing IDs contain an invalid digest")
     else Ok { versions; zstd; max_segment_bytes; max_in_flight; missing }
 
   let intersect_capability ~sender ~receiver =
-    if not sender.zstd || not receiver.zstd then Error Compression_unavailable
+    if (not sender.zstd) || not receiver.zstd then Error Compression_unavailable
     else if
-      not
-        (List.exists
-           (fun version -> version = protocol_version)
-           sender.versions)
+      (not
+         (List.exists
+            (fun version -> version = protocol_version)
+            sender.versions))
       || not
            (List.exists
               (fun version -> version = protocol_version)
@@ -496,20 +504,161 @@ module V2 = struct
   let missing_objects value = value.missing
   let missing_ids value = value
 
+  let capability_encoding_error error =
+    Invalid_capability (Encoding.construction_error_to_string error)
+
+  let capability_decode_error error =
+    Invalid_capability (Encoding.decode_error_to_string error)
+
+  let capability_text value =
+    Encoding.text value |> Result.map_error capability_encoding_error
+
+  let capability_array values =
+    Encoding.array values |> Result.map_error capability_encoding_error
+
+  let capability_texts values =
+    let rec loop reversed = function
+      | [] -> Ok (List.rev reversed)
+      | value :: rest ->
+          let* value = capability_text value in
+          loop (value :: reversed) rest
+    in
+    loop [] values
+
+  let encode_capability value =
+    let* versions =
+      value.versions
+      |> List.map (fun version -> Encoding.integer (Int64.of_int version))
+      |> capability_array
+    in
+    let* missing = capability_texts value.missing in
+    let* missing = capability_array missing in
+    capability_array
+      [
+        Encoding.integer capability_schema_version;
+        versions;
+        Encoding.bool value.zstd;
+        Encoding.integer (Int64.of_int value.max_segment_bytes);
+        Encoding.integer (Int64.of_int value.max_in_flight);
+        missing;
+      ]
+    |> Result.map Encoding.encode
+
+  let capability_exact_array name length = function
+    | Encoding.Array values when List.length values = length -> Ok values
+    | Encoding.Array _ ->
+        Error (Invalid_capability (name ^ " has wrong field count"))
+    | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _ | Encoding.Map _
+    | Encoding.Bool _ | Encoding.Null ->
+        Error (Invalid_capability (name ^ " must be an array"))
+
+  let capability_integer_field name = function
+    | Encoding.Integer value -> Ok value
+    | Encoding.Bytes _ | Encoding.Text _ | Encoding.Array _ | Encoding.Map _
+    | Encoding.Bool _ | Encoding.Null ->
+        Error (Invalid_capability (name ^ " must be an integer"))
+
+  let decode_capability bytes =
+    let* value =
+      Encoding.decode bytes |> Result.map_error capability_decode_error
+    in
+    let* fields = capability_exact_array "capability" 6 value in
+    match fields with
+    | [ version; versions; zstd; max_segment_bytes; max_in_flight; missing ] ->
+        let* version = capability_integer_field "capability version" version in
+        if not (Int64.equal version capability_schema_version) then
+          Error (Invalid_capability "unsupported capability version")
+        else
+          let* versions =
+            match versions with
+            | Encoding.Array values ->
+                let rec loop reversed = function
+                  | [] -> Ok (List.rev reversed)
+                  | value :: rest ->
+                      let* value =
+                        capability_integer_field "capability protocol version"
+                          value
+                      in
+                      if
+                        Int64.compare value 1L < 0
+                        || Int64.compare value 2_147_483_647L > 0
+                      then
+                        Error
+                          (Invalid_capability
+                             "capability protocol version is out of range")
+                      else loop (Int64.to_int value :: reversed) rest
+                in
+                loop [] values
+            | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _
+            | Encoding.Map _ | Encoding.Bool _ | Encoding.Null ->
+                Error
+                  (Invalid_capability "capability versions must be an array")
+          in
+          let* zstd =
+            match zstd with
+            | Encoding.Bool value -> Ok value
+            | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _
+            | Encoding.Array _ | Encoding.Map _ | Encoding.Null ->
+                Error (Invalid_capability "capability zstd must be boolean")
+          in
+          let* max_segment_bytes =
+            capability_integer_field "capability max segment" max_segment_bytes
+          in
+          let* max_in_flight =
+            capability_integer_field "capability max in-flight" max_in_flight
+          in
+          if
+            Int64.compare max_segment_bytes 0L < 0
+            || Int64.compare max_segment_bytes
+                 (Int64.of_int max_raw_object_bytes)
+               > 0
+            || Int64.compare max_in_flight 0L < 0
+            || Int64.compare max_in_flight (Int64.of_int max_parallelism) > 0
+          then Error (Invalid_capability "capability bounds are out of range")
+          else
+            let* missing =
+              match missing with
+              | Encoding.Array values ->
+                  let rec loop reversed = function
+                    | [] -> Ok (List.rev reversed)
+                    | Encoding.Text value :: rest ->
+                        loop (value :: reversed) rest
+                    | ( Encoding.Integer _ | Encoding.Bytes _ | Encoding.Array _
+                      | Encoding.Map _ | Encoding.Bool _ | Encoding.Null )
+                      :: _ ->
+                        Error
+                          (Invalid_capability
+                             "capability missing IDs must be text")
+                  in
+                  loop [] values
+              | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _
+              | Encoding.Map _ | Encoding.Bool _ | Encoding.Null ->
+                  Error
+                    (Invalid_capability
+                       "capability missing IDs must be an array")
+            in
+            let* decoded =
+              capability ~versions ~zstd
+                ~max_segment_bytes:(Int64.to_int max_segment_bytes)
+                ~max_in_flight:(Int64.to_int max_in_flight)
+                ~missing
+            in
+            let* canonical = encode_capability decoded in
+            if String.equal canonical bytes then Ok decoded
+            else Error (Invalid_capability "capability bytes are not canonical")
+    | _ -> assert false
+
   let plan_missing ~offered missing =
     if
       List.length offered > max_missing_objects
-      || not (sorted_unique offered)
+      || (not (sorted_unique offered))
       || List.exists (fun id -> not (valid_digest id)) offered
     then Error (Invalid_offer "offered IDs must be sorted, unique, and bounded")
     else
-      Ok
-        (List.filter
-           (fun missing_id -> List.mem missing_id offered)
-           missing)
+      Ok (List.filter (fun missing_id -> List.mem missing_id offered) missing)
 
   let object_offer ~project ~object_id ~raw_size =
-    if not (valid_digest project) || not (valid_digest object_id) then
+    if (not (valid_digest project)) || not (valid_digest object_id) then
       Error (Invalid_offer "project and object IDs must be SHA-256 digests")
     else if raw_size < 0 || raw_size > max_raw_object_bytes then
       Error (Invalid_offer "raw size exceeds the V2 relay object bound")
@@ -540,12 +689,11 @@ module V2 = struct
 
   let segment_range value = value.range
   let segment_raw_sha256 value = value.raw_sha256
-
   let range_key range = Printf.sprintf "%d:%d" range.offset range.length
 
   let session ~id ~offer ~credential_id ~scope ~expires_at ~quota_bytes
       ~credential_session_count =
-    if not (valid_digest id) || not (valid_digest credential_id) then
+    if (not (valid_digest id)) || not (valid_digest credential_id) then
       Error (Invalid_session "session and credential IDs must be digests")
     else if expires_at < 0L then Error (Invalid_session "expiry is negative")
     else if quota_bytes < offer.raw_size then Error Quota_exceeded
@@ -587,14 +735,15 @@ module V2 = struct
     if Int64.compare now session.expires_at >= 0 then Error Session_expired
     else
       let key = range_key segment.range in
-      if not (List.exists (fun range -> String.equal key (range_key range)) session.ranges)
+      if
+        not
+          (List.exists
+             (fun range -> String.equal key (range_key range))
+             session.ranges)
       then
         Error
           (Range_not_offered
-             {
-               offset = segment.range.offset;
-               length = segment.range.length;
-             })
+             { offset = segment.range.offset; length = segment.range.length })
       else if List.mem key session.received_keys then Ok session
       else Ok { session with received_keys = key :: session.received_keys }
 
@@ -609,7 +758,8 @@ module V2 = struct
   let session_decode_error error =
     Invalid_session (Encoding.decode_error_to_string error)
 
-  let session_text value = Encoding.text value |> Result.map_error session_encoding_error
+  let session_text value =
+    Encoding.text value |> Result.map_error session_encoding_error
 
   let session_array values =
     Encoding.array values |> Result.map_error session_encoding_error
@@ -625,8 +775,8 @@ module V2 = struct
     session.ranges
     |> List.mapi (fun index range -> (index, range))
     |> List.filter_map (fun (index, range) ->
-           if List.mem (range_key range) session.received_keys then Some index
-           else None)
+        if List.mem (range_key range) session.received_keys then Some index
+        else None)
 
   let encode_session session =
     let* id = session_text session.id in
@@ -654,7 +804,8 @@ module V2 = struct
 
   let session_exact_array name length = function
     | Encoding.Array values when List.length values = length -> Ok values
-    | Encoding.Array _ -> Error (Invalid_session (name ^ " has wrong field count"))
+    | Encoding.Array _ ->
+        Error (Invalid_session (name ^ " has wrong field count"))
     | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _ | Encoding.Map _
     | Encoding.Bool _ | Encoding.Null ->
         Error (Invalid_session (name ^ " must be an array"))
@@ -673,12 +824,14 @@ module V2 = struct
 
   let session_index value =
     let* index = session_integer_field "session bitmap index" value in
-    if Int64.compare index 0L < 0 || Int64.compare index 4_294_967_295L > 0
-    then Error (Invalid_session "session bitmap index is out of range")
+    if Int64.compare index 0L < 0 || Int64.compare index 4_294_967_295L > 0 then
+      Error (Invalid_session "session bitmap index is out of range")
     else Ok (Int64.to_int index)
 
   let decode_session bytes =
-    let* value = Encoding.decode bytes |> Result.map_error session_decode_error in
+    let* value =
+      Encoding.decode bytes |> Result.map_error session_decode_error
+    in
     let* fields = session_exact_array "session" 9 value in
     match fields with
     | [
@@ -734,14 +887,16 @@ module V2 = struct
             in
             if
               List.length indexes > List.length session.ranges
-              || not (sorted_unique_int indexes)
-              || List.exists (fun index -> index >= List.length session.ranges) indexes
+              || (not (sorted_unique_int indexes))
+              || List.exists
+                   (fun index -> index >= List.length session.ranges)
+                   indexes
             then Error (Invalid_session "session bitmap is invalid")
             else
               let received_keys =
                 indexes
                 |> List.map (fun index ->
-                       List.nth session.ranges index |> range_key)
+                    List.nth session.ranges index |> range_key)
               in
               let decoded = { session with received_keys } in
               let* canonical = encode_session decoded in
@@ -750,11 +905,12 @@ module V2 = struct
     | _ -> assert false
 
   let retry ~attempt = function
-    | Transient_network | Http_server_error _ when attempt >= 0 && attempt < 4 ->
+    | (Transient_network | Http_server_error _) when attempt >= 0 && attempt < 4
+      ->
         Retry_after_ms (List.nth retry_delays_ms attempt)
     | Invalid_capability _ | Unsupported_protocol | Compression_unavailable
-    | Invalid_offer _ | Invalid_range _ | Range_not_offered _ | Invalid_session _
-    | Session_expired | Session_complete | Quota_exceeded
+    | Invalid_offer _ | Invalid_range _ | Range_not_offered _
+    | Invalid_session _ | Session_expired | Session_complete | Quota_exceeded
     | Credential_session_limit | Authentication_failure | Capability_failure
     | Range_failure | Decompression_failure | Canonical_bytes_failure
     | Identity_failure | Transient_network | Http_server_error _ ->

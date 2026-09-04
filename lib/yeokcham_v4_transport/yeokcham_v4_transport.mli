@@ -127,7 +127,6 @@ module V2 : sig
   type segment
   type transfer_session
   type session_progress
-
   type retry = Retry_after_ms of int | Do_not_retry
 
   val protocol_version : int
@@ -160,10 +159,15 @@ module V2 : sig
   val missing_ids : missing_set -> string list
   val encode_capability : capability -> (string, error) result
   val decode_capability : string -> (capability, error) result
-  val plan_missing : offered:string list -> missing_set -> (string list, error) result
+
+  val plan_missing :
+    offered:string list -> missing_set -> (string list, error) result
 
   val object_offer :
-    project:string -> object_id:string -> raw_size:int -> (object_offer, error) result
+    project:string ->
+    object_id:string ->
+    raw_size:int ->
+    (object_offer, error) result
 
   val offer_project : object_offer -> string
   val offer_object_id : object_offer -> string
@@ -171,7 +175,6 @@ module V2 : sig
   val partition : object_offer -> (range list, error) result
   val range_offset : range -> int
   val range_length : range -> int
-
   val segment : range:range -> raw_sha256:string -> (segment, error) result
   val segment_range : segment -> range
   val segment_raw_sha256 : segment -> string
@@ -194,13 +197,16 @@ module V2 : sig
   val session_expires_at : transfer_session -> int64
   val progress_ranges : session_progress -> range list
   val progress_complete : session_progress -> bool
+
   val receive_segment :
     now:int64 ->
     session:transfer_session ->
     segment ->
     (transfer_session, error) result
 
-  val completion_eligible : now:int64 -> transfer_session -> (unit, error) result
+  val completion_eligible :
+    now:int64 -> transfer_session -> (unit, error) result
+
   val encode_session : transfer_session -> (string, error) result
   val decode_session : string -> (transfer_session, error) result
   val retry : attempt:int -> error -> retry
