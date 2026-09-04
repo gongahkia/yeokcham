@@ -83,6 +83,60 @@ let observations_refuse_invalid_or_duplicate_object_identity () =
     ]
   |> expect_refusal (Health.Duplicate_observation (id 'a'))
 
+let every_damage_code_has_a_stable_machine_name () =
+  let report =
+    Health.verify
+      [
+        Health.Object_observation
+          { object_id = id 'a'; status = Health.Missing; references = [] };
+        Health.Object_observation
+          { object_id = id 'b'; status = Health.Malformed; references = [] };
+        Health.Object_observation
+          {
+            object_id = id 'c';
+            status = Health.Id_mismatch (id 'd');
+            references = [];
+          };
+        Health.Object_observation
+          {
+            object_id = id 'e';
+            status = Health.Present;
+            references = [ id 'f' ];
+          };
+        Health.Durable_observation
+          {
+            durable_kind = Health.Workspace_receipt;
+            durable_id = "workspace";
+            readable = false;
+            restore_mismatch = true;
+          };
+        Health.Temporary_observation
+          {
+            temporary_kind = Health.Transfer_temporary;
+            temporary_id = "transfer";
+            reachable = false;
+          };
+      ]
+    |> require_ok
+  in
+  let codes =
+    Health.report_damages report
+    |> List.map (fun damage ->
+        Health.damage_code damage |> Health.damage_code_to_string)
+  in
+  Alcotest.(check (list string))
+    "all damage machine names"
+    [
+      "missing-object";
+      "malformed-envelope";
+      "canonical-id-mismatch";
+      "dangling-reference";
+      "unreadable-durable-record";
+      "restore-proof-mismatch";
+      "unreachable-temporary-state";
+    ]
+    codes
+
 let expect_outcome_refusal expected = function
   | Health.Refused actual ->
       Alcotest.(check bool) "typed repair refusal" true (actual = expected)
@@ -137,6 +191,53 @@ let plan_binds_source_exact_bytes_and_selection () =
   Health.apply_eligibility ~plan ~selection ~now:11L ~current:report
     ~current_state_head:(id 'e') ~reread_candidate:(Some changed)
   |> expect_outcome_refusal Health.Candidate_changed
+
+let selection_can_explicitly_choose_each_exact_candidate () =
+  let source = Health.Backup "backup-20260904" in
+  let candidate_a =
+    Health.make_candidate ~source ~object_id:(id 'a')
+      ~canonical_bytes_id:(id 'a')
+    |> require_ok
+  in
+  let candidate_b =
+    Health.make_candidate ~source ~object_id:(id 'b')
+      ~canonical_bytes_id:(id 'b')
+    |> require_ok
+  in
+  let report =
+    Health.verify
+      [
+        Health.Object_observation
+          { object_id = id 'a'; status = Health.Missing; references = [] };
+        Health.Object_observation
+          { object_id = id 'b'; status = Health.Missing; references = [] };
+      ]
+    |> require_ok
+  in
+  let plan =
+    Health.make_plan ~repository:(id 'd') ~state_head:(id 'e') ~source
+      ~damages:(Health.report_damages report)
+      ~candidates:[ candidate_a; candidate_b ]
+      ~created_at:10L ~expires_at:20L
+    |> require_ok
+  in
+  [ candidate_a; candidate_b ]
+  |> List.iter (fun candidate ->
+      let selection =
+        Health.make_selection plan ~candidate_id:(Health.candidate_id candidate)
+      in
+      match
+        Health.apply_eligibility ~plan ~selection ~now:11L
+          ~current_state_head:(id 'e') ~current:report
+          ~reread_candidate:(Some candidate)
+      with
+      | Health.Eligible selected ->
+          Alcotest.(check string)
+            "human selection preserves exact named candidate"
+            (Health.candidate_id candidate)
+            (Health.candidate_id selected)
+      | Health.Refused refusal ->
+          Alcotest.fail (Health.refusal_to_string refusal))
 
 let plans_are_canonical_and_expire () =
   let source = Health.Gc_quarantine "quarantine-1" in
@@ -201,8 +302,12 @@ let () =
             report_is_sorted_and_closure_scoped;
           Alcotest.test_case "invalid observations refuse" `Quick
             observations_refuse_invalid_or_duplicate_object_identity;
+          Alcotest.test_case "every damage code is stable" `Quick
+            every_damage_code_has_a_stable_machine_name;
           Alcotest.test_case "plan binds exact source selection" `Quick
             plan_binds_source_exact_bytes_and_selection;
+          Alcotest.test_case "multiple candidates require explicit selection"
+            `Quick selection_can_explicitly_choose_each_exact_candidate;
           Alcotest.test_case "canonical plan expires" `Quick
             plans_are_canonical_and_expire;
           Alcotest.test_case "plan decoder refuses invalid encodings" `Quick

@@ -1,6 +1,7 @@
 module Health = Yeokcham_v4_health
 module Health_repository = Yeokcham_v4_health_repository
 module Bootstrap = Yeokcham_v4_bootstrap
+module Encoding = Yeokcham_encoding
 module Envelope = Yeokcham_envelope
 module Gc = Yeokcham_v4_gc
 module Model = Yeokcham_v4_model
@@ -92,9 +93,12 @@ let close_noerr descriptor =
 
 let command_succeeds executable arguments =
   let null = Unix.openfile "/dev/null" [ Unix.O_WRONLY ] 0 in
-  Fun.protect ~finally:(fun () -> close_noerr null) (fun () ->
+  Fun.protect
+    ~finally:(fun () -> close_noerr null)
+    (fun () ->
       let process =
-        Unix.create_process executable (Array.of_list (executable :: arguments))
+        Unix.create_process executable
+          (Array.of_list (executable :: arguments))
           Unix.stdin null null
       in
       match Unix.waitpid [] process with
@@ -107,7 +111,9 @@ let command_succeeds executable arguments =
 
 let available_loopback_port () =
   let listener = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
-  Fun.protect ~finally:(fun () -> close_noerr listener) (fun () ->
+  Fun.protect
+    ~finally:(fun () -> close_noerr listener)
+    (fun () ->
       Unix.bind listener (Unix.ADDR_INET (Unix.inet_addr_loopback, 0));
       match Unix.getsockname listener with
       | Unix.ADDR_INET (_, port) -> port
@@ -134,7 +140,8 @@ let with_https_relay run =
   let openssl = "/usr/bin/openssl" in
   let socat = "/usr/bin/socat" in
   if not (Sys.file_exists openssl && Sys.file_exists socat) then
-    Alcotest.fail "relay integration requires /usr/bin/openssl and /usr/bin/socat";
+    Alcotest.fail
+      "relay integration requires /usr/bin/openssl and /usr/bin/socat";
   with_directory "v4-repair-https-relay-" (fun root ->
       let certificate = Filename.concat root "relay.crt" in
       let private_key = Filename.concat root "relay.key" in
@@ -160,7 +167,8 @@ let with_https_relay run =
       let project = Trust.Repository_id.to_string collaborative_repository in
       let grant =
         Relay_access.update ~root:relay_root (fun registry ->
-            Relay_access.issue ~now:(Int64.of_float (Unix.gettimeofday ()))
+            Relay_access.issue
+              ~now:(Int64.of_float (Unix.gettimeofday ()))
               ~repository:project
               ~scopes:[ Relay_access.Read; Relay_access.Write ]
               ~expires_in:Relay_access.default_lifetime_seconds registry)
@@ -202,12 +210,14 @@ let with_https_relay run =
           terminate proxy;
           terminate backend;
           List.iter
-            (fun (name, value) -> Unix.putenv name (Option.value ~default:"" value))
+            (fun (name, value) ->
+              Unix.putenv name (Option.value ~default:"" value))
             saved_environment)
         (fun () ->
           Unix.putenv "YEOKCHAM_V4_TEST_TRANSPORT" "1";
           Unix.putenv "YEOKCHAM_V4_TEST_TRANSPORT_CA_BUNDLE" certificate;
-          Unix.putenv "YEOKCHAM_V4_TEST_TRANSPORT_TOKEN" grant.Relay_access.grant_secret;
+          Unix.putenv "YEOKCHAM_V4_TEST_TRANSPORT_TOKEN"
+            grant.Relay_access.grant_secret;
           let url = "https://127.0.0.1:" ^ string_of_int proxy_port in
           let client =
             Transport_http.create ~url ~token:grant.Relay_access.grant_secret
@@ -227,12 +237,14 @@ let initialize root =
 let initialize_signed root =
   let administrator_capability = capability 'a' in
   let administrator =
-    Trust.signing_public_key administrator_capability |> Trust.device_of_public_key
+    Trust.signing_public_key administrator_capability
+    |> Trust.device_of_public_key
     |> require_ok Trust.error_to_string
   in
   let recovery_capability = capability 'r' in
   let recovery_device =
-    Trust.signing_public_key recovery_capability |> Trust.device_of_public_key
+    Trust.signing_public_key recovery_capability
+    |> Trust.device_of_public_key
     |> require_ok Trust.error_to_string
   in
   let status, _ceremony =
@@ -331,6 +343,15 @@ let assert_missing root =
   Alcotest.(check bool)
     "target remains damaged" false
     (Health.report_is_clean report)
+
+let wrong_envelope_bytes () =
+  Envelope.create ~object_type:Envelope.Content
+    ~object_format_version:Envelope.current_object_format_version
+    ~mandatory_features:0L
+    ~payload:(Encoding.bytes "different")
+    ()
+  |> require_ok Envelope.creation_error_to_string
+  |> Envelope.encode
 
 let backup_repair_is_explicit_exact_and_source_safe () =
   initialized_pair (fun root backup status ->
@@ -449,6 +470,64 @@ let[@warning "-4"] changed_state_head_refuses_stale_approval () =
       | Repair.Applied _ -> Alcotest.fail "stale plan published an object");
       assert_missing root)
 
+let[@warning "-4"] malformed_source_never_becomes_visible () =
+  initialized_pair (fun root backup status ->
+      ignore (delete_checkpoint root status);
+      let plan =
+        Repair.plan_from_backup ~root ~backup ~created_at:10L ~expires_at:20L
+        |> require_ok Repair.error_to_string
+      in
+      let candidate = candidate plan in
+      let backup_store, backup_snapshot = checkpoint_object backup status in
+      write_bytes
+        (Store.object_path backup_store backup_snapshot)
+        "not an envelope";
+      let selection =
+        Health.make_selection plan ~candidate_id:(Health.candidate_id candidate)
+      in
+      let outcome =
+        Repair.apply_from_backup ~root ~plan_id:(Health.plan_id plan) ~selection
+          ~now:11L
+        |> require_ok Repair.error_to_string
+      in
+      (match outcome with
+      | Repair.Refused Health.Candidate_changed -> ()
+      | Repair.Refused refusal ->
+          Alcotest.fail (Health.refusal_to_string refusal)
+      | Repair.Applied _ ->
+          Alcotest.fail "malformed source object was published");
+      assert_missing root)
+
+let[@warning "-4"] divergent_destination_is_never_overwritten () =
+  initialized_pair (fun root backup status ->
+      ignore (delete_checkpoint root status);
+      let plan =
+        Repair.plan_from_backup ~root ~backup ~created_at:10L ~expires_at:20L
+        |> require_ok Repair.error_to_string
+      in
+      let candidate = candidate plan in
+      let target_store, target_snapshot = checkpoint_object root status in
+      let divergent = wrong_envelope_bytes () in
+      let target_path = Store.object_path target_store target_snapshot in
+      write_bytes target_path divergent;
+      let selection =
+        Health.make_selection plan ~candidate_id:(Health.candidate_id candidate)
+      in
+      let outcome =
+        Repair.apply_from_backup ~root ~plan_id:(Health.plan_id plan) ~selection
+          ~now:11L
+        |> require_ok Repair.error_to_string
+      in
+      (match outcome with
+      | Repair.Refused Health.Damage_changed -> ()
+      | Repair.Refused refusal ->
+          Alcotest.fail (Health.refusal_to_string refusal)
+      | Repair.Applied _ ->
+          Alcotest.fail "divergent destination was overwritten");
+      Alcotest.(check string)
+        "divergent immutable bytes remain evidence" divergent
+        (In_channel.with_open_bin target_path In_channel.input_all))
+
 let quarantine_source_is_read_only_and_exact () =
   initialized_pair (fun root _backup status ->
       let transaction_id = stage_exact_snapshot_in_quarantine root status in
@@ -550,10 +629,12 @@ let bootstrap_artifact_source_is_verified_without_bootstrap () =
       Package.materialize_artifact ~destination:artifact
         outbound.Service.bootstrap_artifact
       |> require_ok Package.error_to_string;
-      write_bytes (Filename.concat artifact "bootstrap-basis-v1.cbor")
+      write_bytes
+        (Filename.concat artifact "bootstrap-basis-v1.cbor")
         (Bootstrap.encode outbound.Service.bootstrap_basis);
       let target_before =
-        In_channel.with_open_bin (Filename.concat root "main.ml")
+        In_channel.with_open_bin
+          (Filename.concat root "main.ml")
           In_channel.input_all
       in
       let missing = delete_checkpoint root status in
@@ -570,20 +651,74 @@ let bootstrap_artifact_source_is_verified_without_bootstrap () =
         Health.make_selection plan ~candidate_id:(Health.candidate_id candidate)
       in
       let outcome =
-        Repair.apply_from_bootstrap_artifact ~root ~plan_id:(Health.plan_id plan)
-          ~selection ~now:11L
+        Repair.apply_from_bootstrap_artifact ~root
+          ~plan_id:(Health.plan_id plan) ~selection ~now:11L
         |> require_ok Repair.error_to_string
       in
       (match outcome with
       | Repair.Applied _ -> ()
-      | Repair.Refused refusal -> Alcotest.fail (Health.refusal_to_string refusal));
+      | Repair.Refused refusal ->
+          Alcotest.fail (Health.refusal_to_string refusal));
       Alcotest.(check string)
         "repair source never bootstraps or materialises" target_before
-        (In_channel.with_open_bin (Filename.concat root "main.ml")
+        (In_channel.with_open_bin
+           (Filename.concat root "main.ml")
            In_channel.input_all);
       Alcotest.(check bool)
         "bootstrap candidate repaired closure" true
         (Health_repository.verify ~root |> Health.report_is_clean))
+
+let configured_relay_source_is_verified_without_receipt () =
+  with_https_relay (fun client project url ->
+      with_directory "v4-repair-relay-target-" (fun root ->
+          write_file root "main.ml" "let version = 1\n";
+          let status, _administrator_capability = initialize_signed root in
+          let store, snapshot = checkpoint_object root status in
+          let envelope =
+            Store.get store snapshot |> require_ok Store.error_to_string
+          in
+          let object_id = Store.Stored_object_id.to_hex snapshot in
+          Transport_http.put client ~project ~kind:Transport_http.Object
+            ~id:object_id ~bytes:(Envelope.encode envelope)
+          |> require_ok Transport_http.error_to_string;
+          Transport_config.add ~root ~name:"team" ~url
+          |> require_ok Transport_config.error_to_string;
+          let target_before =
+            In_channel.with_open_bin
+              (Filename.concat root "main.ml")
+              In_channel.input_all
+          in
+          let missing = delete_checkpoint root status in
+          let plan =
+            Repair.plan_from_configured_relay ~root ~remote:"team"
+              ~created_at:10L ~expires_at:20L
+            |> require_ok Repair.error_to_string
+          in
+          let candidate = candidate plan in
+          Alcotest.(check string)
+            "relay candidate names missing object" missing
+            (Health.candidate_object_id candidate);
+          let selection =
+            Health.make_selection plan
+              ~candidate_id:(Health.candidate_id candidate)
+          in
+          let outcome =
+            Repair.apply_from_configured_relay ~root
+              ~plan_id:(Health.plan_id plan) ~selection ~now:11L
+            |> require_ok Repair.error_to_string
+          in
+          (match outcome with
+          | Repair.Applied _ -> ()
+          | Repair.Refused refusal ->
+              Alcotest.fail (Health.refusal_to_string refusal));
+          Alcotest.(check string)
+            "repair source never receives or materialises" target_before
+            (In_channel.with_open_bin
+               (Filename.concat root "main.ml")
+               In_channel.input_all);
+          Alcotest.(check bool)
+            "relay candidate repaired closure" true
+            (Health_repository.verify ~root |> Health.report_is_clean)))
 
 let () =
   Alcotest.run "V4 repair"
@@ -596,11 +731,17 @@ let () =
             disappearing_backup_refuses_without_publication;
           Alcotest.test_case "changed state head refuses" `Quick
             changed_state_head_refuses_stale_approval;
+          Alcotest.test_case "malformed source never publishes" `Quick
+            malformed_source_never_becomes_visible;
+          Alcotest.test_case "divergent destination never overwrites" `Quick
+            divergent_destination_is_never_overwritten;
           Alcotest.test_case "quarantine source is exact and source-safe" `Quick
             quarantine_source_is_read_only_and_exact;
           Alcotest.test_case "offline package source is verified and no-receipt"
             `Quick offline_package_source_is_verified_without_receipt;
           Alcotest.test_case "bootstrap artifact is verified and no-bootstrap"
             `Quick bootstrap_artifact_source_is_verified_without_bootstrap;
+          Alcotest.test_case "configured relay is verified and no-receipt" `Slow
+            configured_relay_source_is_verified_without_receipt;
         ] );
     ]

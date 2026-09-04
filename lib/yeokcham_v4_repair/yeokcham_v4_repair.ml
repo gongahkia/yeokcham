@@ -42,7 +42,8 @@ let error_to_string = function
   | Gc_error error -> Gc.error_to_string error
   | Package_error error -> Package.error_to_string error
   | Transport_config_error error -> Transport_config.error_to_string error
-  | Transport_credential_error error -> Transport_credential.error_to_string error
+  | Transport_credential_error error ->
+      Transport_credential.error_to_string error
   | Transport_http_error error -> Transport_http.error_to_string error
   | No_configured_relay_repository ->
       "V4 repair relay source requires a collaborative repository identity"
@@ -165,7 +166,8 @@ let collaborative_repository ~root =
     |> Result.map_error (fun error -> V4_store_error error)
   in
   let* loaded =
-    V4_store.load repository |> Result.map_error (fun error -> V4_store_error error)
+    V4_store.load repository
+    |> Result.map_error (fun error -> V4_store_error error)
   in
   match loaded.V4_store.collaboration with
   | None -> Error No_configured_relay_repository
@@ -180,7 +182,8 @@ let relay_project ~root =
 let relay_candidate ~root ~remote ~object_id =
   let* object_id =
     Store.Stored_object_id.of_hex object_id
-    |> Result.map_error (fun _ -> Health_error (Health.Invalid_identifier object_id))
+    |> Result.map_error (fun _ ->
+        Health_error (Health.Invalid_identifier object_id))
   in
   let* configured =
     Transport_config.find ~root ~name:remote
@@ -203,9 +206,9 @@ let relay_candidate ~root ~remote ~object_id =
   let* envelope =
     Yeokcham_envelope.decode bytes
     |> Result.map_error (fun error ->
-           Transport_http_error
-             (Transport_http.Invalid_response
-                (Yeokcham_envelope.decode_error_to_string error)))
+        Transport_http_error
+          (Transport_http.Invalid_response
+             (Yeokcham_envelope.decode_error_to_string error)))
   in
   if not (String.equal bytes (Yeokcham_envelope.encode envelope)) then
     Error
@@ -214,7 +217,8 @@ let relay_candidate ~root ~remote ~object_id =
   else
     let* candidate =
       candidate_of_envelope ~source:(Health.Configured_relay remote)
-        ~object_id:(Store.Stored_object_id.to_hex object_id) envelope
+        ~object_id:(Store.Stored_object_id.to_hex object_id)
+        envelope
     in
     Ok (Some (candidate, envelope))
 
@@ -237,14 +241,14 @@ let read_bootstrap_basis artifact =
   with
   | Unix.Unix_error (error, _, _) ->
       Error
-        (Invalid_bootstrap_artifact
-           { path; detail = Unix.error_message error })
+        (Invalid_bootstrap_artifact { path; detail = Unix.error_message error })
   | Sys_error detail -> Error (Invalid_bootstrap_artifact { path; detail })
 
 let candidate_from_artifact ~source ~object_id artifact =
   match
     List.find_opt
-      (fun (candidate_id, _) -> Store.Stored_object_id.equal candidate_id object_id)
+      (fun (candidate_id, _) ->
+        Store.Stored_object_id.equal candidate_id object_id)
       (Package.artifact_objects artifact)
   with
   | None -> Ok None
@@ -252,7 +256,7 @@ let candidate_from_artifact ~source ~object_id artifact =
       let* envelope =
         Yeokcham_envelope.decode bytes
         |> Result.map_error (fun error ->
-               Package_error (Package.Envelope_error error))
+            Package_error (Package.Envelope_error error))
       in
       if not (String.equal bytes (Yeokcham_envelope.encode envelope)) then
         Error
@@ -261,19 +265,22 @@ let candidate_from_artifact ~source ~object_id artifact =
       else
         let* candidate =
           candidate_of_envelope ~source
-            ~object_id:(Store.Stored_object_id.to_hex object_id) envelope
+            ~object_id:(Store.Stored_object_id.to_hex object_id)
+            envelope
         in
         Ok (Some (candidate, envelope))
 
 let bootstrap_candidate ~root ~artifact ~object_id =
   let* object_id =
     Store.Stored_object_id.of_hex object_id
-    |> Result.map_error (fun _ -> Health_error (Health.Invalid_identifier object_id))
+    |> Result.map_error (fun _ ->
+        Health_error (Health.Invalid_identifier object_id))
   in
   let* repository = collaborative_repository ~root in
   let* bytes = read_bootstrap_basis artifact in
   let* basis =
-    Bootstrap.decode bytes |> Result.map_error (fun error -> Bootstrap_error error)
+    Bootstrap.decode bytes
+    |> Result.map_error (fun error -> Bootstrap_error error)
   in
   let* _ =
     Bootstrap.verify ~repository ~package:artifact ~bytes
@@ -404,13 +411,14 @@ let[@warning "-4"] plan_from_offline_package ~root ~package ~created_at
 let[@warning "-4"] plan_from_configured_relay ~root ~remote ~created_at
     ~expires_at =
   plan_from_source ~root ~source:(Health.Configured_relay remote)
-    ~read_candidate:(relay_candidate ~root ~remote) ~created_at ~expires_at
+    ~read_candidate:(relay_candidate ~root ~remote)
+    ~created_at ~expires_at
 
 let[@warning "-4"] plan_from_bootstrap_artifact ~root ~artifact ~created_at
     ~expires_at =
   plan_from_source ~root ~source:(Health.Bootstrap_artifact artifact)
-    ~read_candidate:(bootstrap_candidate ~root ~artifact) ~created_at
-    ~expires_at
+    ~read_candidate:(bootstrap_candidate ~root ~artifact)
+    ~created_at ~expires_at
 
 let[@warning "-4"] apply_from_backup ~root ~plan_id ~selection ~now =
   let matches_source = function Health.Backup _ -> true | _ -> false in
@@ -471,8 +479,8 @@ let[@warning "-4"] apply_from_configured_relay ~root ~plan_id ~selection ~now =
   apply_from_source ~root ~plan_id ~selection ~now ~matches_source
     ~read_candidate:(read_candidate (Health.plan_source plan))
 
-let[@warning "-4"] apply_from_bootstrap_artifact ~root ~plan_id ~selection
-    ~now =
+let[@warning "-4"] apply_from_bootstrap_artifact ~root ~plan_id ~selection ~now
+    =
   let matches_source = function
     | Health.Bootstrap_artifact _ -> true
     | _ -> false
