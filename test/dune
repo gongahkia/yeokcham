@@ -14,6 +14,18 @@
  (libraries alcotest qcheck-core qcheck-alcotest yeokcham_v4_health))
 
 (test
+ (name test_v4_health_store)
+ (modules test_v4_health_store)
+ (libraries
+  alcotest
+  unix
+  yeokcham_testkit
+  yeokcham_v4_health
+  yeokcham_v4_health_store)
+ (deps
+  (source_tree golden)))
+
+(test
  (name test_watcher)
  (modules test_watcher)
  (libraries alcotest yeokcham_watcher))

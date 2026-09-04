@@ -159,6 +159,34 @@ let plans_are_canonical_and_expire () =
     ~reread_candidate:(Some candidate)
   |> expect_outcome_refusal Health.Plan_expired
 
+let plans_reject_wrong_version_noncanonical_and_unknown_fields () =
+  let source = Health.Gc_quarantine "quarantine-1" in
+  let candidate =
+    Health.make_candidate ~source ~object_id:(id 'a')
+      ~canonical_bytes_id:(id 'a')
+    |> require_ok
+  in
+  let report = missing_report () in
+  let plan =
+    Health.make_plan ~repository:(id 'd') ~state_head:(id 'e') ~source
+      ~damages:(Health.report_damages report)
+      ~candidates:[ candidate ] ~created_at:0L ~expires_at:2L
+    |> require_ok
+  in
+  let bytes = Health.encode_plan plan in
+  let wrong_version = Bytes.of_string bytes in
+  Bytes.set wrong_version 1 '\002';
+  let malformed = "\x9f" ^ String.sub bytes 1 (String.length bytes - 1) in
+  let unknown_field =
+    "\x8a" ^ String.sub bytes 1 (String.length bytes - 1) ^ "\xf6"
+  in
+  List.iter
+    (fun candidate ->
+      Alcotest.(check bool)
+        "invalid plan encoding refuses" true
+        (Result.is_error (Health.decode_plan candidate)))
+    [ Bytes.unsafe_to_string wrong_version; malformed; unknown_field ]
+
 let () =
   Alcotest.run "V4 health"
     [
@@ -172,5 +200,7 @@ let () =
             plan_binds_source_exact_bytes_and_selection;
           Alcotest.test_case "canonical plan expires" `Quick
             plans_are_canonical_and_expire;
+          Alcotest.test_case "plan decoder refuses invalid encodings" `Quick
+            plans_reject_wrong_version_noncanonical_and_unknown_fields;
         ] );
     ]
