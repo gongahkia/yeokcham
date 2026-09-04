@@ -1,0 +1,3 @@
+(library
+ (name yeokcham_v4_relay_config)
+ (libraries yeokcham_v4_relay))
