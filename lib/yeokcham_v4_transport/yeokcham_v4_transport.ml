@@ -356,6 +356,411 @@ let decode_publication bytes =
         | _ -> assert false)
   | _ -> assert false
 
+module V2 = struct
+  type scope = Upload | Download
+
+  type error =
+    | Invalid_capability of string
+    | Unsupported_protocol
+    | Compression_unavailable
+    | Invalid_offer of string
+    | Invalid_range of { offset : int; length : int }
+    | Range_not_offered of { offset : int; length : int }
+    | Invalid_session of string
+    | Session_expired
+    | Session_complete
+    | Quota_exceeded
+    | Credential_session_limit
+    | Transient_network
+    | Http_server_error of int
+    | Authentication_failure
+    | Capability_failure
+    | Range_failure
+    | Decompression_failure
+    | Canonical_bytes_failure
+    | Identity_failure
+
+  type capability = {
+    versions : int list;
+    zstd : bool;
+    max_segment_bytes : int;
+    max_in_flight : int;
+    missing : string list;
+  }
+
+  type object_offer = { project : string; object_id : string; raw_size : int }
+  type missing_set = string list
+  type range = { offset : int; length : int }
+  type segment = { range : range; raw_sha256 : string }
+
+  type transfer_session = {
+    id : string;
+    offer : object_offer;
+    credential_id : string;
+    scope : scope;
+    expires_at : int64;
+    ranges : range list;
+    received_keys : string list;
+  }
+
+  type session_progress = { progress_received : range list; complete : bool }
+  type retry = Retry_after_ms of int | Do_not_retry
+
+  let protocol_version = 2
+  let segment_bytes = 1024 * 1024
+  let max_raw_object_bytes = 64 * 1024 * 1024
+  let max_missing_objects = 4096
+  let default_parallelism = 4
+  let max_parallelism = 8
+  let retry_delays_ms = [ 250; 1000; 4000; 10_000 ]
+  let session_schema_version = 1L
+
+  let error_to_string = function
+    | Invalid_capability value -> "invalid V2 transfer capability: " ^ value
+    | Unsupported_protocol -> "V2 transfer protocol is not mutually supported"
+    | Compression_unavailable -> "V2 transfer requires zstd support"
+    | Invalid_offer value -> "invalid V2 object offer: " ^ value
+    | Invalid_range { offset; length } ->
+        Printf.sprintf "invalid V2 byte range %d+%d" offset length
+    | Range_not_offered { offset; length } ->
+        Printf.sprintf "V2 byte range was not offered: %d+%d" offset length
+    | Invalid_session value -> "invalid V2 transfer session: " ^ value
+    | Session_expired -> "V2 transfer session has expired"
+    | Session_complete -> "V2 transfer session is already complete"
+    | Quota_exceeded -> "V2 transfer temporary-byte quota is exceeded"
+    | Credential_session_limit -> "V2 transfer credential session limit is exceeded"
+    | Transient_network -> "V2 transfer network failure is retryable"
+    | Http_server_error status ->
+        Printf.sprintf "V2 transfer server failure (%d) is retryable" status
+    | Authentication_failure -> "V2 transfer authentication failure"
+    | Capability_failure -> "V2 transfer capability failure"
+    | Range_failure -> "V2 transfer range failure"
+    | Decompression_failure -> "V2 transfer decompression failure"
+    | Canonical_bytes_failure -> "V2 transfer canonical-byte failure"
+    | Identity_failure -> "V2 transfer identity failure"
+
+  let sorted_unique values =
+    let rec loop = function
+      | [] | [ _ ] -> true
+      | left :: (right :: _ as rest) ->
+          String.compare left right < 0 && loop rest
+    in
+    loop values
+
+  let sorted_unique_int values =
+    let rec loop = function
+      | [] | [ _ ] -> true
+      | left :: (right :: _ as rest) -> left < right && loop rest
+    in
+    loop values
+
+  let capability ~versions ~zstd ~max_segment_bytes ~max_in_flight ~missing =
+    if
+      versions = []
+      || List.exists (fun version -> version <= 0) versions
+      || not (sorted_unique_int versions)
+    then
+      Error (Invalid_capability "versions must be nonempty positive integers")
+    else if max_segment_bytes < segment_bytes then
+      Error (Invalid_capability "maximum segment size is below one MiB")
+    else if max_in_flight < 1 || max_in_flight > max_parallelism then
+      Error (Invalid_capability "in-flight limit is outside 1..8")
+    else if List.length missing > max_missing_objects || not (sorted_unique missing)
+    then Error (Invalid_capability "missing IDs must be sorted, unique, and bounded")
+    else if List.exists (fun id -> not (valid_digest id)) missing then
+      Error (Invalid_capability "missing IDs contain an invalid digest")
+    else Ok { versions; zstd; max_segment_bytes; max_in_flight; missing }
+
+  let intersect_capability ~sender ~receiver =
+    if not sender.zstd || not receiver.zstd then Error Compression_unavailable
+    else if
+      not
+        (List.exists
+           (fun version -> version = protocol_version)
+           sender.versions)
+      || not
+           (List.exists
+              (fun version -> version = protocol_version)
+              receiver.versions)
+    then Error Unsupported_protocol
+    else
+      capability ~versions:[ protocol_version ] ~zstd:true
+        ~max_segment_bytes:segment_bytes
+        ~max_in_flight:(min sender.max_in_flight receiver.max_in_flight)
+        ~missing:receiver.missing
+
+  let capability_versions value = value.versions
+  let capability_zstd value = value.zstd
+  let capability_max_segment_bytes value = value.max_segment_bytes
+  let capability_max_in_flight value = value.max_in_flight
+  let missing_objects value = value.missing
+  let missing_ids value = value
+
+  let plan_missing ~offered missing =
+    if
+      List.length offered > max_missing_objects
+      || not (sorted_unique offered)
+      || List.exists (fun id -> not (valid_digest id)) offered
+    then Error (Invalid_offer "offered IDs must be sorted, unique, and bounded")
+    else
+      Ok
+        (List.filter
+           (fun missing_id -> List.mem missing_id offered)
+           missing)
+
+  let object_offer ~project ~object_id ~raw_size =
+    if not (valid_digest project) || not (valid_digest object_id) then
+      Error (Invalid_offer "project and object IDs must be SHA-256 digests")
+    else if raw_size < 0 || raw_size > max_raw_object_bytes then
+      Error (Invalid_offer "raw size exceeds the V2 relay object bound")
+    else Ok { project; object_id; raw_size }
+
+  let offer_project value = value.project
+  let offer_object_id value = value.object_id
+  let offer_raw_size value = value.raw_size
+
+  let partition offer =
+    let rec loop offset reversed =
+      if offset = offer.raw_size then Ok (List.rev reversed)
+      else
+        let length = min segment_bytes (offer.raw_size - offset) in
+        loop (offset + length) ({ offset; length } :: reversed)
+    in
+    loop 0 []
+
+  let range_offset value = value.offset
+  let range_length value = value.length
+
+  let segment ~range ~raw_sha256 =
+    if range.offset < 0 || range.length <= 0 || range.length > segment_bytes
+    then Error (Invalid_range { offset = range.offset; length = range.length })
+    else if not (valid_digest raw_sha256) then
+      Error (Invalid_range { offset = range.offset; length = range.length })
+    else Ok { range; raw_sha256 }
+
+  let segment_range value = value.range
+  let segment_raw_sha256 value = value.raw_sha256
+
+  let range_key range = Printf.sprintf "%d:%d" range.offset range.length
+
+  let session ~id ~offer ~credential_id ~scope ~expires_at ~quota_bytes
+      ~credential_session_count =
+    if not (valid_digest id) || not (valid_digest credential_id) then
+      Error (Invalid_session "session and credential IDs must be digests")
+    else if expires_at < 0L then Error (Invalid_session "expiry is negative")
+    else if quota_bytes < offer.raw_size then Error Quota_exceeded
+    else if credential_session_count >= max_parallelism then
+      Error Credential_session_limit
+    else
+      let* ranges = partition offer in
+      Ok
+        {
+          id;
+          offer;
+          credential_id;
+          scope;
+          expires_at;
+          ranges;
+          received_keys = [];
+        }
+
+  let session_progress session =
+    let received =
+      List.filter
+        (fun range -> List.mem (range_key range) session.received_keys)
+        session.ranges
+    in
+    {
+      progress_received = received;
+      complete = List.length received = List.length session.ranges;
+    }
+
+  let progress_ranges value = value.progress_received
+  let progress_complete value = value.complete
+  let session_id value = value.id
+  let session_offer value = value.offer
+  let session_credential_id value = value.credential_id
+  let session_scope value = value.scope
+  let session_expires_at value = value.expires_at
+
+  let receive_segment ~now ~session segment =
+    if Int64.compare now session.expires_at >= 0 then Error Session_expired
+    else
+      let key = range_key segment.range in
+      if not (List.exists (fun range -> String.equal key (range_key range)) session.ranges)
+      then
+        Error
+          (Range_not_offered
+             {
+               offset = segment.range.offset;
+               length = segment.range.length;
+             })
+      else if List.mem key session.received_keys then Ok session
+      else Ok { session with received_keys = key :: session.received_keys }
+
+  let completion_eligible ~now session =
+    if Int64.compare now session.expires_at >= 0 then Error Session_expired
+    else if (session_progress session).complete then Ok ()
+    else Error (Invalid_session "not every offered range has been received")
+
+  let session_encoding_error error =
+    Invalid_session (Encoding.construction_error_to_string error)
+
+  let session_decode_error error =
+    Invalid_session (Encoding.decode_error_to_string error)
+
+  let session_text value = Encoding.text value |> Result.map_error session_encoding_error
+
+  let session_array values =
+    Encoding.array values |> Result.map_error session_encoding_error
+
+  let scope_code = function Upload -> 0L | Download -> 1L
+
+  let scope_of_code = function
+    | 0L -> Ok Upload
+    | 1L -> Ok Download
+    | _ -> Error (Invalid_session "unsupported session scope")
+
+  let received_indexes session =
+    session.ranges
+    |> List.mapi (fun index range -> (index, range))
+    |> List.filter_map (fun (index, range) ->
+           if List.mem (range_key range) session.received_keys then Some index
+           else None)
+
+  let encode_session session =
+    let* id = session_text session.id in
+    let* project = session_text session.offer.project in
+    let* object_id = session_text session.offer.object_id in
+    let* credential_id = session_text session.credential_id in
+    let* received =
+      received_indexes session
+      |> List.map (fun index -> Encoding.integer (Int64.of_int index))
+      |> session_array
+    in
+    session_array
+      [
+        Encoding.integer session_schema_version;
+        id;
+        project;
+        object_id;
+        Encoding.integer (Int64.of_int session.offer.raw_size);
+        credential_id;
+        Encoding.integer (scope_code session.scope);
+        Encoding.integer session.expires_at;
+        received;
+      ]
+    |> Result.map Encoding.encode
+
+  let session_exact_array name length = function
+    | Encoding.Array values when List.length values = length -> Ok values
+    | Encoding.Array _ -> Error (Invalid_session (name ^ " has wrong field count"))
+    | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _ | Encoding.Map _
+    | Encoding.Bool _ | Encoding.Null ->
+        Error (Invalid_session (name ^ " must be an array"))
+
+  let session_text_field name = function
+    | Encoding.Text value -> Ok value
+    | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Array _ | Encoding.Map _
+    | Encoding.Bool _ | Encoding.Null ->
+        Error (Invalid_session (name ^ " must be text"))
+
+  let session_integer_field name = function
+    | Encoding.Integer value -> Ok value
+    | Encoding.Bytes _ | Encoding.Text _ | Encoding.Array _ | Encoding.Map _
+    | Encoding.Bool _ | Encoding.Null ->
+        Error (Invalid_session (name ^ " must be an integer"))
+
+  let session_index value =
+    let* index = session_integer_field "session bitmap index" value in
+    if Int64.compare index 0L < 0 || Int64.compare index 4_294_967_295L > 0
+    then Error (Invalid_session "session bitmap index is out of range")
+    else Ok (Int64.to_int index)
+
+  let decode_session bytes =
+    let* value = Encoding.decode bytes |> Result.map_error session_decode_error in
+    let* fields = session_exact_array "session" 9 value in
+    match fields with
+    | [
+     version;
+     id;
+     project;
+     object_id;
+     raw_size;
+     credential_id;
+     scope;
+     expires_at;
+     received;
+    ] ->
+        let* version = session_integer_field "session version" version in
+        if not (Int64.equal version session_schema_version) then
+          Error (Invalid_session "unsupported session version")
+        else
+          let* id = session_text_field "session ID" id in
+          let* project = session_text_field "session project" project in
+          let* object_id = session_text_field "session object ID" object_id in
+          let* raw_size = session_integer_field "session raw size" raw_size in
+          let* credential_id =
+            session_text_field "session credential ID" credential_id
+          in
+          let* scope = session_integer_field "session scope" scope in
+          let* scope = scope_of_code scope in
+          let* expires_at = session_integer_field "session expiry" expires_at in
+          if
+            Int64.compare raw_size 0L < 0
+            || Int64.compare raw_size (Int64.of_int max_raw_object_bytes) > 0
+          then Error (Invalid_session "session raw size is out of range")
+          else
+            let* offer =
+              object_offer ~project ~object_id ~raw_size:(Int64.to_int raw_size)
+            in
+            let* session =
+              session ~id ~offer ~credential_id ~scope ~expires_at
+                ~quota_bytes:offer.raw_size ~credential_session_count:0
+            in
+            let* indexes =
+              match received with
+              | Encoding.Array values ->
+                  let rec loop reversed = function
+                    | [] -> Ok (List.rev reversed)
+                    | value :: rest ->
+                        let* index = session_index value in
+                        loop (index :: reversed) rest
+                  in
+                  loop [] values
+              | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _
+              | Encoding.Map _ | Encoding.Bool _ | Encoding.Null ->
+                  Error (Invalid_session "session bitmap must be an array")
+            in
+            if
+              List.length indexes > List.length session.ranges
+              || not (sorted_unique_int indexes)
+              || List.exists (fun index -> index >= List.length session.ranges) indexes
+            then Error (Invalid_session "session bitmap is invalid")
+            else
+              let received_keys =
+                indexes
+                |> List.map (fun index ->
+                       List.nth session.ranges index |> range_key)
+              in
+              let decoded = { session with received_keys } in
+              let* canonical = encode_session decoded in
+              if String.equal canonical bytes then Ok decoded
+              else Error (Invalid_session "session bytes are not canonical")
+    | _ -> assert false
+
+  let retry ~attempt = function
+    | Transient_network | Http_server_error _ when attempt >= 0 && attempt < 4 ->
+        Retry_after_ms (List.nth retry_delays_ms attempt)
+    | Invalid_capability _ | Unsupported_protocol | Compression_unavailable
+    | Invalid_offer _ | Invalid_range _ | Range_not_offered _ | Invalid_session _
+    | Session_expired | Session_complete | Quota_exceeded
+    | Credential_session_limit | Authentication_failure | Capability_failure
+    | Range_failure | Decompression_failure | Canonical_bytes_failure
+    | Identity_failure | Transient_network | Http_server_error _ ->
+        Do_not_retry
+end
+
 let verify_publication ~authority publication =
   let expected_repository =
     Trust.repository (Trust.authority_membership authority)

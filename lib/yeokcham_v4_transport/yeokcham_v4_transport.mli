@@ -92,3 +92,116 @@ val with_remote : local_state -> remote_state -> (local_state, error) result
 val remove_remote : local_state -> name:string -> local_state
 val encode_local_state : local_state -> (string, error) result
 val decode_local_state : string -> (local_state, error) result
+
+module V2 : sig
+  (** Pure V2 relay-transfer planning. These values describe only raw immutable
+      bytes and relay-local sessions; they are not V4 history or state. *)
+
+  type scope = Upload | Download
+
+  type error =
+    | Invalid_capability of string
+    | Unsupported_protocol
+    | Compression_unavailable
+    | Invalid_offer of string
+    | Invalid_range of { offset : int; length : int }
+    | Range_not_offered of { offset : int; length : int }
+    | Invalid_session of string
+    | Session_expired
+    | Session_complete
+    | Quota_exceeded
+    | Credential_session_limit
+    | Transient_network
+    | Http_server_error of int
+    | Authentication_failure
+    | Capability_failure
+    | Range_failure
+    | Decompression_failure
+    | Canonical_bytes_failure
+    | Identity_failure
+
+  type capability
+  type object_offer
+  type missing_set
+  type range
+  type segment
+  type transfer_session
+  type session_progress
+
+  type retry = Retry_after_ms of int | Do_not_retry
+
+  val protocol_version : int
+  val segment_bytes : int
+  val max_raw_object_bytes : int
+  val max_missing_objects : int
+  val default_parallelism : int
+  val max_parallelism : int
+  val retry_delays_ms : int list
+  val capability_schema_version : int64
+  val session_schema_version : int64
+  val error_to_string : error -> string
+
+  val capability :
+    versions:int list ->
+    zstd:bool ->
+    max_segment_bytes:int ->
+    max_in_flight:int ->
+    missing:string list ->
+    (capability, error) result
+
+  val intersect_capability :
+    sender:capability -> receiver:capability -> (capability, error) result
+
+  val capability_versions : capability -> int list
+  val capability_zstd : capability -> bool
+  val capability_max_segment_bytes : capability -> int
+  val capability_max_in_flight : capability -> int
+  val missing_objects : capability -> missing_set
+  val missing_ids : missing_set -> string list
+  val encode_capability : capability -> (string, error) result
+  val decode_capability : string -> (capability, error) result
+  val plan_missing : offered:string list -> missing_set -> (string list, error) result
+
+  val object_offer :
+    project:string -> object_id:string -> raw_size:int -> (object_offer, error) result
+
+  val offer_project : object_offer -> string
+  val offer_object_id : object_offer -> string
+  val offer_raw_size : object_offer -> int
+  val partition : object_offer -> (range list, error) result
+  val range_offset : range -> int
+  val range_length : range -> int
+
+  val segment : range:range -> raw_sha256:string -> (segment, error) result
+  val segment_range : segment -> range
+  val segment_raw_sha256 : segment -> string
+
+  val session :
+    id:string ->
+    offer:object_offer ->
+    credential_id:string ->
+    scope:scope ->
+    expires_at:int64 ->
+    quota_bytes:int ->
+    credential_session_count:int ->
+    (transfer_session, error) result
+
+  val session_progress : transfer_session -> session_progress
+  val session_id : transfer_session -> string
+  val session_offer : transfer_session -> object_offer
+  val session_credential_id : transfer_session -> string
+  val session_scope : transfer_session -> scope
+  val session_expires_at : transfer_session -> int64
+  val progress_ranges : session_progress -> range list
+  val progress_complete : session_progress -> bool
+  val receive_segment :
+    now:int64 ->
+    session:transfer_session ->
+    segment ->
+    (transfer_session, error) result
+
+  val completion_eligible : now:int64 -> transfer_session -> (unit, error) result
+  val encode_session : transfer_session -> (string, error) result
+  val decode_session : string -> (transfer_session, error) result
+  val retry : attempt:int -> error -> retry
+end
