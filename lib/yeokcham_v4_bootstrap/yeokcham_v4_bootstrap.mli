@@ -58,6 +58,7 @@ val verify :
 
 val authority : verified -> Trust.authority
 val root_certificate : verified -> (Trust.certificate, error) result
+
 val verified_id : verified -> string
 (** The immutable SHA-256 ID of the canonical basis that was fully verified. *)
 

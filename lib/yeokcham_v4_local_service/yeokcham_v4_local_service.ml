@@ -362,6 +362,17 @@ let leaves_of_snapshot store snapshot_id =
   let* snapshot = load_snapshot store snapshot_id in
   collect_leaves store [] (Snapshot.Snapshot.root snapshot) Path_map.empty
 
+let validate_snapshot_closure store snapshot_id =
+  let* leaves = leaves_of_snapshot store snapshot_id in
+  Path_map.bindings leaves
+  |> List.fold_left
+       (fun result (_, (_, content)) ->
+         let* () = result in
+         Snapshot.Content.load store content
+         |> Result.map (fun _ -> ())
+         |> Result.map_error (fun error -> Snapshot_error error))
+       (Ok ())
+
 let entry_of_tree_entry = function
   | Snapshot.Tree.File { mode; content } ->
       {
@@ -568,6 +579,85 @@ let with_repository ~root f =
   in
   f repository loaded
 
+let tree_id snapshot =
+  Snapshot.Snapshot.root snapshot
+  |> Snapshot.Tree.stored_object_id |> Yeokcham_store.Stored_object_id.to_hex
+
+let workspace_destination ~root =
+  try
+    if (Unix.lstat root).Unix.st_kind <> Unix.S_DIR then
+      Workspace.Destination_unsafe
+    else
+      let entries = Sys.readdir root in
+      if
+        Array.for_all
+          (fun name ->
+            String.equal name ".yeokcham"
+            && (Unix.lstat (Filename.concat root name)).Unix.st_kind
+               = Unix.S_DIR)
+          entries
+      then Workspace.Destination_empty
+      else Workspace.Destination_nonempty
+  with Unix.Unix_error _ | Sys_error _ -> Workspace.Destination_unsafe
+
+let workspace_basis_and_closure ~root repository loaded =
+  let* basis =
+    Workspace.read_basis ~root
+    |> Result.map_error (fun _ -> Workspace_refusal Workspace.No_verified_basis)
+  in
+  match basis with
+  | None -> Ok (None, Workspace.Closure_complete)
+  | Some basis ->
+      let* collaboration = require_collaboration loaded in
+      let repository_id = Trust.repository (Store.membership collaboration) in
+      let projected_snapshot =
+        (Model.projection loaded.Store.project).Model.projection_baseline
+      in
+      if
+        (not
+           (Trust.Repository_id.equal repository_id
+              (Workspace.basis_repository basis)))
+        || not
+             (Model.Snapshot_id.equal projected_snapshot
+                (Workspace.basis_snapshot basis))
+      then Error (Workspace_refusal Workspace.No_verified_basis)
+      else
+        let store = Store.underlying_store repository in
+        let* closure =
+          match load_snapshot store projected_snapshot with
+          | Error _ -> Ok Workspace.Closure_missing
+          | Ok snapshot
+            when not
+                   (String.equal (tree_id snapshot)
+                      (Workspace.basis_canonical_tree basis)) ->
+              Ok Workspace.Closure_missing
+          | Ok snapshot -> (
+              match
+                ( Snapshot.Materialize.plan store snapshot,
+                  validate_snapshot_closure store projected_snapshot )
+              with
+              | Ok _, Ok () -> Ok Workspace.Closure_complete
+              | ( Error
+                    ( Snapshot.Materialize.Unsafe_destination_path _
+                    | Snapshot.Materialize.Invalid_symlink_target _ ),
+                  _ ) ->
+                  Error (Workspace_refusal Workspace.Unsafe_path)
+              | ( Error
+                    ( Snapshot.Materialize.Snapshot_error _
+                    | Snapshot.Materialize.Destination_not_directory _
+                    | Snapshot.Materialize.Destination_not_empty _
+                    | Snapshot.Materialize.Io_error _ ),
+                  _ ) ->
+                  Ok Workspace.Closure_missing
+              | Ok _, Error _ -> Ok Workspace.Closure_missing)
+        in
+        Ok (Some basis, closure)
+
+let workspace_receipt ~root =
+  match Workspace.read_receipt ~root with
+  | Ok receipt -> Ok receipt
+  | Error _ -> Error (Workspace_refusal Workspace.Receipt_mismatch)
+
 let recovery_package_path root =
   Filename.concat (Filename.concat root ".yeokcham") "recovery-v1.cbor"
 
@@ -676,12 +766,32 @@ let bootstrap_from_package ~root ~repository ~package ~basis ~verify_phrase
          (Bootstrap.Invalid_basis
             "root verification phrase does not match the authority closure"))
   else
+    let basis_id = Bootstrap.verified_id verified in
     let* repository =
       Store.init_collaborative_with ~root ~bootstrap:(fun underlying_store ->
-          Bootstrap.import ~destination:underlying_store verified
-            ~creator:(Trust.device_id device) ~username ~initial_draft ~title
-            ~local_certificate
-          |> Result.map_error Bootstrap.error_to_string)
+          let* project, collaboration =
+            Bootstrap.import ~destination:underlying_store verified
+              ~creator:(Trust.device_id device) ~username ~initial_draft ~title
+              ~local_certificate
+            |> Result.map_error Bootstrap.error_to_string
+          in
+          let projected_snapshot =
+            (Model.projection project).Model.projection_baseline
+          in
+          let* snapshot =
+            load_snapshot underlying_store projected_snapshot
+            |> Result.map_error error_to_string
+          in
+          let canonical_tree = tree_id snapshot in
+          let* workspace_basis =
+            Workspace.make_projection_basis ~repository
+              ~imported_basis_id:basis_id ~snapshot:projected_snapshot
+              ~canonical_tree ~source_fingerprint:canonical_tree
+            |> Result.map_error Workspace.error_to_string
+          in
+          Workspace.write_basis ~root workspace_basis
+          |> Result.map_error Workspace.error_to_string
+          |> Result.map (fun () -> (project, collaboration)))
       |> Result.map_error (fun error -> Store_error error)
     in
     let* loaded =
@@ -1247,17 +1357,6 @@ let advance_journal ~root journal phase =
   let* () = append_journal ~root next in
   Ok next
 
-let validate_snapshot_closure store snapshot_id =
-  let* leaves = leaves_of_snapshot store snapshot_id in
-  Path_map.bindings leaves
-  |> List.fold_left
-       (fun result (_, (_, content)) ->
-         let* () = result in
-         Snapshot.Content.load store content
-         |> Result.map (fun _ -> ())
-         |> Result.map_error (fun error -> Snapshot_error error))
-       (Ok ())
-
 let ensure_retained project snapshot =
   if retained project snapshot then Ok ()
   else Error (Unknown_checkpoint snapshot)
@@ -1445,6 +1544,141 @@ let restore_in_place ~root ~checkpoint =
               in
               let* () = append_journal ~root journal in
               perform_in_place ~root repository saved journal ~resumed:false)
+
+let workspace_materialization_of_plan plan restored =
+  let basis = Workspace.plan_basis plan in
+  let receipt = Workspace.plan_receipt plan in
+  match restored with
+  | None ->
+      {
+        workspace_basis = basis;
+        workspace_receipt = receipt;
+        workspace_safety_checkpoint = None;
+        workspace_restore_proof = None;
+      }
+  | Some restored ->
+      {
+        workspace_basis = basis;
+        workspace_receipt = receipt;
+        workspace_safety_checkpoint = Some restored.safety_checkpoint;
+        workspace_restore_proof = Some restored.restore_operation;
+      }
+
+let materialize_workspace_plan ~root plan =
+  let receipt = Workspace.plan_receipt plan in
+  let checkpoint = Workspace.basis_snapshot (Workspace.plan_basis plan) in
+  let* observed =
+    with_repository ~root (fun repository _ ->
+        capture ~root (Store.underlying_store repository))
+  in
+  let* staged =
+    Workspace.stage_receipt ~root receipt
+    |> Result.map_error (fun error -> Workspace_error error)
+  in
+  let restored =
+    if Model.Snapshot_id.equal observed checkpoint then Ok None
+    else restore_in_place ~root ~checkpoint |> Result.map Option.some
+  in
+  match restored with
+  | Error error ->
+      Workspace.discard_staged_receipt staged;
+      Error error
+  | Ok restored -> (
+      match Workspace.publish_staged_receipt staged with
+      | Ok () -> Ok (workspace_materialization_of_plan plan restored)
+      | Error receipt_error -> (
+          Workspace.discard_staged_receipt staged;
+          let rollback =
+            match restored with
+            | None -> Ok ()
+            | Some restored ->
+                restore_in_place ~root ~checkpoint:restored.safety_checkpoint
+                |> Result.map (fun _ -> ())
+          in
+          match rollback with
+          | Ok () -> Error (Workspace_error receipt_error)
+          | Error rollback_error -> Error rollback_error))
+
+let materialize_workspace_activation ~root plan =
+  let receipt = Workspace.plan_receipt plan in
+  let checkpoint = Workspace.basis_snapshot (Workspace.plan_basis plan) in
+  let* staged =
+    Workspace.stage_receipt ~root receipt
+    |> Result.map_error (fun error -> Workspace_error error)
+  in
+  let materialized =
+    with_repository ~root (fun repository _ ->
+        let store = Store.underlying_store repository in
+        let* target = load_snapshot store checkpoint in
+        Snapshot.Materialize.write_replacing ~destination:root
+          ~preserved_root_names:[ ".yeokcham"; ".git" ] store target
+        |> Result.map_error (fun error -> Materialize_error error))
+  in
+  match materialized with
+  | Error error -> Error error
+  | Ok () ->
+      Workspace.publish_staged_receipt staged
+      |> Result.map_error (fun error -> Workspace_error error)
+      |> Result.map (fun () -> workspace_materialization_of_plan plan None)
+
+let workspace_activate ~root =
+  let* plan =
+    with_repository ~root (fun repository loaded ->
+        let* basis, closure =
+          workspace_basis_and_closure ~root repository loaded
+        in
+        let* plan =
+          Workspace.activate ~basis ~closure
+            ~destination:Workspace.Destination_empty
+          |> Result.map_error (fun refusal -> Workspace_refusal refusal)
+        in
+        match workspace_destination ~root with
+        | Workspace.Destination_empty -> Ok plan
+        | Workspace.Destination_unsafe ->
+            Error (Workspace_refusal Workspace.Unsafe_path)
+        | Workspace.Destination_nonempty -> (
+            let* pending =
+              Workspace.read_staged_receipt ~root
+              |> Result.map_error (fun error -> Workspace_error error)
+            in
+            match pending with
+            | Some receipt
+              when Workspace.receipt_equal receipt (Workspace.plan_receipt plan)
+              ->
+                Ok plan
+            | Some _ | None ->
+                Error (Workspace_refusal Workspace.Nonempty_destination)))
+  in
+  materialize_workspace_activation ~root plan
+
+let workspace_update ~root ~replace =
+  let* update =
+    with_repository ~root (fun repository loaded ->
+        let* basis, closure =
+          workspace_basis_and_closure ~root repository loaded
+        in
+        let* receipt = workspace_receipt ~root in
+        let store = Store.underlying_store repository in
+        let* observed_snapshot = capture ~root store in
+        let* observed =
+          load_snapshot store observed_snapshot
+          |> Result.map_error (fun _ ->
+              Workspace_refusal Workspace.Missing_closure)
+        in
+        let canonical_tree = tree_id observed in
+        let* observed =
+          Workspace.make_observed_tree ~canonical_tree
+            ~source_fingerprint:canonical_tree
+          |> Result.map_error (fun error -> Workspace_error error)
+        in
+        Workspace.plan_update ~basis ~receipt ~closure ~observed ~replace
+        |> Result.map_error (fun refusal -> Workspace_refusal refusal))
+  in
+  match update with
+  | Workspace.Already_current receipt -> Ok (Workspace_already_current receipt)
+  | Workspace.Update plan ->
+      materialize_workspace_plan ~root plan
+      |> Result.map (fun materialized -> Workspace_updated materialized)
 
 let new_draft ~root ~id ~title =
   with_repository ~root (fun repository loaded ->

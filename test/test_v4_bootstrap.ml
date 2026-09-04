@@ -6,6 +6,7 @@ module Recovery = Yeokcham_v4_recovery
 module Service = Yeokcham_v4_local_service
 module Store = Yeokcham_v4_store
 module Trust = Yeokcham_v4_trust
+module Workspace = Yeokcham_v4_workspace
 
 let require_ok render = function
   | Ok value -> value
@@ -175,6 +176,14 @@ let bootstrap_imports_shared_delivery_without_source_scratch () =
         "bootstrap does not materialize the working tree"
         "untouched local file\n"
         (read_file target "keep.txt");
+      let nonempty_activation = Service.workspace_activate ~root:target in
+      Alcotest.(check bool)
+        "activation refuses an ordinary nonempty destination" true
+        (Result.is_error nonempty_activation);
+      Alcotest.(check string)
+        "nonempty activation refusal preserves ordinary bytes"
+        "untouched local file\n"
+        (read_file target "keep.txt");
       let restored = Filename.concat target "explicit-restore" in
       Unix.mkdir restored 0o700;
       Service.restore ~root:target ~checkpoint:received.Service.checkpoint
@@ -234,6 +243,229 @@ let bootstrap_basis_rejects_a_wrong_repository_before_import () =
       | Ok _ ->
           Alcotest.fail "bootstrap accepted a package for another repository")
 
+let bootstrap_into_an_empty_root_requires_explicit_workspace_activation () =
+  with_directory "yeokcham-v4-bootstrap-workspace-" (fun parent ->
+      let source = Filename.concat parent "source" in
+      let target = Filename.concat parent "target" in
+      let package = Filename.concat parent "package" in
+      Unix.mkdir source 0o700;
+      Unix.mkdir target 0o700;
+      write_file source "main.ml" "let version = 1\n";
+      write_file source "run.sh" "#!/bin/sh\necho projected\n";
+      Unix.chmod (Filename.concat source "run.sh") 0o755;
+      Unix.symlink "main.ml" (Filename.concat source "main-link");
+      let administrator_capability = capability 'a' in
+      let administrator = device administrator_capability in
+      let recovery_capability = capability 'r' in
+      let recovery_device = device recovery_capability in
+      ignore
+        (Service.init_signed_with_recovery ~root:source
+           ~username:(username "alice") ~initial_draft:(draft "source-draft")
+           ~title:"source" ~repository ~device:administrator
+           ~signing_capability:administrator_capability ~recovery_device
+           ~recovery_capability
+        |> require_ok Service.error_to_string);
+      let outbound =
+        Service.prepare_bootstrap_outbound ~root:source
+          ~signing_capability:administrator_capability
+        |> require_ok Service.error_to_string
+      in
+      Package.materialize_artifact ~destination:package
+        outbound.Service.bootstrap_artifact
+      |> require_ok Package.error_to_string;
+      let source_repository =
+        Store.open_repository ~root:source |> require_ok Store.error_to_string
+      in
+      let source_state =
+        Store.load source_repository |> require_ok Store.error_to_string
+      in
+      let source_authority =
+        match source_state.Store.collaboration with
+        | Some collaboration -> (
+            match Store.authority collaboration with
+            | Some authority -> authority
+            | None -> Alcotest.fail "source lacks authority")
+        | None -> Alcotest.fail "source lacks collaboration"
+      in
+      let certificate =
+        root_certificate source_authority |> Trust.certificate_id
+      in
+      let phrase =
+        Recovery.verification_phrase (root_certificate source_authority)
+      in
+      ignore
+        (Service.bootstrap_from_package ~root:target ~repository ~package
+           ~basis:(Bootstrap.encode outbound.Service.bootstrap_basis)
+           ~verify_phrase:phrase ~username:(username "alice")
+           ~initial_draft:(draft "target-draft") ~title:"target"
+           ~device:administrator ~local_certificate:certificate
+        |> require_ok Service.error_to_string);
+      let stored_basis =
+        Workspace.read_basis ~root:target
+        |> require_ok Workspace.error_to_string
+      in
+      Alcotest.(check string)
+        "bootstrap basis marker binds its immutable signed basis"
+        (Bootstrap.id outbound.Service.bootstrap_basis)
+        (stored_basis |> Option.get |> Workspace.basis_imported_basis_id);
+      Alcotest.(check (list string))
+        "bootstrap creates only V4 metadata" [ ".yeokcham" ]
+        (Sys.readdir target |> Array.to_list |> List.sort String.compare);
+      let workspace_directory =
+        Workspace.basis_path ~root:target |> Filename.dirname
+      in
+      let receipt_stage_failure =
+        Unix.chmod workspace_directory 0o500;
+        Fun.protect
+          ~finally:(fun () -> Unix.chmod workspace_directory 0o700)
+          (fun () -> Service.workspace_activate ~root:target)
+      in
+      Alcotest.(check bool)
+        "receipt-stage failure refuses before source materialisation" true
+        (Result.is_error receipt_stage_failure);
+      Alcotest.(check bool)
+        "receipt-stage failure leaves ordinary source absent" false
+        (Sys.file_exists (Filename.concat target "main.ml"));
+      let before =
+        Store.open_repository ~root:target
+        |> require_ok Store.error_to_string
+        |> Store.load
+        |> require_ok Store.error_to_string
+      in
+      let pending_receipt =
+        Workspace.activate ~basis:stored_basis
+          ~closure:Workspace.Closure_complete
+          ~destination:Workspace.Destination_empty
+        |> require_ok Workspace.refusal_to_string
+        |> Workspace.plan_receipt
+      in
+      ignore
+        (Workspace.stage_receipt ~root:target pending_receipt
+        |> require_ok Workspace.error_to_string);
+      write_file target "main.ml" "partial activation output\n";
+      Alcotest.(check bool)
+        "prepared activation leaves a resumable local marker" true
+        (Sys.file_exists (Workspace.pending_receipt_path ~root:target));
+      let activated =
+        Service.workspace_activate ~root:target
+        |> require_ok Service.error_to_string
+      in
+      Alcotest.(check bool)
+        "activation records a local receipt" true
+        (Sys.file_exists (Workspace.receipt_path ~root:target));
+      Alcotest.(check bool)
+        "resumed activation publishes and clears its pending receipt" false
+        (Sys.file_exists (Workspace.pending_receipt_path ~root:target));
+      Alcotest.(check string)
+        "explicit activation materialises exact baseline bytes"
+        "let version = 1\n"
+        (read_file target "main.ml");
+      Alcotest.(check bool)
+        "activation preserves executable mode" true
+        ((Unix.lstat (Filename.concat target "run.sh")).Unix.st_perm land 0o111
+        <> 0);
+      Alcotest.(check string)
+        "activation preserves exact symlink target" "main.ml"
+        (Unix.readlink (Filename.concat target "main-link"));
+      let after =
+        Store.open_repository ~root:target
+        |> require_ok Store.error_to_string
+        |> Store.load
+        |> require_ok Store.error_to_string
+      in
+      Alcotest.(check (list string))
+        "activation does not change signed shared history"
+        (match before.Store.collaboration with
+        | Some collaboration ->
+            Store.signed_revisions collaboration
+            |> List.map (fun signed ->
+                Trust.signed_revision_id signed |> Model.Revision_id.to_string)
+        | None -> [])
+        (match after.Store.collaboration with
+        | Some collaboration ->
+            Store.signed_revisions collaboration
+            |> List.map (fun signed ->
+                Trust.signed_revision_id signed |> Model.Revision_id.to_string)
+        | None -> []);
+      Alcotest.(check bool)
+        "activation and clean replay do not advance the project state" true
+        (Yeokcham_store.Stored_object_id.equal before.Store.object_id
+           after.Store.object_id);
+      let verified_basis = Option.get stored_basis in
+      let stale_basis =
+        Workspace.make_projection_basis
+          ~repository:(Workspace.basis_repository verified_basis)
+          ~imported_basis_id:(String.make 64 'f')
+          ~snapshot:(Workspace.basis_snapshot verified_basis)
+          ~canonical_tree:(Workspace.basis_canonical_tree verified_basis)
+          ~source_fingerprint:
+            (Workspace.basis_source_fingerprint verified_basis)
+        |> require_ok Workspace.error_to_string
+      in
+      let stale_receipt =
+        Workspace.activate ~basis:(Some stale_basis)
+          ~closure:Workspace.Closure_complete
+          ~destination:Workspace.Destination_empty
+        |> require_ok Workspace.refusal_to_string
+        |> Workspace.plan_receipt
+      in
+      Workspace.write_receipt ~root:target stale_receipt
+      |> require_ok Workspace.error_to_string;
+      Alcotest.(check bool)
+        "stale receipt is refused without changing source" true
+        (Result.is_error (Service.workspace_update ~root:target ~replace:false));
+      Alcotest.(check string)
+        "stale receipt refusal preserves exact source bytes" "let version = 1\n"
+        (read_file target "main.ml");
+      Workspace.write_receipt ~root:target pending_receipt
+      |> require_ok Workspace.error_to_string;
+      (match Service.workspace_update ~root:target ~replace:false with
+      | Ok (Service.Workspace_already_current receipt) ->
+          Alcotest.(check int64)
+            "clean update leaves receipt generation stable" 1L
+            (Workspace.receipt_activation_generation receipt)
+      | Ok (Service.Workspace_updated _) ->
+          Alcotest.fail "clean workspace update materialised unexpectedly"
+      | Error error -> Alcotest.fail (Service.error_to_string error));
+      write_file target "main.ml" "let local = 2\n";
+      let dirty_update = Service.workspace_update ~root:target ~replace:false in
+      Alcotest.(check bool)
+        "dirty default update refuses" true
+        (Result.is_error dirty_update);
+      Alcotest.(check string)
+        "dirty refusal preserves ordinary bytes" "let local = 2\n"
+        (read_file target "main.ml");
+      let updated =
+        Service.workspace_update ~root:target ~replace:true
+        |> require_ok Service.error_to_string
+      in
+      let materialized =
+        match updated with
+        | Service.Workspace_updated materialized -> materialized
+        | Service.Workspace_already_current _ ->
+            Alcotest.fail "explicit replace did not materialise the basis"
+      in
+      let safety =
+        match materialized.Service.workspace_safety_checkpoint with
+        | Some checkpoint -> checkpoint
+        | None -> Alcotest.fail "replace did not retain a safety checkpoint"
+      in
+      Alcotest.(check bool)
+        "replace reports a durable restore proof" true
+        (Option.is_some materialized.Service.workspace_restore_proof);
+      Alcotest.(check string)
+        "replace materialises verified baseline bytes" "let version = 1\n"
+        (read_file target "main.ml");
+      let recovered = Filename.concat parent "recovered-local-edit" in
+      Unix.mkdir recovered 0o700;
+      Service.restore ~root:target ~checkpoint:safety ~destination:recovered
+      |> require_ok Service.error_to_string;
+      Alcotest.(check string)
+        "replace safety checkpoint restores the discarded local bytes"
+        "let local = 2\n"
+        (read_file recovered "main.ml");
+      ignore activated)
+
 let () =
   Alcotest.run "V4 bootstrap"
     [
@@ -245,5 +477,9 @@ let () =
             `Quick bootstrap_imports_shared_delivery_without_source_scratch;
           Alcotest.test_case "rejects wrong repository before import" `Quick
             bootstrap_basis_rejects_a_wrong_repository_before_import;
+          Alcotest.test_case
+            "requires explicit projection activation and explicit replacement"
+            `Quick
+            bootstrap_into_an_empty_root_requires_explicit_workspace_activation;
         ] );
     ]

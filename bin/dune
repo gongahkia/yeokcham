@@ -30,6 +30,7 @@
   yeokcham_v4_relay_access
   yeokcham_v4_semantic_config
   yeokcham_v4_trust
+  yeokcham_v4_workspace
   (select
    v4_watch.ml
    from

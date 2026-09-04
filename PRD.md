@@ -1,6 +1,6 @@
 # Product requirements
 
-## Current milestone: V4 verified receipt, explicit relay bootstrap, advisory runtime, durable restore proofs, local recoverable collection, exact decision-proposal assistance, optional external-LSP observations, explicit local device custody, and macOS advisory watch capture
+## Current milestone: V4 verified receipt, explicit relay bootstrap and projection workspace, advisory runtime, durable restore proofs, local recoverable collection, exact decision-proposal assistance, optional external-LSP observations, explicit local device custody, and macOS advisory watch capture
 
 V4 serves one developer and small, explicitly trusted teams. Its required
 vertical slices are complete only when their model transition, durable format,
@@ -76,6 +76,11 @@ failure behaviour, and CLI surface agree.
     existing debounced exact-save path. Coalescing, loss, and overflow require
     exact scanning; no observation is canonical history, intent, or a daemon
     trigger.
+20. Materialise a bootstrapped verified projection only through an explicit
+    workspace activation/update command. A normal update refuses local bytes
+    that differ from its activation receipt; explicit replacement first retains
+    a regular safety checkpoint and restore proof. Bootstrap, receive, sync,
+    relay, and daemon receipt still never materialise ordinary source.
 
 ### Explicit non-goals
 

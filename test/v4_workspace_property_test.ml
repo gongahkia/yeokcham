@@ -1,6 +1,11 @@
 module Model = Yeokcham_v4_model
 module Trust = Yeokcham_v4_trust
 module Workspace = Yeokcham_v4_workspace
+module Bootstrap = Yeokcham_v4_bootstrap
+module Package = Yeokcham_v4_package
+module Recovery = Yeokcham_v4_recovery
+module Service = Yeokcham_v4_local_service
+module Store = Yeokcham_v4_store
 
 let repository =
   Trust.Repository_id.of_string
@@ -26,6 +31,95 @@ let activated tree =
 let observed tree =
   Workspace.make_observed_tree ~canonical_tree:tree ~source_fingerprint:tree
   |> Result.get_ok
+
+let rec remove_tree path =
+  try
+    match (Unix.lstat path).Unix.st_kind with
+    | Unix.S_DIR ->
+        Sys.readdir path
+        |> Array.iter (fun name -> remove_tree (Filename.concat path name));
+        Unix.rmdir path
+    | Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO
+    | Unix.S_SOCK ->
+        Unix.unlink path
+  with Unix.Unix_error (Unix.ENOENT, _, _) -> ()
+
+let with_directory prefix run =
+  let directory = Filename.temp_file prefix "" in
+  Unix.unlink directory;
+  Unix.mkdir directory 0o700;
+  Fun.protect
+    ~finally:(fun () -> remove_tree directory)
+    (fun () -> run directory)
+
+let write_file root name contents =
+  Out_channel.with_open_bin (Filename.concat root name) (fun channel ->
+      Out_channel.output_string channel contents)
+
+let read_file root name =
+  In_channel.with_open_bin (Filename.concat root name) In_channel.input_all
+
+let capability byte =
+  String.make 32 byte |> Trust.signing_capability_of_private_key
+  |> Result.get_ok
+
+let device capability =
+  Trust.signing_public_key capability
+  |> Trust.device_of_public_key |> Result.get_ok
+
+let username value = Model.Username.of_string value |> Result.get_ok
+let draft value = Model.Draft_id.of_string value |> Result.get_ok
+
+let root_certificate authority =
+  Trust.certificates (Trust.authority_membership authority)
+  |> List.find (fun certificate -> Trust.certificate_issuer certificate = None)
+
+let bootstrap_into_empty_root ~populate run =
+  with_directory "v4-workspace-property-" (fun parent ->
+      let source = Filename.concat parent "source" in
+      let target = Filename.concat parent "target" in
+      let package = Filename.concat parent "package" in
+      Unix.mkdir source 0o700;
+      Unix.mkdir target 0o700;
+      populate source;
+      let administrator_capability = capability 'a' in
+      let administrator = device administrator_capability in
+      let recovery_capability = capability 'r' in
+      let recovery_device = device recovery_capability in
+      ignore
+        (Service.init_signed_with_recovery ~root:source
+           ~username:(username "alice") ~initial_draft:(draft "source-draft")
+           ~title:"source" ~repository ~device:administrator
+           ~signing_capability:administrator_capability ~recovery_device
+           ~recovery_capability
+        |> Result.get_ok);
+      let outbound =
+        Service.prepare_bootstrap_outbound ~root:source
+          ~signing_capability:administrator_capability
+        |> Result.get_ok
+      in
+      Package.materialize_artifact ~destination:package
+        outbound.Service.bootstrap_artifact
+      |> Result.get_ok;
+      let source_repository =
+        Store.open_repository ~root:source |> Result.get_ok
+      in
+      let source_state = Store.load source_repository |> Result.get_ok in
+      let authority =
+        match source_state.Store.collaboration with
+        | Some collaboration -> Store.authority collaboration |> Option.get
+        | None -> failwith "source lacks authority"
+      in
+      let certificate = root_certificate authority |> Trust.certificate_id in
+      ignore
+        (Service.bootstrap_from_package ~root:target ~repository ~package
+           ~basis:(Bootstrap.encode outbound.Service.bootstrap_basis)
+           ~verify_phrase:
+             (Recovery.verification_phrase (root_certificate authority))
+           ~username:(username "alice") ~initial_draft:(draft "target-draft")
+           ~title:"target" ~device:administrator ~local_certificate:certificate
+        |> Result.get_ok);
+      run target)
 
 let update_never_discards_a_dirty_tree_without_replace =
   QCheck2.Test.make ~count:300
@@ -90,6 +184,96 @@ let receipt_generation_is_monotonic_for_verified_projection_updates =
           | Workspace.Unsafe_path | Workspace.Nonempty_destination ) ->
           false)
 
+let generated_exact_snapshots_activate_with_file_mode_and_symlink_fidelity =
+  QCheck2.Test.make ~count:30
+    ~name:
+      "V4 workspace activation preserves generated exact file, mode, and \
+       symlink entries"
+    QCheck2.Gen.(triple (int_range 0 1_000_000) bool bool)
+    (fun (seed, executable, link) ->
+      try
+        let contents = Printf.sprintf "generated-%d\n" seed in
+        bootstrap_into_empty_root
+          ~populate:(fun source ->
+            write_file source "main.txt" contents;
+            write_file source "run.sh" "#!/bin/sh\necho generated\n";
+            if executable then
+              Unix.chmod (Filename.concat source "run.sh") 0o755;
+            if link then
+              Unix.symlink "main.txt" (Filename.concat source "main-link"))
+          (fun target ->
+            let before =
+              Store.open_repository ~root:target
+              |> Result.get_ok |> Store.load |> Result.get_ok
+            in
+            match Service.workspace_activate ~root:target with
+            | Error _ -> false
+            | Ok _ -> (
+                String.equal (read_file target "main.txt") contents
+                && (if executable then
+                      (Unix.lstat (Filename.concat target "run.sh"))
+                        .Unix.st_perm land 0o111
+                      <> 0
+                    else
+                      (Unix.lstat (Filename.concat target "run.sh"))
+                        .Unix.st_perm land 0o111
+                      = 0)
+                &&
+                if link then
+                  String.equal
+                    (Unix.readlink (Filename.concat target "main-link"))
+                    "main.txt"
+                else
+                  (not (Sys.file_exists (Filename.concat target "main-link")))
+                  &&
+                  match
+                    Service.workspace_update ~root:target ~replace:false
+                  with
+                  | Ok (Service.Workspace_already_current _) ->
+                      let after =
+                        Store.open_repository ~root:target
+                        |> Result.get_ok |> Store.load |> Result.get_ok
+                      in
+                      Yeokcham_store.Stored_object_id.equal
+                        before.Store.object_id after.Store.object_id
+                  | Ok (Service.Workspace_updated _) | Error _ -> false))
+      with _ -> false)
+
+let empty_and_missing_projection_closures_do_not_materialize_source () =
+  let empty =
+    bootstrap_into_empty_root
+      ~populate:(fun _ -> ())
+      (fun target ->
+        match Service.workspace_activate ~root:target with
+        | Error _ -> false
+        | Ok _ -> Sys.readdir target |> Array.to_list = [ ".yeokcham" ])
+  in
+  let missing =
+    bootstrap_into_empty_root
+      ~populate:(fun source -> write_file source "main.txt" "present\n")
+      (fun target ->
+        let basis =
+          Workspace.read_basis ~root:target |> Result.get_ok |> Option.get
+        in
+        let snapshot =
+          Model.Snapshot_id.to_string (Workspace.basis_snapshot basis)
+        in
+        let object_path =
+          Filename.concat
+            (Filename.concat
+               (Filename.concat (Filename.concat target ".yeokcham") "objects")
+               (String.sub snapshot 0 2))
+            (Filename.concat (String.sub snapshot 2 2)
+               (String.sub snapshot 4 60))
+        in
+        Unix.unlink object_path;
+        Result.is_error (Service.workspace_activate ~root:target)
+        && not (Sys.file_exists (Filename.concat target "main.txt")))
+  in
+  Alcotest.(check bool) "empty verified projection activates exactly" true empty;
+  Alcotest.(check bool)
+    "missing closure refuses without source mutation" true missing
+
 let () =
   Alcotest.run "V4 workspace properties"
     [
@@ -99,5 +283,10 @@ let () =
             update_never_discards_a_dirty_tree_without_replace;
           QCheck_alcotest.to_alcotest
             receipt_generation_is_monotonic_for_verified_projection_updates;
+          QCheck_alcotest.to_alcotest
+            generated_exact_snapshots_activate_with_file_mode_and_symlink_fidelity;
+          Alcotest.test_case
+            "empty and missing closures preserve source boundary" `Quick
+            empty_and_missing_projection_closures_do_not_materialize_source;
         ] );
     ]

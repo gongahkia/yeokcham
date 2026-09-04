@@ -51,6 +51,9 @@ The active V4 decisions are:
 - [ADR-097](docs/adr/097-v4-exact-working-tree-inspection.md): exact local
   current-versus-saved inspection that observes paths and snapshot entries
   without creating intent or a generic verification surface.
+- [ADR-098](docs/adr/098-v4-explicit-projection-workspace.md): verified
+  bootstrap-basis projection materialisation is explicit, local, receipt-bound,
+  and separate from bootstrap, receipt, authority, and shared history.
 
 Earlier product-track ADRs have been removed with their implementations. Git
 history retains their historical record; they are not active architecture.

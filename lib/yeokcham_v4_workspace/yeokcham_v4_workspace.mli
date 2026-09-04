@@ -42,6 +42,7 @@ type error =
   | Unsupported_schema_version of int64
   | Noncanonical_bytes
   | Basis_collision of string
+  | Receipt_collision of string
   | Io_error of { operation : string; path : string; message : string }
 
 val schema_version : int64
@@ -109,6 +110,7 @@ val encode_receipt : workspace_projection_receipt -> (string, error) result
 val decode_receipt : string -> (workspace_projection_receipt, error) result
 val basis_path : root:string -> string
 val receipt_path : root:string -> string
+val pending_receipt_path : root:string -> string
 val write_basis : root:string -> projection_basis -> (unit, error) result
 val read_basis : root:string -> (projection_basis option, error) result
 
@@ -116,14 +118,21 @@ val write_receipt :
   root:string -> workspace_projection_receipt -> (unit, error) result
 
 val stage_receipt :
-  root:string ->
-  workspace_projection_receipt ->
-  (staged_receipt, error) result
-(** Writes and syncs receipt bytes to a private temporary file. The staged file
-    is not an activation receipt and cannot be read by [read_receipt]. *)
+  root:string -> workspace_projection_receipt -> (staged_receipt, error) result
+(** Writes and syncs receipt bytes to a deterministic pending file. The staged
+    file is not an activation receipt and cannot be read by [read_receipt]. A
+    matching existing pending file is a resumable prepared operation. *)
 
 val publish_staged_receipt : staged_receipt -> (unit, error) result
 val discard_staged_receipt : staged_receipt -> unit
 
 val read_receipt :
   root:string -> (workspace_projection_receipt option, error) result
+
+val read_staged_receipt :
+  root:string -> (workspace_projection_receipt option, error) result
+(** Reads a prepared local materialisation receipt. It is never treated as an
+    activation receipt. *)
+
+val receipt_equal :
+  workspace_projection_receipt -> workspace_projection_receipt -> bool

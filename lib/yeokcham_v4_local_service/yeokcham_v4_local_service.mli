@@ -236,7 +236,8 @@ type workspace_materialization = {
     safety checkpoint/proof created before ordinary source bytes changed. *)
 
 type workspace_update =
-  | Workspace_already_current of Yeokcham_v4_workspace.workspace_projection_receipt
+  | Workspace_already_current of
+      Yeokcham_v4_workspace.workspace_projection_receipt
   | Workspace_updated of workspace_materialization
 
 val error_to_string : error -> string
@@ -430,6 +431,18 @@ val restore_in_place :
   root:string ->
   checkpoint:Yeokcham_v4_model.Snapshot_id.t ->
   (in_place_restore, error) result
+
+val workspace_activate :
+  root:string -> (workspace_materialization, error) result
+(** Explicitly materialises the verified imported projection into a root that
+    has no ordinary source entries. Bootstrap, receive, sync, and daemon paths
+    never call this operation. *)
+
+val workspace_update :
+  root:string -> replace:bool -> (workspace_update, error) result
+(** Explicitly refreshes an activated workspace. Without [replace], an exact
+    tree mismatch is a [Dirty_workspace] refusal. [replace] retains a safety
+    checkpoint and proof before it changes ordinary source bytes. *)
 
 val recover_in_place : root:string -> (in_place_restore option, error) result
 

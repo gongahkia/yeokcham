@@ -245,7 +245,16 @@ let local_records_are_create_only_or_atomic () =
       Alcotest.(check bool)
         "different basis cannot overwrite the verified marker" true collision;
       let receipt = Workspace.plan_receipt (activated basis) in
-      Workspace.write_receipt ~root receipt
+      let staged =
+        Workspace.stage_receipt ~root receipt
+        |> require_ok Workspace.error_to_string
+      in
+      Alcotest.(check bool)
+        "staged bytes are not a published receipt" true
+        (Workspace.read_receipt ~root
+        |> require_ok Workspace.error_to_string
+        |> Option.is_none);
+      Workspace.publish_staged_receipt staged
       |> require_ok Workspace.error_to_string;
       let changed_basis = make_basis ~tree:(identifier 'c') () in
       let changed_receipt =

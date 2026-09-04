@@ -66,9 +66,13 @@ than guessing that an arbitrary local state is a portable shared basis.
 into the bootstrapped ordinary root. The root must contain no ordinary entries:
 only the V4 metadata directory created by bootstrap is permitted. The adapter
 loads and validates the exact snapshot closure, derives the existing snapshot
-materialisation plan, and uses the existing restore journal/publish/recovery
-machinery. It writes the projection receipt only after source materialisation
-has completed.
+materialisation plan, and uses the existing local-service materialisation
+primitive. It persists a deterministic pending receipt before writing source,
+then atomically publishes that receipt only after source materialisation has
+completed. A rerun may resume only this exact pending operation, whose
+idempotent writer replaces partial ordinary output. This local pending record
+does not change `Project`; activation therefore does not create a checkpoint
+for an initially empty root.
 
 `workspace update` is equally explicit. It first scans the ordinary root using
 the established `.yeokcham` and `.git` exclusion boundary and compares the
@@ -76,7 +80,9 @@ resulting canonical tree root with the activation receipt. A difference is a
 `Dirty_workspace` refusal. `--replace` authorizes replacement only after the
 existing crash-safe in-place restore path has captured and durably retained the
 local safety checkpoint and its proof. Its output includes those identifiers.
-The receipt is advanced only after materialisation completes.
+The receipt is advanced only after materialisation completes. This is the
+existing prepare/apply/materialise/publish/recover restore journal, not an
+activation shortcut.
 
 Neither command contacts a relay, creates or signs a revision, selects an
 authority head, resolves a decision, infers intent, or calls bootstrap, receive,
@@ -93,9 +99,10 @@ round-trip checks, and golden fixtures. Unknown schema versions, malformed
 identifiers, noncanonical bytes, and incompatible records are rejected.
 
 They are not immutable object-store objects and do not extend the V4 canonical
-object format. Replacing a receipt uses a staged file and atomic rename; a
-receipt write failure leaves the preceding receipt intact. Basis creation is
-create-only and collision-safe.
+object format. Replacing a receipt uses a deterministic staged pending file and
+atomic rename; it represents only a resumable local prepared operation until
+publication. A receipt write failure leaves the preceding published receipt
+intact. Basis creation is create-only and collision-safe.
 
 ## Verification
 
@@ -106,7 +113,8 @@ clean update, dirty refusal, `--replace` safety recovery, empty trees,
 interruption/restart, receipt-write failure, corrupt/missing closures, stale
 or incompatible receipts, and unsafe paths. Each refusal and receipt/closure
 failure preserves ordinary source bytes; interrupted replacement is recovered
-through the existing restore journal before a receipt is published. Focused
+through the existing restore journal before a receipt is published; interrupted
+initial activation is resumed only from its matching pending receipt. Focused
 tests and `make ci` are required before WS-001 is marked complete.
 
 ## Consequences

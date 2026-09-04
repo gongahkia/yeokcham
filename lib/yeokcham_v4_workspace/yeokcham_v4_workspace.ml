@@ -24,7 +24,11 @@ type observed_tree = {
   observed_source_fingerprint : string;
 }
 
-type staged_receipt = { staged_temporary : string; staged_target : string }
+type staged_receipt = {
+  staged_temporary : string;
+  staged_target : string;
+  staged_was_present : bool;
+}
 
 type closure = Closure_complete | Closure_missing
 
@@ -63,6 +67,7 @@ type error =
   | Unsupported_schema_version of int64
   | Noncanonical_bytes
   | Basis_collision of string
+  | Receipt_collision of string
   | Io_error of { operation : string; path : string; message : string }
 
 let schema_version = 1L
@@ -85,6 +90,8 @@ let error_to_string = function
   | Noncanonical_bytes -> "V4 workspace record is not canonically encoded"
   | Basis_collision path ->
       "V4 projection basis path contains different bytes: " ^ path
+  | Receipt_collision path ->
+      "V4 pending projection receipt contains different bytes: " ^ path
   | Io_error { operation; path; message } ->
       Printf.sprintf "%s failed for %s: %s" operation path message
 
@@ -413,6 +420,8 @@ let basis_path ~root =
 let receipt_path ~root =
   Filename.concat (workspace_directory root) "projection-receipt-v1.cbor"
 
+let pending_receipt_path ~root = receipt_path ~root ^ ".pending"
+
 let io_error operation path error =
   Io_error { operation; path; message = Unix.error_message error }
 
@@ -486,18 +495,31 @@ let read_optional ~path decode =
     decode bytes |> Result.map Option.some
 
 let read_basis ~root = read_optional ~path:(basis_path ~root) decode_basis
-
-let temporary_path target =
-  Printf.sprintf "%s.tmp-%d-%Ld" target (Unix.getpid ())
-    (Int64.of_float (Unix.gettimeofday () *. 1_000_000_000.))
+let temporary_path target = target ^ ".pending"
 
 let stage_receipt ~root receipt =
   let* () = ensure_directory (workspace_directory root) in
   let* bytes = encode_receipt receipt in
   let target = receipt_path ~root in
   let temporary = temporary_path target in
-  let* () = write_new temporary bytes in
-  Ok { staged_temporary = temporary; staged_target = target }
+  if Sys.file_exists temporary then
+    let* existing = read_file temporary in
+    if String.equal existing bytes then
+      Ok
+        {
+          staged_temporary = temporary;
+          staged_target = target;
+          staged_was_present = true;
+        }
+    else Error (Receipt_collision temporary)
+  else
+    let* () = write_new temporary bytes in
+    Ok
+      {
+        staged_temporary = temporary;
+        staged_target = target;
+        staged_was_present = false;
+      }
 
 let publish_staged_receipt staged =
   try
@@ -507,7 +529,8 @@ let publish_staged_receipt staged =
     Error (io_error "rename" staged.staged_target error)
 
 let discard_staged_receipt staged =
-  try Unix.unlink staged.staged_temporary with Unix.Unix_error _ -> ()
+  if not staged.staged_was_present then
+    try Unix.unlink staged.staged_temporary with Unix.Unix_error _ -> ()
 
 let write_receipt ~root receipt =
   let* staged = stage_receipt ~root receipt in
@@ -518,3 +541,20 @@ let write_receipt ~root receipt =
       Error error
 
 let read_receipt ~root = read_optional ~path:(receipt_path ~root) decode_receipt
+
+let read_staged_receipt ~root =
+  read_optional ~path:(pending_receipt_path ~root) decode_receipt
+
+let receipt_equal left right =
+  Trust.Repository_id.equal left.receipt_repository_value
+    right.receipt_repository_value
+  && String.equal left.receipt_imported_basis_id_value
+       right.receipt_imported_basis_id_value
+  && Model.Snapshot_id.equal left.receipt_snapshot_value
+       right.receipt_snapshot_value
+  && String.equal left.receipt_canonical_tree_value
+       right.receipt_canonical_tree_value
+  && Int64.equal left.receipt_activation_generation_value
+       right.receipt_activation_generation_value
+  && String.equal left.receipt_source_fingerprint_value
+       right.receipt_source_fingerprint_value

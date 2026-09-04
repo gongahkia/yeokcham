@@ -31,6 +31,18 @@ the compare-and-swap state head, obtains caller-provided signing capability
 from a platform adapter, and never allows a collaborative wrapper to be
 stripped by an ordinary save.
 
+`Yeokcham_v4_workspace` owns only local canonical projection-basis and
+activation-receipt records plus pure activation/update plans. Bootstrap writes
+the basis record while it is creating a verified fresh repository; it remains
+outside the project-state wrapper, package, transport, authority, and signed
+records. The local service is the sole filesystem adapter: it validates the
+snapshot closure, stages the local receipt, and applies initial empty-root
+activation through the shared exact materialisation primitive. Its durable
+pending receipt resumes only that idempotent operation and does not advance the
+project state. Explicit dirty replacement delegates to the existing restore
+journal/proof mechanics. Receipt, relay, bootstrap, sync, and daemon modules
+do not depend on this materialisation path.
+
 `Yeokcham_v4_transport` owns canonical signed courier publications and feed
 validation. The relay owns only bounded, repository-scoped bearer access and
 immutable byte storage; its versioned local access registry, reverse-proxy TLS,

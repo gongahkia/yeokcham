@@ -182,6 +182,41 @@ active draft, baseline checkpoint, and local username; shared changes,
 resolutions, and deliveries remain distinct. Neither transition scans or
 materialises the working tree.
 
+## Explicit projection workspace
+
+A bootstrapped repository records one local
+`projection-basis-v1 = [1, repository, imported-basis-id, snapshot, tree,
+fingerprint]` before its first state head is published. The immutable
+`imported-basis-id` is the verified signed bootstrap-basis ID; it is not a
+remote alias, feed head, branch, delivery, or authority selection. The named
+snapshot and tree are the current verified projection baseline. This local
+record is absent from `Project`, authority, packages, relay artifacts,
+bootstrap bases, deliveries, and signed bytes.
+
+`workspace activate` is an explicit local materialisation transition. It
+requires an ordinary root with no entries other than the V4 metadata created by
+bootstrap, validates the complete named snapshot closure, and materialises its
+exact bytes, modes, and symlinks. After completion it atomically publishes a
+local `workspace-projection-receipt-v1` naming the repository, imported basis,
+snapshot, canonical tree, generation, and source fingerprint. A clean receipt
+therefore identifies exactly one exact projected tree without creating a
+revision, selecting authority, or changing shared history.
+
+Before initial source output, the same receipt bytes may exist only at the
+local pending path. That record is a prepared, resumable exact materialisation,
+not an activation receipt; a rerun accepts it only when it exactly matches the
+current verified plan. Reapplying the exact writer replaces partial output and
+then publishes the receipt. This activation-only recovery record changes no
+`Project` state.
+
+`workspace update` first observes the exact ordinary tree and compares its
+canonical tree root with the receipt. It refuses a dirty tree. Only explicit
+`--replace` may proceed; it uses the existing in-place restore journal to make
+a regular safety checkpoint and durable restore proof before replacing ordinary
+bytes. Neither command is reachable from bootstrap, receive, sync, relay, or
+daemon receipt. A missing/corrupt basis, receipt, closure, or unsafe output path
+is a typed refusal before ordinary source mutation.
+
 ## Advisory runtime state
 
 `Runtime_state` is disposable process observability, not `Project` state. A

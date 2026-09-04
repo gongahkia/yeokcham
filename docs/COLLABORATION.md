@@ -115,5 +115,9 @@ There is no general `clone`. An existing equivalent replica explicitly runs
 repository ID, named immutable basis ID, HTTPS URL, and independently compared
 root phrase, then uses `bootstrap`. Bootstrap verifies the signed basis before
 creating `.yeokcham`; it imports no private key or scratch state and does not
-materialise ordinary files. See `yeokcham help bootstrap` and the full contract
-before operating this path.
+materialise ordinary files. In a deliberately empty bootstrapped root, the
+person then explicitly runs `yeokcham workspace activate`. Later `workspace
+update` refuses local edits unless `--replace` is selected; that selection
+prints a regular safety checkpoint and restore proof. See `yeokcham help
+bootstrap`, `yeokcham help workspace`, and the full contract before operating
+this path.

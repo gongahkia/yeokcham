@@ -24,7 +24,8 @@ It includes:
   candidates, restore a quarantine, then explicitly purge it.
 - Offline directory packages, signed relay publication and bootstrap with
   complete snapshot-closure verification; receiving never materialises a
-  working tree.
+  working tree, while an explicit workspace action can materialise a verified
+  bootstrap basis.
 - Explicit multi-administrator authority, device enrolment and revocation,
   recovery packages, and local device custody through platform stores,
   SSH-agent keys, or PKCS#11 tokens.
@@ -68,8 +69,11 @@ merge, or CI-backed delivery. Linux and macOS `watch` are advisory capture;
 the daemon is Linux-only, and WSL is unsupported. Relay synchronization is for
 already-equivalent replicas behind an operator-managed HTTPS reverse proxy; a
 new replica requires an explicit signed bootstrap basis and independently
-compared root phrase. The relay is an untrusted immutable-byte courier, and
-stored payloads are not end-to-end encrypted.
+compared root phrase. Bootstrap itself does not write ordinary source files;
+`workspace activate` is the later explicit action for an empty bootstrapped
+root, and `workspace update --replace` retains local safety recovery before
+replacement. The relay is an untrusted immutable-byte courier, and stored
+payloads are not end-to-end encrypted.
 
 An external language server, when configured, receives disposable named
 snapshots and is advisory only. Local storage collection is an explicit

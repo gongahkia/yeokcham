@@ -236,7 +236,13 @@
   alcotest
   qcheck-core
   qcheck-alcotest
+  unix
   yeokcham_v4_model
+  yeokcham_v4_bootstrap
+  yeokcham_v4_local_service
+  yeokcham_v4_package
+  yeokcham_v4_recovery
+  yeokcham_v4_store
   yeokcham_v4_trust
   yeokcham_v4_workspace))
 
@@ -321,7 +327,8 @@
   yeokcham_v4_package
   yeokcham_v4_recovery
   yeokcham_v4_store
-  yeokcham_v4_trust)
+  yeokcham_v4_trust
+  yeokcham_v4_workspace)
  (deps
   (source_tree golden)))
 
@@ -333,6 +340,10 @@
   unix
   yeokcham_v4_local_service
   yeokcham_v4_model
+  yeokcham_v4_bootstrap
+  yeokcham_v4_package
+  yeokcham_v4_recovery
+  yeokcham_v4_store
   yeokcham_v4_trust)
  (deps ../bin/yeokcham_v4.exe))
 

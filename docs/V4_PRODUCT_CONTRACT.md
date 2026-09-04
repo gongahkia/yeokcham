@@ -90,6 +90,35 @@ all non-recent roots. `restore retain --operation ID` creates a proof for a
 legacy completed journal. These records never enter package, bootstrap, relay,
 authority, shared-change, or delivery state.
 
+## Explicit projection workspace
+
+`workspace activate --root PATH` is the sole command that materialises a
+verified bootstrap projection into ordinary source files. Bootstrap saves a
+local canonical basis marker only after full signature, authority, package, and
+snapshot-closure verification. It still writes no ordinary source file. An
+activation requires an ordinary root containing no entries except the
+`.yeokcham` metadata created by bootstrap, validates the named exact snapshot,
+then writes a local activation receipt after source materialisation completes.
+Before output it stores the same bytes only as a non-receipt pending operation;
+a rerun may resume that exact operation to replace partial output. Initial
+activation does not advance project state. The pending record is local
+workspace metadata, never package, relay, bootstrap, authority, or signed data.
+The receipt binds the repository, immutable bootstrap-basis ID, snapshot,
+canonical tree, activation generation, and tree fingerprint; it has no remote
+URL or credential and is outside project, authority, package, relay, bootstrap
+artifact, delivery, and signed state.
+
+`workspace update --root PATH` is always explicit. It exactly scans the
+ordinary tree and refuses it if its canonical root differs from the receipt.
+`workspace update --replace` is the only override: it first uses the normal
+in-place restore safety-checkpoint/proof path, prints those identifiers, then
+materialises the verified basis and publishes the next local receipt. A missing
+or corrupt basis/receipt/closure and an unsafe or nonempty destination refuse
+without ordinary-source mutation. Workspace actions never contact a remote,
+create a revision, select an authority head, resolve a decision, or infer
+intent. Receive, sync, bootstrap, daemon, relay, verification, and repair
+paths do not call workspace activation or update.
+
 `storage gc --dry-run --explain` is a read-only object-store projection. It
 lists every retained V4 object with the checkpoint or state-head reason that
 reaches it, and lists only unreachable V4 snapshot/tree/content/manifest/chunk

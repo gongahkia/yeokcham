@@ -1,5 +1,9 @@
 module Model = Yeokcham_v4_model
 module Service = Yeokcham_v4_local_service
+module Bootstrap = Yeokcham_v4_bootstrap
+module Package = Yeokcham_v4_package
+module Recovery = Yeokcham_v4_recovery
+module Store = Yeokcham_v4_store
 module Trust = Yeokcham_v4_trust
 
 let require_success name status stderr =
@@ -145,6 +149,13 @@ let repository =
     "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
   |> Result.get_ok
 
+let root_certificate authority =
+  Trust.certificates (Trust.authority_membership authority)
+  |> List.find (fun certificate -> Trust.certificate_issuer certificate = None)
+
+let draft value = model_id Model.Draft_id.of_string value
+let username value = model_id Model.Username.of_string value
+
 let command_journey_reports_saved_work_and_drafts () =
   with_directory "yeokcham-v4-cli-" (fun root ->
       write_file root "main.ml" "let version = 1\n";
@@ -247,6 +258,117 @@ let command_journey_reports_saved_work_and_drafts () =
       expect_output_contains "restore into the tree is uncaptured work"
         "uncaptured yes" output)
 
+let workspace_cli_journey_requires_explicit_activation_and_replacement () =
+  with_directory "yeokcham-v4-workspace-cli-" (fun parent ->
+      let source = Filename.concat parent "source" in
+      let target = Filename.concat parent "target" in
+      let package = Filename.concat parent "bootstrap-package" in
+      Unix.mkdir source 0o700;
+      Unix.mkdir target 0o700;
+      write_file source "main.ml" "let version = 1\n";
+      let administrator_capability = signing_capability 'a' in
+      let administrator = trust_device administrator_capability in
+      let recovery_capability = signing_capability 'r' in
+      let recovery_device = trust_device recovery_capability in
+      ignore
+        (Service.init_signed_with_recovery ~root:source
+           ~username:(username "alice") ~initial_draft:(draft "source-draft")
+           ~title:"source" ~repository ~device:administrator
+           ~signing_capability:administrator_capability ~recovery_device
+           ~recovery_capability
+        |> require_ok Service.error_to_string);
+      let outbound =
+        Service.prepare_bootstrap_outbound ~root:source
+          ~signing_capability:administrator_capability
+        |> require_ok Service.error_to_string
+      in
+      Package.materialize_artifact ~destination:package
+        outbound.Service.bootstrap_artifact
+      |> require_ok Package.error_to_string;
+      let source_repository =
+        Store.open_repository ~root:source |> require_ok Store.error_to_string
+      in
+      let source_state =
+        Store.load source_repository |> require_ok Store.error_to_string
+      in
+      let authority =
+        match source_state.Store.collaboration with
+        | Some collaboration -> (
+            match Store.authority collaboration with
+            | Some authority -> authority
+            | None -> Alcotest.fail "source lacks authority")
+        | None -> Alcotest.fail "source lacks collaboration"
+      in
+      let certificate = root_certificate authority |> Trust.certificate_id in
+      ignore
+        (Service.bootstrap_from_package ~root:target ~repository ~package
+           ~basis:(Bootstrap.encode outbound.Service.bootstrap_basis)
+           ~verify_phrase:
+             (Recovery.verification_phrase (root_certificate authority))
+           ~username:(username "alice") ~initial_draft:(draft "target-draft")
+           ~title:"target" ~device:administrator ~local_certificate:certificate
+        |> require_ok Service.error_to_string);
+      Alcotest.(check bool)
+        "bootstrap did not materialise ordinary source" false
+        (Sys.file_exists (Filename.concat target "main.ml"));
+      let output, errors, status =
+        run [ "workspace"; "activate"; "--root"; target ]
+      in
+      require_success "workspace activate" status errors;
+      expect_output_contains "activation is inspectable" "workspace activated"
+        output;
+      Alcotest.(check string)
+        "activation materialised exact bytes" "let version = 1\n"
+        (read_file target "main.ml");
+      write_file target "main.ml" "let local = 2\n";
+      let _output, errors, status =
+        run [ "workspace"; "update"; "--root"; target ]
+      in
+      (match status with
+      | Unix.WEXITED 2 -> ()
+      | Unix.WEXITED code ->
+          Alcotest.failf "dirty workspace update exited %d rather than 2" code
+      | Unix.WSIGNALED signal | Unix.WSTOPPED signal ->
+          Alcotest.failf "dirty workspace update ended by signal %d" signal);
+      expect_output_contains "dirty update has a stable refusal"
+        "workspace contains bytes that do not match its activation receipt"
+        errors;
+      Alcotest.(check string)
+        "dirty update preserves ordinary bytes" "let local = 2\n"
+        (read_file target "main.ml");
+      let output, errors, status =
+        run [ "workspace"; "update"; "--root"; target; "--replace" ]
+      in
+      require_success "workspace update --replace" status errors;
+      expect_output_contains "replacement reports its safety checkpoint"
+        "safety-checkpoint " output;
+      expect_output_contains "replacement reports its durable proof"
+        "restore-proof " output;
+      let safety = first_prefixed_value "safety-checkpoint " output in
+      Alcotest.(check string)
+        "replacement materialised verified bytes" "let version = 1\n"
+        (read_file target "main.ml");
+      let recovered = Filename.concat parent "recovered-local-edit" in
+      Unix.mkdir recovered 0o700;
+      let output, errors, status =
+        run
+          [
+            "restore";
+            "--root";
+            target;
+            "--checkpoint";
+            safety;
+            "--destination";
+            recovered;
+          ]
+      in
+      require_success "restore replacement safety checkpoint" status errors;
+      expect_output_contains "restore printed its destination" "restored "
+        output;
+      Alcotest.(check string)
+        "printed safety checkpoint restores local bytes" "let local = 2\n"
+        (read_file recovered "main.ml"))
+
 let help_version_and_invalid_invocation_are_distinct () =
   let output, errors, status = run [ "--help" ] in
   require_success "top-level help" status errors;
@@ -262,6 +384,10 @@ let help_version_and_invalid_invocation_are_distinct () =
   require_success "changes flag help" status errors;
   expect_output_contains "flag help has exact usage"
     "usage: yeokcham changes [--root PATH]" output;
+  let output, errors, status = run [ "workspace"; "update"; "--help" ] in
+  require_success "workspace update help" status errors;
+  expect_output_contains "workspace help documents explicit replacement"
+    "dirty tree is refused unless --replace is explicit" output;
   let output, errors, status = run [ "storage"; "gc"; "--help" ] in
   require_success "nested command help" status errors;
   expect_output_contains "nested help names quarantine" "quarantine" output;
@@ -294,6 +420,9 @@ let every_documented_help_path_is_available () =
       [ "restore"; "proofs" ];
       [ "restore"; "retain" ];
       [ "restore"; "forget" ];
+      [ "workspace" ];
+      [ "workspace"; "activate" ];
+      [ "workspace"; "update" ];
       [ "draft" ];
       [ "draft"; "new" ];
       [ "share" ];
@@ -1532,6 +1661,9 @@ let () =
             command_changes_reports_exact_entries_without_saving;
           Alcotest.test_case "saved work and drafts" `Quick
             command_journey_reports_saved_work_and_drafts;
+          Alcotest.test_case "explicit workspace activation and replacement"
+            `Quick
+            workspace_cli_journey_requires_explicit_activation_and_replacement;
           Alcotest.test_case "share resolve withdraw and deliver" `Quick
             command_journey_shares_resolves_withdraws_and_delivers;
           Alcotest.test_case "isolated materialize and resolve" `Quick

@@ -17,6 +17,7 @@ module Transport_http = Yeokcham_v4_transport_http
 module Relay_http = Yeokcham_v4_relay_http
 module Relay_access = Yeokcham_v4_relay_access
 module Semantic_config = Yeokcham_v4_semantic_config
+module Workspace = Yeokcham_v4_workspace
 
 [@@@warning "-40-42"]
 
@@ -63,6 +64,8 @@ let usage_text =
   \  yeokcham restore proofs [--root PATH]\n\
   \  yeokcham restore retain [--root PATH] --operation ID\n\
   \  yeokcham restore forget [--root PATH] --operation ID\n\
+  \  yeokcham workspace activate [--root PATH]\n\
+  \  yeokcham workspace update [--root PATH] [--replace]\n\
   \  yeokcham draft new [--root PATH] --id ID --title TITLE\n\
   \  yeokcham share [--root PATH] --change ID --revision ID [--authority EPOCH]\n\
   \  yeokcham withdraw [--root PATH] --change ID\n\
@@ -87,7 +90,7 @@ let usage_text =
    --repository ID --basis ID --username NAME --draft ID --title TITLE \
    --device ID --verify-phrase \"TWELVE WORDS\"\n\
   \  receipt rule: receive, sync, and bootstrap never scan or materialize\n\
-  \     the working tree; restore is explicit\n\
+  \     the working tree; restore and workspace actions are explicit\n\
   \  yeokcham remote add [--root PATH] NAME URL\n\
   \  yeokcham remote remove [--root PATH] NAME\n\
   \  yeokcham remote login [--root PATH] NAME\n\
@@ -201,6 +204,24 @@ let help_for = function
       Some
         "usage: yeokcham restore forget [--root PATH] --operation ID\n\n\
          Explicitly remove one durable local restore proof."
+  | [ "workspace" ] ->
+      Some
+        "usage: yeokcham workspace activate [--root PATH]\n\
+        \       yeokcham workspace update [--root PATH] [--replace]\n\n\
+         Explicitly materialise or refresh the verified imported projection. \
+         Bootstrap, receive, sync, and daemon commands never call this path."
+  | [ "workspace"; "activate" ] ->
+      Some
+        "usage: yeokcham workspace activate [--root PATH]\n\n\
+         Materialise the verified imported projection only into a root with no \
+         ordinary source entries. It creates a local activation receipt after \
+         materialisation; it never contacts a remote or selects authority."
+  | [ "workspace"; "update" ] ->
+      Some
+        "usage: yeokcham workspace update [--root PATH] [--replace]\n\n\
+         Compare the exact working tree against its activation receipt. A \
+         dirty tree is refused unless --replace is explicit; replacement first \
+         creates and prints a durable local safety checkpoint and proof."
   | [ "draft" ] ->
       Some
         "usage: yeokcham draft new [--root PATH] --id ID --title TITLE\n\n\
@@ -681,6 +702,66 @@ let parse_restore arguments =
     | _ -> usage ()
   in
   loop None None None arguments
+
+let parse_workspace_activate arguments =
+  let rec loop root = function
+    | [] -> Option.value root ~default:default_root
+    | "--root" :: value :: rest when Option.is_none root ->
+        loop (Some value) rest
+    | _ -> usage ()
+  in
+  loop None arguments
+
+let parse_workspace_update arguments =
+  let rec loop root replace = function
+    | [] -> (Option.value root ~default:default_root, replace)
+    | "--root" :: value :: rest when Option.is_none root ->
+        loop (Some value) replace rest
+    | "--replace" :: rest when not replace -> loop root true rest
+    | _ -> usage ()
+  in
+  loop None false arguments
+
+let render_workspace_materialization verb materialized =
+  let receipt = materialized.Service.workspace_receipt in
+  Printf.printf "workspace %s\n" verb;
+  Printf.printf "basis %s\n" (Workspace.receipt_imported_basis_id receipt);
+  Printf.printf "snapshot %s\n"
+    (Model.Snapshot_id.to_string (Workspace.receipt_snapshot receipt));
+  Printf.printf "tree %s\n" (Workspace.receipt_canonical_tree receipt);
+  Printf.printf "activation-generation %Ld\n"
+    (Workspace.receipt_activation_generation receipt);
+  match
+    ( materialized.Service.workspace_safety_checkpoint,
+      materialized.Service.workspace_restore_proof )
+  with
+  | Some checkpoint, Some proof ->
+      Printf.printf "safety-checkpoint %s\n"
+        (Model.Snapshot_id.to_string checkpoint);
+      Printf.printf "restore-proof %s\n" proof
+  | None, None -> ()
+  | Some _, None | None, Some _ ->
+      fail "workspace materialisation returned incomplete safety evidence"
+
+let run_workspace_activate arguments =
+  let root = parse_workspace_activate arguments in
+  Service.workspace_activate ~root
+  |> require_ok Service.error_to_string
+  |> render_workspace_materialization "activated"
+
+let run_workspace_update arguments =
+  let root, replace = parse_workspace_update arguments in
+  match
+    Service.workspace_update ~root ~replace
+    |> require_ok Service.error_to_string
+  with
+  | Service.Workspace_already_current receipt ->
+      Printf.printf "workspace already-current\n";
+      Printf.printf "basis %s\n" (Workspace.receipt_imported_basis_id receipt);
+      Printf.printf "activation-generation %Ld\n"
+        (Workspace.receipt_activation_generation receipt)
+  | Service.Workspace_updated materialized ->
+      render_workspace_materialization "updated" materialized
 
 let run_init arguments =
   let root, username, draft, title = parse_init arguments in
@@ -3028,6 +3109,9 @@ let dispatch () =
   | _ :: "restore" :: "retain" :: arguments -> run_restore_retain arguments
   | _ :: "restore" :: "forget" :: arguments -> run_restore_forget arguments
   | _ :: "restore" :: arguments -> run_restore arguments
+  | _ :: "workspace" :: "activate" :: arguments ->
+      run_workspace_activate arguments
+  | _ :: "workspace" :: "update" :: arguments -> run_workspace_update arguments
   | _ :: "draft" :: "new" :: arguments -> run_new_draft arguments
   | _ :: "share" :: arguments -> run_share arguments
   | _ :: "withdraw" :: arguments -> run_withdraw arguments
