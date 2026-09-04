@@ -178,3 +178,19 @@ mismatched signers, wrong commits, and changed archives. The fixture creates no
 `.yeokcham` directory. It is supply-chain adapter evidence only: its temporary
 key is not a maintainer key, and passing it does not claim a V4 release, source
 hosting, platform support, or opam publication.
+
+## WS-001 explicit projection workspace
+
+On 2026-09-04, `make ci` passed in 17.6 seconds. Its WS-001 coverage includes
+the seven-test workspace unit suite (pure plans/refusals and canonical local
+records), four workspace property cases, the three-test bootstrap suite, and
+the nineteen-test CLI suite. The generated property executes 30 exact
+activation cases; each has two regular source paths and an optional symlink,
+while the bootstrap fixture separately covers one regular path, one executable
+path, and one symlink. It also checks an empty tree, missing snapshot closure,
+receipt-stage failure before source output, stale receipt refusal, resumable
+pending activation, clean-state replay, and `--replace` safety recovery.
+
+These are small correctness fixtures only. They do not measure object-count,
+repository-size, transfer, latency, or concurrency capacity; EVIDENCE-001 owns
+any such claim.

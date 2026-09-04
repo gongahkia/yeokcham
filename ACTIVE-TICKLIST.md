@@ -86,25 +86,35 @@ yeokcham workspace update [--root PATH] [--replace]
 
 **Types and pure transitions first:**
 
-- [ ] Define a Projection_basis that identifies the verified immutable imported basis and exact snapshot/checkpoint being projected; do not reuse a mutable remote alias as identity.
-- [ ] Define a versioned Workspace_projection_receipt containing repository identity, basis identifier, snapshot/checkpoint identifier, canonical tree identifier, activation generation, and source-byte fingerprint/root needed to recognise a clean projected tree. It contains no credential or remote URL.
-- [ ] Define pure activate and plan_update transitions returning a complete materialisation plan or a typed refusal: Nonempty_destination, Dirty_workspace, Missing_closure, No_verified_basis, Receipt_mismatch, or Unsafe_path. They have no filesystem or network dependency.
-- [ ] State and test: a clean projection receipt maps to exactly one verified tree; a receipt never changes authority/shared history; and an update cannot discard uncheckpointed bytes.
+- [x] Define a Projection_basis that identifies the verified immutable imported basis and exact snapshot/checkpoint being projected; do not reuse a mutable remote alias as identity.
+- [x] Define a versioned Workspace_projection_receipt containing repository identity, basis identifier, snapshot/checkpoint identifier, canonical tree identifier, activation generation, and source-byte fingerprint/root needed to recognise a clean projected tree. It contains no credential or remote URL.
+- [x] Define pure activate and plan_update transitions returning a complete materialisation plan or a typed refusal: Nonempty_destination, Dirty_workspace, Missing_closure, No_verified_basis, Receipt_mismatch, or Unsafe_path. They have no filesystem or network dependency.
+- [x] State and test: a clean projection receipt maps to exactly one verified tree; a receipt never changes authority/shared history; and an update cannot discard uncheckpointed bytes.
 
 **Persistent adapter and CLI:**
 
-- [ ] Add a versioned canonical receipt record and golden fixture under test/golden/v4; reject unknown mandatory features, malformed IDs, version mismatch, and noncanonical bytes.
-- [ ] Build the materialisation plan with Yeokcham_v4_local_service restore primitives rather than a second tree writer. Keep its prepare/publish/recover journal semantics and write the receipt only after completion.
-- [ ] Add workspace parsing and concise text output in bin/yeokcham_v4.ml; preserve bootstrap, receive, and sync semantics.
-- [ ] Add JSON output only when CLI-001 establishes the shared envelope; do not invent a one-off schema.
+- [x] Add a versioned canonical receipt record and golden fixture under test/golden/v4; reject unknown mandatory features, malformed IDs, version mismatch, and noncanonical bytes.
+- [x] Build the materialisation plan with Yeokcham_v4_local_service restore primitives rather than a second tree writer. Keep its prepare/publish/recover journal semantics and write the receipt only after completion.
+- [x] Add workspace parsing and concise text output in bin/yeokcham_v4.ml; preserve bootstrap, receive, and sync semantics.
+- [x] Add JSON output only when CLI-001 establishes the shared envelope; do not invent a one-off schema. No workspace-specific JSON was added.
 
 **Tests and acceptance:**
 
-- [ ] Unit: initial activation, clean update, dirty default refusal, --replace safety checkpoint, empty tree, file/mode/symlink exactness, and all typed refusals.
-- [ ] Generated: random exact snapshots activate then compare byte/mode/symlink trees; replayed activation/update never changes model state beyond the local receipt.
-- [ ] Failure: interrupted materialisation, receipt write failure, missing closure, stale receipt, malicious path traversal, and --replace recovery. Verify no source mutation on every refusal/failure.
-- [ ] CLI journey: bootstrap into an empty directory, explicitly activate, make a local edit, observe default update refusal, use --replace, and restore the printed safety checkpoint.
-- [ ] Run focused tests plus make ci; add measured duration/path-count notes to TESTING_AND_EXPERIMENTS.md without claiming the capacity target unless EVIDENCE-001 measures it.
+- [x] Unit: initial activation, clean update, dirty default refusal, --replace safety checkpoint, empty tree, file/mode/symlink exactness, and all typed refusals.
+- [x] Generated: random exact snapshots activate then compare byte/mode/symlink trees; replayed activation/update never changes model state beyond the local receipt.
+- [x] Failure: interrupted materialisation, receipt write failure, missing closure, stale receipt, malicious path traversal, and --replace recovery. Verify no source mutation on every refusal/failure.
+- [x] CLI journey: bootstrap into an empty directory, explicitly activate, make a local edit, observe default update refusal, use --replace, and restore the printed safety checkpoint.
+- [x] Run focused tests plus make ci; add measured duration/path-count notes to TESTING_AND_EXPERIMENTS.md without claiming the capacity target unless EVIDENCE-001 measures it.
+
+**Verification (2026-09-04):** `opam exec -- dune build @fmt @lint @all`,
+`opam exec -- dune exec test/test_v4_workspace.exe`,
+`opam exec -- dune exec test/v4_workspace_property_test.exe`,
+`opam exec -- dune exec test/test_v4_bootstrap.exe`, and
+`opam exec -- dune exec test/test_v4_cli.exe` passed. `make ci` passed in 17.6
+seconds: it includes the seven-test workspace unit suite, four workspace
+property cases (including 30 generated exact activation cases), three bootstrap
+tests, and nineteen CLI journeys. See `TESTING_AND_EXPERIMENTS.md` for the
+fixture path-count note; this is not capacity evidence.
 
 ### TRANSPORT-002 — V2 efficient, resumable object transfer
 
