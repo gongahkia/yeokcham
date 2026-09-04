@@ -60,7 +60,7 @@ esac
 mkdir "$output"
 
 results="$output/workspace-runs.tsv"
-printf '%s\n' 'iteration\tpaths\tlogical_bytes\tinit_s\tprepare_s\tpackage_s\tbootstrap_s\tactivate_s\twall_s\tuser_cpu_s\tsystem_cpu_s\tmax_rss_kib' > "$results"
+printf 'iteration\tpaths\tlogical_bytes\tinit_s\tprepare_s\tpackage_s\tbootstrap_s\tactivate_s\twall_s\tuser_cpu_s\tsystem_cpu_s\tmax_rss_kib\n' > "$results"
 printf '%s\n' "source_revision=$(git -C "$repository_root" rev-parse HEAD)" > "$output/profile.txt"
 printf '%s\n' "paths=$paths" >> "$output/profile.txt"
 printf '%s\n' "logical_bytes=$bytes" >> "$output/profile.txt"
@@ -84,8 +84,11 @@ while [ "$iteration" -le "$iterations" ]; do
   package_seconds=$(sed -n 's/^package_materialize_seconds=//p' "$run/scenario.txt")
   bootstrap_seconds=$(sed -n 's/^bootstrap_seconds=//p' "$run/scenario.txt")
   activate_seconds=$(sed -n 's/^workspace_activate_seconds=//p' "$run/scenario.txt")
-  resources=$(cat "$run/resources.tsv")
-  printf '%s\n' "$iteration\t$paths\t$bytes\t$init_seconds\t$prepare_seconds\t$package_seconds\t$bootstrap_seconds\t$activate_seconds\t$resources" >> "$results"
+  resources=$(tr -d '\n' < "$run/resources.tsv")
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+    "$iteration" "$paths" "$bytes" "$init_seconds" "$prepare_seconds" \
+    "$package_seconds" "$bootstrap_seconds" "$activate_seconds" "$resources" \
+    >> "$results"
   rm -r "$run"
   iteration=$((iteration + 1))
 done

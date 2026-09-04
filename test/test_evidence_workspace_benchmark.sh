@@ -24,6 +24,8 @@ output="$scratch/output"
 [ -f "$output/workspace-runs.tsv" ] || fail 'run measurements were not retained'
 [ "$(wc -l < "$output/workspace-runs.tsv" | tr -d ' ')" = 2 ] \
   || fail 'expected one measurement plus TSV header'
+awk -F '\t' 'NR == 2 { exit NF == 12 ? 0 : 1 }' "$output/workspace-runs.tsv" \
+  || fail 'measurement row does not have the documented TSV columns'
 grep -F 'paths=10' "$output/profile.txt" >/dev/null \
   || fail 'profile did not retain the exact path count'
 grep -F 'logical_bytes=1000' "$output/profile.txt" >/dev/null \
