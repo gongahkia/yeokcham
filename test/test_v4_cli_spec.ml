@@ -43,6 +43,40 @@ let completion_is_deterministic_and_complete () =
     "Fish has declarative commands" true
     (String.contains (Spec.render_completion Spec.Fish) 'c')
 
+let receipt_and_diagnostic_paths_are_never_hook_eligible () =
+  let excluded =
+    [
+      [ "receive" ];
+      [ "sync" ];
+      [ "bootstrap" ];
+      [ "daemon"; "start" ];
+      [ "daemon"; "status" ];
+      [ "daemon"; "stop" ];
+      [ "daemon"; "sync" ];
+      [ "relay"; "serve" ];
+      [ "relay"; "access"; "issue" ];
+      [ "relay"; "access"; "rotate" ];
+      [ "relay"; "access"; "revoke" ];
+      [ "relay"; "access"; "list" ];
+      [ "verify" ];
+      [ "repair"; "plan" ];
+      [ "repair"; "apply" ];
+      [ "repair"; "defer" ];
+    ]
+  in
+  List.iter
+    (fun path ->
+      match Spec.find path with
+      | Some { Spec.command_hook_eligible = false; _ } -> ()
+      | Some _ ->
+          Alcotest.fail
+            ("receipt or diagnostic command is hook eligible: "
+           ^ String.concat " " path)
+      | None ->
+          Alcotest.fail
+            ("missing command specification: " ^ String.concat " " path))
+    excluded
+
 let () =
   Alcotest.run "V4 CLI specification"
     [
@@ -52,5 +86,7 @@ let () =
             command_paths_are_unique_and_valid;
           Alcotest.test_case "completion is deterministic and complete" `Quick
             completion_is_deterministic_and_complete;
+          Alcotest.test_case "receipt and diagnostic paths exclude hooks" `Quick
+            receipt_and_diagnostic_paths_are_never_hook_eligible;
         ] );
     ]

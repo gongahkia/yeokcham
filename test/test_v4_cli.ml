@@ -7,6 +7,7 @@ module Store = Yeokcham_v4_store
 module Raw_store = Yeokcham_store
 module Trust = Yeokcham_v4_trust
 module Cli_data = Yeokcham_v4_cli_data
+module Cli_spec = Yeokcham_v4_cli_spec
 
 let require_success name status stderr =
   match status with
@@ -127,6 +128,12 @@ let line_after marker output =
 let write_file root name contents =
   Out_channel.with_open_bin (Filename.concat root name) (fun channel ->
       Out_channel.output_string channel contents)
+
+let write_script root name contents =
+  let path = Filename.concat root name in
+  write_file root name ("#!/bin/sh\n" ^ contents);
+  Unix.chmod path 0o700;
+  path
 
 let read_file root name =
   In_channel.with_open_bin (Filename.concat root name) In_channel.input_all
@@ -408,96 +415,7 @@ let help_version_and_invalid_invocation_are_distinct () =
   expect_output_contains "invalid invocation remains an error" "usage:" errors
 
 let every_documented_help_path_is_available () =
-  let paths =
-    [
-      [ "init" ];
-      [ "join" ];
-      [ "save" ];
-      [ "status" ];
-      [ "changes" ];
-      [ "log" ];
-      [ "graph" ];
-      [ "timeline" ];
-      [ "restore" ];
-      [ "restore"; "proofs" ];
-      [ "restore"; "retain" ];
-      [ "restore"; "forget" ];
-      [ "workspace" ];
-      [ "workspace"; "activate" ];
-      [ "workspace"; "update" ];
-      [ "draft" ];
-      [ "draft"; "new" ];
-      [ "share" ];
-      [ "withdraw" ];
-      [ "resolve" ];
-      [ "decision" ];
-      [ "decision"; "show" ];
-      [ "decision"; "inspect" ];
-      [ "decision"; "diff" ];
-      [ "decision"; "propose" ];
-      [ "decision"; "materialize-proposal" ];
-      [ "decision"; "materialize" ];
-      [ "package" ];
-      [ "package"; "create" ];
-      [ "package"; "adopt" ];
-      [ "receive" ];
-      [ "bootstrap" ];
-      [ "bootstrap"; "publish" ];
-      [ "remote" ];
-      [ "remote"; "add" ];
-      [ "remote"; "remove" ];
-      [ "remote"; "login" ];
-      [ "semantic" ];
-      [ "semantic"; "server" ];
-      [ "semantic"; "server"; "add" ];
-      [ "semantic"; "server"; "list" ];
-      [ "semantic"; "server"; "configure" ];
-      [ "semantic"; "server"; "enable" ];
-      [ "semantic"; "server"; "disable" ];
-      [ "semantic"; "server"; "remove" ];
-      [ "sync" ];
-      [ "relay" ];
-      [ "relay"; "serve" ];
-      [ "relay"; "access" ];
-      [ "relay"; "access"; "issue" ];
-      [ "relay"; "access"; "rotate" ];
-      [ "relay"; "access"; "revoke" ];
-      [ "relay"; "access"; "list" ];
-      [ "device" ];
-      [ "device"; "create" ];
-      [ "device"; "attach" ];
-      [ "device"; "custody" ];
-      [ "device"; "show" ];
-      [ "device"; "enroll" ];
-      [ "device"; "revoke" ];
-      [ "device"; "rotate" ];
-      [ "authority" ];
-      [ "authority"; "heads" ];
-      [ "authority"; "reconcile" ];
-      [ "recovery" ];
-      [ "recovery"; "use" ];
-      [ "recovery"; "refresh" ];
-      [ "user" ];
-      [ "user"; "register" ];
-      [ "daemon" ];
-      [ "daemon"; "start" ];
-      [ "daemon"; "status" ];
-      [ "daemon"; "stop" ];
-      [ "daemon"; "sync" ];
-      [ "deliver" ];
-      [ "pin" ];
-      [ "unpin" ];
-      [ "compact" ];
-      [ "storage" ];
-      [ "storage"; "roots" ];
-      [ "storage"; "gc" ];
-      [ "storage"; "gc"; "status" ];
-      [ "storage"; "gc"; "resume" ];
-      [ "storage"; "gc"; "restore" ];
-      [ "storage"; "gc"; "purge" ];
-      [ "watch" ];
-    ]
-  in
+  let paths = Cli_spec.command_paths () in
   List.iter
     (fun path ->
       let output, errors, status = run (path @ [ "--help" ]) in
@@ -1808,6 +1726,135 @@ let completion_scripts_are_static_and_parse_in_each_shell () =
       check "zsh" "zsh";
       check "fish" "fish")
 
+let hooks_observe_only_committed_eligible_commands () =
+  with_directory "yeokcham-v4-cli-hooks-" (fun root ->
+      write_file root "main.ml" "let version = 1\n";
+      let _output, errors, status =
+        run
+          [
+            "init";
+            "--root";
+            root;
+            "--username";
+            "alice";
+            "--draft";
+            "hook-draft";
+            "--title";
+            "hook work";
+          ]
+      in
+      require_success "hook setup init" status errors;
+      with_external_directory "yeokcham-v4-cli-hook-observer-"
+        (fun observer_directory ->
+          let marker = Filename.concat observer_directory "event.json" in
+          let script =
+            write_script observer_directory "observe"
+              "IFS= read -r event\nprintf '%s' \"$event\" > \"$1\"\n"
+          in
+          let output, errors, status =
+            run
+              [
+                "hook";
+                "add";
+                "--root";
+                root;
+                "--event";
+                "save";
+                "--";
+                script;
+                marker;
+                "secret-hook-argument";
+              ]
+          in
+          require_success "hook add" status errors;
+          let hook_id =
+            first_prefixed_value "hook " output
+            |> String.split_on_char ' ' |> List.hd
+          in
+          let _output, errors, status = run [ "save"; "--root"; root ] in
+          require_success "unchanged save with hook" status errors;
+          Alcotest.(check bool)
+            "unchanged save does not invoke the observer" false
+            (Sys.file_exists marker);
+          let before_verify = read_file root "main.ml" in
+          let _output, errors, status =
+            run [ "verify"; "--root"; root; "--format"; "json" ]
+          in
+          require_success "verify excludes observers" status errors;
+          Alcotest.(check bool)
+            "verification does not invoke the observer" false
+            (Sys.file_exists marker);
+          Alcotest.(check string)
+            "verification leaves ordinary source unchanged" before_verify
+            (read_file root "main.ml");
+          write_file root "main.ml" "let version = 2\n";
+          let _output, errors, status = run [ "save"; "--root"; root ] in
+          require_success "changed save invokes hook" status errors;
+          let event = In_channel.with_open_bin marker In_channel.input_all in
+          expect_output_contains "save hook has a public event name"
+            "\"event\":\"save\"" event;
+          expect_output_contains "save hook has its invoking command"
+            "\"command\":\"save\"" event;
+          let output, errors, status =
+            run [ "hook"; "list"; "--root"; root; "--format"; "json" ]
+          in
+          require_success "hook list JSON" status errors;
+          let envelope =
+            Cli_data.decode (String.trim output) |> Result.get_ok
+          in
+          Alcotest.(check string)
+            "hook list command envelope" "hook-list"
+            (Cli_data.command envelope);
+          Alcotest.(check bool)
+            "hook list redacts configured argv arguments" false
+            (contains output "secret-hook-argument");
+          let _output, errors, status =
+            run [ "hook"; "test"; "--root"; root; "--id"; hook_id ]
+          in
+          require_success "hook test" status errors;
+          let event = In_channel.with_open_bin marker In_channel.input_all in
+          expect_output_contains "explicit test has its own command"
+            "\"command\":\"hook-test\"" event;
+          let _output, errors, status =
+            run [ "hook"; "remove"; "--root"; root; "--id"; hook_id ]
+          in
+          require_success "hook remove" status errors))
+
+let hook_failure_is_a_warning_not_a_save_failure () =
+  with_directory "yeokcham-v4-cli-hook-warning-" (fun root ->
+      write_file root "main.ml" "let version = 1\n";
+      let _output, errors, status =
+        run
+          [
+            "init";
+            "--root";
+            root;
+            "--username";
+            "alice";
+            "--draft";
+            "hook-warning-draft";
+            "--title";
+            "hook warning";
+          ]
+      in
+      require_success "warning hook setup init" status errors;
+      with_external_directory "yeokcham-v4-cli-hook-warning-script-"
+        (fun script_directory ->
+          let script = write_script script_directory "fail" "exit 7\n" in
+          let _output, errors, status =
+            run
+              [ "hook"; "add"; "--root"; root; "--event"; "save"; "--"; script ]
+          in
+          require_success "add failing hook" status errors;
+          write_file root "main.ml" "let version = 2\n";
+          let _output, errors, status = run [ "save"; "--root"; root ] in
+          require_success "save survives failed observer" status errors;
+          expect_output_contains "failed observer is a warning"
+            "warning: hook exited with status 7" errors;
+          Alcotest.(check string)
+            "save still records ordinary bytes" "let version = 2\n"
+            (read_file root "main.ml")))
+
 let () =
   Alcotest.run "V4 CLI"
     [
@@ -1863,5 +1910,9 @@ let () =
             health_repair_cli_requires_an_explicit_plan_and_approval;
           Alcotest.test_case "completion scripts are static and parse" `Quick
             completion_scripts_are_static_and_parse_in_each_shell;
+          Alcotest.test_case "hooks observe committed eligible commands" `Quick
+            hooks_observe_only_committed_eligible_commands;
+          Alcotest.test_case "hook failure remains a command warning" `Quick
+            hook_failure_is_a_warning_not_a_save_failure;
         ] );
     ]

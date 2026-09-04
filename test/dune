@@ -23,7 +23,9 @@
 (test
  (name test_v4_hook)
  (modules test_v4_hook)
- (libraries alcotest yeokcham_v4_hook))
+ (libraries alcotest yeokcham_testkit yeokcham_v4_hook)
+ (deps
+  (source_tree golden)))
 
 (test
  (name test_v4_hook_store)
@@ -469,6 +471,7 @@
   alcotest
   unix
   yeokcham_v4_cli_data
+  yeokcham_v4_cli_spec
   yeokcham_v4_local_service
   yeokcham_v4_model
   yeokcham_v4_bootstrap

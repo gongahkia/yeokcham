@@ -24,6 +24,9 @@ module Cli_spec = Yeokcham_v4_cli_spec
 module Health = Yeokcham_v4_health
 module Health_repository = Yeokcham_v4_health_repository
 module Health_store = Yeokcham_v4_health_store
+module Hook = Yeokcham_v4_hook
+module Hook_runner = Yeokcham_v4_hook_runner
+module Hook_store = Yeokcham_v4_hook_store
 module Repair = Yeokcham_v4_repair
 
 [@@@warning "-40-42"]
@@ -127,6 +130,9 @@ let usage_text =
   \  yeokcham storage gc status [--root PATH]\n\
   \  yeokcham storage gc resume|restore|purge [--root PATH] --id ID\n\
   \  yeokcham completion bash|zsh|fish\n\
+  \  yeokcham hook add [--root PATH] --event EVENT -- PROGRAM [ARGUMENT...]\n\
+  \  yeokcham hook list [--root PATH] [--format text|json]\n\
+  \  yeokcham hook remove|test [--root PATH] --id HOOK_ID\n\
   \  yeokcham verify [--root PATH] [--format text|json]\n\
   \  yeokcham repair plan [--root PATH] --from SOURCE [--format text|json]\n\
   \  yeokcham repair apply [--root PATH] --plan PLAN_ID --select CANDIDATE_ID \\\n\
@@ -575,12 +581,21 @@ let help_for = function
          Print a static shell completion script generated from the V4 command \
          specification. It never opens a repository, relay, or credential \
          provider."
+  | [ "hook" ] | [ "hook"; ("add" | "list" | "remove" | "test") ] ->
+      Some
+        "usage: yeokcham hook add [--root PATH] --event EVENT -- PROGRAM \
+         [ARGUMENT ...]\n\
+         yeokcham hook list [--root PATH] [--format text|json]\n\
+         yeokcham hook remove|test [--root PATH] --id HOOK_ID\n\n\
+         Store explicit local post-success observers as an argv list. Hooks \
+         receive only a redacted event on stdin; warning outcomes never change \
+         the V4 command result."
   | [ "verify" ] ->
       Some
         "usage: yeokcham verify [--root PATH] [--format text|json]\n\n\
          Read and report damaged V4 closures. It never creates a lock, plan, \
          object, receipt, quarantine, or ordinary source file."
-  | [ "repair" ] ->
+  | [ "repair" ] | [ "repair"; ("plan" | "apply" | "defer") ] ->
       Some
         "usage: yeokcham repair plan --from SOURCE [--root PATH] [--format \
          text|json]\n\
@@ -993,6 +1008,188 @@ let run_completion = function
   | [ "fish" ] -> print_string (Cli_spec.render_completion Cli_spec.Fish)
   | _ -> usage ()
 
+let hook_event_for_path = function
+  | [ "init" ] -> Some Hook.Init
+  | [ "save" ] -> Some Hook.Save
+  | [ "restore" ] | [ "restore"; "retain" ] | [ "restore"; "forget" ] ->
+      Some Hook.Restore
+  | [ "workspace"; "activate" ] -> Some Hook.Workspace_activate
+  | [ "workspace"; "update" ] -> Some Hook.Workspace_update
+  | [ "draft"; "new" ] -> Some Hook.Draft_new
+  | [ "share" ] -> Some Hook.Share
+  | [ "withdraw" ] -> Some Hook.Withdraw
+  | [ "resolve" ] -> Some Hook.Resolve
+  | [ "deliver" ] -> Some Hook.Deliver
+  | [ "pin" ] -> Some Hook.Pin
+  | [ "unpin" ] -> Some Hook.Unpin
+  | [ "compact" ] -> Some Hook.Compact
+  | _ -> None
+
+let root_from_arguments arguments =
+  let rec loop = function
+    | "--root" :: root :: _ -> root
+    | _ :: rest -> loop rest
+    | [] -> default_root
+  in
+  loop arguments
+
+let run_hooks_after_success path arguments =
+  match hook_event_for_path path with
+  | None -> ()
+  | Some event -> (
+      let root = root_from_arguments arguments in
+      match Hook_store.load ~root with
+      | Error error ->
+          prerr_endline ("warning: " ^ Hook_store.error_to_string error)
+      | Ok registry -> (
+          let public_event =
+            Hook_runner.make_event ~event ~command:(String.concat "-" path)
+              ~repository:None ~paths:[] ~identifiers:[]
+          in
+          match public_event with
+          | Error error -> prerr_endline ("warning: " ^ error)
+          | Ok public_event ->
+              Hook.hooks registry
+              |> List.filter (fun hook -> Hook.hook_event hook = event)
+              |> List.iter (fun hook ->
+                  match
+                    Hook_runner.invoke
+                      ~timeout_seconds:Hook_runner.default_timeout_seconds
+                      public_event hook
+                  with
+                  | None -> ()
+                  | Some warning ->
+                      prerr_endline
+                        ("warning: " ^ Hook_runner.warning_to_string warning))))
+
+let observe_after_success path arguments action =
+  action ();
+  run_hooks_after_success path arguments
+
+let observe_after_commit path arguments action =
+  if action () then run_hooks_after_success path arguments
+
+let parse_hook_add arguments =
+  let rec loop root event = function
+    | "--" :: argv -> (
+        match (event, argv) with
+        | Some event, _ :: _ ->
+            (Option.value root ~default:default_root, event, argv)
+        | _ -> usage ())
+    | "--root" :: value :: rest when Option.is_none root ->
+        loop (Some value) event rest
+    | "--event" :: value :: rest when Option.is_none event ->
+        loop root (Some value) rest
+    | _ -> usage ()
+  in
+  loop None None arguments
+
+let parse_hook_id arguments =
+  let rec loop root id = function
+    | [] -> (
+        match id with
+        | Some id -> (Option.value root ~default:default_root, id)
+        | None -> usage ())
+    | "--root" :: value :: rest when Option.is_none root ->
+        loop (Some value) id rest
+    | "--id" :: value :: rest when Option.is_none id ->
+        loop root (Some value) rest
+    | _ -> usage ()
+  in
+  loop None None arguments
+
+let parse_hook_list arguments =
+  let rec loop root format = function
+    | [] -> (Option.value root ~default:default_root, format)
+    | "--root" :: value :: rest when Option.is_none root ->
+        loop (Some value) format rest
+    | "--format" :: value :: rest when format = Health_text ->
+        loop root (parse_health_format value) rest
+    | _ -> usage ()
+  in
+  loop None Health_text arguments
+
+let json_of_hook hook =
+  let program =
+    match Hook.hook_argv hook with
+    | program :: _ -> program
+    | [] -> assert false
+  in
+  `Assoc
+    [
+      ("id", `String (Hook.hook_id hook));
+      ("event", `String (Hook.event_to_string (Hook.hook_event hook)));
+      ("program", `String program);
+    ]
+
+let run_hook_add arguments =
+  let root, event, argv = parse_hook_add arguments in
+  let event = Hook.event_of_string event |> require_ok Hook.error_to_string in
+  let hook = Hook.make ~event ~argv |> require_ok Hook.error_to_string in
+  let registry =
+    Hook_store.load ~root |> require_ok Hook_store.error_to_string
+  in
+  let registry = Hook.add registry hook |> require_ok Hook.error_to_string in
+  Hook_store.save ~root registry |> require_ok Hook_store.error_to_string;
+  Printf.printf "hook %s event %s\n" (Hook.hook_id hook)
+    (Hook.event_to_string event)
+
+let run_hook_list arguments =
+  let root, format = parse_hook_list arguments in
+  let hooks =
+    Hook_store.load ~root |> require_ok Hook_store.error_to_string |> Hook.hooks
+  in
+  render_health_result format "hook-list"
+    (`Assoc [ ("hooks", `List (List.map json_of_hook hooks)) ])
+    (fun () ->
+      List.iter
+        (fun hook ->
+          Printf.printf "hook %s event %s program %s\n" (Hook.hook_id hook)
+            (Hook.event_to_string (Hook.hook_event hook))
+            (List.hd (Hook.hook_argv hook)))
+        hooks)
+
+let find_hook root id =
+  Hook_store.load ~root
+  |> require_ok Hook_store.error_to_string
+  |> Hook.hooks
+  |> List.find_opt (fun hook -> String.equal id (Hook.hook_id hook))
+
+let run_hook_remove arguments =
+  let root, id = parse_hook_id arguments in
+  let registry =
+    Hook_store.load ~root |> require_ok Hook_store.error_to_string
+  in
+  let registry = Hook.remove registry ~id |> require_ok Hook.error_to_string in
+  Hook_store.save ~root registry |> require_ok Hook_store.error_to_string;
+  Printf.printf "hook removed %s\n" id
+
+let run_hook_test arguments =
+  let root, id = parse_hook_id arguments in
+  match find_hook root id with
+  | None -> fail (Hook.error_to_string (Hook.Unknown_hook id))
+  | Some hook -> (
+      let public_event =
+        Hook_runner.make_event ~event:(Hook.hook_event hook)
+          ~command:"hook-test" ~repository:None ~paths:[] ~identifiers:[]
+        |> require_ok Fun.id
+      in
+      match
+        Hook_runner.invoke ~timeout_seconds:Hook_runner.default_timeout_seconds
+          public_event hook
+      with
+      | None -> Printf.printf "hook test passed %s\n" id
+      | Some warning ->
+          Printf.printf "hook test warning %s\n"
+            (Hook_runner.warning_to_string warning))
+
+let run_hook = function
+  | "add" :: arguments -> run_hook_add arguments
+  | "list" :: arguments -> run_hook_list arguments
+  | "remove" :: arguments -> run_hook_remove arguments
+  | "test" :: arguments -> run_hook_test arguments
+  | _ -> usage ()
+
 let run_verify arguments =
   let root, format = parse_health_arguments arguments in
   let report = Health_repository.verify ~root in
@@ -1122,9 +1319,11 @@ let run_workspace_update arguments =
       Printf.printf "workspace already-current\n";
       Printf.printf "basis %s\n" (Workspace.receipt_imported_basis_id receipt);
       Printf.printf "activation-generation %Ld\n"
-        (Workspace.receipt_activation_generation receipt)
+        (Workspace.receipt_activation_generation receipt);
+      false
   | Service.Workspace_updated materialized ->
-      render_workspace_materialization "updated" materialized
+      render_workspace_materialization "updated" materialized;
+      true
 
 let run_init arguments =
   let root, username, draft, title = parse_init arguments in
@@ -1294,10 +1493,12 @@ let run_save arguments =
   Service.save ~root |> require_ok Service.error_to_string |> function
   | Service.Unchanged status ->
       print_endline "save unchanged";
-      render_status status
+      render_status status;
+      false
   | Service.Saved status ->
       print_endline "save recorded";
-      render_status status
+      render_status status;
+      true
 
 let run_status arguments =
   let root = parse_root arguments in
@@ -1784,7 +1985,8 @@ let run_restore arguments =
       |> require_ok Service.error_to_string;
       Printf.printf "restored %s to %s\n"
         (Model.Snapshot_id.to_string checkpoint)
-        destination
+        destination;
+      false
   | None ->
       let restored =
         Service.restore_in_place ~root ~checkpoint
@@ -1795,7 +1997,8 @@ let run_restore arguments =
         (Model.Snapshot_id.to_string restored.Service.safety_checkpoint);
       Printf.printf "restored %s in-place%s\n"
         (Model.Snapshot_id.to_string restored.Service.restored_checkpoint)
-        (if restored.Service.resumed then " (resumed)" else "")
+        (if restored.Service.resumed then " (resumed)" else "");
+      true
 
 let parse_restore_operation arguments =
   let rec loop root operation = function
@@ -2701,7 +2904,9 @@ let run_compact arguments =
   let keep_recent = Option.value keep ~default:Model.default_keep_recent in
   Service.compact ~root ~keep_recent ~dry_run
   |> require_ok Service.error_to_string
-  |> fun report -> render_compact report explain
+  |> fun report ->
+  render_compact report explain;
+  not dry_run
 
 let parse_remote_add arguments =
   let rec loop root values = function
@@ -3473,9 +3678,11 @@ let run_daemon = function
 
 let dispatch () =
   match Array.to_list Sys.argv with
-  | _ :: "init" :: arguments -> run_init arguments
+  | _ :: "init" :: arguments ->
+      observe_after_success [ "init" ] arguments (fun () -> run_init arguments)
   | _ :: "join" :: arguments -> run_join arguments
-  | _ :: "save" :: arguments -> run_save arguments
+  | _ :: "save" :: arguments ->
+      observe_after_commit [ "save" ] arguments (fun () -> run_save arguments)
   | _ :: "status" :: arguments -> run_status arguments
   | _ :: "changes" :: arguments -> run_changes arguments
   | _ :: "log" :: arguments -> run_log arguments
@@ -3496,16 +3703,33 @@ let dispatch () =
   | _ :: "user" :: "register" :: arguments -> run_user_register arguments
   | _ :: "timeline" :: arguments -> run_timeline arguments
   | _ :: "restore" :: "proofs" :: arguments -> run_restore_proofs arguments
-  | _ :: "restore" :: "retain" :: arguments -> run_restore_retain arguments
-  | _ :: "restore" :: "forget" :: arguments -> run_restore_forget arguments
-  | _ :: "restore" :: arguments -> run_restore arguments
+  | _ :: "restore" :: "retain" :: arguments ->
+      observe_after_success [ "restore"; "retain" ] arguments (fun () ->
+          run_restore_retain arguments)
+  | _ :: "restore" :: "forget" :: arguments ->
+      observe_after_success [ "restore"; "forget" ] arguments (fun () ->
+          run_restore_forget arguments)
+  | _ :: "restore" :: arguments ->
+      observe_after_commit [ "restore" ] arguments (fun () ->
+          run_restore arguments)
   | _ :: "workspace" :: "activate" :: arguments ->
-      run_workspace_activate arguments
-  | _ :: "workspace" :: "update" :: arguments -> run_workspace_update arguments
-  | _ :: "draft" :: "new" :: arguments -> run_new_draft arguments
-  | _ :: "share" :: arguments -> run_share arguments
-  | _ :: "withdraw" :: arguments -> run_withdraw arguments
-  | _ :: "resolve" :: arguments -> run_resolve arguments
+      observe_after_success [ "workspace"; "activate" ] arguments (fun () ->
+          run_workspace_activate arguments)
+  | _ :: "workspace" :: "update" :: arguments ->
+      observe_after_commit [ "workspace"; "update" ] arguments (fun () ->
+          run_workspace_update arguments)
+  | _ :: "draft" :: "new" :: arguments ->
+      observe_after_success [ "draft"; "new" ] arguments (fun () ->
+          run_new_draft arguments)
+  | _ :: "share" :: arguments ->
+      observe_after_success [ "share" ] arguments (fun () ->
+          run_share arguments)
+  | _ :: "withdraw" :: arguments ->
+      observe_after_success [ "withdraw" ] arguments (fun () ->
+          run_withdraw arguments)
+  | _ :: "resolve" :: arguments ->
+      observe_after_success [ "resolve" ] arguments (fun () ->
+          run_resolve arguments)
   | _ :: "decision" :: "show" :: arguments -> run_decision_show arguments
   | _ :: "decision" :: "inspect" :: arguments -> run_decision_show arguments
   | _ :: "decision" :: "diff" :: arguments -> run_decision_diff arguments
@@ -3534,13 +3758,21 @@ let dispatch () =
   | _ :: "relay" :: "access" :: "list" :: arguments ->
       run_relay_access_list arguments
   | _ :: "relay" :: "serve" :: arguments -> run_relay_serve arguments
-  | _ :: "deliver" :: arguments -> run_deliver arguments
-  | _ :: "pin" :: arguments -> run_pin arguments
-  | _ :: "unpin" :: arguments -> run_unpin arguments
-  | _ :: "compact" :: arguments -> run_compact arguments
+  | _ :: "deliver" :: arguments ->
+      observe_after_success [ "deliver" ] arguments (fun () ->
+          run_deliver arguments)
+  | _ :: "pin" :: arguments ->
+      observe_after_success [ "pin" ] arguments (fun () -> run_pin arguments)
+  | _ :: "unpin" :: arguments ->
+      observe_after_success [ "unpin" ] arguments (fun () ->
+          run_unpin arguments)
+  | _ :: "compact" :: arguments ->
+      observe_after_commit [ "compact" ] arguments (fun () ->
+          run_compact arguments)
   | _ :: "storage" :: "gc" :: arguments -> run_storage_gc arguments
   | _ :: "storage" :: "roots" :: arguments -> run_storage_roots arguments
   | _ :: "completion" :: arguments -> run_completion arguments
+  | _ :: "hook" :: arguments -> run_hook arguments
   | _ :: "verify" :: arguments -> run_verify arguments
   | _ :: "repair" :: "plan" :: arguments -> run_repair_plan arguments
   | _ :: "repair" :: "apply" :: arguments -> run_repair_apply arguments

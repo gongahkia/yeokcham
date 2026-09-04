@@ -64,6 +64,7 @@ let failures_are_warnings_and_events_reject_secrets () =
       let nonzero = write_script root "nonzero" "exit 7\n" in
       let output = write_script root "output" "printf unexpected\n" in
       let sleeper = write_script root "sleeper" "sleep 2\n" in
+      let signalled = write_script root "signalled" "kill -TERM $$\n" in
       let nonzero_result =
         Runner.invoke ~timeout_seconds:1 (event ()) (hook [ nonzero ])
       in
@@ -72,6 +73,13 @@ let failures_are_warnings_and_events_reject_secrets () =
       in
       let timeout_result =
         Runner.invoke ~timeout_seconds:1 (event ()) (hook [ sleeper ])
+      in
+      let signalled_result =
+        Runner.invoke ~timeout_seconds:1 (event ()) (hook [ signalled ])
+      in
+      let missing_result =
+        Runner.invoke ~timeout_seconds:1 (event ())
+          (hook [ Filename.concat root "missing" ])
       in
       Alcotest.(check bool)
         "nonzero is a warning" true
@@ -82,6 +90,12 @@ let failures_are_warnings_and_events_reject_secrets () =
       Alcotest.(check bool)
         "timeout is a warning" true
         (Option.is_some timeout_result);
+      Alcotest.(check bool)
+        "signal is a warning" true
+        (Option.is_some signalled_result);
+      Alcotest.(check bool)
+        "missing executable is a warning" true
+        (Option.is_some missing_result);
       Alcotest.(check bool)
         "secret-shaped identifier rejects" true
         (Result.is_error

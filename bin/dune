@@ -21,6 +21,9 @@
   yeokcham_v4_health
   yeokcham_v4_health_repository
   yeokcham_v4_health_store
+  yeokcham_v4_hook
+  yeokcham_v4_hook_runner
+  yeokcham_v4_hook_store
   yeokcham_hash
   yeokcham_v4_model
   yeokcham_v4_package

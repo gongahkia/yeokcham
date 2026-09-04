@@ -39,6 +39,23 @@ let command ?(options = [ root ]) ?(hook = false) command_path =
 
 let commands =
   [
+    command ~options:[] [ "workspace" ];
+    command ~options:[] [ "draft" ];
+    command ~options:[] [ "decision" ];
+    command ~options:[] [ "package" ];
+    command ~options:[] [ "remote" ];
+    command ~options:[] [ "semantic" ];
+    command ~options:[] [ "semantic"; "server" ];
+    command ~options:[] [ "relay" ];
+    command ~options:[] [ "relay"; "access" ];
+    command ~options:[] [ "device" ];
+    command ~options:[] [ "authority" ];
+    command ~options:[] [ "recovery" ];
+    command ~options:[] [ "user" ];
+    command ~options:[] [ "daemon" ];
+    command ~options:[] [ "storage" ];
+    command ~options:[] [ "repair" ];
+    command ~options:[] [ "hook" ];
     command ~hook:true [ "init" ]
       ~options:
         [
@@ -127,15 +144,14 @@ let commands =
     command
       [ "decision"; "materialize" ]
       ~options:[ root; identifier "--decision"; path "--destination" ];
-    command ~hook:true [ "package"; "create" ]
-      ~options:[ root; path "--destination" ];
-    command ~hook:true [ "package"; "adopt" ]
+    command [ "package"; "create" ] ~options:[ root; path "--destination" ];
+    command [ "package"; "adopt" ]
       ~options:
         [
           root; path "--from"; identifier "--revision"; identifier "--authority";
         ];
     command [ "receive" ] ~options:[ root; path "--from"; flag "--review" ];
-    command ~hook:true [ "bootstrap"; "publish" ];
+    command [ "bootstrap"; "publish" ];
     command [ "bootstrap" ]
       ~options:
         [
@@ -150,10 +166,10 @@ let commands =
           identifier "--device";
           option "--verify-phrase" Free_argument;
         ];
-    command ~hook:true [ "remote"; "add" ];
-    command ~hook:true [ "remote"; "remove" ];
+    command [ "remote"; "add" ];
+    command [ "remote"; "remove" ];
     command [ "remote"; "login" ];
-    command ~hook:true
+    command
       [ "semantic"; "server"; "add" ]
       ~options:
         [
@@ -166,7 +182,7 @@ let commands =
           choice "--overlap" [ "same-symbol"; "nearby-ranges"; "references" ];
         ];
     command [ "semantic"; "server"; "list" ];
-    command ~hook:true
+    command
       [ "semantic"; "server"; "configure" ]
       ~options:
         [
@@ -176,9 +192,9 @@ let commands =
           repeated "--glob" Free_argument;
           choice "--overlap" [ "same-symbol"; "nearby-ranges"; "references" ];
         ];
-    command ~hook:true [ "semantic"; "server"; "enable" ];
-    command ~hook:true [ "semantic"; "server"; "disable" ];
-    command ~hook:true [ "semantic"; "server"; "remove" ];
+    command [ "semantic"; "server"; "enable" ];
+    command [ "semantic"; "server"; "disable" ];
+    command [ "semantic"; "server"; "remove" ];
     command [ "sync" ];
     command [ "relay"; "serve" ]
       ~options:
@@ -201,7 +217,7 @@ let commands =
     command
       [ "relay"; "access"; "list" ]
       ~options:[ path "--storage"; identifier "--repository" ];
-    command ~hook:true [ "device"; "create" ]
+    command [ "device"; "create" ]
       ~options:
         [
           root;
@@ -211,7 +227,7 @@ let commands =
           option "--key-label" Free_argument;
           identifier "--key-id";
         ];
-    command ~hook:true [ "device"; "attach" ]
+    command [ "device"; "attach" ]
       ~options:
         [
           root;
@@ -223,7 +239,7 @@ let commands =
         ];
     command [ "device"; "custody" ] ~options:[ root; identifier "--device" ];
     command [ "device"; "show" ];
-    command ~hook:true [ "device"; "enroll" ]
+    command [ "device"; "enroll" ]
       ~options:
         [
           root;
@@ -233,9 +249,9 @@ let commands =
           flag "--administrator";
           identifier "--parent";
         ];
-    command ~hook:true [ "device"; "revoke" ]
+    command [ "device"; "revoke" ]
       ~options:[ root; identifier "--device"; identifier "--parent" ];
-    command ~hook:true [ "device"; "rotate" ]
+    command [ "device"; "rotate" ]
       ~options:
         [
           root;
@@ -244,10 +260,10 @@ let commands =
           identifier "--parent";
         ];
     command [ "authority"; "heads" ];
-    command ~hook:true
+    command
       [ "authority"; "reconcile" ]
       ~options:[ root; option "--parents" Free_argument ];
-    command ~hook:true [ "recovery"; "use" ]
+    command [ "recovery"; "use" ]
       ~options:
         [
           root;
@@ -257,7 +273,7 @@ let commands =
           identifier "--replaced";
           path "--output";
         ];
-    command ~hook:true [ "recovery"; "refresh" ]
+    command [ "recovery"; "refresh" ]
       ~options:
         [
           root;
@@ -265,7 +281,7 @@ let commands =
           option "--mnemonic" Free_argument;
           path "--output";
         ];
-    command ~hook:true [ "user"; "register" ]
+    command [ "user"; "register" ]
       ~options:
         [ root; identifier "--device"; option "--username" Free_argument ];
     command [ "daemon"; "start" ];
@@ -285,18 +301,12 @@ let commands =
     command ~hook:true [ "compact" ]
       ~options:[ root; integer "--keep"; flag "--dry-run"; flag "--explain" ];
     command [ "storage"; "roots" ];
-    command ~hook:true [ "storage"; "gc" ]
+    command [ "storage"; "gc" ]
       ~options:[ root; flag "--dry-run"; flag "--explain"; flag "--apply" ];
     command [ "storage"; "gc"; "status" ];
-    command ~hook:true
-      [ "storage"; "gc"; "resume" ]
-      ~options:[ root; identifier "--id" ];
-    command ~hook:true
-      [ "storage"; "gc"; "restore" ]
-      ~options:[ root; identifier "--id" ];
-    command ~hook:true
-      [ "storage"; "gc"; "purge" ]
-      ~options:[ root; identifier "--id" ];
+    command [ "storage"; "gc"; "resume" ] ~options:[ root; identifier "--id" ];
+    command [ "storage"; "gc"; "restore" ] ~options:[ root; identifier "--id" ];
+    command [ "storage"; "gc"; "purge" ] ~options:[ root; identifier "--id" ];
     command [ "verify" ] ~options:[ root; format ];
     command [ "repair"; "plan" ]
       ~options:[ root; option "--from" Free_argument; format ];
