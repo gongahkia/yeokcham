@@ -13,9 +13,11 @@ docker image inspect yeokcham-relay:local --format '{{index .RepoDigests 0}}'
 
 The local tag is not a deployable identity. Record the resulting immutable
 manifest digest and deploy that digest as `YEOKCHAM_RELAY_IMAGE`. `compose.yaml`
-requires both that digest and an immutable `NGINX_IMAGE` digest. Do not publish
-the relay's port 8080 directly; publish only the proxy's TLS port. Mount the
-named relay volume with UID/GID 10001 ownership, run the relay with a read-only
+requires that relay digest and defaults to the immutable Nginx digest pinned in
+`build-inputs.lock`; an `NGINX_IMAGE` override must also be an immutable digest.
+Do not publish the relay's port 8080 directly; publish only the proxy's TLS
+port. Mount the named relay volume with UID/GID 10001 ownership, run the relay
+with a read-only
 root filesystem and dropped capabilities, and keep the metrics listener on the
 private network.
 
@@ -27,6 +29,19 @@ check creates and removes a zero-byte probe in the relay data volume; it does
 not create a relay object, session, V4 record, or ordinary source file.
 `/metrics` emits fixed aggregate Prometheus text counters without repository,
 object, payload, credential, or source-path values.
+
+## Reproducible container check
+
+Run `make relay-container-test` from a Docker host. By default it builds the
+local relay image with a 900-second timeout. Set `RELAY_IMAGE` only to test a
+previously built local image; it is a test convenience, not a deployable image
+identity. The check uses a disposable Docker network and volumes, a generated
+one-day TLS certificate, and the pinned Nginx image. It proves the non-root
+read-only runtime, proxy readiness, scoped immutable upload/fetch, restart
+persistence, checksum rejection of a corrupt backup, and a disposable
+read-only restored fetch. It also refuses an unknown configuration key and a
+relay without a data volume. The script compares repository status before and
+after so it fails if its receipt path changes ordinary source files.
 
 ## Backup and restore drill
 

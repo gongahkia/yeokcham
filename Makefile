@@ -6,7 +6,7 @@ OCAMLFORMAT_VERSION := 0.29.0
 LOCAL_SWITCH := $(CURDIR)
 RELEASE_REPOSITORY ?= .
 
-.PHONY: setup deps build test lint format ci linux-watch-test release-verify release-verify-test
+.PHONY: setup deps build test lint format ci linux-watch-test relay-container-test release-verify release-verify-test
 
 setup:
 	$(OPAM) init --bare --no-setup --yes
@@ -26,6 +26,9 @@ test:
 linux-watch-test:
 	test "$$(uname)" = Linux
 	$(DUNE) exec test/test_v4_watch.exe
+
+relay-container-test:
+	sh test/test_relay_container.sh
 
 lint:
 	$(DUNE) build @fmt @lint @all
