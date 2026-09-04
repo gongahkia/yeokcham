@@ -16,6 +16,11 @@
   (source_tree golden)))
 
 (test
+ (name test_v4_cli_spec)
+ (modules test_v4_cli_spec)
+ (libraries alcotest yeokcham_v4_cli_spec))
+
+(test
  (name v4_health_property_test)
  (modules v4_health_property_test)
  (libraries alcotest qcheck-core qcheck-alcotest yeokcham_v4_health))
