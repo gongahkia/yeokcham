@@ -1,8 +1,8 @@
 # Experiment 102 — EVIDENCE-001 optional integration matrix
 
 The ordinary GitHub Actions matrix is the supported continuous evidence path:
-Linux and macOS run the model, generated, golden, package, protocol-fault, and
-local receipt non-mutation suites. The Ubuntu `package-and-oci-smoke` job also
+Linux and macOS run the model, generated, golden, protocol-fault, and local
+receipt non-mutation suites. The separate Ubuntu `package-and-oci-smoke` job
 builds the development RPM/archive and runs the disposable OCI relay/proxy,
 backup-restore, scoped-access, and source-unchanged journey. It is deliberately
 a development test, not a published artifact or service claim.
