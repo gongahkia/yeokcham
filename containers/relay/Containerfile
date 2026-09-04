@@ -1,5 +1,9 @@
+# syntax=docker/dockerfile:1
 # Build inputs are pinned in containers/relay/build-inputs.lock. This image is
 # development-only; publish and deploy it by its resulting OCI manifest digest.
+# Include the checked-in build context when BuildKit generates the OCI SBOM.
+ARG BUILDKIT_SBOM_SCAN_CONTEXT=true
+
 FROM docker.io/ocaml/opam:debian-12-ocaml-5.5@sha256:b2b7ff41302eae75c20df6f052513d0a13fb440c43a681f632062f056d01421a AS build
 
 USER root

@@ -46,6 +46,12 @@ repair source selection or authority input.
 
 Before any development image publication, produce an OCI SBOM and provenance
 attestation for the manifest digest, sign that digest with Cosign keyless OIDC,
-and verify using the documented workflow identity and GitHub OIDC issuer. The
-signing identity, attestation, and digest are external development artifacts;
-they do not alter V4 project state or prove a public release.
+and verify using the workflow identity
+`https://github.com/gongahkia/yeokcham/.github/workflows/relay-artifact.yml@refs/heads/main`
+and GitHub OIDC issuer `https://token.actions.githubusercontent.com`. The
+checked-in `relay-artifact.yml` workflow runs only for this repository's `main`
+branch and uses an ephemeral GitHub OIDC credential: no long-lived signing key
+or registry credential is configured. Its candidate digest is the only
+deployable identity; do not deploy the candidate tag. The signing identity,
+attestation, and digest are external development artifacts; they do not alter
+V4 project state or prove a public release.

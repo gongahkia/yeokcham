@@ -1,0 +1,64 @@
+name: Relay development artifact
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/relay-artifact.yml"
+      - ".dockerignore"
+      - "containers/relay/**"
+      - "bin/**"
+      - "lib/**"
+      - "dune-project"
+      - "yeokcham.opam"
+      - "yeokcham.opam.locked"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  publish-development-artifact:
+    if: github.repository == 'gongahkia/yeokcham' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      packages: write
+    env:
+      IMAGE_NAME: ghcr.io/gongahkia/yeokcham/relay
+      WORKFLOW_IDENTITY: https://github.com/gongahkia/yeokcham/.github/workflows/relay-artifact.yml@refs/heads/main
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@v3.11.1
+      - uses: docker/login-action@v4.4.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and publish immutable development candidate
+        id: build
+        uses: docker/build-push-action@v7.3.0
+        with:
+          context: .
+          file: containers/relay/Containerfile
+          platforms: linux/amd64
+          push: true
+          provenance: mode=max
+          sbom: true
+          tags: ${{ env.IMAGE_NAME }}:candidate-${{ github.sha }}
+      - uses: sigstore/cosign-installer@v4.1.2
+      - name: Sign and verify the candidate digest with keyless OIDC
+        env:
+          IMAGE: ${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
+        run: |
+          cosign sign --yes "$IMAGE"
+          cosign verify \
+            --certificate-identity "$WORKFLOW_IDENTITY" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            "$IMAGE"
+      - name: Record deployable immutable digest
+        env:
+          IMAGE: ${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
+        run: echo "deployable_image=$IMAGE" >> "$GITHUB_STEP_SUMMARY"

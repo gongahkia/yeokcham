@@ -48,11 +48,11 @@ storage volume.
 The image contains one relay-serving entrypoint, equivalent to
 `yeokcham relay serve`; it does not run the local VCS workflow, daemon, sync,
 bootstrap, source scanner, or materialiser. A multi-stage Containerfile builds
-with a pinned Fedora/OCaml/Dune toolchain input and copies only the relay
+with a pinned Debian/OCaml/Dune toolchain input and copies only the relay
 executable plus its declared runtime shared libraries into a pinned
-`fedora-minimal`-family runtime image. The exact base reference is always a
-`sha256:` digest in a checked-in build-input lock and the published image is
-recorded and deployed by immutable manifest digest, never a mutable tag.
+`debian:12-slim` runtime image. The exact base reference is always a `sha256:`
+digest in a checked-in build-input lock and the published image is recorded and
+deployed by immutable manifest digest, never a mutable tag.
 
 The image uses a fixed unprivileged UID/GID, exposes only the configured plain
 HTTP listener, and declares `/var/lib/yeokcham-relay` as its writable data
@@ -103,13 +103,15 @@ regular restore drill. Backup remains a byte-level operator procedure: it does
 not repair, merge, replace divergent bytes, or materialise a source tree.
 
 The development image pipeline produces an OCI SBOM and provenance attestation
-for the immutable image digest. It signs only that digest with Sigstore Cosign;
-verification pins the expected GitHub Actions workflow identity and GitHub OIDC
-issuer, then checks the image digest before use. The workflow identity and
-issuer are documented as the development trust root. It must not use build
-arguments for credentials because provenance can expose build inputs. No image
-is presented as a public/stable release merely because it has an attestation or
-signature.
+for the immutable image digest, including the checked-in build context in the
+SBOM scan. It signs only that digest with Sigstore Cosign keyless GitHub OIDC;
+verification pins
+`https://github.com/gongahkia/yeokcham/.github/workflows/relay-artifact.yml@refs/heads/main`
+and issuer `https://token.actions.githubusercontent.com`, then checks the image
+digest before use. The workflow identity and issuer are the development trust
+root; no long-lived signing key is stored. It must not use build arguments for
+credentials because provenance can expose build inputs. No image is presented
+as a public/stable release merely because it has an attestation or signature.
 
 ## Invariants and verification
 
@@ -148,4 +150,6 @@ ADR.
 - [Prometheus text exposition format](https://prometheus.io/docs/instrumenting/exposition_formats/)
 - [Prometheus metric naming guidance](https://prometheus.io/docs/practices/naming/)
 - [Docker BuildKit SBOM and provenance attestations](https://docs.docker.com/build/metadata/attestations/)
+- [Sigstore Cosign container signing](https://docs.sigstore.dev/cosign/signing/signing_with_containers/)
 - [Sigstore Cosign verification](https://docs.sigstore.dev/cosign/verifying/verify/)
+- [GitHub Actions OpenID Connect](https://docs.github.com/en/actions/concepts/security/openid-connect)
