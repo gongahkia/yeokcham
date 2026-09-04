@@ -2,9 +2,13 @@
 
 ## Availability
 
-Yeokcham V4 is a source-only experimental tool. There is no published stable
-release, binary download, package-manager package, or opam publication to
-install. Do not treat a source checkout as a signed release. The separate
+Yeokcham V4 is experimental. There is no published stable release, opam
+publication, support matrix, compatibility promise, or source-release tag to
+install. A successful main-branch development-client workflow may expose a
+short-lived signed CI artifact for a Linux tester; it is neither a public
+release nor a package-manager publication. Verify it using
+[development-artifact guidance](DEVELOPMENT_ARTIFACTS.md). Do not treat a
+source checkout or CI artifact as a signed stable release. The separate
 [source-release procedure](RELEASING.md) applies only when maintainers publish
 an actual annotated signed tag, archive digest, and public fingerprint.
 

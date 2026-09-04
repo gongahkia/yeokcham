@@ -19,15 +19,24 @@ scratch=$(mktemp -d "${TMPDIR:-/tmp}/yeokcham-development-artifact-test.XXXXXX")
   || fail "cannot create a disposable directory"
 cleanup() {
   status=$?
-  rm -rf "$scratch"
+  rm -r "$scratch"
   [ "$(git status --porcelain)" = "$source_status" ] \
     || fail "artifact test changed repository source files"
   exit "$status"
 }
 trap cleanup EXIT HUP INT TERM
 
-artifacts=$scratch/artifacts
-tools/build-development-artifacts.sh --output "$artifacts"
+if [ -n "${YEOKCHAM_DEVELOPMENT_ARTIFACTS:-}" ]; then
+  artifacts=$YEOKCHAM_DEVELOPMENT_ARTIFACTS
+  case "$artifacts" in
+    /*) ;;
+    *) fail "YEOKCHAM_DEVELOPMENT_ARTIFACTS must be an absolute directory" ;;
+  esac
+  [ -d "$artifacts" ] || fail "named development artifact directory is absent"
+else
+  artifacts=$scratch/artifacts
+  tools/build-development-artifacts.sh --output "$artifacts"
+fi
 (cd "$artifacts" && sha256sum --check SHA256SUMS)
 
 archive=$(find "$artifacts" -maxdepth 1 -name 'yeokcham-*-linux-x86_64.tar.zst' -type f -print -quit)

@@ -3,7 +3,9 @@
 Yeokcham has no published stable V4 source release yet. This document describes
 how to verify a future candidate once a maintainer has published its tag,
 expected source commit, public OpenPGP fingerprint, archive, and SHA-256
-digest.
+digest. It does not verify the development-only native archive/RPM CI artifact;
+use [development artifact guidance](DEVELOPMENT_ARTIFACTS.md) for that distinct
+Cosign boundary.
 
 This is source-distribution provenance only. It does not create or verify a
 Yeokcham device, authority epoch, package, relay permission, decision, or

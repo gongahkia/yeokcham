@@ -38,21 +38,23 @@ commit timestamp. This makes inputs and produced bytes inspectable; it is not a
 claim that independent native builds are bit-for-bit reproducible.
 
 The release workflow builds OCI relay images as ADR-102 specifies. A separate
-development-client workflow signs the archive, RPM, SBOM, and build record with
-Cosign keyless GitHub OIDC and writes a bundle beside each signed blob. The
-development signing root is the exact workflow identity on the repository's
-`main` branch plus GitHub's OIDC issuer, not an unpublished maintainer key. Each
-bundle contains the short-lived signing certificate; its SHA-256 fingerprint is
-recorded in the build record for inspection, while verification pins workflow
-identity and issuer rather than trusting that ephemeral fingerprint.
+development-client workflow signs SHA256SUMS, which binds the archive, RPM,
+SBOM, and provenance, and then signs the external build record. It writes a
+Cosign bundle beside both signed blobs. The build record names the SHA256SUMS
+bundle and records its short-lived certificate SHA-256; the record itself stays
+outside the files named by its checksum manifest. The development signing root
+is the exact workflow identity on the repository's main branch plus GitHub's
+OIDC issuer, not an unpublished maintainer key. Verification pins that identity
+and issuer rather than trusting an ephemeral fingerprint.
 
 Maintainers rotate this root by changing the workflow path/branch only through
 an ADR amendment and an announcement containing the old and new identities.
 If GitHub OIDC, Fulcio, Rekor, or the named workflow identity is unavailable or
 revoked, publication stops; no local fallback key silently replaces it. Testers
 obtain the expected workflow identity and issuer from this ADR and verify both
-the bundle and the recorded artifact SHA-256 before installation. No artifact is
-called stable or publicly released merely because this verification succeeds.
+signed blobs, then the recorded artifact SHA-256 values before installation.
+No artifact is called stable or publicly released merely because this
+verification succeeds.
 
 The Fedora smoke image is pinned and uses the explicit test-only signer only to
 exercise `init`, `save`, `restore`, explicit workspace activation, relay sync,

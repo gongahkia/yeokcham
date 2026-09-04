@@ -53,6 +53,13 @@ done
   usage >&2
   exit 2
 }
+case "$output" in
+  /*) ;;
+  *) fail "--output must be an absolute directory outside the repository" ;;
+esac
+case "$output" in
+  "$repo_root" | "$repo_root"/*) fail "artifact output must be outside the repository" ;;
+esac
 case "$version" in
   '' | *[!A-Za-z0-9._+-]*) fail "version and release must be nonempty RPM-safe text" ;;
 esac
@@ -71,6 +78,10 @@ if [ -e "$output" ]; then
 else
   mkdir -p "$output" || fail "cannot create output directory: $output"
 fi
+output=$(cd -- "$output" && pwd -P)
+case "$output" in
+  "$repo_root" | "$repo_root"/*) fail "artifact output resolves inside the repository" ;;
+esac
 
 source_status=$(git status --porcelain)
 check_source_status() {

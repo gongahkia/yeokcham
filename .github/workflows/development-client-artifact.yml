@@ -1,0 +1,90 @@
+name: Development client artifacts
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/development-client-artifact.yml"
+      - ".dockerignore"
+      - "containers/client/**"
+      - "packaging/**"
+      - "tools/**"
+      - "test/test_development_artifact.ml"
+      - "test/test_development_artifacts.sh"
+      - "test/test_development_build_record.sh"
+      - "bin/**"
+      - "lib/**"
+      - "dune"
+      - "dune-project"
+      - "Makefile"
+      - "yeokcham.opam"
+      - "yeokcham.opam.locked"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-sign-and-smoke:
+    if: github.repository == 'gongahkia/yeokcham' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      ARTIFACT_DIRECTORY: ${{ runner.temp }}/yeokcham-development-artifacts
+      WORKFLOW_IDENTITY: https://github.com/gongahkia/yeokcham/.github/workflows/development-client-artifact.yml@refs/heads/main
+      OIDC_ISSUER: https://token.actions.githubusercontent.com
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: "5.5.0"
+          dune-cache: true
+      - run: opam install . --deps-only --with-test
+      - run: make ci
+      - run: make development-build-record-test
+      - uses: docker/setup-buildx-action@v3.11.1
+      - name: Build unsigned client archive, RPM, SBOM, and provenance
+        run: |
+          mkdir "$ARTIFACT_DIRECTORY"
+          tools/build-development-artifacts.sh --output "$ARTIFACT_DIRECTORY"
+          (cd "$ARTIFACT_DIRECTORY" && sha256sum --check SHA256SUMS)
+      - uses: sigstore/cosign-installer@v4.1.2
+      - name: Sign and verify the artifact checksum manifest with keyless OIDC
+        run: |
+          cosign sign-blob --yes \
+            --bundle "$ARTIFACT_DIRECTORY/SHA256SUMS.sigstore.json" \
+            "$ARTIFACT_DIRECTORY/SHA256SUMS"
+          cosign verify-blob "$ARTIFACT_DIRECTORY/SHA256SUMS" \
+            --bundle "$ARTIFACT_DIRECTORY/SHA256SUMS.sigstore.json" \
+            --certificate-identity "$WORKFLOW_IDENTITY" \
+            --certificate-oidc-issuer "$OIDC_ISSUER"
+      - name: Write the canonical external build record
+        run: |
+          tools/write-development-build-record.sh \
+            --directory "$ARTIFACT_DIRECTORY" \
+            --bundle SHA256SUMS.sigstore.json \
+            --workflow-identity "$WORKFLOW_IDENTITY" \
+            --oidc-issuer "$OIDC_ISSUER"
+      - name: Sign and verify the external build record with keyless OIDC
+        run: |
+          cosign sign-blob --yes \
+            --bundle "$ARTIFACT_DIRECTORY/development-build-record-v1.json.sigstore.json" \
+            "$ARTIFACT_DIRECTORY/development-build-record-v1.json"
+          cosign verify-blob "$ARTIFACT_DIRECTORY/development-build-record-v1.json" \
+            --bundle "$ARTIFACT_DIRECTORY/development-build-record-v1.json.sigstore.json" \
+            --certificate-identity "$WORKFLOW_IDENTITY" \
+            --certificate-oidc-issuer "$OIDC_ISSUER"
+      - name: Smoke the signed development artifacts
+        run: |
+          YEOKCHAM_DEVELOPMENT_ARTIFACTS="$ARTIFACT_DIRECTORY" \
+            make development-artifact-test
+      - uses: actions/upload-artifact@v4
+        with:
+          name: yeokcham-development-client-${{ github.sha }}
+          path: ${{ env.ARTIFACT_DIRECTORY }}
+          if-no-files-found: error
+          retention-days: 14

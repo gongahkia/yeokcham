@@ -89,6 +89,8 @@ the complete command and trust boundaries.
 
 - [Installation and support](docs/INSTALL.md) — supported source-build and
   platform paths.
+- [Development artifacts](docs/DEVELOPMENT_ARTIFACTS.md) — verification and
+  lifecycle of the non-release Linux archive/RPM CI artifact.
 - [Local recovery tutorial](docs/GETTING_STARTED.md) — the runnable first-use
   demo.
 - [Concepts glossary](docs/CONCEPTS.md) — scratch, drafts, revisions,
