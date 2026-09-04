@@ -1853,7 +1853,77 @@ let hook_failure_is_a_warning_not_a_save_failure () =
             "warning: hook exited with status 7" errors;
           Alcotest.(check string)
             "save still records ordinary bytes" "let version = 2\n"
-            (read_file root "main.ml")))
+            (read_file root "main.ml");
+          write_file root "main.ml" "let version = 3\n";
+          let output, errors, status =
+            run [ "save"; "--root"; root; "--format"; "json" ]
+          in
+          require_success "JSON save survives failed observer" status errors;
+          let envelope =
+            Cli_data.decode (String.trim output) |> Result.get_ok
+          in
+          Alcotest.(check (list string))
+            "JSON save exposes the ordered hook warning"
+            [ "hook exited with status 7" ]
+            (Cli_data.warnings envelope);
+          expect_output_contains "JSON hook warning remains diagnostic"
+            "warning: hook exited with status 7" errors))
+
+let generic_json_format_is_enveloped_and_preserves_error_channels () =
+  with_directory "yeokcham-v4-cli-generic-json-" (fun root ->
+      write_file root "main.ml" "let version = 1\n";
+      let output, errors, status =
+        run
+          [
+            "init";
+            "--root";
+            root;
+            "--username";
+            "alice";
+            "--draft";
+            "json-draft";
+            "--title";
+            "JSON work";
+            "--format";
+            "json";
+          ]
+      in
+      require_success "JSON init" status errors;
+      let envelope = Cli_data.decode (String.trim output) |> Result.get_ok in
+      Alcotest.(check string)
+        "JSON init names the stable command" "init"
+        (Cli_data.command envelope);
+      Alcotest.(check bool) "JSON init succeeds" true (Cli_data.ok envelope);
+      Alcotest.(check bool)
+        "JSON init does not mix text stdout" false (contains output "saved ");
+      let output, errors, status =
+        run [ "save"; "--root"; root; "--format"; "json" ]
+      in
+      require_success "JSON save" status errors;
+      let envelope = Cli_data.decode (String.trim output) |> Result.get_ok in
+      Alcotest.(check string)
+        "JSON save names the stable command" "save"
+        (Cli_data.command envelope);
+      Alcotest.(check bool) "JSON save succeeds" true (Cli_data.ok envelope);
+      let output, errors, status =
+        run [ "not-a-command"; "--format"; "json" ]
+      in
+      (match status with
+      | Unix.WEXITED 2 -> ()
+      | Unix.WEXITED code ->
+          Alcotest.failf "JSON invalid invocation exited %d rather than 2" code
+      | Unix.WSIGNALED signal | Unix.WSTOPPED signal ->
+          Alcotest.failf "JSON invalid invocation ended by signal %d" signal);
+      let envelope = Cli_data.decode (String.trim output) |> Result.get_ok in
+      Alcotest.(check bool)
+        "JSON invalid invocation is unsuccessful" false (Cli_data.ok envelope);
+      (match Cli_data.error envelope with
+      | Some { Cli_data.code; _ } ->
+          Alcotest.(check string)
+            "JSON invalid invocation has a stable code" "invalid-invocation"
+            code
+      | None -> Alcotest.fail "JSON invalid invocation has no error record");
+      expect_output_contains "JSON diagnostic remains on stderr" "usage:" errors)
 
 let () =
   Alcotest.run "V4 CLI"
@@ -1914,5 +1984,7 @@ let () =
             hooks_observe_only_committed_eligible_commands;
           Alcotest.test_case "hook failure remains a command warning" `Quick
             hook_failure_is_a_warning_not_a_save_failure;
+          Alcotest.test_case "generic JSON is enveloped with stable errors"
+            `Quick generic_json_format_is_enveloped_and_preserves_error_channels;
         ] );
     ]

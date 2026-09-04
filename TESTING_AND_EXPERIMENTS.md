@@ -289,3 +289,27 @@ power-loss or filesystem-crash experiment.
 These are correctness and adapter-boundary results. They do not measure repair
 throughput, repository capacity, remote operational reliability, backup
 durability, or public deployment readiness.
+
+## CLI-001 machine interface, completion, and observers
+
+On 2026-09-04, the CLI-001 focused suites and `make ci` passed on the Fedora 43
+development host. The focused command sequence took 6.379 seconds; the final
+`make ci` took 2.349 seconds while Dune reused unchanged test actions. The three-case
+CLI-data suite fixed the canonical success and generic-completed JSON envelopes
+and rejected malformed, duplicate, unknown-field, and inconsistent envelopes.
+The four-case static-spec suite validated every declared path and option
+spelling, including the shared formatter on every path, generated deterministic
+Bash/Zsh/Fish candidates, and made receipt, relay, daemon, verification, and
+repair paths statically ineligible for hooks. The CLI suite checks every
+documented help path against that specification.
+
+The hook suites covered canonical `hooks-v1` bytes, strict decode refusal,
+private local storage, exact argv whitespace/quotes, a cleared inherited test
+secret, nonzero output, timeout, signal, and missing-executable warnings. The
+25-case CLI suite syntax-checked all three generated shell scripts, exercised
+hook add/list/test/remove, confirmed an unchanged save and `verify` do not run
+an observer, and confirmed a changed save exposes a redacted event. A failing
+observer left the save successful, reported stderr diagnostics, and appeared in
+the JSON envelope warning list. This is local process-boundary evidence; it does
+not measure hook throughput, untrusted-hook containment, shell portability
+beyond the installed Bash/Zsh/Fish parsers, or release compatibility.

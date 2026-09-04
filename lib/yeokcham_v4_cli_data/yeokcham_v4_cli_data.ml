@@ -1,4 +1,5 @@
 type command_error = { code : string; message : string }
+type command_result = Completed
 
 type envelope = {
   command_value : string;
@@ -9,6 +10,9 @@ type envelope = {
 }
 
 let schema_version = 1
+
+let command_result_json = function
+  | Completed -> `Assoc [ ("outcome", `String "completed") ]
 
 let valid_text value =
   String.length value > 0

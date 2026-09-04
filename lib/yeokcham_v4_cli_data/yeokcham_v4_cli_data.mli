@@ -1,9 +1,11 @@
 (** Pure versioned stdout envelopes for V4 command results. *)
 
 type command_error = { code : string; message : string }
+type command_result = Completed
 type envelope
 
 val schema_version : int
+val command_result_json : command_result -> Yojson.Safe.t
 
 val success :
   command:string -> result:Yojson.Safe.t -> warnings:string list -> envelope

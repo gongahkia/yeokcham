@@ -43,6 +43,28 @@ let completion_is_deterministic_and_complete () =
     "Fish has declarative commands" true
     (String.contains (Spec.render_completion Spec.Fish) 'c')
 
+let every_command_accepts_the_shared_format_option () =
+  List.iter
+    (fun command ->
+      match
+        List.find_opt
+          (fun option -> String.equal option.Spec.option_name "--format")
+          command.Spec.command_options
+      with
+      | Some option ->
+          if
+            option.Spec.option_repeatable
+            || option.Spec.option_value <> Spec.Choice [ "text"; "json" ]
+          then
+            Alcotest.fail
+              ("command has an invalid shared format option: "
+              ^ String.concat " " command.Spec.command_path)
+      | None ->
+          Alcotest.fail
+            ("command lacks the shared format option: "
+            ^ String.concat " " command.Spec.command_path))
+    Spec.commands
+
 let receipt_and_diagnostic_paths_are_never_hook_eligible () =
   let excluded =
     [
@@ -86,6 +108,8 @@ let () =
             command_paths_are_unique_and_valid;
           Alcotest.test_case "completion is deterministic and complete" `Quick
             completion_is_deterministic_and_complete;
+          Alcotest.test_case "every command accepts the shared format" `Quick
+            every_command_accepts_the_shared_format_option;
           Alcotest.test_case "receipt and diagnostic paths exclude hooks" `Quick
             receipt_and_diagnostic_paths_are_never_hook_eligible;
         ] );

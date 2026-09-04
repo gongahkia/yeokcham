@@ -35,7 +35,15 @@ let choice name values = option name (Choice values)
 let repeated name value = option ~repeatable:true name value
 
 let command ?(options = [ root ]) ?(hook = false) command_path =
-  { command_path; command_options = options; command_hook_eligible = hook }
+  let command_options =
+    if
+      List.exists
+        (fun option -> String.equal option.option_name "--format")
+        options
+    then options
+    else options @ [ format ]
+  in
+  { command_path; command_options; command_hook_eligible = hook }
 
 let commands =
   [

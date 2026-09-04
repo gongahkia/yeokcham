@@ -31,9 +31,121 @@ module Repair = Yeokcham_v4_repair
 
 [@@@warning "-40-42"]
 
-let fail message =
+type requested_format = Text_format | Json_format
+
+let raw_arguments () = Array.to_list Sys.argv
+
+let requested_format () =
+  let rec loop = function
+    | "--" :: _ -> Text_format
+    | "--format" :: "json" :: _ -> Json_format
+    | "--format" :: "text" :: rest -> loop rest
+    | _ :: rest -> loop rest
+    | [] -> Text_format
+  in
+  loop (raw_arguments ())
+
+let command_arguments () =
+  let rec loop before_separator reversed = function
+    | "--" :: rest when before_separator ->
+        List.rev_append reversed ("--" :: rest)
+    | "--format" :: ("text" | "json") :: rest when before_separator ->
+        loop true reversed rest
+    | argument :: rest -> loop before_separator (argument :: reversed) rest
+    | [] -> List.rev reversed
+  in
+  loop true [] (raw_arguments ())
+
+let rec is_prefix prefix values =
+  match (prefix, values) with
+  | [], _ -> true
+  | left :: prefix, right :: values when String.equal left right ->
+      is_prefix prefix values
+  | _ -> false
+
+let command_name () =
+  match command_arguments () with
+  | _ :: arguments -> (
+      match
+        Cli_spec.command_paths ()
+        |> List.filter (fun path -> is_prefix path arguments)
+        |> List.sort (fun left right ->
+            Int.compare (List.length right) (List.length left))
+      with
+      | path :: _ -> String.concat "-" path
+      | [] -> "cli")
+  | [] -> "cli"
+
+let native_json_command command =
+  List.mem command
+    [ "verify"; "repair-plan"; "repair-apply"; "repair-defer"; "hook-list" ]
+
+let json_stdout_destination : Unix.file_descr option ref = ref None
+let public_warnings : string list ref = ref []
+
+let record_warning warning =
+  if requested_format () = Json_format then
+    public_warnings := warning :: !public_warnings;
+  prerr_endline ("warning: " ^ warning)
+
+let print_json bytes =
+  match !json_stdout_destination with
+  | None -> print_endline bytes
+  | Some descriptor ->
+      let output = Unix.out_channel_of_descr (Unix.dup descriptor) in
+      Fun.protect
+        ~finally:(fun () -> close_out_noerr output)
+        (fun () ->
+          Out_channel.output_string output bytes;
+          Out_channel.output_char output '\n';
+          Out_channel.flush output)
+
+let public_error_message message =
+  let first_line =
+    match String.index_opt message '\n' with
+    | Some index -> String.sub message 0 index
+    | None -> message
+  in
+  let first_line = String.trim first_line in
+  if String.length first_line = 0 then "V4 command failed" else first_line
+
+let fail_with code message =
+  if requested_format () = Json_format then
+    Cli_data.failure ~command:(command_name ()) ~warnings:[]
+      ~error:{ Cli_data.code; message = public_error_message message }
+    |> Cli_data.encode |> print_json;
   prerr_endline message;
   exit 2
+
+let fail message = fail_with "operation-failed" message
+
+let run_generic_json command action =
+  let saved_stdout = Unix.dup Unix.stdout in
+  let restored = ref false in
+  let restore () =
+    if not !restored then (
+      flush stdout;
+      Unix.dup2 saved_stdout Unix.stdout;
+      Unix.close saved_stdout;
+      json_stdout_destination := None;
+      restored := true)
+  in
+  json_stdout_destination := Some saved_stdout;
+  public_warnings := [];
+  try
+    let null = Unix.openfile "/dev/null" [ Unix.O_WRONLY ] 0 in
+    flush stdout;
+    Unix.dup2 null Unix.stdout;
+    Unix.close null;
+    action ();
+    restore ();
+    Cli_data.success ~command
+      ~result:(Cli_data.command_result_json Cli_data.Completed)
+      ~warnings:(List.rev !public_warnings)
+    |> Cli_data.encode |> print_json
+  with error ->
+    restore ();
+    raise error
 
 let usage_text =
   "usage:\n\
@@ -140,7 +252,7 @@ let usage_text =
   \  yeokcham repair defer [--root PATH] [--format text|json]\n\
   \  yeokcham watch [--root PATH]"
 
-let usage () = fail usage_text
+let usage () = fail_with "invalid-invocation" usage_text
 let version_text = "yeokcham V4 source build (unreleased)"
 
 let help_for = function
@@ -778,6 +890,11 @@ let parse_workspace_update arguments =
 
 type health_format = Health_text | Health_json
 
+let health_format_from_request () =
+  match requested_format () with
+  | Text_format -> Health_text
+  | Json_format -> Health_json
+
 type health_source =
   | Backup_source of string
   | Gc_source of string
@@ -799,7 +916,7 @@ let parse_health_arguments arguments =
         loop root (parse_health_format value) rest
     | _ -> usage ()
   in
-  loop None Health_text arguments
+  loop None (health_format_from_request ()) arguments
 
 let parse_repair_plan arguments =
   let rec loop root source format = function
@@ -816,7 +933,7 @@ let parse_repair_plan arguments =
         loop root source (parse_health_format value) rest
     | _ -> usage ()
   in
-  loop None None Health_text arguments
+  loop None None (health_format_from_request ()) arguments
 
 let parse_repair_apply arguments =
   let rec loop root plan candidate approval format = function
@@ -841,7 +958,7 @@ let parse_repair_apply arguments =
         loop root plan candidate approval (parse_health_format value) rest
     | _ -> usage ()
   in
-  loop None None None None Health_text arguments
+  loop None None None None (health_format_from_request ()) arguments
 
 let source_of_argument value =
   match String.split_on_char ':' value with
@@ -1008,21 +1125,27 @@ let run_completion = function
   | [ "fish" ] -> print_string (Cli_spec.render_completion Cli_spec.Fish)
   | _ -> usage ()
 
-let hook_event_for_path = function
-  | [ "init" ] -> Some Hook.Init
-  | [ "save" ] -> Some Hook.Save
-  | [ "restore" ] | [ "restore"; "retain" ] | [ "restore"; "forget" ] ->
-      Some Hook.Restore
-  | [ "workspace"; "activate" ] -> Some Hook.Workspace_activate
-  | [ "workspace"; "update" ] -> Some Hook.Workspace_update
-  | [ "draft"; "new" ] -> Some Hook.Draft_new
-  | [ "share" ] -> Some Hook.Share
-  | [ "withdraw" ] -> Some Hook.Withdraw
-  | [ "resolve" ] -> Some Hook.Resolve
-  | [ "deliver" ] -> Some Hook.Deliver
-  | [ "pin" ] -> Some Hook.Pin
-  | [ "unpin" ] -> Some Hook.Unpin
-  | [ "compact" ] -> Some Hook.Compact
+let hook_event_for_path path =
+  let event =
+    match path with
+    | [ "init" ] -> Some Hook.Init
+    | [ "save" ] -> Some Hook.Save
+    | [ "restore" ] | [ "restore"; "retain" ] | [ "restore"; "forget" ] ->
+        Some Hook.Restore
+    | [ "workspace"; "activate" ] -> Some Hook.Workspace_activate
+    | [ "workspace"; "update" ] -> Some Hook.Workspace_update
+    | [ "draft"; "new" ] -> Some Hook.Draft_new
+    | [ "share" ] -> Some Hook.Share
+    | [ "withdraw" ] -> Some Hook.Withdraw
+    | [ "resolve" ] -> Some Hook.Resolve
+    | [ "deliver" ] -> Some Hook.Deliver
+    | [ "pin" ] -> Some Hook.Pin
+    | [ "unpin" ] -> Some Hook.Unpin
+    | [ "compact" ] -> Some Hook.Compact
+    | _ -> None
+  in
+  match (Cli_spec.find path, event) with
+  | Some { Cli_spec.command_hook_eligible = true; _ }, Some event -> Some event
   | _ -> None
 
 let root_from_arguments arguments =
@@ -1039,15 +1162,14 @@ let run_hooks_after_success path arguments =
   | Some event -> (
       let root = root_from_arguments arguments in
       match Hook_store.load ~root with
-      | Error error ->
-          prerr_endline ("warning: " ^ Hook_store.error_to_string error)
+      | Error error -> record_warning (Hook_store.error_to_string error)
       | Ok registry -> (
           let public_event =
             Hook_runner.make_event ~event ~command:(String.concat "-" path)
               ~repository:None ~paths:[] ~identifiers:[]
           in
           match public_event with
-          | Error error -> prerr_endline ("warning: " ^ error)
+          | Error error -> record_warning error
           | Ok public_event ->
               Hook.hooks registry
               |> List.filter (fun hook -> Hook.hook_event hook = event)
@@ -1059,8 +1181,7 @@ let run_hooks_after_success path arguments =
                   with
                   | None -> ()
                   | Some warning ->
-                      prerr_endline
-                        ("warning: " ^ Hook_runner.warning_to_string warning))))
+                      record_warning (Hook_runner.warning_to_string warning))))
 
 let observe_after_success path arguments action =
   action ();
@@ -1107,7 +1228,7 @@ let parse_hook_list arguments =
         loop root (parse_health_format value) rest
     | _ -> usage ()
   in
-  loop None Health_text arguments
+  loop None (health_format_from_request ()) arguments
 
 let json_of_hook hook =
   let program =
@@ -1180,8 +1301,9 @@ let run_hook_test arguments =
       with
       | None -> Printf.printf "hook test passed %s\n" id
       | Some warning ->
-          Printf.printf "hook test warning %s\n"
-            (Hook_runner.warning_to_string warning))
+          let warning = Hook_runner.warning_to_string warning in
+          if requested_format () = Json_format then record_warning warning
+          else Printf.printf "hook test warning %s\n" warning)
 
 let run_hook = function
   | "add" :: arguments -> run_hook_add arguments
@@ -3677,7 +3799,7 @@ let run_daemon = function
   | _ -> usage ()
 
 let dispatch () =
-  match Array.to_list Sys.argv with
+  match command_arguments () with
   | _ :: "init" :: arguments ->
       observe_after_success [ "init" ] arguments (fun () -> run_init arguments)
   | _ :: "join" :: arguments -> run_join arguments
@@ -3781,7 +3903,7 @@ let dispatch () =
   | _ -> usage ()
 
 let () =
-  match Array.to_list Sys.argv with
+  match command_arguments () with
   | _ :: [ "--version" ] -> print_endline version_text
   | _ :: [ "--help" ] | _ :: [ "-h" ] -> print_help []
   | _ :: "help" :: path -> print_help path
@@ -3789,5 +3911,11 @@ let () =
       match List.rev arguments with
       | "--help" :: reversed_path | "-h" :: reversed_path ->
           print_help (List.rev reversed_path)
-      | _ -> dispatch ())
+      | _ ->
+          let command = command_name () in
+          if
+            requested_format () = Json_format
+            && not (native_json_command command)
+          then run_generic_json command dispatch
+          else dispatch ())
   | [] -> usage ()

@@ -337,18 +337,33 @@ yeokcham hook test [--root PATH] --id HOOK_ID
 
 **CLI contract:**
 
-- [ ] Add --format text|json to every user-facing successful/result command touched by this roadmap, preserving existing text output until its versioned replacement is documented. JSON top-level is a canonical envelope with schema_version, command, ok, result, warnings, and typed error.
-- [ ] Define stable error codes, not parsable prose. JSON goes to stdout; diagnostics remain on stderr; exit status remains the command outcome.
-- [ ] Generate and test Bash, Zsh, and Fish completion scripts from a single command/option specification. Completion never contacts a relay, reads a secret, or mutates a repository.
-- [ ] Provide yeokcham hook add|list|remove|test for local, versioned hook configuration. A hook is a post-operation observer invoked only after a successful eligible local command has committed state. It gets a versioned JSON event on stdin with public identifiers and paths only.
-- [ ] Hooks never run for receive, sync, bootstrap, daemon actions, relay server/access commands, verification, repair planning, or a failed operation. Hook nonzero exit, timeout, malformed output, and signal become a warning and never reverse or change VCS success/state.
-- [ ] Strip bearer tokens, credentials, private keys, secret-service values, passphrases, and raw unredacted configuration from event payloads/logs. Default hook timeout is 30 seconds; run with minimal inherited environment and no shell interpolation.
+- [x] Add --format text|json to every user-facing successful/result command touched by this roadmap, preserving existing text output until its versioned replacement is documented. JSON top-level is a canonical envelope with schema_version, command, ok, result, warnings, and typed error.
+- [x] Define stable error codes, not parsable prose. JSON goes to stdout; diagnostics remain on stderr; exit status remains the command outcome.
+- [x] Generate and test Bash, Zsh, and Fish completion scripts from a single command/option specification. Completion never contacts a relay, reads a secret, or mutates a repository.
+- [x] Provide yeokcham hook add|list|remove|test for local, versioned hook configuration. A hook is a post-operation observer invoked only after a successful eligible local command has committed state. It gets a versioned JSON event on stdin with public identifiers and paths only.
+- [x] Hooks never run for receive, sync, bootstrap, daemon actions, relay server/access commands, verification, repair planning, or a failed operation. Hook nonzero exit, timeout, malformed output, and signal become a warning and never reverse or change VCS success/state.
+- [x] Strip bearer tokens, credentials, private keys, secret-service values, passphrases, and raw unredacted configuration from event payloads/logs. Default hook timeout is 30 seconds; run with minimal inherited environment and no shell interpolation.
 
 **Implementation/tests:**
 
-- [ ] Define typed command result/event/error records and one canonical JSON encoder/decoder fixture set. Do not hand-assemble JSON in every parser.
-- [ ] Add parser and completion-generation tests for every command/flag, shell syntax checks, JSON goldens, stdout/stderr/exit-code tests, and text-output regression tests.
-- [ ] Use an argv-list process launcher, not sh -c. Test spaces, quotes, timeout, signal, missing executable, adversarial environment, and secret redaction. Prove no hook invocation on excluded receipt/daemon paths.
+- [x] Define typed command result/event/error records and one canonical JSON encoder/decoder fixture set. Do not hand-assemble JSON in every parser.
+- [x] Add parser and completion-generation tests for every command/flag, shell syntax checks, JSON goldens, stdout/stderr/exit-code tests, and text-output regression tests.
+- [x] Use an argv-list process launcher, not sh -c. Test spaces, quotes, timeout, signal, missing executable, adversarial environment, and secret redaction. Prove no hook invocation on excluded receipt/daemon paths.
+
+**Verification (2026-09-04):** `opam exec -- dune exec test/test_v4_cli_data.exe`,
+`opam exec -- dune exec test/test_v4_cli_spec.exe`,
+`opam exec -- dune exec test/test_v4_hook.exe`,
+`opam exec -- dune exec test/test_v4_hook_store.exe`,
+`opam exec -- dune exec test/test_v4_hook_runner.exe`, and `opam exec -- dune
+exec test/test_v4_cli.exe` passed. The focused suites cover canonical JSON and
+`hooks-v1` bytes, strict decoder/refusal cases, every documented help path and
+completion candidate, Bash/Zsh/Fish syntax, argv quoting, minimal environment,
+secret-shaped event refusal, output/nonzero/signal/missing-executable/timeout
+warnings, unchanged-save and excluded-verify non-invocation, and JSON
+stdout/stderr/exit behavior. The focused command sequence passed in 6.379
+seconds; the final `make ci` passed in 2.349 seconds with Dune reusing unchanged
+test actions. The optional PKCS#11 hardware case was skipped by its existing
+availability guard; it is not CLI-001 evidence.
 
 ### DIST-001 — signed development artifacts
 

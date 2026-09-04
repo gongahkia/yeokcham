@@ -84,6 +84,23 @@ function for `compinit`; and the Fish script uses declarative `complete -c`
 entries. Scripts offer only static command and option names: they do not invoke
 Yeokcham, a relay, a secret provider, or a repository while completing.
 
+`--format text|json` is a dispatcher-level option on every command path in the
+static specification. `text` remains the default and preserves established
+terminal output. The dispatcher removes the formatter before handing arguments
+to the existing command parser, so formatting cannot affect a model transition
+or its arguments. Health and `hook list` retain their command-specific JSON
+records; commands without a richer public record return the versioned algebraic
+`completed` result (`{"outcome":"completed"}`). They do not embed terminal
+prose in JSON. This narrow development contract lets scripts distinguish the
+command, success, error code, and ordered public warnings without parsing text,
+while the established text interface remains available for detailed inspection.
+
+The dispatcher emits `invalid-invocation` for usage failures and
+`operation-failed` for ordinary command failures; Health retains its documented
+domain-specific codes. The envelope is stdout-only. A concise safe error summary
+and any hook warning are also emitted to stderr. Warnings appear in order in the
+JSON envelope for generic commands and never change the command's exit status.
+
 Hook configuration is explicit and local:
 
 ```text
@@ -105,12 +122,13 @@ operator diagnostic and likewise does not change V4 state.
 
 Receipt, relay, daemon, verification, repair-planning, and failed-command paths
 are ineligible; HEALTH remains hook-free. Event eligibility is a static part of
-the command specification, not a dynamic user choice.
+the command specification, not a dynamic user choice. The runtime consults that
+same eligibility field before dispatching an event.
 
 ## Verification
 
-- canonical success/error JSON fixtures and malformed/unknown-field decoder
-  refusals;
+- canonical success and generic-completed JSON fixtures, plus malformed,
+  unknown-field, and inconsistent-envelope decoder refusals;
 - stdout/stderr and status tests for Health text/JSON output; and
 - CLI-001 expands the same fixtures to every migrated command plus hooks and
   shell completion tests.
