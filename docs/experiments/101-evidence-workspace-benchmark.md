@@ -48,3 +48,9 @@ five rows. Record host CPU, memory, filesystem, kernel, free space, and any
 thermal/power conditions beside the raw result. This method has no network leg;
 Experiment 102 must measure TRANSPORT-002 separately under the stated link
 conditions.
+
+If a fixture, scenario, projection check, or measurement fails, the current
+external `run-N/benchmark-status.txt` retains the schema version, nonzero exit
+status, and named stage. Successful runs retain no child run directory, so a
+status file never represents a successful measurement. This is operational
+diagnostic data, not a V4 record or a benchmark result.

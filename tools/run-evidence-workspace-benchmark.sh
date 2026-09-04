@@ -3,8 +3,10 @@
 set -eu
 
 repository_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-generator="$repository_root/_build/default/bench/evidence_fixture_generator.exe"
-scenario="$repository_root/_build/default/bench/evidence_workspace_scenario.exe"
+generator=${EVIDENCE_FIXTURE_GENERATOR:-$repository_root/_build/default/bench/evidence_fixture_generator.exe}
+scenario=${EVIDENCE_WORKSPACE_SCENARIO:-$repository_root/_build/default/bench/evidence_workspace_scenario.exe}
+run=
+stage=
 
 fail() {
   printf '%s\n' "evidence-workspace-benchmark: $*" >&2
@@ -59,6 +61,20 @@ esac
 [ ! -e "$output" ] || fail '--output must not exist'
 mkdir "$output"
 
+record_failed_run() {
+  status=$?
+  if [ "$status" -ne 0 ] && [ -n "$run" ] && [ -d "$run" ]; then
+    {
+      printf '%s\n' 'schema_version=1'
+      printf '%s\n' "status=$status"
+      printf '%s\n' "stage=$stage"
+    } > "$run/benchmark-status.txt" || :
+  fi
+  exit "$status"
+}
+trap record_failed_run EXIT
+trap 'exit 128' HUP INT TERM
+
 results="$output/workspace-runs.tsv"
 printf 'iteration\tpaths\tlogical_bytes\tinit_s\tprepare_s\tpackage_s\tbootstrap_s\tactivate_s\twall_s\tuser_cpu_s\tsystem_cpu_s\tmax_rss_kib\tsource_v4_disk_bytes\tpackage_disk_bytes\ttarget_v4_disk_bytes\n' > "$results"
 printf '%s\n' "source_revision=$(git -C "$repository_root" rev-parse HEAD)" > "$output/profile.txt"
@@ -83,15 +99,20 @@ iteration=1
 while [ "$iteration" -le "$iterations" ]; do
   run="$output/run-$iteration"
   mkdir "$run" "$run/source" "$run/target"
+  stage=fixture
   "$generator" --root "$run/source" --paths "$paths" --bytes "$bytes" > "$run/fixture.txt"
+  stage=scenario
   /usr/bin/time -f '%e\t%U\t%S\t%M' -o "$run/resources.tsv" \
     "$scenario" --source "$run/source" --target "$run/target" --package "$run/package" \
     > "$run/scenario.txt"
+  stage=projection-count
   target_entries=$(find "$run/target" -path "$run/target/.yeokcham" -prune -o -mindepth 1 -print | wc -l | tr -d ' ')
   [ "$target_entries" = "$paths" ] \
     || fail "workspace activation did not materialise $paths exact entries"
+  stage=projection-diff
   diff -qr --exclude .yeokcham "$run/source" "$run/target" >/dev/null \
     || fail 'workspace activation did not reproduce the source fixture exactly'
+  stage=measurements
   init_seconds=$(sed -n 's/^source_init_seconds=//p' "$run/scenario.txt")
   prepare_seconds=$(sed -n 's/^bootstrap_prepare_seconds=//p' "$run/scenario.txt")
   package_seconds=$(sed -n 's/^package_materialize_seconds=//p' "$run/scenario.txt")
@@ -106,7 +127,10 @@ while [ "$iteration" -le "$iterations" ]; do
     "$package_seconds" "$bootstrap_seconds" "$activate_seconds" "$resources" \
     "$source_v4_disk_bytes" "$package_disk_bytes" "$target_v4_disk_bytes" \
     >> "$results"
+  stage=cleanup
   rm -r "$run"
+  run=
+  stage=
   iteration=$((iteration + 1))
 done
 

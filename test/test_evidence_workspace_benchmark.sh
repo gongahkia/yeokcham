@@ -36,6 +36,19 @@ grep -F 'logical_bytes=1000' "$output/profile.txt" >/dev/null \
 grep -F 'kernel=' "$output/environment.txt" >/dev/null \
   || fail 'environment did not retain the kernel'
 
+failing_scenario="$scratch/failing-scenario"
+printf '%s\n' '#!/bin/sh' 'exit 42' > "$failing_scenario"
+chmod 700 "$failing_scenario"
+failed_output="$scratch/failed-output"
+if EVIDENCE_WORKSPACE_SCENARIO="$failing_scenario" \
+  "$benchmark" --output "$failed_output" --paths 10 --bytes 1000 --iterations 1 >/dev/null 2>&1; then
+  fail 'failing scenario was accepted'
+fi
+grep -Fx 'status=42' "$failed_output/run-1/benchmark-status.txt" >/dev/null \
+  || fail 'failed scenario did not retain its status'
+grep -Fx 'stage=scenario' "$failed_output/run-1/benchmark-status.txt" >/dev/null \
+  || fail 'failed scenario did not retain its stage'
+
 if "$benchmark" --output relative --paths 10 --bytes 1000 --iterations 1 >/dev/null 2>&1; then
   fail 'relative output root was accepted'
 fi
