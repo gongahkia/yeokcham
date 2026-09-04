@@ -1,7 +1,12 @@
 module Gc = Yeokcham_v4_gc
 module Health = Yeokcham_v4_health
 module Plan_store = Yeokcham_v4_health_store
+module Snapshot = Yeokcham_snapshot
 module Store = Yeokcham_store
+
+let object_observation object_id status =
+  Health.Object_observation
+    { object_id = Store.Stored_object_id.to_hex object_id; status; references = [] }
 
 let state_head_unreadable =
   Health.Durable_observation
@@ -37,7 +42,23 @@ let gc_temporary_unreachable =
       reachable = false;
     }
 
-let observation_of_gc_error = function
+let observation_of_store_error = function
+  | Store.Object_identity_mismatch { expected; actual } ->
+      object_observation expected
+        (Health.Id_mismatch (Store.Stored_object_id.to_hex actual))
+  | Store.Object_integrity_error { id; _ } ->
+      object_observation id Health.Malformed
+  | Store.Root_not_directory _ | Store.Repository_not_initialized _
+  | Store.Repository_incomplete _ | Store.Incompatible_repository_format _
+  | Store.Not_regular_file _ | Store.Object_too_large _ | Store.File_size_changed _
+  | Store.Io_error _ | Store.Collision_or_corruption _
+  | Store.Unsupported_publication _ | Store.Temporary_name_exhausted _
+  | Store.Invalid_ref_name _ | Store.Corrupt_ref _ | Store.Concurrent_ref_update _
+  | Store.Ref_lock_held _ | Store.Ref_generation_exhausted _
+  | Store.Invalid_ref_path _ | Store.Concurrent_ref_file_update _ ->
+      state_head_unreadable
+
+let[@warning "-4"] observation_of_gc_error = function
   | Gc.Missing_reachable_object id ->
       Health.Object_observation
         {
@@ -47,12 +68,15 @@ let observation_of_gc_error = function
         }
   | Gc.Proof_error _ -> restore_proof_unreadable
   | Gc.Journal_error _ -> restore_temporary_unreachable
+  | Gc.Snapshot_error (Snapshot.Store_error error) ->
+      observation_of_store_error error
   | Gc.Transaction_not_found _ | Gc.Transaction_collision _
   | Gc.Incomplete_transaction _ | Gc.Stale_transaction_object _
   | Gc.Transaction_object_missing _ | Gc.Quarantine_collision _ ->
       gc_temporary_unreachable
-  | Gc.Store_error _ | Gc.V4_store_error _ | Gc.Snapshot_error _
-  | Gc.Model_error _ | Gc.Invalid_snapshot_id _ | Gc.Duplicate_object _
+  | Gc.Store_error error -> observation_of_store_error error
+  | Gc.V4_store_error _ | Gc.Snapshot_error _ | Gc.Model_error _
+  | Gc.Invalid_snapshot_id _ | Gc.Duplicate_object _
   | Gc.Invalid_schema _ | Gc.Unsupported_schema_version _
   | Gc.Noncanonical_bytes | Gc.No_collectible_objects | Gc.Io_error _ ->
       state_head_unreadable

@@ -202,7 +202,10 @@ type error =
       expected : Stored_object_id.t;
       actual : Stored_object_id.t;
     }
-  | Object_integrity_error of Envelope.decode_error
+  | Object_integrity_error of {
+      id : Stored_object_id.t;
+      error : Envelope.decode_error;
+    }
   | Collision_or_corruption of { id : Stored_object_id.t; detail : string }
   | Unsupported_publication of { path : string; detail : string }
   | Temporary_name_exhausted of string
@@ -242,7 +245,9 @@ let error_to_string = function
       Printf.sprintf "object identity mismatch: expected %s, got %s"
         (Stored_object_id.to_hex expected)
         (Stored_object_id.to_hex actual)
-  | Object_integrity_error error -> Envelope.decode_error_to_string error
+  | Object_integrity_error { id; error } ->
+      Printf.sprintf "object %s is malformed: %s" (Stored_object_id.to_hex id)
+        (Envelope.decode_error_to_string error)
   | Collision_or_corruption { id; detail } ->
       Printf.sprintf "existing object %s is divergent or corrupt: %s"
         (Stored_object_id.to_hex id)
@@ -709,7 +714,7 @@ let get repository id =
     Error (Object_identity_mismatch { expected = id; actual })
   else
     Envelope.decode bytes
-    |> Result.map_error (fun error -> Object_integrity_error error)
+    |> Result.map_error (fun error -> Object_integrity_error { id; error })
 
 let canonical_object_name value length =
   String.length value = length

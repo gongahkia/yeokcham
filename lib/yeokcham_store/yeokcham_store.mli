@@ -44,7 +44,10 @@ type error =
       expected : Stored_object_id.t;
       actual : Stored_object_id.t;
     }
-  | Object_integrity_error of Yeokcham_envelope.decode_error
+  | Object_integrity_error of {
+      id : Stored_object_id.t;
+      error : Yeokcham_envelope.decode_error;
+    }
   | Collision_or_corruption of { id : Stored_object_id.t; detail : string }
   | Unsupported_publication of { path : string; detail : string }
   | Temporary_name_exhausted of string

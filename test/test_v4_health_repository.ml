@@ -93,6 +93,35 @@ let missing_checkpoint_closure_is_typed_without_source_writes () =
         "failed verification writes no source bytes" before
         (tree_fingerprint root))
 
+let malformed_checkpoint_object_is_typed_without_source_writes () =
+  with_directory "v4-health-verify-malformed-" (fun root ->
+      write_file root "main.ml" "let version = 1\n";
+      let status = initialize root in
+      let repository =
+        V4_store.open_repository ~root |> require_ok V4_store.error_to_string
+      in
+      let store = V4_store.underlying_store repository in
+      let snapshot =
+        Model.Snapshot_id.to_string status.Service.checkpoint
+        |> Store.Stored_object_id.of_hex |> Result.get_ok
+      in
+      let path = Store.object_path store snapshot in
+      Out_channel.with_open_bin path (fun output ->
+          Out_channel.output_string output "not an envelope");
+      let before = tree_fingerprint root in
+      let report = Repository.verify ~root in
+      let codes =
+        Health.report_damages report
+        |> List.map (fun damage ->
+            Health.damage_code damage |> Health.damage_code_to_string)
+      in
+      Alcotest.(check bool)
+        "malformed closure has a typed diagnosis" true
+        (List.mem "malformed-envelope" codes);
+      Alcotest.(check (list string))
+        "malformed verification writes no source bytes" before
+        (tree_fingerprint root))
+
 let () =
   Alcotest.run "V4 health repository"
     [
@@ -102,5 +131,7 @@ let () =
             clean_repository_verification_writes_nothing;
           Alcotest.test_case "missing closure is typed and no-write" `Quick
             missing_checkpoint_closure_is_typed_without_source_writes;
+          Alcotest.test_case "malformed closure is typed and no-write" `Quick
+            malformed_checkpoint_object_is_typed_without_source_writes;
         ] );
     ]
