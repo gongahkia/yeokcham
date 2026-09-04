@@ -68,8 +68,44 @@ used by Health verification or repair planning.
 
 ## Persistent-format impact
 
-None. JSON is stdout data, not project state, a package, a repair plan, a
-bootstrap artifact, a relay object, or a semantic sidecar.
+The shared JSON envelope is stdout data, not project state, a package, a repair
+plan, a bootstrap artifact, a relay object, or a semantic sidecar. CLI-001 adds
+one separately versioned, canonical local `hooks-v1` registry below
+`.yeokcham/hooks/`. It stores an explicit hook ID, event, and argv list only;
+it is outside V4 canonical history and cannot represent source bytes, a
+credential, a private key, an authority decision, or a V4 model object.
+
+## CLI-001 implementation amendment
+
+CLI-001 uses one static, pure command/option specification for help-path
+coverage and completion generation. The generated Bash script registers one
+function with `complete -F`; the Zsh script is an underscored `#compdef`
+function for `compinit`; and the Fish script uses declarative `complete -c`
+entries. Scripts offer only static command and option names: they do not invoke
+Yeokcham, a relay, a secret provider, or a repository while completing.
+
+Hook configuration is explicit and local:
+
+```text
+yeokcham hook add --event EVENT -- PROGRAM [ARGUMENT ...]
+yeokcham hook list
+yeokcham hook remove --id HOOK_ID
+yeokcham hook test --id HOOK_ID
+```
+
+`add` records an argv list, never a shell string. Eligible successful commands
+first commit their ordinary local V4 state, then receive a redacted
+`hook-event-v1` JSON document on stdin. The launcher clears inherited
+environment variables except a minimal fixed set, supplies no credential or
+private-material value, has no shell interpolation, and terminates after 30
+seconds. Missing executables, nonzero exits, malformed stdout, signals, and
+timeouts create public warnings only: they neither undo a committed transition
+nor alter the primary command's exit status. Explicit `hook test` is an
+operator diagnostic and likewise does not change V4 state.
+
+Receipt, relay, daemon, verification, repair-planning, and failed-command paths
+are ineligible; HEALTH remains hook-free. Event eligibility is a static part of
+the command specification, not a dynamic user choice.
 
 ## Verification
 
@@ -78,3 +114,9 @@ bootstrap artifact, a relay object, or a semantic sidecar.
 - stdout/stderr and status tests for Health text/JSON output; and
 - CLI-001 expands the same fixtures to every migrated command plus hooks and
   shell completion tests.
+
+## References
+
+- [Bash programmable completion](https://www.gnu.org/software/bash/manual/html_node/Programmable-Completion.html)
+- [Zsh Completion System](https://zsh.sourceforge.io/Doc/Release/Completion-System.html)
+- [Fish `complete` command](https://fishshell.com/docs/current/cmds/complete.html)

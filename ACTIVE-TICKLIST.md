@@ -302,6 +302,39 @@ deployment, availability, or capacity claim.
 
 **Goal:** make the native CLI dependable in terminals and scripts without letting scripting alter VCS decisions or outcomes.
 
+**Vertical slice:** one static, pure command specification names every
+documented command path, option, option-value kind, and hook eligibility. It
+generates Bash, Zsh, and Fish scripts and drives parser-completeness tests.
+One local `hooks-v1` record stores explicit argv-list observers; a command
+result adapter renders typed public results through ADR-101's existing envelope.
+No completion or hook lookup contacts a relay, opens a credential provider, or
+changes a V4 model decision.
+
+**Types and invariants:** `command_spec`, `option_spec`, `command_result`,
+`command_error`, `hook_id`, `hook_event`, `hook_argv`, `hook_record`,
+`hook_registry`, and `hook_event_v1` are algebraic types. A hook event names a
+committed local outcome only; it has no authority, intent, checkpoint, capsule,
+revision, release, conflict, or semantic-sidecar meaning. The dispatcher uses
+an argv-list process launch with a cleared/minimal environment and a bounded
+30-second wait. A hook outcome is an ordered public warning, never a VCS
+transition or command-status override.
+
+**Persistent-format impact:** `hooks-v1` is a versioned, canonical,
+create-or-replace local configuration record below `.yeokcham/hooks/`, outside
+canonical history, package, bootstrap, relay, repair-plan, and source trees.
+It has golden and negative-decode fixtures; no hook configuration is the sole
+copy of a V4 object or authority record.
+
+**CLI additions:**
+
+~~~
+yeokcham completion bash|zsh|fish
+yeokcham hook add [--root PATH] --event EVENT -- PROGRAM [ARGUMENT ...]
+yeokcham hook list [--root PATH] [--format text|json]
+yeokcham hook remove [--root PATH] --id HOOK_ID
+yeokcham hook test [--root PATH] --id HOOK_ID
+~~~
+
 **CLI contract:**
 
 - [ ] Add --format text|json to every user-facing successful/result command touched by this roadmap, preserving existing text output until its versioned replacement is documented. JSON top-level is a canonical envelope with schema_version, command, ok, result, warnings, and typed error.
