@@ -37,7 +37,7 @@ fail() {
 
 trap cleanup EXIT HUP INT TERM
 
-for tool in docker openssl curl sha256sum awk mktemp timeout sed tr grep git script; do
+for tool in docker openssl curl sha256sum awk mktemp timeout sed tr grep git socat; do
   command -v "$tool" >/dev/null 2>&1 || fail "missing required command: $tool"
 done
 [ -x "$client" ] || fail "missing host V4 CLI; run make build first"
@@ -199,8 +199,10 @@ received=$(curl --silent --show-error --insecure --fail \
 [ "$received" = "$payload" ] || fail "disposable restored relay cannot receive immutable bytes"
 
 bootstrap_command="$client bootstrap --root $target_root --remote relay --url $base --repository $project --basis $basis --username alice --draft relay-target --title relay-bootstrap-target --device $source_device --verify-phrase '$phrase'"
-bootstrap_output=$(printf '%s\n' "$secret" \
-  | script --quiet --return --command "$bootstrap_command" /dev/null)
+bootstrap_output=$(
+  (sleep 1; printf '%s\n' "$secret"; sleep 1) \
+    | socat - "EXEC:$bootstrap_command,pty,echo=0"
+)
 case "$bootstrap_output" in
   *"bootstrap verified $basis; no working-tree materialization occurred"*) ;;
   *) fail "restored relay bootstrap did not report receipt without materialization" ;;
