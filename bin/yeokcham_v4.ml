@@ -20,6 +20,7 @@ module Relay_config = Yeokcham_v4_relay_config
 module Semantic_config = Yeokcham_v4_semantic_config
 module Workspace = Yeokcham_v4_workspace
 module Cli_data = Yeokcham_v4_cli_data
+module Cli_spec = Yeokcham_v4_cli_spec
 module Health = Yeokcham_v4_health
 module Health_repository = Yeokcham_v4_health_repository
 module Health_store = Yeokcham_v4_health_store
@@ -125,6 +126,7 @@ let usage_text =
   \  yeokcham storage gc --root PATH --apply\n\
   \  yeokcham storage gc status [--root PATH]\n\
   \  yeokcham storage gc resume|restore|purge [--root PATH] --id ID\n\
+  \  yeokcham completion bash|zsh|fish\n\
   \  yeokcham verify [--root PATH] [--format text|json]\n\
   \  yeokcham repair plan [--root PATH] --from SOURCE [--format text|json]\n\
   \  yeokcham repair apply [--root PATH] --plan PLAN_ID --select CANDIDATE_ID \\\n\
@@ -567,6 +569,12 @@ let help_for = function
         "usage: yeokcham storage gc resume|restore|purge [--root PATH] --id ID\n\n\
          Resume staging, return a pre-purge quarantine, or irreversibly purge \
          one named local transaction."
+  | [ "completion" ] ->
+      Some
+        "usage: yeokcham completion bash|zsh|fish\n\n\
+         Print a static shell completion script generated from the V4 command \
+         specification. It never opens a repository, relay, or credential \
+         provider."
   | [ "verify" ] ->
       Some
         "usage: yeokcham verify [--root PATH] [--format text|json]\n\n\
@@ -978,6 +986,12 @@ let health_refusal_code = function
   | Health.Destination_no_longer_missing -> "destination-no-longer-missing"
 
 let current_unix_seconds () = Int64.of_float (Unix.gettimeofday ())
+
+let run_completion = function
+  | [ "bash" ] -> print_string (Cli_spec.render_completion Cli_spec.Bash)
+  | [ "zsh" ] -> print_string (Cli_spec.render_completion Cli_spec.Zsh)
+  | [ "fish" ] -> print_string (Cli_spec.render_completion Cli_spec.Fish)
+  | _ -> usage ()
 
 let run_verify arguments =
   let root, format = parse_health_arguments arguments in
@@ -3526,6 +3540,7 @@ let dispatch () =
   | _ :: "compact" :: arguments -> run_compact arguments
   | _ :: "storage" :: "gc" :: arguments -> run_storage_gc arguments
   | _ :: "storage" :: "roots" :: arguments -> run_storage_roots arguments
+  | _ :: "completion" :: arguments -> run_completion arguments
   | _ :: "verify" :: arguments -> run_verify arguments
   | _ :: "repair" :: "plan" :: arguments -> run_repair_plan arguments
   | _ :: "repair" :: "apply" :: arguments -> run_repair_apply arguments

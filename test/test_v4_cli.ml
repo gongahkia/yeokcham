@@ -1773,6 +1773,41 @@ let health_repair_cli_requires_an_explicit_plan_and_approval () =
            (Filename.concat root "main.ml")
            In_channel.input_all))
 
+let completion_scripts_are_static_and_parse_in_each_shell () =
+  with_directory "yeokcham-v4-cli-completion-" (fun root ->
+      let check shell suffix =
+        let output, errors, status = run [ "completion"; shell ] in
+        require_success (shell ^ " completion") status errors;
+        expect_output_contains "completion contains init" "init" output;
+        expect_output_contains "completion contains root option" "--root" output;
+        let script = Filename.concat root ("yeokcham." ^ suffix) in
+        Out_channel.with_open_bin script (fun channel ->
+            Out_channel.output_string channel output);
+        let executable, arguments =
+          match shell with
+          | "bash" -> ("/usr/bin/bash", [ "-n"; script ])
+          | "zsh" -> ("/usr/bin/zsh", [ "-n"; script ])
+          | "fish" -> ("/usr/bin/fish", [ "-n"; script ])
+          | _ -> Alcotest.fail "unknown completion shell"
+        in
+        match
+          Unix.waitpid []
+            (Unix.create_process executable
+               (Array.of_list (executable :: arguments))
+               Unix.stdin Unix.stdout Unix.stderr)
+        with
+        | _, Unix.WEXITED 0 -> ()
+        | _, Unix.WEXITED code ->
+            Alcotest.failf "%s completion syntax exited %d" shell code
+        | _, Unix.WSIGNALED signal ->
+            Alcotest.failf "%s completion syntax was signalled %d" shell signal
+        | _, Unix.WSTOPPED signal ->
+            Alcotest.failf "%s completion syntax stopped %d" shell signal
+      in
+      check "bash" "bash";
+      check "zsh" "zsh";
+      check "fish" "fish")
+
 let () =
   Alcotest.run "V4 CLI"
     [
@@ -1826,5 +1861,7 @@ let () =
             health_commands_have_versioned_output_and_no_source_effect;
           Alcotest.test_case "health repair requires explicit approval" `Quick
             health_repair_cli_requires_an_explicit_plan_and_approval;
+          Alcotest.test_case "completion scripts are static and parse" `Quick
+            completion_scripts_are_static_and_parse_in_each_shell;
         ] );
     ]
