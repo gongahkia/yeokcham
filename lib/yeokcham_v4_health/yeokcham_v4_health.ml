@@ -108,6 +108,7 @@ type refusal =
   | Plan_digest_mismatch
   | Candidate_not_in_plan
   | Candidate_changed
+  | State_head_changed
   | Damage_changed
   | Destination_no_longer_missing
 

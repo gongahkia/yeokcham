@@ -255,8 +255,8 @@ SOURCE is one explicit trusted candidate source: a local GC quarantine ID, an of
 
 **Types and pure transitions first:**
 
-- [ ] Define Damage with stable machine codes for missing object, malformed envelope, canonical-ID mismatch, dangling reference, unreadable durable record, restore-proof mismatch, and unreachable temporary state. Include affected closure and blocked operations.
-- [ ] Define Repair_source, Repair_candidate, Repair_plan, Selection, and Repair_outcome. A plan is an immutable snapshot of damage, candidate byte identity, source provenance, and expiry/digest.
+- [x] Define Damage with stable machine codes for missing object, malformed envelope, canonical-ID mismatch, dangling reference, unreadable durable record, restore-proof mismatch, and unreachable temporary state. Include affected closure and blocked operations.
+- [x] Define Repair_source, Repair_candidate, Repair_plan, Selection, and Repair_outcome. A plan is an immutable snapshot of damage, candidate byte identity, source provenance, and expiry/digest.
 - [ ] Implement pure closure verification, candidate matching, and apply eligibility. Invariants: verification has no writes; repair never invents bytes; all source candidates are fully canonical-verified; repair can only add a missing exact object or explicitly quarantine an invalid copy.
 
 **Adapters and behaviour:**

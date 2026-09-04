@@ -107,8 +107,7 @@ let plan_binds_source_exact_bytes_and_selection () =
   in
   (match
      Health.apply_eligibility ~plan ~selection ~now:11L ~current:report
-       ~current_state_head:(id 'e')
-       ~reread_candidate:(Some candidate)
+       ~current_state_head:(id 'e') ~reread_candidate:(Some candidate)
    with
   | Health.Eligible selected ->
       Alcotest.(check string)
@@ -123,10 +122,12 @@ let plan_binds_source_exact_bytes_and_selection () =
     }
   in
   Health.apply_eligibility ~plan ~selection:wrong_selection ~now:11L
-    ~current_state_head:(id 'e') ~current:report ~reread_candidate:(Some candidate)
+    ~current_state_head:(id 'e') ~current:report
+    ~reread_candidate:(Some candidate)
   |> expect_outcome_refusal Health.Plan_digest_mismatch;
   Health.apply_eligibility ~plan ~selection ~now:11L
-    ~current_state_head:(id 'f') ~current:report ~reread_candidate:(Some candidate)
+    ~current_state_head:(id 'f') ~current:report
+    ~reread_candidate:(Some candidate)
   |> expect_outcome_refusal Health.State_head_changed;
   let changed =
     Health.make_candidate ~source ~object_id:(id 'a')
