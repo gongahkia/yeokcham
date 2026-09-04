@@ -217,6 +217,30 @@
   (source_tree golden)))
 
 (test
+ (name test_v4_workspace)
+ (modules test_v4_workspace)
+ (libraries
+  alcotest
+  unix
+  yeokcham_testkit
+  yeokcham_v4_model
+  yeokcham_v4_trust
+  yeokcham_v4_workspace)
+ (deps
+  (source_tree golden)))
+
+(test
+ (name v4_workspace_property_test)
+ (modules v4_workspace_property_test)
+ (libraries
+  alcotest
+  qcheck-core
+  qcheck-alcotest
+  yeokcham_v4_model
+  yeokcham_v4_trust
+  yeokcham_v4_workspace))
+
+(test
  (name test_v4_gc)
  (modules test_v4_gc)
  (libraries
