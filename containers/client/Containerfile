@@ -1,0 +1,44 @@
+# syntax=docker/dockerfile:1
+ARG BUILDKIT_SBOM_SCAN_CONTEXT=true
+ARG SOURCE_DATE_EPOCH
+ARG DEVELOPMENT_VERSION=0.0.0
+ARG DEVELOPMENT_RELEASE=0.dev
+
+FROM docker.io/ocaml/opam:debian-12-ocaml-5.5@sha256:b2b7ff41302eae75c20df6f052513d0a13fb440c43a681f632062f056d01421a AS build
+USER root
+RUN apt-get update \
+ && apt-get install --no-install-recommends --yes build-essential libsecret-1-dev libzstd-dev pkg-config \
+ && rm -rf /var/lib/apt/lists/*
+USER opam
+WORKDIR /home/opam/yeokcham
+COPY --chown=opam:opam . .
+RUN opam install --deps-only --locked --yes ./yeokcham.opam \
+ && opam exec -- dune build bin/yeokcham_v4.exe \
+ && install -D -m 0755 _build/default/bin/yeokcham_v4.exe /home/opam/out/yeokcham
+
+FROM registry.fedoraproject.org/fedora:43@sha256:8d775fbb86b8aa62172a2fd33203d285743ad2b74df8416322066e59e917b4ef AS artifacts
+ARG SOURCE_DATE_EPOCH
+ARG DEVELOPMENT_VERSION
+ARG DEVELOPMENT_RELEASE
+RUN dnf install --assumeyes --setopt=install_weak_deps=False rpm-build zstd \
+ && dnf clean all
+COPY --from=build /home/opam/out/yeokcham /input/yeokcham
+COPY LICENSE /input/LICENSE
+COPY packaging/fedora/yeokcham.spec /input/yeokcham.spec
+RUN set -eu; \
+    test -n "$SOURCE_DATE_EPOCH"; \
+    install -d /out/archive/usr/bin; \
+    install -m 0755 /input/yeokcham /out/archive/usr/bin/yeokcham; \
+    install -m 0644 /input/LICENSE /out/archive/LICENSE; \
+    tar --sort=name --mtime="@$SOURCE_DATE_EPOCH" --owner=0 --group=0 --numeric-owner \
+      --zstd -cf "/out/yeokcham-$DEVELOPMENT_VERSION-linux-x86_64.tar.zst" -C /out/archive .; \
+    install -d /root/rpmbuild/SOURCES; \
+    install -m 0755 /input/yeokcham /root/rpmbuild/SOURCES/yeokcham; \
+    install -m 0644 /input/LICENSE /root/rpmbuild/SOURCES/LICENSE; \
+    rpmbuild -bb /input/yeokcham.spec \
+      --define "version $DEVELOPMENT_VERSION" \
+      --define "build_release $DEVELOPMENT_RELEASE"; \
+    cp /root/rpmbuild/RPMS/x86_64/*.rpm /out/
+
+FROM scratch AS export
+COPY --from=artifacts /out/ /

@@ -8,7 +8,7 @@ cd "$repo_root"
 image=${RELAY_IMAGE:-yeokcham-relay:relay-container-test}
 build_timeout=${RELAY_CONTAINER_BUILD_TIMEOUT:-900}
 nginx_image=docker.io/library/nginx:1.28.0-alpine@sha256:30f1c0d78e0ad60901648be663a710bdadf19e4c10ac6782c235200619158284
-client=$repo_root/_build/default/bin/yeokcham_v4.exe
+client=${YEOKCHAM_RELAY_TEST_CLIENT:-$repo_root/_build/default/bin/yeokcham_v4.exe}
 payload='relay container scoped immutable payload'
 object_id=$(printf %s "$payload" | sha256sum | awk '{print $1}')
 prefix=yeokcham-relay-container-$$
@@ -44,8 +44,9 @@ done
 
 source_root=$scratch/source
 target_root=$scratch/target
+activation_root=$scratch/activation
 signer_directory=$scratch/test-signer
-mkdir "$source_root" "$target_root" "$signer_directory"
+mkdir "$source_root" "$target_root" "$activation_root" "$signer_directory"
 printf '%s\n' 'let relay_bootstrap = 1' > "$source_root/main.ml"
 printf '%s\n' 'untouched target ordinary file' > "$target_root/keep.txt"
 export YEOKCHAM_V4_TEST_SIGNER_DIRECTORY="$signer_directory"
@@ -222,6 +223,22 @@ esac
   || fail "restored relay bootstrap changed the target ordinary file"
 [ "$(cat "$source_root/main.ml")" = 'let relay_bootstrap = 1' ] \
   || fail "bootstrap publish changed the source ordinary file"
+
+export YEOKCHAM_RELAY_TEST_TARGET_ROOT="$activation_root"
+activation_bootstrap_output=$( \
+  (sleep 1; printf '%s\n' "$secret"; sleep 1) \
+    | socat - "$bootstrap_address" \
+)
+case "$activation_bootstrap_output" in
+  *"bootstrap verified $basis; no working-tree materialization occurred"*) ;;
+  *) fail "activation bootstrap did not report receipt without materialization" ;;
+esac
+[ ! -e "$activation_root/main.ml" ] \
+  || fail "activation bootstrap materialized source before explicit activation"
+"$client" workspace activate --root "$activation_root" >/dev/null
+[ "$(cat "$activation_root/main.ml")" = 'let relay_bootstrap = 1' ] \
+  || fail "explicit workspace activation did not materialize the verified basis"
+"$client" verify --root "$activation_root" >/dev/null
 
 invalid_config=$scratch/invalid-relay.conf
 printf '%s\n' 'version=1' 'unknown_key=refuse' > "$invalid_config"

@@ -17,9 +17,9 @@ format compatibility, daemon service, or source-tree action.
 DIST-001 produces Linux x86_64 development artifacts from one checked-in
 container build-input lock:
 
-- a relocatable `tar.zst` archive containing `/usr/bin/yeokcham`, licence, and
-  development-build record; and
-- a Fedora RPM containing the same executable, licence, and record.
+- a relocatable `tar.zst` archive containing `/usr/bin/yeokcham` and licence;
+  and
+- a Fedora RPM containing the same executable and licence.
 
 The archive and RPM are development artifacts, not an opam package, a source
 release, a compatibility promise, or a V4 object. The RPM has no systemd unit,
@@ -29,10 +29,11 @@ repository, scans, restores, or alters ordinary source files. The native client
 does nothing to a working tree until the operator explicitly invokes an
 authorised V4 command.
 
-The build record is a canonical JSON document carrying schema version, source
+The external build record is a canonical JSON document carrying schema version, source
 commit and commit timestamp, architecture, OCaml/Dune versions, opam lock
 digest, pinned builder/Fedora base images, artifact names/sizes/SHA-256 values,
-SBOM digest, and signing bundle filename. `SOURCE_DATE_EPOCH` is the source
+SBOM digest, and signing bundle filename. It is deliberately outside the files
+it digests, avoiding a self-referential archive or RPM. `SOURCE_DATE_EPOCH` is the source
 commit timestamp. This makes inputs and produced bytes inspectable; it is not a
 claim that independent native builds are bit-for-bit reproducible.
 

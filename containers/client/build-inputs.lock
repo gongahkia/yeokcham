@@ -1,0 +1,9 @@
+schema=1
+architecture=linux/amd64
+ocaml=5.5.0
+dune=3.24.2
+builder=docker.io/ocaml/opam:debian-12-ocaml-5.5@sha256:b2b7ff41302eae75c20df6f052513d0a13fb440c43a681f632062f056d01421a
+fedora=registry.fedoraproject.org/fedora:43@sha256:8d775fbb86b8aa62172a2fd33203d285743ad2b74df8416322066e59e917b4ef
+build_packages=build-essential,libsecret-1-dev,libzstd-dev,pkg-config
+rpm_packages=rpm-build,zstd
+opam_lock=yeokcham.opam.locked
