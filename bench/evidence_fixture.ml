@@ -12,7 +12,7 @@ type error =
   | Root_not_directory of string
   | Root_not_empty of string
   | Path_count_too_small of int
-  | Logical_bytes_too_small of { bytes : int64; minimum : int }
+  | Logical_bytes_too_small of { bytes : int64; minimum : int64 }
   | Io_error of { path : string; operation : string; message : string }
 
 let error_to_string = function
@@ -24,7 +24,8 @@ let error_to_string = function
       Printf.sprintf "fixture path count must be at least two, got %d" count
   | Logical_bytes_too_small { bytes; minimum } ->
       Printf.sprintf
-        "fixture logical bytes must be at least the file count (%d), got %Ld"
+        "fixture logical bytes must reserve eight distinct identifier bytes \
+         per file (%Ld), got %Ld"
         minimum bytes
   | Io_error { path; operation; message } ->
       Printf.sprintf "fixture %s failed for %s: %s" operation path message
@@ -38,10 +39,11 @@ let layout_for ({ requested_path_count; requested_logical_bytes } : profile) =
   else
     let generated_directories = (requested_path_count + 100) / 101 in
     let generated_files = requested_path_count - generated_directories in
-    if requested_logical_bytes < Int64.of_int generated_files then
+    let minimum_bytes = Int64.mul 8L (Int64.of_int generated_files) in
+    if requested_logical_bytes < minimum_bytes then
       Error
         (Logical_bytes_too_small
-           { bytes = requested_logical_bytes; minimum = generated_files })
+           { bytes = requested_logical_bytes; minimum = minimum_bytes })
     else
       Ok
         {
@@ -76,7 +78,10 @@ let fill_bytes state bytes length =
       Int64.logand
         (Int64.add (Int64.mul !state 1_103_515_245L) 12_345L)
         0x7fff_ffffL;
-    Bytes.set bytes index (Char.chr (Int64.to_int (Int64.logand !state 0xffL)))
+    Bytes.set bytes index
+      (Char.chr
+         (Int64.to_int
+            (Int64.logand (Int64.shift_right_logical !state 16) 0xffL)))
   done
 
 let file_bytes ~index ~files ~total =
@@ -89,7 +94,18 @@ let write_file ~path ~index ~length =
   let state = ref (Int64.add 0x1f12_3bb5L (Int64.of_int index)) in
   try
     Out_channel.with_open_bin path (fun channel ->
-        let remaining = ref length in
+        let identifier = Bytes.create 8 in
+        let index = Int64.of_int index in
+        for byte = 0 to 7 do
+          Bytes.set identifier byte
+            (Char.chr
+               (Int64.to_int
+                  (Int64.logand
+                     (Int64.shift_right_logical index (byte * 8))
+                     0xffL)))
+        done;
+        write_all channel identifier (Bytes.length identifier);
+        let remaining = ref (Int64.sub length 8L) in
         while Int64.compare !remaining 0L > 0 do
           let write_length =
             Int64.min !remaining (Int64.of_int (Bytes.length buffer))

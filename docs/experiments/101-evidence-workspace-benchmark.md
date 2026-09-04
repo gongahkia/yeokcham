@@ -5,7 +5,11 @@ local source-to-projection journey, without representing a benchmark result as
 a release or compatibility claim.
 
 The deterministic fixture has exactly the requested number of directory and
-regular-file paths and requested logical bytes. One run then:
+regular-file paths and requested logical bytes. Each regular file begins with
+its deterministic eight-byte file identifier, so the fixture cannot collapse
+into repeated content-addressed objects; its remaining bytes come from a
+deterministic high-bit LCG stream. The profile therefore requires at least
+eight logical bytes per generated regular file. One run then:
 
 1. creates a signed source repository from that fixture;
 2. creates a bootstrap package and verified basis;

@@ -17,7 +17,7 @@ type error =
   | Root_not_directory of string
   | Root_not_empty of string
   | Path_count_too_small of int
-  | Logical_bytes_too_small of { bytes : int64; minimum : int }
+  | Logical_bytes_too_small of { bytes : int64; minimum : int64 }
   | Io_error of { path : string; operation : string; message : string }
 
 val error_to_string : error -> string
@@ -25,8 +25,8 @@ val profile : path_count:int -> logical_bytes:int64 -> profile
 
 val validate : profile -> (layout, error) result
 (** A valid profile has at least one directory and one regular file. The exact
-    generated entry count is [requested_path_count], and every file has at least
-    one byte. *)
+    generated entry count is [requested_path_count], and every file reserves an
+    eight-byte unique identifier. *)
 
 val directory_count : layout -> int
 val file_count : layout -> int

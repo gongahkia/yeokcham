@@ -36,6 +36,9 @@ first_digest=$(find "$first" -type f -print0 | sort -z | xargs -0 sha256sum | aw
 second_digest=$(find "$second" -type f -print0 | sort -z | xargs -0 sha256sum | awk '{ print $1 }' | sha256sum | awk '{ print $1 }')
 [ "$first_digest" = "$second_digest" ] \
   || fail "fixture bytes are not deterministic"
+unique_file_digests=$(find "$first" -type f -print0 | xargs -0 sha256sum | awk '{ print $1 }' | sort -u | wc -l | tr -d ' ')
+[ "$unique_file_digests" = "$(find "$first" -type f | wc -l | tr -d ' ')" ] \
+  || fail "fixture files are not byte-distinct"
 
 if "$generator" --root relative --paths 10 --bytes 1000 >/dev/null 2>&1; then
   fail "relative output root was accepted"
@@ -46,8 +49,8 @@ fi
 if "$generator" --root "$scratch" --paths 1 --bytes 1 >/dev/null 2>&1; then
   fail "profile without a file was accepted"
 fi
-if "$generator" --root "$scratch" --paths 10 --bytes 1 >/dev/null 2>&1; then
-  fail "profile with zero-byte files was accepted"
+if "$generator" --root "$scratch" --paths 10 --bytes 9 >/dev/null 2>&1; then
+  fail "profile without identifier bytes for every file was accepted"
 fi
 
 after_status=$(git -C "$repository_root" status --porcelain)
