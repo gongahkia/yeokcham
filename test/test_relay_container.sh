@@ -199,9 +199,10 @@ received=$(curl --silent --show-error --insecure --fail \
 [ "$received" = "$payload" ] || fail "disposable restored relay cannot receive immutable bytes"
 
 bootstrap_command="$client bootstrap --root $target_root --remote relay --url $base --repository $project --basis $basis --username alice --draft relay-target --title relay-bootstrap-target --device $source_device --verify-phrase '$phrase'"
+bootstrap_address="EXEC:\"$bootstrap_command\",pty,echo=0"
 bootstrap_output=$(
   (sleep 1; printf '%s\n' "$secret"; sleep 1) \
-    | socat - "EXEC:$bootstrap_command,pty,echo=0"
+    | socat - "$bootstrap_address"
 )
 case "$bootstrap_output" in
   *"bootstrap verified $basis; no working-tree materialization occurred"*) ;;
