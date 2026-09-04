@@ -313,3 +313,30 @@ observer left the save successful, reported stderr diagnostics, and appeared in
 the JSON envelope warning list. This is local process-boundary evidence; it does
 not measure hook throughput, untrusted-hook containment, shell portability
 beyond the installed Bash/Zsh/Fish parsers, or release compatibility.
+
+## DIST-001 development client artifacts
+
+On 2026-09-04, `make development-artifact-test` passed on the Fedora 43 Docker
+host. The test built a pinned Linux x86_64 `tar.zst` client archive and Fedora
+RPM through BuildKit, observed local `sbom.spdx.json` and `provenance.json`
+outputs, verified the SHA-256 manifest and archive file list, and installed
+then removed the RPM in a clean Fedora 43 container. RPM inspection found no
+scriptlets and no systemd units. DNF reported its expected warning that it
+skipped OpenPGP validation for the direct local test RPM; this is not RPM
+signing evidence and does not replace the documented external Cosign route.
+
+The disposable relay journey used the packaged archive client and performed
+`init`, `save`, `restore`, bootstrap, explicit workspace activation, `sync`,
+and `verify`. It compared the publish source file across bootstrap and a target
+ordinary-source sentinel across receipt; receipt actions did not materialise
+the snapshot, and the explicitly activated source was unchanged by sync. `make
+development-build-record-test` also passed, covering canonical build-record
+bytes, absent-signing-bundle refusal, checksum-mismatch refusal, and
+repository-output refusal. The same checkout passed `make ci`, and Ruby
+successfully parsed `.github/workflows/development-client-artifact.yml`.
+
+The local environment had no Cosign installation or maintainer-controlled
+GitHub Actions execution. Consequently, remote keyless OIDC signing,
+verification against Fulcio/Rekor, artifact upload/retention, and registry
+persistence are [Unverified]. The workflow is checked-in implementation, not
+evidence that those external operations have occurred.

@@ -97,3 +97,5 @@ but cannot establish those external facts.
 - [Docker BuildKit attestations](https://docs.docker.com/build/metadata/attestations/)
 - [Docker SBOM attestations](https://docs.docker.com/build/metadata/attestations/sbom/)
 - [Sigstore CI quickstart and identity verification](https://docs.sigstore.dev/quickstart/quickstart-ci/)
+- [Sigstore blob signing](https://docs.sigstore.dev/cosign/signing/signing_with_blobs/)
+- [Sigstore blob verification](https://docs.sigstore.dev/cosign/verifying/verify/)

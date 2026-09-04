@@ -401,11 +401,26 @@ file-list checks; Fedora-container install/uninstall/smoke with an explicit
 test signer; OCI layout/SBOM/provenance command checks; and failure assertions
 for absent signing bundle, checksum mismatch, and no ordinary-source mutation.
 
-- [ ] Produce a portable Linux archive and Fedora RPM for the native client; publish a signed OCI relay image separately. Pin/build-record compiler, Dune/OCaml, OS base, dependency-lock inputs, source revision, artifact SHA-256, SBOM, and signer fingerprint.
-- [ ] Decide and document development signing root, rotation/revocation process, signature verification commands, and how test users obtain keys. Do not call a tag, artifact, or format stable merely because it is signed.
-- [ ] Add install/uninstall/smoke verification in clean Fedora containers or VMs. Include init, save, restore, explicit workspace activation, relay sync, and verify journeys. Test that package scripts do not autostart a daemon or alter source outside explicit commands.
-- [ ] Publish operator/client installation, upgrade, downgrade, backup, and uninstall guidance. Downgrade may refuse incompatible development records; that is preferable to guessed conversion because no migration promise exists.
-- [ ] Keep opam publication, public source-release tags, support matrix, and format migration policy deferred until an explicit future product decision.
+- [x] Produce a portable Linux archive and Fedora RPM for the native client; publish a signed OCI relay image separately. Pin/build-record compiler, Dune/OCaml, OS base, dependency-lock inputs, source revision, artifact SHA-256, SBOM, and signer fingerprint.
+- [x] Decide and document development signing root, rotation/revocation process, signature verification commands, and how test users obtain keys. Do not call a tag, artifact, or format stable merely because it is signed.
+- [x] Add install/uninstall/smoke verification in clean Fedora containers or VMs. Include init, save, restore, explicit workspace activation, relay sync, and verify journeys. Test that package scripts do not autostart a daemon or alter source outside explicit commands.
+- [x] Publish operator/client installation, upgrade, downgrade, backup, and uninstall guidance. Downgrade may refuse incompatible development records; that is preferable to guessed conversion because no migration promise exists.
+- [x] Keep opam publication, public source-release tags, support matrix, and format migration policy deferred until an explicit future product decision.
+
+**Verification (2026-09-04):** `make development-artifact-test` passed on the
+Fedora 43 Docker host. It built the pinned Linux x86_64 archive and Fedora RPM
+with BuildKit SBOM/provenance output, checked the SHA-256 manifest and archive
+layout, installed and removed the RPM in a clean Fedora 43 container, and ran
+the disposable relay journey through `init`, `save`, `restore`, explicit
+workspace activation, `sync`, and `verify`. It also proved the package has no
+RPM scriptlets or systemd units and that `sync` did not alter an activated
+ordinary source file. `make development-build-record-test`, `make ci`, and a
+Ruby YAML parse of `.github/workflows/development-client-artifact.yml` passed.
+The local record test covers canonical bytes plus missing-bundle,
+checksum-mismatch, and repository-output refusal. The checked-in workflow
+implements keyless SHA256SUMS and build-record signing/verification; its
+remote OIDC execution, artifact upload, and third-party availability remain
+[Unverified] until a maintainer-controlled GitHub Actions run completes.
 
 ### EVIDENCE-001 — release-readiness evidence, not a release
 
