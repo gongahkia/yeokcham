@@ -263,21 +263,37 @@ SOURCE is one explicit trusted candidate source: a local GC quarantine ID, an of
 
 - [x] Define Damage with stable machine codes for missing object, malformed envelope, canonical-ID mismatch, dangling reference, unreadable durable record, restore-proof mismatch, and unreachable temporary state. Include affected closure and blocked operations.
 - [x] Define Repair_source, Repair_candidate, Repair_plan, Selection, and Repair_outcome. A plan is an immutable snapshot of damage, candidate byte identity, source provenance, and expiry/digest.
-- [ ] Implement pure closure verification, candidate matching, and apply eligibility. Invariants: verification has no writes; repair never invents bytes; all source candidates are fully canonical-verified; repair can only add a missing exact object or explicitly quarantine an invalid copy.
+- [x] Implement pure closure verification, candidate matching, and apply eligibility. Invariants: verification has no writes; repair never invents bytes; all source candidates are fully canonical-verified; repair can only add a missing exact object or explicitly quarantine an invalid copy.
 
 **Adapters and behaviour:**
 
-- [ ] Reuse Yeokcham_v4_gc quarantine, Yeokcham_v4_package, relay fetch, bootstrap artifacts, Yeokcham_v4_store, and restore-proof readers through narrow read-only adapters. Do not create an alternate object format.
-- [ ] Persist repair plans only if needed for cross-process apply; version and expire them outside canonical history. A stale plan refuses and requires a fresh repair plan.
-- [ ] Local repair writes stage into a new temporary file, validates byte identity, atomically publishes only if the object is still missing, and preserves invalid originals/quarantine evidence. It never overwrites.
-- [ ] Return structured text and JSON damage/candidate lists. No repair, including a deferred one, may block status, unrelated local saves, inspection of intact history, or work in other repositories.
+- [x] Reuse Yeokcham_v4_gc quarantine, Yeokcham_v4_package, relay fetch, bootstrap artifacts, Yeokcham_v4_store, and restore-proof readers through narrow read-only adapters. Do not create an alternate object format.
+- [x] Persist repair plans only if needed for cross-process apply; version and expire them outside canonical history. A stale plan refuses and requires a fresh repair plan.
+- [x] Local repair writes stage into a new temporary file, validates byte identity, atomically publishes only if the object is still missing, and preserves invalid originals/quarantine evidence. It never overwrites.
+- [x] Return structured text and JSON damage/candidate lists. No repair, including a deferred one, may block status, unrelated local saves, inspection of intact history, or work in other repositories.
 
 **Tests and acceptance:**
 
-- [ ] Fixtures for every damage code and plan encoding, plus decode corruption and unknown-feature rejection.
-- [ ] Generated corrupted/missing-closure cases verify stable diagnosis and prove verify produces no file writes.
-- [ ] Integration journeys restore an exact missing object from each permitted source; test all multiple-candidate selections, stale approval, divergent source, source disappearance, write interruption, and defer/continue work.
-- [ ] Assert malformed/mismatched candidates never become visible and source/destination ordinary worktrees remain unchanged throughout.
+- [x] Fixtures for every damage code and plan encoding, plus decode corruption and unknown-feature rejection.
+- [x] Generated corrupted/missing-closure cases verify stable diagnosis and prove verify produces no file writes.
+- [x] Integration journeys restore an exact missing object from each permitted source; test all multiple-candidate selections, stale approval, divergent source, source disappearance, write interruption, and defer/continue work.
+- [x] Assert malformed/mismatched candidates never become visible and source/destination ordinary worktrees remain unchanged throughout.
+
+**Verification (2026-09-04):** `opam exec -- dune exec test/test_v4_health.exe`,
+`opam exec -- dune exec test/test_v4_health_store.exe`,
+`opam exec -- dune exec test/test_v4_health_repository.exe`,
+`opam exec -- dune exec test/v4_health_repository_property_test.exe`,
+`opam exec -- dune exec test/test_v4_repair.exe`,
+`opam exec -- dune exec test/test_v4_cli_data.exe`, and
+`opam exec -- dune exec test/test_v4_cli.exe` passed. The focused suites cover
+the seven stable damage codes, create-only/canonical repair-plan persistence,
+40 generated clean-or-missing closure cases with byte-for-byte no-write
+verification, no-global-block behaviour, a target staging-write failure, and
+an injected post-fsync staging interruption, and all five explicit repair
+sources. The relay-source integration uses an
+ephemeral loopback OpenSSL/socat TLS proxy. `make ci` passed (format, lint, and
+the complete test suite). This is local adapter evidence only; it makes no
+deployment, availability, or capacity claim.
 
 ### CLI-001 — dependable machine interface, completions, and observer hooks
 

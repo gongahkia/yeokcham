@@ -252,3 +252,40 @@ pending activation, clean-state replay, and `--replace` safety recovery.
 These are small correctness fixtures only. They do not measure object-count,
 repository-size, transfer, latency, or concurrency capacity; EVIDENCE-001 owns
 any such claim.
+
+## HEALTH-001 scoped verification and sourced repair
+
+On 2026-09-04, the HEALTH-001 focused suites and `make ci` passed on the Fedora
+43 development host. The pure health suite ran seven cases covering all stable
+damage codes, canonical plan binding, explicit multiple-candidate selection,
+expiry, and malformed/noncanonical/unknown-field plan rejection. The plan-store
+suite ran three persistence cases, including its `repair-plan-v1` golden bytes
+and create-only corruption refusal.
+
+The generated repository suite ran 40 clean-or-missing closure cases. Each
+compared the complete repository-tree fingerprint before and after `verify`;
+the result had the expected missing-object code exactly when the active closure
+object was removed. The repository integration suite also checked a malformed
+path identity, and that a damaged closure does not block status, a changed local
+save, model inspection, or inspection in an independent intact repository.
+
+The ten-case repair suite restored a missing exact object from each explicit
+source: backup, local GC quarantine, offline package, signed bootstrap artifact,
+and configured relay. It exercised stale state, source disappearance, malformed
+source bytes, divergent destination bytes, and a target staging-write failure;
+none published a claimed repaired object. Source and target ordinary source
+sentinels remained unchanged. Configured-relay coverage used an ephemeral
+loopback OpenSSL/socat TLS proxy and requires `/usr/bin/openssl` and
+`/usr/bin/socat`, which were available for this run. The 21-case CLI suite
+checked versioned JSON for `verify`, `repair defer`, and explicit plan/digest
+approval for apply.
+
+The immutable-store suite injected an interruption immediately after a repair
+object's same-directory temporary file was fsynced and before its add-if-missing
+link. It observed no final canonical object and retained the temporary file as
+inspectable evidence. This is a deterministic fault-injection result, not a
+power-loss or filesystem-crash experiment.
+
+These are correctness and adapter-boundary results. They do not measure repair
+throughput, repository capacity, remote operational reliability, backup
+durability, or public deployment readiness.
