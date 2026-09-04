@@ -31,6 +31,11 @@
  (libraries alcotest unix yeokcham_v4_hook yeokcham_v4_hook_store))
 
 (test
+ (name test_v4_hook_runner)
+ (modules test_v4_hook_runner)
+ (libraries alcotest unix yeokcham_v4_hook yeokcham_v4_hook_runner))
+
+(test
  (name v4_health_property_test)
  (modules v4_health_property_test)
  (libraries alcotest qcheck-core qcheck-alcotest yeokcham_v4_health))
