@@ -19,6 +19,11 @@ module Relay_access = Yeokcham_v4_relay_access
 module Relay_config = Yeokcham_v4_relay_config
 module Semantic_config = Yeokcham_v4_semantic_config
 module Workspace = Yeokcham_v4_workspace
+module Cli_data = Yeokcham_v4_cli_data
+module Health = Yeokcham_v4_health
+module Health_repository = Yeokcham_v4_health_repository
+module Health_store = Yeokcham_v4_health_store
+module Repair = Yeokcham_v4_repair
 
 [@@@warning "-40-42"]
 
@@ -120,6 +125,10 @@ let usage_text =
   \  yeokcham storage gc --root PATH --apply\n\
   \  yeokcham storage gc status [--root PATH]\n\
   \  yeokcham storage gc resume|restore|purge [--root PATH] --id ID\n\
+  \  yeokcham verify [--root PATH] [--format text|json]\n\
+  \  yeokcham repair plan [--root PATH] --from SOURCE [--format text|json]\n\
+  \  yeokcham repair apply [--root PATH] --plan PLAN_ID --select CANDIDATE_ID \\\n+  \     --approve PLAN_DIGEST [--format text|json]\n\
+  \  yeokcham repair defer [--root PATH] [--format text|json]\n\
   \  yeokcham watch [--root PATH]"
 
 let usage () = fail usage_text
@@ -557,6 +566,21 @@ let help_for = function
         "usage: yeokcham storage gc resume|restore|purge [--root PATH] --id ID\n\n\
          Resume staging, return a pre-purge quarantine, or irreversibly purge \
          one named local transaction."
+  | [ "verify" ] ->
+      Some
+        "usage: yeokcham verify [--root PATH] [--format text|json]\n\n\
+         Read and report damaged V4 closures. It never creates a lock, plan, \
+         object, receipt, quarantine, or ordinary source file."
+  | [ "repair" ] ->
+      Some
+        "usage: yeokcham repair plan --from SOURCE [--root PATH] \
+         [--format text|json]\n\
+         yeokcham repair apply --plan PLAN_ID --select CANDIDATE_ID \
+         --approve PLAN_DIGEST [--root PATH] [--format text|json]\n\
+         yeokcham repair defer [--root PATH] [--format text|json]\n\n\
+         SOURCE is backup:PATH, gc:TRANSACTION_ID, package:PATH, \
+         relay:ALIAS, or bootstrap:ARTIFACT_DIRECTORY. Plan has no selection; \
+         apply rechecks source bytes and damage before add-if-missing publish."
   | [ "watch" ] ->
       Some
         "usage: yeokcham watch [--root PATH]\n\n\
@@ -727,6 +751,312 @@ let parse_workspace_update arguments =
     | _ -> usage ()
   in
   loop None false arguments
+
+type health_format = Health_text | Health_json
+
+type health_source =
+  | Backup_source of string
+  | Gc_source of string
+  | Package_source of string
+  | Relay_source of string
+  | Bootstrap_source of string
+
+let parse_health_format = function
+  | "text" -> Health_text
+  | "json" -> Health_json
+  | _ -> usage ()
+
+let parse_health_arguments arguments =
+  let rec loop root format = function
+    | [] -> (Option.value root ~default:default_root, format)
+    | "--root" :: value :: rest when Option.is_none root ->
+        loop (Some value) format rest
+    | "--format" :: value :: rest when format = Health_text ->
+        loop root (parse_health_format value) rest
+    | _ -> usage ()
+  in
+  loop None Health_text arguments
+
+let parse_repair_plan arguments =
+  let rec loop root source format = function
+    | [] -> (
+        match source with
+        | Some source -> (Option.value root ~default:default_root, source, format)
+        | None -> usage ())
+    | "--root" :: value :: rest when Option.is_none root ->
+        loop (Some value) source format rest
+    | "--from" :: value :: rest when Option.is_none source ->
+        loop root (Some value) format rest
+    | "--format" :: value :: rest when format = Health_text ->
+        loop root source (parse_health_format value) rest
+    | _ -> usage ()
+  in
+  loop None None Health_text arguments
+
+let parse_repair_apply arguments =
+  let rec loop root plan candidate approval format = function
+    | [] -> (
+        match (plan, candidate, approval) with
+        | Some plan, Some candidate, Some approval ->
+            (Option.value root ~default:default_root, plan, candidate, approval, format)
+        | _ -> usage ())
+    | "--root" :: value :: rest when Option.is_none root ->
+        loop (Some value) plan candidate approval format rest
+    | "--plan" :: value :: rest when Option.is_none plan ->
+        loop root (Some value) candidate approval format rest
+    | "--select" :: value :: rest when Option.is_none candidate ->
+        loop root plan (Some value) approval format rest
+    | "--approve" :: value :: rest when Option.is_none approval ->
+        loop root plan candidate (Some value) format rest
+    | "--format" :: value :: rest when format = Health_text ->
+        loop root plan candidate approval (parse_health_format value) rest
+    | _ -> usage ()
+  in
+  loop None None None None Health_text arguments
+
+let source_of_argument value =
+  match String.split_on_char ':' value with
+  | prefix :: locator :: rest when String.length locator > 0 ->
+      let locator = String.concat ":" (locator :: rest) in
+      (match prefix with
+      | "backup" -> Backup_source locator
+      | "gc" -> Gc_source locator
+      | "package" -> Package_source locator
+      | "relay" -> Relay_source locator
+      | "bootstrap" -> Bootstrap_source locator
+      | _ ->
+          fail
+            "repair source must be backup:PATH, gc:TRANSACTION_ID, package:PATH, \
+             relay:ALIAS, or bootstrap:ARTIFACT_DIRECTORY")
+  | _ ->
+      fail
+        "repair source must be backup:PATH, gc:TRANSACTION_ID, package:PATH, \
+         relay:ALIAS, or bootstrap:ARTIFACT_DIRECTORY"
+
+let json_of_affected = function
+  | Health.Object id -> `Assoc [ ("kind", `String "object"); ("id", `String id) ]
+  | Health.Durable_record (kind, id) ->
+      let kind =
+        match kind with
+        | Health.State_head -> "state-head"
+        | Health.Restore_proof -> "restore-proof"
+        | Health.Workspace_receipt -> "workspace-receipt"
+        | Health.Gc_transaction -> "gc-transaction"
+        | Health.Repair_plan_record -> "repair-plan"
+      in
+      `Assoc [ ("kind", `String kind); ("id", `String id) ]
+  | Health.Temporary_state (kind, id) ->
+      let kind =
+        match kind with
+        | Health.Restore_temporary -> "restore-temporary"
+        | Health.Gc_temporary -> "gc-temporary"
+        | Health.Transfer_temporary -> "transfer-temporary"
+        | Health.Repair_temporary -> "repair-temporary"
+      in
+      `Assoc [ ("kind", `String kind); ("id", `String id) ]
+
+let json_of_damage damage =
+  `Assoc
+    [
+      ("code", `String (Health.damage_code damage |> Health.damage_code_to_string));
+      ("affected", json_of_affected (Health.damage_affected damage));
+      ( "blocked_operations",
+        `List
+          (Health.damage_blocked_operations damage
+          |> List.map (fun operation ->
+                 `String (Health.blocked_operation_to_string operation))) );
+    ]
+
+let json_of_candidate candidate =
+  `Assoc
+    [
+      ("id", `String (Health.candidate_id candidate));
+      ("object_id", `String (Health.candidate_object_id candidate));
+      ("bytes_id", `String (Health.candidate_bytes_id candidate));
+      ("source", `String (Health.candidate_source candidate |> Health.repair_source_to_string));
+    ]
+
+let json_of_report report =
+  `Assoc
+    [
+      ( "damages",
+        `List (Health.report_damages report |> List.map json_of_damage) );
+    ]
+
+let json_of_plan plan =
+  `Assoc
+    [
+      ("id", `String (Health.plan_id plan));
+      ("digest", `String (Health.plan_digest plan));
+      ("source", `String (Health.plan_source plan |> Health.repair_source_to_string));
+      ("state_head", `String (Health.plan_state_head plan));
+      ("expires_at", `Intlit (Int64.to_string (Health.plan_expires_at plan)));
+      ( "damages",
+        `List (Health.plan_damages plan |> List.map json_of_damage) );
+      ( "candidates",
+        `List (Health.plan_candidates plan |> List.map json_of_candidate) );
+    ]
+
+let render_health_result format command result text =
+  match format with
+  | Health_text -> text ()
+  | Health_json ->
+      Cli_data.success ~command ~result ~warnings:[] |> Cli_data.encode
+      |> print_endline
+
+let fail_health format command code message =
+  (match format with
+  | Health_text -> ()
+  | Health_json ->
+      Cli_data.failure ~command ~warnings:[]
+        ~error:{ Cli_data.code; message }
+      |> Cli_data.encode |> print_endline);
+  prerr_endline message;
+  exit 2
+
+let affected_text affected =
+  match affected with
+  | Health.Object id -> "object " ^ id
+  | Health.Durable_record (_, id) -> "durable " ^ id
+  | Health.Temporary_state (_, id) -> "temporary " ^ id
+
+let render_health_report report =
+  if Health.report_is_clean report then print_endline "verify clean"
+  else
+    Health.report_damages report
+    |> List.iter (fun damage ->
+           Printf.printf "damage %s %s blocks %s\n"
+             (Health.damage_code damage |> Health.damage_code_to_string)
+             (affected_text (Health.damage_affected damage))
+             (Health.damage_blocked_operations damage
+             |> List.map Health.blocked_operation_to_string
+             |> String.concat ","))
+
+let render_repair_plan plan =
+  Printf.printf "repair plan %s\n" (Health.plan_id plan);
+  Printf.printf "digest %s\n" (Health.plan_digest plan);
+  Printf.printf "source %s\n"
+    (Health.plan_source plan |> Health.repair_source_to_string);
+  Printf.printf "expires-at %Ld\n" (Health.plan_expires_at plan);
+  Health.plan_damages plan
+  |> List.iter (fun damage ->
+         Printf.printf "damage %s %s\n"
+           (Health.damage_code damage |> Health.damage_code_to_string)
+           (affected_text (Health.damage_affected damage)));
+  Health.plan_candidates plan
+  |> List.iter (fun candidate ->
+         Printf.printf "candidate %s object %s bytes %s\n"
+           (Health.candidate_id candidate)
+           (Health.candidate_object_id candidate)
+           (Health.candidate_bytes_id candidate))
+
+let health_refusal_code = function
+  | Health.Invalid_identifier _ -> "invalid-identifier"
+  | Health.Invalid_locator _ -> "invalid-locator"
+  | Health.Duplicate_observation _ -> "duplicate-observation"
+  | Health.No_damage -> "no-damage"
+  | Health.Invalid_expiry _ -> "invalid-expiry"
+  | Health.Candidate_source_mismatch -> "candidate-source-mismatch"
+  | Health.Candidate_not_missing -> "candidate-not-missing"
+  | Health.Plan_expired -> "plan-expired"
+  | Health.Plan_id_mismatch -> "plan-id-mismatch"
+  | Health.Plan_digest_mismatch -> "plan-digest-mismatch"
+  | Health.Candidate_not_in_plan -> "candidate-not-in-plan"
+  | Health.Candidate_changed -> "candidate-changed"
+  | Health.State_head_changed -> "state-head-changed"
+  | Health.Damage_changed -> "damage-changed"
+  | Health.Destination_no_longer_missing -> "destination-no-longer-missing"
+
+let current_unix_seconds () = Int64.of_float (Unix.gettimeofday ())
+
+let run_verify arguments =
+  let root, format = parse_health_arguments arguments in
+  let report = Health_repository.verify ~root in
+  render_health_result format "verify" (json_of_report report) (fun () ->
+      render_health_report report)
+
+let run_repair_plan arguments =
+  let root, source, format = parse_repair_plan arguments in
+  let now = current_unix_seconds () in
+  let expires_at = Int64.add now 3600L in
+  let result =
+    match source_of_argument source with
+    | Backup_source backup ->
+        Repair.plan_from_backup ~root ~backup ~created_at:now ~expires_at
+    | Gc_source transaction_id ->
+        Repair.plan_from_gc_quarantine ~root ~transaction_id ~created_at:now
+          ~expires_at
+    | Package_source package ->
+        Repair.plan_from_offline_package ~root ~package ~created_at:now
+          ~expires_at
+    | Relay_source remote ->
+        Repair.plan_from_configured_relay ~root ~remote ~created_at:now
+          ~expires_at
+    | Bootstrap_source artifact ->
+        Repair.plan_from_bootstrap_artifact ~root ~artifact ~created_at:now
+          ~expires_at
+  in
+  match result with
+  | Ok plan ->
+      render_health_result format "repair-plan" (json_of_plan plan) (fun () ->
+          render_repair_plan plan)
+  | Error error ->
+      fail_health format "repair-plan" "repair-plan-failed"
+        (Repair.error_to_string error)
+
+let run_repair_apply arguments =
+  let root, plan_id, candidate_id, approval, format = parse_repair_apply arguments in
+  let plan =
+    match Health_store.find ~root ~id:plan_id with
+    | Ok plan -> plan
+    | Error error ->
+        fail_health format "repair-apply" "repair-plan-unavailable"
+          (Health_store.error_to_string error)
+  in
+  let selection : Health.selection =
+    {
+      Health.selection_plan_id = plan_id;
+      selection_candidate_id = candidate_id;
+      selection_approved_digest = approval;
+    }
+  in
+  let result =
+    match Health.plan_source plan with
+    | Health.Backup _ ->
+        Repair.apply_from_backup ~root ~plan_id ~selection
+          ~now:(current_unix_seconds ())
+    | Health.Gc_quarantine _ ->
+        Repair.apply_from_gc_quarantine ~root ~plan_id ~selection
+          ~now:(current_unix_seconds ())
+    | Health.Offline_package _ ->
+        Repair.apply_from_offline_package ~root ~plan_id ~selection
+          ~now:(current_unix_seconds ())
+    | Health.Configured_relay _ ->
+        Repair.apply_from_configured_relay ~root ~plan_id ~selection
+          ~now:(current_unix_seconds ())
+    | Health.Bootstrap_artifact _ ->
+        Repair.apply_from_bootstrap_artifact ~root ~plan_id ~selection
+          ~now:(current_unix_seconds ())
+  in
+  match result with
+  | Error error ->
+      fail_health format "repair-apply" "repair-apply-failed"
+        (Repair.error_to_string error)
+  | Ok (Repair.Refused refusal) ->
+      fail_health format "repair-apply" (health_refusal_code refusal)
+        (Health.refusal_to_string refusal)
+  | Ok (Repair.Applied candidate) ->
+      render_health_result format "repair-apply"
+        (`Assoc [ ("candidate", json_of_candidate candidate) ])
+        (fun () ->
+          Printf.printf "repair applied %s\n" (Health.candidate_id candidate))
+
+let run_repair_defer arguments =
+  let root, format = parse_health_arguments arguments in
+  let report = Health_repository.verify ~root in
+  render_health_result format "repair-defer"
+    (`Assoc [ ("deferred", `Bool true); ("report", json_of_report report) ])
+    (fun () -> print_endline "repair deferred; no repair was recorded")
 
 let render_workspace_materialization verb materialized =
   let receipt = materialized.Service.workspace_receipt in
@@ -3183,6 +3513,10 @@ let dispatch () =
   | _ :: "compact" :: arguments -> run_compact arguments
   | _ :: "storage" :: "gc" :: arguments -> run_storage_gc arguments
   | _ :: "storage" :: "roots" :: arguments -> run_storage_roots arguments
+  | _ :: "verify" :: arguments -> run_verify arguments
+  | _ :: "repair" :: "plan" :: arguments -> run_repair_plan arguments
+  | _ :: "repair" :: "apply" :: arguments -> run_repair_apply arguments
+  | _ :: "repair" :: "defer" :: arguments -> run_repair_defer arguments
   | _ :: "watch" :: arguments -> run_watch arguments
   | _ -> usage ()
 
