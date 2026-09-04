@@ -8,7 +8,7 @@ cd "$repo_root"
 image=${RELAY_IMAGE:-yeokcham-relay:relay-container-test}
 build_timeout=${RELAY_CONTAINER_BUILD_TIMEOUT:-900}
 nginx_image=docker.io/library/nginx:1.28.0-alpine@sha256:30f1c0d78e0ad60901648be663a710bdadf19e4c10ac6782c235200619158284
-project=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+client=$repo_root/_build/default/bin/yeokcham_v4.exe
 payload='relay container scoped immutable payload'
 object_id=$(printf %s "$payload" | sha256sum | awk '{print $1}')
 prefix=yeokcham-relay-container-$$
@@ -37,9 +37,29 @@ fail() {
 
 trap cleanup EXIT HUP INT TERM
 
-for tool in docker openssl curl sha256sum awk mktemp timeout sed tr grep git; do
+for tool in docker openssl curl sha256sum awk mktemp timeout sed tr grep git script; do
   command -v "$tool" >/dev/null 2>&1 || fail "missing required command: $tool"
 done
+[ -x "$client" ] || fail "missing host V4 CLI; run make build first"
+
+source_root=$scratch/source
+target_root=$scratch/target
+signer_directory=$scratch/test-signer
+mkdir "$source_root" "$target_root" "$signer_directory"
+printf '%s\n' 'let relay_bootstrap = 1' > "$source_root/main.ml"
+printf '%s\n' 'untouched target ordinary file' > "$target_root/keep.txt"
+export YEOKCHAM_V4_TEST_SIGNER_DIRECTORY="$signer_directory"
+
+source_init=$("$client" init --root "$source_root" --username alice \
+  --draft relay-source --title relay-bootstrap-source)
+source_device=$(printf '%s\n' "$source_init" | sed -n 's/^device //p' | sed -n '1p')
+phrase=$(printf '%s\n' "$source_init" \
+  | awk '/^root-verification-phrase \(compare during device join\)$/{getline; print; exit}')
+project=$("$client" device show --root "$source_root" \
+  | sed -n 's/^repository //p' | sed -n '1p')
+[ "${#source_device}" -gt 0 ] || fail "source init did not report a device"
+[ "${#phrase}" -gt 0 ] || fail "source init did not report a verification phrase"
+[ "${#project}" -eq 64 ] || fail "source init did not report a repository ID"
 
 if [ -z "${RELAY_IMAGE+x}" ]; then
   timeout "$build_timeout" docker build \
@@ -72,6 +92,7 @@ start_relay() {
 
 start_relay "$volume"
 openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=localhost \
+  -addext 'subjectAltName = IP:127.0.0.1,DNS:localhost' \
   -keyout "$scratch/tls.key" -out "$scratch/tls.crt" >/dev/null 2>&1
 # Rootless Docker must be able to traverse this disposable certificate mount.
 chmod 755 "$scratch"
@@ -123,6 +144,14 @@ wait_ready
 [ "$(docker inspect --format '{{.HostConfig.ReadonlyRootfs}}' "$relay")" = true ] \
   || fail "relay container root filesystem was writable"
 
+export YEOKCHAM_V4_TEST_TRANSPORT=1
+export YEOKCHAM_V4_TEST_TRANSPORT_CA_BUNDLE="$scratch/tls.crt"
+export YEOKCHAM_V4_TEST_TRANSPORT_TOKEN="$secret"
+"$client" remote add --root "$source_root" relay "$base" >/dev/null
+publish_output=$("$client" bootstrap publish --root "$source_root" relay)
+basis=$(printf '%s\n' "$publish_output" | sed -n 's/^bootstrap basis //p' | sed -n '1p')
+[ "${#basis}" -eq 64 ] || fail "bootstrap publish did not report a basis ID"
+
 object_url=$base/v1/repositories/$project/manifests/$object_id
 status=$(curl --silent --show-error --insecure --output /dev/null --write-out '%{http_code}' \
   --request PUT --header "Authorization: Bearer $secret" \
@@ -168,6 +197,22 @@ wait_ready
 received=$(curl --silent --show-error --insecure --fail \
   --header "Authorization: Bearer $secret" "$object_url")
 [ "$received" = "$payload" ] || fail "disposable restored relay cannot receive immutable bytes"
+
+bootstrap_command="$client bootstrap --root $target_root --remote relay --url $base --repository $project --basis $basis --username alice --draft relay-target --title relay-bootstrap-target --device $source_device --verify-phrase '$phrase'"
+bootstrap_output=$(printf '%s\n' "$secret" \
+  | script --quiet --return --command "$bootstrap_command" /dev/null)
+case "$bootstrap_output" in
+  *"bootstrap verified $basis; no working-tree materialization occurred"*) ;;
+  *) fail "restored relay bootstrap did not report receipt without materialization" ;;
+esac
+[ -d "$target_root/.yeokcham" ] \
+  || fail "restored relay bootstrap did not create V4 metadata"
+[ ! -e "$target_root/main.ml" ] \
+  || fail "restored relay bootstrap materialized source into the target"
+[ "$(cat "$target_root/keep.txt")" = 'untouched target ordinary file' ] \
+  || fail "restored relay bootstrap changed the target ordinary file"
+[ "$(cat "$source_root/main.ml")" = 'let relay_bootstrap = 1' ] \
+  || fail "bootstrap publish changed the source ordinary file"
 
 invalid_config=$scratch/invalid-relay.conf
 printf '%s\n' 'version=1' 'unknown_key=refuse' > "$invalid_config"

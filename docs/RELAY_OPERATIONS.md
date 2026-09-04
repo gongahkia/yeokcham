@@ -43,12 +43,15 @@ Run `make relay-container-test` from a Docker host. By default it builds the
 local relay image with a 900-second timeout. Set `RELAY_IMAGE` only to test a
 previously built local image; it is a test convenience, not a deployable image
 identity. The check uses a disposable Docker network and volumes, a generated
-one-day TLS certificate, and the pinned Nginx image. It proves the non-root
-read-only runtime, proxy readiness, scoped immutable upload/fetch, restart
-persistence, checksum rejection of a corrupt backup, and a disposable
-read-only restored fetch. It also refuses an unknown configuration key and a
-relay without a data volume. The script compares repository status before and
-after so it fails if its receipt path changes ordinary source files.
+one-day TLS certificate, the host-built test CLI with its explicit test signer,
+and the pinned Nginx image. It proves the non-root read-only runtime, proxy
+readiness, scoped immutable upload/fetch, restart persistence, checksum
+rejection of a corrupt backup, and a restored-volume `bootstrap
+publish`/`bootstrap` client journey through the proxy. The target bootstrap
+proves it creates V4 metadata without materialising its source snapshot or
+changing an existing ordinary file. It also refuses an unknown configuration
+key and a relay without a data volume. The script compares repository status
+before and after so it fails if its receipt path changes ordinary source files.
 
 ## Backup and restore drill
 
