@@ -730,6 +730,7 @@ module V2 = struct
   let session_credential_id value = value.credential_id
   let session_scope value = value.scope
   let session_expires_at value = value.expires_at
+  let session_ranges value = value.ranges
 
   let receive_segment ~now ~session segment =
     if Int64.compare now session.expires_at >= 0 then Error Session_expired

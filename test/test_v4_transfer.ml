@@ -1,5 +1,8 @@
 module Golden = Yeokcham_testkit.Golden_fixture
 module Encoding = Yeokcham_encoding
+module Envelope = Yeokcham_envelope
+module Object_store = Yeokcham_store
+module Relay = Yeokcham_v4_relay
 module Transport = Yeokcham_v4_transport
 module V2 = Transport.V2
 
@@ -8,6 +11,38 @@ let require_ok = function
   | Error error -> Alcotest.fail (V2.error_to_string error)
 
 let digest character = String.make 64 character
+
+let rec remove_tree path =
+  try
+    match (Unix.lstat path).Unix.st_kind with
+    | Unix.S_DIR ->
+        Sys.readdir path
+        |> Array.iter (fun name -> remove_tree (Filename.concat path name));
+        Unix.rmdir path
+    | Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO
+    | Unix.S_SOCK ->
+        Unix.unlink path
+  with Unix.Unix_error (Unix.ENOENT, _, _) -> ()
+
+let with_directory prefix run =
+  let root = Filename.temp_file prefix "" in
+  Unix.unlink root;
+  Unix.mkdir root 0o700;
+  Fun.protect ~finally:(fun () -> remove_tree root) (fun () -> run root)
+
+let raw_object () =
+  let payload = Encoding.text "resumable relay object" |> Result.get_ok in
+  let envelope =
+    Envelope.create ~object_type:Envelope.Content
+      ~object_format_version:Envelope.current_object_format_version
+      ~mandatory_features:Envelope.supported_mandatory_features ~payload ()
+    |> Result.get_ok
+  in
+  let bytes = Envelope.encode envelope in
+  let object_id =
+    Object_store.id_of_envelope envelope |> Object_store.Stored_object_id.to_hex
+  in
+  (bytes, object_id)
 
 let golden_path name =
   let local = Filename.concat "golden" name in
@@ -144,6 +179,106 @@ let negotiation_missing_planning_and_retry_boundaries () =
     | V2.Do_not_retry -> true
     | V2.Retry_after_ms _ -> false)
 
+let upload_session_persists_resumes_and_publishes_once () =
+  with_directory "yeokcham-v4-transfer-session-" (fun root ->
+      let relay = Relay.open_repository ~root |> Result.get_ok in
+      let project = digest 'a' in
+      let bytes, object_id = raw_object () in
+      let session =
+        Relay.V2.start_upload relay ~now:0L ~project ~object_id
+          ~raw_size:(String.length bytes) ~credential_id:(digest 'b')
+          ~expires_in:60L
+          ~project_quota_bytes:Relay.V2.default_project_quota_bytes
+        |> Result.get_ok
+      in
+      let session_id = V2.session_id session in
+      Alcotest.(check bool)
+        "incomplete bytes cannot be fetched" true
+        (Result.is_error
+           (Relay.get relay ~project ~kind:Relay.Object ~id:object_id));
+      Relay.V2.receive_upload_segment relay ~now:1L ~project ~session_id
+        ~credential_id:(digest 'b') ~offset:0 ~length:(String.length bytes)
+        ~raw_sha256:(Transport.sha256 bytes) ~bytes
+      |> Result.get_ok |> ignore;
+      let resumed =
+        Relay.V2.resume_upload relay ~now:2L ~project ~session_id
+          ~credential_id:(digest 'b')
+        |> Result.get_ok
+      in
+      Alcotest.(check bool)
+        "restart-visible bitmap is complete" true
+        (V2.progress_complete (V2.session_progress resumed));
+      Relay.V2.complete_upload relay ~now:2L ~project ~session_id
+        ~credential_id:(digest 'b')
+      |> Result.get_ok;
+      Alcotest.(check string)
+        "only complete canonical bytes publish" bytes
+        (Relay.get relay ~project ~kind:Relay.Object ~id:object_id
+        |> Result.get_ok);
+      Alcotest.(check bool)
+        "published session metadata is removed" true
+        (Result.is_error
+           (Relay.V2.resume_upload relay ~now:2L ~project ~session_id
+              ~credential_id:(digest 'b'))))
+
+let upload_session_rejects_quota_expiry_and_changed_duplicates () =
+  with_directory "yeokcham-v4-transfer-refusal-" (fun root ->
+      let relay = Relay.open_repository ~root |> Result.get_ok in
+      let project = digest 'a' in
+      let bytes, object_id = raw_object () in
+      let quota_refusal =
+        Relay.V2.start_upload relay ~now:0L ~project ~object_id
+          ~raw_size:(String.length bytes) ~credential_id:(digest 'b')
+          ~expires_in:60L
+          ~project_quota_bytes:(String.length bytes - 1)
+      in
+      Alcotest.(check bool)
+        "quota is enforced before temp-file creation" true
+        (Result.is_error quota_refusal);
+      let session =
+        Relay.V2.start_upload relay ~now:0L ~project ~object_id
+          ~raw_size:(String.length bytes) ~credential_id:(digest 'b')
+          ~expires_in:1L
+          ~project_quota_bytes:Relay.V2.default_project_quota_bytes
+        |> Result.get_ok
+      in
+      let session_id = V2.session_id session in
+      let expired =
+        Relay.V2.resume_upload relay ~now:1L ~project ~session_id
+          ~credential_id:(digest 'b')
+      in
+      Alcotest.(check bool)
+        "expiry refuses resume" true (Result.is_error expired);
+      let cleanup = Relay.V2.cleanup_expired relay ~now:1L |> Result.get_ok in
+      Alcotest.(check int)
+        "expiry cleanup is observable" 1 cleanup.Relay.V2.expired_sessions;
+      let session =
+        Relay.V2.start_upload relay ~now:2L ~project ~object_id
+          ~raw_size:(String.length bytes) ~credential_id:(digest 'b')
+          ~expires_in:60L
+          ~project_quota_bytes:Relay.V2.default_project_quota_bytes
+        |> Result.get_ok
+      in
+      let session_id = V2.session_id session in
+      Relay.V2.receive_upload_segment relay ~now:2L ~project ~session_id
+        ~credential_id:(digest 'b') ~offset:0 ~length:(String.length bytes)
+        ~raw_sha256:(Transport.sha256 bytes) ~bytes
+      |> Result.get_ok |> ignore;
+      let altered = Bytes.of_string bytes in
+      Bytes.set altered 0 (if Bytes.get altered 0 = 'x' then 'y' else 'x');
+      let altered = Bytes.unsafe_to_string altered in
+      Alcotest.(check bool)
+        "changed duplicate is rejected" true
+        (Result.is_error
+           (Relay.V2.receive_upload_segment relay ~now:3L ~project ~session_id
+              ~credential_id:(digest 'b') ~offset:0
+              ~length:(String.length altered)
+              ~raw_sha256:(Transport.sha256 altered) ~bytes:altered));
+      Alcotest.(check bool)
+        "refusals never publish an incomplete session" true
+        (Result.is_error
+           (Relay.get relay ~project ~kind:Relay.Object ~id:object_id)))
+
 let () =
   Alcotest.run "V4 transfer core"
     [
@@ -160,5 +295,12 @@ let () =
         [
           Alcotest.test_case "negotiation, missing set, and retries" `Quick
             negotiation_missing_planning_and_retry_boundaries;
+        ] );
+      ( "relay session adapter",
+        [
+          Alcotest.test_case "persist, resume, and publish complete bytes"
+            `Quick upload_session_persists_resumes_and_publishes_once;
+          Alcotest.test_case "refuse quota, expiry, and changed duplicates"
+            `Quick upload_session_rejects_quota_expiry_and_changed_duplicates;
         ] );
     ]

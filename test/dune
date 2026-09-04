@@ -133,8 +133,12 @@
  (modules test_v4_transfer)
  (libraries
   alcotest
+  unix
   yeokcham_encoding
+  yeokcham_envelope
+  yeokcham_store
   yeokcham_testkit
+  yeokcham_v4_relay
   yeokcham_v4_transport)
  (deps
   (source_tree golden)))

@@ -195,6 +195,7 @@ module V2 : sig
   val session_credential_id : transfer_session -> string
   val session_scope : transfer_session -> scope
   val session_expires_at : transfer_session -> int64
+  val session_ranges : transfer_session -> range list
   val progress_ranges : session_progress -> range list
   val progress_complete : session_progress -> bool
 

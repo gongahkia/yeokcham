@@ -1,3 +1,8 @@
 (library
  (name yeokcham_v4_relay)
- (libraries unix yeokcham_envelope yeokcham_store yeokcham_v4_transport))
+ (libraries
+  mirage-crypto-rng.unix
+  unix
+  yeokcham_envelope
+  yeokcham_store
+  yeokcham_v4_transport))
