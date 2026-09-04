@@ -21,6 +21,13 @@
  (libraries alcotest yeokcham_v4_cli_spec))
 
 (test
+ (name test_development_artifact)
+ (modules test_development_artifact)
+ (libraries alcotest yeokcham_development_artifact)
+ (deps
+  (source_tree golden)))
+
+(test
  (name test_v4_hook)
  (modules test_v4_hook)
  (libraries alcotest yeokcham_testkit yeokcham_v4_hook)

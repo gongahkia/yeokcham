@@ -1,0 +1,3 @@
+(library
+ (name yeokcham_development_artifact)
+ (libraries yojson))
