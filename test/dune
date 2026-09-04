@@ -166,6 +166,11 @@
   (source_tree golden)))
 
 (test
+ (name test_v4_relay_ops)
+ (modules test_v4_relay_ops)
+ (libraries alcotest qcheck-core qcheck-alcotest yeokcham_v4_relay_ops))
+
+(test
  (name test_v4_inspection)
  (modules test_v4_inspection)
  (libraries
