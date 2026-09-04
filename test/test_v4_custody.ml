@@ -140,7 +140,10 @@ let wait_for_socket socket =
   loop 100
 
 let with_ssh_agent root callback =
-  let socket = Filename.concat root "agent.sock" in
+  let socket =
+    Filename.temp_file ~temp_dir:"/tmp" "yeokcham-v4-agent-" ".sock"
+  in
+  Unix.unlink socket;
   let private_key = Filename.concat root "agent-key" in
   execute "/usr/bin/ssh-keygen"
     [|
@@ -158,7 +161,8 @@ let with_ssh_agent root callback =
   Fun.protect
     ~finally:(fun () ->
       (try Unix.kill agent Sys.sigterm with Unix.Unix_error _ -> ());
-      ignore (Unix.waitpid [] agent))
+      ignore (Unix.waitpid [] agent);
+      try Unix.unlink socket with Unix.Unix_error _ -> ())
     (fun () ->
       wait_for_socket socket;
       Unix.putenv "SSH_AUTH_SOCK" socket;

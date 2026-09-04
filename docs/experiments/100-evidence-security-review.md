@@ -31,11 +31,12 @@ commit. This is an integrity control for checked-in workflow references; it
 does not establish that a remote workflow ran safely.
 
 The normal CI workflow also runs a dedicated Ubuntu package-and-OCI smoke job.
-It checks that the Docker service is reachable before building the unsigned
-development archive/RPM and executing the bounded relay-container journey.
-This makes a missing OCI runtime a failed CI condition rather than an implicit
-skip. Its remote result remains [Unverified] until a run for the current
-revision completes.
+It checks that the Docker service is reachable, configures the BuildKit driver
+required for SBOM/provenance attestations, then builds the unsigned development
+archive/RPM and executes the bounded relay-container journey. This makes a
+missing OCI runtime or attestation-capable builder a failed CI condition rather
+than an implicit skip. Its remote result remains [Unverified] until a run for
+the current revision completes.
 
 ## External references
 

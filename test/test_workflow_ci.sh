@@ -17,6 +17,7 @@ for expected in \
   'runner: [ubuntu-latest, macos-latest]' \
   'package-and-oci-smoke:' \
   'verify Docker service' \
+  'docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435' \
   'make development-artifact-test'; do
   grep -F "$expected" "$workflow" >/dev/null \
     || fail "CI workflow is missing: $expected"

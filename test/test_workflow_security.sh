@@ -44,6 +44,8 @@ assert_pin .github/workflows/ci.yml ocaml/setup-ocaml \
   e89b2ded52a6e13f50162220cf5fe47290162032 v3.8.0
 assert_pin .github/workflows/ci.yml ocaml/setup-ocaml/lint-fmt \
   e89b2ded52a6e13f50162220cf5fe47290162032 v3.8.0
+assert_pin .github/workflows/ci.yml docker/setup-buildx-action \
+  e468171a9de216ec08956ac3ada2f0791b6bd435 v3.11.1
 assert_pin .github/workflows/development-client-artifact.yml actions/checkout \
   d23441a48e516b6c34aea4fa41551a30e30af803 v6.1.0
 assert_pin .github/workflows/development-client-artifact.yml ocaml/setup-ocaml \

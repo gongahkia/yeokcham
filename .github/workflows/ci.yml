@@ -40,7 +40,12 @@ jobs:
           EOF
           export SOFTHSM2_CONF="$token_root/softhsm2.conf"
           softhsm2-util --init-token --free --label yeokcham-v4-test --so-pin 12345678 --pin 1234
-          module_path="$(find /usr/local /opt/homebrew /usr/lib -name libsofthsm2.so -type f -print -quit 2>/dev/null)"
+          module_path=
+          for prefix in /usr/local /opt/homebrew /usr/lib; do
+            test -d "$prefix" || continue
+            module_path="$(find "$prefix" -name libsofthsm2.so -type f -print -quit)"
+            test -z "$module_path" || break
+          done
           test -n "$module_path"
           echo "SOFTHSM2_CONF=$SOFTHSM2_CONF" >> "$GITHUB_ENV"
           echo "YEOKCHAM_V4_TEST_PKCS11_MODULE=$module_path" >> "$GITHUB_ENV"
@@ -67,5 +72,6 @@ jobs:
       - run: opam install . --deps-only --with-test
       - name: verify Docker service
         run: docker info
+      - uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
       - name: build client package and run OCI relay smoke
         run: make development-artifact-test
