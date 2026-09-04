@@ -918,6 +918,50 @@ module V2 = struct
         Do_not_retry
 end
 
+module V2_wire = struct
+  type error =
+    | Invalid_raw_length of int
+    | Compressed_segment_too_large of int
+    | Compression_failure
+    | Decompression_failure
+
+  let compression_level = 3
+  let max_compressed_segment_bytes = V2.segment_bytes + (64 * 1024)
+
+  let error_to_string = function
+    | Invalid_raw_length length ->
+        Printf.sprintf "invalid V2 raw segment length: %d" length
+    | Compressed_segment_too_large length ->
+        Printf.sprintf "V2 compressed segment exceeds its bound: %d" length
+    | Compression_failure -> "V2 zstd compression failed"
+    | Decompression_failure -> "V2 zstd decompression failed"
+
+  let valid_raw_length length = length > 0 && length <= V2.segment_bytes
+
+  let compress bytes =
+    if not (valid_raw_length (String.length bytes)) then
+      Error (Invalid_raw_length (String.length bytes))
+    else
+      try
+        let compressed = Zstd.compress ~level:compression_level bytes in
+        if String.length compressed > max_compressed_segment_bytes then
+          Error (Compressed_segment_too_large (String.length compressed))
+        else Ok compressed
+      with _ -> Error Compression_failure
+
+  let decompress ~raw_length compressed =
+    if not (valid_raw_length raw_length) then
+      Error (Invalid_raw_length raw_length)
+    else if String.length compressed > max_compressed_segment_bytes then
+      Error (Compressed_segment_too_large (String.length compressed))
+    else
+      try
+        let decoded = Zstd.decompress raw_length compressed in
+        if String.length decoded = raw_length then Ok decoded
+        else Error Decompression_failure
+      with _ -> Error Decompression_failure
+end
+
 let verify_publication ~authority publication =
   let expected_repository =
     Trust.repository (Trust.authority_membership authority)

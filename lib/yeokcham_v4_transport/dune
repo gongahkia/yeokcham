@@ -4,4 +4,5 @@
   yeokcham_encoding
   yeokcham_hash
   yeokcham_v4_model
-  yeokcham_v4_trust))
+  yeokcham_v4_trust
+  zstd))

@@ -212,3 +212,20 @@ module V2 : sig
   val decode_session : string -> (transfer_session, error) result
   val retry : attempt:int -> error -> retry
 end
+
+module V2_wire : sig
+  (** Independently compressed V2 wire segments. The values handed to this
+      module are never canonical-store bytes until full-object verification. *)
+
+  type error =
+    | Invalid_raw_length of int
+    | Compressed_segment_too_large of int
+    | Compression_failure
+    | Decompression_failure
+
+  val compression_level : int
+  val max_compressed_segment_bytes : int
+  val error_to_string : error -> string
+  val compress : string -> (string, error) result
+  val decompress : raw_length:int -> string -> (string, error) result
+end

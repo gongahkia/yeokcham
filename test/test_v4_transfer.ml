@@ -5,6 +5,7 @@ module Object_store = Yeokcham_store
 module Relay = Yeokcham_v4_relay
 module Transport = Yeokcham_v4_transport
 module V2 = Transport.V2
+module Wire = Transport.V2_wire
 
 let require_ok = function
   | Ok value -> value
@@ -179,6 +180,26 @@ let negotiation_missing_planning_and_retry_boundaries () =
     | V2.Do_not_retry -> true
     | V2.Retry_after_ms _ -> false)
 
+let independently_compressed_segments_are_exact_and_bounded () =
+  let raw = String.init 65_537 (fun index -> Char.chr (index land 0xff)) in
+  let compressed = Wire.compress raw |> Result.get_ok in
+  Alcotest.(check bool)
+    "compressed segment stays under the wire cap" true
+    (String.length compressed <= Wire.max_compressed_segment_bytes);
+  Alcotest.(check string)
+    "decoded segment is byte-exact" raw
+    (Wire.decompress ~raw_length:(String.length raw) compressed |> Result.get_ok);
+  Alcotest.(check bool)
+    "corrupt zstd bytes are rejected" true
+    (Result.is_error (Wire.decompress ~raw_length:(String.length raw) "bad"));
+  Alcotest.(check bool)
+    "claimed expansion is rejected before allocation" true
+    (Result.is_error
+       (Wire.decompress ~raw_length:(V2.segment_bytes + 1) compressed));
+  Alcotest.(check bool)
+    "oversized raw segment is rejected" true
+    (Result.is_error (Wire.compress (String.make (V2.segment_bytes + 1) 'x')))
+
 let upload_session_persists_resumes_and_publishes_once () =
   with_directory "yeokcham-v4-transfer-session-" (fun root ->
       let relay = Relay.open_repository ~root |> Result.get_ok in
@@ -302,5 +323,10 @@ let () =
             `Quick upload_session_persists_resumes_and_publishes_once;
           Alcotest.test_case "refuse quota, expiry, and changed duplicates"
             `Quick upload_session_rejects_quota_expiry_and_changed_duplicates;
+        ] );
+      ( "zstd wire adapter",
+        [
+          Alcotest.test_case "exact bounded independent segments" `Quick
+            independently_compressed_segments_are_exact_and_bounded;
         ] );
     ]
