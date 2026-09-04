@@ -21,6 +21,7 @@ before_status=$(git -C "$repository_root" status --porcelain)
 output="$scratch/output"
 "$benchmark" --output "$output" --paths 10 --bytes 1000 --iterations 1
 [ -f "$output/profile.txt" ] || fail 'profile was not retained'
+[ -f "$output/environment.txt" ] || fail 'environment was not retained'
 [ -f "$output/workspace-runs.tsv" ] || fail 'run measurements were not retained'
 [ "$(wc -l < "$output/workspace-runs.tsv" | tr -d ' ')" = 2 ] \
   || fail 'expected one measurement plus TSV header'
@@ -32,6 +33,8 @@ grep -F 'paths=10' "$output/profile.txt" >/dev/null \
   || fail 'profile did not retain the exact path count'
 grep -F 'logical_bytes=1000' "$output/profile.txt" >/dev/null \
   || fail 'profile did not retain the exact byte count'
+grep -F 'kernel=' "$output/environment.txt" >/dev/null \
+  || fail 'environment did not retain the kernel'
 
 if "$benchmark" --output relative --paths 10 --bytes 1000 --iterations 1 >/dev/null 2>&1; then
   fail 'relative output root was accepted'

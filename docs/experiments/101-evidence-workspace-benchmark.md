@@ -19,9 +19,11 @@ eight logical bytes per generated regular file. One run then:
    entry against the source fixture.
 
 The source fixture, package, target, and per-run resource files are temporary
-children of the supplied output directory. Only `profile.txt` and
-`workspace-runs.tsv` remain after a successful run. No output path may be
-inside the source repository.
+children of the supplied output directory. Only `profile.txt`,
+`environment.txt`, and `workspace-runs.tsv` remain after a successful run.
+`environment.txt` records the kernel, online CPU count, `lscpu`, byte-based
+memory report, and filesystem capacity/free-space report captured before the
+first iteration. No output path may be inside the source repository.
 
 Run the required target profile on a Linux host with sufficient free disk for
 the source, package, and target copies:

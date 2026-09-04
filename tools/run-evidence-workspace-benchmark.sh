@@ -65,6 +65,19 @@ printf '%s\n' "source_revision=$(git -C "$repository_root" rev-parse HEAD)" > "$
 printf '%s\n' "paths=$paths" >> "$output/profile.txt"
 printf '%s\n' "logical_bytes=$bytes" >> "$output/profile.txt"
 printf '%s\n' "iterations=$iterations" >> "$output/profile.txt"
+{
+  printf '%s\n' 'schema_version=1'
+  printf 'kernel='
+  uname -srmo
+  printf 'online_cpus='
+  getconf _NPROCESSORS_ONLN
+  printf '%s\n' 'cpu_details_begin'
+  lscpu
+  printf '%s\n' 'memory_bytes_begin'
+  free -b
+  printf '%s\n' 'filesystem_bytes_begin'
+  df -B1 "$output_parent"
+} > "$output/environment.txt"
 
 iteration=1
 while [ "$iteration" -le "$iterations" ]; do
