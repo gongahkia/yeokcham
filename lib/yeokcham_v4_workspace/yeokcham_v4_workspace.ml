@@ -24,6 +24,8 @@ type observed_tree = {
   observed_source_fingerprint : string;
 }
 
+type staged_receipt = { staged_temporary : string; staged_target : string }
+
 type closure = Closure_complete | Closure_missing
 
 type destination =
@@ -489,17 +491,30 @@ let temporary_path target =
   Printf.sprintf "%s.tmp-%d-%Ld" target (Unix.getpid ())
     (Int64.of_float (Unix.gettimeofday () *. 1_000_000_000.))
 
-let write_receipt ~root receipt =
+let stage_receipt ~root receipt =
   let* () = ensure_directory (workspace_directory root) in
   let* bytes = encode_receipt receipt in
   let target = receipt_path ~root in
   let temporary = temporary_path target in
   let* () = write_new temporary bytes in
+  Ok { staged_temporary = temporary; staged_target = target }
+
+let publish_staged_receipt staged =
   try
-    Unix.rename temporary target;
-    fsync_directory (workspace_directory root)
+    Unix.rename staged.staged_temporary staged.staged_target;
+    fsync_directory (Filename.dirname staged.staged_target)
   with Unix.Unix_error (error, _, _) ->
-    (try Unix.unlink temporary with Unix.Unix_error _ -> ());
-    Error (io_error "rename" target error)
+    Error (io_error "rename" staged.staged_target error)
+
+let discard_staged_receipt staged =
+  try Unix.unlink staged.staged_temporary with Unix.Unix_error _ -> ()
+
+let write_receipt ~root receipt =
+  let* staged = stage_receipt ~root receipt in
+  match publish_staged_receipt staged with
+  | Ok () -> Ok ()
+  | Error error ->
+      discard_staged_receipt staged;
+      Error error
 
 let read_receipt ~root = read_optional ~path:(receipt_path ~root) decode_receipt

@@ -12,6 +12,7 @@ module Receipt = Yeokcham_v4_receipt
 module Transport = Yeokcham_v4_transport
 module Semantic_config = Yeokcham_v4_semantic_config
 module Lsp_sidecar = Yeokcham_v4_lsp_sidecar
+module Workspace = Yeokcham_v4_workspace
 
 [@@@warning "-40-42"]
 
@@ -35,6 +36,8 @@ type error =
   | Bootstrap_error of Bootstrap.error
   | Recovery_error of Recovery.error
   | Transport_error of Transport.error
+  | Workspace_error of Workspace.error
+  | Workspace_refusal of Workspace.refusal
   | Proposal_error of Proposal.tree_error
   | Proposal_refused of Proposal.refusal list
   | Stale_proposal of {
@@ -230,6 +233,17 @@ type in_place_restore = {
   resumed : bool;
 }
 
+type workspace_materialization = {
+  workspace_basis : Workspace.projection_basis;
+  workspace_receipt : Workspace.workspace_projection_receipt;
+  workspace_safety_checkpoint : Model.Snapshot_id.t option;
+  workspace_restore_proof : string option;
+}
+
+type workspace_update =
+  | Workspace_already_current of Workspace.workspace_projection_receipt
+  | Workspace_updated of workspace_materialization
+
 let error_to_string = function
   | Store_error error -> Store.error_to_string error
   | Snapshot_error error -> Snapshot.error_to_string error
@@ -242,6 +256,8 @@ let error_to_string = function
   | Bootstrap_error error -> Bootstrap.error_to_string error
   | Recovery_error error -> Recovery.error_to_string error
   | Transport_error error -> Transport.error_to_string error
+  | Workspace_error error -> Workspace.error_to_string error
+  | Workspace_refusal refusal -> Workspace.refusal_to_string refusal
   | Proposal_error error -> Proposal.tree_error_to_string error
   | Proposal_refused refusals ->
       "proposal is refused: "

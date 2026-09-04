@@ -8,6 +8,7 @@
 type projection_basis
 type workspace_projection_receipt
 type observed_tree
+type staged_receipt
 type closure = Closure_complete | Closure_missing
 
 type destination =
@@ -113,6 +114,16 @@ val read_basis : root:string -> (projection_basis option, error) result
 
 val write_receipt :
   root:string -> workspace_projection_receipt -> (unit, error) result
+
+val stage_receipt :
+  root:string ->
+  workspace_projection_receipt ->
+  (staged_receipt, error) result
+(** Writes and syncs receipt bytes to a private temporary file. The staged file
+    is not an activation receipt and cannot be read by [read_receipt]. *)
+
+val publish_staged_receipt : staged_receipt -> (unit, error) result
+val discard_staged_receipt : staged_receipt -> unit
 
 val read_receipt :
   root:string -> (workspace_projection_receipt option, error) result

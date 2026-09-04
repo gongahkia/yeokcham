@@ -17,6 +17,8 @@ type error =
   | Bootstrap_error of Yeokcham_v4_bootstrap.error
   | Recovery_error of Yeokcham_v4_recovery.error
   | Transport_error of Yeokcham_v4_transport.error
+  | Workspace_error of Yeokcham_v4_workspace.error
+  | Workspace_refusal of Yeokcham_v4_workspace.refusal
   | Proposal_error of Yeokcham_v4_proposal.tree_error
   | Proposal_refused of Yeokcham_v4_proposal.refusal list
   | Stale_proposal of {
@@ -223,6 +225,19 @@ type in_place_restore = {
   restored_checkpoint : Yeokcham_v4_model.Snapshot_id.t;
   resumed : bool;
 }
+
+type workspace_materialization = {
+  workspace_basis : Yeokcham_v4_workspace.projection_basis;
+  workspace_receipt : Yeokcham_v4_workspace.workspace_projection_receipt;
+  workspace_safety_checkpoint : Yeokcham_v4_model.Snapshot_id.t option;
+  workspace_restore_proof : string option;
+}
+(** The local receipt and, when exact replacement was necessary, the durable
+    safety checkpoint/proof created before ordinary source bytes changed. *)
+
+type workspace_update =
+  | Workspace_already_current of Yeokcham_v4_workspace.workspace_projection_receipt
+  | Workspace_updated of workspace_materialization
 
 val error_to_string : error -> string
 val recovery_package_path : string -> string

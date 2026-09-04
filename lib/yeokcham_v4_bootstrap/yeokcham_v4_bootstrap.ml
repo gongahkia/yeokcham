@@ -527,6 +527,7 @@ let verify ~repository ~package ~bytes =
 
 let authority verified = verified.verified_authority
 let root_certificate verified = root_certificate verified.verified_authority
+let verified_id verified = id verified.verified_basis
 
 let import ~destination verified ~creator ~username ~initial_draft ~title
     ~local_certificate =

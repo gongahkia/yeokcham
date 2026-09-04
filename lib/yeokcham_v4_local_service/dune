@@ -16,4 +16,5 @@
   yeokcham_v4_store
   yeokcham_v4_semantic_config
   yeokcham_v4_transport
-  yeokcham_v4_trust))
+  yeokcham_v4_trust
+  yeokcham_v4_workspace))
