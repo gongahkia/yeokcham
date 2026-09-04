@@ -30,6 +30,13 @@ upstream source and changing both the workflow and this table/test in one
 commit. This is an integrity control for checked-in workflow references; it
 does not establish that a remote workflow ran safely.
 
+The normal CI workflow also runs a dedicated Ubuntu package-and-OCI smoke job.
+It checks that the Docker service is reachable before building the unsigned
+development archive/RPM and executing the bounded relay-container journey.
+This makes a missing OCI runtime a failed CI condition rather than an implicit
+skip. Its remote result remains [Unverified] until a run for the current
+revision completes.
+
 ## External references
 
 - [GitHub secure use reference: full-SHA action pins](https://docs.github.com/en/actions/reference/security/secure-use)

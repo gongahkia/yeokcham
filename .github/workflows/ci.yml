@@ -54,3 +54,18 @@ jobs:
         with:
           ocaml-compiler: "5.5.0"
       - uses: ocaml/setup-ocaml/lint-fmt@e89b2ded52a6e13f50162220cf5fe47290162032 # v3.8.0
+  package-and-oci-smoke:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - uses: ocaml/setup-ocaml@e89b2ded52a6e13f50162220cf5fe47290162032 # v3.8.0
+        with:
+          ocaml-compiler: "5.5.0"
+          dune-cache: true
+      - run: opam install . --deps-only --with-test
+      - name: verify Docker service
+        run: docker info
+      - name: build client package and run OCI relay smoke
+        run: make development-artifact-test
