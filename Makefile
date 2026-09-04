@@ -6,7 +6,7 @@ OCAMLFORMAT_VERSION := 0.29.0
 LOCAL_SWITCH := $(CURDIR)
 RELEASE_REPOSITORY ?= .
 
-.PHONY: setup deps build test lint format ci linux-watch-test relay-container-test development-artifact-test release-verify release-verify-test
+.PHONY: setup deps build test lint format ci linux-watch-test relay-container-test development-artifact-test development-build-record-test release-verify release-verify-test
 
 setup:
 	$(OPAM) init --bare --no-setup --yes
@@ -32,6 +32,9 @@ relay-container-test: build
 
 development-artifact-test: build
 	sh test/test_development_artifacts.sh
+
+development-build-record-test: build
+	sh test/test_development_build_record.sh
 
 lint:
 	$(DUNE) build @fmt @lint @all

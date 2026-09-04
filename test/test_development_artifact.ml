@@ -73,6 +73,27 @@ let malformed_unknown_and_noncanonical_records_refuse () =
         (Result.is_error (Artifact.decode bytes)))
     [ unknown; noncanonical; "{}" ]
 
+let smoke_receipts_require_every_delivery_boundary () =
+  let make ?(archive_installed = true) ?(rpm_lifecycle_checked = true)
+      ?(relay_journey_checked = true) ?(ordinary_source_unchanged = true) () =
+    Artifact.make_smoke_receipt ~source_commit ~artifact_filename:"yeokcham.rpm"
+      ~archive_installed ~rpm_lifecycle_checked ~relay_journey_checked
+      ~ordinary_source_unchanged
+  in
+  Alcotest.(check bool)
+    "complete smoke journey records" true
+    (Result.is_ok (make ()));
+  List.iter
+    (fun receipt ->
+      Alcotest.(check bool)
+        "partial smoke journey refuses" true (Result.is_error receipt))
+    [
+      make ~archive_installed:false ();
+      make ~rpm_lifecycle_checked:false ();
+      make ~relay_journey_checked:false ();
+      make ~ordinary_source_unchanged:false ();
+    ]
+
 let () =
   Alcotest.run "development artifacts"
     [
@@ -82,5 +103,7 @@ let () =
             canonical_fixture_round_trips;
           Alcotest.test_case "strict decoder" `Quick
             malformed_unknown_and_noncanonical_records_refuse;
+          Alcotest.test_case "smoke receipt boundaries" `Quick
+            smoke_receipts_require_every_delivery_boundary;
         ] );
     ]

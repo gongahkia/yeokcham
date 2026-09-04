@@ -17,6 +17,7 @@ type signing_identity = {
   bundle_filename : string;
 }
 
+type smoke_receipt
 type record
 
 val schema_version : int
@@ -37,3 +38,16 @@ val make :
 
 val encode : record -> string
 val decode : string -> (record, string) result
+
+val make_smoke_receipt :
+  source_commit:string ->
+  artifact_filename:string ->
+  archive_installed:bool ->
+  rpm_lifecycle_checked:bool ->
+  relay_journey_checked:bool ->
+  ordinary_source_unchanged:bool ->
+  (smoke_receipt, string) result
+
+val smoke_receipt_source_commit : smoke_receipt -> string
+val smoke_receipt_artifact_filename : smoke_receipt -> string
+val smoke_receipt_is_complete : smoke_receipt -> bool

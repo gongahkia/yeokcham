@@ -14,6 +14,15 @@ type signing_identity = {
   bundle_filename : string;
 }
 
+type smoke_receipt = {
+  smoke_source_commit : string;
+  smoke_artifact_filename : string;
+  archive_installed : bool;
+  rpm_lifecycle_checked : bool;
+  relay_journey_checked : bool;
+  ordinary_source_unchanged : bool;
+}
+
 type record = {
   source_commit : string;
   source_timestamp : int64;
@@ -44,6 +53,9 @@ let is_lower_hex ~length value =
        (function '0' .. '9' | 'a' .. 'f' -> true | _ -> false)
        value
 
+let valid_source_commit value =
+  is_lower_hex ~length:40 value || is_lower_hex ~length:64 value
+
 let artifact_kind_to_string = function
   | Client_archive -> "client-archive"
   | Fedora_rpm -> "fedora-rpm"
@@ -54,11 +66,8 @@ let compare_artifact left right = String.compare left.filename right.filename
 let make ~source_commit ~source_timestamp ~architecture ~ocaml_version
     ~dune_version ~opam_lock_sha256 ~builder_image ~fedora_image ~sbom_sha256
     ~signing ~artifacts =
-  if
-    not
-      (is_lower_hex ~length:40 source_commit
-      || is_lower_hex ~length:64 source_commit)
-  then Error "development build record has an invalid source commit"
+  if not (valid_source_commit source_commit) then
+    Error "development build record has an invalid source commit"
   else if source_timestamp < 0L then
     Error "development build record has an invalid source timestamp"
   else if
@@ -111,7 +120,37 @@ let make ~source_commit ~source_timestamp ~architecture ~ocaml_version
           artifacts;
         }
 
-let encode record =
+let make_smoke_receipt ~source_commit ~artifact_filename ~archive_installed
+    ~rpm_lifecycle_checked ~relay_journey_checked ~ordinary_source_unchanged =
+  if not (valid_source_commit source_commit) then
+    Error "development smoke receipt has an invalid source commit"
+  else if not (valid_text artifact_filename) then
+    Error "development smoke receipt has an invalid artifact filename"
+  else if
+    not
+      (archive_installed && rpm_lifecycle_checked && relay_journey_checked
+     && ordinary_source_unchanged)
+  then Error "development smoke receipt cannot record an incomplete journey"
+  else
+    Ok
+      ({
+         smoke_source_commit = source_commit;
+         smoke_artifact_filename = artifact_filename;
+         archive_installed;
+         rpm_lifecycle_checked;
+         relay_journey_checked;
+         ordinary_source_unchanged;
+       }
+        : smoke_receipt)
+
+let smoke_receipt_source_commit receipt = receipt.smoke_source_commit
+let smoke_receipt_artifact_filename receipt = receipt.smoke_artifact_filename
+
+let smoke_receipt_is_complete receipt =
+  receipt.archive_installed && receipt.rpm_lifecycle_checked
+  && receipt.relay_journey_checked && receipt.ordinary_source_unchanged
+
+let encode (record : record) =
   let artifact artifact =
     `Assoc
       [
