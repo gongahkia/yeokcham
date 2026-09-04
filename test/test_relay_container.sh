@@ -238,6 +238,10 @@ esac
 "$client" workspace activate --root "$activation_root" >/dev/null
 [ "$(cat "$activation_root/main.ml")" = 'let relay_bootstrap = 1' ] \
   || fail "explicit workspace activation did not materialize the verified basis"
+activated_source=$(cat "$activation_root/main.ml")
+"$client" sync --root "$activation_root" relay >/dev/null
+[ "$(cat "$activation_root/main.ml")" = "$activated_source" ] \
+  || fail "relay sync changed an activated ordinary source file"
 "$client" verify --root "$activation_root" >/dev/null
 
 invalid_config=$scratch/invalid-relay.conf
