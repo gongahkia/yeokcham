@@ -49,6 +49,19 @@ thermal/power conditions beside the raw result. This method has no network leg;
 Experiment 102 must measure TRANSPORT-002 separately under the stated link
 conditions.
 
+Summarize the retained five rows without changing them:
+
+```sh
+tools/summarize-evidence-workspace-benchmark.sh \
+  --input /absolute/external/yeokcham-ws-5g-100k/workspace-runs.tsv \
+  --iterations 5
+```
+
+The summary refuses missing, malformed, inconsistent, or count-mismatched
+input. It uses the observed middle row as the median and the nearest-rank p95;
+for five runs that p95 is the highest observed value. Its plain-text output is
+a derived report, never a V4 record or a replacement for the raw TSV.
+
 If a fixture, scenario, projection check, or measurement fails, the current
 external `run-N/benchmark-status.txt` retains the schema version, nonzero exit
 status, and named stage. Successful runs retain no child run directory, so a
