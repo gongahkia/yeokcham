@@ -1,0 +1,32 @@
+services:
+  relay:
+    image: ${YEOKCHAM_RELAY_IMAGE:?set an immutable yeokcham relay image digest}
+    read_only: true
+    user: "10001:10001"
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs: [/tmp:rw,noexec,nosuid,size=16m]
+    volumes: [relay-data:/var/lib/yeokcham-relay]
+    expose: ["8080", "8081", "9090"]
+    networks: [relay-private]
+
+  proxy:
+    image: ${NGINX_IMAGE:?set an immutable nginx image digest}
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs: [/var/cache/nginx:rw,noexec,nosuid,size=8m, /var/run:rw,noexec,nosuid,size=1m]
+    ports: ["443:443"]
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ${TLS_CERTIFICATE:?set certificate path}:/run/tls/tls.crt:ro
+      - ${TLS_PRIVATE_KEY:?set private-key path}:/run/tls/tls.key:ro
+    depends_on: [relay]
+    networks: [relay-private]
+
+volumes:
+  relay-data:
+
+networks:
+  relay-private:
+    internal: true

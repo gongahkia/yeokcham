@@ -1,0 +1,33 @@
+# Build inputs are pinned in containers/relay/build-inputs.lock. This image is
+# development-only; publish and deploy it by its resulting OCI manifest digest.
+FROM docker.io/ocaml/opam:debian-12-ocaml-5.5@sha256:b2b7ff41302eae75c20df6f052513d0a13fb440c43a681f632062f056d01421a AS build
+
+USER root
+RUN apt-get update \
+ && apt-get install --no-install-recommends --yes build-essential libzstd-dev pkg-config \
+ && rm -rf /var/lib/apt/lists/*
+
+USER opam
+WORKDIR /home/opam/yeokcham
+COPY --chown=opam:opam . .
+RUN opam install --deps-only --locked --yes ./yeokcham.opam \
+ && opam exec -- dune build bin/yeokcham_v4.exe \
+ && install -D -m 0755 _build/default/bin/yeokcham_v4.exe /home/opam/out/yeokcham
+
+FROM docker.io/library/debian:12-slim@sha256:5ae3c39ebd15e229dcedd5cee596b2497182493d41ff162e824ba13fc1b2b867
+
+RUN apt-get update \
+ && apt-get install --no-install-recommends --yes libzstd1 \
+ && rm -rf /var/lib/apt/lists/* \
+ && groupadd --system --gid 10001 yeokcham \
+ && useradd --system --uid 10001 --gid 10001 --home-dir /nonexistent --shell /usr/sbin/nologin yeokcham \
+ && install -d --owner 10001 --group 10001 --mode 0700 /var/lib/yeokcham-relay \
+ && install -d --owner 10001 --group 10001 --mode 0755 /etc/yeokcham-relay
+
+COPY --from=build /home/opam/out/yeokcham /usr/local/bin/yeokcham
+COPY --chown=10001:10001 containers/relay/relay-config-v1.conf /etc/yeokcham-relay/relay-config-v1.conf
+
+USER 10001:10001
+VOLUME ["/var/lib/yeokcham-relay"]
+EXPOSE 8080
+ENTRYPOINT ["/usr/local/bin/yeokcham", "relay", "serve", "--config", "/etc/yeokcham-relay/relay-config-v1.conf"]

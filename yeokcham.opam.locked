@@ -1,0 +1,74 @@
+opam-version: "2.0"
+name: "yeokcham"
+version: "dev"
+synopsis: "Experimental model-first local-first version control"
+description:
+  "A local-first VCS separating scratch, intent, and release history."
+maintainer: "Gabriel Ong Zhe Mian <angryapplegravy@gmail.com>"
+authors: "Gabriel Ong Zhe Mian"
+license: "MIT"
+homepage: "https://github.com/gongahkia/yeokcham"
+bug-reports: "https://github.com/gongahkia/yeokcham/issues"
+depends: [
+  "alcotest" {= "1.9.1" & with-test}
+  "astring" {= "0.8.5" & with-test}
+  "base-bigarray" {= "base"}
+  "base-bytes" {= "base"}
+  "base-domains" {= "base"}
+  "base-effects" {= "base"}
+  "base-nnp" {= "base"}
+  "base-threads" {= "base"}
+  "base-unix" {= "base"}
+  "cmdliner" {= "2.1.1"}
+  "compiler-cloning" {= "enabled"}
+  "conf-pkg-config" {= "5"}
+  "conf-zstd" {= "1.3.8"}
+  "csexp" {= "1.5.2"}
+  "ctypes" {= "0.24.0"}
+  "digestif" {= "1.3.1"}
+  "dune" {= "3.24.2"}
+  "dune-configurator" {= "3.24.2"}
+  "duration" {= "0.3.1"}
+  "eqaf" {= "0.10"}
+  "fmt" {= "0.11.0"}
+  "inotify" {= "2.6"}
+  "integers" {= "0.8.0"}
+  "jsonrpc" {= "1.27.0"}
+  "logs" {= "0.10.0"}
+  "lsp" {= "1.27.0"}
+  "mirage-crypto" {= "2.2.0"}
+  "mirage-crypto-ec" {= "2.2.0"}
+  "mirage-crypto-rng" {= "2.2.0"}
+  "ocaml" {= "5.5.0"}
+  "ocaml-base-compiler" {= "5.5.0"}
+  "ocaml-compiler" {= "5.5.0"}
+  "ocaml-options-vanilla" {= "1"}
+  "ocaml-syntax-shims" {= "1.0.0" & with-test}
+  "ocamlbuild" {= "0.16.1"}
+  "ocamlfind" {= "1.9.9~preview"}
+  "ppx_yojson_conv_lib" {= "v0.17.0"}
+  "qcheck-alcotest" {= "0.91" & with-test}
+  "qcheck-core" {= "0.91" & with-test}
+  "re" {= "1.14.0"}
+  "stdlib-shims" {= "0.3.0"}
+  "topkg" {= "1.1.1"}
+  "uutf" {= "1.0.4"}
+  "yojson" {= "3.0.0"}
+  "zstd" {= "0.4"}
+]
+build: [
+  ["dune" "subst"] {dev}
+  [
+    "dune"
+    "build"
+    "-p"
+    name
+    "-j"
+    jobs
+    "@install"
+    "@runtest" {with-test}
+    "@doc" {with-doc}
+  ]
+]
+dev-repo: "git+https://github.com/gongahkia/yeokcham.git"
+x-maintenance-intent: ["(latest)"]

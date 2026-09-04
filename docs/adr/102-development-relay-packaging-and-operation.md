@@ -145,5 +145,7 @@ ADR.
 - [OCI image configuration and immutable image IDs](https://github.com/opencontainers/image-spec/blob/main/config.md)
 - [OCI descriptor digests](https://github.com/opencontainers/image-spec/blob/main/descriptor.md)
 - [Podman read-only root filesystem semantics](https://docs.podman.io/en/latest/markdown/podman-run.1.html)
+- [Prometheus text exposition format](https://prometheus.io/docs/instrumenting/exposition_formats/)
+- [Prometheus metric naming guidance](https://prometheus.io/docs/practices/naming/)
 - [Docker BuildKit SBOM and provenance attestations](https://docs.docker.com/build/metadata/attestations/)
 - [Sigstore Cosign verification](https://docs.sigstore.dev/cosign/verifying/verify/)
