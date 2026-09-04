@@ -39,6 +39,20 @@
   yeokcham_v4_store))
 
 (test
+ (name test_v4_repair)
+ (modules test_v4_repair)
+ (libraries
+  alcotest
+  unix
+  yeokcham_store
+  yeokcham_v4_health
+  yeokcham_v4_health_repository
+  yeokcham_v4_local_service
+  yeokcham_v4_model
+  yeokcham_v4_repair
+  yeokcham_v4_store))
+
+(test
  (name test_watcher)
  (modules test_watcher)
  (libraries alcotest yeokcham_watcher))
