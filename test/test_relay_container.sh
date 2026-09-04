@@ -198,8 +198,14 @@ received=$(curl --silent --show-error --insecure --fail \
   --header "Authorization: Bearer $secret" "$object_url")
 [ "$received" = "$payload" ] || fail "disposable restored relay cannot receive immutable bytes"
 
-bootstrap_command="$client bootstrap --root $target_root --remote relay --url $base --repository $project --basis $basis --username alice --draft relay-target --title relay-bootstrap-target --device $source_device --verify-phrase '$phrase'"
-bootstrap_address="EXEC:\"$bootstrap_command\",pty,echo=0"
+export YEOKCHAM_RELAY_TEST_CLIENT="$client"
+export YEOKCHAM_RELAY_TEST_TARGET_ROOT="$target_root"
+export YEOKCHAM_RELAY_TEST_URL="$base"
+export YEOKCHAM_RELAY_TEST_REPOSITORY="$project"
+export YEOKCHAM_RELAY_TEST_BASIS="$basis"
+export YEOKCHAM_RELAY_TEST_DEVICE="$source_device"
+export YEOKCHAM_RELAY_TEST_PHRASE="$phrase"
+bootstrap_address="EXEC:\"/bin/sh $repo_root/test/relay_bootstrap_pty.sh\",pty,echo=0"
 bootstrap_output=$(
   (sleep 1; printf '%s\n' "$secret"; sleep 1) \
     | socat - "$bootstrap_address"
