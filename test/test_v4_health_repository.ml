@@ -122,6 +122,45 @@ let mismatched_checkpoint_object_is_typed_without_source_writes () =
         "mismatched verification writes no source bytes" before
         (tree_fingerprint root))
 
+let damaged_closure_does_not_block_unrelated_local_work () =
+  with_directory "v4-health-failure-locality-" (fun parent ->
+      let damaged_root = Filename.concat parent "damaged" in
+      let intact_root = Filename.concat parent "intact" in
+      Unix.mkdir damaged_root 0o700;
+      Unix.mkdir intact_root 0o700;
+      List.iter
+        (fun root -> write_file root "main.ml" "let version = 1\n")
+        [ damaged_root; intact_root ];
+      let damaged = initialize damaged_root in
+      ignore (initialize intact_root);
+      let repository =
+        V4_store.open_repository ~root:damaged_root
+        |> require_ok V4_store.error_to_string
+      in
+      let store = V4_store.underlying_store repository in
+      let snapshot =
+        Model.Snapshot_id.to_string damaged.Service.checkpoint
+        |> Store.Stored_object_id.of_hex |> Result.get_ok
+      in
+      Unix.unlink (Store.object_path store snapshot);
+      Alcotest.(check bool)
+        "damage remains visible" false
+        (Repository.verify ~root:damaged_root |> Health.report_is_clean);
+      ignore
+        (Service.status ~root:damaged_root |> require_ok Service.error_to_string);
+      ignore
+        (Service.inspection_state ~root:damaged_root
+        |> require_ok Service.error_to_string);
+      write_file damaged_root "main.ml" "let version = 2\n";
+      (match Service.save ~root:damaged_root with
+      | Ok (Service.Saved _) -> ()
+      | Ok (Service.Unchanged _) ->
+          Alcotest.fail "unrelated changed local work was not saved"
+      | Error error -> Alcotest.fail (Service.error_to_string error));
+      ignore
+        (Service.inspection_state ~root:intact_root
+        |> require_ok Service.error_to_string))
+
 let () =
   Alcotest.run "V4 health repository"
     [
@@ -133,5 +172,8 @@ let () =
             missing_checkpoint_closure_is_typed_without_source_writes;
           Alcotest.test_case "mismatched closure is typed and no-write" `Quick
             mismatched_checkpoint_object_is_typed_without_source_writes;
+          Alcotest.test_case
+            "damage remains local to operations requiring its closure" `Quick
+            damaged_closure_does_not_block_unrelated_local_work;
         ] );
     ]

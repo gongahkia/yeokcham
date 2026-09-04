@@ -528,6 +528,51 @@ let[@warning "-4"] divergent_destination_is_never_overwritten () =
         "divergent immutable bytes remain evidence" divergent
         (In_channel.with_open_bin target_path In_channel.input_all))
 
+let interrupted_staging_never_claims_a_repair () =
+  initialized_pair (fun root backup status ->
+      ignore (delete_checkpoint root status);
+      let plan =
+        Repair.plan_from_backup ~root ~backup ~created_at:10L ~expires_at:20L
+        |> require_ok Repair.error_to_string
+      in
+      let candidate = candidate plan in
+      let target_store, target_snapshot = checkpoint_object root status in
+      let target_path = Store.object_path target_store target_snapshot in
+      let target_directory = Filename.dirname target_path in
+      let source_before =
+        In_channel.with_open_bin
+          (Filename.concat backup "main.ml")
+          In_channel.input_all
+      in
+      Unix.chmod target_directory 0o500;
+      Fun.protect
+        ~finally:(fun () -> Unix.chmod target_directory 0o700)
+        (fun () ->
+          let selection =
+            Health.make_selection plan
+              ~candidate_id:(Health.candidate_id candidate)
+          in
+          match
+            Repair.apply_from_backup ~root ~plan_id:(Health.plan_id plan)
+              ~selection ~now:11L
+          with
+          | Error _ -> ()
+          | Ok (Repair.Refused refusal) ->
+              Alcotest.fail
+                ("staging failure unexpectedly became a refusal: "
+                ^ Health.refusal_to_string refusal)
+          | Ok (Repair.Applied _) ->
+              Alcotest.fail "interrupted staging claimed a repaired object");
+      Alcotest.(check bool)
+        "interrupted staging leaves destination absent" false
+        (Sys.file_exists target_path);
+      Alcotest.(check string)
+        "interrupted staging leaves backup source unchanged" source_before
+        (In_channel.with_open_bin
+           (Filename.concat backup "main.ml")
+           In_channel.input_all);
+      assert_missing root)
+
 let quarantine_source_is_read_only_and_exact () =
   initialized_pair (fun root _backup status ->
       let transaction_id = stage_exact_snapshot_in_quarantine root status in
@@ -735,6 +780,8 @@ let () =
             malformed_source_never_becomes_visible;
           Alcotest.test_case "divergent destination never overwrites" `Quick
             divergent_destination_is_never_overwritten;
+          Alcotest.test_case "interrupted staging never claims repair" `Quick
+            interrupted_staging_never_claims_a_repair;
           Alcotest.test_case "quarantine source is exact and source-safe" `Quick
             quarantine_source_is_read_only_and_exact;
           Alcotest.test_case "offline package source is verified and no-receipt"

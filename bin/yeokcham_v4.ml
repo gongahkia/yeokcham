@@ -127,7 +127,8 @@ let usage_text =
   \  yeokcham storage gc resume|restore|purge [--root PATH] --id ID\n\
   \  yeokcham verify [--root PATH] [--format text|json]\n\
   \  yeokcham repair plan [--root PATH] --from SOURCE [--format text|json]\n\
-  \  yeokcham repair apply [--root PATH] --plan PLAN_ID --select CANDIDATE_ID \\\n+  \     --approve PLAN_DIGEST [--format text|json]\n\
+  \  yeokcham repair apply [--root PATH] --plan PLAN_ID --select CANDIDATE_ID \\\n\
+   --approve PLAN_DIGEST [--format text|json]\n\
   \  yeokcham repair defer [--root PATH] [--format text|json]\n\
   \  yeokcham watch [--root PATH]"
 
@@ -573,14 +574,14 @@ let help_for = function
          object, receipt, quarantine, or ordinary source file."
   | [ "repair" ] ->
       Some
-        "usage: yeokcham repair plan --from SOURCE [--root PATH] \
-         [--format text|json]\n\
-         yeokcham repair apply --plan PLAN_ID --select CANDIDATE_ID \
-         --approve PLAN_DIGEST [--root PATH] [--format text|json]\n\
+        "usage: yeokcham repair plan --from SOURCE [--root PATH] [--format \
+         text|json]\n\
+         yeokcham repair apply --plan PLAN_ID --select CANDIDATE_ID --approve \
+         PLAN_DIGEST [--root PATH] [--format text|json]\n\
          yeokcham repair defer [--root PATH] [--format text|json]\n\n\
-         SOURCE is backup:PATH, gc:TRANSACTION_ID, package:PATH, \
-         relay:ALIAS, or bootstrap:ARTIFACT_DIRECTORY. Plan has no selection; \
-         apply rechecks source bytes and damage before add-if-missing publish."
+         SOURCE is backup:PATH, gc:TRANSACTION_ID, package:PATH, relay:ALIAS, \
+         or bootstrap:ARTIFACT_DIRECTORY. Plan has no selection; apply \
+         rechecks source bytes and damage before add-if-missing publish."
   | [ "watch" ] ->
       Some
         "usage: yeokcham watch [--root PATH]\n\n\
@@ -781,7 +782,8 @@ let parse_repair_plan arguments =
   let rec loop root source format = function
     | [] -> (
         match source with
-        | Some source -> (Option.value root ~default:default_root, source, format)
+        | Some source ->
+            (Option.value root ~default:default_root, source, format)
         | None -> usage ())
     | "--root" :: value :: rest when Option.is_none root ->
         loop (Some value) source format rest
@@ -798,7 +800,11 @@ let parse_repair_apply arguments =
     | [] -> (
         match (plan, candidate, approval) with
         | Some plan, Some candidate, Some approval ->
-            (Option.value root ~default:default_root, plan, candidate, approval, format)
+            ( Option.value root ~default:default_root,
+              plan,
+              candidate,
+              approval,
+              format )
         | _ -> usage ())
     | "--root" :: value :: rest when Option.is_none root ->
         loop (Some value) plan candidate approval format rest
@@ -816,9 +822,9 @@ let parse_repair_apply arguments =
 
 let source_of_argument value =
   match String.split_on_char ':' value with
-  | prefix :: locator :: rest when String.length locator > 0 ->
+  | prefix :: locator :: rest when String.length locator > 0 -> (
       let locator = String.concat ":" (locator :: rest) in
-      (match prefix with
+      match prefix with
       | "backup" -> Backup_source locator
       | "gc" -> Gc_source locator
       | "package" -> Package_source locator
@@ -826,15 +832,16 @@ let source_of_argument value =
       | "bootstrap" -> Bootstrap_source locator
       | _ ->
           fail
-            "repair source must be backup:PATH, gc:TRANSACTION_ID, package:PATH, \
-             relay:ALIAS, or bootstrap:ARTIFACT_DIRECTORY")
+            "repair source must be backup:PATH, gc:TRANSACTION_ID, \
+             package:PATH, relay:ALIAS, or bootstrap:ARTIFACT_DIRECTORY")
   | _ ->
       fail
         "repair source must be backup:PATH, gc:TRANSACTION_ID, package:PATH, \
          relay:ALIAS, or bootstrap:ARTIFACT_DIRECTORY"
 
 let json_of_affected = function
-  | Health.Object id -> `Assoc [ ("kind", `String "object"); ("id", `String id) ]
+  | Health.Object id ->
+      `Assoc [ ("kind", `String "object"); ("id", `String id) ]
   | Health.Durable_record (kind, id) ->
       let kind =
         match kind with
@@ -858,13 +865,14 @@ let json_of_affected = function
 let json_of_damage damage =
   `Assoc
     [
-      ("code", `String (Health.damage_code damage |> Health.damage_code_to_string));
+      ( "code",
+        `String (Health.damage_code damage |> Health.damage_code_to_string) );
       ("affected", json_of_affected (Health.damage_affected damage));
       ( "blocked_operations",
         `List
           (Health.damage_blocked_operations damage
           |> List.map (fun operation ->
-                 `String (Health.blocked_operation_to_string operation))) );
+              `String (Health.blocked_operation_to_string operation))) );
     ]
 
 let json_of_candidate candidate =
@@ -873,7 +881,10 @@ let json_of_candidate candidate =
       ("id", `String (Health.candidate_id candidate));
       ("object_id", `String (Health.candidate_object_id candidate));
       ("bytes_id", `String (Health.candidate_bytes_id candidate));
-      ("source", `String (Health.candidate_source candidate |> Health.repair_source_to_string));
+      ( "source",
+        `String
+          (Health.candidate_source candidate |> Health.repair_source_to_string)
+      );
     ]
 
 let json_of_report report =
@@ -888,11 +899,11 @@ let json_of_plan plan =
     [
       ("id", `String (Health.plan_id plan));
       ("digest", `String (Health.plan_digest plan));
-      ("source", `String (Health.plan_source plan |> Health.repair_source_to_string));
+      ( "source",
+        `String (Health.plan_source plan |> Health.repair_source_to_string) );
       ("state_head", `String (Health.plan_state_head plan));
       ("expires_at", `Intlit (Int64.to_string (Health.plan_expires_at plan)));
-      ( "damages",
-        `List (Health.plan_damages plan |> List.map json_of_damage) );
+      ("damages", `List (Health.plan_damages plan |> List.map json_of_damage));
       ( "candidates",
         `List (Health.plan_candidates plan |> List.map json_of_candidate) );
     ]
@@ -901,15 +912,14 @@ let render_health_result format command result text =
   match format with
   | Health_text -> text ()
   | Health_json ->
-      Cli_data.success ~command ~result ~warnings:[] |> Cli_data.encode
-      |> print_endline
+      Cli_data.success ~command ~result ~warnings:[]
+      |> Cli_data.encode |> print_endline
 
 let fail_health format command code message =
   (match format with
   | Health_text -> ()
   | Health_json ->
-      Cli_data.failure ~command ~warnings:[]
-        ~error:{ Cli_data.code; message }
+      Cli_data.failure ~command ~warnings:[] ~error:{ Cli_data.code; message }
       |> Cli_data.encode |> print_endline);
   prerr_endline message;
   exit 2
@@ -925,12 +935,12 @@ let render_health_report report =
   else
     Health.report_damages report
     |> List.iter (fun damage ->
-           Printf.printf "damage %s %s blocks %s\n"
-             (Health.damage_code damage |> Health.damage_code_to_string)
-             (affected_text (Health.damage_affected damage))
-             (Health.damage_blocked_operations damage
-             |> List.map Health.blocked_operation_to_string
-             |> String.concat ","))
+        Printf.printf "damage %s %s blocks %s\n"
+          (Health.damage_code damage |> Health.damage_code_to_string)
+          (affected_text (Health.damage_affected damage))
+          (Health.damage_blocked_operations damage
+          |> List.map Health.blocked_operation_to_string
+          |> String.concat ","))
 
 let render_repair_plan plan =
   Printf.printf "repair plan %s\n" (Health.plan_id plan);
@@ -940,15 +950,15 @@ let render_repair_plan plan =
   Printf.printf "expires-at %Ld\n" (Health.plan_expires_at plan);
   Health.plan_damages plan
   |> List.iter (fun damage ->
-         Printf.printf "damage %s %s\n"
-           (Health.damage_code damage |> Health.damage_code_to_string)
-           (affected_text (Health.damage_affected damage)));
+      Printf.printf "damage %s %s\n"
+        (Health.damage_code damage |> Health.damage_code_to_string)
+        (affected_text (Health.damage_affected damage)));
   Health.plan_candidates plan
   |> List.iter (fun candidate ->
-         Printf.printf "candidate %s object %s bytes %s\n"
-           (Health.candidate_id candidate)
-           (Health.candidate_object_id candidate)
-           (Health.candidate_bytes_id candidate))
+      Printf.printf "candidate %s object %s bytes %s\n"
+        (Health.candidate_id candidate)
+        (Health.candidate_object_id candidate)
+        (Health.candidate_bytes_id candidate))
 
 let health_refusal_code = function
   | Health.Invalid_identifier _ -> "invalid-identifier"
@@ -1005,7 +1015,9 @@ let run_repair_plan arguments =
         (Repair.error_to_string error)
 
 let run_repair_apply arguments =
-  let root, plan_id, candidate_id, approval, format = parse_repair_apply arguments in
+  let root, plan_id, candidate_id, approval, format =
+    parse_repair_apply arguments
+  in
   let plan =
     match Health_store.find ~root ~id:plan_id with
     | Ok plan -> plan
@@ -1043,7 +1055,8 @@ let run_repair_apply arguments =
       fail_health format "repair-apply" "repair-apply-failed"
         (Repair.error_to_string error)
   | Ok (Repair.Refused refusal) ->
-      fail_health format "repair-apply" (health_refusal_code refusal)
+      fail_health format "repair-apply"
+        (health_refusal_code refusal)
         (Health.refusal_to_string refusal)
   | Ok (Repair.Applied candidate) ->
       render_health_result format "repair-apply"

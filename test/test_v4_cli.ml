@@ -4,7 +4,9 @@ module Bootstrap = Yeokcham_v4_bootstrap
 module Package = Yeokcham_v4_package
 module Recovery = Yeokcham_v4_recovery
 module Store = Yeokcham_v4_store
+module Raw_store = Yeokcham_store
 module Trust = Yeokcham_v4_trust
+module Cli_data = Yeokcham_v4_cli_data
 
 let require_success name status stderr =
   match status with
@@ -1648,6 +1650,129 @@ let watch_is_available_only_on_supported_platforms () =
         | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
             require_success "watch" status errors)
 
+let health_commands_have_versioned_output_and_no_source_effect () =
+  with_directory "yeokcham-v4-cli-health-" (fun root ->
+      write_file root "main.ml" "let version = 1\n";
+      let _output, errors, status =
+        run
+          [
+            "init";
+            "--root";
+            root;
+            "--username";
+            "alice";
+            "--draft";
+            "draft-one";
+            "--title";
+            "health work";
+          ]
+      in
+      require_success "health init" status errors;
+      let before =
+        In_channel.with_open_bin
+          (Filename.concat root "main.ml")
+          In_channel.input_all
+      in
+      let output, errors, status =
+        run [ "verify"; "--root"; root; "--format"; "json" ]
+      in
+      require_success "verify JSON" status errors;
+      let envelope = Cli_data.decode (String.trim output) |> Result.get_ok in
+      Alcotest.(check string)
+        "verify command envelope" "verify"
+        (Cli_data.command envelope);
+      Alcotest.(check bool)
+        "verify command succeeds" true (Cli_data.ok envelope);
+      let output, errors, status =
+        run [ "repair"; "defer"; "--root"; root; "--format"; "json" ]
+      in
+      require_success "repair defer JSON" status errors;
+      let envelope = Cli_data.decode (String.trim output) |> Result.get_ok in
+      Alcotest.(check string)
+        "defer command envelope" "repair-defer"
+        (Cli_data.command envelope);
+      Alcotest.(check string)
+        "verify and defer never materialise source" before
+        (In_channel.with_open_bin
+           (Filename.concat root "main.ml")
+           In_channel.input_all))
+
+let health_repair_cli_requires_an_explicit_plan_and_approval () =
+  with_directory "yeokcham-v4-cli-repair-parent-" (fun parent ->
+      let root = Filename.concat parent "target" in
+      let backup = Filename.concat parent "backup" in
+      Unix.mkdir root 0o700;
+      Unix.mkdir backup 0o700;
+      List.iter
+        (fun directory -> write_file directory "main.ml" "let version = 1\n")
+        [ root; backup ];
+      let init directory =
+        let _output, errors, status =
+          run
+            [
+              "init";
+              "--root";
+              directory;
+              "--username";
+              "alice";
+              "--draft";
+              "draft-one";
+              "--title";
+              "repair work";
+            ]
+        in
+        require_success "repair setup init" status errors
+      in
+      init root;
+      init backup;
+      let status = Service.status ~root |> require_ok Service.error_to_string in
+      let repository =
+        Store.open_repository ~root |> require_ok Store.error_to_string
+      in
+      let raw = Store.underlying_store repository in
+      let snapshot =
+        Model.Snapshot_id.to_string status.Service.checkpoint
+        |> Raw_store.Stored_object_id.of_hex |> Result.get_ok
+      in
+      Unix.unlink (Raw_store.object_path raw snapshot);
+      let output, errors, status =
+        run [ "repair"; "plan"; "--root"; root; "--from"; "backup:" ^ backup ]
+      in
+      require_success "repair plan" status errors;
+      let plan_id = first_prefixed_value "repair plan " output in
+      let digest = first_prefixed_value "digest " output in
+      let candidate =
+        first_prefixed_value "candidate " output
+        |> String.split_on_char ' ' |> List.hd
+      in
+      let output, errors, status =
+        run
+          [
+            "repair";
+            "apply";
+            "--root";
+            root;
+            "--plan";
+            plan_id;
+            "--select";
+            candidate;
+            "--approve";
+            digest;
+            "--format";
+            "json";
+          ]
+      in
+      require_success "repair apply" status errors;
+      let envelope = Cli_data.decode (String.trim output) |> Result.get_ok in
+      Alcotest.(check string)
+        "apply command envelope" "repair-apply"
+        (Cli_data.command envelope);
+      Alcotest.(check string)
+        "repair CLI leaves ordinary target bytes alone" "let version = 1\n"
+        (In_channel.with_open_bin
+           (Filename.concat root "main.ml")
+           In_channel.input_all))
+
 let () =
   Alcotest.run "V4 CLI"
     [
@@ -1697,5 +1822,9 @@ let () =
             inspection_commands_are_read_only_and_keep_domains_distinct;
           Alcotest.test_case "watch is platform-scoped" `Quick
             watch_is_available_only_on_supported_platforms;
+          Alcotest.test_case "health commands are JSON and source-safe" `Quick
+            health_commands_have_versioned_output_and_no_source_effect;
+          Alcotest.test_case "health repair requires explicit approval" `Quick
+            health_repair_cli_requires_an_explicit_plan_and_approval;
         ] );
     ]
