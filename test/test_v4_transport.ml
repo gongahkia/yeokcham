@@ -226,6 +226,19 @@ let command_succeeds executable arguments =
       | _, Unix.WSTOPPED signal ->
           Alcotest.failf "%s was stopped by signal %d" executable signal)
 
+let required_tool environment fallback =
+  match Sys.getenv_opt environment with
+  | Some path when Sys.file_exists path -> path
+  | Some path ->
+      Alcotest.failf "%s names an unavailable executable: %s" environment path
+  | None ->
+      let path = Filename.concat "/usr/bin" fallback in
+      if Sys.file_exists path then path
+      else
+        Alcotest.failf
+          "%s is unavailable; set %s to its absolute executable path" fallback
+          environment
+
 let available_loopback_port () =
   let listener = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
   Fun.protect
@@ -576,11 +589,8 @@ let rec wait_for_https_relay client project attempts =
         ^ Transport_http.error_to_string error)
 
 let with_https_relay run =
-  let openssl = "/usr/bin/openssl" in
-  let socat = "/usr/bin/socat" in
-  if not (Sys.file_exists openssl && Sys.file_exists socat) then
-    Alcotest.fail
-      "HTTPS transport tests require /usr/bin/openssl and /usr/bin/socat";
+  let openssl = required_tool "YEOKCHAM_V4_TEST_OPENSSL" "openssl" in
+  let socat = required_tool "YEOKCHAM_V4_TEST_SOCAT" "socat" in
   with_directory "yeokcham-v4-https-relay-" (fun root ->
       let certificate = Filename.concat root "relay.crt" in
       let private_key = Filename.concat root "relay.key" in
@@ -740,12 +750,8 @@ let serve_malicious_backend ~port ~requests respond =
       loop max_int)
 
 let with_malicious_https_server ~respond run =
-  let openssl = "/usr/bin/openssl" in
-  let socat = "/usr/bin/socat" in
-  if not (Sys.file_exists openssl && Sys.file_exists socat) then
-    Alcotest.fail
-      "malicious HTTPS transport tests require /usr/bin/openssl and \
-       /usr/bin/socat";
+  let openssl = required_tool "YEOKCHAM_V4_TEST_OPENSSL" "openssl" in
+  let socat = required_tool "YEOKCHAM_V4_TEST_SOCAT" "socat" in
   with_directory "yeokcham-v4-malicious-https-" (fun root ->
       let certificate = Filename.concat root "relay.crt" in
       let private_key = Filename.concat root "relay.key" in
