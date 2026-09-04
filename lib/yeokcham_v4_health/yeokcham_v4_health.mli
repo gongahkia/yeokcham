@@ -91,6 +91,7 @@ type refusal =
   | Plan_digest_mismatch
   | Candidate_not_in_plan
   | Candidate_changed
+  | State_head_changed
   | Damage_changed
   | Destination_no_longer_missing
 
@@ -151,6 +152,7 @@ val apply_eligibility :
   plan:repair_plan ->
   selection:selection ->
   now:int64 ->
+  current_state_head:string ->
   current:report ->
   reread_candidate:repair_candidate option ->
   repair_outcome

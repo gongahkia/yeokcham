@@ -151,6 +151,7 @@ let refusal_to_string = function
   | Plan_digest_mismatch -> "repair approval does not match the exact plan"
   | Candidate_not_in_plan -> "repair selection names no candidate in the plan"
   | Candidate_changed -> "repair source candidate changed after planning"
+  | State_head_changed -> "V4 state head changed after repair planning"
   | Damage_changed -> "repair diagnosis changed after planning"
   | Destination_no_longer_missing ->
       "repair destination is no longer the exact missing object"
@@ -681,7 +682,8 @@ let report_matches_plan plan report =
   List.length expected = List.length actual
   && List.for_all2 damage_equal expected actual
 
-let apply_eligibility ~plan ~selection ~now ~current ~reread_candidate =
+let apply_eligibility ~plan ~selection ~now ~current_state_head ~current
+    ~reread_candidate =
   if not (String.equal selection.selection_plan_id plan.plan_id_value) then
     Refused Plan_id_mismatch
   else if
@@ -689,6 +691,8 @@ let apply_eligibility ~plan ~selection ~now ~current ~reread_candidate =
   then Refused Plan_digest_mismatch
   else if Int64.compare now plan.plan_expires_at_value >= 0 then
     Refused Plan_expired
+  else if not (String.equal current_state_head plan.plan_state_head_value) then
+    Refused State_head_changed
   else if not (report_matches_plan plan current) then Refused Damage_changed
   else
     match

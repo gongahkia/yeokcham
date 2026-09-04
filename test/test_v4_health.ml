@@ -107,6 +107,7 @@ let plan_binds_source_exact_bytes_and_selection () =
   in
   (match
      Health.apply_eligibility ~plan ~selection ~now:11L ~current:report
+       ~current_state_head:(id 'e')
        ~reread_candidate:(Some candidate)
    with
   | Health.Eligible selected ->
@@ -122,15 +123,18 @@ let plan_binds_source_exact_bytes_and_selection () =
     }
   in
   Health.apply_eligibility ~plan ~selection:wrong_selection ~now:11L
-    ~current:report ~reread_candidate:(Some candidate)
+    ~current_state_head:(id 'e') ~current:report ~reread_candidate:(Some candidate)
   |> expect_outcome_refusal Health.Plan_digest_mismatch;
+  Health.apply_eligibility ~plan ~selection ~now:11L
+    ~current_state_head:(id 'f') ~current:report ~reread_candidate:(Some candidate)
+  |> expect_outcome_refusal Health.State_head_changed;
   let changed =
     Health.make_candidate ~source ~object_id:(id 'a')
       ~canonical_bytes_id:(id 'b')
     |> require_ok
   in
   Health.apply_eligibility ~plan ~selection ~now:11L ~current:report
-    ~reread_candidate:(Some changed)
+    ~current_state_head:(id 'e') ~reread_candidate:(Some changed)
   |> expect_outcome_refusal Health.Candidate_changed
 
 let plans_are_canonical_and_expire () =
@@ -156,7 +160,7 @@ let plans_are_canonical_and_expire () =
     Health.make_selection plan ~candidate_id:(Health.candidate_id candidate)
   in
   Health.apply_eligibility ~plan ~selection ~now:2L ~current:report
-    ~reread_candidate:(Some candidate)
+    ~current_state_head:(id 'e') ~reread_candidate:(Some candidate)
   |> expect_outcome_refusal Health.Plan_expired
 
 let plans_reject_wrong_version_noncanonical_and_unknown_fields () =
