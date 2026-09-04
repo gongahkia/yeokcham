@@ -251,6 +251,12 @@ yeokcham repair apply [--root PATH] --plan PLAN_ID --select CANDIDATE_ID
 yeokcham repair defer [--root PATH] [--format text|json]
 ~~~
 
+**Shared-output sequencing:** ADR-101 establishes the pure versioned JSON
+envelope early because this command family already requires `--format json`.
+That limited formatter is a HEALTH-001 adapter, not the start of hooks,
+completions, or broad CLI migration; those remain CLI-001 work after Health's
+core acceptance evidence passes.
+
 SOURCE is one explicit trusted candidate source: a local GC quarantine ID, an offline package path, a configured relay alias, a bootstrap artifact, or a backup path. verify never modifies repository or ordinary source bytes. repair plan enumerates every verified candidate and its provenance; it makes no selection. repair apply requires the exact plan digest and candidate ID, revalidates source bytes and current damage immediately before write, and never overwrites a divergent immutable object. repair defer records no repair and leaves unrelated commands usable.
 
 **Types and pure transitions first:**
