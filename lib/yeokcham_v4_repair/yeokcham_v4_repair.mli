@@ -12,6 +12,7 @@ type error =
   | Health_store_error of Yeokcham_v4_health_store.error
   | Store_error of Yeokcham_store.error
   | V4_store_error of Yeokcham_v4_store.error
+  | Gc_error of Yeokcham_v4_gc.error
   | Missing_state_head
   | Invalid_backup of { path : string; detail : string }
 
@@ -31,6 +32,16 @@ val plan_from_backup :
     absent backup object is not a candidate; malformed or mismatched backup
     bytes refuse planning rather than becoming visible in [root]. *)
 
+val plan_from_gc_quarantine :
+  root:string ->
+  transaction_id:string ->
+  created_at:int64 ->
+  expires_at:int64 ->
+  (Yeokcham_v4_health.repair_plan, error) result
+(** Enumerates only fully revalidated staged objects from one named existing GC
+    transaction. It neither restores, purges, changes, nor creates a GC
+    transaction. *)
+
 val apply_from_backup :
   root:string ->
   plan_id:string ->
@@ -40,3 +51,10 @@ val apply_from_backup :
 (** Rechecks the named local plan and explicit backup candidate. An expiry,
     state-head, diagnosis, source, candidate, or destination change returns
     [Refused]. [Applied] publishes at most the selected immutable object. *)
+
+val apply_from_gc_quarantine :
+  root:string ->
+  plan_id:string ->
+  selection:Yeokcham_v4_health.selection ->
+  now:int64 ->
+  (apply_result, error) result

@@ -95,6 +95,11 @@ val apply : root:string -> (transaction_progress, error) result
     every candidate into a local quarantine. It does not unlink objects. *)
 
 val transactions : root:string -> (transaction_progress list, error) result
+val quarantined_object :
+  root:string ->
+  transaction_id:string ->
+  object_id:Yeokcham_store.Stored_object_id.t ->
+  (Yeokcham_envelope.t option, error) result
 val resume : root:string -> id:string -> (transaction_progress, error) result
 val restore : root:string -> id:string -> (unit, error) result
 
