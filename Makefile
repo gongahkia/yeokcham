@@ -6,7 +6,7 @@ OCAMLFORMAT_VERSION := 0.29.0
 LOCAL_SWITCH := $(CURDIR)
 RELEASE_REPOSITORY ?= .
 
-.PHONY: setup deps build test lint format ci workflow-security-test linux-watch-test relay-container-test development-artifact-test development-build-record-test release-verify release-verify-test
+.PHONY: setup deps build test lint format ci workflow-security-test evidence-fixture-test linux-watch-test relay-container-test development-artifact-test development-build-record-test release-verify release-verify-test
 
 setup:
 	$(OPAM) init --bare --no-setup --yes
@@ -46,7 +46,10 @@ format:
 workflow-security-test:
 	sh test/test_workflow_security.sh
 
-ci: lint test workflow-security-test
+evidence-fixture-test: build
+	sh test/test_evidence_fixture.sh
+
+ci: lint test workflow-security-test evidence-fixture-test
 
 release-verify:
 	tools/verify-v4-source-release.sh --repo "$(RELEASE_REPOSITORY)" --tag "$(RELEASE_TAG)" --commit "$(RELEASE_COMMIT)" --fingerprint "$(RELEASE_FINGERPRINT)" --archive "$(RELEASE_ARCHIVE)" --sha256 "$(RELEASE_SHA256)"

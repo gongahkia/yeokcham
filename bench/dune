@@ -1,3 +1,14 @@
+(library
+ (name evidence_fixture)
+ (modules evidence_fixture)
+ (libraries unix))
+
+(executable
+ (name evidence_fixture_generator)
+ (modules evidence_fixture_generator)
+ (libraries evidence_fixture))
+
 (executable
  (name v2_transfer_wire_benchmark)
+ (modules v2_transfer_wire_benchmark)
  (libraries yeokcham_v4_transport))
