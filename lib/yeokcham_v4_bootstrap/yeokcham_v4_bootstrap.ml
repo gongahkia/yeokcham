@@ -562,28 +562,26 @@ let import ~destination verified ~creator ~username ~initial_draft ~title
       (Invalid_basis
          "bootstrap device is not active at a current authority head")
   else
-    let rec import_objects = function
-      | [] -> Ok ()
-      | (id, bytes) :: rest ->
+    let* () =
+      Package.iter_artifact_objects verified.verified_package
+        ~f:(fun id bytes ->
           let* object_ =
             Envelope.decode bytes
-            |> Result.map_error (fun error -> Envelope_error error)
+            |> Result.map_error (fun error -> Package.Envelope_error error)
           in
           if
             not
               (Raw_store.Stored_object_id.equal id
                  (Raw_store.id_of_envelope object_))
-          then Error (Invalid_basis "verified package object changed identity")
+          then
+            Error
+              (Package.Object_identity_mismatch
+                 (Raw_store.Stored_object_id.to_hex id))
           else
-            let* _ =
-              Raw_store.put destination object_
-              |> Result.map_error (fun error ->
-                  Store_error (Store.Store_error error))
-            in
-            import_objects rest
-    in
-    let* () =
-      import_objects (Package.artifact_objects verified.verified_package)
+            Raw_store.put destination object_
+            |> Result.map_error (fun error -> Package.Store_error error)
+            |> Result.map (fun _ -> ()))
+      |> Result.map_error (fun error -> Package_error error)
     in
     let* project =
       Model.bootstrap verified.verified_basis.state_value ~creator ~username

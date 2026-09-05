@@ -443,8 +443,9 @@ count, logical bytes, iterations, transport conditions, and source revision.
 Every reported median/tail derives from retained per-run measurements; a
 missing condition, failed run, or unavailable external service is recorded as
 incomplete evidence, never interpolated. An artifact either owns validated
-in-memory test bytes or borrows one validated on-disk package; its iterator
-validates each object identity and canonical encoding immediately before use.
+in-memory test bytes or borrows an on-disk package whose manifest and exact
+object-file names were checked; its iterator validates each object identity and
+canonical encoding immediately before use.
 Harnesses create fixtures only under an explicitly supplied external directory
 and never materialise ordinary source through receipt paths. Field observations
 name participant count and exercise version but contain no credentials, private

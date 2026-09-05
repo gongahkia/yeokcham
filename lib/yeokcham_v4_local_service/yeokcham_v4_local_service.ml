@@ -3201,13 +3201,13 @@ let remove_outbound_package destination =
 
 let with_outbound_directory ~root run =
   try
-    let destination =
-      Filename.temp_file ~temp_dir:root ".yeokcham-v4-outbound-" ".tmp"
-    in
+    let destination = Filename.temp_file "yeokcham-v4-outbound-" ".tmp" in
     Unix.unlink destination;
-    Fun.protect
-      ~finally:(fun () -> remove_outbound_package destination)
-      (fun () -> run destination)
+    match run destination with
+    | Ok value -> Ok (value, destination)
+    | Error error ->
+        remove_outbound_package destination;
+        Error error
   with Unix.Unix_error (error, operation, _) ->
     Error
       (Package_error
@@ -3247,9 +3247,14 @@ let prepare_bootstrap_outbound ~root ~signing_capability =
             ~adoptions:(Store.adoptions existing) ~publisher
             ~certificate:(Store.local_certificate existing)
             ~signing_capability
-          |> Result.map_error (fun error -> Bootstrap_error error)
-          |> Result.map (fun (bootstrap_basis, bootstrap_artifact) ->
-              { bootstrap_basis; bootstrap_artifact })))
+          |> Result.map_error (fun error -> Bootstrap_error error))
+      |> Result.map (fun ((bootstrap_basis, bootstrap_artifact), destination) ->
+          {
+            bootstrap_basis;
+            bootstrap_artifact =
+              Package.claim_artifact bootstrap_artifact ~cleanup:(fun () ->
+                  remove_outbound_package destination);
+          }))
 
 let prepare_transport_outbound ~root ~remote ~signing_capability =
   with_repository ~root (fun repository loaded ->
@@ -3300,7 +3305,7 @@ let prepare_transport_outbound ~root ~remote ~signing_capability =
               (Trust.adoption_matches_signed_revision adoption)
               packaged_revisions)
       in
-      let* artifact =
+      let* artifact, destination =
         with_outbound_directory ~root (fun destination ->
             let* () =
               Package.create_with_authority
@@ -3313,8 +3318,14 @@ let prepare_transport_outbound ~root ~remote ~signing_capability =
             Package.read_artifact ~package:destination
             |> Result.map_error (fun error -> Package_error error))
       in
+      let artifact =
+        Package.claim_artifact artifact ~cleanup:(fun () ->
+            remove_outbound_package destination)
+      in
       let manifest = Transport.sha256 (Package.artifact_manifest artifact) in
-      if List.mem manifest announced_manifests then Ok None
+      if List.mem manifest announced_manifests then (
+        Package.dispose_artifact artifact;
+        Ok None)
       else
         let* device = local_device existing in
         let certificate = Store.local_certificate existing in

@@ -135,14 +135,13 @@ let package_candidate ~package ~object_id =
     Package.read_artifact ~package
     |> Result.map_error (fun error -> Package_error error)
   in
-  match
-    List.find_opt
-      (fun (candidate_id, _) ->
-        Store.Stored_object_id.equal candidate_id object_id)
-      (Package.artifact_objects artifact)
-  with
+  let* bytes =
+    Package.find_artifact_object artifact ~object_id
+    |> Result.map_error (fun error -> Package_error error)
+  in
+  match bytes with
   | None -> Ok None
-  | Some (_, bytes) ->
+  | Some bytes ->
       let* envelope =
         Yeokcham_envelope.decode bytes
         |> Result.map_error (fun error ->
@@ -245,14 +244,13 @@ let read_bootstrap_basis artifact =
   | Sys_error detail -> Error (Invalid_bootstrap_artifact { path; detail })
 
 let candidate_from_artifact ~source ~object_id artifact =
-  match
-    List.find_opt
-      (fun (candidate_id, _) ->
-        Store.Stored_object_id.equal candidate_id object_id)
-      (Package.artifact_objects artifact)
-  with
+  let* bytes =
+    Package.find_artifact_object artifact ~object_id
+    |> Result.map_error (fun error -> Package_error error)
+  in
+  match bytes with
   | None -> Ok None
-  | Some (_, bytes) ->
+  | Some bytes ->
       let* envelope =
         Yeokcham_envelope.decode bytes
         |> Result.map_error (fun error ->

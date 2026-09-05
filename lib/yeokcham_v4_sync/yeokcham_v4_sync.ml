@@ -58,33 +58,99 @@ let fetch_publication client ~project id =
   if String.equal id (Transport.publication_id publication) then Ok publication
   else detail "relay publication route ID does not match its canonical bytes"
 
+let remove_downloaded_package destination =
+  let objects = Filename.concat destination "objects" in
+  (try
+     Sys.readdir objects
+     |> Array.iter (fun name ->
+         try Unix.unlink (Filename.concat objects name)
+         with Unix.Unix_error _ -> ());
+     Unix.rmdir objects
+   with Unix.Unix_error _ | Sys_error _ -> ());
+  (try Unix.unlink (Filename.concat destination "manifest.cbor")
+   with Unix.Unix_error _ -> ());
+  try Unix.rmdir destination with Unix.Unix_error _ -> ()
+
+let create_download_directory () =
+  try
+    let destination =
+      Filename.temp_file "yeokcham-v4-transport-fetch-" ".tmp"
+    in
+    Unix.unlink destination;
+    Unix.mkdir destination 0o700;
+    Unix.mkdir (Filename.concat destination "objects") 0o700;
+    Ok destination
+  with Unix.Unix_error (error, operation, path) ->
+    detail
+      (Printf.sprintf "transport fetch staging %s %s: %s" operation path
+         (Unix.error_message error))
+
+let write_downloaded_file path bytes =
+  try
+    let descriptor =
+      Unix.openfile path [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_EXCL ] 0o600
+    in
+    let channel = Unix.out_channel_of_descr descriptor in
+    Fun.protect
+      ~finally:(fun () -> close_out_noerr channel)
+      (fun () ->
+        Out_channel.output_string channel bytes;
+        Out_channel.flush channel);
+    Ok ()
+  with Unix.Unix_error (error, operation, _) ->
+    detail
+      (Printf.sprintf "transport fetch write %s %s: %s" operation path
+         (Unix.error_message error))
+
 let fetch_artifact_for_manifest client ~project manifest_id =
-  let* manifest =
-    Transport_http.get client ~project ~kind:Transport_http.Manifest
-      ~id:manifest_id
-    |> Result.map_error (fun error ->
-        sync_error (Transport_http.error_to_string error))
-  in
-  let* object_ids =
-    Package.manifest_object_ids manifest
+  let* destination = create_download_directory () in
+  let result =
+    let* manifest =
+      Transport_http.get client ~project ~kind:Transport_http.Manifest
+        ~id:manifest_id
+      |> Result.map_error (fun error ->
+          sync_error (Transport_http.error_to_string error))
+    in
+    let* object_ids =
+      Package.manifest_object_ids manifest
+      |> Result.map_error (fun error ->
+          sync_error (Package.error_to_string error))
+    in
+    let* () =
+      write_downloaded_file
+        (Filename.concat destination "manifest.cbor")
+        manifest
+    in
+    let rec objects = function
+      | [] -> Ok ()
+      | id :: rest ->
+          let id_text = Store.Stored_object_id.to_hex id in
+          let* bytes =
+            Transport_http.get client ~project ~kind:Transport_http.Object
+              ~id:id_text
+            |> Result.map_error (fun error ->
+                sync_error (Transport_http.error_to_string error))
+          in
+          let* () =
+            write_downloaded_file
+              (Filename.concat (Filename.concat destination "objects") id_text)
+              bytes
+          in
+          objects rest
+    in
+    let* () = objects object_ids in
+    Package.read_artifact ~package:destination
     |> Result.map_error (fun error ->
         sync_error (Package.error_to_string error))
   in
-  let rec objects reversed = function
-    | [] -> Ok (List.rev reversed)
-    | id :: rest ->
-        let id_text = Store.Stored_object_id.to_hex id in
-        let* bytes =
-          Transport_http.get client ~project ~kind:Transport_http.Object
-            ~id:id_text
-          |> Result.map_error (fun error ->
-              sync_error (Transport_http.error_to_string error))
-        in
-        objects ((id, bytes) :: reversed) rest
-  in
-  let* objects = objects [] object_ids in
-  Package.artifact_of_bytes ~manifest ~objects
-  |> Result.map_error (fun error -> sync_error (Package.error_to_string error))
+  match result with
+  | Ok artifact ->
+      Ok
+        (Package.claim_artifact artifact ~cleanup:(fun () ->
+             remove_downloaded_package destination))
+  | Error error ->
+      remove_downloaded_package destination;
+      Error error
 
 let fetch_artifact client ~project publication =
   fetch_artifact_for_manifest client ~project
@@ -184,44 +250,62 @@ let upload_outbound client ~project ~root ~remote identity
   match outbound with
   | None -> Ok 0
   | Some outbound ->
-      let rec objects count = function
-        | [] -> Ok count
-        | (id, bytes) :: rest ->
-            let id = Store.Stored_object_id.to_hex id in
-            let* () =
-              Transport_http.put client ~project ~kind:Transport_http.Object ~id
-                ~bytes
-              |> Result.map_error (fun error ->
-                  sync_error (Transport_http.error_to_string error))
-            in
-            objects (count + 1) rest
-      in
-      let artifact = outbound.Service.outbound_artifact in
-      let* uploaded = objects 0 (Package.artifact_objects artifact) in
-      let manifest = Package.artifact_manifest artifact in
-      let manifest_id = Transport.sha256 manifest in
-      let* () =
-        Transport_http.put client ~project ~kind:Transport_http.Manifest
-          ~id:manifest_id ~bytes:manifest
-        |> Result.map_error (fun error ->
-            sync_error (Transport_http.error_to_string error))
-      in
-      let publication = outbound.Service.outbound_publication in
-      let publication_bytes = Transport.encode_publication publication in
-      let* () =
-        Transport_http.put client ~project ~kind:Transport_http.Publication
-          ~id:(Transport.publication_id publication)
-          ~bytes:publication_bytes
-        |> Result.map_error (fun error ->
-            sync_error (Transport_http.error_to_string error))
-      in
-      let* () =
-        Service.record_transport_outbound ~root ~remote ~publication
-          ~revisions:outbound.Service.outbound_revisions
-        |> Result.map_error (fun error ->
-            sync_error (Service.error_to_string error))
-      in
-      Ok (uploaded + 2)
+      Fun.protect
+        ~finally:(fun () ->
+          Package.dispose_artifact outbound.Service.outbound_artifact)
+        (fun () ->
+          let artifact = outbound.Service.outbound_artifact in
+          let uploaded = ref 0 in
+          let upload_error = ref None in
+          let streamed =
+            Package.iter_artifact_objects artifact ~f:(fun id bytes ->
+                let id = Store.Stored_object_id.to_hex id in
+                match
+                  Transport_http.put client ~project ~kind:Transport_http.Object
+                    ~id ~bytes
+                with
+                | Ok () ->
+                    incr uploaded;
+                    Ok ()
+                | Error error ->
+                    upload_error :=
+                      Some (sync_error (Transport_http.error_to_string error));
+                    Error
+                      (Package.Invalid_package "outbound object upload failed"))
+          in
+          let* uploaded =
+            match (streamed, !upload_error) with
+            | Ok (), None -> Ok !uploaded
+            | Error _, Some error -> Error error
+            | Error error, None ->
+                Error (sync_error (Package.error_to_string error))
+            | Ok (), Some _ ->
+                detail "outbound object upload reported an inconsistent result"
+          in
+          let manifest = Package.artifact_manifest artifact in
+          let manifest_id = Transport.sha256 manifest in
+          let* () =
+            Transport_http.put client ~project ~kind:Transport_http.Manifest
+              ~id:manifest_id ~bytes:manifest
+            |> Result.map_error (fun error ->
+                sync_error (Transport_http.error_to_string error))
+          in
+          let publication = outbound.Service.outbound_publication in
+          let publication_bytes = Transport.encode_publication publication in
+          let* () =
+            Transport_http.put client ~project ~kind:Transport_http.Publication
+              ~id:(Transport.publication_id publication)
+              ~bytes:publication_bytes
+            |> Result.map_error (fun error ->
+                sync_error (Transport_http.error_to_string error))
+          in
+          let* () =
+            Service.record_transport_outbound ~root ~remote ~publication
+              ~revisions:outbound.Service.outbound_revisions
+            |> Result.map_error (fun error ->
+                sync_error (Service.error_to_string error))
+          in
+          Ok (uploaded + 2))
 
 let run ~root ~remote ~load_signing_capability =
   let* remote_config =
@@ -271,9 +355,14 @@ let run ~root ~remote ~load_signing_capability =
     in
     fetch [] publications
   in
-  let* received =
-    receive_transport ~root ~remote ~cursor:next_cursor publications artifacts
+  let received =
+    Fun.protect
+      ~finally:(fun () -> List.iter Package.dispose_artifact artifacts)
+      (fun () ->
+        receive_transport ~root ~remote ~cursor:next_cursor publications
+          artifacts)
   in
+  let* received = received in
   let upload =
     match
       upload_outbound client ~project ~root ~remote identity

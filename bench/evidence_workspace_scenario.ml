@@ -147,10 +147,14 @@ let () =
         |> require_ok Service.error_to_string)
   in
   let _, materialize_package_seconds =
-    elapsed (fun () ->
-        Package.materialize_artifact ~destination:package
-          outbound.Service.bootstrap_artifact
-        |> require_ok Package.error_to_string)
+    Fun.protect
+      ~finally:(fun () ->
+        Package.dispose_artifact outbound.Service.bootstrap_artifact)
+      (fun () ->
+        elapsed (fun () ->
+            Package.materialize_artifact ~destination:package
+              outbound.Service.bootstrap_artifact
+            |> require_ok Package.error_to_string))
   in
   let basis = Bootstrap.encode outbound.Service.bootstrap_basis in
   let phrase = Recovery.verification_phrase (root_certificate authority) in

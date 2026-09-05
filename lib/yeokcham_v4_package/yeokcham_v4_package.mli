@@ -30,17 +30,43 @@ val manifest_object_ids :
 *)
 
 val read_artifact : package:string -> (artifact, error) result
+(** Reads and validates a package manifest and exact object-file names without
+    retaining any object payload. Each object is validated only when an iterator
+    consumer reaches it. *)
+
 val artifact_manifest : artifact -> string
 
-val artifact_objects :
-  artifact -> (Yeokcham_store.Stored_object_id.t * string) list
+val claim_artifact : artifact -> cleanup:(unit -> unit) -> artifact
+(** Attaches one cleanup action to a privately-created temporary package. The
+    action runs at [dispose_artifact] and as a best-effort finalizer. Callers
+    must not claim a user-supplied package path. *)
+
+val dispose_artifact : artifact -> unit
+(** Runs a claimed temporary-package cleanup at most once. Artifacts returned by
+    [read_artifact] and [artifact_of_bytes] have no cleanup action. *)
+
+val iter_artifact_objects :
+  artifact ->
+  f:(Yeokcham_store.Stored_object_id.t -> string -> (unit, error) result) ->
+  (unit, error) result
+(** Streams canonical, identity-checked object bytes one at a time. The callback
+    must not retain the closure when a bounded-memory path is needed. *)
+
+val find_artifact_object :
+  artifact ->
+  object_id:Yeokcham_store.Stored_object_id.t ->
+  (string option, error) result
+(** Reads at most the named package object after validating its canonical bytes
+    and identity. *)
 
 val artifact_of_bytes :
   manifest:string ->
   objects:(Yeokcham_store.Stored_object_id.t * string) list ->
   (artifact, error) result
 (** Validates an in-memory package payload before it is materialized for the
-    normal staged verifier. No object or project state is persisted. *)
+    normal staged verifier. This test/helper adapter retains its caller-provided
+    object bytes; capacity and receipt paths use [read_artifact] and
+    [iter_artifact_objects] instead. No object or project state is persisted. *)
 
 val materialize_artifact :
   destination:string -> artifact -> (unit, error) result
@@ -109,8 +135,11 @@ val prepare_with_authority :
   project:Model.project ->
   (prepared, error) result
 (** Verifies all untrusted package bytes in an isolated store and applies the
-    pure model transition, but does not import a destination object. Callers can
-    validate a whole relay-discovery batch before importing any member. *)
+    pure model transition, but does not import a destination object. Object
+    bytes are streamed through the isolated store and reread with the same
+    identity checks during later import; the prepared value never retains the
+    closure in memory. Callers can validate a whole relay-discovery batch before
+    importing any member. *)
 
 val import_prepared :
   destination:Yeokcham_store.repository ->

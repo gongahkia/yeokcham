@@ -1284,8 +1284,16 @@ let source_and_destination parent =
   |> ignore;
   (source, destination, administrator_capability, member_capability)
 
+let artifact_objects artifact =
+  let objects = ref [] in
+  Package.iter_artifact_objects artifact ~f:(fun id bytes ->
+      objects := (id, bytes) :: !objects;
+      Ok ())
+  |> require_ok Package.error_to_string;
+  List.rev !objects
+
 let upload_artifact client ~project artifact publication =
-  Package.artifact_objects artifact
+  artifact_objects artifact
   |> List.iter (fun (id, bytes) ->
       Transport_http.put client ~project ~kind:Transport_http.Object
         ~id:(Object_store.Stored_object_id.to_hex id)
@@ -1641,7 +1649,7 @@ let malicious_relay_inputs_leave_the_replica_unchanged () =
           in
           let manifest = Package.artifact_manifest artifact in
           let first_object_id =
-            match Package.artifact_objects artifact with
+            match artifact_objects artifact with
             | (id, _) :: _ -> Object_store.Stored_object_id.to_hex id
             | [] ->
                 Alcotest.fail "transport artifact unexpectedly has no objects"
@@ -1739,7 +1747,7 @@ let malicious_relay_inputs_leave_the_replica_unchanged () =
                           String.equal
                             (Object_store.Stored_object_id.to_hex object_id)
                             id)
-                        (Package.artifact_objects artifact)
+                        (artifact_objects artifact)
                     with
                     | Some (_, bytes) -> (200, bytes)
                     | None -> (404, "")) );
@@ -1782,7 +1790,7 @@ let malicious_relay_inputs_leave_the_replica_unchanged () =
                           String.equal
                             (Object_store.Stored_object_id.to_hex object_id)
                             id)
-                        (Package.artifact_objects artifact)
+                        (artifact_objects artifact)
                     with
                     | Some (_, bytes) -> (200, bytes)
                     | None -> (404, "")) );

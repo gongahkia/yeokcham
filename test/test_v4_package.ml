@@ -748,6 +748,32 @@ let late_revision_from_a_revoked_device_requires_current_head_adoption () =
         "a current-head adoption accepts exactly that record" 1
         (List.length (Model.shared_changes imported)))
 
+let on_disk_artifact_defers_object_payloads_to_the_iterator () =
+  with_directory "yeokcham-v4-package-streaming-" (fun root ->
+      let _, source, _, _, root_device, membership, signed = setup root in
+      let authority = root_authority ~membership ~root_device in
+      let package = Filename.concat root "offline-package" in
+      Package.create_with_authority ~source ~destination:package ~authority
+        ~revisions:[ signed ] ~authorizations:[] ~adoptions:[]
+      |> require_ok Package.error_to_string;
+      let artifact =
+        Package.read_artifact ~package |> require_ok Package.error_to_string
+      in
+      let object_name =
+        Sys.readdir (Filename.concat package "objects")
+        |> Array.to_list |> List.hd
+      in
+      let object_path =
+        Filename.concat (Filename.concat package "objects") object_name
+      in
+      Out_channel.with_open_bin object_path (fun channel ->
+          Out_channel.output_string channel "malformed after artifact read");
+      match Package.iter_artifact_objects artifact ~f:(fun _ _ -> Ok ()) with
+      | Error _ -> ()
+      | Ok () ->
+          Alcotest.fail
+            "artifact iteration accepted an object changed after manifest read")
+
 let () =
   Alcotest.run "V4 package"
     [
@@ -775,5 +801,7 @@ let () =
           Alcotest.test_case
             "late revoked revision needs a current-head adoption" `Quick
             late_revision_from_a_revoked_device_requires_current_head_adoption;
+          Alcotest.test_case "on-disk artifacts defer payloads to the iterator"
+            `Quick on_disk_artifact_defers_object_payloads_to_the_iterator;
         ] );
     ]

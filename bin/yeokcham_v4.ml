@@ -3478,7 +3478,24 @@ let run_relay_access_list arguments =
         (Relay_access.credential_expires_at credential);
       Printf.printf "status %s\n" status)
 
-let fetch_artifact_for_manifest client ~project manifest_id =
+let write_staged_package_file path bytes =
+  try
+    let descriptor =
+      Unix.openfile path [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_EXCL ] 0o600
+    in
+    let channel = Unix.out_channel_of_descr descriptor in
+    Fun.protect
+      ~finally:(fun () -> close_out_noerr channel)
+      (fun () ->
+        Out_channel.output_string channel bytes;
+        Out_channel.flush channel);
+    Ok ()
+  with Unix.Unix_error (error, operation, _) ->
+    Error
+      (Printf.sprintf "bootstrap package write %s %s: %s" operation path
+         (Unix.error_message error))
+
+let fetch_package_for_manifest client ~project ~destination manifest_id =
   let manifest =
     Transport_http.get client ~project ~kind:Transport_http.Manifest
       ~id:manifest_id
@@ -3487,19 +3504,38 @@ let fetch_artifact_for_manifest client ~project manifest_id =
   let object_ids =
     Package.manifest_object_ids manifest |> require_ok Package.error_to_string
   in
-  let objects =
-    object_ids
-    |> List.map (fun id ->
+  let* () =
+    try
+      Unix.mkdir destination 0o700;
+      Unix.mkdir (Filename.concat destination "objects") 0o700;
+      Ok ()
+    with Unix.Unix_error (error, operation, path) ->
+      Error
+        (Printf.sprintf "bootstrap package staging %s %s: %s" operation path
+           (Unix.error_message error))
+  in
+  let* () =
+    write_staged_package_file
+      (Filename.concat destination "manifest.cbor")
+      manifest
+  in
+  let rec fetch_objects = function
+    | [] -> Ok ()
+    | id :: rest ->
         let id_text = Yeokcham_store.Stored_object_id.to_hex id in
         let bytes =
           Transport_http.get client ~project ~kind:Transport_http.Object
             ~id:id_text
           |> require_ok Transport_http.error_to_string
         in
-        (id, bytes))
+        let* () =
+          write_staged_package_file
+            (Filename.concat (Filename.concat destination "objects") id_text)
+            bytes
+        in
+        fetch_objects rest
   in
-  Package.artifact_of_bytes ~manifest ~objects
-  |> require_ok Package.error_to_string
+  fetch_objects object_ids
 
 let remove_staged_package destination =
   let objects = Filename.concat destination "objects" in
@@ -3556,33 +3592,34 @@ let run_bootstrap_publish arguments =
     Service.prepare_bootstrap_outbound ~root ~signing_capability
     |> require_ok Service.error_to_string
   in
-  let rec upload_objects count = function
-    | [] -> count
-    | (id, bytes) :: rest ->
-        let id = Yeokcham_store.Stored_object_id.to_hex id in
-        Transport_http.put client ~project ~kind:Transport_http.Object ~id
-          ~bytes
-        |> require_ok Transport_http.error_to_string;
-        upload_objects (count + 1) rest
-  in
-  let uploaded =
-    upload_objects 0
-      (Package.artifact_objects outbound.Service.bootstrap_artifact)
-  in
-  let manifest =
-    Package.artifact_manifest outbound.Service.bootstrap_artifact
-  in
-  let manifest_id = Transport.sha256 manifest in
-  Transport_http.put client ~project ~kind:Transport_http.Manifest
-    ~id:manifest_id ~bytes:manifest
-  |> require_ok Transport_http.error_to_string;
-  let basis = Bootstrap.encode outbound.Service.bootstrap_basis in
-  let basis_id = Bootstrap.id outbound.Service.bootstrap_basis in
-  Transport_http.put client ~project ~kind:Transport_http.Bootstrap ~id:basis_id
-    ~bytes:basis
-  |> require_ok Transport_http.error_to_string;
-  Printf.printf "bootstrap basis %s\n" basis_id;
-  Printf.printf "uploaded artifacts %d\n" (uploaded + 2)
+  Fun.protect
+    ~finally:(fun () ->
+      Package.dispose_artifact outbound.Service.bootstrap_artifact)
+    (fun () ->
+      let uploaded = ref 0 in
+      Package.iter_artifact_objects outbound.Service.bootstrap_artifact
+        ~f:(fun id bytes ->
+          let id = Yeokcham_store.Stored_object_id.to_hex id in
+          Transport_http.put client ~project ~kind:Transport_http.Object ~id
+            ~bytes
+          |> require_ok Transport_http.error_to_string;
+          incr uploaded;
+          Ok ())
+      |> require_ok Package.error_to_string;
+      let manifest =
+        Package.artifact_manifest outbound.Service.bootstrap_artifact
+      in
+      let manifest_id = Transport.sha256 manifest in
+      Transport_http.put client ~project ~kind:Transport_http.Manifest
+        ~id:manifest_id ~bytes:manifest
+      |> require_ok Transport_http.error_to_string;
+      let basis = Bootstrap.encode outbound.Service.bootstrap_basis in
+      let basis_id = Bootstrap.id outbound.Service.bootstrap_basis in
+      Transport_http.put client ~project ~kind:Transport_http.Bootstrap
+        ~id:basis_id ~bytes:basis
+      |> require_ok Transport_http.error_to_string;
+      Printf.printf "bootstrap basis %s\n" basis_id;
+      Printf.printf "uploaded artifacts %d\n" (!uploaded + 2))
 
 let parse_bootstrap arguments =
   let rec loop root remote url repository basis username draft title device
@@ -3710,16 +3747,12 @@ let run_bootstrap arguments =
   in
   if not (String.equal basis_id (Bootstrap.id decoded_basis)) then
     fail "bootstrap basis ID does not match canonical bytes";
-  let artifact =
-    fetch_artifact_for_manifest client ~project
-      (Bootstrap.manifest decoded_basis)
-  in
   let status =
     with_transport_staging ~root (fun staging ->
         let package = Filename.concat staging basis_id in
         let* () =
-          Package.materialize_artifact ~destination:package artifact
-          |> Result.map_error Package.error_to_string
+          fetch_package_for_manifest client ~project ~destination:package
+            (Bootstrap.manifest decoded_basis)
         in
         let* verified =
           Bootstrap.verify ~repository ~package ~bytes:basis
