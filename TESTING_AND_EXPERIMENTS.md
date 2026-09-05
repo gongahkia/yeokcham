@@ -22,6 +22,12 @@ systemd service recorded a 6,382,080,000-byte memory peak and
 retained conditions and status are in
 [`Experiment 106`](docs/experiments/106-evidence-workspace-preflight-failure.md).
 
+The first observable full-profile replacement preflight (source revision
+`e47e4e7`) was intentionally terminated at `source-init:start` after 31m 17s,
+with a 1,738,080,256-byte systemd memory peak. Its retained phase log verifies
+the new interruption diagnostic, but it has no measurement row and is not
+capacity evidence.
+
 On the same checkout, `make format` and `make evidence-workspace-benchmark-test`
 passed after adding immediate per-phase diagnostic logging for interrupted
 workspace scenarios. This validates observability and failure retention, not a

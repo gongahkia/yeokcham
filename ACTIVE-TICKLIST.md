@@ -491,8 +491,9 @@ are separate measurements, not routine CI tests.
     passed after adding the package-and-OCI smoke job.
 - [ ] Benchmark WS-001 and TRANSPORT-002 against capacity target with reproducible fixture generation, stated hardware/network, median and tail results, resource consumption, failure/resume behaviour, and V1 comparison. No cross-VCS performance claim without equivalent public workload/methodology.
   - Verification (2026-09-05): a full WS-001 streaming preflight was
-    intentionally terminated after 3h 42m without a measurement row; see
-    Experiment 106 for that incomplete preflight, the preceding OOM failure,
+    intentionally terminated after 3h 42m without a measurement row; its
+    observable replacement was terminated at `source-init:start` after 31m.
+    See Experiment 106 for both incomplete preflights, the preceding OOM failure,
     and reduced-profile regression. The Fedora-signed `iproute-tc-6.14.0-2.fc43`
     binary was verified and extracted to a disposable external directory; it
     applied a 100 Mbit/50 ms loopback qdisc in an unprivileged network namespace.

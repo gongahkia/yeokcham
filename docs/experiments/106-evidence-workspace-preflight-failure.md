@@ -59,6 +59,16 @@ activation nor a capacity timing. It is retained as incomplete diagnostic data,
 not capacity evidence. The harness now preserves immediate per-phase stderr
 progress for any replacement run.
 
+On 2026-09-05, the first observable replacement preflight from source revision
+`e47e4e7` was also intentionally terminated, at the retained
+`source-init:start` phase, after 31m 17s of wall time and 714.086118 seconds of
+CPU time. Its external root is
+`/home/gongahkia/Desktop/coding/projects/yeokcham-evidence-ws-5g-100k-preflight-observable-e47e4e7`.
+systemd recorded a 1,738,080,256-byte memory peak and 1,531,904-byte swap peak;
+the harness retained `status=128` and `stage=scenario`. This confirms the
+phase-log retention behavior but establishes no source initialization,
+bootstrap, activation, timing, or capacity result.
+
 The failed external root is retained for diagnosis until a successful
 full-capacity retry has been independently summarized. It is not a repository
 fixture and must not be used to report a median, p95, capacity success, or
