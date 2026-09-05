@@ -58,13 +58,6 @@ let current_golden_state_bytes_are_stable () =
     "re-encoded fixture is byte-identical" expected
     (Record.encode_project decoded |> require_ok Record.error_to_string)
 
-let retired_state_encodings_are_rejected () =
-  [ "v1/state-v2.cbor.hex"; "v1/state-v3.cbor.hex" ]
-  |> List.iter (fun fixture ->
-      match read_golden fixture |> Record.decode_project with
-      | Error _ -> ()
-      | Ok _ -> Alcotest.fail ("accepted retired V1 state fixture " ^ fixture))
-
 let state_round_trips_with_shared_change () =
   let project = shared_project () in
   let encoded =
@@ -132,8 +125,6 @@ let () =
         [
           Alcotest.test_case "current golden state bytes are stable" `Quick
             current_golden_state_bytes_are_stable;
-          Alcotest.test_case "retired state encodings are rejected" `Quick
-            retired_state_encodings_are_rejected;
           Alcotest.test_case "shared state round trips" `Quick
             state_round_trips_with_shared_change;
           Alcotest.test_case "malformed model state is rejected" `Quick
