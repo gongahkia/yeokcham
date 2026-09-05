@@ -27,6 +27,14 @@ passed after adding immediate per-phase diagnostic logging for interrupted
 workspace scenarios. This validates observability and failure retention, not a
 capacity result.
 
+For the shaped-transport precondition, the Fedora-signed
+`iproute-tc-6.14.0-2.fc43` RPM was downloaded and signature-verified in a
+disposable external directory, then its extracted `tc` successfully added,
+displayed, and removed a 100 Mbit/50 ms loopback netem qdisc in an unprivileged
+network namespace. This is tool-environment evidence only; it is not a V1/V2
+transfer, quota, resume, or capacity result. Exact commands and limits are in
+[`Experiment 105`](docs/experiments/105-evidence-transport-capacity-method.md).
+
 `opam exec -- dune build @all` and `opam exec -- dune runtest` are the active
 local verification commands. The suite covers V4 model transitions, generated
 model and authority properties, canonical goldens, store compare-and-swap,

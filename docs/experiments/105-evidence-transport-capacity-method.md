@@ -75,16 +75,21 @@ the quota or claim the target was met. The 64 MiB local wire-core result in
 evidence only and does not satisfy this method.
 
 On 2026-09-05, this Fedora 43 host had `/usr/bin/ip` and successful unprivileged
-network-namespace creation (`unshare -Urn true`), but no `tc` executable.
-Fedora offered `iproute-tc-6.14.0-2.fc43` (449.5 KiB download / 895.1 KiB
-installed size) as the required traffic-control package. Non-interactive sudo
-reported that a password was required, so the package was not installed and no
-privileged qdisc was configured. This is an unavailable test dependency, not a
-zero-latency substitute, an unshaped measurement, or a passing skip. Re-enter
-the method after an authorized Linux host supplies `tc`, network-admin authority,
-and an isolated namespace or host pair.
+network-namespace creation (`unshare -Urn true`), but no installed `tc`
+executable. To avoid a host RPM transaction, the Fedora-signed
+`iproute-tc-6.14.0-2.fc43.x86_64` RPM was downloaded to a disposable `/tmp`
+directory with `dnf download`, verified with `rpm -Kv` (header OpenPGP
+RSA/SHA256 and header/payload SHA256 checks passed), then extracted there. Its
+`usr/bin/tc` reported `iproute2-6.14.0, libbpf 1.6.1`. Within an unprivileged
+network namespace, it successfully added, displayed, and removed a loopback
+`netem` qdisc with `rate 100Mbit` and `delay 50ms`. This verifies a non-host-
+mutating traffic-shaping precondition only. No V1/V2 capacity row, paired
+namespace/host transfer, quota result, interruption/resume measurement, or
+ordinary-source non-mutation result has yet been recorded. The temporary RPM
+and extracted binary are operational inputs, not a checked-in dependency.
 
 ## References
 
 - [Linux `tc-netem(8)`](https://www.man7.org/linux/man-pages/man8/netem.8.html)
+- [DNF command reference](https://dnf.readthedocs.io/en/stable/command_ref.html)
 - [ADR-099 V2 compressed resumable relay transfer](../adr/099-v2-compressed-resumable-relay-transfer.md)

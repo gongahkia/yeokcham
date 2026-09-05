@@ -493,10 +493,11 @@ are separate measurements, not routine CI tests.
   - Verification (2026-09-05): a full WS-001 streaming preflight was
     intentionally terminated after 3h 42m without a measurement row; see
     Experiment 106 for that incomplete preflight, the preceding OOM failure,
-    and reduced-profile regression. The required `tc netem` tool is unavailable
-    locally: Fedora offers `iproute-tc-6.14.0-2.fc43`, but installing it requires a sudo
-    password that is not available to this run. No shaped TRANSPORT-002 row is
-    recorded or inferred.
+    and reduced-profile regression. The Fedora-signed `iproute-tc-6.14.0-2.fc43`
+    binary was verified and extracted to a disposable external directory; it
+    applied a 100 Mbit/50 ms loopback qdisc in an unprivileged network namespace.
+    No shaped TRANSPORT-002 row, paired transfer, quota result, or V1/V2
+    comparison is recorded or inferred; see Experiment 105.
   - Implementation verification (2026-09-05): `make format` and
     `make evidence-workspace-benchmark-test` passed after adding retained
     per-phase scenario diagnostics for interrupted capacity preflights.
