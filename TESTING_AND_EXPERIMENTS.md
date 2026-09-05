@@ -1,5 +1,13 @@
 # Testing and experiments
 
+The first EVIDENCE-001 full-capacity workspace preflight did not complete. It
+reached the 100,000-path/5 GiB fixture but was OOM-killed during bootstrap
+preparation before a raw measurement row could be retained. The exact profile,
+environment, service record, and adapter diagnosis are retained as
+[`Experiment 106`](docs/experiments/106-evidence-workspace-preflight-failure.md).
+It is failed diagnostic evidence only: it does not establish WS-001 capacity,
+projection correctness, timing, or release readiness.
+
 `opam exec -- dune build @all` and `opam exec -- dune runtest` are the active
 local verification commands. The suite covers V4 model transitions, generated
 model and authority properties, canonical goldens, store compare-and-swap,

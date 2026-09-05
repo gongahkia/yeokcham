@@ -67,3 +67,7 @@ external `run-N/benchmark-status.txt` retains the schema version, nonzero exit
 status, and named stage. Successful runs retain no child run directory, so a
 status file never represents a successful measurement. This is operational
 diagnostic data, not a V4 record or a benchmark result.
+
+The first full-capacity preflight was killed by the host OOM killer before it
+produced a measurement row. Its retained conditions, raw status, and diagnosis
+are recorded separately in [Experiment 106](106-evidence-workspace-preflight-failure.md).

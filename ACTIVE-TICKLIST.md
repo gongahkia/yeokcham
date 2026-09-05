@@ -431,34 +431,42 @@ remote OIDC execution, artifact upload, and third-party availability remain
 
 **Vertical slice:** reproducible, external-only evidence harnesses exercise the
 existing WS-001 and TRANSPORT-002 boundaries, while the CI matrix runs the
-existing model, golden, fault, package, and OCI checks. A field-exercise guide
-records observations without converting them into model, compatibility, or
-support claims.
+existing model, golden, fault, package, and OCI checks. Capacity paths stream
+one verified package object at a time from the unchanged package-manifest-v1
+directory layout; no artifact, staged validation, or import transition may
+retain the complete closure's object bytes in process memory. A field-exercise
+guide records observations without converting them into model, compatibility,
+or support claims.
 
 **Evidence inputs and invariants:** a benchmark profile explicitly names path
 count, logical bytes, iterations, transport conditions, and source revision.
 Every reported median/tail derives from retained per-run measurements; a
 missing condition, failed run, or unavailable external service is recorded as
-incomplete evidence, never interpolated. Harnesses create fixtures only under
-an explicitly supplied external directory and never materialise ordinary source
-through receipt paths. Field observations name participant count and exercise
-version but contain no credentials, private keys, bearer tokens, or payload
-bytes.
+incomplete evidence, never interpolated. An artifact either owns validated
+in-memory test bytes or borrows one validated on-disk package; its iterator
+validates each object identity and canonical encoding immediately before use.
+Harnesses create fixtures only under an explicitly supplied external directory
+and never materialise ordinary source through receipt paths. Field observations
+name participant count and exercise version but contain no credentials, private
+keys, bearer tokens, or payload bytes.
 
-**Persistent-format impact:** none. Evidence profiles, raw measurements,
-security-review records, and field observations are operational documents or
-external files, not `.yeokcham` records, history, packages, relay objects,
-repair plans, semantic sidecars, or new V4 authority.
+**Persistent-format impact:** none. Streaming changes only the in-process
+adapter over the existing canonical package-manifest-v1 and object bytes; it
+does not add or alter `.yeokcham` records, history, packages, relay objects,
+repair plans, semantic sidecars, or V4 authority. Evidence profiles, raw
+measurements, security-review records, and field observations are operational
+documents or external files.
 
 **Interface:** no V4 CLI command. Maintainer-only scripts must require an
 absolute external output directory and must refuse a repository path. Their
 documented output is inspectable plain text or JSONL only.
 
 **Tests:** parser/argument-refusal tests for the evidence harness; a scaled
-fixture self-check; source-tree non-mutation checks for receipt-oriented paths;
-workflow syntax/static-pin checks; and the existing protocol-fault, package,
-and OCI smoke suites. Full-capacity runs and human field observations are
-separate measurements, not routine CI tests.
+fixture self-check; streaming package-artifact identity/canonicality and
+bounded-retention tests; source-tree non-mutation checks for receipt-oriented
+paths; workflow syntax/static-pin checks; and the existing protocol-fault,
+package, and OCI smoke suites. Full-capacity runs and human field observations
+are separate measurements, not routine CI tests.
 
 - [ ] CI matrix: Linux build/test/format/lint, golden fixture compatibility, package smoke, OCI smoke, protocol fault tests, and a documented optional integration matrix for unavailable hardware/software.
 - [ ] Security review: bearer-token lifetime/revocation, TLS proxy deployment, relay path traversal/object-ID/range/decompression limits, hook redaction, repair provenance, backup exposure, and image supply chain. Track findings as ticklist items; do not silently accept them.
