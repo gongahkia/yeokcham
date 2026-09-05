@@ -102,11 +102,9 @@ the complete command and trust boundaries.
 - [Release provenance](docs/RELEASING.md) — the separate future source-release
   verification procedure.
 
-For the project rationale and formal model, read
-[PROJECT_CONTEXT.md](PROJECT_CONTEXT.md) and
-[FORMAL_MODEL.md](FORMAL_MODEL.md). Implementers should then read
-[ARCHITECTURE.md](ARCHITECTURE.md), [DECISIONS.md](DECISIONS.md), and
-[docs/ISSUE_TRACKING.md](docs/ISSUE_TRACKING.md).
+For the formal model and implementation structure, read
+[FORMAL_MODEL.md](FORMAL_MODEL.md) and
+[ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Contributing
 

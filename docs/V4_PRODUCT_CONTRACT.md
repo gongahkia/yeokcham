@@ -146,10 +146,9 @@ dropped, wrapped, unmounted, or lost streams request a whole-root scan and then
 restart. Precise `.git` and `.yeokcham` ordinary paths do not schedule capture;
 an ambiguous root or ancestor event still requests a whole-root scan rather
 than assuming it was metadata. A root that no longer exists fails plainly
-instead of retrying forever. Unsupported systems fail explicitly. The real
-platform watcher-loop tests are part of the active suite; evidence remains
-platform-specific in
-`TESTING_AND_EXPERIMENTS.md`.
+instead of retrying forever. Unsupported systems fail explicitly. Platform
+watcher-loop tests are part of the active suite; supported behavior remains
+scoped to the documented platform boundaries.
 
 `daemon start`, `status`, and `stop` provide that same capture behaviour with a
 managed Linux process lifetime. There is at most one daemon per canonical
