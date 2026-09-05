@@ -8,6 +8,13 @@ environment, service record, and adapter diagnosis are retained as
 It is failed diagnostic evidence only: it does not establish WS-001 capacity,
 projection correctness, timing, or release readiness.
 
+On 2026-09-05, the post-fix source revision `12f28da` completed a one-iteration
+1,000-path/50 MiB workspace regression journey in 136.42 seconds with 13,876
+KiB maximum RSS. The separate stage timings and allocated-byte measurements are
+in [`Experiment 106`](docs/experiments/106-evidence-workspace-preflight-failure.md).
+This is a scaled adapter check, not a five-iteration capacity result, a 5 GiB
+result, or a transport benchmark.
+
 `opam exec -- dune build @all` and `opam exec -- dune runtest` are the active
 local verification commands. The suite covers V4 model transitions, generated
 model and authority properties, canonical goldens, store compare-and-swap,

@@ -30,6 +30,18 @@ adapter, not a change to package-manifest-v1 semantics. EVIDENCE-001 therefore
 requires the streaming-artifact transition described in the active ticklist
 before this profile is retried.
 
-The failed external root is retained for diagnosis until a successful retry has
-been independently summarized. It is not a repository fixture and must not be
-used to report a median, p95, capacity success, or cross-VCS comparison.
+After that transition, source revision `12f28da` completed one scaled regression
+iteration with 1,000 paths and 52,428,800 logical bytes. The retained row
+reported 6.013755 s initialization, 19.527548 s bootstrap preparation,
+2.542249 s package materialization, 29.504932 s bootstrap, 78.813731 s explicit
+activation, 136.42 s wall time, 129.21 s user CPU, 3.68 s system CPU, and
+13,876 KiB maximum RSS. Source V4 metadata, package, and target V4 metadata
+used 52,822,016, 52,875,264, and 52,826,112 allocated bytes respectively. This
+single reduced-profile iteration verifies the changed journey and provides
+[Inference] bounded-resident-memory behavior at that profile only; it supplies
+no median, tail, 5 GiB, 100,000-path, or network-performance result.
+
+The failed external root is retained for diagnosis until a successful
+full-capacity retry has been independently summarized. It is not a repository
+fixture and must not be used to report a median, p95, capacity success, or
+cross-VCS comparison.
