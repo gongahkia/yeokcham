@@ -1,13 +1,13 @@
 # Contributing
 
-Yeokcham is a model-first research prototype. Contributions must preserve the separation of scratch, intent, and release history.
+Yeokcham is a model-first version-control system. Contributions must preserve
+the separation of scratch, intent, and release history.
 
 ## Before changing code
 
-1. Read the documents listed in `AGENTS.md` in order.
-2. Inspect the relevant `ACTIVE-TICKLIST.md` milestone and its dependencies, and stay within one milestone.
-3. Record the active vertical slice, types, invariants, tests, and ADR impact in that ticklist item.
-4. Open or amend an ADR before implementing an architectural or persistent-format decision.
+1. Read the relevant user, model, architecture, and operational documentation.
+2. State the affected types, invariants, persistence impact, and tests before changing behaviour.
+3. Open or amend an ADR before implementing an architectural or persistent-format decision.
 
 ## Implementation order
 
@@ -35,11 +35,10 @@ Use `make format` to apply formatting. Generated `yeokcham.opam` changes must be
 
 ## Pull requests
 
-- Keep each commit limited to one model change or active ticklist item.
+- Keep each commit limited to one coherent change.
 - Include the invariant and tests in the commit or pull-request description.
-- Update the active ticklist item; update the formal model when semantics change.
+- Update the formal model when semantics change.
 - Add canonical golden fixtures for persistent-format changes.
-- Record experiment results separately from product claims.
 - Do not use OCaml `Marshal` for persistent data.
 - Do not overstate unmeasured or uncertain behavior.
 
