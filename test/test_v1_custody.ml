@@ -28,17 +28,6 @@ let with_repository callback =
   Unix.mkdir (Filename.concat root ".yeokcham") 0o700;
   Fun.protect ~finally:(fun () -> remove_tree root) (fun () -> callback root)
 
-let bytes_hex bytes =
-  let output = Bytes.create (String.length bytes * 2) in
-  String.iteri
-    (fun index byte ->
-      Bytes.set output (index * 2) "0123456789abcdef".[Char.code byte lsr 4];
-      Bytes.set output
-        ((index * 2) + 1)
-        "0123456789abcdef".[Char.code byte land 15])
-    bytes;
-  Bytes.unsafe_to_string output
-
 let fixture_path name =
   let local = Filename.concat "golden" name in
   if Sys.file_exists local then local else Filename.concat "test/golden" name

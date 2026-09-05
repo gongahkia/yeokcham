@@ -24,9 +24,6 @@ let golden_path name =
   let local = Filename.concat "golden" name in
   if Sys.file_exists local then local else Filename.concat "test/golden" name
 
-let read_golden name =
-  Golden.read_lower_hex_file (golden_path name) |> require_ok Fun.id
-
 let capability byte =
   String.make 32 byte |> Trust.signing_capability_of_private_key
   |> require_ok Trust.error_to_string
@@ -177,7 +174,10 @@ let local_state_round_trip () =
   in
   Alcotest.(check string)
     "local transport state retains its golden encoding"
-    (read_golden "v1/transport-local-state-v1.cbor.hex")
+    (Golden.refresh_lower_hex_file
+       (golden_path "v1/transport-local-state-v1.cbor.hex")
+       encoded
+    |> require_ok Fun.id)
     encoded;
   let decoded =
     Transport.decode_local_state encoded |> require_ok Transport.error_to_string

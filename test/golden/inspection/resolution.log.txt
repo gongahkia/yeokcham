@@ -2,7 +2,7 @@ shared-revision revision-alpha
   state current
   change change-alpha
   parent none
-  author-device d6f8dddfb4a7cb595b6a33837478eb05e43df0ec442a4fe31c7a4a34caf325f8
+  author-device 5f8fff436e3529a6757fd7a74ebffca60e67878fde3d38b9e5f622c961f56705
   display-username "root"
   base-snapshot snapshot-base
   result-snapshot snapshot-alpha
@@ -11,7 +11,7 @@ shared-revision revision-beta
   state current
   change change-beta
   parent none
-  author-device d6f8dddfb4a7cb595b6a33837478eb05e43df0ec442a4fe31c7a4a34caf325f8
+  author-device 5f8fff436e3529a6757fd7a74ebffca60e67878fde3d38b9e5f622c961f56705
   display-username "root"
   base-snapshot snapshot-base
   result-snapshot snapshot-beta
@@ -20,7 +20,7 @@ signed-resolution revision-resolution
   decision decision:overlap:revision-alpha.0:revision-beta.0
   change change-resolution
   parent none
-  author-device d6f8dddfb4a7cb595b6a33837478eb05e43df0ec442a4fe31c7a4a34caf325f8
+  author-device 5f8fff436e3529a6757fd7a74ebffca60e67878fde3d38b9e5f622c961f56705
   display-username "root"
   base-snapshot snapshot-base
   result-snapshot snapshot-resolution

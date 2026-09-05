@@ -313,8 +313,14 @@ let golden_path name =
   else Filename.concat "test/golden/inspection" name
 
 let golden name output =
+  let path = golden_path name in
   let expected =
-    In_channel.with_open_bin (golden_path name) In_channel.input_all
+    match Sys.getenv_opt "YEOKCHAM_REFRESH_GOLDENS" with
+    | Some "1" ->
+        Out_channel.with_open_bin path (fun channel ->
+            Out_channel.output_string channel output);
+        output
+    | Some _ | None -> In_channel.with_open_bin path In_channel.input_all
   in
   Alcotest.(check string) name expected output
 
