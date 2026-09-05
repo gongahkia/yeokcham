@@ -18,7 +18,7 @@ usage: tools/write-development-build-record.sh --directory DIRECTORY --bundle FI
 Verify the unsigned artifact checksum manifest, extract the SHA-256 fingerprint
 of the certificate in its Cosign bundle, and write the canonical external
 development-build-record-v1.json. The bundle must sign SHA256SUMS. This command
-does not sign, publish, install, invoke Yeokcham, or alter a V4 repository.
+does not sign, publish, install, invoke Yeokcham, or alter a V1 repository.
 EOF
 }
 

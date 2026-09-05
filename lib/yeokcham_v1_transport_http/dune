@@ -1,0 +1,8 @@
+(library
+ (name yeokcham_v1_transport_http)
+ (libraries
+  unix
+  yeokcham_encoding
+  yeokcham_envelope
+  yeokcham_store
+  yeokcham_v1_transport))

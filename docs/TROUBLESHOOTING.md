@@ -2,9 +2,9 @@
 
 ## `init` or a signed command cannot use the local signer
 
-On Linux, native V4 custody uses the logged-in session's Secret Service. On
+On Linux, native V1 custody uses the logged-in session's Secret Service. On
 macOS it uses Keychain. Unlock or start the appropriate platform service in the
-same user session and retry. On other platforms, native V4 signing is
+same user session and retry. On other platforms, native V1 signing is
 unavailable. Do not copy a private key into `.yeokcham`; instead use a supported
 platform or explicitly configure the documented SSH-agent or PKCS#11 custody
 path.
@@ -45,7 +45,7 @@ Only omit `--destination` when you intend an in-place restore. Afterwards use
 
 ## A second person cannot simply clone the repository
 
-That is expected. V4 has no general clone or Git interchange. An existing
+That is expected. V1 has no general clone or Git interchange. An existing
 administrator must explicitly enrol the device, create an offline package (or
 publish an explicit relay bootstrap basis), and the joining person must compare
 the public root-verification phrase independently. Follow
@@ -65,7 +65,7 @@ and credential scope with the operator rather than weakening verification.
 `watch` is available only on Linux and macOS. The managed `daemon` is
 Linux-only and requires a private `XDG_RUNTIME_DIR`; macOS supports only the
 foreground watcher. Both are advisory and optional. Explicit `save` remains the
-portable V4 workflow on supported signing platforms.
+portable V1 workflow on supported signing platforms.
 
 ## Where is the manual for a command?
 

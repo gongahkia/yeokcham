@@ -1,0 +1,8 @@
+(library
+ (name yeokcham_v1_transport)
+ (libraries
+  yeokcham_encoding
+  yeokcham_hash
+  yeokcham_v1_model
+  yeokcham_v1_trust
+  zstd))

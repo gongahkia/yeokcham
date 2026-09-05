@@ -1,3 +1,0 @@
-(library
- (name yeokcham_v4_relay_access)
- (libraries unix mirage-crypto-rng.unix yeokcham_encoding yeokcham_hash))

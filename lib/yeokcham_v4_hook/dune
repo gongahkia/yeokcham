@@ -1,3 +1,0 @@
-(library
- (name yeokcham_v4_hook)
- (libraries yeokcham_encoding yeokcham_hash))

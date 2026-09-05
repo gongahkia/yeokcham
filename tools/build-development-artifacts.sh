@@ -16,7 +16,7 @@ usage: tools/build-development-artifacts.sh --output DIRECTORY [--version VERSIO
 
 Build unsigned, development-only Linux x86_64 client artifacts in the named
 otherwise-empty directory. BuildKit exports SPDX SBOM and provenance files.
-This command does not publish, sign, install, invoke Yeokcham, or alter a V4
+This command does not publish, sign, install, invoke Yeokcham, or alter a V1
 repository. CI signs SHA256SUMS and the external build record separately.
 EOF
 }

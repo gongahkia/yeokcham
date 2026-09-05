@@ -3,7 +3,7 @@
 # ceremony: it neither stores nor echoes a real mnemonic.
 set -eu
 
-: "${YEOKCHAM:=./_build/default/bin/yeokcham_v4.exe}"
+: "${YEOKCHAM:=./_build/default/bin/yeokcham_v1.exe}"
 
 if ! command -v "$YEOKCHAM" >/dev/null 2>&1 && [ ! -x "$YEOKCHAM" ]; then
   printf '%s\n' "Yeokcham command is unavailable: $YEOKCHAM" >&2

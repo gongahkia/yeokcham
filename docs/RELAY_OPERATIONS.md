@@ -33,7 +33,7 @@ the documented `YEOKCHAM_RELAY_*` overrides are revalidated and unknown
 prefixed names refuse startup. `/healthz` is liveness. `/readyz` returns 200
 only while storage and the credential registry remain usable. Its storage
 check creates and removes a zero-byte probe in the relay data volume; it does
-not create a relay object, session, V4 record, or ordinary source file.
+not create a relay object, session, V1 record, or ordinary source file.
 `/metrics` emits fixed aggregate Prometheus text counters without repository,
 object, payload, credential, or source-path values.
 
@@ -49,7 +49,7 @@ pinned Nginx image. It proves the non-root read-only runtime, proxy readiness,
 scoped immutable upload/fetch, restart persistence, checksum rejection of a
 corrupt backup, and a restored-volume `bootstrap
 publish`/`bootstrap` client journey through the proxy. The target bootstrap
-proves it creates V4 metadata without materialising its source snapshot or
+proves it creates V1 metadata without materialising its source snapshot or
 changing an existing ordinary file. It also refuses an unknown configuration
 key and a relay without a data volume. The script compares repository status
 before and after so it fails if its receipt path changes ordinary source files.
@@ -82,4 +82,4 @@ branch and uses an ephemeral GitHub OIDC credential: no long-lived signing key
 or registry credential is configured. Its candidate digest is the only
 deployable identity; do not deploy the candidate tag. The signing identity,
 attestation, and digest are external development artifacts; they do not alter
-V4 project state or prove a public release.
+V1 project state or prove a public release.

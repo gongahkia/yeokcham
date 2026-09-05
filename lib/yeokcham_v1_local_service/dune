@@ -1,0 +1,20 @@
+(library
+ (name yeokcham_v1_local_service)
+ (libraries
+  unix
+  yeokcham_hash
+  yeokcham_snapshot
+  yeokcham_v1_model
+  yeokcham_v1_bootstrap
+  yeokcham_v1_package
+  yeokcham_v1_lsp_sidecar
+  yeokcham_v1_proposal
+  yeokcham_v1_recovery
+  yeokcham_v1_receipt
+  yeokcham_v1_restore_journal
+  yeokcham_v1_restore_proof
+  yeokcham_v1_store
+  yeokcham_v1_semantic_config
+  yeokcham_v1_transport
+  yeokcham_v1_trust
+  yeokcham_v1_workspace))

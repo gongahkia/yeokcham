@@ -8,7 +8,7 @@ Source0:         yeokcham
 Source1:         LICENSE
 
 %description
-Development-only Yeokcham V4 client. It installs no service and has no RPM
+Development-only Yeokcham V1 client. It installs no service and has no RPM
 scriptlets; every VCS action remains an explicit user command.
 
 %prep

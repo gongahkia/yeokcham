@@ -1,0 +1,3 @@
+(library
+ (name yeokcham_v1_semantic_config)
+ (libraries unix re yeokcham_encoding))

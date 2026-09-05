@@ -44,7 +44,7 @@ type object_type =
   | Peer_advertisement
   | Peer_sync_node
   | Peer_sync_conflict
-  | V4_project_state
+  | V1_project_state
 
 val object_type_code : object_type -> int
 val object_type_of_code : int -> object_type option

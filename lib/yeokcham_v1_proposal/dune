@@ -1,0 +1,3 @@
+(library
+ (name yeokcham_v1_proposal)
+ (libraries yeokcham_snapshot yeokcham_v1_model))

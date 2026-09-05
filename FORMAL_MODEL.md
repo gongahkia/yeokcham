@@ -1,6 +1,6 @@
 # Formal model
 
-This document specifies the active V4 model. It deliberately has no migration
+This document specifies the active V1 model. It deliberately has no migration
 semantics for earlier product tracks.
 
 ## Core state
@@ -99,7 +99,7 @@ Persistent model, authority, certificate, signed-revision, adoption,
 recovery-package, journal, and restore-proof records have a schema version and
 canonical encoding; unknown mandatory features and noncanonical encodings are
 rejected. Only the mutable
-`v4-project-state` head selects a current immutable state object.
+`v1-project-state` head selects a current immutable state object.
 
 ## Relay V2 transfer boundary
 
@@ -155,13 +155,13 @@ byte-level conclusion.
 
 Collection is not a `Project` transition. A pure local plan classifies every
 canonical object in the object store as retained or candidate. Its roots are
-the object selected by `v4-project-state` and the complete snapshot closure of
+the object selected by `v1-project-state` and the complete snapshot closure of
 every checkpoint still named by the current `Project`. The model compaction
 projection supplies the explanatory reasons for baseline, draft, shared,
 delivery, resolution, open-decision, pin, restore-journal, and restore-proof
 roots; ordinary named checkpoints remain roots even when they have no special
 reason. Snapshot closure includes snapshot, tree, content, manifest, and chunk
-objects. An unreachable object type outside the V4 collection set is retained
+objects. An unreachable object type outside the V1 collection set is retained
 rather than guessed safe to remove.
 
 `gc-transaction-v1 = [1, state_head, sorted(candidate_id, type, bytes)]` is a
@@ -220,7 +220,7 @@ record is absent from `Project`, authority, packages, relay artifacts,
 bootstrap bases, deliveries, and signed bytes.
 
 `workspace activate` is an explicit local materialisation transition. It
-requires an ordinary root with no entries other than the V4 metadata created by
+requires an ordinary root with no entries other than the V1 metadata created by
 bootstrap, validates the complete named snapshot closure, and materialises its
 exact bytes, modes, and symlinks. After completion it atomically publishes a
 local `workspace-projection-receipt-v1` naming the repository, imported basis,
@@ -258,4 +258,4 @@ explicit operator `daemon sync(remote)` request, which is observationally
 equivalent to the existing `sync(remote)` receipt and upload orchestration. It
 cannot select a feed or authority head, scan or materialise a working tree
 during receipt, or cause an authority transition. Losing runtime state or the
-runtime process changes no V4 model state.
+runtime process changes no V1 model state.

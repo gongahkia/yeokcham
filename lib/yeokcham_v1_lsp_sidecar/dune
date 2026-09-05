@@ -1,0 +1,10 @@
+(library
+ (name yeokcham_v1_lsp_sidecar)
+ (libraries
+  unix
+  lsp
+  jsonrpc
+  yeokcham_snapshot
+  yeokcham_store
+  yeokcham_v1_model
+  yeokcham_v1_semantic_config))

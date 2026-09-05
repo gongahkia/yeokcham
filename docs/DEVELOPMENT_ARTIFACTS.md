@@ -71,7 +71,7 @@ artifact; verification does not turn it into a stable release.
 ## Install and uninstall
 
 For the portable archive, extract into a new tester-owned versioned directory,
-not a source tree or an existing V4 repository:
+not a source tree or an existing V1 repository:
 
 ~~~sh
 mkdir -p "$HOME/opt/yeokcham-dev-EXACT_BUILD"
@@ -104,7 +104,7 @@ repository's .yeokcham metadata and the operator-managed relay volume through
 their documented explicit procedures; package installation is not a backup.
 
 Development artifacts make no migration promise. A downgrade must not rewrite
-or guess-convert records. If the older client refuses a newer V4 record, keep
+or guess-convert records. If the older client refuses a newer V1 record, keep
 the compatible client or restore a separately verified backup instead. The
 private signer remains outside the package and repository; never copy private
 key material into .yeokcham to work around an installation problem.

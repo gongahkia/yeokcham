@@ -1,4 +1,4 @@
-(** Versioned external development-artifact records. These values are never V4
+(** Versioned external development-artifact records. These values are never V1
     repository state. *)
 
 type artifact_kind = Client_archive | Fedora_rpm | Relay_oci

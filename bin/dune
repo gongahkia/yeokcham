@@ -1,60 +1,60 @@
 (executable
- (name yeokcham_v4)
+ (name yeokcham_v1)
  (public_name yeokcham)
  (modules
-  yeokcham_v4
-  v4_runtime
-  v4_watch
-  v4_watch_runner
-  v4_signer
-  v4_signer_test_file)
+  yeokcham_v1
+  v1_runtime
+  v1_watch
+  v1_watch_runner
+  v1_signer
+  v1_signer_test_file)
  (flags
   (:standard -w -70))
  (libraries
-  yeokcham_v4_local_service
-  yeokcham_v4_gc
-  yeokcham_v4_bootstrap
-  yeokcham_v4_cli_data
-  yeokcham_v4_cli_spec
-  yeokcham_v4_custody
-  yeokcham_v4_inspection
-  yeokcham_v4_health
-  yeokcham_v4_health_repository
-  yeokcham_v4_health_store
-  yeokcham_v4_hook
-  yeokcham_v4_hook_runner
-  yeokcham_v4_hook_store
+  yeokcham_v1_local_service
+  yeokcham_v1_gc
+  yeokcham_v1_bootstrap
+  yeokcham_v1_cli_data
+  yeokcham_v1_cli_spec
+  yeokcham_v1_custody
+  yeokcham_v1_inspection
+  yeokcham_v1_health
+  yeokcham_v1_health_repository
+  yeokcham_v1_health_store
+  yeokcham_v1_hook
+  yeokcham_v1_hook_runner
+  yeokcham_v1_hook_store
   yeokcham_hash
-  yeokcham_v4_model
-  yeokcham_v4_package
-  yeokcham_v4_proposal
-  yeokcham_v4_recovery
-  yeokcham_v4_repair
-  yeokcham_v4_sync
-  yeokcham_v4_transport
-  yeokcham_v4_transport_config
-  yeokcham_v4_transport_credential
-  yeokcham_v4_transport_http
-  yeokcham_v4_relay_http
-  yeokcham_v4_relay_access
-  yeokcham_v4_relay_config
-  yeokcham_v4_semantic_config
-  yeokcham_v4_trust
-  yeokcham_v4_workspace
+  yeokcham_v1_model
+  yeokcham_v1_package
+  yeokcham_v1_proposal
+  yeokcham_v1_recovery
+  yeokcham_v1_repair
+  yeokcham_v1_sync
+  yeokcham_v1_transport
+  yeokcham_v1_transport_config
+  yeokcham_v1_transport_credential
+  yeokcham_v1_transport_http
+  yeokcham_v1_relay_http
+  yeokcham_v1_relay_access
+  yeokcham_v1_relay_config
+  yeokcham_v1_semantic_config
+  yeokcham_v1_trust
+  yeokcham_v1_workspace
   (select
-   v4_watch.ml
+   v1_watch.ml
    from
-   (yeokcham_linux_watcher -> v4_watch_linux.ml)
-   (yeokcham_macos_watcher -> v4_watch_macos.ml)
-   (-> v4_watch_unavailable.ml))
+   (yeokcham_linux_watcher -> v1_watch_linux.ml)
+   (yeokcham_macos_watcher -> v1_watch_macos.ml)
+   (-> v1_watch_unavailable.ml))
   (select
-   v4_runtime.ml
+   v1_runtime.ml
    from
-   (yeokcham_linux_watcher -> v4_runtime_linux.ml)
-   (-> v4_runtime_unavailable.ml))
+   (yeokcham_linux_watcher -> v1_runtime_linux.ml)
+   (-> v1_runtime_unavailable.ml))
   (select
-   v4_signer.ml
+   v1_signer.ml
    from
-   (yeokcham_v4_macos_keychain -> v4_signer_macos.ml)
-   (yeokcham_v4_secret_service -> v4_signer_linux.ml)
-   (-> v4_signer_unavailable.ml))))
+   (yeokcham_v1_macos_keychain -> v1_signer_macos.ml)
+   (yeokcham_v1_secret_service -> v1_signer_linux.ml)
+   (-> v1_signer_unavailable.ml))))

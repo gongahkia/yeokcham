@@ -1,0 +1,17 @@
+(library
+ (name yeokcham_v1_repair)
+ (libraries
+  yeokcham_envelope
+  yeokcham_store
+  yeokcham_v1_gc
+  yeokcham_v1_health
+  yeokcham_v1_health_repository
+  yeokcham_v1_health_store
+  yeokcham_v1_package
+  yeokcham_v1_bootstrap
+  yeokcham_v1_store
+  yeokcham_v1_transport
+  yeokcham_v1_transport_config
+  yeokcham_v1_transport_credential
+  yeokcham_v1_transport_http
+  yeokcham_v1_trust))

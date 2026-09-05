@@ -1,0 +1,12 @@
+(library
+ (name yeokcham_v1_bootstrap)
+ (libraries
+  yeokcham_encoding
+  yeokcham_envelope
+  yeokcham_store
+  yeokcham_v1_model
+  yeokcham_v1_package
+  yeokcham_v1_record
+  yeokcham_v1_store
+  yeokcham_v1_transport
+  yeokcham_v1_trust))

@@ -1,6 +1,6 @@
-# Verifying a future V4 source release
+# Verifying a future V1 source release
 
-Yeokcham has no published stable V4 source release yet. This document describes
+Yeokcham has no published stable V1 source release yet. This document describes
 how to verify a future candidate once a maintainer has published its tag,
 expected source commit, public OpenPGP fingerprint, archive, and SHA-256
 digest. It does not verify the development-only native archive/RPM CI artifact;

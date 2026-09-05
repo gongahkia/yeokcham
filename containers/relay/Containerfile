@@ -15,8 +15,8 @@ USER opam
 WORKDIR /home/opam/yeokcham
 COPY --chown=opam:opam . .
 RUN opam install --deps-only --locked --yes ./yeokcham.opam \
- && opam exec -- dune build bin/yeokcham_v4.exe \
- && install -D -m 0755 _build/default/bin/yeokcham_v4.exe /home/opam/out/yeokcham
+ && opam exec -- dune build bin/yeokcham_v1.exe \
+ && install -D -m 0755 _build/default/bin/yeokcham_v1.exe /home/opam/out/yeokcham
 
 FROM docker.io/library/debian:12-slim@sha256:5ae3c39ebd15e229dcedd5cee596b2497182493d41ff162e824ba13fc1b2b867
 

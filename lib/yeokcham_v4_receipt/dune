@@ -1,8 +1,0 @@
-(library
- (name yeokcham_v4_receipt)
- (libraries
-  yeokcham_v4_model
-  yeokcham_v4_package
-  yeokcham_v4_store
-  yeokcham_v4_transport
-  yeokcham_v4_trust))

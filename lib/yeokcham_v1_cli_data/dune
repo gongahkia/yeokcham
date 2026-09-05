@@ -1,0 +1,3 @@
+(library
+ (name yeokcham_v1_cli_data)
+ (libraries yojson))

@@ -1,6 +1,0 @@
-(library
- (name yeokcham_v4_custody)
- (libraries unix yeokcham_encoding yeokcham_v4_model yeokcham_v4_trust)
- (foreign_stubs
-  (language c)
-  (names yeokcham_v4_pkcs11_stubs)))

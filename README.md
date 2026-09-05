@@ -10,8 +10,8 @@ unresolved decisions, and delivery history. It is deliberately conservative:
 a filesystem event, conflict, device name, or CI result is never treated as
 user intent.
 
-V4 is an experimental, source-only evaluation build. The sole supported
-command is `yeokcham`; it creates new V4 repositories and does not read,
+V1 is an experimental, source-only evaluation build. The sole supported
+command is `yeokcham`; it creates new V1 repositories and does not read,
 upgrade, or mutate repositories from earlier product tracks.
 
 It includes:
@@ -46,7 +46,7 @@ draft. `init` displays a 24-word recovery mnemonic exactly once; record it
 offline before continuing.
 
 ```sh
-YEOKCHAM="$PWD/_build/default/bin/yeokcham_v4.exe"
+YEOKCHAM="$PWD/_build/default/bin/yeokcham_v1.exe"
 
 mkdir first-task && cd first-task
 "$YEOKCHAM" init --username alice --draft first-task --title "first task"
@@ -65,7 +65,7 @@ destination before attempting in-place recovery.
 
 Use `yeokcham --help`, `yeokcham help COMMAND`, and
 `yeokcham COMMAND --help` to explore the implemented surface. `--version`
-reports an unreleased V4 source build rather than implying a published release.
+reports an unreleased V1 source build rather than implying a published release.
 
 ## Boundaries
 
@@ -84,7 +84,7 @@ payloads are not end-to-end encrypted.
 An external language server, when configured, receives disposable named
 snapshots and is advisory only. Local storage collection is an explicit
 quarantine-and-purge workflow; it does not contact a relay or alter the
-working tree. See the [V4 product contract](docs/V4_PRODUCT_CONTRACT.md) for
+working tree. See the [V1 product contract](docs/V1_PRODUCT_CONTRACT.md) for
 the complete command and trust boundaries.
 
 ## Documentation

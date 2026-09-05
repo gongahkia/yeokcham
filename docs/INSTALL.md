@@ -2,7 +2,7 @@
 
 ## Availability
 
-Yeokcham V4 is experimental. There is no published stable release, opam
+Yeokcham V1 is experimental. There is no published stable release, opam
 publication, support matrix, compatibility promise, or source-release tag to
 install. A successful main-branch development-client workflow may expose a
 short-lived signed CI artifact for a Linux tester; it is neither a public
@@ -20,8 +20,8 @@ git clone https://github.com/gongahkia/yeokcham.git
 cd yeokcham
 make setup
 make build
-./_build/default/bin/yeokcham_v4.exe --version
-./_build/default/bin/yeokcham_v4.exe --help
+./_build/default/bin/yeokcham_v1.exe --version
+./_build/default/bin/yeokcham_v1.exe --help
 ```
 
 `make setup` initialises opam without shell setup, creates a local switch at
@@ -34,7 +34,7 @@ To avoid repeatedly spelling the build path during an evaluation, set a shell
 variable for the current shell:
 
 ```sh
-YEOKCHAM=./_build/default/bin/yeokcham_v4.exe
+YEOKCHAM=./_build/default/bin/yeokcham_v1.exe
 "$YEOKCHAM" --help
 ```
 
@@ -48,19 +48,19 @@ make ci
 ## Platform and custody boundary
 
 The native signer used by `init` and ordinary signed operations is platform
-specific. Its private key is outside `.yeokcham` and V4 history.
+specific. Its private key is outside `.yeokcham` and V1 history.
 
 | Environment | Native signing | Optional capture | Scope |
 | --- | --- | --- | --- |
 | Linux | Secret Service | foreground `watch`; Linux-only `daemon` | Supported implementation path; Secret Service must be available to the logged-in session. |
 | macOS | Keychain | foreground `watch` | `daemon` is deliberately unavailable. |
-| Other platforms | unavailable | `watch` unavailable | Native V4 signing is unavailable. |
+| Other platforms | unavailable | `watch` unavailable | Native V1 signing is unavailable. |
 | WSL | unsupported | unsupported | Not planned. |
 
 An existing device may instead be explicitly attached to one `ssh-ed25519`
 key in `SSH_AUTH_SOCK`, or use an Ed25519 PKCS#11 token. Those are local custody
 choices, not authority changes; read the device help and
-[ADR-093](adr/093-v4-device-custody-providers.md) before relying on either.
+[ADR-093](adr/093-v1-device-custody-providers.md) before relying on either.
 
 `watch` and the Linux `daemon` are advisory ways to request the ordinary exact
 `save` path. They never infer an operation or publish intent. Start with
@@ -73,11 +73,11 @@ or clone of another repository. A second replica must be explicitly enrolled
 and joined from an offline package or explicitly bootstrapped from a named,
 verified relay basis. Relay use requires an operator-managed HTTPS reverse
 proxy and repository-scoped access credential. Git import/export, generic
-clone, and automatic remote discovery are not V4 features.
+clone, and automatic remote discovery are not V1 features.
 
 ## First-run checks
 
-`--version` should identify an unreleased V4 source build and `--help` should
+`--version` should identify an unreleased V1 source build and `--help` should
 list only implemented commands. Before `init`, use a disposable empty directory
 and make sure the platform signer is usable. `init` deliberately creates local
 device custody and prints a 12-word public root-verification phrase plus a

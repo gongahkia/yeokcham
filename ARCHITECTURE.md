@@ -1,6 +1,6 @@
 # Architecture
 
-V4 is layered so filesystem and platform adapters cannot change the model by
+V1 is layered so filesystem and platform adapters cannot change the model by
 themselves.
 
 ```
@@ -10,28 +10,28 @@ CLI / inspection projection / Linux and macOS watch / Linux runtime / local cust
               │
  Model ─ Trust ─ Transport publication/feed ─ Package verification ─ Bootstrap ─ Recovery
               │
- V4 state wrapper / canonical CBOR / immutable object store
+ V1 state wrapper / canonical CBOR / immutable object store
               │
  exact snapshot scanner and materialiser
 ```
 
-`Yeokcham_v4_model` owns pure draft, shared-change, decision, projection, and
-delivery transitions. `Yeokcham_v4_trust` owns pure certificate, epoch,
+`Yeokcham_v1_model` owns pure draft, shared-change, decision, projection, and
+delivery transitions. `Yeokcham_v1_trust` owns pure certificate, epoch,
 revocation, signature, adoption, and recovery-authority validation.
-`Yeokcham_v4_package` verifies untrusted directory contents into a staging
-object store before immutable import. `Yeokcham_v4_recovery` encrypts only the
+`Yeokcham_v1_package` verifies untrusted directory contents into a staging
+object store before immutable import. `Yeokcham_v1_recovery` encrypts only the
 active recovery capability and public authority closure; it never stores a
 normal device private key.
 
-`Yeokcham_v4_receipt` is the persistent receipt adapter for packages and relay
+`Yeokcham_v1_receipt` is the persistent receipt adapter for packages and relay
 batches. It depends on model, trust, package, transport, and store only; it has
-no snapshot scanner or materialiser dependency. `Yeokcham_v4_local_service`
+no snapshot scanner or materialiser dependency. `Yeokcham_v1_local_service`
 delegates receive surfaces to it and otherwise captures snapshots, maintains
 the compare-and-swap state head, obtains caller-provided signing capability
 from a platform adapter, and never allows a collaborative wrapper to be
 stripped by an ordinary save.
 
-`Yeokcham_v4_workspace` owns only local canonical projection-basis and
+`Yeokcham_v1_workspace` owns only local canonical projection-basis and
 activation-receipt records plus pure activation/update plans. Bootstrap writes
 the basis record while it is creating a verified fresh repository; it remains
 outside the project-state wrapper, package, transport, authority, and signed
@@ -43,13 +43,13 @@ project state. Explicit dirty replacement delegates to the existing restore
 journal/proof mechanics. Receipt, relay, bootstrap, sync, and daemon modules
 do not depend on this materialisation path.
 
-`Yeokcham_v4_transport` owns canonical signed courier publications and feed
+`Yeokcham_v1_transport` owns canonical signed courier publications and feed
 validation. Its V2 submodel adds capability, raw-range, segment, and relay-only
 session values; session records and temporary raw files are outside objects,
-packages, feeds, bootstrap bases, and the V4 model. The relay owns only bounded,
+packages, feeds, bootstrap bases, and the V1 model. The relay owns only bounded,
 repository-scoped bearer access and immutable byte storage; its versioned local
 access registry, reverse-proxy TLS, aliases, URLs, credentials, and V2 session
-cleanup remain outside the V4 project model. The V2 HTTPS adapter independently
+cleanup remain outside the V1 project model. The V2 HTTPS adapter independently
 zstd-compresses one-MiB raw ranges and delegates bounded concurrent range I/O
 to one external curl process; canonical object IDs always name the uncompressed
 bytes. It verifies every full download before returning staged bytes and has no
@@ -58,11 +58,11 @@ upload adapter falls back only when V2 capability negotiation is absent. The
 transport client stages relay artifacts and delegates receipt solely to the
 receipt boundary; it has no second model or authority path. A relay or any
 future network service cannot coordinate, select, or gate authority epochs.
-`Yeokcham_v4_bootstrap` adds a separately signed
+`Yeokcham_v1_bootstrap` adds a separately signed
 portable-state basis bound to an unchanged package-manifest-v1 closure; it is explicit
 initialization, not a clone protocol.
 
-`Yeokcham_v4_inspection` is a pure terminal projection over a loaded project,
+`Yeokcham_v1_inspection` is a pure terminal projection over a loaded project,
 its signed revision records, deferred review references, and an optional
 authority closure. The local service supplies that input without scanning the
 working tree. Its separate `changes` adapter uses the established exact scanner
@@ -72,24 +72,24 @@ the state head or write source. Neither view stores layout, follows a remote,
 or turns delivery milestones or concurrent authority heads into inferred
 history or policy.
 
-`Yeokcham_v4_semantic_config` and `Yeokcham_v4_lsp_sidecar` form a separate
+`Yeokcham_v1_semantic_config` and `Yeokcham_v1_lsp_sidecar` form a separate
 local advisory boundary. The canonical config selects one external executable;
 the sidecar materialises only named snapshots into disposable directories and
 uses typed bounded LSP/JSON-RPC requests. It returns session-local observations
 or an unavailable result to the local service. It has no dependency on project
 state persistence, package, receipt, relay, bootstrap, authority, delivery, or
-the live worktree, and server requests cannot call back into any V4 mutation.
+the live worktree, and server requests cannot call back into any V1 mutation.
 
-`Yeokcham_v4_restore_journal` records restartable destructive materialisation.
-`Yeokcham_v4_restore_proof` is a separate local, canonical, create-only record
+`Yeokcham_v1_restore_journal` records restartable destructive materialisation.
+`Yeokcham_v1_restore_proof` is a separate local, canonical, create-only record
 that keeps the exact safety and target snapshots reachable after a completed
 journal is pruned. The local service validates both snapshot closures before
 creating it and serializes proof, retain, forget, and compaction operations
 under a repository-local lock. Neither module participates in package export,
 bootstrap, receipt, relay transport, authority, or the project-state schema.
 
-`Yeokcham_v4_gc` is a storage adapter, not a model or receipt adapter. It
-loads one lock-consistent V4 state, derives a pure object-reachability plan,
+`Yeokcham_v1_gc` is a storage adapter, not a model or receipt adapter. It
+loads one lock-consistent V1 state, derives a pure object-reachability plan,
 and treats every named checkpoint closure as retained. It serializes after
 restore retention and before the project-state head, writes only local
 canonical quarantine receipts, and moves same-filesystem object paths with
@@ -98,7 +98,7 @@ materialiser dependency. An explicit purge rechecks current reachability;
 purge markers make an interrupted unlink sequence restartable rather than
 silently treating missing quarantine files as safe.
 
-`Yeokcham_v4_custody` is a local adapter that loads an existing native signer,
+`Yeokcham_v1_custody` is a local adapter that loads an existing native signer,
 an explicitly selected `ssh-ed25519` SSH-agent key, or an explicitly selected
 PKCS#11 Ed25519 key. Its small canonical local profile contains only the
 selector and public key. It cannot add an authority, alter an existing device
@@ -107,7 +107,7 @@ or working-tree transitions. The trust core receives an opaque capability and
 continues to construct and verify every domain-separated signed record.
 
 The unversioned hash, encoding, envelope, store, snapshot, chunking, testkit,
-and watcher modules are V4 foundations. Linux inotify and macOS FSEvents
+and watcher modules are V1 foundations. Linux inotify and macOS FSEvents
 watchers emit advisory scan requests and delegate all capture semantics to
 `save`; neither is a source of canonical history. The Linux runtime gives its
 watcher a private disposable process lifetime and delegates explicit `daemon sync` requests to the same
@@ -115,8 +115,8 @@ transport orchestration as foreground `sync`; it owns no model, authority,
 receipt, or working-tree-materialisation path. macOS and Linux signer and
 custody adapters are custody boundaries, not authority systems.
 
-`tools/verify-v4-source-release.sh` is outside this architecture. It verifies
+`tools/verify-v1-source-release.sh` is outside this architecture. It verifies
 an explicitly supplied Git source tag, OpenPGP fingerprint, commit, and archive
 digest for maintainers and consumers. It has no Yeokcham library dependency,
-creates no V4 record, and cannot affect a V4 repository's identity, authority,
+creates no V1 record, and cannot affect a V1 repository's identity, authority,
 transport, delivery, or working tree.

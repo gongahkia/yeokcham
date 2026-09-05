@@ -1,0 +1,8 @@
+(library
+ (name yeokcham_v1_receipt)
+ (libraries
+  yeokcham_v1_model
+  yeokcham_v1_package
+  yeokcham_v1_store
+  yeokcham_v1_transport
+  yeokcham_v1_trust))

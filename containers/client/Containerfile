@@ -13,8 +13,8 @@ USER opam
 WORKDIR /home/opam/yeokcham
 COPY --chown=opam:opam . .
 RUN opam install --deps-only --locked --yes ./yeokcham.opam \
- && opam exec -- dune build bin/yeokcham_v4.exe \
- && install -D -m 0755 _build/default/bin/yeokcham_v4.exe /home/opam/out/yeokcham
+ && opam exec -- dune build bin/yeokcham_v1.exe \
+ && install -D -m 0755 _build/default/bin/yeokcham_v1.exe /home/opam/out/yeokcham
 
 FROM registry.fedoraproject.org/fedora:43@sha256:8d775fbb86b8aa62172a2fd33203d285743ad2b74df8416322066e59e917b4ef AS artifacts
 ARG SOURCE_DATE_EPOCH

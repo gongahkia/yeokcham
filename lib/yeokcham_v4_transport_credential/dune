@@ -1,3 +1,0 @@
-(library
- (name yeokcham_v4_transport_credential)
- (libraries unix))

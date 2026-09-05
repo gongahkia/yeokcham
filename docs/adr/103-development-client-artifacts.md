@@ -22,12 +22,12 @@ container build-input lock:
 - a Fedora RPM containing the same executable and licence.
 
 The archive and RPM are development artifacts, not an opam package, a source
-release, a compatibility promise, or a V4 object. The RPM has no systemd unit,
+release, a compatibility promise, or a V1 object. The RPM has no systemd unit,
 tmpfiles entry, user creation, `%post`, `%preun`, or other scriptlet. Installing
 or uninstalling it therefore never starts a daemon, contacts a relay, creates a
 repository, scans, restores, or alters ordinary source files. The native client
 does nothing to a working tree until the operator explicitly invokes an
-authorised V4 command.
+authorised V1 command.
 
 The external build record is a canonical JSON document carrying schema version, source
 commit and commit timestamp, architecture, OCaml/Dune versions, opam lock
@@ -61,10 +61,10 @@ exercise `init`, `save`, `restore`, explicit workspace activation, relay sync,
 and `verify` in a disposable container. It does not attest to desktop Secret
 Service integration. The smoke test also compares a sentinel ordinary source
 file before and after package install/uninstall; all materialisation remains an
-explicit V4 operation.
+explicit V1 operation.
 
 Upgrade replaces a development artifact only after verifying its bundle and
-build record. Downgrade runs no conversion: a command encountering a newer V4
+build record. Downgrade runs no conversion: a command encountering a newer V1
 record must refuse according to the existing record decoder. Operators preserve
 the old executable, repository metadata, credential configuration, and any
 relay backup before changing an artifact; uninstall removes only package-owned
@@ -72,7 +72,7 @@ files and leaves all user repositories and relay volumes intact.
 
 ## Invariants
 
-1. Client artifacts and their records are not V4 history, packages, relay
+1. Client artifacts and their records are not V1 history, packages, relay
    objects, authority state, receipts, semantic sidecars, or source content.
 2. Every published development artifact is bound to one immutable source commit,
    SHA-256, SBOM, signing bundle, and OIDC workflow identity.

@@ -1,3 +1,0 @@
-(library
- (name yeokcham_v4_hook_runner)
- (libraries unix yojson yeokcham_v4_hook))

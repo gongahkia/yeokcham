@@ -1,4 +1,4 @@
-(** Advisory macOS FSEvents source. The source owns no V4 state and never scans
+(** Advisory macOS FSEvents source. The source owns no V1 state and never scans
     or saves by itself; it only returns requests for the shared exact scanner.
 *)
 

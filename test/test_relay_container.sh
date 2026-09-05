@@ -8,7 +8,7 @@ cd "$repo_root"
 image=${RELAY_IMAGE:-yeokcham-relay:relay-container-test}
 build_timeout=${RELAY_CONTAINER_BUILD_TIMEOUT:-900}
 nginx_image=docker.io/library/nginx:1.28.0-alpine@sha256:30f1c0d78e0ad60901648be663a710bdadf19e4c10ac6782c235200619158284
-client=${YEOKCHAM_RELAY_TEST_CLIENT:-$repo_root/_build/default/bin/yeokcham_v4.exe}
+client=${YEOKCHAM_RELAY_TEST_CLIENT:-$repo_root/_build/default/bin/yeokcham_v1.exe}
 payload='relay container scoped immutable payload'
 object_id=$(printf %s "$payload" | sha256sum | awk '{print $1}')
 prefix=yeokcham-relay-container-$$
@@ -40,7 +40,7 @@ trap cleanup EXIT HUP INT TERM
 for tool in docker openssl curl sha256sum awk mktemp timeout sed tr grep git socat; do
   command -v "$tool" >/dev/null 2>&1 || fail "missing required command: $tool"
 done
-[ -x "$client" ] || fail "missing host V4 CLI; run make build first"
+[ -x "$client" ] || fail "missing host V1 CLI; run make build first"
 
 source_root=$scratch/source
 target_root=$scratch/target
@@ -49,7 +49,7 @@ signer_directory=$scratch/test-signer
 mkdir "$source_root" "$target_root" "$activation_root" "$signer_directory"
 printf '%s\n' 'let relay_bootstrap = 1' > "$source_root/main.ml"
 printf '%s\n' 'untouched target ordinary file' > "$target_root/keep.txt"
-export YEOKCHAM_V4_TEST_SIGNER_DIRECTORY="$signer_directory"
+export YEOKCHAM_V1_TEST_SIGNER_DIRECTORY="$signer_directory"
 
 source_init=$("$client" init --root "$source_root" --username alice \
   --draft relay-source --title relay-bootstrap-source)
@@ -78,7 +78,7 @@ issue_output=$(docker run --rm -t \
   "$image" relay access issue --storage /var/lib/yeokcham-relay \
   --repository "$project" --scope read,write)
 secret=$(printf '%s\n' "$issue_output" | tr -d '\r' \
-  | sed -n 's/.*relay access secret (record now; shown once): \(v4ra1_[0-9a-f][0-9a-f]*\).*/\1/p')
+  | sed -n 's/.*relay access secret (record now; shown once): \(v1ra1_[0-9a-f][0-9a-f]*\).*/\1/p')
 [ "${#secret}" -eq 70 ] || fail "could not recover the one-time scoped test credential"
 
 start_relay() {
@@ -145,9 +145,9 @@ wait_ready
 [ "$(docker inspect --format '{{.HostConfig.ReadonlyRootfs}}' "$relay")" = true ] \
   || fail "relay container root filesystem was writable"
 
-export YEOKCHAM_V4_TEST_TRANSPORT=1
-export YEOKCHAM_V4_TEST_TRANSPORT_CA_BUNDLE="$scratch/tls.crt"
-export YEOKCHAM_V4_TEST_TRANSPORT_TOKEN="$secret"
+export YEOKCHAM_V1_TEST_TRANSPORT=1
+export YEOKCHAM_V1_TEST_TRANSPORT_CA_BUNDLE="$scratch/tls.crt"
+export YEOKCHAM_V1_TEST_TRANSPORT_TOKEN="$secret"
 "$client" remote add --root "$source_root" relay "$base" >/dev/null
 publish_output=$("$client" bootstrap publish --root "$source_root" relay)
 basis=$(printf '%s\n' "$publish_output" | sed -n 's/^bootstrap basis //p' | sed -n '1p')
@@ -216,7 +216,7 @@ case "$bootstrap_output" in
   *) fail "restored relay bootstrap did not report receipt without materialization" ;;
 esac
 [ -d "$target_root/.yeokcham" ] \
-  || fail "restored relay bootstrap did not create V4 metadata"
+  || fail "restored relay bootstrap did not create V1 metadata"
 [ ! -e "$target_root/main.ml" ] \
   || fail "restored relay bootstrap materialized source into the target"
 [ "$(cat "$target_root/keep.txt")" = 'untouched target ordinary file' ] \

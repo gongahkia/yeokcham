@@ -1,0 +1,3 @@
+(library
+ (name yeokcham_v1_mnemonic)
+ (libraries yeokcham_hash))

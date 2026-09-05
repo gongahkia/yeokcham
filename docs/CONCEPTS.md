@@ -1,6 +1,6 @@
 # Concepts
 
-## The vocabulary that keeps V4 honest
+## The vocabulary that keeps V1 honest
 
 | Term | Meaning | Is not |
 | --- | --- | --- |
@@ -41,4 +41,4 @@ avoids pretending that modified bytes, a merge conflict, a device label, a
 language server result, or a CI outcome says what a person intended.
 
 For the formal types and invariants, read [FORMAL_MODEL.md](../FORMAL_MODEL.md).
-For exact command and trust boundaries, read [V4_PRODUCT_CONTRACT.md](V4_PRODUCT_CONTRACT.md).
+For exact command and trust boundaries, read [V1_PRODUCT_CONTRACT.md](V1_PRODUCT_CONTRACT.md).

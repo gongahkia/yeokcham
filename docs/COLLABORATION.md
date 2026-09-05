@@ -1,13 +1,13 @@
 # Collaboration and relay operations
 
-This guide is for a small trusted team using V4's explicit authority and
+This guide is for a small trusted team using V1's explicit authority and
 transfer boundaries. It is not a Git migration, a general clone recipe, or an
 online membership workflow. Start with the local recovery tutorial before
 adding another person.
 
 ## Two people, offline package
 
-Assume Alice already owns an initial V4 repository and Bob will use a separate
+Assume Alice already owns an initial V1 repository and Bob will use a separate
 machine or user session.
 
 1. Bob creates a native device before joining and sends Alice only its printed
@@ -65,18 +65,18 @@ machine or user session.
    yeokcham graph --root BOB_PROJECT
    ```
 
-   `receive` is history receipt, not working-tree population. V4 has no command
+   `receive` is history receipt, not working-tree population. V1 has no command
    that materialises a received revision as a clone. Bob can inspect received
    history with `log` and `graph`; destination restore remains available only
    for a checkpoint in Bob's own local recovery history.
 
 If authority has concurrent epoch heads, an administrator must inspect
-`authority heads` and explicitly reconcile selected heads. V4 never lets relay
+`authority heads` and explicitly reconcile selected heads. V1 never lets relay
 ordering choose policy.
 
 ## Relay operator runbook
 
-The operator supplies storage and HTTPS transport, but does not become V4
+The operator supplies storage and HTTPS transport, but does not become V1
 authority. Run the backend on a loopback or private address and terminate TLS
 in an independently managed reverse proxy:
 
@@ -102,7 +102,7 @@ yeokcham remote login --root PROJECT team
 yeokcham sync --root PROJECT team
 ```
 
-The relay sees stored payloads; V4 does not claim end-to-end payload encryption.
+The relay sees stored payloads; V1 does not claim end-to-end payload encryption.
 It cannot enrol a device, sign a revision, choose an authority branch, resolve
 a decision, deliver work, or materialise a client working tree. Rotate or revoke
 credentials with `relay access rotate` and `relay access revoke`; that changes

@@ -67,7 +67,7 @@ docker run --rm \
     test ! -e /etc/systemd/system/yeokcham.service
     mkdir /smoke/signer /smoke/project
     printf "%s\\n" before > /smoke/project/note.txt
-    export YEOKCHAM_V4_TEST_SIGNER_DIRECTORY=/smoke/signer
+    export YEOKCHAM_V1_TEST_SIGNER_DIRECTORY=/smoke/signer
     initial=$(/usr/bin/yeokcham init --root /smoke/project --username smoke --draft package --title package-smoke | sed -n "s/^saved //p" | sed -n "1p")
     test "${#initial}" = 64
     printf "%s\\n" after > /smoke/project/note.txt

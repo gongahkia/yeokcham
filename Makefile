@@ -52,7 +52,7 @@ workflow-ci-test:
 ci: lint test workflow-security-test workflow-ci-test
 
 release-verify:
-	tools/verify-v4-source-release.sh --repo "$(RELEASE_REPOSITORY)" --tag "$(RELEASE_TAG)" --commit "$(RELEASE_COMMIT)" --fingerprint "$(RELEASE_FINGERPRINT)" --archive "$(RELEASE_ARCHIVE)" --sha256 "$(RELEASE_SHA256)"
+	tools/verify-v1-source-release.sh --repo "$(RELEASE_REPOSITORY)" --tag "$(RELEASE_TAG)" --commit "$(RELEASE_COMMIT)" --fingerprint "$(RELEASE_FINGERPRINT)" --archive "$(RELEASE_ARCHIVE)" --sha256 "$(RELEASE_SHA256)"
 
 release-verify-test:
-	sh test/test_release_verify.sh tools/verify-v4-source-release.sh
+	sh test/test_release_verify.sh tools/verify-v1-source-release.sh

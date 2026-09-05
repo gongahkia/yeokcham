@@ -1,9 +1,0 @@
-(library
- (name yeokcham_v4_recovery)
- (libraries
-  mirage-crypto
-  mirage-crypto-rng.unix
-  yeokcham_encoding
-  yeokcham_hash
-  yeokcham_v4_mnemonic
-  yeokcham_v4_trust))

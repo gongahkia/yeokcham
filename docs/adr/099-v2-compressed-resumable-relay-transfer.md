@@ -7,7 +7,7 @@
 
 ## Context
 
-V4's V1 relay stores and transfers canonical immutable object bytes, but a
+V1's V1 relay stores and transfers canonical immutable object bytes, but a
 failed transfer restarts the whole object. That is poor operational behaviour
 for large snapshot closures and does not let a receiver state exactly which
 objects it still needs. Any improvement must preserve the receipt boundary:
@@ -34,7 +34,7 @@ boundary; it never scans or writes ordinary source paths.
 ### Raw identity and wire encoding
 
 An object ID always identifies its existing, canonical uncompressed bytes.
-Neither compressed frames nor a transfer session are V4 objects, package data,
+Neither compressed frames nor a transfer session are V1 objects, package data,
 feed entries, bootstrap data, model state, or authority input. V2 divides an
 offered raw byte string into contiguous 1 MiB ranges, except for the final
 short range. Each range is compressed separately into exactly one zstd frame.
@@ -72,7 +72,7 @@ checks the canonical envelope and raw object ID, and then performs one existing
 immutable create-only publish. It records completion only after that publish.
 Downloads retain each bounded compressed response in a private temporary file,
 then return no bytes until every frame/range and the final raw identity
-validate. They make no V4-store write.
+validate. They make no V1-store write.
 
 ### Retry and concurrency
 

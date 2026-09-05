@@ -46,7 +46,7 @@ let record () =
 let canonical_fixture_round_trips () =
   let expected =
     In_channel.with_open_bin
-      (fixture_path "v4/development-build-record-v1.json")
+      (fixture_path "v1/development-build-record-v1.json")
       In_channel.input_all
     |> String.trim
   in

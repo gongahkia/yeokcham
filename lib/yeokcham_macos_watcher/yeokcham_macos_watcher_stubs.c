@@ -221,7 +221,7 @@ static void watcher_finalize(value handle) {
 }
 
 static struct custom_operations watcher_operations = {
-    "yeokcham_v4_macos_watcher",
+    "yeokcham_v1_macos_watcher",
     watcher_finalize,
     custom_compare_default,
     custom_hash_default,
@@ -270,7 +270,7 @@ static struct watcher *watcher_create(const char *root) {
       kCFAllocatorDefault, callback, &context, paths,
       kFSEventStreamEventIdSinceNow, 0.05, flags);
   if (watcher->stream == NULL) goto failed;
-  watcher->queue = dispatch_queue_create("org.yeokcham.v4.fsevents",
+  watcher->queue = dispatch_queue_create("org.yeokcham.v1.fsevents",
                                          DISPATCH_QUEUE_SERIAL);
   if (watcher->queue == NULL) goto failed;
   FSEventStreamSetDispatchQueue(watcher->stream, watcher->queue);

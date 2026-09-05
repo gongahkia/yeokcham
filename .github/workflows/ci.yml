@@ -21,8 +21,8 @@ jobs:
       - if: runner.os == 'macOS'
         run: |
           brew install gnupg openssl socat softhsm
-          echo "YEOKCHAM_V4_TEST_OPENSSL=$(brew --prefix openssl)/bin/openssl" >> "$GITHUB_ENV"
-          echo "YEOKCHAM_V4_TEST_SOCAT=$(brew --prefix socat)/bin/socat" >> "$GITHUB_ENV"
+          echo "YEOKCHAM_V1_TEST_OPENSSL=$(brew --prefix openssl)/bin/openssl" >> "$GITHUB_ENV"
+          echo "YEOKCHAM_V1_TEST_SOCAT=$(brew --prefix socat)/bin/socat" >> "$GITHUB_ENV"
       - uses: ocaml/setup-ocaml@e89b2ded52a6e13f50162220cf5fe47290162032 # v3.8.0
         with:
           ocaml-compiler: "5.5.0"
@@ -39,7 +39,7 @@ jobs:
           log.level = ERROR
           EOF
           export SOFTHSM2_CONF="$token_root/softhsm2.conf"
-          softhsm2-util --init-token --free --label yeokcham-v4-test --so-pin 12345678 --pin 1234
+          softhsm2-util --init-token --free --label yeokcham-v1-test --so-pin 12345678 --pin 1234
           module_path=
           for prefix in /usr/local /opt/homebrew /usr/lib; do
             test -d "$prefix" || continue
@@ -48,7 +48,7 @@ jobs:
           done
           test -n "$module_path"
           echo "SOFTHSM2_CONF=$SOFTHSM2_CONF" >> "$GITHUB_ENV"
-          echo "YEOKCHAM_V4_TEST_PKCS11_MODULE=$module_path" >> "$GITHUB_ENV"
+          echo "YEOKCHAM_V1_TEST_PKCS11_MODULE=$module_path" >> "$GITHUB_ENV"
       - run: opam exec -- dune build @lint @all
       - run: opam exec -- dune runtest
   format:

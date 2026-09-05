@@ -7,7 +7,7 @@
 
 ## Context
 
-The V4 relay is an untrusted, repository-scoped immutable-byte courier. Its
+The V1 relay is an untrusted, repository-scoped immutable-byte courier. Its
 existing HTTP listener deliberately has no TLS, source-tree, model, authority,
 or materialisation capability. TRANSPORT-002 adds relay-local resumable V2
 sessions, so a small self-hosted team also needs an operator boundary for
@@ -35,7 +35,7 @@ backup(storage) -> checksum_verified_archive | operator_refusal
 
 `relay_config`, counters, health results, OCI image metadata, SBOMs,
 provenance, signatures, and backup archives are operator artifacts. None is a
-V4 object, package, feed entry, checkpoint, capsule, revision, release,
+V1 object, package, feed entry, checkpoint, capsule, revision, release,
 authority record, semantic sidecar, or receipt transition. Parsing and
 readiness have no source-tree dependency; the only normal relay writes remain
 immutable relay objects and quota-bound V2 session files beneath the named
@@ -78,7 +78,7 @@ duplicate keys, missing required values, invalid addresses, non-positive or
 over-limit quotas/expiry, inaccessible storage, and an invalid credential
 registry are startup refusals. There is no token, bearer secret, private key,
 or raw request payload setting. Configuration is never written back, imported
-into a V4 repository, or emitted in unredacted logs.
+into a V1 repository, or emitted in unredacted logs.
 
 The storage root, credential-registry root, quota, and session expiry are
 passed explicitly into the existing relay/session adapters rather than silently
@@ -89,7 +89,7 @@ object identifiers.
 
 `/healthz` is liveness only. `/readyz` verifies that the configured storage and
 credential-registry paths are usable without creating ordinary source files or
-changing V4 state. Storage readiness creates then removes a zero-byte probe
+changing V1 state. Storage readiness creates then removes a zero-byte probe
 only in the named relay volume, so a mode-writable but read-only mount is not
 reported ready. A separately bound local metrics listener reports only bounded
 aggregate request/status/object/session/quota/expiry/failure counters; it
@@ -139,7 +139,7 @@ SBOM, provenance, signature, and digest verification all succeed.
 ## Consequences
 
 This milestone deliberately adds operational configuration and evidence, not
-any V4 history, source, identity, or compatibility feature. A team operating
+any V1 history, source, identity, or compatibility feature. A team operating
 the image accepts responsibility for reverse-proxy TLS, volume ownership,
 backup confidentiality, availability, and the documented development signing
 trust root. A production support promise, end-to-end encryption, HA,

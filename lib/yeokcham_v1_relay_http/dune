@@ -1,0 +1,10 @@
+(library
+ (name yeokcham_v1_relay_http)
+ (libraries
+  unix
+  yeokcham_encoding
+  yeokcham_v1_relay
+  yeokcham_v1_relay_access
+  yeokcham_v1_relay_config
+  yeokcham_v1_relay_ops
+  yeokcham_v1_transport))

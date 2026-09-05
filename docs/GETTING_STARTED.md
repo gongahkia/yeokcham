@@ -1,6 +1,6 @@
 # Local recovery tutorial
 
-This is a local, source-checkout evaluation of the V4 scratch/recovery path.
+This is a local, source-checkout evaluation of the V1 scratch/recovery path.
 It does not contact a relay, create a team member, or exchange Git data. Build
 the command first with [Installation and support](INSTALL.md). Use a private
 terminal: `init` prints a real recovery mnemonic once.
@@ -9,7 +9,7 @@ The examples use a source-build command variable. If a future supported release
 installs `yeokcham` on `PATH`, set `YEOKCHAM=yeokcham` instead.
 
 ```sh
-YEOKCHAM=./_build/default/bin/yeokcham_v4.exe
+YEOKCHAM=./_build/default/bin/yeokcham_v1.exe
 "$YEOKCHAM" --version
 "$YEOKCHAM" help changes
 ```

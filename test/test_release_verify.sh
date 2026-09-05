@@ -49,7 +49,7 @@ trap cleanup EXIT HUP INT TERM
 
 repository="$temporary_directory/repository"
 gpg_home="$temporary_directory/gnupg"
-archive="$temporary_directory/yeokcham-v4.tar.gz"
+archive="$temporary_directory/yeokcham-v1.tar.gz"
 mkdir -m 700 "$repository" "$gpg_home"
 
 export GNUPGHOME="$gpg_home"
@@ -70,7 +70,7 @@ fingerprint=$(gpg --batch --with-colons --list-keys \
 [ -n "$fingerprint" ] || fail "fixture signer fingerprint is missing"
 
 git -C "$repository" -c user.signingkey="$fingerprint" \
-  -c gpg.format=openpgp tag -s -m "V4 fixture source release" v0.0.0-test
+  -c gpg.format=openpgp tag -s -m "V1 fixture source release" v0.0.0-test
 git -C "$repository" tag lightweight-test
 git -C "$repository" tag -a -m "unsigned fixture tag" unsigned-test
 
@@ -88,7 +88,7 @@ subkey_signing=$(gpg --batch --with-colons --list-keys \
 [ -n "$subkey_primary" ] && [ -n "$subkey_signing" ] \
   || fail "fixture signing subkey is missing"
 git -C "$repository" -c user.signingkey="$subkey_signing" \
-  -c gpg.format=openpgp tag -s -m "V4 fixture subkey source release" \
+  -c gpg.format=openpgp tag -s -m "V1 fixture subkey source release" \
   v0.0.0-subkey-test
 
 printf '%s\n' fixture-archive >"$archive"

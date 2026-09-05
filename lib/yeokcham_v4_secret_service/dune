@@ -1,5 +1,0 @@
-(library
- (name yeokcham_v4_secret_service)
- (enabled_if
-  (= %{system} linux))
- (libraries unix yeokcham_v4_model yeokcham_v4_trust))
