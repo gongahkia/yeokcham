@@ -71,13 +71,13 @@ Not applicable. No new record is written.
 - CLI status warning;
 - CLI refusal of `watch` outside Linux and macOS.
 
-The inotify loop test is `test/test_v4_watch.ml` (`build_if linux`, Alcotest
+The inotify loop test is `test/test_v1_watch.ml` (`build_if linux`, Alcotest
 `Slow`). It was not run on the Darwin development host. Proof on another
 machine:
 
 ```sh
 uname -s   # must print Linux
-opam exec -- dune exec test/test_v4_watch.exe
+opam exec -- dune exec test/test_v1_watch.exe
 ```
 
 Pass is Alcotest success for “watch records a checkpoint after quiet edits”.

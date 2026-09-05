@@ -1,23 +1,23 @@
 (test
- (name test_v4_model)
- (modules test_v4_model)
+ (name test_v1_model)
+ (modules test_v1_model)
  (libraries alcotest yeokcham_v1_model))
 
 (test
- (name test_v4_health)
- (modules test_v4_health)
+ (name test_v1_health)
+ (modules test_v1_health)
  (libraries alcotest yeokcham_v1_health))
 
 (test
- (name test_v4_cli_data)
- (modules test_v4_cli_data)
+ (name test_v1_cli_data)
+ (modules test_v1_cli_data)
  (libraries alcotest yeokcham_v1_cli_data)
  (deps
   (source_tree golden)))
 
 (test
- (name test_v4_cli_spec)
- (modules test_v4_cli_spec)
+ (name test_v1_cli_spec)
+ (modules test_v1_cli_spec)
  (libraries alcotest yeokcham_v1_cli_spec))
 
 (test
@@ -28,20 +28,20 @@
   (source_tree golden)))
 
 (test
- (name test_v4_hook)
- (modules test_v4_hook)
+ (name test_v1_hook)
+ (modules test_v1_hook)
  (libraries alcotest yeokcham_testkit yeokcham_v1_hook)
  (deps
   (source_tree golden)))
 
 (test
- (name test_v4_hook_store)
- (modules test_v4_hook_store)
+ (name test_v1_hook_store)
+ (modules test_v1_hook_store)
  (libraries alcotest unix yeokcham_v1_hook yeokcham_v1_hook_store))
 
 (test
- (name test_v4_hook_runner)
- (modules test_v4_hook_runner)
+ (name test_v1_hook_runner)
+ (modules test_v1_hook_runner)
  (libraries alcotest unix yeokcham_v1_hook yeokcham_v1_hook_runner))
 
 (test
@@ -50,8 +50,8 @@
  (libraries alcotest qcheck-core qcheck-alcotest yeokcham_v1_health))
 
 (test
- (name test_v4_health_store)
- (modules test_v4_health_store)
+ (name test_v1_health_store)
+ (modules test_v1_health_store)
  (libraries
   alcotest
   unix
@@ -62,8 +62,8 @@
   (source_tree golden)))
 
 (test
- (name test_v4_health_repository)
- (modules test_v4_health_repository)
+ (name test_v1_health_repository)
+ (modules test_v1_health_repository)
  (libraries
   alcotest
   unix
@@ -94,8 +94,8 @@
   yeokcham_v1_store))
 
 (test
- (name test_v4_repair)
- (modules test_v4_repair)
+ (name test_v1_repair)
+ (modules test_v1_repair)
  (libraries
   alcotest
   unix
@@ -124,8 +124,8 @@
  (libraries alcotest qcheck-core qcheck-alcotest yeokcham_watcher))
 
 (test
- (name test_v4_trust)
- (modules test_v4_trust)
+ (name test_v1_trust)
+ (modules test_v1_trust)
  (libraries
   alcotest
   yeokcham_testkit
@@ -136,8 +136,8 @@
   (source_tree golden)))
 
 (test
- (name test_v4_custody)
- (modules test_v4_custody)
+ (name test_v1_custody)
+ (modules test_v1_custody)
  (libraries
   alcotest
   unix
@@ -149,8 +149,8 @@
   (source_tree golden)))
 
 (test
- (name test_v4_semantic_config)
- (modules test_v4_semantic_config)
+ (name test_v1_semantic_config)
+ (modules test_v1_semantic_config)
  (libraries alcotest unix yeokcham_testkit yeokcham_v1_semantic_config)
  (deps
   (source_tree golden)))
@@ -170,8 +170,8 @@
  (libraries unix yojson))
 
 (test
- (name test_v4_lsp_sidecar)
- (modules test_v4_lsp_sidecar)
+ (name test_v1_lsp_sidecar)
+ (modules test_v1_lsp_sidecar)
  (libraries
   alcotest
   unix
@@ -192,8 +192,8 @@
   yeokcham_v1_trust))
 
 (test
- (name test_v4_recovery)
- (modules test_v4_recovery)
+ (name test_v1_recovery)
+ (modules test_v1_recovery)
  (libraries
   alcotest
   yeokcham_testkit
@@ -204,8 +204,8 @@
   (source_tree golden)))
 
 (test
- (name test_v4_package)
- (modules test_v4_package)
+ (name test_v1_package)
+ (modules test_v1_package)
  (libraries
   alcotest
   unix
@@ -216,8 +216,8 @@
   yeokcham_v1_trust))
 
 (test
- (name test_v4_transport)
- (modules test_v4_transport)
+ (name test_v1_transport)
+ (modules test_v1_transport)
  (libraries
   alcotest
   unix
@@ -241,8 +241,8 @@
   (source_tree golden)))
 
 (test
- (name test_v4_transfer)
- (modules test_v4_transfer)
+ (name test_v1_transfer)
+ (modules test_v1_transfer)
  (libraries
   alcotest
   unix
@@ -256,8 +256,8 @@
   (source_tree golden)))
 
 (test
- (name test_v4_relay_access)
- (modules test_v4_relay_access)
+ (name test_v1_relay_access)
+ (modules test_v1_relay_access)
  (libraries
   alcotest
   qcheck-core
@@ -269,20 +269,20 @@
   (source_tree golden)))
 
 (test
- (name test_v4_relay_config)
- (modules test_v4_relay_config)
+ (name test_v1_relay_config)
+ (modules test_v1_relay_config)
  (libraries alcotest qcheck-core qcheck-alcotest yeokcham_v1_relay_config)
  (deps
   (source_tree golden)))
 
 (test
- (name test_v4_relay_ops)
- (modules test_v4_relay_ops)
+ (name test_v1_relay_ops)
+ (modules test_v1_relay_ops)
  (libraries alcotest qcheck-core qcheck-alcotest yeokcham_v1_relay_ops))
 
 (test
- (name test_v4_inspection)
- (modules test_v4_inspection)
+ (name test_v1_inspection)
+ (modules test_v1_inspection)
  (libraries
   alcotest
   qcheck-core
@@ -309,15 +309,15 @@
  (libraries alcotest qcheck-core qcheck-alcotest yeokcham_v1_model))
 
 (test
- (name test_v4_record)
- (modules test_v4_record)
+ (name test_v1_record)
+ (modules test_v1_record)
  (libraries alcotest yeokcham_testkit yeokcham_v1_model yeokcham_v1_record)
  (deps
   (source_tree golden)))
 
 (test
- (name test_v4_store)
- (modules test_v4_store)
+ (name test_v1_store)
+ (modules test_v1_store)
  (libraries
   alcotest
   unix
@@ -332,8 +332,8 @@
   (source_tree golden)))
 
 (test
- (name test_v4_restore_journal)
- (modules test_v4_restore_journal)
+ (name test_v1_restore_journal)
+ (modules test_v1_restore_journal)
  (libraries
   alcotest
   unix
@@ -344,8 +344,8 @@
   (source_tree golden)))
 
 (test
- (name test_v4_restore_proof)
- (modules test_v4_restore_proof)
+ (name test_v1_restore_proof)
+ (modules test_v1_restore_proof)
  (libraries
   alcotest
   unix
@@ -356,8 +356,8 @@
   (source_tree golden)))
 
 (test
- (name test_v4_workspace)
- (modules test_v4_workspace)
+ (name test_v1_workspace)
+ (modules test_v1_workspace)
  (libraries
   alcotest
   unix
@@ -387,8 +387,8 @@
   yeokcham_v1_workspace))
 
 (test
- (name test_v4_gc)
- (modules test_v4_gc)
+ (name test_v1_gc)
+ (modules test_v1_gc)
  (libraries
   alcotest
   unix
@@ -417,8 +417,8 @@
   yeokcham_v1_model))
 
 (test
- (name test_v4_proposal)
- (modules test_v4_proposal)
+ (name test_v1_proposal)
+ (modules test_v1_proposal)
  (libraries
   alcotest
   yeokcham_snapshot
@@ -437,8 +437,8 @@
   yeokcham_v1_proposal))
 
 (test
- (name test_v4_local_service)
- (modules test_v4_local_service)
+ (name test_v1_local_service)
+ (modules test_v1_local_service)
  (libraries
   alcotest
   unix
@@ -455,8 +455,8 @@
   yeokcham_v1_trust))
 
 (test
- (name test_v4_bootstrap)
- (modules test_v4_bootstrap)
+ (name test_v1_bootstrap)
+ (modules test_v1_bootstrap)
  (libraries
   alcotest
   unix
@@ -473,8 +473,8 @@
   (source_tree golden)))
 
 (test
- (name test_v4_cli)
- (modules test_v4_cli)
+ (name test_v1_cli)
+ (modules test_v1_cli)
  (libraries
   alcotest
   unix
@@ -490,8 +490,8 @@
  (deps ../bin/yeokcham_v1.exe))
 
 (test
- (name test_v4_watch)
- (modules test_v4_watch)
+ (name test_v1_watch)
+ (modules test_v1_watch)
  (build_if
   (or
    (= %{system} linux)
@@ -500,15 +500,15 @@
  (deps ../bin/yeokcham_v1.exe))
 
 (test
- (name test_v4_macos_watcher)
- (modules test_v4_macos_watcher)
+ (name test_v1_macos_watcher)
+ (modules test_v1_macos_watcher)
  (build_if
   (= %{system} macosx))
  (libraries alcotest unix yeokcham_macos_watcher yeokcham_watcher))
 
 (test
- (name test_v4_runtime)
- (modules test_v4_runtime)
+ (name test_v1_runtime)
+ (modules test_v1_runtime)
  (build_if
   (= %{system} linux))
  (libraries alcotest unix)

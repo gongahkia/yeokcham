@@ -71,7 +71,7 @@ let valid_path value =
   && (not (has_unsafe_character value))
   && not (List.mem ".." (String.split_on_char '/' value))
 
-let valid_ipv4_host value =
+let valid_ipv1_host value =
   match String.split_on_char '.' value with
   | [ a; b; c; d ] ->
       List.for_all
@@ -93,7 +93,7 @@ let valid_listen value =
   match String.split_on_char ':' value with
   | [ host; port ] -> (
       match int_of_string_opt port with
-      | Some number -> valid_ipv4_host host && number > 0 && number <= 65_535
+      | Some number -> valid_ipv1_host host && number > 0 && number <= 65_535
       | None -> false)
   | _ -> false
 

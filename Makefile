@@ -25,7 +25,7 @@ test:
 
 linux-watch-test:
 	test "$$(uname)" = Linux
-	$(DUNE) exec test/test_v4_watch.exe
+	$(DUNE) exec test/test_v1_watch.exe
 
 relay-container-test: build
 	sh test/test_relay_container.sh

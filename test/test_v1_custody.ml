@@ -215,7 +215,7 @@ let sample_revision author =
       ]
   |> require_ok Model.error_to_string
 
-let pkcs11_signs_every_v4_action () =
+let pkcs11_signs_every_v1_action () =
   match Sys.getenv_opt "YEOKCHAM_V1_TEST_PKCS11_MODULE" with
   | None -> Alcotest.skip ()
   | Some module_path ->
@@ -369,6 +369,6 @@ let () =
           Alcotest.test_case "SSH agent signs for explicit key only" `Quick
             ssh_agent_signs_only_for_its_explicit_key;
           Alcotest.test_case "PKCS#11 token signs V1 actions" `Slow
-            pkcs11_signs_every_v4_action;
+            pkcs11_signs_every_v1_action;
         ] );
     ]
