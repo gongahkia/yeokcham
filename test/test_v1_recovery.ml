@@ -11,9 +11,6 @@ let golden_path name =
   let local = Filename.concat "golden" name in
   if Sys.file_exists local then local else Filename.concat "test/golden" name
 
-let read_golden name =
-  Golden.read_lower_hex_file (golden_path name) |> require_ok Fun.id
-
 let capability byte =
   String.make 32 byte |> Trust.signing_capability_of_private_key
   |> require_ok Trust.error_to_string

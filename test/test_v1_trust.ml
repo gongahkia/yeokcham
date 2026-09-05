@@ -10,9 +10,6 @@ let golden_path name =
   let local = Filename.concat "golden" name in
   if Sys.file_exists local then local else Filename.concat "test/golden" name
 
-let read_golden name =
-  Golden.read_lower_hex_file (golden_path name) |> require_ok Fun.id
-
 let id parser value = parser value |> Result.get_ok
 let change value = id Model.Change_id.of_string value
 let revision value = id Model.Revision_id.of_string value

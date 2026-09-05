@@ -62,9 +62,6 @@ let golden_path name =
   let local = Filename.concat "golden" name in
   if Sys.file_exists local then local else Filename.concat "test/golden" name
 
-let read_golden name =
-  Golden.read_lower_hex_file (golden_path name) |> require_ok Fun.id
-
 let root_certificate authority =
   Trust.certificates (Trust.authority_membership authority)
   |> List.find (fun certificate -> Trust.certificate_issuer certificate = None)

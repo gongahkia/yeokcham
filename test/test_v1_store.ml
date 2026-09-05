@@ -14,9 +14,6 @@ let golden_path name =
   let local = Filename.concat "golden" name in
   if Sys.file_exists local then local else Filename.concat "test/golden" name
 
-let read_golden name =
-  Golden.read_lower_hex_file (golden_path name) |> require_ok Fun.id
-
 let rec remove_tree path =
   try
     match (Unix.lstat path).Unix.st_kind with

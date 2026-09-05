@@ -13,9 +13,6 @@ let golden_path name =
   let local = Filename.concat "golden" name in
   if Sys.file_exists local then local else Filename.concat "test/golden" name
 
-let read_golden name =
-  Golden.read_lower_hex_file (golden_path name) |> Result.get_ok
-
 let hooks_are_canonical_and_sorted () =
   let save = save_hook () in
   let init =
