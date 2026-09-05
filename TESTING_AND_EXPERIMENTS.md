@@ -15,6 +15,18 @@ in [`Experiment 106`](docs/experiments/106-evidence-workspace-preflight-failure.
 This is a scaled adapter check, not a five-iteration capacity result, a 5 GiB
 result, or a transport benchmark.
 
+A separate full-profile streaming preflight from source revision `5268d6a` was
+intentionally terminated after 3h 42m 30s without a measurement row. Its
+systemd service recorded a 6,382,080,000-byte memory peak and
+3,130,544,128-byte swap peak. This is incomplete diagnostic evidence only; the
+retained conditions and status are in
+[`Experiment 106`](docs/experiments/106-evidence-workspace-preflight-failure.md).
+
+On the same checkout, `make format` and `make evidence-workspace-benchmark-test`
+passed after adding immediate per-phase diagnostic logging for interrupted
+workspace scenarios. This validates observability and failure retention, not a
+capacity result.
+
 `opam exec -- dune build @all` and `opam exec -- dune runtest` are the active
 local verification commands. The suite covers V4 model transitions, generated
 model and authority properties, canonical goldens, store compare-and-swap,

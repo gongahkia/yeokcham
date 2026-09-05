@@ -104,7 +104,7 @@ while [ "$iteration" -le "$iterations" ]; do
   stage=scenario
   /usr/bin/time -f '%e\t%U\t%S\t%M' -o "$run/resources.tsv" \
     "$scenario" --source "$run/source" --target "$run/target" --package "$run/package" \
-    > "$run/scenario.txt"
+    > "$run/scenario.txt" 2> "$run/scenario.log"
   stage=projection-count
   target_entries=$(find "$run/target" -path "$run/target/.yeokcham" -prune -o -mindepth 1 -print | wc -l | tr -d ' ')
   [ "$target_entries" = "$paths" ] \

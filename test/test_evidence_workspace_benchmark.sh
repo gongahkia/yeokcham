@@ -37,7 +37,9 @@ grep -F 'kernel=' "$output/environment.txt" >/dev/null \
   || fail 'environment did not retain the kernel'
 
 failing_scenario="$scratch/failing-scenario"
-printf '%s\n' '#!/bin/sh' 'exit 42' > "$failing_scenario"
+printf '%s\n' '#!/bin/sh' \
+  'printf "%s\\n" "evidence-workspace-scenario: phase=fixture:start" >&2' \
+  'exit 42' > "$failing_scenario"
 chmod 700 "$failing_scenario"
 failed_output="$scratch/failed-output"
 if EVIDENCE_WORKSPACE_SCENARIO="$failing_scenario" \
@@ -48,6 +50,8 @@ grep -Fx 'status=42' "$failed_output/run-1/benchmark-status.txt" >/dev/null \
   || fail 'failed scenario did not retain its status'
 grep -Fx 'stage=scenario' "$failed_output/run-1/benchmark-status.txt" >/dev/null \
   || fail 'failed scenario did not retain its stage'
+grep -Fx 'evidence-workspace-scenario: phase=fixture:start' "$failed_output/run-1/scenario.log" >/dev/null \
+  || fail 'failed scenario did not retain its phase log'
 
 if "$benchmark" --output relative --paths 10 --bytes 1000 --iterations 1 >/dev/null 2>&1; then
   fail 'relative output root was accepted'

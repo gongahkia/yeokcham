@@ -64,9 +64,12 @@ a derived report, never a V4 record or a replacement for the raw TSV.
 
 If a fixture, scenario, projection check, or measurement fails, the current
 external `run-N/benchmark-status.txt` retains the schema version, nonzero exit
-status, and named stage. Successful runs retain no child run directory, so a
-status file never represents a successful measurement. This is operational
-diagnostic data, not a V4 record or a benchmark result.
+status, and named stage. During a scenario, its stderr immediately records each
+started and completed major phase in `run-N/scenario.log`; the retained log
+therefore identifies the last completed phase after an interruption. Successful
+runs retain no child run directory, so a status file never represents a
+successful measurement. This is operational diagnostic data, not a V4 record
+or a benchmark result.
 
 The first full-capacity preflight was killed by the host OOM killer before it
 produced a measurement row. Its retained conditions, raw status, and diagnosis

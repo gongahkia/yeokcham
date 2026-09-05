@@ -46,6 +46,9 @@ let elapsed operation =
   let value = operation () in
   (value, Unix.gettimeofday () -. started)
 
+let report_phase phase =
+  Printf.eprintf "evidence-workspace-scenario: phase=%s\n%!" phase
+
 let device capability =
   Trust.signing_public_key capability
   |> Trust.device_of_public_key
@@ -115,6 +118,7 @@ let () =
     Model.Draft_id.of_string "evidence-source"
     |> require_ok Model.error_to_string
   in
+  report_phase "source-init:start";
   let (source_status, _), source_init_seconds =
     elapsed (fun () ->
         Service.init_signed_with_recovery ~root:source ~username ~initial_draft
@@ -123,6 +127,7 @@ let () =
           ~recovery_capability
         |> require_ok Service.error_to_string)
   in
+  report_phase "source-init:complete";
   let source_repository =
     Store.open_repository ~root:source |> require_ok Store.error_to_string
   in
@@ -140,12 +145,15 @@ let () =
     | None -> fail "source initialisation did not create authority state"
   in
   let local_certificate = Store.local_certificate collaboration in
+  report_phase "bootstrap-prepare:start";
   let outbound, package_seconds =
     elapsed (fun () ->
         Service.prepare_bootstrap_outbound ~root:source
           ~signing_capability:administrator_capability
         |> require_ok Service.error_to_string)
   in
+  report_phase "bootstrap-prepare:complete";
+  report_phase "package-materialize:start";
   let _, materialize_package_seconds =
     Fun.protect
       ~finally:(fun () ->
@@ -156,8 +164,10 @@ let () =
               outbound.Service.bootstrap_artifact
             |> require_ok Package.error_to_string))
   in
+  report_phase "package-materialize:complete";
   let basis = Bootstrap.encode outbound.Service.bootstrap_basis in
   let phrase = Recovery.verification_phrase (root_certificate authority) in
+  report_phase "bootstrap:start";
   let _, bootstrap_seconds =
     elapsed (fun () ->
         Service.bootstrap_from_package ~root:target ~repository ~package ~basis
@@ -171,17 +181,20 @@ let () =
           ~title:"EVIDENCE-001 target" ~device:administrator ~local_certificate
         |> require_ok Service.error_to_string)
   in
+  report_phase "bootstrap:complete";
   let source_entries =
     Sys.readdir target |> Array.to_list
     |> List.filter (fun name -> not (String.equal name ".yeokcham"))
   in
   if source_entries <> [] then
     fail "bootstrap materialised ordinary source before workspace activation";
+  report_phase "workspace-activate:start";
   let _, workspace_activate_seconds =
     elapsed (fun () ->
         Service.workspace_activate ~root:target
         |> require_ok Service.error_to_string)
   in
+  report_phase "workspace-activate:complete";
   if not (Sys.file_exists (Filename.concat target ".yeokcham")) then
     fail "workspace activation lost target V4 metadata";
   Printf.printf

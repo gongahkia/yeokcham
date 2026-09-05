@@ -41,6 +41,24 @@ single reduced-profile iteration verifies the changed journey and provides
 [Inference] bounded-resident-memory behavior at that profile only; it supplies
 no median, tail, 5 GiB, 100,000-path, or network-performance result.
 
+On 2026-09-05, a separate one-iteration full-profile streaming preflight was
+started from source revision `5268d6ad735831ac7ff729e6714d19e8aa54b3a4` and
+then intentionally terminated by the operator. Its retained external root is:
+
+```text
+/home/gongahkia/Desktop/coding/projects/yeokcham-evidence-ws-5g-100k-preflight-streaming-12f28da
+```
+
+The run started at 09:04:45 +08 and was terminated at 12:47:15 +08 after
+3h 42m 30s of wall time and 10,217.191705 seconds of CPU time. systemd recorded
+a 6,382,080,000-byte memory peak and 3,130,544,128-byte swap peak. The harness
+recorded `status=128` and `stage=scenario`; no measurement row was produced.
+Because termination was external and the pre-change harness emitted its phase
+timings only on successful completion, this run establishes neither successful
+activation nor a capacity timing. It is retained as incomplete diagnostic data,
+not capacity evidence. The harness now preserves immediate per-phase stderr
+progress for any replacement run.
+
 The failed external root is retained for diagnosis until a successful
 full-capacity retry has been independently summarized. It is not a repository
 fixture and must not be used to report a median, p95, capacity success, or
