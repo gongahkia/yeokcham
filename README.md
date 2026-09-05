@@ -93,6 +93,8 @@ the complete command and trust boundaries.
   platform paths.
 - [Development artifacts](docs/DEVELOPMENT_ARTIFACTS.md) — verification and
   lifecycle of the non-release Linux archive/RPM CI artifact.
+- [Yeokcham simple guide](docs/YEOKCHAM_GUIDE.md) — the shortest path from
+  initialization to safe recovery and explicit sharing.
 - [Local recovery tutorial](docs/GETTING_STARTED.md) — the runnable first-use
   demo.
 - [Concepts glossary](docs/CONCEPTS.md) — scratch, drafts, revisions,
