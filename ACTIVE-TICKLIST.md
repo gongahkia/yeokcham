@@ -475,7 +475,13 @@ are separate measurements, not routine CI tests.
     were not started because GitHub reported a failed account payment or
     exhausted spending limit; hosted Linux/macOS and package/OCI evidence remains
     incomplete until billing is restored and a current-revision run completes.
-- [ ] Security review: bearer-token lifetime/revocation, TLS proxy deployment, relay path traversal/object-ID/range/decompression limits, hook redaction, repair provenance, backup exposure, and image supply chain. Track findings as ticklist items; do not silently accept them.
+- [x] Security review: bearer-token lifetime/revocation, TLS proxy deployment, relay path traversal/object-ID/range/decompression limits, hook redaction, repair provenance, backup exposure, and image supply chain. Track findings as ticklist items; do not silently accept them.
+  - Verification (2026-09-05): Experiment 103 records each boundary, its
+    automated evidence, and its explicit limits; `make workflow-security-test`
+    and local `make ci` passed. EVIDENCE-SEC-001 resolves the mutable-action
+    finding. Hosted build artifacts, external TLS/DNS automation, and off-site
+    backup operations remain [Unverified] gaps with stated re-entry conditions,
+    not accepted deployment claims.
 - [x] EVIDENCE-SEC-001: pin every third-party GitHub Action to the reviewed,
   full commit SHA and record its release tag/SHA mapping. GitHub Actions
   references were mutable tags when this review began; no workflow with
