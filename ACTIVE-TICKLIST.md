@@ -484,6 +484,12 @@ are separate measurements, not routine CI tests.
     parsed all checked-in workflow YAML files and `make workflow-ci-test`
     passed after adding the package-and-OCI smoke job.
 - [ ] Benchmark WS-001 and TRANSPORT-002 against capacity target with reproducible fixture generation, stated hardware/network, median and tail results, resource consumption, failure/resume behaviour, and V1 comparison. No cross-VCS performance claim without equivalent public workload/methodology.
+  - Verification (2026-09-05): the full WS-001 streaming preflight is active;
+    see Experiment 106 for the preceding OOM failure and reduced-profile
+    regression. The required `tc netem` tool is unavailable locally:
+    Fedora offers `iproute-tc-6.14.0-2.fc43`, but installing it requires a sudo
+    password that is not available to this run. No shaped TRANSPORT-002 row is
+    recorded or inferred.
 - [ ] Run a two-to-ten-person controlled Linux field exercise: bootstrap, activate, concurrent work/explicit resolution, sync interruption, repair/defer, backup restore, credential rotation/revocation, and operator recovery. Record defects/usability observations separately from compatibility or production-support claims.
 - [ ] At the end, make a new explicit decision: continue development, define public compatibility/migration policy, or retire/defer. Do not infer it from passing tests.
 

@@ -74,6 +74,16 @@ the quota or claim the target was met. The 64 MiB local wire-core result in
 [Experiment 099](099-v2-transfer-wire-benchmark.md) is supporting adapter
 evidence only and does not satisfy this method.
 
+On 2026-09-05, this Fedora 43 host had `/usr/bin/ip` and successful unprivileged
+network-namespace creation (`unshare -Urn true`), but no `tc` executable.
+Fedora offered `iproute-tc-6.14.0-2.fc43` (449.5 KiB download / 895.1 KiB
+installed size) as the required traffic-control package. Non-interactive sudo
+reported that a password was required, so the package was not installed and no
+privileged qdisc was configured. This is an unavailable test dependency, not a
+zero-latency substitute, an unshaped measurement, or a passing skip. Re-enter
+the method after an authorized Linux host supplies `tc`, network-admin authority,
+and an isolated namespace or host pair.
+
 ## References
 
 - [Linux `tc-netem(8)`](https://www.man7.org/linux/man-pages/man8/netem.8.html)
