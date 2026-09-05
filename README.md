@@ -1,7 +1,7 @@
 # `Yeokcham`
 
 <div align="center">
-  <img src="./asset/logo/yeokcham.png" width="20%" alt="Solomon logo">
+  <img src="./asset/logo/yeokcham.png" width="25%" alt="Solomon logo">
   <p><strong>A model-first, local-first version-control system for small trusted teams.</strong></p>
 </div>
 
