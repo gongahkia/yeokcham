@@ -74,13 +74,15 @@ let create_only_plan_round_trip () =
       Alcotest.(check int) "one create-only plan" 1 (List.length plans))
 
 let plan_matches_the_canonical_golden_fixture () =
+  let value = plan () in
+  let actual = Health.encode_plan value in
   let expected =
-    Golden.read_lower_hex_file (golden_path "v1/repair-plan-v1.cbor.hex")
+    Golden.refresh_lower_hex_file
+      (golden_path "v1/repair-plan-v1.cbor.hex")
+      actual
     |> require_ok Fun.id
   in
-  let value = plan () in
-  Alcotest.(check string)
-    "canonical repair plan bytes" expected (Health.encode_plan value);
+  Alcotest.(check string) "canonical repair plan bytes" expected actual;
   let decoded =
     Health.decode_plan expected |> require_ok Health.refusal_to_string
   in

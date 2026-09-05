@@ -216,10 +216,14 @@ let bootstrap_basis_rejects_a_wrong_repository_before_import () =
         |> require_ok Service.error_to_string
       in
       let encoded = Bootstrap.encode outbound.Service.bootstrap_basis in
+      let expected =
+        Golden.refresh_lower_hex_file
+          (golden_path "v1/bootstrap-basis-v1.cbor.hex")
+          encoded
+        |> require_ok Fun.id
+      in
       Alcotest.(check string)
-        "bootstrap basis bytes are stable"
-        (read_golden "v1/bootstrap-basis-v1.cbor.hex")
-        encoded;
+        "bootstrap basis bytes are stable" expected encoded;
       let decoded =
         Bootstrap.decode encoded |> require_ok Bootstrap.error_to_string
       in

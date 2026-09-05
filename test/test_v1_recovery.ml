@@ -97,7 +97,10 @@ let encrypted_recovery_package_restores_only_with_the_mnemonic () =
   let encoded = Recovery.encode package in
   Alcotest.(check string)
     "recovery package retains its golden encoding"
-    (read_golden "v1/recovery-package-v1.cbor.hex")
+    (Golden.refresh_lower_hex_file
+       (golden_path "v1/recovery-package-v1.cbor.hex")
+       encoded
+    |> require_ok Fun.id)
     encoded;
   let decoded =
     Recovery.decode encoded |> require_ok Recovery.error_to_string

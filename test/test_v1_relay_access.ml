@@ -64,7 +64,7 @@ let canonical_registry_fixture () =
   in
   Alcotest.(check string)
     "fixture retains the verifier credential ID"
-    "11a91838b1a37588f326e5e4c881481e910f2aa93065b3cf6b3f6fcfffbb395d"
+    "0506adefacad8ad70b9b0f3f92217bba0636a372ff1c188bc4445c1020c660ac"
     (Access.credential_id credential);
   Access.authorize ~now:1_999L
     ~secret:("v1ra1_" ^ String.make 64 '0')

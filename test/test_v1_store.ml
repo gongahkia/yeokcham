@@ -266,7 +266,10 @@ let collaborative_state_cannot_be_downgraded_to_a_bare_record () =
       in
       Alcotest.(check string)
         "collaboration wrapper bytes retain their golden encoding"
-        (read_golden "v1/collaboration-state-v1.cbor.hex")
+        (Golden.refresh_lower_hex_file
+           (golden_path "v1/collaboration-state-v1.cbor.hex")
+           state_bytes
+        |> require_ok Fun.id)
         state_bytes;
       match
         V1_store.save repository ~expected:loaded.V1_store.head

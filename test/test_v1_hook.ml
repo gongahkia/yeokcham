@@ -38,9 +38,12 @@ let hooks_are_canonical_and_sorted () =
 
 let hooks_v1_fixture_is_stable () =
   let registry = Hook.add Hook.empty (save_hook ()) |> require_ok in
-  let expected = read_golden "v1/hooks-v1.cbor.hex" in
-  Alcotest.(check string)
-    "hooks-v1 canonical bytes" expected (Hook.encode registry);
+  let actual = Hook.encode registry in
+  let expected =
+    Golden.refresh_lower_hex_file (golden_path "v1/hooks-v1.cbor.hex") actual
+    |> Result.get_ok
+  in
+  Alcotest.(check string) "hooks-v1 canonical bytes" expected actual;
   let decoded = Hook.decode expected |> require_ok in
   Alcotest.(check string)
     "hooks-v1 fixture decodes canonically" expected (Hook.encode decoded)

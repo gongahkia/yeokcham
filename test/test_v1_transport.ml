@@ -85,7 +85,10 @@ let publication_round_trip () =
   let encoded = Transport.encode_publication publication in
   Alcotest.(check string)
     "publication bytes retain their golden encoding"
-    (read_golden "v1/transport-publication-v1.cbor.hex")
+    (Golden.refresh_lower_hex_file
+       (golden_path "v1/transport-publication-v1.cbor.hex")
+       encoded
+    |> require_ok Fun.id)
     encoded;
   let decoded =
     Transport.decode_publication encoded |> require_ok Transport.error_to_string

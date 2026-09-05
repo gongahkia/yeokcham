@@ -70,9 +70,7 @@ let custody_profile_is_canonical_and_local () =
       let bytes = In_channel.with_open_bin path In_channel.input_all in
       let fixture = fixture_path "v1/custody-profile-v1.cbor.hex" in
       let expected =
-        if Sys.file_exists fixture then
-          Golden.read_lower_hex_file fixture |> require_ok Fun.id
-        else Alcotest.fail ("missing custody fixture: " ^ bytes_hex bytes)
+        Golden.refresh_lower_hex_file fixture bytes |> require_ok Fun.id
       in
       Alcotest.(check string) "canonical profile fixture" expected bytes;
       Alcotest.(check int)

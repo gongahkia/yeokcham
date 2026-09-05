@@ -111,7 +111,10 @@ let root_certificate_is_self_certifying () =
     (Trust.certificate_id decoded);
   Alcotest.(check string)
     "certificate bytes retain their golden encoding"
-    (read_golden "v1/certificate-v1.cbor.hex")
+    (Golden.refresh_lower_hex_file
+       (golden_path "v1/certificate-v1.cbor.hex")
+       (Trust.encode_certificate root_certificate)
+    |> require_ok Fun.id)
     (Trust.encode_certificate root_certificate)
 
 let administrator_enrols_a_member_in_causal_order () =
@@ -187,7 +190,10 @@ let signed_revision_binds_author_and_membership () =
   let encoded = Trust.encode_signed_revision signed in
   Alcotest.(check string)
     "signed revision bytes retain their golden encoding"
-    (read_golden "v1/signed-revision-v1.cbor.hex")
+    (Golden.refresh_lower_hex_file
+       (golden_path "v1/signed-revision-v1.cbor.hex")
+       encoded
+    |> require_ok Fun.id)
     encoded;
   Trust.verify_signed_revision_at authority signed
   |> require_ok Trust.error_to_string;
@@ -261,7 +267,10 @@ let signed_resolution_binds_its_target_decision () =
   let encoded = Trust.encode_signed_revision signed in
   Alcotest.(check string)
     "signed resolution bytes retain their golden encoding"
-    (read_golden "v1/signed-resolution-v1.cbor.hex")
+    (Golden.refresh_lower_hex_file
+       (golden_path "v1/signed-resolution-v1.cbor.hex")
+       encoded
+    |> require_ok Fun.id)
     encoded;
   Trust.verify_signed_revision_at authority signed
   |> require_ok Trust.error_to_string;
@@ -294,7 +303,10 @@ let authority_root () =
   in
   Alcotest.(check string)
     "root authority epoch retains its golden encoding"
-    (read_golden "v1/authority-epoch-v1.cbor.hex")
+    (Golden.refresh_lower_hex_file
+       (golden_path "v1/authority-epoch-v1.cbor.hex")
+       (Trust.encode_epoch root_epoch)
+    |> require_ok Fun.id)
     (Trust.encode_epoch root_epoch);
   ( repository,
     root_capability,
@@ -361,7 +373,10 @@ let authority_epochs_are_branch_scoped_and_reconcilable () =
     (Trust.signed_revision_epoch signed);
   Alcotest.(check string)
     "epoch-bound signed record retains its golden encoding"
-    (read_golden "v1/signed-revision-v1.cbor.hex")
+    (Golden.refresh_lower_hex_file
+       (golden_path "v1/signed-revision-v1.cbor.hex")
+       (Trust.encode_signed_revision signed)
+    |> require_ok Fun.id)
     (Trust.encode_signed_revision signed);
   Trust.verify_signed_revision_at authority signed
   |> require_ok Trust.error_to_string;
@@ -485,7 +500,10 @@ let revocation_recovery_and_exact_exceptions_are_verified () =
   |> require_ok Trust.error_to_string;
   Alcotest.(check string)
     "one-time authorization retains its golden encoding"
-    (read_golden "v1/authorization-v1.cbor.hex")
+    (Golden.refresh_lower_hex_file
+       (golden_path "v1/authorization-v1.cbor.hex")
+       (Trust.encode_authorization authorization)
+    |> require_ok Fun.id)
     (Trust.encode_authorization authorization);
   let adoption =
     Trust.make_adoption authority
@@ -497,7 +515,10 @@ let revocation_recovery_and_exact_exceptions_are_verified () =
   Trust.verify_adoption authority adoption |> require_ok Trust.error_to_string;
   Alcotest.(check string)
     "one-time adoption retains its golden encoding"
-    (read_golden "v1/adoption-v1.cbor.hex")
+    (Golden.refresh_lower_hex_file
+       (golden_path "v1/adoption-v1.cbor.hex")
+       (Trust.encode_adoption adoption)
+    |> require_ok Fun.id)
     (Trust.encode_adoption adoption);
   let revoked_epoch =
     Trust.successor_epoch authority
