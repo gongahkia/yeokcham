@@ -35,8 +35,12 @@ It checks that the Docker service is reachable, configures the BuildKit driver
 required for SBOM/provenance attestations, then builds the unsigned development
 archive/RPM and executes the bounded relay-container journey. This makes a
 missing OCI runtime or attestation-capable builder a failed CI condition rather
-than an implicit skip. Its remote result remains [Unverified] until a run for
-the current revision completes.
+than an implicit skip. Its remote result remains [Unverified]: GitHub did not
+start the jobs in [CI run 33896347742](https://github.com/gongahkia/yeokcham/actions/runs/33896347742)
+because of an account payment/spending-limit condition. A current-revision
+remote run, published digest, SBOM/provenance attestation, and Cosign
+verification artifact must be inspected after that external condition is
+resolved.
 
 ## External references
 

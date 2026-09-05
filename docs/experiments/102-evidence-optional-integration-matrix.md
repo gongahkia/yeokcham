@@ -1,11 +1,21 @@
 # Experiment 102 — EVIDENCE-001 optional integration matrix
 
-The ordinary GitHub Actions matrix is the supported continuous evidence path:
+The checked-in GitHub Actions matrix is the intended continuous evidence path:
 Linux and macOS run the model, generated, golden, protocol-fault, and local
 receipt non-mutation suites. The separate Ubuntu `package-and-oci-smoke` job
 builds the development RPM/archive and runs the disposable OCI relay/proxy,
 backup-restore, scoped-access, and source-unchanged journey. It is deliberately
 a development test, not a published artifact or service claim.
+
+On 2026-09-05, GitHub reported that every job in
+[CI run 33896347742](https://github.com/gongahkia/yeokcham/actions/runs/33896347742)
+was not started because recent account payments had failed or the account
+spending limit needed to be increased. This is an external hosted-runner
+availability failure, not a passing skip or a test result. Local `make ci`
+passed on the same checkout, but it does not establish the hosted Linux/macOS
+matrix, a remote package/OCI smoke run, OIDC, artifact upload, or third-party
+availability. Re-enter that evidence only after account billing is restored and
+a current-revision run has completed with inspectable job logs and artifacts.
 
 `make workflow-ci-test` parses the checked-in workflow and refuses removal of
 the Linux/macOS matrix or the dedicated Docker/package-and-OCI smoke job;

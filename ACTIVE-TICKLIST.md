@@ -470,6 +470,11 @@ package, and OCI smoke suites. Full-capacity runs and human field observations
 are separate measurements, not routine CI tests.
 
 - [ ] CI matrix: Linux build/test/format/lint, golden fixture compatibility, package smoke, OCI smoke, protocol fault tests, and a documented optional integration matrix for unavailable hardware/software.
+  - Verification (2026-09-05): local `make ci` passed. GitHub-hosted jobs for
+    [run 33896347742](https://github.com/gongahkia/yeokcham/actions/runs/33896347742)
+    were not started because GitHub reported a failed account payment or
+    exhausted spending limit; hosted Linux/macOS and package/OCI evidence remains
+    incomplete until billing is restored and a current-revision run completes.
 - [ ] Security review: bearer-token lifetime/revocation, TLS proxy deployment, relay path traversal/object-ID/range/decompression limits, hook redaction, repair provenance, backup exposure, and image supply chain. Track findings as ticklist items; do not silently accept them.
 - [x] EVIDENCE-SEC-001: pin every third-party GitHub Action to the reviewed,
   full commit SHA and record its release tag/SHA mapping. GitHub Actions
