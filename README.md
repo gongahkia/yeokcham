@@ -10,8 +10,6 @@
   <p><strong>A model-first, local-first version-control system for small trusted teams.</strong></p>
 </div>
 
->>> EDIT BETWEEN HERE
-
 ## Rationale
 
 [`Git`](https://github.com/git/git) is legendary for a [reason](https://github.com/torvalds).
@@ -27,23 +25,11 @@ I wanted `Yeokcham` to be as joyful as possible. It [currently](https://github.c
 * Exact byte, mode, directory, and symlink snapshots, with saved checkpoints, pins, bounded retention, and journaled restore
 * Exact comparison of the working tree against the active draft's latest checkpoint
 * Explicit drafts, immutable shared revisions, unresolved decisions, and delivery milestones 
-* Inspectable local storage collection: review retained objects, quarantine
-  candidates, restore a quarantine, then explicitly purge it.
-* Offline directory packages, signed relay publication and bootstrap with
-  complete snapshot*closure verification; receiving never materialises a
-  working tree, while an explicit workspace action can materialise a verified
-  bootstrap basis.
-* Receiver-aware V2 relay object transfer: independently zstd-compressed,
-  resumable raw ranges with bounded concurrency and full canonical*byte and
-  identity checks before an immutable publish or staged download. V2 sessions
-  are relay*local temporary state, never history or source materialisation.
-* Explicit multi-administrator authority, device enrolment and revocation,
-  recovery packages, and local device custody through platform stores,
-  SSH*agent keys, or PKCS#11 tokens.
-* Read-only history views and optional external-LSP observations that stay
-  advisory, ephemeral, and unable to write, merge, or resolve source.
-
->>> AND HERE
+* Inspectable local storage collection
+* Offline directory packages, signed relay publication and bootstrap with complete snapshot & closure verification
+* Receiver-aware relay object transfer
+* Explicit multi-administrator authority, device enrolment and revocation with first-class support for recovery packages and local device custody 
+* Read-only history views *(and an optional LSP)*
 
 ## Usage
 
