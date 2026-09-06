@@ -28,6 +28,19 @@ module Hook = Yeokcham_v1_hook
 module Hook_runner = Yeokcham_v1_hook_runner
 module Hook_store = Yeokcham_v1_hook_store
 module Repair = Yeokcham_v1_repair
+module Output = V1_cli_output
+
+module Standard_printf = Printf
+
+module Printf = struct
+  include Standard_printf
+
+  let printf format = Standard_printf.ksprintf Output.print_string format
+end
+
+let print_endline = Output.print_endline
+let print_string = Output.print_string
+let prerr_endline = Output.print_error
 
 [@@@warning "-40-42"]
 
@@ -45,11 +58,30 @@ let requested_format () =
   in
   loop (raw_arguments ())
 
+let requested_color () =
+  let rec loop selected = function
+    | "--" :: _ -> Ok (Option.value selected ~default:Output.Auto)
+    | "--color" :: value :: rest -> (
+        match (selected, value) with
+        | Some _, _ -> Error "--color may be specified only once"
+        | None, "auto" -> loop (Some Output.Auto) rest
+        | None, "always" -> loop (Some Output.Always) rest
+        | None, "never" -> loop (Some Output.Never) rest
+        | None, _ -> Error "--color must be auto, always, or never")
+    | "--color" :: [] -> Error "--color requires auto, always, or never"
+    | _ :: rest -> loop selected rest
+    | [] -> Ok (Option.value selected ~default:Output.Auto)
+  in
+  loop None (raw_arguments ())
+
 let command_arguments () =
   let rec loop before_separator reversed = function
     | "--" :: rest when before_separator ->
         List.rev_append reversed ("--" :: rest)
     | "--format" :: ("text" | "json") :: rest when before_separator ->
+        loop true reversed rest
+    | "--color" :: ("auto" | "always" | "never") :: rest
+      when before_separator ->
         loop true reversed rest
     | argument :: rest -> loop before_separator (argument :: reversed) rest
     | [] -> List.rev reversed
@@ -86,11 +118,11 @@ let public_warnings : string list ref = ref []
 let record_warning warning =
   if requested_format () = Json_format then
     public_warnings := warning :: !public_warnings;
-  prerr_endline ("warning: " ^ warning)
+  Output.print_warning ("warning: " ^ warning)
 
 let print_json bytes =
   match !json_stdout_destination with
-  | None -> print_endline bytes
+  | None -> Output.print_raw_endline bytes
   | Some descriptor ->
       let output = Unix.out_channel_of_descr (Unix.dup descriptor) in
       Fun.protect
@@ -148,7 +180,8 @@ let run_generic_json command action =
     raise error
 
 let usage_text =
-  "usage:\n\
+  "usage: yeokcham [--color auto|always|never] COMMAND [OPTIONS]\n\n\
+   commands:\n\
   \  yeokcham init [--root PATH] --username NAME --draft ID --title TITLE\n\
   \  yeokcham join [--root PATH] --username NAME --draft ID --title TITLE \\\n\
   \     --device ID --from PATH --verify-phrase \"TWELVE WORDS\"\n\
@@ -1053,14 +1086,14 @@ let render_health_result format command result text =
   | Health_text -> text ()
   | Health_json ->
       Cli_data.success ~command ~result ~warnings:[]
-      |> Cli_data.encode |> print_endline
+      |> Cli_data.encode |> Output.print_raw_endline
 
 let fail_health format command code message =
   (match format with
   | Health_text -> ()
   | Health_json ->
       Cli_data.failure ~command ~warnings:[] ~error:{ Cli_data.code; message }
-      |> Cli_data.encode |> print_endline);
+      |> Cli_data.encode |> Output.print_raw_endline);
   prerr_endline message;
   exit 2
 
@@ -1120,9 +1153,9 @@ let health_refusal_code = function
 let current_unix_seconds () = Int64.of_float (Unix.gettimeofday ())
 
 let run_completion = function
-  | [ "bash" ] -> print_string (Cli_spec.render_completion Cli_spec.Bash)
-  | [ "zsh" ] -> print_string (Cli_spec.render_completion Cli_spec.Zsh)
-  | [ "fish" ] -> print_string (Cli_spec.render_completion Cli_spec.Fish)
+  | [ "bash" ] -> Output.print_raw_string (Cli_spec.render_completion Cli_spec.Bash)
+  | [ "zsh" ] -> Output.print_raw_string (Cli_spec.render_completion Cli_spec.Zsh)
+  | [ "fish" ] -> Output.print_raw_string (Cli_spec.render_completion Cli_spec.Fish)
   | _ -> usage ()
 
 let hook_event_for_path path =
@@ -3936,6 +3969,10 @@ let dispatch () =
   | _ -> usage ()
 
 let () =
+  (match requested_color () with
+  | Ok mode ->
+      Output.configure ~mode ~machine_output:(requested_format () = Json_format)
+  | Error message -> fail_with "invalid-invocation" message);
   match command_arguments () with
   | _ :: [ "--version" ] -> print_endline version_text
   | _ :: [ "--help" ] | _ :: [ "-h" ] -> print_help []

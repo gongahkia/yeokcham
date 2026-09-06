@@ -16,6 +16,7 @@ end
 module Make (Source : Source) = struct
   module Service = Yeokcham_v1_local_service
   module Model = Yeokcham_v1_model
+  module Output = V1_cli_output
   module Watcher = Source.Watcher
 
   let ignorable request =
@@ -38,16 +39,17 @@ module Make (Source : Source) = struct
     match Service.save ~root with
     | Ok (Service.Unchanged _) -> ()
     | Ok (Service.Saved status) ->
-        Printf.printf "save recorded\nsaved %s\n"
-          (Model.Snapshot_id.to_string status.Service.checkpoint);
+        Output.print_string
+          (Printf.sprintf "save recorded\nsaved %s\n"
+             (Model.Snapshot_id.to_string status.Service.checkpoint));
         flush stdout
-    | Error error -> prerr_endline (Service.error_to_string error)
+    | Error error -> Output.print_error (Service.error_to_string error)
 
   let rec start root =
     match Source.start ~root with
     | Ok watcher -> Ok watcher
     | Error error when Source.retry_start error ->
-        prerr_endline (Source.error_to_string error);
+        Output.print_error (Source.error_to_string error);
         Unix.sleep 1;
         start root
     | Error error -> Error error
@@ -60,7 +62,7 @@ module Make (Source : Source) = struct
       ->
         `Restart
     | Error error ->
-        prerr_endline (Source.error_to_string error);
+        Output.print_error (Source.error_to_string error);
         Unix.sleep 1;
         wait_for_request root watcher window
     | Ok None ->
@@ -99,13 +101,13 @@ module Make (Source : Source) = struct
   let run ~root =
     match start root with
     | Error error ->
-        prerr_endline (Source.error_to_string error);
+        Output.print_error (Source.error_to_string error);
         exit 2
     | Ok watcher -> (
         let result = run_watcher root watcher in
         match result with
         | Ok () -> ()
         | Error error ->
-            prerr_endline (Source.error_to_string error);
+            Output.print_error (Source.error_to_string error);
             exit 2)
 end

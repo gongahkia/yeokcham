@@ -4,6 +4,7 @@ module Model = Yeokcham_v1_model
 module Service = Yeokcham_v1_local_service
 module Sync = Yeokcham_v1_sync
 module Watcher = Yeokcham_watcher
+module Output = V1_cli_output
 
 let runtime_environment = "XDG_RUNTIME_DIR"
 let runtime_directory_name = "yeokcham-v1"
@@ -41,7 +42,7 @@ type runtime_state = {
 }
 
 let fail message =
-  prerr_endline message;
+  Output.print_error message;
   exit 2
 
 let hex_of_digest digest =
@@ -611,7 +612,7 @@ let start ~root =
         ignore (Unix.waitpid [] launcher);
         wait_until_ready paths
         |> Result.fold
-             ~ok:(fun () -> print_endline "runtime started")
+             ~ok:(fun () -> Output.print_endline "runtime started")
              ~error:(fun detail ->
                let detail =
                  match read_limited paths.log with
@@ -623,15 +624,17 @@ let start ~root =
 let status ~root =
   let paths = paths ~root |> Result.fold ~ok:Fun.id ~error:fail in
   match connect paths "status" with
-  | Ok response -> print_endline response
+  | Ok response -> Output.print_endline response
   | Error detail -> (
       match read_limited paths.state with
-      | Ok state -> Printf.printf "runtime unreachable %s\n%s" detail state
+      | Ok state ->
+          Output.print_string
+            (Printf.sprintf "runtime unreachable %s\n%s" detail state)
       | Error _ -> fail "V1 runtime is not running")
 
 let stop ~root =
   let paths = paths ~root |> Result.fold ~ok:Fun.id ~error:fail in
-  connect paths "stop" |> Result.fold ~ok:print_endline ~error:fail
+  connect paths "stop" |> Result.fold ~ok:Output.print_endline ~error:fail
 
 let sync ~root ~remote =
   let paths = paths ~root |> Result.fold ~ok:Fun.id ~error:fail in
@@ -641,5 +644,5 @@ let sync ~root ~remote =
        ~ok:(fun response ->
          if String.starts_with ~prefix:(protocol ^ " error ") response then
            fail response
-         else print_endline response)
+         else Output.print_endline response)
        ~error:fail

@@ -1,5 +1,7 @@
+module Output = V1_cli_output
+
 let unavailable () =
-  prerr_endline "V1 background runtime is only supported on Linux";
+  Output.print_error "V1 background runtime is only supported on Linux";
   exit 2
 
 let start ~root:_ = unavailable ()

@@ -26,6 +26,7 @@ let option ?(repeatable = false) option_name option_value =
 
 let root = option "--root" Path
 let format = option "--format" (Choice [ "text"; "json" ])
+let color = option "--color" (Choice [ "auto"; "always"; "never" ])
 let identifier name = option name Identifier
 let path name = option name Path
 let flag name = option name Flag
@@ -42,6 +43,14 @@ let command ?(options = [ root ]) ?(hook = false) command_path =
         options
     then options
     else options @ [ format ]
+  in
+  let command_options =
+    if
+      List.exists
+        (fun option -> String.equal option.option_name "--color")
+        command_options
+    then command_options
+    else command_options @ [ color ]
   in
   { command_path; command_options; command_hook_eligible = hook }
 
