@@ -30,7 +30,14 @@ docker run --rm "$image" /bin/sh -ec '
   test -f /workspace/yeokcham/note.txt
   test "$(cat /workspace/yeokcham/note.txt)" = "first note"
   test -d /workspace/recovered
-  yeokcham --version | grep -F "yeokcham V1 source build" >/dev/null
+  escape=$(printf "\\033[")
+  plain=$(yeokcham --version)
+  case "$plain" in *"$escape"*) exit 1 ;; esac
+  printf "%s\\n" "$plain" | grep -F "yeokcham V1 source build" >/dev/null
+  forced=$(yeokcham --color always --version)
+  case "$forced" in *"$escape"*) ;; *) exit 1 ;; esac
+  completion=$(yeokcham completion bash --color always)
+  case "$completion" in *"$escape"*) exit 1 ;; esac
   initial=$(yeokcham init --root /workspace/yeokcham --username alice \
     --draft first-task --title "first task" | sed -n "s/^saved //p" | sed -n "1p")
   test "${#initial}" = 64
@@ -44,6 +51,8 @@ docker run --rm "$image" /bin/sh -ec '
   test "$(cat /workspace/recovered/note.txt)" = "$expected"
   test "$(tail -n 1 /workspace/yeokcham/note.txt)" = "unsaved line"
   yeokcham verify --root /workspace/yeokcham >/dev/null
+  json=$(yeokcham verify --root /workspace/yeokcham --format json --color always)
+  case "$json" in *"$escape"*) exit 1 ;; esac
 '
 
 [ "$(git status --porcelain)" = "$source_status" ] \

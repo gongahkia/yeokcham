@@ -43,26 +43,30 @@ let completion_is_deterministic_and_complete () =
     "Fish has declarative commands" true
     (String.contains (Spec.render_completion Spec.Fish) 'c')
 
-let every_command_accepts_the_shared_format_option () =
+let every_command_accepts_the_shared_output_options () =
+  let require_shared_option name expected_values command =
+    match
+      List.find_opt
+        (fun option -> String.equal option.Spec.option_name name)
+        command.Spec.command_options
+    with
+    | Some option ->
+        if
+          option.Spec.option_repeatable
+          || option.Spec.option_value <> Spec.Choice expected_values
+        then
+          Alcotest.fail
+            ("command has an invalid shared " ^ name ^ " option: "
+            ^ String.concat " " command.Spec.command_path)
+    | None ->
+        Alcotest.fail
+          ("command lacks the shared " ^ name ^ " option: "
+          ^ String.concat " " command.Spec.command_path)
+  in
   List.iter
     (fun command ->
-      match
-        List.find_opt
-          (fun option -> String.equal option.Spec.option_name "--format")
-          command.Spec.command_options
-      with
-      | Some option ->
-          if
-            option.Spec.option_repeatable
-            || option.Spec.option_value <> Spec.Choice [ "text"; "json" ]
-          then
-            Alcotest.fail
-              ("command has an invalid shared format option: "
-              ^ String.concat " " command.Spec.command_path)
-      | None ->
-          Alcotest.fail
-            ("command lacks the shared format option: "
-            ^ String.concat " " command.Spec.command_path))
+      require_shared_option "--format" [ "text"; "json" ] command;
+      require_shared_option "--color" [ "auto"; "always"; "never" ] command)
     Spec.commands
 
 let receipt_and_diagnostic_paths_are_never_hook_eligible () =
@@ -108,8 +112,8 @@ let () =
             command_paths_are_unique_and_valid;
           Alcotest.test_case "completion is deterministic and complete" `Quick
             completion_is_deterministic_and_complete;
-          Alcotest.test_case "every command accepts the shared format" `Quick
-            every_command_accepts_the_shared_format_option;
+          Alcotest.test_case "every command accepts shared output options" `Quick
+            every_command_accepts_the_shared_output_options;
           Alcotest.test_case "receipt and diagnostic paths exclude hooks" `Quick
             receipt_and_diagnostic_paths_are_never_hook_eligible;
         ] );
