@@ -85,3 +85,7 @@ Nerd documentation lives here.
 ## Reference
 
 The creation of `Yeokcham` was heavily inspired by [this episode](https://youtu.be/a1LhEkCjERE?si=5eq2WN5h8TpfCfJ7) of [TheStandupPod](https://www.youtube.com/@TheStandupPod) where [Casey](https://github.com/cmuratori) covers the internal VCS tool his company uses.
+
+<div align="center">
+  <img width="750" alt="image" src="https://github.com/user-attachments/assets/66515367-31de-4acb-b58b-76a47c707460" />
+</div>
