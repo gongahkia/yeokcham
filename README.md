@@ -1,3 +1,8 @@
+[![](https://img.shields.io/badge/yeokcham_1.0-passing-green)](https://github.com/gongahkia/yeokcham/releases/tag/1.0)
+[![](https://github.com/gongahkia/yeokcham/actions/workflows/ci.yml/badge.svg)](https://github.com/gongahkia/yeokcham/actions/workflows/ci.yml)
+[![](https://github.com/gongahkia/yeokcham/actions/workflows/development-client-artifact.yml/badge.svg)](https://github.com/gongahkia/yeokcham/actions/workflows/development-client-artifact.yml)
+[![](https://github.com/gongahkia/yeokcham/actions/workflows/relay-artifact.yml/badge.svg)](https://github.com/gongahkia/yeokcham/actions/workflows/relay-artifact.yml)
+
 # `Yeokcham`
 
 <div align="center">
@@ -7,21 +12,17 @@
 
 ## Rationale
 
-... Blah Blah to update
-
-Yeokcham separates automatic scratch recovery, explicit shared changes,
+`Yeokcham` separates automatic scratch recovery, explicit shared changes,
 unresolved decisions, and delivery history. It is deliberately conservative:
 a filesystem event, conflict, device name, or CI result is never treated as
 user intent.
 
 ## Features
 
-`Yeokcham` was designed to be as joyful as possible. It [currently](https://github.com/gongahkia/yeokcham/issues) has the below capabilities.
+I wanted `Yeokcham` to be as joyful as possible. It [currently](https://github.com/gongahkia/yeokcham/issues) has the below capabilities.
 
-* Exact byte, mode, directory, and symlink snapshots, with saved checkpoints,
-  pins, bounded retention, and journaled restore.
-* `changes`: a stable, exact comparison of the working tree against the active
-  draft's latest checkpoint, without guessing textual intent.
+* Exact byte, mode, directory, and symlink snapshots, with saved checkpoints, pins, bounded retention, and journaled restore.
+* Changes: a stable, exact comparison of the working tree against the active draft's latest checkpoint, without guessing textual intent.
 * Explicit drafts, immutable shared revisions, unresolved decisions, and
   delivery milestones instead of one synthetic commit history.
 * Inspectable local storage collection: review retained objects, quarantine
@@ -42,51 +43,49 @@ user intent.
 
 ## Usage
 
-After building the source checkout as described in the
-[installation guide](docs/INSTALL.md), create an empty directory and start a
-draft. `init` displays a 24-word recovery mnemonic exactly once; record it
-offline before continuing.
+> [!NOTE]  
+> For installation instructions, refer to [INSTALL.md](docs/INSTALL.md).
 
-```sh
-YEOKCHAM="$PWD/_build/default/bin/yeokcham_v1.exe"
+1. Optionally bind Yeokcham to its installed binary executable.
 
-mkdir first-task && cd first-task
-"$YEOKCHAM" init --username alice --draft first-task --title "first task"
-
-printf 'hello\n' > note.txt
-"$YEOKCHAM" changes
-"$YEOKCHAM" save
-"$YEOKCHAM" timeline
+```console
+$ YEOKCHAM="$PWD/_build/default/bin/yeokcham_v1.exe"
 ```
 
-This creates local scratch and an explicit saved checkpoint; it does not share
-anything. The [local recovery tutorial](docs/GETTING_STARTED.md) is the
-supported first-run demo. It works in a temporary directory, inspects the
-saved-versus-current state, and restores a checkpoint into a separate
-destination before attempting in-place recovery.
+2. To get started, first run `init` inside a folder to create a new Yeokcham project.
 
-Use `yeokcham --help`, `yeokcham help COMMAND`, and
-`yeokcham COMMAND --help` to explore the implemented surface. `--version`
-reports an unreleased V1 source build rather than implying a published release.
+3. A 24-word recovery mnemonic will be displayed exactly once, please record it offline before continuing.
+
+```console
+$ mkdir first-task && cd first-task
+$ "$YEOKCHAM" init --username alice --draft first-task --title "first task"
+$ printf 'hello\n' > note.txt
+```
+
+4. Next, run any of the below commands to interact with Yeokcham's functionality.
+
+```console
+$ "$YEOKCHAM" changes # reflects all repo changes
+$ "$YEOKCHAM" save # creates a local scratch & explicit save checkpoint
+$ "$YEOKCHAM" timeline # displays yeokcham graph of all edits and saves 
+```
+
+5. For a more detailed tutorial, run `yeokcham --help` or refer to [YEOKCHAM_GUIDE.md](./docs/YEOKCHAM_GUIDE.md).
 
 ## Other docs
 
-* [Installation and support](docs/INSTALL.md) — supported source-build and
-  platform paths.
-* [Yeokcham simple guide](docs/YEOKCHAM_GUIDE.md) — the shortest path from
-  initialization to safe recovery and explicit sharing.
-* [Local recovery tutorial](docs/GETTING_STARTED.md) — the runnable first-use
-  demo.
-* [Concepts glossary](docs/CONCEPTS.md) — scratch, drafts, revisions,
-  decisions, delivery, and custody.
-* [Collaboration and relay guide](docs/COLLABORATION.md) — packages, bootstrap,
-  synchronization, and their trust model.
-* [Troubleshooting](docs/TROUBLESHOOTING.md) — recovery and operational
-  failures.
+General docs live here.
+
+* [Installation and support](docs/INSTALL.md) for the supported source-build and platform paths
+* [Yeokcham simple guide](docs/YEOKCHAM_GUIDE.md) for the shortest path from initialization to safe recovery and explicit sharing
+* [Local recovery tutorial](docs/GETTING_STARTED.md) for an even shorter version of the simple guide
+* [Concepts glossary](docs/CONCEPTS.md) for the higher-level ideas behind `Yeokcham`'s scratch, drafts, revisions, decisions, delivery, and custody.
+* [Collaboration and relay guide](docs/COLLABORATION.md) for small teams planning to use `Yeokcham` for collaboration and sync
+* [Troubleshooting](docs/TROUBLESHOOTING.md) for recovery and operational failures
 
 ## Nerd stuff
 
-For the nerds, `Yeokcham`'s formal model and implementation structure are stored here.
+Nerd documentation lives here.
 
-* [`FORMAL_MODEL.md`](docs/FORMAL_MODEL.md) 
-* [`ARCHITECTURE.md`](docs/ARCHITECTURE.md)
+* [`FORMAL_MODEL.md`](docs/FORMAL_MODEL.md) for `Yeokcham`'s formal model and philosophical grounding
+* [`ARCHITECTURE.md`](docs/ARCHITECTURE.md) for `Yeokcham`'s implementation structure and the engineering thinking behind it.
