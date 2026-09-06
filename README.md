@@ -1,4 +1,4 @@
-[![](https://img.shields.io/badge/yeokcham_1.0-passing-green)](https://github.com/gongahkia/yeokcham/releases/tag/1.0)
+[![](https://img.shields.io/badge/yeokcham_1.0.0-passing-green)](https://github.com/gongahkia/yeokcham/releases/tag/1.0.0)
 [![](https://github.com/gongahkia/yeokcham/actions/workflows/ci.yml/badge.svg)](https://github.com/gongahkia/yeokcham/actions/workflows/ci.yml)
 [![](https://github.com/gongahkia/yeokcham/actions/workflows/development-client-artifact.yml/badge.svg)](https://github.com/gongahkia/yeokcham/actions/workflows/development-client-artifact.yml)
 [![](https://github.com/gongahkia/yeokcham/actions/workflows/relay-artifact.yml/badge.svg)](https://github.com/gongahkia/yeokcham/actions/workflows/relay-artifact.yml)
