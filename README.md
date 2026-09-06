@@ -10,6 +10,8 @@
   <p><strong>A model-first, local-first version-control system for small trusted teams.</strong></p>
 </div>
 
+>>> EDIT BETWEEN HERE
+
 ## Rationale
 
 `Yeokcham` separates automatic scratch recovery, explicit shared changes,
@@ -41,6 +43,8 @@ I wanted `Yeokcham` to be as joyful as possible. It [currently](https://github.c
 * Read-only history views and optional external-LSP observations that stay
   advisory, ephemeral, and unable to write, merge, or resolve source.
 
+>>> AND HERE
+
 ## Usage
 
 > [!NOTE]  
@@ -70,7 +74,9 @@ $ "$YEOKCHAM" save # creates a local scratch & explicit save checkpoint
 $ "$YEOKCHAM" timeline # displays yeokcham graph of all edits and saves 
 ```
 
-5. For a more detailed tutorial, run `yeokcham --help` or refer to [YEOKCHAM_GUIDE.md](./docs/YEOKCHAM_GUIDE.md).
+5. For a more detailed tutorial, run `yeokcham --help` or refer to [GETTING_STARTED.md](./docs/GETTING_STARTED.md).
+
+6. For the fastest path to getting started with Yeokcham, see [YEOKCHAM_GUIDE.md](./docs/YEOKCHAM_GUIDE.md).
 
 ## Other docs
 
