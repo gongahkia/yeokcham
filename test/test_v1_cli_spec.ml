@@ -112,8 +112,8 @@ let () =
             command_paths_are_unique_and_valid;
           Alcotest.test_case "completion is deterministic and complete" `Quick
             completion_is_deterministic_and_complete;
-          Alcotest.test_case "every command accepts shared output options" `Quick
-            every_command_accepts_the_shared_output_options;
+          Alcotest.test_case "every command accepts shared output options"
+            `Quick every_command_accepts_the_shared_output_options;
           Alcotest.test_case "receipt and diagnostic paths exclude hooks" `Quick
             receipt_and_diagnostic_paths_are_never_hook_eligible;
         ] );

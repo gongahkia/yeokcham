@@ -86,7 +86,6 @@ let contains output needle =
   needle_length > 0 && find 0
 
 let ansi_escape = "\027["
-
 let has_ansi_escape output = contains output ansi_escape
 
 let with_environment name value run =
@@ -428,29 +427,29 @@ let help_version_and_invalid_invocation_are_distinct () =
 let color_controls_human_output_without_changing_machine_output () =
   let output, errors, status = run [ "--color"; "always"; "--help" ] in
   require_success "forced help colour" status errors;
-  Alcotest.(check bool) "forced help has ANSI output" true
-    (has_ansi_escape output);
+  Alcotest.(check bool)
+    "forced help has ANSI output" true (has_ansi_escape output);
   let output, errors, status = run [ "--help" ] in
   require_success "automatic pipe help" status errors;
-  Alcotest.(check bool) "automatic pipe help stays plain" false
-    (has_ansi_escape output);
+  Alcotest.(check bool)
+    "automatic pipe help stays plain" false (has_ansi_escape output);
   let output, errors, status = run [ "--color"; "never"; "--help" ] in
   require_success "disabled help colour" status errors;
-  Alcotest.(check bool) "disabled help stays plain" false
-    (has_ansi_escape output);
+  Alcotest.(check bool)
+    "disabled help stays plain" false (has_ansi_escape output);
   let output, errors, status =
     with_environment "NO_COLOR" "1" (fun () ->
         run [ "--color"; "always"; "--version" ])
   in
   require_success "forced colour overrides NO_COLOR" status errors;
-  Alcotest.(check bool) "forced version has ANSI output" true
-    (has_ansi_escape output);
+  Alcotest.(check bool)
+    "forced version has ANSI output" true (has_ansi_escape output);
   let output, errors, status =
     run [ "completion"; "bash"; "--color"; "always" ]
   in
   require_success "forced completion colour" status errors;
-  Alcotest.(check bool) "completion remains raw shell source" false
-    (has_ansi_escape output);
+  Alcotest.(check bool)
+    "completion remains raw shell source" false (has_ansi_escape output);
   let output, errors, status = run [ "not-a-command"; "--color"; "always" ] in
   (match status with
   | Unix.WEXITED 2 -> ()
@@ -458,10 +457,10 @@ let color_controls_human_output_without_changing_machine_output () =
       Alcotest.failf "forced colour failure exited %d rather than 2" code
   | Unix.WSIGNALED signal | Unix.WSTOPPED signal ->
       Alcotest.failf "forced colour failure ended by signal %d" signal);
-  Alcotest.(check bool) "forced failure has ANSI diagnostics" true
-    (has_ansi_escape errors);
-  Alcotest.(check bool) "forced failure has no ANSI stdout" false
-    (has_ansi_escape output)
+  Alcotest.(check bool)
+    "forced failure has ANSI diagnostics" true (has_ansi_escape errors);
+  Alcotest.(check bool)
+    "forced failure has no ANSI stdout" false (has_ansi_escape output)
 
 let color_rejects_invalid_global_options () =
   let output, errors, status = run [ "--color"; "bright"; "--version" ] in
@@ -471,7 +470,8 @@ let color_rejects_invalid_global_options () =
       Alcotest.failf "invalid colour exited %d rather than 2" code
   | Unix.WSIGNALED signal | Unix.WSTOPPED signal ->
       Alcotest.failf "invalid colour ended by signal %d" signal);
-  Alcotest.(check bool) "invalid colour does not write stdout" false
+  Alcotest.(check bool)
+    "invalid colour does not write stdout" false
     (String.length output > 0);
   expect_output_contains "invalid colour explains accepted values"
     "--color must be auto, always, or never" errors
@@ -1958,8 +1958,8 @@ let generic_json_format_is_enveloped_and_preserves_error_channels () =
         "JSON init names the stable command" "init"
         (Cli_data.command envelope);
       Alcotest.(check bool) "JSON init succeeds" true (Cli_data.ok envelope);
-      Alcotest.(check bool) "JSON init remains ANSI-free" false
-        (has_ansi_escape output);
+      Alcotest.(check bool)
+        "JSON init remains ANSI-free" false (has_ansi_escape output);
       Alcotest.(check bool)
         "JSON init does not mix text stdout" false (contains output "saved ");
       let output, errors, status =
@@ -1999,8 +1999,8 @@ let () =
           Alcotest.test_case "help, version, and invalid invocation" `Quick
             help_version_and_invalid_invocation_are_distinct;
           Alcotest.test_case
-            "colour controls human output without changing machine output" `Quick
-            color_controls_human_output_without_changing_machine_output;
+            "colour controls human output without changing machine output"
+            `Quick color_controls_human_output_without_changing_machine_output;
           Alcotest.test_case "colour rejects invalid global options" `Quick
             color_rejects_invalid_global_options;
           Alcotest.test_case "every documented help path exits zero" `Quick

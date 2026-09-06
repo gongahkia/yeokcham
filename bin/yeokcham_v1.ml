@@ -29,7 +29,6 @@ module Hook_runner = Yeokcham_v1_hook_runner
 module Hook_store = Yeokcham_v1_hook_store
 module Repair = Yeokcham_v1_repair
 module Output = V1_cli_output
-
 module Standard_printf = Printf
 
 module Printf = struct
@@ -80,8 +79,8 @@ let command_arguments () =
         List.rev_append reversed ("--" :: rest)
     | "--format" :: ("text" | "json") :: rest when before_separator ->
         loop true reversed rest
-    | "--color" :: ("auto" | "always" | "never") :: rest
-      when before_separator ->
+    | "--color" :: ("auto" | "always" | "never") :: rest when before_separator
+      ->
         loop true reversed rest
     | argument :: rest -> loop before_separator (argument :: reversed) rest
     | [] -> List.rev reversed
@@ -1153,9 +1152,12 @@ let health_refusal_code = function
 let current_unix_seconds () = Int64.of_float (Unix.gettimeofday ())
 
 let run_completion = function
-  | [ "bash" ] -> Output.print_raw_string (Cli_spec.render_completion Cli_spec.Bash)
-  | [ "zsh" ] -> Output.print_raw_string (Cli_spec.render_completion Cli_spec.Zsh)
-  | [ "fish" ] -> Output.print_raw_string (Cli_spec.render_completion Cli_spec.Fish)
+  | [ "bash" ] ->
+      Output.print_raw_string (Cli_spec.render_completion Cli_spec.Bash)
+  | [ "zsh" ] ->
+      Output.print_raw_string (Cli_spec.render_completion Cli_spec.Zsh)
+  | [ "fish" ] ->
+      Output.print_raw_string (Cli_spec.render_completion Cli_spec.Fish)
   | _ -> usage ()
 
 let hook_event_for_path path =

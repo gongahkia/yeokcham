@@ -1,5 +1,4 @@
 type color_mode = Auto | Always | Never
-
 type stream = Stdout | Stderr
 
 let mode = ref Auto
@@ -22,11 +21,11 @@ let no_color_requested () =
 
 let usable_terminal descriptor =
   let terminal =
-    match Sys.getenv_opt "TERM" with Some "dumb" -> false | Some _ | None -> true
+    match Sys.getenv_opt "TERM" with
+    | Some "dumb" -> false
+    | Some _ | None -> true
   in
-  terminal
-  &&
-  try Unix.isatty descriptor with Unix.Unix_error _ -> false
+  terminal && try Unix.isatty descriptor with Unix.Unix_error _ -> false
 
 let color_enabled stream =
   if !machine_output then false
@@ -35,7 +34,7 @@ let color_enabled stream =
     | Never -> false
     | Always -> true
     | Auto ->
-        not (no_color_requested ())
+        (not (no_color_requested ()))
         && usable_terminal
              (match stream with Stdout -> Unix.stdout | Stderr -> Unix.stderr)
 
@@ -51,7 +50,8 @@ let first_token_end value =
 
 let style_line value =
   if String.length value = 0 then value
-  else if String.starts_with ~prefix:"usage:" value then styled (bold ^ cyan) value
+  else if String.starts_with ~prefix:"usage:" value then
+    styled (bold ^ cyan) value
   else
     let token_end = first_token_end value in
     let token = String.sub value 0 token_end in
@@ -94,7 +94,8 @@ let style_line value =
     styled (bold ^ color) token ^ rest
 
 let style_text value =
-  value |> String.split_on_char '\n' |> List.map style_line |> String.concat "\n"
+  value |> String.split_on_char '\n' |> List.map style_line
+  |> String.concat "\n"
 
 let print_raw_string value = Stdlib.print_string value
 let print_raw_endline value = Stdlib.print_endline value
