@@ -14,19 +14,19 @@
 
 ## Rationale
 
-`Yeokcham` separates automatic scratch recovery, explicit shared changes,
-unresolved decisions, and delivery history. It is deliberately conservative:
-a filesystem event, conflict, device name, or CI result is never treated as
-user intent.
+[`Git`](https://github.com/git/git) is legendary for a [reason](https://github.com/torvalds).
+
+In a bid to *(attempt to)* learn how to make a [VCS](https://deepsource.com/glossary/version-control-system), I tried to build `Yeokcham` on one simple premise - that the singular `git commit` overly simplifies the varied granular states *'informal submissions of work'* can take in real projects.
+
+`Yeokcham` separates automatic scratch recovery, explicit shared changes, unresolved decisions, and delivery history and [***never blocks***](#reference) by being deliberately conservative.
 
 ## Features
 
 I wanted `Yeokcham` to be as joyful as possible. It [currently](https://github.com/gongahkia/yeokcham/issues) has the below capabilities.
 
-* Exact byte, mode, directory, and symlink snapshots, with saved checkpoints, pins, bounded retention, and journaled restore.
-* Changes: a stable, exact comparison of the working tree against the active draft's latest checkpoint, without guessing textual intent.
-* Explicit drafts, immutable shared revisions, unresolved decisions, and
-  delivery milestones instead of one synthetic commit history.
+* Exact byte, mode, directory, and symlink snapshots, with saved checkpoints, pins, bounded retention, and journaled restore
+* Exact comparison of the working tree against the active draft's latest checkpoint
+* Explicit drafts, immutable shared revisions, unresolved decisions, and delivery milestones 
 * Inspectable local storage collection: review retained objects, quarantine
   candidates, restore a quarantine, then explicitly purge it.
 * Offline directory packages, signed relay publication and bootstrap with
@@ -95,3 +95,7 @@ Nerd documentation lives here.
 
 * [`FORMAL_MODEL.md`](docs/FORMAL_MODEL.md) for `Yeokcham`'s formal model and philosophical grounding
 * [`ARCHITECTURE.md`](docs/ARCHITECTURE.md) for `Yeokcham`'s implementation structure and the engineering thinking behind it.
+
+## Reference
+
+The creation of `Yeokcham` was heavily inspired by this episode of

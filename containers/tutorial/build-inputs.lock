@@ -1,0 +1,9 @@
+schema=1
+architecture=linux/amd64
+ocaml=5.5.0
+dune=3.24.2
+builder=docker.io/ocaml/opam:debian-12-ocaml-5.5@sha256:b2b7ff41302eae75c20df6f052513d0a13fb440c43a681f632062f056d01421a
+runtime=docker.io/library/debian:12-slim@sha256:5ae3c39ebd15e229dcedd5cee596b2497182493d41ff162e824ba13fc1b2b867
+build_packages=build-essential,libsecret-1-dev,libzstd-dev,pkg-config
+runtime_packages=dbus-user-session,gnome-keyring,libsecret-tools,libzstd1
+opam_lock=yeokcham.opam.locked
