@@ -44,13 +44,15 @@ temporary_directory=$(mktemp -d "${TMPDIR:-/tmp}/yeokcham-release-verify-test.XX
   || fail "cannot create disposable test directory"
 cleanup() {
   rm -rf "$temporary_directory"
+  [ -z "${gpg_home:-}" ] || rm -rf "$gpg_home"
 }
 trap cleanup EXIT HUP INT TERM
 
 repository="$temporary_directory/repository"
-gpg_home="$temporary_directory/gnupg"
+gpg_home=$(mktemp -d /tmp/yeokcham-release-verify-gpg.XXXXXX) \
+  || fail "cannot create disposable GnuPG directory"
 archive="$temporary_directory/yeokcham-v1.tar.gz"
-mkdir -m 700 "$repository" "$gpg_home"
+mkdir -m 700 "$repository"
 
 export GNUPGHOME="$gpg_home"
 git init -q "$repository"
