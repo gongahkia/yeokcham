@@ -37,7 +37,7 @@ fail() {
 
 trap cleanup EXIT HUP INT TERM
 
-for tool in docker openssl curl sha256sum awk mktemp timeout sed tr grep git socat; do
+for tool in docker openssl curl sha256sum awk mktemp timeout sed tr grep git script; do
   command -v "$tool" >/dev/null 2>&1 || fail "missing required command: $tool"
 done
 [ -x "$client" ] || fail "missing host V1 CLI; run make build first"
@@ -206,11 +206,9 @@ export YEOKCHAM_RELAY_TEST_REPOSITORY="$project"
 export YEOKCHAM_RELAY_TEST_BASIS="$basis"
 export YEOKCHAM_RELAY_TEST_DEVICE="$source_device"
 export YEOKCHAM_RELAY_TEST_PHRASE="$phrase"
-bootstrap_address="EXEC:\"/bin/sh $repo_root/test/relay_bootstrap_pty.sh\",pty,echo=0"
-bootstrap_output=$(
-  (sleep 1; printf '%s\n' "$secret"; sleep 1) \
-    | socat - "$bootstrap_address"
-)
+bootstrap_command="/bin/sh $repo_root/test/relay_bootstrap_pty.sh"
+bootstrap_output=$(printf '%s\n' "$secret" \
+  | script --quiet --return --command "$bootstrap_command" /dev/null)
 case "$bootstrap_output" in
   *"bootstrap verified $basis; no working-tree materialization occurred"*) ;;
   *) fail "restored relay bootstrap did not report receipt without materialization" ;;
@@ -226,8 +224,8 @@ esac
 
 export YEOKCHAM_RELAY_TEST_TARGET_ROOT="$activation_root"
 activation_bootstrap_output=$( \
-  (sleep 1; printf '%s\n' "$secret"; sleep 1) \
-    | socat - "$bootstrap_address" \
+  printf '%s\n' "$secret" \
+    | script --quiet --return --command "$bootstrap_command" /dev/null \
 )
 case "$activation_bootstrap_output" in
   *"bootstrap verified $basis; no working-tree materialization occurred"*) ;;

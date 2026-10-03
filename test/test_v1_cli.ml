@@ -1765,8 +1765,8 @@ let executable_on_path name =
         let directory = if String.equal directory "" then "." else directory in
         let candidate = Filename.concat directory name in
         try
-           Unix.access candidate [ Unix.X_OK ];
-           candidate
+          Unix.access candidate [ Unix.X_OK ];
+          candidate
         with Unix.Unix_error _ -> find rest)
   in
   find directories

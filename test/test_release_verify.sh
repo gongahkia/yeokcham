@@ -61,7 +61,7 @@ git -C "$repository" add README
 git -C "$repository" commit -q -m initial
 commit=$(git -C "$repository" rev-parse HEAD)
 
-gpg --batch --pinentry-mode loopback --passphrase '' \
+gpg --batch --yes --pinentry-mode loopback --passphrase '' \
   --quick-generate-key "Yeokcham Release Fixture <release-fixture@example.invalid>" \
   ed25519 sign 0 >/dev/null 2>&1
 fingerprint=$(gpg --batch --with-colons --list-keys \
@@ -74,13 +74,13 @@ git -C "$repository" -c user.signingkey="$fingerprint" \
 git -C "$repository" tag lightweight-test
 git -C "$repository" tag -a -m "unsigned fixture tag" unsigned-test
 
-gpg --batch --pinentry-mode loopback --passphrase '' \
+gpg --batch --yes --pinentry-mode loopback --passphrase '' \
   --quick-generate-key "Yeokcham Subkey Fixture <subkey-fixture@example.invalid>" \
   ed25519 cert 0 >/dev/null 2>&1
 subkey_primary=$(gpg --batch --with-colons --list-keys \
   "subkey-fixture@example.invalid" 2>/dev/null \
   | awk -F: '$1 == "fpr" { print $10; exit }')
-gpg --batch --pinentry-mode loopback --passphrase '' \
+gpg --batch --yes --pinentry-mode loopback --passphrase '' \
   --quick-add-key "$subkey_primary" ed25519 sign 0 >/dev/null 2>&1
 subkey_signing=$(gpg --batch --with-colons --list-keys \
   "subkey-fixture@example.invalid" 2>/dev/null \
