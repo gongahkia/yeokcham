@@ -25,6 +25,10 @@ for expected in \
     || fail "CI workflow is missing: $expected"
 done
 
+sed -n '/^  package-and-oci-smoke:/,$p' "$workflow" \
+  | grep -F 'sudo apt-get update && sudo apt-get install --yes --no-install-recommends socat' >/dev/null \
+  || fail 'package-and-oci-smoke does not install socat'
+
 if grep -F 'ARTIFACT_DIRECTORY: ${{ runner.temp }}' "$development_artifact_workflow" >/dev/null; then
   fail 'development artifact workflow uses runner.temp in job-level env'
 fi
