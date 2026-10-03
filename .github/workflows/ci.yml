@@ -17,10 +17,12 @@ jobs:
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
       - if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install --yes --no-install-recommends gnupg openssl socat softhsm2
+        run: sudo apt-get update && sudo apt-get install --yes --no-install-recommends gnupg openssl socat softhsm2 zsh fish
       - if: runner.os == 'macOS'
         run: |
-          brew install gnupg openssl socat softhsm
+          brew install gnupg openssl socat softhsm zsh fish
+          echo "$(brew --prefix zsh)/bin" >> "$GITHUB_PATH"
+          echo "$(brew --prefix fish)/bin" >> "$GITHUB_PATH"
           echo "YEOKCHAM_V1_TEST_OPENSSL=$(brew --prefix openssl)/bin/openssl" >> "$GITHUB_ENV"
           echo "YEOKCHAM_V1_TEST_SOCAT=$(brew --prefix socat)/bin/socat" >> "$GITHUB_ENV"
       - uses: ocaml/setup-ocaml@e89b2ded52a6e13f50162220cf5fe47290162032 # v3.8.0

@@ -1753,6 +1753,24 @@ let health_repair_cli_requires_an_explicit_plan_and_approval () =
            (Filename.concat root "main.ml")
            In_channel.input_all))
 
+let executable_on_path name =
+  let directories =
+    match Sys.getenv_opt "PATH" with
+    | Some path -> String.split_on_char ':' path
+    | None -> []
+  in
+  let rec find = function
+    | [] -> Alcotest.failf "cannot find %s on PATH" name
+    | directory :: rest ->
+        let directory = if String.equal directory "" then "." else directory in
+        let candidate = Filename.concat directory name in
+        (try
+           Unix.access candidate [ Unix.X_OK ];
+           candidate
+         with Unix.Unix_error _ -> find rest)
+  in
+  find directories
+
 let completion_scripts_are_static_and_parse_in_each_shell () =
   with_directory "yeokcham-v1-cli-completion-" (fun root ->
       let check shell suffix =
@@ -1763,11 +1781,10 @@ let completion_scripts_are_static_and_parse_in_each_shell () =
         let script = Filename.concat root ("yeokcham." ^ suffix) in
         Out_channel.with_open_bin script (fun channel ->
             Out_channel.output_string channel output);
-        let executable, arguments =
+        let executable = executable_on_path shell in
+        let arguments =
           match shell with
-          | "bash" -> ("/usr/bin/bash", [ "-n"; script ])
-          | "zsh" -> ("/usr/bin/zsh", [ "-n"; script ])
-          | "fish" -> ("/usr/bin/fish", [ "-n"; script ])
+          | "bash" | "zsh" | "fish" -> [ "-n"; script ]
           | _ -> Alcotest.fail "unknown completion shell"
         in
         match

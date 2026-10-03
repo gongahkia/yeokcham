@@ -37,9 +37,15 @@ grep -F 'ARTIFACT_DIRECTORY=$RUNNER_TEMP/yeokcham-development-artifacts' \
   "$development_artifact_workflow" >/dev/null \
   || fail 'development artifact workflow does not initialize ARTIFACT_DIRECTORY at step scope'
 
-grep -F 'sudo apt-get update && sudo apt-get install --yes --no-install-recommends gnupg openssl socat' \
+grep -F 'sudo apt-get update && sudo apt-get install --yes --no-install-recommends gnupg openssl socat zsh fish' \
   "$development_artifact_workflow" >/dev/null \
-  || fail 'development artifact workflow does not install its CI test tools'
+  || fail 'development artifact workflow does not install its CI test shells'
+
+grep -F 'gnupg openssl socat softhsm2 zsh fish' "$workflow" >/dev/null \
+  || fail 'CI workflow does not install its Linux test shells'
+
+grep -F 'brew install gnupg openssl socat softhsm zsh fish' "$workflow" >/dev/null \
+  || fail 'CI workflow does not install its macOS test shells'
 
 grep -F 'opam install ocamlformat.0.29.0 --yes' "$development_artifact_workflow" >/dev/null \
   || fail 'development artifact workflow does not install the pinned formatter'

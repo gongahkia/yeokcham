@@ -136,12 +136,18 @@ let rec wait_for_https_relay client project attempts =
         ("HTTPS relay never became ready: "
         ^ Transport_http.error_to_string error)
 
+let required_tool environment fallback =
+  match Sys.getenv_opt environment with
+  | Some path when Sys.file_exists path -> path
+  | Some path -> Alcotest.failf "%s does not name an executable: %s" environment path
+  | None when Sys.file_exists fallback -> fallback
+  | None ->
+      Alcotest.failf "cannot find %s (set %s to its executable path)" fallback
+        environment
+
 let with_https_relay run =
-  let openssl = "/usr/bin/openssl" in
-  let socat = "/usr/bin/socat" in
-  if not (Sys.file_exists openssl && Sys.file_exists socat) then
-    Alcotest.fail
-      "relay integration requires /usr/bin/openssl and /usr/bin/socat";
+  let openssl = required_tool "YEOKCHAM_V1_TEST_OPENSSL" "/usr/bin/openssl" in
+  let socat = required_tool "YEOKCHAM_V1_TEST_SOCAT" "/usr/bin/socat" in
   with_directory "v1-repair-https-relay-" (fun root ->
       let certificate = Filename.concat root "relay.crt" in
       let private_key = Filename.concat root "relay.key" in
