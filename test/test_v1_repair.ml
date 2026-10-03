@@ -139,7 +139,8 @@ let rec wait_for_https_relay client project attempts =
 let required_tool environment fallback =
   match Sys.getenv_opt environment with
   | Some path when Sys.file_exists path -> path
-  | Some path -> Alcotest.failf "%s does not name an executable: %s" environment path
+  | Some path ->
+      Alcotest.failf "%s does not name an executable: %s" environment path
   | None when Sys.file_exists fallback -> fallback
   | None ->
       Alcotest.failf "cannot find %s (set %s to its executable path)" fallback

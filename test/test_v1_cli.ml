@@ -1761,13 +1761,13 @@ let executable_on_path name =
   in
   let rec find = function
     | [] -> Alcotest.failf "cannot find %s on PATH" name
-    | directory :: rest ->
+    | directory :: rest -> (
         let directory = if String.equal directory "" then "." else directory in
         let candidate = Filename.concat directory name in
-        (try
+        try
            Unix.access candidate [ Unix.X_OK ];
            candidate
-         with Unix.Unix_error _ -> find rest)
+        with Unix.Unix_error _ -> find rest)
   in
   find directories
 
