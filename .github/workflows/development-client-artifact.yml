@@ -47,6 +47,7 @@ jobs:
           ocaml-compiler: "5.5.0"
           dune-cache: true
       - run: opam install . --deps-only --with-test
+      - run: opam install ocamlformat.0.29.0 --yes
       - run: make ci
       - run: make development-build-record-test
       - uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1

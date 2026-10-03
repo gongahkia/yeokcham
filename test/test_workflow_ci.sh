@@ -41,4 +41,7 @@ grep -F 'sudo apt-get update && sudo apt-get install --yes --no-install-recommen
   "$development_artifact_workflow" >/dev/null \
   || fail 'development artifact workflow does not install its CI test tools'
 
+grep -F 'opam install ocamlformat.0.29.0 --yes' "$development_artifact_workflow" >/dev/null \
+  || fail 'development artifact workflow does not install the pinned formatter'
+
 printf '%s\n' 'workflow CI test passed'
