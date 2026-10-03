@@ -33,4 +33,8 @@ grep -F 'ARTIFACT_DIRECTORY=$RUNNER_TEMP/yeokcham-development-artifacts' \
   "$development_artifact_workflow" >/dev/null \
   || fail 'development artifact workflow does not initialize ARTIFACT_DIRECTORY at step scope'
 
+grep -F 'sudo apt-get update && sudo apt-get install --yes --no-install-recommends gnupg openssl socat' \
+  "$development_artifact_workflow" >/dev/null \
+  || fail 'development artifact workflow does not install its CI test tools'
+
 printf '%s\n' 'workflow CI test passed'
