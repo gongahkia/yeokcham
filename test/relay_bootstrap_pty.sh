@@ -2,7 +2,7 @@
 
 set -eu
 
-exec "$YEOKCHAM_RELAY_TEST_CLIENT" bootstrap \
+exec "$YEOKCHAM_RELAY_TEST_CLIENT" --color never bootstrap \
   --root "$YEOKCHAM_RELAY_TEST_TARGET_ROOT" \
   --remote relay \
   --url "$YEOKCHAM_RELAY_TEST_URL" \
