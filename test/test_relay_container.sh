@@ -208,10 +208,13 @@ export YEOKCHAM_RELAY_TEST_DEVICE="$source_device"
 export YEOKCHAM_RELAY_TEST_PHRASE="$phrase"
 bootstrap_command="/bin/sh $repo_root/test/relay_bootstrap_pty.sh"
 bootstrap_output=$(printf '%s\n' "$secret" \
-  | script --quiet --return --command "$bootstrap_command" /dev/null)
+  | script --quiet --return --echo=never --command "$bootstrap_command" /dev/null)
 case "$bootstrap_output" in
   *"bootstrap verified $basis; no working-tree materialization occurred"*) ;;
-  *) fail "restored relay bootstrap did not report receipt without materialization" ;;
+  *)
+    printf '%s\n' "$bootstrap_output" | sed "s/$secret/[redacted]/g" >&2
+    fail "restored relay bootstrap did not report receipt without materialization"
+    ;;
 esac
 [ -d "$target_root/.yeokcham" ] \
   || fail "restored relay bootstrap did not create V1 metadata"
@@ -225,11 +228,14 @@ esac
 export YEOKCHAM_RELAY_TEST_TARGET_ROOT="$activation_root"
 activation_bootstrap_output=$( \
   printf '%s\n' "$secret" \
-    | script --quiet --return --command "$bootstrap_command" /dev/null \
+    | script --quiet --return --echo=never --command "$bootstrap_command" /dev/null \
 )
 case "$activation_bootstrap_output" in
   *"bootstrap verified $basis; no working-tree materialization occurred"*) ;;
-  *) fail "activation bootstrap did not report receipt without materialization" ;;
+  *)
+    printf '%s\n' "$activation_bootstrap_output" | sed "s/$secret/[redacted]/g" >&2
+    fail "activation bootstrap did not report receipt without materialization"
+    ;;
 esac
 [ ! -e "$activation_root/main.ml" ] \
   || fail "activation bootstrap materialized source before explicit activation"
