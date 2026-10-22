@@ -423,6 +423,61 @@ let in_place_restore_retains_and_recovers_unsaved_bytes () =
                restored.Service.safety_checkpoint)
            status.Service.checkpoints))
 
+let directory_only_changes_can_be_shared () =
+  let create root = function
+    | `Missing -> ()
+    | `File -> write_file root "entry" "ordinary file\n"
+    | `Empty -> Unix.mkdir (Filename.concat root "entry") 0o700
+    | `Nested ->
+        Unix.mkdir (Filename.concat root "entry") 0o700;
+        Unix.mkdir (Filename.concat root "entry/nested") 0o700;
+        write_file root "entry/nested/main.ml" "let value = 1\n"
+  in
+  let remove root = function
+    | `Missing -> ()
+    | `File -> Unix.unlink (Filename.concat root "entry")
+    | `Empty -> Unix.rmdir (Filename.concat root "entry")
+    | `Nested ->
+        Unix.unlink (Filename.concat root "entry/nested/main.ml");
+        Unix.rmdir (Filename.concat root "entry/nested");
+        Unix.rmdir (Filename.concat root "entry")
+  in
+  List.iter
+    (fun (before, after, expected) ->
+      with_directory "yeokcham-v1-directory-share-" (fun root ->
+          create root before;
+          ignore (initialize root);
+          remove root before;
+          create root after;
+          let shared =
+            Service.share ~root
+              ~change:(change "directory-change")
+              ~revision:(revision "directory-revision")
+            |> require_ok Service.error_to_string
+          in
+          let edits =
+            (List.hd (List.hd shared.Service.shared_changes).Model.revisions)
+              .Model.edits
+          in
+          Alcotest.(check (list string))
+            "only changed subtree roots are edits" expected
+            (List.map
+               (fun edit -> Model.Path.to_string edit.Model.edit_path)
+               edits);
+          Alcotest.(check int)
+            "revision does not conflict with itself" 0
+            (List.length shared.Service.open_decisions)))
+    [
+      (`Missing, `Empty, [ "entry" ]);
+      (`Empty, `Missing, [ "entry" ]);
+      (`Missing, `Nested, [ "entry" ]);
+      (`Nested, `Missing, [ "entry" ]);
+      (`File, `Nested, [ "entry" ]);
+      (`Nested, `File, [ "entry" ]);
+      (`Empty, `Nested, [ "entry/nested" ]);
+      (`Nested, `Empty, [ "entry/nested" ]);
+    ]
+
 let[@warning "-4"] in_place_restore_refuses_ignored_entries_before_mutation () =
   List.iter
     (fun ignored ->
@@ -2588,6 +2643,8 @@ let () =
         ] );
       ( "shared work",
         [
+          Alcotest.test_case "directory-only changes can be shared" `Quick
+            directory_only_changes_can_be_shared;
           Alcotest.test_case "share and amend retain linear revisions" `Quick
             share_records_a_shared_change_and_amend_appends_a_revision;
           Alcotest.test_case "share without a tree delta fails" `Quick

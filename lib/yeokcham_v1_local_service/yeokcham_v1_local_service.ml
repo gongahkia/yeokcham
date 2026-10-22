@@ -412,18 +412,32 @@ let snapshot_entries store snapshot_id =
     (Snapshot.Snapshot.root snapshot)
     Path_map.empty
 
-let entry_equal (left_mode, left_content) (right_mode, right_content) =
-  left_mode = right_mode && Snapshot.Content.equal_id left_content right_content
-
 let differing_paths left right =
   Path_map.merge
     (fun _ left right ->
       match (left, right) with
-      | Some left, Some right when entry_equal left right -> None
+      | Some left, Some right when left = right -> None
       | None, None -> None
       | _ -> Some ())
     left right
   |> Path_map.bindings |> List.map fst
+  (* A changed directory owns its entire subtree. Keeping descendant edits
+     would make a revision overlap itself during projection. Bindings are
+     sorted, so every descendant immediately follows its selected ancestor. *)
+  |> List.fold_left
+       (fun selected path ->
+         let rec contains ancestor descendant =
+           match (ancestor, descendant) with
+           | [], _ -> true
+           | a :: ancestors, b :: descendants when String.equal a b ->
+               contains ancestors descendants
+           | _ -> false
+         in
+         match selected with
+         | ancestor :: _ when contains ancestor path -> selected
+         | _ -> path :: selected)
+       []
+  |> List.rev
 
 let whole_path_edits paths =
   let rec loop reversed = function
@@ -440,9 +454,9 @@ let whole_path_edits paths =
   loop [] paths
 
 let edits_between store ~baseline ~result =
-  let* baseline_leaves = leaves_of_snapshot store baseline in
-  let* result_leaves = leaves_of_snapshot store result in
-  differing_paths baseline_leaves result_leaves |> whole_path_edits
+  let* baseline_entries = snapshot_entries store baseline in
+  let* result_entries = snapshot_entries store result in
+  differing_paths baseline_entries result_entries |> whole_path_edits
 
 let persist repository loaded project =
   let saved =
