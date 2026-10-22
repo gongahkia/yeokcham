@@ -52,7 +52,7 @@ let argv_launch_is_redacted_and_preserves_arguments () =
       in
       Unix.putenv "YEOKCHAM_HOOK_TEST_SECRET" "must-not-reach-hook";
       let result =
-        Runner.invoke ~timeout_seconds:1 (event ())
+        Runner.invoke ~timeout_seconds:Runner.default_timeout_seconds (event ())
           (hook [ script; "with spaces"; "quote\"value" ])
       in
       Alcotest.(check (option string))
@@ -103,6 +103,36 @@ let failures_are_warnings_and_events_reject_secrets () =
               ~paths:[]
               ~identifiers:[ ("token", "secret") ])))
 
+let timeout_remains_bounded_when_observer_ignores_sigterm () =
+  with_directory "v1-hook-runner-uncooperative-" (fun root ->
+      let marker = Filename.concat root "late-side-effect" in
+      let script =
+        write_script root "ignore-term"
+          ("trap '' TERM\n(sleep 3; printf late > " ^ Filename.quote marker
+         ^ ") &\nwait\n")
+      in
+      let started = Unix.gettimeofday () in
+      let large_event =
+        Runner.make_event ~event:Hook.Save ~command:"save" ~repository:None
+          ~paths:
+            (List.init 128 (fun index ->
+                 string_of_int index ^ String.make 4000 'x'))
+          ~identifiers:[]
+        |> require_ok Fun.id
+      in
+      let result =
+        Runner.invoke ~timeout_seconds:1 large_event (hook [ script ])
+      in
+      Alcotest.(check bool)
+        "timeout is reported" true
+        (result = Some Runner.Timed_out);
+      Alcotest.(check bool)
+        "ignored SIGTERM cannot extend the deadline" true
+        (Unix.gettimeofday () -. started < 2.5);
+      Unix.sleepf 2.2;
+      Alcotest.(check bool)
+        "observer descendants are stopped too" false (Sys.file_exists marker))
+
 let () =
   Alcotest.run "V1 hook runner"
     [
@@ -112,5 +142,7 @@ let () =
             argv_launch_is_redacted_and_preserves_arguments;
           Alcotest.test_case "failures stay warnings and secrets reject" `Quick
             failures_are_warnings_and_events_reject_secrets;
+          Alcotest.test_case "uncooperative observers cannot exceed timeout"
+            `Quick timeout_remains_bounded_when_observer_ignores_sigterm;
         ] );
     ]

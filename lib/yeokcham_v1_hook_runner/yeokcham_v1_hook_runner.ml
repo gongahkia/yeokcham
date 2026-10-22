@@ -24,7 +24,7 @@ let warning_to_string = function
   | Missing_executable path -> "hook executable is unavailable: " ^ path
   | Nonzero_exit status -> Printf.sprintf "hook exited with status %d" status
   | Signalled signal -> Printf.sprintf "hook was terminated by signal %d" signal
-  | Timed_out -> "hook exceeded the 30-second timeout"
+  | Timed_out -> "hook exceeded its configured timeout"
   | Malformed_output -> "hook produced nonempty observer output"
   | Io_failure detail -> "hook launcher failed: " ^ detail
 
@@ -120,20 +120,18 @@ let encode_event event =
 let close_noerr descriptor =
   try Unix.close descriptor with Unix.Unix_error _ -> ()
 
-let write_all descriptor value =
-  let rec loop offset =
-    if offset = String.length value then Ok ()
-    else
-      try
-        let written =
-          Unix.write_substring descriptor value offset
-            (String.length value - offset)
-        in
-        if written = 0 then Error "event stdin write returned zero"
-        else loop (offset + written)
-      with Unix.Unix_error (error, _, _) -> Error (Unix.error_message error)
-  in
-  loop 0
+let event_input event =
+  (* A private, immediately unlinked file avoids a blocking pipe write when
+     an observer never reads stdin, even for events larger than a pipe. *)
+  let path, output = Filename.open_temp_file "yeokcham-hook-event-" ".json" in
+  Fun.protect
+    ~finally:(fun () ->
+      close_out_noerr output;
+      try Unix.unlink path with Unix.Unix_error _ -> ())
+    (fun () ->
+      Out_channel.output_string output (encode_event event ^ "\n");
+      Out_channel.flush output;
+      Unix.openfile path [ Unix.O_RDONLY; Unix.O_CLOEXEC ] 0)
 
 let read_available descriptor output =
   let buffer = Bytes.create 1024 in
@@ -164,17 +162,29 @@ let status_warning output = function
   | Unix.WSIGNALED signal -> Some (Signalled signal)
   | Unix.WSTOPPED signal -> Some (Signalled signal)
 
+let stop_observer process =
+  (* Each observer owns a session. Kill descendants too, including children
+     retaining the output pipe after their parent exits. *)
+  (try Unix.kill (-process) Sys.sigkill with Unix.Unix_error _ -> ());
+  (try Unix.kill process Sys.sigkill with Unix.Unix_error _ -> ());
+  let rec reap () =
+    try ignore (Unix.waitpid [] process) with
+    | Unix.Unix_error (Unix.EINTR, _, _) -> reap ()
+    | Unix.Unix_error (Unix.ECHILD, _, _) -> ()
+  in
+  reap ()
+
 let invoke ~timeout_seconds event hook =
   if timeout_seconds <= 0 || timeout_seconds > default_timeout_seconds then
     Some (Io_failure "hook timeout must be between one and 30 seconds")
   else
     try
-      let stdin_read, stdin_write = Unix.pipe () in
+      let stdin_read = event_input event in
       let stdout_read, stdout_write = Unix.pipe () in
       let null = Unix.openfile "/dev/null" [ Unix.O_WRONLY ] 0 in
       match Unix.fork () with
       | 0 -> (
-          close_noerr stdin_write;
+          ignore (Unix.setsid ());
           close_noerr stdout_read;
           Unix.dup2 stdin_read Unix.stdin;
           Unix.dup2 stdout_write Unix.stdout;
@@ -185,53 +195,40 @@ let invoke ~timeout_seconds event hook =
           let argv = Array.of_list (Hook.hook_argv hook) in
           try Unix.execve argv.(0) argv [| "PATH=/usr/bin:/bin"; "LC_ALL=C" |]
           with Unix.Unix_error _ -> exit 127)
-      | process -> (
+      | process ->
           close_noerr stdin_read;
           close_noerr stdout_write;
           close_noerr null;
-          let write_result =
-            write_all stdin_write (encode_event event ^ "\n")
+          let output = Buffer.create 128 in
+          let deadline = Unix.gettimeofday () +. float_of_int timeout_seconds in
+          let rec wait () =
+            match Unix.waitpid [ Unix.WNOHANG ] process with
+            | 0, _ -> (
+                match read_available stdout_read output with
+                | Error () ->
+                    stop_observer process;
+                    close_noerr stdout_read;
+                    Some Malformed_output
+                | Ok () when Unix.gettimeofday () >= deadline ->
+                    stop_observer process;
+                    close_noerr stdout_read;
+                    Some Timed_out
+                | Ok () ->
+                    Unix.sleepf 0.005;
+                    wait ())
+            | _, status -> (
+                (try Unix.kill (-process) Sys.sigkill
+                 with Unix.Unix_error _ -> ());
+                match read_available stdout_read output with
+                | Error () ->
+                    close_noerr stdout_read;
+                    Some Malformed_output
+                | Ok () ->
+                    close_noerr stdout_read;
+                    status_warning output status)
           in
-          close_noerr stdin_write;
-          match write_result with
-          | Error detail ->
-              Unix.kill process Sys.sigterm;
-              ignore (Unix.waitpid [] process);
-              close_noerr stdout_read;
-              Some (Io_failure detail)
-          | Ok () ->
-              let output = Buffer.create 128 in
-              let deadline =
-                Unix.gettimeofday () +. float_of_int timeout_seconds
-              in
-              let rec wait () =
-                match Unix.waitpid [ Unix.WNOHANG ] process with
-                | 0, _ -> (
-                    match read_available stdout_read output with
-                    | Error () ->
-                        (try Unix.kill process Sys.sigterm
-                         with Unix.Unix_error _ -> ());
-                        ignore (Unix.waitpid [] process);
-                        close_noerr stdout_read;
-                        Some Malformed_output
-                    | Ok () when Unix.gettimeofday () >= deadline ->
-                        (try Unix.kill process Sys.sigterm
-                         with Unix.Unix_error _ -> ());
-                        ignore (Unix.waitpid [] process);
-                        close_noerr stdout_read;
-                        Some Timed_out
-                    | Ok () ->
-                        Unix.sleepf 0.005;
-                        wait ())
-                | _, status -> (
-                    match read_available stdout_read output with
-                    | Error () ->
-                        close_noerr stdout_read;
-                        Some Malformed_output
-                    | Ok () ->
-                        close_noerr stdout_read;
-                        status_warning output status)
-              in
-              wait ())
-    with Unix.Unix_error (error, _, _) ->
-      Some (Io_failure (Unix.error_message error))
+          wait ()
+    with
+    | Unix.Unix_error (error, _, _) ->
+        Some (Io_failure (Unix.error_message error))
+    | Sys_error detail -> Some (Io_failure detail)
