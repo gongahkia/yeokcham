@@ -822,7 +822,7 @@ let render_status status =
     (Model.Snapshot_id.to_string status.Service.checkpoint);
   Printf.printf "draft %s %s\n"
     (Model.Draft_id.to_string status.Service.active_draft.Model.draft_id)
-    status.Service.active_draft.Model.title;
+    (Output.display_value status.Service.active_draft.Model.title);
   Printf.printf "shared %d\n" status.Service.shared_change_count;
   List.iter
     (fun change ->
@@ -2499,7 +2499,9 @@ let render_decision (inspection : Service.decision_inspection) =
     (Model.Decision_id.to_string decision.Model.decision_id);
   Printf.printf "kind %s\n" (decision_kind_name decision.Model.decision_kind);
   List.iter
-    (fun path -> Printf.printf "path %s\n" (Model.Path.to_string path))
+    (fun path ->
+      Printf.printf "path %s\n"
+        (Output.display_value (Model.Path.to_string path)))
     decision.Model.decision_paths;
   List.iter
     (fun candidate ->
@@ -2524,7 +2526,8 @@ let render_decision (inspection : Service.decision_inspection) =
       Printf.printf "edit %s %d %s %s\n"
         (Model.Revision_id.to_string revision.Model.revision)
         candidate.Model.candidate_edit_index
-        (Model.Path.to_string candidate.Model.candidate_edit.Model.edit_path)
+        (Output.display_value
+           (Model.Path.to_string candidate.Model.candidate_edit.Model.edit_path))
         (edit_kind_name candidate.Model.candidate_edit.Model.edit_kind))
     decision.Model.candidates
 
@@ -2573,7 +2576,8 @@ let run_changes arguments =
       List.iter
         (fun difference ->
           Printf.printf "change %s before %s after %s\n"
-            (Model.Path.to_string difference.Service.path)
+            (Output.display_value
+               (Model.Path.to_string difference.Service.path))
             (render_snapshot_entry difference.Service.before)
             (render_snapshot_entry difference.Service.after))
         differences
@@ -2622,7 +2626,7 @@ let render_decision_proposal (proposal : Proposal.t) =
             "unassessed-without-common-base"
       in
       Printf.printf "path %s outcome %s base %s left %s right %s\n"
-        (Model.Path.to_string path.Proposal.path)
+        (Output.display_value (Model.Path.to_string path.Proposal.path))
         outcome
         (render_proposal_entry path.Proposal.base)
         (render_proposal_entry path.Proposal.left)
@@ -2787,7 +2791,7 @@ let run_decision_diff arguments =
   List.iter
     (fun difference ->
       Printf.printf "diff %s before %s after %s\n"
-        (Model.Path.to_string difference.Service.path)
+        (Output.display_value (Model.Path.to_string difference.Service.path))
         (render_snapshot_entry difference.Service.before)
         (render_snapshot_entry difference.Service.after))
     comparison.Service.differences

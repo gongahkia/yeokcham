@@ -10,6 +10,15 @@ let green = "\027[32m"
 let yellow = "\027[33m"
 let red = "\027[31m"
 
+let display_value value =
+  if
+    String.is_empty value
+    || String.exists
+         (function '\000' .. ' ' | '\127' | '"' | '\\' -> true | _ -> false)
+         value
+  then Printf.sprintf "%S" value
+  else value
+
 let configure ~mode:requested_mode ~machine_output:requested_machine_output =
   mode := requested_mode;
   machine_output := requested_machine_output

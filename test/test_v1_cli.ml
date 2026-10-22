@@ -516,8 +516,16 @@ let command_changes_reports_exact_entries_without_saving () =
       Unix.unlink (Filename.concat root "removed.txt");
       Unix.mkdir (Filename.concat root "created") 0o700;
       write_file root "created/nested.txt" "new file\n";
+      let unusual_path = "line\n\027[31m.txt" in
+      write_file root unusual_path "literal filename\n";
       let output, errors, status = run [ "changes"; "--root"; root ] in
       require_success "changes" status errors;
+      expect_output_contains "control bytes in paths are quoted"
+        (Printf.sprintf "change %S before missing" unusual_path)
+        output;
+      Alcotest.(check bool)
+        "filenames cannot inject terminal escapes" false
+        (has_ansi_escape output);
       expect_output_contains "comparison names saved checkpoint"
         ("saved " ^ saved) output;
       expect_output_contains "directory create is explicit"
