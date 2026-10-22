@@ -1580,6 +1580,21 @@ let inspection_commands_are_read_only_and_keep_domains_distinct () =
         Service.inspection_state ~root |> require_ok Service.error_to_string
       in
       let before_model = Model.export before.Service.inspection_project in
+      Unix.mkfifo (Filename.concat root "unscannable-pipe") 0o600;
+      let object_count () =
+        let store =
+          Raw_store.open_repository ~root
+          |> require_ok Raw_store.error_to_string
+        in
+        Raw_store.list_objects store
+        |> require_ok Raw_store.error_to_string
+        |> List.length
+      in
+      let before_objects = object_count () in
+      let output, errors, status = run [ "timeline"; "--root"; root ] in
+      require_success "timeline with an unscannable working tree" status errors;
+      expect_output_contains "timeline still exposes recovery checkpoints"
+        "checkpoint " output;
       let output, errors, status = run [ "log"; "--root"; root ] in
       require_success "log" status errors;
       expect_output_contains "log shows an explicit shared revision"
@@ -1604,6 +1619,9 @@ let inspection_commands_are_read_only_and_keep_domains_distinct () =
       Alcotest.(check bool)
         "inspection leaves the state model unchanged" true
         (before_model = Model.export after.Service.inspection_project);
+      Alcotest.(check int)
+        "history inspection creates no scan objects" before_objects
+        (object_count ());
       Alcotest.(check string)
         "inspection does not scan or rewrite live bytes" "let unsaved = true\n"
         (In_channel.with_open_bin

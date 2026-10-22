@@ -2130,12 +2130,14 @@ let run_recovery_refresh arguments =
 
 let run_timeline arguments =
   let root = parse_root arguments in
-  Service.status ~root |> require_ok Service.error_to_string |> fun status ->
+  let state =
+    Service.inspection_state ~root |> require_ok Service.error_to_string
+  in
   List.iter
     (fun checkpoint ->
       Printf.printf "checkpoint %s\n"
         (Model.Snapshot_id.to_string checkpoint.Model.checkpoint_snapshot))
-    status.Service.checkpoints
+    (Model.checkpoints state.Service.inspection_project)
 
 let run_restore arguments =
   let root, checkpoint, destination = parse_restore arguments in
