@@ -151,6 +151,10 @@ let fail_with code message =
 let fail message = fail_with "operation-failed" message
 
 let run_generic_json command action =
+  if List.mem command [ "init"; "recovery-use" ] then
+    fail_with "recovery-ceremony-requires-text"
+      "this command displays a new recovery mnemonic exactly once; rerun with \
+       --format text in a private terminal so you can record it offline";
   let saved_stdout = Unix.dup Unix.stdout in
   let restored = ref false in
   let restore () =
@@ -304,7 +308,8 @@ let help_for = function
          TITLE\n\n\
          Create a new V1 repository and initial local checkpoint. It prints \
          one public root-verification phrase and one recovery mnemonic; record \
-         the mnemonic offline."
+         the mnemonic offline. This ceremony requires --format text; JSON \
+         requests are refused before creating custody or repository state."
   | [ "join" ] ->
       Some
         "usage: yeokcham join [--root PATH] --username NAME --draft ID --title \
@@ -645,7 +650,9 @@ let help_for = function
         "usage: yeokcham recovery use [--root PATH] --package PATH --mnemonic \
          \"TWENTY FOUR WORDS\" --replacement ID --replaced ID --output PATH\n\n\
          Recover authority through the encrypted package, replacing one device \
-         and writing a new package before state advances."
+         and writing a new package before state advances. Use --format text to \
+         record the replacement recovery mnemonic; JSON is refused before any \
+         recovery action."
   | [ "recovery"; "refresh" ] ->
       Some
         "usage: yeokcham recovery refresh [--root PATH] --package PATH \

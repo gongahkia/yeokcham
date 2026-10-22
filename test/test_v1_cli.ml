@@ -1969,16 +1969,70 @@ let generic_json_format_is_enveloped_and_preserves_error_channels () =
             "json";
           ]
       in
-      require_success "JSON init" status errors;
+      Alcotest.(check bool)
+        "JSON init refuses before hiding the ceremony" true
+        (status = Unix.WEXITED 2);
       let envelope = Cli_data.decode (String.trim output) |> Result.get_ok in
       Alcotest.(check string)
         "JSON init names the stable command" "init"
         (Cli_data.command envelope);
-      Alcotest.(check bool) "JSON init succeeds" true (Cli_data.ok envelope);
+      Alcotest.(check bool)
+        "JSON init fails explicitly" false (Cli_data.ok envelope);
+      expect_output_contains "refusal explains how to receive the mnemonic"
+        "--format text" errors;
+      Alcotest.(check bool)
+        "no repository was created" false
+        (Sys.file_exists (Filename.concat root ".yeokcham"));
+      Alcotest.(check int)
+        "no signing key was created" 0
+        (Sys.readdir (Sys.getenv "YEOKCHAM_V1_TEST_SIGNER_DIRECTORY")
+        |> Array.length);
       Alcotest.(check bool)
         "JSON init remains ANSI-free" false (has_ansi_escape output);
       Alcotest.(check bool)
         "JSON init does not mix text stdout" false (contains output "saved ");
+      let output, errors, status =
+        run
+          [
+            "init";
+            "--root";
+            root;
+            "--username";
+            "alice";
+            "--draft";
+            "json-draft";
+            "--title";
+            "JSON work";
+            "--format";
+            "text";
+          ]
+      in
+      require_success "text initialization after JSON refusal" status errors;
+      let mnemonic =
+        line_after "recovery-mnemonic (record offline; it is shown only now)"
+          output
+      in
+      Alcotest.(check int)
+        "text mode displays all recovery words" 24
+        (String.split_on_char ' ' mnemonic |> List.length);
+      let before = read_file root ".yeokcham/recovery-v1.cbor" in
+      let output, errors, status =
+        run [ "recovery"; "use"; "--root"; root; "--format"; "json" ]
+      in
+      Alcotest.(check bool)
+        "JSON recovery refuses before mutation" true (status = Unix.WEXITED 2);
+      let envelope = Cli_data.decode (String.trim output) |> Result.get_ok in
+      (match Cli_data.error envelope with
+      | Some { Cli_data.code; _ } ->
+          Alcotest.(check string)
+            "recovery has a stable ceremony refusal"
+            "recovery-ceremony-requires-text" code
+      | None -> Alcotest.fail "JSON recovery has no error record");
+      expect_output_contains "recovery explains text mode" "--format text"
+        errors;
+      Alcotest.(check string)
+        "recovery package remains intact" before
+        (read_file root ".yeokcham/recovery-v1.cbor");
       let output, errors, status =
         run [ "save"; "--root"; root; "--format"; "json" ]
       in
