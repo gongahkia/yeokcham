@@ -1436,6 +1436,16 @@ let validate_retention_inputs ~store ~project ~journal_roots proofs =
 
 let perform_in_place ~root repository loaded journal ~resumed =
   let store = Store.underlying_store repository in
+  let* () =
+    match Journal.phase journal with
+    | Journal.Prepared | Journal.Applying ->
+        Snapshot.require_no_ignored_paths
+          ~excluded_root_names:[ ".yeokcham"; ".git" ] ~root
+        |> Result.map_error (fun error -> Snapshot_error error)
+    | Journal.Materialized | Journal.Published -> Ok ()
+  in
+  let* () = validate_snapshot_closure store (Journal.safety journal) in
+  let* () = validate_snapshot_closure store (Journal.target journal) in
   let* applying =
     match Journal.phase journal with
     | Journal.Prepared -> advance_journal ~root journal Journal.Applying
@@ -1524,6 +1534,16 @@ let restore_in_place ~root ~checkpoint =
             Error (Unknown_checkpoint checkpoint)
           else
             let store = Store.underlying_store repository in
+            let* () =
+              Snapshot.require_no_ignored_paths
+                ~excluded_root_names:[ ".yeokcham"; ".git" ] ~root
+              |> Result.map_error (fun error -> Snapshot_error error)
+            in
+            let* target = load_snapshot store checkpoint in
+            let* _ =
+              Snapshot.Materialize.plan store target
+              |> Result.map_error (fun error -> Materialize_error error)
+            in
             let* safety = capture ~root store in
             if Model.Snapshot_id.equal safety checkpoint then
               Error (Restore_journal_error Journal.Identical_snapshots)
@@ -1602,6 +1622,11 @@ let materialize_workspace_plan ~root plan =
 let materialize_workspace_activation ~root plan =
   let receipt = Workspace.plan_receipt plan in
   let checkpoint = Workspace.basis_snapshot (Workspace.plan_basis plan) in
+  let* () =
+    Snapshot.require_no_ignored_paths
+      ~excluded_root_names:[ ".yeokcham"; ".git" ] ~root
+    |> Result.map_error (fun error -> Snapshot_error error)
+  in
   let* staged =
     Workspace.stage_receipt ~root receipt
     |> Result.map_error (fun error -> Workspace_error error)

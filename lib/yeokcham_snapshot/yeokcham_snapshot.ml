@@ -33,6 +33,7 @@ type error =
   | Scan_error of { path : string; operation : string; message : string }
   | Unsupported_file_type of { path : string; kind : string }
   | Invalid_ignore_path of { line : int; path : string }
+  | Ignored_path_would_be_removed of string
 
 let object_type_name object_type =
   Printf.sprintf "object type %d" (Envelope.object_type_code object_type)
@@ -88,6 +89,12 @@ let error_to_string = function
       Printf.sprintf "unsupported filesystem node (%s): %s" kind path
   | Invalid_ignore_path { line; path } ->
       Printf.sprintf "invalid .yeokchamignore path on line %d: %S" line path
+  | Ignored_path_would_be_removed path ->
+      Printf.sprintf
+        "in-place replacement would remove ignored path %S, which has no \
+         safety checkpoint; move it outside the working tree or restore to an \
+         empty destination"
+        path
 
 let ( let* ) = Result.bind
 
@@ -780,7 +787,7 @@ module Materialize = struct
         Printf.sprintf "unsafe materialisation path: %s"
           (String.concat "/" components)
     | Invalid_symlink_target components ->
-        Printf.sprintf "symlink target contains NUL bytes: %s"
+        Printf.sprintf "symlink target is empty or contains NUL bytes: %s"
           (String.concat "/" components)
     | Io_error { path; operation; message } ->
         Printf.sprintf "%s failed for %s: %s" operation path message
@@ -806,8 +813,18 @@ module Materialize = struct
             let* actions =
               match entry with
               | Tree.File { mode = Symlink; content } ->
-                  Ok [ Create_symlink { path; target = content } ]
+                  let* target =
+                    Content.load repository content
+                    |> Result.map_error (fun error -> Snapshot_error error)
+                  in
+                  if String.is_empty target || String.contains target '\000'
+                  then Error (Invalid_symlink_target path)
+                  else Ok [ Create_symlink { path; target = content } ]
               | Tree.File { mode = (Regular | Executable) as mode; content } ->
+                  let* _ =
+                    Content.load repository content
+                    |> Result.map_error (fun error -> Snapshot_error error)
+                  in
                   Ok [ Write_file { path; content; mode } ]
               | Tree.Directory child ->
                   let* descendants = plan_tree path child in
@@ -885,7 +902,7 @@ module Materialize = struct
     with Unix.Unix_error (error, _, _) -> Error (io_error "mkdir" path error)
 
   let create_symlink path target components =
-    if String.contains target '\000' then
+    if String.is_empty target || String.contains target '\000' then
       Error (Invalid_symlink_target components)
     else
       try
@@ -960,10 +977,34 @@ module Materialize = struct
 
   let write_replacing ~destination ~preserved_root_names repository snapshot =
     let* actions = plan repository snapshot in
+    let* () =
+      List.fold_left
+        (fun result action ->
+          let* () = result in
+          let path =
+            match action with
+            | Create_directory path
+            | Write_file { path; _ }
+            | Create_symlink { path; _ } ->
+                path
+          in
+          match path with
+          | name :: _ when List.mem name preserved_root_names ->
+              Error (Unsafe_destination_path path)
+          | _ -> Ok ())
+        (Ok ()) actions
+    in
     let* entries =
-      try Ok (Sys.readdir destination)
-      with Sys_error message ->
-        Error (Io_error { path = destination; operation = "readdir"; message })
+      try
+        if (Unix.lstat destination).Unix.st_kind <> Unix.S_DIR then
+          Error (Destination_not_directory destination)
+        else Ok (Sys.readdir destination)
+      with
+      | Unix.Unix_error (error, _, _) ->
+          Error (io_error "lstat" destination error)
+      | Sys_error message ->
+          Error
+            (Io_error { path = destination; operation = "readdir"; message })
     in
     let* () =
       Array.fold_left
@@ -1190,6 +1231,34 @@ let rec is_prefix prefix path =
 
 let is_ignored rules components =
   List.exists (fun rule -> is_prefix rule components) rules
+
+let require_no_ignored_paths ~excluded_root_names ~root =
+  let* rules = read_ignore_file root in
+  let rec exists path = function
+    | [] -> Ok true
+    | name :: rest -> (
+        let path = Filename.concat path name in
+        try
+          let stat = Unix.lstat path in
+          if rest = [] then Ok true
+          else if stat.Unix.st_kind = Unix.S_DIR then exists path rest
+          else Ok false
+        with
+        | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok false
+        | Unix.Unix_error (error, _, _) -> Error (scan_error "lstat" path error)
+        )
+  in
+  List.fold_left
+    (fun result components ->
+      let* () = result in
+      match components with
+      | name :: _ when List.mem name excluded_root_names -> Ok ()
+      | _ ->
+          let* present = exists root components in
+          if present then
+            Error (Ignored_path_would_be_removed (String.concat "/" components))
+          else Ok ())
+    (Ok ()) rules
 
 let scan_excluding_root_names ~excluded_root_names ~root ~store =
   let* root_stat =

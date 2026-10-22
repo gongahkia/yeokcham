@@ -423,6 +423,86 @@ let in_place_restore_retains_and_recovers_unsaved_bytes () =
                restored.Service.safety_checkpoint)
            status.Service.checkpoints))
 
+let[@warning "-4"] in_place_restore_refuses_ignored_entries_before_mutation () =
+  List.iter
+    (fun ignored ->
+      with_directory "yeokcham-v1-ignored-restore-" (fun root ->
+          write_file root "main.ml" "original\n";
+          write_file root ".yeokchamignore" (ignored ^ "\n");
+          let initial = initialize root in
+          write_file root "main.ml" "unsaved\n";
+          Unix.mkdir (Filename.concat root "private") 0o700;
+          write_file root "private/secret" "never captured\n";
+          Unix.symlink "missing-target" (Filename.concat root "private-link");
+          let before = repository_tree root in
+          (match
+             Service.restore_in_place ~root
+               ~checkpoint:initial.Service.checkpoint
+           with
+          | Error
+              (Service.Snapshot_error
+                 (Yeokcham_snapshot.Ignored_path_would_be_removed path)) ->
+              Alcotest.(check string) "names the ignored entry" ignored path
+          | Error error -> Alcotest.fail (Service.error_to_string error)
+          | Ok _ -> Alcotest.fail "restore deleted an ignored entry");
+          Alcotest.(check string)
+            "unsaved ordinary bytes survive" "unsaved\n"
+            (read_file root "main.ml");
+          Alcotest.(check string)
+            "ignored bytes survive without capture" "never captured\n"
+            (read_file root "private/secret");
+          Alcotest.(check string)
+            "ignored symlink survives" "missing-target"
+            (Unix.readlink (Filename.concat root "private-link"));
+          Alcotest.(check (list string))
+            "refusal writes no state, journal, or objects" before
+            (repository_tree root)))
+    [ "private"; "private/secret"; "private-link" ]
+
+let damaged_restore_target_is_refused_before_mutation () =
+  with_directory "yeokcham-v1-damaged-restore-" (fun root ->
+      write_file root "a.txt" "first target file\n";
+      write_file root "z.txt" "missing target content\n";
+      let initial = initialize root in
+      let repository =
+        Store.open_repository ~root |> require_ok Store.error_to_string
+      in
+      let store = Store.underlying_store repository in
+      let missing =
+        Yeokcham_snapshot.Content.store store "missing target content\n"
+        |> require_ok Yeokcham_snapshot.error_to_string
+        |> Yeokcham_snapshot.Content.stored_object_id
+      in
+      Unix.unlink (Yeokcham_store.object_path store missing);
+      write_file root "a.txt" "unsaved first file\n";
+      write_file root "z.txt" "unsaved last file\n";
+      let before = repository_tree root in
+      with_external_directory "yeokcham-v1-damaged-destination-"
+        (fun destination ->
+          (match
+             Service.restore ~root ~checkpoint:initial.Service.checkpoint
+               ~destination
+           with
+          | Error _ -> ()
+          | Ok () -> Alcotest.fail "restore accepted a missing content object");
+          Alcotest.(check int)
+            "destination stays empty on invalid closure" 0
+            (Array.length (Sys.readdir destination)));
+      (match
+         Service.restore_in_place ~root ~checkpoint:initial.Service.checkpoint
+       with
+      | Error _ -> ()
+      | Ok _ -> Alcotest.fail "in-place restore accepted missing content");
+      Alcotest.(check string)
+        "first file stays untouched" "unsaved first file\n"
+        (read_file root "a.txt");
+      Alcotest.(check string)
+        "last file stays untouched" "unsaved last file\n"
+        (read_file root "z.txt");
+      Alcotest.(check (list string))
+        "invalid target writes no safety state or journal" before
+        (repository_tree root))
+
 let restore_proof_survives_journal_pruning_until_explicit_forget () =
   with_directory "yeokcham-v1-service-restore-proof-" (fun root ->
       write_file root "main.ml" "let version = 1\n";
@@ -674,6 +754,72 @@ let interrupted_applying_restore_is_resumable () =
         (read_file root "main.ml");
       Alcotest.(check bool)
         "published journal is no longer pending" true
+        (Option.is_none
+           (Service.recover_in_place ~root |> require_ok Service.error_to_string)))
+
+let materialized_restore_finishes_without_touching_new_ignored_files () =
+  with_directory "yeokcham-v1-service-materialized-" (fun root ->
+      write_file root "main.ml" "let version = 1\n";
+      write_file root ".yeokchamignore" "cache\n";
+      let initial = initialize root in
+      write_file root "main.ml" "let version = 2\n";
+      let saved =
+        match Service.save ~root |> require_ok Service.error_to_string with
+        | Service.Saved status -> status
+        | Service.Unchanged _ -> Alcotest.fail "changed tree was not saved"
+      in
+      let prepared =
+        Journal.make_prepared ~operation_id:(String.make 64 'e')
+          ~safety:saved.Service.checkpoint ~target:initial.Service.checkpoint
+        |> require_ok Journal.error_to_string
+      in
+      Journal.append ~root prepared |> require_ok Journal.error_to_string;
+      let applying =
+        Journal.advance prepared Journal.Applying
+        |> require_ok Journal.error_to_string
+      in
+      Journal.append ~root applying |> require_ok Journal.error_to_string;
+      write_file root "main.ml" "let version = 1\n";
+      let materialized =
+        Journal.advance applying Journal.Materialized
+        |> require_ok Journal.error_to_string
+      in
+      Journal.append ~root materialized |> require_ok Journal.error_to_string;
+      write_file root "cache" "new ignored bytes\n";
+      let ignored_before = Unix.lstat (Filename.concat root "cache") in
+      let source_before = Unix.lstat (Filename.concat root "main.ml") in
+      let recovered =
+        match
+          Service.recover_in_place ~root |> require_ok Service.error_to_string
+        with
+        | Some recovered -> recovered
+        | None -> Alcotest.fail "materialized restore was not recovered"
+      in
+      Alcotest.(check bool)
+        "recovery is reported as resumed" true recovered.Service.resumed;
+      Alcotest.(check string)
+        "ignored bytes survive publication" "new ignored bytes\n"
+        (read_file root "cache");
+      Alcotest.(check int)
+        "ignored file is not replaced" ignored_before.Unix.st_ino
+        (Unix.lstat (Filename.concat root "cache")).Unix.st_ino;
+      Alcotest.(check string)
+        "materialized source bytes survive" "let version = 1\n"
+        (read_file root "main.ml");
+      Alcotest.(check int)
+        "materialized source is not rewritten" source_before.Unix.st_ino
+        (Unix.lstat (Filename.concat root "main.ml")).Unix.st_ino;
+      Alcotest.(check bool)
+        "target checkpoint is published" true
+        (Model.Snapshot_id.equal initial.Service.checkpoint
+           (Service.status ~root |> require_ok Service.error_to_string)
+             .Service.checkpoint);
+      Alcotest.(check bool)
+        "published journal is no longer pending" true
+        (Option.is_none
+           (Journal.latest_pending ~root |> require_ok Journal.error_to_string));
+      Alcotest.(check bool)
+        "repeat recovery is a no-op" true
         (Option.is_none
            (Service.recover_in_place ~root |> require_ok Service.error_to_string)))
 
@@ -2414,6 +2560,11 @@ let () =
             "in-place restore retains unsaved bytes as a safety checkpoint"
             `Quick in_place_restore_retains_and_recovers_unsaved_bytes;
           Alcotest.test_case
+            "in-place restore refuses ignored entries before mutation" `Quick
+            in_place_restore_refuses_ignored_entries_before_mutation;
+          Alcotest.test_case "damaged restore target is refused before mutation"
+            `Quick damaged_restore_target_is_refused_before_mutation;
+          Alcotest.test_case
             "restore proof remains after journal pruning until explicit forget"
             `Quick restore_proof_survives_journal_pruning_until_explicit_forget;
           Alcotest.test_case
@@ -2431,6 +2582,9 @@ let () =
             `Quick in_place_restore_preserves_repository_metadata;
           Alcotest.test_case "interrupted applying restore resumes exactly"
             `Quick interrupted_applying_restore_is_resumable;
+          Alcotest.test_case
+            "materialized restore preserves newly created ignored files" `Quick
+            materialized_restore_finishes_without_touching_new_ignored_files;
         ] );
       ( "shared work",
         [

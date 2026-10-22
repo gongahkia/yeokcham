@@ -1,4 +1,9 @@
 (test
+ (name test_snapshot_materialize)
+ (modules test_snapshot_materialize)
+ (libraries alcotest unix yeokcham_snapshot yeokcham_store))
+
+(test
  (name test_v1_model)
  (modules test_v1_model)
  (libraries alcotest yeokcham_v1_model))

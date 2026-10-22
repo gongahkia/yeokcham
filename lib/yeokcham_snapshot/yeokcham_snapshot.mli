@@ -28,6 +28,7 @@ type error =
   | Scan_error of { path : string; operation : string; message : string }
   | Unsupported_file_type of { path : string; kind : string }
   | Invalid_ignore_path of { line : int; path : string }
+  | Ignored_path_would_be_removed of string
 
 val error_to_string : error -> string
 
@@ -132,6 +133,8 @@ module Materialize : sig
 
   val plan :
     Yeokcham_store.repository -> Snapshot.t -> (action list, error) result
+  (** Validate all tree and content objects, including symlink targets, before
+      returning any materialisation actions. *)
 
   val write :
     destination:string ->
@@ -164,3 +167,9 @@ val scan_excluding_root_names :
     [scan] preserves the historical default of excluding only [.yeokcham]. *)
 
 val inline_file_limit : int
+
+val require_no_ignored_paths :
+  excluded_root_names:string list -> root:string -> (unit, error) result
+(** Refuse replacement when an existing ignored entry would be deleted without
+    being captured in the safety snapshot. Does not follow symlink ancestors,
+    read ignored contents, or write objects. *)
