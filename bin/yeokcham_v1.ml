@@ -298,7 +298,8 @@ let help_for = function
        ^ "checkpoints, explicit shared revisions, unresolved decisions, and "
        ^ "deliveries distinct.\n\n"
        ^ "Start with a source build, then read docs/GETTING_STARTED.md. "
-       ^ "There is no published release, Git interchange, or general clone.\n\n"
+       ^ "This checkout is development source. Git interchange and general "
+       ^ "clone are not supported.\n\n"
        ^ "Use `yeokcham help COMMAND` or `yeokcham COMMAND --help` for one "
        ^ "supported command. Invalid invocations exit with an error.\n\n"
        ^ usage_text)

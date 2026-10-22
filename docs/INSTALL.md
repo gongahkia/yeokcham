@@ -2,18 +2,28 @@
 
 ## Availability
 
-Yeokcham V1 is experimental. There is no published stable release, opam
-publication, support matrix, compatibility promise, or source-release tag to
-install. A successful main-branch development-client workflow may expose a
+Yeokcham V1 is experimental. GitHub has a
+[1.0.0 source release](https://github.com/gongahkia/yeokcham/releases/tag/1.0.0),
+but that tag is lightweight and the release has no attached binary assets as
+of the October 2026 repository review. Current `main` is later development
+source and its executable identifies itself as an unreleased source build.
+There is no compatibility promise or opam publication. Pin the exact commit
+you evaluate. A successful main-branch development-client workflow may expose a
 short-lived signed CI artifact for a Linux tester; it is neither a public
 release nor a package-manager publication. Verify it using
 [development-artifact guidance](DEVELOPMENT_ARTIFACTS.md). Do not treat a
 source checkout or CI artifact as a signed stable release. The separate
-[source-release procedure](RELEASING.md) applies only when maintainers publish
-an actual annotated signed tag, archive digest, and public fingerprint.
+[source-release verification](RELEASING.md) requires an annotated signed tag,
+archive digest, and independently trusted public fingerprint; the existing
+lightweight `1.0.0` tag does not satisfy that procedure.
+
+Before building, install Git, make, opam, a C development toolchain,
+`pkg-config`, and the zstd development headers/library using your platform's
+package manager or development tools. The setup below then initializes opam
+and installs the declared OCaml dependencies.
 
 The repository currently declares OCaml 5.5.0 and Dune 3.23 or newer. Its
-Makefile is the supported source-build boundary:
+Makefile is the source-build entrypoint:
 
 ```sh
 git clone https://github.com/gongahkia/yeokcham.git
@@ -34,12 +44,16 @@ To avoid repeatedly spelling the build path during an evaluation, set a shell
 variable for the current shell:
 
 ```sh
-YEOKCHAM=./_build/default/bin/yeokcham_v1.exe
+YEOKCHAM="$PWD/_build/default/bin/yeokcham_v1.exe"
 "$YEOKCHAM" --help
 ```
 
 Run the [local recovery tutorial](GETTING_STARTED.md) next. Run the broader
-developer checks only if you are evaluating or changing the source:
+developer checks only if you are evaluating or changing the source. These
+also need Python 3, Ruby, GnuPG, OpenSSL, curl, socat, Bash, Zsh, and Fish.
+The [CI workflow](../.github/workflows/ci.yml) records the Linux/macOS test-tool
+setup, including a disposable SoftHSM token for PKCS#11 coverage. Docker and
+Buildx are needed for the separate container and package smoke targets.
 
 ```sh
 make ci
@@ -57,10 +71,16 @@ specific. Its private key is outside `.yeokcham` and V1 history.
 | Other platforms | unavailable | `watch` unavailable | Native V1 signing is unavailable. |
 | WSL | unsupported | unsupported | Not planned. |
 
+The Linux signer invokes `/usr/bin/secret-tool` and `/usr/bin/busctl`; both
+must be installed in addition to a running Secret Service with an unlocked
+default collection in the user's session. A successful source build alone
+does not establish that this runtime custody environment is available.
+
 An existing device may instead be explicitly attached to one `ssh-ed25519`
 key in `SSH_AUTH_SOCK`, or use an Ed25519 PKCS#11 token. Those are local custody
-choices, not authority changes; read the device help and
-[ADR-093](adr/093-v1-device-custody-providers.md) before relying on either.
+choices, not authority changes; read `yeokcham help device attach`,
+`yeokcham help device custody`, and the custody boundary in
+[Architecture](ARCHITECTURE.md) before relying on either.
 
 `watch` and the Linux `daemon` are advisory ways to request the ordinary exact
 `save` path. They never infer an operation or publish intent. Start with

@@ -14,12 +14,18 @@ A decision is data, not an exceptional control path. A username registration is
 not an identity claim.
 
 Each change revision names its change ID, revision ID, parent revision if any,
-author device ID, base snapshot, result snapshot, and exact edits. A delivery
-uses the model’s current projection only after all relevant decisions are
-resolved. Its signed wrapper is either `Shared` or `Resolution(decision)`;
+author device ID, base snapshot, result snapshot, and exact edits. A signed
+revision is categorized as `Shared` or `Resolution(decision)`;
 the latter binds the exact decision ID as well as the replacement revision.
 This category is part of the signed bytes, not package metadata supplied by an
 untrusted copier.
+
+A delivery requires a decision-free current projection and an `included` list
+of visible revisions representing the active shared draft. The local adapter
+records the current working-tree snapshot and uses the projection's applied
+revision IDs as that list. It does not verify that those bytes equal a
+materialised composition of those revisions. Delivery is a model record,
+not a `Signed_revision` wrapper.
 
 ## Authority state
 

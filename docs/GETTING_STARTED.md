@@ -9,7 +9,7 @@ The examples use a source-build command variable. If a future supported release
 installs `yeokcham` on `PATH`, set `YEOKCHAM=yeokcham` instead.
 
 ```sh
-YEOKCHAM=./_build/default/bin/yeokcham_v1.exe
+YEOKCHAM="$PWD/_build/default/bin/yeokcham_v1.exe"
 "$YEOKCHAM" --version
 "$YEOKCHAM" help changes
 ```
@@ -104,11 +104,8 @@ rm -rf "$DEMO_ROOT"
 That final cleanup is outside Yeokcham and removes the demo's recovery package
 as well as its files. Do not use it on an actual repository.
 
-## Runnable fixture
+## Disposable container alternative
 
-[`examples/local-recovery-demo.sh`](../examples/local-recovery-demo.sh) performs
-the same disposable-directory journey without embedding a mnemonic. It stops
-after `init` so a person can record the real ceremony, then gives the exact
-commands to continue. It is intentionally an instructional fixture rather than
-a CI substitute: the native signer and recovery ceremony require a real local
-custody environment.
+The [Docker tutorial](../containers/tutorial/USAGE.md) provides the same local
+recovery journey with an isolated Linux signer. It includes a sample project
+and an empty restore destination; no host compiler installation is required.

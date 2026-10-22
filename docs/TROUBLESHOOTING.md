@@ -20,6 +20,10 @@ phrase. Keep using the local device while it remains available, and follow the
 explicit recovery/custody procedures before making a device-loss plan. Do not
 post the mnemonic in an issue, chat, shell history, or package.
 
+`init --format json` and `recovery use --format json` refuse before creating
+custody or changing the repository. Run these ceremonies with `--format text`
+in a private terminal so the one-time mnemonic is visible.
+
 ## `changes` reports unexpected paths
 
 `changes` is an exact working-tree comparison against the latest checkpoint of
@@ -32,6 +36,12 @@ The `.yeokcham` and `.git` root names are excluded from this scan. Use
 Like `status`, the scan can write immutable unreferenced scan objects. It never
 saves a checkpoint or changes the working-tree source itself.
 
+`.yeokchamignore` also excludes the exact relative paths listed in it, together
+with their descendants. Use one path per line, without a leading or trailing
+slash. Blank lines and lines beginning with `#` are ignored. Patterns, `!`
+negation, and Git's ignore syntax are not supported. Ignored contents have no
+checkpoint; the ignore file itself is normally captured.
+
 ## I need an earlier file but do not want to overwrite current work
 
 Use destination restore with an empty directory:
@@ -42,6 +52,17 @@ yeokcham restore --root PROJECT --checkpoint CHECKPOINT --destination EMPTY_DIR
 
 Only omit `--destination` when you intend an in-place restore. Afterwards use
 `restore proofs` and `storage roots` to inspect the retained recovery boundary.
+
+If in-place restore reports an ignored path, move that entry outside the
+working tree before retrying, or use destination restore. The command refuses
+before deleting files because ignored bytes are absent from its safety
+checkpoint. `workspace update --replace` has the same protection.
+
+Missing or corrupt target content is rejected before materialisation. Use
+`verify` to inspect damage and `repair plan --from SOURCE` to examine available
+repair material. `timeline`, `log`, and `graph` inspect saved history without
+scanning the live tree, so an unsupported live file such as a named pipe does
+not prevent you from finding a recovery checkpoint.
 
 ## A second person cannot simply clone the repository
 

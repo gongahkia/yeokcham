@@ -35,10 +35,11 @@ Neither command turns a difference into a save or a shared change.
 
 ## Design distinctions
 
-The core distinction is deliberate: scratch recovery is automatic/local;
-intent is explicit; conflict is a durable decision; delivery is separate. This
-avoids pretending that modified bytes, a merge conflict, a device label, a
-language server result, or a CI outcome says what a person intended.
+The core distinction is deliberate: scratch recovery is local, with automatic
+capture while `watch` or the Linux `daemon` is running; intent is explicit;
+conflict is a durable decision; delivery is separate. This avoids pretending
+that modified bytes, a merge conflict, a device label, a language server result,
+or a CI outcome says what a person intended.
 
-For the formal types and invariants, read [FORMAL_MODEL.md](../FORMAL_MODEL.md).
+For the formal types and invariants, read [FORMAL_MODEL.md](FORMAL_MODEL.md).
 For exact command and trust boundaries, read [V1_PRODUCT_CONTRACT.md](V1_PRODUCT_CONTRACT.md).

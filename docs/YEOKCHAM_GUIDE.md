@@ -7,6 +7,7 @@ A short guide to saving work, sharing it deliberately, and recovering exact file
 Build the source checkout, then point `YEOKCHAM` at the resulting command:
 
 ```sh
+make setup
 make build
 YEOKCHAM="$PWD/_build/default/bin/yeokcham_v1.exe"
 "$YEOKCHAM" --version
@@ -43,11 +44,16 @@ file modes, and content identities; it does not guess text edits or moves.
 Copy a checkpoint ID from `timeline`, then restore it into an empty destination:
 
 ```sh
+mkdir ../recovered
 "$YEOKCHAM" restore --checkpoint CHECKPOINT --destination ../recovered
 ```
 
 The current working tree stays untouched. Omitting `--destination` performs an
 explicit in-place restore with a durable safety proof.
+
+Existing paths excluded by `.yeokchamignore` have no recovery checkpoint.
+In-place restore refuses to remove them; move them outside the working tree
+first, or use the empty destination above. See [Troubleshooting](TROUBLESHOOTING.md).
 
 ## Share work
 
