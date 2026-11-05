@@ -12,6 +12,7 @@
  (flags
   (:standard -w -70))
  (libraries
+  yeokcham_v1_undo
   yeokcham_v1_local_service
   yeokcham_v1_gc
   yeokcham_v1_bootstrap

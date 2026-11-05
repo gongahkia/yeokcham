@@ -1,6 +1,7 @@
 (library
  (name yeokcham_v1_local_service)
  (libraries
+  yeokcham_v1_undo
   unix
   yeokcham_hash
   yeokcham_snapshot

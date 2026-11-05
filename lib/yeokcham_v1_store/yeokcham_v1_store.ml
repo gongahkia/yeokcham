@@ -5,8 +5,10 @@ module Record = Yeokcham_v1_record
 module Store = Yeokcham_store
 module Trust = Yeokcham_v1_trust
 module Transport = Yeokcham_v1_transport
+module History = Yeokcham_v1_undo
 
 type error =
+  | History_error of string
   | Store_error of Store.error
   | Record_error of Record.error
   | Envelope_error of Envelope.creation_error
@@ -21,6 +23,7 @@ type error =
   | Collaborative_state_requires_collaborative_save
 
 let error_to_string = function
+  | History_error detail -> "invalid local undo history: " ^ detail
   | Store_error error -> Store.error_to_string error
   | Record_error error -> Record.error_to_string error
   | Envelope_error error -> Envelope.creation_error_to_string error
@@ -53,6 +56,7 @@ type collaboration = {
 }
 
 type loaded = {
+  history : History.t;
   project : Model.project;
   collaboration : collaboration option;
   head : Store.Mutable_ref.t;
@@ -565,26 +569,63 @@ let store_collaborative_project store project collaboration =
   let* payload = payload_for_collaborative_project project collaboration in
   store_payload store payload
 
-let decode_project_object store object_id =
-  let* object_ =
-    Store.get store object_id
-    |> Result.map_error (fun error -> Store_error error)
-  in
+let history_for_project project =
+  let active = Model.active_draft project in
+  History.seed ~snapshot:active.Model.latest_checkpoint ~draft:active.Model.draft_id
+
+let validate_history project history =
+  if Model.Snapshot_id.equal (History.current history).History.snapshot
+       (Model.active_draft project).Model.latest_checkpoint then Ok history
+  else Error (History_error "cursor does not match the active checkpoint")
+
+let decode_inner encoded =
+  match decode_collaborative_state encoded with
+  | Ok (project, collaboration) -> Ok (project, Some collaboration)
+  | Error _ ->
+      Record.decode_project encoded
+      |> Result.map (fun project -> (project, None))
+      |> Result.map_error (fun error -> Record_error error)
+
+let[@warning "-4"] decode_project_object store object_id =
+  let* object_ = Store.get store object_id
+    |> Result.map_error (fun error -> Store_error error) in
   if Envelope.object_type object_ <> Envelope.V1_project_state then
     Error (Unexpected_object_type (Envelope.object_type object_))
   else
-    let encoded = Envelope.payload object_ |> Encoding.encode in
-    match decode_collaborative_state encoded with
-    | Ok (project, collaboration) -> Ok (project, Some collaboration)
-    | Error
-        ( Invalid_collaboration_state _ | Record_error _ | Trust_error _
-        | Transport_error _ | Store_error _ | Envelope_error _
-        | Existing_repository _ | Bootstrap_error _ | Missing_state_head
-        | Empty_state_head | Unexpected_object_type _
-        | Collaborative_state_requires_collaborative_save ) ->
-        Record.decode_project encoded
-        |> Result.map (fun project -> (project, None))
-        |> Result.map_error (fun error -> Record_error error)
+    match Envelope.payload object_ with
+    | Encoding.Array [ Encoding.Text "yeokcham-local-state";
+                       Encoding.Integer 1L; Encoding.Bytes inner; Encoding.Bytes bytes ] ->
+        let* project, collaboration = decode_inner inner in
+        let* history = History.decode bytes |> Result.map_error (fun e -> History_error e) in
+        let* history = validate_history project history in
+        Ok (project, collaboration, history)
+    | Encoding.Array (Encoding.Text "yeokcham-local-state" :: _) ->
+        Error (History_error "unsupported local state wrapper")
+    | payload ->
+        let* project, collaboration = decode_inner (Encoding.encode payload) in
+        Ok (project, collaboration, history_for_project project)
+
+let store_with_history store project collaboration history =
+  let* history = validate_history project history in
+  let* inner = match collaboration with
+    | None -> Record.encode_project project |> Result.map_error (fun e -> Record_error e)
+    | Some collaboration -> encode_collaborative_state ~project collaboration in
+  let* history = History.encode history |> Result.map_error (fun e -> History_error e) in
+  let* tag = Encoding.text "yeokcham-local-state"
+    |> Result.map_error (fun e -> History_error (Encoding.construction_error_to_string e)) in
+  let* payload = Encoding.array [ tag; Encoding.integer 1L;
+                                  Encoding.bytes inner; Encoding.bytes history ]
+    |> Result.map_error (fun e -> History_error (Encoding.construction_error_to_string e)) in
+  store_payload store payload
+
+let observed_history ?history existing project =
+  match history with
+  | Some history -> validate_history project history
+  | None ->
+      let active = Model.active_draft project in
+      History.record existing ~snapshot:active.Model.latest_checkpoint
+        ~draft:active.Model.draft_id ~created_at:(Int64.of_float (Unix.gettimeofday ()))
+      |> Result.map_error (fun e -> History_error e)
 
 let current_head repository =
   Store.read_ref repository.store ~name:state_head_name
@@ -598,10 +639,10 @@ let load repository =
       match Store.Mutable_ref.target head with
       | None -> Error Empty_state_head
       | Some object_id ->
-          let* project, collaboration =
+          let* project, collaboration, history =
             decode_project_object repository.store object_id
           in
-          Ok { project; collaboration; head; object_id })
+          Ok { project; collaboration; history; head; object_id })
 
 let init_with ~root ~bootstrap =
   let metadata = repository_metadata_path root in
@@ -655,37 +696,29 @@ let open_repository ~root =
   let* _ = load repository in
   Ok repository
 
-let save repository ~expected ~project =
-  let* existing_collaboration =
-    match Store.Mutable_ref.target expected with
-    | None -> Error Empty_state_head
-    | Some object_id ->
-        let* _, collaboration =
-          decode_project_object repository.store object_id
-        in
-        Ok collaboration
-  in
-  let* () =
-    match existing_collaboration with
-    | None -> Ok ()
-    | Some _ -> Error Collaborative_state_requires_collaborative_save
-  in
-  let* object_id = store_project repository.store project in
-  let* head =
-    Store.compare_and_swap_ref repository.store ~name:state_head_name
-      ~expected:(Some expected) ~target:(Some object_id)
-    |> Result.map_error (fun error -> Store_error error)
-  in
-  Ok { project; collaboration = None; head; object_id }
+let previous repository expected =
+  match Store.Mutable_ref.target expected with
+  | None -> Error Empty_state_head
+  | Some object_id -> decode_project_object repository.store object_id
 
-let save_collaborative repository ~expected ~project ~collaboration =
-  let* collaboration = validate_collaboration ~project collaboration in
-  let* object_id =
-    store_collaborative_project repository.store project collaboration
-  in
-  let* head =
-    Store.compare_and_swap_ref repository.store ~name:state_head_name
+let save ?history repository ~expected ~project =
+  let* _, existing_collaboration, existing_history = previous repository expected in
+  let* () = match existing_collaboration with
+    | None -> Ok ()
+    | Some _ -> Error Collaborative_state_requires_collaborative_save in
+  let* history = observed_history ?history existing_history project in
+  let* object_id = store_with_history repository.store project None history in
+  let* head = Store.compare_and_swap_ref repository.store ~name:state_head_name
       ~expected:(Some expected) ~target:(Some object_id)
-    |> Result.map_error (fun error -> Store_error error)
-  in
-  Ok { project; collaboration = Some collaboration; head; object_id }
+    |> Result.map_error (fun error -> Store_error error) in
+  Ok { project; collaboration = None; history; head; object_id }
+
+let save_collaborative ?history repository ~expected ~project ~collaboration =
+  let* collaboration = validate_collaboration ~project collaboration in
+  let* _, _, existing_history = previous repository expected in
+  let* history = observed_history ?history existing_history project in
+  let* object_id = store_with_history repository.store project (Some collaboration) history in
+  let* head = Store.compare_and_swap_ref repository.store ~name:state_head_name
+      ~expected:(Some expected) ~target:(Some object_id)
+    |> Result.map_error (fun error -> Store_error error) in
+  Ok { project; collaboration = Some collaboration; history; head; object_id }

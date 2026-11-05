@@ -4,6 +4,7 @@
     refuses any pre-existing [.yeokcham] directory. *)
 
 type error =
+  | History_error of string
   | Store_error of Yeokcham_store.error
   | Record_error of Yeokcham_v1_record.error
   | Envelope_error of Yeokcham_envelope.creation_error
@@ -63,6 +64,7 @@ val transport : collaboration -> Yeokcham_v1_transport.local_state
 val local_certificate : collaboration -> string
 
 type loaded = {
+  history : Yeokcham_v1_undo.t;
   project : Yeokcham_v1_model.project;
   collaboration : collaboration option;
   head : Yeokcham_store.Mutable_ref.t;
@@ -104,6 +106,7 @@ val open_repository : root:string -> (repository, error) result
 val load : repository -> (loaded, error) result
 
 val save :
+  ?history:Yeokcham_v1_undo.t ->
   repository ->
   expected:Yeokcham_store.Mutable_ref.t ->
   project:Yeokcham_v1_model.project ->
@@ -112,6 +115,7 @@ val save :
     head. Use [save_collaborative] to preserve and validate that state. *)
 
 val save_collaborative :
+  ?history:Yeokcham_v1_undo.t ->
   repository ->
   expected:Yeokcham_store.Mutable_ref.t ->
   project:Yeokcham_v1_model.project ->

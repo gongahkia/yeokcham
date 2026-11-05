@@ -1,6 +1,8 @@
 (library
  (name yeokcham_v1_store)
  (libraries
+  unix
+  yeokcham_v1_undo
   yeokcham_encoding
   yeokcham_envelope
   yeokcham_store

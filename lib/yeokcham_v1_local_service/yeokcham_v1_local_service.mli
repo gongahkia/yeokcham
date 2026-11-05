@@ -6,6 +6,7 @@
     part of this module. *)
 
 type error =
+  | History_error of string
   | Store_error of Yeokcham_v1_store.error
   | Snapshot_error of Yeokcham_snapshot.error
   | Materialize_error of Yeokcham_snapshot.Materialize.error
@@ -643,3 +644,31 @@ val deliver :
   next_draft:Yeokcham_v1_model.Draft_id.t ->
   next_title:string ->
   (status, error) result
+
+type history_direction = Undo | Redo of int64 option | Go_to of int64
+
+type local_history = {
+  undo_tree : Yeokcham_v1_undo.t;
+  retained_checkpoints : Yeokcham_v1_model.Snapshot_id.t list;
+}
+
+type history_navigation = {
+  source_node : int64;
+  target_node : Yeokcham_v1_undo.node;
+  history_changes : path_difference list;
+  captures_unsaved : bool;
+  history_applied : bool;
+  history_restore : in_place_restore option;
+}
+
+val local_history : root:string -> (local_history, error) result
+(** Reads the saved tree without scanning files. Compaction may expire snapshot
+    contents; parent links and node IDs remain inspectable. *)
+
+val navigate_history :
+  root:string -> direction:history_direction -> dry_run:bool ->
+  (history_navigation, error) result
+(** Undo captures unsaved disk edits before moving to the previous node. Redo
+    requires saved files and an explicit child when several continuations exist.
+    Preview may allocate scan objects but never advances history or writes files.
+    A resumed journal completes its original navigation without another step. *)

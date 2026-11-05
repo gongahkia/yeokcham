@@ -5,6 +5,7 @@ type phase = Prepared | Applying | Materialized | Published
 
 type t = {
   operation_id : string;
+  history_node : int64 option;
   safety : Model.Snapshot_id.t;
   target : Model.Snapshot_id.t;
   generation : int64;
@@ -63,7 +64,12 @@ let make_prepared ~operation_id ~safety ~target =
   if not (valid_operation_id operation_id) then
     Error (Invalid_operation_id operation_id)
   else if Model.Snapshot_id.equal safety target then Error Identical_snapshots
-  else Ok { operation_id; safety; target; generation = 0L; phase = Prepared }
+  else Ok { operation_id; history_node = None; safety; target; generation = 0L; phase = Prepared }
+
+let history_node journal = journal.history_node
+let with_history_node journal node =
+  if Int64.compare node 0L < 0 then Error (Invalid_schema "negative history node")
+  else Ok { journal with history_node = Some node }
 
 let operation_id journal = journal.operation_id
 let safety journal = journal.safety
@@ -118,14 +124,14 @@ let encode journal =
     |> Result.map_error (fun error -> Encoding_error error)
   in
   Encoding.array
-    [
-      Encoding.integer schema_version;
+    ([
+      Encoding.integer (if Option.is_some journal.history_node then 2L else schema_version);
       operation;
       safety;
       target;
       Encoding.integer journal.generation;
       Encoding.integer (phase_code journal.phase);
-    ]
+    ] @ Option.fold ~none:[] ~some:(fun node -> [ Encoding.integer node ]) journal.history_node)
   |> Result.map Encoding.encode
   |> Result.map_error (fun error -> Encoding_error error)
 
@@ -145,9 +151,12 @@ let decode bytes =
   let* value =
     Encoding.decode bytes |> Result.map_error (fun error -> Decode_error error)
   in
-  let* fields =
+  let* fields, history_node =
     match value with
-    | Encoding.Array fields when List.length fields = 6 -> Ok fields
+    | Encoding.Array [ Encoding.Integer 2L; operation; safety; target; generation; phase; Encoding.Integer node ]
+      when Int64.compare node 0L >= 0 ->
+        Ok ([ Encoding.integer 2L; operation; safety; target; generation; phase ], Some node)
+    | Encoding.Array fields when List.length fields = 6 -> Ok (fields, None)
     | Encoding.Array _ ->
         Error (Invalid_schema "record must contain six fields")
     | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _ | Encoding.Map _
@@ -157,7 +166,7 @@ let decode bytes =
   match fields with
   | [ version; operation; safety; target; generation; phase ] ->
       let* version = decoded_integer "version" version in
-      if not (Int64.equal version schema_version) then
+      if not (Int64.equal version (if Option.is_some history_node then 2L else schema_version)) then
         Error (Unsupported_schema_version version)
       else
         let* operation_id = decoded_text "operation id" operation in
@@ -187,7 +196,7 @@ let decode bytes =
           if not (Int64.equal generation expected_generation) then
             Error (Invalid_generation generation)
           else
-            let journal = { operation_id; safety; target; generation; phase } in
+            let journal = { operation_id; history_node; safety; target; generation; phase } in
             let* canonical = encode journal in
             if String.equal canonical bytes then Ok journal
             else Error Noncanonical_bytes
