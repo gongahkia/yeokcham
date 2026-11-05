@@ -265,3 +265,23 @@ equivalent to the existing `sync(remote)` receipt and upload orchestration. It
 cannot select a feed or authority head, scan or materialise a working tree
 during receipt, or cause an authority transition. Losing runtime state or the
 runtime process changes no V1 model state.
+
+## Local undo positions
+
+The local persistence wrapper additionally carries an undo forest and cursor.
+Each node has a local integer ID, optional parent ID, exact snapshot ID,
+originating draft, and capture time. IDs are consecutive; a parent always names
+an earlier node. Identical snapshots may have different node IDs. The cursor's
+snapshot equals the active draft's latest checkpoint.
+
+Capture appends a child only when exact contents change. Undo selects a parent;
+redo selects a child and requires explicit selection at a fork. Navigation
+preserves the other continuations. A legacy checkpoint with no recorded
+ancestry can become a separate root. In-place restoration binds its exact
+node in a V2 journal and publishes node/checkpoint selection together. A retry
+finishes that original selection without taking another undo/redo step.
+
+Nodes are outside public `Project` state, signatures, packages, and bootstrap
+bases. Metadata persists through checkpoint compaction; an unavailable snapshot
+cannot be selected and is never silently skipped. No language semantics or
+operation attribution are inferred from this history.

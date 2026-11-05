@@ -477,8 +477,8 @@ let save_project ?history repository loaded project =
   match loaded.Store.collaboration with
   | None -> Store.save ?history repository ~expected:loaded.Store.head ~project
   | Some collaboration ->
-      Store.save_collaborative ?history repository ~expected:loaded.Store.head ~project
-        ~collaboration
+      Store.save_collaborative ?history repository ~expected:loaded.Store.head
+        ~project ~collaboration
 
 let persist_collaborative repository loaded project collaboration =
   Store.save_collaborative repository ~expected:loaded.Store.head ~project
@@ -597,31 +597,44 @@ let with_repository ~root f =
   f repository loaded
 
 let with_worktree_lock ~root action =
-  let* repository = Store.open_repository ~root
-    |> Result.map_error (fun error -> Store_error error) in
-  let path = Filename.concat (Filename.concat root ".yeokcham") "local-worktree.lock" in
-  let _ = repository in
+  let* _ =
+    Store.open_repository ~root
+    |> Result.map_error (fun error -> Store_error error)
+  in
+  let path =
+    Filename.concat (Filename.concat root ".yeokcham") "local-worktree.lock"
+  in
   try
-    let fd = Unix.openfile path [ Unix.O_RDWR; Unix.O_CREAT; Unix.O_CLOEXEC ] 0o600 in
-    Fun.protect ~finally:(fun () -> Unix.close fd) (fun () ->
-      Unix.lockf fd Unix.F_TLOCK 0;
-      action ())
+    let fd =
+      Unix.openfile path [ Unix.O_RDWR; Unix.O_CREAT; Unix.O_CLOEXEC ] 0o600
+    in
+    Fun.protect
+      ~finally:(fun () -> Unix.close fd)
+      (fun () ->
+        Unix.lockf fd Unix.F_TLOCK 0;
+        action ())
   with Unix.Unix_error (error, _, _) ->
-    Error (History_error ("workspace operation unavailable: " ^ Unix.error_message error))
+    Error
+      (History_error
+         ("workspace operation unavailable: " ^ Unix.error_message error))
 
 let require_no_pending_restore ~root =
-  let* pending = Journal.latest_pending ~root
-    |> Result.map_error (fun error -> Restore_journal_error error) in
+  let* pending =
+    Journal.latest_pending ~root
+    |> Result.map_error (fun error -> Restore_journal_error error)
+  in
   match pending with
   | None -> Ok ()
-  | Some journal -> Error (History_error
-      ("a restore is incomplete; resume it with restore --checkpoint "
-       ^ Model.Snapshot_id.to_string (Journal.target journal)))
+  | Some journal ->
+      Error
+        (History_error
+           ("a restore is incomplete; resume it with restore --checkpoint "
+           ^ Model.Snapshot_id.to_string (Journal.target journal)))
 
 let with_writable_repository ~root action =
   with_worktree_lock ~root (fun () ->
-    let* () = require_no_pending_restore ~root in
-    with_repository ~root action)
+      let* () = require_no_pending_restore ~root in
+      with_repository ~root action)
 
 let tree_id snapshot =
   Snapshot.Snapshot.root snapshot
@@ -1483,20 +1496,29 @@ let perform_in_place ~root repository loaded journal ~resumed =
   let* history =
     match Journal.history_node journal with
     | Some id ->
-        let* node = History.find loaded.Store.history id
-          |> Result.map_error (fun error -> History_error error) in
-        if not (Model.Snapshot_id.equal node.History.snapshot (Journal.target journal)) then
+        let* node =
+          History.find loaded.Store.history id
+          |> Result.map_error (fun error -> History_error error)
+        in
+        if
+          not
+            (Model.Snapshot_id.equal node.History.snapshot
+               (Journal.target journal))
+        then
           Error (History_error "restore journal node does not match its target")
-        else History.select loaded.Store.history id
+        else
+          History.select loaded.Store.history id
           |> Result.map_error (fun error -> History_error error)
     | None ->
         let active = Model.active_draft loaded.Store.project in
-        let* history, node = History.target_snapshot loaded.Store.history
-          ~snapshot:(Journal.target journal) ~draft:active.Model.draft_id
-          ~created_at:(Int64.of_float (Unix.gettimeofday ()))
-          |> Result.map_error (fun error -> History_error error) in
-        History.select history node.History.id
+        let* history, node =
+          History.target_snapshot loaded.Store.history
+            ~snapshot:(Journal.target journal) ~draft:active.Model.draft_id
+            ~created_at:(Int64.of_float (Unix.gettimeofday ()))
           |> Result.map_error (fun error -> History_error error)
+        in
+        History.select history node.History.id
+        |> Result.map_error (fun error -> History_error error)
   in
   let* () =
     match Journal.phase journal with
@@ -1615,18 +1637,28 @@ let restore_in_place_unlocked ~root ~checkpoint ~history_node =
               in
               let active = Model.active_draft project in
               let now = Int64.of_float (Unix.gettimeofday ()) in
-              let* history = History.record loaded.Store.history ~snapshot:safety
-                ~draft:active.Model.draft_id ~created_at:now
-                |> Result.map_error (fun error -> History_error error) in
-              let* history, target_node = match history_node with
-                | None -> History.target_snapshot history ~snapshot:checkpoint
-                    ~draft:active.Model.draft_id ~created_at:now
+              let* history =
+                History.record loaded.Store.history ~snapshot:safety
+                  ~draft:active.Model.draft_id ~created_at:now
+                |> Result.map_error (fun error -> History_error error)
+              in
+              let* history, target_node =
+                match history_node with
+                | None ->
+                    History.target_snapshot history ~snapshot:checkpoint
+                      ~draft:active.Model.draft_id ~created_at:now
                     |> Result.map_error (fun error -> History_error error)
                 | Some id ->
-                    let* node = History.find history id
-                      |> Result.map_error (fun error -> History_error error) in
-                    if Model.Snapshot_id.equal node.History.snapshot checkpoint then Ok (history, node)
-                    else Error (History_error "selected node does not match target snapshot")
+                    let* node =
+                      History.find history id
+                      |> Result.map_error (fun error -> History_error error)
+                    in
+                    if Model.Snapshot_id.equal node.History.snapshot checkpoint
+                    then Ok (history, node)
+                    else
+                      Error
+                        (History_error
+                           "selected node does not match target snapshot")
               in
               let* saved =
                 save_project ~history repository loaded project
@@ -1639,8 +1671,10 @@ let restore_in_place_unlocked ~root ~checkpoint ~history_node =
                 Journal.make_prepared ~operation_id ~safety ~target:checkpoint
                 |> Result.map_error (fun error -> Restore_journal_error error)
               in
-              let* journal = Journal.with_history_node journal target_node.History.id
-                |> Result.map_error (fun error -> Restore_journal_error error) in
+              let* journal =
+                Journal.with_history_node journal target_node.History.id
+                |> Result.map_error (fun error -> Restore_journal_error error)
+              in
               let* () = append_journal ~root journal in
               perform_in_place ~root repository saved journal ~resumed:false)
 
@@ -1649,7 +1683,7 @@ let recover_in_place ~root =
 
 let restore_in_place ~root ~checkpoint =
   with_worktree_lock ~root (fun () ->
-    restore_in_place_unlocked ~root ~checkpoint ~history_node:None)
+      restore_in_place_unlocked ~root ~checkpoint ~history_node:None)
 
 let workspace_materialization_of_plan plan restored =
   let basis = Workspace.plan_basis plan in
@@ -1718,7 +1752,7 @@ let materialize_workspace_activation ~root plan =
     |> Result.map_error (fun error -> Workspace_error error)
   in
   let materialized =
-    with_repository ~root (fun repository _ ->
+    with_writable_repository ~root (fun repository _ ->
         let store = Store.underlying_store repository in
         let* target = load_snapshot store checkpoint in
         Snapshot.Materialize.write_replacing ~destination:root
@@ -2535,76 +2569,165 @@ type history_navigation = {
 
 let local_history ~root =
   with_repository ~root (fun _ loaded ->
-    Ok { undo_tree = loaded.Store.history;
-         retained_checkpoints = Model.checkpoints loaded.Store.project
-           |> List.map (fun checkpoint -> checkpoint.Model.checkpoint_snapshot) })
+      Ok
+        {
+          undo_tree = loaded.Store.history;
+          retained_checkpoints =
+            Model.checkpoints loaded.Store.project
+            |> List.map (fun checkpoint -> checkpoint.Model.checkpoint_snapshot);
+        })
 
 let history_target history = function
   | Go_to id -> History.find history id
-  | Undo -> (match (History.current history).History.parent with
+  | Undo -> (
+      match (History.current history).History.parent with
       | Some id -> History.find history id
       | None -> Error "already at a history root; there is no recorded parent")
-  | Redo selected ->
-      let children = History.children history (History.current history).History.id in
-      match selected, children with
+  | Redo selected -> (
+      let children =
+        History.children history (History.current history).History.id
+      in
+      match (selected, children) with
       | None, [ child ] -> Ok child
       | None, [] -> Error "there is no redo branch at this node"
-      | None, children -> Error ("choose a redo branch with --node: " ^
-          String.concat ", " (List.map (fun node -> Int64.to_string node.History.id) children))
-      | Some id, children -> (match List.find_opt (fun node -> Int64.equal node.History.id id) children with
+      | None, children ->
+          Error
+            ("choose a redo branch with --node: "
+            ^ String.concat ", "
+                (List.map
+                   (fun node -> Int64.to_string node.History.id)
+                   children))
+      | Some id, children -> (
+          match
+            List.find_opt (fun node -> Int64.equal node.History.id id) children
+          with
           | Some node -> Ok node
-          | None -> Error "the selected redo node is not a child of the current node")
+          | None ->
+              Error "the selected redo node is not a child of the current node")
+      )
 
 let navigate_history ~root ~direction ~dry_run =
   with_worktree_lock ~root (fun () ->
-    let* initial = local_history ~root in
-    let* pending = Journal.latest_pending ~root
-      |> Result.map_error (fun error -> Restore_journal_error error) in
-    match pending with
-    | Some _ when dry_run ->
-        Error (History_error "resume the incomplete restore before previewing navigation")
-    | Some _ ->
-        let* restored = recover_in_place_unlocked ~root in
-        let* after = local_history ~root in
-        Ok { source_node = (History.current initial.undo_tree).History.id;
-             target_node = History.current after.undo_tree;
-             history_changes = []; captures_unsaved = false;
-             history_applied = true; history_restore = restored }
-    | None ->
-        let* plan = with_repository ~root (fun repository loaded ->
-          let store = Store.underlying_store repository in
-          let* observed = capture ~root store in
-          let active = Model.active_draft loaded.Store.project in
-          let dirty = not (Model.Snapshot_id.equal observed active.Model.latest_checkpoint) in
-          let* () = match direction with
-            | Redo _ when dirty -> Error (History_error "working files have unsaved edits; save or undo them before redo")
-            | Undo | Go_to _ | Redo _ -> Ok () in
-          let* history = History.record loaded.Store.history ~snapshot:observed
-            ~draft:active.Model.draft_id ~created_at:(Int64.of_float (Unix.gettimeofday ()))
-            |> Result.map_error (fun error -> History_error error) in
-          let* target = history_target history direction
-            |> Result.map_error (fun error -> History_error error) in
-          let* () = if retained loaded.Store.project target.History.snapshot then Ok ()
-            else Error (History_error "that node's checkpoint was compacted; its contents are no longer retained") in
-          let* changes = comparison_differences store ~before:observed ~after:target.History.snapshot in
-          Ok ({ source_node = (History.current history).History.id; target_node = target;
-                history_changes = changes; captures_unsaved = dirty;
-                history_applied = false; history_restore = None }, observed)) in
-        let navigation, observed = plan in
-        if dry_run then Ok navigation
-        else if Model.Snapshot_id.equal observed navigation.target_node.History.snapshot then
-          with_repository ~root (fun repository loaded ->
-            let* history = History.select loaded.Store.history navigation.target_node.History.id
-              |> Result.map_error (fun error -> History_error error) in
-            let project = Model.checkpoint loaded.Store.project ~snapshot:observed in
-            let* _ = save_project ~history repository loaded project
-              |> Result.map_error (fun error -> Store_error error) in
-            Ok { navigation with history_applied = true })
-        else
-          let* restored = restore_in_place_unlocked ~root
-            ~checkpoint:navigation.target_node.History.snapshot
-            ~history_node:(Some navigation.target_node.History.id) in
-          Ok { navigation with history_applied = true; history_restore = Some restored })
+      let* initial = local_history ~root in
+      let* pending =
+        Journal.latest_pending ~root
+        |> Result.map_error (fun error -> Restore_journal_error error)
+      in
+      match pending with
+      | Some _ when dry_run ->
+          Error
+            (History_error
+               "resume the incomplete restore before previewing navigation")
+      | Some _ ->
+          let* restored = recover_in_place_unlocked ~root in
+          let* after = local_history ~root in
+          Ok
+            {
+              source_node = (History.current initial.undo_tree).History.id;
+              target_node = History.current after.undo_tree;
+              history_changes = [];
+              captures_unsaved = false;
+              history_applied = true;
+              history_restore = restored;
+            }
+      | None ->
+          let* plan =
+            with_repository ~root (fun repository loaded ->
+                let store = Store.underlying_store repository in
+                let* observed = capture ~root store in
+                let active = Model.active_draft loaded.Store.project in
+                let dirty =
+                  not
+                    (Model.Snapshot_id.equal observed
+                       active.Model.latest_checkpoint)
+                in
+                let* () =
+                  match direction with
+                  | Redo _ when dirty ->
+                      Error
+                        (History_error
+                           "working files have unsaved edits; save or undo \
+                            them before redo")
+                  | Undo | Go_to _ | Redo _ -> Ok ()
+                in
+                let* history =
+                  History.record loaded.Store.history ~snapshot:observed
+                    ~draft:active.Model.draft_id
+                    ~created_at:(Int64.of_float (Unix.gettimeofday ()))
+                  |> Result.map_error (fun error -> History_error error)
+                in
+                let* target =
+                  history_target history direction
+                  |> Result.map_error (fun error -> History_error error)
+                in
+                let* () =
+                  if retained loaded.Store.project target.History.snapshot then
+                    Ok ()
+                  else
+                    Error
+                      (History_error
+                         "that node's checkpoint was compacted; its contents \
+                          are no longer retained")
+                in
+                let* changes =
+                  comparison_differences store ~before:observed
+                    ~after:target.History.snapshot
+                in
+                Ok
+                  ( {
+                      source_node = (History.current history).History.id;
+                      target_node = target;
+                      history_changes = changes;
+                      captures_unsaved = dirty;
+                      history_applied = false;
+                      history_restore = None;
+                    },
+                    observed ))
+          in
+          let navigation, observed = plan in
+          if dry_run then Ok navigation
+          else if
+            Model.Snapshot_id.equal observed
+              navigation.target_node.History.snapshot
+          then
+            with_repository ~root (fun repository loaded ->
+                if
+                  Int64.equal (History.current loaded.Store.history).History.id
+                    navigation.target_node.History.id
+                  && not navigation.captures_unsaved
+                then Ok navigation
+                else
+                  let active = Model.active_draft loaded.Store.project in
+                  let* history =
+                    History.record loaded.Store.history ~snapshot:observed
+                      ~draft:active.Model.draft_id
+                      ~created_at:(Int64.of_float (Unix.gettimeofday ()))
+                    |> Result.map_error (fun error -> History_error error)
+                  in
+                  let* history =
+                    History.select history navigation.target_node.History.id
+                    |> Result.map_error (fun error -> History_error error)
+                  in
+                  let project =
+                    Model.checkpoint loaded.Store.project ~snapshot:observed
+                  in
+                  let* _ =
+                    save_project ~history repository loaded project
+                    |> Result.map_error (fun error -> Store_error error)
+                  in
+                  Ok { navigation with history_applied = true })
+          else
+            let* restored =
+              restore_in_place_unlocked ~root
+                ~checkpoint:navigation.target_node.History.snapshot
+                ~history_node:(Some navigation.target_node.History.id)
+            in
+            Ok
+              {
+                navigation with
+                history_applied = true;
+                history_restore = Some restored;
+              })
 
 let compare_decision ~root ~decision ~candidate ~against =
   with_repository ~root (fun repository loaded ->

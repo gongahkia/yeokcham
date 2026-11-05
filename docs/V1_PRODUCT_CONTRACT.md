@@ -12,6 +12,7 @@ the implemented user workflow.
 | Observe edits | `status`, `changes` | Scans exact entries; may store unreferenced immutable objects. Does not save or publish history. |
 | Recover scratch work | `save`, `watch`, Linux `daemon` | Captures a checkpoint when the observed tree differs. Automatic capture requires a running watcher or daemon. |
 | Inspect recorded work | `timeline`, `log`, `graph` | Reads local history without scanning the current tree or contacting a relay. |
+| Navigate local work | `undo-tree`, `undo`, `redo` | Local nodes preserve alternate continuations. Preview lists exact path changes; applying uses recovery journals. Ambiguous redo requires a selected child. |
 | Recover exact files | `restore` | Destination must already exist and be empty. In-place replacement retains safety and target snapshots in a durable proof. |
 | Start another local task | `draft new` | Starts a local draft from the latest saved checkpoint; it does not switch or rewrite ordinary files. Save outstanding edits first if they belong to the old task. |
 | Declare shared intent | `share`, `withdraw` | Creates signed immutable revisions or explicitly withdraws eligible work. Sharing captures the current tree, including directory-only changes. |
@@ -44,11 +45,17 @@ atomic filesystem transaction. Coordinate with editors and other processes
 before replacement: a checkpoint cannot protect writes made concurrently
 after its scan.
 
+Local undo nodes have identities independent of their snapshots. Their topology
+and current position persist locally; receipt and public exchange do not carry
+them. Compaction may expire node contents while preserving parent links. See
+[Local undo tree](LOCAL_UNDO.md) for retention, restart, and client-format
+compatibility.
+
 ## Human and machine interfaces
 
 Use `yeokcham help COMMAND` for actual arguments. Text output is the primary
 inspection interface. `--color auto|always|never` controls styling; JSON is
-always free of styling. `verify`, `repair`, and `hook list` provide structured
+always free of styling. `verify`, `repair`, `hook list`, `undo-tree`, `undo`, and `redo` provide structured
 results. Most other commands currently return only a versioned completion
 envelope in JSON mode, so that mode is not a complete inspection API.
 

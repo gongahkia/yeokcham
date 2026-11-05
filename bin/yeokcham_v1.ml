@@ -110,7 +110,16 @@ let command_name () =
 
 let native_json_command command =
   List.mem command
-    [ "verify"; "repair-plan"; "repair-apply"; "repair-defer"; "hook-list"; "undo-tree"; "undo"; "redo" ]
+    [
+      "verify";
+      "repair-plan";
+      "repair-apply";
+      "repair-defer";
+      "hook-list";
+      "undo-tree";
+      "undo";
+      "redo";
+    ]
 
 let json_stdout_destination : Unix.file_descr option ref = ref None
 let public_warnings : string list ref = ref []
@@ -328,12 +337,25 @@ let help_for = function
         "usage: yeokcham save [--root PATH]\n\n\
          Create a local checkpoint only if the exact working tree changed. A \
          save is recovery, not shared intent."
-  | [ "undo-tree" ] -> Some
-      "usage: yeokcham undo-tree [--root PATH]\n\nShow persistent local history, parent links, current position, and compacted checkpoints. This does not scan files or contact a relay."
-  | [ "undo" ] -> Some
-      "usage: yeokcham undo [--root PATH] [--to NODE] [--dry-run]\n\nMove to the parent node, or a selected node. Unsaved disk edits are preserved first. --dry-run previews exact path changes without writing files or advancing history. Navigation leaves shared history unchanged."
-  | [ "redo" ] -> Some
-      "usage: yeokcham redo [--root PATH] [--node NODE] [--dry-run]\n\nMove to a child of the current node. Choose --node when there are several branches. Save or undo outstanding disk edits first. An interrupted navigation resumes its original target without taking another step."
+  | [ "undo-tree" ] ->
+      Some
+        "usage: yeokcham undo-tree [--root PATH]\n\n\
+         Show persistent local history, parent links, current position, and \
+         compacted checkpoints. This does not scan files or contact a relay."
+  | [ "undo" ] ->
+      Some
+        "usage: yeokcham undo [--root PATH] [--to NODE] [--dry-run]\n\n\
+         Move to the parent node, or a selected node. Unsaved disk edits are \
+         preserved first. --dry-run previews exact path changes without \
+         writing files or advancing history. Navigation leaves shared history \
+         unchanged."
+  | [ "redo" ] ->
+      Some
+        "usage: yeokcham redo [--root PATH] [--node NODE] [--dry-run]\n\n\
+         Move to a child of the current node. Choose --node when there are \
+         several branches. Save or undo outstanding disk edits first. An \
+         interrupted navigation resumes its original target without taking \
+         another step."
   | [ "status" ] ->
       Some
         "usage: yeokcham status [--root PATH]\n\n\
@@ -1183,7 +1205,11 @@ let hook_event_for_path path =
     match path with
     | [ "init" ] -> Some Hook.Init
     | [ "save" ] -> Some Hook.Save
-    | [ "undo" ] | [ "redo" ] | [ "restore" ] | [ "restore"; "retain" ] | [ "restore"; "forget" ] ->
+    | [ "undo" ]
+    | [ "redo" ]
+    | [ "restore" ]
+    | [ "restore"; "retain" ]
+    | [ "restore"; "forget" ] ->
         Some Hook.Restore
     | [ "workspace"; "activate" ] -> Some Hook.Workspace_activate
     | [ "workspace"; "update" ] -> Some Hook.Workspace_update
@@ -2594,92 +2620,162 @@ let run_changes arguments =
         differences
 
 let history_json_node node =
-  `Assoc [ ("node", `String (Int64.to_string node.History.id));
-           ("parent", Option.fold ~none:`Null ~some:(fun id -> `String (Int64.to_string id)) node.History.parent);
-           ("checkpoint", `String (Model.Snapshot_id.to_string node.History.snapshot));
-           ("draft", `String (Model.Draft_id.to_string node.History.draft));
-           ("created_at", `Intlit (Int64.to_string node.History.created_at)) ]
+  `Assoc
+    [
+      ("node", `String (Int64.to_string node.History.id));
+      ( "parent",
+        Option.fold ~none:`Null
+          ~some:(fun id -> `String (Int64.to_string id))
+          node.History.parent );
+      ("checkpoint", `String (Model.Snapshot_id.to_string node.History.snapshot));
+      ("draft", `String (Model.Draft_id.to_string node.History.draft));
+      ("created_at", `Intlit (Int64.to_string node.History.created_at));
+    ]
 
 let history_json_result command result =
-  Cli_data.success ~command ~result ~warnings:[] |> Cli_data.encode |> print_json
+  Cli_data.success ~command ~result ~warnings:(List.rev !public_warnings)
+  |> Cli_data.encode |> print_json
 
 let run_undo_tree arguments =
   let root = parse_root arguments in
-  let history = Service.local_history ~root |> require_ok Service.error_to_string in
+  let history =
+    Service.local_history ~root |> require_ok Service.error_to_string
+  in
   let tree = history.Service.undo_tree in
   let cursor = (History.current tree).History.id in
-  let available node = List.exists (Model.Snapshot_id.equal node.History.snapshot)
-      history.Service.retained_checkpoints in
+  let available node =
+    List.exists
+      (Model.Snapshot_id.equal node.History.snapshot)
+      history.Service.retained_checkpoints
+  in
   if requested_format () = Json_format then
-    history_json_result "undo-tree" (`Assoc [
-      ("current", `String (Int64.to_string cursor));
-      ("nodes", `List (List.map (fun node -> `Assoc [
-        ("entry", history_json_node node); ("available", `Bool (available node)) ]) (History.nodes tree))) ])
+    history_json_result "undo-tree"
+      (`Assoc
+         [
+           ("current", `String (Int64.to_string cursor));
+           ( "nodes",
+             `List
+               (List.map
+                  (fun node ->
+                    `Assoc
+                      [
+                        ("entry", history_json_node node);
+                        ("available", `Bool (available node));
+                      ])
+                  (History.nodes tree)) );
+         ])
   else (
-    print_endline "Local undo tree (* = current; parent links identify branches)";
-    List.iter (fun node ->
-      Printf.printf "%s node %Ld <- %s  checkpoint %s  draft %s%s\n"
-        (if Int64.equal cursor node.History.id then "*" else " ")
-        node.History.id
-        (Option.fold ~none:"root" ~some:Int64.to_string node.History.parent)
-        (Model.Snapshot_id.to_string node.History.snapshot)
-        (Output.display_value (Model.Draft_id.to_string node.History.draft))
-        (if available node then "" else " [compacted]")) (History.nodes tree))
+    print_endline
+      "Local undo tree (* = current; parent links identify branches)";
+    List.iter
+      (fun node ->
+        Printf.printf "%s node %Ld <- %s  checkpoint %s  draft %s%s\n"
+          (if Int64.equal cursor node.History.id then "*" else " ")
+          node.History.id
+          (Option.fold ~none:"root" ~some:Int64.to_string node.History.parent)
+          (Model.Snapshot_id.to_string node.History.snapshot)
+          (Output.display_value (Model.Draft_id.to_string node.History.draft))
+          (if available node then "" else " [compacted]"))
+      (History.nodes tree))
 
 let parse_history_navigation command arguments =
   let rec loop root target dry_run = function
     | [] -> (root, target, dry_run)
     | "--root" :: value :: rest -> loop value target dry_run rest
     | option :: value :: rest
-      when (String.equal command "undo" && String.equal option "--to"
-            || String.equal command "redo" && String.equal option "--node")
+      when ((String.equal command "undo" && String.equal option "--to")
+           || (String.equal command "redo" && String.equal option "--node"))
            && Option.is_none target ->
-        let id = match Int64.of_string_opt value with
+        let id =
+          match Int64.of_string_opt value with
           | Some id when Int64.compare id 0L >= 0 -> id
-          | Some _ | None -> fail "history node must be a nonnegative integer" in
+          | Some _ | None -> fail "history node must be a nonnegative integer"
+        in
         loop root (Some id) dry_run rest
     | "--dry-run" :: rest when not dry_run -> loop root target true rest
-    | _ -> usage () in
+    | _ -> usage ()
+  in
   loop default_root None false arguments
 
 let run_history_navigation command arguments =
   let root, target, dry_run = parse_history_navigation command arguments in
-  let direction = match command, target with
+  let direction =
+    match (command, target) with
     | "undo", None -> Service.Undo
     | "undo", Some id -> Service.Go_to id
-    | _, target -> Service.Redo target in
-  let result = Service.navigate_history ~root ~direction ~dry_run
-    |> require_ok Service.error_to_string in
+    | _, target -> Service.Redo target
+  in
+  let result =
+    Service.navigate_history ~root ~direction ~dry_run
+    |> require_ok Service.error_to_string
+  in
+  if result.Service.history_applied then
+    run_hooks_after_success [ command ] arguments;
   let entry_json = function
     | None -> `Null
-    | Some entry -> `String (render_snapshot_entry (Some entry)) in
+    | Some entry ->
+        `Assoc
+          [
+            ("kind", `String (snapshot_entry_kind_name entry.Service.kind));
+            ( "mode",
+              Option.fold ~none:`Null
+                ~some:(fun mode -> `String (snapshot_mode_name mode))
+                entry.Service.mode );
+            ( "content",
+              Option.fold ~none:`Null
+                ~some:(fun content -> `String content)
+                entry.Service.content );
+          ]
+  in
   if requested_format () = Json_format then
-    history_json_result command (`Assoc [
-      ("applied", `Bool result.Service.history_applied);
-      ("source_node", `String (Int64.to_string result.Service.source_node));
-      ("target", history_json_node result.Service.target_node);
-      ("captures_unsaved", `Bool result.Service.captures_unsaved);
-      ("restore_proof", Option.fold ~none:`Null
-        ~some:(fun restored -> `String restored.Service.restore_operation) result.Service.history_restore);
-      ("changes", `List (List.map (fun difference -> `Assoc [
-        ("path", `String (Model.Path.to_string difference.Service.path));
-        ("before", entry_json difference.Service.before);
-        ("after", entry_json difference.Service.after) ]) result.Service.history_changes)) ])
+    history_json_result command
+      (`Assoc
+         [
+           ("applied", `Bool result.Service.history_applied);
+           ("source_node", `String (Int64.to_string result.Service.source_node));
+           ("target", history_json_node result.Service.target_node);
+           ("captures_unsaved", `Bool result.Service.captures_unsaved);
+           ( "restore_proof",
+             Option.fold ~none:`Null
+               ~some:(fun restored ->
+                 `String restored.Service.restore_operation)
+               result.Service.history_restore );
+           ( "changes",
+             `List
+               (List.map
+                  (fun difference ->
+                    `Assoc
+                      [
+                        ( "path",
+                          `String (Model.Path.to_string difference.Service.path)
+                        );
+                        ("before", entry_json difference.Service.before);
+                        ("after", entry_json difference.Service.after);
+                      ])
+                  result.Service.history_changes) );
+         ])
   else (
     Printf.printf "%s node %Ld (checkpoint %s)\n"
       (if dry_run then "would move to" else "current")
       result.Service.target_node.History.id
       (Model.Snapshot_id.to_string result.Service.target_node.History.snapshot);
     if result.Service.captures_unsaved then
-      print_endline (if dry_run then "would preserve unsaved disk edits as a new node" else "preserved unsaved disk edits as a new node");
-    List.iter (fun difference ->
-      Printf.printf "%s: %s -> %s\n"
-        (Output.display_value (Model.Path.to_string difference.Service.path))
-        (render_snapshot_entry difference.Service.before)
-        (render_snapshot_entry difference.Service.after)) result.Service.history_changes;
-    Option.iter (fun restored ->
-      Printf.printf "restore-proof %s%s\n" restored.Service.restore_operation
-        (if restored.Service.resumed then " (resumed original navigation)" else "")) result.Service.history_restore);
+      print_endline
+        (if dry_run then "would preserve unsaved disk edits as a new node"
+         else "preserved unsaved disk edits as a new node");
+    List.iter
+      (fun difference ->
+        Printf.printf "%s: %s -> %s\n"
+          (Output.display_value (Model.Path.to_string difference.Service.path))
+          (render_snapshot_entry difference.Service.before)
+          (render_snapshot_entry difference.Service.after))
+      result.Service.history_changes;
+    Option.iter
+      (fun restored ->
+        Printf.printf "restore-proof %s%s\n" restored.Service.restore_operation
+          (if restored.Service.resumed then " (resumed original navigation)"
+           else ""))
+      result.Service.history_restore);
   result.Service.history_applied
 
 let render_proposal_entry = function
@@ -4005,8 +4101,8 @@ let dispatch () =
   | _ :: "recovery" :: "refresh" :: arguments -> run_recovery_refresh arguments
   | _ :: "user" :: "register" :: arguments -> run_user_register arguments
   | _ :: "undo-tree" :: arguments -> run_undo_tree arguments
-  | _ :: ("undo" | "redo" as command) :: arguments ->
-      observe_after_commit [ command ] arguments (fun () -> run_history_navigation command arguments)
+  | _ :: (("undo" | "redo") as command) :: arguments ->
+      ignore (run_history_navigation command arguments)
   | _ :: "timeline" :: arguments -> run_timeline arguments
   | _ :: "restore" :: "proofs" :: arguments -> run_restore_proofs arguments
   | _ :: "restore" :: "retain" :: arguments ->

@@ -120,3 +120,23 @@ an explicitly supplied Git source tag, OpenPGP fingerprint, commit, and archive
 digest for maintainers and consumers. It has no Yeokcham library dependency,
 creates no V1 record, and cannot affect a V1 repository's identity, authority,
 transport, delivery, or working tree.
+
+## Local undo history
+
+`Yeokcham_v1_undo` owns pure local nodes and cursor transitions. Node identity
+is independent of exact snapshot identity. The V1 store atomically wraps its
+unchanged project/collaboration record and the canonical undo tree in a tagged
+`yeokcham-local-state` V1 envelope under the existing state head. Legacy state
+payloads seed a single known root. The wrapper is local persistence only;
+model export, signatures, packages, receipt, and bootstrap do not carry it.
+Store saves append only when the active checkpoint changes. Authority and
+receipt updates preserve the cursor.
+
+The local service plans undo/redo using exact snapshot comparison and performs
+replacement through the existing safety snapshot, journal, and proof path.
+V2 restore journals add the exact target node; V1 journal bytes remain readable.
+The node selection is validated before filesystem writes and committed with
+its active checkpoint. A pending replacement blocks scratch capture, and a
+process-owned workspace lock serializes capture and navigation without stale
+locks after process exit. Compaction retains node metadata but may remove
+snapshot availability through its existing explicit checkpoint policy.

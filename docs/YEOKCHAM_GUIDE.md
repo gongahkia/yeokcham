@@ -55,6 +55,23 @@ Existing paths excluded by `.yeokchamignore` have no recovery checkpoint.
 In-place restore refuses to remove them; move them outside the working tree
 first, or use the empty destination above. See [Troubleshooting](TROUBLESHOOTING.md).
 
+## Undo and revisit local work
+
+`undo-tree` shows saved positions and their parent links. Preview `undo` before
+applying it; undo preserves unsaved disk edits first. Editing after undo creates
+another continuation. Redo requires a child ID when several exist:
+
+```sh
+"$YEOKCHAM" undo-tree
+"$YEOKCHAM" undo --dry-run
+"$YEOKCHAM" undo
+"$YEOKCHAM" redo --node NODE_ID
+"$YEOKCHAM" undo --to NODE_ID
+```
+
+The [local undo guide](LOCAL_UNDO.md) explains branching, restart recovery,
+legacy repositories, and checkpoint retention.
+
 ## Share work
 
 Sharing is a separate, explicit action. Choose the change and revision IDs,

@@ -2088,6 +2088,104 @@ let generic_json_format_is_enveloped_and_preserves_error_channels () =
       | None -> Alcotest.fail "JSON invalid invocation has no error record");
       expect_output_contains "JSON diagnostic remains on stderr" "usage:" errors)
 
+let local_undo_tree_commands_preserve_branches_and_shared_history () =
+  with_directory "yeokcham-v1-cli-undo-" (fun root ->
+      write_file root "note.txt" "A";
+      let execute args =
+        let output, errors, status = run (args @ [ "--root"; root ]) in
+        require_success (String.concat " " args) status errors;
+        output
+      in
+      ignore
+        (execute
+           [
+             "init";
+             "--username";
+             "alice";
+             "--draft";
+             "first";
+             "--title";
+             "work";
+           ]);
+      write_file root "note.txt" "B";
+      ignore (execute [ "save" ]);
+      write_file root "note.txt" "C";
+      ignore (execute [ "save" ]);
+      let before =
+        Store.open_repository ~root
+        |> require_ok Store.error_to_string
+        |> Store.load
+        |> require_ok Store.error_to_string
+      in
+      let preview = execute [ "undo"; "--dry-run"; "--format"; "json" ] in
+      let envelope = Cli_data.decode preview |> require_ok Fun.id in
+      Alcotest.(check bool)
+        "preview returns valid success JSON" true (Cli_data.ok envelope);
+      expect_output_contains "preview is explicit" "\"applied\":false" preview;
+      expect_output_contains "preview includes changed path" "note.txt" preview;
+      let after =
+        Store.open_repository ~root
+        |> require_ok Store.error_to_string
+        |> Store.load
+        |> require_ok Store.error_to_string
+      in
+      Alcotest.(check bool)
+        "preview preserves the state head" true
+        (Raw_store.Mutable_ref.equal before.Store.head after.Store.head);
+      ignore (execute [ "undo" ]);
+      Alcotest.(check string) "undo writes B" "B" (read_file root "note.txt");
+      write_file root "note.txt" "D";
+      ignore (execute [ "save" ]);
+      ignore (execute [ "undo" ]);
+      let refused, _, status =
+        run [ "redo"; "--root"; root; "--format"; "json" ]
+      in
+      (match status with
+      | Unix.WEXITED 2 -> ()
+      | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
+          Alcotest.fail "ambiguous redo succeeded");
+      Alcotest.(check bool)
+        "ambiguous redo has failure JSON" false
+        (Cli_data.decode refused |> require_ok Fun.id |> Cli_data.ok);
+      let output = execute [ "redo"; "--node"; "2"; "--format"; "json" ] in
+      expect_output_contains "redo applied selected branch" "\"applied\":true"
+        output;
+      Alcotest.(check string) "redo writes C" "C" (read_file root "note.txt");
+      let tree = execute [ "undo-tree"; "--format"; "json" ] in
+      expect_output_contains "tree has current node" "\"current\":\"2\"" tree;
+      expect_output_contains "tree retains alternative D" "\"node\":\"3\"" tree;
+      ignore (execute [ "share"; "--change"; "work"; "--revision"; "r1" ]);
+      let shared_before =
+        Store.open_repository ~root
+        |> require_ok Store.error_to_string
+        |> Store.load
+        |> require_ok Store.error_to_string
+      in
+      ignore (execute [ "undo"; "--to"; "0" ]);
+      let shared_after =
+        Store.open_repository ~root
+        |> require_ok Store.error_to_string
+        |> Store.load
+        |> require_ok Store.error_to_string
+      in
+      let revisions loaded =
+        match loaded.Store.collaboration with
+        | Some collaboration ->
+            Store.signed_revisions collaboration
+            |> List.map Trust.encode_signed_revision
+        | None -> Alcotest.fail "local navigation stripped collaboration"
+      in
+      Alcotest.(check (list string))
+        "undo preserves signed work" (revisions shared_before)
+        (revisions shared_after);
+      let history = execute [ "undo-tree" ] in
+      expect_output_contains "text tree marks current position" "* node 0"
+        history;
+      expect_output_contains "text tree shows a fork" "node 3 <- 1" history;
+      let unchanged = execute [ "undo"; "--to"; "0"; "--format"; "json" ] in
+      expect_output_contains "current-node navigation is a no-op"
+        "\"applied\":false" unchanged)
+
 let () =
   Alcotest.run "V1 CLI"
     [
@@ -2152,6 +2250,9 @@ let () =
             hooks_observe_only_committed_eligible_commands;
           Alcotest.test_case "hook failure remains a command warning" `Quick
             hook_failure_is_a_warning_not_a_save_failure;
+          Alcotest.test_case
+            "local undo tree preserves branches and shared work" `Quick
+            local_undo_tree_commands_preserve_branches_and_shared_history;
           Alcotest.test_case "generic JSON is enveloped with stable errors"
             `Quick generic_json_format_is_enveloped_and_preserves_error_channels;
         ] );

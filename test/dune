@@ -518,3 +518,19 @@
   (= %{system} linux))
  (libraries alcotest unix)
  (deps ../bin/yeokcham_v1.exe))
+
+(test
+ (name test_v1_undo)
+ (modules test_v1_undo)
+ (libraries
+  alcotest
+  unix
+  yeokcham_encoding
+  yeokcham_envelope
+  yeokcham_store
+  yeokcham_v1_local_service
+  yeokcham_v1_model
+  yeokcham_v1_record
+  yeokcham_v1_restore_journal
+  yeokcham_v1_store
+  yeokcham_v1_undo))

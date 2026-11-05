@@ -57,7 +57,7 @@ $ printf 'hello\n' > note.txt
 ```console
 $ "$YEOKCHAM" changes # reflects all repo changes
 $ "$YEOKCHAM" save # creates a local scratch & explicit save checkpoint
-$ "$YEOKCHAM" timeline # displays yeokcham graph of all edits and saves 
+$ "$YEOKCHAM" timeline # lists retained checkpoints
 ```
 
 5. For a more detailed tutorial, run `yeokcham --help` or refer to [GETTING_STARTED.md](./docs/GETTING_STARTED.md).

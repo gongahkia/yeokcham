@@ -29,6 +29,7 @@ val make_prepared :
   (t, error) result
 
 val history_node : t -> int64 option
+
 val with_history_node : t -> int64 -> (t, error) result
 (** V2 journals bind the exact local history node to resume after interruption.
     Legacy V1 bytes remain readable and unchanged when no node is supplied. *)

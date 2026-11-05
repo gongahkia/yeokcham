@@ -666,9 +666,12 @@ val local_history : root:string -> (local_history, error) result
     contents; parent links and node IDs remain inspectable. *)
 
 val navigate_history :
-  root:string -> direction:history_direction -> dry_run:bool ->
+  root:string ->
+  direction:history_direction ->
+  dry_run:bool ->
   (history_navigation, error) result
 (** Undo captures unsaved disk edits before moving to the previous node. Redo
     requires saved files and an explicit child when several continuations exist.
-    Preview may allocate scan objects but never advances history or writes files.
-    A resumed journal completes its original navigation without another step. *)
+    Preview may allocate scan objects but never advances history or writes
+    files. A resumed journal completes its original navigation without another
+    step. *)

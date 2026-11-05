@@ -99,8 +99,10 @@ let commands =
     command [ "graph" ] ~options:[ root; flag "--authority" ];
     command [ "timeline" ];
     command [ "undo-tree" ];
-    command ~hook:true [ "undo" ] ~options:[ root; identifier "--to"; flag "--dry-run" ];
-    command ~hook:true [ "redo" ] ~options:[ root; identifier "--node"; flag "--dry-run" ];
+    command ~hook:true [ "undo" ]
+      ~options:[ root; identifier "--to"; flag "--dry-run" ];
+    command ~hook:true [ "redo" ]
+      ~options:[ root; identifier "--node"; flag "--dry-run" ];
     command ~hook:true [ "restore" ]
       ~options:[ root; identifier "--checkpoint"; path "--destination" ];
     command [ "restore"; "proofs" ];

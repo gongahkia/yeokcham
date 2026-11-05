@@ -571,11 +571,14 @@ let store_collaborative_project store project collaboration =
 
 let history_for_project project =
   let active = Model.active_draft project in
-  History.seed ~snapshot:active.Model.latest_checkpoint ~draft:active.Model.draft_id
+  History.seed ~snapshot:active.Model.latest_checkpoint
+    ~draft:active.Model.draft_id
 
 let validate_history project history =
-  if Model.Snapshot_id.equal (History.current history).History.snapshot
-       (Model.active_draft project).Model.latest_checkpoint then Ok history
+  if
+    Model.Snapshot_id.equal (History.current history).History.snapshot
+      (Model.active_draft project).Model.latest_checkpoint
+  then Ok history
   else Error (History_error "cursor does not match the active checkpoint")
 
 let decode_inner encoded =
@@ -587,16 +590,25 @@ let decode_inner encoded =
       |> Result.map_error (fun error -> Record_error error)
 
 let[@warning "-4"] decode_project_object store object_id =
-  let* object_ = Store.get store object_id
-    |> Result.map_error (fun error -> Store_error error) in
+  let* object_ =
+    Store.get store object_id
+    |> Result.map_error (fun error -> Store_error error)
+  in
   if Envelope.object_type object_ <> Envelope.V1_project_state then
     Error (Unexpected_object_type (Envelope.object_type object_))
   else
     match Envelope.payload object_ with
-    | Encoding.Array [ Encoding.Text "yeokcham-local-state";
-                       Encoding.Integer 1L; Encoding.Bytes inner; Encoding.Bytes bytes ] ->
+    | Encoding.Array
+        [
+          Encoding.Text "yeokcham-local-state";
+          Encoding.Integer 1L;
+          Encoding.Bytes inner;
+          Encoding.Bytes bytes;
+        ] ->
         let* project, collaboration = decode_inner inner in
-        let* history = History.decode bytes |> Result.map_error (fun e -> History_error e) in
+        let* history =
+          History.decode bytes |> Result.map_error (fun e -> History_error e)
+        in
         let* history = validate_history project history in
         Ok (project, collaboration, history)
     | Encoding.Array (Encoding.Text "yeokcham-local-state" :: _) ->
@@ -607,15 +619,27 @@ let[@warning "-4"] decode_project_object store object_id =
 
 let store_with_history store project collaboration history =
   let* history = validate_history project history in
-  let* inner = match collaboration with
-    | None -> Record.encode_project project |> Result.map_error (fun e -> Record_error e)
-    | Some collaboration -> encode_collaborative_state ~project collaboration in
-  let* history = History.encode history |> Result.map_error (fun e -> History_error e) in
-  let* tag = Encoding.text "yeokcham-local-state"
-    |> Result.map_error (fun e -> History_error (Encoding.construction_error_to_string e)) in
-  let* payload = Encoding.array [ tag; Encoding.integer 1L;
-                                  Encoding.bytes inner; Encoding.bytes history ]
-    |> Result.map_error (fun e -> History_error (Encoding.construction_error_to_string e)) in
+  let* inner =
+    match collaboration with
+    | None ->
+        Record.encode_project project
+        |> Result.map_error (fun e -> Record_error e)
+    | Some collaboration -> encode_collaborative_state ~project collaboration
+  in
+  let* history =
+    History.encode history |> Result.map_error (fun e -> History_error e)
+  in
+  let* tag =
+    Encoding.text "yeokcham-local-state"
+    |> Result.map_error (fun e ->
+        History_error (Encoding.construction_error_to_string e))
+  in
+  let* payload =
+    Encoding.array
+      [ tag; Encoding.integer 1L; Encoding.bytes inner; Encoding.bytes history ]
+    |> Result.map_error (fun e ->
+        History_error (Encoding.construction_error_to_string e))
+  in
   store_payload store payload
 
 let observed_history ?history existing project =
@@ -624,7 +648,8 @@ let observed_history ?history existing project =
   | None ->
       let active = Model.active_draft project in
       History.record existing ~snapshot:active.Model.latest_checkpoint
-        ~draft:active.Model.draft_id ~created_at:(Int64.of_float (Unix.gettimeofday ()))
+        ~draft:active.Model.draft_id
+        ~created_at:(Int64.of_float (Unix.gettimeofday ()))
       |> Result.map_error (fun e -> History_error e)
 
 let current_head repository =
@@ -644,6 +669,26 @@ let load repository =
           in
           Ok { project; collaboration; history; head; object_id })
 
+let initialize_workspace_lock ~root =
+  let path =
+    Filename.concat (repository_metadata_path root) "local-worktree.lock"
+  in
+  try
+    let fd =
+      Unix.openfile path [ Unix.O_RDWR; Unix.O_CREAT; Unix.O_CLOEXEC ] 0o600
+    in
+    Fun.protect ~finally:(fun () -> Unix.close fd) (fun () -> Unix.fsync fd);
+    Ok ()
+  with Unix.Unix_error (error, _, _) ->
+    Error
+      (Store_error
+         (Store.Io_error
+            {
+              operation = "initialize workspace lock";
+              path;
+              message = Unix.error_message error;
+            }))
+
 let init_with ~root ~bootstrap =
   let metadata = repository_metadata_path root in
   if Sys.file_exists metadata then Error (Existing_repository metadata)
@@ -651,6 +696,7 @@ let init_with ~root ~bootstrap =
     let* store =
       Store.init ~root |> Result.map_error (fun error -> Store_error error)
     in
+    let* () = initialize_workspace_lock ~root in
     let* project =
       bootstrap store |> Result.map_error (fun error -> Bootstrap_error error)
     in
@@ -671,6 +717,7 @@ let init_collaborative_with ~root ~bootstrap =
     let* store =
       Store.init ~root |> Result.map_error (fun error -> Store_error error)
     in
+    let* () = initialize_workspace_lock ~root in
     let* project, collaboration =
       bootstrap store |> Result.map_error (fun error -> Bootstrap_error error)
     in
@@ -702,23 +749,33 @@ let previous repository expected =
   | Some object_id -> decode_project_object repository.store object_id
 
 let save ?history repository ~expected ~project =
-  let* _, existing_collaboration, existing_history = previous repository expected in
-  let* () = match existing_collaboration with
+  let* _, existing_collaboration, existing_history =
+    previous repository expected
+  in
+  let* () =
+    match existing_collaboration with
     | None -> Ok ()
-    | Some _ -> Error Collaborative_state_requires_collaborative_save in
+    | Some _ -> Error Collaborative_state_requires_collaborative_save
+  in
   let* history = observed_history ?history existing_history project in
   let* object_id = store_with_history repository.store project None history in
-  let* head = Store.compare_and_swap_ref repository.store ~name:state_head_name
+  let* head =
+    Store.compare_and_swap_ref repository.store ~name:state_head_name
       ~expected:(Some expected) ~target:(Some object_id)
-    |> Result.map_error (fun error -> Store_error error) in
+    |> Result.map_error (fun error -> Store_error error)
+  in
   Ok { project; collaboration = None; history; head; object_id }
 
 let save_collaborative ?history repository ~expected ~project ~collaboration =
   let* collaboration = validate_collaboration ~project collaboration in
   let* _, _, existing_history = previous repository expected in
   let* history = observed_history ?history existing_history project in
-  let* object_id = store_with_history repository.store project (Some collaboration) history in
-  let* head = Store.compare_and_swap_ref repository.store ~name:state_head_name
+  let* object_id =
+    store_with_history repository.store project (Some collaboration) history
+  in
+  let* head =
+    Store.compare_and_swap_ref repository.store ~name:state_head_name
       ~expected:(Some expected) ~target:(Some object_id)
-    |> Result.map_error (fun error -> Store_error error) in
+    |> Result.map_error (fun error -> Store_error error)
+  in
   Ok { project; collaboration = Some collaboration; history; head; object_id }
