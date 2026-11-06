@@ -2,9 +2,10 @@
 
 Status: design in progress, November 6, 2026. Product direction is agreed in
 [Product design](PRODUCT_DESIGN.md), D18 and D21-D27. The interaction below is a
-concrete starting specification; record schemas, command names, and integration
-mechanics still need engineering design. No review feature is implemented by
-this document.
+design baseline. The user delegated remaining default choices; the
+[technical contracts](TECHNICAL_CONTRACTS.md) and [CLI design](CLI_DESIGN.md) now
+specify record/evaluation and interaction defaults. No review feature is
+implemented by this document.
 
 ## Purpose and default behavior
 
@@ -73,12 +74,12 @@ itself turn an otherwise optional repository into an approval-gated repository;
 show outstanding feedback to the integrator without adding a mandatory gate.
 
 An authorized repository administrator can enable required approval through a
-versioned repository policy. Proposed initial rule: at least one other trusted
+versioned repository policy. Chosen initial rule: at least one other trusted
 member approves the current review version (or eligible earlier work under an
 explicit renewed-approval opt-out), with no unresolved blocking
-change-request review for that same version. A second device belonging to the
-author is not another reviewer. The identity binding and authority checks must
-be explicit in the technical contract.
+change-request review applicable to that version. A second device belonging to an
+author is not another reviewer. TC06 binds devices to administrator-admitted
+member principals and excludes submitted-work authors from the approval count.
 
 In required mode, work must have a review request and satisfy the policy before
 integration. The interface should offer to create the request from the selected
@@ -92,7 +93,7 @@ relay's administrative access cannot fabricate an authorized approval. Team
 policy changes require appropriate repository authority; editing a local
 personal preference is insufficient.
 
-The minimum-reviewer rule above is a proposed initial mechanism, not a mandate
+The minimum-reviewer rule above is the chosen initial mechanism, not a mandate
 for a broader governance system. Code-owner rules, compulsory CI checks, merge
 queues, branch-specific approval counts, and complex reviewer hierarchies are
 not implied by this feature. Discuss such additions if their value justifies
@@ -112,13 +113,20 @@ the accepted version without a reviewer inspecting them. This relaxation does
 not itself disable preview confirmation. A personal preference cannot relax
 the repository's review rules.
 
-Proposed initial eligibility rule for this opt-out: an otherwise valid approval
+Chosen eligibility rule for this opt-out: an otherwise valid approval
 of an earlier version in the same review request's explicit version ancestry
 can satisfy the policy's prior-review requirement. Do not borrow approval from
-an unrelated request or an unproven concurrent version. Missing approvals,
+an unrelated request, a changed author-principal set, or an unproven concurrent
+version. Missing approvals,
 withdrawn approvals, invalid reviewer authority, and applicable blocking review
 decisions still follow the repository's other rules. An opt-out only relaxes
 the need for renewed approval; it is not a general review-policy bypass.
+
+Use causal reviewer-event ancestry to interpret updates. Concurrent conflicting
+decisions by one reviewer do not count as an approval until reconciled. A blocking
+change request survives descendant versions until its reviewer clears it or an
+administrator explicitly dismisses it with a recorded reason. Publishing another
+version cannot by itself erase a blocking review. Ordinary comments stay advisory.
 
 Continue to compute coverage and display a distinction such as "An earlier
 version was approved; later changes have not been reviewed. This repository
@@ -149,8 +157,7 @@ arrival order as authority. If a policy, authorization, request version, or
 target has changed incompatibly, expose the discrepancy and re-evaluate the
 integration against the effective policy. Never silently relabel stale approval
 as approval of current content, including under a renewed-approval opt-out. The
-technical design must specify these checks and how divergent accepted histories
-are reconciled.
+TC06 admission rules govern these checks and divergent accepted histories.
 
 ## Acceptance scenarios
 

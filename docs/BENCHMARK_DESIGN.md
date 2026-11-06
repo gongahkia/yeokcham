@@ -1,7 +1,8 @@
 # Benchmark design
 
-Status: implementation planning, November 6, 2026. No benchmark results are
-claimed here. Product decisions are in [Product design](PRODUCT_DESIGN.md),
+Status: implementation planning, November 6, 2026. Fixture and validation defaults
+are selected under the user's delegated design authority. No benchmark results
+are claimed here. Product decisions are in [Product design](PRODUCT_DESIGN.md),
 especially D04, D15, D19, and D20.
 
 ## Priority and purpose
@@ -18,8 +19,8 @@ reproducible baselines; no universal speedup over Git is assumed.
 
 ## Workload matrix
 
-These are proposed initial fixture sizes, not approved maximum repository sizes
-or measured limits. Adjust fixture construction to represent real projects and
+These are the selected initial fixture sizes, not maximum repository sizes or
+measured limits. Adjust fixture construction to represent real projects and
 record any changes. Keep file count and total bytes independently configurable.
 
 | Priority | Workload | Initial fixture targets | Required variations |
@@ -125,3 +126,47 @@ regression budgets for responsiveness, background cost, growth, and recovery.
 Record those budgets and the hardware assumptions before treating a performance
 handoff as complete. The current design deliberately makes no invented numeric
 latency guarantee in advance of measurement.
+
+## Default execution and regression policy
+
+Use deterministic synthetic fixtures with seed `1` for the repeatable baseline;
+record generator version and full content manifests. The ordinary tier pairs
+10 MiB/1,000 files, 100 MiB/10,000 files, and 1 GiB/100,000 files, then separately
+varies count and size. Monorepo targets pair 1/10/50 GiB with 100,000/500,000/
+1,000,000 files. Binary tiers include both many small assets and 1-GiB-or-larger
+individual files where the total size permits. The 10/1,000/10,000 history-depth
+tiers include linear work and branching experiments. Real licensed fixtures
+supplement these cases; they are not required downloads for unit tests.
+
+For each timed case, use five cold runs and thirty warm runs after three excluded
+warmups; report all samples. Summarize cold median/range and warm median/p95.
+Measure idle background CPU over ten minutes and foreground interference during
+a thirty-minute mixed-edit session. Use the same machine, filesystem, fixture,
+settings, and verified retained states for paired comparisons.
+
+Initial regression gate: investigate a reproducible increase above 10% in warm
+median/p95 latency or above 15% in allocated storage, peak memory, or transfer
+bytes on the same workload. Repeat affected cases before classifying noise as a
+regression. Record an intentional tradeoff and its compensating measured benefit
+when accepting it; never waive a correctness failure because another metric wins.
+These percentages are engineering review thresholds, not promised speedups or
+absolute product latency limits. Establish absolute budgets from the baseline.
+
+The default benchmark command runs the ordinary tier; monorepo and asset suites
+are explicit extended runs with resource estimates. Unit/pull-request checks use
+small deterministic versions of fault and fidelity cases. Full source tiers and
+affected extended workloads run for storage/codec/integration performance changes;
+cross-platform acceptance runs precede portability claims. Choose concrete build
+target names during implementation and document them with the runner.
+
+Compare the TC05 starting defaults against raw storage and relevant alternatives:
+existing Buzhash chunks, Zstandard level 3, 64-MiB indexed packs, incremental
+history/index writes, and 1-MiB transfer ranges. A delta-chain implementation is
+not a prerequisite; propose it only if measured reuse/space benefits justify its
+restore cost and complexity. Report incompressible and already-compressed assets.
+
+Required fault-matrix cases include capture races, a write at each journal step,
+lost upload acknowledgement, partial archive manifests, missing ciphertext/key
+envelopes, concurrent pack replacement/collection, disk and remote quota failures,
+and offline policy/review changes. Apply the same exact-restore checks to every
+size/type tier. These scenarios and planned sample counts are not executed results.

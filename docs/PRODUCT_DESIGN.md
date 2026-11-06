@@ -7,6 +7,10 @@ decisions before implementation is delegated. Approval of a product direction
 does not settle every default or storage format. No implementation work or
 agent delegation is started by this document.
 
+The user has now delegated the remaining default choices (D28). The technical,
+CLI, review, and benchmark documents record those chosen defaults explicitly;
+they are design decisions, not implemented or measured behavior.
+
 This is the continuing design record. The dated discussion in
 [Repository review](REPOSITORY_REVIEW.md#product-direction-discussion-november-6-2026)
 preserves its earlier context. [V1 product boundaries](V1_PRODUCT_CONTRACT.md)
@@ -40,9 +44,9 @@ restricted to a recovery utility; that earlier suggestion was not accepted.
 | --- | --- | --- |
 | D01 | Pursue a VCS with practical advantages over native Git; assess the complete workflow rather than novelty alone. | Agreed |
 | D02 | Make persistent, project-wide history of unfinished work and alternate continuations central. | Agreed; initial local undo tree implemented |
-| D03 | Provide managed background capture, private backup, and remote synchronization, with useful offline operation and retry after interruption. Publish to teammates explicitly. | Agreed; protocol and lifecycle details need design |
+| D03 | Provide managed background capture, private backup, and remote synchronization, with useful offline operation and retry after interruption. Publish to teammates explicitly. | Agreed; protocol/lifecycle defaults in TC03/TC04 |
 | D04 | Make continuous history affordable through efficient storage, transfer, and background work. Separate lossless compression from history expiration. | Agreed; policy in D13/D14, initial limits in D15 |
-| D05 | Replace the separate mandatory delivery ceremony with explicit integration of shared work; no further delivery action afterward. | Agreed interaction; integration mechanics open |
+| D05 | Replace the separate mandatory delivery ceremony with explicit integration of shared work; no further delivery action afterward. | Agreed interaction; integration defaults in TC02/TC06 |
 | D06 | Preserve the distinction between work being available and being accepted into a shared version. Automatic transfer alone does not establish acceptance. | Agreed |
 | D07 | Core recovery and synchronization should not require an AI agent or online inference service. | Agreed |
 | D08 | Continue exploring complementary capabilities. Do not require proof of a recovery-only product before discussing the broader VCS. | Agreed |
@@ -54,17 +58,18 @@ restricted to a recovery utility; that earlier suggestion was not accepted.
 | D14 | Provide sensible built-in limits, account-wide defaults, and per-repository overrides for automatic history management. | Agreed; initial values approved in D15 |
 | D15 | Start with a 30-day local-history preference, a 5 GiB private-history target per repository, and a 20 GiB aggregate target per account per device. | Agreed initial defaults; configurable, with protected-data rules below |
 | D16 | Ship self-hosted Yeokcham servers first for native remotes, private backups, and account settings. | Agreed; no managed hosted service required for the first implementation |
-| D17 | Recovery after losing all devices requires the user's recovery phrase; the server administrator cannot read or recover private history on the user's behalf. | Agreed; recovery material and protocol still need technical specification |
+| D17 | Recovery after losing all devices requires the user's recovery phrase; the server administrator cannot read or recover private history on the user's behalf. | Agreed; account/key/recovery defaults in TC03 |
 | D18 | Require integration preview and confirmation by default; users may disable confirmation after a warning. | Agreed; disabling confirmation does not bypass conflict or integrity checks |
 | D19 | Benchmark ordinary source-code projects by size first, then larger monorepos, then large binary/asset repositories. | Agreed priority; fixture plan and measurement requirements are linked below |
 | D20 | Support repositories with many nontraditional code files as a core goal, including exact storage, history, synchronization, and restoration of opaque file contents. | Agreed; no automatic format-aware merge capability is implied |
 | D21 | Integrate already-available shared work offline using local verified state; synchronize and reconcile on reconnect. | Agreed; supports the intended effortless background workflow |
-| D22 | Use `.yeokchamignore` as the native ignore mechanism; do not consult `.gitignore` during normal operation. Translate ignore rules during later one-time Git carryover. | Agreed; matcher and translation contracts need specification |
+| D22 | Use `.yeokchamignore` as the native ignore mechanism; do not consult `.gitignore` during normal operation. Translate ignore rules during later one-time Git carryover. | Agreed; native matching defaults in TC07, later Git translation remains separate scope |
 | D23 | Allow every trusted repository member to integrate shared work initially, subject to the repository's review policy and ordinary checks. | Agreed; membership administration remains separate |
 | D24 | Provide a native PR-style review workflow as an optional collaboration capability. | Agreed; direct integration remains the ordinary default |
 | D25 | Let repositories opt into required review approval before integration; optional/advisory reviews are the default. | Agreed; personal confirmation opt-out cannot bypass repository policy |
 | D26 | Prioritize an exceptionally understandable, low-friction CLI, including issue and conflict explanations that nontechnical users can act on. | Agreed; applies from the start to every feature and implementation handoff |
 | D27 | Require renewed approval after reviewed content or relevant context changes by default; allow an authorized repository-policy opt-out with a warning. Keep this independent of D18's personal confirmation opt-out. | Agreed; required reviews remain opt-in, historical approval scope stays exact, and conflict/integrity checks always apply |
+| D28 | Choose logical defaults for the remaining technical, CLI, review, and validation choices without another preference round, and record them in the design documents. | Authorized; selected defaults in TC03-TC08 and linked designs, implementation still separate |
 
 ## Discussion minutes
 
@@ -172,8 +177,9 @@ them does not set their priority or authorize implementation.
 
 ## Proposed user flow
 
-This is a design outline. Command names and protocol details are still being
-refined; policy and initial capacity defaults are recorded above.
+This is the target design flow. Chosen command families are in the CLI design;
+protocol/behavior defaults are in the technical contracts. Runtime support must
+be checked against the current product boundaries until implementation lands.
 
 1. Register a workspace and configure its remote and background behavior once.
 2. Edit normally. Capture records changed disk states and their local ancestry,
@@ -217,9 +223,9 @@ that data is saved or that files are unchanged unless the operation can prove it
 
 Treat CLI comprehension and minimal interaction as acceptance criteria in every
 work package. Package F validates the overall experience; it is not permission
-to defer usable commands and errors until the end. Specific command names and
-message wording remain design work, with representative journeys evaluated by
-people unfamiliar with version-control terminology.
+to defer usable commands and errors until the end. The CLI design selects command
+families, complete journeys, JSON outcomes, and exit codes under D28. Refine prose
+through evaluation by people unfamiliar with version-control terminology.
 
 ### Local history: D02
 
@@ -249,9 +255,9 @@ configuration, or a Git executable. Keep mandatory internal-metadata exclusions
 separate from user rules. Ignoring is based on explicit path rules, not blanket
 assumptions that documents, media, archives, or binaries are unwanted.
 
-The existing `.yeokchamignore` accepts literal relative paths only. Specify the
-native pattern syntax, ordering, directory scope, and re-inclusion semantics
-before extending it into the intended `.gitignore`-style facility. Show which
+The existing `.yeokchamignore` accepts literal relative paths only. TC07 chooses
+native glob/negation rules, nested-directory scope, precedence, and re-inclusion
+semantics for the replacement. Show which
 rule excluded a path so users can understand and adjust capture coverage.
 Changing ignore rules must not silently delete earlier recorded history or
 erase excluded working files during restoration.
@@ -290,8 +296,8 @@ they do not turn all shared history into an evictable cache.
 Private backup, team publication, and workspace integration need separate
 semantics even if transfers use one service. The current shared relay/package
 path is not a private backup channel, and local undo ancestry is not exported.
-The private backup design must define audience, access, key handling, retention,
-and restore behavior before implementation; see Q09.
+TC03 defines private audience, access, key handling, completion, retention, and
+restore defaults; use these for Q09's implementation.
 
 Default policy: record each capture locally without waiting for the network;
 upload private history asynchronously; require an intentional publication
@@ -317,11 +323,10 @@ deleted remote contents. The phrase and unwrapped private keys must not enter
 team packages, logs, ordinary configuration, or server-readable records.
 
 The current project-authority recovery mechanism does not by itself specify
-private archive recovery. Q09 must define the account/key relationship, device
-enrollment and revocation, authenticated encrypted archive/index formats, and
-recovery of the keys needed for retained history. Use established cryptographic
-constructions and libraries; this document does not select a new primitive or
-assume that an identity-recovery seed may simply be reused for encryption.
+private archive recovery. TC03 selects separate account recovery material, device
+enrollment/revocation, authenticated encryption, and recovery envelopes for retained
+epoch keys. Use the specified established cryptographic constructions and library
+interfaces; never reuse the project-authority seed as an archive encryption key.
 
 Acceptance scenarios must include recovery on a fresh device after loss of every
 old device, exact restoration of private snapshots and their undo ancestry,
@@ -351,7 +356,7 @@ An old private checkpoint may leave local storage only after the archive records
 its exact contents and the history needed to find and restore it. A queued upload
 is not a completed backup. The implementation must establish and persist archive
 completion before making the checkpoint eligible for local cleanup. Protocol
-details, owner recovery, and the remote storage contract remain Q09.
+details, owner recovery, and the remote storage defaults are in TC03.
 
 Protect the current working state, pinned checkpoints, pending uploads, and
 active restoration/recovery roots. Preserve the local history index and branch
@@ -376,9 +381,9 @@ another user's private-history retention.
 Account-wide capacity limits constrain the combined use of repositories; a
 repository override cannot bypass that aggregate limit. Local capacity is
 enforced on each device's disk, not pooled across different machines. Remote
-quotas also remain authoritative. The account/profile and multi-device settings
-representation is part of Q09; the existing display username is not an account
-identity.
+quotas also remain authoritative. TC03 selects causal per-key settings and their
+conflict behavior; TC06 defines stable identity. A display username is not an
+account identity.
 
 The following initial defaults are approved. Measurements should evaluate their
 practical behavior; they are capacity preferences and targets, not benchmarked
@@ -411,9 +416,10 @@ reported as incomplete, but existing promised coverage is not silently removed.
 
 Settings apply automatically after an override or account-default change. A
 smaller local budget only evicts eligible backed-up data. Permanent remote
-expiry is a separate, explicit retention setting; its interaction with pins,
-devices, quotas, and advertised availability must be defined before enabling it.
-No remote capacity or indefinite storage guarantee is implied by expiry being off.
+deletion is an explicit owner-authorized previewed operation initially; automatic
+remote expiry remains off. A later automatic-expiry policy must preserve pins,
+devices, quotas, and advertised availability. No remote capacity or indefinite
+storage guarantee is implied by expiry being off.
 
 Acceptance examples:
 
@@ -516,7 +522,7 @@ approval remain explicit, while local editing and history continue to work.
 When required review is enabled, offline integration needs the relevant signed
 approval records locally. Without them a member can still edit, capture, prepare
 a review request, and inspect a plan; they cannot claim approved integration.
-The precise concurrent-history and authority-admission rules remain part of Q08.
+TC06 supplies concurrent-history and authority-admission defaults for Q08.
 
 Acceptance scenarios include two disconnected members integrating independent
 work, reconnecting in either order, retaining both histories, and inspecting any
@@ -539,13 +545,13 @@ before applying; if the workspace, baseline, selected revisions, or resolution
 inputs changed, regenerate the preview and obtain a fresh confirmation. An old
 confirmation cannot authorize a different result. This does not by itself make
 multi-file replacement atomic against external programs; preserve the restore
-preflight/journal guarantees and define concurrent-write handling in Q08.
+preflight/journal guarantees and use TC06/TC07's concurrent-write handling.
 
 Users can disable preview confirmation through personal account defaults or a
 repository override. Warn when disabling it, including the affected scope:
 future explicit integration requests will apply without a confirmation pause.
 An explicit per-invocation bypass may serve automation with the same warning;
-exact command syntax remains to be specified. A shared repository file must not
+the CLI design selects `--yes` and exact `--plan` binding. A shared repository file must not
 silently disable another user's confirmation preference.
 
 Opting out of confirmation still requires an explicit integration request and
@@ -566,9 +572,9 @@ Current `deliver` advances the baseline, consumes represented changes, clears
 resolutions, closes the active draft, and creates the next draft. Its replacement
 must account for each responsibility and concurrent baseline updates. Deleting
 the command or renaming it is insufficient. Q03 has settled the interaction;
-Q08 still covers integration/provenance semantics and the new representation of
-accepted versions. Migrating obsolete development delivery records is not
-required (D10). A future command name has not been chosen.
+TC02/TC06 now define integration/provenance defaults and accepted-version
+representation for Q08. Migrating obsolete development delivery records is not
+required (D10). The selected replacement command is `integrate`.
 
 Acceptance criteria must cover publication without unintended acceptance,
 preservation of unfinished work, explicit handling of conflicting concurrent
@@ -600,8 +606,8 @@ credential handling behind platform boundaries so Windows support can follow
 without redesigning the core capture, storage, and synchronization semantics.
 The user can validate behavior on all three operating systems.
 
-Platform order is settled. Service startup, pause/resume, and credential UX still
-need concrete design, but do not require reopening the operating-system choice.
+Platform order is settled. TC03/TC04 select account custody, user-service startup,
+pause/resume, and resource defaults; platform adapters implement the same contract.
 
 ### Native remotes and later carryovers: D12
 
@@ -629,8 +635,8 @@ scope. Future hosting options do not need to be settled for this implementation.
 A deployment can serve team exchange and private backups while keeping their
 audiences and authorization separate. Self-hosting does not make a shared relay
 upload private, and project membership does not grant access to another person's
-scratch history. Q09 must define private account identity, device enrollment,
-recovery, settings, archive completion, and quotas for this deployment model.
+scratch history. TC03 defines private account identity, device enrollment,
+recovery, settings, archive completion, and quota defaults for this deployment.
 
 The handoff must include a reproducible server setup and configuration guide,
 clear storage/quota reporting, and verification that capture and available
@@ -639,48 +645,40 @@ pending transfers without a separate manual recovery workflow.
 
 ## Decision status and remaining design
 
-Resolved choices are binding design inputs. Items still marked open require
-technical design; they do not reopen the accepted product choices.
+Resolved choices are binding design inputs. D28 closes the audited default
+choices through TC03-TC08; implementation and evidence remain to be produced.
 
 | ID | Question or answer | Status / implication |
 | --- | --- | --- |
-| Q01 | Automatically back up local history privately and publish to teammates explicitly. | Policy resolved through D03/D13; owner/access and backup protocol design remain Q09. |
+| Q01 | Automatically back up local history privately and publish to teammates explicitly. | Policy resolved through D03/D13; TC03 now selects owner/access and backup protocol defaults. |
 | Q02 | All shared history and branches by default, with optional narrower selection. | Resolved as D09; requires prefetch, completeness checks, and retained scope configuration. |
-| Q03 | Explicitly integrate shared work; no further delivery action. | Resolved as D05/D06; replacement mechanics remain Q08. |
+| Q03 | Explicitly integrate shared work; no further delivery action. | Resolved as D05/D06; TC02/TC06 select replacement mechanics. |
 | Q04 | Recent history and pins local; older private history archived remotely, automatically by default. Account defaults and repository overrides. | Policy and initial limits resolved as D13-D15. Measure their practical behavior. D10 separately settles old-version compatibility. |
-| Q05 | macOS and Linux first; Windows close second. | Platform order resolved as D11. Startup, pause/resume, and credential behavior still need design. |
+| Q05 | macOS and Linux first; Windows close second. | Platform order resolved as D11; TC03/TC04 select custody, startup, and pause/resume defaults. |
 | Q06 | Yeokcham remotes first; one-time carryovers designed later. | Resolved as D12; no initial Git import/export or bidirectional sync requirement. |
 | Q07 | Ordinary source-code projects by size first, larger monorepos second, large binary/assets third; varied file types are a core goal. | Product priorities resolved as D19/D20. See the benchmark design; numeric latency/resource targets require baseline measurements. |
-| Q08 | Preview and confirm integration by default; warn on opt-out. What are the exact baseline composition rules and representation of accepted versions? | D18 and TC01/TC02 settle behavior and plan binding; concrete composition, encodings, and persistence transitions need engineering design. Legacy artifact migration is excluded by D10. |
-| Q09 | On the self-hosted service, how does an account own private backups/settings, enroll devices, and enforce archive completion, remote retention, and quotas? | Hosting and recovery policy resolved as D16/D17: owner phrase required after all-device loss, no administrator decryption/recovery. Account/key/archive protocol design remains. |
-| Q10 | Integrate downloaded shared work offline, then synchronize and reconcile on reconnect. | Resolved as D21; concurrent-history representation and admission are engineering work. |
-| Q11 | Use `.yeokchamignore` natively; translate Git ignore rules during later carryover. | Resolved as D22; no runtime `.gitignore` inheritance. |
+| Q08 | Preview and confirm integration by default; warn on opt-out. What are the exact baseline composition rules and representation of accepted versions? | D18 and TC01/TC02 settle behavior; TC06 selects composition, record layouts, and journal transitions. S0 implements schema constants/APIs/vectors. No legacy migration (D10). |
+| Q09 | On the self-hosted service, how does an account own private backups/settings, enroll devices, and enforce archive completion, remote retention, and quotas? | D16/D17 settle hosting/recovery; TC03 selects device pairing, separate recovery keys, archive completion, retention, and settings behavior. |
+| Q10 | Integrate downloaded shared work offline, then synchronize and reconcile on reconnect. | Resolved as D21; TC06 selects causal-head representation and late-arrival admission defaults. |
+| Q11 | Use `.yeokchamignore` natively; translate Git ignore rules during later carryover. | Resolved as D22; TC07 selects native matcher semantics. Git translation stays in later carryover scope. |
 | Q12 | Every trusted member may integrate; offer a native PR-style review workflow. | Resolved as D23/D24; direct integration is the default. |
-| Q13 | Reviews optional by default; repositories may require approval. | Resolved as D25; see review workflow for the proposed minimal policy and exact-revision binding. |
-| Q14 | Both personal preview confirmation and required renewed approval after relevant changes default on, with independent warned opt-outs. | Resolved as D18/D27; renewed approval is repository policy, and exact policy encoding/evidence evaluation remain engineering work. |
+| Q13 | Reviews optional by default; repositories may require approval. | Resolved as D25; review workflow and TC06 select one independent approver and exact-review binding. |
+| Q14 | Both personal preview confirmation and required renewed approval after relevant changes default on, with independent warned opt-outs. | Resolved as D18/D27; TC06 and the CLI design select evidence evaluation, warning scopes, and automation behavior. |
 
-Next resolve the dependent defaults and engineering design.
-Implementation-specific choices such as codec settings should be informed by
-measurements; they do not all require product-level questions.
+D28 authorizes the logical default choices now recorded in
+[Technical contracts](TECHNICAL_CONTRACTS.md), TC03-TC08. TC01/TC02 retain the
+explicitly agreed history/integration behavior. The private account/archive,
+service lifecycle, storage representation, deterministic composition, native
+ignore rules, review evaluation, CLI commands, and validation defaults are chosen.
+The [readiness audit](TECHNICAL_CONTRACTS.md#implementation-readiness-audit-november-6-2026)
+records how each previously open area was resolved.
 
-The workflow audit and review follow-up have been answered. Remaining work is
-engineering specification: service lifecycle, measured performance targets,
-integration representation/verification, the private account/archive protocol,
-native ignore matching, and the review record/policy contracts.
-TC01 in [Technical contracts](TECHNICAL_CONTRACTS.md) is agreed at the logical
-model/behavior level: identity and history of work, including the distinction
-between a reviewed revision, an accepted result, and later private working edits.
-TC02 is agreed at the behavior/invariant level: exact plans, preserved private
-edits, revalidation, recoverable application, concurrent offline histories, and
-review coverage with D27's explicit opt-out. Concrete composition algorithms,
-record encodings, policy evaluation, and journal transitions remain to specify.
-D26's [CLI design](CLI_DESIGN.md) is a requirement across these interfaces.
-The [implementation-readiness audit](TECHNICAL_CONTRACTS.md#implementation-readiness-audit-november-6-2026)
-lists the remaining contracts, concrete CLI journeys, and validation evidence
-needed for handoffs, distinguishing user-visible choices from engineering work.
-Use D15's accepted defaults, D16's self-hosted deployment, D17's recovery boundary,
-D18's preview behavior, and D19/D20's benchmark scope. Do not reopen these choices
-by treating an implementation detail as permission to change product behavior.
+Remaining execution work is schema constants and concrete module APIs/golden
+vectors (S0), feature implementation, benchmark evidence, and usability evaluation.
+It does not require another preference round. D15's retention limits, D16's
+self-hosted scope, D17's recovery boundary, D18/D27's safeguards, platform order,
+and source/monorepo/asset coverage remain binding. Measurement may tune scheduling
+and codec parameters without weakening correctness or changing those choices.
 
 The earlier recommendation to inherit `.gitignore` at runtime was rejected and
 is superseded by D22. Review support is now agreed scope, rather than only a
@@ -737,6 +735,7 @@ running goals, assigned tasks, or finalized implementation instructions.
 
 | Package | Outcome | Decisions or dependencies required |
 | --- | --- | --- |
+| S0: schema foundation | Canonical record registry, pure types, identity/policy/composition rules, crypto boundary, and golden vectors | TC03/TC06/TC08; freeze shared interfaces before dependent consumers |
 | A: measurements | Reproducible baseline workloads and resource/latency results across source sizes, monorepos, and binary/mixed assets | D19/D20 and the benchmark design; derive numeric targets from measurements |
 | B: storage and capture | Efficient exact captures, native ignore matching, history persistence, and retained storage | A, D13/D14/D22, representation and archive contract design; no legacy migration requirement (D10) |
 | P: private account and archive | Self-hosted owner/device access, phrase-recoverable private backups, inherited settings, and a quota-aware archive protocol | Q09, D13-D17, and agreed object/archive interfaces with B; no administrator recovery |
@@ -824,3 +823,8 @@ minimal-accuracy-only README constraint in all later handoffs.
   (D18/D27). Updated the review design and added CLI requirements and examples.
   Changes remain documentation only; technical formats and APIs are not yet
   ready for implementation delegation.
+- November 6, 2026, delegated default decisions: the user authorized choosing
+  logical defaults for all six readiness areas. Added D28, completed TC03-TC08,
+  selected CLI commands/automation semantics, settled the review mechanism, and
+  fixed initial benchmark fixtures/sampling/regression gates. These are documented
+  design defaults, not implemented features or measured performance claims.
