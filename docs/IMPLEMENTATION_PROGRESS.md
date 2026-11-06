@@ -13,9 +13,9 @@ verification, commits, and rollback. Each new agent reads and updates this file.
 - Completed phases in this chain: **0 / 20**.
 - G01 environment setup and measurement harness work has started; product runtime
   remains unchanged. Existing V1/undo functionality predates this chain.
-- Current blocker: none. The preliminary profile was deliberately stopped to
-  correct harness verification overhead and allocation accounting; v2 validation
-  and the full replacement profile are next. Later native OS, resource, and human
+- Current blocker: none. Harness v2 passed build/lint/CI and focused/export
+  checks; the full replacement profile is running in session `20722` (runner
+  PID `118787` at launch). Later native OS, resource, and human
   evidence gates remain pending; they are not presumed available or passed.
 
 Update the active phase/session label and starting commit when work starts.
@@ -30,7 +30,7 @@ files and TC08. Do not skip a failed phase or execute later prompts concurrently
 
 | Phase / copyable prompt | Prerequisite | Status | Implementation commits / latest report | Remaining |
 | --- | --- | --- | --- | --- |
-| [G01: Build the measurement harness and capture the local baseline](implementation/goals/G01-baseline.md) | Verified design baseline | in_progress | `5761fd69ff6856324a3ae265a58c8e3e8c785247`, `b1e78a92c6d095e30d78d1355af6b5fbcc215c42`, `48fd99a7a765dd12cb0ddcf54c80501b8fff2f28`; [attempt 02](implementation/reports/G01-attempt-02.md) | Live two-tier baseline, compact results, acceptance audit; next G01 |
+| [G01: Build the measurement harness and capture the local baseline](implementation/goals/G01-baseline.md) | Verified design baseline | in_progress | `5761fd69ff6856324a3ae265a58c8e3e8c785247`, `b1e78a92c6d095e30d78d1355af6b5fbcc215c42`, `48fd99a7a765dd12cb0ddcf54c80501b8fff2f28`, `547bef4cd33c44d1068159a305b230d5ffd22b41`; [attempt 02](implementation/reports/G01-attempt-02.md) | Live two-tier baseline, compact results, acceptance audit; next G01 |
 | [G02: Implement canonical records, identities, and shared interfaces](implementation/goals/G02-canonical-records.md) | G01 | pending | — | All criteria in prompt |
 | [G03: Implement causal authority, member identity, and review-policy evaluation](implementation/goals/G03-authority-policy.md) | G02 | pending | — | All criteria in prompt |
 | [G04: Implement deterministic composition and exact integration plans](implementation/goals/G04-composition-plans.md) | G03 | pending | — | All criteria in prompt |
@@ -107,8 +107,13 @@ partial phase. Do not relabel a partial phase complete to expose the next prompt
   preserving all 13 accepted records and interruption context in external
   `preliminary-cancellation.json`. No runtime failure was hidden. Do not poll or
   restart that old handle; v2 will use a fresh full profile with no mixed timings.
-- Next: verify/commit v2, execute all selected measurements, compact evidence,
-  audit and handoff. Earlier live-run checkpoints above are historical.
+- Harness v2 committed as `547bef4`; `make build`, `make lint`, `make ci`, ten
+  focused tests and the pinned-export v2 smoke passed. New full profile is live
+  in session `20722` / PID `118787`, output `source-local-v2` under the external
+  artifact root. Original/new 10-MiB manifests are byte-identical, including
+  tree SHA-256 `b6625b95d9d0e47d090658e1ac01f1660112dfa65aaa03f4ca4b3ee77b3f8160`.
+- Next: finish both full v2 tiers, compact evidence, audit and handoff. Earlier
+  live-run checkpoints above are historical; the old process exited 143.
 - Large fixtures and full logs: `/home/gongahkia/.cache/yeokcham-g01`, outside Git.
 
 ## Evidence and coverage gates
@@ -121,7 +126,7 @@ that relationship explicitly.
 
 | Gate | Owner phase(s) | State | Required evidence |
 | --- | --- | --- | --- |
-| Local existing-runtime baseline and reproducible runner | G01 | in_progress | [Environment](implementation/results/G01-environment.json) and [export smoke](implementation/results/G01-export-smoke.json) verified; selected two-tier run is live, not yet accepted |
+| Local existing-runtime baseline and reproducible runner | G01 | in_progress | [Environment](implementation/results/G01-environment.json), [v2 correction evidence](implementation/results/G01-harness-v2.json), and [v2 export smoke](implementation/results/G01-export-smoke-v2.json) verified; full v2 profile is live, not yet accepted |
 | Canonical records, causal policy, deterministic composition | G02-G04 | pending | Golden/negative/property cases and actual interfaces |
 | Capture/history/storage integrity and maintenance recovery | G05-G07 | pending | Exact-byte tests, restart/collection/pack fault cases, incremental work measurements |
 | Shared offline coverage and concurrent-history preservation | G08/G13 | pending | Missing closure, offline unvisited state, receipt permutation and journal evidence |

@@ -1,0 +1,56 @@
+{
+  "schema": "yeokcham-g01-harness-v2-evidence",
+  "implementation_commit": "547bef4cd33c44d1068159a305b230d5ffd22b41",
+  "source_revision": "d03ac1e095af7c896eede2334c5a1f5fc50c4e74",
+  "preliminary": {
+    "status": "deliberately_cancelled",
+    "exit_code": 143,
+    "accepted_records": 13,
+    "recorded_failures": [],
+    "reason": "Replace redundant untimed in-place undo validation with exact destination restoration; correct directory allocation accounting. Preserve all preliminary records; do not mix them into the new full profile.",
+    "snapshot": "/home/gongahkia/.cache/yeokcham-g01/preliminary-cancellation.json",
+    "snapshot_sha256": "7078efe1ea22a5e7af1442fa0c8e831e475c9266abe5b717d17354aa7d96bbb3",
+    "timings_reused_in_v2": false
+  },
+  "probe": {
+    "metrics": {
+      "seconds": 4.963334316,
+      "cpu_user_seconds": 4.620861,
+      "cpu_system_seconds": 0.322291,
+      "peak_rss_bytes": 22106112,
+      "input_blocks": 0,
+      "output_blocks": 24000
+    },
+    "verified_tree_sha256": "b6625b95d9d0e47d090658e1ac01f1660112dfa65aaa03f4ca4b3ee77b3f8160",
+    "command": "restore --checkpoint NODE_0_CHECKPOINT --destination EMPTY_DIRECTORY"
+  },
+  "checks": [
+    {
+      "command": "make build && make lint",
+      "exit_code": 0,
+      "notes": "passed on the 547bef4 implementation tree before commit"
+    },
+    {
+      "command": "python3 -B -m unittest discover -s test -p 'test_benchmark_*.py' -v",
+      "exit_code": 0,
+      "notes": "10 tests passed; includes altered-live-file restoration, corruption rejection, du allocation and seed sensitivity",
+      "log": "/home/gongahkia/.cache/yeokcham-g01/harness-v2-tests.log",
+      "log_sha256": "c566d556c1d2fd7229e7a90f8422c106efb2e01514e35ac75b6ba14e81e6bdac"
+    },
+    {
+      "command": "SOFTHSM2_CONF=$ARTIFACTS/softhsm2.conf YEOKCHAM_V1_TEST_PKCS11_MODULE=/usr/lib64/libsofthsm2.so YEOKCHAM_V1_TEST_OPENSSL=/home/linuxbrew/.linuxbrew/bin/openssl make ci",
+      "exit_code": 0,
+      "notes": "passed on 547bef4 implementation tree before commit",
+      "log": "/home/gongahkia/.cache/yeokcham-g01/ci-v2.log",
+      "log_sha256": "a106fe49f34f83cf0cd9c8cb9395ee3d97f162c86959c5216fd74006e06f5d9a"
+    },
+    {
+      "command": "python3 tools/benchmark_runner.py --output $ARTIFACTS/export-smoke-v2 --source-tree $ARTIFACTS/pinned-source --revision d03ac1e095af7c896eede2334c5a1f5fc50c4e74 --bytes 8192 --files 8 --history-nodes 5 --history-shape branching --attributes --cold 1 --warmups 1 --warm 2",
+      "exit_code": 0,
+      "notes": "passed on 547bef4 implementation tree; raw runner_revision names pre-commit HEAD, script hashes identify the tested code",
+      "log": "/home/gongahkia/.cache/yeokcham-g01/export-smoke-v2.log",
+      "log_sha256": "5c43a9a9d654b8bb9ed63eea7c20785acf07aaca5a42c448ec856d74f18c2aa9"
+    }
+  ],
+  "scope": "Only harness/test/docs changes; timed CLI and product runtime unchanged. Full two-tier v2 baseline still required."
+}
