@@ -1,0 +1,94 @@
+{
+  "schema": "yeokcham-g01-environment-v1",
+  "branch": "main",
+  "starting_commit": "0f162112ecdad0bedf98997f9b2b5b3a58457e5d",
+  "baseline": "d03ac1e095af7c896eede2334c5a1f5fc50c4e74",
+  "artifacts": "/home/gongahkia/.cache/yeokcham-g01",
+  "repo": "/home/gongahkia/coding/projects/yeokcham",
+  "checks": [
+    {
+      "command": "make setup",
+      "exit_code": 0,
+      "log": "/home/gongahkia/.cache/yeokcham-g01/setup.log",
+      "log_sha256": "7f12dda0799cbf06388194ccd5721285662d0436bd2e12b1abd5f2ac75afb674",
+      "notes": "starting tree 0f162112 + G01 fixture additions"
+    },
+    {
+      "command": "make build",
+      "exit_code": 0,
+      "log": "/home/gongahkia/.cache/yeokcham-g01/build-initial.log",
+      "log_sha256": "e90e1e244d9512c60ffb9a48589ca172a1059a79f19dbb267ecfa379fabcb5ff",
+      "notes": "starting tree 0f162112 + G01 fixture additions"
+    },
+    {
+      "command": "make lint",
+      "exit_code": 2,
+      "log": "/home/gongahkia/.cache/yeokcham-g01/lint-initial.log",
+      "log_sha256": "81634764e5bbc8564b3b82a53647e02660ed7d8a62804f9ba048a94917c7c620",
+      "notes": "early check before formatter setup finished"
+    },
+    {
+      "command": "make lint",
+      "exit_code": 2,
+      "log": "/home/gongahkia/.cache/yeokcham-g01/lint-fixture.log",
+      "log_sha256": "926535adbdfceb2dafe91abe86601d3dc87b668d5017db5298364162d8123c63",
+      "notes": "new Dune stanza needed formatter layout; corrected before 5761fd6"
+    },
+    {
+      "command": "SOFTHSM2_CONF=$ARTIFACTS/softhsm2.conf YEOKCHAM_V1_TEST_PKCS11_MODULE=/usr/lib64/libsofthsm2.so opam exec -- dune runtest",
+      "exit_code": 1,
+      "log": "/home/gongahkia/.cache/yeokcham-g01/tests-initial.log",
+      "log_sha256": "2c9eab1d01cf364b18b22fa13684235a45b45c21843b3b239780d0b1c38755f6",
+      "notes": "OpenSSL default path absent; 259 cases in 45 fully successful suites; 10 failing cases across two other suites"
+    },
+    {
+      "command": "python3 -B -m unittest discover -s test -p test_benchmark_*.py -v",
+      "exit_code": 0,
+      "log": "/home/gongahkia/.cache/yeokcham-g01/harness-tests.log",
+      "log_sha256": "241fc459650a52e87caf3df14d996a28ae964f8305c26212bc0a16fecd668a11",
+      "notes": "b1e78a9 implementation tree before commit; 8 tests"
+    },
+    {
+      "command": "SOFTHSM2_CONF=$ARTIFACTS/softhsm2.conf YEOKCHAM_V1_TEST_PKCS11_MODULE=/usr/lib64/libsofthsm2.so YEOKCHAM_V1_TEST_OPENSSL=/home/linuxbrew/.linuxbrew/bin/openssl OPAMSWITCH=$REPO make ci",
+      "exit_code": 2,
+      "log": "/home/gongahkia/.cache/yeokcham-g01/pinned-ci.log",
+      "log_sha256": "17633b51781d18e20d837526e851aa7e2541a7432cff067c0761f6dc417ea593",
+      "notes": "pinned archive: lint and 289 runtime cases passed; docs-check requires Git metadata"
+    },
+    {
+      "command": "SOFTHSM2_CONF=$ARTIFACTS/softhsm2.conf YEOKCHAM_V1_TEST_PKCS11_MODULE=/usr/lib64/libsofthsm2.so YEOKCHAM_V1_TEST_OPENSSL=/home/linuxbrew/.linuxbrew/bin/openssl make ci",
+      "exit_code": 0,
+      "log": "/home/gongahkia/.cache/yeokcham-g01/ci-final.log",
+      "log_sha256": "a4615c1a1cd6ab7cb98a655f39149722ae436f8544eff6bce4e191058007523b",
+      "notes": "b1e78a92c6d095e30d78d1355af6b5fbcc215c42; lint, runtest (including 8 harness tests), docs and workflow checks passed; Dune reused unchanged successful targets"
+    },
+    {
+      "command": "python3 tools/benchmark_runner.py --export-baseline $ARTIFACTS/pinned-source --switch $REPO",
+      "exit_code": 0,
+      "log": "/home/gongahkia/.cache/yeokcham-g01/export-build.log",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "notes": "d03ac1e095af7c896eede2334c5a1f5fc50c4e74; build and full tracked-source equality passed"
+    },
+    {
+      "command": "python3 tools/benchmark_runner.py --output $ARTIFACTS/export-smoke --source-tree $ARTIFACTS/pinned-source --revision d03ac1e095af7c896eede2334c5a1f5fc50c4e74 --bytes 8192 --files 8 --history-nodes 5 --history-shape branching --attributes --cold 1 --warmups 1 --warm 2",
+      "exit_code": 0,
+      "log": "/home/gongahkia/.cache/yeokcham-g01/export-smoke.log",
+      "log_sha256": "9d69fe82d5f779654286b35bef01ef68223c25b25e50cfdddeee545a5968c7b9",
+      "notes": "pinned executable, committed b1e78a9 runner; 16 samples/warmups with exact restore"
+    }
+  ],
+  "setup": {
+    "system_command": "sudo -n dnf install -y gcc gcc-c++ make pkgconf-pkg-config libzstd-devel socat softhsm fish gnupg2 ruby openssl-devel",
+    "opam_command": "make setup",
+    "openssl_override": "/home/linuxbrew/.linuxbrew/bin/openssl",
+    "pkcs11_module": "/usr/lib64/libsofthsm2.so",
+    "token": "disposable test token initialized with CI label and test PINs; outside Git"
+  },
+  "packages": "# Packages matching: installed\n# Name                  # Version\nalcotest                1.9.1\nastring                 0.8.5\nbase                    v0.17.3\nbase-bigarray           base\nbase-bytes              base\nbase-domains            base\nbase-effects            base\nbase-nnp                base\nbase-threads            base\nbase-unix               base\ncamlp-streams           5.0.1\ncmdliner                2.1.1\ncompiler-cloning        enabled\nconf-pkg-config         5\nconf-zstd               1.3.8\ncsexp                   1.5.2\nctypes                  0.24.0\ndigestif                1.3.1\ndune                    3.24.2\ndune-build-info         3.24.2\ndune-configurator       3.24.2\nduration                0.3.1\neither                  1.0.0\neqaf                    0.10\nfix                     20250919\nfmt                     0.11.0\nfpath                   0.7.3\ninotify                 2.6\nintegers                0.8.0\njsonrpc                 1.27.0\nlogs                    0.10.0\nlsp                     1.27.0\nmenhir                  20260209\nmenhirCST               20260209\nmenhirGLR               20260209\nmenhirLib               20260209\nmenhirSdk               20260209\nmirage-crypto           2.2.0\nmirage-crypto-ec        2.2.0\nmirage-crypto-rng       2.2.0\nocaml                   5.5.0\nocaml-base-compiler     5.5.0\nocaml-compiler          5.5.0\nocaml-options-vanilla   1\nocaml-syntax-shims      1.0.0\nocaml-version           4.1.4\nocaml_intrinsics_kernel v0.17.2\nocamlbuild              0.16.1\nocamlfind               1.9.9~preview\nocamlformat             0.29.0\nocamlformat-lib         0.29.0\nocp-indent              1.10.0\nppx_yojson_conv_lib     v0.17.0\nqcheck-alcotest         0.91\nqcheck-core             0.91\nre                      1.14.0\nsexplib0                v0.17.0\nstdio                   v0.17.0\nstdlib-shims            0.3.0\ntopkg                   1.1.1\nuucp                    18.0.0\nuuseg                   18.0.0\nuutf                    1.0.4\nyojson                  3.0.0\nzstd                    0.4\n",
+  "limitations": [
+    "WSL2 is unsupported as a product platform; this is local measurement evidence only.",
+    "No native macOS, Linux or Windows acceptance claim.",
+    "No Docker/Buildx package/OCI smoke; G20 owns that gate.",
+    "No Next.js package exists; inherited Next.js guide instruction does not apply to this OCaml repository."
+  ]
+}
