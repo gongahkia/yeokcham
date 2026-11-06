@@ -534,3 +534,9 @@
   yeokcham_v1_restore_journal
   yeokcham_v1_store
   yeokcham_v1_undo))
+
+(rule
+ (alias runtest)
+ (deps test_benchmark_fixture.py ../tools/benchmark_fixture.py)
+ (action
+  (run python3 %{dep:test_benchmark_fixture.py})))

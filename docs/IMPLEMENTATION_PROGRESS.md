@@ -8,11 +8,11 @@ verification, commits, and rollback. Each new agent reads and updates this file.
 
 - Design baseline: `d03ac1e095af7c896eede2334c5a1f5fc50c4e74`.
 - Branch: `main`; one implementation writer at a time.
-- Active implementation phase: none.
-- Next ready phase: [G01 — local baseline](implementation/goals/G01-baseline.md).
+- Active implementation phase: G01 (`g01-local-baseline-2026-11-06`).
+- Next ready phase: none while G01 is in progress.
 - Completed phases in this chain: **0 / 20**.
-- Handoff workflow and all 20 goal prompts are prepared; runtime implementation
-  from this chain has not started. Existing V1/undo functionality predates it.
+- G01 environment setup and measurement harness work has started; product runtime
+  remains unchanged. Existing V1/undo functionality predates this chain.
 - Current blocker: none for starting G01. Later native OS, resource, and human
   evidence gates remain pending; they are not presumed available or passed.
 
@@ -28,7 +28,7 @@ files and TC08. Do not skip a failed phase or execute later prompts concurrently
 
 | Phase / copyable prompt | Prerequisite | Status | Implementation commits / latest report | Remaining |
 | --- | --- | --- | --- | --- |
-| [G01: Build the measurement harness and capture the local baseline](implementation/goals/G01-baseline.md) | Verified design baseline | ready | — | All criteria in prompt |
+| [G01: Build the measurement harness and capture the local baseline](implementation/goals/G01-baseline.md) | Verified design baseline | in_progress | Starting `0f162112ecdad0bedf98997f9b2b5b3a58457e5d` | Environment, harness, local measurements, acceptance audit |
 | [G02: Implement canonical records, identities, and shared interfaces](implementation/goals/G02-canonical-records.md) | G01 | pending | — | All criteria in prompt |
 | [G03: Implement causal authority, member identity, and review-policy evaluation](implementation/goals/G03-authority-policy.md) | G02 | pending | — | All criteria in prompt |
 | [G04: Implement deterministic composition and exact integration plans](implementation/goals/G04-composition-plans.md) | G03 | pending | — | All criteria in prompt |
@@ -55,10 +55,29 @@ partial phase. Do not relabel a partial phase complete to expose the next prompt
 
 ## Current-phase checkpoints
 
-No implementation checkpoints yet. Replace this paragraph with the active
-phase, session label, starting SHA, finished checkpoints, next action, and any
-unexpected pre-existing/overlapping changes. Preserve completed checkpoints in
-that phase's report when advancing.
+- G01 session: `g01-local-baseline-2026-11-06`; starting commit
+  `0f162112ecdad0bedf98997f9b2b5b3a58457e5d`, clean `main`.
+- Verified `d03ac1e095af7c896eede2334c5a1f5fc50c4e74` is an ancestor;
+  G01 has no predecessor implementation report. Other observed agent processes
+  work in another project; no overlapping writer observed.
+- Read G01, workflow, TC08, benchmark design, Makefile, CI, and install/undo docs.
+  The inherited Next.js instruction has no applicable package: this is OCaml.
+- Host is Fedora 44 under WSL2, not a native-platform acceptance machine.
+  No opam switch existed; documented local setup and test-tool installation started.
+- Generator determinism, exact byte/count and corruption/attribute checks pass
+  (4 Python tests); source/monorepo/asset layouts and large-file controls implemented.
+- `make setup` completed: OCaml 5.5.0, Dune 3.24.2, ocamlformat 0.29.0.
+  First build passed. Early lint ran before formatter installation and failed;
+  formatter setup completed and the new Dune stanza formatting was corrected.
+- Initial test run found an environment-only OpenSSL path issue: Fedora has
+  Homebrew OpenSSL, while tests default to `/usr/bin/openssl`. Re-run with the
+  documented `YEOKCHAM_V1_TEST_OPENSSL` override; disposable SoftHSM is configured.
+- Real CLI runner checks passed (4 Python tests, including linear/branching
+  restores and intentional corruption rejection); pinned source export built and
+  every tracked exported source file matches the pinned revision.
+- Next: commit harness, run full CI and two local source tiers with
+  5 cold / 3 excluded warmups / 30 warm samples per operation.
+- Large fixtures and full logs: `/home/gongahkia/.cache/yeokcham-g01`, outside Git.
 
 ## Evidence and coverage gates
 
