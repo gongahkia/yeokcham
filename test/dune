@@ -540,3 +540,14 @@
  (deps test_benchmark_fixture.py ../tools/benchmark_fixture.py)
  (action
   (run python3 %{dep:test_benchmark_fixture.py})))
+
+(rule
+ (alias runtest)
+ (deps
+  test_benchmark_runner.py
+  ../tools/benchmark_fixture.py
+  ../tools/benchmark_runner.py
+  ../tools/benchmark_summary.py
+  ../bin/yeokcham_v1.exe)
+ (action
+  (run python3 %{dep:test_benchmark_runner.py})))

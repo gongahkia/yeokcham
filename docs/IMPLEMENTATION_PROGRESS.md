@@ -75,7 +75,12 @@ partial phase. Do not relabel a partial phase complete to expose the next prompt
 - Real CLI runner checks passed (4 Python tests, including linear/branching
   restores and intentional corruption rejection); pinned source export built and
   every tracked exported source file matches the pinned revision.
-- Next: commit harness, run full CI and two local source tiers with
+- Fixture implementation committed as `5761fd6`; build, lint and four fixture
+  tests passed. Runner/summarizer tests now total eight passing checks.
+- Pinned export `make ci` passed lint/runtime tests, then failed at `docs-check`
+  because that pre-existing checker requires Git metadata absent from an archive.
+  This is recorded, not suppressed; final full CI will run on the actual checkout.
+- Next: commit runner, run full CI and two local source tiers with
   5 cold / 3 excluded warmups / 30 warm samples per operation.
 - Large fixtures and full logs: `/home/gongahkia/.cache/yeokcham-g01`, outside Git.
 
