@@ -13,8 +13,9 @@ verification, commits, and rollback. Each new agent reads and updates this file.
 - Completed phases in this chain: **0 / 20**.
 - G01 environment setup and measurement harness work has started; product runtime
   remains unchanged. Existing V1/undo functionality predates this chain.
-- Current blocker: none for starting G01. Later native OS, resource, and human
-  evidence gates remain pending; they are not presumed available or passed.
+- Current blocker: none. The full G01 profile is running; its restoration checks
+  are slow on this WSL2 filesystem. Later native OS, resource, and human evidence
+  gates remain pending; they are not presumed available or passed.
 
 Update the active phase/session label and starting commit when work starts.
 Update meaningful checkpoints while working, and reconcile all fields at closeout.
@@ -28,7 +29,7 @@ files and TC08. Do not skip a failed phase or execute later prompts concurrently
 
 | Phase / copyable prompt | Prerequisite | Status | Implementation commits / latest report | Remaining |
 | --- | --- | --- | --- | --- |
-| [G01: Build the measurement harness and capture the local baseline](implementation/goals/G01-baseline.md) | Verified design baseline | in_progress | Starting `0f162112ecdad0bedf98997f9b2b5b3a58457e5d` | Environment, harness, local measurements, acceptance audit |
+| [G01: Build the measurement harness and capture the local baseline](implementation/goals/G01-baseline.md) | Verified design baseline | in_progress | `5761fd69ff6856324a3ae265a58c8e3e8c785247`, `b1e78a92c6d095e30d78d1355af6b5fbcc215c42`, `48fd99a7a765dd12cb0ddcf54c80501b8fff2f28`; [attempt 01](implementation/reports/G01-attempt-01.md) | Live two-tier baseline, compact results, acceptance audit; next G01 |
 | [G02: Implement canonical records, identities, and shared interfaces](implementation/goals/G02-canonical-records.md) | G01 | pending | — | All criteria in prompt |
 | [G03: Implement causal authority, member identity, and review-policy evaluation](implementation/goals/G03-authority-policy.md) | G02 | pending | — | All criteria in prompt |
 | [G04: Implement deterministic composition and exact integration plans](implementation/goals/G04-composition-plans.md) | G03 | pending | — | All criteria in prompt |
@@ -80,8 +81,17 @@ partial phase. Do not relabel a partial phase complete to expose the next prompt
 - Pinned export `make ci` passed lint/runtime tests, then failed at `docs-check`
   because that pre-existing checker requires Git metadata absent from an archive.
   This is recorded, not suppressed; final full CI will run on the actual checkout.
-- Next: commit runner, run full CI and two local source tiers with
-  5 cold / 3 excluded warmups / 30 warm samples per operation.
+- Runner/summarizer committed as `b1e78a9`. `make ci` passed on that commit
+  with the OpenSSL override and configured SoftHSM token; no skipped test was
+  counted as passed. Pinned runtime tests: 289 cases in 47 successful suites.
+- Pinned-export smoke completed: 8-KiB/8-file, five-node branching history,
+  executable/symlink attributes, all four operations, exact restores.
+- Full G01 profile is running from the pinned export: 10-MiB/1,000-file and
+  100-MiB/10,000-file, 10 nodes, 5 cold / 3 excluded warmups / 30 warm samples
+  per operation. Process/session evidence and full logs remain outside Git;
+  `/home/gongahkia/.cache/yeokcham-g01/source-local/summary.json` is the durable
+  result, `source-local.log` the progress log. Do not restart a live run.
+- Next: finish the selected measurements, compact evidence, audit and handoff.
 - Large fixtures and full logs: `/home/gongahkia/.cache/yeokcham-g01`, outside Git.
 
 ## Evidence and coverage gates
@@ -94,7 +104,7 @@ that relationship explicitly.
 
 | Gate | Owner phase(s) | State | Required evidence |
 | --- | --- | --- | --- |
-| Local existing-runtime baseline and reproducible runner | G01 | pending | Commands, fixture hashes, source SHA, local build/CI outcomes, small ordinary-source results |
+| Local existing-runtime baseline and reproducible runner | G01 | in_progress | [Environment](implementation/results/G01-environment.json) and [export smoke](implementation/results/G01-export-smoke.json) verified; selected two-tier run is live, not yet accepted |
 | Canonical records, causal policy, deterministic composition | G02-G04 | pending | Golden/negative/property cases and actual interfaces |
 | Capture/history/storage integrity and maintenance recovery | G05-G07 | pending | Exact-byte tests, restart/collection/pack fault cases, incremental work measurements |
 | Shared offline coverage and concurrent-history preservation | G08/G13 | pending | Missing closure, offline unvisited state, receipt permutation and journal evidence |
@@ -134,3 +144,9 @@ records, not current proof.
   tracked progress, atomic commits on main, and README edits limited to accurate
   additions or corrections of obvious outdated/wrong content. Prepared the
   workflow and 20 phase prompts. No implementation goal has been started here.
+
+- November 6, 2026, G01 attempt 01: committed fixture/runner/evidence; main CI and
+  pinned export smoke passed. Full selected profile is running in exec session
+  `29807`, runner PID `107969` at checkpoint. Revalidate the live process before
+  continuing; never infer liveness from this ledger alone. G01 remains active,
+  G02 remains pending; no phase-completion claim.
