@@ -1,6 +1,6 @@
 # Implementation progress
 
-Updated November 6, 2026. This is the shared implementation ledger. Follow
+Updated November 7, 2026. This is the shared implementation ledger. Follow
 [Implementation workflow](IMPLEMENTATION_WORKFLOW.md) for execution, reports,
 verification, commits, and rollback. Each new agent reads and updates this file.
 
@@ -29,7 +29,7 @@ files and TC08. Do not skip a failed phase or execute later prompts concurrently
 
 | Phase / copyable prompt | Prerequisite | Status | Implementation commits / latest report | Remaining |
 | --- | --- | --- | --- | --- |
-| [G01: Build the measurement harness and capture the local baseline](implementation/goals/G01-baseline.md) | Verified design baseline | in_progress | `5761fd69ff6856324a3ae265a58c8e3e8c785247`, `b1e78a92c6d095e30d78d1355af6b5fbcc215c42`, `48fd99a7a765dd12cb0ddcf54c80501b8fff2f28`; [attempt 01](implementation/reports/G01-attempt-01.md) | Live two-tier baseline, compact results, acceptance audit; next G01 |
+| [G01: Build the measurement harness and capture the local baseline](implementation/goals/G01-baseline.md) | Verified design baseline | in_progress | `5761fd69ff6856324a3ae265a58c8e3e8c785247`, `b1e78a92c6d095e30d78d1355af6b5fbcc215c42`, `48fd99a7a765dd12cb0ddcf54c80501b8fff2f28`; [attempt 02](implementation/reports/G01-attempt-02.md) | Live two-tier baseline, compact results, acceptance audit; next G01 |
 | [G02: Implement canonical records, identities, and shared interfaces](implementation/goals/G02-canonical-records.md) | G01 | pending | — | All criteria in prompt |
 | [G03: Implement causal authority, member identity, and review-policy evaluation](implementation/goals/G03-authority-policy.md) | G02 | pending | — | All criteria in prompt |
 | [G04: Implement deterministic composition and exact integration plans](implementation/goals/G04-composition-plans.md) | G03 | pending | — | All criteria in prompt |
@@ -91,6 +91,11 @@ partial phase. Do not relabel a partial phase complete to expose the next prompt
   per operation. Process/session evidence and full logs remain outside Git;
   `/home/gongahkia/.cache/yeokcham-g01/source-local/summary.json` is the durable
   result, `source-local.log` the progress log. Do not restart a live run.
+- November 7, 00:07 SGT checkpoint: original session `29807` / PID `107969`
+  confirmed live after repeated polls. The 10-MiB initial-capture case has accepted
+  five cold samples, three excluded warmups and two warm samples, with no recorded
+  failures. Full counts and the 100-MiB tier remain outstanding; this is a verified
+  wait, not a blocked condition. Snapshot: external `checkpoints/attempt-02.json`.
 - Next: finish the selected measurements, compact evidence, audit and handoff.
 - Large fixtures and full logs: `/home/gongahkia/.cache/yeokcham-g01`, outside Git.
 
@@ -150,3 +155,8 @@ records, not current proof.
   `29807`, runner PID `107969` at checkpoint. Revalidate the live process before
   continuing; never infer liveness from this ledger alone. G01 remains active,
   G02 remains pending; no phase-completion claim.
+
+- November 7, 2026, G01 attempt 02: revalidated original live process and ancestor
+  commits; observed first accepted baseline samples. Saved a durable external
+  observation and this continuation report. No runtime/harness changes or new
+  implementation phase; G01 stays active while the full profile runs.
