@@ -6,6 +6,12 @@ transfer boundaries, tests, onboarding, and GitHub Actions. It is not a proof
 of the absence of bugs or an independent cryptographic audit. `README.md`
 was left unchanged.
 
+The [November 6 product discussion](#product-direction-discussion-november-6-2026)
+below records subsequent priorities and open questions; the review above that
+section describes the implemented model, including delivery.
+The continuing decision log, proposed flows, and implementation handoff criteria
+are maintained in [Product design](PRODUCT_DESIGN.md).
+
 ## What Yeokcham seeks to do
 
 Yeokcham gives a small trusted team a vocabulary for progress that a single
@@ -164,6 +170,97 @@ a new collaboration or storage model.
    as build provenance and check CI for the same commit before deployment.
    Gating publication and establishing stable release compatibility deserve
    a separate release policy.
+
+## Product direction discussion: November 6, 2026
+
+This dated discussion is expanded in [Product design](PRODUCT_DESIGN.md), which
+is the continuing record for new decisions and implementation readiness.
+
+These are planning notes, not implemented behavior or approval to start runtime
+changes. The agreed direction remains a VCS with useful advantages over native
+Git. There is no decision to narrow Yeokcham to a recovery-only tool or to make
+further product exploration conditional on validating that narrower scope.
+
+### Core capabilities to implement or develop further
+
+1. **Persistent history of unfinished work.** Keep the local undo tree central:
+   capture disk states, preserve alternate continuations, and revisit experiments
+   without planning commits beforehand. The initial tree is implemented; usable
+   discovery, predictable retention, and performance during sustained editing
+   still need work. See [the current contract](LOCAL_UNDO.md).
+2. **Native background synchronization and reliable offline work.** Make capture
+   and remote synchronization an integrated, managed background service with
+   retry after disconnection and restart. The intended benefit is having remote
+   work available locally without remembering to fetch each task or branch.
+   Today watch/daemon are opt-in, daemon sync is explicit, and received history
+   is not a general selectable workspace basis. Automatic transfer therefore
+   also needs a complete local inspection and workspace-selection journey.
+   Offline availability must refer to verified local content as of a successful
+   sync, not remote work created while disconnected. Whole-repository coverage
+   is the desired experience where feasible; any bounded working-set mode,
+   history depth, default coverage, and disk-limit behavior remain design
+   questions. Expose incomplete downloads rather than claiming readiness.
+3. **Efficient storage and low background cost.** Design storage, transfer, and
+   retention together so continuous history and synchronization are practical.
+   Existing content-addressed storage and Buzhash chunking reuse identical
+   content; V2 transport already compresses ranges with zstd. Local objects are
+   currently stored as canonical uncompressed envelopes. Evaluate compression
+   at rest, packing small objects, delta encoding for similar versions, and
+   incremental maintenance before choosing a format or inventing an algorithm.
+   Compression preserves history; expiration removes recoverability and needs
+   its own explicit policy. A cache limit must not silently evict promised
+   offline contents or the only copy of unsynchronized work.
+
+The performance work should measure capture latency, idle CPU, bytes read and
+written, disk growth, transferred bytes, and restore time on representative
+source trees and binary assets. Compare equivalent retained history and offline
+coverage before claiming an advantage over Git. Code inspection already shows
+full-tree capture on watcher saves and full undo-history serialization on state
+saves; investigate those costs alongside compression. Neither is a benchmark.
+
+Automatic fetching alone is not unique: Git supports scheduled
+[background prefetch](https://git-scm.com/docs/git-maintenance). Its
+[packfiles](https://git-scm.com/book/en/v2/Git-Internals-Packfiles) and
+[restic's storage design](https://restic.readthedocs.io/en/stable/100_references.html)
+are established references for the storage evaluation.
+
+### Delivery and sharing: simplify the product surface
+
+The current separate delivery step has not demonstrated enough user value to
+justify its friction. Prefer removing or folding that step into an ordinary
+workflow unless a concrete need emerges. The useful distinction to preserve is
+between making work available and accepting it into a shared baseline: automatic
+transfer of an experiment should not by itself mean the team has accepted it.
+
+Delivery currently advances the baseline, consumes represented changes, clears
+resolutions, closes the active draft, and starts another. Removing its command
+therefore needs replacement semantics, not just deletion of a milestone label.
+The exact replacement remains open, as does whether shared baselines require
+mechanically verified composition. Private backup, publishing work to peers,
+and integrating it into current files also need explicit semantics for the
+background service; this discussion does not decide to publish every scratch
+snapshot or automatically merge incoming work.
+
+### Candidates for further discussion, not implementation commitments
+
+The inspiration is Anthropic's
+[Scion article](https://www.anthropic.com/research/redesigning-source-control):
+its online dependency conflicts with our offline goal; incremental operations,
+shared caching, and programmatic access are relevant ideas to evaluate.
+
+- Incremental capture and history persistence, with reconciliation after missed
+  filesystem events, so small edits need not repeatedly process the whole repo.
+- Shared immutable storage across local workspaces, reducing duplicate contents
+  for parallel experiments; ownership, retention, and scope require design.
+- Complete structured history and inspection APIs for editors, scripts, tests,
+  and agents, without requiring an AI service for core functionality.
+- Optional associations between exact snapshots and test/build results, helping
+  people find a known working state without introducing another mandatory step.
+
+Selective undo remains a design topic. Operation grouping is supporting behavior,
+not an agreed headline feature; a separate alternative-implementation feature
+remains deferred. Article-inspired ideas above are proposals, not additions to
+the agreed implementation scope.
 
 ## Validation
 
