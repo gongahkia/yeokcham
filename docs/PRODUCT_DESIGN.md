@@ -70,6 +70,7 @@ restricted to a recovery utility; that earlier suggestion was not accepted.
 | D26 | Prioritize an exceptionally understandable, low-friction CLI, including issue and conflict explanations that nontechnical users can act on. | Agreed; applies from the start to every feature and implementation handoff |
 | D27 | Require renewed approval after reviewed content or relevant context changes by default; allow an authorized repository-policy opt-out with a warning. Keep this independent of D18's personal confirmation opt-out. | Agreed; required reviews remain opt-in, historical approval scope stays exact, and conflict/integrity checks always apply |
 | D28 | Choose logical defaults for the remaining technical, CLI, review, and validation choices without another preference round, and record them in the design documents. | Authorized; selected defaults in TC03-TC08 and linked designs, implementation still separate |
+| D29 | Execute implementation through copyable sequential `/goal` prompts with evidence reports, a persistent progress ledger, and atomic commits on `main`. Limit README edits to accurate additions or corrections of obvious outdated/wrong content. | Authorized workflow; G01-G20 prepared, no implementation goal started by the handoff setup |
 
 ## Discussion minutes
 
@@ -91,7 +92,8 @@ reused across replies. They are decisions and rationale, not a verbatim transcri
   not accepted merely to make Yeokcham seem different.
 - Implementation was explicitly paused during discussion, then separately
   authorized for the undo tree. README changes were restricted to the smallest
-  accuracy corrections. That documentation constraint remains in force.
+  accuracy corrections. D29 now permits accurate additions as well, while retaining
+  the restriction against unrelated rewrites.
 
 ### The six-point Git comparison and follow-up
 
@@ -728,10 +730,13 @@ Implementation evidence is in the [architecture](ARCHITECTURE.md),
 [undo model](../lib/yeokcham_v1_undo/yeokcham_v1_undo.ml), and
 [delivery transition](../lib/yeokcham_v1_model/yeokcham_v1_model.ml).
 
-## Future implementation handoffs
+## Implementation handoffs
 
-These are candidate work packages for later `/goal` prompts. They are not
-running goals, assigned tasks, or finalized implementation instructions.
+The [implementation workflow](IMPLEMENTATION_WORKFLOW.md) and
+[progress ledger](IMPLEMENTATION_PROGRESS.md) now provide the copyable G01-G20
+goal chain, report format, validation gates, and commit rules. The table below
+maps the architectural work packages; the individual goal files define bounded
+execution. No goal is running merely because its prompt has been prepared.
 
 | Package | Outcome | Decisions or dependencies required |
 | --- | --- | --- |
@@ -769,12 +774,15 @@ default-on safeguards with warned opt-outs at their respective policy scopes.
 Define structured error/action data alongside each API so usable explanations
 do not require the final CLI layer to infer state from raw error strings.
 Unresolved product decisions must not become implicit implementer choices.
-Separate shared schema work from consumers before assigning parallel tasks.
+Separate shared schema work from consumers and run one implementation writer at
+a time on `main` under the selected handoff workflow.
 Benchmark and validate the integrated workflow, not only isolated modules.
 
-Do not create goals or delegate implementation until the design is sufficiently
-resolved and implementation is requested. Preserve unrelated changes and the
-minimal-accuracy-only README constraint in all later handoffs.
+The design supports starting the staged implementation. Users invoke each goal
+explicitly; a completion report prints the next prompt without executing it.
+Preserve unrelated changes, work directly on `main` with atomic commits, and
+apply D29's README rule: accurate additions or corrections of material that has
+become obviously wrong/outdated, without broad rewrites or unrelated churn.
 
 ## Design updates
 
@@ -828,3 +836,9 @@ minimal-accuracy-only README constraint in all later handoffs.
   selected CLI commands/automation semantics, settled the review mechanism, and
   fixed initial benchmark fixtures/sampling/regression gates. These are documented
   design defaults, not implemented features or measured performance claims.
+- November 6, 2026, chained implementation workflow: added D29, a progress ledger,
+  report template, common execution rules, and twenty copyable goal prompts.
+  Each phase maintains evidence and remaining work, commits logical changes on
+  main, and returns the next eligible prompt or a continuation when incomplete.
+  The user's latest README instruction allows accurate additions and corrections
+  of obviously outdated/wrong content. Handoff setup starts no runtime goal.

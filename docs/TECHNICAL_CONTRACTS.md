@@ -789,6 +789,13 @@ contracts. The [CLI design](CLI_DESIGN.md) fixes command families, prompts, and
 structured outcomes; the [benchmark design](BENCHMARK_DESIGN.md) fixes workload
 defaults and comparison gates. No further preference round is required.
 
+The user has now selected a sequential `/goal` handoff workflow. Follow
+[Implementation workflow](IMPLEMENTATION_WORKFLOW.md) and maintain
+[Implementation progress](IMPLEMENTATION_PROGRESS.md). The G01-G20 prompts split
+the architectural stages below into bounded tasks, with reports, evidence gates,
+atomic Git commits on `main`, and the user's current README constraint. Preparing
+these prompts does not start an implementation goal automatically.
+
 | Stage | Owned deliverable and dependency |
 | --- | --- |
 | S0: schema foundation | One owner for the record registry, canonical encoders, pure record types, logical IDs, crypto-provider boundary, composition vectors, and policy evaluator. Freeze exported interfaces and malformed-input cases before consumers. |
@@ -890,3 +897,8 @@ agent delegation and claims no benchmark or usability results.
   assumptions for the remaining audit items. Added TC03-TC08 and concrete CLI,
   review, and benchmark defaults; superseded the pending-question audit with
   their disposition. Existing product choices remain binding. No runtime changes.
+- November 6, 2026, implementation handoff authorization: prepared the sequential
+  goal/report/progress workflow and G01-G20 prompts. The design baseline is
+  `d03ac1e095af7c896eede2334c5a1f5fc50c4e74`. User instructions require atomic
+  commits on `main` and README edits limited to accurate additions or corrections
+  of obvious outdated/wrong content. Runtime work starts when a goal is invoked.
