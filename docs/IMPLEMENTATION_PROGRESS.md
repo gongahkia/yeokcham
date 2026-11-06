@@ -13,9 +13,10 @@ verification, commits, and rollback. Each new agent reads and updates this file.
 - Completed phases in this chain: **0 / 20**.
 - G01 environment setup and measurement harness work has started; product runtime
   remains unchanged. Existing V1/undo functionality predates this chain.
-- Current blocker: none. The full G01 profile is running; its restoration checks
-  are slow on this WSL2 filesystem. Later native OS, resource, and human evidence
-  gates remain pending; they are not presumed available or passed.
+- Current blocker: none. The preliminary profile was deliberately stopped to
+  correct harness verification overhead and allocation accounting; v2 validation
+  and the full replacement profile are next. Later native OS, resource, and human
+  evidence gates remain pending; they are not presumed available or passed.
 
 Update the active phase/session label and starting commit when work starts.
 Update meaningful checkpoints while working, and reconcile all fields at closeout.
@@ -96,7 +97,18 @@ partial phase. Do not relabel a partial phase complete to expose the next prompt
   five cold samples, three excluded warmups and two warm samples, with no recorded
   failures. Full counts and the 100-MiB tier remain outstanding; this is a verified
   wait, not a blocked condition. Snapshot: external `checkpoints/attempt-02.json`.
-- Next: finish the selected measurements, compact evidence, audit and handoff.
+- November 7 harness audit: an exact destination restore took 4.963 seconds;
+  redundant untimed in-place validation took minutes and added navigation proofs
+  to the prepared history. Replaced only that harness verification with captured
+  checkpoint restoration to an empty destination; measured undo remains unchanged.
+  Corrected storage allocation to include directory blocks and tightened the seed
+  check. Run/summary schema v2 records the verifier and its duration.
+- Original session `29807` was deliberately terminated, confirmed exit 143, after
+  preserving all 13 accepted records and interruption context in external
+  `preliminary-cancellation.json`. No runtime failure was hidden. Do not poll or
+  restart that old handle; v2 will use a fresh full profile with no mixed timings.
+- Next: verify/commit v2, execute all selected measurements, compact evidence,
+  audit and handoff. Earlier live-run checkpoints above are historical.
 - Large fixtures and full logs: `/home/gongahkia/.cache/yeokcham-g01`, outside Git.
 
 ## Evidence and coverage gates

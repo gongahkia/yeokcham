@@ -26,7 +26,7 @@ class FixtureTests(unittest.TestCase):
                 self.assertEqual(23, sum(e['kind'] == 'file' for e in a['entries']))
                 self.assertTrue(any(e.get('executable') for e in a['entries']))
                 self.assertTrue(any(e['kind'] == 'symlink' for e in a['entries']))
-                c = fixture.generate(Path(tmp) / (suite + '-seed'), 123457, 23, suite, seed=2)
+                c = fixture.generate(Path(tmp) / (suite + '-seed'), 123457, 23, suite, seed=2, attributes=True)
                 self.assertNotEqual(a['tree_sha256'], c['tree_sha256'])
 
     def test_fidelity_rejects_bytes_modes_links_extra_and_missing(self):

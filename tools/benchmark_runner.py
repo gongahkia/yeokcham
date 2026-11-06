@@ -94,14 +94,19 @@ def machine(root):
 
 
 def storage(root):
-    logical = allocated = count = 0
+    logical = allocated_files = allocated_directories = count = directories = 0
     for directory, _, files in os.walk(root):
+        allocated_directories += Path(directory).lstat().st_blocks * 512
+        directories += 1
         for name in files:
             info = (Path(directory) / name).lstat()
             logical += info.st_size
-            allocated += info.st_blocks * 512
+            allocated_files += info.st_blocks * 512
             count += 1
-    return dict(file_bytes=logical, allocated_bytes=allocated, files=count)
+    return dict(file_bytes=logical, allocated_file_bytes=allocated_files,
+                allocated_directory_bytes=allocated_directories,
+                allocated_bytes=allocated_files + allocated_directories,
+                files=count, directories=directories)
 
 
 def command(binary, root, operation):
@@ -141,6 +146,18 @@ def check_history(binary, root, env, count, current):
     if len(tree['nodes']) != count or tree['current'] != str(current) or not all(n['available'] for n in tree['nodes']):
         raise ValueError(f'history fidelity failure: expected {count} nodes, current {current}')
     return tree
+
+
+def verify_checkpoint(binary, root, env, tree, node, expected, scratch):
+    """Restore from stored objects into an empty directory, never from live files."""
+    checkpoint = next(item['entry']['checkpoint'] for item in tree['nodes']
+                      if item['entry']['node'] == str(node))
+    with tempfile.TemporaryDirectory(prefix='restored-', dir=scratch) as directory:
+        destination = Path(directory)
+        _, metrics = invoke([str(binary), 'restore', '--root', str(root),
+                             '--checkpoint', checkpoint, '--destination', str(destination)], env)
+        fixture.verify(destination, expected)
+    return metrics['seconds']
 
 
 def edit(root, base, step):
@@ -217,11 +234,11 @@ def run_case(args, case_dir, total_bytes, files):
         else:
             states.append(edit(master, manifest, node))
         invoke(command(args.binary, master, 'small_edit'), env)
-    check_history(args.binary, master, env, args.history_nodes, args.history_nodes - 1)
-    # Prove every retained checkpoint restores, not just the current working copy.
+    tree = check_history(args.binary, master, env, args.history_nodes, args.history_nodes - 1)
+    # Prove every retained checkpoint restores without adding navigation proofs to the fixture.
     for node, state in enumerate(states):
-        invoke([str(args.binary), 'undo', '--to', str(node), '--root', str(master)], env)
-        fixture.verify(master, state)
+        verify_checkpoint(args.binary, master, env, tree, node, state, case_dir)
+        print(f'{case_dir.name}: retained node {node} verified', flush=True)
     baseline_storage = storage(master / '.yeokcham')
     case = dict(config=manifest['config'], tree_sha256=manifest['tree_sha256'],
                 manifest_sha256=fixture.file_hash(case_dir / 'fixture-manifest.json'),
@@ -247,14 +264,15 @@ def run_case(args, case_dir, total_bytes, files):
                     fixture.verify(sample_root, expected)
                     node_count = 1 if operation == 'initial_capture' else args.history_nodes + (operation == 'small_edit')
                     current = 0 if operation in ('initial_capture', 'undo_restore') else node_count - 1
-                    check_history(args.binary, sample_root, env, node_count, current)
-                    # A successful save and untouched files do not prove stored content: force a restore.
+                    tree = check_history(args.binary, sample_root, env, node_count, current)
+                    # Mutate live bytes so verification must recover the captured objects, not copy the worktree.
                     edit(sample_root, expected, -1)
-                    invoke([str(args.binary), 'undo', '--to', str(current), '--root', str(sample_root)], env)
-                    fixture.verify(sample_root, expected)
+                    verification_seconds = verify_checkpoint(args.binary, sample_root, env, tree,
+                                                             current, expected, case_dir)
                     case['samples'].append(dict(operation=operation, temperature=temperature,
                                                 index=sample_index, command=argv, **metrics,
-                                                storage=measured_storage, verified_tree_sha256=expected['tree_sha256']))
+                                                storage=measured_storage, verified_tree_sha256=expected['tree_sha256'],
+                                                verification_seconds=verification_seconds))
                     write_json(case_dir / 'result.json', case)
                 except Exception as error:
                     case['failures'].append(dict(operation=operation, temperature=temperature,
@@ -312,7 +330,7 @@ def main():
     args.output.mkdir(parents=True, exist_ok=False)
     print(f'Selected {tiers}; allow at least 4x live bytes plus retained history, and substantial inode space.', flush=True)
     result = {
-        'schema': 'yeokcham-benchmark-run-v1', 'status': 'running',
+        'schema': 'yeokcham-benchmark-run-v2', 'status': 'running',
         'started_utc': datetime.datetime.now(datetime.timezone.utc).isoformat(),
         'source_revision': revision, 'source_tree': str(args.source_tree),
         'runner_revision': output(['git', 'rev-parse', 'HEAD'], REPO),
@@ -326,7 +344,9 @@ def main():
             'warm_reset': 'fresh identical repository copy; pre-read fixture/store/binary files; new CLI process each time',
             'ignore': 'no ignore files; all generated paths included',
             'watcher': 'off', 'network': 'none', 'server': 'none',
-            'storage': 'existing runtime defaults; no codec/packing changes',
+            'storage': 'existing runtime defaults; no codec/packing changes; allocation includes file and directory blocks',
+            'verification': 'restore --checkpoint ID --destination EMPTY_DIR after mutating live bytes; full manifest comparison outside timings',
+            'history_preparation': 'capture N nodes; restore each to a separate directory; no navigation/proof metadata added to the fixture',
         },
         'not_measured': [
             '1-GiB/full extended tiers unless selected; G19',

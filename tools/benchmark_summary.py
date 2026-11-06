@@ -11,20 +11,26 @@ import benchmark_runner as runner
 
 COLUMNS = ['operation', 'temperature', 'index', 'seconds', 'cpu_user_seconds',
            'cpu_system_seconds', 'peak_rss_bytes', 'input_blocks', 'output_blocks',
-           'stored_file_bytes', 'allocated_bytes', 'stored_files', 'verified_tree_sha256']
+           'stored_file_bytes', 'allocated_file_bytes', 'allocated_directory_bytes',
+           'allocated_bytes', 'stored_files', 'stored_directories', 'verified_tree_sha256',
+           'verification_seconds']
 
 
 def compact(raw):
+    if raw.get('schema') != 'yeokcham-benchmark-run-v2':
+        raise ValueError('expected benchmark run schema v2')
     if raw['status'] != 'passed' or raw['failures'] or not raw['cases']:
         raise ValueError('only completed, verified runs can be summarized as evidence')
     result = {key: value for key, value in raw.items() if key != 'cases'}
-    result['schema'] = 'yeokcham-benchmark-summary-v1'
+    result['schema'] = 'yeokcham-benchmark-summary-v2'
     result['sample_columns'] = COLUMNS
     result['cases'] = []
     for case in raw['cases']:
         if case['status'] != 'passed' or case['failures']:
             raise ValueError('case contains failures')
         expected = raw['settings']
+        if len(case['samples']) != len(runner.OPERATIONS) * (expected['cold'] + expected['warm'] + expected['warmups']):
+            raise ValueError('incomplete or unexpected sample set')
         for operation in runner.OPERATIONS:
             for temperature, count in [('cold', expected['cold']), ('warm', expected['warm']), ('warmup', expected['warmups'])]:
                 observed = [s for s in case['samples'] if s['operation'] == operation and s['temperature'] == temperature]
@@ -36,8 +42,11 @@ def compact(raw):
         reduced['samples'] = []
         for sample in case['samples']:
             values = dict(sample, stored_file_bytes=sample['storage']['file_bytes'],
+                          allocated_file_bytes=sample['storage']['allocated_file_bytes'],
+                          allocated_directory_bytes=sample['storage']['allocated_directory_bytes'],
                           allocated_bytes=sample['storage']['allocated_bytes'],
-                          stored_files=sample['storage']['files'])
+                          stored_files=sample['storage']['files'],
+                          stored_directories=sample['storage']['directories'])
             reduced['samples'].append([values[column] for column in COLUMNS])
         reduced['investigation_budgets'] = {
             op: dict(warm_median_seconds=summary['warm']['median_seconds'] * 1.10,

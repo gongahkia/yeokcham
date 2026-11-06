@@ -94,7 +94,9 @@ this does not validate native Secret Service/Keychain custody performance.
 
 ## Measurement and correctness semantics
 
-Each case builds and restores every node of a retained history before samples.
+Each case builds a retained history and restores every node into a separate empty
+directory before samples. This leaves the fixture at its latest node without adding
+untimed navigation proofs to its metadata.
 Linear history replaces 64 bytes (or the entire file if smaller) in one file per
 node. Branching history returns to node 0 on alternating edits and repeats earlier
 contents every third nonfinal node. An initial capture starts with no repository
@@ -115,14 +117,20 @@ use `--cold 0` and report missing cold coverage; that is not a full G01 profile.
 
 Wall time includes CLI startup and exit. `wait4` supplies per-process user/system
 CPU, peak RSS and input/output block counts (not exact application or device bytes).
-Stored file bytes and allocated bytes are measured separately after each operation,
-before the extra fidelity restore changes recovery metadata. Logical captured bytes
-are live bytes times retained nodes, including repeated contents. No network,
+Stored file bytes and allocated bytes are measured separately after each operation.
+Allocation includes both regular-file and directory blocks (with separate counters),
+including the metadata root directory. It is checked against `du -sk` in the focused
+tests. Verification writes only to a separate disposable directory. Logical
+captured bytes are live bytes times retained nodes, including repeated contents. No network,
 watcher, remote server, packing or codec setting is introduced by this harness.
 
 After timing, the runner verifies files and history node count/current position,
-then changes a tracked file and forces a restore to the measured checkpoint. Only
-an exact manifest match accepts the sample. It checks opaque bytes, executable
+then changes a tracked file and runs the existing
+`restore --checkpoint ID --destination EMPTY_DIRECTORY` command. The destination
+must match the captured manifest even though the live file now differs, proving
+that verification reads stored objects. The timed undo operation itself also has
+its restored worktree checked before this extra verification. Only an exact
+manifest match accepts a sample. It checks opaque bytes, executable
 state, directories and links when present. A command failure or mismatch writes a
 failed result and exits nonzero; it never becomes a faster passing sample. Full
 manifests identify every path and SHA-256. Small summaries retain all sample metrics
@@ -153,3 +161,21 @@ and maximum measured peak RSS/allocated storage times 1.15. They apply only to t
 same machine, filesystem, fixture, retained states, cache treatment and settings;
 repeat a breached case before deciding it is a regression. These are review
 thresholds, not latency guarantees or a substitute for the G19 evidence gate.
+
+## Harness revision and preliminary run
+
+Run/summary schema v2 uses destination restoration for untimed verification and
+includes directory allocation. Version 1 performed a redundant in-place undo after
+every sample and navigated through all nodes during setup, creating extra proof
+metadata. On this WSL2 host, a destination restore of the 10-MiB fixture matched its
+full manifest in 4.963 seconds while the extra in-place verifier took minutes.
+
+The original `source-local` run was deliberately terminated (exit 143) after 13
+accepted sample/warmup records to correct this harness work and allocation metric.
+The complete preliminary records, interruption context and probe are preserved
+outside Git in `preliminary-cancellation.json`. They are not merged into v2 results.
+The full profile uses a fresh `source-local-v2` output with unchanged fixture bytes,
+file counts, history depth, timed CLI commands and 5/3/30 sampling. This is a harness
+revision, not a runtime optimization or an omitted correctness gate. Earlier
+reports document their then-live process; its old status file is no longer a
+liveness signal. Use the new run's verified process/session handle.

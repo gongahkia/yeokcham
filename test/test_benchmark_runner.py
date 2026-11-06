@@ -1,5 +1,7 @@
 """Exercise real CLI measurements and refusal paths on small disposable fixtures."""
 import argparse
+import os
+import subprocess
 from pathlib import Path
 import sys
 import tempfile
@@ -28,6 +30,48 @@ class RunnerTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'outside'):
                 runner.assert_external(path)
 
+    def test_storage_includes_directory_allocation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for index in range(8):
+                directory = root / str(index)
+                directory.mkdir()
+                (directory / 'data').write_bytes(b'data' * 1024)
+            observed = runner.storage(root)
+            du_bytes = int(subprocess.check_output(['du', '-sk', str(root)]).split()[0]) * 1024
+            self.assertEqual(du_bytes, observed['allocated_bytes'])
+            self.assertEqual(9, observed['directories'])
+            self.assertEqual(8, observed['files'])
+            self.assertEqual(32768, observed['file_bytes'])
+            self.assertEqual(observed['allocated_bytes'], observed['allocated_file_bytes'] + observed['allocated_directory_bytes'])
+
+    def test_destination_restore_uses_stored_bytes_and_rejects_corruption(self):
+        binary = runner.REPO / 'bin/yeokcham_v1.exe'
+        if not binary.exists():
+            binary = runner.REPO / '_build/default/bin/yeokcham_v1.exe'
+        with tempfile.TemporaryDirectory() as tmp:
+            scratch = Path(tmp)
+            root = scratch / 'tree'
+            expected = fixture.generate(root, 8192, 8, 'asset', attributes=True)
+            signers = scratch / 'signers'
+            signers.mkdir(mode=0o700)
+            env = dict(os.environ, YEOKCHAM_V1_TEST_SIGNER_DIRECTORY=str(signers))
+            runner.invoke(runner.command(binary, root, 'initial_capture'), env)
+            tree = runner.check_history(binary, root, env, 1, 0)
+            runner.edit(root, expected, -1)
+            with self.assertRaisesRegex(ValueError, 'fidelity'):
+                fixture.verify(root, expected)
+            runner.verify_checkpoint(binary, root, env, tree, 0, expected, scratch)
+            original = runner.invoke
+            def corrupt_destination(argv, environment):
+                result = original(argv, environment)
+                destination = Path(argv[argv.index('--destination') + 1])
+                (destination / 'unexpected').write_bytes(b'corruption')
+                return result
+            with patch.object(runner, 'invoke', corrupt_destination):
+                with self.assertRaisesRegex(ValueError, 'fidelity'):
+                    runner.verify_checkpoint(binary, root, env, tree, 0, expected, scratch)
+
     def test_summaries_exclude_warmups(self):
         samples = [dict(operation='no_op', temperature='warm', seconds=n) for n in range(1, 31)]
         samples.append(dict(operation='no_op', temperature='warmup', seconds=10000))
@@ -52,11 +96,15 @@ class RunnerTests(unittest.TestCase):
                 self.assertEqual(16, len(case['samples']))
                 self.assertFalse(case['failures'])
                 self.assertEqual(2, case['summary']['undo_restore']['warm']['count'])
-                raw = dict(status='passed', failures=[], cases=[case],
+                raw = dict(schema='yeokcham-benchmark-run-v2', status='passed', failures=[], cases=[case],
                            settings=dict(cold=1, warm=2, warmups=1))
                 small = summary.compact(raw)
                 self.assertEqual(16, len(small['cases'][0]['samples']))
                 self.assertEqual(case['summary'], small['cases'][0]['summary'])
+                case['samples'].append(dict(case['samples'][0], operation='unknown'))
+                with self.assertRaisesRegex(ValueError, 'unexpected'):
+                    summary.compact(raw)
+                case['samples'].pop()
                 case['samples'].pop()
                 with self.assertRaisesRegex(ValueError, 'incomplete'):
                     summary.compact(raw)
