@@ -30,7 +30,7 @@ files and TC08. Do not skip a failed phase or execute later prompts concurrently
 
 | Phase / copyable prompt | Prerequisite | Status | Implementation commits / latest report | Remaining |
 | --- | --- | --- | --- | --- |
-| [G01: Build the measurement harness and capture the local baseline](implementation/goals/G01-baseline.md) | Verified design baseline | in_progress | `5761fd69ff6856324a3ae265a58c8e3e8c785247`, `b1e78a92c6d095e30d78d1355af6b5fbcc215c42`, `48fd99a7a765dd12cb0ddcf54c80501b8fff2f28`, `547bef4cd33c44d1068159a305b230d5ffd22b41`; [attempt 02](implementation/reports/G01-attempt-02.md) | Live two-tier baseline, compact results, acceptance audit; next G01 |
+| [G01: Build the measurement harness and capture the local baseline](implementation/goals/G01-baseline.md) | Verified design baseline | in_progress | `5761fd69ff6856324a3ae265a58c8e3e8c785247`, `b1e78a92c6d095e30d78d1355af6b5fbcc215c42`, `48fd99a7a765dd12cb0ddcf54c80501b8fff2f28`, `547bef4cd33c44d1068159a305b230d5ffd22b41`, `c14443cca934b3666c439d4448925ed8b06addc8`; [attempt 03](implementation/reports/G01-attempt-03.md) | Live two-tier baseline, compact results, acceptance audit; next G01 |
 | [G02: Implement canonical records, identities, and shared interfaces](implementation/goals/G02-canonical-records.md) | G01 | pending | — | All criteria in prompt |
 | [G03: Implement causal authority, member identity, and review-policy evaluation](implementation/goals/G03-authority-policy.md) | G02 | pending | — | All criteria in prompt |
 | [G04: Implement deterministic composition and exact integration plans](implementation/goals/G04-composition-plans.md) | G03 | pending | — | All criteria in prompt |
@@ -114,6 +114,11 @@ partial phase. Do not relabel a partial phase complete to expose the next prompt
   tree SHA-256 `b6625b95d9d0e47d090658e1ac01f1660112dfa65aaa03f4ca4b3ee77b3f8160`.
 - Next: finish both full v2 tiers, compact evidence, audit and handoff. Earlier
   live-run checkpoints above are historical; the old process exited 143.
+- November 7, 00:59:43 SGT checkpoint: v2 session `20722` / PID `118787`
+  confirmed live after 42m35s. Accepted 69 measured samples and six warmups:
+  10-MiB initial capture 5 cold / 3 warmup / 30 warm; no-op 5 / 3 / 29.
+  No failures; small edit, undo/restore and 100 MiB remain. External snapshot
+  `checkpoints/attempt-03.json` and its SHA-256 are recorded in attempt 03.
 - Large fixtures and full logs: `/home/gongahkia/.cache/yeokcham-g01`, outside Git.
 
 ## Evidence and coverage gates
@@ -177,3 +182,14 @@ records, not current proof.
   commits; observed first accepted baseline samples. Saved a durable external
   observation and this continuation report. No runtime/harness changes or new
   implementation phase; G01 stays active while the full profile runs.
+
+- November 7, 2026, G01 attempt 03: corrected untimed verification and allocation
+  accounting, preserved the deliberately cancelled v1 evidence, passed corrected
+  build/lint/CI and ten focused checks, and started/observed the full v2 profile.
+  G01 remains active; its incomplete measurements are not a completion claim.
+
+- Future workflow preference from the user: after the current run and pasted
+  handoff, use coordinator-managed agents in separate branches/worktrees, deduplicate
+  work, resolve conflicts, test integration and synchronize local/remote main.
+  Reconcile the workflow before that subsequent work. Current G01 stays within its
+  original phase boundary; later work still needs dependency ordering and evidence.
