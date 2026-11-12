@@ -1,6 +1,6 @@
 # Implementation progress
 
-Updated November 7, 2026. This is the shared implementation ledger. Follow
+Updated November 12, 2026. This is the shared implementation ledger. Follow
 [Implementation workflow](IMPLEMENTATION_WORKFLOW.md) for execution, reports,
 verification, commits, and rollback. Each new agent reads and updates this file.
 
@@ -13,9 +13,10 @@ verification, commits, and rollback. Each new agent reads and updates this file.
 - Completed phases in this chain: **0 / 20**.
 - G01 environment setup and measurement harness work has started; product runtime
   remains unchanged. Existing V1/undo functionality predates this chain.
-- Current blocker: none. Harness v2 passed build/lint/CI and focused/export
-  checks; the full replacement profile is running in session `20722` (runner
-  PID `118787` at launch). Later native OS, resource, and human
+- Current blocker: none. On November 12 the old session `20722` was missing and
+  PID `118787` was absent. The interrupted v2 profile retained 132 verified records;
+  checked resumption is being implemented to finish its remaining samples.
+  Later native OS, resource, and human
   evidence gates remain pending; they are not presumed available or passed.
 
 Update the active phase/session label and starting commit when work starts.
@@ -119,6 +120,17 @@ partial phase. Do not relabel a partial phase complete to expose the next prompt
   10-MiB initial capture 5 cold / 3 warmup / 30 warm; no-op 5 / 3 / 29.
   No failures; small edit, undo/restore and 100 MiB remain. External snapshot
   `checkpoints/attempt-03.json` and its SHA-256 are recorded in attempt 03.
+- November 12 interruption audit: old process absent and session unknown; no
+  benchmark process observed. The 10-MiB tier retained all capture/no-op/small-edit
+  groups plus 5 cold / 3 warmup / 10 warm undo/restore records, without failures.
+  Twenty warm undo records and the entire 100-MiB tier remain. Current machine,
+  kernel, toolchain and filesystem identities match the original; free resources
+  differ. Implementing checked resumption with preserved input snapshots.
+- Resume checks: build/lint/CI and twelve focused tests passed, including real
+  linear/branching interruption recovery, preserved samples, lock rejection and
+  incompatible binary/machine/settings rejection. A local probe confirmed wait4
+  RSS includes inherited launcher memory; label it an upper bound and retain
+  isolated executable-memory comparisons under G19.
 - Large fixtures and full logs: `/home/gongahkia/.cache/yeokcham-g01`, outside Git.
 
 ## Evidence and coverage gates

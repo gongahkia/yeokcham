@@ -54,6 +54,32 @@ implementation checkout. Commit owned source changes before measuring HEAD.
 A caller must build the recorded source before invoking the runner; a binary
 hash identifies the executable but cannot by itself prove its build provenance.
 
+An interrupted run can continue with the same command plus `--resume`, after
+checking that its previous process has stopped. A missing process/session is
+evidence of interruption; a stale `running` JSON or an observation timeout alone
+is insufficient. A per-output process lock prevents concurrent new runners.
+Resume refuses failed runs, changed workload/counts, source/binary/generator
+identities, or machine/toolchain/filesystem identities. Free-memory and free-disk
+readings may vary and are retained for each continuation. A runner code change
+is allowed only when its recorded committed source matches its hash and the
+parsed measurement functions, verification functions and complete timed sample
+body are unchanged.
+
+Before continuing, byte-for-byte summary/case snapshots and their hashes are
+preserved under an external `resumption-*` directory. Every pristine path and
+retained checkpoint is checked again, along with history position/storage and
+the exact accepted sample prefix. Accepted records remain untouched; a leftover
+in-flight sample is renamed `interrupted-sample-*` for inspection and measured
+again from a fresh copy. An interrupted case preparation with no accepted result
+is preserved as `interrupted-preparation-*` and rebuilt. Continuation metadata
+records the timestamp, machine, invocation, runner provenance and accepted count
+per case before the continuation.
+Those counts delimit the segments in sample order, including a later tier that
+had not started (zero accepted). Disclose interruptions and the time gap when
+reporting pooled statistics; they are not an uninterrupted session or paired
+comparison. A failed or changed input must be investigated, never overwritten
+with a resumed passing record.
+
 To compare against the unmodified pinned source later, without switching `main`:
 
 ```sh
@@ -117,6 +143,12 @@ use `--cold 0` and report missing cold coverage; that is not a full G01 profile.
 
 Wall time includes CLI startup and exit. `wait4` supplies per-process user/system
 CPU, peak RSS and input/output block counts (not exact application or device bytes).
+On this Linux host, the peak RSS counter also includes inherited launcher memory
+before `exec`. A `/bin/true` probe rose from 22,278,144 to 89,223,168 bytes after
+allocating 64 MiB in its Python parent. Thus `peak_rss_bytes` is a process/launcher
+upper bound, not isolated executable RSS; continuation launcher footprints can
+differ. Retain the raw counter and this limitation when interpreting its 15%
+investigation budget. Isolated executable memory comparisons remain a G19 task.
 Stored file bytes and allocated bytes are measured separately after each operation.
 Allocation includes both regular-file and directory blocks (with separate counters),
 including the metadata root directory. It is checked against `du -sk` in the focused

@@ -1,5 +1,8 @@
 """Exercise real CLI measurements and refusal paths on small disposable fixtures."""
 import argparse
+import copy
+import hashlib
+import json
 import os
 import subprocess
 from pathlib import Path
@@ -17,6 +20,117 @@ import benchmark_summary as summary
 
 
 class RunnerTests(unittest.TestCase):
+    def test_resume_preserves_samples_and_refuses_changed_inputs(self):
+        binary = runner.REPO / 'bin/yeokcham_v1.exe'
+        if not binary.exists():
+            binary = runner.REPO / '_build/default/bin/yeokcham_v1.exe'
+        for shape in ('linear', 'branching'):
+            with self.subTest(shape=shape), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp) / 'run'
+                argv = ['benchmark_runner.py', '--output', str(root), '--binary', str(binary),
+                        '--suite', 'asset', '--bytes', '8192', '--files', '8', '--attributes',
+                        '--history-nodes', '5', '--history-shape', shape,
+                        '--cold', '1', '--warmups', '1', '--warm', '2']
+                observed_machine = runner.machine(Path(tmp))
+                invoke = runner.invoke
+                def interrupt(argv, env):
+                    if argv[1] == 'save' and Path(argv[-1]).name == 'sample':
+                        raise KeyboardInterrupt('simulated process interruption')
+                    return invoke(argv, env)
+                # Source export checks have their own integration evidence; all measured CLI calls here are real.
+                with patch.object(runner, 'verify_source'), patch.object(runner, 'machine', return_value=observed_machine):
+                    with patch.object(sys, 'argv', argv), patch.object(runner, 'invoke', interrupt):
+                        with self.assertRaises(KeyboardInterrupt):
+                            runner.main()
+                    case_dir = root / 'asset-8192-8'
+                    original_bytes = (case_dir / 'result.json').read_bytes()
+                    accepted = json.loads(original_bytes)['samples']
+                    self.assertEqual(4, len(accepted))
+                    # Model an abruptly killed in-flight copy, which must be preserved and never accepted.
+                    (case_dir / 'sample').mkdir()
+                    (case_dir / 'sample/unfinished').write_bytes(b'partial operation')
+                    resumed = [*argv, '--resume']
+                    with (root / '.benchmark.lock').open('a') as lock:
+                        runner.fcntl.flock(lock, runner.fcntl.LOCK_EX | runner.fcntl.LOCK_NB)
+                        with patch.object(sys, 'argv', resumed):
+                            with self.assertRaisesRegex(ValueError, 'already in use'):
+                                runner.main()
+                    for extra, message in [(['--warm', '3'], 'settings mismatch'),
+                                           (['--binary', sys.executable], 'binary_sha256')]:
+                        with patch.object(sys, 'argv', [*resumed, *extra]):
+                            with self.assertRaisesRegex(ValueError, message):
+                                runner.main()
+                        self.assertEqual(original_bytes, (case_dir / 'result.json').read_bytes())
+                    changed = copy.deepcopy(observed_machine)
+                    changed['cpu_count'] += 1
+                    with patch.object(runner, 'machine', return_value=changed), patch.object(sys, 'argv', resumed):
+                        with self.assertRaisesRegex(ValueError, 'machine/toolchain/filesystem mismatch'):
+                            runner.main()
+                    # A fixture for Git's prior source keeps this check usable in shallow CI checkouts.
+                    previous = json.loads((root / 'summary.json').read_text())
+                    old_source = Path(runner.__file__).read_bytes() + b'\n# earlier compatible runner\n'
+                    previous['runner_revision'] = 'previous-test-runner'
+                    check_output = subprocess.check_output
+                    recorded_source = old_source.replace(b"'initial_capture': ['init'", b"'initial_capture': ['changed-init'")
+                    def source_output(command, *args, **kwargs):
+                        if command == ['git', 'show', 'previous-test-runner:tools/benchmark_runner.py']:
+                            return recorded_source
+                        return check_output(command, *args, **kwargs)
+                    with patch.object(subprocess, 'check_output', side_effect=source_output):
+                        previous['runner_sha256'] = hashlib.sha256(recorded_source).hexdigest()
+                        runner.write_json(root / 'summary.json', previous)
+                        with patch.object(sys, 'argv', resumed):
+                            with self.assertRaisesRegex(ValueError, 'measurement or verification code changed'):
+                                runner.main()
+                        recorded_source = old_source
+                        previous['runner_sha256'] = hashlib.sha256(recorded_source).hexdigest()
+                        runner.write_json(root / 'summary.json', previous)
+                        with patch.object(sys, 'argv', resumed):
+                            runner.main()
+                result = json.loads((root / 'summary.json').read_text())
+                samples = result['cases'][0]['samples']
+                self.assertEqual('passed', result['status'])
+                self.assertEqual(accepted, samples[:4])
+                self.assertEqual(16, len(samples))
+                event = result['continuations'][0]
+                self.assertEqual(4, event['accepted_before']['asset-8192-8'])
+                self.assertEqual(original_bytes, (Path(event['snapshot']) / 'asset-8192-8/result.json').read_bytes())
+                leftovers = list(case_dir.glob('interrupted-sample-*/unfinished'))
+                self.assertEqual([b'partial operation'], [p.read_bytes() for p in leftovers])
+                self.assertEqual(16, len(summary.compact(result)['cases'][0]['samples']))
+                # A truncated/reordered accepted prefix is not silently repaired or rerun.
+                case = json.loads((case_dir / 'result.json').read_text())
+                case['samples'][0], case['samples'][1] = case['samples'][1], case['samples'][0]
+                runner.write_json(case_dir / 'result.json', case)
+                args = argparse.Namespace(binary=binary, suite='asset', seed=1, depth=3, fanout=8,
+                                          large_file_bytes=0, attributes=True, history_nodes=5,
+                                          history_shape=shape, cold=1, warmups=1, warm=2)
+                with self.assertRaisesRegex(ValueError, 'exact accepted sample prefix'):
+                    runner.resume_case(args, case_dir, 8192, 8)
+
+    def test_resume_preserves_interrupted_preparation(self):
+        binary = runner.REPO / 'bin/yeokcham_v1.exe'
+        if not binary.exists():
+            binary = runner.REPO / '_build/default/bin/yeokcham_v1.exe'
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / 'run'
+            argv = ['benchmark_runner.py', '--output', str(root), '--binary', str(binary),
+                    '--bytes', '2048', '--files', '4', '--history-nodes', '2',
+                    '--cold', '0', '--warmups', '0', '--warm', '1']
+            observed_machine = runner.machine(Path(tmp))
+            with patch.object(runner, 'verify_source'), patch.object(runner, 'machine', return_value=observed_machine):
+                with patch.object(sys, 'argv', argv), patch.object(runner, 'invoke', side_effect=KeyboardInterrupt):
+                    with self.assertRaises(KeyboardInterrupt):
+                        runner.main()
+                first_manifest = (root / 'source-2048-4/fixture-manifest.json').read_bytes()
+                with patch.object(sys, 'argv', [*argv, '--resume']):
+                    runner.main()
+            preserved = list(root.glob('interrupted-preparation-*/fixture-manifest.json'))
+            self.assertEqual([first_manifest], [p.read_bytes() for p in preserved])
+            result = json.loads((root / 'summary.json').read_text())
+            self.assertEqual('passed', result['status'])
+            self.assertEqual(4, len(result['cases'][0]['samples']))
+
     def test_subprocess_failure_and_resource_measurement(self):
         with self.assertRaisesRegex(RuntimeError, 'exited 7'):
             runner.invoke([sys.executable, '-c', 'raise SystemExit(7)'], {})

@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Measure the existing CLI with verified deterministic fixtures, outside Git."""
 import argparse
+import ast
 import copy
 import datetime
+import fcntl
 import hashlib
 import json
 import math
@@ -210,46 +212,122 @@ def summarize(samples):
     return result
 
 
-def run_case(args, case_dir, total_bytes, files):
-    case_dir.mkdir()
-    pristine = case_dir / 'fixture'
-    manifest = fixture.generate(pristine, total_bytes, files, args.suite, args.seed,
-                                args.depth, args.fanout, args.large_file_bytes, args.attributes)
-    write_json(case_dir / 'fixture-manifest.json', manifest)
-    signers = case_dir / 'signers'
-    signers.mkdir(mode=0o700)
-    env = dict(os.environ, YEOKCHAM_V1_TEST_SIGNER_DIRECTORY=str(signers))
-    master = case_dir / 'history'
-    shutil.copytree(pristine, master, symlinks=True)
-    invoke(command(args.binary, master, 'initial_capture'), env)
+def sample_schedule(args):
+    return [(op, temperature, index) for op in OPERATIONS
+            for temperature, count in [('cold', args.cold), ('warmup', args.warmups), ('warm', args.warm)]
+            for index in range(count)]
+
+
+def resume_case(args, case_dir, total_bytes, files):
+    """Check retained inputs and the accepted prefix before measuring anything else."""
+    case = json.loads((case_dir / 'result.json').read_text())
+    manifest_path = case_dir / 'fixture-manifest.json'
+    manifest = json.loads(manifest_path.read_text())
+    config = dict(total_bytes=total_bytes, files=files, suite=args.suite, seed=args.seed,
+                  depth=args.depth, fanout=args.fanout, large_file_bytes=args.large_file_bytes,
+                  attributes=args.attributes)
+    if (case['status'] not in ('running', 'passed') or case['failures']
+            or case['config'] != config or manifest['config'] != config
+            or case['manifest_sha256'] != fixture.file_hash(manifest_path)
+            or case['tree_sha256'] != manifest['tree_sha256']
+            or case['history_nodes'] != args.history_nodes or case['history_shape'] != args.history_shape):
+        raise ValueError('resume case settings, manifest or status mismatch')
+    pristine, master, signers = (case_dir / name for name in ('fixture', 'history', 'signers'))
+    fixture.verify(pristine, manifest)
+    if not signers.is_dir():
+        raise ValueError('resume requires the original disposable signers')
+    # Reconstruct expected edits using only the first pristine file, never modify history.
     states = [manifest]
-    for node in range(1, args.history_nodes):
-        repeat = args.history_shape == 'branching' and node % 3 == 0 and node != args.history_nodes - 1
-        if args.history_shape == 'branching' and node > 1 and node % 2 == 0 and not repeat:
-            invoke([str(args.binary), 'undo', '--to', '0', '--root', str(master)], env)
-        if repeat:
-            entry = next(e for e in manifest['entries'] if e['kind'] == 'file')
-            shutil.copy2(pristine / entry['path'], master / entry['path'])
-            states.append(manifest)
-        else:
-            states.append(edit(master, manifest, node))
-        invoke(command(args.binary, master, 'small_edit'), env)
+    entry = next(e for e in manifest['entries'] if e['kind'] == 'file')
+    with tempfile.TemporaryDirectory(prefix='expected-', dir=case_dir) as directory:
+        scratch = Path(directory)
+        target = scratch / entry['path']
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(pristine / entry['path'], target)
+        for node in range(1, args.history_nodes):
+            repeat = args.history_shape == 'branching' and node % 3 == 0 and node != args.history_nodes - 1
+            if repeat:
+                shutil.copy2(pristine / entry['path'], target)
+                states.append(manifest)
+            else:
+                states.append(edit(scratch, manifest, node))
+        small_edit = edit(scratch, states[-1], args.history_nodes)
+    fixture.verify(master, states[-1])
+    env = dict(os.environ, YEOKCHAM_V1_TEST_SIGNER_DIRECTORY=str(signers))
     tree = check_history(args.binary, master, env, args.history_nodes, args.history_nodes - 1)
-    # Prove every retained checkpoint restores without adding navigation proofs to the fixture.
     for node, state in enumerate(states):
         verify_checkpoint(args.binary, master, env, tree, node, state, case_dir)
-        print(f'{case_dir.name}: retained node {node} verified', flush=True)
-    baseline_storage = storage(master / '.yeokcham')
-    case = dict(config=manifest['config'], tree_sha256=manifest['tree_sha256'],
-                manifest_sha256=fixture.file_hash(case_dir / 'fixture-manifest.json'),
-                fixture_manifest=str(case_dir / 'fixture-manifest.json'),
-                history_nodes=args.history_nodes, history_shape=args.history_shape,
-                logical_captured_bytes=total_bytes * args.history_nodes,
-                history_storage=baseline_storage, samples=[], failures=[], status='running')
-    write_json(case_dir / 'result.json', case)
+        print(f'{case_dir.name}: resumed retained node {node} verified', flush=True)
+    if storage(master / '.yeokcham') != case['history_storage']:
+        raise ValueError('resume retained storage changed')
+    schedule = sample_schedule(args)
+    observed = [(s['operation'], s['temperature'], s['index']) for s in case['samples']]
+    if observed != schedule[:len(observed)] or len(observed) > len(schedule):
+        raise ValueError('resume requires an exact accepted sample prefix')
+    if case['status'] == 'passed' and len(observed) != len(schedule):
+        raise ValueError('resume passed case has incomplete samples')
+    for sample in case['samples']:
+        expected = (small_edit if sample['operation'] == 'small_edit' else
+                    manifest if sample['operation'] in ('initial_capture', 'undo_restore') else states[-1])
+        if (sample['verified_tree_sha256'] != expected['tree_sha256']
+                or sample['command'] != command(args.binary, case_dir / 'sample', sample['operation'])):
+            raise ValueError('resume accepted sample provenance mismatch')
+    return pristine, manifest, signers, master, states, case
+
+
+def run_case(args, case_dir, total_bytes, files):
+    if getattr(args, 'resume', False) and case_dir.exists() and not (case_dir / 'result.json').exists():
+        case_dir.rename(case_dir.with_name('interrupted-preparation-' + case_dir.name + '-' + str(time.time_ns())))
+    if getattr(args, 'resume', False) and case_dir.exists():
+        pristine, manifest, signers, master, states, case = resume_case(args, case_dir, total_bytes, files)
+        # The interrupted in-flight operation is not an accepted timing. Preserve it for inspection.
+        sample = case_dir / 'sample'
+        if sample.exists():
+            sample.rename(case_dir / ('interrupted-sample-' + str(time.time_ns())))
+    else:
+        case_dir.mkdir()
+        pristine = case_dir / 'fixture'
+        manifest = fixture.generate(pristine, total_bytes, files, args.suite, args.seed,
+                                    args.depth, args.fanout, args.large_file_bytes, args.attributes)
+        write_json(case_dir / 'fixture-manifest.json', manifest)
+        signers = case_dir / 'signers'
+        signers.mkdir(mode=0o700)
+        env = dict(os.environ, YEOKCHAM_V1_TEST_SIGNER_DIRECTORY=str(signers))
+        master = case_dir / 'history'
+        shutil.copytree(pristine, master, symlinks=True)
+        invoke(command(args.binary, master, 'initial_capture'), env)
+        states = [manifest]
+        for node in range(1, args.history_nodes):
+            repeat = args.history_shape == 'branching' and node % 3 == 0 and node != args.history_nodes - 1
+            if args.history_shape == 'branching' and node > 1 and node % 2 == 0 and not repeat:
+                invoke([str(args.binary), 'undo', '--to', '0', '--root', str(master)], env)
+            if repeat:
+                entry = next(e for e in manifest['entries'] if e['kind'] == 'file')
+                shutil.copy2(pristine / entry['path'], master / entry['path'])
+                states.append(manifest)
+            else:
+                states.append(edit(master, manifest, node))
+            invoke(command(args.binary, master, 'small_edit'), env)
+        tree = check_history(args.binary, master, env, args.history_nodes, args.history_nodes - 1)
+        # Prove every retained checkpoint restores without adding navigation proofs to the fixture.
+        for node, state in enumerate(states):
+            verify_checkpoint(args.binary, master, env, tree, node, state, case_dir)
+            print(f'{case_dir.name}: retained node {node} verified', flush=True)
+        baseline_storage = storage(master / '.yeokcham')
+        case = dict(config=manifest['config'], tree_sha256=manifest['tree_sha256'],
+                    manifest_sha256=fixture.file_hash(case_dir / 'fixture-manifest.json'),
+                    fixture_manifest=str(case_dir / 'fixture-manifest.json'),
+                    history_nodes=args.history_nodes, history_shape=args.history_shape,
+                    logical_captured_bytes=total_bytes * args.history_nodes,
+                    history_storage=baseline_storage, samples=[], failures=[], status='running')
+        write_json(case_dir / 'result.json', case)
+    env = dict(os.environ, YEOKCHAM_V1_TEST_SIGNER_DIRECTORY=str(signers))
+    completed = {(s['operation'], s['temperature'], s['index']) for s in case['samples']}
     for operation in OPERATIONS:
         for temperature, count in [('cold', args.cold), ('warmup', args.warmups), ('warm', args.warm)]:
             for sample_index in range(count):
+                if (operation, temperature, sample_index) in completed:
+                    continue
                 sample_root = case_dir / 'sample'
                 shutil.copytree(pristine if operation == 'initial_capture' else master, sample_root, symlinks=True)
                 try:
@@ -289,11 +367,76 @@ def run_case(args, case_dir, total_bytes, files):
     return case
 
 
+def measurement_code(source):
+    """Keep resume compatibility bounded to unchanged measurement/verification code."""
+    functions = {node.name: node for node in ast.parse(source).body if isinstance(node, ast.FunctionDef)}
+    names = ('command', 'invoke', 'storage', 'history', 'check_history', 'verify_checkpoint',
+             'edit', 'cache_prepare', 'summarize')
+    result = {name: ast.dump(functions[name]) for name in names}
+    result['sample_body'] = ast.dump(next(node for node in ast.walk(functions['run_case'])
+                                        if isinstance(node, ast.Try)))
+    return result
+
+
+def machine_identity(value):
+    # Free memory/disk space vary during a run; retain their full readings in each segment.
+    result = {k: v for k, v in value.items() if k not in ('memory', 'filesystem')}
+    result['memory_total'] = value['memory'].splitlines()[1].split()[1] if value['memory'] else None
+    result['filesystem'] = (value['filesystem'].splitlines()[1].split()[:3]
+                            + value['filesystem'].splitlines()[1].split()[-1:]) if value['filesystem'] else None
+    return result
+
+
+def resume_run(args, parser, current):
+    previous = json.loads((args.output / 'summary.json').read_text())
+    if previous.get('schema') != 'yeokcham-benchmark-run-v2' or previous['status'] != 'running' or previous['failures']:
+        raise ValueError('resume requires an interrupted running v2 result without failures')
+    original = parser.parse_args(previous['invocation'][1:])
+    fields = ('suite', 'tiers', 'bytes', 'files', 'history_nodes', 'history_shape', 'seed',
+              'depth', 'fanout', 'large_file_bytes', 'attributes', 'cold', 'warmups', 'warm')
+    if any(getattr(args, key) != getattr(original, key) for key in fields):
+        raise ValueError('resume workload or sample settings mismatch')
+    for key in ('source_revision', 'source_tree', 'generator_sha256', 'binary_sha256', 'settings'):
+        if previous[key] != current[key]:
+            raise ValueError(f'resume provenance mismatch: {key}')
+    if machine_identity(previous['machine']) != machine_identity(current['machine']):
+        raise ValueError('resume machine/toolchain/filesystem mismatch; use a separate run')
+    compatibility = 'identical runner hash'
+    if previous['runner_sha256'] != current['runner_sha256']:
+        source = subprocess.check_output(['git', 'show', previous['runner_revision'] + ':tools/benchmark_runner.py'], cwd=REPO)
+        if (hashlib.sha256(source).hexdigest() != previous['runner_sha256']
+                or measurement_code(source) != measurement_code(Path(__file__).read_bytes())):
+            raise ValueError('resume runner measurement or verification code changed')
+        compatibility = 'identical parsed measurement functions and sample body'
+    # Preserve byte-for-byte originals before changing any result or interrupted sample.
+    snapshot = args.output / ('resumption-' + str(time.time_ns()))
+    snapshot.mkdir()
+    paths = [args.output / 'summary.json', *sorted(args.output.glob('*/result.json'))]
+    hashes, accepted = {}, {}
+    for path in paths:
+        relative = path.relative_to(args.output)
+        target = snapshot / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(path, target)
+        hashes[str(relative)] = fixture.file_hash(target)
+        if path.name == 'result.json':
+            accepted[path.parent.name] = len(json.loads(path.read_text())['samples'])
+    event = {key: current[key] for key in ('started_utc', 'runner_revision', 'runner_sha256', 'machine', 'invocation')}
+    event.update(accepted_before=accepted, snapshot=str(snapshot), snapshot_sha256=hashes,
+                 compatibility=compatibility)
+    previous.setdefault('continuations', []).append(event)
+    previous['measurement_limits'] = current['measurement_limits']
+    previous.pop('finished_utc', None)
+    previous['cases'] = []  # Reconcile completed cases from their checked per-case records.
+    return previous
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--export-baseline', type=Path)
     parser.add_argument('--switch', type=Path, default=REPO)
     parser.add_argument('--output', type=Path)
+    parser.add_argument('--resume', action='store_true', help='resume an interrupted output after confirming its process stopped')
     parser.add_argument('--source-tree', type=Path, default=REPO)
     parser.add_argument('--revision', default='HEAD')
     parser.add_argument('--binary', type=Path)
@@ -327,51 +470,65 @@ def main():
     if not args.binary.is_file():
         raise ValueError(f'build the benchmark executable first: {args.binary}')
     args.output = assert_external(args.output)
-    args.output.mkdir(parents=True, exist_ok=False)
-    print(f'Selected {tiers}; allow at least 4x live bytes plus retained history, and substantial inode space.', flush=True)
-    result = {
-        'schema': 'yeokcham-benchmark-run-v2', 'status': 'running',
-        'started_utc': datetime.datetime.now(datetime.timezone.utc).isoformat(),
-        'source_revision': revision, 'source_tree': str(args.source_tree),
-        'runner_revision': output(['git', 'rev-parse', 'HEAD'], REPO),
-        'runner_sha256': fixture.file_hash(Path(__file__)),
-        'generator_sha256': fixture.file_hash(Path(fixture.__file__)),
-        'binary_sha256': fixture.file_hash(args.binary), 'invocation': sys.argv,
-        'machine': machine(args.output), 'settings': {
-            'cold': args.cold, 'warmups': args.warmups, 'warm': args.warm,
-            'signer': 'explicit disposable test-file provider, outside worktree',
-            'cold_reset': 'fsync + POSIX_FADV_DONTNEED on fixture/store/binary files; advisory, metadata and shared libraries not reset',
-            'warm_reset': 'fresh identical repository copy; pre-read fixture/store/binary files; new CLI process each time',
-            'ignore': 'no ignore files; all generated paths included',
-            'watcher': 'off', 'network': 'none', 'server': 'none',
-            'storage': 'existing runtime defaults; no codec/packing changes; allocation includes file and directory blocks',
-            'verification': 'restore --checkpoint ID --destination EMPTY_DIR after mutating live bytes; full manifest comparison outside timings',
-            'history_preparation': 'capture N nodes; restore each to a separate directory; no navigation/proof metadata added to the fixture',
-        },
-        'not_measured': [
-            '1-GiB/full extended tiers unless selected; G19',
-            '1000/10000-node deep and branching sessions unless selected; G19',
-            'native macOS/Linux/Windows comparisons; G19/G20',
-            '10-minute idle CPU and 30-minute interference; G19',
-            'Git/codec comparisons and licensed real snapshots; G19',
-            'shared sync/review/integration, private archive/eviction, managed background scheduler: target operations not implemented at pinned baseline',
-            'device-level I/O bytes unavailable: rusage block counters only; no network operation',
-        ], 'cases': [], 'failures': [],
-    }
-    write_json(args.output / 'summary.json', result)
-    try:
-        for total_bytes, files in tiers:
-            case = run_case(args, args.output / f'{args.suite}-{total_bytes}-{files}', total_bytes, files)
-            result['cases'].append(case)
-            write_json(args.output / 'summary.json', result)
-        result['status'] = 'passed'
-    except Exception as error:
-        result['status'] = 'failed'
-        result['failures'].append(str(error))
-        raise
-    finally:
-        result['finished_utc'] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    if not args.resume:
+        args.output.mkdir(parents=True, exist_ok=False)
+    elif not args.output.is_dir():
+        raise ValueError('resume output directory is missing')
+    # Locks are released on normal exit, rejected resumption and interruption.
+    with (args.output / '.benchmark.lock').open('a') as run_lock:
+        try:
+            fcntl.flock(run_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise ValueError('benchmark output is already in use by a live runner') from None
+        print(f'Selected {tiers}; allow at least 4x live bytes plus retained history, and substantial inode space.', flush=True)
+        result = {
+            'schema': 'yeokcham-benchmark-run-v2', 'status': 'running',
+            'started_utc': datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            'source_revision': revision, 'source_tree': str(args.source_tree),
+            'runner_revision': output(['git', 'rev-parse', 'HEAD'], REPO),
+            'runner_sha256': fixture.file_hash(Path(__file__)),
+            'generator_sha256': fixture.file_hash(Path(fixture.__file__)),
+            'binary_sha256': fixture.file_hash(args.binary), 'invocation': sys.argv,
+            'measurement_limits': [
+                'wait4 peak_rss_bytes can include inherited launcher RSS before exec on this host; an upper bound, not isolated executable RSS',
+            ],
+            'machine': machine(args.output), 'settings': {
+                'cold': args.cold, 'warmups': args.warmups, 'warm': args.warm,
+                'signer': 'explicit disposable test-file provider, outside worktree',
+                'cold_reset': 'fsync + POSIX_FADV_DONTNEED on fixture/store/binary files; advisory, metadata and shared libraries not reset',
+                'warm_reset': 'fresh identical repository copy; pre-read fixture/store/binary files; new CLI process each time',
+                'ignore': 'no ignore files; all generated paths included',
+                'watcher': 'off', 'network': 'none', 'server': 'none',
+                'storage': 'existing runtime defaults; no codec/packing changes; allocation includes file and directory blocks',
+                'verification': 'restore --checkpoint ID --destination EMPTY_DIR after mutating live bytes; full manifest comparison outside timings',
+                'history_preparation': 'capture N nodes; restore each to a separate directory; no navigation/proof metadata added to the fixture',
+            },
+            'not_measured': [
+                '1-GiB/full extended tiers unless selected; G19',
+                '1000/10000-node deep and branching sessions unless selected; G19',
+                'native macOS/Linux/Windows comparisons; G19/G20',
+                '10-minute idle CPU and 30-minute interference; G19',
+                'Git/codec comparisons and licensed real snapshots; G19',
+                'shared sync/review/integration, private archive/eviction, managed background scheduler: target operations not implemented at pinned baseline',
+                'device-level I/O bytes unavailable: rusage block counters only; no network operation',
+            ], 'cases': [], 'failures': [],
+        }
+        if args.resume:
+            result = resume_run(args, parser, result)
         write_json(args.output / 'summary.json', result)
+        try:
+            for total_bytes, files in tiers:
+                case = run_case(args, args.output / f'{args.suite}-{total_bytes}-{files}', total_bytes, files)
+                result['cases'].append(case)
+                write_json(args.output / 'summary.json', result)
+            result['status'] = 'passed'
+        except Exception as error:
+            result['status'] = 'failed'
+            result['failures'].append(str(error))
+            raise
+        finally:
+            result['finished_utc'] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+            write_json(args.output / 'summary.json', result)
 
 
 if __name__ == '__main__':
