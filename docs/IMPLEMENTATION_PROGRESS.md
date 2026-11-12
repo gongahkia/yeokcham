@@ -15,7 +15,8 @@ verification, commits, and rollback. Each new agent reads and updates this file.
   remains unchanged. Existing V1/undo functionality predates this chain.
 - Current blocker: none. On November 12 the old session `20722` was missing and
   PID `118787` was absent. The interrupted v2 profile retained 132 verified records;
-  checked resumption is being implemented to finish its remaining samples.
+  checked resumption is live in session `79434`, PID `154851` at launch, after
+  revalidating all ten retained checkpoints and preserving the accepted prefix.
   Later native OS, resource, and human
   evidence gates remain pending; they are not presumed available or passed.
 
@@ -31,7 +32,7 @@ files and TC08. Do not skip a failed phase or execute later prompts concurrently
 
 | Phase / copyable prompt | Prerequisite | Status | Implementation commits / latest report | Remaining |
 | --- | --- | --- | --- | --- |
-| [G01: Build the measurement harness and capture the local baseline](implementation/goals/G01-baseline.md) | Verified design baseline | in_progress | `5761fd69ff6856324a3ae265a58c8e3e8c785247`, `b1e78a92c6d095e30d78d1355af6b5fbcc215c42`, `48fd99a7a765dd12cb0ddcf54c80501b8fff2f28`, `547bef4cd33c44d1068159a305b230d5ffd22b41`, `c14443cca934b3666c439d4448925ed8b06addc8`; [attempt 03](implementation/reports/G01-attempt-03.md) | Live two-tier baseline, compact results, acceptance audit; next G01 |
+| [G01: Build the measurement harness and capture the local baseline](implementation/goals/G01-baseline.md) | Verified design baseline | in_progress | `5761fd69ff6856324a3ae265a58c8e3e8c785247`, `b1e78a92c6d095e30d78d1355af6b5fbcc215c42`, `48fd99a7a765dd12cb0ddcf54c80501b8fff2f28`, `547bef4cd33c44d1068159a305b230d5ffd22b41`, `c14443cca934b3666c439d4448925ed8b06addc8`, `b0fa2492957a1e1c801833b12fe6aac7f95dd0a9`; [attempt 03](implementation/reports/G01-attempt-03.md) | Live two-tier baseline, compact results, acceptance audit; next G01 |
 | [G02: Implement canonical records, identities, and shared interfaces](implementation/goals/G02-canonical-records.md) | G01 | pending | — | All criteria in prompt |
 | [G03: Implement causal authority, member identity, and review-policy evaluation](implementation/goals/G03-authority-policy.md) | G02 | pending | — | All criteria in prompt |
 | [G04: Implement deterministic composition and exact integration plans](implementation/goals/G04-composition-plans.md) | G03 | pending | — | All criteria in prompt |
@@ -131,6 +132,13 @@ partial phase. Do not relabel a partial phase complete to expose the next prompt
   incompatible binary/machine/settings rejection. A local probe confirmed wait4
   RSS includes inherited launcher memory; label it an upper bound and retain
   isolated executable-memory comparisons under G19.
+- Resumption committed as `b0fa249`; live session `79434`, PID `154851` at launch.
+  Original 132 records are unchanged, all ten retained checkpoints reverified,
+  and the in-flight sample was preserved separately. Exact commands, snapshot
+  hashes, test log hashes and RSS probe are in
+  [resumption evidence](implementation/results/G01-resumption.json).
+  New progress log: external `source-local-v2-resume.log`; result directory is
+  still `source-local-v2`. Revalidate liveness before further continuation.
 - Large fixtures and full logs: `/home/gongahkia/.cache/yeokcham-g01`, outside Git.
 
 ## Evidence and coverage gates
@@ -143,7 +151,7 @@ that relationship explicitly.
 
 | Gate | Owner phase(s) | State | Required evidence |
 | --- | --- | --- | --- |
-| Local existing-runtime baseline and reproducible runner | G01 | in_progress | [Environment](implementation/results/G01-environment.json), [v2 correction evidence](implementation/results/G01-harness-v2.json), and [v2 export smoke](implementation/results/G01-export-smoke-v2.json) verified; full v2 profile is live, not yet accepted |
+| Local existing-runtime baseline and reproducible runner | G01 | in_progress | [Environment](implementation/results/G01-environment.json), [v2 correction evidence](implementation/results/G01-harness-v2.json), [v2 export smoke](implementation/results/G01-export-smoke-v2.json), and [resumption checks](implementation/results/G01-resumption.json) verified; full v2 profile is live, not yet accepted; RSS is a launcher-inclusive upper bound |
 | Canonical records, causal policy, deterministic composition | G02-G04 | pending | Golden/negative/property cases and actual interfaces |
 | Capture/history/storage integrity and maintenance recovery | G05-G07 | pending | Exact-byte tests, restart/collection/pack fault cases, incremental work measurements |
 | Shared offline coverage and concurrent-history preservation | G08/G13 | pending | Missing closure, offline unvisited state, receipt permutation and journal evidence |

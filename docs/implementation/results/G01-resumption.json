@@ -1,0 +1,86 @@
+{
+  "schema": "yeokcham-g01-resumption-evidence-v1",
+  "implementation_commit": "b0fa2492957a1e1c801833b12fe6aac7f95dd0a9",
+  "source_revision": "d03ac1e095af7c896eede2334c5a1f5fc50c4e74",
+  "interruption": {
+    "observed_at": "2026-11-12T23:20:34+08:00",
+    "old_session": 20722,
+    "old_pid": 118787,
+    "session_result": "Unknown process id 20722",
+    "process_result": "PID absent; no benchmark process observed",
+    "exit_code": null,
+    "cause": "not established",
+    "accepted_records": 132,
+    "recorded_failures": []
+  },
+  "continuation": {
+    "started_utc": "2026-11-12T15:28:43.290784+00:00",
+    "runner_revision": "b0fa2492957a1e1c801833b12fe6aac7f95dd0a9",
+    "runner_sha256": "56d6f10f92b2b08eb7cea4ab9fc6ac2cbcd055655e1ea24d2b97e8e0b3b4702f",
+    "invocation": [
+      "tools/benchmark_runner.py",
+      "--output",
+      "/home/gongahkia/.cache/yeokcham-g01/source-local-v2",
+      "--source-tree",
+      "/home/gongahkia/.cache/yeokcham-g01/pinned-source",
+      "--revision",
+      "d03ac1e095af7c896eede2334c5a1f5fc50c4e74",
+      "--suite",
+      "source",
+      "--tiers",
+      "0,1",
+      "--history-nodes",
+      "10",
+      "--resume"
+    ],
+    "accepted_before": {
+      "source-10485760-1000": 132
+    },
+    "snapshot": "/home/gongahkia/.cache/yeokcham-g01/source-local-v2/resumption-1794497323694408468",
+    "snapshot_sha256": {
+      "summary.json": "0e6ba3c072a9985f0c0fcab64ace429924d39249e5edd4366f02ee7b619c2edd",
+      "source-10485760-1000/result.json": "0fa7a1dedc091ef561ef0e333e49dadff11c933b3815149716d83b06c676f267"
+    },
+    "compatibility": "identical parsed measurement functions and sample body"
+  },
+  "live_handle_at_launch": {
+    "session": 79434,
+    "pid": 154851
+  },
+  "accepted_prefix_preserved": true,
+  "checks": [
+    {
+      "command": "make build && make lint",
+      "exit_code": 0,
+      "notes": "exit 0 on resumption implementation tree before commit; this log retains lint output",
+      "log": "/home/gongahkia/.cache/yeokcham-g01/resume-build-lint.log",
+      "log_sha256": "2a19a33e28c32c5dea7a816aa16891c07e006878ee11e0c819c7aee6d260008d"
+    },
+    {
+      "command": "python3 -B -W error::ResourceWarning -m unittest discover -s test -p 'test_benchmark_*.py' -v",
+      "exit_code": 0,
+      "notes": "exit 0; twelve focused tests before the final shallow-CI test-source fixture adjustment",
+      "log": "/home/gongahkia/.cache/yeokcham-g01/resume-tests.log",
+      "log_sha256": "4253e95c561fea9ac14d0fdb2400b24bbcf11b7af7e43af7534a6e8b14cf93aa"
+    },
+    {
+      "command": "SOFTHSM2_CONF=/home/gongahkia/.cache/yeokcham-g01/softhsm2.conf YEOKCHAM_V1_TEST_PKCS11_MODULE=/usr/lib64/libsofthsm2.so YEOKCHAM_V1_TEST_OPENSSL=/home/linuxbrew/.linuxbrew/bin/openssl make ci",
+      "exit_code": 0,
+      "notes": "exit 0 on final b0fa249 implementation tree before commit; eight runner tests executed, unchanged four fixture tests and runtime targets reused by Dune",
+      "log": "/home/gongahkia/.cache/yeokcham-g01/resume-ci.log",
+      "log_sha256": "e32f8a538742ac516aab29874ece0bfbd068d53ac1844762609ee82a3b9a112d"
+    }
+  ],
+  "rss_probe": {
+    "command": "python3 -B; invoke /bin/true via runner.invoke before and after allocating bytearray(64*1024*1024) in the launcher",
+    "before_peak_rss_bytes": 22278144,
+    "after_peak_rss_bytes": 89223168,
+    "conclusion": "wait4 includes inherited launcher RSS before exec; peak_rss_bytes is an upper bound, not isolated executable RSS",
+    "isolated_memory_owner": "G19"
+  },
+  "limitations": [
+    "Measurement interval spans November 6-7 and November 12; pooled statistics are not an uninterrupted session or a paired comparison.",
+    "Free-memory and disk readings differ; recorded hardware, kernel, toolchain, storage and filesystem identities match.",
+    "Full G01 profile remains required; no partial result is accepted as complete."
+  ]
+}
