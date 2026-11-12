@@ -1,6 +1,6 @@
 # Implementation progress
 
-Updated November 12, 2026. This is the shared implementation ledger. Follow
+Updated November 13, 2026. This is the shared implementation ledger. Follow
 [Implementation workflow](IMPLEMENTATION_WORKFLOW.md) for execution, reports,
 verification, commits, and rollback. Each new agent reads and updates this file.
 
@@ -17,6 +17,8 @@ verification, commits, and rollback. Each new agent reads and updates this file.
   PID `118787` was absent. The interrupted v2 profile retained 132 verified records;
   checked resumption is live in session `79434`, PID `154851` at launch, after
   revalidating all ten retained checkpoints and preserving the accepted prefix.
+  The 10-MiB tier passed all 140 measured samples and 12 excluded warmups;
+  the 100-MiB tier verified all retained checkpoints and began measured samples.
   Later native OS, resource, and human
   evidence gates remain pending; they are not presumed available or passed.
 
@@ -32,7 +34,7 @@ files and TC08. Do not skip a failed phase or execute later prompts concurrently
 
 | Phase / copyable prompt | Prerequisite | Status | Implementation commits / latest report | Remaining |
 | --- | --- | --- | --- | --- |
-| [G01: Build the measurement harness and capture the local baseline](implementation/goals/G01-baseline.md) | Verified design baseline | in_progress | `5761fd69ff6856324a3ae265a58c8e3e8c785247`, `b1e78a92c6d095e30d78d1355af6b5fbcc215c42`, `48fd99a7a765dd12cb0ddcf54c80501b8fff2f28`, `547bef4cd33c44d1068159a305b230d5ffd22b41`, `c14443cca934b3666c439d4448925ed8b06addc8`, `b0fa2492957a1e1c801833b12fe6aac7f95dd0a9`; [attempt 03](implementation/reports/G01-attempt-03.md) | Live two-tier baseline, compact results, acceptance audit; next G01 |
+| [G01: Build the measurement harness and capture the local baseline](implementation/goals/G01-baseline.md) | Verified design baseline | in_progress | `5761fd69ff6856324a3ae265a58c8e3e8c785247`, `b1e78a92c6d095e30d78d1355af6b5fbcc215c42`, `48fd99a7a765dd12cb0ddcf54c80501b8fff2f28`, `547bef4cd33c44d1068159a305b230d5ffd22b41`, `c14443cca934b3666c439d4448925ed8b06addc8`, `b0fa2492957a1e1c801833b12fe6aac7f95dd0a9`, `e5beeefcff25590cb4cf50ab02c7e2d4428a25d6`; [attempt 04](implementation/reports/G01-attempt-04.md) | 100-MiB tier, compact full results, acceptance audit; next G01 |
 | [G02: Implement canonical records, identities, and shared interfaces](implementation/goals/G02-canonical-records.md) | G01 | pending | — | All criteria in prompt |
 | [G03: Implement causal authority, member identity, and review-policy evaluation](implementation/goals/G03-authority-policy.md) | G02 | pending | — | All criteria in prompt |
 | [G04: Implement deterministic composition and exact integration plans](implementation/goals/G04-composition-plans.md) | G03 | pending | — | All criteria in prompt |
@@ -139,6 +141,17 @@ partial phase. Do not relabel a partial phase complete to expose the next prompt
   [resumption evidence](implementation/results/G01-resumption.json).
   New progress log: external `source-local-v2-resume.log`; result directory is
   still `source-local-v2`. Revalidate liveness before further continuation.
+- November 12: 10-MiB tier passed all 152 records (140 measured, 12 warmups).
+  Independent audit checked exact bytes/count, manifest/tree hashes, all expected
+  unique sample indices, finite metrics, unchanged original 132-record prefix and
+  recomputed median/p95 summaries. Raw case SHA-256:
+  `c437e7ed3233ed696e66c5bac2ebc67d7ef15df130941b9bb5b3d85daca7b874`.
+  The same process moved to the 100-MiB tier; G01 remains incomplete.
+- November 13, 00:22:38 SGT: session `79434` / PID `154851` confirmed live after
+  53m55s. All ten 100-MiB checkpoints verified; first cold capture accepted.
+  Total 141 measured records and 12 warmups accepted; no failures. Immutable
+  external checkpoint `checkpoints/attempt-04.json`, SHA-256
+  `c27c2b428bcf28855a1d7b7c3c342ecea76a9c97caa7a49ced4608f8b13ddc56`.
 - Large fixtures and full logs: `/home/gongahkia/.cache/yeokcham-g01`, outside Git.
 
 ## Evidence and coverage gates
