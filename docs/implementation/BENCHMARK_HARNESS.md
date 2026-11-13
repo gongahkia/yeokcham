@@ -236,7 +236,9 @@ Large fixtures and secrets stay outside Git. Completed records must remain
 unchanged; do not rerun them to replace slow timings or overwrite earlier reports.
 
 Refresh the small committed checkpoint after completed operation groups or before
-a handoff. The export below reads atomic per-case records without changing the
+a handoff while the run is in progress. Once the run passes, use the normal
+complete-run summarizer instead of this partial export. The export below reads
+atomic per-case records without changing the
 runner, preserves byte-for-byte inputs outside Git, checks their accepted prefix,
 and records their hashes. Run from the repository root; update the observation
 PID if the verified runner changes. Commit the checkpoint and relevant ledger

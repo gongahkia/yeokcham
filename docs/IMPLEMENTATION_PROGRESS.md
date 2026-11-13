@@ -1,6 +1,6 @@
 # Implementation progress
 
-Updated November 13, 2026. This is the shared implementation ledger. Follow
+Updated November 14, 2026. This is the shared implementation ledger. Follow
 [Implementation workflow](IMPLEMENTATION_WORKFLOW.md) for execution, reports,
 verification, commits, and rollback. Each new agent reads and updates this file.
 
@@ -18,9 +18,9 @@ verification, commits, and rollback. Each new agent reads and updates this file.
   checked resumption is live in session `79434`, PID `154851` at launch, after
   revalidating all ten retained checkpoints and preserving the accepted prefix.
   The 10-MiB tier passed all 140 measured samples and 12 excluded warmups;
-  the 100-MiB tier completed capture and is measuring no-op. The committed
+  the 100-MiB tier completed capture/no-op and is starting small-edit. The committed
   [measurement checkpoint](implementation/results/G01-measurement-checkpoint.json)
-  preserves 189 measured records and 18 warmups at its observation time.
+  preserves 210 measured records and 18 warmups at its observation time.
   Later native OS, resource, and human
   evidence gates remain pending; they are not presumed available or passed.
 
@@ -169,6 +169,15 @@ partial phase. Do not relabel a partial phase complete to expose the next prompt
   The harness guide now contains exact checkpoint-export and read-before-resume
   instructions. Preserve the external fixture/history/signers; accepted samples
   must be skipped by checked resumption, not rerun or replaced.
+- November 14, 00:34:13 SGT: the same process is live after 4h21m03s.
+  100-MiB no-op completed all 38 records; capture/no-op are complete and small-edit
+  is next. Refreshed checkpoint preserves all 228 records (210 measured and
+  18 warmups) without changing the earlier 207 records. All raw fields, input
+  hashes and the expected latest-node restored hash passed independent audit.
+  Committed checkpoint SHA-256:
+  `a67a6ec0fd3ca5aafefee01f6240e6d7273ffdf2245123d22bc885c8fffca242`.
+  External audit `checkpoints/attempt-06.json`, SHA-256
+  `b242e37b44c1cdb6cef1b75704689cc03caa07eab59c1c72778370c9424dc854`.
 - Large fixtures and full logs: `/home/gongahkia/.cache/yeokcham-g01`, outside Git.
 
 ## Evidence and coverage gates
