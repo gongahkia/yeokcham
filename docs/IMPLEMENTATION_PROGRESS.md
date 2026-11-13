@@ -18,9 +18,10 @@ verification, commits, and rollback. Each new agent reads and updates this file.
   checked resumption is live in session `79434`, PID `154851` at launch, after
   revalidating all ten retained checkpoints and preserving the accepted prefix.
   The 10-MiB tier passed all 140 measured samples and 12 excluded warmups;
-  the 100-MiB tier completed capture/no-op/small-edit and is running undo/restore. The committed
+  the 100-MiB tier completed capture/no-op/small-edit and the cold undo/warmup groups.
+  Thirty warm undo/restore samples remain. The committed
   [measurement checkpoint](implementation/results/G01-measurement-checkpoint.json)
-  preserves 245 measured records and 21 warmups at its observation time.
+  preserves 250 measured records and all 24 warmups at its observation time.
   Later native OS, resource, and human
   evidence gates remain pending; they are not presumed available or passed.
 
@@ -195,6 +196,20 @@ partial phase. Do not relabel a partial phase complete to expose the next prompt
   `0ed254515e0f06d3aa9b15db1a4b472ae2d5a4b079eb99286719dd926de56524`;
   invoke it with the committed checkpoint and optional previous checkpoint paths.
   At this observation, 35 measured undo records and three warmups remain.
+- November 14, 03:15:37 SGT: the same process is live after 7h00m45s.
+  All five cold undo samples and all three excluded warmups passed; thirty warm
+  undo samples remain. The 74,753-byte checkpoint preserves 274 records
+  (250 measured and all 24 warmups), retaining the earlier 266-record prefix
+  unchanged. Checkpoint SHA-256:
+  `bf33bce3570e762d3291e7d5923213183aaacd547ca12ca2be4b4e069bd8f0ee`.
+  Independent audit matched all raw metrics/commands, input hashes, expected
+  restored trees and recomputed statistics. Cold undo median/range:
+  480.815 / 423.613–724.747 seconds; full warm statistics are still pending.
+  Inputs: external `checkpoints/documentation-1794597337635867450`; audit:
+  `checkpoints/undo-warm-start-audit-1794597337635867450.json`, SHA-256
+  `37df515102db381fbf17509caba5ed4ed046ed3f736f2decfc5005209a62e627`.
+  The preceding small-edit checkpoint/ledger update is committed as
+  `5a69bb5b0a557f85b7f472be6af8fc7e16dc4163`. No runtime or harness code changed.
 - Large fixtures and full logs: `/home/gongahkia/.cache/yeokcham-g01`, outside Git.
 
 ## Evidence and coverage gates
