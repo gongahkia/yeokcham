@@ -18,7 +18,8 @@ verification, commits, and rollback. Each new agent reads and updates this file.
   checked resumption is live in session `79434`, PID `154851` at launch, after
   revalidating all ten retained checkpoints and preserving the accepted prefix.
   The 10-MiB tier passed all 140 measured samples and 12 excluded warmups;
-  the 100-MiB tier verified all retained checkpoints and began measured samples.
+  the 100-MiB tier completed capture and is measuring no-op next. At the latest
+  checkpoint, 175 measured records and 15 warmups were accepted overall.
   Later native OS, resource, and human
   evidence gates remain pending; they are not presumed available or passed.
 
@@ -34,7 +35,7 @@ files and TC08. Do not skip a failed phase or execute later prompts concurrently
 
 | Phase / copyable prompt | Prerequisite | Status | Implementation commits / latest report | Remaining |
 | --- | --- | --- | --- | --- |
-| [G01: Build the measurement harness and capture the local baseline](implementation/goals/G01-baseline.md) | Verified design baseline | in_progress | `5761fd69ff6856324a3ae265a58c8e3e8c785247`, `b1e78a92c6d095e30d78d1355af6b5fbcc215c42`, `48fd99a7a765dd12cb0ddcf54c80501b8fff2f28`, `547bef4cd33c44d1068159a305b230d5ffd22b41`, `c14443cca934b3666c439d4448925ed8b06addc8`, `b0fa2492957a1e1c801833b12fe6aac7f95dd0a9`, `e5beeefcff25590cb4cf50ab02c7e2d4428a25d6`; [attempt 04](implementation/reports/G01-attempt-04.md) | 100-MiB tier, compact full results, acceptance audit; next G01 |
+| [G01: Build the measurement harness and capture the local baseline](implementation/goals/G01-baseline.md) | Verified design baseline | in_progress | `5761fd69ff6856324a3ae265a58c8e3e8c785247`, `b1e78a92c6d095e30d78d1355af6b5fbcc215c42`, `48fd99a7a765dd12cb0ddcf54c80501b8fff2f28`, `547bef4cd33c44d1068159a305b230d5ffd22b41`, `c14443cca934b3666c439d4448925ed8b06addc8`, `b0fa2492957a1e1c801833b12fe6aac7f95dd0a9`, `e5beeefcff25590cb4cf50ab02c7e2d4428a25d6`; [attempt 05](implementation/reports/G01-attempt-05.md) | 100-MiB no-op/small-edit/undo, compact full results, acceptance audit; next G01 |
 | [G02: Implement canonical records, identities, and shared interfaces](implementation/goals/G02-canonical-records.md) | G01 | pending | — | All criteria in prompt |
 | [G03: Implement causal authority, member identity, and review-policy evaluation](implementation/goals/G03-authority-policy.md) | G02 | pending | — | All criteria in prompt |
 | [G04: Implement deterministic composition and exact integration plans](implementation/goals/G04-composition-plans.md) | G03 | pending | — | All criteria in prompt |
@@ -152,6 +153,12 @@ partial phase. Do not relabel a partial phase complete to expose the next prompt
   Total 141 measured records and 12 warmups accepted; no failures. Immutable
   external checkpoint `checkpoints/attempt-04.json`, SHA-256
   `c27c2b428bcf28855a1d7b7c3c342ecea76a9c97caa7a49ced4608f8b13ddc56`.
+- November 13, 22:57:10 SGT: same process confirmed live after 2h44m01s.
+  100-MiB capture passed 5 cold / 3 warmup / 30 warm samples; no-op child is
+  executing. Overall 175 measured samples and 15 warmups accepted, no failures.
+  Independent capture audit checked bytes/count, hashes, indices and metrics.
+  External checkpoint `checkpoints/attempt-05.json`, SHA-256
+  `8a097192384fd9dcf120277ad822c3c593c463a4d6e224b4ff24dffaa73e7fff`.
 - Large fixtures and full logs: `/home/gongahkia/.cache/yeokcham-g01`, outside Git.
 
 ## Evidence and coverage gates
