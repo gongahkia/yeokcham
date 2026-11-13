@@ -211,3 +211,109 @@ file counts, history depth, timed CLI commands and 5/3/30 sampling. This is a ha
 revision, not a runtime optimization or an omitted correctness gate. Earlier
 reports document their then-live process; its old status file is no longer a
 liveness signal. Use the new run's verified process/session handle.
+
+## Preserving accepted measurements between sessions
+
+Read the [progress ledger](../IMPLEMENTATION_PROGRESS.md), its latest report and
+[committed measurement checkpoint](results/G01-measurement-checkpoint.json) before
+starting work. The runner saves each accepted record atomically. Its checked
+`--resume` path skips the accepted prefix; a new session must monitor an existing
+live runner rather than start another run. Old report handles are historical;
+verify the current process before deciding whether resumption is needed.
+
+The committed checkpoint backs up every accepted sample metric and command,
+fixture hashes, source/binary/generator/runner provenance, machine settings and
+continuation boundaries. Its schema is `yeokcham-benchmark-checkpoint-v1` and its
+status is explicitly `in_progress`. Statistics are labelled `statistics_so_far`;
+this file never passes the full-baseline completion gate. The normal summarizer
+continues to require a complete passing run.
+
+Keep `/home/gongahkia/.cache/yeokcham-g01/`, including the pinned export, fixture
+manifests, retained histories, disposable signers, raw results and snapshots.
+Exact resumption needs these external artifacts; the committed metrics are a
+backup of measurement evidence, not a replacement for retained history or keys.
+Large fixtures and secrets stay outside Git. Completed records must remain
+unchanged; do not rerun them to replace slow timings or overwrite earlier reports.
+
+Refresh the small committed checkpoint after completed operation groups or before
+a handoff. The export below reads atomic per-case records without changing the
+runner, preserves byte-for-byte inputs outside Git, checks their accepted prefix,
+and records their hashes. Run from the repository root; update the observation
+PID if the verified runner changes. Commit the checkpoint and relevant ledger
+update after `make docs-check` and `git diff --check`.
+
+```sh
+python3 -B - /home/gongahkia/.cache/yeokcham-g01/source-local-v2 \
+  docs/implementation/results/G01-measurement-checkpoint.json <<'PY'
+"""Run from the implementation checkout; preserve accepted in-progress data."""
+import datetime
+import hashlib
+import json
+from pathlib import Path
+import subprocess
+import sys
+import time
+
+sys.dont_write_bytecode = True
+sys.path.insert(0, str(Path.cwd() / 'tools'))
+import benchmark_runner as runner
+from benchmark_summary import COLUMNS
+
+run = runner.assert_external(Path(sys.argv[1]))
+destination = Path(sys.argv[2])
+archive = run.parent / 'checkpoints' / ('documentation-' + str(time.time_ns()))
+archive.mkdir(parents=True)
+hashes = {}
+
+def preserve(path):
+    data = path.read_bytes()
+    relative = path.relative_to(run)
+    saved = archive / relative
+    saved.parent.mkdir(parents=True, exist_ok=True)
+    saved.write_bytes(data)
+    hashes[str(relative)] = hashlib.sha256(data).hexdigest()
+    return json.loads(data)
+
+raw = preserve(run / 'summary.json')
+assert raw['status'] == 'running' and not raw['failures']
+result = {k: v for k, v in raw.items() if k not in ('schema', 'status', 'cases')}
+result.update(schema='yeokcham-benchmark-checkpoint-v1', status='in_progress',
+              purpose='Accepted partial measurements only; not full G01 completion evidence',
+              captured_utc=datetime.datetime.now(datetime.timezone.utc).isoformat(),
+              input_snapshot=str(archive), sample_columns=COLUMNS, cases=[])
+schedule = [(op, temp, i) for op in runner.OPERATIONS
+            for temp, n in [('cold', raw['settings']['cold']), ('warmup', raw['settings']['warmups']),
+                            ('warm', raw['settings']['warm'])] for i in range(n)]
+for path in sorted(run.glob('source-*/result.json')):
+    case = preserve(path)
+    samples = case['samples']
+    assert case['status'] in ('running', 'passed') and not case['failures']
+    assert [(s['operation'], s['temperature'], s['index']) for s in samples] == schedule[:len(samples)]
+    assert len(samples) <= len(schedule)
+    assert case['status'] != 'passed' or len(samples) == len(schedule)
+    reduced = {k: v for k, v in case.items() if k not in ('samples', 'summary')}
+    reduced.update(statistics_so_far=runner.summarize(samples), commands={}, samples=[])
+    for sample in samples:
+        command = reduced['commands'].setdefault(sample['operation'], sample['command'])
+        assert command == sample['command']
+        storage = sample['storage']
+        values = dict(sample, stored_file_bytes=storage['file_bytes'],
+                      allocated_file_bytes=storage['allocated_file_bytes'],
+                      allocated_directory_bytes=storage['allocated_directory_bytes'],
+                      allocated_bytes=storage['allocated_bytes'], stored_files=storage['files'],
+                      stored_directories=storage['directories'])
+        row = [values[column] for column in COLUMNS]
+        assert dict(zip(COLUMNS, row)) == {column: values[column] for column in COLUMNS}
+        reduced['samples'].append(row)
+    result['cases'].append(reduced)
+result['input_sha256'] = hashes
+result['process_observation'] = subprocess.run(
+    ['ps', '-p', '154851', '-o', 'pid,etime,stat,args'], capture_output=True, text=True).stdout
+temporary = destination.with_suffix(destination.suffix + '.tmp')
+temporary.write_text(json.dumps(result, separators=(',', ':')) + '\n')
+temporary.replace(destination)
+total = sum(len(case['samples']) for case in result['cases'])
+print(json.dumps({'destination': str(destination), 'accepted_records': total,
+                  'snapshot': str(archive), 'status': result['status']}))
+PY
+```

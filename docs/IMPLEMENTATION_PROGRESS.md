@@ -18,8 +18,9 @@ verification, commits, and rollback. Each new agent reads and updates this file.
   checked resumption is live in session `79434`, PID `154851` at launch, after
   revalidating all ten retained checkpoints and preserving the accepted prefix.
   The 10-MiB tier passed all 140 measured samples and 12 excluded warmups;
-  the 100-MiB tier completed capture and is measuring no-op next. At the latest
-  checkpoint, 175 measured records and 15 warmups were accepted overall.
+  the 100-MiB tier completed capture and is measuring no-op. The committed
+  [measurement checkpoint](implementation/results/G01-measurement-checkpoint.json)
+  preserves 189 measured records and 18 warmups at its observation time.
   Later native OS, resource, and human
   evidence gates remain pending; they are not presumed available or passed.
 
@@ -159,6 +160,15 @@ partial phase. Do not relabel a partial phase complete to expose the next prompt
   Independent capture audit checked bytes/count, hashes, indices and metrics.
   External checkpoint `checkpoints/attempt-05.json`, SHA-256
   `8a097192384fd9dcf120277ad822c3c593c463a4d6e224b4ff24dffaa73e7fff`.
+- November 13, 23:34:49 SGT: preserved all 207 accepted records in the committed
+  59,942-byte measurement checkpoint, explicitly `in_progress`; it contains
+  189 measured records and 18 excluded warmups. An independent reconstruction
+  matched every raw sample field and verified hashes of the preserved external
+  input snapshots. Checkpoint SHA-256:
+  `aa194fea7ae47c0d9733d827b6814ef8ba4f5f985492241e28fc951cd5c54fbc`.
+  The harness guide now contains exact checkpoint-export and read-before-resume
+  instructions. Preserve the external fixture/history/signers; accepted samples
+  must be skipped by checked resumption, not rerun or replaced.
 - Large fixtures and full logs: `/home/gongahkia/.cache/yeokcham-g01`, outside Git.
 
 ## Evidence and coverage gates
@@ -233,3 +243,8 @@ records, not current proof.
   work, resolve conflicts, test integration and synchronize local/remote main.
   Reconcile the workflow before that subsequent work. Current G01 stays within its
   original phase boundary; later work still needs dependency ordering and evidence.
+
+- November 13, 2026: user requested durable documentation to avoid repeating the
+  long measurement work. Keep the versioned partial checkpoint current at operation
+  boundaries/handoffs, retain its external inputs, and begin continuation by
+  reading the ledger/latest report/checkpoint and verifying actual process state.
