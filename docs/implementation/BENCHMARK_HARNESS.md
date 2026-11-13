@@ -5,6 +5,12 @@ build environment. They do not change product code. Large artifacts belong outsi
 the checkout. No benchmark is a passing correctness test until restored contents
 match its full manifest, including directories, executable bits and symlink targets.
 
+The completed G01 ordinary-source measurements are saved as a
+[readable baseline and budgets](results/G01-baseline.md) and a
+[lossless complete summary](results/G01-baseline.json): 280 measured records and
+24 excluded warmups across both selected tiers. The earlier partial checkpoint
+is retained as a historical accepted-prefix snapshot.
+
 ## Fixtures
 
 ```sh
@@ -215,8 +221,11 @@ liveness signal. Use the new run's verified process/session handle.
 ## Preserving accepted measurements between sessions
 
 Read the [progress ledger](../IMPLEMENTATION_PROGRESS.md), its latest report and
-[committed measurement checkpoint](results/G01-measurement-checkpoint.json) before
-starting work. The runner saves each accepted record atomically. Its checked
+[complete G01 baseline](results/G01-baseline.md) before starting work. The
+[historical partial checkpoint](results/G01-measurement-checkpoint.json) preserves
+294 accepted records at its observation time; its `in_progress` status describes
+that snapshot, not the completed run. The procedure below applies to a run still
+in progress. The runner saves each accepted record atomically. Its checked
 `--resume` path skips the accepted prefix; a new session must monitor an existing
 live runner rather than start another run. Old report handles are historical;
 verify the current process before deciding whether resumption is needed.

@@ -11,19 +11,16 @@ verification, commits, and rollback. Each new agent reads and updates this file.
 - Active implementation phase: G01 (`g01-local-baseline-2026-11-06`).
 - Next ready phase: none while G01 is in progress.
 - Completed phases in this chain: **0 / 20**.
-- G01 environment setup and measurement harness work has started; product runtime
-  remains unchanged. Existing V1/undo functionality predates this chain.
-- Current blocker: none. On November 12 the old session `20722` was missing and
-  PID `118787` was absent. The interrupted v2 profile retained 132 verified records;
-  checked resumption is live in session `79434`, PID `154851` at launch, after
-  revalidating all ten retained checkpoints and preserving the accepted prefix.
-  The 10-MiB tier passed all 140 measured samples and 12 excluded warmups;
-  the 100-MiB tier completed capture/no-op/small-edit and the cold undo/warmup groups.
-  Ten warm undo/restore samples remain. The committed
-  [measurement checkpoint](implementation/results/G01-measurement-checkpoint.json)
-  preserves 270 measured records and all 24 warmups at its observation time.
-  Later native OS, resource, and human
-  evidence gates remain pending; they are not presumed available or passed.
+- G01 harness and local measurements are complete; final phase checks/report remain.
+  Product runtime remains unchanged. Existing V1/undo functionality predates this chain.
+- Current blocker: none. Session `79434` exited 0 after both tiers passed all
+  280 measured records and 24 excluded warmups. The
+  [complete baseline and budgets](implementation/results/G01-baseline.md) and
+  [lossless full summary](implementation/results/G01-baseline.json) preserve the
+  accepted measurements. The partial checkpoint is historical. Independent audit
+  verified the complete schedule, raw metrics, restored identities, statistics,
+  budgets, full pristine contents and unchanged accepted prefixes. Later native
+  OS, resource and human evidence gates remain pending.
 
 Update the active phase/session label and starting commit when work starts.
 Update meaningful checkpoints while working, and reconcile all fields at closeout.
@@ -37,7 +34,7 @@ files and TC08. Do not skip a failed phase or execute later prompts concurrently
 
 | Phase / copyable prompt | Prerequisite | Status | Implementation commits / latest report | Remaining |
 | --- | --- | --- | --- | --- |
-| [G01: Build the measurement harness and capture the local baseline](implementation/goals/G01-baseline.md) | Verified design baseline | in_progress | `5761fd69ff6856324a3ae265a58c8e3e8c785247`, `b1e78a92c6d095e30d78d1355af6b5fbcc215c42`, `48fd99a7a765dd12cb0ddcf54c80501b8fff2f28`, `547bef4cd33c44d1068159a305b230d5ffd22b41`, `c14443cca934b3666c439d4448925ed8b06addc8`, `b0fa2492957a1e1c801833b12fe6aac7f95dd0a9`, `e5beeefcff25590cb4cf50ab02c7e2d4428a25d6`, `950a450f080f8f5a62e7e460910099dd157e8841`, `e3ccae824c1aa03f4b6f984006e69033cefd95d1`; [attempt 06](implementation/reports/G01-attempt-06.md) | 100-MiB undo/restore, compact full results, acceptance audit; next G01 |
+| [G01: Build the measurement harness and capture the local baseline](implementation/goals/G01-baseline.md) | Verified design baseline | in_progress | `5761fd69ff6856324a3ae265a58c8e3e8c785247`, `b1e78a92c6d095e30d78d1355af6b5fbcc215c42`, `48fd99a7a765dd12cb0ddcf54c80501b8fff2f28`, `547bef4cd33c44d1068159a305b230d5ffd22b41`, `c14443cca934b3666c439d4448925ed8b06addc8`, `b0fa2492957a1e1c801833b12fe6aac7f95dd0a9`, `e5beeefcff25590cb4cf50ab02c7e2d4428a25d6`, `950a450f080f8f5a62e7e460910099dd157e8841`, `e3ccae824c1aa03f4b6f984006e69033cefd95d1`, `5a69bb5b0a557f85b7f472be6af8fc7e16dc4163`, `35a95f7f0ce0df5c5400e666eeae02b876e280f6`, `1b69a3ac3f20b1e10158d6626703a09ed6a22e17`, `e385b9ce42fc0c708e0af95d52af92a33cb6ef43`; [attempt 06](implementation/reports/G01-attempt-06.md) | Final phase checks and acceptance report; next G01 |
 | [G02: Implement canonical records, identities, and shared interfaces](implementation/goals/G02-canonical-records.md) | G01 | pending | — | All criteria in prompt |
 | [G03: Implement causal authority, member identity, and review-policy evaluation](implementation/goals/G03-authority-policy.md) | G02 | pending | — | All criteria in prompt |
 | [G04: Implement deterministic composition and exact integration plans](implementation/goals/G04-composition-plans.md) | G03 | pending | — | All criteria in prompt |
@@ -234,6 +231,24 @@ partial phase. Do not relabel a partial phase complete to expose the next prompt
   `6d87482b90bd503753d7e5b5000cc047f13a674216910ace34edaf9df14c5e0d`.
   The preceding ten-warm-sample checkpoint is committed as
   `1b69a3ac3f20b1e10158d6626703a09ed6a22e17`; runtime/harness code is unchanged.
+- November 14, 06:58:12 SGT: the full v2 profile passed; session `79434` exited 0.
+  Both tiers contain all 152 records each: 280 measured and 24 excluded warmups.
+  The normal completed-run summarizer produced the 80,522-byte full summary,
+  SHA-256 `03e105c1c9ad56178f20b67bc1132c1a5795015d4346dce6d3c9b5f4115ed88b`.
+  Raw summary SHA-256:
+  `91952fc8cb14e77f97a46f181b56755e92365c5271931878a408e358c106caea`.
+  Independent full audit verified every raw field/command, unique scheduled
+  index, allocation sum, expected tree hash, statistic/budget and pristine path;
+  the 294-record checkpoint and original 132-record prefix are unchanged.
+  Data audit: external `completion-measurement-audit.json`, SHA-256
+  `f40ccffb4aa00ea953eca8ac41646c0a74f1382ab98a46ce80e5abd537d0d441`.
+  Full raw snapshot: external `checkpoints/final-1794610728850154352`;
+  `completion-raw-snapshot.json` records all five hashes and terminal exit.
+  Final provenance audit reverified pinned source/executable/generator/runner,
+  identical measurement AST, both machine identities and retained storage against
+  `du -s -B1`. The readable baseline records exact investigation budgets and limits.
+  The preceding twenty-warm-sample checkpoint is committed as
+  `e385b9ce42fc0c708e0af95d52af92a33cb6ef43`. Phase checks/report still remain.
 - Large fixtures and full logs: `/home/gongahkia/.cache/yeokcham-g01`, outside Git.
 
 ## Evidence and coverage gates
@@ -246,7 +261,7 @@ that relationship explicitly.
 
 | Gate | Owner phase(s) | State | Required evidence |
 | --- | --- | --- | --- |
-| Local existing-runtime baseline and reproducible runner | G01 | in_progress | [Environment](implementation/results/G01-environment.json), [v2 correction evidence](implementation/results/G01-harness-v2.json), [v2 export smoke](implementation/results/G01-export-smoke-v2.json), and [resumption checks](implementation/results/G01-resumption.json) verified; full v2 profile is live, not yet accepted; RSS is a launcher-inclusive upper bound |
+| Local existing-runtime baseline and reproducible runner | G01 | in_progress | [Environment](implementation/results/G01-environment.json), [v2 correction evidence](implementation/results/G01-harness-v2.json), [v2 export smoke](implementation/results/G01-export-smoke-v2.json), and [resumption checks](implementation/results/G01-resumption.json) verified; [full local measurements](implementation/results/G01-baseline.md) passed and were independently audited; final phase checks remain; RSS is a launcher-inclusive upper bound |
 | Canonical records, causal policy, deterministic composition | G02-G04 | pending | Golden/negative/property cases and actual interfaces |
 | Capture/history/storage integrity and maintenance recovery | G05-G07 | pending | Exact-byte tests, restart/collection/pack fault cases, incremental work measurements |
 | Shared offline coverage and concurrent-history preservation | G08/G13 | pending | Missing closure, offline unvisited state, receipt permutation and journal evidence |
