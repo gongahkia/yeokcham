@@ -19,9 +19,9 @@ verification, commits, and rollback. Each new agent reads and updates this file.
   revalidating all ten retained checkpoints and preserving the accepted prefix.
   The 10-MiB tier passed all 140 measured samples and 12 excluded warmups;
   the 100-MiB tier completed capture/no-op/small-edit and the cold undo/warmup groups.
-  Thirty warm undo/restore samples remain. The committed
+  Twenty warm undo/restore samples remain. The committed
   [measurement checkpoint](implementation/results/G01-measurement-checkpoint.json)
-  preserves 250 measured records and all 24 warmups at its observation time.
+  preserves 260 measured records and all 24 warmups at its observation time.
   Later native OS, resource, and human
   evidence gates remain pending; they are not presumed available or passed.
 
@@ -210,6 +210,18 @@ partial phase. Do not relabel a partial phase complete to expose the next prompt
   `37df515102db381fbf17509caba5ed4ed046ed3f736f2decfc5005209a62e627`.
   The preceding small-edit checkpoint/ledger update is committed as
   `5a69bb5b0a557f85b7f472be6af8fc7e16dc4163`. No runtime or harness code changed.
+- November 14, 04:30:20 SGT: the same process is live after 8h15m27s.
+  Ten of thirty measured warm undo samples passed; twenty remain, with no failures.
+  The 77,015-byte checkpoint preserves 284 accepted records (260 measured and
+  24 warmups), including the earlier 274-record prefix unchanged. SHA-256:
+  `45fbaabe06adf68753e43907381bb8d7ae8b04f304851ee5698b9712950bf786`.
+  Independent audit matched raw fields/commands, input hashes, restored-tree
+  identities and statistics. Inputs:
+  `checkpoints/documentation-1794601820212616890`; audit:
+  `checkpoints/undo-warm-10-audit-1794601820212616890.json`, SHA-256
+  `8ef16dd6cf4e1c7a1510a846b130a04a1628d0c3efe7a048eb0690a1c7622cb6`.
+  The preceding cold-undo/warmup checkpoint is committed as
+  `35a95f7f0ce0df5c5400e666eeae02b876e280f6`; runtime/harness code remains unchanged.
 - Large fixtures and full logs: `/home/gongahkia/.cache/yeokcham-g01`, outside Git.
 
 ## Evidence and coverage gates
