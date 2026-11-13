@@ -7,6 +7,8 @@ not completion of the extended benchmark or native-platform coverage gates.
 [All sample metrics, provenance and exact budgets](G01-baseline.json) are retained
 in an 80,522-byte lossless summary. [Harness instructions](../BENCHMARK_HARNESS.md)
 define generation, cache preparation, verification, export and checked resumption.
+[Completion checks and audit receipt](G01-acceptance.json) records the exact tested
+commit, command exits, log hashes and independent acceptance evidence.
 
 ## Machine and workload
 

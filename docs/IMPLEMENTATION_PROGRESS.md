@@ -11,7 +11,7 @@ verification, commits, and rollback. Each new agent reads and updates this file.
 - Active implementation phase: G01 (`g01-local-baseline-2026-11-06`).
 - Next ready phase: none while G01 is in progress.
 - Completed phases in this chain: **0 / 20**.
-- G01 harness and local measurements are complete; final phase checks/report remain.
+- G01 harness, local measurements and phase checks passed; report closeout remains.
   Product runtime remains unchanged. Existing V1/undo functionality predates this chain.
 - Current blocker: none. Session `79434` exited 0 after both tiers passed all
   280 measured records and 24 excluded warmups. The
@@ -34,7 +34,7 @@ files and TC08. Do not skip a failed phase or execute later prompts concurrently
 
 | Phase / copyable prompt | Prerequisite | Status | Implementation commits / latest report | Remaining |
 | --- | --- | --- | --- | --- |
-| [G01: Build the measurement harness and capture the local baseline](implementation/goals/G01-baseline.md) | Verified design baseline | in_progress | `5761fd69ff6856324a3ae265a58c8e3e8c785247`, `b1e78a92c6d095e30d78d1355af6b5fbcc215c42`, `48fd99a7a765dd12cb0ddcf54c80501b8fff2f28`, `547bef4cd33c44d1068159a305b230d5ffd22b41`, `c14443cca934b3666c439d4448925ed8b06addc8`, `b0fa2492957a1e1c801833b12fe6aac7f95dd0a9`, `e5beeefcff25590cb4cf50ab02c7e2d4428a25d6`, `950a450f080f8f5a62e7e460910099dd157e8841`, `e3ccae824c1aa03f4b6f984006e69033cefd95d1`, `5a69bb5b0a557f85b7f472be6af8fc7e16dc4163`, `35a95f7f0ce0df5c5400e666eeae02b876e280f6`, `1b69a3ac3f20b1e10158d6626703a09ed6a22e17`, `e385b9ce42fc0c708e0af95d52af92a33cb6ef43`; [attempt 06](implementation/reports/G01-attempt-06.md) | Final phase checks and acceptance report; next G01 |
+| [G01: Build the measurement harness and capture the local baseline](implementation/goals/G01-baseline.md) | Verified design baseline | in_progress | `5761fd69ff6856324a3ae265a58c8e3e8c785247`, `b1e78a92c6d095e30d78d1355af6b5fbcc215c42`, `48fd99a7a765dd12cb0ddcf54c80501b8fff2f28`, `547bef4cd33c44d1068159a305b230d5ffd22b41`, `c14443cca934b3666c439d4448925ed8b06addc8`, `b0fa2492957a1e1c801833b12fe6aac7f95dd0a9`, `e5beeefcff25590cb4cf50ab02c7e2d4428a25d6`, `950a450f080f8f5a62e7e460910099dd157e8841`, `e3ccae824c1aa03f4b6f984006e69033cefd95d1`, `5a69bb5b0a557f85b7f472be6af8fc7e16dc4163`, `35a95f7f0ce0df5c5400e666eeae02b876e280f6`, `1b69a3ac3f20b1e10158d6626703a09ed6a22e17`, `e385b9ce42fc0c708e0af95d52af92a33cb6ef43`, `7646362d80929e4f9cdccce0b90ac86beaa1a4a8`; [attempt 06](implementation/reports/G01-attempt-06.md) | Separate acceptance report and closeout; next G01 |
 | [G02: Implement canonical records, identities, and shared interfaces](implementation/goals/G02-canonical-records.md) | G01 | pending | — | All criteria in prompt |
 | [G03: Implement causal authority, member identity, and review-policy evaluation](implementation/goals/G03-authority-policy.md) | G02 | pending | — | All criteria in prompt |
 | [G04: Implement deterministic composition and exact integration plans](implementation/goals/G04-composition-plans.md) | G03 | pending | — | All criteria in prompt |
@@ -249,6 +249,20 @@ partial phase. Do not relabel a partial phase complete to expose the next prompt
   `du -s -B1`. The readable baseline records exact investigation budgets and limits.
   The preceding twenty-warm-sample checkpoint is committed as
   `e385b9ce42fc0c708e0af95d52af92a33cb6ef43`. Phase checks/report still remain.
+- November 14, 07:05:24 SGT: `make build`, `make lint` and `make ci` exited 0
+  on clean `7646362d80929e4f9cdccce0b90ac86beaa1a4a8`, which commits the full
+  baseline. Completion CI reused Dune's valid cached runtime/focused-test results;
+  docs and workflow shell checks ran. No cached target is presented as freshly run.
+  The twelve focused checks remain valid: tools/test sources are unchanged from
+  `b0fa249`; runtime/README/Makefile/CI remain unchanged from the pinned revision.
+  [Acceptance receipt](implementation/results/G01-acceptance.json), SHA-256
+  `a83992829ec0900fbf8ee695f49a0ee4f65ce25b71a371590543779a66a55f72`, records
+  all five passed criteria, actual exits, audits, snapshots, ancestry and scope.
+  External completion build/lint/CI logs have SHA-256:
+  `e90e1e244d9512c60ffb9a48589ca172a1059a79f19dbb267ecfa379fabcb5ff`,
+  `2a19a33e28c32c5dea7a816aa16891c07e006878ee11e0c819c7aee6d260008d`,
+  `4b875a04737d8700a4f8df61dd0c52c7fa16abc88e685dc13303b31ac4c4dc0f`.
+  A separate report/tracker closeout remains; later coverage gates stay pending.
 - Large fixtures and full logs: `/home/gongahkia/.cache/yeokcham-g01`, outside Git.
 
 ## Evidence and coverage gates
@@ -261,7 +275,7 @@ that relationship explicitly.
 
 | Gate | Owner phase(s) | State | Required evidence |
 | --- | --- | --- | --- |
-| Local existing-runtime baseline and reproducible runner | G01 | in_progress | [Environment](implementation/results/G01-environment.json), [v2 correction evidence](implementation/results/G01-harness-v2.json), [v2 export smoke](implementation/results/G01-export-smoke-v2.json), and [resumption checks](implementation/results/G01-resumption.json) verified; [full local measurements](implementation/results/G01-baseline.md) passed and were independently audited; final phase checks remain; RSS is a launcher-inclusive upper bound |
+| Local existing-runtime baseline and reproducible runner | G01 | in_progress | [Environment](implementation/results/G01-environment.json), [v2 correction evidence](implementation/results/G01-harness-v2.json), [v2 export smoke](implementation/results/G01-export-smoke-v2.json), and [resumption checks](implementation/results/G01-resumption.json) verified; [full local measurements](implementation/results/G01-baseline.md) passed and were independently audited; completion checks passed; separate handoff report remains; RSS is a launcher-inclusive upper bound |
 | Canonical records, causal policy, deterministic composition | G02-G04 | pending | Golden/negative/property cases and actual interfaces |
 | Capture/history/storage integrity and maintenance recovery | G05-G07 | pending | Exact-byte tests, restart/collection/pack fault cases, incremental work measurements |
 | Shared offline coverage and concurrent-history preservation | G08/G13 | pending | Missing closure, offline unvisited state, receipt permutation and journal evidence |

@@ -10,6 +10,8 @@ The completed G01 ordinary-source measurements are saved as a
 [lossless complete summary](results/G01-baseline.json): 280 measured records and
 24 excluded warmups across both selected tiers. The earlier partial checkpoint
 is retained as a historical accepted-prefix snapshot.
+[Completion checks](results/G01-acceptance.json) record the tested commit and log
+hashes; later documentation-only handoff commits preserve that code validation.
 
 ## Fixtures
 

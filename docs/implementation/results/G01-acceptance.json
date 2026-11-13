@@ -1,0 +1,287 @@
+{
+  "schema": "yeokcham-g01-acceptance-v1",
+  "status": "passed",
+  "verified_utc": "2026-11-13T23:07:09.720830+00:00",
+  "phase": "G01",
+  "source_revision": "d03ac1e095af7c896eede2334c5a1f5fc50c4e74",
+  "tested_commit": "7646362d80929e4f9cdccce0b90ac86beaa1a4a8",
+  "baseline_summary": "docs/implementation/results/G01-baseline.json",
+  "baseline_summary_sha256": "03e105c1c9ad56178f20b67bc1132c1a5795015d4346dce6d3c9b5f4115ed88b",
+  "baseline_summary_bytes": 80522,
+  "measurement_record_count": 304,
+  "measured_samples": 280,
+  "excluded_warmups": 24,
+  "runner_exit_code": 0,
+  "criteria": [
+    {
+      "number": 1,
+      "result": "passed",
+      "evidence": [
+        "G01-environment.json",
+        "G01-resumption.json",
+        "completion_checks"
+      ]
+    },
+    {
+      "number": 2,
+      "result": "passed",
+      "evidence": [
+        "tools/benchmark_fixture.py",
+        "tools/benchmark_runner.py",
+        "test/test_benchmark_fixture.py",
+        "test/test_benchmark_runner.py",
+        "G01-export-smoke-v2.json",
+        "G01-resumption.json"
+      ]
+    },
+    {
+      "number": 3,
+      "result": "passed",
+      "evidence": [
+        "G01-baseline.json",
+        "independent_measurement_audit"
+      ]
+    },
+    {
+      "number": 4,
+      "result": "passed",
+      "evidence": [
+        "G01-baseline.json",
+        "G01-baseline.md"
+      ]
+    },
+    {
+      "number": 5,
+      "result": "passed",
+      "evidence": [
+        "pinned_provenance_audit",
+        "G01-baseline.md",
+        "docs/IMPLEMENTATION_PROGRESS.md"
+      ]
+    }
+  ],
+  "completion_checks": {
+    "tested_commit": "7646362d80929e4f9cdccce0b90ac86beaa1a4a8",
+    "started_utc": "2026-11-13T23:05:23.139036+00:00",
+    "environment_overrides": {
+      "SOFTHSM2_CONF": "/home/gongahkia/.cache/yeokcham-g01/softhsm2.conf",
+      "YEOKCHAM_V1_TEST_PKCS11_MODULE": "/usr/lib64/libsofthsm2.so",
+      "YEOKCHAM_V1_TEST_OPENSSL": "/home/linuxbrew/.linuxbrew/bin/openssl"
+    },
+    "checks": [
+      {
+        "command": [
+          "make",
+          "build"
+        ],
+        "started_utc": "2026-11-13T23:05:23.139169+00:00",
+        "finished_utc": "2026-11-13T23:05:23.602235+00:00",
+        "exit_code": 0,
+        "log": "/home/gongahkia/.cache/yeokcham-g01/completion-build.log",
+        "log_sha256": "e90e1e244d9512c60ffb9a48589ca172a1059a79f19dbb267ecfa379fabcb5ff"
+      },
+      {
+        "command": [
+          "make",
+          "lint"
+        ],
+        "started_utc": "2026-11-13T23:05:23.602572+00:00",
+        "finished_utc": "2026-11-13T23:05:23.952693+00:00",
+        "exit_code": 0,
+        "log": "/home/gongahkia/.cache/yeokcham-g01/completion-lint.log",
+        "log_sha256": "2a19a33e28c32c5dea7a816aa16891c07e006878ee11e0c819c7aee6d260008d"
+      },
+      {
+        "command": [
+          "make",
+          "ci"
+        ],
+        "started_utc": "2026-11-13T23:05:23.952990+00:00",
+        "finished_utc": "2026-11-13T23:05:24.685062+00:00",
+        "exit_code": 0,
+        "log": "/home/gongahkia/.cache/yeokcham-g01/completion-ci.log",
+        "log_sha256": "4b875a04737d8700a4f8df61dd0c52c7fa16abc88e685dc13303b31ac4c4dc0f"
+      }
+    ],
+    "status": "passed",
+    "finished_utc": "2026-11-13T23:05:24.685335+00:00",
+    "ending_git_status": ""
+  },
+  "focused_checks": {
+    "count": 12,
+    "last_code_revision": "b0fa2492957a1e1c801833b12fe6aac7f95dd0a9",
+    "evidence": "G01-resumption.json",
+    "harness_and_test_sources_unchanged_since_that_revision": true,
+    "completion_ci_reused_dune_cache": true,
+    "note": "No forced rerun of cached Dune targets; docs and workflow shell checks ran at completion."
+  },
+  "independent_measurement_audit": {
+    "audit_utc": "2026-11-13T22:58:52.094272+00:00",
+    "audited_file": "/home/gongahkia/coding/projects/yeokcham/docs/implementation/results/G01-baseline.json",
+    "audited_sha256": "03e105c1c9ad56178f20b67bc1132c1a5795015d4346dce6d3c9b5f4115ed88b",
+    "independent_audit_script_sha256": "0ed254515e0f06d3aa9b15db1a4b472ae2d5a4b079eb99286719dd926de56524",
+    "partial": false,
+    "previous_prefix_preserved": "docs/implementation/results/G01-measurement-checkpoint.json",
+    "raw_input_root": "/home/gongahkia/.cache/yeokcham-g01/source-local-v2",
+    "pristine_contents_verified": true,
+    "cases": [
+      {
+        "bytes": 10485760,
+        "records": 152,
+        "measured": 140,
+        "warmups": 12,
+        "expected_restored_hashes": {
+          "initial_capture": "b6625b95d9d0e47d090658e1ac01f1660112dfa65aaa03f4ca4b3ee77b3f8160",
+          "undo_restore": "b6625b95d9d0e47d090658e1ac01f1660112dfa65aaa03f4ca4b3ee77b3f8160",
+          "no_op": "0215a977d70a254fbd2d35b55fefe55b232bc8f2cadf1d5c2b8c950ea3b007fc",
+          "small_edit": "ab5f5c5b131eb79e45329f55c9b8e4d6b379a88ee844937df4ccbf5aad76e024"
+        },
+        "complete": true
+      },
+      {
+        "bytes": 104857600,
+        "records": 152,
+        "measured": 140,
+        "warmups": 12,
+        "expected_restored_hashes": {
+          "initial_capture": "a2482d6706de2a8e10389130db702506eba3e03a77ba5b21633b0ec2fb2537c4",
+          "undo_restore": "a2482d6706de2a8e10389130db702506eba3e03a77ba5b21633b0ec2fb2537c4",
+          "no_op": "84b296bba811fa01b5b4a1c6a10e41d2ee4e86076dd1c2d917c8f6fcc68aa827",
+          "small_edit": "0d62bfb3ff3915d156c31a697e27d93e84e401ac96b49d0b630e4931b4c0612d"
+        },
+        "complete": true
+      }
+    ]
+  },
+  "independent_measurement_audit_sha256": "f40ccffb4aa00ea953eca8ac41646c0a74f1382ab98a46ce80e5abd537d0d441",
+  "pinned_provenance_audit": {
+    "verified_utc": "2026-11-13T23:00:09.518573+00:00",
+    "source_revision": "d03ac1e095af7c896eede2334c5a1f5fc50c4e74",
+    "all_tracked_export_files_match": true,
+    "binary_sha256": "8a7f77267e4d68907ffbf7a4999403f3906dc73ed4248f068776717a857dfec6",
+    "generator_sha256": "9f60efce36e6515a82b444620bf8fb334438c916de05c3e82af75021e038e433",
+    "current_runner_sha256": "56d6f10f92b2b08eb7cea4ab9fc6ac2cbcd055655e1ea24d2b97e8e0b3b4702f",
+    "original_runner_sha256": "9f2ddbe98d617d1ee722dd05b93bd34b19822902e88d71b57515f53d717ab21e",
+    "measurement_ast_unchanged": true,
+    "original_132_records_unchanged": true,
+    "original_snapshot_sha256": "0fa7a1dedc091ef561ef0e333e49dadff11c933b3815149716d83b06c676f267",
+    "current_machine_identity_matches_both_segments": true,
+    "current_machine": {
+      "platform": "Linux-6.18.33.2-microsoft-standard-WSL2-x86_64-with-glibc2.43",
+      "uname": [
+        "Linux",
+        "DESKTOP-GKM08D9",
+        "6.18.33.2-microsoft-standard-WSL2",
+        "#1 SMP PREEMPT_DYNAMIC Thu Jun 18 21:54:43 UTC 2026",
+        "x86_64",
+        ""
+      ],
+      "python": "3.14.8 (main, Sep 30 2026, 17:55:09) [GCC 13.3.0]",
+      "cpu_count": 12,
+      "cpu": "Architecture:                            x86_64\nCPU op-mode(s):                          32-bit, 64-bit\nAddress sizes:                           39 bits physical, 48 bits virtual\nByte Order:                              Little Endian\nCPU(s):                                  12\nOn-line CPU(s) list:                     0-11\nVendor ID:                               GenuineIntel\nModel name:                              13th Gen Intel(R) Core(TM) i7-1355U\nCPU family:                              6\nModel:                                   186\nThread(s) per core:                      2\nCore(s) per socket:                      6\nSocket(s):                               1\nStepping:                                3\nMicrocode version:                       0xffffffff\nBogoMIPS:                                5222.42\nFlags:                                   fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ss ht syscall nx pdpe1gb rdtscp lm constant_tsc rep_good nopl xtopology tsc_reliable nonstop_tsc cpuid tsc_known_freq pni pclmulqdq vmx ssse3 fma cx16 pcid sse4_1 sse4_2 x2apic movbe popcnt tsc_deadline_timer aes xsave avx f16c rdrand hypervisor lahf_lm abm 3dnowprefetch ssbd ibrs ibpb stibp ibrs_enhanced tpr_shadow ept vpid ept_ad fsgsbase tsc_adjust bmi1 avx2 smep bmi2 erms invpcid rdseed adx smap clflushopt clwb sha_ni xsaveopt xsavec xgetbv1 xsaves avx_vnni vnmi umip waitpkg gfni vaes vpclmulqdq rdpid movdiri movdir64b fsrm md_clear serialize ibt flush_l1d arch_capabilities\nVirtualization:                          VT-x\nHypervisor vendor:                       Microsoft\nVirtualization type:                     full\nL1d cache:                               288 KiB (6 instances)\nL1i cache:                               192 KiB (6 instances)\nL2 cache:                                7.5 MiB (6 instances)\nL3 cache:                                12 MiB (1 instance)\nNUMA node(s):                            1\nNUMA node0 CPU(s):                       0-11\nVulnerability Gather data sampling:      Not affected\nVulnerability Ghostwrite:                Not affected\nVulnerability Indirect target selection: Not affected\nVulnerability Itlb multihit:             Not affected\nVulnerability L1tf:                      Not affected\nVulnerability Mds:                       Not affected\nVulnerability Meltdown:                  Not affected\nVulnerability Mmio stale data:           Not affected\nVulnerability Old microcode:             Not affected\nVulnerability Reg file data sampling:    Mitigation; Clear Register File\nVulnerability Retbleed:                  Mitigation; Enhanced IBRS\nVulnerability Spec rstack overflow:      Not affected\nVulnerability Spec store bypass:         Mitigation; Speculative Store Bypass disabled via prctl\nVulnerability Spectre v1:                Mitigation; usercopy/swapgs barriers and __user pointer sanitization\nVulnerability Spectre v2:                Mitigation; Enhanced / Automatic IBRS; IBPB conditional; PBRSB-eIBRS SW sequence; BHI BHI_DIS_S\nVulnerability Srbds:                     Not affected\nVulnerability Tsa:                       Not affected\nVulnerability Tsx async abort:           Not affected\nVulnerability Vmscape:                   Not affected",
+      "memory": "total        used        free      shared  buff/cache   available\nMem:      5155467264  1255473152   402386944   138731520  3825598464  3899994112\nSwap:     6442450944  2111946752  4330504192",
+      "filesystem": "Filesystem     Type  1K-blocks      Used Available Use% Mounted on\n/dev/sdd       ext4 1055762868 151804736 850254660  16% /",
+      "storage": "NAME MODEL            ROTA   SIZE FSTYPE\nsda  Virtual Disk        1 356.9M \nsdb  Virtual Disk        1 159.4M \nsdc  Virtual Disk        1     6G \nsdd  Virtual Disk        1     1T",
+      "ocaml": "5.5.0",
+      "dune": "3.24.2",
+      "ocamlformat": "0.29.0"
+    },
+    "retained_storage": [
+      {
+        "bytes": 10485760,
+        "retained_storage_matches": true,
+        "du_allocated_bytes": 22761472
+      },
+      {
+        "bytes": 104857600,
+        "retained_storage_matches": true,
+        "du_allocated_bytes": 167014400
+      }
+    ],
+    "export_provenance": {
+      "revision": "d03ac1e095af7c896eede2334c5a1f5fc50c4e74",
+      "source": "/home/gongahkia/.cache/yeokcham-g01/pinned-source",
+      "build_command": [
+        "opam",
+        "exec",
+        "--switch",
+        "/home/gongahkia/coding/projects/yeokcham",
+        "--",
+        "dune",
+        "build",
+        "@all"
+      ],
+      "binary_sha256": "8a7f77267e4d68907ffbf7a4999403f3906dc73ed4248f068776717a857dfec6"
+    },
+    "export_provenance_sha256": "4e17f66723030ad34e54f79a833fafae7e31b1a7e935c87e429738066dfcd5c3",
+    "measurement_audit_sha256": "f40ccffb4aa00ea953eca8ac41646c0a74f1382ab98a46ce80e5abd537d0d441"
+  },
+  "pinned_provenance_audit_sha256": "a81914dd5e610ff34d7ac46d0688c5074bac52bb6389b5522dc965d827db3c8e",
+  "raw_snapshot": {
+    "observed_utc": "2026-11-13T22:58:48.855342+00:00",
+    "session_id": 79434,
+    "pid_at_launch": 154851,
+    "observed_exit_code": 0,
+    "raw_snapshot": "/home/gongahkia/.cache/yeokcham-g01/checkpoints/final-1794610728850154352",
+    "input_sha256": {
+      "summary.json": "91952fc8cb14e77f97a46f181b56755e92365c5271931878a408e358c106caea",
+      "source-10485760-1000/result.json": "c437e7ed3233ed696e66c5bac2ebc67d7ef15df130941b9bb5b3d85daca7b874",
+      "source-104857600-10000/result.json": "c0de3f3f9eb2266057217316315d3b5210d3003fc937a1f018aa718a6f745a97",
+      "source-10485760-1000/fixture-manifest.json": "4e509827536d558ebe5a7acaf2888eeaf48651aec376b5d122788f03c2675fa0",
+      "source-104857600-10000/fixture-manifest.json": "a8c193fc4d052f78bab787cce737351f5343abaf1a677d32a98005255d99c2eb"
+    }
+  },
+  "raw_snapshot_receipt_sha256": "6a78b4bc0185b474f2958b1969495922a3f42f5a7aabcae5e52f9d0f79d2adb2",
+  "implementation_commits_verified_ancestors": [
+    "5761fd69ff6856324a3ae265a58c8e3e8c785247",
+    "b1e78a92c6d095e30d78d1355af6b5fbcc215c42",
+    "48fd99a7a765dd12cb0ddcf54c80501b8fff2f28",
+    "547bef4cd33c44d1068159a305b230d5ffd22b41",
+    "c14443cca934b3666c439d4448925ed8b06addc8",
+    "b0fa2492957a1e1c801833b12fe6aac7f95dd0a9",
+    "e5beeefcff25590cb4cf50ab02c7e2d4428a25d6",
+    "950a450f080f8f5a62e7e460910099dd157e8841",
+    "e3ccae824c1aa03f4b6f984006e69033cefd95d1",
+    "5a69bb5b0a557f85b7f472be6af8fc7e16dc4163",
+    "35a95f7f0ce0df5c5400e666eeae02b876e280f6",
+    "1b69a3ac3f20b1e10158d6626703a09ed6a22e17",
+    "e385b9ce42fc0c708e0af95d52af92a33cb6ef43",
+    "7646362d80929e4f9cdccce0b90ac86beaa1a4a8"
+  ],
+  "changed_paths_from_phase_start": [
+    "docs/IMPLEMENTATION_PROGRESS.md",
+    "docs/implementation/BENCHMARK_HARNESS.md",
+    "docs/implementation/reports/G01-attempt-01.md",
+    "docs/implementation/reports/G01-attempt-02.md",
+    "docs/implementation/reports/G01-attempt-03.md",
+    "docs/implementation/reports/G01-attempt-04.md",
+    "docs/implementation/reports/G01-attempt-05.md",
+    "docs/implementation/reports/G01-attempt-06.md",
+    "docs/implementation/results/G01-baseline.json",
+    "docs/implementation/results/G01-baseline.md",
+    "docs/implementation/results/G01-environment.json",
+    "docs/implementation/results/G01-export-smoke-v2.json",
+    "docs/implementation/results/G01-export-smoke.json",
+    "docs/implementation/results/G01-harness-v2.json",
+    "docs/implementation/results/G01-measurement-checkpoint.json",
+    "docs/implementation/results/G01-resumption.json",
+    "test/dune",
+    "test/test_benchmark_fixture.py",
+    "test/test_benchmark_runner.py",
+    "tools/benchmark_fixture.py",
+    "tools/benchmark_runner.py",
+    "tools/benchmark_summary.py"
+  ],
+  "runtime_readme_makefile_ci_unchanged_from_pin": true,
+  "remaining_coverage": [
+    "1-GiB/full extended tiers unless selected; G19",
+    "1000/10000-node deep and branching sessions unless selected; G19",
+    "native macOS/Linux/Windows comparisons; G19/G20",
+    "10-minute idle CPU and 30-minute interference; G19",
+    "Git/codec comparisons and licensed real snapshots; G19",
+    "shared sync/review/integration, private archive/eviction, managed background scheduler: target operations not implemented at pinned baseline",
+    "device-level I/O bytes unavailable: rusage block counters only; no network operation"
+  ],
+  "coverage_ledger": "docs/IMPLEMENTATION_PROGRESS.md",
+  "phase_handoff_note": "This acceptance receipt records passed checks; the separate report/tracker handoff closes G01. Later gates remain pending."
+}
