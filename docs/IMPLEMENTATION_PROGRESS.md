@@ -18,9 +18,9 @@ verification, commits, and rollback. Each new agent reads and updates this file.
   checked resumption is live in session `79434`, PID `154851` at launch, after
   revalidating all ten retained checkpoints and preserving the accepted prefix.
   The 10-MiB tier passed all 140 measured samples and 12 excluded warmups;
-  the 100-MiB tier completed capture/no-op and is starting small-edit. The committed
+  the 100-MiB tier completed capture/no-op/small-edit and is running undo/restore. The committed
   [measurement checkpoint](implementation/results/G01-measurement-checkpoint.json)
-  preserves 210 measured records and 18 warmups at its observation time.
+  preserves 245 measured records and 21 warmups at its observation time.
   Later native OS, resource, and human
   evidence gates remain pending; they are not presumed available or passed.
 
@@ -36,7 +36,7 @@ files and TC08. Do not skip a failed phase or execute later prompts concurrently
 
 | Phase / copyable prompt | Prerequisite | Status | Implementation commits / latest report | Remaining |
 | --- | --- | --- | --- | --- |
-| [G01: Build the measurement harness and capture the local baseline](implementation/goals/G01-baseline.md) | Verified design baseline | in_progress | `5761fd69ff6856324a3ae265a58c8e3e8c785247`, `b1e78a92c6d095e30d78d1355af6b5fbcc215c42`, `48fd99a7a765dd12cb0ddcf54c80501b8fff2f28`, `547bef4cd33c44d1068159a305b230d5ffd22b41`, `c14443cca934b3666c439d4448925ed8b06addc8`, `b0fa2492957a1e1c801833b12fe6aac7f95dd0a9`, `e5beeefcff25590cb4cf50ab02c7e2d4428a25d6`, `950a450f080f8f5a62e7e460910099dd157e8841`, `e3ccae824c1aa03f4b6f984006e69033cefd95d1`; [attempt 06](implementation/reports/G01-attempt-06.md) | 100-MiB small-edit/undo, compact full results, acceptance audit; next G01 |
+| [G01: Build the measurement harness and capture the local baseline](implementation/goals/G01-baseline.md) | Verified design baseline | in_progress | `5761fd69ff6856324a3ae265a58c8e3e8c785247`, `b1e78a92c6d095e30d78d1355af6b5fbcc215c42`, `48fd99a7a765dd12cb0ddcf54c80501b8fff2f28`, `547bef4cd33c44d1068159a305b230d5ffd22b41`, `c14443cca934b3666c439d4448925ed8b06addc8`, `b0fa2492957a1e1c801833b12fe6aac7f95dd0a9`, `e5beeefcff25590cb4cf50ab02c7e2d4428a25d6`, `950a450f080f8f5a62e7e460910099dd157e8841`, `e3ccae824c1aa03f4b6f984006e69033cefd95d1`; [attempt 06](implementation/reports/G01-attempt-06.md) | 100-MiB undo/restore, compact full results, acceptance audit; next G01 |
 | [G02: Implement canonical records, identities, and shared interfaces](implementation/goals/G02-canonical-records.md) | G01 | pending | — | All criteria in prompt |
 | [G03: Implement causal authority, member identity, and review-policy evaluation](implementation/goals/G03-authority-policy.md) | G02 | pending | — | All criteria in prompt |
 | [G04: Implement deterministic composition and exact integration plans](implementation/goals/G04-composition-plans.md) | G03 | pending | — | All criteria in prompt |
@@ -178,6 +178,23 @@ partial phase. Do not relabel a partial phase complete to expose the next prompt
   `a67a6ec0fd3ca5aafefee01f6240e6d7273ffdf2245123d22bc885c8fffca242`.
   External audit `checkpoints/attempt-06.json`, SHA-256
   `b242e37b44c1cdb6cef1b75704689cc03caa07eab59c1c72778370c9424dc854`.
+- November 14, 02:02:49 SGT: the same process is live after 5h47m57s.
+  100-MiB small-edit completed all 5 cold / 3 excluded warmups / 30 warm samples;
+  undo/restore is the final operation. The 72,664-byte checkpoint preserves all
+  266 accepted records (245 measured and 21 warmups), including the earlier
+  228-record prefix unchanged. Its SHA-256 is
+  `c84ea3184da5d0867eb93a022a9b422ebe0249642c769b48532033b25154e2cb`.
+  Independent audit matched every raw field/command, input hash, expected restored
+  tree and recomputed statistic; the original 132 records also remain identical.
+  Small-edit cold median/range: 117.061 / 107.465–146.031 seconds; warm
+  median/p95: 71.043 / 108.231 seconds. These remain partial-profile results.
+  External inputs: `checkpoints/documentation-1794592969254993262`; audit:
+  `checkpoints/small-edit-complete-audit-1794592969254993262.json`, SHA-256
+  `7aa7f8f085705baa279f6ae41d5b0a3df3521efeb23854aa549bdbf41e3a6517`.
+  Reproducible independent diagnostic: external `audit_measurements.py`, SHA-256
+  `0ed254515e0f06d3aa9b15db1a4b472ae2d5a4b079eb99286719dd926de56524`;
+  invoke it with the committed checkpoint and optional previous checkpoint paths.
+  At this observation, 35 measured undo records and three warmups remain.
 - Large fixtures and full logs: `/home/gongahkia/.cache/yeokcham-g01`, outside Git.
 
 ## Evidence and coverage gates
