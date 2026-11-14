@@ -1,5 +1,8 @@
 (library
  (name yeokcham_snapshot)
+ (foreign_stubs
+  (language c)
+  (names yeokcham_scan_stubs))
  (libraries
   unix
   yeokcham_chunking
