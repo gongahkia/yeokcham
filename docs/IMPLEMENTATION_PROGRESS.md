@@ -8,13 +8,17 @@ verification, commits, and rollback. Each new agent reads and updates this file.
 
 - Design baseline: `d03ac1e095af7c896eede2334c5a1f5fc50c4e74`.
 - Branch: `main`; one implementation writer at a time.
-- Active implementation phase: none; G01 (`g01-local-baseline-2026-11-06`) complete.
+- Active implementation slice: P1 core-workflow foundation, session
+  `p1-core-foundation-2026-11-14`, starting clean main at
+  `4577f3456f9fce0246a61e3b1ec4740319d8442e`. G01 remains complete.
 - Next ready full-design phase: G02; unstarted. The user's current priority is
   the [complete core-workflow pilot](PILOT_PLAN.md), whose evaluation P0 is
-  complete and whose implementation slices P1-P4 are unstarted.
+  complete, P1 is in progress, and P2-P4 are unstarted. G02 has partial scope
+  assigned to P1; none of its criteria is yet claimed complete.
 - Completed phases in this chain: **1 / 20**.
 - G01 harness, local measurements, phase checks and acceptance report are complete.
-  Product runtime remains unchanged. Existing V1/undo functionality predates this chain.
+  Existing V1/undo functionality predates this chain. P1 is extending the shared
+  foundation; no new CLI workflow is claimed by starting it.
 - Current blocker: none. Session `79434` exited 0 after both tiers passed all
   280 measured records and 24 excluded warmups. The
   [complete baseline and budgets](implementation/results/G01-baseline.md) and
@@ -68,6 +72,14 @@ Allowed states: `pending`, `ready`, `in_progress`, `complete`, `blocked`,
 partial phase. Do not relabel a partial phase complete to expose the next prompt.
 
 ## Current-phase checkpoints
+
+- P1, November 14: verified clean main and ancestry of the pilot-plan and G01
+  handoff commits. Pilot receipt SHA-256 is
+  `d5ff0fd335fb2bd48b986a1f2c5289944d08ab91b974f1c616b7b13b545699df`;
+  accepted G01 result/acceptance hashes match. Read the pilot task, workflow,
+  progress, report template, TC01/TC02, TC03 identity boundaries, TC06 and TC08.
+  The inherited Next.js rule has no applicable package in this OCaml checkout.
+  One writer owns the common model/record/trust interfaces and registry.
 
 - G01 session: `g01-local-baseline-2026-11-06`; starting commit
   `0f162112ecdad0bedf98997f9b2b5b3a58457e5d`, clean `main`.

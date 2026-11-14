@@ -9,8 +9,9 @@ set of essential operations and optional capabilities around it. Local recovery
 is one part of that workflow. The broader direction in
 [Product design](PRODUCT_DESIGN.md) remains in place.
 
-The initial evaluation is complete. Core product implementation has not started.
-G01 remains complete; G02 is unstarted. G01-G20 remain the full-design backlog.
+The initial evaluation is complete. P1 core foundation implementation is in
+progress from 4577f3456f9fce0246a61e3b1ec4740319d8442e. G01 remains complete;
+G02 is only partially assigned to P1 and is not complete. G01-G20 remain the backlog.
 This pilot changes delivery order and the first milestone; it does not mark
 original criteria complete or relax privacy, authority, fidelity or recovery.
 
@@ -114,7 +115,7 @@ development ranges including tests/integration; host/participant waits add time.
 | Slice | Deliverable | Existing work to use | State / rough effort |
 | --- | --- | --- | --- |
 | P0: evaluate | This walkthrough, evidence and essential-operation inventory. | Current V1, G01 and existing designs/guides. | complete |
-| P1: core foundation | Canonical revision/accepted-version/branch records, workspace/history identities, bounded signed decoding, duplicate/collision handling and actual state/plan/error interfaces; golden/negative cases. | Relevant G02 contracts and encoding/envelope/record/model/trust modules. | pending; 1-3 days |
+| P1: core foundation | Canonical revision/accepted-version/branch records, workspace/history identities, bounded signed decoding, duplicate/collision handling and actual state/plan/error interfaces; golden/negative cases. | Relevant G02 contracts and encoding/envelope/record/model/trust modules. | in_progress; starting 4577f3456f9fce0246a61e3b1ec4740319d8442e |
 | P2: local work | Readable status/history/diff, native file/directory exclusions, tool-generated IDs/names, branch selection/private-work preservation and exact recovery. Reuse working capture/undo; profile before replacing storage. | Core parts of G03/G05/G06/G14; snapshot, undo, store, workspace and CLI. | pending; 3-5 days |
 | P3: shared loop | One native clone/materialization path, explicit selected sharing, verified exchange/retry, composition, preview/confirmation, journaled integration, conflict actions and accepted-history publication. Wire CLI alongside services. | Basic authority/heads G03, composition G04, transfer G08, integration G13 and CLI G14. | pending; 5-10 days |
 | P4: harden/handoff | Two-person/source/document/binary journeys, branches/offline cases, fault/retry/private-work tests, native onboarding, pilot responsiveness, concise instructions and actual user feedback; fix blockers. | Focused G18/G20 checks and affected domain tests. | pending; 3-7 days |
@@ -176,8 +177,8 @@ for these documentation-only changes.
 ## Next handoff
 
 Use the [scoped P1 task](implementation/goals/P01-core-workflow-foundation.md);
-preserve the original G02 remainder. Neither P1 nor G02 was started by the
-evaluation. Before delegating consumers, record
+preserve the original G02 remainder. P1 was separately invoked after the
+evaluation; no later slice has started. Before delegating consumers, record
 one registry owner, concrete module ownership and integration checks. Reconcile
 the existing workflow with the user's recorded worktree preference before using
 that future orchestration; this assessment used a single writer on main.
