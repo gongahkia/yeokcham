@@ -30,3 +30,31 @@ let names descriptor =
         | exception End_of_file -> List.sort String.compare reversed
       in
       loop [])
+
+external create_at : Unix.file_descr -> string -> Unix.file_descr
+  = "yeokcham_scan_create_at"
+
+external mkdir_at : Unix.file_descr -> string -> unit = "yeokcham_scan_mkdir_at"
+
+external symlink_at : Unix.file_descr -> string -> string -> unit
+  = "yeokcham_scan_symlink_at"
+
+external rename_at :
+  Unix.file_descr -> string -> Unix.file_descr -> string -> bool -> unit
+  = "yeokcham_scan_rename_at"
+
+let identity stamp =
+  match String.split_on_char ':' stamp with
+  | dev :: ino :: mode :: _ -> String.concat ":" [ dev; ino; mode ]
+  | _ -> invalid_arg "invalid native fingerprint"
+
+let stable stamp =
+  match String.split_on_char ':' stamp with
+  | [ dev; ino; mode; _links; size; mtime; nanoseconds; _ctime; _ctime_ns ] ->
+      String.concat ":" [ dev; ino; mode; size; mtime; nanoseconds ]
+  | _ -> invalid_arg "invalid native fingerprint"
+
+let device stamp =
+  match String.split_on_char ':' stamp with
+  | dev :: _ -> dev
+  | [] -> invalid_arg "invalid native fingerprint"

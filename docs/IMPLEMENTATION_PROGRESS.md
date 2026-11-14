@@ -556,3 +556,10 @@ records, not current proof.
   `test-cli-inspection-final.log`, and `test-*-json-final.log` in the session
   cache. Switch, safe application/interruption recovery and final P2 audit remain
   outstanding. No P3 work is claimed.
+
+P2 continuation checkpoint: added descriptor-relative exclusive moves/atomic
+exchanges, private streaming output and complete capture read sets. Five native
+filesystem tests passed on this Linux filesystem, including original-inode
+retention and no-follow refusal. These are prerequisites; safe journaled
+application and CLI branch switching remain incomplete. No macOS/Windows
+execution evidence is claimed.

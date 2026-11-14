@@ -1,3 +1,5 @@
+module Filesystem = Native
+
 type file_mode = Regular | Executable | Symlink
 
 module Ignore = Ignore
@@ -60,6 +62,12 @@ module Content : sig
       display bound. Larger manifests are verified with bounded streaming. *)
 
   val verify : Yeokcham_store.repository -> id -> (unit, error) result
+
+  val stream_to_fd :
+    Yeokcham_store.repository -> id -> Unix.file_descr -> (unit, error) result
+  (** Write to caller-owned private staging output with bounded verification.
+      Failure can leave partial staged bytes; success validates complete
+      content. *)
 end
 
 module Chunk : sig
@@ -216,4 +224,21 @@ module For_test : sig
     (Snapshot.id * Snapshot.t, error) result
   (** Trusted in-process fault injection only; never configured by project
       files, environment variables, a language server or incoming records. *)
+end
+
+module Observation : sig
+  type t
+
+  val scan :
+    root:string ->
+    store:Yeokcham_store.repository ->
+    (Snapshot.id * Snapshot.t * t, error) result
+
+  val entries : t -> (string list * string) list
+  val rules : t -> (string list * string option) list
+
+  val directories : t -> (string list * string * string list) list
+  (** Native fingerprints from one successful bounded consistent observation.
+      They do not reserve filesystem names or provide a filesystem transaction.
+  *)
 end

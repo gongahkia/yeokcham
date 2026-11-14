@@ -3,6 +3,7 @@ module Envelope = Yeokcham_envelope
 module Store = Yeokcham_store
 module Hash = Yeokcham_hash.Sha256
 module Ignore = Ignore
+module Filesystem = Native
 
 type file_mode = Regular | Executable | Symlink
 
@@ -438,7 +439,7 @@ module Manifest = struct
             Ok manifest
     | _ -> Error (Invalid_schema "file manifest must contain nine values")
 
-  let verify_stream repository manifest =
+  let verify_stream ?(consume = fun _ -> Ok ()) repository manifest =
     let* splitter =
       Yeokcham_chunking.create_splitter Yeokcham_chunking.default
       |> Result.map_error (fun e ->
@@ -473,6 +474,7 @@ module Manifest = struct
           else (
             total := !total + actual;
             hash := Hash.feed_string !hash bytes;
+            let* () = consume bytes in
             compare_chunks (Yeokcham_chunking.feed splitter bytes)))
         (Ok ()) manifest.chunks
     in
@@ -609,6 +611,49 @@ module Content = struct
 
   let verify repository identity =
     load_bounded repository ~max_bytes:0 identity |> Result.map (fun _ -> ())
+
+  let stream_to_fd repository identity descriptor =
+    let write bytes =
+      let rec loop offset =
+        if offset = String.length bytes then Ok ()
+        else
+          try
+            let count =
+              Unix.write_substring descriptor bytes offset
+                (String.length bytes - offset)
+            in
+            if count = 0 then
+              Error
+                (Scan_error
+                   {
+                     path = "<staged descriptor>";
+                     operation = "write";
+                     message = "write returned zero";
+                   })
+            else loop (offset + count)
+          with Unix.Unix_error (error, operation, _) ->
+            Error
+              (Scan_error
+                 {
+                   path = "<staged descriptor>";
+                   operation;
+                   message = Unix.error_message error;
+                 })
+      in
+      loop 0
+    in
+    let* object_ =
+      Store.get repository (stored_object_id identity)
+      |> Result.map_error (fun e -> Store_error e)
+    in
+    let actual = Envelope.object_type object_ in
+    if actual = Envelope.Content then
+      let* bytes = decode (Envelope.payload object_) in
+      write bytes
+    else if actual = Envelope.File_manifest then
+      let* manifest = Manifest.decode (Envelope.payload object_) in
+      Manifest.verify_stream ~consume:write repository manifest
+    else Error (Unexpected_object_type { expected = Envelope.Content; actual })
 end
 
 module Tree = struct
@@ -1420,7 +1465,7 @@ let capture_with_fd parent name directory path f =
   in
   Fun.protect ~finally:(fun () -> close_capture_fd fd) (fun () -> f fd)
 
-let scan_with_observer ~observe ~excluded_root_names ~root ~store =
+let scan_with_observer ~complete ~observe ~excluded_root_names ~root ~store =
   let* root_stat =
     try Ok (Unix.lstat root)
     with Unix.Unix_error (error, _, _) ->
@@ -1616,6 +1661,7 @@ let scan_with_observer ~observe ~excluded_root_names ~root ~store =
             in
             let snapshot = Snapshot.create ~root:root_tree in
             let* identity = Snapshot.store store snapshot in
+            complete !observations;
             Ok (identity, snapshot))
     in
     let[@warning "-4"] rec retry remaining =
@@ -1627,7 +1673,10 @@ let scan_with_observer ~observe ~excluded_root_names ~root ~store =
     retry 3
 
 let scan_excluding_root_names ~excluded_root_names ~root ~store =
-  scan_with_observer ~observe:(fun _ _ -> ()) ~excluded_root_names ~root ~store
+  scan_with_observer
+    ~complete:(fun _ -> ())
+    ~observe:(fun _ _ -> ())
+    ~excluded_root_names ~root ~store
 
 let scan ~root ~store =
   scan_excluding_root_names ~excluded_root_names:[ ".yeokcham"; ".git" ] ~root
@@ -1637,6 +1686,47 @@ module For_test = struct
   type stage = capture_stage = Before_open | After_read | Before_publish
 
   let scan ~observe ~root ~store =
-    scan_with_observer ~observe ~excluded_root_names:[ ".yeokcham"; ".git" ]
-      ~root ~store
+    scan_with_observer
+      ~complete:(fun _ -> ())
+      ~observe ~excluded_root_names:[ ".yeokcham"; ".git" ] ~root ~store
+end
+
+module Observation = struct
+  type t = observation list
+
+  let scan ~root ~store =
+    let observations = ref [] in
+    let* id, value =
+      scan_with_observer
+        ~complete:(fun complete -> observations := complete)
+        ~observe:(fun _ _ -> ())
+        ~excluded_root_names:[ ".yeokcham"; ".git" ] ~root ~store
+    in
+    Ok (id, value, !observations)
+
+  let entries observations =
+    List.filter_map
+      (function
+        | Observed_entry (path, Some stamp) -> Some (path, stamp)
+        | Observed_directory (path, stamp, _) -> Some (path, stamp)
+        | Observed_entry (_, None) -> None)
+      observations
+    |> List.sort_uniq compare
+
+  let rules observations =
+    List.filter_map
+      (function
+        | Observed_entry (path, stamp)
+          when List.rev path |> List.hd = ".yeokchamignore" ->
+            Some (path, stamp)
+        | Observed_entry _ | Observed_directory _ -> None)
+      observations
+    |> List.sort_uniq compare
+
+  let directories observations =
+    List.filter_map
+      (function
+        | Observed_directory (path, stamp, names) -> Some (path, stamp, names)
+        | Observed_entry _ -> None)
+      observations
 end

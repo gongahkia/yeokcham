@@ -1,3 +1,8 @@
+(test
+ (name test_native_materialize)
+ (modules test_native_materialize)
+ (libraries alcotest unix yeokcham_snapshot yeokcham_store))
+
 (rule
  (alias runtest)
  (deps test_local_inspection_cli.py ../bin/yeokcham_v1.exe)

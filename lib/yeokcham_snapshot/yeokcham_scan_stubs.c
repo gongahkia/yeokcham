@@ -12,6 +12,13 @@
 #include <inttypes.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#ifdef __linux__
+#include <sys/syscall.h>
+#include <linux/fs.h>
+#endif
+#ifdef __APPLE__
+#include <stdio.h>
+#endif
 
 static value fingerprint(const struct stat *s) {
 #ifdef __APPLE__
@@ -84,6 +91,56 @@ CAMLprim value yeokcham_scan_readlink_at(value parent, value name) {
   }
 }
 
+CAMLprim value yeokcham_scan_create_at(value parent, value name) {
+  CAMLparam2(parent, name);
+  caml_unix_check_path(name, "openat-create");
+  int fd = openat(Int_val(parent), String_val(name),
+                  O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0600);
+  if (fd < 0) caml_uerror("openat-create", name);
+  CAMLreturn(Val_int(fd));
+}
+
+CAMLprim value yeokcham_scan_mkdir_at(value parent, value name) {
+  CAMLparam2(parent, name);
+  caml_unix_check_path(name, "mkdirat");
+  if (mkdirat(Int_val(parent), String_val(name), 0700) < 0) caml_uerror("mkdirat", name);
+  CAMLreturn(Val_unit);
+}
+
+CAMLprim value yeokcham_scan_symlink_at(value parent, value name, value target) {
+  CAMLparam3(parent, name, target);
+  caml_unix_check_path(name, "symlinkat");
+  caml_unix_check_path(target, "symlinkat-target");
+  if (symlinkat(String_val(target), Int_val(parent), String_val(name)) < 0)
+    caml_uerror("symlinkat", name);
+  CAMLreturn(Val_unit);
+}
+
+CAMLprim value yeokcham_scan_rename_at(value source, value name, value destination, value target, value exchange) {
+  CAMLparam5(source, name, destination, target, exchange);
+  caml_unix_check_path(name, "renameat-source");
+  caml_unix_check_path(target, "renameat-target");
+  int result;
+#ifdef __linux__
+#ifdef SYS_renameat2
+  result = syscall(SYS_renameat2, Int_val(source), String_val(name),
+                   Int_val(destination), String_val(target),
+                   Bool_val(exchange) ? RENAME_EXCHANGE : RENAME_NOREPLACE);
+#else
+  errno = ENOSYS;
+  result = -1;
+#endif
+#elif defined(__APPLE__)
+  result = renameatx_np(Int_val(source), String_val(name), Int_val(destination),
+                        String_val(target), Bool_val(exchange) ? RENAME_SWAP : RENAME_EXCL);
+#else
+  errno = ENOSYS;
+  result = -1;
+#endif
+  if (result < 0) caml_uerror("renameat-exclusive", target);
+  CAMLreturn(Val_unit);
+}
+
 static void directory_finalize(value handle) {
   DIR **directory = (DIR **)Data_custom_val(handle);
   if (*directory) { closedir(*directory); *directory = NULL; }
@@ -147,5 +204,20 @@ CAMLprim value yeokcham_scan_inspect_at(value a, value b) {
 }
 CAMLprim value yeokcham_scan_readlink_at(value a, value b) {
   (void)a; (void)b; caml_failwith("native no-follow capture is unavailable");
+}
+#endif
+
+#ifdef _WIN32
+CAMLprim value yeokcham_scan_create_at(value a, value b) {
+  (void)a; (void)b; caml_failwith("native exclusive materialization is unavailable");
+}
+CAMLprim value yeokcham_scan_mkdir_at(value a, value b) {
+  (void)a; (void)b; caml_failwith("native exclusive materialization is unavailable");
+}
+CAMLprim value yeokcham_scan_symlink_at(value a, value b, value c) {
+  (void)a; (void)b; (void)c; caml_failwith("native exclusive materialization is unavailable");
+}
+CAMLprim value yeokcham_scan_rename_at(value a, value b, value c, value d, value e) {
+  (void)a; (void)b; (void)c; (void)d; (void)e; caml_failwith("native exclusive materialization is unavailable");
 }
 #endif

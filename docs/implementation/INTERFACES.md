@@ -505,3 +505,13 @@ missing content, namespace errors, terminal controls and byte paths/roots.
 Eight branch cases additionally cover actual creation outcomes and unavailable
 signers. These journeys use real immutable records/durable state with the explicit
 disposable test signer; native credential-service acceptance is not inferred.
+
+P2 safe-application prerequisites expose `Yeokcham_snapshot.Filesystem` for
+no-follow descriptor-relative inspection, exclusive creation, exclusive rename
+and atomic exchange. Unsupported rename adapters refuse; no overwrite fallback
+is used. `Content.stream_to_fd` verifies full content while writing only to a
+caller-owned private staging file. Failure may leave partial staged bytes.
+`Observation.scan` returns the successful capture's included-entry fingerprints,
+ignore-rule read set and raw directory names (without reading ignored contents).
+These observations do not reserve names or constitute a filesystem transaction.
+The existing destructive restore path is not yet replaced by these primitives.
