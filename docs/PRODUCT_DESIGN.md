@@ -1,6 +1,6 @@
 # Yeokcham product design and discussion record
 
-Status: design in progress. Updated November 6, 2026.
+Status: design in progress. Updated November 14, 2026.
 
 This document records agreed direction, proposed behavior, and unresolved
 decisions before implementation is delegated. Approval of a product direction
@@ -71,6 +71,7 @@ restricted to a recovery utility; that earlier suggestion was not accepted.
 | D27 | Require renewed approval after reviewed content or relevant context changes by default; allow an authorized repository-policy opt-out with a warning. Keep this independent of D18's personal confirmation opt-out. | Agreed; required reviews remain opt-in, historical approval scope stays exact, and conflict/integrity checks always apply |
 | D28 | Choose logical defaults for the remaining technical, CLI, review, and validation choices without another preference round, and record them in the design documents. | Authorized; selected defaults in TC03-TC08 and linked designs, implementation still separate |
 | D29 | Execute implementation through copyable sequential `/goal` prompts with evidence reports, a persistent progress ledger, and atomic commits on `main`. Limit README edits to accurate additions or corrections of obvious outdated/wrong content. | Authorized workflow; G01-G20 prepared, no implementation goal started by the handoff setup |
+| D30 | Prioritize a complete everyday VCS pilot: start/obtain a project, inspect/save/history, branch/switch, recover, explicitly share/receive, integrate and resolve conflicts. Deliver optional capabilities afterward while preserving privacy, authority and recovery guarantees. | Agreed November 14; [pilot evaluation and delivery slices](PILOT_PLAN.md) recorded. This amends delivery order, not the broader product direction. G01 complete; pilot implementation unstarted. |
 
 ## Discussion minutes
 

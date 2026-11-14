@@ -1,0 +1,964 @@
+{
+  "schema": "yeokcham-pilot-workflow-assessment-v1",
+  "revision": "f3bd17705591413078e1504d46d8240eb6c47f2e",
+  "binary_sha256": "b4834ffd225a8bb1ce548edb5b83b20836f32e6df4f23fc86d284138ec35fa67",
+  "platform": "Linux-6.18.33.2-microsoft-standard-WSL2-x86_64-with-glibc2.43",
+  "started_utc": "2026-11-14T04:05:27.369442+00:00",
+  "finished_utc": "2026-11-14T04:06:44.818705+00:00",
+  "status": "completed_with_product_gaps",
+  "artifact_root": "/home/gongahkia/.cache/yeokcham-pilot-20261114-jef0er2n",
+  "scope": "single walkthrough of tiny disposable text/binary project; no benchmark or native custody claim",
+  "fixture": {
+    "description": "five regular files, one symlink, one empty directory",
+    "initial_inventory": [
+      {
+        "path": ".yeokchamignore",
+        "kind": "file",
+        "bytes": 14,
+        "sha256": "04475e1187ae5e49cab9aa154dcee67ab267309f74c919f3797c3124a02257ef",
+        "executable": false
+      },
+      {
+        "path": "asset.bin",
+        "kind": "file",
+        "bytes": 17152,
+        "sha256": "f4ce9f2c6d112aecf8a2451be615d8151972a6d184add6df3c4af7223dbc9afa",
+        "executable": false
+      },
+      {
+        "path": "document with spaces.txt",
+        "kind": "file",
+        "bytes": 35,
+        "sha256": "578e20899ee8c2549bc176e3331dd88b96dd2cd41d144b3a99e0942de8eed74d",
+        "executable": false
+      },
+      {
+        "path": "empty-directory",
+        "kind": "directory"
+      },
+      {
+        "path": "note-link",
+        "kind": "symlink",
+        "target": "note.txt"
+      },
+      {
+        "path": "note.txt",
+        "kind": "file",
+        "bytes": 14,
+        "sha256": "21106042ce10397e374bd7eaeb530f4d41a2b119621ffa71079ce3b5245d6566",
+        "executable": false
+      },
+      {
+        "path": "run.sh",
+        "kind": "file",
+        "bytes": 17,
+        "sha256": "306c6ca7407560340797866e077e053627ad409277d1b9da58106fce4cf717cb",
+        "executable": true
+      }
+    ]
+  },
+  "watch": {
+    "captured_changed_node": true,
+    "exit_after_requested_stop": -15,
+    "elapsed_seconds_single_observation": 1.733029450988397,
+    "log_sha256": "610d3c08a9f30b597106e5fde6af32969e75d3889a4b454488f0b0321fbf834b"
+  },
+  "checks": [
+    {
+      "label": "initial history has one available node",
+      "passed": true
+    },
+    {
+      "label": "unchanged save creates no history node",
+      "passed": true
+    },
+    {
+      "label": "undo preview preserves files and history",
+      "passed": true
+    },
+    {
+      "label": "undo restores exact B including binary/modes/symlink/empty directory",
+      "passed": true
+    },
+    {
+      "label": "ambiguous redo preserves current files",
+      "passed": true
+    },
+    {
+      "label": "selected continuation C restores exactly",
+      "passed": true
+    },
+    {
+      "label": "alternate continuation D survives fresh CLI processes",
+      "passed": true
+    },
+    {
+      "label": "unsaved disk edit is recoverable exactly",
+      "passed": true
+    },
+    {
+      "label": "separate restore has exact C fidelity",
+      "passed": true
+    },
+    {
+      "label": "separate restore preserves live unsaved/private state",
+      "passed": true
+    },
+    {
+      "label": "ignored live file refusal leaves all files intact",
+      "passed": true
+    },
+    {
+      "label": "foreground watch captures a disk edit",
+      "passed": true
+    },
+    {
+      "label": "draft new does not switch ordinary files",
+      "passed": true
+    },
+    {
+      "label": "join preserves an empty Bob worktree",
+      "passed": true
+    },
+    {
+      "label": "Bob can inspect the received shared revision",
+      "passed": true
+    },
+    {
+      "label": "receive does not materialize Bob files",
+      "passed": true
+    },
+    {
+      "label": "refused activation leaves Bob worktree empty",
+      "passed": true
+    }
+  ],
+  "executed_cli_invocations": 60,
+  "passed_walkthrough_checks": 17,
+  "build": {
+    "command": [
+      "make",
+      "build"
+    ],
+    "exit_code": 0,
+    "note": "Executed before walkthrough; no product source edits."
+  },
+  "external_artifacts": {
+    "assessment.json": {
+      "path": "/home/gongahkia/.cache/yeokcham-pilot-20261114-jef0er2n/assessment.json",
+      "sha256": "84f2e8c1245bd441c64df17fe56b59bafd91d01f4af3ba9eeb44d7080748a6d9",
+      "bytes": 107007
+    },
+    "evaluate.py": {
+      "path": "/home/gongahkia/.cache/yeokcham-pilot-20261114-jef0er2n/evaluate.py",
+      "sha256": "6deb46f458b210526f22d6668573a81726f295debb51fb8577aeeac9aa5bfb02",
+      "bytes": 13178
+    },
+    "watch.log": {
+      "path": "/home/gongahkia/.cache/yeokcham-pilot-20261114-jef0er2n/watch.log",
+      "sha256": "610d3c08a9f30b597106e5fde6af32969e75d3889a4b454488f0b0321fbf834b",
+      "bytes": 85
+    }
+  },
+  "reproduction": {
+    "driver_command": [
+      "python3",
+      "-B",
+      "/home/gongahkia/.cache/yeokcham-pilot-20261114-jef0er2n/evaluate.py"
+    ],
+    "note": "Copy driver into a fresh external directory for a new run; preserve existing fixtures and signers. Driver runs first 57 CLI invocations. Final three decision probes are listed in steps. Exact original commands/outputs in hashed external receipt; ROOT below expands to artifact_root and BINARY is the assessed checkout executable. No G01 run is repeated."
+  },
+  "steps": [
+    {
+      "label": "version",
+      "arguments": [
+        "--version"
+      ],
+      "exit_code": 0,
+      "expected_exit": 0,
+      "seconds_single_observation": 0.006291
+    },
+    {
+      "label": "ordinary-help",
+      "arguments": [
+        "--help"
+      ],
+      "exit_code": 0,
+      "expected_exit": 0,
+      "seconds_single_observation": 0.007194
+    },
+    {
+      "label": "native-onboarding-probe",
+      "arguments": [
+        "init",
+        "--username",
+        "probe",
+        "--draft",
+        "probe",
+        "--title",
+        "Disposable native probe",
+        "--root",
+        "ROOT/native-probe"
+      ],
+      "exit_code": 2,
+      "expected_exit": null,
+      "seconds_single_observation": 0.085695,
+      "stderr_first_line": "Linux Secret Service is unavailable or rejected the request"
+    },
+    {
+      "label": "initialize-alice",
+      "arguments": [
+        "init",
+        "--username",
+        "alice",
+        "--draft",
+        "first-task",
+        "--title",
+        "First task",
+        "--root",
+        "ROOT/alice"
+      ],
+      "exit_code": 0,
+      "expected_exit": 0,
+      "seconds_single_observation": 0.258408
+    },
+    {
+      "label": "initial-history",
+      "arguments": [
+        "undo-tree",
+        "--format",
+        "json",
+        "--root",
+        "ROOT/alice"
+      ],
+      "exit_code": 0,
+      "expected_exit": 0,
+      "seconds_single_observation": 0.011214
+    },
+    {
+      "label": "status-text",
+      "arguments": [
+        "status",
+        "--root",
+        "ROOT/alice"
+      ],
+      "exit_code": 0,
+      "expected_exit": 0,
+      "seconds_single_observation": 0.126083
+    },
+    {
+      "label": "status-json",
+      "arguments": [
+        "status",
+        "--format",
+        "json",
+        "--root",
+        "ROOT/alice"
+      ],
+      "exit_code": 0,
+      "expected_exit": 0,
+      "seconds_single_observation": 0.109386,
+      "stdout": "{\"schema_version\":1,\"command\":\"status\",\"ok\":true,\"result\":{\"outcome\":\"completed\"},\"warnings\":[],\"error\":null}\n"
+    },
+    {
+      "label": "unchanged-save",
+      "arguments": [
+        "save",
+        "--root",
+        "ROOT/alice"
+      ],
+      "exit_code": 0,
+      "expected_exit": 0,
+      "seconds_single_observation": 0.116208
+    },
+    {
+      "label": "history-after-noop",
+      "arguments": [
+        "undo-tree",
+        "--format",
+        "json",
+        "--root",
+        "ROOT/alice"
+      ],
+      "exit_code": 0,
+      "expected_exit": 0,
+      "seconds_single_observation": 0.012063
+    },
+    {
+      "label": "inspect-change",
+      "arguments": [
+        "changes",
+        "--root",
+        "ROOT/alice"
+      ],
+      "exit_code": 0,
+      "expected_exit": 0,
+      "seconds_single_observation": 0.15882
+    },
+    {
+      "label": "save-B",
+      "arguments": [
+        "save",
+        "--root",
+        "ROOT/alice"
+      ],
+      "exit_code": 0,
+      "expected_exit": 0,
+      "seconds_single_observation": 0.185581
+    },
+    {
+      "label": "save-C",
+      "arguments": [
+        "save",
+        "--root",
+        "ROOT/alice"
+      ],
+      "exit_code": 0,
+      "expected_exit": 0,
+      "seconds_single_observation": 0.186208
+    },
+    {
+      "label": "history-at-C",
+      "arguments": [
+        "undo-tree",
+        "--format",
+        "json",
+        "--root",
+        "ROOT/alice"
+      ],
+      "exit_code": 0,
+      "expected_exit": 0,
+      "seconds_single_observation": 0.011562
+    },
+    {
+      "label": "preview-undo",
+      "arguments": [
+        "undo",
+        "--dry-run",
+        "--root",
+        "ROOT/alice"
+      ],
+      "exit_code": 0,
+      "expected_exit": 0,
+      "seconds_single_observation": 0.135085
+    },
+    {
+      "label": "history-after-preview",
+      "arguments": [
+        "undo-tree",
+        "--format",
+        "json",
+        "--root",
+        "ROOT/alice"
+      ],
+      "exit_code": 0,
+      "expected_exit": 0,
+      "seconds_single_observation": 0.012904
+    },
+    {
+      "label": "undo-to-B",
+      "arguments": [
+        "undo",
+        "--root",
+        "ROOT/alice"
+      ],
+      "exit_code": 0,
+      "expected_exit": 0,
+      "seconds_single_observation": 0.417142
+    },
+    {
+      "label": "save-D",
+      "arguments": [
+        "save",
+        "--root",
+        "ROOT/alice"
+      ],
+      "exit_code": 0,
+      "expected_exit": 0,
+      "seconds_single_observation": 0.162033
+    },
+    {
+      "label": "history-at-D",
+      "arguments": [
+        "undo-tree",
+        "--format",
+        "json",
+        "--root",
+        "ROOT/alice"
+      ],
+      "exit_code": 0,
+      "expected_exit": 0,
+      "seconds_single_observation": 0.012831
+    },
+    {
+      "label": "undo-D-to-B",
+      "arguments": [
+        "undo",
+        "--root",
+        "ROOT/alice"
+      ],
+      "exit_code": 0,
+      "expected_exit": 0,
+      "seconds_single_observation": 0.408543
+    },
+    {
+      "label": "ambiguous-redo",
+      "arguments": [
+        "redo",
+        "--root",
+        "ROOT/alice"
+      ],
+      "exit_code": 2,
+      "expected_exit": 2,
+      "seconds_single_observation": 0.15102,
+      "stderr_first_line": "local undo history: choose a redo branch with --node: 2, 3"
+    },
+    {
+      "label": "select-C",
+      "arguments": [
+        "redo",
+        "--node",
+        "2",
+        "--root",
+        "ROOT/alice"
+      ],
+      "exit_code": 0,
+      "expected_exit": 0,
+      "seconds_single_observation": 0.362746
+    },
+    {
+      "label": "select-D",
+      "arguments": [
+        "undo",
+        "--to",
+        "3",
+        "--root",
+        "ROOT/alice"
+      ],
+      "exit_code": 0,
+      "expected_exit": 0,
+      "seconds_single_observation": 0.359155
+    },
+    {
+      "label": "undo-preserves-unsaved-E",
+      "arguments": [
+        "undo",
+        "--root",
+        "ROOT/alice"
+      ],
+      "exit_code": 0,
+      "expected_exit": 0,
+      "seconds_single_observation": 0.432321
+    },
+    {
+      "label": "history-with-preserved-E",
+      "arguments": [
+        "undo-tree",
+        "--format",
+        "json",
+        "--root",
+        "ROOT/alice"
+      ],
+      "exit_code": 0,
+      "expected_exit": 0,
+      "seconds_single_observation": 0.012301
+    },
+    {
+      "label": "recover-preserved-E",
+      "arguments": [
+        "redo",
+        "--node",
+        "4",
+        "--root",
+        "ROOT/alice"
+      ],
+      "exit_code": 0,
+      "expected_exit": 0,
+      "seconds_single_observation": 0.381651
+    },
+    {
+      "label": "restore-C-to-separate-directory",
+      "arguments": [
+        "restore",
+        "--checkpoint",
+        "2c0008ed88244c09662abe550caf6e000cea35b6d93780ba526539c8b6cb6492",
+        "--destination",
+        "ROOT/recovered",
+        "--root",
+        "ROOT/alice"
+      ],
+      "exit_code": 0,
+      "expected_exit": 0,
+      "seconds_single_observation": 0.020591
+    },
+    {
+      "label": "undo-with-ignored-live-file",
+      "arguments": [
+        "undo",
+        "--to",
+        "2",
+        "--root",
+        "ROOT/alice"
+      ],
+      "exit_code": 2,
+      "expected_exit": 2,
+      "seconds_single_observation": 0.161193,
+      "stderr_first_line": "in-place replacement would remove ignored path \"scratch-cache\", which has no safety checkpoint; move it outside the working tree or restore to an empty destination"
+    },
+    {
+      "label": "timeline",
+      "arguments": [
+        "timeline",
+        "--root",
+        "ROOT/alice"
+      ],
+      "exit_code": 0,
+      "expected_exit": 0,
+      "seconds_single_observation": 0.010584
+    },
+    {
+      "label": "history-before-watch",
+      "arguments": [
+        "undo-tree",
+        "--root",
+        "ROOT/alice"
+      ],
+      "exit_code": 0,
+      "expected_exit": 0,
+      "seconds_single_observation": 0.008623
+    },
+    {
+      "label": "watch-start-history",
+      "arguments": [
+        "undo-tree",
+        "--format",
+        "json",
+        "--root",
+        "ROOT/alice"
+      ],
+      "exit_code": 0,
+      "expected_exit": 0,
+      "seconds_single_observation": 0.011106
+    },
+    {
+      "label": "watch-poll-30",
+      "arguments": [
+        "undo-tree",
+        "--format",
+        "json",
+        "--root",
+        "ROOT/alice"
+      ],
+      "exit_code": 0,
+      "expected_exit": 0,
+      "seconds_single_observation": 0.014137
+    },
+    {
+      "label": "watch-poll-31",
+      "arguments": [
+        "undo-tree",
+        "--format",
+        "json",
+        "--root",
+        "ROOT/alice"
+      ],
+      "exit_code": 0,
+      "expected_exit": 0,
+      "seconds_single_observation": 0.009142
+    },
+    {
+      "label": "watch-poll-32",
+      "arguments": [
+        "undo-tree",
+        "--format",
+        "json",
+        "--root",
+        "ROOT/alice"
+      ],
+      "exit_code": 0,
+      "expected_exit": 0,
+      "seconds_single_observation": 0.012513
+    },
+    {
+      "label": "watch-poll-33",
+      "arguments": [
+        "undo-tree",
+        "--format",
+        "json",
+        "--root",
+        "ROOT/alice"
+      ],
+      "exit_code": 0,
+      "expected_exit": 0,
+      "seconds_single_observation": 0.014564
+    },
+    {
+      "label": "watch-poll-34",
+      "arguments": [
+        "undo-tree",
+        "--format",
+        "json",
+        "--root",
+        "ROOT/alice"
+      ],
+      "exit_code": 0,
+      "expected_exit": 0,
+      "seconds_single_observation": 0.015391
+    },
+    {
+      "label": "watch-poll-35",
+      "arguments": [
+        "undo-tree",
+        "--format",
+        "json",
+        "--root",
+        "ROOT/alice"
+      ],
+      "exit_code": 0,
+      "expected_exit": 0,
+      "seconds_single_observation": 0.013589
+    },
+    {
+      "label": "watch-poll-36",
+      "arguments": [
+        "undo-tree",
+        "--format",
+        "json",
+        "--root",
+        "ROOT/alice"
+      ],
+      "exit_code": 0,
+      "expected_exit": 0,
+      "seconds_single_observation": 0.007928
+    },
+    {
+      "label": "start-another-draft",
+      "arguments": [
+        "draft",
+        "new",
+        "--id",
+        "second-task",
+        "--title",
+        "Second task",
+        "--root",
+        "ROOT/alice"
+      ],
+      "exit_code": 0,
+      "expected_exit": 0,
+      "seconds_single_observation": 0.073116
+    },
+    {
+      "label": "share-explicit-change",
+      "arguments": [
+        "share",
+        "--change",
+        "pilot-change",
+        "--revision",
+        "pilot-revision",
+        "--root",
+        "ROOT/alice"
+      ],
+      "exit_code": 0,
+      "expected_exit": 0,
+      "seconds_single_observation": 0.19224
+    },
+    {
+      "label": "shared-log",
+      "arguments": [
+        "log",
+        "--root",
+        "ROOT/alice"
+      ],
+      "exit_code": 0,
+      "expected_exit": 0,
+      "seconds_single_observation": 0.012888
+    },
+    {
+      "label": "create-bob-device",
+      "arguments": [
+        "device",
+        "create"
+      ],
+      "exit_code": 0,
+      "expected_exit": 0,
+      "seconds_single_observation": 0.008411
+    },
+    {
+      "label": "enroll-bob",
+      "arguments": [
+        "device",
+        "enroll",
+        "--device",
+        "436785089c880d5f0946dbe415e1066212194900139860166c4668b3019ba303",
+        "--public-key",
+        "dce53f91bf2c5707a0d7fbf1159ec05c40f3be9bd5c2cbbcf62d5a250b5c1130",
+        "--username",
+        "bob",
+        "--root",
+        "ROOT/alice"
+      ],
+      "exit_code": 0,
+      "expected_exit": 0,
+      "seconds_single_observation": 0.0794
+    },
+    {
+      "label": "create-public-package",
+      "arguments": [
+        "package",
+        "create",
+        "--destination",
+        "ROOT/public-package",
+        "--root",
+        "ROOT/alice"
+      ],
+      "exit_code": 0,
+      "expected_exit": 0,
+      "seconds_single_observation": 0.032607
+    },
+    {
+      "label": "bob-join",
+      "arguments": [
+        "join",
+        "--username",
+        "bob",
+        "--draft",
+        "bob-work",
+        "--title",
+        "Bob work",
+        "--device",
+        "436785089c880d5f0946dbe415e1066212194900139860166c4668b3019ba303",
+        "--from",
+        "ROOT/public-package",
+        "--verify-phrase",
+        "wagon more coffee such topic umbrella cinnamon person sleep carpet decline subway",
+        "--root",
+        "ROOT/bob"
+      ],
+      "exit_code": 0,
+      "expected_exit": 0,
+      "seconds_single_observation": 0.095423
+    },
+    {
+      "label": "bob-receive",
+      "arguments": [
+        "receive",
+        "--from",
+        "ROOT/public-package",
+        "--root",
+        "ROOT/bob"
+      ],
+      "exit_code": 0,
+      "expected_exit": 0,
+      "seconds_single_observation": 0.23175
+    },
+    {
+      "label": "bob-inspect-received-history",
+      "arguments": [
+        "log",
+        "--root",
+        "ROOT/bob"
+      ],
+      "exit_code": 0,
+      "expected_exit": 0,
+      "seconds_single_observation": 0.011539
+    },
+    {
+      "label": "bob-activate-received-work",
+      "arguments": [
+        "workspace",
+        "activate",
+        "--root",
+        "ROOT/bob"
+      ],
+      "exit_code": 2,
+      "expected_exit": 2,
+      "seconds_single_observation": 0.009239,
+      "stderr_first_line": "workspace has no verified imported projection basis"
+    },
+    {
+      "label": "bob-update-received-work",
+      "arguments": [
+        "workspace",
+        "update",
+        "--root",
+        "ROOT/bob"
+      ],
+      "exit_code": 2,
+      "expected_exit": 2,
+      "seconds_single_observation": 0.061171,
+      "stderr_first_line": "workspace has no verified imported projection basis"
+    },
+    {
+      "label": "clone-entry-point",
+      "arguments": [
+        "clone",
+        "https://example.invalid/project",
+        "--root",
+        "ROOT/alice"
+      ],
+      "exit_code": 2,
+      "expected_exit": 2,
+      "seconds_single_observation": 0.007278,
+      "stderr_first_line": "usage: yeokcham [--color auto|always|never] COMMAND [OPTIONS]"
+    },
+    {
+      "label": "branch-list-entry-point",
+      "arguments": [
+        "branch",
+        "list",
+        "--root",
+        "ROOT/alice"
+      ],
+      "exit_code": 2,
+      "expected_exit": 2,
+      "seconds_single_observation": 0.005584,
+      "stderr_first_line": "usage: yeokcham [--color auto|always|never] COMMAND [OPTIONS]"
+    },
+    {
+      "label": "switch-entry-point",
+      "arguments": [
+        "switch",
+        "alternative",
+        "--root",
+        "ROOT/alice"
+      ],
+      "exit_code": 2,
+      "expected_exit": 2,
+      "seconds_single_observation": 0.005716,
+      "stderr_first_line": "usage: yeokcham [--color auto|always|never] COMMAND [OPTIONS]"
+    },
+    {
+      "label": "integration-entry-point",
+      "arguments": [
+        "integrate",
+        "pilot-change",
+        "--root",
+        "ROOT/alice"
+      ],
+      "exit_code": 2,
+      "expected_exit": 2,
+      "seconds_single_observation": 0.005523,
+      "stderr_first_line": "usage: yeokcham [--color auto|always|never] COMMAND [OPTIONS]"
+    },
+    {
+      "label": "history-entry-point",
+      "arguments": [
+        "history",
+        "--root",
+        "ROOT/alice"
+      ],
+      "exit_code": 2,
+      "expected_exit": 2,
+      "seconds_single_observation": 0.004812,
+      "stderr_first_line": "usage: yeokcham [--color auto|always|never] COMMAND [OPTIONS]"
+    },
+    {
+      "label": "version-diff-entry-point",
+      "arguments": [
+        "diff",
+        "before",
+        "after",
+        "--root",
+        "ROOT/alice"
+      ],
+      "exit_code": 2,
+      "expected_exit": 2,
+      "seconds_single_observation": 0.005681,
+      "stderr_first_line": "usage: yeokcham [--color auto|always|never] COMMAND [OPTIONS]"
+    },
+    {
+      "label": "conflicts-entry-point",
+      "arguments": [
+        "conflicts",
+        "--root",
+        "ROOT/alice"
+      ],
+      "exit_code": 2,
+      "expected_exit": 2,
+      "seconds_single_observation": 0.006147,
+      "stderr_first_line": "usage: yeokcham [--color auto|always|never] COMMAND [OPTIONS]"
+    },
+    {
+      "label": "advanced-conflict-help",
+      "arguments": [
+        "help",
+        "resolve"
+      ],
+      "exit_code": 0,
+      "expected_exit": 0,
+      "seconds_single_observation": 0.005633
+    },
+    {
+      "label": "advanced-workspace-help",
+      "arguments": [
+        "help",
+        "workspace"
+      ],
+      "exit_code": 0,
+      "expected_exit": 0,
+      "seconds_single_observation": 0.005736
+    },
+    {
+      "label": "bob-advanced-decision-show",
+      "arguments": [
+        "decision",
+        "show",
+        "--root",
+        "ROOT/bob",
+        "--decision",
+        "decision:stale:pilot-revision.0"
+      ],
+      "exit_code": 0,
+      "expected_exit": null,
+      "seconds_single_observation": 0.016885
+    },
+    {
+      "label": "bob-advanced-decision-inspect",
+      "arguments": [
+        "decision",
+        "inspect",
+        "--root",
+        "ROOT/bob",
+        "--decision",
+        "decision:stale:pilot-revision.0"
+      ],
+      "exit_code": 0,
+      "expected_exit": null,
+      "seconds_single_observation": 0.016176
+    },
+    {
+      "label": "bob-advanced-decision-diff",
+      "arguments": [
+        "decision",
+        "diff",
+        "--root",
+        "ROOT/bob",
+        "--decision",
+        "decision:stale:pilot-revision.0",
+        "--candidate",
+        "pilot-revision",
+        "--against",
+        "base"
+      ],
+      "exit_code": 0,
+      "expected_exit": null,
+      "seconds_single_observation": 0.01804
+    }
+  ],
+  "not_exercised": [
+    "Native Linux/macOS/Windows custody and installation",
+    "Remote HTTPS/relay/bootstrap path and credential provisioning",
+    "Complete two-way integration and real multi-author conflicts",
+    "Partial-path publication privacy and device-loss recovery",
+    "Crash/disk-full/corruption fault matrix",
+    "Representative performance and cross-host comparisons",
+    "Human usability with a participant"
+  ],
+  "limitations": [
+    "WSL2 is unsupported as a native product platform. Native init failed: Linux Secret Service unavailable/rejected request.",
+    "Other mutations used explicit disposable test-file signing keys outside worktrees; not production onboarding evidence.",
+    "Tiny fixture; timings are single diagnostic observations, not benchmark statistics or a speedup claim.",
+    "Expected refusals and missing-command probes document gaps. Existing advanced commands remain distinct from absent everyday workflows.",
+    "Documentation/evidence only. G02 remains unstarted and accepted G01 measurements are preserved."
+  ]
+}

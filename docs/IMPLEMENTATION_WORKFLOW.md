@@ -5,7 +5,28 @@ in bounded stages. This document prepares the handoffs; creating it does not
 start any implementation goal. The starting design commit is
 `d03ac1e095af7c896eede2334c5a1f5fc50c4e74`.
 
-## How to use the chain
+## Current delivery priority: complete core workflow
+
+On November 14, 2026, the user prioritized evaluating the existing workflow and
+delivering a complete everyday VCS pilot with essential primitives first. Read
+[Pilot plan](PILOT_PLAN.md) before selecting the next implementation task. P0's
+evaluation is complete; P1-P4 and G02 remain unstarted.
+
+The pilot is a delivery-order amendment to the original full-design chain.
+Use separately scoped pilot tasks and track their coverage against G01-G20;
+partial work does not complete an original phase. Preserve actual schema,
+authority, capture, composition and journal dependencies, including all relevant
+tests. Optional account/archive/review features need not precede ordinary
+collaboration merely because of their original phase numbers. The original
+goal files retain their full scope and must not be reported complete early.
+
+Existing main-branch, coherent-commit, README, evidence and publication constraints
+still apply to this single-writer assessment. Future multi-agent worktree
+orchestration must reconcile the user's recorded preference and explicit module
+ownership before parallel consumers are assigned. No implementation or deployment
+is started by recording this amendment.
+
+## How to use the original full-design chain
 
 1. Open [Implementation progress](IMPLEMENTATION_PROGRESS.md) and copy the next
    ready goal file into Codex in this repository. Run one implementation agent

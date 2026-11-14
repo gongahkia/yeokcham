@@ -783,6 +783,16 @@ the same logical contract. Expose downloaded versus materializable scope separat
 
 ## TC08: validation and implementation sequence
 
+November 14 delivery-order amendment: D30 prioritizes the complete everyday VCS
+[pilot](PILOT_PLAN.md). Its P0 assessment is complete and implementation is
+unstarted. Use separately scoped pilot slices and retain G01-G20 as the full
+backlog. Shared schemas precede consumers; verified composition, protected
+private work, native custody and durable application remain required for the
+capabilities shipped. Optional review/account/archive work need not delay the
+basic collaboration loop solely because of its original phase number. The
+sequential handoff paragraph below records the original full-design workflow;
+partial pilot coverage never completes an original phase or its evidence gates.
+
 Defaults above settle the previous audit's design choices. Remaining work is
 implementing shared schemas, collecting evidence, and validating the chosen
 contracts. The [CLI design](CLI_DESIGN.md) fixes command families, prompts, and

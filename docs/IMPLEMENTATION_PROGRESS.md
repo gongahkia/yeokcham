@@ -9,7 +9,9 @@ verification, commits, and rollback. Each new agent reads and updates this file.
 - Design baseline: `d03ac1e095af7c896eede2334c5a1f5fc50c4e74`.
 - Branch: `main`; one implementation writer at a time.
 - Active implementation phase: none; G01 (`g01-local-baseline-2026-11-06`) complete.
-- Next ready phase: G02; unstarted until invoked.
+- Next ready full-design phase: G02; unstarted. The user's current priority is
+  the [complete core-workflow pilot](PILOT_PLAN.md), whose evaluation P0 is
+  complete and whose implementation slices P1-P4 are unstarted.
 - Completed phases in this chain: **1 / 20**.
 - G01 harness, local measurements, phase checks and acceptance report are complete.
   Product runtime remains unchanged. Existing V1/undo functionality predates this chain.
@@ -30,9 +32,13 @@ A completion report without supporting commits/tests does not complete a phase.
 
 ## Phase ledger
 
-The default chain is sequential. Every phase requires the previous phase's
-accepted report and implementation commits; domain dependencies are in the goal
-files and TC08. Do not skip a failed phase or execute later prompts concurrently.
+The original full-design chain below is sequential. Every full phase requires
+its predecessor's accepted report and implementation commits; domain dependencies
+are in the goal files and TC08. The November 14 core-workflow pilot uses separately
+scoped slices before completing the whole design. Track each slice against the
+original phase criteria; a partial slice does not complete a G-phase or bypass
+its actual schema, authority, integrity or recovery dependencies. Do not execute
+later full-phase prompts as a shortcut around an unfinished predecessor.
 
 | Phase / copyable prompt | Prerequisite | Status | Implementation commits / latest report | Remaining |
 | --- | --- | --- | --- | --- |
@@ -319,6 +325,19 @@ invalidates dependent results; keep completed-looking reports as historical
 records, not current proof.
 
 ## Coordination log
+
+- November 14, 2026: user prioritized a complete everyday VCS workflow with
+  essential primitives first and optional features later. The interrupted G02
+  request did not start implementation. Completed P0: built current main,
+  exercised 60 CLI invocations plus a foreground watcher in disposable projects,
+  and passed 17 explicit walkthrough checks. Local recovery works on the tiny
+  mixed fixture; ordinary clone/branch/switch/diff/integration remain gaps.
+  Offline package receipt works, but activation/update refuse without a verified
+  imported projection basis. Native init failed on this WSL host; subsequent
+  mutations used disposable test signing, so native custody and real-user gates
+  remain open. See [pilot scope, findings and next slices](PILOT_PLAN.md) and the
+  [compact receipt](implementation/results/PILOT-workflow-assessment.json).
+  G01 measurements are unchanged; G02 and all pilot implementation are unstarted.
 
 - November 6, 2026: user authorized copyable, report-chained implementation goals,
   tracked progress, atomic commits on main, and README edits limited to accurate
