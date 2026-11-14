@@ -25,4 +25,5 @@ val encode_change_revision :
 
 val decode_change_revision :
   string -> (Yeokcham_v1_model.change_revision, error) result
+
 module Core = Core_record
