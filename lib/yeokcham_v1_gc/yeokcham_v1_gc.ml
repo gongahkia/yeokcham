@@ -436,10 +436,11 @@ let retention_snapshots ~root project =
     latest
     |> List.filter (fun journal ->
         Journal.phase journal <> Journal.Published
-        || not
-             (List.exists
-                (fun proof -> proof_matches_journal proof journal)
-                proofs))
+        || Journal.destination journal = None
+           && not
+                (List.exists
+                   (fun proof -> proof_matches_journal proof journal)
+                   proofs))
     |> List.concat_map (fun journal ->
         [ Journal.safety journal; Journal.target journal ])
     |> List.sort_uniq Model.Snapshot_id.compare

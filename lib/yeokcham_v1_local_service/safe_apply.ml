@@ -747,6 +747,8 @@ let copyout_binding t =
     ]
   |> E.encode |> Hash.digest_string |> Hash.to_raw_string
 
+let copyout_token = copyout_binding
+
 let prepare_copyout_with ~stage ~root ~store ~operation ~target
     ~destination:requested =
   guard (fun () ->

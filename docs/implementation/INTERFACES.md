@@ -632,4 +632,47 @@ parent identity are checked; a replaced/occupied destination refuses, and an
 exchange retains its original inode, including external directory-FD writes.
 Destinations on another filesystem, within source metadata/Git metadata or
 covering the source root refuse explicitly. This is an engine checkpoint:
-service/journal and CLI copy-out remain to be connected before P2 is complete.
+service/journal routing is now connected below. Full CLI confirmation and
+structured recovery outcomes remain necessary before P2 is complete.
+
+
+Restore journal schema 4 is exactly `[4, operation, target, target, generation,
+phase, null, physical_digest, null, destination_bytes]`. It records a canonical
+absolute destination (at most 4096 bytes) with no source-history or branch
+reservation. Equal safety/target IDs are allowed only in this copy-out scope;
+schema 1–3 bytes/invariants remain unchanged. `Journal.pending` exposes every
+pending scope/root. `latest_pending` keeps the sole in-place operation primary
+when a separate recovery export is pending; multiple in-place operations refuse.
+`pending_snapshots` roots all incomplete scopes. The independent Python emitter
+`tools/generate_local_vectors.py` checks the schema-4 golden fixture.
+
+`Service.preview_copy_out` returns exact target/destination and a stable semantic
+plan hash, without staging or changing history/files. `copy_out ~expected_plan`
+checks that token under the workspace lock and stages/journals one directory
+installation. `restore ~destination` is now the compatibility wrapper over this
+engine; its existing nonempty-destination error shape remains supported.
+Source namespace, allocation counter, cursor, branch positions and mutable head
+are unchanged. Pending copy-outs resume the same recorded operation. A
+Materialized retry publishes completion without rewriting destination edits made
+later. A recovery export outside the source workspace can materialize its saved
+safety/target while an original in-place operation remains conflicted, without
+capturing a partial source tree. Another copy-out requires completing the
+existing copy-out scope first.
+
+`Service.recover_operation ~operation` dispatches explicit recovery by journal
+scope. An already Published operation is acknowledged without navigating again
+or claiming its current filesystem contents were reverified. Completed exports
+create no source restore proof and stop rooting immutable source snapshots;
+compaction can prune their Published journals. Pending export targets remain
+retained. Displaced native directories remain in operation staging. Unsupported
+filesystem placement, corrupt/missing targets and newly occupied destinations
+fail before replacement. Complete CLI `restore STATE`/confirmation/JSON recovery
+journeys remain unfinished at this checkpoint.
+
+The G01 harness's untimed checkpoint verifier now restores from a disposable
+metadata replica. The supported restore path durably journals recovery, so
+running verification directly against the measured fixture would change its
+storage count during resume. Copying metadata before verification preserves the
+measured fixture and still verifies stored snapshot bytes against the full
+manifest. Accepted G01 measurements/results are unchanged; only tiny harness
+regression fixtures run as part of required CI.

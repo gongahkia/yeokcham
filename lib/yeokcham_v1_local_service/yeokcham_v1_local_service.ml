@@ -1415,25 +1415,6 @@ let save ~root =
         persist repository loaded project
         |> Result.map (fun status -> Saved status))
 
-let restore ~root ~checkpoint ~destination =
-  with_repository ~root (fun repository loaded ->
-      if
-        not
-          (List.exists
-             (fun candidate ->
-               Model.Snapshot_id.equal candidate.Model.checkpoint_snapshot
-                 checkpoint)
-             (Model.checkpoints loaded.Store.project))
-      then Error (Unknown_checkpoint checkpoint)
-      else
-        let* snapshot =
-          load_snapshot (Store.underlying_store repository) checkpoint
-        in
-        Snapshot.Materialize.write ~destination
-          (Store.underlying_store repository)
-          snapshot
-        |> Result.map_error (fun error -> Materialize_error error))
-
 let retained project checkpoint =
   List.exists
     (fun candidate ->
@@ -1516,10 +1497,11 @@ let retention_inputs ~root =
     latest
     |> List.filter (fun journal ->
         Journal.phase journal <> Journal.Published
-        || not
-             (List.exists
-                (fun proof -> proof_matches_journal proof journal)
-                proofs))
+        || Journal.destination journal = None
+           && not
+                (List.exists
+                   (fun proof -> proof_matches_journal proof journal)
+                   proofs))
     |> List.concat_map (fun journal ->
         [ Journal.safety journal; Journal.target journal ])
     |> List.sort_uniq Model.Snapshot_id.compare
@@ -1552,6 +1534,13 @@ type application_boundary =
 let no_application_observer _ = ()
 
 let perform_in_place ~observe ~root repository loaded journal ~resumed =
+  let* () =
+    if Journal.destination journal = None then Ok ()
+    else
+      Error
+        (History_error
+           "a restore is incomplete; resume the copy-out operation explicitly")
+  in
   let store = Store.underlying_store repository in
   let* history =
     match Journal.history_node journal with
@@ -1815,6 +1804,359 @@ let restore_in_place ~root ~checkpoint =
       restore_in_place_unlocked ~observe:no_application_observer ~root
         ~checkpoint ~history_node:None ~selected_branch:None
         ~expected_safety:None)
+
+type copy_outcome = {
+  copy_operation : string option;
+  copy_snapshot : Model.Snapshot_id.t;
+  copy_destination : string;
+  copy_plan : string;
+  copy_applied : bool;
+  copy_resumed : bool;
+}
+
+let canonical_copy_destination destination =
+  try
+    Ok
+      (Filename.concat
+         (Unix.realpath (Filename.dirname destination))
+         (Filename.basename destination))
+  with Unix.Unix_error (error, _, _) ->
+    Error (Selection_unavailable (Unix.error_message error))
+
+let within_directory path directory =
+  path = directory || String.starts_with ~prefix:(directory ^ "/") path
+
+let perform_copyout ~observe ~root repository loaded journal ~resumed =
+  let* destination =
+    match Journal.destination journal with
+    | Some destination -> Ok destination
+    | None -> Error (History_error "operation is not a copy-out")
+  in
+  let result =
+    {
+      copy_operation = Some (Journal.operation_id journal);
+      copy_snapshot = Journal.target journal;
+      copy_destination = destination;
+      copy_plan = "";
+      copy_applied = false;
+      copy_resumed = resumed;
+    }
+  in
+  if Journal.phase journal = Journal.Published then Ok result
+  else
+    let store = Store.underlying_store repository in
+    let* () = ensure_retained loaded.Store.project (Journal.target journal) in
+    let* () = validate_snapshot_closure store (Journal.target journal) in
+    let* target = load_snapshot store (Journal.target journal) in
+    let* target_id =
+      Snapshot.Snapshot.id target
+      |> Result.map_error (fun e -> Snapshot_error e)
+    in
+    let* digest =
+      match Journal.plan journal with
+      | Some (digest, None) -> Ok digest
+      | None | Some (_, Some _) ->
+          Error
+            (Selection_integrity
+               "copy-out journal has no unambiguous physical plan")
+    in
+    let* physical =
+      Safe_apply.load ~root
+        ~operation:(Journal.operation_id journal)
+        ~digest ~safety:target_id ~target:target_id
+      |> Result.map_error applying_error
+    in
+    let* () =
+      if Safe_apply.destination physical = Some destination then Ok ()
+      else
+        Error
+          (Selection_integrity
+             "copy-out journal and physical destination differ")
+    in
+    let* applying =
+      match Journal.phase journal with
+      | Journal.Prepared -> advance_journal ~root journal Journal.Applying
+      | Journal.Applying | Journal.Materialized | Journal.Published ->
+          Ok journal
+    in
+    observe Applying_journal;
+    let* materialized =
+      match Journal.phase applying with
+      | Journal.Applying ->
+          let* () =
+            Safe_apply.For_test.apply
+              ~observe:(fun stage path ->
+                observe (Filesystem_mutation (stage, path)))
+              ~root ~store physical
+            |> Result.map_error applying_error
+          in
+          advance_journal ~root applying Journal.Materialized
+      | Journal.Materialized | Journal.Published -> Ok applying
+      | Journal.Prepared -> assert false
+    in
+    observe Materialized_journal;
+    let* () =
+      match Journal.phase materialized with
+      | Journal.Materialized ->
+          let* _ = advance_journal ~root materialized Journal.Published in
+          observe Published_journal;
+          Ok ()
+      | Journal.Published -> Ok ()
+      | Journal.Prepared | Journal.Applying -> assert false
+    in
+    Ok
+      {
+        result with
+        copy_plan = hex_of_raw (Safe_apply.copyout_token physical);
+        copy_applied = true;
+      }
+
+let[@warning "-4"] copy_out_with ~observe ~root ~checkpoint ~destination
+    ~dry_run ~expected_plan =
+  with_worktree_lock ~root (fun () ->
+      with_repository ~root (fun repository loaded ->
+          let* destination = canonical_copy_destination destination in
+          let* pending =
+            Journal.pending ~root
+            |> Result.map_error (fun e -> Restore_journal_error e)
+          in
+          let copies =
+            List.filter (fun j -> Journal.destination j <> None) pending
+          in
+          let matching =
+            List.find_opt
+              (fun j ->
+                Journal.destination j = Some destination
+                && Model.Snapshot_id.equal (Journal.target j) checkpoint)
+              copies
+          in
+          match matching with
+          | Some _ when dry_run ->
+              Error
+                (History_error
+                   "a restore is incomplete; resume this copy-out before \
+                    preparing another preview")
+          | Some journal ->
+              let* () =
+                match expected_plan with
+                | None -> Ok ()
+                | Some expected ->
+                    let store = Store.underlying_store repository in
+                    let* target = load_snapshot store checkpoint in
+                    let* target_id =
+                      Snapshot.Snapshot.id target
+                      |> Result.map_error (fun e -> Snapshot_error e)
+                    in
+                    let digest = Option.get (Journal.plan journal) |> fst in
+                    let* physical =
+                      Safe_apply.load ~root
+                        ~operation:(Journal.operation_id journal)
+                        ~digest ~safety:target_id ~target:target_id
+                      |> Result.map_error applying_error
+                    in
+                    if hex_of_raw (Safe_apply.copyout_token physical) = expected
+                    then Ok ()
+                    else
+                      Error
+                        (History_error
+                           "local selection plan is stale; its copy-out scope \
+                            differs")
+              in
+              perform_copyout ~observe ~root repository loaded journal
+                ~resumed:true
+          | None when copies <> [] ->
+              Error
+                (History_error
+                   "a restore is incomplete; resume the existing copy-out \
+                    operation before creating another")
+          | None ->
+              let* origin =
+                try Ok (Unix.realpath root)
+                with Unix.Unix_error (error, _, _) ->
+                  Error (Selection_unavailable (Unix.error_message error))
+              in
+              let* () =
+                if pending <> [] && within_directory destination origin then
+                  Error
+                    (History_error
+                       "a restore is incomplete; recovery copy-out must use a \
+                        directory outside the source workspace")
+                else Ok ()
+              in
+              let store = Store.underlying_store repository in
+              let* () = ensure_retained loaded.Store.project checkpoint in
+              let* () = validate_snapshot_closure store checkpoint in
+              let* target = load_snapshot store checkpoint in
+              let* target_id =
+                Snapshot.Snapshot.id target
+                |> Result.map_error (fun e -> Snapshot_error e)
+              in
+              let* destination, token =
+                Safe_apply.check_copyout ~root ~store ~target:target_id
+                  ~destination
+                |> Result.map_error (fun error ->
+                    match (expected_plan, error) with
+                    | Some _, Safe_apply.Conflict _ ->
+                        History_error
+                          "local selection plan is stale; destination no \
+                           longer matches preview"
+                    | _ -> preflight_error error)
+              in
+              let plan = hex_of_raw token in
+              let* () =
+                match expected_plan with
+                | Some expected when expected <> plan ->
+                    Error
+                      (History_error
+                         "local selection plan is stale; copy destination \
+                          changed")
+                | None | Some _ -> Ok ()
+              in
+              let preview =
+                {
+                  copy_operation = None;
+                  copy_snapshot = checkpoint;
+                  copy_destination = destination;
+                  copy_plan = plan;
+                  copy_applied = false;
+                  copy_resumed = false;
+                }
+              in
+              if dry_run then Ok preview
+              else
+                let* entropy =
+                  Trust.random_bytes 32
+                  |> Result.map_error (fun e ->
+                      History_error ("core identity entropy unavailable: " ^ e))
+                in
+                let operation = hex_of_raw entropy in
+                let* physical =
+                  Safe_apply.prepare_copyout ~root ~store ~operation
+                    ~target:target_id ~destination
+                  |> Result.map_error preflight_error
+                in
+                let* () =
+                  if hex_of_raw (Safe_apply.copyout_token physical) = plan then
+                    Ok ()
+                  else
+                    Error
+                      (History_error
+                         "local selection plan is stale; destination changed \
+                          while staging")
+                in
+                let* journal =
+                  Journal.make_copyout ~operation_id:operation
+                    ~target:checkpoint
+                    ~digest:(Safe_apply.digest physical)
+                    ~destination
+                  |> Result.map_error (fun e -> Restore_journal_error e)
+                in
+                let* () = append_journal ~root journal in
+                observe Prepared_journal;
+                perform_copyout ~observe ~root repository loaded journal
+                  ~resumed:false))
+
+let preview_copy_out ~root ~checkpoint ~destination =
+  copy_out_with ~observe:no_application_observer ~root ~checkpoint ~destination
+    ~dry_run:true ~expected_plan:None
+
+let copy_out ~root ~checkpoint ~destination ~expected_plan =
+  copy_out_with ~observe:no_application_observer ~root ~checkpoint ~destination
+    ~dry_run:false ~expected_plan
+
+let[@warning "-4"] restore ~root ~checkpoint ~destination =
+  (* retain the existing destination-safety error shape for legacy callers. *)
+  copy_out ~root ~checkpoint ~destination ~expected_plan:None
+  |> Result.map (fun _ -> ())
+  |> Result.map_error (function
+    | Selection_conflict "copy destination is not empty" ->
+        Materialize_error
+          (Snapshot.Materialize.Destination_not_empty destination)
+    | error -> error)
+
+type recovered_operation =
+  | Recovered_in_place of in_place_restore
+  | Recovered_copy_out of copy_outcome
+
+type recovery_result = {
+  already_completed : bool;
+  recovered : recovered_operation;
+}
+
+let recover_operation ~root ~operation =
+  with_worktree_lock ~root (fun () ->
+      with_repository ~root (fun repository loaded ->
+          let* journals =
+            Journal.scan ~root
+            |> Result.map_error (fun e -> Restore_journal_error e)
+          in
+          let latest = latest_journals journals in
+          let* selected =
+            match operation with
+            | Some operation -> (
+                match List.assoc_opt operation latest with
+                | Some journal -> Ok (Some journal)
+                | None ->
+                    Error
+                      (History_error
+                         "unknown restore operation; inspect status or restore \
+                          proofs"))
+            | None -> (
+                match
+                  List.filter
+                    (fun (_, j) -> Journal.phase j <> Journal.Published)
+                    latest
+                with
+                | [] -> Ok None
+                | [ (_, journal) ] -> Ok (Some journal)
+                | pending ->
+                    Error
+                      (History_error
+                         ("choose a recovery operation with --operation: "
+                         ^ String.concat ", " (List.map fst pending))))
+          in
+          match selected with
+          | None -> Ok None
+          | Some journal ->
+              let already_completed =
+                Journal.phase journal = Journal.Published
+              in
+              let* recovered =
+                match Journal.destination journal with
+                | Some _ ->
+                    perform_copyout ~observe:no_application_observer ~root
+                      repository loaded journal ~resumed:true
+                    |> Result.map (fun result -> Recovered_copy_out result)
+                | None when already_completed ->
+                    Ok
+                      (Recovered_in_place
+                         {
+                           restore_operation = Journal.operation_id journal;
+                           safety_checkpoint = Journal.safety journal;
+                           restored_checkpoint = Journal.target journal;
+                           resumed = true;
+                         })
+                | None ->
+                    let* pending =
+                      Journal.latest_pending ~root
+                      |> Result.map_error (fun e -> Restore_journal_error e)
+                    in
+                    let* () =
+                      if
+                        Option.map Journal.operation_id pending
+                        = Some (Journal.operation_id journal)
+                      then Ok ()
+                      else
+                        Error
+                          (History_error
+                             "a restore is incomplete; selected operation is \
+                              not the active in-place operation")
+                    in
+                    perform_in_place ~observe:no_application_observer ~root
+                      repository loaded journal ~resumed:true
+                    |> Result.map (fun result -> Recovered_in_place result)
+              in
+              Ok (Some { already_completed; recovered })))
 
 let workspace_materialization_of_plan plan restored =
   let basis = Workspace.plan_basis plan in
@@ -4005,6 +4347,11 @@ let retain_restore_proof ~root ~operation =
                 (Restore_journal_error
                    (Journal.Invalid_schema
                       "only a completed restore journal can be retained"))
+          | Some journal when Journal.destination journal <> None ->
+              Error
+                (History_error
+                   "copy-out does not replace source work and has no source \
+                    restore proof")
           | Some journal ->
               let* () =
                 ensure_retained loaded.Store.project (Journal.safety journal)
@@ -4075,9 +4422,10 @@ let compact ~root ~keep_recent ~dry_run =
             latest
             |> List.filter (fun journal ->
                 Journal.phase journal = Journal.Published
-                && List.exists
-                     (fun proof -> proof_matches_journal proof journal)
-                     proofs)
+                && (Journal.destination journal <> None
+                   || List.exists
+                        (fun proof -> proof_matches_journal proof journal)
+                        proofs))
             |> List.map Journal.operation_id
             |> List.sort_uniq String.compare
           in
@@ -4773,6 +5121,8 @@ let inspect_local_history ~root ~before ~limit =
 
 module For_test = struct
   include Navigation_for_test
+
+  let copy_out = copy_out_with
 
   let branch_switch ~observe ~root ~name ~dry_run =
     branch_switch_with ~observe ~expected:None ~root ~name ~dry_run

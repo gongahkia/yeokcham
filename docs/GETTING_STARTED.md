@@ -136,8 +136,9 @@ preserves source disk edits before replacement. Noninteractive selection needs
 `--yes`; `--preview` never moves files/history. Branch selection persists across
 restart. Missing target contents or ignored obstructions refuse before
 replacement; interrupted switches resume their exact original target. Full
-shared exchange/integration is P3. Remaining P2 work includes copy-out safety,
-complete navigation confirmation/outcomes and the final acceptance audit.
+shared exchange/integration is P3. Snapshot copy-out now uses staged whole-directory installation; remaining P2
+work includes complete navigation confirmation/outcomes, ordinary restore syntax
+and the final acceptance audit.
 Existing V1 sharing/delivery commands retain their older record semantics; they
 are not the future P3 native core exchange/integration loop.
 

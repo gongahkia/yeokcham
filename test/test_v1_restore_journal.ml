@@ -194,11 +194,94 @@ let plan_digest_cannot_change_between_generations () =
       | Error _ -> ()
       | Ok _ -> Alcotest.fail "journal chain changed physical plan")
 
+let copyout_record_has_stable_scope () =
+  with_journal_root (fun root ->
+      let target = snapshot "snapshot-target" in
+      let copy =
+        Journal.make_copyout ~operation_id:(String.make 64 'a') ~target
+          ~digest:(String.make 32 'p') ~destination:"/fixture/copy"
+        |> require_ok Journal.error_to_string
+      in
+      let bytes = Journal.encode copy |> require_ok Journal.error_to_string in
+      let expected =
+        Golden.read_lower_hex_file
+          (golden_path "local/restore-copyout-v4.cbor.hex")
+        |> require_ok Fun.id
+      in
+      Alcotest.(check string) "independent schema4 golden" expected bytes;
+      let decoded =
+        Journal.decode bytes |> require_ok Journal.error_to_string
+      in
+      Alcotest.(check (option string))
+        "exact output scope" (Some "/fixture/copy")
+        (Journal.destination decoded);
+      Alcotest.(check (option int64))
+        "no source navigation reservation" None
+        (Journal.history_node decoded);
+      Alcotest.(check bool)
+        "source safety equals immutable target" true
+        (Model.Snapshot_id.equal (Journal.safety decoded)
+           (Journal.target decoded));
+      (match Journal.with_history_node decoded 1L with
+      | Error _ -> ()
+      | Ok _ -> Alcotest.fail "copy-out retargeted source history");
+      Journal.append ~root (prepared ()) |> require_ok Journal.error_to_string;
+      let copy =
+        Journal.make_copyout ~operation_id:(String.make 64 'b')
+          ~target:(snapshot "copy-target") ~digest:(String.make 32 'p')
+          ~destination:"/fixture/copy"
+        |> require_ok Journal.error_to_string
+      in
+      Journal.append ~root copy |> require_ok Journal.error_to_string;
+      let pending =
+        Journal.pending ~root |> require_ok Journal.error_to_string
+      in
+      Alcotest.(check int)
+        "independent recovery export and original operation visible" 2
+        (List.length pending);
+      let primary =
+        Journal.latest_pending ~root
+        |> require_ok Journal.error_to_string
+        |> Option.get
+      in
+      Alcotest.(check (option string))
+        "original in-place recovery remains primary" None
+        (Journal.destination primary);
+      Alcotest.(check int)
+        "all pending targets retained" 3
+        (Journal.pending_snapshots ~root
+        |> require_ok Journal.error_to_string
+        |> List.length))
+
+let copyout_scope_cannot_change_between_generations () =
+  with_journal_root (fun root ->
+      let make destination =
+        Journal.make_copyout ~operation_id:(String.make 64 'c')
+          ~target:(snapshot "snapshot-target")
+          ~digest:(String.make 32 'p') ~destination
+        |> require_ok Journal.error_to_string
+      in
+      Journal.append ~root (make "/fixture/first")
+      |> require_ok Journal.error_to_string;
+      Journal.advance (make "/fixture/other") Journal.Applying
+      |> require_ok Journal.error_to_string
+      |> Journal.append ~root
+      |> require_ok Journal.error_to_string;
+      match Journal.scan ~root with
+      | Error _ -> ()
+      | Ok _ -> Alcotest.fail "copy scope changed mid-operation")
+
 let () =
   Alcotest.run "V1 restore journal"
     [
       ( "record",
         [
+          Alcotest.test_case
+            "copy-out has independent golden and scoped pending roots" `Quick
+            copyout_record_has_stable_scope;
+          Alcotest.test_case
+            "copy-out destination is immutable across generations" `Quick
+            copyout_scope_cannot_change_between_generations;
           Alcotest.test_case "physical plan and typed branch scope" `Quick
             physical_plan_roundtrip_and_scope;
           Alcotest.test_case "plan digest is immutable across generations"

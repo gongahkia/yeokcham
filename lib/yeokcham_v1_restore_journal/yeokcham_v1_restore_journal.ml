@@ -7,6 +7,7 @@ type t = {
   operation_id : string;
   history_node : int64 option;
   plan : (string * Model.Core.Branch_id.t option) option;
+  destination : string option;
   safety : Model.Snapshot_id.t;
   target : Model.Snapshot_id.t;
   generation : int64;
@@ -71,6 +72,7 @@ let make_prepared ~operation_id ~safety ~target =
         operation_id;
         history_node = None;
         plan = None;
+        destination = None;
         safety;
         target;
         generation = 0L;
@@ -78,9 +80,45 @@ let make_prepared ~operation_id ~safety ~target =
       }
 
 let history_node journal = journal.history_node
+let destination journal = journal.destination
+
+let valid_destination destination =
+  String.length destination <= 4096
+  && (not (Filename.is_relative destination))
+  && (not (String.contains destination '\000'))
+  &&
+  match String.split_on_char '/' destination with
+  | "" :: parts ->
+      parts <> []
+      && List.for_all (fun p -> p <> "" && p <> "." && p <> "..") parts
+  | _ -> false
+
+let make_copyout ~operation_id ~target ~digest ~destination =
+  if not (valid_operation_id operation_id) then
+    Error (Invalid_operation_id operation_id)
+  else if String.length digest <> 32 then
+    Error (Invalid_schema "copy physical-plan digest must be 32 bytes")
+  else if not (valid_destination destination) then
+    Error
+      (Invalid_schema
+         "copy destination must be a canonical absolute path within 4096 bytes")
+  else
+    Ok
+      {
+        operation_id;
+        history_node = None;
+        plan = Some (digest, None);
+        destination = Some destination;
+        safety = target;
+        target;
+        generation = 0L;
+        phase = Prepared;
+      }
 
 let with_history_node journal node =
-  if Int64.compare node 0L < 0 then
+  if journal.destination <> None then
+    Error (Invalid_schema "copy-out does not navigate source history")
+  else if Int64.compare node 0L < 0 then
     Error (Invalid_schema "negative history node")
   else Ok { journal with history_node = Some node }
 
@@ -150,7 +188,8 @@ let encode journal =
   Encoding.array
     ([
        Encoding.integer
-         (if Option.is_some journal.plan then 3L
+         (if Option.is_some journal.destination then 4L
+          else if Option.is_some journal.plan then 3L
           else if Option.is_some journal.history_node then 2L
           else schema_version);
        operation;
@@ -159,9 +198,11 @@ let encode journal =
        Encoding.integer journal.generation;
        Encoding.integer (phase_code journal.phase);
      ]
-    @ Option.fold ~none:[]
-        ~some:(fun node -> [ Encoding.integer node ])
-        journal.history_node
+    @ (if journal.destination <> None then [ Encoding.null ]
+       else
+         Option.fold ~none:[]
+           ~some:(fun node -> [ Encoding.integer node ])
+           journal.history_node)
     @ Option.fold ~none:[]
         ~some:(fun (digest, branch) ->
           [
@@ -171,7 +212,10 @@ let encode journal =
                 Encoding.bytes (Model.Core.Branch_id.to_raw branch))
               branch;
           ])
-        journal.plan)
+        journal.plan
+    @ Option.fold ~none:[]
+        ~some:(fun path -> [ Encoding.bytes path ])
+        journal.destination)
   |> Result.map Encoding.encode
   |> Result.map_error (fun error -> Encoding_error error)
 
@@ -195,8 +239,29 @@ let[@warning "-4"] decode bytes =
       Encoding.decode bytes
       |> Result.map_error (fun error -> Decode_error error)
     in
-    let* fields, history_node, plan =
+    let* fields, history_node, plan, destination =
       match value with
+      | Encoding.Array
+          [
+            Encoding.Integer 4L;
+            operation;
+            safety;
+            target;
+            generation;
+            phase;
+            Encoding.Null;
+            Encoding.Bytes digest;
+            Encoding.Null;
+            Encoding.Bytes destination;
+          ]
+        when String.length digest = 32 && valid_destination destination ->
+          Ok
+            ( [
+                Encoding.integer 4L; operation; safety; target; generation; phase;
+              ],
+              None,
+              Some (digest, None),
+              Some destination )
       | Encoding.Array
           [
             Encoding.Integer 3L;
@@ -228,7 +293,8 @@ let[@warning "-4"] decode bytes =
                 Encoding.integer 3L; operation; safety; target; generation; phase;
               ],
               Some node,
-              Some (digest, branch) )
+              Some (digest, branch),
+              None )
       | Encoding.Array
           [
             Encoding.Integer 2L;
@@ -245,9 +311,10 @@ let[@warning "-4"] decode bytes =
                 Encoding.integer 2L; operation; safety; target; generation; phase;
               ],
               Some node,
+              None,
               None )
       | Encoding.Array fields when List.length fields = 6 ->
-          Ok (fields, None, None)
+          Ok (fields, None, None, None)
       | Encoding.Array _ ->
           Error (Invalid_schema "record must contain six fields")
       | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _ | Encoding.Map _
@@ -260,7 +327,8 @@ let[@warning "-4"] decode bytes =
         if
           not
             (Int64.equal version
-               (if Option.is_some plan then 3L
+               (if Option.is_some destination then 4L
+                else if Option.is_some plan then 3L
                 else if Option.is_some history_node then 2L
                 else schema_version))
         then Error (Unsupported_schema_version version)
@@ -284,8 +352,13 @@ let[@warning "-4"] decode bytes =
             Error (Invalid_operation_id operation_id)
           else if Int64.compare generation 0L < 0 then
             Error (Invalid_generation generation)
-          else if Model.Snapshot_id.equal safety target then
-            Error Identical_snapshots
+          else if destination = None && Model.Snapshot_id.equal safety target
+          then Error Identical_snapshots
+          else if
+            destination <> None && not (Model.Snapshot_id.equal safety target)
+          then
+            Error
+              (Invalid_schema "copy-out must not reserve another source state")
           else
             let* phase = phase_of_code phase_code in
             let expected_generation = phase_code in
@@ -297,6 +370,7 @@ let[@warning "-4"] decode bytes =
                   operation_id;
                   history_node;
                   plan;
+                  destination;
                   safety;
                   target;
                   generation;
@@ -457,25 +531,38 @@ let latest_by_operation journals =
       | None -> (journal.operation_id, journal) :: latest)
     [] journals
 
-let latest_pending ~root =
+let pending ~root =
   let* journals = scan ~root in
-  match
-    latest_by_operation journals
+  Ok
+    (latest_by_operation journals
     |> List.map snd
     |> List.filter (fun journal -> journal.phase <> Published)
-  with
-  | [] -> Ok None
-  | [ journal ] -> Ok (Some journal)
-  | _ -> Error (Invalid_schema "multiple restore operations remain incomplete")
+    |> List.sort (fun a b -> String.compare a.operation_id b.operation_id))
+
+let latest_pending ~root =
+  let* pending = pending ~root in
+  let in_place =
+    List.filter (fun journal -> journal.destination = None) pending
+  in
+  match (in_place, pending) with
+  | [], [] -> Ok None
+  | [ journal ], _ -> Ok (Some journal)
+  | [], [ journal ] -> Ok (Some journal)
+  | [], _ ->
+      Error
+        (Invalid_schema
+           "multiple copy-out operations need explicit recovery operation IDs")
+  | _ ->
+      Error
+        (Invalid_schema "multiple in-place restore operations remain incomplete")
 
 let pending_snapshots ~root =
-  let* pending = latest_pending ~root in
-  match pending with
-  | None -> Ok []
-  | Some journal ->
-      Ok
-        (List.sort_uniq Model.Snapshot_id.compare
-           [ journal.safety; journal.target ])
+  let* journals = pending ~root in
+  Ok
+    (List.concat_map
+       (fun journal -> [ journal.safety; journal.target ])
+       journals
+    |> List.sort_uniq Model.Snapshot_id.compare)
 
 let prune_published ~root ~operations =
   let* journals = scan ~root in

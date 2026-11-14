@@ -175,7 +175,11 @@ class RunnerTests(unittest.TestCase):
             runner.edit(root, expected, -1)
             with self.assertRaisesRegex(ValueError, 'fidelity'):
                 fixture.verify(root, expected)
+            before_storage = runner.storage(root / '.yeokcham')
+            before_head = (root / '.yeokcham/refs/v1-project-state').read_bytes()
             runner.verify_checkpoint(binary, root, env, tree, 0, expected, scratch)
+            self.assertEqual(before_storage, runner.storage(root / '.yeokcham'))
+            self.assertEqual(before_head, (root / '.yeokcham/refs/v1-project-state').read_bytes())
             original = runner.invoke
             def corrupt_destination(argv, environment):
                 result = original(argv, environment)

@@ -1,3 +1,11 @@
+(rule
+ (alias runtest)
+ (deps
+  ../tools/generate_local_vectors.py
+  golden/local/restore-copyout-v4.cbor.hex)
+ (action
+  (run python3 %{dep:../tools/generate_local_vectors.py})))
+
 (test
  (name test_store_safety)
  (modules test_store_safety)

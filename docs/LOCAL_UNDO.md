@@ -140,5 +140,12 @@ journals without physical identity plans refuse unexplained replacement;
 recover their retained snapshots into separate directories and preserve the
 live tree for diagnosis. Do not delete a journal to clear a conflict.
 
+Snapshot copy-out through `restore --checkpoint SNAPSHOT --destination DIRECTORY`
+now stages a complete directory and installs it atomically into a new/empty
+same-filesystem destination. It leaves source history/branch selection unchanged,
+retains a displaced empty directory and refuses an occupied destination. This is
+an explicit recovery copy; it does not configure automatic private backup.
+
 P2 remains in progress: complete undo/redo/restore confirmation and structured
-recovery journeys, copy-out hardening and final acceptance evidence are pending.
+recovery journeys, ordinary state-selection syntax and final acceptance evidence
+are pending.

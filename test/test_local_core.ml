@@ -795,11 +795,303 @@ let external_edit_after_materialized_switch () =
         "later edits reported honestly" true
         (Service.status ~root |> service).Service.uncaptured)
 
+module J = Yeokcham_v1_restore_journal
+
+let with_copy_destination root run =
+  let destination = root ^ "-copy" in
+  Fun.protect
+    ~finally:(fun () -> if Sys.file_exists destination then remove destination)
+    (fun () -> run destination)
+
+let initial_snapshot repository =
+  (M.active_draft (load repository).S.project).M.latest_checkpoint
+
+let copy root snapshot destination expected_plan =
+  Service.copy_out ~root ~checkpoint:snapshot ~destination ~expected_plan
+  |> service
+
+let copyout_keeps_source_private_state () =
+  with_root (fun root ->
+      with_copy_destination root (fun destination ->
+          let repository, _, _, _, _ = initialize root in
+          let target = initial_snapshot repository
+          and original = read_private root in
+          write_private root "source unsaved bytes";
+          let before = load repository in
+          let preview =
+            Service.preview_copy_out ~root ~checkpoint:target ~destination
+            |> service
+          in
+          Alcotest.(check bool)
+            "preview does not apply" false preview.Service.copy_applied;
+          Alcotest.(check int)
+            "stable semantic plan" 64
+            (String.length preview.Service.copy_plan);
+          Alcotest.(check bool)
+            "preview does not create output" false
+            (Sys.file_exists destination);
+          Alcotest.(check bool)
+            "preview does not stage" false
+            (Sys.file_exists (root ^ "/.yeokcham/restore-staging"));
+          let result =
+            copy root target destination (Some preview.Service.copy_plan)
+          in
+          Alcotest.(check string)
+            "saved target copied" original
+            (In_channel.with_open_bin
+               (destination ^ "/private.bin")
+               In_channel.input_all);
+          Alcotest.(check string)
+            "unsaved source untouched" "source unsaved bytes"
+            (read_private root);
+          let current = load repository in
+          Alcotest.(check bool)
+            "one authoritative head unchanged" true
+            (Raw.Mutable_ref.equal before.S.head current.S.head);
+          Alcotest.(check string)
+            "namespace/counter/cursor unchanged"
+            (H.encode before.S.history |> ok Fun.id)
+            (H.encode current.S.history |> ok Fun.id);
+          Alcotest.(check string)
+            "branch selection/private position unchanged"
+            (L.encode (local before) |> ok Fun.id)
+            (L.encode (local current) |> ok Fun.id);
+          let operation = Option.get result.Service.copy_operation in
+          let pending = J.latest_pending ~root |> ok J.error_to_string in
+          Alcotest.(check bool) "copy journal completed" true (pending = None);
+          let resume =
+            Service.recover_operation ~root ~operation:(Some operation)
+            |> service |> Option.get
+          in
+          Alcotest.(check bool)
+            "explicit identical operation retry acknowledged" true
+            resume.Service.already_completed;
+          Alcotest.(check bool)
+            "no source restore proof invented" true
+            (Service.restore_proofs ~root |> service = [])))
+
+let[@warning "-4"] copyout_recovers_actual_journal_boundaries () =
+  List.iter
+    (fun boundary ->
+      with_root (fun root ->
+          with_copy_destination root (fun destination ->
+              let repository, _, _, _, _ = initialize root in
+              let target = initial_snapshot repository
+              and original = read_private root in
+              write_private root "unsaved source";
+              let before = load repository in
+              let child = Unix.fork () in
+              if child = 0 then (
+                let observe stage =
+                  if
+                    stage = boundary
+                    ||
+                    match (boundary, stage) with
+                    | ( Service.Filesystem_mutation (expected, _),
+                        Service.Filesystem_mutation (actual, _) ) ->
+                        expected = actual
+                    | _ -> false
+                  then Unix._exit 73
+                in
+                ignore
+                  (Service.For_test.copy_out ~observe ~root ~checkpoint:target
+                     ~destination ~dry_run:false ~expected_plan:None);
+                Unix._exit 74);
+              let _, status = Unix.waitpid [] child in
+              Alcotest.(check bool)
+                "terminated at actual copy-out boundary" true
+                (status = Unix.WEXITED 73);
+              let journals = J.scan ~root |> ok J.error_to_string in
+              let operation = J.operation_id (List.hd journals) in
+              Service.recover_operation ~root ~operation:(Some operation)
+              |> service |> ignore;
+              Alcotest.(check string)
+                "exact target after process restart" original
+                (In_channel.with_open_bin
+                   (destination ^ "/private.bin")
+                   In_channel.input_all);
+              let after = load repository in
+              Alcotest.(check bool)
+                "copy-out never publishes source head" true
+                (Raw.Mutable_ref.equal before.S.head after.S.head);
+              Alcotest.(check int)
+                "no partial-tree history" 1
+                (List.length (H.nodes after.S.history));
+              Alcotest.(check string)
+                "source unsaved bytes survive" "unsaved source"
+                (read_private root))))
+    [
+      Service.Prepared_journal;
+      Service.Applying_journal;
+      Service.Filesystem_mutation (Service.Safe_apply.Before_mutation, []);
+      Service.Filesystem_mutation (Service.Safe_apply.After_mutation, []);
+      Service.Filesystem_mutation (Service.Safe_apply.After_sync, []);
+      Service.Materialized_journal;
+      Service.Published_journal;
+    ]
+
+let copyout_later_destination_edits_survive_materialized () =
+  with_root (fun root ->
+      with_copy_destination root (fun destination ->
+          let repository, _, _, _, _ = initialize root in
+          let target = initial_snapshot repository in
+          let before = load repository in
+          let child = Unix.fork () in
+          if child = 0 then (
+            ignore
+              (Service.For_test.copy_out
+                 ~observe:(fun stage ->
+                   if stage = Service.Materialized_journal then Unix._exit 73)
+                 ~root ~checkpoint:target ~destination ~dry_run:false
+                 ~expected_plan:None);
+            Unix._exit 74);
+          let _, status = Unix.waitpid [] child in
+          Alcotest.(check bool)
+            "copy was fully materialized" true (status = Unix.WEXITED 73);
+          Out_channel.with_open_bin (destination ^ "/private.bin") (fun out ->
+              output_string out "later destination edits");
+          let result = copy root target destination None in
+          Alcotest.(check bool)
+            "resumed original copy" true result.Service.copy_resumed;
+          Alcotest.(check string)
+            "later destination bytes preserved" "later destination edits"
+            (In_channel.with_open_bin
+               (destination ^ "/private.bin")
+               In_channel.input_all);
+          Alcotest.(check bool)
+            "source metadata unchanged" true
+            (Raw.Mutable_ref.equal before.S.head (load repository).S.head)))
+
+let[@warning "-4"] copyout_stale_plan_and_obstructions () =
+  with_root (fun root ->
+      with_copy_destination root (fun destination ->
+          let repository, _, _, _, _ = initialize root in
+          let target = initial_snapshot repository in
+          let preview =
+            Service.preview_copy_out ~root ~checkpoint:target ~destination
+            |> service
+          in
+          Unix.mkdir destination 0o700;
+          Out_channel.with_open_bin (destination ^ "/external") (fun out ->
+              output_string out "keep");
+          let before = load repository in
+          (match
+             Service.copy_out ~root ~checkpoint:target ~destination
+               ~expected_plan:(Some preview.Service.copy_plan)
+           with
+          | Error (Service.History_error message) ->
+              Alcotest.(check bool)
+                "stale plan explained" true
+                (String.starts_with ~prefix:"local selection plan is stale"
+                   message)
+          | Error error -> Alcotest.fail (Service.error_to_string error)
+          | Ok _ -> Alcotest.fail "applied stale destination plan");
+          Alcotest.(check string)
+            "external obstruction unchanged" "keep"
+            (In_channel.with_open_bin
+               (destination ^ "/external")
+               In_channel.input_all);
+          Alcotest.(check bool)
+            "metadata unchanged" true
+            (Raw.Mutable_ref.equal before.S.head (load repository).S.head);
+          Alcotest.(check bool)
+            "no journal reservation" true
+            (J.pending ~root |> ok J.error_to_string = [])))
+
+let[@warning "-4"] copyout_can_recover_safety_while_source_conflicts () =
+  with_root (fun root ->
+      with_copy_destination root (fun destination ->
+          let repository, capability, _, _, _ = initialize root in
+          make_topic root capability;
+          write_private root "source safety B";
+          let child = Unix.fork () in
+          if child = 0 then (
+            let observe = function
+              | Service.Filesystem_mutation (Service.Safe_apply.After_sync, _)
+                ->
+                  Unix._exit 73
+              | _ -> ()
+            in
+            ignore
+              (Service.For_test.branch_switch ~observe ~root ~name:"topic"
+                 ~dry_run:false);
+            Unix._exit 74);
+          let _, status = Unix.waitpid [] child in
+          Alcotest.(check bool)
+            "original selection interrupted" true (status = Unix.WEXITED 73);
+          write_private root "unexplained external edit";
+          reject "replayed over external edit"
+            (Service.branch_switch ~root ~name:"topic" ~dry_run:false);
+          let pending =
+            J.latest_pending ~root |> ok J.error_to_string |> Option.get
+          in
+          let before = load repository in
+          ignore (copy root (J.safety pending) destination None);
+          Alcotest.(check string)
+            "saved safety available through supported recovery export"
+            "source safety B"
+            (In_channel.with_open_bin
+               (destination ^ "/private.bin")
+               In_channel.input_all);
+          Alcotest.(check string)
+            "conflicting live bytes preserved" "unexplained external edit"
+            (read_private root);
+          Alcotest.(check bool)
+            "source metadata and partial-tree capture untouched" true
+            (Raw.Mutable_ref.equal before.S.head (load repository).S.head);
+          Alcotest.(check string)
+            "original incomplete operation preserved" (J.operation_id pending)
+            (J.latest_pending ~root |> ok J.error_to_string |> Option.get
+           |> J.operation_id)))
+
+let completed_copyout_has_no_permanent_source_root () =
+  with_root (fun root ->
+      with_copy_destination root (fun destination ->
+          let repository, _, _, _, _ = initialize root in
+          let target = initial_snapshot repository in
+          write_private root "later B";
+          Service.save ~root |> service |> ignore;
+          let result = copy root target destination None in
+          let compacted =
+            Service.compact ~root ~keep_recent:0 ~dry_run:false |> service
+          in
+          Alcotest.(check bool)
+            "completed export does not pin source contents forever" true
+            (List.exists (M.Snapshot_id.equal target) compacted.Service.dropped);
+          Alcotest.(check bool)
+            "completed copy journal pruned without source proof" true
+            (List.mem
+               (Option.get result.Service.copy_operation)
+               compacted.Service.pruned_journals);
+          Alcotest.(check int)
+            "source history topology preserved" 2
+            (List.length (H.nodes (load repository).S.history));
+          Alcotest.(check bool)
+            "copied directory remains" true
+            (Sys.file_exists (destination ^ "/private.bin"))))
+
 let () =
   Alcotest.run "Local authenticated branch state"
     [
       ( "state",
         [
+          Alcotest.test_case
+            "copy-out preserves source private state and previews" `Quick
+            copyout_keeps_source_private_state;
+          Alcotest.test_case
+            "copy-out recovers actual journal and mutation boundaries" `Quick
+            copyout_recovers_actual_journal_boundaries;
+          Alcotest.test_case
+            "copy-out Materialized retry preserves later destination edits"
+            `Quick copyout_later_destination_edits_survive_materialized;
+          Alcotest.test_case "stale copy plan preserves obstructions" `Quick
+            copyout_stale_plan_and_obstructions;
+          Alcotest.test_case
+            "recovery export available while source selection conflicts" `Quick
+            copyout_can_recover_safety_while_source_conflicts;
+          Alcotest.test_case
+            "completed export does not permanently pin source history" `Quick
+            completed_copyout_has_no_permanent_source_root;
           Alcotest.test_case "private switching across fresh processes" `Quick
             private_switch_journey;
           Alcotest.test_case "equal contents keep exact branch positions" `Quick

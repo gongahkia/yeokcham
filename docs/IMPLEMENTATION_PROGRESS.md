@@ -663,3 +663,36 @@ suite includes complete identity verification for large manifests and direct
 byte corruption with preserved native metadata. Unaffected Dune results may be
 cached. No G01 measurements were rerun. Copy-out is not yet exposed by the new
 service/journal path, and P2 remains incomplete.
+
+P2 copy-out service/journal checkpoint: existing restore-to-directory now uses
+whole-directory staged installation. New schema-4 journals bind the exact target,
+physical digest and canonical output path without source-history/branch updates.
+The independent Python canonical emitter verifies a committed golden. Six new
+native local-service cases (suite total 20) passed: no source head/counter/cursor
+or branch-position changes, seven actual copy journal/mutation exits, identical
+explicit operation retries, stale destination plan refusal, later destination
+edits after Materialized, safety export while an original source selection is
+conflicted, and completed-export journal pruning without permanent source pins.
+Journal suite total 8 passed; original service45/GC11/undo14 suites passed. The
+first service run exposed a changed legacy nonempty-destination error prefix;
+the compatibility wrapper now retains that error shape without weakening safety.
+P2 remains incomplete: ordinary restore syntax, complete selection confirmation,
+consistent plan/JSON/exit/action handling and the final acceptance report/receipt
+are still required. No later pilot slice started.
+
+Copy-out integration's initial `make ci` exited 2: two tiny benchmark-harness
+resume cases detected storage changes caused by recovery verification writing
+journals into the measured fixture. The untimed verifier now uses a disposable
+metadata replica and asserts original storage/head are unchanged. The eight-case
+harness suite passed after that fix; accepted G01 measurements/artifacts were
+not rerun or changed. A first standalone harness invocation supplied an
+unsupported extra positional argument and was rejected by unittest; the correct
+no-argument invocation passed. Final common-check evidence follows this fix.
+
+Final copy-out routing verification: `make build`, `make lint`, `make ci` exited
+0 (`*-copyout-routing-final.log`). Focused journal8/native-local20/service45/
+GC11/undo14 and independent vector generation passed. Tiny harness8 passed;
+unchanged Dune results may be cached. The final formatter pass exited 0 (the
+initial routing formatter promoted files). README and accepted G01 evidence
+remain unchanged. Consistent local selection CLI confirmation/plan/outcome
+handling and final P2 acceptance evidence remain outstanding.

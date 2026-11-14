@@ -1,7 +1,7 @@
-(** Immutable V1 in-place restore journal generations.
-
-    Records name exact V1 snapshots only. They contain no filesystem paths or
-    bytes; an adapter re-derives the materialisation plan from the target. *)
+(** Immutable scoped local restore generations. In-place operations bind exact
+    snapshots, history position and optional branch selection. Copy-out binds an
+    exact target and canonical output directory without navigating source
+    history. Both bind separately staged physical plans by digest. *)
 
 type phase = Prepared | Applying | Materialized | Published
 type t
@@ -27,6 +27,17 @@ val make_prepared :
   safety:Yeokcham_v1_model.Snapshot_id.t ->
   target:Yeokcham_v1_model.Snapshot_id.t ->
   (t, error) result
+
+val make_copyout :
+  operation_id:string ->
+  target:Yeokcham_v1_model.Snapshot_id.t ->
+  digest:string ->
+  destination:string ->
+  (t, error) result
+
+val destination : t -> string option
+(** Schema 4 copy-out scope. Safety equals target because source work is not
+    replaced; history and branch fields are absent. *)
 
 val history_node : t -> int64 option
 
@@ -57,6 +68,7 @@ val append : root:string -> t -> (unit, error) result
 (** Create-only append. Equal existing bytes are an idempotent retry. *)
 
 val scan : root:string -> (t list, error) result
+val pending : root:string -> (t list, error) result
 val latest_pending : root:string -> (t option, error) result
 
 val pending_snapshots :

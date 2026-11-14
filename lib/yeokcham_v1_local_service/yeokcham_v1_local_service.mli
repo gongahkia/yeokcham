@@ -834,7 +834,52 @@ val branch_switch :
     and journal file changes before atomically publishing branch and cursor.
     Preview has no history, ordinary-file or staging writes. *)
 
+type copy_outcome = {
+  copy_operation : string option;
+  copy_snapshot : Yeokcham_v1_model.Snapshot_id.t;
+  copy_destination : string;
+  copy_plan : string;
+  copy_applied : bool;
+  copy_resumed : bool;
+}
+
+val preview_copy_out :
+  root:string ->
+  checkpoint:Yeokcham_v1_model.Snapshot_id.t ->
+  destination:string ->
+  (copy_outcome, error) result
+
+val copy_out :
+  root:string ->
+  checkpoint:Yeokcham_v1_model.Snapshot_id.t ->
+  destination:string ->
+  expected_plan:string option ->
+  (copy_outcome, error) result
+
+type recovered_operation =
+  | Recovered_in_place of in_place_restore
+  | Recovered_copy_out of copy_outcome
+
+type recovery_result = {
+  already_completed : bool;
+  recovered : recovered_operation;
+}
+
+val recover_operation :
+  root:string ->
+  operation:string option ->
+  (recovery_result option, error) result
+
 module For_test : sig
+  val copy_out :
+    observe:(application_boundary -> unit) ->
+    root:string ->
+    checkpoint:Yeokcham_v1_model.Snapshot_id.t ->
+    destination:string ->
+    dry_run:bool ->
+    expected_plan:string option ->
+    (copy_outcome, error) result
+
   val branch_switch :
     observe:(application_boundary -> unit) ->
     root:string ->

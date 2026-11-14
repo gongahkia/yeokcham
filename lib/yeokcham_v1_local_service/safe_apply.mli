@@ -70,3 +70,4 @@ val prepare_copyout :
   (t, error) result
 
 val destination : t -> string option
+val copyout_token : t -> string

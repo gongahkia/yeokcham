@@ -151,12 +151,18 @@ def check_history(binary, root, env, count, current):
 
 
 def verify_checkpoint(binary, root, env, tree, node, expected, scratch):
-    """Restore from stored objects into an empty directory, never from live files."""
+    """Verify stored bytes using a metadata replica, leaving measured inputs intact."""
     checkpoint = next(item['entry']['checkpoint'] for item in tree['nodes']
                       if item['entry']['node'] == str(node))
-    with tempfile.TemporaryDirectory(prefix='restored-', dir=scratch) as directory:
-        destination = Path(directory)
-        _, metrics = invoke([str(binary), 'restore', '--root', str(root),
+    with tempfile.TemporaryDirectory(prefix='restore-verification-', dir=scratch) as directory:
+        verification = Path(directory)
+        replica = verification / 'source'
+        replica.mkdir()
+        # Restore journals belong to this disposable verifier, outside measured inputs.
+        shutil.copytree(root / '.yeokcham', replica / '.yeokcham', symlinks=True)
+        destination = verification / 'restored'
+        destination.mkdir()
+        _, metrics = invoke([str(binary), 'restore', '--root', str(replica),
                              '--checkpoint', checkpoint, '--destination', str(destination)], env)
         fixture.verify(destination, expected)
     return metrics['seconds']
@@ -500,7 +506,7 @@ def main():
                 'ignore': 'no ignore files; all generated paths included',
                 'watcher': 'off', 'network': 'none', 'server': 'none',
                 'storage': 'existing runtime defaults; no codec/packing changes; allocation includes file and directory blocks',
-                'verification': 'restore --checkpoint ID --destination EMPTY_DIR after mutating live bytes; full manifest comparison outside timings',
+                'verification': 'restore --checkpoint ID --destination EMPTY_DIR from a disposable metadata replica after mutating live bytes; full manifest comparison outside timings',
                 'history_preparation': 'capture N nodes; restore each to a separate directory; no navigation/proof metadata added to the fixture',
             },
             'not_measured': [
