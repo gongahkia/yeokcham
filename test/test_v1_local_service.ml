@@ -478,7 +478,7 @@ let directory_only_changes_can_be_shared () =
       (`Nested, `Empty, [ "entry/nested" ]);
     ]
 
-let[@warning "-4"] in_place_restore_refuses_ignored_entries_before_mutation () =
+let in_place_restore_preserves_noncolliding_ignored_entries () =
   List.iter
     (fun ignored ->
       with_directory "yeokcham-v1-ignored-restore-" (fun root ->
@@ -489,29 +489,20 @@ let[@warning "-4"] in_place_restore_refuses_ignored_entries_before_mutation () =
           Unix.mkdir (Filename.concat root "private") 0o700;
           write_file root "private/secret" "never captured\n";
           Unix.symlink "missing-target" (Filename.concat root "private-link");
-          let before = repository_tree root in
-          (match
-             Service.restore_in_place ~root
+          ignore
+            (Service.restore_in_place ~root
                ~checkpoint:initial.Service.checkpoint
-           with
-          | Error
-              (Service.Snapshot_error
-                 (Yeokcham_snapshot.Ignored_path_would_be_removed path)) ->
-              Alcotest.(check string) "names the ignored entry" ignored path
-          | Error error -> Alcotest.fail (Service.error_to_string error)
-          | Ok _ -> Alcotest.fail "restore deleted an ignored entry");
+            |> require_ok Service.error_to_string);
           Alcotest.(check string)
-            "unsaved ordinary bytes survive" "unsaved\n"
-            (read_file root "main.ml");
-          Alcotest.(check string)
-            "ignored bytes survive without capture" "never captured\n"
-            (read_file root "private/secret");
-          Alcotest.(check string)
-            "ignored symlink survives" "missing-target"
-            (Unix.readlink (Filename.concat root "private-link"));
-          Alcotest.(check (list string))
-            "refusal writes no state, journal, or objects" before
-            (repository_tree root)))
+            "ordinary bytes restored" "original\n" (read_file root "main.ml");
+          if ignored = "private-link" then
+            Alcotest.(check string)
+              "ignored symlink survives" "missing-target"
+              (Unix.readlink (Filename.concat root "private-link"))
+          else
+            Alcotest.(check string)
+              "ignored bytes survive without capture" "never captured\n"
+              (read_file root "private/secret")))
     [ "private"; "private/secret"; "private-link" ]
 
 let damaged_restore_target_is_refused_before_mutation () =
@@ -772,7 +763,7 @@ let in_place_restore_preserves_repository_metadata () =
         "Yeokcham metadata remains present" true
         (Sys.file_exists (Filename.concat root ".yeokcham")))
 
-let interrupted_applying_restore_is_resumable () =
+let[@warning "-4"] interrupted_applying_restore_is_resumable () =
   with_directory "yeokcham-v1-service-resume-" (fun root ->
       write_file root "main.ml" "let version = 1\n";
       let initial = initialize root in
@@ -794,23 +785,19 @@ let interrupted_applying_restore_is_resumable () =
       in
       Journal.append ~root applying |> require_ok Journal.error_to_string;
       write_file root "main.ml" "partial restore bytes\n";
-      let recovered =
-        Service.recover_in_place ~root |> require_ok Service.error_to_string
-      in
-      let recovered =
-        match recovered with
-        | Some recovered -> recovered
-        | None -> Alcotest.fail "pending restore was not recovered"
-      in
-      Alcotest.(check bool)
-        "recovery is reported as resumed" true recovered.Service.resumed;
+      (match Service.recover_in_place ~root with
+      | Error (Service.Safe_application_error _) -> ()
+      | Error error -> Alcotest.fail (Service.error_to_string error)
+      | Ok _ ->
+          Alcotest.fail
+            "legacy Applying journal replayed over unexplained bytes");
       Alcotest.(check string)
-        "recovery re-derives the exact target" "let version = 1\n"
-        (read_file root "main.ml");
+        "unexplained partial/external bytes are preserved"
+        "partial restore bytes\n" (read_file root "main.ml");
       Alcotest.(check bool)
-        "published journal is no longer pending" true
-        (Option.is_none
-           (Service.recover_in_place ~root |> require_ok Service.error_to_string)))
+        "legacy journal remains available for diagnosis" true
+        (Option.is_some
+           (Journal.latest_pending ~root |> require_ok Journal.error_to_string)))
 
 let materialized_restore_finishes_without_touching_new_ignored_files () =
   with_directory "yeokcham-v1-service-materialized-" (fun root ->
@@ -2583,11 +2570,88 @@ let late_package_review_retains_feed_forks_across_retry_before_adoption () =
         "let version = 1\n"
         (read_file destination "main.ml"))
 
+let navigation_recovers_actual_file_and_metadata_boundaries () =
+  let boundaries =
+    [
+      Service.Before_safety_publish;
+      Service.After_safety_publish;
+      Service.Prepared_journal;
+      Service.Applying_journal;
+      Service.Materialized_journal;
+      Service.Before_metadata_publish;
+      Service.After_metadata_publish;
+      Service.Published_journal;
+      Service.Filesystem_mutation
+        (Service.Safe_apply.Before_mutation, [ "main.ml" ]);
+      Service.Filesystem_mutation
+        (Service.Safe_apply.After_mutation, [ "main.ml" ]);
+      Service.Filesystem_mutation (Service.Safe_apply.After_sync, [ "main.ml" ]);
+    ]
+  in
+  List.iter
+    (fun dirty ->
+      List.iter
+        (fun boundary ->
+          with_directory "yeokcham-navigation-boundary-" (fun root ->
+              write_file root "main.ml" "A\n";
+              ignore (initialize root);
+              write_file root "main.ml" "B\n";
+              ignore (Service.save ~root |> require_ok Service.error_to_string);
+              write_file root "main.ml" "C\n";
+              ignore (Service.save ~root |> require_ok Service.error_to_string);
+              if dirty then write_file root "main.ml" "D unsaved\n";
+              let child = Unix.fork () in
+              (if child = 0 then
+                 let observe seen = if seen = boundary then Unix._exit 73 in
+                 match
+                   Service.For_test.navigate_history ~observe ~root
+                     ~direction:Service.Undo ~dry_run:false
+                 with
+                 | Ok _ -> Unix._exit 74
+                 | Error _ -> Unix._exit 75);
+              let _, status = Unix.waitpid [] child in
+              Alcotest.(check bool)
+                "terminated at requested real boundary" true
+                (status = Unix.WEXITED 73);
+              if boundary <> Service.Published_journal then
+                ignore
+                  (Service.navigate_history ~root ~direction:Service.Undo
+                     ~dry_run:false
+                  |> require_ok Service.error_to_string)
+              else
+                Alcotest.(check bool)
+                  "published operation already complete" true
+                  (Option.is_none
+                     (Service.recover_in_place ~root
+                     |> require_ok Service.error_to_string));
+              let tree =
+                Service.local_history ~root
+                |> require_ok Service.error_to_string
+              in
+              let history = tree.Service.undo_tree in
+              Alcotest.(check int)
+                "safety captured once without partial-tree nodes"
+                (if dirty then 4 else 3)
+                (List.length (Yeokcham_v1_undo.nodes history));
+              Alcotest.(check int64)
+                "one navigation only"
+                (if dirty then 2L else 1L)
+                (Yeokcham_v1_undo.current history).Yeokcham_v1_undo.id;
+              Alcotest.(check string)
+                "exact requested target after restart"
+                (if dirty then "C\n" else "B\n")
+                (read_file root "main.ml")))
+        boundaries)
+    [ false; true ]
+
 let () =
   Alcotest.run "V1 local service"
     [
       ( "saved work",
         [
+          Alcotest.test_case
+            "navigation recovers actual file and metadata boundaries" `Quick
+            navigation_recovers_actual_file_and_metadata_boundaries;
           Alcotest.test_case "init captures and unchanged save is a no-op"
             `Quick init_captures_the_initial_tree_and_save_observes_no_change;
           Alcotest.test_case "username registration survives repository reload"
@@ -2615,8 +2679,8 @@ let () =
             "in-place restore retains unsaved bytes as a safety checkpoint"
             `Quick in_place_restore_retains_and_recovers_unsaved_bytes;
           Alcotest.test_case
-            "in-place restore refuses ignored entries before mutation" `Quick
-            in_place_restore_refuses_ignored_entries_before_mutation;
+            "in-place restore preserves noncolliding ignored entries" `Quick
+            in_place_restore_preserves_noncolliding_ignored_entries;
           Alcotest.test_case "damaged restore target is refused before mutation"
             `Quick damaged_restore_target_is_refused_before_mutation;
           Alcotest.test_case
@@ -2635,8 +2699,9 @@ let () =
             missing_restore_proof_object_blocks_compaction_before_state_change;
           Alcotest.test_case "in-place restore preserves repository metadata"
             `Quick in_place_restore_preserves_repository_metadata;
-          Alcotest.test_case "interrupted applying restore resumes exactly"
-            `Quick interrupted_applying_restore_is_resumable;
+          Alcotest.test_case
+            "legacy Applying journal preserves unexplained bytes" `Quick
+            interrupted_applying_restore_is_resumable;
           Alcotest.test_case
             "materialized restore preserves newly created ignored files" `Quick
             materialized_restore_finishes_without_touching_new_ignored_files;

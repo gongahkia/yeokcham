@@ -532,3 +532,28 @@ in-process hooks before/after actual mutations and after directory fsyncs.
 Casefold directories, cross-filesystem application and unavailable native rename
 semantics refuse explicitly. This checkpoint does not yet connect the engine to
 the restore journal or CLI; the existing restore path remains outstanding.
+
+P2 navigation now uses the physical engine. Restore journal schema 3 extends
+schema 2 with a 32-byte physical-plan digest and optional typed branch identity.
+Every generation must preserve operation, safety/target IDs, exact history node,
+plan digest and branch scope. The service saves a complete safety observation
+and target-node reservation before appending Prepared, then advances Applying,
+verifies/applies the physical plan, appends Materialized, publishes the exact
+cursor/project/branch root and appends the existing restore proof and Published.
+A Materialized retry publishes metadata without rescanning or rewriting later
+external edits. A crash after metadata publication selects the same reserved
+node again, without allocating another safety or target node. Displaced native
+nodes are retained in the operation's staging directory; proof forgetting and
+object GC do not erase them. This is process-interruption evidence, not a claim
+of tested power-loss behavior on every filesystem.
+
+Legacy Prepared/Applying journals without physical identity plans refuse
+replacement and retain their live bytes and checkpoint roots for explicit
+copy-out/diagnosis. Legacy Materialized/Published journals remain readable and
+can finish metadata publication. `Store.save{,_collaborative}` now refuses a
+changed branch selection unless the submitted history already selects that
+branch's exact retained cursor. This prevents accidental branch retargeting.
+`Service.For_test` provides in-process hooks at safety publication, journal
+phases, actual file mutations and metadata publication; no CLI, project file or
+environment setting enables those hooks. CLI switch, complete preview and
+copy-out hardening remain outstanding at this checkpoint.

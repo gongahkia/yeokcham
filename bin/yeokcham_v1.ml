@@ -270,6 +270,8 @@ let action ?(confirmation_required = false) ~root arguments explanation =
     }
 
 let[@warning "-4"] fail_local = function
+  | Service.Safe_application_error message ->
+      fail_with_status 8 "file-application-conflict" message
   | Service.Snapshot_error
       ( Yeokcham_snapshot.Invalid_ignore_rule _
       | Yeokcham_snapshot.Invalid_ignore_path _ ) as error ->

@@ -6,6 +6,7 @@ type phase = Prepared | Applying | Materialized | Published
 type t = {
   operation_id : string;
   history_node : int64 option;
+  plan : (string * Model.Core.Branch_id.t option) option;
   safety : Model.Snapshot_id.t;
   target : Model.Snapshot_id.t;
   generation : int64;
@@ -69,6 +70,7 @@ let make_prepared ~operation_id ~safety ~target =
       {
         operation_id;
         history_node = None;
+        plan = None;
         safety;
         target;
         generation = 0L;
@@ -81,6 +83,17 @@ let with_history_node journal node =
   if Int64.compare node 0L < 0 then
     Error (Invalid_schema "negative history node")
   else Ok { journal with history_node = Some node }
+
+let plan journal = journal.plan
+
+let with_plan journal ~digest ~selected_branch =
+  if String.length digest <> 32 then
+    Error (Invalid_schema "physical plan digest must be 32 bytes")
+  else if journal.history_node = None then
+    Error (Invalid_schema "physical plan requires an exact history node")
+  else if journal.phase <> Prepared then
+    Error (Invalid_schema "physical plan must be bound before application")
+  else Ok { journal with plan = Some (digest, selected_branch) }
 
 let operation_id journal = journal.operation_id
 let safety journal = journal.safety
@@ -137,7 +150,9 @@ let encode journal =
   Encoding.array
     ([
        Encoding.integer
-         (if Option.is_some journal.history_node then 2L else schema_version);
+         (if Option.is_some journal.plan then 3L
+          else if Option.is_some journal.history_node then 2L
+          else schema_version);
        operation;
        safety;
        target;
@@ -146,7 +161,17 @@ let encode journal =
      ]
     @ Option.fold ~none:[]
         ~some:(fun node -> [ Encoding.integer node ])
-        journal.history_node)
+        journal.history_node
+    @ Option.fold ~none:[]
+        ~some:(fun (digest, branch) ->
+          [
+            Encoding.bytes digest;
+            Option.fold ~none:Encoding.null
+              ~some:(fun branch ->
+                Encoding.bytes (Model.Core.Branch_id.to_raw branch))
+              branch;
+          ])
+        journal.plan)
   |> Result.map Encoding.encode
   |> Result.map_error (fun error -> Encoding_error error)
 
@@ -162,12 +187,42 @@ let decoded_integer name = function
   | Encoding.Bool _ | Encoding.Null ->
       Error (Invalid_schema (name ^ " must be an integer"))
 
-let decode bytes =
+let[@warning "-4"] decode bytes =
   let* value =
     Encoding.decode bytes |> Result.map_error (fun error -> Decode_error error)
   in
-  let* fields, history_node =
+  let* fields, history_node, plan =
     match value with
+    | Encoding.Array
+        [
+          Encoding.Integer 3L;
+          operation;
+          safety;
+          target;
+          generation;
+          phase;
+          Encoding.Integer node;
+          Encoding.Bytes digest;
+          branch;
+        ]
+      when Int64.compare node 0L >= 0 && String.length digest = 32 ->
+        let* branch =
+          match branch with
+          | Encoding.Null -> Ok None
+          | Encoding.Bytes raw ->
+              Model.Core.Branch_id.of_raw raw
+              |> Result.map Option.some
+              |> Result.map_error (fun e ->
+                  Invalid_schema (Model.Core.error_to_string e))
+          | _ ->
+              Error
+                (Invalid_schema
+                   "selected branch must be null or a typed identity")
+        in
+        Ok
+          ( [ Encoding.integer 3L; operation; safety; target; generation; phase ],
+            Some node,
+            Some (digest, branch) )
     | Encoding.Array
         [
           Encoding.Integer 2L;
@@ -181,8 +236,10 @@ let decode bytes =
       when Int64.compare node 0L >= 0 ->
         Ok
           ( [ Encoding.integer 2L; operation; safety; target; generation; phase ],
-            Some node )
-    | Encoding.Array fields when List.length fields = 6 -> Ok (fields, None)
+            Some node,
+            None )
+    | Encoding.Array fields when List.length fields = 6 ->
+        Ok (fields, None, None)
     | Encoding.Array _ ->
         Error (Invalid_schema "record must contain six fields")
     | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _ | Encoding.Map _
@@ -195,7 +252,9 @@ let decode bytes =
       if
         not
           (Int64.equal version
-             (if Option.is_some history_node then 2L else schema_version))
+             (if Option.is_some plan then 3L
+              else if Option.is_some history_node then 2L
+              else schema_version))
       then Error (Unsupported_schema_version version)
       else
         let* operation_id = decoded_text "operation id" operation in
@@ -226,7 +285,15 @@ let decode bytes =
             Error (Invalid_generation generation)
           else
             let journal =
-              { operation_id; history_node; safety; target; generation; phase }
+              {
+                operation_id;
+                history_node;
+                plan;
+                safety;
+                target;
+                generation;
+                phase;
+              }
             in
             let* canonical = encode journal in
             if String.equal canonical bytes then Ok journal
@@ -342,12 +409,13 @@ let scan ~root =
       | [] -> Ok ()
       | next :: rest ->
           let* expected = advance previous next.phase in
-          if
-            (not (String.equal expected.operation_id next.operation_id))
-            || (not (Model.Snapshot_id.equal expected.safety next.safety))
-            || (not (Model.Snapshot_id.equal expected.target next.target))
-            || not (Int64.equal expected.generation next.generation)
-          then Error (Invalid_schema "restore journal chain is not contiguous")
+          let* expected_bytes = encode expected in
+          let* next_bytes = encode next in
+          if expected_bytes <> next_bytes then
+            Error
+              (Invalid_schema
+                 "restore journal chain changes operation, scope, history node \
+                  or physical plan")
           else follow next rest
     in
     match records with

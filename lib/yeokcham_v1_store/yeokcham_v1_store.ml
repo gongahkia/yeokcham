@@ -860,6 +860,22 @@ let previous repository expected =
 
 let local_for_history ?local ~existing ~project history =
   let local = match local with Some _ -> local | None -> existing in
+  let* () =
+    match (existing, local) with
+    | Some previous, Some selected
+      when not
+             (Model.Core.Branch_id.equal (Local.selected previous).Local.branch
+                (Local.selected selected).Local.branch) ->
+        if
+          (Local.selected selected).Local.cursor
+          = (History.current history).History.id
+        then Ok ()
+        else
+          Error
+            (History_error
+               "branch selection must use its exact retained history cursor")
+    | _ -> Ok ()
+  in
   let* local =
     match local with
     | None -> Ok None

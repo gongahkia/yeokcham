@@ -333,6 +333,30 @@ let repeated_mixed_transitions () =
         A.apply ~root (load root plan safety target) |> ok Fun.id)
   done
 
+let root_path_replacement () =
+  with_root (fun root store ->
+      let safety, target, observation = fixture root store in
+      let plan = prepare root store safety target observation in
+      let moved = root ^ "-externally-moved" in
+      Fun.protect
+        ~finally:(fun () -> if Sys.file_exists moved then remove moved)
+        (fun () ->
+          let once = ref false in
+          let observe stage _ =
+            if stage = A.Before_mutation && not !once then (
+              once := true;
+              Unix.rename root moved;
+              Unix.mkdir root 0o700)
+          in
+          assert_refused "continued applying through a stale root descriptor"
+            (A.For_test.apply ~observe ~root plan);
+          Alcotest.(check int)
+            "replacement root untouched" 0
+            (Array.length (Sys.readdir root));
+          Alcotest.(check string)
+            "moved original root untouched" "original A"
+            (read (moved ^ "/a"))))
+
 let () =
   Alcotest.run "Safe local file application"
     [
@@ -341,6 +365,7 @@ let () =
           (fun (name, f) -> Alcotest.test_case name `Quick f)
           [
             ("exact mixed target and identical retry", exact_apply_and_retry);
+            ("root path replacement during application", root_path_replacement);
             ("forked interruption at all mutation boundaries", crash_boundaries);
             ("external edit before application", external_edits_are_preserved);
             ( "external writer holds original descriptor",

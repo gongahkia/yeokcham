@@ -120,11 +120,89 @@ let published_journals_are_pruned () =
         "journal directory is empty after prune" 0
         (Journal.scan ~root |> require_ok Journal.error_to_string |> List.length))
 
+let[@warning "-4"] physical_plan_roundtrip_and_scope () =
+  with_journal_root (fun root ->
+      let branch =
+        Model.Core.Branch_id.of_raw (String.make 16 'b')
+        |> require_ok Model.Core.error_to_string
+      in
+      let base =
+        Journal.with_history_node (prepared ()) 7L
+        |> require_ok Journal.error_to_string
+      in
+      let planned =
+        Journal.with_plan base ~digest:(String.make 32 'p')
+          ~selected_branch:(Some branch)
+        |> require_ok Journal.error_to_string
+      in
+      let bytes =
+        Journal.encode planned |> require_ok Journal.error_to_string
+      in
+      let decoded =
+        Journal.decode bytes |> require_ok Journal.error_to_string
+      in
+      Alcotest.(check string)
+        "V3 canonical round trip" bytes
+        (Journal.encode decoded |> require_ok Journal.error_to_string);
+      Alcotest.(check (option int64))
+        "exact target position" (Some 7L)
+        (Journal.history_node decoded);
+      (match Journal.plan decoded with
+      | Some (digest, Some selected) ->
+          Alcotest.(check string) "plan digest" (String.make 32 'p') digest;
+          Alcotest.(check bool)
+            "typed branch" true
+            (Model.Core.Branch_id.equal branch selected)
+      | _ -> Alcotest.fail "plan scope missing");
+      Journal.append ~root planned |> require_ok Journal.error_to_string;
+      let changed =
+        Journal.with_history_node planned 8L
+        |> require_ok Journal.error_to_string
+      in
+      let applying =
+        Journal.advance changed Journal.Applying
+        |> require_ok Journal.error_to_string
+      in
+      Journal.append ~root applying |> require_ok Journal.error_to_string;
+      match Journal.scan ~root with
+      | Error _ -> ()
+      | Ok _ -> Alcotest.fail "journal chain retargeted history node")
+
+let plan_digest_cannot_change_between_generations () =
+  with_journal_root (fun root ->
+      let prepared =
+        Journal.with_history_node (prepared ()) 0L
+        |> require_ok Journal.error_to_string
+      in
+      let first =
+        Journal.with_plan prepared ~digest:(String.make 32 'a')
+          ~selected_branch:None
+        |> require_ok Journal.error_to_string
+      in
+      Journal.append ~root first |> require_ok Journal.error_to_string;
+      let second =
+        Journal.with_plan prepared ~digest:(String.make 32 'b')
+          ~selected_branch:None
+        |> require_ok Journal.error_to_string
+      in
+      let applying =
+        Journal.advance second Journal.Applying
+        |> require_ok Journal.error_to_string
+      in
+      Journal.append ~root applying |> require_ok Journal.error_to_string;
+      match Journal.scan ~root with
+      | Error _ -> ()
+      | Ok _ -> Alcotest.fail "journal chain changed physical plan")
+
 let () =
   Alcotest.run "V1 restore journal"
     [
       ( "record",
         [
+          Alcotest.test_case "physical plan and typed branch scope" `Quick
+            physical_plan_roundtrip_and_scope;
+          Alcotest.test_case "plan digest is immutable across generations"
+            `Quick plan_digest_cannot_change_between_generations;
           Alcotest.test_case "prepared golden bytes" `Quick
             prepared_record_has_stable_bytes;
           Alcotest.test_case "phases advance in order" `Quick

@@ -472,6 +472,17 @@ let branch_work_is_a_retention_root () =
       |> ok S.error_to_string |> ignore;
       save "C";
       let current = load repository in
+      let alternate =
+        L.lookup (local current) "saved-alternative" |> ok Fun.id
+      in
+      let selected = L.select (local current) alternate.L.branch |> ok Fun.id in
+      reject "selection retargeted a branch to another cursor"
+        (S.save_collaborative ~local:selected repository
+           ~expected:current.S.head ~project:current.S.project ~collaboration);
+      Alcotest.(check int64)
+        "rejected selection preserves alternate cursor" alternate.L.cursor
+        (L.lookup (local (load repository)) "saved-alternative" |> ok Fun.id)
+          .L.cursor;
       let unsafe =
         M.compact current.S.project ~keep_recent:0 ~journal_snapshots:[]
           ~proof_snapshots:[]

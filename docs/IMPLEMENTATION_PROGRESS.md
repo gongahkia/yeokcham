@@ -572,3 +572,26 @@ plans and external edits before/after interruption or through an open original
 file descriptor. Integration into journals/navigation/switch is still pending.
 The prior native-primitives checkpoint passed `make build`, `make lint`,
 `make ci`; the first `make format` exited 1 while promoting formatter output.
+
+P2 journal/navigation integration checkpoint: new restores carry schema-3
+physical-plan digests and exact history-node scope. The service uses staged
+application for in-place restore and undo/redo; legacy partial journals without
+identity evidence refuse unexplained replacement. Complete safety captures and
+reserved target nodes remain in the authoritative state root. Branch selection
+cannot implicitly overwrite its stored cursor. Focused service (45), journal
+(6), local-core (7) and engine (13) suites passed; one new service case exercises
+22 fork exits at real filesystem/safety/journal/metadata boundaries for clean
+and dirty undo. The two changed legacy test expectations reflect P2's required
+ignored-file preservation and external-edit refusal. P2 remains incomplete:
+actual switch/CLI preview and recovery outcomes, copy-out safety, lock/GC crash
+audits, final acceptance evidence and the report remain outstanding.
+
+Journal checkpoint verification: `make build`, `make lint` and final `make ci`
+exited 0 (`*-journal-scope-final.log` in the P2 external log directory). Initial
+CI exited 2 because one older undo test constructed a legacy journal then
+expected unknown partial bytes to be overwritten. It now terminates a real
+planned navigation after its actual atomic mutation and verifies exact-node
+recovery. Engine coverage is now fourteen cases, including root-path replacement
+at the mutation boundary. The initial formatter runs exited 1 while promoting
+output; subsequent lint passed. Unaffected Dune results may be cached; no G01
+measurements were rerun.

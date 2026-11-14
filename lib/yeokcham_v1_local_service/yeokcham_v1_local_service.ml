@@ -29,6 +29,7 @@ module Name_map = Map.Make (String)
 
 type error =
   | History_error of string
+  | Safe_application_error of string
   | Store_error of Store.error
   | Snapshot_error of Snapshot.error
   | Materialize_error of Snapshot.Materialize.error
@@ -249,6 +250,7 @@ type workspace_update =
   | Workspace_updated of workspace_materialization
 
 let error_to_string = function
+  | Safe_application_error detail -> "safe local application refused: " ^ detail
   | History_error detail -> "local undo history: " ^ detail
   | Store_error error -> Store.error_to_string error
   | Snapshot_error error -> Snapshot.error_to_string error
@@ -474,12 +476,13 @@ let persist repository loaded project =
   |> Result.map (fun saved -> status_of_project saved.Store.project)
   |> Result.map_error (fun error -> Store_error error)
 
-let save_project ?history repository loaded project =
+let save_project ?history ?local repository loaded project =
   match loaded.Store.collaboration with
-  | None -> Store.save ?history repository ~expected:loaded.Store.head ~project
+  | None ->
+      Store.save ?history ?local repository ~expected:loaded.Store.head ~project
   | Some collaboration ->
-      Store.save_collaborative ?history repository ~expected:loaded.Store.head
-        ~project ~collaboration
+      Store.save_collaborative ?history ?local repository
+        ~expected:loaded.Store.head ~project ~collaboration
 
 let persist_collaborative repository loaded project collaboration =
   Store.save_collaborative repository ~expected:loaded.Store.head ~project
@@ -1430,20 +1433,6 @@ let hex_of_raw raw =
       if index mod 2 = 0 then alphabet.[byte lsr 4]
       else alphabet.[byte land 0x0f])
 
-let restore_operation_id ~safety ~target =
-  let seed =
-    String.concat ":"
-      [
-        Model.Snapshot_id.to_string safety;
-        Model.Snapshot_id.to_string target;
-        string_of_int (Unix.getpid ());
-        Int64.to_string
-          (Int64.of_float (Unix.gettimeofday () *. 1_000_000_000.));
-      ]
-  in
-  Yeokcham_hash.Sha256.digest_string seed
-  |> Yeokcham_hash.Sha256.to_raw_string |> hex_of_raw
-
 let append_journal ~root journal =
   Journal.append ~root journal
   |> Result.map_error (fun error -> Restore_journal_error error)
@@ -1533,7 +1522,20 @@ let validate_retention_inputs ~store ~project ~journal_roots proofs =
       validate_snapshot_closure store snapshot)
     (Ok ()) roots
 
-let perform_in_place ~root repository loaded journal ~resumed =
+type application_boundary =
+  | Before_safety_publish
+  | After_safety_publish
+  | Prepared_journal
+  | Applying_journal
+  | Materialized_journal
+  | Before_metadata_publish
+  | After_metadata_publish
+  | Published_journal
+  | Filesystem_mutation of Safe_apply.boundary * string list
+
+let no_application_observer _ = ()
+
+let perform_in_place ~observe ~root repository loaded journal ~resumed =
   let store = Store.underlying_store repository in
   let* history =
     match Journal.history_node journal with
@@ -1562,14 +1564,6 @@ let perform_in_place ~root repository loaded journal ~resumed =
         History.select history node.History.id
         |> Result.map_error (fun error -> History_error error)
   in
-  let* () =
-    match Journal.phase journal with
-    | Journal.Prepared | Journal.Applying ->
-        Snapshot.require_no_ignored_paths
-          ~excluded_root_names:[ ".yeokcham"; ".git" ] ~root
-        |> Result.map_error (fun error -> Snapshot_error error)
-    | Journal.Materialized | Journal.Published -> Ok ()
-  in
   let* () = validate_snapshot_closure store (Journal.safety journal) in
   let* () = validate_snapshot_closure store (Journal.target journal) in
   let* applying =
@@ -1578,19 +1572,48 @@ let perform_in_place ~root repository loaded journal ~resumed =
     | Journal.Applying -> Ok journal
     | Journal.Materialized | Journal.Published -> Ok journal
   in
+  observe Applying_journal;
   let* materialized =
     match Journal.phase applying with
     | Journal.Applying ->
+        let* digest =
+          match Journal.plan applying with
+          | None ->
+              Error
+                (Safe_application_error
+                   "this legacy Applying journal has no physical identity \
+                    plan; preserve the live tree and recover its safety/target \
+                    checkpoints to separate directories")
+          | Some (digest, _) -> Ok digest
+        in
+        let* safety = load_snapshot store (Journal.safety applying) in
         let* target = load_snapshot store (Journal.target applying) in
+        let* safety_id =
+          Snapshot.Snapshot.id safety
+          |> Result.map_error (fun e -> Snapshot_error e)
+        in
+        let* target_id =
+          Snapshot.Snapshot.id target
+          |> Result.map_error (fun e -> Snapshot_error e)
+        in
+        let* plan =
+          Safe_apply.load ~root
+            ~operation:(Journal.operation_id applying)
+            ~digest ~safety:safety_id ~target:target_id
+          |> Result.map_error (fun e -> Safe_application_error e)
+        in
         let* () =
-          Snapshot.Materialize.write_replacing ~destination:root
-            ~preserved_root_names:[ ".yeokcham"; ".git" ] store target
-          |> Result.map_error (fun error -> Materialize_error error)
+          Safe_apply.For_test.apply
+            ~observe:(fun stage path ->
+              observe (Filesystem_mutation (stage, path)))
+            ~root plan
+          |> Result.map_error (fun e -> Safe_application_error e)
         in
         advance_journal ~root applying Journal.Materialized
     | Journal.Materialized | Journal.Published -> Ok applying
     | Journal.Prepared -> assert false
   in
+  observe Materialized_journal;
   let* () =
     match Journal.phase materialized with
     | Journal.Materialized ->
@@ -1598,16 +1621,34 @@ let perform_in_place ~root repository loaded journal ~resumed =
           Model.checkpoint loaded.Store.project
             ~snapshot:(Journal.target materialized)
         in
+        let* local =
+          match Journal.plan materialized with
+          | Some (_, Some branch) -> (
+              match loaded.Store.local with
+              | None ->
+                  Error
+                    (History_error
+                       "branch-selection journal requires authenticated local \
+                        branch state")
+              | Some local ->
+                  Store.Local.select local branch
+                  |> Result.map Option.some
+                  |> Result.map_error (fun e -> History_error e))
+          | None | Some (_, None) -> Ok loaded.Store.local
+        in
+        observe Before_metadata_publish;
         let* _ =
-          save_project ~history repository loaded project
+          save_project ~history ?local repository loaded project
           |> Result.map_error (fun error -> Store_error error)
         in
+        observe After_metadata_publish;
         let* () =
           Yeokcham_store.with_lock store ~name:"restore-retention"
             ~on_error:(fun error -> Store_error (Store.Store_error error))
             (fun () -> ensure_restore_proof ~root store materialized)
         in
         let* _ = advance_journal ~root materialized Journal.Published in
+        observe Published_journal;
         Ok ()
     | Journal.Published -> Ok ()
     | Journal.Prepared | Journal.Applying -> assert false
@@ -1620,7 +1661,7 @@ let perform_in_place ~root repository loaded journal ~resumed =
       resumed;
     }
 
-let recover_in_place_unlocked ~root =
+let recover_in_place_unlocked ~observe ~root =
   with_repository ~root (fun repository loaded ->
       let* pending =
         Journal.latest_pending ~root
@@ -1638,11 +1679,13 @@ let recover_in_place_unlocked ~root =
                  (Journal.Invalid_schema
                     "pending restore names an unretained checkpoint"))
           else
-            perform_in_place ~root repository loaded journal ~resumed:true
+            perform_in_place ~observe ~root repository loaded journal
+              ~resumed:true
             |> Result.map Option.some)
 
-let restore_in_place_unlocked ~root ~checkpoint ~history_node =
-  let* recovered = recover_in_place_unlocked ~root in
+let restore_in_place_unlocked ~observe ~root ~checkpoint ~history_node
+    ~selected_branch =
+  let* recovered = recover_in_place_unlocked ~observe ~root in
   match recovered with
   | Some restored
     when Model.Snapshot_id.equal restored.restored_checkpoint checkpoint ->
@@ -1660,17 +1703,16 @@ let restore_in_place_unlocked ~root ~checkpoint ~history_node =
             Error (Unknown_checkpoint checkpoint)
           else
             let store = Store.underlying_store repository in
-            let* () =
-              Snapshot.require_no_ignored_paths
-                ~excluded_root_names:[ ".yeokcham"; ".git" ] ~root
-              |> Result.map_error (fun error -> Snapshot_error error)
-            in
             let* target = load_snapshot store checkpoint in
-            let* _ =
-              Snapshot.Materialize.plan store target
-              |> Result.map_error (fun error -> Materialize_error error)
+            let* target_id =
+              Snapshot.Snapshot.id target
+              |> Result.map_error (fun e -> Snapshot_error e)
             in
-            let* safety = capture ~root store in
+            let* safety_id, _, observation =
+              Snapshot.Observation.scan ~root ~store
+              |> Result.map_error (fun e -> Snapshot_error e)
+            in
+            let* safety = snapshot_id safety_id in
             if Model.Snapshot_id.equal safety checkpoint then
               Error (Restore_journal_error Journal.Identical_snapshots)
             else
@@ -1702,13 +1744,23 @@ let restore_in_place_unlocked ~root ~checkpoint ~history_node =
                         (History_error
                            "selected node does not match target snapshot")
               in
+              let* entropy =
+                Trust.random_bytes 32
+                |> Result.map_error (fun e ->
+                    History_error ("core identity entropy unavailable: " ^ e))
+              in
+              let operation_id = hex_of_raw entropy in
+              let* physical =
+                Safe_apply.prepare ~root ~store ~operation:operation_id
+                  ~safety:safety_id ~target:target_id observation
+                |> Result.map_error (fun e -> Safe_application_error e)
+              in
+              observe Before_safety_publish;
               let* saved =
                 save_project ~history repository loaded project
-                |> Result.map_error (fun error -> Store_error error)
+                |> Result.map_error (fun e -> Store_error e)
               in
-              let operation_id =
-                restore_operation_id ~safety ~target:checkpoint
-              in
+              observe After_safety_publish;
               let* journal =
                 Journal.make_prepared ~operation_id ~safety ~target:checkpoint
                 |> Result.map_error (fun error -> Restore_journal_error error)
@@ -1717,15 +1769,25 @@ let restore_in_place_unlocked ~root ~checkpoint ~history_node =
                 Journal.with_history_node journal target_node.History.id
                 |> Result.map_error (fun error -> Restore_journal_error error)
               in
+              let* journal =
+                Journal.with_plan journal
+                  ~digest:(Safe_apply.digest physical)
+                  ~selected_branch
+                |> Result.map_error (fun e -> Restore_journal_error e)
+              in
               let* () = append_journal ~root journal in
-              perform_in_place ~root repository saved journal ~resumed:false)
+              observe Prepared_journal;
+              perform_in_place ~observe ~root repository saved journal
+                ~resumed:false)
 
 let recover_in_place ~root =
-  with_worktree_lock ~root (fun () -> recover_in_place_unlocked ~root)
+  with_worktree_lock ~root (fun () ->
+      recover_in_place_unlocked ~observe:no_application_observer ~root)
 
 let restore_in_place ~root ~checkpoint =
   with_worktree_lock ~root (fun () ->
-      restore_in_place_unlocked ~root ~checkpoint ~history_node:None)
+      restore_in_place_unlocked ~observe:no_application_observer ~root
+        ~checkpoint ~history_node:None ~selected_branch:None)
 
 let workspace_materialization_of_plan plan restored =
   let basis = Workspace.plan_basis plan in
@@ -2648,7 +2710,7 @@ let history_target history = function
               Error "the selected redo node is not a child of the current node")
       )
 
-let navigate_history ~root ~direction ~dry_run =
+let navigate_history_with ~observe ~root ~direction ~dry_run =
   with_worktree_lock ~root (fun () ->
       let* initial = local_history ~root in
       let* pending =
@@ -2661,7 +2723,7 @@ let navigate_history ~root ~direction ~dry_run =
             (History_error
                "resume the incomplete restore before previewing navigation")
       | Some _ ->
-          let* restored = recover_in_place_unlocked ~root in
+          let* restored = recover_in_place_unlocked ~observe ~root in
           let* after = local_history ~root in
           Ok
             {
@@ -2760,9 +2822,10 @@ let navigate_history ~root ~direction ~dry_run =
                   Ok { navigation with history_applied = true })
           else
             let* restored =
-              restore_in_place_unlocked ~root
+              restore_in_place_unlocked ~observe ~root
                 ~checkpoint:navigation.target_node.History.snapshot
                 ~history_node:(Some navigation.target_node.History.id)
+                ~selected_branch:None
             in
             Ok
               {
@@ -2770,6 +2833,19 @@ let navigate_history ~root ~direction ~dry_run =
                 history_applied = true;
                 history_restore = Some restored;
               })
+
+let navigate_history ~root ~direction ~dry_run =
+  navigate_history_with ~observe:no_application_observer ~root ~direction
+    ~dry_run
+
+module For_test = struct
+  let restore_in_place ~observe ~root ~checkpoint =
+    with_worktree_lock ~root (fun () ->
+        restore_in_place_unlocked ~observe ~root ~checkpoint ~history_node:None
+          ~selected_branch:None)
+
+  let navigate_history = navigate_history_with
+end
 
 let compare_decision ~root ~decision ~candidate ~against =
   with_repository ~root (fun repository loaded ->

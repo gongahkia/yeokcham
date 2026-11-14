@@ -230,32 +230,34 @@ let ordinary_restore_changes_the_branch_position () =
         (History.children (tree root) 1L
         |> List.map (fun node -> node.History.id)))
 
-let interrupted_navigation_resumes_the_exact_node () =
+let[@warning "-4"] interrupted_navigation_resumes_the_exact_node () =
   with_root (fun root ->
       initialize root;
       save root "B";
       save root "C";
       save root "B";
       save root "D";
-      let current = History.current (tree root) in
-      let target = History.find (tree root) 1L |> ok Fun.id in
-      let prepared =
-        Journal.make_prepared ~operation_id:(String.make 64 'f')
-          ~safety:current.History.snapshot ~target:target.History.snapshot
-        |> ok Journal.error_to_string
-        |> fun journal ->
-        Journal.with_history_node journal 1L |> ok Journal.error_to_string
+      let child = Unix.fork () in
+      if child = 0 then (
+        let observe = function
+          | Service.Filesystem_mutation (Service.Safe_apply.After_mutation, _)
+            ->
+              Unix._exit 73
+          | _ -> ()
+        in
+        ignore
+          (Service.For_test.navigate_history ~observe ~root
+             ~direction:(Service.Go_to 1L) ~dry_run:false);
+        Unix._exit 74);
+      let _, status = Unix.waitpid [] child in
+      Alcotest.(check bool)
+        "stopped at actual navigation mutation" true (status = Unix.WEXITED 73);
+      let pending =
+        Journal.latest_pending ~root |> ok Journal.error_to_string |> Option.get
       in
-      let bytes = Journal.encode prepared |> ok Journal.error_to_string in
-      let reopened = Journal.decode bytes |> ok Journal.error_to_string in
       Alcotest.(check (option int64))
         "journal retained exact target node" (Some 1L)
-        (Journal.history_node reopened);
-      Journal.append ~root prepared |> ok Journal.error_to_string;
-      Journal.advance prepared Journal.Applying
-      |> ok Journal.error_to_string |> Journal.append ~root
-      |> ok Journal.error_to_string;
-      write root "partial replacement";
+        (Journal.history_node pending);
       reject "watcher save accepted during pending replacement"
         (Service.save ~root);
       let result = move root Service.Undo in

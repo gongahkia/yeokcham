@@ -10,6 +10,7 @@ module Text_diff = Text_diff
 
 type error =
   | History_error of string
+  | Safe_application_error of string
   | Store_error of Yeokcham_v1_store.error
   | Snapshot_error of Yeokcham_snapshot.error
   | Materialize_error of Yeokcham_snapshot.Materialize.error
@@ -794,3 +795,29 @@ val inspect_local_history :
 (** Metadata and verified availability, without a working-tree scan or
     publication. Local history alternatives are not projected as named shared
     branches. *)
+
+type application_boundary =
+  | Before_safety_publish
+  | After_safety_publish
+  | Prepared_journal
+  | Applying_journal
+  | Materialized_journal
+  | Before_metadata_publish
+  | After_metadata_publish
+  | Published_journal
+  | Filesystem_mutation of Safe_apply.boundary * string list
+
+module For_test : sig
+  val restore_in_place :
+    observe:(application_boundary -> unit) ->
+    root:string ->
+    checkpoint:Yeokcham_v1_model.Snapshot_id.t ->
+    (in_place_restore, error) result
+
+  val navigate_history :
+    observe:(application_boundary -> unit) ->
+    root:string ->
+    direction:history_direction ->
+    dry_run:bool ->
+    (history_navigation, error) result
+end

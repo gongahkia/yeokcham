@@ -34,6 +34,16 @@ val with_history_node : t -> int64 -> (t, error) result
 (** V2 journals bind the exact local history node to resume after interruption.
     Legacy V1 bytes remain readable and unchanged when no node is supplied. *)
 
+val plan : t -> (string * Yeokcham_v1_model.Core.Branch_id.t option) option
+
+val with_plan :
+  t ->
+  digest:string ->
+  selected_branch:Yeokcham_v1_model.Core.Branch_id.t option ->
+  (t, error) result
+(** V3 binds the exact physical-plan digest and optional branch selection. Every
+    journal generation must retain the same operation, node and plan scope. *)
+
 val operation_id : t -> string
 val safety : t -> Yeokcham_v1_model.Snapshot_id.t
 val target : t -> Yeokcham_v1_model.Snapshot_id.t

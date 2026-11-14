@@ -213,7 +213,10 @@ let verify_tree fd name stamps =
            (fun (a, x) (b, y) -> a = b && stamp_matches x y)
            stamps current
 
-let validate_parents rootfd t =
+let validate_parents ~root rootfd t =
+  open_root root (fun current ->
+      if F.identity (F.fingerprint current) <> F.identity (F.fingerprint rootfd)
+      then refuse "workspace root path now names a different directory");
   if F.identity (F.fingerprint rootfd) <> F.identity t.root then
     refuse "workspace root identity changed";
   List.iter
@@ -245,14 +248,23 @@ let classify rootfd staging a =
 let apply_with ~observe ~root t =
   guard (fun () ->
       with_staging root t.operation (fun rootfd staging ->
-          validate_parents rootfd t;
+          let validate_scope () =
+            validate_parents ~root rootfd t;
+            directory rootfd [ ".yeokcham"; "restore-staging"; t.operation ]
+              (fun current ->
+                if
+                  F.identity (F.fingerprint current)
+                  <> F.identity (F.fingerprint staging)
+                then refuse "private staging directory identity changed")
+          in
+          validate_scope ();
           List.iter (fun a -> ignore (classify rootfd staging a)) t.actions;
           List.iter
             (fun a ->
-              validate_parents rootfd t;
+              validate_scope ();
               if not (classify rootfd staging a) then (
                 observe Before_mutation a.path;
-                validate_parents rootfd t;
+                validate_scope ();
                 if classify rootfd staging a then
                   refuse "application changed while preparing mutation";
                 parent rootfd a.path (fun fd name ->
@@ -269,7 +281,7 @@ let apply_with ~observe ~root t =
                   refuse
                     "atomic application did not install the recorded target"))
             t.actions;
-          validate_parents rootfd t;
+          validate_scope ();
           List.iter
             (fun a ->
               if not (classify rootfd staging a) then
@@ -467,7 +479,7 @@ let[@warning "-4"] prepare ~root ~store ~operation ~safety ~target observation =
                           bytes = "";
                         }
                       in
-                      validate_parents rootfd t;
+                      validate_parents ~root rootfd t;
                       List.iter
                         (fun a ->
                           if classify rootfd staging a then
