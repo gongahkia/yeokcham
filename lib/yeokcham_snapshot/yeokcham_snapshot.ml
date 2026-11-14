@@ -654,6 +654,67 @@ module Content = struct
       let* manifest = Manifest.decode (Envelope.payload object_) in
       Manifest.verify_stream ~consume:write repository manifest
     else Error (Unexpected_object_type { expected = Envelope.Content; actual })
+
+  let verify_fd repository identity descriptor =
+    try
+      if (Unix.fstat descriptor).Unix.st_kind <> Unix.S_REG then
+        Error (Invalid_schema "verification descriptor is not a regular file")
+      else
+        let initial = Native.fingerprint descriptor in
+        let compare bytes =
+          let buffer = Bytes.create (String.length bytes) in
+          let rec read offset =
+            if offset = Bytes.length buffer then Ok ()
+            else
+              let count =
+                Unix.read descriptor buffer offset (Bytes.length buffer - offset)
+              in
+              if count = 0 then
+                Error
+                  (Invalid_schema
+                     "filesystem content is shorter than its saved identity")
+              else read (offset + count)
+          in
+          let* () = read 0 in
+          if Bytes.equal buffer (Bytes.unsafe_of_string bytes) then Ok ()
+          else
+            Error
+              (Invalid_schema
+                 "filesystem bytes differ from the saved content identity")
+        in
+        let* object_ =
+          Store.get repository (stored_object_id identity)
+          |> Result.map_error (fun e -> Store_error e)
+        in
+        let actual = Envelope.object_type object_ in
+        let* () =
+          if actual = Envelope.Content then
+            let* bytes = decode (Envelope.payload object_) in
+            compare bytes
+          else if actual = Envelope.File_manifest then
+            let* manifest = Manifest.decode (Envelope.payload object_) in
+            Manifest.verify_stream ~consume:compare repository manifest
+          else
+            Error
+              (Unexpected_object_type { expected = Envelope.Content; actual })
+        in
+        let extra = Bytes.create 1 in
+        if Unix.read descriptor extra 0 1 <> 0 then
+          Error
+            (Invalid_schema
+               "filesystem content is longer than its saved identity")
+        else if Native.fingerprint descriptor <> initial then
+          Error
+            (Observation_changed "verification descriptor changed while reading")
+        else Ok ()
+    with Unix.Unix_error (error, operation, _) ->
+      Error
+        (Scan_error
+           {
+             path = "<verification descriptor>";
+             operation;
+             message = Unix.error_message error;
+           })
 end
 
 module Tree = struct

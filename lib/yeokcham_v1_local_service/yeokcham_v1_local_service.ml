@@ -31,6 +31,8 @@ type error =
   | History_error of string
   | Safe_application_error of string
   | Selection_conflict of string
+  | Selection_unavailable of string
+  | Selection_integrity of string
   | Store_error of Store.error
   | Snapshot_error of Snapshot.error
   | Materialize_error of Snapshot.Materialize.error
@@ -251,6 +253,8 @@ type workspace_update =
   | Workspace_updated of workspace_materialization
 
 let error_to_string = function
+  | Selection_unavailable detail -> "local selection unavailable: " ^ detail
+  | Selection_integrity detail -> "local selection integrity failure: " ^ detail
   | Selection_conflict detail -> "local selection conflict: " ^ detail
   | Safe_application_error detail -> "safe local application refused: " ^ detail
   | History_error detail -> "local undo history: " ^ detail
@@ -304,6 +308,16 @@ let error_to_string = function
   | Unsigned_project ->
       "this V1 project has no signed collaboration state; initialize a signed \
        project"
+
+let preflight_error = function
+  | Safe_apply.Conflict detail -> Selection_conflict detail
+  | Safe_apply.Unavailable detail -> Selection_unavailable detail
+  | Safe_apply.Invalid_plan detail -> Selection_integrity detail
+
+let applying_error = function
+  | Safe_apply.Invalid_plan detail -> Selection_integrity detail
+  | (Safe_apply.Conflict _ | Safe_apply.Unavailable _) as error ->
+      Safe_application_error (Safe_apply.error_to_string error)
 
 let ( let* ) = Result.bind
 
@@ -1602,14 +1616,14 @@ let perform_in_place ~observe ~root repository loaded journal ~resumed =
           Safe_apply.load ~root
             ~operation:(Journal.operation_id applying)
             ~digest ~safety:safety_id ~target:target_id
-          |> Result.map_error (fun e -> Safe_application_error e)
+          |> Result.map_error applying_error
         in
         let* () =
           Safe_apply.For_test.apply
             ~observe:(fun stage path ->
               observe (Filesystem_mutation (stage, path)))
-            ~root plan
-          |> Result.map_error (fun e -> Safe_application_error e)
+            ~root ~store plan
+          |> Result.map_error applying_error
         in
         advance_journal ~root applying Journal.Materialized
     | Journal.Materialized | Journal.Published -> Ok applying
@@ -1765,7 +1779,7 @@ let restore_in_place_unlocked ~observe ~root ~checkpoint ~history_node
               let* physical =
                 Safe_apply.prepare ~root ~store ~operation:operation_id
                   ~safety:safety_id ~target:target_id observation
-                |> Result.map_error (fun e -> Selection_conflict e)
+                |> Result.map_error preflight_error
               in
               observe Before_safety_publish;
               let* saved =
@@ -2803,7 +2817,7 @@ let navigate_history_with ~observe ~root ~direction ~dry_run =
                 let* () =
                   Safe_apply.check ~root ~store ~safety:observed_id
                     ~target:target_id observation
-                  |> Result.map_error (fun e -> Selection_conflict e)
+                  |> Result.map_error preflight_error
                 in
                 let* changes =
                   comparison_differences store ~before:observed
@@ -4283,7 +4297,7 @@ let branch_switch_with ~observe ~expected ~root ~name ~dry_run =
               let* () =
                 Safe_apply.check ~root ~store ~safety:observed_id
                   ~target:target_id observation
-                |> Result.map_error (fun e -> Selection_conflict e)
+                |> Result.map_error preflight_error
               in
               let* changes =
                 comparison_differences store ~before:observed

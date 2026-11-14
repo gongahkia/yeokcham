@@ -63,6 +63,11 @@ module Content : sig
 
   val verify : Yeokcham_store.repository -> id -> (unit, error) result
 
+  val verify_fd :
+    Yeokcham_store.repository -> id -> Unix.file_descr -> (unit, error) result
+  (** Compare an opened regular file, from its current offset through EOF, with
+      fully verified canonical content using bounded chunk buffers. *)
+
   val stream_to_fd :
     Yeokcham_store.repository -> id -> Unix.file_descr -> (unit, error) result
   (** Write to caller-owned private staging output with bounded verification.

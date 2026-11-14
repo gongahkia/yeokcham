@@ -18,11 +18,21 @@ type t = {
   safety : string;
   target : string;
   root : string;
+  destination_parent : (string * string) option;
   parents : (string list * string) list;
   actions : action list;
   bytes : string;
 }
 
+type error =
+  | Conflict of string
+  | Unavailable of string
+  | Invalid_plan of string
+
+let error_to_string = function
+  | Conflict detail | Unavailable detail | Invalid_plan detail -> detail
+
+exception Invalid_plan_bytes of string
 exception Refusal of string
 
 let refuse message = raise (Refusal message)
@@ -30,13 +40,29 @@ let require render = function Ok x -> x | Error e -> refuse (render e)
 
 let guard f =
   try Ok (f ()) with
-  | Refusal message -> Error message
+  | Invalid_plan_bytes message -> Error (Invalid_plan message)
+  | Refusal message -> Error (Conflict message)
   | Unix.Unix_error (e, call, name) ->
+      let detail =
+        Printf.sprintf "%s %S: %s; live and retained files were not rolled back"
+          call name (Unix.error_message e)
+      in
       Error
-        (Printf.sprintf
-           "%s %S: %s; live and retained files were not rolled back" call name
-           (Unix.error_message e))
-  | Sys_error message | Failure message -> Error message
+        ((if e = Unix.EEXIST then fun x -> Conflict x
+          else fun x -> Unavailable x)
+           detail)
+  | Sys_error message | Failure message -> Error (Unavailable message)
+
+let[@warning "-4"] require_snapshot = function
+  | Ok value -> value
+  | Error ((S.Scan_error _ | S.Store_error (Store.Io_error _)) as error) ->
+      raise (Failure (S.error_to_string error))
+  | Error error -> raise (Invalid_plan_bytes (S.error_to_string error))
+
+let[@warning "-4"] require_target_plan = function
+  | Ok value -> value
+  | Error (S.Materialize.Snapshot_error error) -> require_snapshot (Error error)
+  | Error error -> refuse (S.Materialize.error_to_string error)
 
 let close fd f = Fun.protect ~finally:(fun () -> Unix.close fd) (fun () -> f fd)
 let open_root root f = close (F.open_at None root true) f
@@ -106,25 +132,29 @@ let stamps_value stamps =
 
 let encode t =
   array
-    [
-      E.integer 1L;
-      E.bytes t.operation;
-      E.bytes t.safety;
-      E.bytes t.target;
-      E.bytes t.root;
-      stamps_value t.parents;
-      array
-        (List.map
-           (fun a ->
-             array
-               [
-                 array (List.map E.bytes a.path);
-                 E.bytes a.slot;
-                 stamps_value a.before;
-                 stamps_value a.after;
-               ])
-           t.actions);
-    ]
+    ([
+       E.integer (if t.destination_parent = None then 1L else 2L);
+       E.bytes t.operation;
+       E.bytes t.safety;
+       E.bytes t.target;
+       E.bytes t.root;
+       stamps_value t.parents;
+       array
+         (List.map
+            (fun a ->
+              array
+                [
+                  array (List.map E.bytes a.path);
+                  E.bytes a.slot;
+                  stamps_value a.before;
+                  stamps_value a.after;
+                ])
+            t.actions);
+     ]
+    @ Option.fold ~none:[]
+        ~some:(fun (parent, repository) ->
+          [ E.bytes parent; E.bytes repository ])
+        t.destination_parent)
   |> E.encode
 
 let digest t = Hash.digest_string t.bytes |> Hash.to_raw_string
@@ -159,7 +189,7 @@ let entry_equal a b =
       false
 
 let entries store id =
-  S.Tree.load store id |> require S.error_to_string |> S.Tree.entries
+  S.Tree.load store id |> require_snapshot |> S.Tree.entries
 
 let rec create_entry store fd name = function
   | S.Tree.Directory id ->
@@ -172,7 +202,7 @@ let rec create_entry store fd name = function
   | S.Tree.File { mode = S.Symlink; content } ->
       let target =
         S.Content.load_bounded store ~max_bytes:65536 content
-        |> require S.error_to_string
+        |> require_snapshot
       in
       let target =
         match target with
@@ -182,8 +212,7 @@ let rec create_entry store fd name = function
       F.symlink_at fd name target
   | S.Tree.File { mode = (S.Regular | S.Executable) as mode; content } ->
       close (F.create_at fd name) (fun output ->
-          S.Content.stream_to_fd store content output
-          |> require S.error_to_string;
+          S.Content.stream_to_fd store content output |> require_snapshot;
           Unix.fchmod output (if mode = S.Executable then 0o755 else 0o644);
           Unix.fsync output)
 
@@ -202,7 +231,7 @@ let rec native_tree fd name relative =
   in
   (relative, stamp) :: descendants
 
-let verify_tree fd name stamps =
+let verify_tree ?(exact = false) fd name stamps =
   match (stamps, inspect fd name) with
   | [], None -> true
   | [], Some _ | _ :: _, None -> false
@@ -210,7 +239,8 @@ let verify_tree fd name stamps =
       let current = native_tree fd name [] in
       List.length current = List.length stamps
       && List.for_all2
-           (fun (a, x) (b, y) -> a = b && stamp_matches x y)
+           (fun (a, x) (b, y) ->
+             a = b && if exact then x = y else stamp_matches x y)
            stamps current
 
 let validate_parents ~root rootfd t =
@@ -230,9 +260,16 @@ let validate_parents ~root rootfd t =
 
 let classify rootfd staging a =
   parent rootfd a.path (fun fd name ->
-      let initial =
-        verify_tree fd name a.before && verify_tree staging a.slot a.after
-      in
+      let source_initial = verify_tree ~exact:true fd name a.before in
+      let staged_initial = verify_tree ~exact:true staging a.slot a.after in
+      if source_initial && not staged_initial then
+        raise
+          (Invalid_plan_bytes
+             (Printf.sprintf
+                "staged target at slot %S is missing or changed before \
+                 replacing %S"
+                a.slot (String.concat "/" a.path)));
+      let initial = source_initial && staged_initial in
       let applied =
         verify_tree fd name a.after && verify_tree staging a.slot a.before
       in
@@ -245,50 +282,205 @@ let classify rootfd staging a =
               slot %S before recovery"
              (String.concat "/" a.path) a.slot))
 
-let apply_with ~observe ~root t =
-  guard (fun () ->
-      with_staging root t.operation (fun rootfd staging ->
-          let validate_scope () =
-            validate_parents ~root rootfd t;
-            directory rootfd [ ".yeokcham"; "restore-staging"; t.operation ]
-              (fun current ->
-                if
-                  F.identity (F.fingerprint current)
-                  <> F.identity (F.fingerprint staging)
-                then refuse "private staging directory identity changed")
-          in
-          validate_scope ();
-          List.iter (fun a -> ignore (classify rootfd staging a)) t.actions;
-          List.iter
-            (fun a ->
-              validate_scope ();
-              if not (classify rootfd staging a) then (
-                observe Before_mutation a.path;
-                validate_scope ();
-                if classify rootfd staging a then
-                  refuse "application changed while preparing mutation";
-                parent rootfd a.path (fun fd name ->
-                    if a.before = [] then
-                      F.rename_at staging a.slot fd name false
-                    else if a.after = [] then
-                      F.rename_at fd name staging a.slot false
-                    else F.rename_at fd name staging a.slot true;
-                    observe After_mutation a.path;
-                    Unix.fsync fd;
-                    Unix.fsync staging;
-                    observe After_sync a.path);
-                if not (classify rootfd staging a) then
-                  refuse
-                    "atomic application did not install the recorded target"))
-            t.actions;
-          validate_scope ();
-          List.iter
-            (fun a ->
-              if not (classify rootfd staging a) then
-                refuse "application is incomplete")
-            t.actions))
+let snapshot_entry_lookup store raw =
+  let id =
+    Store.Stored_object_id.of_raw_bytes raw
+    |> Option.get |> S.Snapshot.of_stored_object_id
+  in
+  let snapshot = S.Snapshot.load store id |> require_snapshot in
+  let table = Hashtbl.create 64 in
+  let rec walk path id =
+    List.iter
+      (fun (name, entry) ->
+        let path = path @ [ name ] in
+        Hashtbl.add table path entry;
+        match entry with
+        | S.Tree.File _ -> ()
+        | S.Tree.Directory child -> walk path child)
+      (entries store id)
+  in
+  walk [] (S.Snapshot.root snapshot);
+  (snapshot, fun path -> Hashtbl.find_opt table path)
 
-let apply ~root t = apply_with ~observe:(fun _ _ -> ()) ~root t
+let[@warning "-4"] rec entry_bytes_match store fd name expected =
+  match (expected, inspect fd name) with
+  | None, None -> true
+  | None, Some _ | Some _, None -> false
+  | Some (S.Tree.Directory id), Some (F.Directory, stamp) ->
+      close (F.open_at (Some fd) name true) (fun child ->
+          let expected = entries store id in
+          F.identity (F.fingerprint child) = F.identity stamp
+          && F.names child = List.map fst expected
+          && List.for_all
+               (fun (name, e) -> entry_bytes_match store child name (Some e))
+               expected
+          && F.fingerprint child = stamp)
+  | Some (S.Tree.File { mode = S.Symlink; content }), Some (F.Link, stamp) ->
+      let expected =
+        S.Content.load_bounded store ~max_bytes:65536 content
+        |> require_snapshot
+      in
+      expected = Some (F.readlink_at fd name)
+      && Option.map snd (inspect fd name) = Some stamp
+  | ( Some (S.Tree.File { mode = (S.Regular | S.Executable) as mode; content }),
+      Some (F.File, stamp) ) ->
+      close (F.open_at (Some fd) name false) (fun input ->
+          let stats = Unix.fstat input in
+          F.fingerprint input = stamp
+          && stats.Unix.st_perm land 0o111 <> 0 = (mode = S.Executable)
+          && (match S.Content.verify_fd store content input with
+            | Ok () -> true
+            | Error (S.Invalid_schema message)
+              when String.starts_with ~prefix:"filesystem" message ->
+                false
+            | Error (S.Observation_changed _) -> false
+            | Error error -> require_snapshot (Error error))
+          && Option.map snd (inspect fd name) = Some stamp)
+  | ( Some (S.Tree.Directory _),
+      Some ((F.File | F.Link | F.Fifo | F.Socket | F.Character | F.Block), _) )
+  | ( Some (S.Tree.File { mode = S.Symlink; _ }),
+      Some
+        ((F.File | F.Directory | F.Fifo | F.Socket | F.Character | F.Block), _)
+    )
+  | ( Some (S.Tree.File { mode = S.Regular | S.Executable; _ }),
+      Some
+        ((F.Directory | F.Link | F.Fifo | F.Socket | F.Character | F.Block), _)
+    ) ->
+      false
+
+let apply_with ~observe ~store ~root t =
+  guard (fun () ->
+      with_staging root t.operation (fun repository_fd staging ->
+          let with_action_root f =
+            match t.destination_parent with
+            | None -> f repository_fd
+            | Some (path, _) -> open_root path f
+          in
+          with_action_root (fun rootfd ->
+              let target_snapshot, target_entry =
+                snapshot_entry_lookup store t.target
+              in
+              let _, before_entry = snapshot_entry_lookup store t.safety in
+              let checked action =
+                let applied = classify rootfd staging action in
+                let before_fd, before_name, after_fd, after_name =
+                  if applied then (staging, action.slot, rootfd, "")
+                  else (rootfd, "", staging, action.slot)
+                in
+                let before_valid fd name =
+                  match t.destination_parent with
+                  | None ->
+                      entry_bytes_match store fd name (before_entry action.path)
+                  | Some _ when action.before = [] -> not (exists fd name)
+                  | Some _ -> (
+                      match inspect fd name with
+                      | Some (F.Directory, _) ->
+                          close (F.open_at (Some fd) name true) (fun child ->
+                              F.names child = [])
+                      | None
+                      | Some
+                          ( ( F.File | F.Link | F.Fifo | F.Socket | F.Character
+                            | F.Block ),
+                            _ ) ->
+                          false)
+                in
+                let after_expected =
+                  match t.destination_parent with
+                  | None -> target_entry action.path
+                  | Some _ ->
+                      Some (S.Tree.Directory (S.Snapshot.root target_snapshot))
+                in
+                let before_ok, after_ok =
+                  parent rootfd action.path (fun fd name ->
+                      let before_fd, before_name =
+                        if before_name = "" then (fd, name)
+                        else (before_fd, before_name)
+                      in
+                      let after_fd, after_name =
+                        if after_name = "" then (fd, name)
+                        else (after_fd, after_name)
+                      in
+                      ( before_valid before_fd before_name,
+                        entry_bytes_match store after_fd after_name
+                          after_expected ))
+                in
+                if not before_ok then
+                  refuse
+                    (Printf.sprintf
+                       "original or retained bytes changed at %S (retained \
+                        slot %S); preserve both before recovery"
+                       (String.concat "/" action.path)
+                       action.slot);
+                if not after_ok then
+                  if applied then
+                    refuse
+                      (Printf.sprintf
+                         "installed target bytes changed at %S after \
+                          application"
+                         (String.concat "/" action.path))
+                  else
+                    raise
+                      (Invalid_plan_bytes
+                         (Printf.sprintf
+                            "staged target bytes at slot %S do not match the \
+                             complete saved identity for %S"
+                            action.slot
+                            (String.concat "/" action.path)));
+                applied
+              in
+              let validate_scope () =
+                let action_root, repository_stamp =
+                  match t.destination_parent with
+                  | None -> (root, t.root)
+                  | Some (path, stamp) -> (path, stamp)
+                in
+                open_root root (fun current ->
+                    if
+                      F.identity (F.fingerprint current)
+                      <> F.identity repository_stamp
+                      || F.identity (F.fingerprint repository_fd)
+                         <> F.identity repository_stamp
+                    then refuse "origin repository identity changed");
+                validate_parents ~root:action_root rootfd t;
+                directory repository_fd
+                  [ ".yeokcham"; "restore-staging"; t.operation ]
+                  (fun current ->
+                    if
+                      F.identity (F.fingerprint current)
+                      <> F.identity (F.fingerprint staging)
+                    then refuse "private staging directory identity changed")
+              in
+              validate_scope ();
+              List.iter (fun a -> ignore (checked a)) t.actions;
+              List.iter
+                (fun a ->
+                  validate_scope ();
+                  if not (checked a) then (
+                    observe Before_mutation a.path;
+                    validate_scope ();
+                    if checked a then
+                      refuse "application changed while preparing mutation";
+                    parent rootfd a.path (fun fd name ->
+                        if a.before = [] then
+                          F.rename_at staging a.slot fd name false
+                        else if a.after = [] then
+                          F.rename_at fd name staging a.slot false
+                        else F.rename_at fd name staging a.slot true;
+                        observe After_mutation a.path;
+                        Unix.fsync fd;
+                        Unix.fsync staging;
+                        observe After_sync a.path);
+                    if not (checked a) then
+                      refuse
+                        "atomic application did not install the recorded target"))
+                t.actions;
+              validate_scope ();
+              List.iter
+                (fun a ->
+                  if not (checked a) then refuse "application is incomplete")
+                t.actions)))
+
+let apply ~root ~store t = apply_with ~observe:(fun _ _ -> ()) ~root ~store t
 
 module For_test = struct
   let apply = apply_with
@@ -298,15 +490,9 @@ let[@warning "-4"] prepare_with ~stage ~root ~store ~operation ~safety ~target
     observation =
   guard (fun () ->
       check_operation operation;
-      let target_snapshot =
-        S.Snapshot.load store target |> require S.error_to_string
-      in
-      ignore
-        (S.Materialize.plan store target_snapshot
-        |> require S.Materialize.error_to_string);
-      let safety_snapshot =
-        S.Snapshot.load store safety |> require S.error_to_string
-      in
+      let target_snapshot = S.Snapshot.load store target |> require_snapshot in
+      ignore (S.Materialize.plan store target_snapshot |> require_target_plan);
+      let safety_snapshot = S.Snapshot.load store safety |> require_snapshot in
       let observed = S.Observation.entries observation in
       let directories = S.Observation.directories observation in
       let root_stamp = List.assoc [] observed in
@@ -335,7 +521,7 @@ let[@warning "-4"] prepare_with ~stage ~root ~store ~operation ~safety ~target
           refuse "target contains a mandatory metadata path";
         let explanation =
           S.explain_ignore ~directory:is_directory ~root path
-          |> require S.error_to_string
+          |> require_snapshot
         in
         if explanation.S.ignored then
           refuse
@@ -441,6 +627,7 @@ let[@warning "-4"] prepare_with ~stage ~root ~store ~operation ~safety ~target
               safety = snapshot_bytes safety;
               target = snapshot_bytes target;
               root = root_stamp;
+              destination_parent = None;
               parents;
               actions = [];
               bytes = "";
@@ -513,6 +700,7 @@ let[@warning "-4"] prepare_with ~stage ~root ~store ~operation ~safety ~target
                             safety = snapshot_bytes safety;
                             target = snapshot_bytes target;
                             root = root_stamp;
+                            destination_parent = None;
                             parents;
                             actions;
                             bytes = "";
@@ -541,6 +729,159 @@ let check ~root ~store ~safety ~target observation =
   prepare_with ~stage:false ~root ~store ~operation:(String.make 64 '0') ~safety
     ~target observation
   |> Result.map (fun _ -> ())
+
+let destination t =
+  match (t.destination_parent, t.actions) with
+  | Some (parent, _), [ { path = [ name ]; _ } ] ->
+      Some (Filename.concat parent name)
+  | None, _ | Some _, _ -> None
+
+let copyout_binding t =
+  array
+    [
+      E.bytes "yeokcham:copyout-preflight:v1";
+      E.bytes t.target;
+      E.bytes (Option.get (destination t));
+      E.bytes (F.identity t.root);
+      stamps_value (List.hd t.actions).before;
+    ]
+  |> E.encode |> Hash.digest_string |> Hash.to_raw_string
+
+let prepare_copyout_with ~stage ~root ~store ~operation ~target
+    ~destination:requested =
+  guard (fun () ->
+      check_operation operation;
+      let target_snapshot = S.Snapshot.load store target |> require_snapshot in
+      ignore (S.Materialize.plan store target_snapshot |> require_target_plan);
+      let rec check_tree path id =
+        List.iter
+          (fun (name, e) ->
+            let path = path @ [ name ] in
+            if not (valid_path path) then
+              refuse "copy target contains reserved metadata";
+            match e with
+            | S.Tree.File _ -> ()
+            | S.Tree.Directory child -> check_tree path child)
+          (entries store id)
+      in
+      check_tree [] (S.Snapshot.root target_snapshot);
+      let name = Filename.basename requested in
+      if not (valid_path [ name ]) then refuse "unsafe copy destination name";
+      let parent_path = Unix.realpath (Filename.dirname requested) in
+      let destination = Filename.concat parent_path name in
+      let origin = Unix.realpath root in
+      let metadata = Filename.concat origin ".yeokcham"
+      and git = Filename.concat origin ".git" in
+      let within path ancestor =
+        path = ancestor || String.starts_with ~prefix:(ancestor ^ "/") path
+      in
+      if
+        within destination metadata
+        || within destination git || within origin destination
+      then
+        refuse "copy destination overlaps the source repository or its metadata";
+      open_root root (fun repository_fd ->
+          open_root parent_path (fun parentfd ->
+              F.check_destination parentfd name;
+              let root_stamp = F.fingerprint parentfd
+              and repository_stamp = F.fingerprint repository_fd in
+              if F.device root_stamp <> F.device repository_stamp then
+                raise
+                  (Failure
+                     "copy destination is on another filesystem; choose a \
+                      destination on the source filesystem");
+              let before =
+                match inspect parentfd name with
+                | None -> []
+                | Some (F.Directory, _) ->
+                    close (F.open_at (Some parentfd) name true) (fun fd ->
+                        if F.names fd <> [] then
+                          refuse "copy destination is not empty";
+                        native_tree parentfd name [])
+                | Some
+                    ( ( F.File | F.Link | F.Fifo | F.Socket | F.Character
+                      | F.Block ),
+                      _ ) ->
+                    refuse "copy destination is not a real directory"
+              in
+              let scope =
+                {
+                  operation;
+                  safety = snapshot_bytes target;
+                  target = snapshot_bytes target;
+                  root = root_stamp;
+                  destination_parent = Some (parent_path, repository_stamp);
+                  parents = [];
+                  actions =
+                    [ { path = [ name ]; slot = "0"; before; after = [] } ];
+                  bytes = "";
+                }
+              in
+              if not stage then scope
+              else
+                directory repository_fd [ ".yeokcham" ] (fun metadatafd ->
+                    ensure_directory metadatafd "restore-staging";
+                    directory metadatafd [ "restore-staging" ] (fun base ->
+                        if exists base operation then
+                          refuse
+                            "copy operation already has staging; resume its \
+                             journal";
+                        F.mkdir_at base operation;
+                        Unix.fsync base;
+                        directory base [ operation ] (fun staging ->
+                            if
+                              F.device (F.fingerprint staging)
+                              <> F.device root_stamp
+                            then
+                              raise
+                                (Failure
+                                   "copy staging crosses a filesystem boundary");
+                            close (F.create_at staging ".probe-a") (fun fd ->
+                                Unix.fsync fd);
+                            close (F.create_at staging ".probe-b") (fun fd ->
+                                Unix.fsync fd);
+                            F.rename_at staging ".probe-a" staging ".probe-b"
+                              true;
+                            F.rename_at staging ".probe-a" staging ".probe-c"
+                              false;
+                            create_entry store staging "0"
+                              (S.Tree.Directory
+                                 (S.Snapshot.root target_snapshot));
+                            Unix.fsync staging;
+                            let after = native_tree staging "0" [] in
+                            let t =
+                              {
+                                scope with
+                                actions =
+                                  [
+                                    {
+                                      path = [ name ];
+                                      slot = "0";
+                                      before;
+                                      after;
+                                    };
+                                  ];
+                              }
+                            in
+                            validate_parents ~root:parent_path parentfd t;
+                            if classify parentfd staging (List.hd t.actions)
+                            then refuse "copy unexpectedly already installed";
+                            let bytes = encode t in
+                            if String.length bytes > 16 * 1024 * 1024 then
+                              refuse "copy plan exceeds 16 MiB bound";
+                            close (F.create_at staging "plan.cbor") (fun fd ->
+                                write_all fd bytes;
+                                Unix.fsync fd);
+                            Unix.fsync staging;
+                            { t with bytes }))))))
+
+let check_copyout ~root ~store ~target ~destination:requested =
+  prepare_copyout_with ~stage:false ~root ~store ~operation:(String.make 64 '0')
+    ~target ~destination:requested
+  |> Result.map (fun t -> (Option.get (destination t), copyout_binding t))
+
+let prepare_copyout ~root ~store ~operation ~target ~destination =
+  prepare_copyout_with ~stage:true ~root ~store ~operation ~target ~destination
 
 let[@warning "-4"] decode bytes =
   let value = E.decode bytes |> require E.decode_error_to_string in
@@ -586,6 +927,38 @@ let[@warning "-4"] decode bytes =
     then refuse "application fingerprints must be unique and sorted";
     stamps
   in
+  let value, destination_parent =
+    match value with
+    | E.Array
+        [
+          E.Integer 2L;
+          operation;
+          safety;
+          target;
+          root;
+          parents;
+          actions;
+          E.Bytes parent;
+          E.Bytes repository;
+        ] ->
+        let components = String.split_on_char '/' parent in
+        if
+          Filename.is_relative parent
+          || String.contains parent '\000'
+          || parent <> "/"
+             &&
+             match components with
+             | "" :: rest -> not (List.for_all safe_name rest)
+             | _ -> true
+        then
+          refuse
+            "copy destination parent must be a canonical absolute native path";
+        valid_stamp repository;
+        ( array
+            [ E.integer 1L; operation; safety; target; root; parents; actions ],
+          Some (parent, repository) )
+    | other -> (other, None)
+  in
   match value with
   | E.Array [ E.Integer 1L; operation; safety; target; root; parents; actions ]
     ->
@@ -628,7 +1001,25 @@ let[@warning "-4"] decode bytes =
              (fun p -> List.exists (fun q -> p <> q && prefix p q) paths)
              paths
       then refuse "application actions overlap or are unordered";
-      let t = { operation; safety; target; root; parents; actions; bytes } in
+      (match (destination_parent, actions, parents) with
+      | None, _, _ -> ()
+      | Some _, [ { path = [ _ ]; after = _ :: _; _ } ], [] when safety = target
+        ->
+          ()
+      | Some _, _, _ ->
+          refuse "copy plan must install one whole directory without navigation");
+      let t =
+        {
+          operation;
+          safety;
+          target;
+          root;
+          destination_parent;
+          parents;
+          actions;
+          bytes;
+        }
+      in
       if encode t <> bytes then refuse "noncanonical application plan";
       t
   | _ -> refuse "unsupported application plan schema"
@@ -668,3 +1059,7 @@ let load ~root ~operation ~digest:expected ~safety ~target =
                 refuse
                   "application plan names a different operation or snapshots";
               t)))
+  |> Result.map_error (function
+    | Conflict detail -> Invalid_plan detail
+    | Unavailable _ as error -> error
+    | Invalid_plan _ as error -> error)

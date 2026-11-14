@@ -609,3 +609,27 @@ a second CLI process from collecting newly captured objects before their safety
 root is published. Read-only `Gc.inspect` remains an observation. The lock order
 is workspace, restore-retention, state head. This pilot does not introduce a
 managed scheduler or claim concurrent-domain support for process advisory locks.
+
+The physical engine now reports typed `Conflict`, `Unavailable` and
+`Invalid_plan` errors. Initial preflight maps these to selection conflict (4),
+unavailable capability/I/O (5) or integrity failure (6); interrupted application
+retains its operation and refuses recovery conflicts (8). `Content.verify_fd`
+compares an opened regular file with its complete canonical content through EOF,
+using bounded inline/chunk buffers and before/after native observations.
+`Safe_apply.apply` and `For_test.apply` now take the immutable store explicitly:
+all initial/applied states verify original/retained and target bytes against the
+actual safety/target snapshot trees as well as native ownership fingerprints.
+This detects changed bytes even when an external writer restores inode, length
+and nanosecond mtime. Corrupt staged targets refuse before ordinary replacement.
+
+`Safe_apply.check_copyout` returns canonical destination and a 32-byte native
+preflight token without staging/history/file writes. `prepare_copyout` creates
+one whole-directory action for a new/empty destination. Physical-plan schema 2
+adds the canonical destination-parent path and origin-repository fingerprint;
+workspace schema-1 plans stay readable and byte-stable. Apply/load share the
+same verified action state machine. Both repository/staging scope and destination
+parent identity are checked; a replaced/occupied destination refuses, and an
+exchange retains its original inode, including external directory-FD writes.
+Destinations on another filesystem, within source metadata/Git metadata or
+covering the source root refuse explicitly. This is an engine checkpoint:
+service/journal and CLI copy-out remain to be connected before P2 is complete.

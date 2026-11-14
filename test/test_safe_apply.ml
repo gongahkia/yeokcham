@@ -30,10 +30,12 @@ let observe root store = S.Observation.scan ~root ~store |> ok S.error_to_string
 let operation = String.make 64 'a'
 
 let prepare root store safety target observation =
-  A.prepare ~root ~store ~operation ~safety ~target observation |> ok Fun.id
+  A.prepare ~root ~store ~operation ~safety ~target observation
+  |> ok A.error_to_string
 
 let load root plan safety target =
-  A.load ~root ~operation ~digest:(A.digest plan) ~safety ~target |> ok Fun.id
+  A.load ~root ~operation ~digest:(A.digest plan) ~safety ~target
+  |> ok A.error_to_string
 
 let assert_refused name = function Error _ -> () | Ok _ -> Alcotest.fail name
 
@@ -61,12 +63,12 @@ let exact_apply_and_retry () =
   with_root (fun root store ->
       let safety, target, observation = fixture root store in
       let plan = prepare root store safety target observation in
-      A.apply ~root plan |> ok Fun.id;
+      A.apply ~root ~store plan |> ok A.error_to_string;
       Alcotest.(check bool)
         "exact mixed target" true
         (S.Snapshot.equal_id target (capture root store));
       let plan = load root plan safety target in
-      A.apply ~root plan |> ok Fun.id;
+      A.apply ~root ~store plan |> ok A.error_to_string;
       Alcotest.(check string)
         "original bytes retained" "original A"
         (read (A.retained_directory ~root ~operation ^ "/0"));
@@ -93,14 +95,14 @@ let crash_boundaries () =
                      incr count;
                      if !count = number then Unix._exit 73)
                  in
-                 match A.For_test.apply ~observe ~root plan with
+                 match A.For_test.apply ~observe ~root ~store plan with
                  | Ok () -> Unix._exit 0
                  | Error _ -> Unix._exit 74);
               let _, status = Unix.waitpid [] child in
               Alcotest.(check bool)
                 "crashed at actual boundary" true (status = Unix.WEXITED 73);
               let plan = load root plan safety target in
-              A.apply ~root plan |> ok Fun.id;
+              A.apply ~root ~store plan |> ok A.error_to_string;
               Alcotest.(check bool)
                 "exact target after restart" true
                 (S.Snapshot.equal_id target (capture root store))))
@@ -112,7 +114,7 @@ let external_edits_are_preserved () =
       let safety, target, observation = fixture root store in
       let plan = prepare root store safety target observation in
       write (root ^ "/z") "unexpected external edit";
-      assert_refused "overwrote external edit" (A.apply ~root plan);
+      assert_refused "overwrote external edit" (A.apply ~root ~store plan);
       Alcotest.(check string)
         "unmodified first path" "original A"
         (read (root ^ "/a"));
@@ -137,7 +139,7 @@ let concurrent_old_descriptor_edit () =
               Unix.fsync fd)
           in
           assert_refused "accepted changed displaced node"
-            (A.For_test.apply ~observe ~root plan);
+            (A.For_test.apply ~observe ~root ~store plan);
           Alcotest.(check string)
             "installed target retained" "target A"
             (read (root ^ "/a"));
@@ -156,12 +158,12 @@ let edit_after_interruption () =
           (A.For_test.apply
              ~observe:(fun stage _ ->
                if stage = A.After_sync then Unix._exit 73)
-             ~root plan);
+             ~root ~store plan);
         Unix._exit 74);
       ignore (Unix.waitpid [] child);
       write (root ^ "/a") "edit after crash";
       assert_refused "replayed over changed installed target"
-        (A.apply ~root (load root plan safety target));
+        (A.apply ~root ~store (load root plan safety target));
       Alcotest.(check string)
         "later external edit" "edit after crash"
         (read (root ^ "/a"));
@@ -182,7 +184,7 @@ let ignored_paths () =
       write (root ^ "/cache/data") "ignored bytes";
       let safety, _, observation = observe root store in
       let plan = prepare root store safety target observation in
-      A.apply ~root plan |> ok Fun.id;
+      A.apply ~root ~store plan |> ok A.error_to_string;
       Alcotest.(check string)
         "noncolliding ignored bytes retained" "ignored bytes"
         (read (root ^ "/cache/data"));
@@ -213,7 +215,7 @@ let ignored_directory_kept_on_delete () =
       write (root ^ "/dir/ignored.private") "private";
       let safety, _, observation = observe root store in
       let plan = prepare root store safety target observation in
-      A.apply ~root plan |> ok Fun.id;
+      A.apply ~root ~store plan |> ok A.error_to_string;
       Alcotest.(check bool)
         "managed child removed" false
         (Sys.file_exists (root ^ "/dir/visible"));
@@ -288,7 +290,8 @@ let parent_replacement () =
       Unix.rename (root ^ "/dir") (root ^ "/original-dir");
       Unix.mkdir (root ^ "/dir") 0o700;
       write (root ^ "/dir/file") "external directory";
-      assert_refused "applied through a replaced parent" (A.apply ~root plan);
+      assert_refused "applied through a replaced parent"
+        (A.apply ~root ~store plan);
       Alcotest.(check string)
         "replacement parent retained" "external directory"
         (read (root ^ "/dir/file"));
@@ -326,11 +329,12 @@ let repeated_mixed_transitions () =
           "source fixture" true
           (S.Snapshot.equal_id actual safety);
         let plan = prepare root store safety target observation in
-        A.apply ~root plan |> ok Fun.id;
+        A.apply ~root ~store plan |> ok A.error_to_string;
         Alcotest.(check bool)
           "mixed transition exact snapshot" true
           (S.Snapshot.equal_id target (capture root store));
-        A.apply ~root (load root plan safety target) |> ok Fun.id)
+        A.apply ~root ~store (load root plan safety target)
+        |> ok A.error_to_string)
   done
 
 let root_path_replacement () =
@@ -349,13 +353,270 @@ let root_path_replacement () =
               Unix.mkdir root 0o700)
           in
           assert_refused "continued applying through a stale root descriptor"
-            (A.For_test.apply ~observe ~root plan);
+            (A.For_test.apply ~observe ~root ~store plan);
           Alcotest.(check int)
             "replacement root untouched" 0
             (Array.length (Sys.readdir root));
           Alcotest.(check string)
             "moved original root untouched" "original A"
             (read (moved ^ "/a"))))
+
+let with_export root run =
+  let destination = root ^ "-export" in
+  Fun.protect
+    ~finally:(fun () -> if Sys.file_exists destination then remove destination)
+    (fun () -> run destination)
+
+let copyout_whole_tree () =
+  List.iter
+    (fun existing ->
+      with_root (fun root store ->
+          with_export root (fun destination ->
+              let safety, target, _ = fixture root store in
+              if existing then Unix.mkdir destination 0o700;
+              let prior =
+                if existing then Some (Unix.lstat destination).Unix.st_ino
+                else None
+              in
+              let canonical, token =
+                A.check_copyout ~root ~store ~target ~destination
+                |> ok A.error_to_string
+              in
+              Alcotest.(check string)
+                "canonical destination" destination canonical;
+              Alcotest.(check int)
+                "native preview token" 32 (String.length token);
+              Alcotest.(check bool)
+                "copy preview has no staging writes" false
+                (Sys.file_exists (root ^ "/.yeokcham/restore-staging"));
+              let plan =
+                A.prepare_copyout ~root ~store ~operation ~target ~destination
+                |> ok A.error_to_string
+              in
+              Alcotest.(check (option string))
+                "plan output scope" (Some destination) (A.destination plan);
+              A.apply ~root ~store plan |> ok A.error_to_string;
+              Alcotest.(check bool)
+                "source unchanged" true
+                (S.Snapshot.equal_id safety (capture root store));
+              Alcotest.(check bool)
+                "whole exact target output" true
+                (S.Snapshot.equal_id target (capture destination store));
+              Option.iter
+                (fun inode ->
+                  Alcotest.(check int)
+                    "original empty directory retained" inode
+                    (Unix.lstat (A.retained_directory ~root ~operation ^ "/0"))
+                      .Unix.st_ino)
+                prior;
+              let loaded =
+                A.load ~root ~operation ~digest:(A.digest plan) ~safety:target
+                  ~target
+                |> ok A.error_to_string
+              in
+              A.apply ~root ~store loaded |> ok A.error_to_string)))
+    [ false; true ]
+
+let copyout_interruptions () =
+  List.iter
+    (fun boundary ->
+      List.iter
+        (fun existing ->
+          with_root (fun root store ->
+              with_export root (fun destination ->
+                  let safety, target, _ = fixture root store in
+                  if existing then Unix.mkdir destination 0o700;
+                  let plan =
+                    A.prepare_copyout ~root ~store ~operation ~target
+                      ~destination
+                    |> ok A.error_to_string
+                  in
+                  let child = Unix.fork () in
+                  if child = 0 then (
+                    ignore
+                      (A.For_test.apply
+                         ~observe:(fun stage _ ->
+                           if stage = boundary then Unix._exit 73)
+                         ~root ~store plan);
+                    Unix._exit 74);
+                  let _, status = Unix.waitpid [] child in
+                  Alcotest.(check bool)
+                    "stopped at actual copy mutation boundary" true
+                    (status = Unix.WEXITED 73);
+                  let loaded =
+                    A.load ~root ~operation ~digest:(A.digest plan)
+                      ~safety:target ~target
+                    |> ok A.error_to_string
+                  in
+                  A.apply ~root ~store loaded |> ok A.error_to_string;
+                  Alcotest.(check bool)
+                    "exact output after restart" true
+                    (S.Snapshot.equal_id target (capture destination store));
+                  Alcotest.(check bool)
+                    "source remains complete original" true
+                    (S.Snapshot.equal_id safety (capture root store)))))
+        [ false; true ])
+    [ A.Before_mutation; A.After_mutation; A.After_sync ]
+
+let copyout_external_obstruction () =
+  with_root (fun root store ->
+      with_export root (fun destination ->
+          let _, target, _ = fixture root store in
+          Unix.mkdir destination 0o700;
+          let plan =
+            A.prepare_copyout ~root ~store ~operation ~target ~destination
+            |> ok A.error_to_string
+          in
+          write (destination ^ "/unexpected") "external data";
+          assert_refused "overwrote a newly occupied copy destination"
+            (A.apply ~root ~store plan);
+          Alcotest.(check string)
+            "external bytes retained" "external data"
+            (read (destination ^ "/unexpected"))))
+
+let copyout_open_directory_writer () =
+  with_root (fun root store ->
+      with_export root (fun destination ->
+          let _, target, _ = fixture root store in
+          Unix.mkdir destination 0o700;
+          let plan =
+            A.prepare_copyout ~root ~store ~operation ~target ~destination
+            |> ok A.error_to_string
+          in
+          let fd = S.Filesystem.open_at None destination true in
+          Fun.protect
+            ~finally:(fun () -> Unix.close fd)
+            (fun () ->
+              let once = ref false in
+              let observe stage _ =
+                if stage = A.After_mutation && not !once then (
+                  once := true;
+                  let out = S.Filesystem.create_at fd "external" in
+                  Fun.protect
+                    ~finally:(fun () -> Unix.close out)
+                    (fun () ->
+                      ignore (Unix.write_substring out "retained" 0 8);
+                      Unix.fsync out))
+              in
+              assert_refused "accepted unexplained external directory writes"
+                (A.For_test.apply ~observe ~root ~store plan);
+              Alcotest.(check string)
+                "external directory write retained with original inode"
+                "retained"
+                (read (A.retained_directory ~root ~operation ^ "/0/external"));
+              Alcotest.(check bool)
+                "installed target remains complete" true
+                (S.Snapshot.equal_id target (capture destination store)))))
+
+let copyout_refuses_unsafe_destination () =
+  with_root (fun root store ->
+      with_export root (fun destination ->
+          let _, target, _ = fixture root store in
+          Unix.mkdir destination 0o700;
+          write (destination ^ "/keep") "private";
+          List.iter
+            (fun destination ->
+              assert_refused "unsafe copy destination accepted"
+                (A.check_copyout ~root ~store ~target ~destination))
+            [
+              destination;
+              root;
+              Filename.dirname root;
+              root ^ "/.yeokcham/export";
+            ];
+          let link = destination ^ "-link" in
+          Unix.symlink destination link;
+          Fun.protect
+            ~finally:(fun () -> Unix.unlink link)
+            (fun () ->
+              assert_refused "followed destination symlink"
+                (A.check_copyout ~root ~store ~target ~destination:link));
+          Alcotest.(check string)
+            "unrelated destination data unchanged" "private"
+            (read (destination ^ "/keep"))))
+
+let mutate_preserving_mtime path =
+  let argv =
+    [|
+      "python3";
+      "-c";
+      "import os,sys; p=sys.argv[1]; st=os.stat(p); f=open(p,'r+b'); \
+       f.write(b'X'*st.st_size); f.close(); \
+       os.utime(p,ns=(st.st_atime_ns,st.st_mtime_ns))";
+      path;
+    |]
+  in
+  let pid =
+    Unix.create_process "python3" argv Unix.stdin Unix.stdout Unix.stderr
+  in
+  let _, status = Unix.waitpid [] pid in
+  Alcotest.(check bool)
+    "mtime-preserving external writer" true (status = Unix.WEXITED 0)
+
+let byte_verification_rejects_preserved_mtime_edit () =
+  with_root (fun root store ->
+      let safety, target, observation = fixture root store in
+      let plan = prepare root store safety target observation in
+      let child = Unix.fork () in
+      if child = 0 then (
+        ignore
+          (A.For_test.apply
+             ~observe:(fun stage _ ->
+               if stage = A.After_sync then Unix._exit 73)
+             ~root ~store plan);
+        Unix._exit 74);
+      let _, status = Unix.waitpid [] child in
+      Alcotest.(check bool)
+        "target installed before interruption" true (status = Unix.WEXITED 73);
+      mutate_preserving_mtime (root ^ "/a");
+      assert_refused "accepted changed bytes at same owned inode/size/mtime"
+        (A.apply ~root ~store (load root plan safety target));
+      Alcotest.(check string)
+        "changed bytes preserved"
+        (String.make (String.length "target A") 'X')
+        (read (root ^ "/a"));
+      Alcotest.(check string)
+        "unapplied path unchanged" "original Z"
+        (read (root ^ "/z")))
+
+let[@warning "-4"] corrupt_staging_refuses_before_replacement () =
+  with_root (fun root store ->
+      let safety, target, observation = fixture root store in
+      let plan = prepare root store safety target observation in
+      write (A.retained_directory ~root ~operation ^ "/0") "corrupt target";
+      (match A.apply ~root ~store plan with
+      | Error (A.Invalid_plan _) -> ()
+      | Error error -> Alcotest.fail (A.error_to_string error)
+      | Ok () -> Alcotest.fail "installed a corrupt staged target");
+      Alcotest.(check string)
+        "original remains" "original A"
+        (read (root ^ "/a")))
+
+let large_binary_verification () =
+  with_root (fun root store ->
+      let bytes =
+        String.init
+          ((2 * 1024 * 1024) + 3)
+          (fun index -> Char.chr (index * 13 mod 256))
+      in
+      write (root ^ "/large") bytes;
+      Unix.chmod (root ^ "/large") 0o755;
+      let target = capture root store in
+      Unix.unlink (root ^ "/large");
+      let safety, _, observation = observe root store in
+      let plan = prepare root store safety target observation in
+      A.apply ~root ~store plan |> ok A.error_to_string;
+      Alcotest.(check string)
+        "large binary exact bytes" bytes
+        (read (root ^ "/large"));
+      Alcotest.(check bool)
+        "executable distinction" true
+        ((Unix.stat (root ^ "/large")).Unix.st_perm land 0o111 <> 0);
+      A.apply ~root ~store (load root plan safety target)
+      |> ok A.error_to_string;
+      mutate_preserving_mtime (root ^ "/large");
+      assert_refused "manifest verifier accepted altered binary chunks"
+        (A.apply ~root ~store (load root plan safety target)))
 
 let () =
   Alcotest.run "Safe local file application"
@@ -365,6 +626,20 @@ let () =
           (fun (name, f) -> Alcotest.test_case name `Quick f)
           [
             ("exact mixed target and identical retry", exact_apply_and_retry);
+            ("whole copy-out into new/empty destinations", copyout_whole_tree);
+            ( "bounded large-binary verification and corruption refusal",
+              large_binary_verification );
+            ("copy-out resumes all mutation boundaries", copyout_interruptions);
+            ( "copy-out preserves new destination obstructions",
+              copyout_external_obstruction );
+            ( "copy-out retains writes through displaced directory descriptors",
+              copyout_open_directory_writer );
+            ( "copy-out rejects unsafe destinations",
+              copyout_refuses_unsafe_destination );
+            ( "byte verification rejects edits preserving inode/size/mtime",
+              byte_verification_rejects_preserved_mtime_edit );
+            ( "corrupt staging refuses before replacement",
+              corrupt_staging_refuses_before_replacement );
             ("root path replacement during application", root_path_replacement);
             ("forked interruption at all mutation boundaries", crash_boundaries);
             ("external edit before application", external_edits_are_preserved);

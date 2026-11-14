@@ -640,3 +640,26 @@ ran before CI; unchanged Dune results may be cached. No accepted G01 benchmark
 was rerun, and README is unchanged. Unknown or live owner markers are retained
 rather than guessed away; diagnostic handling for those markers remains a
 conservative refusal, including possible PID reuse.
+
+P2 copy-out engine / byte verification checkpoint: added a schema-2 physical
+scope for one whole-directory copy into a new/empty destination, sharing the
+existing staged application engine. Workspace schema-1 plans remain readable.
+The source state/history is outside copy-out's physical action scope. Typed
+preflight errors now distinguish conflicts, unavailable capabilities/I/O and
+integrity. In-place and copy-out application verify actual original/retained and
+installed/staged bytes against the real snapshot trees, using bounded descriptor
+verification in addition to fingerprints. The focused engine suite passed 22
+cases, including six copy mutation exits, original empty-directory retention,
+external writes through displaced directory descriptors, corruption before
+replacement, a 2 MiB binary executable and edits preserving inode/size/mtime.
+Actual copy-out service/journal/CLI routing is still outstanding; this checkpoint
+does not claim the existing CLI copy-out path has been hardened. Complete
+undo/redo/restore CLI confirmation/outcomes and final P2 evidence remain open.
+
+Copy-out engine checkpoint verification: `make build`, `make lint`, `make ci`
+exited 0 (`*-copyout-engine.log` in the P2 external log directory). Formatter
+promotion exited 1 on its first run; subsequent lint passed. The 22-case engine
+suite includes complete identity verification for large manifests and direct
+byte corruption with preserved native metadata. Unaffected Dune results may be
+cached. No G01 measurements were rerun. Copy-out is not yet exposed by the new
+service/journal path, and P2 remains incomplete.

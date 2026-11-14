@@ -1,10 +1,17 @@
+type error =
+  | Conflict of string
+  | Unavailable of string
+  | Invalid_plan of string
+
+val error_to_string : error -> string
+
 val check :
   root:string ->
   store:Yeokcham_store.repository ->
   safety:Yeokcham_snapshot.Snapshot.id ->
   target:Yeokcham_snapshot.Snapshot.id ->
   Yeokcham_snapshot.Observation.t ->
-  (unit, string) result
+  (unit, error) result
 
 (* read-only preflight: no staging, source writes, journal or history updates.
     Actual application also probes/stages native representations before mutation. *)
@@ -21,7 +28,7 @@ val prepare :
   safety:Yeokcham_snapshot.Snapshot.id ->
   target:Yeokcham_snapshot.Snapshot.id ->
   Yeokcham_snapshot.Observation.t ->
-  (t, string) result
+  (t, error) result
 
 val digest : t -> string
 
@@ -31,15 +38,35 @@ val load :
   digest:string ->
   safety:Yeokcham_snapshot.Snapshot.id ->
   target:Yeokcham_snapshot.Snapshot.id ->
-  (t, string) result
+  (t, error) result
 
-val apply : root:string -> t -> (unit, string) result
+val apply :
+  root:string -> store:Yeokcham_store.repository -> t -> (unit, error) result
+
 val retained_directory : root:string -> operation:string -> string
 
 module For_test : sig
   val apply :
     observe:(boundary -> string list -> unit) ->
+    store:Yeokcham_store.repository ->
     root:string ->
     t ->
-    (unit, string) result
+    (unit, error) result
 end
+
+val check_copyout :
+  root:string ->
+  store:Yeokcham_store.repository ->
+  target:Yeokcham_snapshot.Snapshot.id ->
+  destination:string ->
+  (string * string, error) result
+
+val prepare_copyout :
+  root:string ->
+  store:Yeokcham_store.repository ->
+  operation:string ->
+  target:Yeokcham_snapshot.Snapshot.id ->
+  destination:string ->
+  (t, error) result
+
+val destination : t -> string option

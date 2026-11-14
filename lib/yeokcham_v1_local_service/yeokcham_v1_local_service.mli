@@ -12,6 +12,8 @@ type error =
   | History_error of string
   | Safe_application_error of string
   | Selection_conflict of string
+  | Selection_unavailable of string
+  | Selection_integrity of string
   | Store_error of Yeokcham_v1_store.error
   | Snapshot_error of Yeokcham_snapshot.error
   | Materialize_error of Yeokcham_snapshot.Materialize.error

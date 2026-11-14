@@ -271,6 +271,10 @@ let action ?(confirmation_required = false) ~root arguments explanation =
     }
 
 let[@warning "-4"] fail_local = function
+  | Service.Selection_unavailable message ->
+      fail_with_status 5 "selection-unavailable" message
+  | Service.Selection_integrity message ->
+      fail_with_status 6 "selection-integrity-failure" message
   | Service.History_error message
     when String.starts_with ~prefix:"unknown branch " message ->
       fail_with_status 2 "unknown-branch" message
