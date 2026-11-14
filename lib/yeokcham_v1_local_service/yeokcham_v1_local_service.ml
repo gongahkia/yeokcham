@@ -4047,3 +4047,402 @@ let branch_create ~root ~name ~signing_capability =
         |> Result.map_error (fun e -> Store_error e)
       in
       branch_listing saved)
+
+type state_reference =
+  | Current_saved
+  | Working_tree
+  | History_node of int64
+  | Exact_history of Model.Core.History_id.t
+  | Snapshot_state of Model.Snapshot_id.t
+
+type state_view = {
+  state_name : string;
+  history_identity : Model.Core.History_id.t option;
+  state_snapshot : Model.Snapshot_id.t;
+}
+
+type display_difference = {
+  entry_difference : path_difference;
+  text_difference : Text_diff.t option;
+}
+
+type state_comparison = {
+  before_state : state_view;
+  after_state : state_view;
+  display_differences : display_difference list;
+}
+
+type pending_local_recovery = {
+  recovery_operation : string;
+  recovery_target : Model.Snapshot_id.t;
+}
+
+type local_status = {
+  saved_metadata : status;
+  status_branch : branch_listing option;
+  status_cursor : state_view;
+  status_head : string;
+  capture_observation : (working_tree_comparison, string) result;
+  pending_local_recovery : pending_local_recovery option;
+}
+
+type availability = Available | Not_retained | Unavailable of string
+
+type history_entry = {
+  history_node : History.node;
+  history_identity : Model.Core.History_id.t option;
+  history_title : string option;
+  availability : availability;
+  history_children : int64 list;
+  history_paths : (Model.Path.t list, string) result;
+  referenced_by_branches : Model.Core.Branch_id.t list;
+}
+
+type history_page = {
+  page_workspace : Model.Core.Workspace_id.t option;
+  page_cursor : int64;
+  entries : history_entry list;
+  next_before : int64 option;
+}
+
+let history_identity history node =
+  match History.workspace history with
+  | None -> None
+  | Some _ -> Some (History.identity history node |> Result.get_ok)
+
+let view_of_node history node =
+  let identity = history_identity history node in
+  let state_name =
+    Option.fold
+      ~none:("node:" ^ Int64.to_string node.History.id)
+      ~some:(fun id ->
+        Model.Core.Workspace_id.to_hex (Model.Core.History_id.workspace id)
+        ^ ":"
+        ^ Int64.to_string (Model.Core.History_id.sequence id))
+      identity
+  in
+  {
+    state_name;
+    history_identity = identity;
+    state_snapshot = node.History.snapshot;
+  }
+
+let retained project snapshot =
+  List.exists
+    (fun checkpoint ->
+      Model.Snapshot_id.equal checkpoint.Model.checkpoint_snapshot snapshot)
+    (Model.checkpoints project)
+
+let resolve_state loaded observed = function
+  | Working_tree -> (
+      match observed with
+      | Some snapshot ->
+          Ok
+            {
+              state_name = "working";
+              history_identity = None;
+              state_snapshot = snapshot;
+            }
+      | None ->
+          Error
+            (History_error
+               "working comparison requires a complete current observation"))
+  | Current_saved ->
+      Ok
+        (view_of_node loaded.Store.history
+           (History.current loaded.Store.history))
+  | History_node id ->
+      History.find loaded.Store.history id
+      |> Result.map (view_of_node loaded.Store.history)
+      |> Result.map_error (fun e -> History_error e)
+  | Exact_history id -> (
+      match History.workspace loaded.Store.history with
+      | Some workspace
+        when Model.Core.Workspace_id.equal workspace
+               (Model.Core.History_id.workspace id) ->
+          History.find loaded.Store.history (Model.Core.History_id.sequence id)
+          |> Result.map (view_of_node loaded.Store.history)
+          |> Result.map_error (fun e -> History_error e)
+      | None | Some _ ->
+          Error
+            (History_error "history identity belongs to a different workspace"))
+  | Snapshot_state snapshot ->
+      if retained loaded.Store.project snapshot then
+        Ok
+          {
+            state_name = Model.Snapshot_id.to_string snapshot;
+            history_identity = None;
+            state_snapshot = snapshot;
+          }
+      else Error (Unknown_checkpoint snapshot)
+
+let validate_view loaded store observed view =
+  if
+    Option.fold ~none:false
+      ~some:(Model.Snapshot_id.equal view.state_snapshot)
+      observed
+    || retained loaded.Store.project view.state_snapshot
+  then validate_snapshot_closure store view.state_snapshot
+  else Error (Unknown_checkpoint view.state_snapshot)
+
+let[@warning "-4"] regular_bytes store = function
+  | None -> Ok (Some "")
+  | Some { kind = Directory; _ } -> Ok None
+  | Some { kind = File; mode = Some Snapshot.Symlink; _ } -> Ok None
+  | Some { kind = File; content = Some id; _ } ->
+      let* id =
+        Yeokcham_store.Stored_object_id.of_hex id
+        |> Result.map_error (fun _ -> Invalid_checkpoint_id id)
+      in
+      Snapshot.Content.load_bounded store ~max_bytes:Text_diff.max_bytes
+        (Snapshot.Content.of_stored_object_id id)
+      |> Result.map_error (fun e -> Snapshot_error e)
+  | Some { kind = File; content = None; _ } ->
+      Error (Invalid_proposal_tree "file entry lacks content identity")
+
+let display_difference store difference =
+  let same_content =
+    match (difference.before, difference.after) with
+    | Some before, Some after ->
+        before.kind = after.kind && before.content = after.content
+    | None, (None | Some _) | Some _, None -> false
+  in
+  if same_content then
+    Ok { entry_difference = difference; text_difference = None }
+  else
+    let* before = regular_bytes store difference.before in
+    let* after = regular_bytes store difference.after in
+    let text_difference =
+      match (before, after) with
+      | Some before, Some after -> Some (Text_diff.compare ~before ~after)
+      | None, _ | _, None ->
+          Some
+            (Text_diff.Opaque
+               "opaque, symlink, directory or display limit; inspect exact \
+                type/mode/content identities")
+    in
+    Ok { entry_difference = difference; text_difference }
+
+let compare_local_states ~root ~before ~after =
+  let observe = before = Working_tree || after = Working_tree in
+  let action () =
+    with_repository ~root (fun repository loaded ->
+        let store = Store.underlying_store repository in
+        let* observed =
+          if observe then
+            let* () = require_no_pending_restore ~root in
+            capture ~root store |> Result.map Option.some
+          else Ok None
+        in
+        let* before_state = resolve_state loaded observed before in
+        let* after_state = resolve_state loaded observed after in
+        let* () = validate_view loaded store observed before_state in
+        let* () =
+          if
+            Model.Snapshot_id.equal before_state.state_snapshot
+              after_state.state_snapshot
+          then Ok ()
+          else validate_view loaded store observed after_state
+        in
+        let* differences =
+          comparison_differences store ~before:before_state.state_snapshot
+            ~after:after_state.state_snapshot
+        in
+        let* display_differences =
+          List.fold_left
+            (fun result difference ->
+              let* values = result in
+              let* value = display_difference store difference in
+              Ok (value :: values))
+            (Ok []) differences
+          |> Result.map List.rev
+        in
+        Ok { before_state; after_state; display_differences })
+  in
+  if observe then with_worktree_lock ~root action else action ()
+
+let inspect_local_status ~root =
+  with_worktree_lock ~root (fun () ->
+      with_repository ~root (fun repository loaded ->
+          let store = Store.underlying_store repository in
+          let pending = Journal.latest_pending ~root in
+          let pending_local_recovery =
+            match pending with
+            | Ok (Some journal) ->
+                Some
+                  {
+                    recovery_operation = Journal.operation_id journal;
+                    recovery_target = Journal.target journal;
+                  }
+            | Ok None | Error _ -> None
+          in
+          let observation =
+            let* () =
+              match pending with
+              | Ok None -> Ok ()
+              | Ok (Some journal) ->
+                  Error
+                    (History_error
+                       ("recovery "
+                       ^ Journal.operation_id journal
+                       ^ " is pending; resume restore --checkpoint "
+                       ^ Model.Snapshot_id.to_string (Journal.target journal)))
+              | Error e -> Error (Restore_journal_error e)
+            in
+            let saved_checkpoint =
+              (Model.active_draft loaded.Store.project).Model.latest_checkpoint
+            in
+            let* observed_snapshot = capture ~root store in
+            let* differences =
+              comparison_differences store ~before:saved_checkpoint
+                ~after:observed_snapshot
+            in
+            Ok { saved_checkpoint; observed_snapshot; differences }
+          in
+          let uncaptured =
+            match observation with
+            | Ok comparison -> comparison.differences <> []
+            | Error _ -> false
+          in
+          let status_branch =
+            match loaded.Store.local with
+            | Some _ -> branch_listing loaded |> Result.to_option
+            | None -> None
+          in
+          Ok
+            {
+              saved_metadata =
+                status_of_project ~uncaptured loaded.Store.project;
+              status_branch;
+              status_cursor =
+                view_of_node loaded.Store.history
+                  (History.current loaded.Store.history);
+              status_head =
+                Yeokcham_store.Stored_object_id.to_hex loaded.Store.object_id;
+              capture_observation = Result.map_error error_to_string observation;
+              pending_local_recovery;
+            }))
+
+let inspect_local_history ~root ~before ~limit =
+  if limit < 1 || limit > 200 then
+    Error (History_error "history limit must be between 1 and 200")
+  else if
+    Option.fold ~none:false ~some:(fun id -> Int64.compare id 0L < 0) before
+  then Error (History_error "history cursor must be nonnegative")
+  else
+    with_repository ~root (fun repository loaded ->
+        let store = Store.underlying_store repository in
+        let history = loaded.Store.history in
+        let candidates =
+          History.nodes history |> List.rev
+          |> List.filter (fun node ->
+              Option.fold ~none:true
+                ~some:(fun before -> Int64.compare node.History.id before < 0)
+                before)
+        in
+        let rec page remaining reversed = function
+          | [] -> (List.rev reversed, false)
+          | _ when remaining = 0 -> (List.rev reversed, true)
+          | node :: rest -> page (remaining - 1) (node :: reversed) rest
+        in
+        let page, more = page limit [] candidates in
+        let checked = ref [] in
+        let availability snapshot =
+          match
+            List.assoc_opt (Model.Snapshot_id.to_string snapshot) !checked
+          with
+          | Some availability -> availability
+          | None ->
+              let availability =
+                if not (retained loaded.Store.project snapshot) then
+                  Not_retained
+                else
+                  match validate_snapshot_closure store snapshot with
+                  | Ok () -> Available
+                  | Error e -> Unavailable (error_to_string e)
+              in
+              checked :=
+                (Model.Snapshot_id.to_string snapshot, availability) :: !checked;
+              availability
+        in
+        let entries =
+          List.map
+            (fun node ->
+              let node_availability = availability node.History.snapshot in
+              let history_paths =
+                match (node_availability, node.History.parent) with
+                | Available, Some parent -> (
+                    let* parent = History.find history parent in
+                    match availability parent.History.snapshot with
+                    | Available ->
+                        comparison_differences store
+                          ~before:parent.History.snapshot
+                          ~after:node.History.snapshot
+                        |> Result.map
+                             (List.map (fun difference -> difference.path))
+                        |> Result.map_error error_to_string
+                    | Not_retained -> Error "parent contents are not retained"
+                    | Unavailable reason ->
+                        Error ("parent contents unavailable: " ^ reason))
+                | Available, None -> (
+                    match loaded.Store.local with
+                    | None -> Error "no recorded parent comparison"
+                    | Some local ->
+                        let* empty =
+                          Model.Snapshot_id.of_string
+                            (Model.Core.Object_id.to_hex
+                               (Store.Local.empty_snapshot local))
+                          |> Result.map_error Model.error_to_string
+                        in
+                        comparison_differences store ~before:empty
+                          ~after:node.History.snapshot
+                        |> Result.map
+                             (List.map (fun difference -> difference.path))
+                        |> Result.map_error error_to_string)
+                | Not_retained, _ -> Error "contents are not retained"
+                | Unavailable reason, _ -> Error reason
+              in
+              let history_title =
+                Model.export loaded.Store.project |> fun state ->
+                state.Model.state_drafts
+                |> List.find_opt (fun draft ->
+                    Model.Draft_id.equal draft.Model.draft_id node.History.draft)
+                |> Option.map (fun draft -> draft.Model.title)
+              in
+              let referenced_by_branches =
+                match loaded.Store.local with
+                | None -> []
+                | Some local ->
+                    Store.Local.positions local
+                    |> List.filter_map (fun position ->
+                        if position.Store.Local.cursor = node.History.id then
+                          Some position.Store.Local.branch
+                        else None)
+              in
+              {
+                history_node = node;
+                history_identity = history_identity history node;
+                history_title;
+                availability = node_availability;
+                history_children =
+                  History.children history node.History.id
+                  |> List.map (fun child -> child.History.id);
+                history_paths;
+                referenced_by_branches;
+              })
+            page
+        in
+        let next_before =
+          if more then
+            Option.map
+              (fun node -> node.History.id)
+              (List.nth_opt page (List.length page - 1))
+          else None
+        in
+        Ok
+          {
+            page_workspace = History.workspace history;
+            page_cursor = (History.current history).History.id;
+            entries;
+            next_before;
+          })

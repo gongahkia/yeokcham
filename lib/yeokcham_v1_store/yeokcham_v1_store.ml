@@ -584,6 +584,15 @@ let authority_for_local = function
 
 let validate_local_history ~project history local =
   let* () =
+    match History.workspace history with
+    | Some _ -> Ok ()
+    | None ->
+        Error
+          (History_error
+             "authenticated local branches require a persisted workspace \
+              namespace")
+  in
+  let* () =
     List.fold_left
       (fun result (position : Local.position) ->
         let* () = result in

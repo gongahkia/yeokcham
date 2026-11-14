@@ -716,3 +716,80 @@ val branch_create :
 (** Capture private disk edits and publish the new authenticated named branch
     with all local positions/history in one root update under the writer lock.
     The selected branch is unchanged. *)
+
+type state_reference =
+  | Current_saved
+  | Working_tree
+  | History_node of int64
+  | Exact_history of Yeokcham_v1_model.Core.History_id.t
+  | Snapshot_state of Yeokcham_v1_model.Snapshot_id.t
+
+type state_view = {
+  state_name : string;
+  history_identity : Yeokcham_v1_model.Core.History_id.t option;
+  state_snapshot : Yeokcham_v1_model.Snapshot_id.t;
+}
+
+type display_difference = {
+  entry_difference : path_difference;
+  text_difference : Text_diff.t option;
+}
+
+type state_comparison = {
+  before_state : state_view;
+  after_state : state_view;
+  display_differences : display_difference list;
+}
+
+type pending_local_recovery = {
+  recovery_operation : string;
+  recovery_target : Yeokcham_v1_model.Snapshot_id.t;
+}
+
+type local_status = {
+  saved_metadata : status;
+  status_branch : branch_listing option;
+  status_cursor : state_view;
+  status_head : string;
+  capture_observation : (working_tree_comparison, string) result;
+  pending_local_recovery : pending_local_recovery option;
+}
+(** [saved_metadata.uncaptured] is meaningful only after a successful
+    observation; failed/incomplete observation is explicit and must never be
+    rendered clean. *)
+
+type availability = Available | Not_retained | Unavailable of string
+
+type history_entry = {
+  history_node : Yeokcham_v1_undo.node;
+  history_identity : Yeokcham_v1_model.Core.History_id.t option;
+  history_title : string option;
+  availability : availability;
+  history_children : int64 list;
+  history_paths : (Yeokcham_v1_model.Path.t list, string) result;
+  referenced_by_branches : Yeokcham_v1_model.Core.Branch_id.t list;
+}
+
+type history_page = {
+  page_workspace : Yeokcham_v1_model.Core.Workspace_id.t option;
+  page_cursor : int64;
+  entries : history_entry list;
+  next_before : int64 option;
+}
+
+val compare_local_states :
+  root:string ->
+  before:state_reference ->
+  after:state_reference ->
+  (state_comparison, error) result
+
+val inspect_local_status : root:string -> (local_status, error) result
+
+val inspect_local_history :
+  root:string ->
+  before:int64 option ->
+  limit:int ->
+  (history_page, error) result
+(** Metadata and verified availability, without a working-tree scan or
+    publication. Local history alternatives are not projected as named shared
+    branches. *)

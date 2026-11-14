@@ -1,4 +1,18 @@
 (test
+ (name test_local_inspection)
+ (modules test_local_inspection)
+ (libraries
+  alcotest
+  unix
+  yeokcham_store
+  yeokcham_v1_model
+  yeokcham_v1_local_service
+  yeokcham_v1_store
+  yeokcham_v1_trust
+  yeokcham_v1_undo
+  yeokcham_v1_restore_journal))
+
+(test
  (name test_text_diff)
  (modules test_text_diff)
  (libraries alcotest qcheck-core qcheck-alcotest yeokcham_v1_local_service))

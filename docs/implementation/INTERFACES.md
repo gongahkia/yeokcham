@@ -420,3 +420,41 @@ and individual stored chunks. Existing `Content.load` still returns a complete
 string when a caller explicitly requests it. Snapshot/manifest/chunk identities
 and canonical bytes remain unchanged. The local service's closure preflight
 uses `Content.verify`; materialization output staging remains separate work.
+
+### P2 local inspection domain checkpoint (in progress)
+
+`Service.inspect_local_status` returns saved metadata, exact cursor/content
+identity, selected branch metadata, a complete current comparison or explicit
+capture-incomplete error, and any pending recovery operation. Incomplete capture
+must not be rendered as clean. Working observations use the existing worktree
+writer boundary and refuse pending recovery, so inspection does not capture an
+interrupted partial application. They may store immutable scan objects, but do
+not publish a root, create history or rewrite ordinary files.
+
+`Service.compare_local_states` accepts `Current_saved`, `Working_tree`,
+`History_node sequence`, `Exact_history workspace_sequence` and
+`Snapshot_state snapshot`. It verifies content availability, compares exact
+path/type/mode/content metadata and adds bounded display hunks. Foreign workspace
+IDs refuse instead of being interpreted as local sequences. Equal contents at
+different nodes retain different state identities. Saved-only comparisons do
+not scan the live tree and remain available while recovery is pending.
+
+`Service.inspect_local_history ~root ~before ~limit` returns newest-first saved
+rows, alternate children, titles, known changed paths, workspace identities and
+availability. Limits are 1-200; the CLI default remains to be wired at 50.
+Availability distinguishes verified local contents, no longer retained contents,
+and missing/corrupt/unavailable contents. A missing parent comparison is explicit.
+Branch working positions appear only as references to real branch identities;
+undo continuations are not synthesized as shared branches. This query does not
+scan working files or move the history cursor.
+
+`Service.Text_diff` uses UTF-8 without NUL, exact CRLF/final-newline information,
+common-prefix/suffix trimming, deletion-first LCS alignment and three context
+lines. Display limits are 2 MiB per side and 4,000,000 alignment cells. Beyond
+limits or for opaque bytes it reports an opaque result with exact metadata
+available separately. This is display logic, not a P3 composition proof.
+Five text cases include 400 randomized exact-byte hunk reconstructions. Six
+service cases cover mixed changes, A-B-C/return-B-D, pagination, namespace scope,
+equal contents/different positions, malformed/special-file capture, unavailable
+contents, compaction and pending recovery without a partial capture. CLI rendering
+and target structured outcomes remain outstanding at this checkpoint.

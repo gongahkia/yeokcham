@@ -524,3 +524,18 @@ records, not current proof.
   and local-service (44) cases passed. `make build`, `make lint` and `make ci`
   exited 0 with valid Dune cache reuse; exact logs are
   `*-stream-inspection*.log` in the session cache.
+
+- P2 local-inspection domain checkpoint, November 15:
+  real status/history/exact comparison APIs now expose changed paths, workspace
+  positions, alternates, branch references, truthful availability and bounded
+  readable text hunks. Working observations respect the writer boundary and
+  pending recovery; saved-only comparisons never scan the live tree. Six domain
+  cases pass; five text cases include 400 randomized exact-byte reconstructions.
+  Focused cases, `make build`, `make lint` and `make ci` exited 0 with valid
+  Dune cache reuse; exact logs are `*-inspection*.log`/`*-text-diff*.log` in
+  the session cache. Main advanced externally to
+  `0e629dc7c38637fcb9cf99cd8ec168bfe2572700`, which committed this session's
+  text-diff module/test groundwork; those changes and updated tracking refs were
+  preserved. No agent push was performed. CLI rendering/structured outcomes, safe switch/recovery and final acceptance
+  remain outstanding. No P3 composition/acceptance is implemented by display
+  hunks. Authenticated branch metadata additionally refuses unnamespaced history.
