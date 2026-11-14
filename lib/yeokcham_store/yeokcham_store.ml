@@ -406,7 +406,7 @@ let unlink_if_present path =
   | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok ()
   | Unix.Unix_error (error, _, _) -> Error (io_error "unlink" path error)
 
-let read_regular_file path =
+let read_regular_file ?(limit = max_object_bytes) path =
   let* initial = lstat path in
   if initial.Unix.st_kind <> Unix.S_REG then Error (Not_regular_file path)
   else
@@ -417,10 +417,12 @@ let read_regular_file path =
         (fun () ->
           let stat = Unix.fstat descriptor in
           if stat.Unix.st_kind <> Unix.S_REG then Error (Not_regular_file path)
-          else if stat.Unix.st_size > max_object_bytes then
-            Error
-              (Object_too_large
-                 { path; size = stat.Unix.st_size; limit = max_object_bytes })
+          else if
+            stat.Unix.st_dev <> initial.Unix.st_dev
+            || stat.Unix.st_ino <> initial.Unix.st_ino
+          then Error (File_size_changed path)
+          else if stat.Unix.st_size > limit then
+            Error (Object_too_large { path; size = stat.Unix.st_size; limit })
           else
             let bytes = Bytes.create stat.Unix.st_size in
             let rec read offset =
@@ -443,9 +445,22 @@ let read_regular_file path =
               with Unix.Unix_error (error, _, _) ->
                 Error (io_error "read" path error)
             in
-            if extra_count = 0 then Ok (Bytes.unsafe_to_string bytes)
+            let final = Unix.fstat descriptor in
+            if
+              extra_count = 0
+              && final.Unix.st_size = stat.Unix.st_size
+              && final.Unix.st_mtime = stat.Unix.st_mtime
+              && final.Unix.st_ctime = stat.Unix.st_ctime
+            then Ok (Bytes.unsafe_to_string bytes)
             else Error (File_size_changed path))
     with Unix.Unix_error (error, _, _) -> Error (io_error "open" path error)
+
+let read_file_bounded ~path ~max_bytes =
+  if max_bytes < 0 then
+    Error
+      (Io_error
+         { operation = "read bounded file"; path; message = "negative bound" })
+  else read_regular_file ~limit:max_bytes path
 
 let stored_object_id bytes =
   Hash.feed_string Hash.empty object_domain |> fun context ->
@@ -470,11 +485,20 @@ let repository_paths root =
 
 let format_path repository = Filename.concat repository.yeokcham format_name
 
+type file_publication_boundary =
+  | Temporary_created
+  | Temporary_written
+  | Temporary_synced
+  | Final_linked
+  | Directory_synced
+
+let no_file_observer _ _ = ()
+
 let temporary_path directory final_name attempt =
   Filename.concat directory
     (Printf.sprintf ".%s.tmp-%d-%d" final_name (Unix.getpid ()) attempt)
 
-let create_temporary directory final_name bytes =
+let create_temporary ?(observe = no_file_observer) directory final_name bytes =
   let rec attempt number =
     if number = 128 then Error (Temporary_name_exhausted directory)
     else
@@ -483,10 +507,15 @@ let create_temporary directory final_name bytes =
         let descriptor =
           Unix.openfile path [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_EXCL ] 0o600
         in
+        observe Temporary_created path;
         let result =
           match write_all descriptor path bytes with
           | Error error -> Error error
-          | Ok () -> fsync_file descriptor path
+          | Ok () ->
+              observe Temporary_written path;
+              let* () = fsync_file descriptor path in
+              observe Temporary_synced path;
+              Ok ()
         in
         let close_result = close_file descriptor path in
         let result =
@@ -520,6 +549,34 @@ let link_without_replace ~temporary ~final =
 let finish_temporary ~directory temporary =
   let* () = unlink_if_present temporary in
   fsync_directory directory
+
+let publish_file_with ~observe ~path ~bytes =
+  let directory = Filename.dirname path in
+  let* temporary =
+    create_temporary ~observe directory (Filename.basename path)
+      (Bytes.of_string bytes)
+  in
+  let cleanup () = ignore (finish_temporary ~directory temporary) in
+  match link_without_replace ~temporary ~final:path with
+  | Error error ->
+      cleanup ();
+      Error error
+  | Ok Already_exists ->
+      let* () = finish_temporary ~directory temporary in
+      Ok false
+  | Ok Published ->
+      observe Final_linked path;
+      let* () = fsync_directory directory in
+      observe Directory_synced path;
+      let* () = finish_temporary ~directory temporary in
+      Ok true
+
+let publish_file_create_only ~path ~bytes =
+  publish_file_with ~observe:no_file_observer ~path ~bytes
+
+module File_for_test = struct
+  let publish_file = publish_file_with
+end
 
 let write_repository_format repository =
   let path = format_path repository in
@@ -924,61 +981,117 @@ let read_ref repository ~name =
       |> Result.map_error (fun detail -> Corrupt_ref { name; detail })
   | Error error -> Error error
 
+type ref_lock = { lock_path : string; gate : Unix.file_descr }
+
+let stale_ref_lock path =
+  let* initial = lstat path in
+  if initial.Unix.st_kind <> Unix.S_REG || initial.Unix.st_size > 128 then
+    Ok false
+  else
+    let* bytes = read_file_bounded ~path ~max_bytes:128 in
+    match String.split_on_char '\n' bytes with
+    | [ "yeokcham-mutable-ref-lock-v1"; pid; "" ]
+      when String.starts_with ~prefix:"pid=" pid -> (
+        match int_of_string_opt (String.sub pid 4 (String.length pid - 4)) with
+        | Some pid when pid > 0 ->
+            let dead =
+              try
+                Unix.kill pid 0;
+                false
+              with
+              | Unix.Unix_error (Unix.ESRCH, _, _) -> true
+              | Unix.Unix_error _ -> false
+            in
+            if not dead then Ok false
+            else
+              let* current = lstat path in
+              if
+                current.Unix.st_ino <> initial.Unix.st_ino
+                || current.Unix.st_dev <> initial.Unix.st_dev
+                || current.Unix.st_size <> initial.Unix.st_size
+                || current.Unix.st_mtime <> initial.Unix.st_mtime
+                || current.Unix.st_ctime <> initial.Unix.st_ctime
+              then Ok false
+              else
+                let* () = unlink_if_present path in
+                Ok true
+        | Some _ | None -> Ok false)
+    | _ -> Ok false
+
 let acquire_ref_lock repository name =
   let* () = checked_ref_name name in
   let path = ref_lock_path repository name in
-  let contents =
-    Printf.sprintf "yeokcham-mutable-ref-lock-v1\npid=%d\n" (Unix.getpid ())
-  in
+  let gate_path = path ^ ".gate" in
   try
-    let descriptor =
-      Unix.openfile path [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_EXCL ] 0o600
+    let gate =
+      Unix.openfile gate_path
+        [ Unix.O_RDWR; Unix.O_CREAT; Unix.O_CLOEXEC ]
+        0o600
     in
-    let result =
-      match write_all descriptor path (Bytes.of_string contents) with
-      | Error error -> Error error
-      | Ok () -> fsync_file descriptor path
+    let acquire () =
+      let* () =
+        try
+          Unix.lockf gate Unix.F_TLOCK 0;
+          Ok ()
+        with Unix.Unix_error _ -> Error (Ref_lock_held name)
+      in
+      let* existing = lstat_or_missing path in
+      let* () =
+        match existing with
+        | None -> Ok ()
+        | Some _ ->
+            let* stale = stale_ref_lock path in
+            if stale then Ok () else Error (Ref_lock_held name)
+      in
+      let contents =
+        Printf.sprintf "yeokcham-mutable-ref-lock-v1\npid=%d\n" (Unix.getpid ())
+      in
+      let* created = publish_file_create_only ~path ~bytes:contents in
+      if created then Ok { lock_path = path; gate }
+      else Error (Ref_lock_held name)
     in
-    let close_result = close_file descriptor path in
-    let result =
-      match result with Error _ as error -> error | Ok () -> close_result
-    in
-    match result with
-    | Error error ->
-        ignore (unlink_if_present path);
-        Error error
-    | Ok () -> fsync_directory repository.locks |> Result.map (fun () -> path)
-  with
-  | Unix.Unix_error (Unix.EEXIST, _, _) -> Error (Ref_lock_held name)
-  | Unix.Unix_error (error, _, _) ->
-      Error (io_error "create mutable ref lock" path error)
+    match acquire () with
+    | Ok _ as result -> result
+    | Error _ as result ->
+        close_noerr gate;
+        result
+  with Unix.Unix_error (error, _, _) ->
+    Error (io_error "acquire mutable ref lock" gate_path error)
 
-let release_ref_lock repository path =
-  let* () = unlink_if_present path in
-  fsync_directory repository.locks
+let release_ref_lock repository lock =
+  Fun.protect
+    ~finally:(fun () -> close_noerr lock.gate)
+    (fun () ->
+      let* () = unlink_if_present lock.lock_path in
+      fsync_directory repository.locks)
 
 let with_ref_lock repository name action =
-  let* lock_path = acquire_ref_lock repository name in
-  let result = action () in
-  match release_ref_lock repository lock_path with
+  let* lock = acquire_ref_lock repository name in
+  let result =
+    try action ()
+    with error ->
+      ignore (release_ref_lock repository lock);
+      raise error
+  in
+  match release_ref_lock repository lock with
   | Ok () -> result
   | Error release_error -> (
       match result with Ok _ -> Error release_error | Error _ -> result)
 
 let with_lock repository ~name ~on_error action =
-  match checked_ref_name name with
+  match acquire_ref_lock repository name with
   | Error error -> Error (on_error error)
-  | Ok () -> (
-      match acquire_ref_lock repository name with
-      | Error error -> Error (on_error error)
-      | Ok lock_path -> (
-          let result = action () in
-          match release_ref_lock repository lock_path with
-          | Ok () -> result
-          | Error error -> (
-              match result with
-              | Ok _ -> Error (on_error error)
-              | Error _ -> result)))
+  | Ok lock -> (
+      let result =
+        try action ()
+        with error ->
+          ignore (release_ref_lock repository lock);
+          raise error
+      in
+      match release_ref_lock repository lock with
+      | Ok () -> result
+      | Error error -> (
+          match result with Ok _ -> Error (on_error error) | Error _ -> result))
 
 let rename_ref_temporary ~temporary ~final =
   try
@@ -987,7 +1100,12 @@ let rename_ref_temporary ~temporary ~final =
   with Unix.Unix_error (error, _, _) ->
     Error (io_error "rename mutable ref" final error)
 
-let compare_and_swap_ref repository ~name ~expected ~target =
+type ref_publication_boundary =
+  | Before_ref_replace
+  | After_ref_replace
+  | After_ref_sync
+
+let compare_and_swap_ref_with ~observe repository ~name ~expected ~target =
   let* () = checked_ref_name name in
   with_ref_lock repository name (fun () ->
       let* actual = read_ref repository ~name in
@@ -1010,13 +1128,28 @@ let compare_and_swap_ref repository ~name ~expected ~target =
         let* temporary =
           create_temporary repository.refs (Filename.basename final) bytes
         in
+        observe Before_ref_replace;
         let publication = rename_ref_temporary ~temporary ~final in
         match publication with
         | Error error ->
             ignore (unlink_if_present temporary);
             Error error
         | Ok () ->
-            fsync_directory repository.refs |> Result.map (fun () -> next))
+            observe After_ref_replace;
+            let* () = fsync_directory repository.refs in
+            observe After_ref_sync;
+            Ok next)
+
+let compare_and_swap_ref repository ~name ~expected ~target =
+  compare_and_swap_ref_with
+    ~observe:(fun _ -> ())
+    repository ~name ~expected ~target
+
+module For_test = struct
+  include File_for_test
+
+  let compare_and_swap_ref = compare_and_swap_ref_with
+end
 
 module Ref_file = struct
   let valid_component component = valid_ref_name component

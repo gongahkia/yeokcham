@@ -188,117 +188,125 @@ let decoded_integer name = function
       Error (Invalid_schema (name ^ " must be an integer"))
 
 let[@warning "-4"] decode bytes =
-  let* value =
-    Encoding.decode bytes |> Result.map_error (fun error -> Decode_error error)
-  in
-  let* fields, history_node, plan =
-    match value with
-    | Encoding.Array
-        [
-          Encoding.Integer 3L;
-          operation;
-          safety;
-          target;
-          generation;
-          phase;
-          Encoding.Integer node;
-          Encoding.Bytes digest;
-          branch;
-        ]
-      when Int64.compare node 0L >= 0 && String.length digest = 32 ->
-        let* branch =
-          match branch with
-          | Encoding.Null -> Ok None
-          | Encoding.Bytes raw ->
-              Model.Core.Branch_id.of_raw raw
-              |> Result.map Option.some
-              |> Result.map_error (fun e ->
-                  Invalid_schema (Model.Core.error_to_string e))
-          | _ ->
-              Error
-                (Invalid_schema
-                   "selected branch must be null or a typed identity")
-        in
-        Ok
-          ( [ Encoding.integer 3L; operation; safety; target; generation; phase ],
-            Some node,
-            Some (digest, branch) )
-    | Encoding.Array
-        [
-          Encoding.Integer 2L;
-          operation;
-          safety;
-          target;
-          generation;
-          phase;
-          Encoding.Integer node;
-        ]
-      when Int64.compare node 0L >= 0 ->
-        Ok
-          ( [ Encoding.integer 2L; operation; safety; target; generation; phase ],
-            Some node,
-            None )
-    | Encoding.Array fields when List.length fields = 6 ->
-        Ok (fields, None, None)
-    | Encoding.Array _ ->
-        Error (Invalid_schema "record must contain six fields")
-    | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _ | Encoding.Map _
-    | Encoding.Bool _ | Encoding.Null ->
-        Error (Invalid_schema "record must be an array")
-  in
-  match fields with
-  | [ version; operation; safety; target; generation; phase ] ->
-      let* version = decoded_integer "version" version in
-      if
-        not
-          (Int64.equal version
-             (if Option.is_some plan then 3L
-              else if Option.is_some history_node then 2L
-              else schema_version))
-      then Error (Unsupported_schema_version version)
-      else
-        let* operation_id = decoded_text "operation id" operation in
-        let* safety_text = decoded_text "safety snapshot" safety in
-        let* target_text = decoded_text "target snapshot" target in
-        let* generation = decoded_integer "generation" generation in
-        let* phase_code = decoded_integer "phase" phase in
-        let* safety =
-          Model.Snapshot_id.of_string safety_text
-          |> Result.map_error (fun error ->
-              Invalid_schema (Model.error_to_string error))
-        in
-        let* target =
-          Model.Snapshot_id.of_string target_text
-          |> Result.map_error (fun error ->
-              Invalid_schema (Model.error_to_string error))
-        in
-        if not (valid_operation_id operation_id) then
-          Error (Invalid_operation_id operation_id)
-        else if Int64.compare generation 0L < 0 then
-          Error (Invalid_generation generation)
-        else if Model.Snapshot_id.equal safety target then
-          Error Identical_snapshots
+  if String.length bytes > 8192 then
+    Error (Invalid_schema "record exceeds 8192 bytes")
+  else
+    let* value =
+      Encoding.decode bytes
+      |> Result.map_error (fun error -> Decode_error error)
+    in
+    let* fields, history_node, plan =
+      match value with
+      | Encoding.Array
+          [
+            Encoding.Integer 3L;
+            operation;
+            safety;
+            target;
+            generation;
+            phase;
+            Encoding.Integer node;
+            Encoding.Bytes digest;
+            branch;
+          ]
+        when Int64.compare node 0L >= 0 && String.length digest = 32 ->
+          let* branch =
+            match branch with
+            | Encoding.Null -> Ok None
+            | Encoding.Bytes raw ->
+                Model.Core.Branch_id.of_raw raw
+                |> Result.map Option.some
+                |> Result.map_error (fun e ->
+                    Invalid_schema (Model.Core.error_to_string e))
+            | _ ->
+                Error
+                  (Invalid_schema
+                     "selected branch must be null or a typed identity")
+          in
+          Ok
+            ( [
+                Encoding.integer 3L; operation; safety; target; generation; phase;
+              ],
+              Some node,
+              Some (digest, branch) )
+      | Encoding.Array
+          [
+            Encoding.Integer 2L;
+            operation;
+            safety;
+            target;
+            generation;
+            phase;
+            Encoding.Integer node;
+          ]
+        when Int64.compare node 0L >= 0 ->
+          Ok
+            ( [
+                Encoding.integer 2L; operation; safety; target; generation; phase;
+              ],
+              Some node,
+              None )
+      | Encoding.Array fields when List.length fields = 6 ->
+          Ok (fields, None, None)
+      | Encoding.Array _ ->
+          Error (Invalid_schema "record must contain six fields")
+      | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _ | Encoding.Map _
+      | Encoding.Bool _ | Encoding.Null ->
+          Error (Invalid_schema "record must be an array")
+    in
+    match fields with
+    | [ version; operation; safety; target; generation; phase ] ->
+        let* version = decoded_integer "version" version in
+        if
+          not
+            (Int64.equal version
+               (if Option.is_some plan then 3L
+                else if Option.is_some history_node then 2L
+                else schema_version))
+        then Error (Unsupported_schema_version version)
         else
-          let* phase = phase_of_code phase_code in
-          let expected_generation = phase_code in
-          if not (Int64.equal generation expected_generation) then
+          let* operation_id = decoded_text "operation id" operation in
+          let* safety_text = decoded_text "safety snapshot" safety in
+          let* target_text = decoded_text "target snapshot" target in
+          let* generation = decoded_integer "generation" generation in
+          let* phase_code = decoded_integer "phase" phase in
+          let* safety =
+            Model.Snapshot_id.of_string safety_text
+            |> Result.map_error (fun error ->
+                Invalid_schema (Model.error_to_string error))
+          in
+          let* target =
+            Model.Snapshot_id.of_string target_text
+            |> Result.map_error (fun error ->
+                Invalid_schema (Model.error_to_string error))
+          in
+          if not (valid_operation_id operation_id) then
+            Error (Invalid_operation_id operation_id)
+          else if Int64.compare generation 0L < 0 then
             Error (Invalid_generation generation)
+          else if Model.Snapshot_id.equal safety target then
+            Error Identical_snapshots
           else
-            let journal =
-              {
-                operation_id;
-                history_node;
-                plan;
-                safety;
-                target;
-                generation;
-                phase;
-              }
-            in
-            let* canonical = encode journal in
-            if String.equal canonical bytes then Ok journal
-            else Error Noncanonical_bytes
-  | _ -> assert false
+            let* phase = phase_of_code phase_code in
+            let expected_generation = phase_code in
+            if not (Int64.equal generation expected_generation) then
+              Error (Invalid_generation generation)
+            else
+              let journal =
+                {
+                  operation_id;
+                  history_node;
+                  plan;
+                  safety;
+                  target;
+                  generation;
+                  phase;
+                }
+              in
+              let* canonical = encode journal in
+              if String.equal canonical bytes then Ok journal
+              else Error Noncanonical_bytes
+    | _ -> assert false
 
 let journal_directory root =
   Filename.concat (Filename.concat root ".yeokcham") "journal"
@@ -330,36 +338,38 @@ let read_file path =
   try
     if (Unix.lstat path).Unix.st_kind <> Unix.S_REG then
       Error (Invalid_schema ("journal entry is not a regular file: " ^ path))
-    else Ok (In_channel.with_open_bin path In_channel.input_all)
+    else
+      Yeokcham_store.read_file_bounded ~path ~max_bytes:8192
+      |> Result.map_error (fun error ->
+          Io_error
+            {
+              operation = "read immutable metadata";
+              path;
+              message = Yeokcham_store.error_to_string error;
+            })
   with
   | Unix.Unix_error (error, _, _) -> Error (io_error "lstat" path error)
   | Sys_error message -> Error (Io_error { operation = "read"; path; message })
 
-let write_exclusive path bytes =
-  try
-    let descriptor =
-      Unix.openfile path [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_EXCL ] 0o600
-    in
-    let output = Unix.out_channel_of_descr descriptor in
-    Fun.protect
-      ~finally:(fun () -> close_out_noerr output)
-      (fun () ->
-        output_string output bytes;
-        flush output;
-        Unix.fsync descriptor);
-    fsync_directory (Filename.dirname path)
-  with
-  | Unix.Unix_error (error, _, _) -> Error (io_error "create" path error)
-  | Sys_error message -> Error (Io_error { operation = "write"; path; message })
+let publish_file path bytes =
+  Yeokcham_store.publish_file_create_only ~path ~bytes
+  |> Result.map_error (fun error ->
+      Io_error
+        {
+          operation = "publish immutable metadata";
+          path;
+          message = Yeokcham_store.error_to_string error;
+        })
 
 let append ~root journal =
   let* bytes = encode journal in
   let path = path root journal in
-  if Sys.file_exists path then
+  let* created = publish_file path bytes in
+  if created then Ok ()
+  else
     let* existing = read_file path in
     if String.equal existing bytes then Ok ()
     else Error (Journal_collision path)
-  else write_exclusive path bytes
 
 let is_record_name name =
   String.starts_with ~prefix:"v1-restore-" name

@@ -582,3 +582,30 @@ literal next actions; default interactive cancellation changes no files/history.
 Initial selection obstructions return exit 4; a conflicted pending application
 returns exit 8. Required missing content remains unavailable (5), integrity and
 unsupported state fail closed (6), and unknown names are invalid (2).
+
+Local metadata publication now reuses `Yeokcham_store.publish_file_create_only
+~path ~bytes`: write/fsync an exclusive private temporary, hard-link without
+replacement, fsync the parent, then remove the temporary. The boolean result
+means created versus existing; callers must validate existing bytes. Restore
+journal/proof append use this boundary, so readers do not recognize partially
+written final records. `read_file_bounded` validates regular-file identity and
+bounds; journal/proof reads and public decoders reject records above 8192 bytes.
+Their canonical record schemas and existing golden bytes are unchanged.
+
+Mutable-ref locking retains the existing `name.lock` owner marker and adds a
+persistent `name.lock.gate` advisory process lock. Owner markers are themselves
+published atomically. Under the gate, only an exact known marker whose positive
+PID is confirmed absent can be removed. Unknown markers and live/unverifiable
+owners remain untouched; PID reuse can therefore require explicit diagnosis.
+The gate is released on process exit; normal return or an exception releases
+both resources. The root CAS still publishes one complete immutable state ID.
+`Store.For_test` exposes trusted publication hooks at temporary creation/write/
+fsync, final link/directory fsync and ref replacement/directory fsync. These
+process-interruption tests do not claim filesystem-independent power-loss proof.
+
+GC's consistent/mutating operations now acquire the same workspace process lock
+as capture/navigation before restore-retention and state-head locks. This stops
+a second CLI process from collecting newly captured objects before their safety
+root is published. Read-only `Gc.inspect` remains an observation. The lock order
+is workspace, restore-retention, state head. This pilot does not introduce a
+managed scheduler or claim concurrent-domain support for process advisory locks.

@@ -616,3 +616,27 @@ exited 0; logs are `build-branch-switch.log`, `lint-branch-switch.log` and
 exited 1 on its first run; lint subsequently passed. Focused native branch and
 CLI journeys passed before the broad checks; unaffected Dune results may be
 cached. README and accepted G01 measurements remain unchanged.
+
+P2 durable-metadata audit checkpoint: journals/proofs now use the generic store's
+fsynced temporary/create-only publication instead of writing final records in
+place. Their decoders/readers are bounded at 8192 bytes. Mutable-ref writers use
+an advisory gate plus atomically published existing-format owner markers;
+confirmed-dead owners recover on retry, while unknown/live ownership evidence
+is preserved. Exceptions release locks. GC now shares the workspace writer lock
+before retention/head locks, protecting captures before root publication.
+Seven new durability cases passed, including ten journal/proof publication exits,
+three root-replacement exits while the writer lock is held, collision retention,
+live/unknown owner refusal, concurrent writers, exception cleanup and a GC
+attempt during actual pre-publication safety capture. Focused journal (6), proof
+(3), identity (7), GC (11), undo (14), branch (14) and service (45) suites passed.
+These are process-interruption checks on this Linux filesystem; ambiguous owner
+markers are conservative refusals. Copy-out and remaining navigation CLI work
+still block P2 completion.
+
+Durable-metadata checkpoint verification: `make build`, `make lint`, `make ci`
+exited 0 (`*-store-safety.log` in the P2 external log directory). The formatter's
+first run exited 1 while promoting files; subsequent lint passed. Focused suites
+ran before CI; unchanged Dune results may be cached. No accepted G01 benchmark
+was rerun, and README is unchanged. Unknown or live owner markers are retained
+rather than guessed away; diagnostic handling for those markers remains a
+conservative refusal, including possible PID reuse.

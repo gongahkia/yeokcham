@@ -1,4 +1,18 @@
 (test
+ (name test_store_safety)
+ (modules test_store_safety)
+ (libraries
+  alcotest
+  unix
+  yeokcham_store
+  yeokcham_snapshot
+  yeokcham_v1_model
+  yeokcham_v1_restore_journal
+  yeokcham_v1_restore_proof
+  yeokcham_v1_local_service
+  yeokcham_v1_gc))
+
+(test
  (name test_safe_apply)
  (modules test_safe_apply)
  (libraries

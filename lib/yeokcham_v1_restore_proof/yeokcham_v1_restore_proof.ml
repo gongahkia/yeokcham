@@ -78,42 +78,46 @@ let decoded_integer name = function
       Error (Invalid_schema (name ^ " must be an integer"))
 
 let decode bytes =
-  let* value =
-    Encoding.decode bytes |> Result.map_error (fun error -> Decode_error error)
-  in
-  let* fields =
-    match value with
-    | Encoding.Array fields when List.length fields = 4 -> Ok fields
-    | Encoding.Array _ ->
-        Error (Invalid_schema "record must contain four fields")
-    | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _ | Encoding.Map _
-    | Encoding.Bool _ | Encoding.Null ->
-        Error (Invalid_schema "record must be an array")
-  in
-  match fields with
-  | [ version; operation; safety; target ] ->
-      let* version = decoded_integer "version" version in
-      if not (Int64.equal version schema_version) then
-        Error (Unsupported_schema_version version)
-      else
-        let* operation_id = decoded_text "operation id" operation in
-        let* safety_text = decoded_text "safety snapshot" safety in
-        let* target_text = decoded_text "target snapshot" target in
-        let* safety =
-          Model.Snapshot_id.of_string safety_text
-          |> Result.map_error (fun error ->
-              Invalid_schema (Model.error_to_string error))
-        in
-        let* target =
-          Model.Snapshot_id.of_string target_text
-          |> Result.map_error (fun error ->
-              Invalid_schema (Model.error_to_string error))
-        in
-        let* proof = make ~operation_id ~safety ~target in
-        let* canonical = encode proof in
-        if String.equal canonical bytes then Ok proof
-        else Error Noncanonical_bytes
-  | _ -> assert false
+  if String.length bytes > 8192 then
+    Error (Invalid_schema "record exceeds 8192 bytes")
+  else
+    let* value =
+      Encoding.decode bytes
+      |> Result.map_error (fun error -> Decode_error error)
+    in
+    let* fields =
+      match value with
+      | Encoding.Array fields when List.length fields = 4 -> Ok fields
+      | Encoding.Array _ ->
+          Error (Invalid_schema "record must contain four fields")
+      | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _ | Encoding.Map _
+      | Encoding.Bool _ | Encoding.Null ->
+          Error (Invalid_schema "record must be an array")
+    in
+    match fields with
+    | [ version; operation; safety; target ] ->
+        let* version = decoded_integer "version" version in
+        if not (Int64.equal version schema_version) then
+          Error (Unsupported_schema_version version)
+        else
+          let* operation_id = decoded_text "operation id" operation in
+          let* safety_text = decoded_text "safety snapshot" safety in
+          let* target_text = decoded_text "target snapshot" target in
+          let* safety =
+            Model.Snapshot_id.of_string safety_text
+            |> Result.map_error (fun error ->
+                Invalid_schema (Model.error_to_string error))
+          in
+          let* target =
+            Model.Snapshot_id.of_string target_text
+            |> Result.map_error (fun error ->
+                Invalid_schema (Model.error_to_string error))
+          in
+          let* proof = make ~operation_id ~safety ~target in
+          let* canonical = encode proof in
+          if String.equal canonical bytes then Ok proof
+          else Error Noncanonical_bytes
+    | _ -> assert false
 
 let proof_directory root =
   Filename.concat (Filename.concat root ".yeokcham") "restore-proofs"
@@ -162,37 +166,39 @@ let read_file path =
     if (Unix.lstat path).Unix.st_kind <> Unix.S_REG then
       Error
         (Invalid_schema ("restore proof entry is not a regular file: " ^ path))
-    else Ok (In_channel.with_open_bin path In_channel.input_all)
+    else
+      Yeokcham_store.read_file_bounded ~path ~max_bytes:8192
+      |> Result.map_error (fun error ->
+          Io_error
+            {
+              operation = "read immutable metadata";
+              path;
+              message = Yeokcham_store.error_to_string error;
+            })
   with
   | Unix.Unix_error (error, _, _) -> Error (io_error "lstat" path error)
   | Sys_error message -> Error (Io_error { operation = "read"; path; message })
 
-let write_exclusive path bytes =
-  try
-    let descriptor =
-      Unix.openfile path [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_EXCL ] 0o600
-    in
-    let output = Unix.out_channel_of_descr descriptor in
-    Fun.protect
-      ~finally:(fun () -> close_out_noerr output)
-      (fun () ->
-        output_string output bytes;
-        flush output;
-        Unix.fsync descriptor);
-    fsync_directory (Filename.dirname path)
-  with
-  | Unix.Unix_error (error, _, _) -> Error (io_error "create" path error)
-  | Sys_error message -> Error (Io_error { operation = "write"; path; message })
+let publish_file path bytes =
+  Yeokcham_store.publish_file_create_only ~path ~bytes
+  |> Result.map_error (fun error ->
+      Io_error
+        {
+          operation = "publish immutable metadata";
+          path;
+          message = Yeokcham_store.error_to_string error;
+        })
 
 let append ~root proof =
   let* () = ensure_directory (proof_directory root) in
   let* bytes = encode proof in
   let target = path root proof in
-  if Sys.file_exists target then
+  let* created = publish_file target bytes in
+  if created then Ok ()
+  else
     let* existing = read_file target in
     if String.equal existing bytes then Ok ()
     else Error (Proof_collision target)
-  else write_exclusive target bytes
 
 let is_record_name name =
   String.starts_with ~prefix:"v1-restore-proof-" name

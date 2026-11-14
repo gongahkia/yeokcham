@@ -610,23 +610,46 @@ let plan_from_loaded ~root store loaded =
   classify ~state_head:loaded.V1_store.object_id ~objects
     ~reachable:(Object_map.bindings reachable)
 
+let with_workspace_lock ~root action =
+  let path =
+    Filename.concat (Filename.concat root ".yeokcham") "local-worktree.lock"
+  in
+  try
+    let descriptor =
+      Unix.openfile path [ Unix.O_RDWR; Unix.O_CREAT; Unix.O_CLOEXEC ] 0o600
+    in
+    Fun.protect
+      ~finally:(fun () -> Unix.close descriptor)
+      (fun () ->
+        Unix.lockf descriptor Unix.F_TLOCK 0;
+        action ())
+  with Unix.Unix_error (error, _, _) ->
+    Error
+      (Io_error
+         {
+           operation = "acquire workspace operation lock";
+           path;
+           message = Unix.error_message error;
+         })
+
 let with_consistent_repository ~root action =
   let* repository =
     V1_store.open_repository ~root
     |> Result.map_error (fun error -> V1_store_error error)
   in
   let store = V1_store.underlying_store repository in
-  Store.with_lock store ~name:"restore-retention"
-    ~on_error:(fun error -> Store_error error)
-    (fun () ->
-      Store.with_lock store ~name:V1_store.state_head_name
+  with_workspace_lock ~root (fun () ->
+      Store.with_lock store ~name:"restore-retention"
         ~on_error:(fun error -> Store_error error)
         (fun () ->
-          let* loaded =
-            V1_store.load repository
-            |> Result.map_error (fun error -> V1_store_error error)
-          in
-          action repository store loaded))
+          Store.with_lock store ~name:V1_store.state_head_name
+            ~on_error:(fun error -> Store_error error)
+            (fun () ->
+              let* loaded =
+                V1_store.load repository
+                |> Result.map_error (fun error -> V1_store_error error)
+              in
+              action repository store loaded)))
 
 let plan ~root =
   with_consistent_repository ~root (fun _repository store loaded ->

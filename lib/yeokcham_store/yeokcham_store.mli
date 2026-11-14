@@ -123,3 +123,39 @@ val with_lock :
   on_error:(error -> 'e) ->
   (unit -> ('a, 'e) result) ->
   ('a, 'e) result
+
+val publish_file_create_only :
+  path:string -> bytes:string -> (bool, error) result
+(** Reuse the immutable store's fsynced temporary/hard-link publication for
+    local metadata. True means created; false means an existing path was left
+    intact and must be checked by the caller. Parent directories must exist. *)
+
+val read_file_bounded : path:string -> max_bytes:int -> (string, error) result
+
+type file_publication_boundary =
+  | Temporary_created
+  | Temporary_written
+  | Temporary_synced
+  | Final_linked
+  | Directory_synced
+
+type ref_publication_boundary =
+  | Before_ref_replace
+  | After_ref_replace
+  | After_ref_sync
+
+module For_test : sig
+  val compare_and_swap_ref :
+    observe:(ref_publication_boundary -> unit) ->
+    repository ->
+    name:string ->
+    expected:Mutable_ref.t option ->
+    target:Stored_object_id.t option ->
+    (Mutable_ref.t, error) result
+
+  val publish_file :
+    observe:(file_publication_boundary -> string -> unit) ->
+    path:string ->
+    bytes:string ->
+    (bool, error) result
+end
