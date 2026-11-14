@@ -281,6 +281,21 @@ val init_signed_with_recovery :
     24-word mnemonic to the user exactly once and persist or export the package
     through an explicit adapter. *)
 
+val init_local_signed_with_recovery :
+  root:string ->
+  username:Yeokcham_v1_model.Username.t ->
+  initial_draft:Yeokcham_v1_model.Draft_id.t ->
+  title:string ->
+  repository:Yeokcham_v1_trust.Repository_id.t ->
+  device:Yeokcham_v1_trust.device ->
+  signing_capability:Yeokcham_v1_trust.signing_capability ->
+  recovery_device:Yeokcham_v1_trust.device ->
+  recovery_capability:Yeokcham_v1_trust.signing_capability ->
+  (status * Yeokcham_v1_recovery.ceremony, error) result
+(** P2 initialization: existing files are captured privately against signed
+    empty accepted genesis, with a generated main branch. No service/backup is
+    started. *)
+
 val init_collaboration :
   root:string ->
   username:Yeokcham_v1_model.Username.t ->
@@ -681,3 +696,21 @@ val ignore_explain :
   root:string ->
   string list ->
   (Yeokcham_snapshot.ignore_explanation, error) result
+
+type branch_listing = {
+  selected_branch : Yeokcham_v1_model.Core.Branch_id.t;
+  shared_branches : Yeokcham_v1_model.Core.branch_state list;
+  private_positions : Yeokcham_v1_store.Local.position list;
+  workspace : Yeokcham_v1_model.Core.Workspace_id.t option;
+}
+
+val branch_list : root:string -> (branch_listing, error) result
+
+val branch_create :
+  root:string ->
+  name:string ->
+  signing_capability:Yeokcham_v1_trust.signing_capability ->
+  (branch_listing, error) result
+(** Capture private disk edits and publish the new authenticated named branch
+    with all local positions/history in one root update under the writer lock.
+    The selected branch is unchanged. *)

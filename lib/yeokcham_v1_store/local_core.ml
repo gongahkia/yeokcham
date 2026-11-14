@@ -192,6 +192,7 @@ let lookup state name =
 
 let add_branch ~random_bytes ~store ~authority ~certificate ~signing_capability
     ~name ~cursor ~parents state =
+  let* () = Core.validate_branch_name name |> model in
   if Int64.compare cursor 0L < 0 then Error "branch cursor must be nonnegative"
   else if
     List.exists

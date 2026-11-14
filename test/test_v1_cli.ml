@@ -667,6 +667,38 @@ let command_journey_shares_resolves_withdraws_and_delivers () =
       expect_output_contains "delivery starts the next draft"
         "draft draft-three" output)
 
+let establish_v1_fixture_baseline root =
+  (* these legacy proposal journeys need a common accepted V1 baseline;
+     init now keeps the original files private *)
+  let _, errors, status =
+    run
+      [
+        "share";
+        "--root";
+        root;
+        "--change";
+        "initial-baseline";
+        "--revision";
+        "initial-baseline-revision";
+      ]
+  in
+  require_success "explicitly share initial fixture baseline" status errors;
+  let _, errors, status =
+    run
+      [
+        "deliver";
+        "--root";
+        root;
+        "--id";
+        "initial-baseline-delivery";
+        "--draft";
+        "after-initial-baseline";
+        "--title";
+        "proposal candidates";
+      ]
+  in
+  require_success "explicitly establish V1 proposal baseline" status errors
+
 let command_journey_materializes_and_resolves_from_an_isolated_tree () =
   with_directory "yeokcham-v1-cli-isolated-" (fun root ->
       write_file root "main.ml" "let version = 1\n";
@@ -685,6 +717,7 @@ let command_journey_materializes_and_resolves_from_an_isolated_tree () =
           ]
       in
       require_success "init" status errors;
+      establish_v1_fixture_baseline root;
       write_file root "main.ml" "let version = 2\n";
       let _output, errors, status =
         run
@@ -892,6 +925,7 @@ let command_journey_materializes_an_exact_proposal_without_accepting_it () =
               ]
           in
           require_success "proposal init" status errors;
+          establish_v1_fixture_baseline root;
           write_file root "main.ml" "let version = 2\n";
           write_file root "left.txt" "left-change\n";
           let _output, errors, status =

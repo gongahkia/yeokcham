@@ -81,7 +81,7 @@ partial phase. Do not relabel a partial phase complete to expose the next prompt
 | --- | --- | --- |
 | P0 evaluation | complete | [Assessment](PILOT_PLAN.md), [receipt](implementation/results/PILOT-workflow-assessment.json); tiny WSL/test-signer walkthrough only |
 | P1 core foundation | complete | [Interfaces](implementation/INTERFACES.md), [report](implementation/reports/P01-attempt-01.md), [acceptance](implementation/results/P01-acceptance.json); no P1 criteria remaining |
-| P2 local work | in_progress | [Scoped task](implementation/goals/P02-local-workflow.md); native ignore matching/explanation and capture consistency landed; durable workspace/history identity foundation landed; authenticated branches, local CLI and safe recovery remain; P2 incomplete |
+| P2 local work | in_progress | [Scoped task](implementation/goals/P02-local-workflow.md); native ignore matching/explanation and capture consistency landed; durable workspace/history identity foundation landed; authenticated branch list/create and private init landed; switch, local inspection CLI and safe recovery remain; P2 incomplete |
 | P3 shared loop | pending | Clone/selected sharing/composition/journaled integration/conflicts; unstarted |
 | P4 harden/handoff | pending | Representative/native/human and fault evidence; unstarted |
 
@@ -498,3 +498,17 @@ records, not current proof.
   branch/switch completion. CLI init
   still uses the old path pending service wiring; safe replacement and ordinary
   status/history/diff journeys remain outstanding. No P3 work is claimed.
+
+- P2 private-init/branch CLI checkpoint, November 15:
+  CLI init now captures files privately against signed empty accepted genesis
+  and generates IDs/defaults. Branch list/create are connected to real service
+  and state operations, with text and JSON data. Seven new fresh-process Python
+  cases pass. Two existing V1 proposal fixtures relied on implicit acceptance
+  at init; they now establish their baseline through explicit existing V1
+  share/deliver commands, retaining all substantive assertions. All 28 existing
+  CLI cases pass, as do the 44 existing local-service cases. `make build`,
+  `make lint` and `make ci` exited 0 with valid Dune cache reuse; exact logs
+  are `*-local-cli*.log` and `*-local-branch-cli*.log` in the session cache.
+  Switch, preservation-aware mutation/recovery and useful local
+  status/history/diff still remain; P2 is incomplete. Native credential/service
+  acceptance is not claimed by the disposable test-signer journeys.

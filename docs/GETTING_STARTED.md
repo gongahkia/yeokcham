@@ -109,3 +109,26 @@ as well as its files. Do not use it on an actual repository.
 The [Docker tutorial](../containers/tutorial/USAGE.md) provides the same local
 recovery journey with an isolated Linux signer. It includes a sample project
 and an empty restore destination; no host compiler installation is required.
+
+## Current P2 branch checkpoint
+
+`init [PATH]` now generates workspace/branch identities and an initial draft ID;
+`--username`, `--draft` and `--title` remain optional overrides. Existing files
+are captured privately against authenticated empty accepted genesis. The
+command reports automatic capture and private backup as unconfigured. Use
+`save` or a running foreground `watch` for subsequent capture.
+
+```sh
+"$YEOKCHAM" branch list --root "$DEMO_ROOT/work"
+"$YEOKCHAM" branch create experiment --root "$DEMO_ROOT/work"
+"$YEOKCHAM" branch list --root "$DEMO_ROOT/work" --format json
+```
+
+Creation saves current private disk edits and creates a named shared branch
+identity at the current accepted version. It keeps the current selection and
+preserves both private positions in the existing history/state root. Names are
+case-sensitive; duplicates refuse without retargeting. JSON includes actual
+branch IDs, causal heads, workspace identity and local positions. This is a P2
+checkpoint: `switch` and the new status/history/diff journeys are unfinished.
+Existing V1 sharing/delivery commands retain their older record semantics; they
+are not the future P3 native core exchange/integration loop.

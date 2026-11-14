@@ -201,6 +201,8 @@ let valid_name name value =
     | Ok _ -> Ok ()
     | Error _ -> Error (Invalid_field (name ^ " is not UTF-8"))
 
+let validate_branch_name = valid_name "branch name"
+
 let valid_profile = function
   | "line-hunks-v1" -> Ok ()
   | _ -> Error (Invalid_field "unsupported composition profile")
@@ -303,7 +305,7 @@ let make_branch_event ~branch ~previous_events ~action ~targets ~display_name =
   let* () =
     match display_name with
     | None -> Ok ()
-    | Some value -> valid_name "branch name" value
+    | Some value -> validate_branch_name value
   in
   let valid =
     match action with

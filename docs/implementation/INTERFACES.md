@@ -376,3 +376,31 @@ collision and entropy failure, logical/physical identity mismatch, invalid
 signatures, unsupported acceptance, historical/current admission and unselected
 private work surviving compaction/GC planning. Materialization and CLI branch
 journeys remain outstanding.
+
+
+### P2 private-init and branch CLI checkpoint (in progress)
+
+`Service.init_local_signed_with_recovery` reuses the existing signer/recovery
+ceremony while capturing initial files privately against authenticated empty
+accepted genesis. The earlier V1 library initializer remains for current V1
+workflows. `Service.branch_list` returns selected identity, causal branch rows,
+private positions and workspace namespace. `Service.branch_create` scans and
+retains unsaved disk edits, creates a signed named fork and publishes the
+history/positions together under the worktree lock and sole state-head CAS.
+
+CLI `init [PATH]` generates required IDs and default names; username/draft/title
+options remain available. A new PATH may be created when its parent exists.
+Existing metadata refuses before another signer is created. The recovery
+ceremony still refuses JSON before mutation. Automatic capture and backup are
+reported unconfigured, without managed-service claims. `branch list` and
+`branch create NAME` provide actual domain data in the existing CLI JSON
+boundary and escaped plain text. `Core.validate_branch_name` is shared by the
+constructor, store adapter and CLI argument check. Full target JSON outcomes
+and ordinary inspection journeys remain P2 work.
+
+This checkpoint does not implement switch. The legacy V1 share/deliver path is
+not native core acceptance; P3 must connect explicit publication/integration
+through its real policy/composition boundary. Existing proposal CLI fixtures
+now explicitly share/deliver their initial V1 baseline, rather than relying on
+initialization to accept private files. Their substantive conflict/provenance,
+no-acceptance and recovery assertions remain intact.

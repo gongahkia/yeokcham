@@ -1,3 +1,9 @@
+(rule
+ (alias runtest)
+ (deps test_local_branch_cli.py ../bin/yeokcham_v1.exe)
+ (action
+  (run python3 %{dep:test_local_branch_cli.py} %{dep:../bin/yeokcham_v1.exe})))
+
 (test
  (name test_local_core)
  (modules test_local_core)

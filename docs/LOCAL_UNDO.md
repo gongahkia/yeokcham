@@ -118,4 +118,6 @@ is `(workspace ID, sequence)`; short numeric IDs remain convenient within one
 workspace. Selection never resets the counter. Separate workspaces can have the
 same short sequence without sharing a history identity. Existing current data
 keeps its known ancestry when a namespace is first bound on a mutating write.
-This checkpoint does not yet expose named shared branches in the CLI.
+The P2 CLI now lists and creates named shared branches with `branch list` and
+`branch create NAME`. These identities are separate from undo continuations.
+File switching remains unfinished in the current checkpoint.

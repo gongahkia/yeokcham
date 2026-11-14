@@ -869,8 +869,9 @@ let init_signed ~root ~username ~initial_draft ~title ~repository ~device
   init_collaboration ~root ~username ~initial_draft ~title ~device ~membership
     ~local_certificate:(Trust.certificate_id root_certificate)
 
-let init_signed_with_recovery ~root ~username ~initial_draft ~title ~repository
-    ~device ~signing_capability ~recovery_device ~recovery_capability =
+let init_signed_with_recovery_mode ~local_workflow ~root ~username
+    ~initial_draft ~title ~repository ~device ~signing_capability
+    ~recovery_device ~recovery_capability =
   let* root_certificate =
     Trust.root_certificate ~repository ~device signing_capability
     |> Result.map_error (fun error -> Trust_error error)
@@ -893,27 +894,67 @@ let init_signed_with_recovery ~root ~username ~initial_draft ~title ~repository
     Recovery.create ~authority ~recovery_capability
     |> Result.map_error (fun error -> Recovery_error error)
   in
+  let bootstrap underlying_store =
+    let* () = write_recovery_package_exclusive ~root ceremony in
+    let* initial_snapshot =
+      capture ~root underlying_store |> Result.map_error error_to_string
+    in
+    let* local =
+      if local_workflow then
+        Store.Local.initialize ~store:underlying_store ~authority
+          ~certificate:(Trust.certificate_id root_certificate)
+          ~signing_capability ~cursor:0L
+        |> Result.map Option.some
+      else Ok None
+    in
+    let* baseline =
+      match local with
+      | None -> Ok initial_snapshot
+      | Some local ->
+          Model.Snapshot_id.of_string
+            (Model.Core.Object_id.to_hex (Store.Local.empty_snapshot local))
+          |> Result.map_error Model.error_to_string
+    in
+    let project =
+      Model.init ~creator:(Trust.device_id device) ~username
+        ~initial_snapshot:baseline ~initial_draft ~title
+      |> fun project -> Model.checkpoint project ~snapshot:initial_snapshot
+    in
+    let* collaboration =
+      Store.collaboration_with_authority ~authority ~revisions:[]
+        ~local_certificate:(Trust.certificate_id root_certificate)
+        ~authorizations:[] ~adoptions:[]
+      |> Result.map_error Store.error_to_string
+    in
+    Ok (project, collaboration, local)
+  in
   let* repository =
-    Store.init_collaborative_with ~root ~bootstrap:(fun underlying_store ->
-        let* () = write_recovery_package_exclusive ~root ceremony in
-        let* initial_snapshot =
-          capture ~root underlying_store |> Result.map_error error_to_string
-        in
-        let project =
-          Model.init ~creator:(Trust.device_id device) ~username
-            ~initial_snapshot ~initial_draft ~title
-        in
-        Store.collaboration_with_authority ~authority ~revisions:[]
-          ~local_certificate:(Trust.certificate_id root_certificate)
-          ~authorizations:[] ~adoptions:[]
-        |> Result.map_error Store.error_to_string
-        |> Result.map (fun collaboration -> (project, collaboration)))
+    (if local_workflow then
+       Store.init_local_collaborative_with ~root ~bootstrap:(fun store ->
+           let* project, collaboration, local = bootstrap store in
+           match local with
+           | Some local -> Ok (project, collaboration, local)
+           | None ->
+               Error
+                 "local initialization did not produce authenticated branch \
+                  state")
+     else
+       Store.init_collaborative_with ~root ~bootstrap:(fun store ->
+           bootstrap store
+           |> Result.map (fun (project, collaboration, _) ->
+               (project, collaboration))))
     |> Result.map_error (fun error -> Store_error error)
   in
   let* loaded =
     Store.load repository |> Result.map_error (fun error -> Store_error error)
   in
   Ok (status_of_project loaded.Store.project, ceremony)
+
+let init_signed_with_recovery =
+  init_signed_with_recovery_mode ~local_workflow:false
+
+let init_local_signed_with_recovery =
+  init_signed_with_recovery_mode ~local_workflow:true
 
 let status ~root =
   with_repository ~root (fun repository loaded ->
@@ -3939,3 +3980,70 @@ let compact ~root ~keep_recent ~dry_run =
 let ignore_explain ?directory ~root path =
   Snapshot.explain_ignore ?directory ~root path
   |> Result.map_error (fun error -> Snapshot_error error)
+
+type branch_listing = {
+  selected_branch : Model.Core.Branch_id.t;
+  shared_branches : Model.Core.branch_state list;
+  private_positions : Store.Local.position list;
+  workspace : Model.Core.Workspace_id.t option;
+}
+
+let require_local loaded =
+  match loaded.Store.local with
+  | Some local -> Ok local
+  | None ->
+      Error
+        (History_error
+           "this repository has no authenticated local branch state; existing \
+            V1 work/history is preserved")
+
+let branch_listing loaded =
+  let* local = require_local loaded in
+  Ok
+    {
+      selected_branch = (Store.Local.selected local).Store.Local.branch;
+      shared_branches = Store.Local.branches local;
+      private_positions = Store.Local.positions local;
+      workspace = History.workspace loaded.Store.history;
+    }
+
+let branch_list ~root =
+  with_repository ~root (fun _ loaded -> branch_listing loaded)
+
+let branch_create ~root ~name ~signing_capability =
+  with_writable_repository ~root (fun repository loaded ->
+      let* local = require_local loaded in
+      let* collaboration = require_collaboration loaded in
+      let* authority =
+        match Store.authority collaboration with
+        | Some authority -> Ok authority
+        | None ->
+            Error (History_error "branch creation requires verified authority")
+      in
+      let* observed = capture ~root (Store.underlying_store repository) in
+      let project = checkpoint_observed loaded.Store.project observed in
+      let* history =
+        History.record loaded.Store.history ~snapshot:observed
+          ~draft:(Model.active_draft project).Model.draft_id
+          ~created_at:(Int64.of_float (Unix.gettimeofday ()))
+        |> Result.map_error (fun e -> History_error e)
+      in
+      let cursor = (History.current history).History.id in
+      let* local =
+        Store.Local.remember local ~cursor
+        |> Result.map_error (fun e -> History_error e)
+      in
+      let* local =
+        Store.Local.create_branch
+          ~store:(Store.underlying_store repository)
+          ~authority
+          ~certificate:(Store.local_certificate collaboration)
+          ~signing_capability ~name ~cursor local
+        |> Result.map_error (fun e -> History_error e)
+      in
+      let* saved =
+        Store.save_collaborative ~history ~local repository
+          ~expected:loaded.Store.head ~project ~collaboration
+        |> Result.map_error (fun e -> Store_error e)
+      in
+      branch_listing saved)

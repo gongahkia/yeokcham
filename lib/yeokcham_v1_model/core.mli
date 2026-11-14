@@ -124,6 +124,8 @@ val make_accepted_version :
   review_evidence:Digest.t list ->
   (accepted_version, error) result
 
+val validate_branch_name : string -> (unit, error) result
+
 val make_branch_event :
   branch:Branch_id.t ->
   previous_events:Record_id.t list ->

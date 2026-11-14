@@ -1,5 +1,7 @@
 module History = Yeokcham_v1_undo
 module Model = Yeokcham_v1_model
+module Core = Model.Core
+module Local = Yeokcham_v1_store.Local
 module Service = Yeokcham_v1_local_service
 module Trust = Yeokcham_v1_trust
 module Package = Yeokcham_v1_package
@@ -112,6 +114,9 @@ let native_json_command command =
   List.mem command
     [
       "ignore-explain";
+      "branch";
+      "branch-list";
+      "branch-create";
       "verify";
       "repair-plan";
       "repair-apply";
@@ -200,7 +205,7 @@ let usage_text =
   \  yeokcham undo-tree [--root PATH]\n\
   \  yeokcham undo [--root PATH] [--to NODE] [--dry-run]\n\
   \  yeokcham redo [--root PATH] [--node NODE] [--dry-run]\n\
-  \  yeokcham init [--root PATH] --username NAME --draft ID --title TITLE\n\
+  \  yeokcham init [PATH] [--username NAME] [--draft ID] [--title TITLE]\n\
   \  yeokcham join [--root PATH] --username NAME --draft ID --title TITLE \\\n\
   \     --device ID --from PATH --verify-phrase \"TWELVE WORDS\"\n\
   \  yeokcham save [--root PATH]\n\
@@ -320,12 +325,13 @@ let help_for = function
        ^ usage_text)
   | [ "init" ] ->
       Some
-        "usage: yeokcham init [--root PATH] --username NAME --draft ID --title \
-         TITLE\n\n\
-         Create a new V1 repository and initial local checkpoint. It prints \
-         one public root-verification phrase and one recovery mnemonic; record \
-         the mnemonic offline. This ceremony requires --format text; JSON \
-         requests are refused before creating custody or repository state."
+        "usage: yeokcham init [PATH] [--root PATH] [--username NAME] [--draft \
+         ID] [--title TITLE]\n\n\
+         Capture existing files privately in a new local repository. \
+         Workspace, branch and draft identities are generated. It prints one \
+         public root-verification phrase and one recovery mnemonic; record the \
+         mnemonic offline. This ceremony requires --format text; JSON requests \
+         are refused before creating custody or repository state."
   | [ "join" ] ->
       Some
         "usage: yeokcham join [--root PATH] --username NAME --draft ID --title \
@@ -363,6 +369,13 @@ let help_for = function
         "usage: yeokcham ignore explain PATH [--root DIRECTORY]\n\n\
          Show the winning native .yeokchamignore rule or mandatory metadata \
          exclusion. Git ignore files are not consulted."
+  | [ "branch" ] | [ "branch"; "list" ] | [ "branch"; "create" ] ->
+      Some
+        "usage: yeokcham branch list [--root PATH] [--format json]\n\n\
+         yeokcham branch create NAME [--root PATH] [--format json]\n\n\
+         List authenticated shared branches or create a named fork without \
+         changing selection. Private disk edits are captured locally; creation \
+         does not accept or publish them. File switching is not yet available."
   | [ "status" ] ->
       Some
         "usage: yeokcham status [--root PATH]\n\n\
@@ -897,11 +910,32 @@ let render_status status =
 
 let parse_init arguments =
   let rec loop root username draft title = function
-    | [] -> (
-        match (username, draft, title) with
-        | Some username, Some draft, Some title ->
-            (Option.value root ~default:default_root, username, draft, title)
-        | None, _, _ | _, None, _ | _, _, None -> usage ())
+    | [] ->
+        let root = Option.value root ~default:default_root in
+        let username =
+          match username with
+          | Some value -> value
+          | None -> (
+              let candidate =
+                try (Unix.getpwuid (Unix.getuid ())).Unix.pw_name
+                with Not_found -> "local"
+              in
+              match Model.Username.of_string candidate with
+              | Ok _ -> candidate
+              | Error _ -> "local")
+        in
+        let draft =
+          match draft with
+          | Some value -> value
+          | None ->
+              Core.Change_id.generate ~random_bytes:Trust.random_bytes ()
+              |> require_ok Core.error_to_string
+              |> Core.Change_id.to_hex
+        in
+        let title =
+          Option.value title ~default:("Work on " ^ Filename.basename root)
+        in
+        (root, username, draft, title)
     | "--root" :: value :: rest when Option.is_none root ->
         loop (Some value) username draft title rest
     | "--username" :: value :: rest when Option.is_none username ->
@@ -910,6 +944,11 @@ let parse_init arguments =
         loop root username (Some value) title rest
     | "--title" :: value :: rest when Option.is_none title ->
         loop root username draft (Some value) rest
+    | "--" :: [ value ] when Option.is_none root ->
+        loop (Some value) username draft title []
+    | value :: rest
+      when Option.is_none root && not (String.starts_with ~prefix:"-" value) ->
+        loop (Some value) username draft title rest
     | _ -> usage ()
   in
   loop None None None None arguments
@@ -1541,6 +1580,21 @@ let run_init arguments =
   let username =
     parse_identifier "invalid username" Model.Username.of_string username
   in
+  (try
+     let metadata = Filename.concat root ".yeokcham" in
+     (match Unix.lstat metadata with
+     | _ ->
+         fail_with_status 2 "already-initialized"
+           "refusing to initialize over existing Yeokcham metadata"
+     | exception Unix.Unix_error (Unix.ENOENT, _, _) -> ());
+     match Unix.lstat root with
+     | stats when stats.Unix.st_kind = Unix.S_DIR -> ()
+     | _ ->
+         fail_with_status 2 "invalid-root" "initialization requires a directory"
+     | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Unix.mkdir root 0o755
+   with Unix.Unix_error (error, operation, _) ->
+     fail_with_status 5 "initialization-unavailable"
+       (operation ^ " failed: " ^ Unix.error_message error));
   let repository =
     Trust.Repository_id.generate ()
     |> require_ok (fun error ->
@@ -1557,12 +1611,15 @@ let run_init arguments =
     |> require_ok Trust.error_to_string
   in
   let status, ceremony =
-    Service.init_signed_with_recovery ~root ~username ~initial_draft ~title
-      ~repository ~device ~signing_capability ~recovery_device
+    Service.init_local_signed_with_recovery ~root ~username ~initial_draft
+      ~title ~repository ~device ~signing_capability ~recovery_device
       ~recovery_capability
     |> require_ok Service.error_to_string
   in
   render_status status;
+  print_endline "branch main (initial files remain private)";
+  print_endline "automatic-capture not configured; run save or foreground watch";
+  print_endline "private-backup not configured";
   print_endline "root-verification-phrase (compare during device join)";
   Printf.printf "%s\n" (Recovery.verification_phrase root_certificate);
   Printf.printf "recovery-package %s\n" (Service.recovery_package_path root);
@@ -2730,6 +2787,132 @@ let history_json_node node =
 let history_json_result command result =
   Cli_data.success ~command ~result ~warnings:(List.rev !public_warnings)
   |> Cli_data.encode |> print_json
+
+let json_ids values =
+  `List (List.map (fun id -> `String (Core.Record_id.to_hex id)) values)
+
+let render_branches listing =
+  let selected = listing.Service.selected_branch in
+  let workspace =
+    Option.map Core.Workspace_id.to_hex listing.Service.workspace
+  in
+  let data =
+    `Assoc
+      [
+        ( "workspace_id",
+          Option.fold ~none:`Null ~some:(fun value -> `String value) workspace
+        );
+        ("selected_branch_id", `String (Core.Branch_id.to_hex selected));
+        ( "branches",
+          `List
+            (List.map
+               (fun row ->
+                 let position =
+                   List.find_opt
+                     (fun p ->
+                       Core.Branch_id.equal p.Local.branch row.Core.branch_id)
+                     listing.Service.private_positions
+                 in
+                 `Assoc
+                   [
+                     ("id", `String (Core.Branch_id.to_hex row.Core.branch_id));
+                     ( "names",
+                       `List
+                         (List.map
+                            (fun name -> `String name)
+                            row.Core.display_names) );
+                     ( "selected",
+                       `Bool (Core.Branch_id.equal selected row.Core.branch_id)
+                     );
+                     ("event_heads", json_ids row.Core.event_heads);
+                     ("accepted_heads", json_ids row.Core.accepted_heads);
+                     ( "private_position",
+                       Option.fold ~none:`Null
+                         ~some:(fun p ->
+                           `Assoc
+                             [
+                               ( "sequence",
+                                 `String (Int64.to_string p.Local.cursor) );
+                               ( "working_basis",
+                                 `String (Core.Record_id.to_hex p.Local.basis)
+                               );
+                             ])
+                         position );
+                   ])
+               listing.Service.shared_branches) );
+      ]
+  in
+  match requested_format () with
+  | Json_format -> history_json_result (command_name ()) data
+  | Text_format ->
+      List.iter
+        (fun row ->
+          Printf.printf "%s %s branch:%s accepted:%s\n"
+            (if Core.Branch_id.equal selected row.Core.branch_id then "*"
+             else " ")
+            (String.concat ", "
+               (List.map Output.display_value row.Core.display_names))
+            (Core.Branch_id.to_hex row.Core.branch_id)
+            (String.concat ","
+               (List.map Core.Record_id.to_hex row.Core.accepted_heads)))
+        listing.Service.shared_branches
+
+let[@warning "-4"] fail_branch = function
+  | Service.Snapshot_error error -> (
+      match error with
+      | Yeokcham_snapshot.Invalid_ignore_rule _
+      | Yeokcham_snapshot.Invalid_ignore_path _ ->
+          fail_with_status 2 "invalid-ignore-rule"
+            (Yeokcham_snapshot.error_to_string error)
+      | _ ->
+          fail_with_status 5 "capture-incomplete"
+            (Yeokcham_snapshot.error_to_string error))
+  | Service.Trust_error error ->
+      fail_with_status 7 "branch-authority-blocked"
+        (Trust.error_to_string error)
+  | Service.History_error message
+    when String.starts_with ~prefix:"branch name " message
+         && String.ends_with ~suffix:"it was not retargeted" message ->
+      fail_with_status 2 "branch-name-exists" message
+  | Service.History_error message
+    when String.starts_with ~prefix:"core identity entropy unavailable:" message
+    ->
+      fail_with_status 5 "identity-entropy-unavailable" message
+  | Service.History_error message
+    when String.starts_with ~prefix:"branch has divergent" message ->
+      fail_with_status 3 "branch-choice-required" message
+  | error ->
+      fail_with_status 6 "branch-operation-refused"
+        (Service.error_to_string error)
+
+let run_branch_list arguments =
+  match Service.branch_list ~root:(parse_root arguments) with
+  | Ok listing -> render_branches listing
+  | Error error -> fail_branch error
+
+let run_branch_create arguments =
+  let rec parse root name = function
+    | [] -> (
+        match name with
+        | Some name -> (Option.value root ~default:default_root, name)
+        | None -> usage ())
+    | "--root" :: value :: rest when Option.is_none root ->
+        parse (Some value) name rest
+    | "--" :: [ value ] when Option.is_none name -> parse root (Some value) []
+    | value :: rest
+      when Option.is_none name && not (String.starts_with ~prefix:"-" value) ->
+        parse root (Some value) rest
+    | _ -> usage ()
+  in
+  let root, name = parse None None arguments in
+  (match Core.validate_branch_name name with
+  | Ok () -> ()
+  | Error error ->
+      fail_with_status 2 "invalid-branch-name" (Core.error_to_string error));
+  let signing_capability = local_signing_capability root in
+  match Service.branch_create ~root ~name ~signing_capability with
+  | Ok listing -> render_branches listing
+  | Error error -> fail_branch error
 
 let run_undo_tree arguments =
   let root = parse_root arguments in
@@ -4178,6 +4361,9 @@ let dispatch () =
   | _ :: "save" :: arguments ->
       observe_after_commit [ "save" ] arguments (fun () -> run_save arguments)
   | _ :: "ignore" :: "explain" :: arguments -> run_ignore_explain arguments
+  | _ :: "branch" :: "list" :: arguments -> run_branch_list arguments
+  | _ :: "branch" :: "create" :: arguments -> run_branch_create arguments
+  | _ :: "branch" :: arguments -> run_branch_list arguments
   | _ :: "status" :: arguments -> run_status arguments
   | _ :: "changes" :: arguments -> run_changes arguments
   | _ :: "log" :: arguments -> run_log arguments
