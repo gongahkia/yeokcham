@@ -1,4 +1,10 @@
 (test
+ (name test_cli_domain_data)
+ (modules test_cli_domain_data)
+ (libraries alcotest yojson yeokcham_v1_cli_data)
+ (deps (source_tree golden)))
+
+(test
  (name test_local_inspection)
  (modules test_local_inspection)
  (libraries
