@@ -72,7 +72,7 @@ docker run --rm \
     test "${#initial}" = 64
     printf "%s\\n" after > /smoke/project/note.txt
     /usr/bin/yeokcham save --root /smoke/project >/dev/null
-    /usr/bin/yeokcham restore --root /smoke/project --checkpoint "$initial" >/dev/null
+    /usr/bin/yeokcham restore --yes --root /smoke/project --checkpoint "$initial" >/dev/null
     test "$(cat /smoke/project/note.txt)" = before
     /usr/bin/yeokcham verify --root /smoke/project >/dev/null
     dnf remove --assumeyes yeokcham

@@ -45,7 +45,7 @@ Copy a checkpoint ID from `timeline`, then restore it into an empty destination:
 
 ```sh
 mkdir ../recovered
-"$YEOKCHAM" restore --checkpoint CHECKPOINT --destination ../recovered
+"$YEOKCHAM" restore --checkpoint CHECKPOINT --destination ../recovered --yes
 ```
 
 The current working tree stays untouched. Omitting `--destination` performs an

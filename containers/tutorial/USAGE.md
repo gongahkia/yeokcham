@@ -37,7 +37,7 @@ the session. Copy the checkpoint ID for the saved two-line note from
 ```sh
 printf '%s\n' 'unsaved line' >>note.txt
 yeokcham changes
-yeokcham restore --checkpoint CHECKPOINT --destination ../recovered
+yeokcham restore --checkpoint CHECKPOINT --destination ../recovered --yes
 cat ../recovered/note.txt
 cat note.txt
 ```
