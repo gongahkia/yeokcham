@@ -1448,3 +1448,5 @@ let compact project ~keep_recent ~journal_snapshots ~proof_snapshots =
     match import (export project) with
     | Error error -> Error error
     | Ok project -> Ok { project; kept; dropped }
+
+module Core = Core

@@ -291,3 +291,5 @@ val deliver :
   next_title:string ->
   created_at:int64 ->
   (project, error) result
+
+module Core = Core

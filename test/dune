@@ -551,3 +551,7 @@
   ../bin/yeokcham_v1.exe)
  (action
   (run python3 %{dep:test_benchmark_runner.py})))
+(test
+ (name test_core_model)
+ (modules test_core_model)
+ (libraries alcotest qcheck-core qcheck-alcotest yeokcham_v1_model))
