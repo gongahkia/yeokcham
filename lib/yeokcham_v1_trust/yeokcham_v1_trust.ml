@@ -2175,3 +2175,146 @@ let adoption_matches_signed_revision adoption signed =
     (signed_revision_id signed)
   && String.equal adoption.adoption_signed_digest
        (signed_revision_digest signed)
+
+module Core = struct
+  module M = Model.Core
+  module R = Record.Core
+
+  type trust_error = error
+
+  (* Shared core labels use OCaml 5.5 type-directed disambiguation. *)
+  [@@@warning "-42"]
+
+  type error =
+    | Trust_error of trust_error
+    | Record_error of R.error
+    | Model_error of M.error
+    | Late_record_requires_adoption
+
+  let trust result = Result.map_error (fun e -> (Trust_error e : error)) result
+
+  let record result =
+    Result.map_error (fun e -> (Record_error e : error)) result
+
+  let model result = Result.map_error (fun e -> (Model_error e : error)) result
+
+  let error_to_string (error : error) =
+    match error with
+    | Trust_error e -> error_to_string e
+    | Record_error e -> R.error_to_string e
+    | Model_error e -> M.error_to_string e
+    | Late_record_requires_adoption ->
+        "late core record needs exact authorized adoption; core adoption is \
+         not implemented"
+
+  let context authority (body : M.body) =
+    if
+      M.Repository_id.to_hex body.M.context.M.repository
+      <> Repository_id.to_string (repository (authority_membership authority))
+    then Error (Trust_error Cross_repository_certificate)
+    else
+      let* certificate =
+        match
+          certificate_by_id
+            authority.authority_membership_value.membership_certificates
+            (M.Digest.to_hex body.M.context.M.author_certificate)
+        with
+        | None -> Error (Trust_error Unknown_author_certificate)
+        | Some certificate -> Ok certificate
+      in
+      let* epochs =
+        map_result
+          (fun id -> authority_epoch authority (M.Digest.to_hex id) |> trust)
+          body.M.context.M.authority_heads
+      in
+      if
+        List.exists
+          (fun epoch ->
+            List.exists
+              (fun other ->
+                epoch_id epoch <> epoch_id other
+                && epoch_descends_from authority ~ancestor:(epoch_id epoch)
+                     other)
+              epochs)
+          epochs
+      then
+        Error
+          (Trust_error
+             (Invalid_epoch "core authority heads must be incomparable"))
+      else if
+        List.for_all
+          (fun epoch ->
+            certificate_active authority.authority_membership_value epoch
+              certificate)
+          epochs
+      then Ok (certificate, epochs)
+      else Error (Trust_error Revoked_device)
+
+  let verify authority signed =
+    let body = R.body signed in
+    let* certificate, _ = context authority body in
+    let* bytes = R.encode_body body |> record in
+    verify_detached
+      ~device:(certificate_subject certificate)
+      ~domain:(R.signature_domain (M.kind body.M.payload))
+      ~signature:(R.signature signed) bytes
+    |> trust
+
+  let sign authority capability body =
+    let* certificate, epochs = context authority body in
+    if
+      not
+        (List.for_all
+           (fun epoch -> authority_epoch_is_head authority (epoch_id epoch))
+           epochs)
+    then
+      Error
+        (Trust_error (Invalid_epoch "signing requires current authority heads"))
+    else if
+      signing_public_key capability
+      <> device_public_key (certificate_subject certificate)
+    then Error (Trust_error Invalid_private_key)
+    else
+      let* bytes = R.encode_body body |> record in
+      let* signature =
+        sign_detached capability
+          ~domain:(R.signature_domain (M.kind body.M.payload))
+          bytes
+        |> trust
+      in
+      let* signed = R.attach_signature body ~signature |> record in
+      let* () = verify authority signed in
+      Ok signed
+
+  let receive authority pool bytes =
+    let* signed =
+      R.decode ~repository:(M.pool_repository pool) bytes |> record
+    in
+    let* () = verify authority signed in
+    let* id = R.id signed |> record in
+    let* next, insertion = M.retain pool ~id (R.body signed) |> model in
+    match insertion with
+    | M.Unchanged -> Ok (next, insertion)
+    | M.Added ->
+        let* certificate, epochs = context authority (R.body signed) in
+        let* current_epochs =
+          map_result
+            (fun head -> authority_epoch authority head |> trust)
+            (authority_heads authority)
+        in
+        let late =
+          List.exists
+            (fun current ->
+              List.exists
+                (fun epoch ->
+                  epoch_descends_from authority ~ancestor:(epoch_id epoch)
+                    current
+                  && not
+                       (certificate_active authority.authority_membership_value
+                          current certificate))
+                epochs)
+            current_epochs
+        in
+        if late then Error Late_record_requires_adoption
+        else Ok (next, insertion)
+end

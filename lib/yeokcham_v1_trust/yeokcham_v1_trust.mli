@@ -296,3 +296,39 @@ val adoption_revision : adoption -> Model.Revision_id.t
 val adoption_epoch : adoption -> string
 val verify_adoption : authority -> adoption -> (unit, error) result
 val adoption_matches_signed_revision : adoption -> signed_revision -> bool
+
+module Core : sig
+  type trust_error = error
+
+  type error =
+    | Trust_error of trust_error
+    | Record_error of Yeokcham_v1_record.Core.error
+    | Model_error of Model.Core.error
+    | Late_record_requires_adoption
+
+  val error_to_string : error -> string
+
+  val sign :
+    authority ->
+    signing_capability ->
+    Model.Core.body ->
+    (Yeokcham_v1_record.Core.signed, error) result
+  (** Signs only explicitly named current authority heads, with the author
+      certificate active in every named head. Does not publish acceptance. *)
+
+  val verify :
+    authority -> Yeokcham_v1_record.Core.signed -> (unit, error) result
+  (** Historical proof at the signed authority context, not current admission,
+      composition, snapshot closure or repository-policy approval. *)
+
+  val receive :
+    authority ->
+    Model.Core.pool ->
+    string ->
+    (Model.Core.pool * Model.Core.insertion, error) result
+  (** Bounded decode, historical verification, current late-arrival check and
+      model reference validation. A previously retained identical record is a
+      no-op. A newly received record revoked by a descendant current epoch is
+      refused until an exact core-adoption protocol exists. This pure pool is
+      not a persisted project state or an accepted branch-head update. *)
+end

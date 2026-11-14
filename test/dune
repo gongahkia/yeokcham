@@ -573,3 +573,8 @@
   yeokcham_v1_trust)
  (deps
   (source_tree golden)))
+
+(test
+ (name test_core_trust)
+ (modules test_core_trust)
+ (libraries alcotest yeokcham_v1_model yeokcham_v1_record yeokcham_v1_trust))
