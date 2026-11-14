@@ -261,7 +261,8 @@ assumptions that documents, media, archives, or binaries are unwanted.
 P2 implements TC07's native glob/negation rules, nested-directory scope,
 precedence, re-inclusion and `ignore explain` source reporting. See
 [Native ignore rules](NATIVE_IGNORE.md) for the landed matching contract.
-Capture-race and materialization work remain separate P2 acceptance criteria.
+P2 also connects bounded stable capture and preservation-aware local selection;
+[Local undo](LOCAL_UNDO.md) documents the delivered boundary and limitations.
 Changing ignore rules must not silently delete earlier recorded history or
 erase excluded working files during restoration.
 

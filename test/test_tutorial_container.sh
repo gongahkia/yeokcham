@@ -45,7 +45,7 @@ docker run --rm "$image" /bin/sh -ec '
   saved=$(yeokcham save --root /workspace/yeokcham | sed -n "s/^saved //p" | sed -n "1p")
   test "${#saved}" = 64
   printf "%s\\n" "unsaved line" >>/workspace/yeokcham/note.txt
-  yeokcham restore --root /workspace/yeokcham --checkpoint "$saved" \
+  yeokcham restore --yes --root /workspace/yeokcham --checkpoint "$saved" \
     --destination /workspace/recovered
   expected=$(printf "%s\\n%s" "first note" "second note")
   test "$(cat /workspace/recovered/note.txt)" = "$expected"

@@ -1896,6 +1896,9 @@ let perform_copyout ~observe ~root repository loaded journal ~resumed =
           (Selection_integrity
              "copy-out journal and physical destination differ")
     in
+    let* copy_token =
+      Safe_apply.copyout_token physical |> Result.map_error applying_error
+    in
     let* applying =
       match Journal.phase journal with
       | Journal.Prepared -> advance_journal ~root journal Journal.Applying
@@ -1927,12 +1930,7 @@ let perform_copyout ~observe ~root repository loaded journal ~resumed =
       | Journal.Published -> Ok ()
       | Journal.Prepared | Journal.Applying -> assert false
     in
-    Ok
-      {
-        result with
-        copy_plan = hex_of_raw (Safe_apply.copyout_token physical);
-        copy_applied = true;
-      }
+    Ok { result with copy_plan = hex_of_raw copy_token; copy_applied = true }
 
 let[@warning "-4"] copy_out_with ~observe ~root ~checkpoint ~destination
     ~dry_run ~expected_plan =
@@ -1977,8 +1975,11 @@ let[@warning "-4"] copy_out_with ~observe ~root ~checkpoint ~destination
                         ~digest ~safety:target_id ~target:target_id
                       |> Result.map_error applying_error
                     in
-                    if hex_of_raw (Safe_apply.copyout_token physical) = expected
-                    then Ok ()
+                    let* token =
+                      Safe_apply.copyout_token physical
+                      |> Result.map_error applying_error
+                    in
+                    if hex_of_raw token = expected then Ok ()
                     else
                       Error
                         (History_error
@@ -2059,8 +2060,11 @@ let[@warning "-4"] copy_out_with ~observe ~root ~checkpoint ~destination
                   |> Result.map_error preflight_error
                 in
                 let* () =
-                  if hex_of_raw (Safe_apply.copyout_token physical) = plan then
-                    Ok ()
+                  let* token =
+                    Safe_apply.copyout_token physical
+                    |> Result.map_error preflight_error
+                  in
+                  if hex_of_raw token = plan then Ok ()
                   else
                     Error
                       (History_error
@@ -2106,7 +2110,7 @@ type recovery_result = {
   recovered : recovered_operation;
 }
 
-let recover_operation ~root ~operation =
+let recover_operation_with ~expected_plan ~root ~operation =
   with_worktree_lock ~root (fun () ->
       with_repository ~root (fun repository loaded ->
           let* journals =
@@ -2141,6 +2145,55 @@ let recover_operation ~root ~operation =
           match selected with
           | None -> Ok None
           | Some journal ->
+              let* () =
+                match expected_plan with
+                | None -> Ok ()
+                | Some expected
+                  when Option.map hex_of_raw (Journal.selection_plan journal)
+                       = Some expected ->
+                    Ok ()
+                | Some expected when Journal.destination journal <> None ->
+                    let* object_id =
+                      Yeokcham_store.Stored_object_id.of_hex
+                        (Model.Snapshot_id.to_string (Journal.target journal))
+                      |> Result.map_error (fun _ ->
+                          Selection_integrity
+                            "copy-out target is not a canonical snapshot \
+                             identity")
+                    in
+                    let target_id =
+                      Snapshot.Snapshot.of_stored_object_id object_id
+                    in
+                    let* digest =
+                      match Journal.plan journal with
+                      | Some (digest, None) -> Ok digest
+                      | None | Some (_, Some _) ->
+                          Error
+                            (Selection_integrity
+                               "copy-out has no exact physical plan")
+                    in
+                    let* physical =
+                      Safe_apply.load ~root
+                        ~operation:(Journal.operation_id journal)
+                        ~digest ~safety:target_id ~target:target_id
+                      |> Result.map_error applying_error
+                    in
+                    let* token =
+                      Safe_apply.copyout_token physical
+                      |> Result.map_error applying_error
+                    in
+                    if hex_of_raw token = expected then Ok ()
+                    else
+                      Error
+                        (History_error
+                           "local selection plan is stale; copy-out intent \
+                            differs")
+                | Some _ ->
+                    Error
+                      (History_error
+                         "local selection plan is stale; use the exact \
+                          recorded operation without a different plan")
+              in
               let already_completed =
                 Journal.phase journal = Journal.Published
               in
@@ -2180,6 +2233,12 @@ let recover_operation ~root ~operation =
                     |> Result.map (fun result -> Recovered_in_place result)
               in
               Ok (Some { already_completed; recovered })))
+
+let recover_operation ~root ~operation =
+  recover_operation_with ~expected_plan:None ~root ~operation
+
+let recover_operation_plan ~root ~operation ~expected_plan =
+  recover_operation_with ~expected_plan ~root ~operation
 
 let workspace_materialization_of_plan plan restored =
   let basis = Workspace.plan_basis plan in
@@ -4848,6 +4907,8 @@ type local_status = {
   status_head : string;
   capture_observation : (working_tree_comparison, string) result;
   pending_local_recovery : pending_local_recovery option;
+  pending_recovery_journals : Journal.t list;
+  recovery_inspection_error : string option;
 }
 
 type availability = Available | Not_retained | Unavailable of string
@@ -5029,28 +5090,28 @@ let inspect_local_status ~root =
   with_worktree_lock ~root (fun () ->
       with_repository ~root (fun repository loaded ->
           let store = Store.underlying_store repository in
-          let pending = Journal.latest_pending ~root in
+          let pending = Journal.pending ~root in
           let pending_local_recovery =
             match pending with
-            | Ok (Some journal) ->
+            | Ok (journal :: _) ->
                 Some
                   {
                     recovery_operation = Journal.operation_id journal;
                     recovery_target = Journal.target journal;
                   }
-            | Ok None | Error _ -> None
+            | Ok [] | Error _ -> None
           in
           let observation =
             let* () =
               match pending with
-              | Ok None -> Ok ()
-              | Ok (Some journal) ->
+              | Ok [] -> Ok ()
+              | Ok (journal :: _) ->
                   Error
                     (History_error
                        ("recovery "
                        ^ Journal.operation_id journal
-                       ^ " is pending; resume restore --checkpoint "
-                       ^ Model.Snapshot_id.to_string (Journal.target journal)))
+                       ^ " is pending; inspect restore --resume --operation "
+                       ^ Journal.operation_id journal))
               | Error e -> Error (Restore_journal_error e)
             in
             let saved_checkpoint =
@@ -5085,6 +5146,12 @@ let inspect_local_status ~root =
                 Yeokcham_store.Stored_object_id.to_hex loaded.Store.object_id;
               capture_observation = Result.map_error error_to_string observation;
               pending_local_recovery;
+              pending_recovery_journals =
+                (match pending with Ok journals -> journals | Error _ -> []);
+              recovery_inspection_error =
+                (match pending with
+                | Error error -> Some (Journal.error_to_string error)
+                | Ok _ -> None);
             }))
 
 let inspect_local_history ~root ~before ~limit =

@@ -316,5 +316,37 @@ class LocalBranchCliTests(unittest.TestCase):
         self.assertEqual((self.root / "notes.txt").read_bytes(), b"external edit after preview")
 
 
+    def test_switch_plan_refuses_changed_inputs_and_applies_exact_preview(self):
+        self.initialize()
+        self.make_topic()
+        preview = self.run_cli("switch", "topic", "--preview", "--root", self.root, machine=True)
+        self.assertEqual(preview.returncode, 0, preview.stderr)
+        plan = json.loads(preview.stdout)["plan_id"]
+        before = self.head_bytes()
+        (self.root / "notes.txt").write_bytes(b"changed after preview")
+        refused = self.run_cli("switch", "topic", "--yes", "--plan", plan, "--root", self.root, machine=True)
+        self.assertEqual(refused.returncode, 3, refused.stderr)
+        self.assertEqual(before, self.head_bytes())
+        preview = self.run_cli("switch", "topic", "--preview", "--root", self.root, machine=True)
+        plan = json.loads(preview.stdout)["plan_id"]
+        selected = self.run_cli("switch", "topic", "--yes", "--plan", plan, "--root", self.root, machine=True)
+        self.assertEqual(selected.returncode, 0, selected.stderr)
+        self.assertEqual(json.loads(selected.stdout)["plan_id"], plan)
+
+    def test_leading_dash_branch_name_actions_keep_literal_arguments(self):
+        self.initialize()
+        result = self.run_cli("branch", "create", "--root", self.root, "--format", "json", "--", "--yes")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        preview = self.run_cli("switch", "--root", self.root, "--preview", "--format", "json", "--", "--yes")
+        self.assertEqual(preview.returncode, 0, preview.stderr)
+        data = json.loads(preview.stdout)
+        action = data["next_actions"][0]["arguments"]
+        self.assertEqual(action[-2:], ["--", "--yes"])
+        result = self.run_cli(*action[1:])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        selected = next(branch for branch in self.branches()["branches"] if branch["selected"])
+        self.assertEqual(selected["names"], ["--yes"])
+
+
 if __name__ == "__main__":
     unittest.main()

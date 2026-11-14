@@ -231,9 +231,9 @@ stop at excluded or symlink ancestors. Capture uses the same matcher at each
 included directory, preserving one source of truth for native exclusions.
 
 This checkpoint does not establish P2 completion, capture consistency, safe
-replacement, durable workspace/branch state or the remaining ordinary CLI journeys.
+replacement by itself; durable workspace/branch state and ordinary CLI adapters are described below.
 
-### P2 capture consistency checkpoint (in progress)
+### P2 capture consistency checkpoint
 
 `Yeokcham_snapshot.scan` and `scan_excluding_root_names` retain their existing
 signatures. Internally, the POSIX descriptor adapter opens children with
@@ -256,7 +256,7 @@ boundaries. Production `scan` supplies a no-op observer. No environment,
 repository configuration or remote input enables fault injection. The adapter
 is POSIX-only; unsupported native platforms fail explicitly.
 
-### P2 durable history identity checkpoint (in progress)
+### P2 durable history identity checkpoint
 
 `Yeokcham_v1_undo` retains its node/tree navigation API and adds:
 
@@ -299,7 +299,7 @@ reload/retry. These are metadata publication tests, not materialization-journal
 acceptance or completed branch support.
 
 
-### P2 causal branch projection checkpoint (in progress)
+### P2 causal branch projection checkpoint
 
 `Yeokcham_v1_model.Core.branch_states : pool -> branch_state list` projects
 verified retained records. Each row contains `branch_id`, `event_heads`,
@@ -317,7 +317,7 @@ exercise rename inheritance, all six receipt permutations of concurrent events,
 explicit target reconciliation and independent branch identities. No P3 exchange,
 composition or CLI branch success is claimed by this checkpoint.
 
-### P2 authenticated local branch state (adapter checkpoint, in progress)
+### P2 authenticated local branch state
 
 `Yeokcham_v1_store.Local` aliases `Local_core`. Its concrete signatures are in
 [local_core.mli](../../lib/yeokcham_v1_store/local_core.mli). It creates signed
@@ -378,7 +378,7 @@ private work surviving compaction/GC planning. Materialization and CLI branch
 journeys remain outstanding.
 
 
-### P2 private-init and branch CLI checkpoint (in progress)
+### P2 private-init and branch CLI checkpoint
 
 `Service.init_local_signed_with_recovery` reuses the existing signer/recovery
 ceremony while capturing initial files privately against authenticated empty
@@ -405,7 +405,7 @@ now explicitly share/deliver their initial V1 baseline, rather than relying on
 initialization to accept private files. Their substantive conflict/provenance,
 no-acceptance and recovery assertions remain intact.
 
-### P2 bounded inspection prerequisite (in progress)
+### P2 bounded inspection prerequisite
 
 `Snapshot.Content.load_bounded repository ~max_bytes id` verifies complete
 content closure and returns `Some bytes` within the bound or `None` for a larger
@@ -421,7 +421,7 @@ string when a caller explicitly requests it. Snapshot/manifest/chunk identities
 and canonical bytes remain unchanged. The local service's closure preflight
 uses `Content.verify`; materialization output staging remains separate work.
 
-### P2 local inspection domain checkpoint (in progress)
+### P2 local inspection domain checkpoint
 
 `Service.inspect_local_status` returns saved metadata, exact cursor/content
 identity, selected branch metadata, a complete current comparison or explicit
@@ -459,7 +459,7 @@ equal contents/different positions, malformed/special-file capture, unavailable
 contents, compaction and pending recovery without a partial capture. CLI rendering
 and target structured outcomes remain outstanding at this checkpoint.
 
-### P2 inspection CLI and domain JSON checkpoint (in progress)
+### P2 inspection CLI and domain JSON checkpoint
 
 `status`, `history`, `diff`, `changes`, `save`, `ignore explain` and branch
 inspection/creation now use the shared schema-2 domain result in
@@ -502,7 +502,8 @@ explicitly inapplicable with a run-from-workspace explanation.
 Nine fresh-process inspection cases cover mixed text/binary/mode/type changes,
 A-B-C/return-B-D, pagination, equal content/different positions, malformed rules,
 missing content, namespace errors, terminal controls and byte paths/roots.
-Eight branch cases additionally cover actual creation outcomes and unavailable
+Seventeen branch cases additionally cover creation/selection, plan changes,
+interactive cancellation, literal names, ignored obstructions and unavailable
 signers. These journeys use real immutable records/durable state with the explicit
 disposable test signer; native credential-service acceptance is not inferred.
 
@@ -514,7 +515,9 @@ caller-owned private staging file. Failure may leave partial staged bytes.
 `Observation.scan` returns the successful capture's included-entry fingerprints,
 ignore-rule read set and raw directory names (without reading ignored contents).
 These observations do not reserve names or constitute a filesystem transaction.
-These primitives now support staged P2 in-place navigation; copy-out and the legacy activation adapter require further hardening.
+These primitives support staged P2 in-place navigation and copy-out. The legacy
+shared workspace-activation adapter is separate and retains its conservative
+behavior; P2 does not claim to replace that future P3 integration path.
 
 `Yeokcham_v1_local_service.Safe_apply` prepares bounded canonical physical plans
 under `.yeokcham/restore-staging/OPERATION/`, binds them to safety/target snapshot
@@ -555,7 +558,7 @@ branch's exact retained cursor. This prevents accidental branch retargeting.
 `Service.For_test` provides in-process hooks at safety publication, journal
 phases, actual file mutations and metadata publication; no CLI, project file or
 environment setting enables those hooks. CLI switch is now delivered below;
-complete navigation confirmation and copy-out hardening remain outstanding.
+selection confirmation, exact plan binding and copy-out routing are described below.
 
 
 `Service.branch_switch ~root ~name ~dry_run` resolves an unambiguous authenticated
@@ -632,15 +635,14 @@ parent identity are checked; a replaced/occupied destination refuses, and an
 exchange retains its original inode, including external directory-FD writes.
 Destinations on another filesystem, within source metadata/Git metadata or
 covering the source root refuse explicitly. This is an engine checkpoint:
-service/journal routing is now connected below. Full CLI confirmation and
-structured recovery outcomes remain necessary before P2 is complete.
+service/journal routing and the supported local CLI contract are described below.
 
 
 Restore journal schema 4 is exactly `[4, operation, target, target, generation,
 phase, null, physical_digest, null, destination_bytes]`. It records a canonical
 absolute destination (at most 4096 bytes) with no source-history or branch
-reservation. Equal safety/target IDs are allowed only in this copy-out scope;
-schema 1–3 bytes/invariants remain unchanged. `Journal.pending` exposes every
+reservation. Schema 4 permits equal safety/target IDs in copy-out scope; schema 5 below also
+permits metadata-only selection. Schema 1–3 bytes/invariants remain unchanged. `Journal.pending` exposes every
 pending scope/root. `latest_pending` keeps the sole in-place operation primary
 when a separate recovery export is pending; multiple in-place operations refuse.
 `pending_snapshots` roots all incomplete scopes. The independent Python emitter
@@ -666,8 +668,8 @@ create no source restore proof and stop rooting immutable source snapshots;
 compaction can prune their Published journals. Pending export targets remain
 retained. Displaced native directories remain in operation staging. Unsupported
 filesystem placement, corrupt/missing targets and newly occupied destinations
-fail before replacement. Complete CLI `restore STATE`/confirmation/JSON recovery
-journeys remain unfinished at this checkpoint.
+fail before replacement. CLI `restore STATE` and explicit operation recovery
+use this same service boundary; their contract follows below.
 
 The G01 harness's untimed checkpoint verifier now restores from a disposable
 metadata replica. The supported restore path durably journals recovery, so
@@ -699,3 +701,68 @@ adds optional `selection_plan` and `target_provisional`; branch results add
 optional `switch_plan`. Existing convenience methods use fresh validation.
 All non-no-op navigation, including equal-byte moves, now uses the same journal
 path. Metadata-only selection leaves ordinary file inodes/bytes unchanged.
+
+
+### Local selection CLI and recovery contract
+
+`undo [--to NODE]`, `redo [--node NODE]`, `restore STATE [--to DIRECTORY]`
+and `switch NAME` share `--preview` (`--dry-run` alias), `--yes` and optional
+`--plan ID`. Interactive confirmation defaults to cancel. Without explicit
+confirmation, noninteractive writes return choice-required/exit 3 with real
+preview data and literal next-action arrays. `--yes` validates fresh inputs;
+`--plan ID --yes` refuses changed inputs with exit 3. Explicit preview/cancellation
+never moves the cursor or writes ordinary files. All non-no-op selections use
+an exact journal, including equal-content cursor/branch moves. No-op results
+return unchanged without a confirmation prompt. The CLI specification registers
+these flags for completion/help and keeps existing hook eligibility.
+
+`restore STATE` accepts current saved, local sequence, workspace:sequence or a
+snapshot identity. `working` is invalid as a restore target; save it first.
+Foreign workspace IDs refuse before mutation. `--checkpoint SNAPSHOT` and
+`--destination DIRECTORY` remain compatibility aliases. Preview target nodes
+include `target_provisional`; only atomic history publication allocates them.
+`history_navigation` results include plan ID, exact history identity, full target
+metadata, actual changed paths, whether unsaved work is preserved and recovery
+operation data. Copy-out results include exact byte-valued destination, snapshot,
+plan/operation IDs, and explicit false source-history/source-branch change flags.
+
+`restore --resume [--operation ID]` inspects/resumes a recorded operation. Without
+an ID it selects a sole pending operation; multiple operations return a choice
+with exact IDs/actions. `--preview` reads recorded state without scanning a
+partial source tree and labels current contents unverified. `--yes` dispatches
+`Service.recover_operation_plan ~root ~operation ~expected_plan`. Schema-5 intent
+or schema-4 physical copy intent must match a supplied plan. Older intents cannot
+claim that binding. An already Published operation is acknowledged unchanged,
+without rewriting or reverifying current files. `recover_operation` remains the
+unbound convenience wrapper. A new relative command after completed acknowledgement
+is a new request; explicit operation retry handles lost acknowledgement.
+
+`Service.local_status` includes `pending_recovery_journals : Journal.t list` and
+`recovery_inspection_error : string option`, alongside the compatibility primary
+recovery summary. All pending scopes block partial capture. Status returns domain
+metadata even when capture/journal inspection is incomplete. JSON lists each
+operation's exact target history/snapshot/branch, scope, phase, destination,
+retained staging location, known intent and `current_contents_verified=false`.
+Selection errors include saved metadata, redo alternatives and pending operations,
+plus meaningful preview/resume actions. Inspection exits 0 while reporting
+incomplete data; mutation exits follow the design: 2 arguments/rule syntax,
+3 choice/stale plan, 4 initial workspace conflict, 5 unavailable data/provider,
+6 integrity/unsupported format, 7 authority refusal, 8 pending/conflicted recovery.
+Legacy unrelated commands keep their existing output contract.
+
+Byte-valued destinations use nullable UTF-8 text, display and exact bytes hex.
+Actions containing non-UTF-8 arguments are escaped, explicitly inapplicable and
+explain how to use the original bytes. UTF-8 actions preserve literal `--`
+separators, including branch names beginning with a dash. `Safe_apply.copyout_token : t -> (string, error) result` explicitly rejects a workspace-scoped physical
+plan rather than assuming every loaded plan has a destination.
+
+Sixteen fresh-process selection journeys (`test_local_selection_cli.py`) cover
+mixed byte fidelity, A-B-C/return-B-D, exact IDs, dirty redo, equal-byte metadata
+moves, plan staleness, TTY cancellation, copy-out/source isolation, raw byte
+paths, missing/corrupt targets and recorded recovery after actual native mutation,
+Materialized and metadata-publication exits. `test/local_cli_fault.ml` is a trusted
+test-only process using existing `For_test` observers; production CLI has no
+fault-injection option/environment switch. Existing CLI28, branch17, inspection9,
+ignore4 and tiny harness regressions remain part of CI. No native macOS/Windows,
+managed scheduling, private archive/backup or P3 shared-loop claim follows from
+these Linux tests.

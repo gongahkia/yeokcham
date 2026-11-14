@@ -49,16 +49,25 @@ See [Native ignore rules](NATIVE_IGNORE.md) for syntax and examples.
 Use destination restore with an empty directory:
 
 ```sh
-yeokcham restore --root PROJECT --checkpoint CHECKPOINT --destination EMPTY_DIR
+yeokcham restore CHECKPOINT --root PROJECT --to EMPTY_DIR --preview
+yeokcham restore CHECKPOINT --root PROJECT --to EMPTY_DIR --yes
 ```
 
 Only omit `--destination` when you intend an in-place restore. Afterwards use
 `restore proofs` and `storage roots` to inspect the retained recovery boundary.
 
-If in-place restore reports an ignored path, move that entry outside the
-working tree before retrying, or use destination restore. The command refuses
-before deleting files because ignored bytes are absent from its safety
-checkpoint. `workspace update --replace` has the same protection.
+Noncolliding ignored files stay in place during local navigation/switch. A target
+that would cover an ignored/untracked obstruction refuses before replacement;
+move that entry elsewhere or make a separate recovery copy. Legacy
+`workspace update --replace` has separate, more conservative restrictions.
+
+Pending local selection/copy operations appear in `status`. Inspect with
+`restore --resume --operation ID --preview` and continue with `--yes`. This uses
+the original recorded target without scanning a partial source tree. Unexpected
+external edits produce an explicit conflict and retain original displaced nodes
+under `.yeokcham/restore-staging/ID/`. Preserve the live tree, journals and staging;
+do not delete recovery state to force a retry. Export a retained safety/target to
+a separate directory for inspection. See [Local undo](LOCAL_UNDO.md).
 
 Missing or corrupt target content is rejected before materialisation. Use
 `verify` to inspect damage and `repair plan --from SOURCE` to examine available

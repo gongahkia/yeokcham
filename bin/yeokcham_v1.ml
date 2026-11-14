@@ -1,3 +1,4 @@
+module Journal = Yeokcham_v1_restore_journal
 module History = Yeokcham_v1_undo
 module Model = Yeokcham_v1_model
 module Core = Model.Core
@@ -124,6 +125,7 @@ let native_json_command command =
       "branch-list";
       "branch-create";
       "switch";
+      "restore";
       "verify";
       "repair-plan";
       "repair-apply";
@@ -168,7 +170,15 @@ let domain_command command =
       "branch-list";
       "branch-create";
       "switch";
+      "undo";
+      "redo";
+      "restore";
     ]
+
+let local_failure_context :
+    (unit -> Yojson.Safe.t * Cli_data.next_action list * string option) option
+    ref =
+  ref None
 
 let public_error_message message =
   let first_line =
@@ -211,33 +221,46 @@ let fail_with_status status code message =
   (if requested_format () = Json_format then
      let command_label = command_name () in
      let error = Cli_data.{ code; message = public_error_message message } in
+     let data, context_actions, operation_id =
+       match !local_failure_context with
+       | None -> (`Assoc [], [], None)
+       | Some context -> (
+           try context ()
+           with _ ->
+             ( `Assoc
+                 [ ("recovery", `Assoc [ ("state", `String "unreadable") ]) ],
+               [],
+               None ))
+     in
      (if domain_command command_label then
-        Cli_data.domain_failure ~command:command_label
-          ~outcome:(failure_outcome status) ~error ~data:(`Assoc [])
-          ~warnings:[]
+        Cli_data.domain_failure ?operation_id ~command:command_label
+          ~outcome:(failure_outcome status) ~error ~data ~warnings:[]
           ~next_actions:
-            [
-              Cli_data.
-                {
-                  arguments =
-                    [ "yeokcham"; "help" ]
-                    @ String.split_on_char '-' command_label;
-                  explanation =
-                    "Inspect supported arguments and recovery boundaries.";
-                  applicable = true;
-                  confirmation_required = false;
-                };
-            ]
+            (if context_actions <> [] then context_actions
+             else
+               [
+                 Cli_data.
+                   {
+                     arguments =
+                       [ "yeokcham"; "help" ]
+                       @ String.split_on_char '-' command_label;
+                     explanation =
+                       "Inspect supported arguments and recovery boundaries.";
+                     applicable = true;
+                     confirmation_required = false;
+                   };
+               ])
           ()
       else Cli_data.failure ~command:command_label ~warnings:[] ~error)
      |> Cli_data.encode |> print_json);
   prerr_endline message;
   exit status
 
-let domain_json ?operation_id ~outcome ~code ~message ~data ~next_actions () =
+let domain_json ?operation_id ?plan_id ~outcome ~code ~message ~data
+    ~next_actions () =
   let emit () =
-    Cli_data.domain_success ?operation_id ~command:(command_name ()) ~outcome
-      ~code ~message ~data
+    Cli_data.domain_success ?operation_id ?plan_id ~command:(command_name ())
+      ~outcome ~code ~message ~data
       ~warnings:(List.rev !public_warnings)
       ~next_actions ()
     |> Cli_data.encode |> print_json
@@ -251,26 +274,71 @@ let flush_domain_output () =
   pending_domain_output := None;
   Option.iter (fun emit -> emit ()) pending
 
+let append_before_literal arguments extra =
+  let rec loop reversed = function
+    | [] -> List.rev reversed @ extra
+    | "--" :: rest -> List.rev reversed @ extra @ ("--" :: rest)
+    | value :: rest -> loop (value :: reversed) rest
+  in
+  loop [] arguments
+
 let action ?(confirmation_required = false) ~root arguments explanation =
-  let representable = Result.is_ok (Yeokcham_encoding.text root) in
+  let root_representable = Result.is_ok (Yeokcham_encoding.text root) in
+  let arguments_representable =
+    List.for_all
+      (fun argument -> Result.is_ok (Yeokcham_encoding.text argument))
+      arguments
+  in
   let action_arguments =
-    ("yeokcham" :: arguments) @ if representable then [ "--root"; root ] else []
+    "yeokcham"
+    ::
+    (if root_representable then
+       append_before_literal arguments [ "--root"; root ]
+     else arguments)
+  in
+  let action_arguments =
+    List.map
+      (fun argument ->
+        if Result.is_ok (Yeokcham_encoding.text argument) then argument
+        else String.escaped argument)
+      action_arguments
   in
   let explanation =
-    if representable then explanation
+    explanation
+    ^ (if root_representable then ""
+       else
+         " Run this from the inspected workspace; its root path is not UTF-8.")
+    ^
+    if arguments_representable then ""
     else
-      explanation
-      ^ " Run this from the inspected workspace; its root path is not UTF-8."
+      " Non-UTF-8 arguments are escaped display values; supply their original \
+       bytes using the exact path bytes in data."
   in
   Cli_data.
     {
       arguments = action_arguments;
       explanation;
-      applicable = representable;
+      applicable = root_representable && arguments_representable;
       confirmation_required;
     }
 
 let[@warning "-4"] fail_local = function
+  | Service.History_error message
+    when String.starts_with ~prefix:"choose a redo branch" message
+         || String.starts_with ~prefix:"choose a recovery operation" message ->
+      fail_with_status 3 "selection-choice-required" message
+  | Service.History_error message
+    when String.starts_with ~prefix:"already at a history root" message
+         || String.starts_with ~prefix:"there is no redo branch" message ->
+      fail_with_status 3 "navigation-unavailable" message
+  | Service.History_error message
+    when String.starts_with ~prefix:"the selected redo node" message
+         || String.starts_with ~prefix:"unknown restore operation" message ->
+      fail_with_status 2 "invalid-selection" message
+  | Service.History_error message
+    when String.starts_with ~prefix:"working files have unsaved edits" message
+    ->
+      fail_with_status 4 "unsaved-work-conflict" message
   | Service.Selection_unavailable message ->
       fail_with_status 5 "selection-unavailable" message
   | Service.Selection_integrity message ->
@@ -378,14 +446,19 @@ let usage_text =
   "usage: yeokcham [--color auto|always|never] COMMAND [OPTIONS]\n\n\
    commands:\n\
   \  yeokcham undo-tree [--root PATH]\n\
-  \  yeokcham undo [--root PATH] [--to NODE] [--dry-run]\n\
-  \  yeokcham redo [--root PATH] [--node NODE] [--dry-run]\n\
+  \  yeokcham undo [--root PATH] [--to NODE] [--preview|--yes] [--plan ID]\n\
+  \  yeokcham redo [--root PATH] [--node NODE] [--preview|--yes] [--plan ID]\n\
   \  yeokcham init [PATH] [--username NAME] [--draft ID] [--title TITLE]\n\
   \  yeokcham join [--root PATH] --username NAME --draft ID --title TITLE \\\n\
   \     --device ID --from PATH --verify-phrase \"TWELVE WORDS\"\n\
   \  yeokcham save [--root PATH]\n\
-  \  yeokcham switch NAME [--root PATH] [--preview|--yes]\n\
+  \  yeokcham branch list [--root PATH]\n\
+  \  yeokcham branch create NAME [--root PATH]\n\
+  \  yeokcham switch NAME [--root PATH] [--preview|--yes] [--plan ID]\n\
   \  yeokcham status [--root PATH]\n\
+  \  yeokcham history [--root PATH] [--before SEQUENCE] [--limit 1-200] [--all]\n\
+  \  yeokcham diff [STATE_A [STATE_B]] [--root PATH]\n\
+  \  yeokcham ignore explain PATH [--root PATH]\n\
   \  yeokcham changes [--root PATH]\n\
   \  yeokcham log [--root PATH]\n\
   \  yeokcham graph [--root PATH] [--authority]\n\
@@ -414,7 +487,9 @@ let usage_text =
    \"TWENTY FOUR WORDS\" --output PATH\n\
   \  yeokcham user register [--root PATH] --device ID --username NAME\n\
   \  yeokcham timeline [--root PATH]\n\
-  \  yeokcham restore [--root PATH] --checkpoint ID [--destination PATH]\n\
+  \  yeokcham restore STATE [--root PATH] [--to DIRECTORY] [--preview|--yes] \
+   [--plan ID]\n\
+  \  yeokcham restore --resume [--operation ID] [--preview|--yes]\n\
   \  yeokcham restore proofs [--root PATH]\n\
   \  yeokcham restore retain [--root PATH] --operation ID\n\
   \  yeokcham restore forget [--root PATH] --operation ID\n\
@@ -528,14 +603,17 @@ let help_for = function
          compacted checkpoints. This does not scan files or contact a relay."
   | [ "undo" ] ->
       Some
-        "usage: yeokcham undo [--root PATH] [--to NODE] [--dry-run]\n\n\
+        "usage: yeokcham undo [--root PATH] [--to NODE] [--preview|--yes] \
+         [--plan ID]\n\n\
          Move to the parent node, or a selected node. Unsaved disk edits are \
-         preserved first. --dry-run previews exact path changes without \
-         writing files or advancing history. Navigation leaves shared history \
-         unchanged."
+         preserved first. --preview (or --dry-run) inspects exact path changes \
+         without moving history/files. --yes confirms fresh validation; --plan \
+         ID binds a prior preview. Noninteractive application needs \
+         confirmation. Navigation leaves shared history unchanged."
   | [ "redo" ] ->
       Some
-        "usage: yeokcham redo [--root PATH] [--node NODE] [--dry-run]\n\n\
+        "usage: yeokcham redo [--root PATH] [--node NODE] [--preview|--yes] \
+         [--plan ID]\n\n\
          Move to a child of the current node. Choose --node when there are \
          several branches. Save or undo outstanding disk edits first. An \
          interrupted navigation resumes its original target without taking \
@@ -555,13 +633,24 @@ let help_for = function
          position."
   | [ "switch" ] ->
       Some
-        "usage: yeokcham switch NAME [--root PATH] [--preview|--yes] [--format \
-         json]\n\n\
+        "usage: yeokcham switch NAME [--root PATH] [--preview|--yes] [--plan \
+         ID] [--format json]\n\n\
          Select an authenticated named branch and its private cursor. Preview \
          lists effects without moving files/history. Noninteractive \
          application requires --yes; ignored obstructions and unavailable \
          targets refuse before replacement. Interrupted switches resume their \
          exact target."
+  | [ "restore" ] ->
+      Some
+        "usage: yeokcham restore STATE [--to DIRECTORY] [--root PATH] \
+         [--preview|--yes] [--plan ID] [--format json]\n\n\
+         yeokcham restore --resume [--operation ID] [--preview|--yes]\n\n\
+         Select a saved history node, workspace:sequence, current saved state \
+         or snapshot ID. --to makes a separate verified copy into a new/empty \
+         same-filesystem directory. --checkpoint and --destination remain \
+         aliases. Confirmation defaults to cancel; noninteractive writes need \
+         --yes. Resume uses the original recorded target and retains \
+         unexpected external edits."
   | [ "history" ] ->
       Some
         "usage: yeokcham history [--root PATH] [--before SEQUENCE] [--limit \
@@ -607,14 +696,6 @@ let help_for = function
       Some
         "usage: yeokcham timeline [--root PATH]\n\n\
          List local checkpoints for recovery and their exact snapshot IDs."
-  | [ "restore" ] ->
-      Some
-        "usage: yeokcham restore [--root PATH] --checkpoint ID [--destination \
-         PATH]\n\
-        \       yeokcham restore proofs|retain|forget ...\n\n\
-         Materialise one named checkpoint. With --destination, the destination \
-         must be empty and the live tree is untouched. Without it, restore is \
-         in-place and creates a durable local safety/target proof."
   | [ "restore"; "proofs" ] ->
       Some
         "usage: yeokcham restore proofs [--root PATH]\n\n\
@@ -1175,23 +1256,6 @@ let parse_new_draft arguments =
         loop root (Some value) title rest
     | "--title" :: value :: rest when Option.is_none title ->
         loop root id (Some value) rest
-    | _ -> usage ()
-  in
-  loop None None None arguments
-
-let parse_restore arguments =
-  let rec loop root checkpoint destination = function
-    | [] -> (
-        match checkpoint with
-        | Some checkpoint ->
-            (Option.value root ~default:default_root, checkpoint, destination)
-        | None -> usage ())
-    | "--root" :: value :: rest when Option.is_none root ->
-        loop (Some value) checkpoint destination rest
-    | "--checkpoint" :: value :: rest when Option.is_none checkpoint ->
-        loop root (Some value) destination rest
-    | "--destination" :: value :: rest when Option.is_none destination ->
-        loop root checkpoint (Some value) rest
     | _ -> usage ()
   in
   loop None None None arguments
@@ -2580,33 +2644,6 @@ let run_timeline arguments =
         (Model.Snapshot_id.to_string checkpoint.Model.checkpoint_snapshot))
     (Model.checkpoints state.Service.inspection_project)
 
-let run_restore arguments =
-  let root, checkpoint, destination = parse_restore arguments in
-  let checkpoint =
-    parse_identifier "invalid checkpoint identifier" Model.Snapshot_id.of_string
-      checkpoint
-  in
-  match destination with
-  | Some destination ->
-      Service.restore ~root ~checkpoint ~destination
-      |> require_ok Service.error_to_string;
-      Printf.printf "restored %s to %s\n"
-        (Model.Snapshot_id.to_string checkpoint)
-        destination;
-      false
-  | None ->
-      let restored =
-        Service.restore_in_place ~root ~checkpoint
-        |> require_ok Service.error_to_string
-      in
-      Printf.printf "restore-proof %s\n" restored.Service.restore_operation;
-      Printf.printf "safety %s\n"
-        (Model.Snapshot_id.to_string restored.Service.safety_checkpoint);
-      Printf.printf "restored %s in-place%s\n"
-        (Model.Snapshot_id.to_string restored.Service.restored_checkpoint)
-        (if restored.Service.resumed then " (resumed)" else "");
-      true
-
 let parse_restore_operation arguments =
   let rec loop root operation = function
     | [] -> (
@@ -3245,21 +3282,273 @@ let json_difference difference =
         ("after", json_entry difference.Service.after);
       ])
 
-let selection_choice ~data ~next_actions ~message =
+type local_selection_flags = {
+  selection_root : string;
+  selection_preview : bool;
+  selection_yes : bool;
+  selection_plan : string option;
+}
+
+let parse_local_selection_flags arguments =
+  let rec loop root preview yes plan remaining = function
+    | [] ->
+        ( {
+            selection_root = Option.value root ~default:default_root;
+            selection_preview = preview;
+            selection_yes = yes;
+            selection_plan = plan;
+          },
+          List.rev remaining )
+    | (("--to" | "--node" | "--checkpoint" | "--destination" | "--operation") as
+       option)
+      :: value :: rest ->
+        loop root preview yes plan (value :: option :: remaining) rest
+    | "--" :: rest ->
+        ( {
+            selection_root = Option.value root ~default:default_root;
+            selection_preview = preview;
+            selection_yes = yes;
+            selection_plan = plan;
+          },
+          List.rev remaining @ ("--" :: rest) )
+    | "--root" :: value :: rest when root = None ->
+        loop (Some value) preview yes plan remaining rest
+    | ("--preview" | "--dry-run") :: rest when not preview ->
+        loop root true yes plan remaining rest
+    | "--yes" :: rest when not yes -> loop root preview true plan remaining rest
+    | "--plan" :: value :: rest when plan = None ->
+        if
+          String.length value <> 64
+          || not
+               (String.for_all
+                  (function '0' .. '9' | 'a' .. 'f' -> true | _ -> false)
+                  value)
+        then
+          fail_with_status 2 "invalid-plan-id"
+            "--plan needs a lowercase 64-digit plan ID from a preview";
+        loop root preview yes (Some value) remaining rest
+    | ("--root" | "--preview" | "--dry-run" | "--yes" | "--plan") :: _ ->
+        fail_with_status 2 "invalid-invocation"
+          "selection flags cannot be duplicated or omit their values"
+    | value :: rest -> loop root preview yes plan (value :: remaining) rest
+  in
+  let flags, remaining = loop None false false None [] arguments in
+  if flags.selection_preview && flags.selection_yes then
+    fail_with_status 2 "invalid-invocation"
+      "--preview and --yes are mutually exclusive";
+  (flags, remaining)
+
+let json_byte_path path =
+  let utf8 = Result.is_ok (Yeokcham_encoding.text path) in
+  `Assoc
+    [
+      ("path", if utf8 then `String path else `Null);
+      ( "display",
+        `String
+          (if utf8 then Output.display_value path else String.escaped path) );
+      ("bytes_hex", `String (hex_of_bytes path));
+    ]
+
+let journal_phase = function
+  | Journal.Prepared -> "prepared"
+  | Journal.Applying -> "applying"
+  | Journal.Materialized -> "materialized"
+  | Journal.Published -> "published"
+
+let operation_json ~history journal =
+  let history_id =
+    match (History.workspace history, Journal.history_node journal) with
+    | Some workspace, Some sequence ->
+        Core.History_id.make ~workspace ~sequence
+        |> Result.to_option
+        |> Option.map json_history_identity
+    | None, _ | _, None -> None
+  in
+  `Assoc
+    [
+      ("operation_id", `String (Journal.operation_id journal));
+      ( "scope",
+        `String
+          (if Journal.destination journal <> None then "copy-out"
+           else if Journal.requires_source_proof journal then "in-place"
+           else "metadata-only") );
+      ("phase", `String (journal_phase (Journal.phase journal)));
+      ( "safety_snapshot_id",
+        `String (Model.Snapshot_id.to_string (Journal.safety journal)) );
+      ( "target_snapshot_id",
+        `String (Model.Snapshot_id.to_string (Journal.target journal)) );
+      ("target_history", Option.value history_id ~default:`Null);
+      ( "target_branch_id",
+        match Journal.plan journal with
+        | Some (_, Some branch) -> `String (Core.Branch_id.to_hex branch)
+        | None | Some (_, None) -> `Null );
+      ("destination", json_optional json_byte_path (Journal.destination journal));
+      ( "plan_id",
+        json_optional
+          (fun raw -> `String (hex_of_bytes raw))
+          (Journal.selection_plan journal) );
+      ( "retained_directory_relative",
+        `String (".yeokcham/restore-staging/" ^ Journal.operation_id journal) );
+      ("current_contents_verified", `Bool false);
+    ]
+
+let latest_recovery_journals ~root =
+  let journals =
+    match Journal.scan ~root with
+    | Ok journals -> journals
+    | Error error ->
+        fail_with_status 6 "recovery-integrity-failure"
+          (Journal.error_to_string error)
+  in
+  let table = Hashtbl.create 16 in
+  List.iter
+    (fun journal ->
+      match Hashtbl.find_opt table (Journal.operation_id journal) with
+      | Some previous
+        when Journal.generation previous >= Journal.generation journal ->
+          ()
+      | None | Some _ ->
+          Hashtbl.replace table (Journal.operation_id journal) journal)
+    journals;
+  Hashtbl.to_seq_values table
+  |> List.of_seq
+  |> List.sort (fun a b ->
+      String.compare (Journal.operation_id a) (Journal.operation_id b))
+
+let set_local_failure_context ~root =
+  local_failure_context :=
+    Some
+      (fun () ->
+        let history =
+          Service.local_history ~root
+          |> Result.to_option
+          |> Option.map (fun h -> h.Service.undo_tree)
+        in
+        let pending = Journal.pending ~root in
+        let operations =
+          match (pending, history) with
+          | Ok journals, Some history ->
+              List.map (operation_json ~history) journals
+          | Ok _, None | Error _, _ -> []
+        in
+        let actions =
+          match pending with
+          | Ok journals ->
+              List.concat_map
+                (fun j ->
+                  [
+                    action ~confirmation_required:true ~root
+                      [
+                        "restore";
+                        "--resume";
+                        "--operation";
+                        Journal.operation_id j;
+                        "--yes";
+                      ]
+                      "Resume this exact operation after validating retained \
+                       and live data.";
+                    action ~root
+                      [
+                        "restore";
+                        "--resume";
+                        "--operation";
+                        Journal.operation_id j;
+                        "--preview";
+                      ]
+                      "Inspect the recorded recovery target without changing \
+                       files or history.";
+                  ])
+                journals
+          | Error _ -> []
+        in
+        let saved =
+          json_optional
+            (fun history ->
+              let node = History.current history in
+              `Assoc
+                [
+                  ( "history",
+                    json_optional json_history_identity
+                      (History.identity history node |> Result.to_option) );
+                  ( "snapshot_id",
+                    `String (Model.Snapshot_id.to_string node.History.snapshot)
+                  );
+                ])
+            history
+        in
+        let redo_choices =
+          match history with
+          | None -> []
+          | Some history ->
+              History.children history (History.current history).History.id
+              |> List.map (fun node ->
+                  `Assoc
+                    [
+                      ( "history",
+                        json_optional json_history_identity
+                          (History.identity history node |> Result.to_option) );
+                      ( "snapshot_id",
+                        `String
+                          (Model.Snapshot_id.to_string node.History.snapshot) );
+                    ])
+        in
+        let redo_actions =
+          match (history, pending) with
+          | Some history, Ok [] ->
+              History.children history (History.current history).History.id
+              |> List.map (fun node ->
+                  action ~root
+                    [
+                      "redo";
+                      "--node";
+                      Int64.to_string node.History.id;
+                      "--preview";
+                    ]
+                    "Inspect this exact redo continuation before selection.")
+          | None, _ | _, (Ok _ | Error _) -> []
+        in
+        let operation =
+          match pending with
+          | Ok [ journal ] -> Some (Journal.operation_id journal)
+          | Ok _ | Error _ -> None
+        in
+        ( `Assoc
+            [
+              ("saved", saved);
+              ("redo_choices", `List redo_choices);
+              ("pending_operations", `List operations);
+              ( "recovery_state",
+                `String
+                  (match pending with
+                  | Error _ -> "unreadable"
+                  | Ok [] -> "none"
+                  | Ok _ -> "pending") );
+            ],
+          actions @ redo_actions
+          @ [
+              action ~root [ "history" ]
+                "Inspect saved alternatives and availability.";
+              action ~root [ "status" ] "Inspect capture and recovery state.";
+            ],
+          operation ))
+
+let selection_choice ?plan_id ~data ~next_actions ~message () =
   if requested_format () = Json_format then
-    Cli_data.domain_failure ~command:(command_name ()) ~outcome:`Choice_required
+    Cli_data.domain_failure ?plan_id ~command:(command_name ())
+      ~outcome:`Choice_required
       ~error:Cli_data.{ code = "confirmation-required"; message }
       ~data ~warnings:[] ~next_actions ()
     |> Cli_data.encode |> print_json;
   prerr_endline message;
   exit 3
 
-let confirm_local_selection ~data ~next_actions ~render =
+let confirm_local_selection ?plan_id ~data ~next_actions ~render () =
   if requested_format () = Json_format || not (Unix.isatty Unix.stdin) then
-    selection_choice ~data ~next_actions
+    selection_choice ?plan_id ~data ~next_actions
       ~message:
         "Preview the affected files, then rerun with --yes to confirm the \
-         freshly validated selection.";
+         freshly validated selection."
+      ();
   render ();
   prerr_string "Apply this selection and preserve current private work? [y/N] ";
   flush stderr;
@@ -3345,94 +3634,96 @@ let render_switch_text result =
     result.Service.switch_restore
 
 let run_switch arguments =
-  let rec parse root name preview yes = function
-    | [] ->
-        ( Option.value root ~default:default_root,
-          Option.value name ~default:"",
-          preview,
-          yes )
-    | "--root" :: value :: rest when root = None ->
-        parse (Some value) name preview yes rest
-    | ("--preview" | "--dry-run") :: rest when not preview ->
-        parse root name true yes rest
-    | "--yes" :: rest when not yes -> parse root name preview true rest
-    | "--" :: [ value ] when name = None ->
-        parse root (Some value) preview yes []
-    | value :: rest
-      when name = None && not (String.starts_with ~prefix:"-" value) ->
-        parse root (Some value) preview yes rest
-    | _ -> usage ()
+  let flags, remaining = parse_local_selection_flags arguments in
+  let root = flags.selection_root in
+  set_local_failure_context ~root;
+  let name =
+    match remaining with [ name ] | [ "--"; name ] -> name | _ -> usage ()
   in
-  let root, name, preview, yes = parse None None false false arguments in
   (match Core.validate_branch_name name with
   | Ok () -> ()
-  | Error e -> fail_with_status 2 "invalid-branch-name" (Core.error_to_string e));
-  if preview && yes then
-    fail_with_status 2 "invalid-invocation"
-      "--preview and --yes are mutually exclusive";
-  let next_actions =
-    [
-      action ~confirmation_required:true ~root
-        [ "switch"; name; "--yes" ]
-        "Select this named branch after fresh preflight.";
-      action ~root
-        [ "switch"; name; "--preview" ]
-        "Inspect selection effects without moving history or files.";
-    ]
-  in
+  | Error error ->
+      fail_with_status 2 "invalid-branch-name" (Core.error_to_string error));
   let inspected =
-    if yes then None
-    else Some (Service.branch_switch ~root ~name ~dry_run:true |> require_local)
+    if flags.selection_yes then None
+    else
+      Some
+        (Service.branch_switch_plan ~root ~name ~dry_run:true
+           ~expected_plan:flags.selection_plan
+        |> require_local)
   in
   let unchanged =
     Option.fold ~none:false
-      ~some:(fun r ->
-        Core.Branch_id.equal r.Service.switch_from r.Service.switch_to)
+      ~some:(fun result ->
+        Core.Branch_id.equal result.Service.switch_from result.Service.switch_to)
       inspected
   in
+  let base =
+    if String.starts_with ~prefix:"-" name then [ "switch"; "--"; name ]
+    else [ "switch"; name ]
+  in
+  let next_actions result =
+    [
+      action ~confirmation_required:true ~root
+        (append_before_literal base
+           ([ "--yes" ]
+           @ Option.fold ~none:[]
+               ~some:(fun id -> [ "--plan"; id ])
+               result.Service.switch_plan))
+        "Apply this exact freshly validated branch selection.";
+      action ~root
+        (append_before_literal base [ "--preview" ])
+        "Inspect selection effects without changing files or history.";
+    ]
+  in
   let cancelled =
-    (not yes) && (not preview) && (not unchanged)
+    (not flags.selection_yes)
+    && (not flags.selection_preview)
+    && (not unchanged)
     && not
-         (confirm_local_selection
-            ~data:(switch_json ~root (Option.get inspected))
-            ~next_actions
-            ~render:(fun () -> render_switch_text (Option.get inspected)))
+         (let result = Option.get inspected in
+          confirm_local_selection ?plan_id:result.Service.switch_plan
+            ~data:(switch_json ~root result) ~next_actions:(next_actions result)
+            ~render:(fun () -> render_switch_text result)
+            ())
   in
   let result =
-    if yes then
-      Service.branch_switch ~root ~name ~dry_run:false |> require_local
-    else if not (preview || unchanged || cancelled) then
-      Service.branch_switch_confirmed ~root ~name
-        ~preview:(Option.get inspected)
+    if flags.selection_yes then
+      Service.branch_switch_plan ~root ~name ~dry_run:false
+        ~expected_plan:flags.selection_plan
       |> require_local
-    else Option.get inspected
+    else if flags.selection_preview || unchanged || cancelled then
+      Option.get inspected
+    else
+      let preview = Option.get inspected in
+      Service.branch_switch_confirmed ~root ~name ~preview |> require_local
   in
   let unchanged =
     (not result.Service.switch_applied)
     && Core.Branch_id.equal result.Service.switch_from result.Service.switch_to
   in
   if requested_format () = Json_format then
-    domain_json
+    domain_json ?plan_id:result.Service.switch_plan
       ?operation_id:
         (Option.map
-           (fun r -> r.Service.restore_operation)
+           (fun recovery -> recovery.Service.restore_operation)
            result.Service.switch_restore)
       ~outcome:(if cancelled || unchanged then `Unchanged else `Completed)
       ~code:
         (if cancelled then "selection-cancelled"
          else if unchanged then "branch-already-selected"
-         else if preview then "switch-preview"
+         else if flags.selection_preview then "switch-preview"
          else "branch-selected")
       ~message:
         (if cancelled then
            "Selection cancelled; files and history are unchanged."
-         else if preview then
+         else if flags.selection_preview then
            "Branch selection preview; files and history are unchanged."
          else if unchanged then "The named branch is already selected."
          else "Branch and exact private history position selected.")
       ~data:(switch_json ~root result)
       ~next_actions:
-        (if preview then next_actions
+        (if flags.selection_preview then next_actions result
          else
            [ action ~root [ "status" ] "Inspect local work after selection." ])
       ()
@@ -3588,6 +3879,10 @@ let run_status arguments =
           ])
       status.Service.pending_local_recovery
   in
+  let recovery_history =
+    Service.local_history ~root |> require_local |> fun result ->
+    result.Service.undo_tree
+  in
   let data =
     `Assoc
       [
@@ -3598,6 +3893,15 @@ let run_status arguments =
         ("uncaptured", uncaptured);
         ("changes", changed_paths);
         ("recovery", Option.value recovery ~default:`Null);
+        ( "pending_operations",
+          `List
+            (List.map
+               (operation_json ~history:recovery_history)
+               status.Service.pending_recovery_journals) );
+        ( "recovery_inspection_error",
+          json_optional
+            (fun message -> `String (public_error_message message))
+            status.Service.recovery_inspection_error );
         ( "watcher",
           `Assoc
             [
@@ -3615,16 +3919,31 @@ let run_status arguments =
     match
       (status.Service.pending_local_recovery, status.Service.capture_observation)
     with
-    | Some pending, _ ->
-        [
-          action ~root
+    | Some _, _ ->
+        List.concat_map
+          (fun journal ->
             [
-              "restore";
-              "--checkpoint";
-              Model.Snapshot_id.to_string pending.Service.recovery_target;
-            ]
-            "Resume the original recovery operation.";
-        ]
+              action ~root
+                [
+                  "restore";
+                  "--resume";
+                  "--operation";
+                  Journal.operation_id journal;
+                  "--preview";
+                ]
+                "Inspect this recorded recovery operation.";
+              action ~confirmation_required:true ~root
+                [
+                  "restore";
+                  "--resume";
+                  "--operation";
+                  Journal.operation_id journal;
+                  "--yes";
+                ]
+                "Resume this exact operation after validating retained and \
+                 live data.";
+            ])
+          status.Service.pending_recovery_journals
     | None, Ok comparison when comparison.Service.differences <> [] ->
         [
           action ~root [ "diff" ] "Inspect text and exact file changes.";
@@ -3690,6 +4009,15 @@ let run_status arguments =
                 (render_snapshot_entry difference.Service.before)
                 (render_snapshot_entry difference.Service.after))
             comparison.Service.differences);
+      List.iter
+        (fun journal ->
+          Printf.printf
+            "recovery-operation %s %s; inspect restore --resume --operation %s \
+             --preview\n"
+            (Journal.operation_id journal)
+            (journal_phase (Journal.phase journal))
+            (Journal.operation_id journal))
+        status.Service.pending_recovery_journals;
       print_endline
         "watcher state not inspected; use watch or daemon status where \
          supported";
@@ -3718,9 +4046,10 @@ let[@warning "-4"] parse_state value =
           | _ -> invalid ())
       | [ _ ] when String.length value = 64 -> (
           match Yeokcham_store.Stored_object_id.of_hex value with
-          | Ok _ ->
+          | Ok id ->
               Service.Snapshot_state
-                (Model.Snapshot_id.of_string value
+                (Model.Snapshot_id.of_string
+                   (Yeokcham_store.Stored_object_id.to_hex id)
                 |> require_ok Model.error_to_string)
           | Error _ -> invalid ())
       | [ _ ] -> (
@@ -3729,6 +4058,46 @@ let[@warning "-4"] parse_state value =
               Service.History_node sequence
           | _ -> invalid ())
       | _ -> invalid ())
+
+let scoped_history_node ~root state =
+  let history =
+    Service.local_history ~root |> require_local |> fun result ->
+    result.Service.undo_tree
+  in
+  let sequence =
+    match state with
+    | Service.Current_saved -> (History.current history).History.id
+    | Service.History_node sequence -> sequence
+    | Service.Exact_history identity ->
+        (match History.workspace history with
+        | Some workspace
+          when Core.Workspace_id.equal workspace
+                 (Core.History_id.workspace identity) ->
+            ()
+        | Some _ | None ->
+            fail_with_status 2 "wrong-workspace"
+              "history identity belongs to another or unbound workspace");
+        Core.History_id.sequence identity
+    | Service.Working_tree | Service.Snapshot_state _ ->
+        fail_with_status 2 "invalid-history-target"
+          "choose a saved history node or workspace:sequence identity"
+  in
+  History.find history sequence |> function
+  | Ok node -> node
+  | Error message -> fail_with_status 2 "unknown-history-node" message
+
+let restore_state ~root value =
+  match parse_state value with
+  | Service.Snapshot_state snapshot ->
+      (snapshot, Service.Restore_snapshot snapshot)
+  | Service.Working_tree ->
+      fail_with_status 2 "invalid-restore-state"
+        "restore needs a saved state; save working files before selecting them \
+         as a target"
+  | (Service.Current_saved | Service.History_node _ | Service.Exact_history _)
+    as state ->
+      let node = scoped_history_node ~root state in
+      (node.History.snapshot, Service.Go_to node.History.id)
 
 let parse_diff arguments =
   let rec loop root states = function
@@ -4073,120 +4442,582 @@ let run_undo_tree arguments =
           (if available node then "" else " [compacted]"))
       (History.nodes tree))
 
-let parse_history_navigation command arguments =
-  let rec loop root target dry_run = function
-    | [] -> (root, target, dry_run)
-    | "--root" :: value :: rest -> loop value target dry_run rest
-    | option :: value :: rest
-      when ((String.equal command "undo" && String.equal option "--to")
-           || (String.equal command "redo" && String.equal option "--node"))
-           && Option.is_none target ->
-        let id =
-          match Int64.of_string_opt value with
-          | Some id when Int64.compare id 0L >= 0 -> id
-          | Some _ | None -> fail "history node must be a nonnegative integer"
-        in
-        loop root (Some id) dry_run rest
-    | "--dry-run" :: rest when not dry_run -> loop root target true rest
-    | _ -> usage ()
+let recovery_json restored =
+  `Assoc
+    [
+      ("operation_id", `String restored.Service.restore_operation);
+      ( "safety_snapshot_id",
+        `String (Model.Snapshot_id.to_string restored.Service.safety_checkpoint)
+      );
+      ( "target_snapshot_id",
+        `String
+          (Model.Snapshot_id.to_string restored.Service.restored_checkpoint) );
+      ("resumed", `Bool restored.Service.resumed);
+      ( "source_proof",
+        if
+          Model.Snapshot_id.equal restored.Service.safety_checkpoint
+            restored.Service.restored_checkpoint
+        then `Null
+        else `String restored.Service.restore_operation );
+      ( "retained_directory_relative",
+        `String
+          (".yeokcham/restore-staging/" ^ restored.Service.restore_operation) );
+    ]
+
+let navigation_json ~root result =
+  let history =
+    Service.local_history ~root |> require_local |> fun value ->
+    value.Service.undo_tree
   in
-  loop default_root None false arguments
+  `Assoc
+    [
+      ("applied", `Bool result.Service.history_applied);
+      ("source_node", `String (Int64.to_string result.Service.source_node));
+      ("target", history_json_node result.Service.target_node);
+      ( "target_history",
+        json_optional json_history_identity
+          (History.identity history result.Service.target_node
+          |> Result.to_option) );
+      ("target_provisional", `Bool result.Service.target_provisional);
+      ("captures_unsaved", `Bool result.Service.captures_unsaved);
+      ( "changes",
+        `List (List.map json_difference result.Service.history_changes) );
+      ("recovery", json_optional recovery_json result.Service.history_restore);
+    ]
+
+let render_navigation_text ~preview result =
+  Printf.printf "%s node %Ld (snapshot %s)%s\n"
+    (if preview then "would select" else "current")
+    result.Service.target_node.History.id
+    (Model.Snapshot_id.to_string result.Service.target_node.History.snapshot)
+    (if result.Service.target_provisional then " [provisional; not allocated]"
+     else "");
+  if result.Service.captures_unsaved then
+    print_endline
+      (if preview then "would preserve unsaved disk edits as a new node"
+       else "preserved unsaved disk edits as a new node");
+  List.iter
+    (fun difference ->
+      Printf.printf "%s: %s -> %s\n"
+        (Output.display_value (Model.Path.to_string difference.Service.path))
+        (render_snapshot_entry difference.Service.before)
+        (render_snapshot_entry difference.Service.after))
+    result.Service.history_changes;
+  Option.iter
+    (fun recovery ->
+      Printf.printf "%s %s%s\n"
+        (if
+           Model.Snapshot_id.equal recovery.Service.safety_checkpoint
+             recovery.Service.restored_checkpoint
+         then "selection-operation"
+         else "restore-proof")
+        recovery.Service.restore_operation
+        (if recovery.Service.resumed then " (resumed original selection)"
+         else "");
+      Printf.printf "safety %s\nrestored %s in-place\n"
+        (Model.Snapshot_id.to_string recovery.Service.safety_checkpoint)
+        (Model.Snapshot_id.to_string recovery.Service.restored_checkpoint))
+    result.Service.history_restore
+
+let run_local_navigation ~flags ~base_arguments ~direction =
+  let root = flags.selection_root in
+  set_local_failure_context ~root;
+  let inspected =
+    if flags.selection_yes then None
+    else
+      Some
+        (Service.navigate_history_plan ~root ~direction ~dry_run:true
+           ~expected_plan:flags.selection_plan
+        |> require_local)
+  in
+  let is_noop result =
+    let history = Service.local_history ~root |> require_local in
+    (not result.Service.captures_unsaved)
+    && (History.current history.Service.undo_tree).History.id
+       = result.Service.target_node.History.id
+  in
+  let unchanged = Option.fold ~none:false ~some:is_noop inspected in
+  let actions result =
+    [
+      action ~confirmation_required:true ~root
+        (append_before_literal base_arguments
+           ([ "--yes" ]
+           @ Option.fold ~none:[]
+               ~some:(fun id -> [ "--plan"; id ])
+               result.Service.selection_plan))
+        "Apply this exact saved-state selection after fresh validation.";
+      action ~root
+        (append_before_literal base_arguments [ "--preview" ])
+        "Inspect selection effects without changing history or files.";
+    ]
+  in
+  let cancelled =
+    (not flags.selection_yes)
+    && (not flags.selection_preview)
+    && (not unchanged)
+    && not
+         (let result = Option.get inspected in
+          confirm_local_selection ?plan_id:result.Service.selection_plan
+            ~data:(navigation_json ~root result)
+            ~next_actions:(actions result)
+            ~render:(fun () -> render_navigation_text ~preview:true result)
+            ())
+  in
+  let result =
+    if flags.selection_yes then
+      Service.navigate_history_plan ~root ~direction ~dry_run:false
+        ~expected_plan:flags.selection_plan
+      |> require_local
+    else if flags.selection_preview || unchanged || cancelled then
+      Option.get inspected
+    else
+      let preview = Option.get inspected in
+      Service.navigate_history_plan ~root ~direction ~dry_run:false
+        ~expected_plan:preview.Service.selection_plan
+      |> require_local
+  in
+  if requested_format () = Json_format then
+    domain_json ?plan_id:result.Service.selection_plan
+      ?operation_id:
+        (Option.map
+           (fun recovery -> recovery.Service.restore_operation)
+           result.Service.history_restore)
+      ~outcome:
+        (if
+           cancelled
+           || (not flags.selection_preview)
+              && not result.Service.history_applied
+         then `Unchanged
+         else `Completed)
+      ~code:
+        (if cancelled then "selection-cancelled"
+         else if flags.selection_preview then "selection-preview"
+         else if result.Service.history_applied then "state-selected"
+         else "state-unchanged")
+      ~message:
+        (if cancelled then
+           "Selection cancelled; files and history are unchanged."
+         else if flags.selection_preview then
+           "Exact saved-state selection preview; files and history are \
+            unchanged."
+         else if result.Service.history_applied then
+           "Exact saved state selected; private alternatives retained."
+         else "The exact saved state is already selected.")
+      ~data:(navigation_json ~root result)
+      ~next_actions:
+        (if flags.selection_preview then actions result
+         else
+           [
+             action ~root [ "status" ] "Inspect local files and capture state.";
+             action ~root [ "history" ] "Inspect retained alternatives.";
+           ])
+      ()
+  else if cancelled then
+    print_endline "Selection cancelled; files and history are unchanged."
+  else render_navigation_text ~preview:flags.selection_preview result;
+  result.Service.history_applied
 
 let run_history_navigation command arguments =
-  let root, target, dry_run = parse_history_navigation command arguments in
+  let flags, remaining = parse_local_selection_flags arguments in
+  let root = flags.selection_root in
+  set_local_failure_context ~root;
+  let target =
+    match remaining with
+    | [] -> None
+    | [ option; value ]
+      when option = if command = "undo" then "--to" else "--node" ->
+        Some (scoped_history_node ~root (parse_state value)).History.id
+    | _ -> usage ()
+  in
   let direction =
     match (command, target) with
     | "undo", None -> Service.Undo
-    | "undo", Some id -> Service.Go_to id
+    | "undo", Some node -> Service.Go_to node
     | _, target -> Service.Redo target
   in
-  let result =
-    Service.navigate_history ~root ~direction ~dry_run
-    |> require_ok Service.error_to_string
+  let applied =
+    run_local_navigation ~flags ~base_arguments:(command :: remaining)
+      ~direction
   in
-  if result.Service.history_applied then
-    run_hooks_after_success [ command ] arguments;
-  let entry_json = function
-    | None -> `Null
-    | Some entry ->
-        `Assoc
-          [
-            ("kind", `String (snapshot_entry_kind_name entry.Service.kind));
-            ( "mode",
-              Option.fold ~none:`Null
-                ~some:(fun mode -> `String (snapshot_mode_name mode))
-                entry.Service.mode );
-            ( "content",
-              Option.fold ~none:`Null
-                ~some:(fun content -> `String content)
-                entry.Service.content );
-          ]
+  if applied then run_hooks_after_success [ command ] arguments;
+  applied
+
+let copyout_json result =
+  `Assoc
+    [
+      ( "snapshot_id",
+        `String (Model.Snapshot_id.to_string result.Service.copy_snapshot) );
+      ("destination", json_byte_path result.Service.copy_destination);
+      ("applied", `Bool result.Service.copy_applied);
+      ("resumed", `Bool result.Service.copy_resumed);
+      ( "operation_id",
+        json_optional (fun id -> `String id) result.Service.copy_operation );
+      ("source_history_changed", `Bool false);
+      ("source_branch_changed", `Bool false);
+      ( "retained_directory_relative",
+        json_optional
+          (fun op -> `String (".yeokcham/restore-staging/" ^ op))
+          result.Service.copy_operation );
+    ]
+
+let render_copyout_text ~preview result =
+  Printf.printf "%s snapshot %s to %s%s\n"
+    (if preview then "would copy" else "copied")
+    (Model.Snapshot_id.to_string result.Service.copy_snapshot)
+    (Output.display_value result.Service.copy_destination)
+    (if result.Service.copy_resumed then " (resumed original operation)" else "");
+  print_endline "source history and branch selection unchanged";
+  Option.iter
+    (fun op -> Printf.printf "recovery-operation %s\n" op)
+    result.Service.copy_operation
+
+let run_copyout ~flags ~base_arguments ~checkpoint ~destination =
+  let root = flags.selection_root in
+  let inspected =
+    if flags.selection_yes then None
+    else
+      Some
+        (Service.preview_copy_out ~root ~checkpoint ~destination
+        |> require_local)
+  in
+  (match (flags.selection_plan, inspected) with
+  | Some expected, Some preview when expected <> preview.Service.copy_plan ->
+      fail_with_status 3 "stale-selection-plan"
+        "Recovery-copy inputs changed; inspect a fresh preview."
+  | None, _ | Some _, _ -> ());
+  let actions result =
+    [
+      action ~confirmation_required:true ~root
+        (append_before_literal base_arguments
+           [ "--yes"; "--plan"; result.Service.copy_plan ])
+        "Create this exact recovery copy without changing source history.";
+      action ~root
+        (append_before_literal base_arguments [ "--preview" ])
+        "Inspect the recovery-copy destination before application.";
+    ]
+  in
+  let cancelled =
+    (not flags.selection_yes)
+    && (not flags.selection_preview)
+    && not
+         (let preview = Option.get inspected in
+          confirm_local_selection ~plan_id:preview.Service.copy_plan
+            ~data:(copyout_json preview) ~next_actions:(actions preview)
+            ~render:(fun () -> render_copyout_text ~preview:true preview)
+            ())
+  in
+  let result =
+    if flags.selection_yes then
+      Service.copy_out ~root ~checkpoint ~destination
+        ~expected_plan:flags.selection_plan
+      |> require_local
+    else if flags.selection_preview || cancelled then Option.get inspected
+    else
+      let preview = Option.get inspected in
+      Service.copy_out ~root ~checkpoint ~destination
+        ~expected_plan:(Some preview.Service.copy_plan)
+      |> require_local
   in
   if requested_format () = Json_format then
-    history_json_result command
-      (`Assoc
-         [
-           ("applied", `Bool result.Service.history_applied);
-           ("source_node", `String (Int64.to_string result.Service.source_node));
-           ("target", history_json_node result.Service.target_node);
-           ("captures_unsaved", `Bool result.Service.captures_unsaved);
-           ( "operation_id",
-             Option.fold ~none:`Null
-               ~some:(fun restored ->
-                 `String restored.Service.restore_operation)
-               result.Service.history_restore );
-           ( "restore_proof",
-             Option.fold ~none:`Null
-               ~some:(fun restored ->
-                 if
-                   Model.Snapshot_id.equal restored.Service.safety_checkpoint
-                     restored.Service.restored_checkpoint
-                 then `Null
-                 else `String restored.Service.restore_operation)
-               result.Service.history_restore );
-           ( "changes",
-             `List
-               (List.map
-                  (fun difference ->
-                    `Assoc
-                      [
-                        ( "path",
-                          `String (Model.Path.to_string difference.Service.path)
-                        );
-                        ("before", entry_json difference.Service.before);
-                        ("after", entry_json difference.Service.after);
-                      ])
-                  result.Service.history_changes) );
-         ])
+    domain_json ?operation_id:result.Service.copy_operation
+      ?plan_id:
+        (if result.Service.copy_plan = "" then None
+         else Some result.Service.copy_plan)
+      ~outcome:(if cancelled then `Unchanged else `Completed)
+      ~code:
+        (if cancelled then "selection-cancelled"
+         else if flags.selection_preview then "copy-preview"
+         else "snapshot-copied")
+      ~message:
+        (if cancelled then
+           "Recovery copy cancelled; files and history are unchanged."
+         else if flags.selection_preview then
+           "Recovery-copy preview; destination and source history are \
+            unchanged."
+         else
+           "Saved snapshot copied; source history and branch selection are \
+            unchanged.")
+      ~data:(copyout_json result)
+      ~next_actions:
+        (if flags.selection_preview then actions result
+         else [ action ~root [ "history" ] "Inspect source alternatives." ])
+      ()
+  else if cancelled then
+    print_endline "Recovery copy cancelled; files and history are unchanged."
+  else render_copyout_text ~preview:flags.selection_preview result;
+  false
+
+let recorded_selection_plan ~root journal =
+  match
+    ( Journal.selection_plan journal,
+      Journal.destination journal,
+      Journal.plan journal )
+  with
+  | Some raw, _, _ -> Some (hex_of_bytes raw)
+  | None, Some _, Some (digest, None) ->
+      let id =
+        match
+          Yeokcham_store.Stored_object_id.of_hex
+            (Model.Snapshot_id.to_string (Journal.target journal))
+        with
+        | Ok id -> id
+        | Error _ ->
+            fail_with_status 6 "recovery-integrity-failure"
+              "Copy-out target identity is malformed."
+      in
+      let target = Yeokcham_snapshot.Snapshot.of_stored_object_id id in
+      let physical =
+        match
+          Service.Safe_apply.load ~root
+            ~operation:(Journal.operation_id journal)
+            ~digest ~safety:target ~target
+        with
+        | Ok plan -> plan
+        | Error error ->
+            let status =
+              match error with
+              | Service.Safe_apply.Unavailable _ -> 5
+              | Service.Safe_apply.Invalid_plan _ -> 6
+              | Service.Safe_apply.Conflict _ -> 8
+            in
+            fail_with_status status "recovery-plan-unavailable"
+              (Service.Safe_apply.error_to_string error)
+      in
+      let token =
+        match Service.Safe_apply.copyout_token physical with
+        | Ok token -> token
+        | Error error ->
+            fail_with_status 6 "recovery-integrity-failure"
+              (Service.Safe_apply.error_to_string error)
+      in
+      Some (hex_of_bytes token)
+  | None, None, _ | None, Some _, (None | Some (_, Some _)) -> None
+
+let run_recovery_resume ~flags ~operation =
+  let root = flags.selection_root in
+  let history =
+    Service.local_history ~root |> require_local |> fun result ->
+    result.Service.undo_tree
+  in
+  let journals = latest_recovery_journals ~root in
+  let selected =
+    match operation with
+    | Some op -> (
+        match List.find_opt (fun j -> Journal.operation_id j = op) journals with
+        | Some j -> Some j
+        | None ->
+            fail_with_status 2 "unknown-operation"
+              "No recorded recovery operation has that ID.")
+    | None -> (
+        match
+          List.filter (fun j -> Journal.phase j <> Journal.Published) journals
+        with
+        | [] -> None
+        | [ j ] -> Some j
+        | pending ->
+            selection_choice
+              ~data:
+                (`Assoc
+                   [
+                     ( "operations",
+                       `List (List.map (operation_json ~history) pending) );
+                   ])
+              ~next_actions:
+                (List.map
+                   (fun j ->
+                     action ~confirmation_required:true ~root
+                       [
+                         "restore";
+                         "--resume";
+                         "--operation";
+                         Journal.operation_id j;
+                         "--yes";
+                       ]
+                       "Resume this exact recorded operation.")
+                   pending)
+              ~message:"Choose a recovery operation with --operation." ())
+  in
+  match selected with
+  | None ->
+      if requested_format () = Json_format then
+        domain_json ~outcome:`Unchanged ~code:"no-recovery-pending"
+          ~message:"No recovery operation is pending."
+          ~data:(`Assoc [ ("operations", `List []) ])
+          ~next_actions:[] ()
+      else print_endline "no recovery operation is pending";
+      false
+  | Some journal ->
+      let op = Journal.operation_id journal in
+      let plan =
+        if flags.selection_plan = None then
+          Option.map hex_of_bytes (Journal.selection_plan journal)
+        else recorded_selection_plan ~root journal
+      in
+      (match flags.selection_plan with
+      | Some expected when plan <> Some expected ->
+          fail_with_status 3 "stale-selection-plan"
+            "The recorded recovery operation has a different plan."
+      | None | Some _ -> ());
+      let data = operation_json ~history journal in
+      let actions =
+        [
+          action ~confirmation_required:true ~root
+            ([ "restore"; "--resume"; "--operation"; op; "--yes" ]
+            @ Option.fold ~none:[]
+                ~some:(fun p -> [ "--plan"; p ])
+                flags.selection_plan)
+            "Resume this recorded target after validating retained and live \
+             data.";
+          action ~root
+            [ "restore"; "--resume"; "--operation"; op; "--preview" ]
+            "Inspect this recorded recovery operation.";
+        ]
+      in
+      let already = Journal.phase journal = Journal.Published in
+      let cancelled =
+        (not flags.selection_yes)
+        && (not flags.selection_preview)
+        && (not already)
+        && not
+             (confirm_local_selection
+                ?plan_id:
+                  (Option.map hex_of_bytes (Journal.selection_plan journal))
+                ~data ~next_actions:actions
+                ~render:(fun () ->
+                  Printf.printf "recovery-operation %s target %s (%s)\n" op
+                    (Model.Snapshot_id.to_string (Journal.target journal))
+                    (journal_phase (Journal.phase journal)))
+                ())
+      in
+      if flags.selection_preview || cancelled then (
+        if requested_format () = Json_format then
+          domain_json ~operation_id:op
+            ?plan_id:(Option.map hex_of_bytes (Journal.selection_plan journal))
+            ~outcome:(if cancelled then `Unchanged else `Completed)
+            ~code:
+              (if cancelled then "selection-cancelled" else "recovery-preview")
+            ~message:
+              (if cancelled then
+                 "Recovery cancelled; files and history are unchanged."
+               else
+                 "Recorded recovery target inspected; current files were not \
+                  scanned or rewritten.")
+            ~data ~next_actions:actions ()
+        else
+          print_endline
+            (if cancelled then
+               "Recovery cancelled; files and history are unchanged."
+             else
+               "recorded recovery target inspected; files and history are \
+                unchanged");
+        false)
+      else
+        let recovered =
+          Service.recover_operation_plan ~root ~operation:(Some op)
+            ~expected_plan:flags.selection_plan
+          |> require_local |> Option.get
+        in
+        let in_place =
+          match recovered.Service.recovered with
+          | Service.Recovered_in_place _ -> true
+          | Service.Recovered_copy_out _ -> false
+        in
+        let data =
+          `Assoc
+            [
+              ("operation", data);
+              ("already_completed", `Bool recovered.Service.already_completed);
+              ("applied", `Bool (not recovered.Service.already_completed));
+              ("current_contents_reverified", `Bool false);
+              ( "result",
+                match recovered.Service.recovered with
+                | Service.Recovered_in_place result -> recovery_json result
+                | Service.Recovered_copy_out result -> copyout_json result );
+            ]
+        in
+        if requested_format () = Json_format then
+          domain_json ~operation_id:op
+            ?plan_id:(Option.map hex_of_bytes (Journal.selection_plan journal))
+            ~outcome:
+              (if recovered.Service.already_completed then `Unchanged
+               else `Completed)
+            ~code:
+              (if recovered.Service.already_completed then
+                 "operation-already-completed"
+               else "operation-recovered")
+            ~message:
+              (if recovered.Service.already_completed then
+                 "The recorded operation completed earlier; current files were \
+                  not reverified or rewritten."
+               else
+                 "The original recorded operation completed without another \
+                  navigation step.")
+            ~data
+            ~next_actions:
+              [
+                action ~root [ "status" ]
+                  "Inspect local files and capture state.";
+              ]
+            ()
+        else
+          Printf.printf
+            "%s recovery-operation %s; current files were not rescanned\n"
+            (if recovered.Service.already_completed then "already completed"
+             else "completed original")
+            op;
+        in_place && not recovered.Service.already_completed
+
+let run_restore arguments =
+  let flags, remaining = parse_local_selection_flags arguments in
+  let root = flags.selection_root in
+  set_local_failure_context ~root;
+  let rec parse state destination resume operation = function
+    | [] -> (state, destination, resume, operation)
+    | "--resume" :: rest when not resume ->
+        parse state destination true operation rest
+    | "--operation" :: op :: rest when operation = None ->
+        if
+          String.length op <> 64
+          || not
+               (String.for_all
+                  (function '0' .. '9' | 'a' .. 'f' -> true | _ -> false)
+                  op)
+        then
+          fail_with_status 2 "invalid-operation-id"
+            "operation IDs are lowercase 64-digit identifiers";
+        parse state destination resume (Some op) rest
+    | "--checkpoint" :: value :: rest when state = None ->
+        parse (Some value) destination resume operation rest
+    | ("--to" | "--destination") :: value :: rest when destination = None ->
+        parse state (Some value) resume operation rest
+    | "--" :: [ value ] when state = None ->
+        parse (Some value) destination resume operation []
+    | value :: rest
+      when state = None && not (String.starts_with ~prefix:"-" value) ->
+        parse (Some value) destination resume operation rest
+    | _ -> usage ()
+  in
+  let state, destination, resume, operation =
+    parse None None false None remaining
+  in
+  if resume then (
+    if state <> None || destination <> None then
+      fail_with_status 2 "invalid-invocation"
+        "--resume cannot select another state or destination";
+    run_recovery_resume ~flags ~operation)
   else (
-    Printf.printf "%s node %Ld (checkpoint %s)\n"
-      (if dry_run then "would move to" else "current")
-      result.Service.target_node.History.id
-      (Model.Snapshot_id.to_string result.Service.target_node.History.snapshot);
-    if result.Service.captures_unsaved then
-      print_endline
-        (if dry_run then "would preserve unsaved disk edits as a new node"
-         else "preserved unsaved disk edits as a new node");
-    List.iter
-      (fun difference ->
-        Printf.printf "%s: %s -> %s\n"
-          (Output.display_value (Model.Path.to_string difference.Service.path))
-          (render_snapshot_entry difference.Service.before)
-          (render_snapshot_entry difference.Service.after))
-      result.Service.history_changes;
-    Option.iter
-      (fun restored ->
-        Printf.printf "%s %s%s\n"
-          (if
-             Model.Snapshot_id.equal restored.Service.safety_checkpoint
-               restored.Service.restored_checkpoint
-           then "selection-operation"
-           else "restore-proof")
-          restored.Service.restore_operation
-          (if restored.Service.resumed then " (resumed original navigation)"
-           else ""))
-      result.Service.history_restore);
-  result.Service.history_applied
+    if operation <> None then
+      fail_with_status 2 "invalid-invocation" "--operation requires --resume";
+    let state = match state with Some value -> value | None -> usage () in
+    let checkpoint, direction = restore_state ~root state in
+    match destination with
+    | Some destination ->
+        run_copyout ~flags
+          ~base_arguments:[ "restore"; state; "--to"; destination ]
+          ~checkpoint ~destination
+    | None ->
+        run_local_navigation ~flags ~base_arguments:[ "restore"; state ]
+          ~direction)
 
 let render_proposal_entry = function
   | None -> "missing"

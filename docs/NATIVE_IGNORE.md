@@ -57,9 +57,9 @@ rule files inside that excluded subtree. It creates no repository, checkpoint
 or scan objects. JSON provides actual path/rule data, not only completion.
 
 Changing rules affects future capture. It does not remove previously saved
-history or delete live files. Existing in-place restore still refuses ignored
-entries while P2's preservation-aware replacement is being implemented; a
-separate empty destination remains the available recovery path for that case.
+history or delete live files. Local switch/undo/redo/restore preserve noncolliding ignored files. A target
+covering an ignored or untracked obstruction refuses before replacement; use a
+separate recovery copy or move the obstruction explicitly. See [Local undo](LOCAL_UNDO.md).
 
 Capture opens child entries relative to their parent directory descriptor and
 refuses to follow symlinks. It records symlink target bytes instead. It compares

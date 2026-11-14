@@ -114,7 +114,7 @@ def storage(root):
 def command(binary, root, operation):
     args = {'initial_capture': ['init', '--username', 'benchmark', '--draft', 'baseline', '--title', 'G01 baseline'],
             'no_op': ['save'], 'small_edit': ['save'],
-            'undo_restore': ['undo', '--to', '0']}[operation]
+            'undo_restore': ['undo', '--yes', '--to', '0']}[operation]
     return [str(binary), *args, '--root', str(root)]
 
 
@@ -162,7 +162,7 @@ def verify_checkpoint(binary, root, env, tree, node, expected, scratch):
         shutil.copytree(root / '.yeokcham', replica / '.yeokcham', symlinks=True)
         destination = verification / 'restored'
         destination.mkdir()
-        _, metrics = invoke([str(binary), 'restore', '--root', str(replica),
+        _, metrics = invoke([str(binary), 'restore', '--yes', '--root', str(replica),
                              '--checkpoint', checkpoint, '--destination', str(destination)], env)
         fixture.verify(destination, expected)
     return metrics['seconds']
@@ -306,7 +306,7 @@ def run_case(args, case_dir, total_bytes, files):
         for node in range(1, args.history_nodes):
             repeat = args.history_shape == 'branching' and node % 3 == 0 and node != args.history_nodes - 1
             if args.history_shape == 'branching' and node > 1 and node % 2 == 0 and not repeat:
-                invoke([str(args.binary), 'undo', '--to', '0', '--root', str(master)], env)
+                invoke([str(args.binary), 'undo', '--yes', '--to', '0', '--root', str(master)], env)
             if repeat:
                 entry = next(e for e in manifest['entries'] if e['kind'] == 'file')
                 shutil.copy2(pristine / entry['path'], master / entry['path'])

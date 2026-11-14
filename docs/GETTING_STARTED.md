@@ -67,7 +67,7 @@ Make an unsaved edit, then restore the named checkpoint into the empty
 ```sh
 printf '%s\n' 'unsaved line' >>"$DEMO_ROOT/work/note.txt"
 "$YEOKCHAM" changes --root "$DEMO_ROOT/work"
-"$YEOKCHAM" restore --root "$DEMO_ROOT/work" \
+"$YEOKCHAM" restore --yes --root "$DEMO_ROOT/work" \
   --checkpoint CHECKPOINT --destination "$DEMO_ROOT/recovered"
 printf '%s\n%s\n' 'first note' 'second note' >"$DEMO_ROOT/expected-note.txt"
 cmp "$DEMO_ROOT/recovered/note.txt" "$DEMO_ROOT/expected-note.txt"
@@ -81,11 +81,11 @@ that its unsaved line remains.
 
 An in-place restore omits `--destination` and changes the working tree only
 after its recovery journal is durable. It prints a restore-proof operation ID.
-That proof retains both the pre-restore safety checkpoint and target checkpoint
+When replacing different contents, that proof retains both the pre-restore safety checkpoint and target checkpoint
 until `restore forget --operation ID`:
 
 ```sh
-"$YEOKCHAM" restore --root "$DEMO_ROOT/work" --checkpoint CHECKPOINT
+"$YEOKCHAM" restore --yes --root "$DEMO_ROOT/work" --checkpoint CHECKPOINT
 "$YEOKCHAM" restore proofs --root "$DEMO_ROOT/work"
 "$YEOKCHAM" storage roots --root "$DEMO_ROOT/work"
 ```
@@ -110,7 +110,7 @@ The [Docker tutorial](../containers/tutorial/USAGE.md) provides the same local
 recovery journey with an isolated Linux signer. It includes a sample project
 and an empty restore destination; no host compiler installation is required.
 
-## Current P2 branch checkpoint
+## Named branches and local selection
 
 `init [PATH]` now generates workspace/branch identities and an initial draft ID;
 `--username`, `--draft` and `--title` remain optional overrides. Existing files
@@ -130,15 +130,18 @@ Creation saves current private disk edits and creates a named shared branch
 identity at the current accepted version. It keeps the current selection and
 preserves both private positions in the existing history/state root. Names are
 case-sensitive; duplicates refuse without retargeting. JSON includes actual
-branch IDs, causal heads, workspace identity and local positions. This is a P2
-checkpoint: `switch NAME` now selects that branch's private saved position and
+branch IDs, causal heads, workspace identity and local positions.
+`switch NAME` selects that branch's private saved position and
 preserves source disk edits before replacement. Noninteractive selection needs
 `--yes`; `--preview` never moves files/history. Branch selection persists across
 restart. Missing target contents or ignored obstructions refuse before
 replacement; interrupted switches resume their exact original target. Full
-shared exchange/integration is P3. Snapshot copy-out now uses staged whole-directory installation; remaining P2
-work includes complete navigation confirmation/outcomes, ordinary restore syntax
-and the final acceptance audit.
+shared exchange/integration is P3. Use `restore STATE --to DIRECTORY --preview`
+then `--yes` for a separate verified copy; source history/branch selection stays
+unchanged. `undo`, `redo`, `restore` and `switch` all support `--preview`,
+`--yes`, `--plan ID` and structured outcomes. Selection defaults to cancel;
+noninteractive application needs `--yes`. See [Local undo](LOCAL_UNDO.md) for
+exact state selectors and recorded-operation recovery.
 Existing V1 sharing/delivery commands retain their older record semantics; they
 are not the future P3 native core exchange/integration loop.
 

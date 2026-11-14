@@ -747,7 +747,11 @@ let copyout_binding t =
     ]
   |> E.encode |> Hash.digest_string |> Hash.to_raw_string
 
-let copyout_token = copyout_binding
+let copyout_token t =
+  match destination t with
+  | Some _ -> Ok (copyout_binding t)
+  | None ->
+      Error (Invalid_plan "copy-out token requires an exact destination scope")
 
 let prepare_copyout_with ~stage ~root ~store ~operation ~target
     ~destination:requested =

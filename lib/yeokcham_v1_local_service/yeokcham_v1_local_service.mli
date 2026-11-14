@@ -771,6 +771,8 @@ type local_status = {
   status_head : string;
   capture_observation : (working_tree_comparison, string) result;
   pending_local_recovery : pending_local_recovery option;
+  pending_recovery_journals : Yeokcham_v1_restore_journal.t list;
+  recovery_inspection_error : string option;
 }
 (** [saved_metadata.uncaptured] is meaningful only after a successful
     observation; failed/incomplete observation is explicit and must never be
@@ -885,6 +887,12 @@ type recovery_result = {
   already_completed : bool;
   recovered : recovered_operation;
 }
+
+val recover_operation_plan :
+  root:string ->
+  operation:string option ->
+  expected_plan:string option ->
+  (recovery_result option, error) result
 
 val recover_operation :
   root:string ->

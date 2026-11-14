@@ -9,11 +9,12 @@ the implemented user workflow.
 | Intention | Commands | Observable boundary |
 | --- | --- | --- |
 | Start independent work | `init` | Creates local custody, authority, and an initial checkpoint. Displays a new recovery mnemonic once; requires text output. |
-| Observe edits | `status`, `changes` | Scans exact entries; may store unreferenced immutable objects. Does not save or publish history. |
+| Observe edits | `status`, `diff`, `changes` | Actual changed paths, text/opaque/type/mode differences and capture state. Working comparisons may store unreferenced scan objects; no history publication. |
 | Recover scratch work | `save`, `watch`, Linux `daemon` | Captures a checkpoint when the observed tree differs. Automatic capture requires a running watcher or daemon. |
-| Inspect recorded work | `timeline`, `log`, `graph` | Reads local history without scanning the current tree or contacting a relay. |
-| Navigate local work | `undo-tree`, `undo`, `redo` | Local nodes preserve alternate continuations. Preview lists exact path changes; applying uses recovery journals. Ambiguous redo requires a selected child. |
-| Recover exact files | `restore` | Destination must already exist and be empty. In-place replacement retains safety and target snapshots in a durable proof. |
+| Inspect recorded work | `history`, `timeline`, `log`, `graph` | Reads local history without scanning the current tree or contacting a relay. |
+| Navigate local work | `history`, `undo-tree`, `undo`, `redo`, `restore STATE` | Exact workspace/history identities and alternate continuations. Preview, default cancellation, `--yes`/`--plan` and recorded recovery. Ambiguous redo requires a selected child. |
+| Recover exact files | `restore STATE --to DIRECTORY` | Verified separate copy into a new/empty same-filesystem destination; source history/branch unchanged. Destructive in-place selection retains a safety/target proof. |
+| Select named branches | `branch list`, `branch create NAME`, `switch NAME` | Authenticated empty genesis/forks with durable private positions; no implicit acceptance/publication of private work. P3 shared exchange/integration remains separate. |
 | Start another local task | `draft new` | Starts a local draft from the latest saved checkpoint; it does not switch or rewrite ordinary files. Save outstanding edits first if they belong to the old task. |
 | Declare shared intent | `share`, `withdraw` | Creates signed immutable revisions or explicitly withdraws eligible work. Sharing captures the current tree, including directory-only changes. |
 | Resolve ambiguity | `decision …`, `resolve` | Inspection and proposals are advisory; only explicit resolution changes the decision. |
@@ -36,15 +37,17 @@ Root `.git` and Yeokcham metadata entries are always excluded. Root and nested
 `.yeokchamignore` files support native globs, negation and ordered precedence;
 Git ignore configuration is never consulted. `ignore explain PATH` reports the
 winning file/line or mandatory exclusion. See [Native ignore rules](NATIVE_IGNORE.md).
-Ignored contents are outside recovery history. In-place replacement refuses existing ignored entries so
-they cannot be deleted without a safety copy. Use an empty destination or move
-those entries outside the tree before retrying.
+Ignored live contents are outside new captures. Local selection preserves
+noncolliding ignored files and refuses target collisions before replacement.
+Use a separate recovery copy or explicitly move an obstruction.
 
 Restore validates target trees, contents, and symlink targets before output.
-The journal supports retry after an interrupted in-place write; it is not an
-atomic filesystem transaction. Coordinate with editors and other processes
-before replacement: a checkpoint cannot protect writes made concurrently
-after its scan.
+Recorded operations resume their original targets; the whole workspace is not
+a single atomic filesystem transaction. Staged exclusive moves/exchange retain
+displaced nodes and check native identities and bytes before continuing.
+Unexpected external edits cause a conflict; preserve the live tree and recovery
+state. Later edits after Materialized are not replayed over during metadata
+completion. See [Local undo](LOCAL_UNDO.md) for exact recovery commands.
 
 Local undo nodes have identities independent of their snapshots. Their topology
 and current position persist locally; receipt and public exchange do not carry

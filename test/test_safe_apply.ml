@@ -63,6 +63,8 @@ let exact_apply_and_retry () =
   with_root (fun root store ->
       let safety, target, observation = fixture root store in
       let plan = prepare root store safety target observation in
+      assert_refused "a workspace plan cannot supply a copy-out intent"
+        (A.copyout_token plan);
       A.apply ~root ~store plan |> ok A.error_to_string;
       Alcotest.(check bool)
         "exact mixed target" true

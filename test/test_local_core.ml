@@ -407,6 +407,94 @@ let[@warning "-4"] invalid_mappings_signatures_and_acceptance () =
       reject "logical/physical mapping mismatch accepted"
         (L.decode ~store ~authority swapped))
 
+let[@warning "-4"] divergent_names_are_retained_and_refused () =
+  with_root (fun root ->
+      let repository, capability, certificate, authority, _ = initialize root in
+      let original = load repository |> local in
+      let row = List.hd (L.branches original) in
+      let store = S.underlying_store repository in
+      let context =
+        C.make_context
+          ~repository:(C.Repository_id.of_hex (String.make 64 'a') |> model)
+          ~author_certificate:(C.Digest.of_hex certificate |> model)
+          ~authority_heads:
+            (List.map
+               (fun id -> C.Digest.of_hex id |> model)
+               (T.authority_heads authority))
+          ~display_time:None
+        |> model
+      in
+      let array values =
+        Yeokcham_encoding.array values
+        |> ok Yeokcham_encoding.construction_error_to_string
+      in
+      let mappings =
+        [ "left"; "right" ]
+        |> List.map (fun name ->
+            let payload =
+              C.make_branch_event ~branch:row.C.branch_id
+                ~previous_events:row.C.event_heads ~action:C.Rename ~targets:[]
+                ~display_name:(Some name)
+              |> model
+            in
+            let body = C.make_body ~context ~payload:(C.Branch_event payload) in
+            let signed =
+              T.Core.sign authority capability body |> ok T.Core.error_to_string
+            in
+            let id = R.id signed |> ok R.error_to_string in
+            let envelope =
+              R.encode signed |> ok R.error_to_string
+              |> Yeokcham_envelope.decode
+              |> ok Yeokcham_envelope.decode_error_to_string
+            in
+            let stored = Raw.put store envelope |> ok Raw.error_to_string in
+            array
+              [
+                Yeokcham_encoding.bytes (C.Record_id.to_raw id);
+                Yeokcham_encoding.bytes
+                  (Raw.Stored_object_id.to_raw_bytes stored);
+              ])
+      in
+      let encoded =
+        L.encode original |> ok Fun.id |> Yeokcham_encoding.decode
+        |> ok Yeokcham_encoding.decode_error_to_string
+      in
+      let encoded =
+        match encoded with
+        | Yeokcham_encoding.Array
+            [
+              version;
+              empty;
+              selected;
+              Yeokcham_encoding.Array records;
+              positions;
+            ] ->
+            let records =
+              List.sort
+                (fun a b ->
+                  String.compare
+                    (Yeokcham_encoding.encode a)
+                    (Yeokcham_encoding.encode b))
+                (mappings @ records)
+            in
+            array [ version; empty; selected; array records; positions ]
+            |> Yeokcham_encoding.encode
+        | _ -> Alcotest.fail "unexpected local core schema"
+      in
+      let state = L.decode ~store ~authority encoded |> ok Fun.id in
+      let row = List.hd (L.branches state) in
+      Alcotest.(check (list string))
+        "concurrent names retained" [ "left"; "right" ] row.C.display_names;
+      Alcotest.(check int)
+        "concurrent event heads retained" 2
+        (List.length row.C.event_heads);
+      reject "lookup selected a divergent causal head" (L.lookup state "left");
+      reject "selection silently chose a divergent head"
+        (L.select state row.C.branch_id);
+      Alcotest.(check bool)
+        "published state untouched" true
+        (L.encode original = L.encode (load repository |> local)))
+
 let historical_load_and_current_admission () =
   with_root (fun root ->
       let repository, capability, certificate, authority, _ = initialize root in
@@ -1188,6 +1276,8 @@ let () =
           Alcotest.test_case
             "logical mapping, signature and acceptance validation" `Quick
             invalid_mappings_signatures_and_acceptance;
+          Alcotest.test_case "concurrent branch names refuse local selection"
+            `Quick divergent_names_are_retained_and_refused;
           Alcotest.test_case
             "historical verification differs from new admission" `Quick
             historical_load_and_current_admission;

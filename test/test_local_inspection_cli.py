@@ -86,7 +86,7 @@ class LocalInspectionCliTests(unittest.TestCase):
     def test_alternatives_pagination_and_exact_saved_comparisons(self):
         self.save(b"B\n")
         self.save(b"C\n")
-        result = self.run_cli("undo")
+        result = self.run_cli("undo", "--yes")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.save(b"D\n")
         before = self.head()

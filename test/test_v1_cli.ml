@@ -235,6 +235,7 @@ let command_journey_reports_saved_work_and_drafts () =
         run
           [
             "restore";
+            "--yes";
             "--root";
             root;
             "--checkpoint";
@@ -244,7 +245,7 @@ let command_journey_reports_saved_work_and_drafts () =
           ]
       in
       require_success "restore" status errors;
-      expect_output_contains "restore is explicit" "restored " output;
+      expect_output_contains "restore is explicit" "copied snapshot " output;
       Alcotest.(check string)
         "CLI restore materializes prior file bytes" "let version = 1\n"
         (In_channel.with_open_bin
@@ -373,6 +374,7 @@ let workspace_cli_journey_requires_explicit_activation_and_replacement () =
         run
           [
             "restore";
+            "--yes";
             "--root";
             target;
             "--checkpoint";
@@ -382,8 +384,8 @@ let workspace_cli_journey_requires_explicit_activation_and_replacement () =
           ]
       in
       require_success "restore replacement safety checkpoint" status errors;
-      expect_output_contains "restore printed its destination" "restored "
-        output;
+      expect_output_contains "restore printed its destination"
+        "copied snapshot " output;
       Alcotest.(check string)
         "printed safety checkpoint restores local bytes" "let local = 2\n"
         (read_file recovered "main.ml"))
@@ -1059,7 +1061,7 @@ let command_journey_restores_in_place_with_a_safety_checkpoint () =
       let initial = saved_checkpoint output in
       write_file root "main.ml" "let unsaved = 2\n";
       let output, errors, status =
-        run [ "restore"; "--root"; root; "--checkpoint"; initial ]
+        run [ "restore"; "--yes"; "--root"; root; "--checkpoint"; initial ]
       in
       require_success "in-place restore" status errors;
       let operation = first_prefixed_value "restore-proof " output in
@@ -2166,22 +2168,24 @@ let local_undo_tree_commands_preserve_branches_and_shared_history () =
       Alcotest.(check bool)
         "preview preserves the state head" true
         (Raw_store.Mutable_ref.equal before.Store.head after.Store.head);
-      ignore (execute [ "undo" ]);
+      ignore (execute [ "undo"; "--yes" ]);
       Alcotest.(check string) "undo writes B" "B" (read_file root "note.txt");
       write_file root "note.txt" "D";
       ignore (execute [ "save" ]);
-      ignore (execute [ "undo" ]);
+      ignore (execute [ "undo"; "--yes" ]);
       let refused, _, status =
         run [ "redo"; "--root"; root; "--format"; "json" ]
       in
       (match status with
-      | Unix.WEXITED 2 -> ()
+      | Unix.WEXITED 3 -> ()
       | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
-          Alcotest.fail "ambiguous redo succeeded");
+          Alcotest.fail "ambiguous redo did not require a choice");
       Alcotest.(check bool)
         "ambiguous redo has failure JSON" false
         (Cli_data.decode refused |> require_ok Fun.id |> Cli_data.ok);
-      let output = execute [ "redo"; "--node"; "2"; "--format"; "json" ] in
+      let output =
+        execute [ "redo"; "--yes"; "--node"; "2"; "--format"; "json" ]
+      in
       expect_output_contains "redo applied selected branch" "\"applied\":true"
         output;
       Alcotest.(check string) "redo writes C" "C" (read_file root "note.txt");
@@ -2195,7 +2199,7 @@ let local_undo_tree_commands_preserve_branches_and_shared_history () =
         |> Store.load
         |> require_ok Store.error_to_string
       in
-      ignore (execute [ "undo"; "--to"; "0" ]);
+      ignore (execute [ "undo"; "--yes"; "--to"; "0" ]);
       let shared_after =
         Store.open_repository ~root
         |> require_ok Store.error_to_string
@@ -2216,7 +2220,9 @@ let local_undo_tree_commands_preserve_branches_and_shared_history () =
       expect_output_contains "text tree marks current position" "* node 0"
         history;
       expect_output_contains "text tree shows a fork" "node 3 <- 1" history;
-      let unchanged = execute [ "undo"; "--to"; "0"; "--format"; "json" ] in
+      let unchanged =
+        execute [ "undo"; "--yes"; "--to"; "0"; "--format"; "json" ]
+      in
       expect_output_contains "current-node navigation is a no-op"
         "\"applied\":false" unchanged)
 

@@ -1,151 +1,157 @@
 # Persistent local undo tree
 
-Yeokcham remembers how saved working states follow one another. Return to an
-earlier state, edit again, and both continuations remain in local history.
-The tree survives restarts while its repository metadata is retained.
+Yeokcham records complete saved working states and their continuations. Return
+to an earlier state, edit again, and both continuations remain inspectable after
+restart. This covers disk bytes, empty directories, symlink targets and the
+regular/executable distinction. Unsaved editor buffers and edits between captures
+are outside this history. Capture requires `save`, foreground `watch`, or the
+existing explicitly started Linux runtime; managed scheduling and private backup
+are not configured by initialization.
 
-Navigation covers the whole recorded project: bytes written to disk,
-directories, executable state, and symlink targets. Unsaved editor buffers
-and intermediate edits between captures are outside this history. Automatic
-capture requires a running `watch` or Linux daemon.
-
-## Browse and navigate
+## Inspect and select
 
 ```sh
-yeokcham undo-tree
-yeokcham undo --dry-run
-yeokcham undo
-yeokcham redo --dry-run
-yeokcham redo
+yeokcham status
+yeokcham diff                  # current saved state versus working files
+yeokcham history               # 50 rows; --limit 1-200, --before SEQUENCE
+yeokcham undo --preview
+yeokcham undo --yes
+yeokcham redo --preview
+yeokcham redo --node 2 --yes
+yeokcham restore 0 --preview
+yeokcham restore 0 --yes
 ```
 
-`undo-tree` reads saved metadata without scanning files. Each row shows a local
-node ID, its parent, checkpoint, and originating draft. The current node is
-marked `*`. Node IDs identify positions in history; checkpoint IDs identify
-exact contents. Editing back to identical contents creates another node.
-Saving an unchanged tree creates neither a node nor a checkpoint.
+`history` reads saved metadata without scanning working files. It reports parent
+and alternate child links, changed paths, recorded times and verified content
+availability. A full history identity is `WORKSPACE_HEX:SEQUENCE`; short sequences
+are conveniences within the current workspace. A snapshot ID identifies contents,
+not a history position. Equal contents at different nodes keep distinct positions.
+An unchanged save adds no node. `undo-tree` remains a simpler legacy view.
 
-`undo` moves to the parent. If working files contain unsaved disk edits, it
-first preserves them as a new child, then returns to the previously saved
-node. Redo can recover that new child. At a root, undo reports that no parent
-was recorded.
+`undo` selects the parent. With unsaved disk edits, it preserves a new child first
+and returns to the previously saved node. `redo` refuses unsaved edits; save or
+undo them first. Multiple children require `--node ID`, even with `--yes`.
+`undo --to ID` or `restore ID` selects an exact retained history position.
+`restore current` selects the current saved state. Snapshot IDs also work; a
+retained snapshot without known local ancestry creates a separate root. No
+parent relationship is inferred from timestamps or matching contents.
 
-`redo` moves to a child. When several children exist, it reports their IDs and
-requires `--node ID`. Redo refuses unsaved disk edits; save or undo them first.
-Use `undo --to ID` to navigate directly to any retained node.
+Preview lists exact affected paths, modes and content identities, including
+preservation of unsaved work. Use `diff STATE_A STATE_B` for readable text hunks
+and explicit opaque/type/mode differences. States include `current`, `working`,
+sequences, full history identities and snapshot IDs. Exact saved comparisons do
+not scan working files or save history. Working comparisons and previews can
+store unreferenced immutable scan objects; they do not move history or rewrite
+ordinary files. A provisional preview node is not a durable ID reservation.
 
-Preview with `--dry-run` before replacing files. The preview lists exact
-before/after path entries, modes, and content identities, using the same
-comparison as `changes`. It is not a line-by-line text patch. Preview can
-allocate immutable scan objects but never saves a node, advances the state
-head, or writes ordinary files. Applying a later command scans again.
+Selection prompts default to cancel on a terminal. Without `--yes`, a
+noninteractive write returns exit 3 and actionable preview/application commands.
+`--yes` authorizes fresh validation. For automation, take `plan_id` from
+`--preview --format json` and supply `--plan ID --yes`; changed inputs return
+exit 3 without applying a replacement plan. `--dry-run` remains a preview alias.
+No-op selection needs no confirmation. JSON includes actual target identities,
+changes, preservation effects, recovery operation IDs and next actions.
 
 ## Two continuations
 
-Start inside a new directory, using an installed `yeokcham` executable or the
-source-build command described in [Installation](INSTALL.md):
-
 ```sh
 printf 'A\n' > note.txt
-yeokcham init --username alice --draft experiment --title "Try two layouts"
+yeokcham init
 # Record the one-time recovery mnemonic offline.
 printf 'B\n' > note.txt
 yeokcham save
 printf 'C\n' > note.txt
 yeokcham save
-yeokcham undo                 # back to B, node 1
+yeokcham undo --yes           # B, node 1
 printf 'D\n' > note.txt
-yeokcham save                 # node 3 is another child of node 1
-yeokcham undo                 # back to B again
-yeokcham undo-tree
-yeokcham redo --node 2        # recover C
-yeokcham undo --to 3          # revisit D
+yeokcham save                 # node 3, another child of node 1
+yeokcham undo --yes           # B again
+yeokcham history
+yeokcham redo --node 2 --yes   # C
+yeokcham restore 3 --yes      # D
 ```
 
-The parent links are `0 -> 1 -> 2` and `1 -> 3`. Returning to B did not discard
-C. Navigation and saving create no shared revisions or deliveries. `draft new`
-changes the active task without moving files or adding a node solely for the
-task change. Navigation updates the latest checkpoint of the current active
-draft; it does not reopen the draft named on a historical node.
+The links are `0 -> 1 -> 2` and `1 -> 3`. Navigation preserves both continuations
+while their contents are retained. Saving/navigation do not accept or publish
+work. Workspace namespaces and monotonic node allocation are persisted with the
+history/cursor in the existing atomic state root. Selection never resets the
+counter. Whole-history encoding is retained; bounded pages/indexes remain G06.
 
-## Recovery and retention
+## Named branches
 
-When navigation replaces files, it uses the restore journal and retains both
-safety and target snapshots in a restore proof. The journal names the exact
-target node, including when multiple nodes have identical contents. After
-interruption, rerun `undo` or `redo` to finish the original navigation. The
-retry does not take another step. Save and watcher capture refuse to record a
-partially restored tree while a journal is pending.
+```sh
+yeokcham branch list
+yeokcham branch create experiment
+yeokcham switch experiment --preview
+yeokcham switch experiment --yes
+```
 
-Workspace mutations are serialized by a local process lock that the operating
-system releases if its owner exits. Coordinate with editors and other programs
-before replacement: the lock cannot prevent them from writing after a safety
-scan. Existing ignore rules and in-place restore restrictions apply; see
-[Troubleshooting](TROUBLESHOOTING.md).
+Initialization generates identities and captures existing files privately against
+an empty accepted genesis. Creating a named branch forks the current accepted
+version and captures current private work without changing selection. Switching
+restores the selected branch's private history position and preserves the source
+position and unsaved work. Selection survives restart. Duplicate names refuse
+without retargeting; divergent names/heads require reconciliation. Shared branches,
+drafts and local undo continuations are separate objects. These local commands do
+not implement P3's shared exchange/composition/integration loop.
 
-Checkpoint compaction preserves tree topology but can expire snapshot contents.
-A node without a retained checkpoint is marked `[compacted]` and cannot be
-restored. Its parent links remain visible; undo never silently skips it. Pin
-a checkpoint before compaction when you need its contents preserved. Recovery
-proofs and journals also protect snapshots under the existing retention policy.
+## Recovery and separate copies
 
-## Locality and existing repositories
+```sh
+yeokcham restore STATE --to NEW_OR_EMPTY_DIRECTORY --preview
+yeokcham restore STATE --to NEW_OR_EMPTY_DIRECTORY --yes
+yeokcham status
+yeokcham restore --resume --operation OPERATION_ID --preview
+yeokcham restore --resume --operation OPERATION_ID --yes
+yeokcham restore proofs
+```
 
-Node IDs, parent links, timestamps, and the current position remain local.
-Packages, relay publications, and bootstrap bases do not export them. Receiving
-shared history does not create local editing ancestry. A fresh bootstrap starts
-its own local tree.
+`--checkpoint SNAPSHOT` and `--destination DIRECTORY` remain aliases. Copy-out
+stages a complete verified directory and installs it into a new/empty destination
+on the same filesystem. It does not change source history, cursor, counter or
+branch selection, and can export a saved safety/target outside a source workspace
+whose in-place operation is conflicted. This is an explicit copy, not private
+backup. Occupied destinations and unsupported placements refuse before replacement.
 
-Existing repositories start from one root at their current checkpoint. Older
-deduplicated checkpoints cannot reconstruct ancestry. Restoring one without a
-history node creates a separate root. Snapshot-based `restore` prefers the
-closest matching ancestor, then the newest matching node; use `undo --to ID`
-when the exact position matters.
+In-place selection preflights all target contents and destination constraints.
+Noncolliding ignored files remain; a replacement covering an ignored/untracked
+obstruction refuses. Malformed rules, unsupported special files and unstable
+captures retain the last complete saved state. Git ignore configuration is not
+read. Missing or corrupt targets fail before replacement.
 
-The client reads existing V1 state records. The first saved mutation writes a
-versioned local wrapper containing the existing project/collaboration record
-and the undo tree under the same atomic state-head update. Older clients cannot
-read this wrapper. Public project and signed revision encodings are unchanged.
+A recorded operation binds its exact history position, branch and physical plan.
+`status` lists pending scopes and exact resume commands. Resume completes that
+operation without taking another undo step or scanning a partial tree. Multiple
+pending operations require `--operation`. A completed operation retry acknowledges
+its previous completion without rewriting or claiming to reverify current files.
+Keep the operation ID when acknowledgement is lost. Repeating a relative `undo`
+after a completed acknowledgement is a new request; use explicit operation retry
+when the original outcome is uncertain.
 
-All three commands support structured `--format json` results, including node
-IDs, checkpoint availability, and navigation previews. Node IDs are strings in
-JSON to preserve integer precision. Root timestamps use zero when the original
-capture time is unavailable.
+Application retains displaced original files/directories under
+`.yeokcham/restore-staging/OPERATION_ID/`. Native identities and contents are checked
+before continuing; unexpected external edits cause a conflict, retaining both
+versions. A crash after materialization can finish metadata without replaying over
+later edits. Equal-content cursor moves are journaled without rewriting files.
+Destructive source selections retain safety and target snapshots through restore
+proofs; metadata-only moves and copy-outs do not fabricate destructive proofs.
 
-P2's history foundation now persists a generated 128-bit workspace namespace
-with the node counter in the existing project-state root. A node's full identity
-is `(workspace ID, sequence)`; short numeric IDs remain convenient within one
-workspace. Selection never resets the counter. Separate workspaces can have the
-same short sequence without sharing a history identity. Existing current data
-keeps its known ancestry when a namespace is first bound on a mutating write.
-The P2 CLI lists and creates named shared branches with `branch list` and
-`branch create NAME`. `switch NAME --preview` inspects the target private
-position, changed paths and preservation of source disk edits. Apply with
-`switch NAME --yes` in automation; interactive selection previews and defaults
-to cancel. A change to the saved state or observed contents after interactive
-preview requires a fresh preview. These branch identities are separate from
-undo continuations. Private positions survive switching and restart; creating
-or switching branches does not accept or publish private work. P3 exchange and
-integration remain separate work.
+Do not delete journals or staging directories to clear conflicts. Preserve them
+and the live files; copy a retained safety/target elsewhere for inspection.
+Forgetting a proof or collecting immutable objects does not delete displaced
+native files. Legacy partial journals without physical identity plans refuse
+unexplained replacement. Source rollback alone cannot restore filesystem state.
 
-In-place navigation now stages verified contents, uses exclusive moves or
-atomic exchange, and retains displaced original nodes under
-`.yeokcham/restore-staging/OPERATION/`. Recovery checks native identities before
-continuing; unexplained external edits cause a conflict without an automatic
-rollback. Preserve those directories when keeping recovery data: forgetting a
-proof or collecting immutable objects does not remove retained native nodes.
-Noncolliding ignored files remain in place; a directory-to-file replacement
-that would cover an ignored child refuses before replacement. Legacy partial
-journals without physical identity plans refuse unexplained replacement;
-recover their retained snapshots into separate directories and preserve the
-live tree for diagnosis. Do not delete a journal to clear a conflict.
+The writer lock serializes Yeokcham processes, not external editors. Real process
+interruption tests run on native Linux. No claim here covers power-loss behavior
+on every filesystem or native macOS/Windows validation. Unsupported atomic
+filesystem operations refuse explicitly.
 
-Snapshot copy-out through `restore --checkpoint SNAPSHOT --destination DIRECTORY`
-now stages a complete directory and installs it atomically into a new/empty
-same-filesystem destination. It leaves source history/branch selection unchanged,
-retains a displaced empty directory and refuses an occupied destination. This is
-an explicit recovery copy; it does not configure automatic private backup.
-
-P2 remains in progress: complete undo/redo/restore confirmation and structured
-recovery journeys, ordinary state-selection syntax and final acceptance evidence
-are pending.
+Compaction preserves topology but can expire contents. `history` distinguishes
+not retained from unavailable/corrupt contents and reports archive as unconfigured.
+Pin needed snapshots; private branch positions, pending journals and destructive
+restore proofs are retention roots. Local ancestry is not exported by existing
+public package/relay operations. Existing V1 roots remain readable; a namespace is
+bound on a saved mutation without inventing ancestry. Older clients may not read
+new local wrappers/journals; preserve current data before changing versions.

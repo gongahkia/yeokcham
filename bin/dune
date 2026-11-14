@@ -33,6 +33,7 @@
   yeokcham_v1_package
   yeokcham_v1_proposal
   yeokcham_v1_recovery
+  yeokcham_v1_restore_journal
   yeokcham_v1_repair
   yeokcham_v1_sync
   yeokcham_v1_transport

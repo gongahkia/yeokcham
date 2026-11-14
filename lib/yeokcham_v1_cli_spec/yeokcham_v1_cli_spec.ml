@@ -60,7 +60,14 @@ let commands =
     command [ "branch"; "list" ];
     command [ "branch"; "create" ];
     command ~hook:true [ "switch" ]
-      ~options:[ root; flag "--preview"; flag "--dry-run"; flag "--yes" ];
+      ~options:
+        [
+          root;
+          flag "--preview";
+          flag "--dry-run";
+          flag "--yes";
+          identifier "--plan";
+        ];
     command ~options:[] [ "ignore" ];
     command [ "ignore"; "explain" ];
     command ~options:[] [ "workspace" ];
@@ -110,11 +117,39 @@ let commands =
     command [ "timeline" ];
     command [ "undo-tree" ];
     command ~hook:true [ "undo" ]
-      ~options:[ root; identifier "--to"; flag "--dry-run" ];
+      ~options:
+        [
+          root;
+          identifier "--to";
+          flag "--preview";
+          flag "--dry-run";
+          flag "--yes";
+          identifier "--plan";
+        ];
     command ~hook:true [ "redo" ]
-      ~options:[ root; identifier "--node"; flag "--dry-run" ];
+      ~options:
+        [
+          root;
+          identifier "--node";
+          flag "--preview";
+          flag "--dry-run";
+          flag "--yes";
+          identifier "--plan";
+        ];
     command ~hook:true [ "restore" ]
-      ~options:[ root; identifier "--checkpoint"; path "--destination" ];
+      ~options:
+        [
+          root;
+          identifier "--checkpoint";
+          path "--destination";
+          path "--to";
+          flag "--resume";
+          identifier "--operation";
+          flag "--preview";
+          flag "--dry-run";
+          flag "--yes";
+          identifier "--plan";
+        ];
     command [ "restore"; "proofs" ];
     command ~hook:true [ "restore"; "retain" ]
       ~options:[ root; identifier "--operation" ];

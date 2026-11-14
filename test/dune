@@ -722,3 +722,21 @@
  (name test_core_trust)
  (modules test_core_trust)
  (libraries alcotest yeokcham_v1_model yeokcham_v1_record yeokcham_v1_trust))
+
+(executable
+ (name local_cli_fault)
+ (modules local_cli_fault)
+ (libraries unix yeokcham_v1_model yeokcham_v1_local_service))
+
+(rule
+ (alias runtest)
+ (deps
+  test_local_selection_cli.py
+  local_cli_fault.exe
+  ../bin/yeokcham_v1.exe)
+ (action
+  (run
+   python3
+   %{dep:test_local_selection_cli.py}
+   %{dep:../bin/yeokcham_v1.exe}
+   %{dep:local_cli_fault.exe})))
