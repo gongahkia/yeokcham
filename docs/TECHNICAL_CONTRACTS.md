@@ -785,7 +785,7 @@ the same logical contract. Expose downloaded versus materializable scope separat
 
 November 14 delivery-order amendment: D30 prioritizes the complete everyday VCS
 [pilot](PILOT_PLAN.md). Its P0 assessment and P1 foundation are complete; P2 is
-ready and unstarted, and full G02 remains partial. Use separately scoped pilot
+in progress, and full G02 remains partial. Use separately scoped pilot
 slices and retain G01-G20 as the full backlog. Shared schemas precede consumers;
 verified composition, protected
 private work, native custody and durable application remain required for the

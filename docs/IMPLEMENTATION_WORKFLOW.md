@@ -10,7 +10,7 @@ start any implementation goal. The starting design commit is
 On November 14, 2026, the user prioritized evaluating the existing workflow and
 delivering a complete everyday VCS pilot with essential primitives first. Read
 [Pilot plan](PILOT_PLAN.md) before selecting the next implementation task. P0's
-evaluation and P1 foundation are complete; P2 is ready and unstarted, P3/P4 are
+evaluation and P1 foundation are complete; P2 is in progress, P3/P4 are
 pending, and full G02 remains partial. See the progress ledger and P1 report.
 
 The pilot is a delivery-order amendment to the original full-design chain.
