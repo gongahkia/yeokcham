@@ -123,6 +123,7 @@ let native_json_command command =
       "branch";
       "branch-list";
       "branch-create";
+      "switch";
       "verify";
       "repair-plan";
       "repair-apply";
@@ -270,6 +271,21 @@ let action ?(confirmation_required = false) ~root arguments explanation =
     }
 
 let[@warning "-4"] fail_local = function
+  | Service.History_error message
+    when String.starts_with ~prefix:"unknown branch " message ->
+      fail_with_status 2 "unknown-branch" message
+  | Service.History_error message
+    when String.starts_with ~prefix:"branch has divergent" message
+         || String.starts_with ~prefix:"branch name " message
+            && String.ends_with ~suffix:"explicitly" message ->
+      fail_with_status 3 "branch-choice-required" message
+  | Service.History_error message
+    when String.starts_with ~prefix:"local selection plan is stale" message
+         || String.starts_with ~prefix:"working files changed after preview"
+              message ->
+      fail_with_status 3 "stale-selection-plan" message
+  | Service.Selection_conflict message ->
+      fail_with_status 4 "selection-conflict" message
   | Service.Safe_application_error message ->
       fail_with_status 8 "file-application-conflict" message
   | Service.Snapshot_error
@@ -364,6 +380,7 @@ let usage_text =
   \  yeokcham join [--root PATH] --username NAME --draft ID --title TITLE \\\n\
   \     --device ID --from PATH --verify-phrase \"TWELVE WORDS\"\n\
   \  yeokcham save [--root PATH]\n\
+  \  yeokcham switch NAME [--root PATH] [--preview|--yes]\n\
   \  yeokcham status [--root PATH]\n\
   \  yeokcham changes [--root PATH]\n\
   \  yeokcham log [--root PATH]\n\
@@ -530,7 +547,17 @@ let help_for = function
          yeokcham branch create NAME [--root PATH] [--format json]\n\n\
          List authenticated shared branches or create a named fork without \
          changing selection. Private disk edits are captured locally; creation \
-         does not accept or publish them. File switching is not yet available."
+         does not accept or publish them. Use switch NAME to select a private \
+         position."
+  | [ "switch" ] ->
+      Some
+        "usage: yeokcham switch NAME [--root PATH] [--preview|--yes] [--format \
+         json]\n\n\
+         Select an authenticated named branch and its private cursor. Preview \
+         lists effects without moving files/history. Noninteractive \
+         application requires --yes; ignored obstructions and unavailable \
+         targets refuse before replacement. Interrupted switches resume their \
+         exact target."
   | [ "history" ] ->
       Some
         "usage: yeokcham history [--root PATH] [--before SEQUENCE] [--limit \
@@ -3092,8 +3119,16 @@ let[@warning "-4"] fail_branch = function
     ->
       fail_with_status 5 "identity-entropy-unavailable" message
   | Service.History_error message
-    when String.starts_with ~prefix:"branch has divergent" message ->
+    when String.starts_with ~prefix:"branch has divergent" message
+         || String.starts_with ~prefix:"branch name " message
+            && String.ends_with ~suffix:"before switching" message ->
       fail_with_status 3 "branch-choice-required" message
+  | Service.History_error message
+    when String.starts_with ~prefix:"unknown branch " message ->
+      fail_with_status 2 "unknown-branch" message
+  | (Service.Safe_application_error _ | Service.Selection_conflict _) as error
+    ->
+      fail_local error
   | error ->
       fail_with_status 6 "branch-operation-refused"
         (Service.error_to_string error)
@@ -3205,6 +3240,196 @@ let json_difference difference =
         ("before", json_entry difference.Service.before);
         ("after", json_entry difference.Service.after);
       ])
+
+let selection_choice ~data ~next_actions ~message =
+  if requested_format () = Json_format then
+    Cli_data.domain_failure ~command:(command_name ()) ~outcome:`Choice_required
+      ~error:Cli_data.{ code = "confirmation-required"; message }
+      ~data ~warnings:[] ~next_actions ()
+    |> Cli_data.encode |> print_json;
+  prerr_endline message;
+  exit 3
+
+let confirm_local_selection ~data ~next_actions ~render =
+  if requested_format () = Json_format || not (Unix.isatty Unix.stdin) then
+    selection_choice ~data ~next_actions
+      ~message:
+        "Preview the affected files, then rerun with --yes to confirm the \
+         freshly validated selection.";
+  render ();
+  prerr_string "Apply this selection and preserve current private work? [y/N] ";
+  flush stderr;
+  let answer =
+    try read_line () |> String.trim |> String.lowercase_ascii
+    with End_of_file -> ""
+  in
+  answer = "y" || answer = "yes"
+
+let switch_json ~root result =
+  let history =
+    Service.local_history ~root |> require_local |> fun h -> h.Service.undo_tree
+  in
+  let identity =
+    History.identity history result.Service.switch_target |> Result.to_option
+  in
+  `Assoc
+    [
+      ("source_state_head", `String result.Service.switch_state_head);
+      ( "observed_snapshot_id",
+        json_optional
+          (fun id -> `String (Model.Snapshot_id.to_string id))
+          result.Service.switch_observed );
+      ( "from_branch_id",
+        `String (Core.Branch_id.to_hex result.Service.switch_from) );
+      ( "target_branch_id",
+        `String (Core.Branch_id.to_hex result.Service.switch_to) );
+      ("target_history", json_optional json_history_identity identity);
+      ( "target_snapshot_id",
+        `String
+          (Model.Snapshot_id.to_string
+             result.Service.switch_target.History.snapshot) );
+      ("captures_unsaved", `Bool result.Service.switch_captures_unsaved);
+      ("applied", `Bool result.Service.switch_applied);
+      ("changes", `List (List.map json_difference result.Service.switch_changes));
+      ( "recovery",
+        json_optional
+          (fun r ->
+            `Assoc
+              [
+                ("operation_id", `String r.Service.restore_operation);
+                ( "safety_snapshot_id",
+                  `String
+                    (Model.Snapshot_id.to_string r.Service.safety_checkpoint) );
+                ( "target_snapshot_id",
+                  `String
+                    (Model.Snapshot_id.to_string r.Service.restored_checkpoint)
+                );
+                ("resumed", `Bool r.Service.resumed);
+                ( "retained_directory_relative",
+                  `String
+                    (".yeokcham/restore-staging/" ^ r.Service.restore_operation)
+                );
+              ])
+          result.Service.switch_restore );
+    ]
+
+let render_switch_text result =
+  Printf.printf "%s branch:%s at node %Ld (snapshot %s)\n"
+    (if result.Service.switch_applied then "selected" else "selection")
+    (Core.Branch_id.to_hex result.Service.switch_to)
+    result.Service.switch_target.History.id
+    (Model.Snapshot_id.to_string result.Service.switch_target.History.snapshot);
+  if result.Service.switch_captures_unsaved then
+    print_endline "Preserve unsaved disk edits on the source branch.";
+  List.iter
+    (fun d ->
+      Printf.printf "%s: %s -> %s\n"
+        (Output.display_value (Model.Path.to_string d.Service.path))
+        (render_snapshot_entry d.Service.before)
+        (render_snapshot_entry d.Service.after))
+    result.Service.switch_changes;
+  Option.iter
+    (fun r ->
+      Printf.printf "restore-proof %s%s\n" r.Service.restore_operation
+        (if r.Service.resumed then " (resumed original switch)" else ""))
+    result.Service.switch_restore
+
+let run_switch arguments =
+  let rec parse root name preview yes = function
+    | [] ->
+        ( Option.value root ~default:default_root,
+          Option.value name ~default:"",
+          preview,
+          yes )
+    | "--root" :: value :: rest when root = None ->
+        parse (Some value) name preview yes rest
+    | ("--preview" | "--dry-run") :: rest when not preview ->
+        parse root name true yes rest
+    | "--yes" :: rest when not yes -> parse root name preview true rest
+    | "--" :: [ value ] when name = None ->
+        parse root (Some value) preview yes []
+    | value :: rest
+      when name = None && not (String.starts_with ~prefix:"-" value) ->
+        parse root (Some value) preview yes rest
+    | _ -> usage ()
+  in
+  let root, name, preview, yes = parse None None false false arguments in
+  (match Core.validate_branch_name name with
+  | Ok () -> ()
+  | Error e -> fail_with_status 2 "invalid-branch-name" (Core.error_to_string e));
+  if preview && yes then
+    fail_with_status 2 "invalid-invocation"
+      "--preview and --yes are mutually exclusive";
+  let next_actions =
+    [
+      action ~confirmation_required:true ~root
+        [ "switch"; name; "--yes" ]
+        "Select this named branch after fresh preflight.";
+      action ~root
+        [ "switch"; name; "--preview" ]
+        "Inspect selection effects without moving history or files.";
+    ]
+  in
+  let inspected =
+    if yes then None
+    else Some (Service.branch_switch ~root ~name ~dry_run:true |> require_local)
+  in
+  let unchanged =
+    Option.fold ~none:false
+      ~some:(fun r ->
+        Core.Branch_id.equal r.Service.switch_from r.Service.switch_to)
+      inspected
+  in
+  let cancelled =
+    (not yes) && (not preview) && (not unchanged)
+    && not
+         (confirm_local_selection
+            ~data:(switch_json ~root (Option.get inspected))
+            ~next_actions
+            ~render:(fun () -> render_switch_text (Option.get inspected)))
+  in
+  let result =
+    if yes then
+      Service.branch_switch ~root ~name ~dry_run:false |> require_local
+    else if not (preview || unchanged || cancelled) then
+      Service.branch_switch_confirmed ~root ~name
+        ~preview:(Option.get inspected)
+      |> require_local
+    else Option.get inspected
+  in
+  let unchanged =
+    (not result.Service.switch_applied)
+    && Core.Branch_id.equal result.Service.switch_from result.Service.switch_to
+  in
+  if requested_format () = Json_format then
+    domain_json
+      ?operation_id:
+        (Option.map
+           (fun r -> r.Service.restore_operation)
+           result.Service.switch_restore)
+      ~outcome:(if cancelled || unchanged then `Unchanged else `Completed)
+      ~code:
+        (if cancelled then "selection-cancelled"
+         else if unchanged then "branch-already-selected"
+         else if preview then "switch-preview"
+         else "branch-selected")
+      ~message:
+        (if cancelled then
+           "Selection cancelled; files and history are unchanged."
+         else if preview then
+           "Branch selection preview; files and history are unchanged."
+         else if unchanged then "The named branch is already selected."
+         else "Branch and exact private history position selected.")
+      ~data:(switch_json ~root result)
+      ~next_actions:
+        (if preview then next_actions
+         else
+           [ action ~root [ "status" ] "Inspect local work after selection." ])
+      ()
+  else if cancelled then
+    print_endline "Selection cancelled; files and history are unchanged."
+  else render_switch_text result;
+  result.Service.switch_applied
 
 let json_hunk hunk =
   `Assoc
@@ -5245,6 +5470,9 @@ let dispatch () =
   | _ :: "ignore" :: "explain" :: arguments -> run_ignore_explain arguments
   | _ :: "branch" :: "list" :: arguments -> run_branch_list arguments
   | _ :: "branch" :: "create" :: arguments -> run_branch_create arguments
+  | _ :: "switch" :: arguments ->
+      observe_after_commit [ "switch" ] arguments (fun () ->
+          run_switch arguments)
   | _ :: "branch" :: arguments -> run_branch_list arguments
   | _ :: "status" :: arguments -> run_status arguments
   | _ :: "history" :: arguments -> run_history arguments

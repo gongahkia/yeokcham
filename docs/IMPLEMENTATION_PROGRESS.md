@@ -595,3 +595,24 @@ recovery. Engine coverage is now fourteen cases, including root-path replacement
 at the mutation boundary. The initial formatter runs exited 1 while promoting
 output; subsequent lint passed. Unaffected Dune results may be cached; no G01
 measurements were rerun.
+
+P2 branch-switch checkpoint: actual named selection now preserves source private
+work and target history positions, including equal contents at distinct nodes.
+The native branch suite passed fourteen cases (seven new switch cases), including
+fresh-process selection, unavailable targets, ignored obstructions, nine real
+process exits around switch mutation/metadata and edits after Materialized.
+The CLI branch suite passed fifteen cases (seven new), covering mixed text/binary
+journeys, JSON exit-3 confirmation data/actions, preview without staging/history
+writes, explicit confirmation, interactive cancellation, stale preview refusal,
+unknown names and ignored-file preservation/conflicts. Navigation preview now
+uses the same read-only target/filesystem preflight. Target validation streams
+large contents. P2 remains incomplete: complete undo/redo/restore confirmation
+and JSON recovery journeys, copy-out safety, lock/GC interruption audits and
+final acceptance report/receipt are still required. P3 remains unstarted.
+
+Branch-switch checkpoint verification: `make build`, `make lint`, `make ci`
+exited 0; logs are `build-branch-switch.log`, `lint-branch-switch.log` and
+`ci-branch-switch.log` in the P2 external log directory. Formatter promotion
+exited 1 on its first run; lint subsequently passed. Focused native branch and
+CLI journeys passed before the broad checks; unaffected Dune results may be
+cached. README and accepted G01 measurements remain unchanged.

@@ -11,6 +11,7 @@ module Text_diff = Text_diff
 type error =
   | History_error of string
   | Safe_application_error of string
+  | Selection_conflict of string
   | Store_error of Yeokcham_v1_store.error
   | Snapshot_error of Yeokcham_snapshot.error
   | Materialize_error of Yeokcham_snapshot.Materialize.error
@@ -807,7 +808,38 @@ type application_boundary =
   | Published_journal
   | Filesystem_mutation of Safe_apply.boundary * string list
 
+type branch_switch = {
+  switch_state_head : string;
+  switch_observed : Yeokcham_v1_model.Snapshot_id.t option;
+  switch_from : Yeokcham_v1_model.Core.Branch_id.t;
+  switch_to : Yeokcham_v1_model.Core.Branch_id.t;
+  switch_target : Yeokcham_v1_undo.node;
+  switch_changes : path_difference list;
+  switch_captures_unsaved : bool;
+  switch_applied : bool;
+  switch_restore : in_place_restore option;
+}
+
+val branch_switch_confirmed :
+  root:string ->
+  name:string ->
+  preview:branch_switch ->
+  (branch_switch, error) result
+
+val branch_switch :
+  root:string -> name:string -> dry_run:bool -> (branch_switch, error) result
+(** Capture private source work, preflight exact target contents/obstructions,
+    and journal file changes before atomically publishing branch and cursor.
+    Preview has no history, ordinary-file or staging writes. *)
+
 module For_test : sig
+  val branch_switch :
+    observe:(application_boundary -> unit) ->
+    root:string ->
+    name:string ->
+    dry_run:bool ->
+    (branch_switch, error) result
+
   val restore_in_place :
     observe:(application_boundary -> unit) ->
     root:string ->

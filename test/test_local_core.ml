@@ -522,11 +522,301 @@ let branch_work_is_a_retention_root () =
       | Yeokcham_v1_gc.Collect ->
           Alcotest.fail "GC planned to collect branch working contents")
 
+module Service = Yeokcham_v1_local_service
+
+let service r = ok Service.error_to_string r
+
+let write_private root bytes =
+  Out_channel.with_open_bin (Filename.concat root "private.bin") (fun out ->
+      output_string out bytes)
+
+let read_private root =
+  In_channel.with_open_bin
+    (Filename.concat root "private.bin")
+    In_channel.input_all
+
+let switch root name =
+  Service.branch_switch ~root ~name ~dry_run:false |> service
+
+let make_topic root capability =
+  Service.branch_create ~root ~name:"topic" ~signing_capability:capability
+  |> service |> ignore
+
+let selected_name repository =
+  let local = local (load repository) in
+  let selected = (L.selected local).L.branch in
+  List.find
+    (fun row -> C.Branch_id.equal row.C.branch_id selected)
+    (L.branches local)
+  |> fun row -> row.C.display_names
+
+let private_switch_journey () =
+  with_root (fun root ->
+      let repository, capability, _, _, _ = initialize root in
+      let original = read_private root in
+      make_topic root capability;
+      write_private root "B unsaved\000";
+      let before = load repository in
+      let preview =
+        Service.branch_switch ~root ~name:"topic" ~dry_run:true |> service
+      in
+      Alcotest.(check bool)
+        "preview explains preservation" true
+        preview.Service.switch_captures_unsaved;
+      Alcotest.(check bool)
+        "preview has real differences" true
+        (preview.Service.switch_changes <> []);
+      Alcotest.(check bool)
+        "preview does not publish a root" true
+        (Raw.Stored_object_id.equal before.S.object_id
+           (load repository).S.object_id);
+      Alcotest.(check bool)
+        "preview does not stage files" false
+        (Sys.file_exists (Filename.concat root ".yeokcham/restore-staging"));
+      Alcotest.(check string)
+        "preview leaves working bytes" "B unsaved\000" (read_private root);
+      ignore (switch root "topic");
+      Alcotest.(check string)
+        "target private contents" original (read_private root);
+      write_private root "C topic\255";
+      ignore (switch root "main");
+      Alcotest.(check string)
+        "source unsaved private work recovered" "B unsaved\000"
+        (read_private root);
+      let child = Unix.fork () in
+      (if child = 0 then
+         try
+           ignore (switch root "topic");
+           Unix._exit 0
+         with _ -> Unix._exit 1);
+      let _, status = Unix.waitpid [] child in
+      Alcotest.(check bool)
+        "fresh process switched" true (status = Unix.WEXITED 0);
+      Alcotest.(check string)
+        "topic private alternative survived restart" "C topic\255"
+        (read_private root);
+      Alcotest.(check (list string))
+        "selection persisted" [ "topic" ] (selected_name repository);
+      let current = load repository in
+      Alcotest.(check int)
+        "three actual local states" 3
+        (List.length (H.nodes current.S.history));
+      Alcotest.(check int)
+        "two shared branches distinct from local alternatives" 2
+        (List.length (L.branches (local current)));
+      Alcotest.(check (list int64))
+        "alternate continuations retained" [ 1L; 2L ]
+        (H.children current.S.history 0L |> List.map (fun node -> node.H.id)))
+
+let equal_content_switch_keeps_positions () =
+  with_root (fun root ->
+      let repository, capability, _, _, _ = initialize root in
+      write_private root "B";
+      Service.save ~root |> service |> ignore;
+      make_topic root capability;
+      write_private root "C";
+      Service.save ~root |> service |> ignore;
+      write_private root "B";
+      let inode =
+        (Unix.lstat (Filename.concat root "private.bin")).Unix.st_ino
+      in
+      ignore (switch root "topic");
+      let current = load repository in
+      Alcotest.(check int64)
+        "select exact existing target position" 1L
+        (H.current current.S.history).H.id;
+      Alcotest.(check int64)
+        "source identical contents retained at another position" 3L
+        (L.lookup (local current) "main" |> ok Fun.id).L.cursor;
+      Alcotest.(check int)
+        "equal bytes need no file replacement" inode
+        (Unix.lstat (Filename.concat root "private.bin")).Unix.st_ino;
+      ignore (switch root "main");
+      let current = load repository in
+      Alcotest.(check int64)
+        "same contents different node selected" 3L
+        (H.current current.S.history).H.id;
+      Alcotest.(check int)
+        "no duplicate observation" 4
+        (List.length (H.nodes current.S.history)))
+
+let switch_same_branch_is_noop () =
+  with_root (fun root ->
+      let repository, _, _, _, _ = initialize root in
+      write_private root "unsaved";
+      let before = load repository in
+      let result = switch root "main" in
+      Alcotest.(check bool) "no-op reported" false result.Service.switch_applied;
+      Alcotest.(check string)
+        "unsaved bytes unchanged" "unsaved" (read_private root);
+      Alcotest.(check bool)
+        "no root publication" true
+        (Raw.Stored_object_id.equal before.S.object_id
+           (load repository).S.object_id))
+
+let switch_unavailable_target () =
+  with_root (fun root ->
+      let repository, capability, _, _, _ = initialize root in
+      make_topic root capability;
+      let raw = S.underlying_store repository in
+      let captured, _ =
+        Snapshot.scan ~root ~store:raw |> ok Snapshot.error_to_string
+      in
+      let target =
+        Snapshot.Snapshot.load raw captured |> ok Snapshot.error_to_string
+      in
+      let tree =
+        Snapshot.Tree.load raw (Snapshot.Snapshot.root target)
+        |> ok Snapshot.error_to_string
+      in
+      let content =
+        match List.assoc "private.bin" (Snapshot.Tree.entries tree) with
+        | Snapshot.Tree.File file -> file.content
+        | Snapshot.Tree.Directory _ -> Alcotest.fail "expected file"
+      in
+      write_private root "new source";
+      Service.save ~root |> service |> ignore;
+      let before = load repository in
+      Unix.unlink
+        (Raw.object_path raw (Snapshot.Content.stored_object_id content));
+      reject "switched to missing contents"
+        (Service.branch_switch ~root ~name:"topic" ~dry_run:false);
+      Alcotest.(check string)
+        "source bytes unchanged" "new source" (read_private root);
+      Alcotest.(check bool)
+        "root unchanged" true
+        (Raw.Stored_object_id.equal before.S.object_id
+           (load repository).S.object_id);
+      Alcotest.(check bool)
+        "no journal" true
+        (Option.is_none
+           (Yeokcham_v1_restore_journal.latest_pending ~root
+           |> ok Yeokcham_v1_restore_journal.error_to_string)))
+
+let switch_ignored_obstruction () =
+  with_root (fun root ->
+      let repository, capability, _, _, _ = initialize root in
+      Out_channel.with_open_bin (Filename.concat root ".yeokchamignore")
+        (fun out -> output_string out "*.private\n");
+      Out_channel.with_open_bin (Filename.concat root "node") (fun out ->
+          output_string out "target file");
+      Service.save ~root |> service |> ignore;
+      make_topic root capability;
+      Unix.unlink (Filename.concat root "node");
+      Unix.mkdir (Filename.concat root "node") 0o700;
+      Out_channel.with_open_bin (Filename.concat root "node/secret.private")
+        (fun out -> output_string out "ignored secret");
+      let before = load repository in
+      reject "replaced ignored directory obstruction"
+        (Service.branch_switch ~root ~name:"topic" ~dry_run:false);
+      Alcotest.(check string)
+        "ignored secret preserved" "ignored secret"
+        (In_channel.with_open_bin
+           (Filename.concat root "node/secret.private")
+           In_channel.input_all);
+      Alcotest.(check bool)
+        "refusal did not publish metadata" true
+        (Raw.Stored_object_id.equal before.S.object_id
+           (load repository).S.object_id))
+
+let interrupted_switch_keeps_exact_target () =
+  List.iter
+    (fun boundary ->
+      with_root (fun root ->
+          let repository, capability, _, _, _ = initialize root in
+          let target = read_private root in
+          make_topic root capability;
+          write_private root "private main edits";
+          let child = Unix.fork () in
+          if child = 0 then (
+            let observe seen = if seen = boundary then Unix._exit 73 in
+            ignore
+              (Service.For_test.branch_switch ~observe ~root ~name:"topic"
+                 ~dry_run:false);
+            Unix._exit 74);
+          let _, status = Unix.waitpid [] child in
+          Alcotest.(check bool)
+            "stopped at actual switch boundary" true (status = Unix.WEXITED 73);
+          ignore (switch root "topic");
+          let current = load repository in
+          Alcotest.(check string)
+            "original exact target restored" target (read_private root);
+          Alcotest.(check (list string))
+            "target branch selected" [ "topic" ] (selected_name repository);
+          Alcotest.(check int64)
+            "exact target cursor" 0L (H.current current.S.history).H.id;
+          Alcotest.(check int)
+            "source captured only once" 2
+            (List.length (H.nodes current.S.history));
+          Alcotest.(check int64)
+            "source private cursor retained" 1L
+            (L.lookup (local current) "main" |> ok Fun.id).L.cursor;
+          ignore (switch root "main");
+          Alcotest.(check string)
+            "source edits recoverable" "private main edits" (read_private root)))
+    [
+      Service.Before_safety_publish;
+      Service.After_safety_publish;
+      Service.Prepared_journal;
+      Service.Applying_journal;
+      Service.Filesystem_mutation
+        (Service.Safe_apply.After_mutation, [ "private.bin" ]);
+      Service.Materialized_journal;
+      Service.Before_metadata_publish;
+      Service.After_metadata_publish;
+      Service.Published_journal;
+    ]
+
+let external_edit_after_materialized_switch () =
+  with_root (fun root ->
+      let repository, capability, _, _, _ = initialize root in
+      make_topic root capability;
+      write_private root "source private";
+      let child = Unix.fork () in
+      if child = 0 then (
+        ignore
+          (Service.For_test.branch_switch
+             ~observe:(fun stage ->
+               if stage = Service.Materialized_journal then Unix._exit 73)
+             ~root ~name:"topic" ~dry_run:false);
+        Unix._exit 74);
+      let _, status = Unix.waitpid [] child in
+      Alcotest.(check bool)
+        "materialized phase reached" true (status = Unix.WEXITED 73);
+      write_private root "later external edit";
+      ignore (switch root "topic");
+      Alcotest.(check string)
+        "later external bytes survive publication" "later external edit"
+        (read_private root);
+      Alcotest.(check int)
+        "later edits were not captured as partial application" 2
+        (List.length (H.nodes (load repository).S.history));
+      Alcotest.(check bool)
+        "later edits reported honestly" true
+        (Service.status ~root |> service).Service.uncaptured)
+
 let () =
   Alcotest.run "Local authenticated branch state"
     [
       ( "state",
         [
+          Alcotest.test_case "private switching across fresh processes" `Quick
+            private_switch_journey;
+          Alcotest.test_case "equal contents keep exact branch positions" `Quick
+            equal_content_switch_keeps_positions;
+          Alcotest.test_case
+            "same branch preserves unsaved work without capture" `Quick
+            switch_same_branch_is_noop;
+          Alcotest.test_case
+            "unavailable branch target fails before replacement" `Quick
+            switch_unavailable_target;
+          Alcotest.test_case "ignored obstruction refuses before metadata"
+            `Quick switch_ignored_obstruction;
+          Alcotest.test_case
+            "switch resumes exact target across mutation and metadata exits"
+            `Quick interrupted_switch_keeps_exact_target;
+          Alcotest.test_case "later external edit survives Materialized retry"
+            `Quick external_edit_after_materialized_switch;
           Alcotest.test_case
             "private initialization and signed empty acceptance" `Quick
             private_initialization;

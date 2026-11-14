@@ -398,7 +398,7 @@ boundary and escaped plain text. `Core.validate_branch_name` is shared by the
 constructor, store adapter and CLI argument check. Full target JSON outcomes
 and ordinary inspection journeys remain P2 work.
 
-This checkpoint does not implement switch. The legacy V1 share/deliver path is
+`Service.branch_switch` now implements private file selection (documented below). The legacy V1 share/deliver path is
 not native core acceptance; P3 must connect explicit publication/integration
 through its real policy/composition boundary. Existing proposal CLI fixtures
 now explicitly share/deliver their initial V1 baseline, rather than relying on
@@ -514,7 +514,7 @@ caller-owned private staging file. Failure may leave partial staged bytes.
 `Observation.scan` returns the successful capture's included-entry fingerprints,
 ignore-rule read set and raw directory names (without reading ignored contents).
 These observations do not reserve names or constitute a filesystem transaction.
-The existing destructive restore path is not yet replaced by these primitives.
+These primitives now support staged P2 in-place navigation; copy-out and the legacy activation adapter require further hardening.
 
 `Yeokcham_v1_local_service.Safe_apply` prepares bounded canonical physical plans
 under `.yeokcham/restore-staging/OPERATION/`, binds them to safety/target snapshot
@@ -530,8 +530,7 @@ continuing. Unknown states refuse with the path and retained slot; there is no
 automatic rollback over external edits. `For_test.apply` exposes trusted
 in-process hooks before/after actual mutations and after directory fsyncs.
 Casefold directories, cross-filesystem application and unavailable native rename
-semantics refuse explicitly. This checkpoint does not yet connect the engine to
-the restore journal or CLI; the existing restore path remains outstanding.
+semantics refuse explicitly. The engine is now connected to the schema-3 restore journal, navigation and CLI switch described below.
 
 P2 navigation now uses the physical engine. Restore journal schema 3 extends
 schema 2 with a 32-byte physical-plan digest and optional typed branch identity.
@@ -555,5 +554,31 @@ changed branch selection unless the submitted history already selects that
 branch's exact retained cursor. This prevents accidental branch retargeting.
 `Service.For_test` provides in-process hooks at safety publication, journal
 phases, actual file mutations and metadata publication; no CLI, project file or
-environment setting enables those hooks. CLI switch, complete preview and
-copy-out hardening remain outstanding at this checkpoint.
+environment setting enables those hooks. CLI switch is now delivered below;
+complete navigation confirmation and copy-out hardening remain outstanding.
+
+
+`Service.branch_switch ~root ~name ~dry_run` resolves an unambiguous authenticated
+branch and its exact private history node. A different branch causes a complete
+source observation, full target-closure and read-only filesystem preflight,
+then either a metadata-only selection for equal contents or the schema-3
+journaled file operation. The source branch remembers its private safety cursor;
+the target retains its own cursor. Selecting the current branch is a no-op and
+does not capture unsaved files. Pending switches resume only their original
+target; unrelated operations refuse. `branch_switch_confirmed ~preview` checks
+the state-head, target branch/node and observed contents under the writer lock;
+stale interactive previews cannot apply another plan. `branch_switch` results
+carry those scope values, exact changed paths, capture effects and recovery IDs.
+`For_test.branch_switch` exercises actual mutation and metadata boundaries.
+
+`Safe_apply.check` performs read-only preflight without staging or ordinary-file,
+history or journal writes. Actual application also stages native representations
+and probes exclusive rename/exchange before replacement. The target planner now
+uses streaming content verification and bounded symlink targets. The CLI
+`switch NAME [--preview|--yes]` emits schema-2 domain data with typed branch and
+full workspace/history identities, changes and retained recovery-directory
+references. Noninteractive selection without confirmation returns exit 3 and
+literal next actions; default interactive cancellation changes no files/history.
+Initial selection obstructions return exit 4; a conflicted pending application
+returns exit 8. Required missing content remains unavailable (5), integrity and
+unsupported state fail closed (6), and unknown names are invalid (2).

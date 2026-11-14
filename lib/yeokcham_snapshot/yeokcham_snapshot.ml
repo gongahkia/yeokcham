@@ -946,17 +946,19 @@ module Materialize = struct
             let path = prefix @ [ name ] in
             let* actions =
               match entry with
-              | Tree.File { mode = Symlink; content } ->
+              | Tree.File { mode = Symlink; content } -> (
                   let* target =
-                    Content.load repository content
+                    Content.load_bounded repository ~max_bytes:65536 content
                     |> Result.map_error (fun error -> Snapshot_error error)
                   in
-                  if String.is_empty target || String.contains target '\000'
-                  then Error (Invalid_symlink_target path)
-                  else Ok [ Create_symlink { path; target = content } ]
+                  match target with
+                  | Some target
+                    when target <> "" && not (String.contains target '\000') ->
+                      Ok [ Create_symlink { path; target = content } ]
+                  | Some _ | None -> Error (Invalid_symlink_target path))
               | Tree.File { mode = (Regular | Executable) as mode; content } ->
-                  let* _ =
-                    Content.load repository content
+                  let* () =
+                    Content.verify repository content
                     |> Result.map_error (fun error -> Snapshot_error error)
                   in
                   Ok [ Write_file { path; content; mode } ]

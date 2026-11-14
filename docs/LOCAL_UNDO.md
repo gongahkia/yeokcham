@@ -118,6 +118,27 @@ is `(workspace ID, sequence)`; short numeric IDs remain convenient within one
 workspace. Selection never resets the counter. Separate workspaces can have the
 same short sequence without sharing a history identity. Existing current data
 keeps its known ancestry when a namespace is first bound on a mutating write.
-The P2 CLI now lists and creates named shared branches with `branch list` and
-`branch create NAME`. These identities are separate from undo continuations.
-File switching remains unfinished in the current checkpoint.
+The P2 CLI lists and creates named shared branches with `branch list` and
+`branch create NAME`. `switch NAME --preview` inspects the target private
+position, changed paths and preservation of source disk edits. Apply with
+`switch NAME --yes` in automation; interactive selection previews and defaults
+to cancel. A change to the saved state or observed contents after interactive
+preview requires a fresh preview. These branch identities are separate from
+undo continuations. Private positions survive switching and restart; creating
+or switching branches does not accept or publish private work. P3 exchange and
+integration remain separate work.
+
+In-place navigation now stages verified contents, uses exclusive moves or
+atomic exchange, and retains displaced original nodes under
+`.yeokcham/restore-staging/OPERATION/`. Recovery checks native identities before
+continuing; unexplained external edits cause a conflict without an automatic
+rollback. Preserve those directories when keeping recovery data: forgetting a
+proof or collecting immutable objects does not remove retained native nodes.
+Noncolliding ignored files remain in place; a directory-to-file replacement
+that would cover an ignored child refuses before replacement. Legacy partial
+journals without physical identity plans refuse unexplained replacement;
+recover their retained snapshots into separate directories and preserve the
+live tree for diagnosis. Do not delete a journal to clear a conflict.
+
+P2 remains in progress: complete undo/redo/restore confirmation and structured
+recovery journeys, copy-out hardening and final acceptance evidence are pending.

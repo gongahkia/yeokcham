@@ -59,6 +59,8 @@ let commands =
     command ~options:[] [ "branch" ];
     command [ "branch"; "list" ];
     command [ "branch"; "create" ];
+    command ~hook:true [ "switch" ]
+      ~options:[ root; flag "--preview"; flag "--dry-run"; flag "--yes" ];
     command ~options:[] [ "ignore" ];
     command [ "ignore"; "explain" ];
     command ~options:[] [ "workspace" ];

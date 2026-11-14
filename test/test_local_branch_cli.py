@@ -4,6 +4,9 @@ The explicit test signer lives outside the workspace and never represents
 native credential-store or managed-service acceptance.
 """
 import json
+import pty
+import select
+import time
 import os
 from pathlib import Path
 import subprocess
@@ -156,6 +159,161 @@ class LocalBranchCliTests(unittest.TestCase):
             result = self.run_cli("help", *command.split())
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn("usage:", result.stdout)
+
+    def make_topic(self):
+        result = self.run_cli("branch", "create", "topic", "--root", self.root, machine=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return json.loads(result.stdout)["data"]
+
+    def test_switch_choice_preview_and_confirmed_mixed_journey(self):
+        self.initialize()
+        original_notes = (self.root / "notes.txt").read_bytes()
+        original_binary = (self.root / "opaque.bin").read_bytes()
+        self.make_topic()
+        (self.root / "notes.txt").write_bytes(b"B unsaved\n")
+        (self.root / "opaque.bin").write_bytes(b"\0\xffprivate B")
+        before = self.head_bytes()
+        choice = self.run_cli("switch", "topic", "--root", self.root, machine=True)
+        self.assertEqual(choice.returncode, 3, choice.stderr)
+        value = json.loads(choice.stdout)
+        self.assertEqual(value["schema_version"], 2)
+        self.assertEqual(value["code"], "confirmation-required")
+        self.assertFalse(value["ok"])
+        self.assertFalse(value["data"]["applied"])
+        self.assertTrue(value["data"]["captures_unsaved"])
+        self.assertEqual({row["path"] for row in value["data"]["changes"]}, {"notes.txt", "opaque.bin"})
+        self.assertTrue(any("--yes" in a["arguments"] and a["confirmation_required"] for a in value["next_actions"]))
+        self.assertEqual(self.head_bytes(), before)
+        self.assertEqual((self.root / "notes.txt").read_bytes(), b"B unsaved\n")
+        preview = self.run_cli("switch", "topic", "--root", self.root, "--preview", machine=True)
+        self.assertEqual(preview.returncode, 0, preview.stderr)
+        self.assertEqual(json.loads(preview.stdout)["code"], "switch-preview")
+        self.assertEqual(self.head_bytes(), before)
+        self.assertFalse((self.root / ".yeokcham/restore-staging").exists())
+        selected = self.run_cli("switch", "topic", "--root", self.root, "--yes", machine=True)
+        self.assertEqual(selected.returncode, 0, selected.stderr)
+        data = json.loads(selected.stdout)["data"]
+        self.assertTrue(data["applied"])
+        self.assertEqual(data["target_history"]["sequence"], "0")
+        self.assertRegex(data["target_history"]["id"], r"^[0-9a-f]{32}:0$")
+        self.assertRegex(data["recovery"]["operation_id"], r"^[0-9a-f]{64}$")
+        self.assertTrue((self.root / data["recovery"]["retained_directory_relative"]).is_dir())
+        self.assertEqual((self.root / "notes.txt").read_bytes(), original_notes)
+        self.assertEqual((self.root / "opaque.bin").read_bytes(), original_binary)
+        (self.root / "notes.txt").write_bytes(b"C topic\n")
+        result = self.run_cli("switch", "main", "--root", self.root, "--yes")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("selected branch:", result.stdout)
+        self.assertEqual((self.root / "notes.txt").read_bytes(), b"B unsaved\n")
+        result = self.run_cli("switch", "topic", "--root", self.root, "--yes", machine=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((self.root / "notes.txt").read_bytes(), b"C topic\n")
+        self.assertEqual(next(b for b in self.branches()["branches"] if b["selected"])["names"], ["topic"])
+
+    def test_switch_same_branch_is_unchanged_and_needs_no_confirmation(self):
+        self.initialize()
+        (self.root / "notes.txt").write_bytes(b"unrecorded edits")
+        before = self.head_bytes()
+        for flags in [[], ["--yes"]]:
+            result = self.run_cli("switch", "main", "--root", self.root, *flags, machine=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            data = json.loads(result.stdout)
+            self.assertEqual(data["outcome"], "unchanged")
+            self.assertFalse(data["data"]["applied"])
+            self.assertEqual(self.head_bytes(), before)
+        self.assertEqual((self.root / "notes.txt").read_bytes(), b"unrecorded edits")
+
+    def test_switch_preserves_noncolliding_ignored_bytes(self):
+        self.initialize()
+        (self.root / ".yeokchamignore").write_text("cache\n")
+        self.run_cli("save", "--root", self.root)
+        self.make_topic()
+        (self.root / "notes.txt").write_bytes(b"private")
+        (self.root / "cache").write_bytes(b"ignored\0bytes")
+        inode = (self.root / "cache").stat().st_ino
+        result = self.run_cli("switch", "topic", "--root", self.root, "--yes", machine=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((self.root / "cache").read_bytes(), b"ignored\0bytes")
+        self.assertEqual((self.root / "cache").stat().st_ino, inode)
+
+    def test_switch_ignored_obstruction_is_conflict_before_replacement(self):
+        self.initialize()
+        (self.root / ".yeokchamignore").write_text("*.private\n")
+        (self.root / "node").write_bytes(b"target file")
+        self.run_cli("save", "--root", self.root)
+        self.make_topic()
+        (self.root / "node").unlink()
+        (self.root / "node").mkdir()
+        (self.root / "node/secret.private").write_bytes(b"must survive")
+        before = self.head_bytes()
+        result = self.run_cli("switch", "topic", "--root", self.root, "--yes", machine=True)
+        self.assertEqual(result.returncode, 4, result.stderr)
+        self.assertEqual(json.loads(result.stdout)["code"], "selection-conflict")
+        self.assertEqual(self.head_bytes(), before)
+        self.assertEqual((self.root / "node/secret.private").read_bytes(), b"must survive")
+
+    def test_switch_unknown_name_does_not_retarget(self):
+        self.initialize()
+        before = self.head_bytes()
+        result = self.run_cli("switch", "missing", "--root", self.root, "--yes", machine=True)
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertEqual(json.loads(result.stdout)["code"], "unknown-branch")
+        self.assertEqual(self.head_bytes(), before)
+
+    def test_interactive_switch_cancel_leaves_root_and_files(self):
+        self.initialize()
+        self.make_topic()
+        (self.root / "notes.txt").write_bytes(b"private pending")
+        before = self.head_bytes()
+        master, slave = pty.openpty()
+        process = subprocess.Popen([BINARY, "switch", "topic", "--root", str(self.root)], env=self.environment,
+                                   stdin=slave, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        os.close(slave)
+        try:
+            os.write(master, b"n\n")
+            stdout, stderr = process.communicate(timeout=15)
+        finally:
+            os.close(master)
+            if process.poll() is None:
+                process.kill()
+                process.wait()
+        self.assertEqual(process.returncode, 0, stderr)
+        self.assertIn("cancelled", stdout)
+        self.assertEqual(self.head_bytes(), before)
+        self.assertEqual((self.root / "notes.txt").read_bytes(), b"private pending")
+
+    def test_confirmed_switch_refuses_stale_working_tree(self):
+        self.initialize()
+        self.make_topic()
+        (self.root / "notes.txt").write_bytes(b"preview source")
+        before = self.head_bytes()
+        master, slave = pty.openpty()
+        process = subprocess.Popen([BINARY, "switch", "topic", "--root", str(self.root)], env=self.environment,
+                                   stdin=slave, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        os.close(slave)
+        try:
+            prompt = b""
+            deadline = time.monotonic() + 15
+            while b"[y/N]" not in prompt and time.monotonic() < deadline:
+                readable, _, _ = select.select([process.stderr], [], [], 0.2)
+                if readable:
+                    chunk = os.read(process.stderr.fileno(), 1024)
+                    if not chunk:
+                        break
+                    prompt += chunk
+            self.assertIn(b"[y/N]", prompt)
+            (self.root / "notes.txt").write_bytes(b"external edit after preview")
+            os.write(master, b"y\n")
+            stdout, stderr = process.communicate(timeout=15)
+        finally:
+            os.close(master)
+            if process.poll() is None:
+                process.kill()
+                process.wait()
+        self.assertEqual(process.returncode, 3, stderr)
+        self.assertIn(b"after preview", stderr)
+        self.assertEqual(self.head_bytes(), before)
+        self.assertEqual((self.root / "notes.txt").read_bytes(), b"external edit after preview")
 
 
 if __name__ == "__main__":

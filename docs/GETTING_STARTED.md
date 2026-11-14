@@ -122,6 +122,8 @@ command reports automatic capture and private backup as unconfigured. Use
 "$YEOKCHAM" branch list --root "$DEMO_ROOT/work"
 "$YEOKCHAM" branch create experiment --root "$DEMO_ROOT/work"
 "$YEOKCHAM" branch list --root "$DEMO_ROOT/work" --format json
+"$YEOKCHAM" switch experiment --root "$DEMO_ROOT/work" --preview
+"$YEOKCHAM" switch experiment --root "$DEMO_ROOT/work" --yes
 ```
 
 Creation saves current private disk edits and creates a named shared branch
@@ -129,7 +131,13 @@ identity at the current accepted version. It keeps the current selection and
 preserves both private positions in the existing history/state root. Names are
 case-sensitive; duplicates refuse without retargeting. JSON includes actual
 branch IDs, causal heads, workspace identity and local positions. This is a P2
-checkpoint: file switching and safe application hardening remain unfinished.
+checkpoint: `switch NAME` now selects that branch's private saved position and
+preserves source disk edits before replacement. Noninteractive selection needs
+`--yes`; `--preview` never moves files/history. Branch selection persists across
+restart. Missing target contents or ignored obstructions refuse before
+replacement; interrupted switches resume their exact original target. Full
+shared exchange/integration is P3. Remaining P2 work includes copy-out safety,
+complete navigation confirmation/outcomes and the final acceptance audit.
 Existing V1 sharing/delivery commands retain their older record semantics; they
 are not the future P3 native core exchange/integration loop.
 
@@ -157,5 +165,5 @@ If rules or a special file prevent a complete observation, `status` still shows
 saved metadata and reports capture incomplete with unknown unsaved state. It does
 not report clean. The JSON domain result includes outcomes, real data and actions;
 current result/error aliases remain supported. Watcher/service and private backup
-state are distinct from a successful local save. P2's safe switch/application
+state are distinct from a successful local save. P2's remaining application
 work remains in progress.

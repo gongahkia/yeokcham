@@ -1,3 +1,13 @@
+val check :
+  root:string ->
+  store:Yeokcham_store.repository ->
+  safety:Yeokcham_snapshot.Snapshot.id ->
+  target:Yeokcham_snapshot.Snapshot.id ->
+  Yeokcham_snapshot.Observation.t ->
+  (unit, string) result
+
+(* read-only preflight: no staging, source writes, journal or history updates.
+    Actual application also probes/stages native representations before mutation. *)
 type t
 (** Local filesystem application plans. Displaced nodes remain in private
     staging. Conflicts never trigger an automatic rollback over live files. *)

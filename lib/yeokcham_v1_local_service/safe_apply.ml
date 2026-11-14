@@ -294,7 +294,8 @@ module For_test = struct
   let apply = apply_with
 end
 
-let[@warning "-4"] prepare ~root ~store ~operation ~safety ~target observation =
+let[@warning "-4"] prepare_with ~stage ~root ~store ~operation ~safety ~target
+    observation =
   guard (fun () ->
       check_operation operation;
       let target_snapshot =
@@ -411,89 +412,135 @@ let[@warning "-4"] prepare ~root ~store ~operation ~safety ~target observation =
               observed
           in
           verify_observation ();
-          directory rootfd [ ".yeokcham" ] (fun metadata ->
-              ensure_directory metadata "restore-staging";
-              directory metadata [ "restore-staging" ] (fun base ->
-                  if exists base operation then
-                    refuse
-                      "application staging identity already exists; resume its \
-                       journal";
-                  F.mkdir_at base operation;
-                  Unix.fsync base;
-                  directory base [ operation ] (fun staging ->
-                      close (F.create_at staging ".probe-a") (fun fd ->
-                          Unix.fsync fd);
-                      close (F.create_at staging ".probe-b") (fun fd ->
-                          Unix.fsync fd);
-                      F.rename_at staging ".probe-a" staging ".probe-b" true;
-                      F.rename_at staging ".probe-a" staging ".probe-c" false;
-                      let actions =
-                        List.mapi
-                          (fun index (path, old, next) ->
-                            let slot = string_of_int index in
-                            parent rootfd path (fun fd name ->
-                                F.check_destination fd name;
-                                if
-                                  F.device (F.fingerprint fd)
-                                  <> F.device (F.fingerprint staging)
-                                then
-                                  refuse
-                                    "application crosses a filesystem boundary";
-                                match (old, inspect fd name) with
-                                | None, None | Some _, Some _ -> ()
-                                | _ ->
+          List.iter
+            (fun (path, old, next) ->
+              parent rootfd path (fun fd name ->
+                  F.check_destination fd name;
+                  if F.device (F.fingerprint fd) <> F.device root_stamp then
+                    refuse "application crosses a filesystem boundary";
+                  (match (old, inspect fd name) with
+                  | None, None | Some _, Some _ -> ()
+                  | _ ->
+                      refuse
+                        (Printf.sprintf "untracked path obstructs target: %S"
+                           (String.concat "/" path)));
+                  let rec check name entry =
+                    F.check_destination fd name;
+                    match entry with
+                    | S.Tree.File _ -> ()
+                    | S.Tree.Directory id ->
+                        List.iter
+                          (fun (child, e) -> check child e)
+                          (entries store id)
+                  in
+                  Option.iter (check name) next))
+            changes;
+          let scope =
+            {
+              operation;
+              safety = snapshot_bytes safety;
+              target = snapshot_bytes target;
+              root = root_stamp;
+              parents;
+              actions = [];
+              bytes = "";
+            }
+          in
+          validate_parents ~root rootfd scope;
+          if not stage then scope
+          else
+            directory rootfd [ ".yeokcham" ] (fun metadata ->
+                ensure_directory metadata "restore-staging";
+                directory metadata [ "restore-staging" ] (fun base ->
+                    if exists base operation then
+                      refuse
+                        "application staging identity already exists; resume \
+                         its journal";
+                    F.mkdir_at base operation;
+                    Unix.fsync base;
+                    directory base [ operation ] (fun staging ->
+                        close (F.create_at staging ".probe-a") (fun fd ->
+                            Unix.fsync fd);
+                        close (F.create_at staging ".probe-b") (fun fd ->
+                            Unix.fsync fd);
+                        F.rename_at staging ".probe-a" staging ".probe-b" true;
+                        F.rename_at staging ".probe-a" staging ".probe-c" false;
+                        let actions =
+                          List.mapi
+                            (fun index (path, old, next) ->
+                              let slot = string_of_int index in
+                              parent rootfd path (fun fd name ->
+                                  F.check_destination fd name;
+                                  if
+                                    F.device (F.fingerprint fd)
+                                    <> F.device (F.fingerprint staging)
+                                  then
                                     refuse
-                                      (Printf.sprintf
-                                         "untracked path obstructs target: %S"
-                                         (String.concat "/" path)));
-                            let before =
-                              match old with
-                              | None -> []
-                              | Some _ ->
-                                  observed
-                                  |> List.filter (fun (p, _) -> prefix path p)
-                                  |> List.map (fun (p, s) ->
-                                      ( List.filteri
-                                          (fun i _ -> i >= List.length path)
-                                          p,
-                                        s ))
-                                  |> List.sort Stdlib.compare
-                            in
-                            Option.iter (create_entry store staging slot) next;
-                            let after =
-                              if next = None then []
-                              else native_tree staging slot []
-                            in
-                            { path; before; after; slot })
-                          changes
-                      in
-                      Unix.fsync staging;
-                      let t =
-                        {
-                          operation;
-                          safety = snapshot_bytes safety;
-                          target = snapshot_bytes target;
-                          root = root_stamp;
-                          parents;
+                                      "application crosses a filesystem \
+                                       boundary";
+                                  match (old, inspect fd name) with
+                                  | None, None | Some _, Some _ -> ()
+                                  | _ ->
+                                      refuse
+                                        (Printf.sprintf
+                                           "untracked path obstructs target: %S"
+                                           (String.concat "/" path)));
+                              let before =
+                                match old with
+                                | None -> []
+                                | Some _ ->
+                                    observed
+                                    |> List.filter (fun (p, _) -> prefix path p)
+                                    |> List.map (fun (p, s) ->
+                                        ( List.filteri
+                                            (fun i _ -> i >= List.length path)
+                                            p,
+                                          s ))
+                                    |> List.sort Stdlib.compare
+                              in
+                              Option.iter (create_entry store staging slot) next;
+                              let after =
+                                if next = None then []
+                                else native_tree staging slot []
+                              in
+                              { path; before; after; slot })
+                            changes
+                        in
+                        Unix.fsync staging;
+                        let t =
+                          {
+                            operation;
+                            safety = snapshot_bytes safety;
+                            target = snapshot_bytes target;
+                            root = root_stamp;
+                            parents;
+                            actions;
+                            bytes = "";
+                          }
+                        in
+                        validate_parents ~root rootfd t;
+                        List.iter
+                          (fun a ->
+                            if classify rootfd staging a then
+                              refuse
+                                "new application unexpectedly already applied")
                           actions;
-                          bytes = "";
-                        }
-                      in
-                      validate_parents ~root rootfd t;
-                      List.iter
-                        (fun a ->
-                          if classify rootfd staging a then
-                            refuse
-                              "new application unexpectedly already applied")
-                        actions;
-                      let bytes = encode t in
-                      if String.length bytes > 16 * 1024 * 1024 then
-                        refuse "application plan exceeds 16 MiB bound";
-                      close (F.create_at staging "plan.cbor") (fun fd ->
-                          write_all fd bytes;
-                          Unix.fsync fd);
-                      Unix.fsync staging;
-                      { t with bytes })))))
+                        let bytes = encode t in
+                        if String.length bytes > 16 * 1024 * 1024 then
+                          refuse "application plan exceeds 16 MiB bound";
+                        close (F.create_at staging "plan.cbor") (fun fd ->
+                            write_all fd bytes;
+                            Unix.fsync fd);
+                        Unix.fsync staging;
+                        { t with bytes })))))
+
+let prepare ~root ~store ~operation ~safety ~target observation =
+  prepare_with ~stage:true ~root ~store ~operation ~safety ~target observation
+
+let check ~root ~store ~safety ~target observation =
+  prepare_with ~stage:false ~root ~store ~operation:(String.make 64 '0') ~safety
+    ~target observation
+  |> Result.map (fun _ -> ())
 
 let[@warning "-4"] decode bytes =
   let value = E.decode bytes |> require E.decode_error_to_string in
