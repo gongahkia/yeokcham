@@ -667,7 +667,11 @@ val deliver :
   next_title:string ->
   (status, error) result
 
-type history_direction = Undo | Redo of int64 option | Go_to of int64
+type history_direction =
+  | Undo
+  | Redo of int64 option
+  | Go_to of int64
+  | Restore_snapshot of Yeokcham_v1_model.Snapshot_id.t
 
 type local_history = {
   undo_tree : Yeokcham_v1_undo.t;
@@ -675,6 +679,8 @@ type local_history = {
 }
 
 type history_navigation = {
+  selection_plan : string option;
+  target_provisional : bool;
   source_node : int64;
   target_node : Yeokcham_v1_undo.node;
   history_changes : path_difference list;
@@ -703,6 +709,13 @@ val ignore_explain :
   root:string ->
   string list ->
   (Yeokcham_snapshot.ignore_explanation, error) result
+
+val navigate_history_plan :
+  root:string ->
+  direction:history_direction ->
+  dry_run:bool ->
+  expected_plan:string option ->
+  (history_navigation, error) result
 
 type branch_listing = {
   selected_branch : Yeokcham_v1_model.Core.Branch_id.t;
@@ -811,6 +824,7 @@ type application_boundary =
   | Filesystem_mutation of Safe_apply.boundary * string list
 
 type branch_switch = {
+  switch_plan : string option;
   switch_state_head : string;
   switch_observed : Yeokcham_v1_model.Snapshot_id.t option;
   switch_from : Yeokcham_v1_model.Core.Branch_id.t;
@@ -821,6 +835,13 @@ type branch_switch = {
   switch_applied : bool;
   switch_restore : in_place_restore option;
 }
+
+val branch_switch_plan :
+  root:string ->
+  name:string ->
+  dry_run:bool ->
+  expected_plan:string option ->
+  (branch_switch, error) result
 
 val branch_switch_confirmed :
   root:string ->

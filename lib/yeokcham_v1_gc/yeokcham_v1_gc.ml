@@ -436,7 +436,7 @@ let retention_snapshots ~root project =
     latest
     |> List.filter (fun journal ->
         Journal.phase journal <> Journal.Published
-        || Journal.destination journal = None
+        || Journal.requires_source_proof journal
            && not
                 (List.exists
                    (fun proof -> proof_matches_journal proof journal)

@@ -271,11 +271,57 @@ let copyout_scope_cannot_change_between_generations () =
       | Error _ -> ()
       | Ok _ -> Alcotest.fail "copy scope changed mid-operation")
 
+let selection_intent_and_metadata_only_scope () =
+  with_journal_root (fun root ->
+      let target = snapshot "snapshot-target" in
+      let make intent =
+        Journal.make_selection ~operation_id:(String.make 64 'a') ~safety:target
+          ~target ~history_node:2L ~digest:(String.make 32 'p')
+          ~selected_branch:None ~selection_plan:intent
+        |> require_ok Journal.error_to_string
+      in
+      let selected = make (String.make 32 's') in
+      let expected =
+        Golden.read_lower_hex_file
+          (golden_path "local/restore-selection-v5.cbor.hex")
+        |> require_ok Fun.id
+      in
+      Alcotest.(check string)
+        "independent selection golden" expected
+        (Journal.encode selected |> require_ok Journal.error_to_string);
+      let decoded =
+        Journal.decode expected |> require_ok Journal.error_to_string
+      in
+      Alcotest.(check (option string))
+        "exact local selection intent"
+        (Some (String.make 32 's'))
+        (Journal.selection_plan decoded);
+      Alcotest.(check bool)
+        "metadata-only scope has no destructive proof" false
+        (Journal.requires_source_proof decoded);
+      (match
+         Journal.make_prepared ~operation_id:(String.make 64 'a') ~safety:target
+           ~target
+       with
+      | Error _ -> ()
+      | Ok _ -> Alcotest.fail "legacy identical-snapshot constraint weakened");
+      Journal.append ~root selected |> require_ok Journal.error_to_string;
+      Journal.advance (make (String.make 32 't')) Journal.Applying
+      |> require_ok Journal.error_to_string
+      |> Journal.append ~root
+      |> require_ok Journal.error_to_string;
+      match Journal.scan ~root with
+      | Error _ -> ()
+      | Ok _ -> Alcotest.fail "selection intent changed between generations")
+
 let () =
   Alcotest.run "V1 restore journal"
     [
       ( "record",
         [
+          Alcotest.test_case
+            "selection intent and equal-byte scope have independent golden"
+            `Quick selection_intent_and_metadata_only_scope;
           Alcotest.test_case
             "copy-out has independent golden and scoped pending roots" `Quick
             copyout_record_has_stable_scope;

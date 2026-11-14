@@ -55,6 +55,26 @@ val with_plan :
 (** V3 binds the exact physical-plan digest and optional branch selection. Every
     journal generation must retain the same operation, node and plan scope. *)
 
+val selection_plan : t -> string option
+
+val with_selection_plan : t -> string -> (t, error) result
+(** Schema 5 binds the exact local selection intent for confirmation/retry. This
+    is a local CLI plan ID, not review approval or a signed acceptance. *)
+
+val make_selection :
+  operation_id:string ->
+  safety:Yeokcham_v1_model.Snapshot_id.t ->
+  target:Yeokcham_v1_model.Snapshot_id.t ->
+  history_node:int64 ->
+  digest:string ->
+  selected_branch:Yeokcham_v1_model.Core.Branch_id.t option ->
+  selection_plan:string ->
+  (t, error) result
+
+val requires_source_proof : t -> bool
+(** Metadata-only selection has equal snapshots and no destructive source proof;
+    schema 5 still journals its exact cursor/branch movement for crash retry. *)
+
 val operation_id : t -> string
 val safety : t -> Yeokcham_v1_model.Snapshot_id.t
 val target : t -> Yeokcham_v1_model.Snapshot_id.t

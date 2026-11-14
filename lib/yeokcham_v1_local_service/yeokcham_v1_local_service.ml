@@ -314,6 +314,13 @@ let preflight_error = function
   | Safe_apply.Unavailable detail -> Selection_unavailable detail
   | Safe_apply.Invalid_plan detail -> Selection_integrity detail
 
+let[@warning "-4"] selection_preflight_error expected = function
+  | Safe_apply.Conflict _ when expected <> None ->
+      History_error
+        "local selection plan is stale; filesystem inputs no longer match \
+         preview"
+  | error -> preflight_error error
+
 let applying_error = function
   | Safe_apply.Invalid_plan detail -> Selection_integrity detail
   | (Safe_apply.Conflict _ | Safe_apply.Unavailable _) as error ->
@@ -1447,16 +1454,18 @@ let ensure_retained project snapshot =
   else Error (Unknown_checkpoint snapshot)
 
 let ensure_restore_proof ~root store journal =
-  let* () = validate_snapshot_closure store (Journal.safety journal) in
-  let* () = validate_snapshot_closure store (Journal.target journal) in
-  let* proof =
-    Restore_proof.make
-      ~operation_id:(Journal.operation_id journal)
-      ~safety:(Journal.safety journal) ~target:(Journal.target journal)
+  if not (Journal.requires_source_proof journal) then Ok ()
+  else
+    let* () = validate_snapshot_closure store (Journal.safety journal) in
+    let* () = validate_snapshot_closure store (Journal.target journal) in
+    let* proof =
+      Restore_proof.make
+        ~operation_id:(Journal.operation_id journal)
+        ~safety:(Journal.safety journal) ~target:(Journal.target journal)
+      |> Result.map_error (fun error -> Restore_proof_error error)
+    in
+    Restore_proof.append ~root proof
     |> Result.map_error (fun error -> Restore_proof_error error)
-  in
-  Restore_proof.append ~root proof
-  |> Result.map_error (fun error -> Restore_proof_error error)
 
 let latest_journals journals =
   List.fold_left
@@ -1497,7 +1506,7 @@ let retention_inputs ~root =
     latest
     |> List.filter (fun journal ->
         Journal.phase journal <> Journal.Published
-        || Journal.destination journal = None
+        || Journal.requires_source_proof journal
            && not
                 (List.exists
                    (fun proof -> proof_matches_journal proof journal)
@@ -1689,7 +1698,7 @@ let recover_in_place_unlocked ~observe ~root =
             |> Result.map Option.some)
 
 let restore_in_place_unlocked ~observe ~root ~checkpoint ~history_node
-    ~selected_branch ~expected_safety =
+    ~selected_branch ~expected_safety ~selection_plan =
   let* recovered = recover_in_place_unlocked ~observe ~root in
   match recovered with
   | Some restored
@@ -1728,8 +1737,9 @@ let restore_in_place_unlocked ~observe ~root ~checkpoint ~history_node
                         plan")
               | None | Some _ -> Ok ()
             in
-            if Model.Snapshot_id.equal safety checkpoint then
-              Error (Restore_journal_error Journal.Identical_snapshots)
+            if
+              Model.Snapshot_id.equal safety checkpoint && selection_plan = None
+            then Error (Restore_journal_error Journal.Identical_snapshots)
             else
               let project =
                 Model.checkpoint loaded.Store.project ~snapshot:safety
@@ -1777,18 +1787,31 @@ let restore_in_place_unlocked ~observe ~root ~checkpoint ~history_node
               in
               observe After_safety_publish;
               let* journal =
-                Journal.make_prepared ~operation_id ~safety ~target:checkpoint
-                |> Result.map_error (fun error -> Restore_journal_error error)
-              in
-              let* journal =
-                Journal.with_history_node journal target_node.History.id
-                |> Result.map_error (fun error -> Restore_journal_error error)
-              in
-              let* journal =
-                Journal.with_plan journal
-                  ~digest:(Safe_apply.digest physical)
-                  ~selected_branch
-                |> Result.map_error (fun e -> Restore_journal_error e)
+                match selection_plan with
+                | Some selection ->
+                    Journal.make_selection ~operation_id ~safety
+                      ~target:checkpoint ~history_node:target_node.History.id
+                      ~digest:(Safe_apply.digest physical)
+                      ~selected_branch ~selection_plan:selection
+                    |> Result.map_error (fun error ->
+                        Restore_journal_error error)
+                | None ->
+                    let* journal =
+                      Journal.make_prepared ~operation_id ~safety
+                        ~target:checkpoint
+                      |> Result.map_error (fun error ->
+                          Restore_journal_error error)
+                    in
+                    let* journal =
+                      Journal.with_history_node journal target_node.History.id
+                      |> Result.map_error (fun error ->
+                          Restore_journal_error error)
+                    in
+                    Journal.with_plan journal
+                      ~digest:(Safe_apply.digest physical)
+                      ~selected_branch
+                    |> Result.map_error (fun error ->
+                        Restore_journal_error error)
               in
               let* () = append_journal ~root journal in
               observe Prepared_journal;
@@ -1803,7 +1826,7 @@ let restore_in_place ~root ~checkpoint =
   with_worktree_lock ~root (fun () ->
       restore_in_place_unlocked ~observe:no_application_observer ~root
         ~checkpoint ~history_node:None ~selected_branch:None
-        ~expected_safety:None)
+        ~expected_safety:None ~selection_plan:None)
 
 type copy_outcome = {
   copy_operation : string option;
@@ -3024,7 +3047,11 @@ let inspect_working_tree ~root =
       in
       Ok { saved_checkpoint; observed_snapshot; differences })
 
-type history_direction = Undo | Redo of int64 option | Go_to of int64
+type history_direction =
+  | Undo
+  | Redo of int64 option
+  | Go_to of int64
+  | Restore_snapshot of Model.Snapshot_id.t
 
 type local_history = {
   undo_tree : History.t;
@@ -3032,6 +3059,8 @@ type local_history = {
 }
 
 type history_navigation = {
+  selection_plan : string option;
+  target_provisional : bool;
   source_node : int64;
   target_node : History.node;
   history_changes : path_difference list;
@@ -3050,7 +3079,10 @@ let local_history ~root =
             |> List.map (fun checkpoint -> checkpoint.Model.checkpoint_snapshot);
         })
 
-let history_target history = function
+let history_target history ~draft ~created_at = function
+  | Restore_snapshot snapshot ->
+      History.target_snapshot history ~snapshot ~draft ~created_at
+      |> Result.map snd
   | Go_to id -> History.find history id
   | Undo -> (
       match (History.current history).History.parent with
@@ -3079,7 +3111,31 @@ let history_target history = function
               Error "the selected redo node is not a child of the current node")
       )
 
-let navigate_history_with ~observe ~root ~direction ~dry_run =
+let selection_plan_id loaded ~observed ~target ~branch =
+  let* value =
+    Yeokcham_encoding.array
+      [
+        Yeokcham_encoding.bytes "yeokcham:local-selection:v1";
+        Yeokcham_encoding.bytes
+          (Yeokcham_store.Stored_object_id.to_raw_bytes loaded.Store.object_id);
+        Yeokcham_encoding.bytes (Model.Snapshot_id.to_string observed);
+        Yeokcham_encoding.bytes
+          (Model.Snapshot_id.to_string target.History.snapshot);
+        Yeokcham_encoding.integer target.History.id;
+        Option.fold ~none:Yeokcham_encoding.null
+          ~some:(fun id ->
+            Yeokcham_encoding.bytes (Model.Core.Branch_id.to_raw id))
+          branch;
+      ]
+    |> Result.map_error (fun error ->
+        History_error (Yeokcham_encoding.construction_error_to_string error))
+  in
+  Ok
+    (Yeokcham_encoding.encode value
+    |> Yeokcham_hash.Sha256.digest_string |> Yeokcham_hash.Sha256.to_raw_string
+    )
+
+let navigate_history_with ~observe ~expected_plan ~root ~direction ~dry_run =
   with_worktree_lock ~root (fun () ->
       let* initial = local_history ~root in
       let* pending =
@@ -3090,12 +3146,29 @@ let navigate_history_with ~observe ~root ~direction ~dry_run =
       | Some _ when dry_run ->
           Error
             (History_error
-               "resume the incomplete restore before previewing navigation")
-      | Some _ ->
+               "a restore is incomplete; resume it before previewing navigation")
+      | Some journal ->
+          let* () =
+            match expected_plan with
+            | None -> Ok ()
+            | Some expected ->
+                if
+                  Option.map hex_of_raw (Journal.selection_plan journal)
+                  = Some expected
+                then Ok ()
+                else
+                  Error
+                    (History_error
+                       "local selection plan is stale; resume the recorded \
+                        operation explicitly")
+          in
           let* restored = recover_in_place_unlocked ~observe ~root in
           let* after = local_history ~root in
           Ok
             {
+              selection_plan =
+                Option.map hex_of_raw (Journal.selection_plan journal);
+              target_provisional = false;
               source_node = (History.current initial.undo_tree).History.id;
               target_node = History.current after.undo_tree;
               history_changes = [];
@@ -3104,12 +3177,18 @@ let navigate_history_with ~observe ~root ~direction ~dry_run =
               history_restore = restored;
             }
       | None ->
-          let* plan =
+          let* navigation, observed, raw_plan =
             with_repository ~root (fun repository loaded ->
                 let store = Store.underlying_store repository in
+                let* () =
+                  match direction with
+                  | Restore_snapshot snapshot ->
+                      ensure_retained loaded.Store.project snapshot
+                  | Undo | Redo _ | Go_to _ -> Ok ()
+                in
                 let* observed_id, _, observation =
                   Snapshot.Observation.scan ~root ~store
-                  |> Result.map_error (fun e -> Snapshot_error e)
+                  |> Result.map_error (fun error -> Snapshot_error error)
                 in
                 let* observed = snapshot_id observed_id in
                 let active = Model.active_draft loaded.Store.project in
@@ -3125,26 +3204,25 @@ let navigate_history_with ~observe ~root ~direction ~dry_run =
                         (History_error
                            "working files have unsaved edits; save or undo \
                             them before redo")
-                  | Undo | Go_to _ | Redo _ -> Ok ()
+                  | Undo | Redo _ | Go_to _ | Restore_snapshot _ -> Ok ()
                 in
+                let now = Int64.of_float (Unix.gettimeofday ()) in
                 let* history =
                   History.record loaded.Store.history ~snapshot:observed
-                    ~draft:active.Model.draft_id
-                    ~created_at:(Int64.of_float (Unix.gettimeofday ()))
+                    ~draft:active.Model.draft_id ~created_at:now
                   |> Result.map_error (fun error -> History_error error)
                 in
                 let* target =
-                  history_target history direction
+                  history_target history ~draft:active.Model.draft_id
+                    ~created_at:now direction
                   |> Result.map_error (fun error -> History_error error)
                 in
+                let target_provisional =
+                  Result.is_error
+                    (History.find loaded.Store.history target.History.id)
+                in
                 let* () =
-                  if retained loaded.Store.project target.History.snapshot then
-                    Ok ()
-                  else
-                    Error
-                      (History_error
-                         "that node's checkpoint was compacted; its contents \
-                          are no longer retained")
+                  ensure_retained loaded.Store.project target.History.snapshot
                 in
                 let* () =
                   validate_snapshot_closure store target.History.snapshot
@@ -3154,19 +3232,34 @@ let navigate_history_with ~observe ~root ~direction ~dry_run =
                 in
                 let* target_id =
                   Snapshot.Snapshot.id target_snapshot
-                  |> Result.map_error (fun e -> Snapshot_error e)
+                  |> Result.map_error (fun error -> Snapshot_error error)
                 in
                 let* () =
                   Safe_apply.check ~root ~store ~safety:observed_id
                     ~target:target_id observation
-                  |> Result.map_error preflight_error
+                  |> Result.map_error (selection_preflight_error expected_plan)
                 in
                 let* changes =
                   comparison_differences store ~before:observed
                     ~after:target.History.snapshot
                 in
+                let* raw_plan =
+                  selection_plan_id loaded ~observed ~target ~branch:None
+                in
+                let plan = hex_of_raw raw_plan in
+                let* () =
+                  match expected_plan with
+                  | Some expected when expected <> plan ->
+                      Error
+                        (History_error
+                           "local selection plan is stale; inspect a fresh \
+                            preview")
+                  | None | Some _ -> Ok ()
+                in
                 Ok
                   ( {
+                      selection_plan = Some plan;
+                      target_provisional;
                       source_node = (History.current history).History.id;
                       target_node = target;
                       history_changes = changes;
@@ -3174,65 +3267,51 @@ let navigate_history_with ~observe ~root ~direction ~dry_run =
                       history_applied = false;
                       history_restore = None;
                     },
-                    observed ))
+                    observed,
+                    raw_plan ))
           in
-          let navigation, observed = plan in
-          if dry_run then Ok navigation
-          else if
-            Model.Snapshot_id.equal observed
-              navigation.target_node.History.snapshot
-          then
-            with_repository ~root (fun repository loaded ->
-                if
-                  Int64.equal (History.current loaded.Store.history).History.id
-                    navigation.target_node.History.id
-                  && not navigation.captures_unsaved
-                then Ok navigation
-                else
-                  let active = Model.active_draft loaded.Store.project in
-                  let* history =
-                    History.record loaded.Store.history ~snapshot:observed
-                      ~draft:active.Model.draft_id
-                      ~created_at:(Int64.of_float (Unix.gettimeofday ()))
-                    |> Result.map_error (fun error -> History_error error)
-                  in
-                  let* history =
-                    History.select history navigation.target_node.History.id
-                    |> Result.map_error (fun error -> History_error error)
-                  in
-                  let project =
-                    Model.checkpoint loaded.Store.project ~snapshot:observed
-                  in
-                  let* _ =
-                    save_project ~history repository loaded project
-                    |> Result.map_error (fun error -> Store_error error)
-                  in
-                  Ok { navigation with history_applied = true })
+          let no_op =
+            (not navigation.captures_unsaved)
+            && Int64.equal (History.current initial.undo_tree).History.id
+                 navigation.target_node.History.id
+          in
+          if dry_run || no_op then Ok navigation
           else
             let* restored =
               restore_in_place_unlocked ~observe ~root
                 ~checkpoint:navigation.target_node.History.snapshot
-                ~history_node:(Some navigation.target_node.History.id)
+                ~history_node:
+                  (if navigation.target_provisional then None
+                   else Some navigation.target_node.History.id)
                 ~selected_branch:None ~expected_safety:(Some observed)
+                ~selection_plan:(Some raw_plan)
             in
+            let* after = local_history ~root in
             Ok
               {
                 navigation with
+                target_provisional = false;
+                target_node = History.current after.undo_tree;
                 history_applied = true;
                 history_restore = Some restored;
               })
 
 let navigate_history ~root ~direction ~dry_run =
-  navigate_history_with ~observe:no_application_observer ~root ~direction
-    ~dry_run
+  navigate_history_with ~observe:no_application_observer ~expected_plan:None
+    ~root ~direction ~dry_run
+
+let navigate_history_plan ~root ~direction ~dry_run ~expected_plan =
+  navigate_history_with ~observe:no_application_observer ~expected_plan ~root
+    ~direction ~dry_run
 
 module Navigation_for_test = struct
   let restore_in_place ~observe ~root ~checkpoint =
     with_worktree_lock ~root (fun () ->
         restore_in_place_unlocked ~observe ~root ~checkpoint ~history_node:None
-          ~selected_branch:None ~expected_safety:None)
+          ~selected_branch:None ~expected_safety:None ~selection_plan:None)
 
-  let navigate_history = navigate_history_with
+  let navigate_history ~observe ~root ~direction ~dry_run =
+    navigate_history_with ~observe ~expected_plan:None ~root ~direction ~dry_run
 end
 
 let compare_decision ~root ~decision ~candidate ~against =
@@ -4347,7 +4426,7 @@ let retain_restore_proof ~root ~operation =
                 (Restore_journal_error
                    (Journal.Invalid_schema
                       "only a completed restore journal can be retained"))
-          | Some journal when Journal.destination journal <> None ->
+          | Some journal when not (Journal.requires_source_proof journal) ->
               Error
                 (History_error
                    "copy-out does not replace source work and has no source \
@@ -4422,7 +4501,7 @@ let compact ~root ~keep_recent ~dry_run =
             latest
             |> List.filter (fun journal ->
                 Journal.phase journal = Journal.Published
-                && (Journal.destination journal <> None
+                && ((not (Journal.requires_source_proof journal))
                    || List.exists
                         (fun proof -> proof_matches_journal proof journal)
                         proofs))
@@ -4520,6 +4599,7 @@ let branch_create ~root ~name ~signing_capability =
       branch_listing saved)
 
 type branch_switch = {
+  switch_plan : string option;
   switch_state_head : string;
   switch_observed : Model.Snapshot_id.t option;
   switch_from : Model.Core.Branch_id.t;
@@ -4531,7 +4611,7 @@ type branch_switch = {
   switch_restore : in_place_restore option;
 }
 
-let branch_switch_with ~observe ~expected ~root ~name ~dry_run =
+let branch_switch_with ~observe ~expected ~expected_plan ~root ~name ~dry_run =
   with_worktree_lock ~root (fun () ->
       with_repository ~root (fun repository loaded ->
           let* () =
@@ -4570,6 +4650,7 @@ let branch_switch_with ~observe ~expected ~root ~name ~dry_run =
           in
           let result =
             {
+              switch_plan = None;
               switch_state_head =
                 Yeokcham_store.Stored_object_id.to_hex loaded.Store.object_id;
               switch_observed = None;
@@ -4605,14 +4686,36 @@ let branch_switch_with ~observe ~expected ~root ~name ~dry_run =
                      "a restore is incomplete; resume its original operation \
                       before switching")
               else
+                let* () =
+                  match expected_plan with
+                  | None -> Ok ()
+                  | Some expected ->
+                      if
+                        Option.map hex_of_raw (Journal.selection_plan journal)
+                        = Some expected
+                      then Ok ()
+                      else
+                        Error
+                          (History_error
+                             "local selection plan is stale; resume the \
+                              original operation explicitly")
+                in
                 let* restored = recover_in_place_unlocked ~observe ~root in
                 Ok
                   {
                     result with
+                    switch_plan =
+                      Option.map hex_of_raw (Journal.selection_plan journal);
                     switch_applied = true;
                     switch_restore = restored;
                   }
-          | None when Model.Core.Branch_id.equal from target_branch -> Ok result
+          | None when Model.Core.Branch_id.equal from target_branch ->
+              if expected_plan = None then Ok result
+              else
+                Error
+                  (History_error
+                     "local selection plan is stale; the branch is already \
+                      selected")
           | None ->
               let store = Store.underlying_store repository in
               let* observed_id, _, observation =
@@ -4642,10 +4745,24 @@ let branch_switch_with ~observe ~expected ~root ~name ~dry_run =
                 Snapshot.Snapshot.id target_snapshot
                 |> Result.map_error (fun e -> Snapshot_error e)
               in
+              let* raw_plan =
+                selection_plan_id loaded ~observed ~target
+                  ~branch:(Some target_branch)
+              in
+              let plan = hex_of_raw raw_plan in
+              let* () =
+                match expected_plan with
+                | Some expected when expected <> plan ->
+                    Error
+                      (History_error
+                         "local selection plan is stale; inspect a fresh \
+                          preview")
+                | None | Some _ -> Ok ()
+              in
               let* () =
                 Safe_apply.check ~root ~store ~safety:observed_id
                   ~target:target_id observation
-                |> Result.map_error preflight_error
+                |> Result.map_error (selection_preflight_error expected_plan)
               in
               let* changes =
                 comparison_differences store ~before:observed
@@ -4660,43 +4777,13 @@ let branch_switch_with ~observe ~expected ~root ~name ~dry_run =
               let result =
                 {
                   result with
+                  switch_plan = Some plan;
                   switch_observed = Some observed;
                   switch_changes = changes;
                   switch_captures_unsaved = dirty;
                 }
               in
               if dry_run then Ok result
-              else if Model.Snapshot_id.equal observed target.History.snapshot
-              then (
-                let project =
-                  Model.checkpoint loaded.Store.project ~snapshot:observed
-                in
-                let* history =
-                  History.record loaded.Store.history ~snapshot:observed
-                    ~draft:(Model.active_draft project).Model.draft_id
-                    ~created_at:(Int64.of_float (Unix.gettimeofday ()))
-                  |> Result.map_error (fun e -> History_error e)
-                in
-                let* local =
-                  Store.Local.remember local
-                    ~cursor:(History.current history).History.id
-                  |> Result.map_error (fun e -> History_error e)
-                in
-                let* local =
-                  Store.Local.select local target_branch
-                  |> Result.map_error (fun e -> History_error e)
-                in
-                let* history =
-                  History.select history target.History.id
-                  |> Result.map_error (fun e -> History_error e)
-                in
-                observe Before_metadata_publish;
-                let* _ =
-                  save_project ~history ~local repository loaded project
-                  |> Result.map_error (fun e -> Store_error e)
-                in
-                observe After_metadata_publish;
-                Ok { result with switch_applied = true })
               else
                 let* restored =
                   restore_in_place_unlocked ~observe ~root
@@ -4704,6 +4791,7 @@ let branch_switch_with ~observe ~expected ~root ~name ~dry_run =
                     ~history_node:(Some target.History.id)
                     ~selected_branch:(Some target_branch)
                     ~expected_safety:(Some observed)
+                    ~selection_plan:(Some raw_plan)
                 in
                 Ok
                   {
@@ -4713,12 +4801,16 @@ let branch_switch_with ~observe ~expected ~root ~name ~dry_run =
                   }))
 
 let branch_switch ~root ~name ~dry_run =
-  branch_switch_with ~observe:no_application_observer ~expected:None ~root ~name
-    ~dry_run
+  branch_switch_with ~observe:no_application_observer ~expected:None
+    ~expected_plan:None ~root ~name ~dry_run
 
 let branch_switch_confirmed ~root ~name ~preview =
   branch_switch_with ~observe:no_application_observer ~expected:(Some preview)
-    ~root ~name ~dry_run:false
+    ~expected_plan:preview.switch_plan ~root ~name ~dry_run:false
+
+let branch_switch_plan ~root ~name ~dry_run ~expected_plan =
+  branch_switch_with ~observe:no_application_observer ~expected:None
+    ~expected_plan ~root ~name ~dry_run
 
 type state_reference =
   | Current_saved
@@ -5125,5 +5217,6 @@ module For_test = struct
   let copy_out = copy_out_with
 
   let branch_switch ~observe ~root ~name ~dry_run =
-    branch_switch_with ~observe ~expected:None ~root ~name ~dry_run
+    branch_switch_with ~observe ~expected:None ~expected_plan:None ~root ~name
+      ~dry_run
 end

@@ -8,6 +8,7 @@ type t = {
   history_node : int64 option;
   plan : (string * Model.Core.Branch_id.t option) option;
   destination : string option;
+  selection_plan : string option;
   safety : Model.Snapshot_id.t;
   target : Model.Snapshot_id.t;
   generation : int64;
@@ -73,6 +74,7 @@ let make_prepared ~operation_id ~safety ~target =
         history_node = None;
         plan = None;
         destination = None;
+        selection_plan = None;
         safety;
         target;
         generation = 0L;
@@ -109,6 +111,7 @@ let make_copyout ~operation_id ~target ~digest ~destination =
         history_node = None;
         plan = Some (digest, None);
         destination = Some destination;
+        selection_plan = None;
         safety = target;
         target;
         generation = 0L;
@@ -132,6 +135,53 @@ let with_plan journal ~digest ~selected_branch =
   else if journal.phase <> Prepared then
     Error (Invalid_schema "physical plan must be bound before application")
   else Ok { journal with plan = Some (digest, selected_branch) }
+
+let selection_plan journal = journal.selection_plan
+
+let with_selection_plan journal id =
+  if String.length id <> 32 then
+    Error (Invalid_schema "selection plan ID must be 32 bytes")
+  else if
+    journal.phase <> Prepared
+    || journal.destination <> None
+    || journal.plan = None
+    || journal.history_node = None
+  then
+    Error
+      (Invalid_schema
+         "selection plan requires a prepared in-place physical/history plan")
+  else Ok { journal with selection_plan = Some id }
+
+let make_selection ~operation_id ~safety ~target ~history_node ~digest
+    ~selected_branch ~selection_plan =
+  if not (valid_operation_id operation_id) then
+    Error (Invalid_operation_id operation_id)
+  else if
+    Int64.compare history_node 0L < 0
+    || String.length digest <> 32
+    || String.length selection_plan <> 32
+  then
+    Error
+      (Invalid_schema
+         "selection requires a nonnegative node and exact 32-byte plan \
+          identities")
+  else
+    Ok
+      {
+        operation_id;
+        history_node = Some history_node;
+        plan = Some (digest, selected_branch);
+        destination = None;
+        selection_plan = Some selection_plan;
+        safety;
+        target;
+        generation = 0L;
+        phase = Prepared;
+      }
+
+let requires_source_proof journal =
+  journal.destination = None
+  && not (Model.Snapshot_id.equal journal.safety journal.target)
 
 let operation_id journal = journal.operation_id
 let safety journal = journal.safety
@@ -188,7 +238,8 @@ let encode journal =
   Encoding.array
     ([
        Encoding.integer
-         (if Option.is_some journal.destination then 4L
+         (if Option.is_some journal.selection_plan then 5L
+          else if Option.is_some journal.destination then 4L
           else if Option.is_some journal.plan then 3L
           else if Option.is_some journal.history_node then 2L
           else schema_version);
@@ -215,7 +266,10 @@ let encode journal =
         journal.plan
     @ Option.fold ~none:[]
         ~some:(fun path -> [ Encoding.bytes path ])
-        journal.destination)
+        journal.destination
+    @ Option.fold ~none:[]
+        ~some:(fun id -> [ Encoding.bytes id ])
+        journal.selection_plan)
   |> Result.map Encoding.encode
   |> Result.map_error (fun error -> Encoding_error error)
 
@@ -239,8 +293,45 @@ let[@warning "-4"] decode bytes =
       Encoding.decode bytes
       |> Result.map_error (fun error -> Decode_error error)
     in
-    let* fields, history_node, plan, destination =
+    let* fields, history_node, plan, destination, selection_plan =
       match value with
+      | Encoding.Array
+          [
+            Encoding.Integer 5L;
+            operation;
+            safety;
+            target;
+            generation;
+            phase;
+            Encoding.Integer node;
+            Encoding.Bytes digest;
+            branch;
+            Encoding.Bytes selection;
+          ]
+        when Int64.compare node 0L >= 0
+             && String.length digest = 32
+             && String.length selection = 32 ->
+          let* branch =
+            match branch with
+            | Encoding.Null -> Ok None
+            | Encoding.Bytes raw ->
+                Model.Core.Branch_id.of_raw raw
+                |> Result.map Option.some
+                |> Result.map_error (fun error ->
+                    Invalid_schema (Model.Core.error_to_string error))
+            | _ ->
+                Error
+                  (Invalid_schema
+                     "selection branch must be a typed identity or null")
+          in
+          Ok
+            ( [
+                Encoding.integer 5L; operation; safety; target; generation; phase;
+              ],
+              Some node,
+              Some (digest, branch),
+              None,
+              Some selection )
       | Encoding.Array
           [
             Encoding.Integer 4L;
@@ -261,7 +352,8 @@ let[@warning "-4"] decode bytes =
               ],
               None,
               Some (digest, None),
-              Some destination )
+              Some destination,
+              None )
       | Encoding.Array
           [
             Encoding.Integer 3L;
@@ -294,6 +386,7 @@ let[@warning "-4"] decode bytes =
               ],
               Some node,
               Some (digest, branch),
+              None,
               None )
       | Encoding.Array
           [
@@ -312,9 +405,10 @@ let[@warning "-4"] decode bytes =
               ],
               Some node,
               None,
+              None,
               None )
       | Encoding.Array fields when List.length fields = 6 ->
-          Ok (fields, None, None, None)
+          Ok (fields, None, None, None, None)
       | Encoding.Array _ ->
           Error (Invalid_schema "record must contain six fields")
       | Encoding.Integer _ | Encoding.Bytes _ | Encoding.Text _ | Encoding.Map _
@@ -327,7 +421,8 @@ let[@warning "-4"] decode bytes =
         if
           not
             (Int64.equal version
-               (if Option.is_some destination then 4L
+               (if Option.is_some selection_plan then 5L
+                else if Option.is_some destination then 4L
                 else if Option.is_some plan then 3L
                 else if Option.is_some history_node then 2L
                 else schema_version))
@@ -352,7 +447,9 @@ let[@warning "-4"] decode bytes =
             Error (Invalid_operation_id operation_id)
           else if Int64.compare generation 0L < 0 then
             Error (Invalid_generation generation)
-          else if destination = None && Model.Snapshot_id.equal safety target
+          else if
+            destination = None && selection_plan = None
+            && Model.Snapshot_id.equal safety target
           then Error Identical_snapshots
           else if
             destination <> None && not (Model.Snapshot_id.equal safety target)
@@ -371,6 +468,7 @@ let[@warning "-4"] decode bytes =
                   history_node;
                   plan;
                   destination;
+                  selection_plan;
                   safety;
                   target;
                   generation;

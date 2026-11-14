@@ -3334,7 +3334,13 @@ let render_switch_text result =
     result.Service.switch_changes;
   Option.iter
     (fun r ->
-      Printf.printf "restore-proof %s%s\n" r.Service.restore_operation
+      Printf.printf "%s %s%s\n"
+        (if
+           Model.Snapshot_id.equal r.Service.safety_checkpoint
+             r.Service.restored_checkpoint
+         then "selection-operation"
+         else "restore-proof")
+        r.Service.restore_operation
         (if r.Service.resumed then " (resumed original switch)" else ""))
     result.Service.switch_restore
 
@@ -4124,10 +4130,19 @@ let run_history_navigation command arguments =
            ("source_node", `String (Int64.to_string result.Service.source_node));
            ("target", history_json_node result.Service.target_node);
            ("captures_unsaved", `Bool result.Service.captures_unsaved);
-           ( "restore_proof",
+           ( "operation_id",
              Option.fold ~none:`Null
                ~some:(fun restored ->
                  `String restored.Service.restore_operation)
+               result.Service.history_restore );
+           ( "restore_proof",
+             Option.fold ~none:`Null
+               ~some:(fun restored ->
+                 if
+                   Model.Snapshot_id.equal restored.Service.safety_checkpoint
+                     restored.Service.restored_checkpoint
+                 then `Null
+                 else `String restored.Service.restore_operation)
                result.Service.history_restore );
            ( "changes",
              `List
@@ -4161,7 +4176,13 @@ let run_history_navigation command arguments =
       result.Service.history_changes;
     Option.iter
       (fun restored ->
-        Printf.printf "restore-proof %s%s\n" restored.Service.restore_operation
+        Printf.printf "%s %s%s\n"
+          (if
+             Model.Snapshot_id.equal restored.Service.safety_checkpoint
+               restored.Service.restored_checkpoint
+           then "selection-operation"
+           else "restore-proof")
+          restored.Service.restore_operation
           (if restored.Service.resumed then " (resumed original navigation)"
            else ""))
       result.Service.history_restore);

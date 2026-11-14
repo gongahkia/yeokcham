@@ -1070,11 +1070,78 @@ let completed_copyout_has_no_permanent_source_root () =
             "copied directory remains" true
             (Sys.file_exists (destination ^ "/private.bin"))))
 
+let snapshot_selection_reserves_provisional_target_atomically () =
+  with_root (fun root ->
+      let repository, _, _, _, _ = initialize root in
+      let before = load repository in
+      let local = local before in
+      let empty = snapshot (C.Object_id.to_hex (L.empty_snapshot local)) in
+      let preview =
+        Service.navigate_history ~root
+          ~direction:(Service.Restore_snapshot empty) ~dry_run:true
+        |> service
+      in
+      Alcotest.(check bool)
+        "new separate root is provisional" true
+        preview.Service.target_provisional;
+      Alcotest.(check int)
+        "preview has no durable reservation" 1
+        (List.length (H.nodes (load repository).S.history));
+      let result =
+        Service.navigate_history_plan ~root
+          ~direction:(Service.Restore_snapshot empty) ~dry_run:false
+          ~expected_plan:preview.Service.selection_plan
+        |> service
+      in
+      Alcotest.(check bool)
+        "published node no longer provisional" false
+        result.Service.target_provisional;
+      Alcotest.(check (option int64))
+        "no invented local ancestry" None result.Service.target_node.H.parent;
+      Alcotest.(check int64)
+        "reserved node published once" 1L result.Service.target_node.H.id;
+      Alcotest.(check (option int64))
+        "counter advances with target" (Some 2L)
+        (H.next_sequence (load repository).S.history);
+      Alcotest.(check bool)
+        "exact empty version selected" false
+        (Sys.file_exists (Filename.concat root "private.bin"));
+      Service.navigate_history ~root ~direction:(Service.Go_to 0L)
+        ~dry_run:false
+      |> service |> ignore;
+      Alcotest.(check string)
+        "initial private files still recoverable" "private\000bytes\255"
+        (read_private root))
+
+let branch_plan_rejects_changed_inputs () =
+  with_root (fun root ->
+      let repository, capability, _, _, _ = initialize root in
+      make_topic root capability;
+      write_private root "B";
+      let preview =
+        Service.branch_switch ~root ~name:"topic" ~dry_run:true |> service
+      in
+      write_private root "changed after preview";
+      let before = load repository in
+      reject "stale named selection applied"
+        (Service.branch_switch_plan ~root ~name:"topic" ~dry_run:false
+           ~expected_plan:preview.Service.switch_plan);
+      Alcotest.(check bool)
+        "stale plan preserves head" true
+        (Raw.Mutable_ref.equal before.S.head (load repository).S.head);
+      Alcotest.(check string)
+        "stale plan preserves bytes" "changed after preview" (read_private root))
+
 let () =
   Alcotest.run "Local authenticated branch state"
     [
       ( "state",
         [
+          Alcotest.test_case
+            "snapshot selection reserves provisional target with atomic root"
+            `Quick snapshot_selection_reserves_provisional_target_atomically;
+          Alcotest.test_case "branch plans reject changed inputs" `Quick
+            branch_plan_rejects_changed_inputs;
           Alcotest.test_case
             "copy-out preserves source private state and previews" `Quick
             copyout_keeps_source_private_state;

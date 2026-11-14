@@ -696,3 +696,31 @@ unchanged Dune results may be cached. The final formatter pass exited 0 (the
 initial routing formatter promoted files). README and accepted G01 evidence
 remain unchanged. Consistent local selection CLI confirmation/plan/outcome
 handling and final P2 acceptance evidence remain outstanding.
+
+P2 exact selection-intent checkpoint: schema 5 binds a local selection plan and
+exact history target, including metadata-only moves between equal contents.
+The audit found the previous equal-byte direct-CAS path could interpret retry
+after lost acknowledgement as another undo. It now journals the cursor/branch
+move while keeping ordinary file inodes unchanged. No destructive source proof
+is fabricated for equal-content selection. Plan-aware navigation/branch APIs
+reject changed inputs; snapshot selection marks new target IDs provisional until
+atomic publication and creates no invented ancestry. Independent schema-5
+golden generation, journal9, undo16 and service45 passed; native-local suite now
+also covers provisional snapshot-root publication and stale branch plans.
+Complete CLI confirmation/plan/restore syntax and structured recovery journeys,
+then the final P2 acceptance evidence, remain outstanding.
+
+Selection-intent focused verification now includes native-local22 (provisional
+snapshot roots and stale named-branch plans), journal9 and undo16. The earlier
+14-case undo suite expected an absent restore record for equal-byte navigation;
+that assertion now verifies unchanged inode/size/mtime/ctime plus a recovery
+operation. This directly tests no ordinary rewrite while retaining metadata
+crash recovery. A first selection-intent full CI passed; final checks below
+cover the last stale-preflight and additional native-local test changes.
+
+Final selection-intent verification: `make format`, `make build`, `make lint`,
+`make ci` exited 0 (`*-selection-intent-final.log`). Final Dune test results were
+cached from matching successful runs; focused journal9/undo16/native-local22 and
+service45 ran during this checkpoint. No G01 measurements or README edits.
+Complete local CLI flag/selection/recovery journeys and final P2 evidence remain
+required before completion.

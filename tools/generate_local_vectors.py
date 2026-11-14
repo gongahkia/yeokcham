@@ -33,12 +33,18 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--write", action="store_true", help="replace the owned golden fixture")
     arguments = parser.parse_args()
-    record = [4, "a" * 64, "snapshot-target", "snapshot-target", 0, 0,
-              None, b"p" * 32, None, b"/fixture/copy"]
-    expected = encode(record).hex() + "\n"
-    path = Path(__file__).resolve().parents[1] / "test/golden/local/restore-copyout-v4.cbor.hex"
-    if arguments.write:
-        path.write_text(expected)
-    elif path.read_text() != expected:
-        raise SystemExit("copy-out journal golden differs from independent encoding")
-    print("local copy-out journal vector verified")
+    records = {
+        "restore-copyout-v4.cbor.hex": [4, "a" * 64, "snapshot-target", "snapshot-target", 0, 0,
+                                        None, b"p" * 32, None, b"/fixture/copy"],
+        "restore-selection-v5.cbor.hex": [5, "a" * 64, "snapshot-target", "snapshot-target", 0, 0,
+                                          2, b"p" * 32, None, b"s" * 32],
+    }
+    directory = Path(__file__).resolve().parents[1] / "test/golden/local"
+    for name, record in records.items():
+        expected = encode(record).hex() + "\n"
+        path = directory / name
+        if arguments.write:
+            path.write_text(expected)
+        elif path.read_text() != expected:
+            raise SystemExit(f"local journal golden differs from independent encoding: {name}")
+    print(f"local journal vectors verified ({len(records)})")

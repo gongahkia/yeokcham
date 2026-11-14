@@ -198,11 +198,21 @@ let equal_contents_can_select_a_different_node () =
       save root "B";
       save root "A";
       check_id "new A node" 2L (cursor root);
+      let before = Unix.lstat (Filename.concat root "note.txt") in
       let result = move root (Service.Go_to 0L) in
       check_id "selected original A" 0L (cursor root);
+      let after = Unix.lstat (Filename.concat root "note.txt") in
+      Alcotest.(check int)
+        "equal contents keep the same file inode" before.Unix.st_ino
+        after.Unix.st_ino;
       Alcotest.(check bool)
-        "no replacement needed" true
-        (Option.is_none result.Service.history_restore);
+        "equal contents do not rewrite the file" true
+        (before.Unix.st_size = after.Unix.st_size
+        && before.Unix.st_mtime = after.Unix.st_mtime
+        && before.Unix.st_ctime = after.Unix.st_ctime);
+      Alcotest.(check bool)
+        "metadata movement still has a recovery operation" true
+        (Option.is_some result.Service.history_restore);
       move root (Service.Go_to 1L) |> ignore;
       write root "A";
       move root (Service.Go_to 0L) |> ignore;
@@ -463,11 +473,88 @@ let navigation_keeps_the_active_task () =
         "new task work follows selected local position" (Some 0L)
         node.History.parent)
 
+let metadata_only_navigation_resumes_one_movement () =
+  List.iter
+    (fun boundary ->
+      with_root (fun root ->
+          initialize root;
+          save root "B";
+          save root "A";
+          save root "D";
+          save root "A";
+          let before = Unix.lstat (Filename.concat root "note.txt") in
+          let child = Unix.fork () in
+          if child = 0 then (
+            ignore
+              (Service.For_test.navigate_history
+                 ~observe:(fun seen -> if seen = boundary then Unix._exit 73)
+                 ~root ~direction:(Service.Go_to 2L) ~dry_run:false);
+            Unix._exit 74);
+          let _, status = Unix.waitpid [] child in
+          Alcotest.(check bool)
+            "stopped at metadata selection boundary" true
+            (status = Unix.WEXITED 73);
+          let pending =
+            Journal.latest_pending ~root
+            |> ok Journal.error_to_string |> Option.get
+          in
+          Alcotest.(check bool)
+            "equal-byte selection retains exact intent" true
+            (Option.is_some (Journal.selection_plan pending));
+          Alcotest.(check bool)
+            "no destructive source proof required" false
+            (Journal.requires_source_proof pending);
+          let result = move root Service.Undo in
+          check_id "retry finishes original node rather than another undo" 2L
+            (cursor root);
+          check_id "result exact target" 2L
+            result.Service.target_node.History.id;
+          Alcotest.(check int)
+            "no file replacement" before.Unix.st_ino
+            (Unix.lstat (Filename.concat root "note.txt")).Unix.st_ino;
+          Alcotest.(check int)
+            "no duplicate history" 5
+            (List.length (History.nodes (tree root)))))
+    [
+      Service.Prepared_journal;
+      Service.Materialized_journal;
+      Service.Before_metadata_publish;
+      Service.After_metadata_publish;
+    ]
+
+let plans_bind_fresh_observation_and_history () =
+  with_root (fun root ->
+      initialize root;
+      save root "B";
+      save root "C";
+      let preview = move ~dry_run:true root Service.Undo in
+      let plan = Option.get preview.Service.selection_plan in
+      let result =
+        Service.navigate_history_plan ~root ~direction:Service.Undo
+          ~dry_run:false ~expected_plan:(Some plan)
+        |> ok Service.error_to_string
+      in
+      check_id "exact confirmed parent" 1L result.Service.target_node.History.id;
+      let preview = move ~dry_run:true root (Service.Redo None) in
+      let plan = Option.get preview.Service.selection_plan in
+      write root "external edit";
+      reject "stale selection replaced external edits"
+        (Service.navigate_history_plan ~root ~direction:(Service.Redo None)
+           ~dry_run:false ~expected_plan:(Some plan));
+      Alcotest.(check string) "stale edit retained" "external edit" (read root);
+      check_id "stale plan does not navigate" 1L (cursor root))
+
 let () =
   Alcotest.run "V1 local undo tree"
     [
       ( "history",
         [
+          Alcotest.test_case
+            "equal-byte metadata selection resumes exactly once" `Quick
+            metadata_only_navigation_resumes_one_movement;
+          Alcotest.test_case
+            "selection plans bind fresh observation and history" `Quick
+            plans_bind_fresh_observation_and_history;
           Alcotest.test_case "equal snapshots retain distinct branching history"
             `Quick repeated_contents_preserve_distinct_history;
           Alcotest.test_case "invalid topology and cursors are rejected" `Quick

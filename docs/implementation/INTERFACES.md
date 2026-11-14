@@ -676,3 +676,26 @@ storage count during resume. Copying metadata before verification preserves the
 measured fixture and still verifies stored snapshot bytes against the full
 manifest. Accepted G01 measurements/results are unchanged; only tiny harness
 regression fixtures run as part of required CI.
+
+Schema 5 in-place selection is `[5, operation, safety, target, generation, phase,
+exact_history_node, physical_digest, branch_or_null, selection_plan_id]`. The
+32-byte local selection plan identifies the immutable pre-selection state head,
+complete observed contents, exact target node/snapshot and optional target
+branch. It is independent of signed review/acceptance. `Journal.make_selection`
+also supports equal safety/target contents when changing history position or
+branch. Those metadata-only operations still need a durable exact-node journal:
+a process exit after cursor publication must not turn retry into another undo.
+`requires_source_proof` is false for copy-out and equal-content selection; their
+Published journals do not permanently root contents or fabricate source proofs.
+Existing schema-1 through schema-4 bytes remain readable and unchanged.
+
+`Service.navigate_history_plan ~expected_plan` and `branch_switch_plan` validate
+fresh local selection intent under the workspace lock. Resuming schema-5
+operations compares the recorded intent before continuing its original node.
+`history_direction` now includes `Restore_snapshot`; a retained snapshot without
+local ancestry receives a separate root when published. Preview results label
+provisional target nodes and never durably reserve their IDs. `history_navigation`
+adds optional `selection_plan` and `target_provisional`; branch results add
+optional `switch_plan`. Existing convenience methods use fresh validation.
+All non-no-op navigation, including equal-byte moves, now uses the same journal
+path. Metadata-only selection leaves ordinary file inodes/bytes unchanged.
