@@ -3,6 +3,7 @@
  (libraries
   yeokcham_v1_undo
   unix
+  yeokcham_encoding
   yeokcham_hash
   yeokcham_snapshot
   yeokcham_v1_model

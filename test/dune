@@ -1,4 +1,9 @@
 (test
+ (name test_text_diff)
+ (modules test_text_diff)
+ (libraries alcotest qcheck-core qcheck-alcotest yeokcham_v1_local_service))
+
+(test
  (name test_content_verification)
  (modules test_content_verification)
  (libraries alcotest unix yeokcham_snapshot yeokcham_store))
