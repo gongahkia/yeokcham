@@ -50,6 +50,9 @@ type object_type =
   | Peer_sync_node
   | Peer_sync_conflict
   | V1_project_state
+  | Core_shared_revision
+  | Core_accepted_version
+  | Core_branch_event
 
 let object_type_code = function
   | Content -> 1
@@ -92,6 +95,9 @@ let object_type_code = function
   | Peer_sync_node -> 38
   | Peer_sync_conflict -> 39
   | V1_project_state -> 40
+  | Core_shared_revision -> 41
+  | Core_accepted_version -> 42
+  | Core_branch_event -> 43
 
 let object_type_of_code = function
   | 1 -> Some Content
@@ -134,6 +140,9 @@ let object_type_of_code = function
   | 38 -> Some Peer_sync_node
   | 39 -> Some Peer_sync_conflict
   | 40 -> Some V1_project_state
+  | 41 -> Some Core_shared_revision
+  | 42 -> Some Core_accepted_version
+  | 43 -> Some Core_branch_event
   | _ -> None
 
 type creation_error =

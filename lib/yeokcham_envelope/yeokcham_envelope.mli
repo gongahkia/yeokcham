@@ -45,6 +45,9 @@ type object_type =
   | Peer_sync_node
   | Peer_sync_conflict
   | V1_project_state
+  | Core_shared_revision
+  | Core_accepted_version
+  | Core_branch_event
 
 val object_type_code : object_type -> int
 val object_type_of_code : int -> object_type option

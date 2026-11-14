@@ -526,3 +526,4 @@ let encode_project project = Model.export project |> encode_state
 let decode_project encoded =
   let* state = decode_state encoded in
   Model.import state |> model
+module Core = Core_record
