@@ -1,13 +1,15 @@
-# Core-workflow foundation interfaces (P1)
+# Core-workflow interfaces (P1 and current P2 checkpoints)
 
 These are implemented pure interfaces, not a clone, integration executor or
 persistent accepted-head store. Read the actual signatures in
 [model Core](../../lib/yeokcham_v1_model/core.mli),
 [record Core](../../lib/yeokcham_v1_record/core_record.mli) and
 [trust Core](../../lib/yeokcham_v1_trust/yeokcham_v1_trust.mli).
-The existing V1 CLI, project-state wrapper, package and transport formats are
-unchanged. The new records are consumed through the model/trust boundary below;
-they are not yet wired into those adapters. TC01/TC02/TC06 remain the design
+P1 left the V1 CLI, project-state wrapper, package and transport formats
+unchanged. The current P2 checkpoints below add native ignore/capture behavior
+and persisted workspace/history identity to the existing local-state wrapper.
+Signed core branch records still await their durable local adapter; the P1
+model/trust boundary and current causal-head projection are described below. TC01/TC02/TC06 remain the design
 authority in [Technical contracts](../TECHNICAL_CONTRACTS.md).
 
 ## Registry and canonical bytes
@@ -104,13 +106,13 @@ returns it once and then `None`. `Record.Core.encode_history_id` and
 `decode_history_id` use the canonical CBOR pair `[workspace_bytes, sequence]`.
 The same snapshot can occur at multiple distinct positions.
 
-**Durability belongs to the future local store/journal adapter.** It must create
-and retain the workspace namespace, acquire the repository writer lock, reserve
-the sequence, append the node and publish the returned counter/cursor under one
-atomic metadata-root update. Failed/retried writes must reuse the committed
-operation or leave the reservation unpublished. P1's pure `allocate` function
-does not perform that transaction. No CLI or existing integer undo IDs have been
-migrated. A copied workspace needs a new namespace; its first node can name the
+**Durability belongs to the local store/journal adapter.** It must retain the
+workspace namespace, acquire the repository writer lock, reserve the sequence,
+append the node and publish the returned counter/cursor under one atomic
+metadata-root update. Failed/retried writes must reuse the committed operation
+or leave the reservation unpublished. P1's pure `allocate` function does not
+perform that transaction. P2's implemented durable-history checkpoint below
+binds existing short integer positions to a persisted workspace namespace. A copied workspace needs a new namespace; its first node can name the
 source workspace's node as explicit ancestry.
 
 ## Model records, retention and trust
@@ -295,3 +297,22 @@ before/after root CAS (after immutable object persistence). Production `save` ha
 no external fault flags. Crash tests exercise both boundaries and subsequent
 reload/retry. These are metadata publication tests, not materialization-journal
 acceptance or completed branch support.
+
+
+### P2 causal branch projection checkpoint (in progress)
+
+`Yeokcham_v1_model.Core.branch_states : pool -> branch_state list` projects
+verified retained records. Each row contains `branch_id`, `event_heads`,
+`accepted_heads` and `display_names`. Event ancestry supersedes earlier events;
+rename events inherit accepted targets through that ancestry. Accepted-parent
+ancestry removes superseded target records while preserving incomparable
+alternatives, even when their result snapshots match. Concurrent names remain
+a set. IDs order presentation only; display times and receipt order never
+choose a winner. Traversal visits each causal record once per projection pass.
+
+The adapter must still refuse ambiguous branch names/heads and verify actual
+snapshot closure and accepted-result semantics. This pure projection neither
+persists selection nor authorizes file replacement. Three signed-record cases
+exercise rename inheritance, all six receipt permutations of concurrent events,
+explicit target reconciliation and independent branch identities. No P3 exchange,
+composition or CLI branch success is claimed by this checkpoint.

@@ -168,6 +168,20 @@ val retain : pool -> id:Record_id.t -> body -> (pool * insertion, error) result
     from outside the process. Unsupported policy/review/resolution references
     block new retention. *)
 
+type branch_state = {
+  branch_id : Branch_id.t;
+  event_heads : Record_id.t list;
+  accepted_heads : Record_id.t list;
+  display_names : string list;
+}
+
+val branch_states : pool -> branch_state list
+(** Causal maximal event/accepted heads, ordered only for stable presentation.
+    Rename events inherit target sets from their event ancestry. Concurrent
+    names and accepted alternatives remain sets; neither arrival order nor
+    display time selects a winner. The pool must have passed trust admission.
+    This projection does not authorize switching or prove snapshot contents. *)
+
 type history_node = private {
   history_id : History_id.t;
   parent : History_id.t option;

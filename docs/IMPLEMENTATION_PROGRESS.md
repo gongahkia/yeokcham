@@ -471,3 +471,13 @@ records, not current proof.
   Named authenticated branches, generated CLI names, readable local inspection
   and safe preservation-aware replacement remain outstanding. G06 paging/index
   replacement is not claimed. P2 remains in progress.
+
+- P2 causal-head checkpoint, November 15: the P1 core
+  pool now exposes causal branch event/accepted head sets and concurrent names.
+  Three authenticated-record tests cover rename inheritance, six receipt-order
+  permutations, explicit target reconciliation and equal-content branch identity.
+  Focused tests, `make build`, `make lint` and `make ci` exited 0 on this tree
+  with valid Dune cache reuse; logs are `*-branch-heads*.log` in the session
+  cache. This is the minimum pure projection prerequisite; durable branch state, empty
+  accepted genesis checks and actual branch/switch CLI operations remain to do.
+  No P3 exchange/composition or full G03 completion is claimed.

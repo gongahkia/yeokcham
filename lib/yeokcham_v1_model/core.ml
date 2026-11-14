@@ -470,6 +470,111 @@ let retain (pool : pool) ~id body =
         in
         Ok ({ pool with records = Records.add id body pool.records }, Added)
 
+module Record_set = Set.Make (Record_id)
+module Branch_map = Map.Make (Branch_id)
+
+type branch_state = {
+  branch_id : Branch_id.t;
+  event_heads : Record_id.t list;
+  accepted_heads : Record_id.t list;
+  display_names : string list;
+}
+
+let branch_states pool =
+  let groups =
+    Records.fold
+      (fun id body groups ->
+        match body.payload with
+        | Branch_event event ->
+            let events =
+              Option.value (Branch_map.find_opt event.branch groups) ~default:[]
+            in
+            Branch_map.add event.branch ((id, event) :: events) groups
+        | Shared_revision _ | Accepted_version _ -> groups)
+      pool.records Branch_map.empty
+  in
+  let inherited ~extract ~add ~empty ids =
+    let rec walk visited collected = function
+      | [] -> collected
+      | id :: rest when Record_set.mem id visited -> walk visited collected rest
+      | id :: rest -> (
+          let visited = Record_set.add id visited in
+          match find pool id with
+          | Some { payload = Branch_event event; _ } ->
+              let values = extract event in
+              if values = [] then
+                walk visited collected (event.previous_events @ rest)
+              else walk visited (List.fold_left add collected values) rest
+          | Some { payload = Shared_revision _ | Accepted_version _; _ } | None
+            ->
+              walk visited collected rest)
+    in
+    walk Record_set.empty empty ids
+  in
+  let accepted_ancestors visited ids =
+    let rec walk visited = function
+      | [] -> visited
+      | id :: rest when Record_set.mem id visited -> walk visited rest
+      | id :: rest -> (
+          let visited = Record_set.add id visited in
+          match find pool id with
+          | Some { payload = Accepted_version version; _ } ->
+              walk visited (version.accepted_parents @ rest)
+          | Some { payload = Shared_revision _ | Branch_event _; _ } | None ->
+              walk visited rest)
+    in
+    walk visited ids
+  in
+  Branch_map.bindings groups
+  |> List.map (fun (branch_id, events) ->
+      let superseded =
+        List.fold_left
+          (fun set (_, event) ->
+            List.fold_left
+              (fun set id -> Record_set.add id set)
+              set event.previous_events)
+          Record_set.empty events
+      in
+      let event_heads =
+        List.filter_map
+          (fun (id, _) ->
+            if Record_set.mem id superseded then None else Some id)
+          events
+        |> List.sort Record_id.compare
+      in
+      let targets =
+        inherited
+          ~extract:(fun event -> event.targets)
+          ~add:(fun set id -> Record_set.add id set)
+          ~empty:Record_set.empty event_heads
+        |> Record_set.elements
+      in
+      let ancestors =
+        List.fold_left
+          (fun set id ->
+            match find pool id with
+            | Some { payload = Accepted_version version; _ } ->
+                accepted_ancestors set version.accepted_parents
+            | Some { payload = Shared_revision _ | Branch_event _; _ } | None ->
+                set)
+          Record_set.empty targets
+      in
+      let accepted_heads =
+        List.filter (fun id -> not (Record_set.mem id ancestors)) targets
+      in
+      {
+        branch_id;
+        event_heads;
+        accepted_heads;
+        display_names =
+          inherited
+            ~extract:(fun event -> Option.to_list event.display_name)
+            ~add:(fun set name ->
+              if List.mem name set then set else name :: set)
+            ~empty:[] event_heads
+          |> List.sort String.compare;
+      })
+
 type history_node = {
   history_id : History_id.t;
   parent : History_id.t option;

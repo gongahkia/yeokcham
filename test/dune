@@ -1,4 +1,9 @@
 (test
+ (name test_core_branch_heads)
+ (modules test_core_branch_heads)
+ (libraries alcotest yeokcham_v1_model yeokcham_v1_record yeokcham_v1_trust))
+
+(test
  (name test_history_identity)
  (modules test_history_identity)
  (libraries
