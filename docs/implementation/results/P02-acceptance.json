@@ -1,0 +1,588 @@
+{
+  "schema_version": 1,
+  "slice": "P2",
+  "attempt": 1,
+  "status": "complete",
+  "session": "p2-local-2026-11-14",
+  "branch": "main",
+  "starting_revision": "56eb13d271421720299d7e3f0dcd589d80b4d153",
+  "tested_revision": "6826af74810bb4087bb4795781d0176276df2b9e",
+  "implementation_revision": "e181ff9ec863740ceb511fb888b23472056ebd15",
+  "design_baseline": "d03ac1e095af7c896eede2334c5a1f5fc50c4e74",
+  "verified_ancestors": [
+    "56eb13d271421720299d7e3f0dcd589d80b4d153",
+    "51c374f499372349b235e68b32e7bf3e748d2718",
+    "f900fbc3432e1d7134a547eda4f2ec7366d6c991",
+    "06b662a8bab5c783117e5fcf45e36b7d942cfc64",
+    "f3bd17705591413078e1504d46d8240eb6c47f2e",
+    "4577f3456f9fce0246a61e3b1ec4740319d8442e"
+  ],
+  "environment": {
+    "platform": "native Arch Linux x86_64",
+    "kernel": "7.2.15-1-omarchy",
+    "ocaml": "5.5.0",
+    "dune": "3.25.0",
+    "ocamlformat": "0.29.0",
+    "opam": "2.6.1",
+    "environment_script": "/home/gongahkia/.cache/yeokcham-p1-20261114/environment.sh",
+    "test_signer": "explicit disposable signer outside each test workspace; not native custody acceptance",
+    "dependencies": "repository-local opam test dependencies; existing SoftHSM module/config from environment script"
+  },
+  "acceptance": [
+    {
+      "id": 1,
+      "result": "passed",
+      "scope": "Actual status/history/text+opaque/type+mode diff; exact IDs/alternatives/availability; saved and working comparisons without history advance; schema-2 domain outcomes.",
+      "evidence": [
+        "test/test_local_inspection.ml",
+        "test/test_text_diff.ml",
+        "test/test_local_inspection_cli.py",
+        "bin/yeokcham_v1.ml"
+      ]
+    },
+    {
+      "id": 2,
+      "result": "passed",
+      "scope": "TC07 native exclusions/explanations; bounded descriptor-anchored retries and identity/directory rechecks; incomplete capture preserves last complete state; streamed byte/exec/directory/symlink fidelity.",
+      "evidence": [
+        "test/test_native_ignore.ml",
+        "test/test_native_ignore_cli.py",
+        "test/test_capture_consistency.ml",
+        "test/test_content_verification.ml",
+        "docs/NATIVE_IGNORE.md"
+      ]
+    },
+    {
+      "id": 3,
+      "result": "passed",
+      "scope": "Generated typed workspace/branch IDs/defaults; atomic namespace/counter/history/cursor root; collisions, restart, identical repeats and exhaustion. Local commands create no shared change/revision; ordinary share identity allocation belongs to P3.",
+      "evidence": [
+        "test/test_history_identity.ml",
+        "test/test_local_core.ml",
+        "lib/yeokcham_v1_store/local_core.ml",
+        "lib/yeokcham_v1_store/yeokcham_v1_store.ml"
+      ]
+    },
+    {
+      "id": 4,
+      "result": "passed",
+      "scope": "Signed empty accepted genesis/forks, causal branch sets, persistent private selection, duplicate/divergent refusal and private alternative preservation. Local empty/fork-only adapter refuses unsupported acceptance/policy.",
+      "evidence": [
+        "test/test_core_branch_heads.ml",
+        "test/test_local_core.ml",
+        "test/test_local_branch_cli.py"
+      ]
+    },
+    {
+      "id": 5,
+      "result": "passed",
+      "scope": "Verified bounded staged apply/copy-out, ignored/untracked/representability preflight, retained originals, exact operation journals and recovery at actual mutation/metadata boundaries; preserve external edits; preview/cancel do not move history/files.",
+      "evidence": [
+        "test/test_safe_apply.ml",
+        "test/test_native_materialize.ml",
+        "test/test_store_safety.ml",
+        "test/test_v1_undo.ml",
+        "test/test_v1_restore_journal.ml",
+        "test/test_local_selection_cli.py"
+      ]
+    },
+    {
+      "id": 6,
+      "result": "passed",
+      "scope": "CLI help/spec, generated identities, preview/default cancellation/yes/plan, noninteractive choice, semantic JSON/exit/action journeys and regression checks; service/backup state reported honestly.",
+      "evidence": [
+        "test/test_v1_cli.ml",
+        "test/test_cli_domain_data.ml",
+        "test/test_local_selection_cli.py",
+        "test/test_local_branch_cli.py",
+        "test/test_local_inspection_cli.py"
+      ]
+    },
+    {
+      "id": 7,
+      "result": "passed",
+      "scope": "Concrete APIs/current guides, criterion-level G03/G05/G06/G14 coverage and remaining G02/P3 dependencies; original full phases remain uncompleted.",
+      "evidence": [
+        "docs/implementation/INTERFACES.md",
+        "docs/IMPLEMENTATION_PROGRESS.md",
+        "docs/LOCAL_UNDO.md",
+        "docs/implementation/reports/P02-attempt-01.md"
+      ]
+    }
+  ],
+  "verification": {
+    "started_at": "2026-11-14T21:24:52.990915+00:00",
+    "completed_at": "2026-11-14T21:25:08.071068+00:00",
+    "checks": [
+      {
+        "command": "opam exec -- dune exec test/test_native_ignore.exe",
+        "exit": 0,
+        "log": "/home/gongahkia/.cache/yeokcham-p2-20261114/p02-final-00.log",
+        "log_sha256": "155259eb011f7e39747c0daef6c21c7876714fa5fe66a1ed2e1520b7b5f6f5bc",
+        "ocaml_cases": 5,
+        "python_cases": 0
+      },
+      {
+        "command": "opam exec -- dune exec test/test_capture_consistency.exe",
+        "exit": 0,
+        "log": "/home/gongahkia/.cache/yeokcham-p2-20261114/p02-final-01.log",
+        "log_sha256": "c870bdfa1818c54782f247896cab03093062805c6d9a746cf2b54cc2cf7ae84a",
+        "ocaml_cases": 7,
+        "python_cases": 0
+      },
+      {
+        "command": "opam exec -- dune exec test/test_history_identity.exe",
+        "exit": 0,
+        "log": "/home/gongahkia/.cache/yeokcham-p2-20261114/p02-final-02.log",
+        "log_sha256": "57a2d69dc72e9ff2fcc6f571035e102d20a0b5dacf2851370da4c39b83d5879d",
+        "ocaml_cases": 7,
+        "python_cases": 0
+      },
+      {
+        "command": "opam exec -- dune exec test/test_core_branch_heads.exe",
+        "exit": 0,
+        "log": "/home/gongahkia/.cache/yeokcham-p2-20261114/p02-final-03.log",
+        "log_sha256": "87cb085be5cbb97c41e0e2b40738b292fc692fabd5b56fe420e7b2195019baf7",
+        "ocaml_cases": 3,
+        "python_cases": 0
+      },
+      {
+        "command": "opam exec -- dune exec test/test_content_verification.exe",
+        "exit": 0,
+        "log": "/home/gongahkia/.cache/yeokcham-p2-20261114/p02-final-04.log",
+        "log_sha256": "0f231779dc9547baadf09e83ce6768643e7bd80fa31ac1174a28019cfb61a48f",
+        "ocaml_cases": 5,
+        "python_cases": 0
+      },
+      {
+        "command": "opam exec -- dune exec test/test_local_inspection.exe",
+        "exit": 0,
+        "log": "/home/gongahkia/.cache/yeokcham-p2-20261114/p02-final-05.log",
+        "log_sha256": "47368c8bd54640ba8606a4da18b4e4930a45dd456f3247d9defe513114f325bf",
+        "ocaml_cases": 6,
+        "python_cases": 0
+      },
+      {
+        "command": "opam exec -- dune exec test/test_text_diff.exe",
+        "exit": 0,
+        "log": "/home/gongahkia/.cache/yeokcham-p2-20261114/p02-final-06.log",
+        "log_sha256": "1142fae7c75046cd813fcd6f5237e027839941994a54bfe9c58f0242af26ffb2",
+        "ocaml_cases": 5,
+        "python_cases": 0
+      },
+      {
+        "command": "opam exec -- dune exec test/test_native_materialize.exe",
+        "exit": 0,
+        "log": "/home/gongahkia/.cache/yeokcham-p2-20261114/p02-final-07.log",
+        "log_sha256": "6687ed27c8edb446280d3b4cf5e4d4c20355cd6be0e996d26fa6105aa82c9da0",
+        "ocaml_cases": 5,
+        "python_cases": 0
+      },
+      {
+        "command": "opam exec -- dune exec test/test_safe_apply.exe",
+        "exit": 0,
+        "log": "/home/gongahkia/.cache/yeokcham-p2-20261114/p02-final-08.log",
+        "log_sha256": "3b44202ba9b6270f47aadbb04854fee1aaffdae7daef2c0575c54e958ee202cc",
+        "ocaml_cases": 22,
+        "python_cases": 0
+      },
+      {
+        "command": "opam exec -- dune exec test/test_store_safety.exe",
+        "exit": 0,
+        "log": "/home/gongahkia/.cache/yeokcham-p2-20261114/p02-final-09.log",
+        "log_sha256": "9da576ec0602a397c4a59dff7ac2922188589ea806b6506b70a74f7d3748270a",
+        "ocaml_cases": 7,
+        "python_cases": 0
+      },
+      {
+        "command": "opam exec -- dune exec test/test_local_core.exe",
+        "exit": 0,
+        "log": "/home/gongahkia/.cache/yeokcham-p2-20261114/p02-final-10.log",
+        "log_sha256": "7d3b725c006e9a71cd3f78013f00325586a1799baaf9a46481f40b45f3ba4554",
+        "ocaml_cases": 23,
+        "python_cases": 0
+      },
+      {
+        "command": "opam exec -- dune exec test/test_cli_domain_data.exe",
+        "exit": 0,
+        "log": "/home/gongahkia/.cache/yeokcham-p2-20261114/p02-final-11.log",
+        "log_sha256": "466a7e2754be797cbf2571608cffff2cd48e31c5cd6f68d7a284373129e495d5",
+        "ocaml_cases": 4,
+        "python_cases": 0
+      },
+      {
+        "command": "opam exec -- dune exec test/test_v1_restore_journal.exe",
+        "exit": 0,
+        "log": "/home/gongahkia/.cache/yeokcham-p2-20261114/p02-final-12.log",
+        "log_sha256": "1046a1f6712b10fc61e982d2651b4fd53b919807b3a2a13c7745a8008ccb0707",
+        "ocaml_cases": 9,
+        "python_cases": 0
+      },
+      {
+        "command": "opam exec -- dune exec test/test_v1_undo.exe",
+        "exit": 0,
+        "log": "/home/gongahkia/.cache/yeokcham-p2-20261114/p02-final-13.log",
+        "log_sha256": "e16cb81214065ac32a8f39ac0683694c1b34e0a386442194f62eee0490a1e0bd",
+        "ocaml_cases": 16,
+        "python_cases": 0
+      },
+      {
+        "command": "opam exec -- dune exec test/test_v1_local_service.exe",
+        "exit": 0,
+        "log": "/home/gongahkia/.cache/yeokcham-p2-20261114/p02-final-14.log",
+        "log_sha256": "8377a3e463aafb58dfe39df8b5bd228242c1a20765124f7e7304fc264e7e99a7",
+        "ocaml_cases": 45,
+        "python_cases": 0
+      },
+      {
+        "command": "opam exec -- dune exec test/test_v1_cli.exe",
+        "exit": 0,
+        "log": "/home/gongahkia/.cache/yeokcham-p2-20261114/p02-final-15.log",
+        "log_sha256": "e985de17f89fe20735222092f31755f31375d6e80cd7b3959ec9b5032e0be0c8",
+        "ocaml_cases": 28,
+        "python_cases": 0
+      },
+      {
+        "command": "python3 test/test_local_inspection_cli.py _build/default/bin/yeokcham_v1.exe",
+        "exit": 0,
+        "log": "/home/gongahkia/.cache/yeokcham-p2-20261114/p02-final-16.log",
+        "log_sha256": "e272f3f6ae84c527226e3cffd8d5bf50715bae2bbcd213d1322f8b70123b3adb",
+        "ocaml_cases": 0,
+        "python_cases": 9
+      },
+      {
+        "command": "python3 test/test_local_branch_cli.py _build/default/bin/yeokcham_v1.exe",
+        "exit": 0,
+        "log": "/home/gongahkia/.cache/yeokcham-p2-20261114/p02-final-17.log",
+        "log_sha256": "0e6acb9e0a0b9094af563a53b703bb24bbe0f28a86c1aec74dbbb7d6ff3ad223",
+        "ocaml_cases": 0,
+        "python_cases": 17
+      },
+      {
+        "command": "python3 test/test_local_selection_cli.py _build/default/bin/yeokcham_v1.exe _build/default/test/local_cli_fault.exe",
+        "exit": 0,
+        "log": "/home/gongahkia/.cache/yeokcham-p2-20261114/p02-final-18.log",
+        "log_sha256": "785f41f19af5c3bbe93f7d08968cb47662e80542881718531e98ff13de38b481",
+        "ocaml_cases": 0,
+        "python_cases": 16
+      },
+      {
+        "command": "python3 test/test_native_ignore_cli.py _build/default/bin/yeokcham_v1.exe",
+        "exit": 0,
+        "log": "/home/gongahkia/.cache/yeokcham-p2-20261114/p02-final-19.log",
+        "log_sha256": "967c92d36cebcf36f2f214cac7698609db89c071c595426864067899c8d2dcc7",
+        "ocaml_cases": 0,
+        "python_cases": 4
+      },
+      {
+        "command": "python3 tools/generate_local_vectors.py",
+        "exit": 0,
+        "log": "/home/gongahkia/.cache/yeokcham-p2-20261114/p02-final-20.log",
+        "log_sha256": "f9ff9c8e9116916faea79c3d3b79916b03e5f93b45b54fda63353e9d7dd8698d",
+        "ocaml_cases": 0,
+        "python_cases": 0
+      },
+      {
+        "command": "make build",
+        "exit": 0,
+        "log": "/home/gongahkia/.cache/yeokcham-p2-20261114/p02-final-21.log",
+        "log_sha256": "e90e1e244d9512c60ffb9a48589ca172a1059a79f19dbb267ecfa379fabcb5ff",
+        "ocaml_cases": 0,
+        "python_cases": 0
+      },
+      {
+        "command": "make lint",
+        "exit": 0,
+        "log": "/home/gongahkia/.cache/yeokcham-p2-20261114/p02-final-22.log",
+        "log_sha256": "2a19a33e28c32c5dea7a816aa16891c07e006878ee11e0c819c7aee6d260008d",
+        "ocaml_cases": 0,
+        "python_cases": 0
+      },
+      {
+        "command": "make ci",
+        "exit": 0,
+        "log": "/home/gongahkia/.cache/yeokcham-p2-20261114/p02-final-23.log",
+        "log_sha256": "eb8ce1c21765cf0aa24cbc52f35b5f6e8c0beafa9c0094044e01e2e396d2ba97",
+        "ocaml_cases": 0,
+        "python_cases": 0
+      }
+    ],
+    "fresh_focused_ocaml_suites": 16,
+    "fresh_focused_ocaml_cases": 197,
+    "fresh_focused_python_cases": 46,
+    "cache": "Final make ci reused matching successful Dune runtest results. Fresh focused processes above executed at tested revision. Earlier ci-local-cli-complete.log executed CLI28/branch17/inspection9/ignore4/selection16/local23 plus watcher/runtime/transport and tiny harness8; other valid results cached. No total full-suite execution count is fabricated.",
+    "reported_skips_in_focused_checks": 0
+  },
+  "preserved": {
+    "README_unchanged": true,
+    "accepted_G01_results_and_reports_unchanged": true,
+    "P1_core_goldens_unchanged": true,
+    "G01_measurements_rerun": false
+  },
+  "unavailable_or_deferred": [
+    {
+      "check": "Docker tutorial/development container integration",
+      "outcome": "unavailable: docker info exited 1; permission denied connecting to unix:///var/run/docker.sock. Shell syntax checks passed.",
+      "owner": "G20"
+    },
+    {
+      "check": "Native macOS/Windows build, fidelity, service and power-loss qualification",
+      "outcome": "No access; not counted as passed. Linux process interruption tests are not cross-platform/power-loss proof.",
+      "owner": "G16/G17/G20"
+    },
+    {
+      "check": "Native onboarding, real project responsiveness and participant comprehension",
+      "outcome": "not executed in P2; signer tests do not accept native credential-service/user experience gates",
+      "owner": "P4/G18/G20"
+    },
+    {
+      "check": "Whole-history paging/index rebuild/depth measurements",
+      "outcome": "outside scoped P2; existing whole-history representation retained. No index replacement or speedup claim.",
+      "owner": "G06/G19"
+    }
+  ],
+  "commits_newest_first": [
+    {
+      "commit": "6826af74810bb4087bb4795781d0176276df2b9e",
+      "subject": "docs(cli): confirm restore writes in container and source journeys"
+    },
+    {
+      "commit": "e181ff9ec863740ceb511fb888b23472056ebd15",
+      "subject": "feat(cli): complete confirmed local selection and exact operation recovery"
+    },
+    {
+      "commit": "c9c8f2509db2768279287a02724b69367777c9aa",
+      "subject": "fix(local): bind selection plans and journal equal-content navigation"
+    },
+    {
+      "commit": "822066fbf1f842c42d57a8586c78dfc2e399fd77",
+      "subject": "fix(local): journal safe recovery copies without changing source history"
+    },
+    {
+      "commit": "5377c3f2a2b34fc405b26fe29117b3572da2b06c",
+      "subject": "feat(local): verify applied bytes and stage scoped directory copy-out"
+    },
+    {
+      "commit": "440422b7d66dcaa624fef953f5c9666a8d2aeca8",
+      "subject": "fix(store): publish recovery metadata atomically and recover dead writers"
+    },
+    {
+      "commit": "bf148b817337b13867900f90290681099c65fdeb",
+      "subject": "feat(local): select named branches and preserve private alternatives"
+    },
+    {
+      "commit": "c1bdcea3c4f9e18e8890c69b13d42fc5e82d179b",
+      "subject": "fix(local): resume exact planned navigation without overwriting external edits"
+    },
+    {
+      "commit": "90feb3d120f85a9033682dcbaf1b974b2451523a",
+      "subject": "feat(local): stage recoverable file actions and preserve external edits"
+    },
+    {
+      "commit": "41087171de052c7cbe83ee0732f0ba447ebf0523",
+      "subject": "feat(snapshot): add safe staged-application filesystem primitives"
+    },
+    {
+      "commit": "37bc7667dc843683591d5605260fa3f204271983",
+      "subject": "feat(cli): expose exact local inspection and structured domain outcomes"
+    },
+    {
+      "commit": "0e539d8718906713b9fac7514e198ccc7ece1d28",
+      "subject": "makingsomeinitialcommits"
+    },
+    {
+      "commit": "c51684ffc60b473c7ba8a1a14246cc29791300fd",
+      "subject": "feat(local): inspect exact states, capture health and alternate history"
+    },
+    {
+      "commit": "0e629dc7c38637fcb9cf99cd8ec168bfe2572700",
+      "subject": "makingsomeinitialcommits"
+    },
+    {
+      "commit": "2625e2396772b76a57bed332a4c48aa236bbcae4",
+      "subject": "feat(snapshot): verify large content without whole-file display buffers"
+    },
+    {
+      "commit": "bf7b883c6a990288d8a3959f877ac823da857867",
+      "subject": "feat(cli): initialize privately and create authenticated named branches"
+    },
+    {
+      "commit": "1d28ab7042f9749b038e41c5ebcbb6c8ed27dc4c",
+      "subject": "feat(store): persist authenticated local branches with private retention roots"
+    },
+    {
+      "commit": "6033674c69389e486e61f76d0c1e9b6c8c2dac83",
+      "subject": "feat(core): expose causal branch head sets without choosing alternatives"
+    },
+    {
+      "commit": "93966254c483cc6e657ac7e71ec7017285e33430",
+      "subject": "feat(history): persist workspace identities and atomic sequence allocation"
+    },
+    {
+      "commit": "986ee9c70260ad2e9704cb7589d59884dbe2ca35",
+      "subject": "fix(capture): anchor observations and bound instability retries"
+    },
+    {
+      "commit": "6f224e356219febfdad3fe077d67b2d67ead4f05",
+      "subject": "updatedzellijconfig"
+    },
+    {
+      "commit": "f7d0a25f1bb6b36b0bbbd79a7bdf0d01956700ae",
+      "subject": "feat(capture): implement native ignore rules and CLI explanations"
+    },
+    {
+      "commit": "2b34dc43218abe7a6a5ab939465a4b06853c6496",
+      "subject": "docs: start scoped P2 local-workflow implementation"
+    }
+  ],
+  "rollback_order_newest_first": [
+    "6826af74810bb4087bb4795781d0176276df2b9e",
+    "e181ff9ec863740ceb511fb888b23472056ebd15",
+    "c9c8f2509db2768279287a02724b69367777c9aa",
+    "822066fbf1f842c42d57a8586c78dfc2e399fd77",
+    "5377c3f2a2b34fc405b26fe29117b3572da2b06c",
+    "440422b7d66dcaa624fef953f5c9666a8d2aeca8",
+    "bf148b817337b13867900f90290681099c65fdeb",
+    "c1bdcea3c4f9e18e8890c69b13d42fc5e82d179b",
+    "90feb3d120f85a9033682dcbaf1b974b2451523a",
+    "41087171de052c7cbe83ee0732f0ba447ebf0523",
+    "37bc7667dc843683591d5605260fa3f204271983",
+    "0e539d8718906713b9fac7514e198ccc7ece1d28",
+    "c51684ffc60b473c7ba8a1a14246cc29791300fd",
+    "0e629dc7c38637fcb9cf99cd8ec168bfe2572700",
+    "2625e2396772b76a57bed332a4c48aa236bbcae4",
+    "bf7b883c6a990288d8a3959f877ac823da857867",
+    "1d28ab7042f9749b038e41c5ebcbb6c8ed27dc4c",
+    "6033674c69389e486e61f76d0c1e9b6c8c2dac83",
+    "93966254c483cc6e657ac7e71ec7017285e33430",
+    "986ee9c70260ad2e9704cb7589d59884dbe2ca35",
+    "6f224e356219febfdad3fe077d67b2d67ead4f05",
+    "f7d0a25f1bb6b36b0bbbd79a7bdf0d01956700ae",
+    "2b34dc43218abe7a6a5ab939465a4b06853c6496"
+  ],
+  "changed_paths_through_tested_revision": [
+    "bin/dune",
+    "bin/v1_cli_output.ml",
+    "bin/yeokcham_v1.ml",
+    "containers/tutorial/USAGE.md",
+    "docs/GETTING_STARTED.md",
+    "docs/IMPLEMENTATION_PROGRESS.md",
+    "docs/IMPLEMENTATION_WORKFLOW.md",
+    "docs/LOCAL_UNDO.md",
+    "docs/NATIVE_IGNORE.md",
+    "docs/PILOT_PLAN.md",
+    "docs/PRODUCT_DESIGN.md",
+    "docs/TECHNICAL_CONTRACTS.md",
+    "docs/TROUBLESHOOTING.md",
+    "docs/V1_PRODUCT_CONTRACT.md",
+    "docs/YEOKCHAM_GUIDE.md",
+    "docs/implementation/INTERFACES.md",
+    "docs/implementation/goals/P02-local-workflow.md",
+    "lib/yeokcham_snapshot/dune",
+    "lib/yeokcham_snapshot/ignore.ml",
+    "lib/yeokcham_snapshot/ignore.mli",
+    "lib/yeokcham_snapshot/native.ml",
+    "lib/yeokcham_snapshot/native.mli",
+    "lib/yeokcham_snapshot/yeokcham_scan_stubs.c",
+    "lib/yeokcham_snapshot/yeokcham_snapshot.ml",
+    "lib/yeokcham_snapshot/yeokcham_snapshot.mli",
+    "lib/yeokcham_store/yeokcham_store.ml",
+    "lib/yeokcham_store/yeokcham_store.mli",
+    "lib/yeokcham_v1_cli_data/yeokcham_v1_cli_data.ml",
+    "lib/yeokcham_v1_cli_data/yeokcham_v1_cli_data.mli",
+    "lib/yeokcham_v1_cli_spec/yeokcham_v1_cli_spec.ml",
+    "lib/yeokcham_v1_gc/yeokcham_v1_gc.ml",
+    "lib/yeokcham_v1_local_service/dune",
+    "lib/yeokcham_v1_local_service/safe_apply.ml",
+    "lib/yeokcham_v1_local_service/safe_apply.mli",
+    "lib/yeokcham_v1_local_service/text_diff.ml",
+    "lib/yeokcham_v1_local_service/text_diff.mli",
+    "lib/yeokcham_v1_local_service/yeokcham_v1_local_service.ml",
+    "lib/yeokcham_v1_local_service/yeokcham_v1_local_service.mli",
+    "lib/yeokcham_v1_model/core.ml",
+    "lib/yeokcham_v1_model/core.mli",
+    "lib/yeokcham_v1_model/yeokcham_v1_model.ml",
+    "lib/yeokcham_v1_model/yeokcham_v1_model.mli",
+    "lib/yeokcham_v1_restore_journal/dune",
+    "lib/yeokcham_v1_restore_journal/yeokcham_v1_restore_journal.ml",
+    "lib/yeokcham_v1_restore_journal/yeokcham_v1_restore_journal.mli",
+    "lib/yeokcham_v1_restore_proof/dune",
+    "lib/yeokcham_v1_restore_proof/yeokcham_v1_restore_proof.ml",
+    "lib/yeokcham_v1_store/dune",
+    "lib/yeokcham_v1_store/local_core.ml",
+    "lib/yeokcham_v1_store/local_core.mli",
+    "lib/yeokcham_v1_store/yeokcham_v1_store.ml",
+    "lib/yeokcham_v1_store/yeokcham_v1_store.mli",
+    "lib/yeokcham_v1_trust/yeokcham_v1_trust.ml",
+    "lib/yeokcham_v1_trust/yeokcham_v1_trust.mli",
+    "lib/yeokcham_v1_undo/yeokcham_v1_undo.ml",
+    "lib/yeokcham_v1_undo/yeokcham_v1_undo.mli",
+    "test/dune",
+    "test/golden/local/cli-domain-v2.json",
+    "test/golden/local/history-v2.cbor.hex",
+    "test/golden/local/restore-copyout-v4.cbor.hex",
+    "test/golden/local/restore-selection-v5.cbor.hex",
+    "test/local_cli_fault.ml",
+    "test/test_benchmark_runner.py",
+    "test/test_capture_consistency.ml",
+    "test/test_cli_domain_data.ml",
+    "test/test_content_verification.ml",
+    "test/test_core_branch_heads.ml",
+    "test/test_development_artifacts.sh",
+    "test/test_history_identity.ml",
+    "test/test_local_branch_cli.py",
+    "test/test_local_core.ml",
+    "test/test_local_inspection.ml",
+    "test/test_local_inspection_cli.py",
+    "test/test_local_selection_cli.py",
+    "test/test_native_ignore.ml",
+    "test/test_native_ignore_cli.py",
+    "test/test_native_materialize.ml",
+    "test/test_safe_apply.ml",
+    "test/test_store_safety.ml",
+    "test/test_text_diff.ml",
+    "test/test_tutorial_container.sh",
+    "test/test_v1_cli.ml",
+    "test/test_v1_local_service.ml",
+    "test/test_v1_restore_journal.ml",
+    "test/test_v1_store.ml",
+    "test/test_v1_undo.ml",
+    "tools/benchmark_runner.py",
+    "tools/generate_local_vectors.py"
+  ],
+  "original_phases_complete": 1,
+  "original_phases_total": 20,
+  "remaining_original_phase_scope": {
+    "G02": "P1 report remainder: review/request/event/policy, account/settings/archive records and consumers/vectors",
+    "G03": "C1,C3,C4 and review/policy portions of C2,C5; branch causal projection only delivered",
+    "G05": "Linux scoped implementation covered; native portability/qualification matrix and full-phase acceptance remain G05/G20",
+    "G06": "C1 pages/index; C2 publication correspondence; C3 independent received-record/page scenarios; C4 rebuild; C5 page/index/depth measurements",
+    "G14": "C1 whole vocabulary; C2 verified clone; C3 selected share/update/archive/integration; C4 full command/preferences consistency; C5 multi-person/shared journeys; C6 managed services"
+  },
+  "next_eligible_slice": "P3 only when separately invoked; unstarted",
+  "next_goal_generated": false,
+  "handoff_commit_lookup": "git log -1 --format=%H -- docs/implementation/reports/P02-attempt-01.md",
+  "closeout_checks": [
+    {
+      "command": "python3 tools/check_doc_links.py",
+      "exit": 0,
+      "local_file_references": 243
+    },
+    {
+      "command": "git diff --check",
+      "exit": 0
+    },
+    {
+      "command": "sh -n test/test_tutorial_container.sh test/test_development_artifacts.sh",
+      "exit": 0
+    }
+  ],
+  "closeout_documentation_only_paths": [
+    "docs/IMPLEMENTATION_PROGRESS.md",
+    "docs/IMPLEMENTATION_WORKFLOW.md",
+    "docs/PILOT_PLAN.md",
+    "docs/implementation/INTERFACES.md",
+    "docs/implementation/reports/P02-attempt-01.md",
+    "docs/implementation/results/P02-acceptance.json"
+  ]
+}

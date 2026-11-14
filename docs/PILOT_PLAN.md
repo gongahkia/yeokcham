@@ -1,6 +1,6 @@
 # First usable Yeokcham: core workflow pilot
 
-Updated November 14, 2026.
+Updated November 15, 2026.
 
 ## Priority and status
 
@@ -12,8 +12,10 @@ is one part of that workflow. The broader direction in
 P0 evaluation and P1 core foundation are complete. The
 [P1 report](implementation/reports/P01-attempt-01.md) records implementation
 `06b662a8bab5c783117e5fcf45e36b7d942cfc64`, actual checks and
-[interfaces](implementation/INTERFACES.md). P2 local work is in progress;
-P3/P4 are pending. G01 remains complete; G02 has partial P1 coverage and is not
+[interfaces](implementation/INTERFACES.md). P2 local work is complete; see its
+[report](implementation/reports/P02-attempt-01.md) and
+[acceptance receipt](implementation/results/P02-acceptance.json). P3/P4 are
+pending and unstarted. G01 remains complete; G02 has partial P1 coverage and is not
 complete. G01-G20 remain the full-design backlog.
 This pilot changes delivery order and the first milestone; it does not mark
 original criteria complete or relax privacy, authority, fidelity or recovery.
@@ -26,7 +28,11 @@ complete native-host pilot or human-usability gate has passed.
 ## Essential operations
 
 The assessment column below records P0's observed V1 behavior on its WSL host.
-P1 adds pure library interfaces; it does not implement these missing CLI journeys.
+P1 added pure interfaces. P2 now delivers private initialization, native ignore/
+stable capture, useful status/history/diff, signed named local branch selection
+and exact confirmed recovery/copy-out. The rows below remain historical P0
+observations, not current P2 status; see the P2 report for current acceptance.
+Shared clone/exchange/integration remains P3.
 
 These are user intentions; names may evolve toward [CLI design](CLI_DESIGN.md).
 Git terms provide orientation, without adding a Git interoperability commitment.
@@ -123,7 +129,7 @@ development ranges including tests/integration; host/participant waits add time.
 | --- | --- | --- | --- |
 | P0: evaluate | This walkthrough, evidence and essential-operation inventory. | Current V1, G01 and existing designs/guides. | complete |
 | P1: core foundation | Canonical revision/accepted-version/branch records, workspace/history identities, bounded signed decoding, duplicate/collision handling and actual state/plan/error interfaces; golden/negative cases. | Relevant G02 contracts and encoding/envelope/record/model/trust modules. | complete; [report](implementation/reports/P01-attempt-01.md) |
-| P2: local work | Readable status/history/diff, native file/directory exclusions, tool-generated IDs/names, branch selection/private-work preservation and exact recovery. Reuse working capture/undo; profile before replacing storage. | Core parts of G03/G05/G06/G14; snapshot, undo, store, workspace and CLI. | in_progress; original rough estimate 3-5 days |
+| P2: local work | Readable status/history/diff, native file/directory exclusions, tool-generated IDs/names, branch selection/private-work preservation and exact recovery. Reuse working capture/undo; profile before replacing storage. | Core parts of G03/G05/G06/G14; snapshot, undo, store, workspace and CLI. | complete; [report](implementation/reports/P02-attempt-01.md) |
 | P3: shared loop | One native clone/materialization path, explicit selected sharing, verified exchange/retry, composition, preview/confirmation, journaled integration, conflict actions and accepted-history publication. Wire CLI alongside services. | Basic authority/heads G03, composition G04, transfer G08, integration G13 and CLI G14. | pending; 5-10 days |
 | P4: harden/handoff | Two-person/source/document/binary journeys, branches/offline cases, fault/retry/private-work tests, native onboarding, pilot responsiveness, concise instructions and actual user feedback; fix blockers. | Focused G18/G20 checks and affected domain tests. | pending; 3-7 days |
 

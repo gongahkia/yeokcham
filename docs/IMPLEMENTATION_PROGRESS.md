@@ -8,7 +8,7 @@ verification, commits, and rollback. Each new agent reads and updates this file.
 
 - Design baseline: `d03ac1e095af7c896eede2334c5a1f5fc50c4e74`.
 - Branch: `main`; one implementation writer at a time.
-- Active implementation slice: P2 local workflow, session `p2-local-2026-11-14`,
+- Completed implementation slice: P2 local workflow, session `p2-local-2026-11-14`,
   starting clean main `56eb13d271421720299d7e3f0dcd589d80b4d153`.
   P1 core-workflow foundation is complete;
   continuation `p1-core-resume-2026-11-14` started on clean main
@@ -16,14 +16,26 @@ verification, commits, and rollback. Each new agent reads and updates this file.
   `06b662a8bab5c783117e5fcf45e36b7d942cfc64`. See the
   [P1 report](implementation/reports/P01-attempt-01.md) and
   [acceptance receipt](implementation/results/P01-acceptance.json).
-- Current pilot slice: P2 is in progress; P3/P4 are pending. The current priority remains the [complete pilot](PILOT_PLAN.md).
+- Current pilot handoff: P2 is complete; P3 is next eligible and unstarted, P4 pending.
+  See the [P2 report](implementation/reports/P02-attempt-01.md) and
+  [acceptance receipt](implementation/results/P02-acceptance.json). The current
+  priority remains the [complete pilot](PILOT_PLAN.md).
   P2 was separately invoked after P1; no P3/P4 work is authorized.
 - Original G02 has partial coverage through P1, with its full remainder below.
   It is not complete and does not make full G03 ready.
 - Completed full-design phases: **1 / 20** (G01). Completed pilot slices:
-  P0 evaluation and P1 foundation. Existing V1/undo predates this chain;
-  P1 adds pure records/validation and no new ordinary CLI workflow.
-- Current blocker: none. Session `79434` exited 0 after both tiers passed all
+  P0 evaluation, P1 foundation and P2 local work. Existing V1/undo predates this
+  chain; P2 adds durable signed local branches, inspection and safe selection.
+  None of G02/G03/G05/G06/G14 is complete as a full phase.
+- Current P2 blocker: none; all seven scoped criteria passed at
+  `6826af74810bb4087bb4795781d0176276df2b9e`. Final source implementation is
+  `e181ff9ec863740ceb511fb888b23472056ebd15`; the later commit updates existing
+  container/source invocations for explicit confirmation. Fresh focused checks
+  executed 197 OCaml cases and 46 Python cases; build/lint/CI passed. Final CI
+  reused matching valid Dune results. Native macOS/Windows, container execution
+  (Docker socket access denied), native onboarding and human/performance product
+  gates remain owned by later phases. P2 does not close those gates.
+- Accepted G01 baseline: session `79434` exited 0 after both tiers passed all
   280 measured records and 24 excluded warmups. The
   [complete baseline and budgets](implementation/results/G01-baseline.md) and
   [lossless full summary](implementation/results/G01-baseline.json) preserve the
@@ -52,10 +64,10 @@ later full-phase prompts as a shortcut around an unfinished predecessor.
 | --- | --- | --- | --- | --- |
 | [G01: Build the measurement harness and capture the local baseline](implementation/goals/G01-baseline.md) | Verified design baseline | complete | `5761fd69ff6856324a3ae265a58c8e3e8c785247`, `b1e78a92c6d095e30d78d1355af6b5fbcc215c42`, `48fd99a7a765dd12cb0ddcf54c80501b8fff2f28`, `547bef4cd33c44d1068159a305b230d5ffd22b41`, `c14443cca934b3666c439d4448925ed8b06addc8`, `b0fa2492957a1e1c801833b12fe6aac7f95dd0a9`, `e5beeefcff25590cb4cf50ab02c7e2d4428a25d6`, `950a450f080f8f5a62e7e460910099dd157e8841`, `e3ccae824c1aa03f4b6f984006e69033cefd95d1`, `5a69bb5b0a557f85b7f472be6af8fc7e16dc4163`, `35a95f7f0ce0df5c5400e666eeae02b876e280f6`, `1b69a3ac3f20b1e10158d6626703a09ed6a22e17`, `e385b9ce42fc0c708e0af95d52af92a33cb6ef43`, `7646362d80929e4f9cdccce0b90ac86beaa1a4a8`, `f924e0f480b4b5b7040b2ad3572790f171a8d745`; [attempt 07](implementation/reports/G01-attempt-07.md) | None for G01; next G02 |
 | [G02: Implement canonical records, identities, and shared interfaces](implementation/goals/G02-canonical-records.md) | G01 | in_progress | Partial via P1: `0c1f910dcd8a4f4a7d10db81a199d83fa9774043`, `06f526d9f6f09cd06bd3b57a7a348f64ea17817a`, `51c374f499372349b235e68b32e7bf3e748d2718`, `f900fbc3432e1d7134a547eda4f2ec7366d6c991`, `06b662a8bab5c783117e5fcf45e36b7d942cfc64`; [P1 report](implementation/reports/P01-attempt-01.md) | Review/request/event/policy and account/settings/archive records; request/member identity and proof; full policy/review/archive/journal and crypto interfaces; corresponding vectors/tests. P1 does not complete G02. |
-| [G03: Implement causal authority, member identity, and review-policy evaluation](implementation/goals/G03-authority-policy.md) | G02 | pending | — | All criteria in prompt |
+| [G03: Implement causal authority, member identity, and review-policy evaluation](implementation/goals/G03-authority-policy.md) | G02 | pending | Partial P2 coverage; [report](implementation/reports/P02-attempt-01.md) | Principal/review/policy evaluation, reconciliation/adoption and full review matrix; see criterion coverage below |
 | [G04: Implement deterministic composition and exact integration plans](implementation/goals/G04-composition-plans.md) | G03 | pending | — | All criteria in prompt |
-| [G05: Implement native ignore rules and reliable portable capture](implementation/goals/G05-capture-ignore.md) | G04 | pending | — | All criteria in prompt |
-| [G06: Persist history and indexes incrementally with atomic roots](implementation/goals/G06-incremental-history.md) | G05 | pending | — | All criteria in prompt |
+| [G05: Implement native ignore rules and reliable portable capture](implementation/goals/G05-capture-ignore.md) | G04 | pending | Partial P2 coverage; [report](implementation/reports/P02-attempt-01.md) | Native ignores/stable streaming capture/preflight delivered on Linux; full portability qualification and formal phase acceptance outstanding |
+| [G06: Persist history and indexes incrementally with atomic roots](implementation/goals/G06-incremental-history.md) | G05 | pending | Partial P2 coverage; [report](implementation/reports/P02-attempt-01.md) | Pages/index/rebuild/publication correspondence and depth measurements; whole-history encoding retained |
 | [G07: Implement lossless compression, indexed packs, and safe collection](implementation/goals/G07-compression-packs.md) | G06 | pending | — | All criteria in prompt |
 | [G08: Synchronize immutable shared history with verified offline coverage](implementation/goals/G08-shared-sync.md) | G07 | pending | — | All criteria in prompt |
 | [G09: Implement private account identity, device enrollment, and recovery custody](implementation/goals/G09-private-identity.md) | G08 | pending | — | All criteria in prompt |
@@ -63,7 +75,7 @@ later full-phase prompts as a shortcut around an unfinished predecessor.
 | [G11: Implement automatic private retention and inherited settings](implementation/goals/G11-retention-settings.md) | G10 | pending | — | All criteria in prompt |
 | [G12: Implement native optional and required review workflows](implementation/goals/G12-review-workflow.md) | G11 | pending | — | All criteria in prompt |
 | [G13: Implement exact recoverable integration and remove delivery friction](implementation/goals/G13-recoverable-integration.md) | G12 | pending | — | All criteria in prompt |
-| [G14: Complete native workspace and ordinary CLI journeys](implementation/goals/G14-workspace-cli.md) | G13 | pending | — | All criteria in prompt |
+| [G14: Complete native workspace and ordinary CLI journeys](implementation/goals/G14-workspace-cli.md) | G13 | pending | Partial P2 coverage; [report](implementation/reports/P02-attempt-01.md) | Verified clone, selected share/update, shared integration/archive, complete preferences and multi-person journeys |
 | [G15: Implement the durable per-user background scheduler](implementation/goals/G15-background-core.md) | G14 | pending | — | All criteria in prompt |
 | [G16: Integrate managed macOS and Linux services](implementation/goals/G16-macos-linux-services.md) | G15 | pending | — | All criteria in prompt |
 | [G17: Implement Windows support immediately after macOS/Linux service work](implementation/goals/G17-windows-support.md) | G16 | pending | — | All criteria in prompt |
@@ -81,7 +93,7 @@ partial phase. Do not relabel a partial phase complete to expose the next prompt
 | --- | --- | --- |
 | P0 evaluation | complete | [Assessment](PILOT_PLAN.md), [receipt](implementation/results/PILOT-workflow-assessment.json); tiny WSL/test-signer walkthrough only |
 | P1 core foundation | complete | [Interfaces](implementation/INTERFACES.md), [report](implementation/reports/P01-attempt-01.md), [acceptance](implementation/results/P01-acceptance.json); no P1 criteria remaining |
-| P2 local work | in_progress | [Scoped task](implementation/goals/P02-local-workflow.md); native ignore matching/explanation and capture consistency landed; durable workspace/history identity foundation landed; authenticated branch list/create and private init landed; switch, local inspection CLI and safe recovery remain; P2 incomplete |
+| P2 local work | complete | [Scoped task](implementation/goals/P02-local-workflow.md), [report](implementation/reports/P02-attempt-01.md), [receipt](implementation/results/P02-acceptance.json); all seven scoped criteria passed; original phases remain partial |
 | P3 shared loop | pending | Clone/selected sharing/composition/journaled integration/conflicts; unstarted |
 | P4 harden/handoff | pending | Representative/native/human and fault evidence; unstarted |
 
@@ -377,7 +389,7 @@ that relationship explicitly.
 | --- | --- | --- | --- |
 | Local existing-runtime baseline and reproducible runner | G01 | complete | [Environment](implementation/results/G01-environment.json), [v2 correction evidence](implementation/results/G01-harness-v2.json), [v2 export smoke](implementation/results/G01-export-smoke-v2.json), and [resumption checks](implementation/results/G01-resumption.json) verified; [full local measurements](implementation/results/G01-baseline.md) passed and were independently audited; [completion checks](implementation/results/G01-acceptance.json) and [report](implementation/reports/G01-attempt-07.md) passed; later gates remain pending; RSS is a launcher-inclusive upper bound |
 | Canonical records, causal policy, deterministic composition | G02-G04 | pending | P1 core records/identities/interfaces and trust tests passed ([report](implementation/reports/P01-attempt-01.md)); full G02 remainder, policy and composition evidence remain outstanding |
-| Capture/history/storage integrity and maintenance recovery | G05-G07 | pending | Exact-byte tests, restart/collection/pack fault cases, incremental work measurements |
+| Capture/history/storage integrity and maintenance recovery | G05-G07 | partial | P2 Linux exact-byte/stable capture, journal/root/mutation faults and branch retention passed; incremental pages/index/rebuild, packs, depth and portable qualification remain |
 | Shared offline coverage and concurrent-history preservation | G08/G13 | pending | Missing closure, offline unvisited state, receipt permutation and journal evidence |
 | Private recovery and complete archive before eviction | G09-G11 | pending | Fresh-device recovery, rejected unauthorized access, interrupted manifests, protected-root tests |
 | Review/confirmation boundaries and public/private separation | G12-G14 | pending | Both toggles, direct/required/offline paths, no private publication or false approval |
@@ -385,7 +397,7 @@ that relationship explicitly.
 | Native macOS validation | G16/G20 | pending | Real macOS candidate-revision build/tests and service/fidelity journeys |
 | Native Linux validation | G16/G20 | pending | Real Linux candidate-revision build/tests and systemd/fidelity journeys |
 | Native Windows validation | G17/G20 | pending | Real Windows candidate-revision build/tests and login-service/fidelity journeys |
-| Complete automated CLI journeys | G18/G20 | pending | Text/JSON/noninteractive/recovery/source/document flows, actual outputs |
+| Complete automated CLI journeys | G18/G20 | partial | P2 local text/JSON/confirmation/plan/branch/copy-out and process recovery passed; shared/remote/archive and whole-product journeys remain |
 | Nontechnical comprehension evaluation | G18/G20 | pending | Actual participant observations and resolved findings; an agent walkthrough is insufficient |
 | Full source, monorepo, binary/asset performance evidence | G19 | pending | Full selected tiers/sample counts, equivalent baseline comparisons, correctness gates, hardware/limits |
 | Integrated CI, packaging and self-hosted server smoke | G20 | pending | Candidate-revision required checks and applicable disposable package/container journeys |
@@ -724,3 +736,54 @@ cached from matching successful runs; focused journal9/undo16/native-local22 and
 service45 ran during this checkpoint. No G01 measurements or README edits.
 Complete local CLI flag/selection/recovery journeys and final P2 evidence remain
 required before completion.
+
+
+## P2 completed local-workflow handoff — November 15, 2026
+
+Scoped task: [P02-local-workflow](implementation/goals/P02-local-workflow.md).
+Implementation through `e181ff9ec863740ceb511fb888b23472056ebd15`, documented
+invocations `6826af74810bb4087bb4795781d0176276df2b9e`. The separate closeout
+commit contains this ledger, [report](implementation/reports/P02-attempt-01.md)
+and [receipt](implementation/results/P02-acceptance.json). Its hash is obtained
+from `git log -1 --format=%H -- docs/implementation/reports/P02-attempt-01.md`.
+Earlier checkpoint remainders above are historical; this audit supersedes them.
+
+All seven P2 criteria passed: actual inspection/domain output; TC07 ignore and
+bounded stable capture; durable identity/allocation; signed native branch
+list/create/switch; verified selection/copy-out/recovery; coherent confirmed CLI
+journeys and tests; current APIs/guides and exact remaining-phase accounting.
+Final focused verification executed 16 OCaml suites/197 cases and 46 Python
+cases at the tested commit, including 16 selection and 17 branch CLI journeys.
+`make build`, `make lint`, `make ci` exited 0. Final CI reused matching successful
+Dune test results. Exact commands/exits/log digests are in the receipt; logs live
+under `/home/gongahkia/.cache/yeokcham-p2-20261114/`. Native local suite now has
+23 cases including signed concurrent-name refusal. Initial CLI expectation and
+formatter-promotion failures were corrected; final checks report no skip.
+
+| Original criteria | P2 coverage | Remaining owner/scope |
+| --- | --- | --- |
+| G03 C1 | Existing device trust reused | G03 principal/device proof binding, independent reviewer identity |
+| G03 C2 | Signed causal branch/name/accepted head sets, receipt permutations, conservative selection/refusal | G03 full policy heads/fork evaluation, authority reconciliation/adoption |
+| G03 C3–C5 | No fabricated approval/policy success; branch permutation/current trust tests | G03 independent approvers, exact review context/preferences/invalidation, event supersession/withdrawal/block/dismissal and full review matrix |
+| G05 C1–C3 | Native ignore/explain, bounded descriptor-based capture and streamed exact bytes/exec/dirs/symlinks on Linux | G05/G20 full portable qualification and formal phase acceptance |
+| G05 C4–C5 | Destination preflight, ignored/untracked/case/normalization conflicts, actual Linux and boundary/generated tests | G20 remaining native OS/filesystem matrix; no macOS/Windows pass claimed |
+| G06 C1 | No paging/index replacement | G06 bounded pages/rebuildable index/append-cost work; profile before replacement |
+| G06 C2–C3 | Durable namespace/counter/ancestry/cursor/private branch positions; atomic root/retry/collision/exhaustion | G06 publication correspondence and full independent-received-record/incremental-page scenarios |
+| G06 C4–C5 | Current/pinned/branch/pending/proof roots, process restart/root/mutation faults and GC regressions | G06 index rebuild/page faults/depth measurements; accepted G01 not rerun |
+| G14 C1–C3 | Private init/genesis, local inspection/history, named branches and exact local recovery | P3/G14 ordinary verified clone, selected share/update, shared composition/integration/archive and remaining vocabulary |
+| G14 C4–C5 | Scoped preview/yes/plan/cancel/JSON/pagination/exits and mixed local journeys | G14 full command/preferences consistency and multi-person shared/remote journeys |
+| G14 C6 | Honest watcher/service/backup state; existing regressions retained | G15–G17 actual managed service delivery |
+
+G02 remains partial per P1; no additional full phase is closed. Completed full
+design remains 1/20 (G01); pilot P0/P1/P2 complete. P3 is next eligible only upon
+separate invocation; P3/P4 remain unstarted. No next prompt was generated.
+Native onboarding, representative project responsiveness and human evaluation
+remain P4/G18/G20. Docker integration is unavailable: `docker info` exited 1,
+permission denied on `/var/run/docker.sock`; affected shell scripts passed syntax
+checks. No native macOS/Windows or power-loss portability claim. README, accepted
+G01 measurement/report/result files and P1 core golden bytes remain unchanged.
+No benchmark artifact directories were recreated. Whole-history encoding remains;
+no storage performance improvement is claimed. Preserve current metadata/live
+files/journals/proofs and displaced native nodes when changing executable versions;
+a source rollback does not undo materialization. See the report's exact rollback
+order and data implications. No push/release/deployment or additional agent.

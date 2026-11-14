@@ -1,16 +1,16 @@
-# Core-workflow interfaces (P1 and current P2 checkpoints)
+# Core-workflow interfaces (P1 and P2)
 
-These are implemented pure interfaces, not a clone, integration executor or
-persistent accepted-head store. Read the actual signatures in
+P1 supplies the pure canonical model/record/trust interfaces. P2 connects them
+to durable local branches, workspace/history identities, capture, inspection and
+verified local selection/recovery. Read actual signatures in
 [model Core](../../lib/yeokcham_v1_model/core.mli),
-[record Core](../../lib/yeokcham_v1_record/core_record.mli) and
-[trust Core](../../lib/yeokcham_v1_trust/yeokcham_v1_trust.mli).
-P1 left the V1 CLI, project-state wrapper, package and transport formats
-unchanged. The current P2 checkpoints below add native ignore/capture behavior
-and persisted workspace/history identity to the existing local-state wrapper.
-Signed core branch records still await their durable local adapter; the P1
-model/trust boundary and current causal-head projection are described below. TC01/TC02/TC06 remain the design
-authority in [Technical contracts](../TECHNICAL_CONTRACTS.md).
+[record Core](../../lib/yeokcham_v1_record/core_record.mli),
+[trust Core](../../lib/yeokcham_v1_trust/yeokcham_v1_trust.mli) and the local
+adapters below. P1 left V1 CLI/wrappers unchanged; P2 extends the existing local
+state root while preserving public package/transport formats. There is no new
+clone/shared composition/integration executor. See the
+[P2 report](reports/P02-attempt-01.md). TC01/TC02/TC06 remain the authority in
+[Technical contracts](../TECHNICAL_CONTRACTS.md).
 
 ## Registry and canonical bytes
 
@@ -230,8 +230,8 @@ and no rule. They read ancestor rule files without writing objects/history and
 stop at excluded or symlink ancestors. Capture uses the same matcher at each
 included directory, preserving one source of truth for native exclusions.
 
-This checkpoint does not establish P2 completion, capture consistency, safe
-replacement by itself; durable workspace/branch state and ordinary CLI adapters are described below.
+This matcher is one part of P2. Capture consistency, durable local branch/history
+state and safe selection/CLI adapters are described below.
 
 ### P2 capture consistency checkpoint
 
@@ -276,9 +276,10 @@ with null only after `Int64.max_int`. Schema 1 remains readable for current data
 its known ancestry is preserved on the next write. The new canonical fixture is
 `test/golden/local/history-v2.cbor.hex`.
 
-Initialization now stores history immediately in the existing
+History-only current data uses the existing
 `["yeokcham-local-state", 1, inner_project_bytes, history_bytes]` wrapper under
-`v1-project-state`; there is no second mutable history head. The store generates
+`v1-project-state`; native initialization adds local core state with wrapper 2
+below. There is no second mutable history head. The store generates
 128-bit workspace entropy via `Yeokcham_v1_trust.random_bytes` and the P1 typed
 constructor. Reads do not invent a fresh namespace. A mutating write binds an
 existing unnamespaced history once. Namespaced appends use P1
@@ -295,8 +296,8 @@ measurements remain G06 work, outside this checkpoint.
 `Yeokcham_v1_store.For_test.save` injects trusted in-process callbacks immediately
 before/after root CAS (after immutable object persistence). Production `save` has
 no external fault flags. Crash tests exercise both boundaries and subsequent
-reload/retry. These are metadata publication tests, not materialization-journal
-acceptance or completed branch support.
+reload/retry. Materialization-journal and branch acceptance use the separate
+connected service tests below.
 
 
 ### P2 causal branch projection checkpoint
@@ -310,12 +311,12 @@ alternatives, even when their result snapshots match. Concurrent names remain
 a set. IDs order presentation only; display times and receipt order never
 choose a winner. Traversal visits each causal record once per projection pass.
 
-The adapter must still refuse ambiguous branch names/heads and verify actual
+The connected adapter refuses ambiguous branch names/heads and verifies actual
 snapshot closure and accepted-result semantics. This pure projection neither
 persists selection nor authorizes file replacement. Three signed-record cases
 exercise rename inheritance, all six receipt permutations of concurrent events,
-explicit target reconciliation and independent branch identities. No P3 exchange,
-composition or CLI branch success is claimed by this checkpoint.
+explicit target reconciliation and independent branch identities. This projection
+does not implement P3 exchange/composition; CLI selection is tested separately.
 
 ### P2 authenticated local branch state
 
@@ -327,7 +328,7 @@ selected accepted version, resolves names conservatively and retains a private
 collisions, exhausted collision retries, ambiguous event/accepted/name sets,
 unknown positions and unsupported acceptance refuse explicitly. `select` only
 prepares metadata; a service must materialize safely before publishing it.
-There is no branch/switch CLI claim at this checkpoint.
+The connected CLI branch/switch adapter is described below.
 
 `initialize` stores a canonical empty snapshot and signs it through
 `Trust.Core.sign`/`receive`. It never accepts existing worktree files. The local
@@ -370,12 +371,12 @@ service compaction/storage-root inspection and GC pass the actual roots. The
 store refuses dropping a branch's retained checkpoint. These protections do not
 invent snapshot availability after independent object loss.
 
-Seven adapter cases cover signed/private initialization, metadata selection in a
+Twenty-three adapter cases cover signed/private initialization, metadata selection in a
 fresh process, duplicate names, missing objects/positions, bounded identity
 collision and entropy failure, logical/physical identity mismatch, invalid
 signatures, unsupported acceptance, historical/current admission and unselected
-private work surviving compaction/GC planning. Materialization and CLI branch
-journeys remain outstanding.
+private work surviving compaction/GC planning, actual materialization interruptions,
+copy-out recovery and signed concurrent-name refusal. CLI journeys are below.
 
 
 ### P2 private-init and branch CLI checkpoint
@@ -456,8 +457,8 @@ available separately. This is display logic, not a P3 composition proof.
 Five text cases include 400 randomized exact-byte hunk reconstructions. Six
 service cases cover mixed changes, A-B-C/return-B-D, pagination, namespace scope,
 equal contents/different positions, malformed/special-file capture, unavailable
-contents, compaction and pending recovery without a partial capture. CLI rendering
-and target structured outcomes remain outstanding at this checkpoint.
+contents, compaction and pending recovery without a partial capture. The connected
+CLI exposes these actual results through the domain schema below.
 
 ### P2 inspection CLI and domain JSON checkpoint
 
