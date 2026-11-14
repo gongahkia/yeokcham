@@ -9,17 +9,24 @@ set of essential operations and optional capabilities around it. Local recovery
 is one part of that workflow. The broader direction in
 [Product design](PRODUCT_DESIGN.md) remains in place.
 
-The initial evaluation is complete. P1 core foundation implementation is in
-progress from 4577f3456f9fce0246a61e3b1ec4740319d8442e. G01 remains complete;
-G02 is only partially assigned to P1 and is not complete. G01-G20 remain the backlog.
+P0 evaluation and P1 core foundation are complete. The
+[P1 report](implementation/reports/P01-attempt-01.md) records implementation
+`06b662a8bab5c783117e5fcf45e36b7d942cfc64`, actual checks and
+[interfaces](implementation/INTERFACES.md). P2 local work is ready and unstarted;
+P3/P4 are pending. G01 remains complete; G02 has partial P1 coverage and is not
+complete. G01-G20 remain the full-design backlog.
 This pilot changes delivery order and the first milestone; it does not mark
 original criteria complete or relax privacy, authority, fidelity or recovery.
 
 The first native pilot OS and representative real project remain to be selected.
 The automated evaluation used WSL2, which is not a supported native product
-platform. No native-host or human-usability gate has passed here.
+platform. P1 subsequently passed module/CI checks on native Arch Linux, but no
+complete native-host pilot or human-usability gate has passed.
 
 ## Essential operations
+
+The assessment column below records P0's observed V1 behavior on its WSL host.
+P1 adds pure library interfaces; it does not implement these missing CLI journeys.
 
 These are user intentions; names may evolve toward [CLI design](CLI_DESIGN.md).
 Git terms provide orientation, without adding a Git interoperability commitment.
@@ -115,8 +122,8 @@ development ranges including tests/integration; host/participant waits add time.
 | Slice | Deliverable | Existing work to use | State / rough effort |
 | --- | --- | --- | --- |
 | P0: evaluate | This walkthrough, evidence and essential-operation inventory. | Current V1, G01 and existing designs/guides. | complete |
-| P1: core foundation | Canonical revision/accepted-version/branch records, workspace/history identities, bounded signed decoding, duplicate/collision handling and actual state/plan/error interfaces; golden/negative cases. | Relevant G02 contracts and encoding/envelope/record/model/trust modules. | in_progress; starting 4577f3456f9fce0246a61e3b1ec4740319d8442e |
-| P2: local work | Readable status/history/diff, native file/directory exclusions, tool-generated IDs/names, branch selection/private-work preservation and exact recovery. Reuse working capture/undo; profile before replacing storage. | Core parts of G03/G05/G06/G14; snapshot, undo, store, workspace and CLI. | pending; 3-5 days |
+| P1: core foundation | Canonical revision/accepted-version/branch records, workspace/history identities, bounded signed decoding, duplicate/collision handling and actual state/plan/error interfaces; golden/negative cases. | Relevant G02 contracts and encoding/envelope/record/model/trust modules. | complete; [report](implementation/reports/P01-attempt-01.md) |
+| P2: local work | Readable status/history/diff, native file/directory exclusions, tool-generated IDs/names, branch selection/private-work preservation and exact recovery. Reuse working capture/undo; profile before replacing storage. | Core parts of G03/G05/G06/G14; snapshot, undo, store, workspace and CLI. | ready, unstarted; original rough estimate 3-5 days |
 | P3: shared loop | One native clone/materialization path, explicit selected sharing, verified exchange/retry, composition, preview/confirmation, journaled integration, conflict actions and accepted-history publication. Wire CLI alongside services. | Basic authority/heads G03, composition G04, transfer G08, integration G13 and CLI G14. | pending; 5-10 days |
 | P4: harden/handoff | Two-person/source/document/binary journeys, branches/offline cases, fault/retry/private-work tests, native onboarding, pilot responsiveness, concise instructions and actual user feedback; fix blockers. | Focused G18/G20 checks and affected domain tests. | pending; 3-7 days |
 
@@ -164,7 +171,7 @@ host, with real native custody and a documented remote setup:
 The native OS/project choice remains an open input. Required privacy/recovery
 guarantees do not depend on that choice.
 
-## Assessment verification
+## P0 assessment verification (historical)
 
 The current checkout built successfully. Documentation link checking passed
 with 186 local references, and the compact receipt was independently compared
@@ -176,12 +183,13 @@ for these documentation-only changes.
 
 ## Next handoff
 
-Use the [scoped P1 task](implementation/goals/P01-core-workflow-foundation.md);
-preserve the original G02 remainder. P1 was separately invoked after the
-evaluation; no later slice has started. Before delegating consumers, record
-one registry owner, concrete module ownership and integration checks. Reconcile
-the existing workflow with the user's recorded worktree preference before using
-that future orchestration; this assessment used a single writer on main.
+P1 is complete under the [scoped task](implementation/goals/P01-core-workflow-foundation.md).
+Verify its [report](implementation/reports/P01-attempt-01.md),
+[acceptance receipt](implementation/results/P01-acceptance.json) and actual
+interfaces before starting P2 local work. Preserve the original G02 remainder.
+No later slice has started; a P2 prompt will be prepared only when requested.
+The user requires one writer on main for this handoff. Future orchestration
+preferences must be reconciled separately before changing that workflow.
 
 Maintain [Implementation progress](IMPLEMENTATION_PROGRESS.md), original-phase
 coverage, evidence and coherent commits. Full-design native/resource/backup

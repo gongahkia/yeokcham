@@ -784,9 +784,10 @@ the same logical contract. Expose downloaded versus materializable scope separat
 ## TC08: validation and implementation sequence
 
 November 14 delivery-order amendment: D30 prioritizes the complete everyday VCS
-[pilot](PILOT_PLAN.md). Its P0 assessment is complete and implementation is
-unstarted. Use separately scoped pilot slices and retain G01-G20 as the full
-backlog. Shared schemas precede consumers; verified composition, protected
+[pilot](PILOT_PLAN.md). Its P0 assessment and P1 foundation are complete; P2 is
+ready and unstarted, and full G02 remains partial. Use separately scoped pilot
+slices and retain G01-G20 as the full backlog. Shared schemas precede consumers;
+verified composition, protected
 private work, native custody and durable application remain required for the
 capabilities shipped. Optional review/account/archive work need not delay the
 basic collaboration loop solely because of its original phase number. The
@@ -854,10 +855,11 @@ authenticates revisions under explicit authority context.
 
 The repository does not yet implement the new account/archive, managed service,
 review, composition, packing, or CLI defaults merely because they are documented.
-TC03-TC07 select their behavior and interfaces. S0 turns the specified record
-layouts and rules into concrete module APIs, registered type codes, and golden
-vectors before dependent feature work. Performance and usability evidence is
-collected under TC08 and the linked plans.
+TC03-TC07 select their behavior and interfaces. P1 implements the three core
+record layouts, registered type codes, identity and consumer contracts, trust validation and
+independent vectors documented in [Interfaces](implementation/INTERFACES.md).
+The rest of S0/G02 remains outstanding before its dependent full-design work.
+Performance and usability evidence is collected under TC08 and the linked plans.
 
 No old-development-format compatibility layer is required (D10). Exact
 current-format recovery, bounded decoding, durable retry, and preservation of

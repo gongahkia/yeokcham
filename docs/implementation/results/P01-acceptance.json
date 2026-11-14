@@ -1,0 +1,327 @@
+{
+  "schema": "yeokcham-p01-acceptance-v1",
+  "status": "passed",
+  "phase": "P1",
+  "verified_utc": "2026-11-14T15:04:57.885840+00:00",
+  "starting_commit": "06f526d9f6f09cd06bd3b57a7a348f64ea17817a",
+  "tested_commit": "06b662a8bab5c783117e5fcf45e36b7d942cfc64",
+  "branch": "main",
+  "predecessors_verified_ancestors": [
+    "d03ac1e095af7c896eede2334c5a1f5fc50c4e74",
+    "f3bd17705591413078e1504d46d8240eb6c47f2e",
+    "4577f3456f9fce0246a61e3b1ec4740319d8442e"
+  ],
+  "implementation_commits": [
+    "51c374f499372349b235e68b32e7bf3e748d2718",
+    "f900fbc3432e1d7134a547eda4f2ec7366d6c991",
+    "06b662a8bab5c783117e5fcf45e36b7d942cfc64"
+  ],
+  "platform": "Linux-7.2.15-1-omarchy-x86_64-with-glibc2.44",
+  "toolchain": {
+    "ocaml": "5.5.0",
+    "dune": "3.25.0",
+    "ocamlformat": "0.29.0",
+    "opam": "2.6.1",
+    "python": "3.14.8"
+  },
+  "environment": {
+    "artifact_root": "/home/gongahkia/.cache/yeokcham-p1-20261114",
+    "setup_command": "make setup",
+    "setup_exit_code": 0,
+    "setup_log_sha256": "60970c9cfdbc9eea21593156359f3315ca5ef2ce9833b99e348406325735ce12",
+    "exports": [
+      "export PATH=/home/gongahkia/.cache/yeokcham-p1-20261114/bin:$PATH",
+      "export LD_LIBRARY_PATH=/home/gongahkia/.cache/yeokcham-p1-20261114/tool-root/usr/lib",
+      "export SOFTHSM2_CONF=/home/gongahkia/.cache/yeokcham-p1-20261114/softhsm2.conf",
+      "export YEOKCHAM_V1_TEST_PKCS11_MODULE=/home/gongahkia/.cache/yeokcham-p1-20261114/tool-root/usr/lib/softhsm/libsofthsm2.so",
+      "export OPAMJOBS=4"
+    ],
+    "packages": [
+      {
+        "name": "botan-3.13.0-1-x86_64.pkg.tar.zst",
+        "sha256": "00fc2726752793e201cdbea92bd7c2b1c37c7a16d2b14d3d2955567deb4c8fea"
+      },
+      {
+        "name": "fish-4.9.3-1-x86_64.pkg.tar.zst",
+        "sha256": "57f5e1d91f0c86498c5666d5f3cbae6181394299fadc20d43ef01b3cfcaca15b"
+      },
+      {
+        "name": "ocaml-5.5.0-1-x86_64.pkg.tar.zst",
+        "sha256": "01c1e12fc2c7a19be2e89e470fe33670a7b1a92e0f2ce18be00aa25c30f788d4"
+      },
+      {
+        "name": "ocaml-compiler-libs-5.5.0-1-x86_64.pkg.tar.zst",
+        "sha256": "a871c0cf34fcb0a113d6a22eaa1885d17cc4631f2a4de8e4d80f3376ac57fe0f"
+      },
+      {
+        "name": "opam-2.6.1-1-x86_64.pkg.tar.zst",
+        "sha256": "f9ce22df99c675913348386459841bccb54886d2d945c2acc68dd4649d909bfb"
+      },
+      {
+        "name": "softhsm-2.7.0-1-x86_64.pkg.tar.zst",
+        "sha256": "e03831635a9dcca7ad03d42faa2fc3d3b470f7a8b07b86a8aac047e45cd7f3b1"
+      }
+    ],
+    "setup_notes": [
+      "Passwordless sudo unavailable; configured package-mirror binaries extracted under external cache, not installed system-wide. Compiler/dependencies built in repository-local opam switch.",
+      "SoftHSM initialization initially failed at compiled-in system path; --module with the cached library initialized the disposable CI-label token.",
+      "Initial focused compilation caught warnings and helper polymorphism errors; corrected before commits. No validation was suppressed.",
+      "Dune 3.25.0 satisfies manifest >=3.23; no lockfile was changed."
+    ]
+  },
+  "checks": [
+    {
+      "command": [
+        "make",
+        "build"
+      ],
+      "tested_commit": "06b662a8bab5c783117e5fcf45e36b7d942cfc64",
+      "exit_code": 0,
+      "log": "/home/gongahkia/.cache/yeokcham-p1-20261114/build.log",
+      "log_sha256": "e90e1e244d9512c60ffb9a48589ca172a1059a79f19dbb267ecfa379fabcb5ff"
+    },
+    {
+      "command": [
+        "make",
+        "lint"
+      ],
+      "tested_commit": "06b662a8bab5c783117e5fcf45e36b7d942cfc64",
+      "exit_code": 0,
+      "log": "/home/gongahkia/.cache/yeokcham-p1-20261114/lint.log",
+      "log_sha256": "2a19a33e28c32c5dea7a816aa16891c07e006878ee11e0c819c7aee6d260008d"
+    },
+    {
+      "command": [
+        "make",
+        "ci"
+      ],
+      "tested_commit": "06b662a8bab5c783117e5fcf45e36b7d942cfc64",
+      "exit_code": 0,
+      "log": "/home/gongahkia/.cache/yeokcham-p1-20261114/ci.log",
+      "log_sha256": "394d8e4be893516937860e106b3c509771bf61a6fde8990f55c0afd15b6cdaf3"
+    }
+  ],
+  "ci": {
+    "alcotest_suites": 50,
+    "alcotest_cases": 307,
+    "python_tests": 12,
+    "reported_skips": 0,
+    "new_core_cases": 18,
+    "new_property_trials": 2200,
+    "pkcs11_module_configured": true,
+    "cache_notes": "Fresh local switch/build. CI executed all 50 scheduled OCaml test suites and both Python test files; build/lint reused already-built artifacts. Later documentation-only closeout reuses this code validation."
+  },
+  "focused_checks": [
+    {
+      "command": [
+        "opam",
+        "exec",
+        "--",
+        "dune",
+        "exec",
+        "test/test_core_model.exe"
+      ],
+      "cases": 9,
+      "exit_code": 0,
+      "log": "/home/gongahkia/.cache/yeokcham-p1-20261114/model-tests.log",
+      "log_sha256": "f81f166a7195e10ee58be66a1b689da68215de31f61bce866eba6122157e75bf"
+    },
+    {
+      "command": [
+        "opam",
+        "exec",
+        "--",
+        "dune",
+        "exec",
+        "test/test_core_record.exe"
+      ],
+      "cases": 6,
+      "exit_code": 0,
+      "log": "/home/gongahkia/.cache/yeokcham-p1-20261114/codec-tests.log",
+      "log_sha256": "a6fde8ab32994a5b8d28a26331f42e11be3aa212638b92cc8c1510773a959e8a"
+    },
+    {
+      "command": [
+        "opam",
+        "exec",
+        "--",
+        "dune",
+        "exec",
+        "test/test_core_trust.exe"
+      ],
+      "cases": 3,
+      "exit_code": 0,
+      "log": "/home/gongahkia/.cache/yeokcham-p1-20261114/trust-tests.log",
+      "log_sha256": "e575d0f67a8936853195a3a4d657efc7fdeeba948b1727c9cca31384b1915fd5"
+    }
+  ],
+  "vectors": {
+    "command": [
+      "python3",
+      "-B",
+      "test/generate_core_vectors.py"
+    ],
+    "exit_code": 0,
+    "reproduction_matches_committed_files": true,
+    "generator_sha256": "eac354eaea1f78336c9cfd83950ac3488cac3dcca4b7db989147674b80d86df2",
+    "files": {
+      "test/golden/core/accepted-version-body.hex": "18563149ae54c3effdaafd98f0188ce37cf3e9f68037d79fc61a0f8a783d1295",
+      "test/golden/core/accepted-version-envelope.hex": "7c6a937499506807d1ad6ba92f9f32382acdd9540070a9668efd9abe04633a86",
+      "test/golden/core/accepted-version-id.hex": "d7e090ce62fd344fd994098e0a275057576789734aa3e73f34ff789fbb64725e",
+      "test/golden/core/accepted-version-signing-input.hex": "e2d48d6ed9f7ab32b815600b7ca9ff325116114e00f549a797d73c1140840511",
+      "test/golden/core/branch-event-body.hex": "89c92f6198f3c395679c6194d662cb85ac195ce07766d86b353c10817b5a257c",
+      "test/golden/core/branch-event-envelope.hex": "4a04bee6df229aac000bef7608198573aa03c10c14d8b072ba5043fda25639c1",
+      "test/golden/core/branch-event-id.hex": "fb6671ff779ffa1ec2eceee18127f27d54b667880d629982febf2cf34f92d578",
+      "test/golden/core/branch-event-signing-input.hex": "7a95277674ee9535f46a54e374b190ac23d2cd68ab5605f195c7f6357e18e2fc",
+      "test/golden/core/history-id.hex": "16245a3512b768e8f8065d030ffaef3515ccf251fa52717b94081efdffff8c50",
+      "test/golden/core/shared-revision-body.hex": "aac739a5ddd5de0652ea62cb71de9b2f46b82ccb8cd97787c8e75484bf7c2ffa",
+      "test/golden/core/shared-revision-envelope.hex": "c04d0db62b00af302a2ed788c50a9da717cbdb9db11dd21793f51b2d7050980c",
+      "test/golden/core/shared-revision-id.hex": "f44c5fe41bded99c8c7dbca2b564915445f966f68c9c512432f69d7ee71e9515",
+      "test/golden/core/shared-revision-signing-input.hex": "2452ede07d1fd26d90f915da64dad5c85b5abc881c580ff236cae1c024e7f5a8"
+    }
+  },
+  "criteria": [
+    {
+      "number": 1,
+      "result": "passed",
+      "evidence": [
+        "lib/yeokcham_v1_record/core_record.ml",
+        "test/test_core_record.ml",
+        "test/golden/core"
+      ]
+    },
+    {
+      "number": 2,
+      "result": "passed",
+      "evidence": [
+        "lib/yeokcham_v1_model/core.ml",
+        "test/test_core_model.ml",
+        "docs/implementation/INTERFACES.md"
+      ]
+    },
+    {
+      "number": 3,
+      "result": "passed",
+      "evidence": [
+        "lib/yeokcham_v1_model/core.mli",
+        "lib/yeokcham_v1_trust/yeokcham_v1_trust.mli",
+        "docs/implementation/INTERFACES.md"
+      ]
+    },
+    {
+      "number": 4,
+      "result": "passed",
+      "evidence": [
+        "test/test_core_trust.ml",
+        "test/generate_core_vectors.py",
+        "checks"
+      ]
+    },
+    {
+      "number": 5,
+      "result": "passed",
+      "evidence": [
+        "docs/implementation/INTERFACES.md",
+        "docs/IMPLEMENTATION_PROGRESS.md",
+        "docs/implementation/reports/P01-attempt-01.md"
+      ]
+    }
+  ],
+  "preserved_predecessor_evidence_sha256": {
+    "G01-baseline.json": "03e105c1c9ad56178f20b67bc1132c1a5795015d4346dce6d3c9b5f4115ed88b",
+    "G01-acceptance.json": "a83992829ec0900fbf8ee695f49a0ee4f65ce25b71a371590543779a66a55f72",
+    "PILOT-workflow-assessment.json": "d5ff0fd335fb2bd48b986a1f2c5289944d08ab91b974f1c616b7b13b545699df"
+  },
+  "g01_measurements_repeated": false,
+  "readme_changed": false,
+  "remaining_g02": [
+    "review request/version/event and repository-policy record families",
+    "account epochs, personal settings and archive manifests",
+    "request/member identities and principal proof",
+    "private crypto and full policy/review/archive/journal consumer contracts"
+  ],
+  "not_claimed": [
+    "new CLI init/clone/branch/switch/integrate workflows",
+    "composition, snapshot/scope proof or durable accepted-head publication",
+    "durable sequence allocation or new history persistence",
+    "core adoption; late arrivals requiring it refuse explicitly",
+    "native platform product/service acceptance, macOS/Windows, human pilot evidence",
+    "extended benchmark, package/container or deployment validation"
+  ],
+  "unavailable_historical_artifacts": [
+    "/home/gongahkia/.cache/yeokcham-g01",
+    "/home/gongahkia/.cache/yeokcham-pilot-20261114-jef0er2n"
+  ],
+  "criteria_source": "docs/implementation/goals/P01-core-workflow-foundation.md (five original criteria)",
+  "continuation_criteria": [
+    {
+      "number": 1,
+      "result": "passed",
+      "evidence": [
+        "lib/yeokcham_v1_record/core_record.ml",
+        "test/golden/core"
+      ]
+    },
+    {
+      "number": 2,
+      "result": "passed",
+      "evidence": [
+        "test/test_core_record.ml"
+      ]
+    },
+    {
+      "number": 3,
+      "result": "passed",
+      "evidence": [
+        "lib/yeokcham_v1_model/core.ml",
+        "test/test_core_model.ml",
+        "docs/implementation/INTERFACES.md"
+      ]
+    },
+    {
+      "number": 4,
+      "result": "passed",
+      "evidence": [
+        "lib/yeokcham_v1_trust/yeokcham_v1_trust.ml",
+        "test/test_core_trust.ml"
+      ]
+    },
+    {
+      "number": 5,
+      "result": "passed",
+      "evidence": [
+        "docs/implementation/INTERFACES.md"
+      ]
+    },
+    {
+      "number": 6,
+      "result": "passed",
+      "evidence": [
+        "test/generate_core_vectors.py",
+        "test/test_core_record.ml",
+        "test/test_core_trust.ml",
+        "checks"
+      ]
+    },
+    {
+      "number": 7,
+      "result": "passed",
+      "evidence": [
+        "docs/IMPLEMENTATION_PROGRESS.md",
+        "docs/implementation/reports/P01-attempt-01.md",
+        "remaining_g02"
+      ]
+    }
+  ],
+  "documentation_closeout": {
+    "command": [
+      "make",
+      "docs-check"
+    ],
+    "exit_code": 0,
+    "local_references": 212,
+    "log": "/home/gongahkia/.cache/yeokcham-p1-20261114/docs-closeout.log",
+    "log_sha256": "72a3a84e15738172c87cec86e226156112a388b92826449f0317be383e390e3c",
+    "git_diff_check_exit_code": 0
+  }
+}
