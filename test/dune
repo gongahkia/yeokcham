@@ -4,6 +4,20 @@
  (libraries alcotest unix yeokcham_snapshot yeokcham_store))
 
 (test
+ (name test_native_ignore)
+ (modules test_native_ignore)
+ (libraries alcotest unix yeokcham_snapshot yeokcham_store))
+
+(rule
+ (alias runtest)
+ (deps test_native_ignore_cli.py ../bin/yeokcham_v1.exe)
+ (action
+  (run
+   python3
+   %{dep:test_native_ignore_cli.py}
+   %{dep:../bin/yeokcham_v1.exe})))
+
+(test
  (name test_v1_model)
  (modules test_v1_model)
  (libraries alcotest yeokcham_v1_model))

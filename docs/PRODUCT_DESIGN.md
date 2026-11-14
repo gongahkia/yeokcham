@@ -71,7 +71,7 @@ restricted to a recovery utility; that earlier suggestion was not accepted.
 | D27 | Require renewed approval after reviewed content or relevant context changes by default; allow an authorized repository-policy opt-out with a warning. Keep this independent of D18's personal confirmation opt-out. | Agreed; required reviews remain opt-in, historical approval scope stays exact, and conflict/integrity checks always apply |
 | D28 | Choose logical defaults for the remaining technical, CLI, review, and validation choices without another preference round, and record them in the design documents. | Authorized; selected defaults in TC03-TC08 and linked designs, implementation still separate |
 | D29 | Execute implementation through copyable sequential `/goal` prompts with evidence reports, a persistent progress ledger, and atomic commits on `main`. Limit README edits to accurate additions or corrections of obvious outdated/wrong content. | Authorized workflow; G01-G20 prepared, no implementation goal started by the handoff setup |
-| D30 | Prioritize a complete everyday VCS pilot: start/obtain a project, inspect/save/history, branch/switch, recover, explicitly share/receive, integrate and resolve conflicts. Deliver optional capabilities afterward while preserving privacy, authority and recovery guarantees. | Agreed November 14; [pilot evaluation and delivery slices](PILOT_PLAN.md) recorded. This amends delivery order, not the broader product direction. G01 and pilot P0/P1 complete; P2 ready and unstarted; full G02 remains partial. |
+| D30 | Prioritize a complete everyday VCS pilot: start/obtain a project, inspect/save/history, branch/switch, recover, explicitly share/receive, integrate and resolve conflicts. Deliver optional capabilities afterward while preserving privacy, authority and recovery guarantees. | Agreed November 14; [pilot evaluation and delivery slices](PILOT_PLAN.md) recorded. This amends delivery order, not the broader product direction. G01 and pilot P0/P1 complete; P2 in progress; full G02 remains partial. |
 
 ## Discussion minutes
 
@@ -258,10 +258,10 @@ configuration, or a Git executable. Keep mandatory internal-metadata exclusions
 separate from user rules. Ignoring is based on explicit path rules, not blanket
 assumptions that documents, media, archives, or binaries are unwanted.
 
-The existing `.yeokchamignore` accepts literal relative paths only. TC07 chooses
-native glob/negation rules, nested-directory scope, precedence, and re-inclusion
-semantics for the replacement. Show which
-rule excluded a path so users can understand and adjust capture coverage.
+P2 implements TC07's native glob/negation rules, nested-directory scope,
+precedence, re-inclusion and `ignore explain` source reporting. See
+[Native ignore rules](NATIVE_IGNORE.md) for the landed matching contract.
+Capture-race and materialization work remain separate P2 acceptance criteria.
 Changing ignore rules must not silently delete earlier recorded history or
 erase excluded working files during restoration.
 

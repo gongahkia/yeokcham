@@ -3933,3 +3933,7 @@ let compact ~root ~keep_recent ~dry_run =
                status;
              }
               : compact_report)))
+
+let ignore_explain ?directory ~root path =
+  Snapshot.explain_ignore ?directory ~root path
+  |> Result.map_error (fun error -> Snapshot_error error)

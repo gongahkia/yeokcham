@@ -2,6 +2,7 @@ module Encoding = Yeokcham_encoding
 module Envelope = Yeokcham_envelope
 module Store = Yeokcham_store
 module Hash = Yeokcham_hash.Sha256
+module Ignore = Ignore
 
 type file_mode = Regular | Executable | Symlink
 
@@ -34,11 +35,13 @@ type error =
   | Unsupported_file_type of { path : string; kind : string }
   | Invalid_ignore_path of { line : int; path : string }
   | Ignored_path_would_be_removed of string
+  | Invalid_ignore_rule of Ignore.error
 
 let object_type_name object_type =
   Printf.sprintf "object type %d" (Envelope.object_type_code object_type)
 
 let error_to_string = function
+  | Invalid_ignore_rule error -> Ignore.error_to_string error
   | Store_error error -> Store.error_to_string error
   | Encoding_error error -> Encoding.construction_error_to_string error
   | Envelope_creation_error error -> Envelope.creation_error_to_string error
@@ -1180,85 +1183,144 @@ let unsupported_node_kind = function
   | Unix.S_REG -> "regular-file"
   | Unix.S_LNK -> "symlink"
 
-let safe_ignore_components path =
-  if String.is_empty path || String.starts_with ~prefix:"/" path then None
-  else
-    let components = String.split_on_char '/' path in
-    if List.for_all valid_name components then Some components else None
-
-let read_ignore_file root =
-  let path = Filename.concat root ".yeokchamignore" in
+let read_ignore_file ~root ~relative rules =
+  let source = String.concat "/" (relative @ [ ".yeokchamignore" ]) in
+  let path = Filename.concat root source in
   try
     let stat = Unix.lstat path in
     if stat.Unix.st_kind <> Unix.S_REG then
-      Error (Invalid_ignore_path { line = 0; path = ".yeokchamignore" })
+      Error
+        (Invalid_ignore_rule
+           {
+             Ignore.source;
+             line = 0;
+             pattern = "";
+             message = "ignore file must be a regular file";
+           })
     else if stat.Unix.st_size > inline_file_limit then
       Error
         (File_too_large
            { path; size = stat.Unix.st_size; limit = inline_file_limit })
     else
       let* contents = read_file path stat in
-      let lines = String.split_on_char '\n' contents in
-      let rec parse line_number reversed = function
-        | [] -> Ok (List.rev reversed)
-        | line :: rest -> (
-            let line =
-              if String.ends_with ~suffix:"\r" line then
-                String.sub line 0 (String.length line - 1)
-              else line
-            in
-            if String.is_empty line || String.starts_with ~prefix:"#" line then
-              parse (line_number + 1) reversed rest
-            else
-              match safe_ignore_components line with
-              | Some components ->
-                  parse (line_number + 1) (components :: reversed) rest
-              | None ->
-                  Error
-                    (Invalid_ignore_path { line = line_number; path = line }))
-      in
-      parse 1 [] lines
+      Ignore.extend rules ~source ~base:relative contents
+      |> Result.map_error (fun error -> Invalid_ignore_rule error)
   with
-  | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok []
+  | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok rules
   | Unix.Unix_error (error, _, _) -> Error (scan_error "lstat" path error)
 
-let rec is_prefix prefix path =
-  match (prefix, path) with
-  | [], _ -> true
-  | _, [] -> false
-  | left :: left_rest, right :: right_rest ->
-      String.equal left right && is_prefix left_rest right_rest
+type ignore_reason =
+  | Mandatory_exclusion
+  | Native_rule of Ignore.rule
+  | No_rule
 
-let is_ignored rules components =
-  List.exists (fun rule -> is_prefix rule components) rules
+type ignore_explanation = {
+  ignored : bool;
+  reason : ignore_reason;
+  blocked_by_parent : bool;
+}
+
+let mandatory_excluded ~excluded_root_names relative name =
+  name = ".yeokcham"
+  || (relative = [] && (name = ".git" || List.mem name excluded_root_names))
+
+let ignore_result rules path directory =
+  let decision = Ignore.evaluate rules ~path ~directory in
+  {
+    ignored = decision.Ignore.ignored;
+    reason =
+      (match decision.Ignore.rule with
+      | None -> No_rule
+      | Some r -> Native_rule r);
+    blocked_by_parent = decision.Ignore.blocked_by_parent;
+  }
+
+let explain_ignore ?directory:hint ~root path =
+  if path = [] || not (List.for_all valid_name path) then
+    Error (Invalid_name (String.concat "/" path))
+  else
+    let* root_stat =
+      try Ok (Unix.lstat root)
+      with Unix.Unix_error (error, _, _) ->
+        Error (scan_error "lstat" root error)
+    in
+    if root_stat.Unix.st_kind <> Unix.S_DIR then
+      Error (Unsupported_file_type { path = root; kind = "not a directory" })
+    else
+      let rec walk rules relative = function
+        | [] -> Ok (ignore_result rules relative true)
+        | name :: rest -> (
+            let* rules = read_ignore_file ~root ~relative rules in
+            let child = relative @ [ name ] in
+            if mandatory_excluded ~excluded_root_names:[] relative name then
+              Ok
+                {
+                  ignored = true;
+                  reason = Mandatory_exclusion;
+                  blocked_by_parent = rest <> [];
+                }
+            else
+              let actual = List.fold_left Filename.concat root child in
+              let* stat =
+                try Ok (Some (Unix.lstat actual)) with
+                | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok None
+                | Unix.Unix_error (error, _, _) ->
+                    Error (scan_error "lstat" actual error)
+              in
+              let directory =
+                match stat with
+                | None -> rest <> [] || Option.value hint ~default:false
+                | Some stat -> stat.Unix.st_kind = Unix.S_DIR
+              in
+              let decision = ignore_result rules child directory in
+              if decision.ignored then
+                Ok { decision with blocked_by_parent = rest <> [] }
+              else if rest = [] then Ok decision
+              else
+                match stat with
+                | Some stat when stat.Unix.st_kind <> Unix.S_DIR ->
+                    Error
+                      (Unsupported_file_type
+                         {
+                           path = actual;
+                           kind = "non-directory ignore ancestor";
+                         })
+                | None ->
+                    Ok
+                      (ignore_result rules path
+                         (Option.value hint ~default:false))
+                | Some _ -> walk rules child rest)
+      in
+      walk Ignore.empty [] path
 
 let require_no_ignored_paths ~excluded_root_names ~root =
-  let* rules = read_ignore_file root in
-  let rec exists path = function
-    | [] -> Ok true
-    | name :: rest -> (
-        let path = Filename.concat path name in
-        try
-          let stat = Unix.lstat path in
-          if rest = [] then Ok true
-          else if stat.Unix.st_kind = Unix.S_DIR then exists path rest
-          else Ok false
-        with
-        | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok false
-        | Unix.Unix_error (error, _, _) -> Error (scan_error "lstat" path error)
-        )
-  in
-  List.fold_left
-    (fun result components ->
-      let* () = result in
-      match components with
-      | name :: _ when List.mem name excluded_root_names -> Ok ()
-      | _ ->
-          let* present = exists root components in
-          if present then
-            Error (Ignored_path_would_be_removed (String.concat "/" components))
+  let rec walk rules relative path =
+    let* rules = read_ignore_file ~root ~relative rules in
+    let* names =
+      try Ok (Array.to_list (Sys.readdir path) |> List.sort String.compare)
+      with Sys_error message ->
+        Error (Scan_error { path; operation = "readdir"; message })
+    in
+    List.fold_left
+      (fun result name ->
+        let* () = result in
+        if mandatory_excluded ~excluded_root_names relative name then Ok ()
+        else
+          let child = relative @ [ name ] in
+          let actual = Filename.concat path name in
+          let* stat =
+            try Ok (Unix.lstat actual)
+            with Unix.Unix_error (error, _, _) ->
+              Error (scan_error "lstat" actual error)
+          in
+          let directory = stat.Unix.st_kind = Unix.S_DIR in
+          if (Ignore.evaluate rules ~path:child ~directory).Ignore.ignored then
+            Error (Ignored_path_would_be_removed (String.concat "/" child))
+          else if directory then walk rules child actual
           else Ok ())
-    (Ok ()) rules
+      (Ok ()) names
+  in
+  walk Ignore.empty [] root
 
 let scan_excluding_root_names ~excluded_root_names ~root ~store =
   let* root_stat =
@@ -1269,8 +1331,8 @@ let scan_excluding_root_names ~excluded_root_names ~root ~store =
   if root_stat.Unix.st_kind <> Unix.S_DIR then
     Error (Unsupported_file_type { path = root; kind = "not a directory" })
   else
-    let* ignore_rules = read_ignore_file root in
-    let rec scan_directory relative path =
+    let rec scan_directory rules relative path =
+      let* rules = read_ignore_file ~root ~relative rules in
       let names =
         try Ok (Sys.readdir path |> Array.to_list |> List.sort String.compare)
         with Sys_error message ->
@@ -1281,10 +1343,8 @@ let scan_excluding_root_names ~excluded_root_names ~root ~store =
         | [] -> Tree.create (List.rev reversed)
         | name :: rest ->
             let child_relative = relative @ [ name ] in
-            if
-              (relative = [] && List.mem name excluded_root_names)
-              || is_ignored ignore_rules child_relative
-            then scan_entries reversed rest
+            if mandatory_excluded ~excluded_root_names relative name then
+              scan_entries reversed rest
             else
               let child_path = Filename.concat path name in
               let* stat =
@@ -1292,42 +1352,51 @@ let scan_excluding_root_names ~excluded_root_names ~root ~store =
                 with Unix.Unix_error (error, _, _) ->
                   Error (scan_error "lstat" child_path error)
               in
-              let* entry =
-                if stat.Unix.st_kind = Unix.S_DIR then
-                  let* child = scan_directory child_relative child_path in
-                  Ok (Tree.Directory child)
-                else if stat.Unix.st_kind = Unix.S_REG then
-                  let* content = store_regular_file store child_path stat in
-                  let mode =
-                    if stat.Unix.st_perm land 0o111 = 0 then Regular
-                    else Executable
-                  in
-                  Ok (Tree.File { mode; content })
-                else if stat.Unix.st_kind = Unix.S_LNK then
-                  let* target =
-                    try Ok (Unix.readlink child_path)
-                    with Unix.Unix_error (error, _, _) ->
-                      Error (scan_error "readlink" child_path error)
-                  in
-                  let* content = Content.store store target in
-                  Ok (Tree.File { mode = Symlink; content })
-                else
-                  Error
-                    (Unsupported_file_type
-                       {
-                         path = child_path;
-                         kind = unsupported_node_kind stat.Unix.st_kind;
-                       })
-              in
-              scan_entries ((name, entry) :: reversed) rest
+              let directory = stat.Unix.st_kind = Unix.S_DIR in
+              if
+                (Ignore.evaluate rules ~path:child_relative ~directory)
+                  .Ignore.ignored
+              then scan_entries reversed rest
+              else
+                let* entry =
+                  if directory then
+                    let* child =
+                      scan_directory rules child_relative child_path
+                    in
+                    Ok (Tree.Directory child)
+                  else if stat.Unix.st_kind = Unix.S_REG then
+                    let* content = store_regular_file store child_path stat in
+                    let mode =
+                      if stat.Unix.st_perm land 0o111 = 0 then Regular
+                      else Executable
+                    in
+                    Ok (Tree.File { mode; content })
+                  else if stat.Unix.st_kind = Unix.S_LNK then
+                    let* target =
+                      try Ok (Unix.readlink child_path)
+                      with Unix.Unix_error (error, _, _) ->
+                        Error (scan_error "readlink" child_path error)
+                    in
+                    let* content = Content.store store target in
+                    Ok (Tree.File { mode = Symlink; content })
+                  else
+                    Error
+                      (Unsupported_file_type
+                         {
+                           path = child_path;
+                           kind = unsupported_node_kind stat.Unix.st_kind;
+                         })
+                in
+                scan_entries ((name, entry) :: reversed) rest
       in
       let* tree = scan_entries [] names in
       Tree.store store tree
     in
-    let* root_tree = scan_directory [] root in
+    let* root_tree = scan_directory Ignore.empty [] root in
     let snapshot = Snapshot.create ~root:root_tree in
     let* identity = Snapshot.store store snapshot in
     Ok (identity, snapshot)
 
 let scan ~root ~store =
-  scan_excluding_root_names ~excluded_root_names:[ ".yeokcham" ] ~root ~store
+  scan_excluding_root_names ~excluded_root_names:[ ".yeokcham"; ".git" ] ~root
+    ~store

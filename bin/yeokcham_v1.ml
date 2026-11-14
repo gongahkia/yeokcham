@@ -111,6 +111,7 @@ let command_name () =
 let native_json_command command =
   List.mem command
     [
+      "ignore-explain";
       "verify";
       "repair-plan";
       "repair-apply";
@@ -150,14 +151,15 @@ let public_error_message message =
   let first_line = String.trim first_line in
   if String.length first_line = 0 then "V1 command failed" else first_line
 
-let fail_with code message =
+let fail_with_status status code message =
   if requested_format () = Json_format then
     Cli_data.failure ~command:(command_name ()) ~warnings:[]
       ~error:{ Cli_data.code; message = public_error_message message }
     |> Cli_data.encode |> print_json;
   prerr_endline message;
-  exit 2
+  exit status
 
+let fail_with code message = fail_with_status 2 code message
 let fail message = fail_with "operation-failed" message
 
 let run_generic_json command action =
@@ -356,6 +358,11 @@ let help_for = function
          several branches. Save or undo outstanding disk edits first. An \
          interrupted navigation resumes its original target without taking \
          another step."
+  | [ "ignore" ] | [ "ignore"; "explain" ] ->
+      Some
+        "usage: yeokcham ignore explain PATH [--root DIRECTORY]\n\n\
+         Show the winning native .yeokchamignore rule or mandatory metadata \
+         exclusion. Git ignore files are not consulted."
   | [ "status" ] ->
       Some
         "usage: yeokcham status [--root PATH]\n\n\
@@ -1700,6 +1707,94 @@ let run_save arguments =
       print_endline "save recorded";
       render_status status;
       true
+
+let[@warning "-4"] run_ignore_explain arguments =
+  let rec parse root path = function
+    | "--root" :: value :: rest when Option.is_none root ->
+        parse (Some value) path rest
+    | [ "--"; value ] when Option.is_none path ->
+        (Option.value root ~default:default_root, value)
+    | value :: rest
+      when Option.is_none path && not (String.starts_with ~prefix:"-" value) ->
+        parse root (Some value) rest
+    | [] -> (
+        match path with
+        | Some path -> (Option.value root ~default:default_root, path)
+        | None -> usage ())
+    | _ -> usage ()
+  in
+  let root, path = parse None None arguments in
+  let rec strip_relative p =
+    if String.starts_with ~prefix:"./" p then
+      strip_relative (String.sub p 2 (String.length p - 2))
+    else p
+  in
+  let path = strip_relative path in
+  let directory = String.ends_with ~suffix:"/" path in
+  let path =
+    if directory then String.sub path 0 (String.length path - 1) else path
+  in
+  let explanation =
+    match
+      Service.ignore_explain ~directory ~root (String.split_on_char '/' path)
+    with
+    | Ok explanation -> explanation
+    | Error
+        (Service.Snapshot_error (Yeokcham_snapshot.Invalid_ignore_rule _) as
+         error) ->
+        fail_with "invalid-ignore-rule" (Service.error_to_string error)
+    | Error (Service.Snapshot_error (Yeokcham_snapshot.Invalid_name _) as error)
+      ->
+        fail_with "invalid-path" (Service.error_to_string error)
+    | Error error ->
+        fail_with_status 5 "ignore-inspection-unavailable"
+          (Service.error_to_string error)
+  in
+  let source, line, pattern, mandatory =
+    match explanation.Yeokcham_snapshot.reason with
+    | Yeokcham_snapshot.Mandatory_exclusion -> (None, None, None, true)
+    | Yeokcham_snapshot.No_rule -> (None, None, None, false)
+    | Yeokcham_snapshot.Native_rule rule ->
+        ( Some (Yeokcham_snapshot.Ignore.source rule),
+          Some (Yeokcham_snapshot.Ignore.line rule),
+          Some (Yeokcham_snapshot.Ignore.pattern rule),
+          false )
+  in
+  let string_option = function None -> `Null | Some s -> `String s in
+  match requested_format () with
+  | Json_format ->
+      Cli_data.success ~command:"ignore-explain" ~warnings:[]
+        ~result:
+          (`Assoc
+             [
+               ("outcome", `String "completed");
+               ("path", `String path);
+               ("ignored", `Bool explanation.Yeokcham_snapshot.ignored);
+               ("mandatory", `Bool mandatory);
+               ("source", string_option source);
+               ("line", match line with None -> `Null | Some n -> `Int n);
+               ("pattern", string_option pattern);
+               ( "blocked_by_parent",
+                 `Bool explanation.Yeokcham_snapshot.blocked_by_parent );
+             ])
+      |> Cli_data.encode |> print_json
+  | Text_format ->
+      Printf.printf "%s: %s\n"
+        (Output.display_value path)
+        (if explanation.Yeokcham_snapshot.ignored then "excluded from capture"
+         else "included in capture");
+      (if mandatory then print_endline "mandatory Yeokcham metadata exclusion"
+       else
+         match (source, line, pattern) with
+         | Some source, Some line, Some pattern ->
+             Printf.printf "rule %s:%d %s\n"
+               (Output.display_value source)
+               line
+               (Output.display_value pattern)
+         | _ -> print_endline "no native rule matched");
+      if explanation.Yeokcham_snapshot.blocked_by_parent then
+        print_endline
+          "the parent is excluded; re-include it before re-including this path"
 
 let run_status arguments =
   let root = parse_root arguments in
@@ -4082,6 +4177,7 @@ let dispatch () =
   | _ :: "join" :: arguments -> run_join arguments
   | _ :: "save" :: arguments ->
       observe_after_commit [ "save" ] arguments (fun () -> run_save arguments)
+  | _ :: "ignore" :: "explain" :: arguments -> run_ignore_explain arguments
   | _ :: "status" :: arguments -> run_status arguments
   | _ :: "changes" :: arguments -> run_changes arguments
   | _ :: "log" :: arguments -> run_log arguments

@@ -56,6 +56,8 @@ let command ?(options = [ root ]) ?(hook = false) command_path =
 
 let commands =
   [
+    command ~options:[] [ "ignore" ];
+    command [ "ignore"; "explain" ];
     command ~options:[] [ "workspace" ];
     command ~options:[] [ "draft" ];
     command ~options:[] [ "decision" ];

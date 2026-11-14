@@ -36,11 +36,13 @@ The `.yeokcham` and `.git` root names are excluded from this scan. Use
 Like `status`, the scan can write immutable unreferenced scan objects. It never
 saves a checkpoint or changes the working-tree source itself.
 
-`.yeokchamignore` also excludes the exact relative paths listed in it, together
-with their descendants. Use one path per line, without a leading or trailing
-slash. Blank lines and lines beginning with `#` are ignored. Patterns, `!`
-negation, and Git's ignore syntax are not supported. Ignored contents have no
-checkpoint; the ignore file itself is normally captured.
+Use `yeokcham ignore explain PATH` to see the exact matching native rule and
+its file/line. Root and nested `.yeokchamignore` files support globs and `!`
+re-inclusion, with later/deeper applicable rules taking precedence. Re-include
+an excluded parent before its child. Malformed rules stop capture with an error;
+correct the reported file/line and retry. Git ignore files are not read.
+Ignored contents have no new checkpoint; old captured history is retained.
+See [Native ignore rules](NATIVE_IGNORE.md) for syntax and examples.
 
 ## I need an earlier file but do not want to overwrite current work
 

@@ -1,5 +1,7 @@
 type file_mode = Regular | Executable | Symlink
 
+module Ignore = Ignore
+
 type error =
   | Store_error of Yeokcham_store.error
   | Encoding_error of Yeokcham_encoding.construction_error
@@ -29,6 +31,7 @@ type error =
   | Unsupported_file_type of { path : string; kind : string }
   | Invalid_ignore_path of { line : int; path : string }
   | Ignored_path_would_be_removed of string
+  | Invalid_ignore_rule of Ignore.error
 
 val error_to_string : error -> string
 
@@ -163,8 +166,8 @@ val scan_excluding_root_names :
   root:string ->
   store:Yeokcham_store.repository ->
   (Snapshot.id * Snapshot.t, error) result
-(** Like [scan], with an explicit list of root-level metadata names to exclude.
-    [scan] preserves the historical default of excluding only [.yeokcham]. *)
+(** Like [scan], with additional root-level metadata names to exclude. Yeokcham
+    metadata and root [.git] cannot be re-included by native rules. *)
 
 val inline_file_limit : int
 
@@ -173,3 +176,20 @@ val require_no_ignored_paths :
 (** Refuse replacement when an existing ignored entry would be deleted without
     being captured in the safety snapshot. Does not follow symlink ancestors,
     read ignored contents, or write objects. *)
+
+type ignore_reason =
+  | Mandatory_exclusion
+  | Native_rule of Ignore.rule
+  | No_rule
+
+type ignore_explanation = {
+  ignored : bool;
+  reason : ignore_reason;
+  blocked_by_parent : bool;
+}
+
+val explain_ignore :
+  ?directory:bool ->
+  root:string ->
+  string list ->
+  (ignore_explanation, error) result

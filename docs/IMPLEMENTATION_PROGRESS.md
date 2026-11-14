@@ -81,11 +81,25 @@ partial phase. Do not relabel a partial phase complete to expose the next prompt
 | --- | --- | --- |
 | P0 evaluation | complete | [Assessment](PILOT_PLAN.md), [receipt](implementation/results/PILOT-workflow-assessment.json); tiny WSL/test-signer walkthrough only |
 | P1 core foundation | complete | [Interfaces](implementation/INTERFACES.md), [report](implementation/reports/P01-attempt-01.md), [acceptance](implementation/results/P01-acceptance.json); no P1 criteria remaining |
-| P2 local work | in_progress | [Scoped task](implementation/goals/P02-local-workflow.md); native ignore/capture, durable identities/branches, local CLI and safe recovery; all acceptance criteria pending |
+| P2 local work | in_progress | [Scoped task](implementation/goals/P02-local-workflow.md); native ignore matching/explanation landed; capture consistency, durable identities/branches, local CLI and safe recovery remain; P2 incomplete |
 | P3 shared loop | pending | Clone/selected sharing/composition/journaled integration/conflicts; unstarted |
 | P4 harden/handoff | pending | Representative/native/human and fault evidence; unstarted |
 
 ## Current-phase checkpoints
+
+- P2 native-ignore checkpoint: root/nested byte-oriented glob/negation/escape
+  matching, explicit parent re-inclusion and mandatory metadata exclusions now
+  drive the real scanner. `ignore explain` supplies text/JSON domain results,
+  winning source/line and explicit invalid-config/unavailable outcomes. Five
+  module cases and four fresh-process CLI cases passed; existing snapshot
+  materialization and 44 local-service cases passed. Build/lint and full `make ci`
+  passed on this implementation tree with valid Dune cache reuse. The first CI
+  found missing `help ignore`; the routing was corrected and its focused test
+  and full CI passed. Capture-race/no-follow hardening, durable identities and
+  branches, ordinary status/history/diff and preservation-aware recovery remain
+  outstanding. P2 is not complete; no original full phase is closed. Logs are
+  external under `/home/gongahkia/.cache/yeokcham-p2-20261114/`.
+
 
 - P2 start: clean main and all P1 prerequisite ancestry verified; original
   G01/P0 evidence hashes unchanged. Existing local toolchain/SoftHSM environment

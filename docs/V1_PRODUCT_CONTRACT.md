@@ -32,10 +32,11 @@ arbitrary Unix permissions, directory modes, ownership, ACLs, extended
 attributes, or timestamps. Snapshot identity is independent of semantic
 analysis and editor events.
 
-The root `.git` and `.yeokcham` entries are excluded. `.yeokchamignore` contains
-literal relative paths, one per line, which exclude those entries and their
-descendants. It has no glob or negation syntax. Ignored contents are outside
-recovery history. In-place replacement refuses existing ignored entries so
+Root `.git` and Yeokcham metadata entries are always excluded. Root and nested
+`.yeokchamignore` files support native globs, negation and ordered precedence;
+Git ignore configuration is never consulted. `ignore explain PATH` reports the
+winning file/line or mandatory exclusion. See [Native ignore rules](NATIVE_IGNORE.md).
+Ignored contents are outside recovery history. In-place replacement refuses existing ignored entries so
 they cannot be deleted without a safety copy. Use an empty destination or move
 those entries outside the tree before retrying.
 

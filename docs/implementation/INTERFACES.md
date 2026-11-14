@@ -210,3 +210,23 @@ account epochs/settings/archive manifests, request/member identity and proof,
 private-crypto interfaces and full review/policy/archive/journal consumer APIs
 are outstanding. There is no claim of completed G03 authority policy, G04
 composition, persisted new history, clone/integration services or pilot usability.
+
+## P2 native ignore checkpoint
+
+`Yeokcham_snapshot.Ignore` is a pure byte-oriented matcher. `empty` starts a rule
+set; `extend : t -> source:string -> base:string list -> string -> (t,error) result`
+adds one file's rules. `evaluate : t -> path:string list -> directory:bool -> decision`
+returns `{ignored; rule; blocked_by_parent}`. `source`, `line`, `pattern` and
+`includes` inspect the matching abstract rule. A malformed rule returns a file,
+line, original pattern and reason. No filesystem/Git lookup happens in the matcher.
+
+`Yeokcham_snapshot.explain_ignore` and the local-service `ignore_explain` expose
+`?directory:bool -> root:string -> string list -> (ignore_explanation,error) result`.
+The hint supplies the kind of a nonexistent final directory; existing filesystem
+kinds take precedence. Explanations distinguish mandatory exclusion, matched rule
+and no rule. They read ancestor rule files without writing objects/history and
+stop at excluded or symlink ancestors. Capture uses the same matcher at each
+included directory, preserving one source of truth for native exclusions.
+
+This checkpoint does not establish P2 completion, capture consistency, safe
+replacement, durable workspace/branch state or the remaining ordinary CLI journeys.

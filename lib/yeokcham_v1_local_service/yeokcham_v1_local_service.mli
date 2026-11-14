@@ -675,3 +675,9 @@ val navigate_history :
     Preview may allocate scan objects but never advances history or writes
     files. A resumed journal completes its original navigation without another
     step. *)
+
+val ignore_explain :
+  ?directory:bool ->
+  root:string ->
+  string list ->
+  (Yeokcham_snapshot.ignore_explanation, error) result
