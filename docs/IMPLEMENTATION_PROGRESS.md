@@ -481,3 +481,20 @@ records, not current proof.
   cache. This is the minimum pure projection prerequisite; durable branch state, empty
   accepted genesis checks and actual branch/switch CLI operations remain to do.
   No P3 exchange/composition or full G03 completion is claimed.
+
+- P2 authenticated-local-state checkpoint, November 15: `Store.Local` now creates real signed empty genesis/branch records
+  and named fork metadata in the existing object store. Version-2 state wrappers
+  publish this with workspace/history and selection under the same head CAS.
+  Seven adapter cases pass, including fresh-process metadata selection,
+  duplicate/collision/entropy refusal, signature/mapping/acceptance validation,
+  late-record admission and compaction/GC protection of unselected private work.
+  An integration test exposed the existing generic store's domain-prefixed
+  physical hash versus P1's complete-envelope record hash. The root now retains
+  and verifies both references; neither identity contract was changed. This is
+  a store adapter checkpoint. Focused local-core (7), history identity (7),
+  store (6), undo (14), GC (11) and local-service (44) cases passed, along with
+  `make build`, `make lint` and `make ci` (valid Dune cache reuse). Exact logs
+  are `*-local-core*.log` in the session cache. This is not usable CLI
+  branch/switch completion. CLI init
+  still uses the old path pending service wiring; safe replacement and ordinary
+  status/history/diff journeys remain outstanding. No P3 work is claimed.

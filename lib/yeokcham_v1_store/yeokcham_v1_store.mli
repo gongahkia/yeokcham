@@ -1,3 +1,5 @@
+module Local = Local_core
+
 (** Immutable V1 model-state objects and their sole mutable head.
 
     The store is intentionally not a V3 compatibility layer. V1 initialization
@@ -65,11 +67,15 @@ val local_certificate : collaboration -> string
 
 type loaded = {
   history : Yeokcham_v1_undo.t;
+  local : Local.t option;
   project : Yeokcham_v1_model.project;
   collaboration : collaboration option;
   head : Yeokcham_store.Mutable_ref.t;
   object_id : Yeokcham_store.Stored_object_id.t;
 }
+
+val local_branch_snapshots : loaded -> Yeokcham_v1_model.Snapshot_id.t list
+(** Private working positions are retention roots for every local branch. *)
 
 val state_head_name : string
 val underlying_store : repository -> Yeokcham_store.repository
@@ -107,6 +113,7 @@ val load : repository -> (loaded, error) result
 
 val save :
   ?history:Yeokcham_v1_undo.t ->
+  ?local:Local.t ->
   repository ->
   expected:Yeokcham_store.Mutable_ref.t ->
   project:Yeokcham_v1_model.project ->
@@ -116,6 +123,7 @@ val save :
 
 val save_collaborative :
   ?history:Yeokcham_v1_undo.t ->
+  ?local:Local.t ->
   repository ->
   expected:Yeokcham_store.Mutable_ref.t ->
   project:Yeokcham_v1_model.project ->
@@ -133,3 +141,13 @@ module For_test : sig
   (** In-process crash tests at the durable-object/root-CAS boundaries.
       Production saves have no externally enabled hooks. *)
 end
+
+val init_local_collaborative_with :
+  root:string ->
+  bootstrap:
+    (Yeokcham_store.repository ->
+    (Yeokcham_v1_model.project * collaboration * Local.t, string) result) ->
+  (repository, error) result
+(** The P2 initialization boundary: one verified root carries project/private
+    capture, workspace/history allocation and authenticated local branch state.
+*)

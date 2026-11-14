@@ -3875,8 +3875,9 @@ let storage_roots ~root =
             validate_retention_inputs ~store ~project:loaded.Store.project
               ~journal_roots proofs
           in
-          Model.compact loaded.Store.project ~keep_recent:0
-            ~journal_snapshots:journal_roots
+          Model.compact
+            ~branch_snapshots:(Store.local_branch_snapshots loaded)
+            loaded.Store.project ~keep_recent:0 ~journal_snapshots:journal_roots
             ~proof_snapshots:(Restore_proof.snapshots proofs)
           |> Result.map (fun compacted ->
               List.map
@@ -3900,8 +3901,9 @@ let compact ~root ~keep_recent ~dry_run =
               ~journal_roots proofs
           in
           let* compacted =
-            Model.compact loaded.Store.project ~keep_recent
-              ~journal_snapshots:journal_roots
+            Model.compact
+              ~branch_snapshots:(Store.local_branch_snapshots loaded)
+              loaded.Store.project ~keep_recent ~journal_snapshots:journal_roots
               ~proof_snapshots:(Restore_proof.snapshots proofs)
             |> Result.map_error (fun error -> Model_error error)
           in

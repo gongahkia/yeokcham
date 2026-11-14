@@ -1296,6 +1296,7 @@ type protection_reason =
   | Restore_journal
   | Restore_proof
   | Recent
+  | Local_branch
 
 let protection_reason_to_string = function
   | Baseline -> "baseline"
@@ -1308,6 +1309,7 @@ let protection_reason_to_string = function
   | Restore_journal -> "restore-safety"
   | Restore_proof -> "restore-proof"
   | Recent -> "recent"
+  | Local_branch -> "local-branch"
 
 type compact_keep = {
   snapshot : Snapshot_id.t;
@@ -1333,6 +1335,7 @@ let reason_order = function
   | Restore_journal -> 7
   | Restore_proof -> 8
   | Recent -> 9
+  | Local_branch -> 10
 
 let sort_reasons reasons =
   List.sort_uniq
@@ -1360,7 +1363,8 @@ let add_revision_snapshots table revision reason =
     (add_reason table revision.base_snapshot reason)
     revision.result_snapshot reason
 
-let named_protection_table project ~journal_snapshots ~proof_snapshots =
+let named_protection_table project ~branch_snapshots ~journal_snapshots
+    ~proof_snapshots =
   let table = add_reason Snapshot_map.empty project.baseline Baseline in
   let table =
     List.fold_left
@@ -1409,15 +1413,22 @@ let named_protection_table project ~journal_snapshots ~proof_snapshots =
       (fun table snapshot -> add_reason table snapshot Restore_journal)
       table journal_snapshots
   in
+  let table =
+    List.fold_left
+      (fun table snapshot -> add_reason table snapshot Local_branch)
+      table branch_snapshots
+  in
   List.fold_left
     (fun table snapshot -> add_reason table snapshot Restore_proof)
     table proof_snapshots
 
-let compact project ~keep_recent ~journal_snapshots ~proof_snapshots =
+let compact ?(branch_snapshots = []) project ~keep_recent ~journal_snapshots
+    ~proof_snapshots =
   if keep_recent < 0 then Error Invalid_keep_recent
   else
     let protected =
-      named_protection_table project ~journal_snapshots ~proof_snapshots
+      named_protection_table project ~branch_snapshots ~journal_snapshots
+        ~proof_snapshots
     in
     let kept_rev, dropped_rev, _remaining_recent =
       List.fold_left

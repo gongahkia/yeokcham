@@ -464,9 +464,11 @@ let retention_snapshots ~root project =
   in
   Ok (journal_snapshots, proof_snapshots)
 
-let checkpoint_roots project ~journal_snapshots ~proof_snapshots =
+let checkpoint_roots project ~branch_snapshots ~journal_snapshots
+    ~proof_snapshots =
   let* compacted =
-    Model.compact project ~keep_recent:0 ~journal_snapshots ~proof_snapshots
+    Model.compact ~branch_snapshots project ~keep_recent:0 ~journal_snapshots
+      ~proof_snapshots
     |> Result.map_error (fun error -> Model_error error)
   in
   let* named =
@@ -589,7 +591,9 @@ let plan_from_loaded ~root store loaded =
     retention_snapshots ~root loaded.V1_store.project
   in
   let* roots =
-    checkpoint_roots loaded.V1_store.project ~journal_snapshots ~proof_snapshots
+    checkpoint_roots loaded.V1_store.project
+      ~branch_snapshots:(V1_store.local_branch_snapshots loaded)
+      ~journal_snapshots ~proof_snapshots
   in
   let* reachable =
     List.fold_left

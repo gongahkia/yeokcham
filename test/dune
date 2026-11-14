@@ -1,4 +1,22 @@
 (test
+ (name test_local_core)
+ (modules test_local_core)
+ (libraries
+  alcotest
+  unix
+  yeokcham_encoding
+  yeokcham_envelope
+  yeokcham_store
+  yeokcham_snapshot
+  yeokcham_v1_local_service
+  yeokcham_v1_gc
+  yeokcham_v1_model
+  yeokcham_v1_record
+  yeokcham_v1_store
+  yeokcham_v1_trust
+  yeokcham_v1_undo))
+
+(test
  (name test_core_branch_heads)
  (modules test_core_branch_heads)
  (libraries alcotest yeokcham_v1_model yeokcham_v1_record yeokcham_v1_trust))

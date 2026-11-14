@@ -244,6 +244,7 @@ type protection_reason =
   | Restore_journal
   | Restore_proof
   | Recent
+  | Local_branch
 
 val protection_reason_to_string : protection_reason -> string
 
@@ -261,6 +262,7 @@ type compact_result = {
 val default_keep_recent : int
 
 val compact :
+  ?branch_snapshots:Snapshot_id.t list ->
   project ->
   keep_recent:int ->
   journal_snapshots:Snapshot_id.t list ->

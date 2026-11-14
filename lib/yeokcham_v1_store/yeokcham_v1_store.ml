@@ -1,3 +1,4 @@
+module Local = Local_core
 module Encoding = Yeokcham_encoding
 module Envelope = Yeokcham_envelope
 module Model = Yeokcham_v1_model
@@ -57,6 +58,7 @@ type collaboration = {
 
 type loaded = {
   history : History.t;
+  local : Local.t option;
   project : Model.project;
   collaboration : collaboration option;
   head : Store.Mutable_ref.t;
@@ -567,6 +569,44 @@ let decode_inner encoded =
       |> Result.map (fun project -> (project, None))
       |> Result.map_error (fun error -> Record_error error)
 
+let authority_for_local = function
+  | Some collaboration -> (
+      match authority collaboration with
+      | Some authority -> Ok authority
+      | None ->
+          Error
+            (Invalid_collaboration_state
+               "local core state requires verified authority"))
+  | None ->
+      Error
+        (Invalid_collaboration_state
+           "local core state requires signed collaboration")
+
+let validate_local_history ~project history local =
+  let* () =
+    List.fold_left
+      (fun result (position : Local.position) ->
+        let* () = result in
+        let* node =
+          History.find history position.Local.cursor
+          |> Result.map_error (fun e -> History_error e)
+        in
+        if
+          List.exists
+            (fun checkpoint ->
+              Model.Snapshot_id.equal checkpoint.Model.checkpoint_snapshot
+                node.History.snapshot)
+            (Model.checkpoints project)
+        then Ok ()
+        else
+          Error
+            (History_error "local branch working contents must remain retained"))
+      (Ok ()) (Local.positions local)
+  in
+  if (Local.selected local).Local.cursor = (History.current history).History.id
+  then Ok ()
+  else Error (History_error "selected branch and history cursor disagree")
+
 let[@warning "-4"] decode_project_object store object_id =
   let* object_ =
     Store.get store object_id
@@ -588,14 +628,34 @@ let[@warning "-4"] decode_project_object store object_id =
           History.decode bytes |> Result.map_error (fun e -> History_error e)
         in
         let* history = validate_history project history in
-        Ok (project, collaboration, history)
+        Ok (project, collaboration, history, None)
+    | Encoding.Array
+        [
+          Encoding.Text "yeokcham-local-state";
+          Encoding.Integer 2L;
+          Encoding.Bytes inner;
+          Encoding.Bytes history;
+          Encoding.Bytes local;
+        ] ->
+        let* project, collaboration = decode_inner inner in
+        let* history =
+          History.decode history |> Result.map_error (fun e -> History_error e)
+        in
+        let* history = validate_history project history in
+        let* authority = authority_for_local collaboration in
+        let* local =
+          Local.decode ~store ~authority local
+          |> Result.map_error (fun e -> History_error e)
+        in
+        let* () = validate_local_history ~project history local in
+        Ok (project, collaboration, history, Some local)
     | Encoding.Array (Encoding.Text "yeokcham-local-state" :: _) ->
         Error (History_error "unsupported local state wrapper")
     | payload ->
         let* project, collaboration = decode_inner (Encoding.encode payload) in
-        Ok (project, collaboration, history_for_project project)
+        Ok (project, collaboration, history_for_project project, None)
 
-let store_with_history store project collaboration history =
+let store_with_history ?local store project collaboration history =
   let* history = validate_history project history in
   let* inner =
     match collaboration with
@@ -612,9 +672,31 @@ let store_with_history store project collaboration history =
     |> Result.map_error (fun e ->
         History_error (Encoding.construction_error_to_string e))
   in
+  let* fields =
+    match local with
+    | None ->
+        Ok
+          [
+            tag;
+            Encoding.integer 1L;
+            Encoding.bytes inner;
+            Encoding.bytes history;
+          ]
+    | Some local ->
+        let* local =
+          Local.encode local |> Result.map_error (fun e -> History_error e)
+        in
+        Ok
+          [
+            tag;
+            Encoding.integer 2L;
+            Encoding.bytes inner;
+            Encoding.bytes history;
+            Encoding.bytes local;
+          ]
+  in
   let* payload =
-    Encoding.array
-      [ tag; Encoding.integer 1L; Encoding.bytes inner; Encoding.bytes history ]
+    Encoding.array fields
     |> Result.map_error (fun e ->
         History_error (Encoding.construction_error_to_string e))
   in
@@ -668,10 +750,21 @@ let load repository =
       match Store.Mutable_ref.target head with
       | None -> Error Empty_state_head
       | Some object_id ->
-          let* project, collaboration, history =
+          let* project, collaboration, history, local =
             decode_project_object repository.store object_id
           in
-          Ok { project; collaboration; history; head; object_id })
+          Ok { project; collaboration; history; local; head; object_id })
+
+let local_branch_snapshots loaded =
+  match loaded.local with
+  | None -> []
+  | Some local ->
+      Local.positions local
+      |> List.map (fun (position : Local.position) ->
+          match History.find loaded.history position.Local.cursor with
+          | Ok node -> node.History.snapshot
+          | Error _ -> invalid_arg "invalid loaded local branch cursor")
+      |> List.sort_uniq Model.Snapshot_id.compare
 
 let initialize_workspace_lock ~root =
   let path =
@@ -756,9 +849,34 @@ let previous repository expected =
   | None -> Error Empty_state_head
   | Some object_id -> decode_project_object repository.store object_id
 
-let save_at_boundaries ~before_publish ~after_publish ?history repository
+let local_for_history ?local ~existing ~project history =
+  let local = match local with Some _ -> local | None -> existing in
+  let* local =
+    match local with
+    | None -> Ok None
+    | Some local ->
+        Local.remember local ~cursor:(History.current history).History.id
+        |> Result.map (fun local -> Some local)
+        |> Result.map_error (fun e -> History_error e)
+  in
+  let* () =
+    match (existing, local) with
+    | Some previous, Some local ->
+        Local.validate_update ~previous local
+        |> Result.map_error (fun e -> History_error e)
+    | Some _, None -> Error (History_error "cannot erase local branch state")
+    | None, (None | Some _) -> Ok ()
+  in
+  let* () =
+    match local with
+    | None -> Ok ()
+    | Some local -> validate_local_history ~project history local
+  in
+  Ok local
+
+let save_at_boundaries ~before_publish ~after_publish ?history ?local repository
     ~expected ~project =
-  let* _, existing_collaboration, existing_history =
+  let* _, existing_collaboration, existing_history, existing_local =
     previous repository expected
   in
   let* () =
@@ -767,7 +885,20 @@ let save_at_boundaries ~before_publish ~after_publish ?history repository
     | Some _ -> Error Collaborative_state_requires_collaborative_save
   in
   let* history = observed_history ?history existing_history project in
-  let* object_id = store_with_history repository.store project None history in
+  let* local =
+    local_for_history ?local ~existing:existing_local ~project history
+  in
+  let* () =
+    match local with
+    | None -> Ok ()
+    | Some _ ->
+        Error
+          (Invalid_collaboration_state
+             "local core state requires signed collaboration")
+  in
+  let* object_id =
+    store_with_history ?local repository.store project None history
+  in
   before_publish ();
   let* head =
     Store.compare_and_swap_ref repository.store ~name:state_head_name
@@ -775,13 +906,13 @@ let save_at_boundaries ~before_publish ~after_publish ?history repository
     |> Result.map_error (fun error -> Store_error error)
   in
   after_publish ();
-  Ok { project; collaboration = None; history; head; object_id }
+  Ok { project; collaboration = None; history; local; head; object_id }
 
-let save ?history repository ~expected ~project =
+let save ?history ?local repository ~expected ~project =
   save_at_boundaries
     ~before_publish:(fun () -> ())
     ~after_publish:(fun () -> ())
-    ?history repository ~expected ~project
+    ?history ?local repository ~expected ~project
 
 module For_test = struct
   let save ~before_publish ~after_publish repository ~expected ~project =
@@ -789,16 +920,81 @@ module For_test = struct
       ~project
 end
 
-let save_collaborative ?history repository ~expected ~project ~collaboration =
+let save_collaborative ?history ?local repository ~expected ~project
+    ~collaboration =
   let* collaboration = validate_collaboration ~project collaboration in
-  let* _, _, existing_history = previous repository expected in
+  let* _, _, existing_history, existing_local = previous repository expected in
   let* history = observed_history ?history existing_history project in
+  let* local =
+    local_for_history ?local ~existing:existing_local ~project history
+  in
+  let* () =
+    match local with
+    | None -> Ok ()
+    | Some local ->
+        let* authority = authority_for_local (Some collaboration) in
+        let* bytes =
+          Local.encode local |> Result.map_error (fun e -> History_error e)
+        in
+        let* _ =
+          Local.decode ~store:repository.store ~authority bytes
+          |> Result.map_error (fun e -> History_error e)
+        in
+        Local.admit_update ~store:repository.store ~authority
+          ~previous:existing_local local
+        |> Result.map_error (fun e -> History_error e)
+  in
   let* object_id =
-    store_with_history repository.store project (Some collaboration) history
+    store_with_history ?local repository.store project (Some collaboration)
+      history
   in
   let* head =
     Store.compare_and_swap_ref repository.store ~name:state_head_name
       ~expected:(Some expected) ~target:(Some object_id)
     |> Result.map_error (fun error -> Store_error error)
   in
-  Ok { project; collaboration = Some collaboration; history; head; object_id }
+  Ok
+    {
+      project;
+      collaboration = Some collaboration;
+      history;
+      local;
+      head;
+      object_id;
+    }
+
+let init_local_collaborative_with ~root ~bootstrap =
+  let metadata = repository_metadata_path root in
+  if Sys.file_exists metadata then Error (Existing_repository metadata)
+  else
+    let* store =
+      Store.init ~root |> Result.map_error (fun e -> Store_error e)
+    in
+    let* () = initialize_workspace_lock ~root in
+    let* project, collaboration, local =
+      bootstrap store |> Result.map_error (fun e -> Bootstrap_error e)
+    in
+    let* collaboration = validate_collaboration ~project collaboration in
+    let* authority = authority_for_local (Some collaboration) in
+    let* bytes =
+      Local.encode local |> Result.map_error (fun e -> History_error e)
+    in
+    let* local =
+      Local.decode ~store ~authority bytes
+      |> Result.map_error (fun e -> History_error e)
+    in
+    let* () =
+      Local.admit_update ~store ~authority ~previous:None local
+      |> Result.map_error (fun e -> History_error e)
+    in
+    let* history = ensure_workspace (history_for_project project) in
+    let* () = validate_local_history ~project history local in
+    let* object_id =
+      store_with_history ~local store project (Some collaboration) history
+    in
+    let* _ =
+      Store.compare_and_swap_ref store ~name:state_head_name ~expected:None
+        ~target:(Some object_id)
+      |> Result.map_error (fun e -> Store_error e)
+    in
+    Ok { store }

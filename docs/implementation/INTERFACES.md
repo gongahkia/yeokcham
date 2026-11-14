@@ -316,3 +316,63 @@ persists selection nor authorizes file replacement. Three signed-record cases
 exercise rename inheritance, all six receipt permutations of concurrent events,
 explicit target reconciliation and independent branch identities. No P3 exchange,
 composition or CLI branch success is claimed by this checkpoint.
+
+### P2 authenticated local branch state (adapter checkpoint, in progress)
+
+`Yeokcham_v1_store.Local` aliases `Local_core`. Its concrete signatures are in
+[local_core.mli](../../lib/yeokcham_v1_store/local_core.mli). It creates signed
+empty accepted genesis and a generated `main` branch, creates named forks of the
+selected accepted version, resolves names conservatively and retains a private
+`{ branch; cursor; basis }` position per branch. Duplicate names, identity
+collisions, exhausted collision retries, ambiguous event/accepted/name sets,
+unknown positions and unsupported acceptance refuse explicitly. `select` only
+prepares metadata; a service must materialize safely before publishing it.
+There is no branch/switch CLI claim at this checkpoint.
+
+`initialize` stores a canonical empty snapshot and signs it through
+`Trust.Core.sign`/`receive`. It never accepts existing worktree files. The local
+adapter currently admits only empty genesis and forks with at most one accepted
+parent, no chosen revisions/resolutions/review/policy and the canonical empty
+result. Other acceptance requires the actual P3 integration proof. Historical
+state reload verifies signatures and causal references. New records pass
+current admission separately; a late revoked signer cannot bypass this boundary
+by decoding historically valid bytes.
+
+Local core metadata has ordered fields
+`[1, empty_snapshot_object_id, selected_branch_id, record_references, positions]`.
+A reference is `[signed_record_id, stored_object_id]`; a position is
+`[branch_id, cursor_sequence, working_basis_record_id]`. References and positions
+are strictly ordered by their logical IDs, without duplicates. Every branch has
+one position; each basis belongs to its branch's accepted ancestry.
+
+The distinction between the two record references is intentional. P1 signed
+record identity is SHA-256 of the complete canonical envelope. The existing
+object store hashes its domain prefix plus that envelope. Both identities are
+verified on reload, and their immutable association is retained in the same
+state root. Neither the accepted P1 vectors nor existing snapshot/object IDs
+were changed. These remain typed objects 41-43 in the single registry; there is
+no second mutable object store or record-ID registry.
+
+`Yeokcham_v1_store.loaded` now includes `local : Local.t option`.
+`init_local_collaborative_with` atomically publishes project/private capture,
+workspace/history and local core state. Wrapper version 2 is
+`["yeokcham-local-state", 2, inner_project_bytes, history_bytes, local_core_bytes]`.
+Existing version-1/current data remains readable; its state is preserved by
+ordinary saves. `save`/`save_collaborative` accept optional `local`, preserve it
+when omitted and cannot erase previously retained signed records, branches or
+history. Selection/counter updates share the existing `v1-project-state` CAS.
+Unsigned state cannot acquire authenticated core metadata.
+
+`local_branch_snapshots : loaded -> Model.Snapshot_id.t list` exposes all private
+branch working positions as retention roots. `Model.compact` adds optional
+`branch_snapshots` and reports the `Local_branch` protection reason; local
+service compaction/storage-root inspection and GC pass the actual roots. The
+store refuses dropping a branch's retained checkpoint. These protections do not
+invent snapshot availability after independent object loss.
+
+Seven adapter cases cover signed/private initialization, metadata selection in a
+fresh process, duplicate names, missing objects/positions, bounded identity
+collision and entropy failure, logical/physical identity mismatch, invalid
+signatures, unsupported acceptance, historical/current admission and unselected
+private work surviving compaction/GC planning. Materialization and CLI branch
+journeys remain outstanding.
