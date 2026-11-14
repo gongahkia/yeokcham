@@ -58,3 +58,6 @@ let device stamp =
   match String.split_on_char ':' stamp with
   | dev :: _ -> dev
   | [] -> invalid_arg "invalid native fingerprint"
+
+external check_destination : Unix.file_descr -> string -> unit
+  = "yeokcham_scan_check_destination"

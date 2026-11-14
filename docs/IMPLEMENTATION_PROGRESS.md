@@ -563,3 +563,12 @@ filesystem tests passed on this Linux filesystem, including original-inode
 retention and no-follow refusal. These are prerequisites; safe journaled
 application and CLI branch switching remain incomplete. No macOS/Windows
 execution evidence is claimed.
+
+P2 safe-application engine checkpoint: thirteen focused cases passed, including
+nine fork/exit points across actual mutations, forty generated mixed
+content/type/mode transitions, ignored-directory obstruction/preservation,
+missing contents, oversized destination names, replaced parents, corrupted
+plans and external edits before/after interruption or through an open original
+file descriptor. Integration into journals/navigation/switch is still pending.
+The prior native-primitives checkpoint passed `make build`, `make lint`,
+`make ci`; the first `make format` exited 1 while promoting formatter output.

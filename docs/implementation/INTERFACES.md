@@ -515,3 +515,20 @@ caller-owned private staging file. Failure may leave partial staged bytes.
 ignore-rule read set and raw directory names (without reading ignored contents).
 These observations do not reserve names or constitute a filesystem transaction.
 The existing destructive restore path is not yet replaced by these primitives.
+
+`Yeokcham_v1_local_service.Safe_apply` prepares bounded canonical physical plans
+under `.yeokcham/restore-staging/OPERATION/`, binds them to safety/target snapshot
+IDs and a SHA-256 digest, and applies them using no-follow parent descriptors.
+`prepare` validates complete target contents, native exclusions, known ignored
+obstructions, parent access, component lengths and filesystem boundaries before
+ordinary mutations. Changed nodes use exclusive moves or atomic exchange;
+displaced original inodes stay in numbered slots. Shared directories containing
+noncolliding ignored children remain in place. `load` validates the digest,
+operation/snapshot scope, canonical paths/order and the 16 MiB plan bound.
+`apply` checks every action's recorded initial/applied identity state before
+continuing. Unknown states refuse with the path and retained slot; there is no
+automatic rollback over external edits. `For_test.apply` exposes trusted
+in-process hooks before/after actual mutations and after directory fsyncs.
+Casefold directories, cross-filesystem application and unavailable native rename
+semantics refuse explicitly. This checkpoint does not yet connect the engine to
+the restore journal or CLI; the existing restore path remains outstanding.

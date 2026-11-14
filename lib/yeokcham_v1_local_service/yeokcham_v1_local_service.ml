@@ -1,3 +1,4 @@
+module Safe_apply = Safe_apply
 module Text_diff = Text_diff
 module History = Yeokcham_v1_undo
 module Model = Yeokcham_v1_model

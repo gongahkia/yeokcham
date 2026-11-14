@@ -1,4 +1,14 @@
 (test
+ (name test_safe_apply)
+ (modules test_safe_apply)
+ (libraries
+  alcotest
+  unix
+  yeokcham_snapshot
+  yeokcham_store
+  yeokcham_v1_local_service))
+
+(test
  (name test_native_materialize)
  (modules test_native_materialize)
  (libraries alcotest unix yeokcham_snapshot yeokcham_store))

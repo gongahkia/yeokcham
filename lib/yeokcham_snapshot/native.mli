@@ -22,3 +22,6 @@ val rename_at :
 val identity : string -> string
 val stable : string -> string
 val device : string -> string
+
+val check_destination : Unix.file_descr -> string -> unit
+(** Check component-length, parent access and unsupported casefold semantics. *)

@@ -15,6 +15,7 @@
 #ifdef __linux__
 #include <sys/syscall.h>
 #include <linux/fs.h>
+#include <sys/ioctl.h>
 #endif
 #ifdef __APPLE__
 #include <stdio.h>
@@ -31,6 +32,24 @@ static value fingerprint(const struct stat *s) {
     (uintmax_t)s->st_dev, (uintmax_t)s->st_ino, (uintmax_t)s->st_mode,
     (uintmax_t)s->st_nlink, (intmax_t)s->st_size,
     (intmax_t)mt.tv_sec, mt.tv_nsec, (intmax_t)ct.tv_sec, ct.tv_nsec);
+}
+
+CAMLprim value yeokcham_scan_check_destination(value parent, value name) {
+  CAMLparam2(parent, name);
+  caml_unix_check_path(name, "destination");
+  errno = 0;
+  long limit = fpathconf(Int_val(parent), _PC_NAME_MAX);
+  if (limit < 0 && errno) caml_uerror("fpathconf", name);
+  if (limit >= 0 && caml_string_length(name) > (mlsize_t)limit)
+    caml_unix_error(ENAMETOOLONG, "destination", name);
+  if (faccessat(Int_val(parent), ".", W_OK | X_OK, AT_EACCESS) < 0)
+    caml_uerror("destination-access", name);
+#ifdef __linux__
+  unsigned long flags = 0;
+  if (ioctl(Int_val(parent), FS_IOC_GETFLAGS, &flags) == 0 && (flags & FS_CASEFOLD_FL))
+    caml_failwith("casefold directory application is unsupported");
+#endif
+  CAMLreturn(Val_unit);
 }
 
 CAMLprim value yeokcham_scan_open_at(value parent, value name, value directory) {
@@ -208,6 +227,9 @@ CAMLprim value yeokcham_scan_readlink_at(value a, value b) {
 #endif
 
 #ifdef _WIN32
+CAMLprim value yeokcham_scan_check_destination(value a, value b) {
+  (void)a; (void)b; caml_failwith("native destination preflight is unavailable");
+}
 CAMLprim value yeokcham_scan_create_at(value a, value b) {
   (void)a; (void)b; caml_failwith("native exclusive materialization is unavailable");
 }
