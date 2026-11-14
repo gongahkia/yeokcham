@@ -99,6 +99,9 @@ let commands =
         ];
     command ~hook:true [ "save" ];
     command [ "status" ];
+    command [ "history" ]
+      ~options:[ root; integer "--before"; integer "--limit"; flag "--all" ];
+    command [ "diff" ];
     command [ "changes" ];
     command [ "log" ];
     command [ "graph" ] ~options:[ root; flag "--authority" ];

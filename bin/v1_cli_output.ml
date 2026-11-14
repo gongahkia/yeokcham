@@ -13,6 +13,7 @@ let red = "\027[31m"
 let display_value value =
   if
     String.is_empty value
+    || Result.is_error (Yeokcham_encoding.text value)
     || String.exists
          (function '\000' .. ' ' | '\127' | '"' | '\\' -> true | _ -> false)
          value

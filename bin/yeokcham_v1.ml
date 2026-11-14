@@ -3,6 +3,7 @@ module Model = Yeokcham_v1_model
 module Core = Model.Core
 module Local = Yeokcham_v1_store.Local
 module Service = Yeokcham_v1_local_service
+module Text_diff = Service.Text_diff
 module Trust = Yeokcham_v1_trust
 module Package = Yeokcham_v1_package
 module Bootstrap = Yeokcham_v1_bootstrap
@@ -113,6 +114,11 @@ let command_name () =
 let native_json_command command =
   List.mem command
     [
+      "status";
+      "history";
+      "diff";
+      "changes";
+      "save";
       "ignore-explain";
       "branch";
       "branch-list";
@@ -129,6 +135,7 @@ let native_json_command command =
 
 let json_stdout_destination : Unix.file_descr option ref = ref None
 let public_warnings : string list ref = ref []
+let pending_domain_output : (unit -> unit) option ref = ref None
 
 let record_warning warning =
   if requested_format () = Json_format then
@@ -147,6 +154,21 @@ let print_json bytes =
           Out_channel.output_char output '\n';
           Out_channel.flush output)
 
+let domain_command command =
+  List.mem command
+    [
+      "status";
+      "history";
+      "diff";
+      "changes";
+      "save";
+      "ignore-explain";
+      "branch";
+      "branch-list";
+      "branch-create";
+      "switch";
+    ]
+
 let public_error_message message =
   let first_line =
     match String.index_opt message '\n' with
@@ -154,15 +176,146 @@ let public_error_message message =
     | None -> message
   in
   let first_line = String.trim first_line in
-  if String.length first_line = 0 then "V1 command failed" else first_line
+  let first_line =
+    if String.is_empty first_line then "Command failed" else first_line
+  in
+  let first_line =
+    if
+      Result.is_error (Yeokcham_encoding.text first_line)
+      || String.exists
+           (function '\000' | '\r' -> true | _ -> false)
+           first_line
+    then String.escaped first_line
+    else first_line
+  in
+  if String.length first_line <= 4000 then first_line
+  else
+    let stop = ref 3997 in
+    while !stop > 0 && Char.code first_line.[!stop] land 0xc0 = 0x80 do
+      decr stop
+    done;
+    String.sub first_line 0 !stop ^ "..."
+
+let failure_outcome = function
+  | 2 -> `Invalid
+  | 3 -> `Choice_required
+  | 4 -> `Conflict
+  | 5 -> `Unavailable
+  | 6 -> `Integrity_failure
+  | 7 -> `Blocked
+  | 8 -> `Interrupted
+  | _ -> `Failed
 
 let fail_with_status status code message =
-  if requested_format () = Json_format then
-    Cli_data.failure ~command:(command_name ()) ~warnings:[]
-      ~error:{ Cli_data.code; message = public_error_message message }
-    |> Cli_data.encode |> print_json;
+  (if requested_format () = Json_format then
+     let command_label = command_name () in
+     let error = Cli_data.{ code; message = public_error_message message } in
+     (if domain_command command_label then
+        Cli_data.domain_failure ~command:command_label
+          ~outcome:(failure_outcome status) ~error ~data:(`Assoc [])
+          ~warnings:[]
+          ~next_actions:
+            [
+              Cli_data.
+                {
+                  arguments =
+                    [ "yeokcham"; "help" ]
+                    @ String.split_on_char '-' command_label;
+                  explanation =
+                    "Inspect supported arguments and recovery boundaries.";
+                  applicable = true;
+                  confirmation_required = false;
+                };
+            ]
+          ()
+      else Cli_data.failure ~command:command_label ~warnings:[] ~error)
+     |> Cli_data.encode |> print_json);
   prerr_endline message;
   exit status
+
+let domain_json ?operation_id ~outcome ~code ~message ~data ~next_actions () =
+  let emit () =
+    Cli_data.domain_success ?operation_id ~command:(command_name ()) ~outcome
+      ~code ~message ~data
+      ~warnings:(List.rev !public_warnings)
+      ~next_actions ()
+    |> Cli_data.encode |> print_json
+  in
+  match !pending_domain_output with
+  | None -> pending_domain_output := Some emit
+  | Some _ -> invalid_arg "multiple domain results for one command"
+
+let flush_domain_output () =
+  let pending = !pending_domain_output in
+  pending_domain_output := None;
+  Option.iter (fun emit -> emit ()) pending
+
+let action ?(confirmation_required = false) ~root arguments explanation =
+  let representable = Result.is_ok (Yeokcham_encoding.text root) in
+  let action_arguments =
+    ("yeokcham" :: arguments) @ if representable then [ "--root"; root ] else []
+  in
+  let explanation =
+    if representable then explanation
+    else
+      explanation
+      ^ " Run this from the inspected workspace; its root path is not UTF-8."
+  in
+  Cli_data.
+    {
+      arguments = action_arguments;
+      explanation;
+      applicable = representable;
+      confirmation_required;
+    }
+
+let[@warning "-4"] fail_local = function
+  | Service.Snapshot_error
+      ( Yeokcham_snapshot.Invalid_ignore_rule _
+      | Yeokcham_snapshot.Invalid_ignore_path _ ) as error ->
+      fail_with_status 2 "invalid-ignore-rule" (Service.error_to_string error)
+  | Service.Snapshot_error
+      ( Yeokcham_snapshot.Scan_error _
+      | Yeokcham_snapshot.Unsupported_file_type _
+      | Yeokcham_snapshot.Observation_changed _
+      | Yeokcham_snapshot.Capture_unstable _ ) as error ->
+      fail_with_status 5 "capture-incomplete" (Service.error_to_string error)
+  | Service.Snapshot_error
+      (Yeokcham_snapshot.Store_error (Yeokcham_store.Io_error _)) as error ->
+      fail_with_status 5 "content-unavailable" (Service.error_to_string error)
+  | Service.Unknown_checkpoint _ as error ->
+      fail_with_status 5 "state-not-retained" (Service.error_to_string error)
+  | Service.History_error message
+    when String.starts_with ~prefix:"a restore is incomplete" message ->
+      fail_with_status 8 "recovery-pending" message
+  | Service.History_error message
+    when String.starts_with ~prefix:"history identity belongs" message
+         || String.starts_with ~prefix:"unknown local history node" message ->
+      fail_with_status 2 "invalid-state" message
+  | Service.History_error "workspace history sequence is exhausted" ->
+      fail_with_status 5 "history-sequence-exhausted"
+        "The workspace history sequence is exhausted; its existing identities \
+         were preserved."
+  | Service.History_error message
+    when String.starts_with ~prefix:"core identity entropy unavailable:" message
+    ->
+      fail_with_status 5 "identity-entropy-unavailable" message
+  | Service.Trust_error _ as error ->
+      fail_with_status 7 "authority-blocked" (Service.error_to_string error)
+  | Service.Store_error
+      (Yeokcham_v1_store.Store_error
+         ( Yeokcham_store.Repository_not_initialized _
+         | Yeokcham_store.Root_not_directory _ | Yeokcham_store.Io_error _ )) as
+    error ->
+      fail_with_status 5 "repository-unavailable"
+        (Service.error_to_string error)
+  | error ->
+      fail_with_status 6 "local-operation-refused"
+        (Service.error_to_string error)
+
+let require_local = function
+  | Ok value -> value
+  | Error error -> fail_local error
 
 let fail_with code message = fail_with_status 2 code message
 let fail message = fail_with "operation-failed" message
@@ -376,11 +529,28 @@ let help_for = function
          List authenticated shared branches or create a named fork without \
          changing selection. Private disk edits are captured locally; creation \
          does not accept or publish them. File switching is not yet available."
+  | [ "history" ] ->
+      Some
+        "usage: yeokcham history [--root PATH] [--before SEQUENCE] [--limit \
+         1-200] [--all] [--format json]\n\n\
+         Inspect exact saved states, alternatives, changed paths and verified \
+         availability. Default page size is 50. No working-tree scan or \
+         archive success is implied."
+  | [ "diff" ] ->
+      Some
+        "usage: yeokcham diff [STATE_A [STATE_B]] [--root PATH] [--format \
+         json]\n\n\
+         Compare exact states without saving or rewriting files. States are \
+         current, working, local sequences, workspace:sequence identities or \
+         retained snapshot IDs. With no states compare current with working; \
+         with one compare it with working. Text display is bounded; \
+         opaque/type/mode changes retain exact identities."
   | [ "status" ] ->
       Some
         "usage: yeokcham status [--root PATH]\n\n\
-         Show local draft and collaboration status plus whether one exact scan \
-         differs from the latest saved checkpoint."
+         Show actual changed paths, local cursor/branch and complete or \
+         incomplete capture state. Inspection does not save history or rewrite \
+         working files. Watcher state is reported separately from saved data."
   | [ "changes" ] ->
       Some
         "usage: yeokcham changes [--root PATH]\n\n\
@@ -869,7 +1039,7 @@ let bytes_of_hex value =
     in
     decode 0
 
-let render_status status =
+let render_status ?(uncaptured_known = true) status =
   Printf.printf "device %s\n" (Model.Device_id.to_string status.Service.creator);
   Printf.printf "saved %s\n"
     (Model.Snapshot_id.to_string status.Service.checkpoint);
@@ -906,7 +1076,9 @@ let render_status status =
         (Model.Username.to_string registration.Model.username));
   print_endline "capture command";
   Printf.printf "uncaptured %s\n"
-    (if status.Service.uncaptured then "yes" else "no")
+    (if not uncaptured_known then "unknown"
+     else if status.Service.uncaptured then "yes"
+     else "no")
 
 let parse_init arguments =
   let rec loop root username draft title = function
@@ -932,9 +1104,13 @@ let parse_init arguments =
               |> require_ok Core.error_to_string
               |> Core.Change_id.to_hex
         in
-        let title =
-          Option.value title ~default:("Work on " ^ Filename.basename root)
+        let basename = Filename.basename root in
+        let default_title =
+          if Result.is_ok (Yeokcham_encoding.text basename) then
+            "Work on " ^ basename
+          else "Local work"
         in
+        let title = Option.value title ~default:default_title in
         (root, username, draft, title)
     | "--root" :: value :: rest when Option.is_none root ->
         loop (Some value) username draft title rest
@@ -1601,7 +1777,11 @@ let run_init arguments =
         "could not generate V1 repository identity: " ^ error)
   in
   let device, signing_capability =
-    V1_signer.create () |> require_ok V1_signer.error_to_string
+    match V1_signer.create () with
+    | Ok value -> value
+    | Error error ->
+        fail_with_status 5 "credential-provider-unavailable"
+          (V1_signer.error_to_string error)
   in
   let recovery = Trust.generate_device () |> require_ok Trust.error_to_string in
   let recovery_device = Trust.generated_identity recovery in
@@ -1622,7 +1802,8 @@ let run_init arguments =
   print_endline "private-backup not configured";
   print_endline "root-verification-phrase (compare during device join)";
   Printf.printf "%s\n" (Recovery.verification_phrase root_certificate);
-  Printf.printf "recovery-package %s\n" (Service.recovery_package_path root);
+  Printf.printf "recovery-package %s\n"
+    (Output.display_value (Service.recovery_package_path root));
   print_endline "recovery-mnemonic (record offline; it is shown only now)";
   Printf.printf "%s\n" ceremony.Yeokcham_v1_recovery.mnemonic
 
@@ -1755,15 +1936,40 @@ let run_user_register arguments =
 
 let run_save arguments =
   let root = parse_root arguments in
-  Service.save ~root |> require_ok Service.error_to_string |> function
-  | Service.Unchanged status ->
-      print_endline "save unchanged";
-      render_status status;
-      false
-  | Service.Saved status ->
-      print_endline "save recorded";
-      render_status status;
-      true
+  let result = Service.save ~root |> require_local in
+  let changed, status =
+    match result with
+    | Service.Unchanged status -> (false, status)
+    | Service.Saved status -> (true, status)
+  in
+  (match requested_format () with
+  | Json_format ->
+      domain_json
+        ~outcome:(if changed then `Completed else `Unchanged)
+        ~code:(if changed then "capture-saved" else "capture-unchanged")
+        ~message:
+          (if changed then "A complete local capture was saved."
+           else "The saved contents already match disk.")
+        ~data:
+          (`Assoc
+             [
+               ( "snapshot_id",
+                 `String (Model.Snapshot_id.to_string status.Service.checkpoint)
+               );
+               ( "draft_id",
+                 `String
+                   (Model.Draft_id.to_string
+                      status.Service.active_draft.Model.draft_id) );
+               ("changed", `Bool changed);
+               ("private_backup", `String "not-configured");
+             ])
+        ~next_actions:
+          [ action ~root [ "history" ] "Inspect saved work and alternatives." ]
+        ()
+  | Text_format ->
+      print_endline (if changed then "save recorded" else "save unchanged");
+      render_status status);
+  changed
 
 let[@warning "-4"] run_ignore_explain arguments =
   let rec parse root path = function
@@ -1817,23 +2023,40 @@ let[@warning "-4"] run_ignore_explain arguments =
           Some (Yeokcham_snapshot.Ignore.pattern rule),
           false )
   in
-  let string_option = function None -> `Null | Some s -> `String s in
+  let string_option = function
+    | None -> `Null
+    | Some s when Result.is_ok (Yeokcham_encoding.text s) -> `String s
+    | Some _ -> `Null
+  in
   match requested_format () with
   | Json_format ->
-      Cli_data.success ~command:"ignore-explain" ~warnings:[]
-        ~result:
+      Cli_data.domain_success ~command:"ignore-explain" ~outcome:`Completed
+        ~code:"ignore-explained" ~message:"Capture rules inspected."
+        ~warnings:[]
+        ~data:
           (`Assoc
              [
                ("outcome", `String "completed");
-               ("path", `String path);
+               ("path", string_option (Some path));
+               ("path_display", `String (Output.display_value path));
+               ("path_bytes_hex", `String (hex_of_bytes path));
                ("ignored", `Bool explanation.Yeokcham_snapshot.ignored);
                ("mandatory", `Bool mandatory);
                ("source", string_option source);
+               ( "source_bytes_hex",
+                 Option.fold ~none:`Null
+                   ~some:(fun value -> `String (hex_of_bytes value))
+                   source );
                ("line", match line with None -> `Null | Some n -> `Int n);
                ("pattern", string_option pattern);
+               ( "pattern_bytes_hex",
+                 Option.fold ~none:`Null
+                   ~some:(fun value -> `String (hex_of_bytes value))
+                   pattern );
                ( "blocked_by_parent",
                  `Bool explanation.Yeokcham_snapshot.blocked_by_parent );
              ])
+        ~next_actions:[] ()
       |> Cli_data.encode |> print_json
   | Text_format ->
       Printf.printf "%s: %s\n"
@@ -1852,10 +2075,6 @@ let[@warning "-4"] run_ignore_explain arguments =
       if explanation.Yeokcham_snapshot.blocked_by_parent then
         print_endline
           "the parent is excluded; re-include it before re-including this path"
-
-let run_status arguments =
-  let root = parse_root arguments in
-  Service.status ~root |> require_ok Service.error_to_string |> render_status
 
 let inspection_width () =
   match Option.bind (Sys.getenv_opt "COLUMNS") int_of_string_opt with
@@ -2750,27 +2969,6 @@ let render_snapshot_entry = function
       | Some mode, None -> kind ^ " " ^ mode
       | None, Some content -> kind ^ " " ^ content)
 
-let run_changes arguments =
-  let root = parse_root arguments in
-  let comparison =
-    Service.inspect_working_tree ~root |> require_ok Service.error_to_string
-  in
-  Printf.printf "saved %s\n"
-    (Model.Snapshot_id.to_string comparison.Service.saved_checkpoint);
-  Printf.printf "observed %s\n"
-    (Model.Snapshot_id.to_string comparison.Service.observed_snapshot);
-  match comparison.Service.differences with
-  | [] -> print_endline "changes unchanged"
-  | differences ->
-      List.iter
-        (fun difference ->
-          Printf.printf "change %s before %s after %s\n"
-            (Output.display_value
-               (Model.Path.to_string difference.Service.path))
-            (render_snapshot_entry difference.Service.before)
-            (render_snapshot_entry difference.Service.after))
-        differences
-
 let history_json_node node =
   `Assoc
     [
@@ -2791,7 +2989,7 @@ let history_json_result command result =
 let json_ids values =
   `List (List.map (fun id -> `String (Core.Record_id.to_hex id)) values)
 
-let render_branches listing =
+let render_branches ?created_branch listing =
   let selected = listing.Service.selected_branch in
   let workspace =
     Option.map Core.Workspace_id.to_hex listing.Service.workspace
@@ -2803,6 +3001,10 @@ let render_branches listing =
           Option.fold ~none:`Null ~some:(fun value -> `String value) workspace
         );
         ("selected_branch_id", `String (Core.Branch_id.to_hex selected));
+        ( "created_branch_id",
+          Option.fold ~none:`Null
+            ~some:(fun id -> `String (Core.Branch_id.to_hex id))
+            created_branch );
         ( "branches",
           `List
             (List.map
@@ -2843,7 +3045,16 @@ let render_branches listing =
       ]
   in
   match requested_format () with
-  | Json_format -> history_json_result (command_name ()) data
+  | Json_format ->
+      domain_json ~outcome:`Completed
+        ~code:
+          (if Option.is_some created_branch then "branch-created"
+           else "branches-inspected")
+        ~message:
+          (if Option.is_some created_branch then
+             "A named branch was created; selection was preserved."
+           else "Authenticated branches and private positions inspected.")
+        ~data ~next_actions:[] ()
   | Text_format ->
       List.iter
         (fun row ->
@@ -2909,10 +3120,679 @@ let run_branch_create arguments =
   | Ok () -> ()
   | Error error ->
       fail_with_status 2 "invalid-branch-name" (Core.error_to_string error));
-  let signing_capability = local_signing_capability root in
+  let identity = Service.identity ~root |> require_local in
+  let signing_capability =
+    match V1_signer.load ~root (Trust.device_id identity.Service.device) with
+    | Ok capability -> capability
+    | Error error ->
+        fail_with_status 5 "credential-provider-unavailable"
+          (V1_signer.error_to_string error)
+  in
   match Service.branch_create ~root ~name ~signing_capability with
-  | Ok listing -> render_branches listing
+  | Ok listing ->
+      let row =
+        List.find
+          (fun row -> List.mem name row.Core.display_names)
+          listing.Service.shared_branches
+      in
+      render_branches ~created_branch:row.Core.branch_id listing
   | Error error -> fail_branch error
+
+let json_optional f = Option.fold ~none:`Null ~some:f
+
+let json_history_identity id =
+  `Assoc
+    [
+      ( "workspace_id",
+        `String (Core.Workspace_id.to_hex (Core.History_id.workspace id)) );
+      ("sequence", `String (Int64.to_string (Core.History_id.sequence id)));
+      ( "id",
+        `String
+          (Core.Workspace_id.to_hex (Core.History_id.workspace id)
+          ^ ":"
+          ^ Int64.to_string (Core.History_id.sequence id)) );
+    ]
+
+let json_state state =
+  `Assoc
+    [
+      ("id", `String state.Service.state_name);
+      ( "snapshot_id",
+        `String (Model.Snapshot_id.to_string state.Service.state_snapshot) );
+      ( "history",
+        json_optional json_history_identity state.Service.history_identity );
+    ]
+
+let json_entry =
+  json_optional (fun entry ->
+      `Assoc
+        [
+          ( "kind",
+            `String
+              (match entry.Service.kind with
+              | Service.File -> "file"
+              | Service.Directory -> "directory") );
+          ( "mode",
+            json_optional
+              (fun mode ->
+                `String
+                  (match mode with
+                  | Yeokcham_snapshot.Regular -> "regular"
+                  | Yeokcham_snapshot.Executable -> "executable"
+                  | Yeokcham_snapshot.Symlink -> "symlink"))
+              entry.Service.mode );
+          ( "content_id",
+            json_optional (fun id -> `String id) entry.Service.content );
+        ])
+
+let path_fields path =
+  let raw = Model.Path.to_string path in
+  let valid = Result.is_ok (Yeokcham_encoding.text raw) in
+  [
+    ("path", if valid then `String raw else `Null);
+    ( "path_display",
+      `String (if valid then Output.display_value raw else String.escaped raw)
+    );
+    ("path_bytes_hex", `String (hex_of_bytes raw));
+  ]
+
+let json_difference difference =
+  `Assoc
+    (path_fields difference.Service.path
+    @ [
+        ("before", json_entry difference.Service.before);
+        ("after", json_entry difference.Service.after);
+      ])
+
+let json_hunk hunk =
+  `Assoc
+    [
+      ("old_start", `Int hunk.Text_diff.old_start);
+      ("old_count", `Int hunk.Text_diff.old_count);
+      ("new_start", `Int hunk.Text_diff.new_start);
+      ("new_count", `Int hunk.Text_diff.new_count);
+      ( "lines",
+        `List
+          (List.map
+             (fun line ->
+               `Assoc
+                 [
+                   ( "kind",
+                     `String
+                       (match line.Text_diff.kind with
+                       | Text_diff.Context -> "context"
+                       | Text_diff.Removed -> "removed"
+                       | Text_diff.Added -> "added") );
+                   ("text", `String line.Text_diff.text);
+                   ("newline", `Bool line.Text_diff.newline);
+                 ])
+             hunk.Text_diff.lines) );
+    ]
+
+let json_display_difference difference =
+  let fields =
+    path_fields difference.Service.entry_difference.Service.path
+    @ [
+        ("before", json_entry difference.Service.entry_difference.Service.before);
+        ("after", json_entry difference.Service.entry_difference.Service.after);
+        ( "text",
+          match difference.Service.text_difference with
+          | None -> `Assoc [ ("state", `String "metadata-only") ]
+          | Some (Text_diff.Opaque reason) ->
+              `Assoc [ ("state", `String "opaque"); ("reason", `String reason) ]
+          | Some (Text_diff.Text hunks) ->
+              `Assoc
+                [
+                  ("state", `String "text");
+                  ("hunks", `List (List.map json_hunk hunks));
+                ] );
+      ]
+  in
+  `Assoc fields
+
+let display_line value =
+  if Result.is_error (Yeokcham_encoding.text value) then String.escaped value
+  else
+    let buffer = Buffer.create (String.length value) in
+    String.iter
+      (function
+        | '\r' -> Buffer.add_string buffer "\\r"
+        | ('\000' .. '\008' | '\011' .. '\031' | '\127') as byte ->
+            Buffer.add_string buffer
+              (Standard_printf.sprintf "\\x%02x" (Char.code byte))
+        | byte -> Buffer.add_char buffer byte)
+      value;
+    Buffer.contents buffer
+
+let render_display_difference difference =
+  let entry = difference.Service.entry_difference in
+  Printf.printf "diff %s\n"
+    (Output.display_value (Model.Path.to_string entry.Service.path));
+  Printf.printf "  before %s\n  after  %s\n"
+    (render_snapshot_entry entry.Service.before)
+    (render_snapshot_entry entry.Service.after);
+  match difference.Service.text_difference with
+  | None -> ()
+  | Some (Text_diff.Opaque reason) -> Printf.printf "  %s\n" reason
+  | Some (Text_diff.Text hunks) ->
+      List.iter
+        (fun hunk ->
+          Printf.printf "@@ -%d,%d +%d,%d @@\n" hunk.Text_diff.old_start
+            hunk.Text_diff.old_count hunk.Text_diff.new_start
+            hunk.Text_diff.new_count;
+          List.iter
+            (fun line ->
+              Printf.printf "%s%s\n"
+                (match line.Text_diff.kind with
+                | Text_diff.Context -> " "
+                | Text_diff.Removed -> "-"
+                | Text_diff.Added -> "+")
+                (display_line line.Text_diff.text);
+              if not line.Text_diff.newline then
+                print_endline "\\ No newline at end of file")
+            hunk.Text_diff.lines)
+        hunks
+
+let run_status arguments =
+  let root = parse_root arguments in
+  let status = Service.inspect_local_status ~root |> require_local in
+  let capture, uncaptured, changed_paths =
+    match status.Service.capture_observation with
+    | Ok comparison ->
+        ( `Assoc
+            [
+              ("state", `String "complete");
+              ( "observed_snapshot",
+                `String
+                  (Model.Snapshot_id.to_string
+                     comparison.Service.observed_snapshot) );
+            ],
+          `Bool status.Service.saved_metadata.Service.uncaptured,
+          `List (List.map json_difference comparison.Service.differences) )
+    | Error message ->
+        ( `Assoc
+            [
+              ("state", `String "incomplete");
+              ("message", `String (public_error_message message));
+            ],
+          `Null,
+          `Null )
+  in
+  let branch =
+    Option.map
+      (fun listing ->
+        let row =
+          List.find
+            (fun row ->
+              Core.Branch_id.equal row.Core.branch_id
+                listing.Service.selected_branch)
+            listing.Service.shared_branches
+        in
+        `Assoc
+          [
+            ("id", `String (Core.Branch_id.to_hex row.Core.branch_id));
+            ( "names",
+              `List (List.map (fun name -> `String name) row.Core.display_names)
+            );
+            ("event_heads", json_ids row.Core.event_heads);
+            ("accepted_heads", json_ids row.Core.accepted_heads);
+          ])
+      status.Service.status_branch
+  in
+  let recovery =
+    Option.map
+      (fun pending ->
+        `Assoc
+          [
+            ("operation_id", `String pending.Service.recovery_operation);
+            ( "target_snapshot",
+              `String
+                (Model.Snapshot_id.to_string pending.Service.recovery_target) );
+          ])
+      status.Service.pending_local_recovery
+  in
+  let data =
+    `Assoc
+      [
+        ("saved", json_state status.Service.status_cursor);
+        ("state_head", `String status.Service.status_head);
+        ("branch", Option.value branch ~default:`Null);
+        ("capture", capture);
+        ("uncaptured", uncaptured);
+        ("changes", changed_paths);
+        ("recovery", Option.value recovery ~default:`Null);
+        ( "watcher",
+          `Assoc
+            [
+              ("state", `String "not-inspected");
+              ( "message",
+                `String
+                  "Foreground watch and the disposable runtime are inspected \
+                   separately." );
+            ] );
+        ("managed_service", `String "not-implemented");
+        ("private_backup", `String "not-configured");
+      ]
+  in
+  let next_actions =
+    match
+      (status.Service.pending_local_recovery, status.Service.capture_observation)
+    with
+    | Some pending, _ ->
+        [
+          action ~root
+            [
+              "restore";
+              "--checkpoint";
+              Model.Snapshot_id.to_string pending.Service.recovery_target;
+            ]
+            "Resume the original recovery operation.";
+        ]
+    | None, Ok comparison when comparison.Service.differences <> [] ->
+        [
+          action ~root [ "diff" ] "Inspect text and exact file changes.";
+          action ~root [ "save" ] "Save a complete private local capture.";
+        ]
+    | None, (Ok _ | Error _) ->
+        [ action ~root [ "history" ] "Inspect saved work and alternatives." ]
+  in
+  match requested_format () with
+  | Json_format ->
+      domain_json
+        ~outcome:
+          (if Result.is_ok status.Service.capture_observation then `Completed
+           else `Incomplete)
+        ~code:
+          (if Result.is_ok status.Service.capture_observation then
+             "status-inspected"
+           else "capture-incomplete")
+        ~message:
+          (if Result.is_ok status.Service.capture_observation then
+             "Local workspace inspected."
+           else "Capture is incomplete; saved metadata remains available.")
+        ~data ~next_actions ()
+  | Text_format ->
+      render_status
+        ~uncaptured_known:(Result.is_ok status.Service.capture_observation)
+        status.Service.saved_metadata;
+      Printf.printf "cursor %s\n"
+        status.Service.status_cursor.Service.state_name;
+      (match status.Service.status_branch with
+      | None ->
+          print_endline "branch metadata unavailable for this V1 repository"
+      | Some listing ->
+          let row =
+            List.find
+              (fun row ->
+                Core.Branch_id.equal row.Core.branch_id
+                  listing.Service.selected_branch)
+              listing.Service.shared_branches
+          in
+          Printf.printf "branch %s %s\n"
+            (String.concat ", "
+               (List.map Output.display_value row.Core.display_names))
+            (Core.Branch_id.to_hex row.Core.branch_id);
+          Printf.printf "accepted-heads %s\n"
+            (String.concat ","
+               (List.map Core.Record_id.to_hex row.Core.accepted_heads));
+          if
+            List.length row.Core.event_heads <> 1
+            || List.length row.Core.accepted_heads <> 1
+            || List.length row.Core.display_names <> 1
+          then
+            print_endline "branch reconciliation is required before selection");
+      (match status.Service.capture_observation with
+      | Error message ->
+          Printf.printf "capture incomplete: %s\n" (display_line message)
+      | Ok comparison ->
+          List.iter
+            (fun difference ->
+              Printf.printf "changed %s before %s after %s\n"
+                (Output.display_value
+                   (Model.Path.to_string difference.Service.path))
+                (render_snapshot_entry difference.Service.before)
+                (render_snapshot_entry difference.Service.after))
+            comparison.Service.differences);
+      print_endline
+        "watcher state not inspected; use watch or daemon status where \
+         supported";
+      print_endline
+        "managed service not implemented; private backup not configured"
+
+let[@warning "-4"] parse_state value =
+  let invalid () =
+    fail_with_status 2 "invalid-state"
+      "state must be current, working, a local sequence, workspace:sequence, \
+       or a retained snapshot ID"
+  in
+  match value with
+  | "current" | "saved" -> Service.Current_saved
+  | "working" -> Service.Working_tree
+  | _ -> (
+      match String.split_on_char ':' value with
+      | [ workspace; sequence ] -> (
+          let workspace = Core.Workspace_id.of_hex workspace in
+          let sequence = Int64.of_string_opt sequence in
+          match (workspace, sequence) with
+          | Ok workspace, Some sequence when Int64.compare sequence 0L >= 0 ->
+              Service.Exact_history
+                (Core.History_id.make ~workspace ~sequence
+                |> require_ok Core.error_to_string)
+          | _ -> invalid ())
+      | [ _ ] when String.length value = 64 -> (
+          match Yeokcham_store.Stored_object_id.of_hex value with
+          | Ok _ ->
+              Service.Snapshot_state
+                (Model.Snapshot_id.of_string value
+                |> require_ok Model.error_to_string)
+          | Error _ -> invalid ())
+      | [ _ ] -> (
+          match Int64.of_string_opt value with
+          | Some sequence when Int64.compare sequence 0L >= 0 ->
+              Service.History_node sequence
+          | _ -> invalid ())
+      | _ -> invalid ())
+
+let parse_diff arguments =
+  let rec loop root states = function
+    | [] -> (Option.value root ~default:default_root, List.rev states)
+    | "--root" :: value :: rest when Option.is_none root ->
+        loop (Some value) states rest
+    | value :: rest
+      when List.length states < 2 && not (String.starts_with ~prefix:"-" value)
+      ->
+        loop root (value :: states) rest
+    | _ -> usage ()
+  in
+  let root, states = loop None [] arguments in
+  let before, after =
+    match states with
+    | [] -> (Service.Current_saved, Service.Working_tree)
+    | [ before ] -> (parse_state before, Service.Working_tree)
+    | [ before; after ] -> (parse_state before, parse_state after)
+    | _ -> usage ()
+  in
+  (root, before, after)
+
+let run_diff arguments =
+  let root, before, after = parse_diff arguments in
+  let comparison =
+    Service.compare_local_states ~root ~before ~after |> require_local
+  in
+  let changed = comparison.Service.display_differences <> [] in
+  match requested_format () with
+  | Json_format ->
+      domain_json
+        ~outcome:(if changed then `Completed else `Unchanged)
+        ~code:(if changed then "states-differ" else "states-equal")
+        ~message:
+          (if changed then "Exact states differ."
+           else "Exact states have equal contents.")
+        ~data:
+          (`Assoc
+             [
+               ("before", json_state comparison.Service.before_state);
+               ("after", json_state comparison.Service.after_state);
+               ( "differences",
+                 `List
+                   (List.map json_display_difference
+                      comparison.Service.display_differences) );
+             ])
+        ~next_actions:[] ()
+  | Text_format ->
+      Printf.printf "before %s snapshot %s\nafter %s snapshot %s\n"
+        comparison.Service.before_state.Service.state_name
+        (Model.Snapshot_id.to_string
+           comparison.Service.before_state.Service.state_snapshot)
+        comparison.Service.after_state.Service.state_name
+        (Model.Snapshot_id.to_string
+           comparison.Service.after_state.Service.state_snapshot);
+      if not changed then print_endline "diff unchanged"
+      else
+        List.iter render_display_difference
+          comparison.Service.display_differences
+
+let run_changes arguments =
+  let root = parse_root arguments in
+  let comparison =
+    Service.compare_local_states ~root ~before:Service.Current_saved
+      ~after:Service.Working_tree
+    |> require_local
+  in
+  let differences =
+    List.map
+      (fun display -> display.Service.entry_difference)
+      comparison.Service.display_differences
+  in
+  match requested_format () with
+  | Json_format ->
+      domain_json
+        ~outcome:(if differences = [] then `Unchanged else `Completed)
+        ~code:"changes-inspected"
+        ~message:"Exact working-tree changes inspected."
+        ~data:
+          (`Assoc
+             [
+               ("saved", json_state comparison.Service.before_state);
+               ("observed", json_state comparison.Service.after_state);
+               ("differences", `List (List.map json_difference differences));
+             ])
+        ~next_actions:
+          [ action ~root [ "diff" ] "Inspect readable text differences." ]
+        ()
+  | Text_format -> (
+      Printf.printf "saved %s\nobserved %s\n"
+        (Model.Snapshot_id.to_string
+           comparison.Service.before_state.Service.state_snapshot)
+        (Model.Snapshot_id.to_string
+           comparison.Service.after_state.Service.state_snapshot);
+      match differences with
+      | [] -> print_endline "changes unchanged"
+      | differences ->
+          List.iter
+            (fun difference ->
+              Printf.printf "change %s before %s after %s\n"
+                (Output.display_value
+                   (Model.Path.to_string difference.Service.path))
+                (render_snapshot_entry difference.Service.before)
+                (render_snapshot_entry difference.Service.after))
+            differences)
+
+let display_capture_time timestamp =
+  if timestamp = 0L then "capture time unrecorded"
+  else
+    try
+      let time = Unix.gmtime (Int64.to_float timestamp) in
+      Standard_printf.sprintf "%04d-%02d-%02d %02d:%02d:%02d UTC"
+        (time.Unix.tm_year + 1900) (time.Unix.tm_mon + 1) time.Unix.tm_mday
+        time.Unix.tm_hour time.Unix.tm_min time.Unix.tm_sec
+    with Unix.Unix_error _ | Invalid_argument _ -> "capture time unavailable"
+
+let run_history arguments =
+  let rec parse root before limit = function
+    | [] ->
+        ( Option.value root ~default:default_root,
+          before,
+          Option.value limit ~default:50 )
+    | "--root" :: value :: rest when Option.is_none root ->
+        parse (Some value) before limit rest
+    | "--all" :: rest -> parse root before limit rest
+    | "--before" :: value :: rest when Option.is_none before -> (
+        match Int64.of_string_opt value with
+        | Some value when Int64.compare value 0L >= 0 ->
+            parse root (Some value) limit rest
+        | _ ->
+            fail_with_status 2 "invalid-history-cursor"
+              "history cursor must be a nonnegative sequence")
+    | "--limit" :: value :: rest when Option.is_none limit -> (
+        match int_of_string_opt value with
+        | Some value when value >= 1 && value <= 200 ->
+            parse root before (Some value) rest
+        | _ ->
+            fail_with_status 2 "invalid-history-limit"
+              "history limit must be 1-200")
+    | _ -> usage ()
+  in
+  let root, before, limit = parse None None None arguments in
+  let page =
+    Service.inspect_local_history ~root ~before ~limit |> require_local
+  in
+  let reference sequence =
+    Option.fold
+      ~none:("node:" ^ Int64.to_string sequence)
+      ~some:(fun workspace ->
+        Core.Workspace_id.to_hex workspace ^ ":" ^ Int64.to_string sequence)
+      page.Service.page_workspace
+  in
+  let availability = function
+    | Service.Available -> "available"
+    | Service.Not_retained -> "not-retained"
+    | Service.Unavailable _ -> "unavailable"
+  in
+  let row_json row =
+    `Assoc
+      [
+        ("id", `String (reference row.Service.history_node.History.id));
+        ( "history",
+          json_optional json_history_identity row.Service.history_identity );
+        ( "sequence",
+          `String (Int64.to_string row.Service.history_node.History.id) );
+        ( "parent",
+          json_optional
+            (fun sequence -> `String (reference sequence))
+            row.Service.history_node.History.parent );
+        ( "children",
+          `List
+            (List.map
+               (fun sequence -> `String (reference sequence))
+               row.Service.history_children) );
+        ( "snapshot_id",
+          `String
+            (Model.Snapshot_id.to_string
+               row.Service.history_node.History.snapshot) );
+        ( "title",
+          json_optional (fun title -> `String title) row.Service.history_title
+        );
+        ( "captured_at",
+          if row.Service.history_node.History.created_at = 0L then `Null
+          else
+            `Intlit
+              (Int64.to_string row.Service.history_node.History.created_at) );
+        ("availability", `String (availability row.Service.availability));
+        ( "unavailable_reason",
+          match row.Service.availability with
+          | Service.Unavailable reason -> `String (public_error_message reason)
+          | Service.Available | Service.Not_retained -> `Null );
+        ( "changed_paths",
+          match row.Service.history_paths with
+          | Ok paths ->
+              `List (List.map (fun path -> `Assoc (path_fields path)) paths)
+          | Error _ -> `Null );
+        ( "path_comparison_unavailable",
+          match row.Service.history_paths with
+          | Error reason -> `String (public_error_message reason)
+          | Ok _ -> `Null );
+        ( "referenced_by_branches",
+          `List
+            (List.map
+               (fun id -> `String (Core.Branch_id.to_hex id))
+               row.Service.referenced_by_branches) );
+      ]
+  in
+  let next_actions =
+    Option.fold ~none:[]
+      ~some:(fun before ->
+        [
+          action ~root
+            [
+              "history";
+              "--before";
+              Int64.to_string before;
+              "--limit";
+              string_of_int limit;
+            ]
+            "Read the next page of saved history.";
+        ])
+      page.Service.next_before
+    @ List.filter_map
+        (fun row ->
+          match row.Service.availability with
+          | Service.Available ->
+              Some
+                (action ~root
+                   [
+                     "undo";
+                     "--to";
+                     Int64.to_string row.Service.history_node.History.id;
+                     "--dry-run";
+                   ]
+                   ("Preview recovery of "
+                   ^ reference row.Service.history_node.History.id
+                   ^ "."))
+          | Service.Not_retained | Service.Unavailable _ -> None)
+        page.Service.entries
+  in
+  match requested_format () with
+  | Json_format ->
+      domain_json ~outcome:`Completed ~code:"history-inspected"
+        ~message:"Saved local history inspected."
+        ~data:
+          (`Assoc
+             [
+               ( "workspace_id",
+                 json_optional
+                   (fun id -> `String (Core.Workspace_id.to_hex id))
+                   page.Service.page_workspace );
+               ("current", `String (reference page.Service.page_cursor));
+               ("entries", `List (List.map row_json page.Service.entries));
+               ( "next_before",
+                 json_optional
+                   (fun before -> `String (Int64.to_string before))
+                   page.Service.next_before );
+               ("archive", `String "not-configured");
+             ])
+        ~next_actions ()
+  | Text_format ->
+      Printf.printf "current %s\n" (reference page.Service.page_cursor);
+      List.iter
+        (fun row ->
+          Printf.printf "%s %s %s %s %s\n"
+            (if row.Service.history_node.History.id = page.Service.page_cursor
+             then "*"
+             else " ")
+            (reference row.Service.history_node.History.id)
+            (availability row.Service.availability)
+            (display_capture_time row.Service.history_node.History.created_at)
+            (Option.fold ~none:"title unavailable" ~some:Output.display_value
+               row.Service.history_title);
+          Printf.printf "  snapshot %s parent %s children %s\n"
+            (Model.Snapshot_id.to_string
+               row.Service.history_node.History.snapshot)
+            (Option.fold ~none:"none" ~some:reference
+               row.Service.history_node.History.parent)
+            (String.concat ","
+               (List.map reference row.Service.history_children));
+          (match row.Service.history_paths with
+          | Ok paths ->
+              Printf.printf "  paths %s\n"
+                (String.concat ", "
+                   (List.map
+                      (fun path ->
+                        Output.display_value (Model.Path.to_string path))
+                      paths))
+          | Error reason ->
+              Printf.printf "  paths unavailable: %s\n" (display_line reason));
+          match row.Service.availability with
+          | Service.Unavailable reason ->
+              Printf.printf "  unavailable: %s\n" (display_line reason)
+          | Service.Available | Service.Not_retained -> ())
+        page.Service.entries;
+      Option.iter
+        (fun before ->
+          Printf.printf "more: history --before %Ld --limit %d\n" before limit)
+        page.Service.next_before;
+      print_endline
+        "archive not configured; availability describes local retained contents"
 
 let run_undo_tree arguments =
   let root = parse_root arguments in
@@ -4365,6 +5245,8 @@ let dispatch () =
   | _ :: "branch" :: "create" :: arguments -> run_branch_create arguments
   | _ :: "branch" :: arguments -> run_branch_list arguments
   | _ :: "status" :: arguments -> run_status arguments
+  | _ :: "history" :: arguments -> run_history arguments
+  | _ :: "diff" :: arguments -> run_diff arguments
   | _ :: "changes" :: arguments -> run_changes arguments
   | _ :: "log" :: arguments -> run_log arguments
   | _ :: "graph" :: arguments -> run_graph arguments
@@ -4483,5 +5365,7 @@ let () =
             requested_format () = Json_format
             && not (native_json_command command)
           then run_generic_json command dispatch
-          else dispatch ())
+          else (
+            dispatch ();
+            flush_domain_output ()))
   | [] -> usage ()

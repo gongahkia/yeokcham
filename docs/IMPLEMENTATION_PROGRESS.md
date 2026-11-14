@@ -539,3 +539,20 @@ records, not current proof.
   preserved. No agent push was performed. CLI rendering/structured outcomes, safe switch/recovery and final acceptance
   remain outstanding. No P3 composition/acceptance is implemented by display
   hunks. Authenticated branch metadata additionally refuses unnamespaced history.
+
+- P2 inspection CLI checkpoint, November 15: status,
+  history, exact diff, changes/save and native ignore/branch results now carry
+  real schema-2 domain data/outcomes/actions through the existing codec. Nine
+  fresh-process inspection and eight branch Python cases pass; four schema
+  cases preserve legacy golden compatibility and reject contradictory outcomes.
+  Existing CLI testing caught JSON save being emitted before hook warnings;
+  domain output is now deferred until post-success observers finish, and all
+  28 existing CLI cases pass. Byte-path display/JSON tests also caught and fixed
+  invalid UTF-8 output. External main commit
+  `0e539d8` contains this session's schema/test foundation and is preserved.
+  Focused schema/legacy codec/28 existing CLI plus nine inspection and eight
+  branch Python cases pass; `make build`, `make lint` and `make ci` exited 0
+  with valid Dune cache reuse. Exact final logs are `*-inspection-cli-final.log`,
+  `test-cli-inspection-final.log`, and `test-*-json-final.log` in the session
+  cache. Switch, safe application/interruption recovery and final P2 audit remain
+  outstanding. No P3 work is claimed.

@@ -1,15 +1,27 @@
 type command_error = { code : string; message : string }
 type command_result = Completed
-
 type success_outcome = [ `Completed | `Unchanged | `Incomplete ]
-type failure_outcome = [ `Invalid | `Choice_required | `Conflict | `Unavailable | `Integrity_failure | `Blocked | `Interrupted | `Incomplete | `Failed ]
+
+type failure_outcome =
+  [ `Invalid
+  | `Choice_required
+  | `Conflict
+  | `Unavailable
+  | `Integrity_failure
+  | `Blocked
+  | `Interrupted
+  | `Incomplete
+  | `Failed ]
+
 type outcome = [ success_outcome | failure_outcome ]
+
 type next_action = {
   arguments : string list;
   explanation : string;
   applicable : bool;
   confirmation_required : bool;
 }
+
 type domain_details = {
   domain_outcome : outcome;
   domain_code : string;
@@ -104,46 +116,102 @@ let warnings envelope = envelope.warnings_value
 let error envelope = envelope.error_value
 
 let outcome_string : outcome -> string = function
-  | `Completed -> "completed" | `Unchanged -> "unchanged" | `Incomplete -> "incomplete"
-  | `Invalid -> "invalid" | `Choice_required -> "choice-required" | `Conflict -> "conflict"
-  | `Unavailable -> "unavailable" | `Integrity_failure -> "integrity-failure" | `Blocked -> "blocked"
-  | `Interrupted -> "interrupted" | `Failed -> "failed"
+  | `Completed -> "completed"
+  | `Unchanged -> "unchanged"
+  | `Incomplete -> "incomplete"
+  | `Invalid -> "invalid"
+  | `Choice_required -> "choice-required"
+  | `Conflict -> "conflict"
+  | `Unavailable -> "unavailable"
+  | `Integrity_failure -> "integrity-failure"
+  | `Blocked -> "blocked"
+  | `Interrupted -> "interrupted"
+  | `Failed -> "failed"
 
-let action_json action = `Assoc [
-  "arguments",`List (List.map (fun value -> `String value) action.arguments);
-  "explanation",`String action.explanation;
-  "applicable",`Bool action.applicable;
-  "confirmation_required",`Bool action.confirmation_required]
+let action_json action =
+  `Assoc
+    [
+      ( "arguments",
+        `List (List.map (fun value -> `String value) action.arguments) );
+      ("explanation", `String action.explanation);
+      ("applicable", `Bool action.applicable);
+      ("confirmation_required", `Bool action.confirmation_required);
+    ]
 
 let check_actions actions =
   if List.length actions > 1024 then Error "too many CLI next actions"
-  else if List.for_all (fun action -> valid_text action.explanation &&
-    action.arguments<>[] && List.length action.arguments<=256 &&
-    List.for_all (fun argument -> String.length argument<=4096 && not (String.contains argument '\000')) action.arguments) actions
-  then Ok () else Error "invalid CLI next action"
+  else if
+    List.for_all
+      (fun action ->
+        valid_text action.explanation
+        && action.arguments <> []
+        && List.hd action.arguments <> ""
+        && List.length action.arguments <= 256
+        && List.for_all
+             (fun argument ->
+               String.length argument <= 4096
+               && not (String.contains argument '\000'))
+             action.arguments)
+      actions
+  then Ok ()
+  else Error "invalid CLI next action"
 
-let domain_details ?operation_id ?plan_id ~outcome ~code ~message ~data ~next_actions () =
+let domain_details ?operation_id ?plan_id ~outcome ~code ~message ~data
+    ~next_actions () =
   let valid_id = Option.fold ~none:true ~some:valid_text in
-  match check_result data,check_actions next_actions with
-  | Ok (),Ok () when valid_error_code code && valid_text message && valid_id operation_id && valid_id plan_id ->
-      {domain_outcome=outcome;domain_code=code;domain_message=message;domain_data=data;
-        domain_actions=next_actions;operation_id;plan_id}
-  | Ok (),Ok () | Error _,(Ok () | Error _) | Ok (),Error _ -> invalid_arg "invalid CLI domain outcome"
+  match (check_result data, check_actions next_actions) with
+  | Ok (), Ok ()
+    when valid_error_code code && valid_text message && valid_id operation_id
+         && valid_id plan_id ->
+      {
+        domain_outcome = outcome;
+        domain_code = code;
+        domain_message = message;
+        domain_data = data;
+        domain_actions = next_actions;
+        operation_id;
+        plan_id;
+      }
+  | Ok (), Ok () | Error _, (Ok () | Error _) | Ok (), Error _ ->
+      invalid_arg "invalid CLI domain outcome"
 
-let domain_success ?operation_id ?plan_id ~command ~(outcome:success_outcome) ~code ~message ~data ~warnings ~next_actions () =
+let domain_success ?operation_id ?plan_id ~command ~(outcome : success_outcome)
+    ~code ~message ~data ~warnings ~next_actions () =
   let legacy = success ~command ~result:data ~warnings in
-  let details = domain_details ?operation_id ?plan_id ~outcome:(outcome:>outcome) ~code ~message ~data ~next_actions () in
-  {legacy with domain_value=Some details}
+  let details =
+    domain_details ?operation_id ?plan_id
+      ~outcome:(outcome :> outcome)
+      ~code ~message ~data ~next_actions ()
+  in
+  { legacy with domain_value = Some details }
 
-let domain_failure ?operation_id ?plan_id ~command ~(outcome:failure_outcome) ~error ~data ~warnings ~next_actions () =
+let domain_failure ?operation_id ?plan_id ~command ~(outcome : failure_outcome)
+    ~error ~data ~warnings ~next_actions () =
   let legacy = failure ~command ~error ~warnings in
-  let details = domain_details ?operation_id ?plan_id ~outcome:(outcome:>outcome) ~code:error.code ~message:error.message ~data ~next_actions () in
-  {legacy with domain_value=Some details}
+  let details =
+    domain_details ?operation_id ?plan_id
+      ~outcome:(outcome :> outcome)
+      ~code:error.code ~message:error.message ~data ~next_actions ()
+  in
+  { legacy with domain_value = Some details }
 
-let version envelope = match envelope.domain_value with None -> schema_version | Some _ -> domain_schema_version
-let outcome envelope = Option.map (fun details -> details.domain_outcome) envelope.domain_value
-let data envelope = match envelope.domain_value with Some details -> Some details.domain_data | None -> envelope.result_value
-let next_actions envelope = Option.fold ~none:[] ~some:(fun details -> details.domain_actions) envelope.domain_value
+let version envelope =
+  match envelope.domain_value with
+  | None -> schema_version
+  | Some _ -> domain_schema_version
+
+let outcome envelope =
+  Option.map (fun details -> details.domain_outcome) envelope.domain_value
+
+let data envelope =
+  match envelope.domain_value with
+  | Some details -> Some details.domain_data
+  | None -> envelope.result_value
+
+let next_actions envelope =
+  Option.fold ~none:[]
+    ~some:(fun details -> details.domain_actions)
+    envelope.domain_value
 
 let encode envelope =
   let result = Option.value ~default:`Null envelope.result_value in
@@ -153,17 +221,41 @@ let encode envelope =
     | Some { code; message } ->
         `Assoc [ ("code", `String code); ("message", `String message) ]
   in
-  let warnings = `List (List.map (fun warning -> `String warning) envelope.warnings_value) in
-  let fields = match envelope.domain_value with
-    | None -> ["schema_version",`Int schema_version;"command",`String envelope.command_value;
-        "ok",`Bool envelope.ok_value;"result",result;"warnings",warnings;"error",error]
-    | Some details -> ["schema_version",`Int domain_schema_version;"command",`String envelope.command_value;
-        "outcome",`String (outcome_string details.domain_outcome);"code",`String details.domain_code;
-        "message",`String details.domain_message;"data",details.domain_data;"warnings",warnings;
-        "next_actions",`List (List.map action_json details.domain_actions);
-        "ok",`Bool envelope.ok_value;"result",result;"error",error]
-        @ Option.fold ~none:[] ~some:(fun value -> ["operation_id",`String value]) details.operation_id
-        @ Option.fold ~none:[] ~some:(fun value -> ["plan_id",`String value]) details.plan_id in
+  let warnings =
+    `List (List.map (fun warning -> `String warning) envelope.warnings_value)
+  in
+  let fields =
+    match envelope.domain_value with
+    | None ->
+        [
+          ("schema_version", `Int schema_version);
+          ("command", `String envelope.command_value);
+          ("ok", `Bool envelope.ok_value);
+          ("result", result);
+          ("warnings", warnings);
+          ("error", error);
+        ]
+    | Some details ->
+        [
+          ("schema_version", `Int domain_schema_version);
+          ("command", `String envelope.command_value);
+          ("outcome", `String (outcome_string details.domain_outcome));
+          ("code", `String details.domain_code);
+          ("message", `String details.domain_message);
+          ("data", details.domain_data);
+          ("warnings", warnings);
+          ("next_actions", `List (List.map action_json details.domain_actions));
+          ("ok", `Bool envelope.ok_value);
+          ("result", result);
+          ("error", error);
+        ]
+        @ Option.fold ~none:[]
+            ~some:(fun value -> [ ("operation_id", `String value) ])
+            details.operation_id
+        @ Option.fold ~none:[]
+            ~some:(fun value -> [ ("plan_id", `String value) ])
+            details.plan_id
+  in
   `Assoc fields |> Yojson.Safe.to_string
 
 let duplicate names =
@@ -267,53 +359,102 @@ let decode_legacy bytes =
   | `Assoc _ -> Error "CLI envelope has unknown or duplicate fields"
   | _ -> Error "CLI envelope must be an object"
 
-
 let outcome_of_string = function
-  | "completed" -> Ok `Completed | "unchanged" -> Ok `Unchanged | "incomplete" -> Ok `Incomplete
-  | "invalid" -> Ok `Invalid | "choice-required" -> Ok `Choice_required | "conflict" -> Ok `Conflict
-  | "unavailable" -> Ok `Unavailable | "integrity-failure" -> Ok `Integrity_failure
-  | "blocked" -> Ok `Blocked | "interrupted" -> Ok `Interrupted | "failed" -> Ok `Failed
+  | "completed" -> Ok `Completed
+  | "unchanged" -> Ok `Unchanged
+  | "incomplete" -> Ok `Incomplete
+  | "invalid" -> Ok `Invalid
+  | "choice-required" -> Ok `Choice_required
+  | "conflict" -> Ok `Conflict
+  | "unavailable" -> Ok `Unavailable
+  | "integrity-failure" -> Ok `Integrity_failure
+  | "blocked" -> Ok `Blocked
+  | "interrupted" -> Ok `Interrupted
+  | "failed" -> Ok `Failed
   | _ -> Error "unsupported CLI outcome"
 
 let bool_field name fields =
   let* value = field name fields in
-  match value with `Bool value -> Ok value | _ -> Error ("CLI field " ^ name ^ " must be boolean")
+  match value with
+  | `Bool value -> Ok value
+  | _ -> Error ("CLI field " ^ name ^ " must be boolean")
 
 let actions_field fields =
   let* value = field "next_actions" fields in
   match value with
   | `List actions ->
-      let* actions = List.fold_left (fun result -> function
-        | `Assoc fields when exactly_fields ["arguments";"explanation";"applicable";"confirmation_required"] fields ->
-            let* actions = result in
-            let* arguments = field "arguments" fields in
-            let* arguments = match arguments with
-              | `List values -> List.fold_left (fun result -> function
-                  | `String value -> let* values = result in Ok (value::values)
-                  | _ -> Error "CLI action arguments must be strings") (Ok []) values |> Result.map List.rev
-              | _ -> Error "CLI action arguments must be an array" in
-            let* explanation = string_field "explanation" fields in
-            let* applicable = bool_field "applicable" fields in
-            let* confirmation_required = bool_field "confirmation_required" fields in
-            Ok ({arguments;explanation;applicable;confirmation_required}::actions)
-        | _ -> Error "invalid CLI action fields") (Ok []) actions |> Result.map List.rev in
-      let* () = check_actions actions in Ok actions
+      let* actions =
+        List.fold_left
+          (fun result -> function
+            | `Assoc fields
+              when exactly_fields
+                     [
+                       "arguments";
+                       "explanation";
+                       "applicable";
+                       "confirmation_required";
+                     ]
+                     fields ->
+                let* actions = result in
+                let* arguments = field "arguments" fields in
+                let* arguments =
+                  match arguments with
+                  | `List values ->
+                      List.fold_left
+                        (fun result -> function
+                          | `String value ->
+                              let* values = result in
+                              Ok (value :: values)
+                          | _ -> Error "CLI action arguments must be strings")
+                        (Ok []) values
+                      |> Result.map List.rev
+                  | _ -> Error "CLI action arguments must be an array"
+                in
+                let* explanation = string_field "explanation" fields in
+                let* applicable = bool_field "applicable" fields in
+                let* confirmation_required =
+                  bool_field "confirmation_required" fields
+                in
+                Ok
+                  ({ arguments; explanation; applicable; confirmation_required }
+                  :: actions)
+            | _ -> Error "invalid CLI action fields")
+          (Ok []) actions
+        |> Result.map List.rev
+      in
+      let* () = check_actions actions in
+      Ok actions
   | _ -> Error "CLI next_actions must be an array"
 
-let optional_id name fields = match List.assoc_opt name fields with
+let optional_id name fields =
+  match List.assoc_opt name fields with
   | None -> Ok None
   | Some (`String value) when valid_text value -> Ok (Some value)
   | Some _ -> Error ("invalid CLI " ^ name)
 
 let decode_domain fields =
-  let legacy_names = ["schema_version";"command";"ok";"result";"warnings";"error"] in
-  let required = legacy_names @ ["outcome";"code";"message";"data";"next_actions"] in
-  let optional = List.filter (fun name -> List.mem_assoc name fields) ["operation_id";"plan_id"] in
-  if not (exactly_fields (required@optional) fields) then Error "CLI domain envelope has unknown or duplicate fields"
+  let legacy_names =
+    [ "schema_version"; "command"; "ok"; "result"; "warnings"; "error" ]
+  in
+  let required =
+    legacy_names @ [ "outcome"; "code"; "message"; "data"; "next_actions" ]
+  in
+  let optional =
+    List.filter
+      (fun name -> List.mem_assoc name fields)
+      [ "operation_id"; "plan_id" ]
+  in
+  if not (exactly_fields (required @ optional) fields) then
+    Error "CLI domain envelope has unknown or duplicate fields"
   else
-    let legacy_fields = List.filter (fun (name,_) -> List.mem name legacy_names) fields
-      |> List.map (fun (name,value) -> name,if name="schema_version" then `Int schema_version else value) in
-    let* legacy = decode_legacy (Yojson.Safe.to_string (`Assoc legacy_fields)) in
+    let legacy_fields =
+      List.filter (fun (name, _) -> List.mem name legacy_names) fields
+      |> List.map (fun (name, value) ->
+          (name, if name = "schema_version" then `Int schema_version else value))
+    in
+    let* legacy =
+      decode_legacy (Yojson.Safe.to_string (`Assoc legacy_fields))
+    in
     let* outcome = string_field "outcome" fields in
     let* outcome = outcome_of_string outcome in
     let* code = string_field "code" fields in
@@ -323,21 +464,53 @@ let decode_domain fields =
     let* actions = actions_field fields in
     let* operation_id = optional_id "operation_id" fields in
     let* plan_id = optional_id "plan_id" fields in
-    let* () = if valid_error_code code && valid_text message then Ok () else Error "invalid CLI domain code/message" in
-    let* () = match legacy.ok_value,outcome with
-      | true,(`Completed | `Unchanged | `Incomplete)
-      | false,(`Invalid | `Choice_required | `Conflict | `Unavailable | `Integrity_failure | `Blocked | `Interrupted | `Incomplete | `Failed) -> Ok ()
-      | _ -> Error "CLI domain outcome disagrees with success" in
-    let* () = if legacy.ok_value then
-        if legacy.result_value=Some data then Ok () else Error "CLI result/data aliases disagree"
-      else match legacy.error_value with
-        | Some error when error.code=code && error.message=message -> Ok ()
-        | None | Some _ -> Error "CLI error/code aliases disagree" in
-    Ok {legacy with domain_value=Some {domain_outcome=outcome;domain_code=code;domain_message=message;
-      domain_data=data;domain_actions=actions;operation_id;plan_id}}
+    let* () =
+      if valid_error_code code && valid_text message then Ok ()
+      else Error "invalid CLI domain code/message"
+    in
+    let* () =
+      match (legacy.ok_value, outcome) with
+      | true, (`Completed | `Unchanged | `Incomplete)
+      | ( false,
+          ( `Invalid | `Choice_required | `Conflict | `Unavailable
+          | `Integrity_failure | `Blocked | `Interrupted | `Incomplete | `Failed
+            ) ) ->
+          Ok ()
+      | _ -> Error "CLI domain outcome disagrees with success"
+    in
+    let* () =
+      if legacy.ok_value then
+        if legacy.result_value = Some data then Ok ()
+        else Error "CLI result/data aliases disagree"
+      else
+        match legacy.error_value with
+        | Some error when error.code = code && error.message = message -> Ok ()
+        | None | Some _ -> Error "CLI error/code aliases disagree"
+    in
+    Ok
+      {
+        legacy with
+        domain_value =
+          Some
+            {
+              domain_outcome = outcome;
+              domain_code = code;
+              domain_message = message;
+              domain_data = data;
+              domain_actions = actions;
+              operation_id;
+              plan_id;
+            };
+      }
 
 let decode bytes =
-  let* json = try Ok (Yojson.Safe.from_string bytes) with Yojson.Json_error message -> Error ("invalid CLI JSON: " ^ message) in
+  let* json =
+    try Ok (Yojson.Safe.from_string bytes)
+    with Yojson.Json_error message -> Error ("invalid CLI JSON: " ^ message)
+  in
   match json with
-  | `Assoc fields when List.assoc_opt "schema_version" fields=Some (`Int domain_schema_version) -> decode_domain fields
+  | `Assoc fields
+    when List.assoc_opt "schema_version" fields
+         = Some (`Int domain_schema_version) ->
+      decode_domain fields
   | _ -> decode_legacy bytes

@@ -129,6 +129,33 @@ identity at the current accepted version. It keeps the current selection and
 preserves both private positions in the existing history/state root. Names are
 case-sensitive; duplicates refuse without retargeting. JSON includes actual
 branch IDs, causal heads, workspace identity and local positions. This is a P2
-checkpoint: `switch` and the new status/history/diff journeys are unfinished.
+checkpoint: file switching and safe application hardening remain unfinished.
 Existing V1 sharing/delivery commands retain their older record semantics; they
 are not the future P3 native core exchange/integration loop.
+
+## Inspect exact local work
+
+The current P2 checkpoint also supports:
+
+```sh
+"$YEOKCHAM" status --root "$DEMO_ROOT/work"
+"$YEOKCHAM" history --root "$DEMO_ROOT/work"
+"$YEOKCHAM" diff --root "$DEMO_ROOT/work"
+"$YEOKCHAM" diff 0 1 --root "$DEMO_ROOT/work" --format json
+```
+
+`diff` with no states compares saved work with current disk files. Numeric states
+select positions within this workspace; history also prints full
+`workspace:sequence` identities. Exact saved-state comparisons leave working
+files and the history cursor alone. Text differences are readable within the
+stated display bounds; opaque files retain type/mode/content identities.
+History includes alternate continuations and availability, with 50 rows by
+default. Follow `--before` to read another page. Missing contents and unretained
+states are reported explicitly.
+
+If rules or a special file prevent a complete observation, `status` still shows
+saved metadata and reports capture incomplete with unknown unsaved state. It does
+not report clean. The JSON domain result includes outcomes, real data and actions;
+current result/error aliases remain supported. Watcher/service and private backup
+state are distinct from a successful local save. P2's safe switch/application
+work remains in progress.

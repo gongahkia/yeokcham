@@ -458,3 +458,50 @@ service cases cover mixed changes, A-B-C/return-B-D, pagination, namespace scope
 equal contents/different positions, malformed/special-file capture, unavailable
 contents, compaction and pending recovery without a partial capture. CLI rendering
 and target structured outcomes remain outstanding at this checkpoint.
+
+### P2 inspection CLI and domain JSON checkpoint (in progress)
+
+`status`, `history`, `diff`, `changes`, `save`, `ignore explain` and branch
+inspection/creation now use the shared schema-2 domain result in
+`Yeokcham_v1_cli_data`. It contains `schema_version`, `command`, `outcome`,
+`code`, `message`, `data`, `warnings`, `next_actions` and optional operation/plan
+IDs. Checked `ok`/`result`/`error` aliases preserve current consumers. Legacy
+schema-1 commands and exact golden bytes remain readable. Actions contain literal
+argument arrays, explanation, applicability and confirmation requirements;
+unknown fields, contradictory aliases/outcomes and malformed actions refuse.
+The new fixture is `test/golden/local/cli-domain-v2.json`.
+
+`status` reports changed path/type/mode/content entries, exact saved cursor,
+branch/head sets and complete/incomplete observation. Incomplete observation has
+`uncaptured: null`, never a clean result. Successful inspection still exits 0.
+Watcher state is explicitly uninspected; managed scheduling is unimplemented and
+private backup unconfigured. No runtime or backup success is inferred.
+
+`history [--before SEQUENCE] [--limit 1-200] [--all]` defaults to 50 rows and
+reports alternate children, paths, titles, recorded UTC times, exact workspace
+identities and verified availability. Initial zero timestamps are unrecorded,
+not displayed as 1970. Archive state remains explicitly unconfigured. Suggested
+recovery actions use the currently supported preview command.
+
+`diff [STATE_A [STATE_B]]` compares exact retained snapshots/history positions
+or `working`. No arguments compares current saved with working; one compares it
+with working. Sequences are local convenience selectors; `workspace:sequence`
+identifies a scoped history position. Missing content and foreign scopes refuse
+explicitly. Text displays bounded hunks with exact newline flags; opaque/type/
+mode changes retain exact identities. `changes` keeps its existing plain metadata
+view while now exposing domain data in JSON. `save` returns actual saved/unchanged
+snapshot data and emits JSON after post-success hooks so warnings are retained.
+
+Byte paths use nullable UTF-8 text plus an exact hex representation in structured
+inspection; invalid UTF-8 is escaped in plain text. Literal terminal controls in
+text differences are escaped. Ignore explanation preserves byte-pattern/source
+hex alongside nullable display strings. Non-UTF-8 workspace roots use a safe
+default title; actions that cannot represent that root as a JSON string are
+explicitly inapplicable with a run-from-workspace explanation.
+
+Nine fresh-process inspection cases cover mixed text/binary/mode/type changes,
+A-B-C/return-B-D, pagination, equal content/different positions, malformed rules,
+missing content, namespace errors, terminal controls and byte paths/roots.
+Eight branch cases additionally cover actual creation outcomes and unavailable
+signers. These journeys use real immutable records/durable state with the explicit
+disposable test signer; native credential-service acceptance is not inferred.

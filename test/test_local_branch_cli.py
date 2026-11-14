@@ -82,7 +82,13 @@ class LocalBranchCliTests(unittest.TestCase):
             self.assertEqual(branch["private_position"]["sequence"], "1")
         main = next(branch for branch in created["branches"] if branch["names"] == ["main"])
         self.assertEqual(main["accepted_heads"], first["branches"][0]["accepted_heads"])
-        self.assertEqual(created, self.branches())
+        listed = self.branches()
+        self.assertEqual(created["branches"], listed["branches"])
+        self.assertEqual(created["selected_branch_id"], listed["selected_branch_id"])
+        self.assertEqual(created["workspace_id"], listed["workspace_id"])
+        experiment = next(branch for branch in created["branches"] if branch["names"] == ["experiment"])
+        self.assertEqual(created["created_branch_id"], experiment["id"])
+        self.assertIsNone(listed["created_branch_id"])
         before = self.head_bytes()
         duplicate = self.run_cli("branch", "create", "experiment", "--root", self.root, machine=True)
         self.assertEqual(duplicate.returncode, 2, duplicate.stderr)
@@ -111,6 +117,19 @@ class LocalBranchCliTests(unittest.TestCase):
             self.assertEqual(result.returncode, 2, result.stderr)
             self.assertEqual(json.loads(result.stdout)["error"]["code"], "invalid-branch-name")
             self.assertEqual(before, self.head_bytes())
+
+    def test_missing_signer_is_unavailable_and_does_not_create_a_branch(self):
+        self.initialize()
+        before = self.head_bytes()
+        for key in self.keys.iterdir():
+            key.unlink()
+        result = self.run_cli("branch", "create", "blocked", "--root", self.root, machine=True)
+        self.assertEqual(result.returncode, 5, result.stderr)
+        envelope = json.loads(result.stdout)
+        self.assertEqual(envelope["outcome"], "unavailable")
+        self.assertEqual(envelope["code"], "credential-provider-unavailable")
+        self.assertEqual(len(self.branches()["branches"]), 1)
+        self.assertEqual(before, self.head_bytes())
 
     def test_private_ceremony_refuses_json_before_mutation(self):
         result = self.run_cli("init", self.root, machine=True)
