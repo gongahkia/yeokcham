@@ -1,3 +1,7 @@
+val random_bytes : int -> (string, string) result
+(** OS-seeded CSPRNG adapter for typed local identities. Entropy failure is
+    explicit; this function does not allocate or persist an identity. *)
+
 (** Pure V1 device identity, administrator enrolment, and signed revision
     records. Private-key custody and filesystem publication are adapters. *)
 

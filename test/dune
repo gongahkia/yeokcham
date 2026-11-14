@@ -1,4 +1,22 @@
 (test
+ (name test_history_identity)
+ (modules test_history_identity)
+ (libraries
+  alcotest
+  qcheck-core
+  qcheck-alcotest
+  unix
+  yeokcham_testkit
+  yeokcham_encoding
+  yeokcham_envelope
+  yeokcham_store
+  yeokcham_v1_model
+  yeokcham_v1_store
+  yeokcham_v1_undo)
+ (deps
+  (source_tree golden)))
+
+(test
  (name test_capture_consistency)
  (modules test_capture_consistency)
  (libraries alcotest unix yeokcham_snapshot yeokcham_store))

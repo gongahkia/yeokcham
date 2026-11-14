@@ -111,3 +111,11 @@ All three commands support structured `--format json` results, including node
 IDs, checkpoint availability, and navigation previews. Node IDs are strings in
 JSON to preserve integer precision. Root timestamps use zero when the original
 capture time is unavailable.
+
+P2's history foundation now persists a generated 128-bit workspace namespace
+with the node counter in the existing project-state root. A node's full identity
+is `(workspace ID, sequence)`; short numeric IDs remain convenient within one
+workspace. Selection never resets the counter. Separate workspaces can have the
+same short sequence without sharing a history identity. Existing current data
+keeps its known ancestry when a namespace is first bound on a mutating write.
+This checkpoint does not yet expose named shared branches in the CLI.

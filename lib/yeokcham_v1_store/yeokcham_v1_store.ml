@@ -538,20 +538,6 @@ let decode_collaborative_state encoded =
         (Invalid_collaboration_state
            "V1 collaborative state has the wrong field count")
 
-let payload_for_project project =
-  let* encoded =
-    Record.encode_project project
-    |> Result.map_error (fun error -> Record_error error)
-  in
-  Encoding.decode encoded
-  |> Result.map_error (fun error -> Record_error (Record.Decode_error error))
-
-let payload_for_collaborative_project project collaboration =
-  let* encoded = encode_collaborative_state ~project collaboration in
-  Encoding.decode encoded
-  |> Result.map_error (fun error ->
-      Invalid_collaboration_state (Encoding.decode_error_to_string error))
-
 let store_payload store payload =
   let* envelope =
     Envelope.create ~object_type:Envelope.V1_project_state
@@ -560,14 +546,6 @@ let store_payload store payload =
     |> Result.map_error (fun error -> Envelope_error error)
   in
   Store.put store envelope |> Result.map_error (fun error -> Store_error error)
-
-let store_project store project =
-  let* payload = payload_for_project project in
-  store_payload store payload
-
-let store_collaborative_project store project collaboration =
-  let* payload = payload_for_collaborative_project project collaboration in
-  store_payload store payload
 
 let history_for_project project =
   let active = Model.active_draft project in
@@ -642,15 +620,41 @@ let store_with_history store project collaboration history =
   in
   store_payload store payload
 
-let observed_history ?history existing project =
-  match history with
-  | Some history -> validate_history project history
+let ensure_workspace history =
+  match History.workspace history with
+  | Some _ -> Ok history
   | None ->
-      let active = Model.active_draft project in
-      History.record existing ~snapshot:active.Model.latest_checkpoint
-        ~draft:active.Model.draft_id
-        ~created_at:(Int64.of_float (Unix.gettimeofday ()))
+      let* workspace =
+        Model.Core.Workspace_id.generate ~random_bytes:Trust.random_bytes ()
+        |> Result.map_error (fun e ->
+            History_error (Model.Core.error_to_string e))
+      in
+      History.bind_workspace history workspace
       |> Result.map_error (fun e -> History_error e)
+
+let observed_history ?history existing project =
+  let* existing = ensure_workspace existing in
+  let* candidate =
+    match history with
+    | Some history ->
+        let* history =
+          History.bind_workspace history
+            (Option.get (History.workspace existing))
+          |> Result.map_error (fun e -> History_error e)
+        in
+        validate_history project history
+    | None ->
+        let active = Model.active_draft project in
+        History.record existing ~snapshot:active.Model.latest_checkpoint
+          ~draft:active.Model.draft_id
+          ~created_at:(Int64.of_float (Unix.gettimeofday ()))
+        |> Result.map_error (fun e -> History_error e)
+  in
+  let* candidate =
+    History.validate_update ~previous:existing candidate
+    |> Result.map_error (fun e -> History_error e)
+  in
+  ensure_workspace candidate
 
 let current_head repository =
   Store.read_ref repository.store ~name:state_head_name
@@ -700,7 +704,8 @@ let init_with ~root ~bootstrap =
     let* project =
       bootstrap store |> Result.map_error (fun error -> Bootstrap_error error)
     in
-    let* object_id = store_project store project in
+    let* history = ensure_workspace (history_for_project project) in
+    let* object_id = store_with_history store project None history in
     let* _ =
       Store.compare_and_swap_ref store ~name:state_head_name ~expected:None
         ~target:(Some object_id)
@@ -722,7 +727,10 @@ let init_collaborative_with ~root ~bootstrap =
       bootstrap store |> Result.map_error (fun error -> Bootstrap_error error)
     in
     let* collaboration = validate_collaboration ~project collaboration in
-    let* object_id = store_collaborative_project store project collaboration in
+    let* history = ensure_workspace (history_for_project project) in
+    let* object_id =
+      store_with_history store project (Some collaboration) history
+    in
     let* _ =
       Store.compare_and_swap_ref store ~name:state_head_name ~expected:None
         ~target:(Some object_id)
@@ -748,7 +756,8 @@ let previous repository expected =
   | None -> Error Empty_state_head
   | Some object_id -> decode_project_object repository.store object_id
 
-let save ?history repository ~expected ~project =
+let save_at_boundaries ~before_publish ~after_publish ?history repository
+    ~expected ~project =
   let* _, existing_collaboration, existing_history =
     previous repository expected
   in
@@ -759,12 +768,26 @@ let save ?history repository ~expected ~project =
   in
   let* history = observed_history ?history existing_history project in
   let* object_id = store_with_history repository.store project None history in
+  before_publish ();
   let* head =
     Store.compare_and_swap_ref repository.store ~name:state_head_name
       ~expected:(Some expected) ~target:(Some object_id)
     |> Result.map_error (fun error -> Store_error error)
   in
+  after_publish ();
   Ok { project; collaboration = None; history; head; object_id }
+
+let save ?history repository ~expected ~project =
+  save_at_boundaries
+    ~before_publish:(fun () -> ())
+    ~after_publish:(fun () -> ())
+    ?history repository ~expected ~project
+
+module For_test = struct
+  let save ~before_publish ~after_publish repository ~expected ~project =
+    save_at_boundaries ~before_publish ~after_publish repository ~expected
+      ~project
+end
 
 let save_collaborative ?history repository ~expected ~project ~collaboration =
   let* collaboration = validate_collaboration ~project collaboration in

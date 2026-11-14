@@ -47,3 +47,16 @@ val target_snapshot :
 
 val encode : t -> (string, string) result
 val decode : string -> (t, string) result
+val workspace : t -> Yeokcham_v1_model.Core.Workspace_id.t option
+val next_sequence : t -> int64 option
+
+val bind_workspace :
+  t -> Yeokcham_v1_model.Core.Workspace_id.t -> (t, string) result
+(** Bind an unnamespaced current history exactly once without losing ancestry.
+    The store generates entropy and publishes this with the existing root. *)
+
+val identity : t -> node -> (Yeokcham_v1_model.Core.History_id.t, string) result
+
+val validate_update : previous:t -> t -> (t, string) result
+(** A state-root update may append nodes and move the cursor; it cannot erase
+    existing nodes, alter their payloads or reassign a workspace namespace. *)

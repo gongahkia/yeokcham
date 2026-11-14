@@ -81,7 +81,7 @@ partial phase. Do not relabel a partial phase complete to expose the next prompt
 | --- | --- | --- |
 | P0 evaluation | complete | [Assessment](PILOT_PLAN.md), [receipt](implementation/results/PILOT-workflow-assessment.json); tiny WSL/test-signer walkthrough only |
 | P1 core foundation | complete | [Interfaces](implementation/INTERFACES.md), [report](implementation/reports/P01-attempt-01.md), [acceptance](implementation/results/P01-acceptance.json); no P1 criteria remaining |
-| P2 local work | in_progress | [Scoped task](implementation/goals/P02-local-workflow.md); native ignore matching/explanation and capture consistency landed; durable identities/branches, local CLI and safe recovery remain; P2 incomplete |
+| P2 local work | in_progress | [Scoped task](implementation/goals/P02-local-workflow.md); native ignore matching/explanation and capture consistency landed; durable workspace/history identity foundation landed; authenticated branches, local CLI and safe recovery remain; P2 incomplete |
 | P3 shared loop | pending | Clone/selected sharing/composition/journaled integration/conflicts; unstarted |
 | P4 harden/handoff | pending | Representative/native/human and fault evidence; unstarted |
 
@@ -455,3 +455,19 @@ records, not current proof.
   long measurement work. Keep the versioned partial checkpoint current at operation
   boundaries/handoffs, retain its external inputs, and begin continuation by
   reading the ledger/latest report/checkpoint and verifying actual process state.
+
+- P2 durable-history checkpoint, November 15: new
+  workspaces persist a generated P1 workspace ID, next sequence and history in
+  the existing sole state-root wrapper. Appends use P1 allocation; namespace
+  replacement, history collisions/deletion and stale roots refuse. New tests
+  cover fresh writer processes, identical retries, exhaustion, actual crashes
+  before/after root CAS and 150 randomized save/navigation/reopen trials. Seven
+  new cases and existing undo (14), store (6), local-service (44) and GC (11)
+  cases passed. `make build`, `make lint` and `make ci` exited 0; valid Dune
+  cache reuse and full logs are recorded in `*-identity*.log` in the session
+  cache. The initial store golden assertion was updated to inspect the preserved
+  inner signed payload after initialization began wrapping history. The
+  existing signed collaboration golden payload is retained inside the wrapper.
+  Named authenticated branches, generated CLI names, readable local inspection
+  and safe preservation-aware replacement remain outstanding. G06 paging/index
+  replacement is not claimed. P2 remains in progress.

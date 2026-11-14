@@ -18,6 +18,12 @@ let recovery_issuer_prefix = "recovery:"
 
 type role = Member | Administrator
 
+let random_bytes length =
+  try
+    Mirage_crypto_rng_unix.use_default ();
+    Ok (Mirage_crypto_rng.generate length)
+  with _ -> Error "OS CSPRNG unavailable"
+
 module Repository_id = struct
   type t = string
 
@@ -45,10 +51,8 @@ module Repository_id = struct
     Bytes.unsafe_to_string result
 
   let generate () =
-    try
-      Mirage_crypto_rng_unix.use_default ();
-      Ok (hex (Mirage_crypto_rng.generate 32))
-    with _ -> Error "OS CSPRNG unavailable"
+    let* bytes = random_bytes 32 in
+    Ok (hex bytes)
 end
 
 type device = { device_id_value : Model.Device_id.t; public_key : string }

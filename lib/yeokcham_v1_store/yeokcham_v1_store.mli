@@ -121,3 +121,15 @@ val save_collaborative :
   project:Yeokcham_v1_model.project ->
   collaboration:collaboration ->
   (loaded, error) result
+
+module For_test : sig
+  val save :
+    before_publish:(unit -> unit) ->
+    after_publish:(unit -> unit) ->
+    repository ->
+    expected:Yeokcham_store.Mutable_ref.t ->
+    project:Yeokcham_v1_model.project ->
+    (loaded, error) result
+  (** In-process crash tests at the durable-object/root-CAS boundaries.
+      Production saves have no externally enabled hooks. *)
+end

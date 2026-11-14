@@ -241,7 +241,8 @@ let interrupted_object_staging_never_publishes_a_partial_object () =
         (Sys.readdir directory
         |> Array.exists (String.starts_with ~prefix:temporary_prefix)))
 
-let collaborative_state_cannot_be_downgraded_to_a_bare_record () =
+let[@warning "-4"] collaborative_state_cannot_be_downgraded_to_a_bare_record ()
+    =
   with_directory "yeokcham-v1-collaboration-save-" (fun root ->
       let project, collaboration = collaborative_project () in
       let repository =
@@ -259,7 +260,28 @@ let collaborative_state_cannot_be_downgraded_to_a_bare_record () =
           (V1_store.underlying_store repository)
           loaded.V1_store.object_id
         |> require_ok Store.error_to_string
-        |> Envelope.payload |> Encoding.encode
+        |> Envelope.payload
+        |> function
+        | Encoding.Array
+            [
+              Encoding.Text "yeokcham-local-state";
+              Encoding.Integer 1L;
+              Encoding.Bytes inner;
+              Encoding.Bytes history;
+            ] ->
+            let history =
+              Yeokcham_v1_undo.decode history |> require_ok Fun.id
+            in
+            Alcotest.(check bool)
+              "persisted workspace present" true
+              (Option.is_some (Yeokcham_v1_undo.workspace history));
+            Alcotest.(check (option int64))
+              "initial allocation persisted" (Some 1L)
+              (Yeokcham_v1_undo.next_sequence history);
+            inner
+        | _ ->
+            Alcotest.fail
+              "initial state did not wrap history with collaboration"
       in
       Alcotest.(check string)
         "collaboration wrapper bytes retain their golden encoding"

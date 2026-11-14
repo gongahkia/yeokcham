@@ -253,3 +253,45 @@ head. Failed attempts may leave unreachable immutable objects, as before.
 boundaries. Production `scan` supplies a no-op observer. No environment,
 repository configuration or remote input enables fault injection. The adapter
 is POSIX-only; unsupported native platforms fail explicitly.
+
+### P2 durable history identity checkpoint (in progress)
+
+`Yeokcham_v1_undo` retains its node/tree navigation API and adds:
+
+```ocaml
+val workspace : t -> Yeokcham_v1_model.Core.Workspace_id.t option
+val next_sequence : t -> int64 option
+val bind_workspace : t -> Yeokcham_v1_model.Core.Workspace_id.t -> (t, string) result
+val identity : t -> node -> (Yeokcham_v1_model.Core.History_id.t, string) result
+val validate_update : previous:t -> t -> (t, string) result
+```
+
+History schema 2 has ordered fields `[2, workspace_bytes_16, next_sequence_or_null,
+cursor_sequence, nodes]`. Each node retains `[sequence, parent_or_null,
+snapshot_text, draft_text, timestamp]`. IDs are nonnegative and strictly ordered;
+parents must already exist. The next counter must exactly follow the last node,
+with null only after `Int64.max_int`. Schema 1 remains readable for current data;
+its known ancestry is preserved on the next write. The new canonical fixture is
+`test/golden/local/history-v2.cbor.hex`.
+
+Initialization now stores history immediately in the existing
+`["yeokcham-local-state", 1, inner_project_bytes, history_bytes]` wrapper under
+`v1-project-state`; there is no second mutable history head. The store generates
+128-bit workspace entropy via `Yeokcham_v1_trust.random_bytes` and the P1 typed
+constructor. Reads do not invent a fresh namespace. A mutating write binds an
+existing unnamespaced history once. Namespaced appends use P1
+`Core.History_id.allocate`; the returned counter, nodes, cursor and project are
+published by one root CAS. Local-service mutations retain the existing worktree
+writer lock. A reservation or staged immutable object is not durable allocation.
+
+State updates refuse namespace reassignment, altered earlier nodes and erased
+ancestry. A stale writer cannot publish against a newer root. Identical-content
+retries after reload do not append again, including at exhaustion. These changes
+retain whole-history encoding; bounded paging/index replacement and depth
+measurements remain G06 work, outside this checkpoint.
+
+`Yeokcham_v1_store.For_test.save` injects trusted in-process callbacks immediately
+before/after root CAS (after immutable object persistence). Production `save` has
+no external fault flags. Crash tests exercise both boundaries and subsequent
+reload/retry. These are metadata publication tests, not materialization-journal
+acceptance or completed branch support.
