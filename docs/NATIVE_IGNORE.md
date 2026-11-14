@@ -60,3 +60,18 @@ Changing rules affects future capture. It does not remove previously saved
 history or delete live files. Existing in-place restore still refuses ignored
 entries while P2's preservation-aware replacement is being implemented; a
 separate empty destination remains the available recovery path for that case.
+
+Capture opens child entries relative to their parent directory descriptor and
+refuses to follow symlinks. It records symlink target bytes instead. It compares
+file identity, mode, size and nanosecond modification/change times before and
+after reading, checks directory entries again, and rechecks observed paths and
+ignore configuration before storing the snapshot. A replaced root is refused.
+Detected instability restarts the complete scan at most three times; continued
+changes return an incomplete-capture error and leave the saved head alone.
+Large files use bounded streaming reads rather than a file-sized buffer. FIFOs,
+sockets and device files are refused without reading their contents.
+
+These checks observe a live filesystem; they do not freeze other programs or
+provide a filesystem transaction. An edit after the final observation belongs
+to the next capture. The native descriptor adapter is implemented for POSIX;
+this checkpoint was exercised on Linux, with macOS execution still unverified.

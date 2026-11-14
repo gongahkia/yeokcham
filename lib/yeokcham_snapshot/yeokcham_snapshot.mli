@@ -32,6 +32,8 @@ type error =
   | Invalid_ignore_path of { line : int; path : string }
   | Ignored_path_would_be_removed of string
   | Invalid_ignore_rule of Ignore.error
+  | Observation_changed of string
+  | Capture_unstable of string
 
 val error_to_string : error -> string
 
@@ -193,3 +195,15 @@ val explain_ignore :
   root:string ->
   string list ->
   (ignore_explanation, error) result
+
+module For_test : sig
+  type stage = Before_open | After_read | Before_publish
+
+  val scan :
+    observe:(stage -> string list -> unit) ->
+    root:string ->
+    store:Yeokcham_store.repository ->
+    (Snapshot.id * Snapshot.t, error) result
+  (** Trusted in-process fault injection only; never configured by project
+      files, environment variables, a language server or incoming records. *)
+end

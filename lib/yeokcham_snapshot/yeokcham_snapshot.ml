@@ -36,11 +36,20 @@ type error =
   | Invalid_ignore_path of { line : int; path : string }
   | Ignored_path_would_be_removed of string
   | Invalid_ignore_rule of Ignore.error
+  | Observation_changed of string
+  | Capture_unstable of string
 
 let object_type_name object_type =
   Printf.sprintf "object type %d" (Envelope.object_type_code object_type)
 
 let error_to_string = function
+  | Observation_changed path ->
+      Printf.sprintf "filesystem changed while observing %S; retry capture" path
+  | Capture_unstable path ->
+      Printf.sprintf
+        "capture incomplete after three unstable scans at %S; the last saved \
+         state remains current"
+        path
   | Invalid_ignore_rule error -> Ignore.error_to_string error
   | Store_error error -> Store.error_to_string error
   | Encoding_error error -> Encoding.construction_error_to_string error
@@ -1028,24 +1037,28 @@ let same_file_identity expected actual =
   && expected.Unix.st_dev = actual.Unix.st_dev
   && expected.Unix.st_ino = actual.Unix.st_ino
 
-let read_file path expected =
+let read_file ?open_descriptor ?expected_stamp path expected =
   try
-    let descriptor = Unix.openfile path [ Unix.O_RDONLY ] 0 in
+    let descriptor =
+      match open_descriptor with
+      | None -> Native.open_at None path false
+      | Some open_descriptor -> open_descriptor ()
+    in
     Fun.protect
       ~finally:(fun () ->
         try Unix.close descriptor with Unix.Unix_error _ -> ())
       (fun () ->
         let stat = Unix.fstat descriptor in
-        if stat.Unix.st_kind <> Unix.S_REG then
+        let stamp = Native.fingerprint descriptor in
+        if
+          Option.fold ~none:false
+            ~some:(fun expected -> expected <> stamp)
+            expected_stamp
+        then Error (Observation_changed path)
+        else if stat.Unix.st_kind <> Unix.S_REG then
           Error (Unsupported_file_type { path; kind = "non-regular file" })
         else if not (same_file_identity expected stat) then
-          Error
-            (Scan_error
-               {
-                 path;
-                 operation = "open";
-                 message = "file identity changed while it was scanned";
-               })
+          Error (Observation_changed path)
         else
           let size = expected.Unix.st_size in
           let bytes = Bytes.create size in
@@ -1054,14 +1067,7 @@ let read_file path expected =
             else
               try
                 match Unix.read descriptor bytes offset (size - offset) with
-                | 0 ->
-                    Error
-                      (Scan_error
-                         {
-                           path;
-                           operation = "read";
-                           message = "file ended before its recorded size";
-                         })
+                | 0 -> Error (Observation_changed path)
                 | count -> read (offset + count)
               with Unix.Unix_error (error, _, _) ->
                 Error (scan_error "read" path error)
@@ -1073,35 +1079,34 @@ let read_file path expected =
             with Unix.Unix_error (error, _, _) ->
               Error (scan_error "read" path error)
           in
-          if extra = 0 then Ok (Bytes.unsafe_to_string bytes)
-          else
-            Error
-              (Scan_error
-                 {
-                   path;
-                   operation = "read";
-                   message = "file grew while it was scanned";
-                 }))
+          if Native.fingerprint descriptor <> stamp then
+            Error (Observation_changed path)
+          else if extra = 0 then Ok (Bytes.unsafe_to_string bytes)
+          else Error (Observation_changed path))
   with Unix.Unix_error (error, _, _) -> Error (scan_error "open" path error)
 
-let store_large_file repository path expected =
+let store_large_file ?open_descriptor ?expected_stamp repository path expected =
   try
-    let descriptor = Unix.openfile path [ Unix.O_RDONLY ] 0 in
+    let descriptor =
+      match open_descriptor with
+      | None -> Native.open_at None path false
+      | Some open_descriptor -> open_descriptor ()
+    in
     Fun.protect
       ~finally:(fun () ->
         try Unix.close descriptor with Unix.Unix_error _ -> ())
       (fun () ->
         let stat = Unix.fstat descriptor in
-        if stat.Unix.st_kind <> Unix.S_REG then
+        let stamp = Native.fingerprint descriptor in
+        if
+          Option.fold ~none:false
+            ~some:(fun expected -> expected <> stamp)
+            expected_stamp
+        then Error (Observation_changed path)
+        else if stat.Unix.st_kind <> Unix.S_REG then
           Error (Unsupported_file_type { path; kind = "non-regular file" })
         else if not (same_file_identity expected stat) then
-          Error
-            (Scan_error
-               {
-                 path;
-                 operation = "open";
-                 message = "file identity changed while it was scanned";
-               })
+          Error (Observation_changed path)
         else
           let* splitter =
             Yeokcham_chunking.create_splitter Yeokcham_chunking.default
@@ -1128,11 +1133,19 @@ let store_large_file repository path expected =
           in
           let rec read () =
             let* count =
-              try Ok (Unix.read descriptor buffer 0 (Bytes.length buffer))
+              try
+                let remaining = expected.Unix.st_size - !total in
+                let limit =
+                  if remaining >= Bytes.length buffer then Bytes.length buffer
+                  else remaining + 1
+                in
+                Ok (Unix.read descriptor buffer 0 limit)
               with Unix.Unix_error (error, _, _) ->
                 Error (scan_error "read" path error)
             in
             if count = 0 then Ok ()
+            else if count > expected.Unix.st_size - !total then
+              Error (Observation_changed path)
             else
               let bytes = Bytes.sub_string buffer 0 count in
               full_content_hash := Hash.feed_string !full_content_hash bytes;
@@ -1143,18 +1156,13 @@ let store_large_file repository path expected =
           let* () = read () in
           let* () = store_chunks (Yeokcham_chunking.finish splitter) in
           let final_stat = Unix.fstat descriptor in
-          if
+          if Native.fingerprint descriptor <> stamp then
+            Error (Observation_changed path)
+          else if
             !total <> expected.Unix.st_size
             || final_stat.Unix.st_size <> expected.Unix.st_size
             || not (same_file_identity expected final_stat)
-          then
-            Error
-              (Scan_error
-                 {
-                   path;
-                   operation = "read";
-                   message = "file size changed while it was scanned";
-                 })
+          then Error (Observation_changed path)
           else
             let full_content_id =
               Hash.get !full_content_hash |> Hash.to_raw_string
@@ -1168,20 +1176,11 @@ let store_large_file repository path expected =
               (Content.of_stored_object_id (Manifest.stored_object_id manifest)))
   with Unix.Unix_error (error, _, _) -> Error (scan_error "open" path error)
 
-let store_regular_file repository path stat =
+let store_regular_file ?open_descriptor ?expected_stamp repository path stat =
   if stat.Unix.st_size <= inline_file_limit then
-    let* contents = read_file path stat in
+    let* contents = read_file ?open_descriptor ?expected_stamp path stat in
     Content.store repository contents
-  else store_large_file repository path stat
-
-let unsupported_node_kind = function
-  | Unix.S_SOCK -> "socket"
-  | Unix.S_FIFO -> "fifo"
-  | Unix.S_CHR -> "character-device"
-  | Unix.S_BLK -> "block-device"
-  | Unix.S_DIR -> "directory"
-  | Unix.S_REG -> "regular-file"
-  | Unix.S_LNK -> "symlink"
+  else store_large_file ?open_descriptor ?expected_stamp repository path stat
 
 let read_ignore_file ~root ~relative rules =
   let source = String.concat "/" (relative @ [ ".yeokchamignore" ]) in
@@ -1322,7 +1321,29 @@ let require_no_ignored_paths ~excluded_root_names ~root =
   in
   walk Ignore.empty [] root
 
-let scan_excluding_root_names ~excluded_root_names ~root ~store =
+type capture_stage = Before_open | After_read | Before_publish
+
+type observation =
+  | Observed_entry of string list * string option
+  | Observed_directory of string list * string * string list
+
+let native_observation path operation f =
+  try Ok (f ()) with
+  | Unix.Unix_error ((Unix.ENOENT | Unix.ENOTDIR | Unix.ELOOP), _, _) ->
+      Error (Observation_changed path)
+  | Unix.Unix_error (error, _, _) -> Error (scan_error operation path error)
+  | Failure message -> Error (Scan_error { path; operation; message })
+
+let close_capture_fd fd = try Unix.close fd with Unix.Unix_error _ -> ()
+
+let capture_with_fd parent name directory path f =
+  let* fd =
+    native_observation path "open without following symlinks" (fun () ->
+        Native.open_at parent name directory)
+  in
+  Fun.protect ~finally:(fun () -> close_capture_fd fd) (fun () -> f fd)
+
+let scan_with_observer ~observe ~excluded_root_names ~root ~store =
   let* root_stat =
     try Ok (Unix.lstat root)
     with Unix.Unix_error (error, _, _) ->
@@ -1331,72 +1352,214 @@ let scan_excluding_root_names ~excluded_root_names ~root ~store =
   if root_stat.Unix.st_kind <> Unix.S_DIR then
     Error (Unsupported_file_type { path = root; kind = "not a directory" })
   else
-    let rec scan_directory rules relative path =
-      let* rules = read_ignore_file ~root ~relative rules in
-      let names =
-        try Ok (Sys.readdir path |> Array.to_list |> List.sort String.compare)
-        with Sys_error message ->
-          Error (Scan_error { path; operation = "readdir"; message })
-      in
-      let* names = names in
-      let rec scan_entries reversed = function
-        | [] -> Tree.create (List.rev reversed)
-        | name :: rest ->
-            let child_relative = relative @ [ name ] in
-            if mandatory_excluded ~excluded_root_names relative name then
-              scan_entries reversed rest
-            else
-              let child_path = Filename.concat path name in
-              let* stat =
-                try Ok (Unix.lstat child_path)
-                with Unix.Unix_error (error, _, _) ->
-                  Error (scan_error "lstat" child_path error)
+    let attempt () =
+      capture_with_fd None root true root (fun root_fd ->
+          if not (same_file_identity root_stat (Unix.fstat root_fd)) then
+            Error (Observation_changed root)
+          else
+            let observations = ref [] in
+            let actual path = List.fold_left Filename.concat root path in
+            let entry fd path name =
+              native_observation (actual path)
+                "inspect without following symlinks" (fun () ->
+                  Native.inspect_at fd name)
+            in
+            let names fd path =
+              native_observation (actual path) "enumerate directory" (fun () ->
+                  Native.names fd)
+            in
+            let record_entry path stamp =
+              observations := Observed_entry (path, stamp) :: !observations
+            in
+            let load_rules rules relative fd =
+              let path = relative @ [ ".yeokchamignore" ] in
+              let source = String.concat "/" path in
+              let* info =
+                try Ok (Some (Native.inspect_at fd ".yeokchamignore")) with
+                | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok None
+                | Unix.Unix_error (error, _, _) ->
+                    Error (scan_error "inspect ignore file" (actual path) error)
               in
-              let directory = stat.Unix.st_kind = Unix.S_DIR in
-              if
-                (Ignore.evaluate rules ~path:child_relative ~directory)
-                  .Ignore.ignored
-              then scan_entries reversed rest
-              else
-                let* entry =
-                  if directory then
-                    let* child =
-                      scan_directory rules child_relative child_path
-                    in
-                    Ok (Tree.Directory child)
-                  else if stat.Unix.st_kind = Unix.S_REG then
-                    let* content = store_regular_file store child_path stat in
-                    let mode =
-                      if stat.Unix.st_perm land 0o111 = 0 then Regular
-                      else Executable
-                    in
-                    Ok (Tree.File { mode; content })
-                  else if stat.Unix.st_kind = Unix.S_LNK then
-                    let* target =
-                      try Ok (Unix.readlink child_path)
-                      with Unix.Unix_error (error, _, _) ->
-                        Error (scan_error "readlink" child_path error)
-                    in
-                    let* content = Content.store store target in
-                    Ok (Tree.File { mode = Symlink; content })
-                  else
-                    Error
-                      (Unsupported_file_type
-                         {
-                           path = child_path;
-                           kind = unsupported_node_kind stat.Unix.st_kind;
-                         })
-                in
-                scan_entries ((name, entry) :: reversed) rest
-      in
-      let* tree = scan_entries [] names in
-      Tree.store store tree
+              match info with
+              | None ->
+                  record_entry path None;
+                  Ok rules
+              | Some (Native.File, stamp) ->
+                  record_entry path (Some stamp);
+                  capture_with_fd (Some fd) ".yeokchamignore" false
+                    (actual path) (fun config_fd ->
+                      let stat = Unix.fstat config_fd in
+                      if stat.Unix.st_size > inline_file_limit then
+                        Error
+                          (File_too_large
+                             {
+                               path = actual path;
+                               size = stat.Unix.st_size;
+                               limit = inline_file_limit;
+                             })
+                      else
+                        let* contents =
+                          read_file
+                            ~open_descriptor:(fun () -> Unix.dup config_fd)
+                            ~expected_stamp:stamp (actual path) stat
+                        in
+                        observe After_read path;
+                        Ignore.extend rules ~source ~base:relative contents
+                        |> Result.map_error (fun e -> Invalid_ignore_rule e))
+              | Some
+                  ( ( Native.Directory | Native.Link | Native.Fifo
+                    | Native.Socket | Native.Character | Native.Block ),
+                    _ ) ->
+                  Error
+                    (Invalid_ignore_rule
+                       {
+                         Ignore.source;
+                         line = 0;
+                         pattern = "";
+                         message = "ignore file must be a regular file";
+                       })
+            in
+            let rec scan_directory rules relative fd =
+              let stamp = Native.fingerprint fd in
+              let* before = names fd relative in
+              observations :=
+                Observed_directory (relative, stamp, before) :: !observations;
+              let* rules = load_rules rules relative fd in
+              let rec scan_entries reversed = function
+                | [] -> Tree.create (List.rev reversed)
+                | name :: rest ->
+                    if mandatory_excluded ~excluded_root_names relative name
+                    then scan_entries reversed rest
+                    else
+                      let path = relative @ [ name ] in
+                      let* kind, stamp = entry fd path name in
+                      let directory = kind = Native.Directory in
+                      if (Ignore.evaluate rules ~path ~directory).Ignore.ignored
+                      then scan_entries reversed rest
+                      else
+                        let () = record_entry path (Some stamp) in
+                        observe Before_open path;
+                        let* node =
+                          match kind with
+                          | Native.Directory ->
+                              capture_with_fd (Some fd) name true (actual path)
+                                (fun child_fd ->
+                                  if Native.fingerprint child_fd <> stamp then
+                                    Error (Observation_changed (actual path))
+                                  else
+                                    let* child =
+                                      scan_directory rules path child_fd
+                                    in
+                                    Ok (Tree.Directory child))
+                          | Native.File ->
+                              capture_with_fd (Some fd) name false (actual path)
+                                (fun file_fd ->
+                                  let stat = Unix.fstat file_fd in
+                                  let* content =
+                                    store_regular_file
+                                      ~open_descriptor:(fun () ->
+                                        Unix.dup file_fd)
+                                      ~expected_stamp:stamp store (actual path)
+                                      stat
+                                  in
+                                  let mode =
+                                    if stat.Unix.st_perm land 0o111 = 0 then
+                                      Regular
+                                    else Executable
+                                  in
+                                  observe After_read path;
+                                  Ok (Tree.File { mode; content }))
+                          | Native.Link ->
+                              let* target =
+                                native_observation (actual path) "readlinkat"
+                                  (fun () -> Native.readlink_at fd name)
+                              in
+                              let* content = Content.store store target in
+                              observe After_read path;
+                              Ok (Tree.File { mode = Symlink; content })
+                          | Native.Fifo | Native.Socket | Native.Character
+                          | Native.Block ->
+                              Error
+                                (Unsupported_file_type
+                                   { path = actual path; kind = "special file" })
+                        in
+                        scan_entries ((name, node) :: reversed) rest
+              in
+              let* tree = scan_entries [] before in
+              let* after = names fd relative in
+              if before <> after || Native.fingerprint fd <> stamp then
+                Error (Observation_changed (actual relative))
+              else Tree.store store tree
+            in
+            let* root_tree = scan_directory Ignore.empty [] root_fd in
+            observe Before_publish [];
+            let rec visit fd components f =
+              match components with
+              | [] -> f fd
+              | name :: rest ->
+                  capture_with_fd (Some fd) name true (actual components)
+                    (fun child -> visit child rest f)
+            in
+            let verify_entry path expected =
+              match List.rev path with
+              | [] -> Error (Invalid_name "empty observed entry")
+              | name :: parents ->
+                  visit root_fd (List.rev parents) (fun parent ->
+                      let* current =
+                        try Ok (Some (snd (Native.inspect_at parent name))) with
+                        | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok None
+                        | Unix.Unix_error (error, _, _) ->
+                            Error
+                              (scan_error "recheck entry" (actual path) error)
+                      in
+                      if current = expected then Ok ()
+                      else Error (Observation_changed (actual path)))
+            in
+            let* () =
+              List.fold_left
+                (fun result observation ->
+                  let* () = result in
+                  match observation with
+                  | Observed_entry (path, expected) ->
+                      verify_entry path expected
+                  | Observed_directory (path, stamp, expected) ->
+                      visit root_fd path (fun fd ->
+                          let* current = names fd path in
+                          if current = expected && Native.fingerprint fd = stamp
+                          then Ok ()
+                          else Error (Observation_changed (actual path))))
+                (Ok ()) !observations
+            in
+            (* refuse a root pathname that was replaced while its descriptor remained valid *)
+            let* () =
+              capture_with_fd None root true root (fun current ->
+                  if Native.fingerprint current = Native.fingerprint root_fd
+                  then Ok ()
+                  else Error (Observation_changed root))
+            in
+            let snapshot = Snapshot.create ~root:root_tree in
+            let* identity = Snapshot.store store snapshot in
+            Ok (identity, snapshot))
     in
-    let* root_tree = scan_directory Ignore.empty [] root in
-    let snapshot = Snapshot.create ~root:root_tree in
-    let* identity = Snapshot.store store snapshot in
-    Ok (identity, snapshot)
+    let[@warning "-4"] rec retry remaining =
+      match attempt () with
+      | Error (Observation_changed _) when remaining > 1 -> retry (remaining - 1)
+      | Error (Observation_changed path) -> Error (Capture_unstable path)
+      | result -> result
+    in
+    retry 3
+
+let scan_excluding_root_names ~excluded_root_names ~root ~store =
+  scan_with_observer ~observe:(fun _ _ -> ()) ~excluded_root_names ~root ~store
 
 let scan ~root ~store =
   scan_excluding_root_names ~excluded_root_names:[ ".yeokcham"; ".git" ] ~root
     ~store
+
+module For_test = struct
+  type stage = capture_stage = Before_open | After_read | Before_publish
+
+  let scan ~observe ~root ~store =
+    scan_with_observer ~observe ~excluded_root_names:[ ".yeokcham"; ".git" ]
+      ~root ~store
+end

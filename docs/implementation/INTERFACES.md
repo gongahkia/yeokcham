@@ -230,3 +230,26 @@ included directory, preserving one source of truth for native exclusions.
 
 This checkpoint does not establish P2 completion, capture consistency, safe
 replacement, durable workspace/branch state or the remaining ordinary CLI journeys.
+
+### P2 capture consistency checkpoint (in progress)
+
+`Yeokcham_snapshot.scan` and `scan_excluding_root_names` retain their existing
+signatures. Internally, the POSIX descriptor adapter opens children with
+`openat`/`O_NOFOLLOW`, observes them with `fstatat` without traversal and reads
+symlinks with `readlinkat`. Regular reads compare device/inode/type, mode, size,
+and nanosecond mtime/ctime, including an end-of-scan pathname recheck. Directory
+entry lists and ignore-file presence/identity are rechecked. Large reads stop at
+the initially observed size plus a one-byte growth probe.
+
+`Observation_changed of string` requests an internal retry; after three unstable
+attempts `Capture_unstable of string` reports an incomplete capture. Other
+errors, including malformed rules and special files, are explicit failures.
+Snapshot/object creation does not itself allocate history or publish the project
+head. Failed attempts may leave unreachable immutable objects, as before.
+
+`Yeokcham_snapshot.For_test.scan` adds an in-process
+`observe:(stage -> string list -> unit)` seam (`Before_open`, `After_read`,
+`Before_publish`) to exercise filesystem mutations at actual observation
+boundaries. Production `scan` supplies a no-op observer. No environment,
+repository configuration or remote input enables fault injection. The adapter
+is POSIX-only; unsupported native platforms fail explicitly.

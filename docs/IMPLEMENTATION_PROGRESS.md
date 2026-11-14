@@ -1,6 +1,6 @@
 # Implementation progress
 
-Updated November 14, 2026. This is the shared implementation ledger. Follow
+Updated November 15, 2026. This is the shared implementation ledger. Follow
 [Implementation workflow](IMPLEMENTATION_WORKFLOW.md) for execution, reports,
 verification, commits, and rollback. Each new agent reads and updates this file.
 
@@ -81,7 +81,7 @@ partial phase. Do not relabel a partial phase complete to expose the next prompt
 | --- | --- | --- |
 | P0 evaluation | complete | [Assessment](PILOT_PLAN.md), [receipt](implementation/results/PILOT-workflow-assessment.json); tiny WSL/test-signer walkthrough only |
 | P1 core foundation | complete | [Interfaces](implementation/INTERFACES.md), [report](implementation/reports/P01-attempt-01.md), [acceptance](implementation/results/P01-acceptance.json); no P1 criteria remaining |
-| P2 local work | in_progress | [Scoped task](implementation/goals/P02-local-workflow.md); native ignore matching/explanation landed; capture consistency, durable identities/branches, local CLI and safe recovery remain; P2 incomplete |
+| P2 local work | in_progress | [Scoped task](implementation/goals/P02-local-workflow.md); native ignore matching/explanation and capture consistency landed; durable identities/branches, local CLI and safe recovery remain; P2 incomplete |
 | P3 shared loop | pending | Clone/selected sharing/composition/journaled integration/conflicts; unstarted |
 | P4 harden/handoff | pending | Representative/native/human and fault evidence; unstarted |
 
@@ -100,6 +100,18 @@ partial phase. Do not relabel a partial phase complete to expose the next prompt
   outstanding. P2 is not complete; no original full phase is closed. Logs are
   external under `/home/gongahkia/.cache/yeokcham-p2-20261114/`.
 
+
+- P2 capture consistency checkpoint, November 15: descriptor-relative no-follow
+  capture and final metadata/entry rechecks are implemented, with three bounded
+  retries and bounded streaming reads. Seven filesystem cases exercise same-size
+  writes, continuous instability, entry changes, late rule changes, symlink
+  swaps, root replacement and mixed-file fidelity. Focused capture (7), ignore
+  (5), materialization (3) and local-service (44) cases passed. `make build`,
+  `make lint` and `make ci` exited 0 on the checkpoint tree, with valid Dune
+  cache reuse; logs are `*-capture-final.log` in the session cache. Main advanced externally to
+  `6f224e356219febfdad3fe077d67b2d67ead4f05` while work was active; that commit
+  contains the native helper/Dune changes from this session and is preserved.
+  No unrelated paths changed. P2 remains incomplete.
 
 - P2 start: clean main and all P1 prerequisite ancestry verified; original
   G01/P0 evidence hashes unchanged. Existing local toolchain/SoftHSM environment
@@ -120,7 +132,8 @@ partial phase. Do not relabel a partial phase complete to expose the next prompt
   Vector regeneration is byte-identical. Original G01/P0 evidence hashes match.
   Toolchain: OCaml 5.5.0, Dune 3.25.0, ocamlformat 0.29.0 on native Arch Linux.
   This is module/CI evidence, not full native product/service or human acceptance.
-  Full G02 remains partial; P2 is next eligible and unstarted. The final
+  Full G02 remains partial; this P1 checkpoint made P2 next eligible (P2
+  has since started as recorded above). The final
   report/ledger is a separate documentation-only commit.
 
 - P1 continuation, November 14: session `p1-core-resume-2026-11-14` starts
