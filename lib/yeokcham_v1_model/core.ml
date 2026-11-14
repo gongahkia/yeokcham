@@ -397,6 +397,22 @@ let retain (pool : pool) ~id body =
           match body.payload with
           | Shared_revision revision ->
               let* () =
+                if
+                  revision.previous_revisions = []
+                  && Records.exists
+                       (fun _ body ->
+                         match body.payload with
+                         | Shared_revision existing ->
+                             Change_id.equal existing.change revision.change
+                         | Accepted_version _ | Branch_event _ -> false)
+                       pool.records
+                then
+                  Error
+                    (Identity_collision
+                       ("change " ^ Change_id.to_hex revision.change))
+                else Ok ()
+              in
+              let* () =
                 check_all
                   (fun parent ->
                     let* body = require pool Shared_revision_kind parent in

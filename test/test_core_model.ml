@@ -141,6 +141,8 @@ let core_pool () =
     (result = M.Unchanged && pool = pool2);
   rejects "collision cannot replace immutable record"
     (M.retain pool ~id:(r '1') (body (M.Shared_revision (shared 'b'))));
+  rejects "change identity cannot be independently re-created"
+    (M.retain pool ~id:(r '2') first);
   let foreign =
     M.make_body
       ~context:(context ~repository:(repo 's') ())
