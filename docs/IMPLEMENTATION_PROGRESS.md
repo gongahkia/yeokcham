@@ -512,3 +512,15 @@ records, not current proof.
   Switch, preservation-aware mutation/recovery and useful local
   status/history/diff still remain; P2 is incomplete. Native credential/service
   acceptance is not claimed by the disposable test-signer journeys.
+
+- P2 bounded-content checkpoint, November 15:
+  `Content.verify` and `load_bounded` provide complete closure checks without
+  whole-file display buffers. Manifest verification streams CDC boundaries and
+  full-content hashing. Five cases cover exact bounds/no writes, forged chunk
+  boundaries, incorrect full-content IDs, length mismatches and missing chunks.
+  The local-service closure boundary reuses the verifier. This is a prerequisite
+  for truthful large-file availability/status/diff, not completion of those CLI
+  journeys or safe materialization. Focused content (5), capture (7), package
+  and local-service (44) cases passed. `make build`, `make lint` and `make ci`
+  exited 0 with valid Dune cache reuse; exact logs are
+  `*-stream-inspection*.log` in the session cache.

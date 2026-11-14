@@ -50,6 +50,16 @@ module Content : sig
   val identity_to_raw_bytes : identity -> string
   val store : Yeokcham_store.repository -> string -> (id, error) result
   val load : Yeokcham_store.repository -> id -> (string, error) result
+
+  val load_bounded :
+    Yeokcham_store.repository ->
+    max_bytes:int ->
+    id ->
+    (string option, error) result
+  (** Complete identity/closure validation, returning bytes only within the
+      display bound. Larger manifests are verified with bounded streaming. *)
+
+  val verify : Yeokcham_store.repository -> id -> (unit, error) result
 end
 
 module Chunk : sig

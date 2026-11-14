@@ -1,3 +1,8 @@
+(test
+ (name test_content_verification)
+ (modules test_content_verification)
+ (libraries alcotest unix yeokcham_snapshot yeokcham_store))
+
 (rule
  (alias runtest)
  (deps test_local_branch_cli.py ../bin/yeokcham_v1.exe)

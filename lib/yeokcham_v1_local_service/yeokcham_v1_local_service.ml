@@ -371,8 +371,7 @@ let validate_snapshot_closure store snapshot_id =
   |> List.fold_left
        (fun result (_, (_, content)) ->
          let* () = result in
-         Snapshot.Content.load store content
-         |> Result.map (fun _ -> ())
+         Snapshot.Content.verify store content
          |> Result.map_error (fun error -> Snapshot_error error))
        (Ok ())
 

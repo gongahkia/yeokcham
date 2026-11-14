@@ -404,3 +404,19 @@ through its real policy/composition boundary. Existing proposal CLI fixtures
 now explicitly share/deliver their initial V1 baseline, rather than relying on
 initialization to accept private files. Their substantive conflict/provenance,
 no-acceptance and recovery assertions remain intact.
+
+### P2 bounded inspection prerequisite (in progress)
+
+`Snapshot.Content.load_bounded repository ~max_bytes id` verifies complete
+content closure and returns `Some bytes` within the bound or `None` for a larger
+file. Oversized display does not hide missing chunks, incorrect lengths,
+noncanonical chunk boundaries or a mismatched full-content identity.
+`Snapshot.Content.verify repository id` performs the same closure validation
+without returning file bytes. Neither operation writes objects or metadata.
+
+`Manifest.load` now verifies with a streaming CDC/hash pass instead of rebuilding
+whole file contents. Working memory retains manifest references, the splitter
+and individual stored chunks. Existing `Content.load` still returns a complete
+string when a caller explicitly requests it. Snapshot/manifest/chunk identities
+and canonical bytes remain unchanged. The local service's closure preflight
+uses `Content.verify`; materialization output staging remains separate work.

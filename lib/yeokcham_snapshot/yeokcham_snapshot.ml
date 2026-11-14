@@ -193,6 +193,11 @@ module Chunk = struct
   let payload value =
     encoding_array [ Encoding.integer 1L; Encoding.bytes value ]
 
+  let id value =
+    let* payload = payload value in
+    let* object_ = envelope Envelope.Chunk payload in
+    Ok (Store.id_of_envelope object_)
+
   let store repository value =
     let* payload = payload value in
     let* object_ = envelope Envelope.Chunk payload in
@@ -433,6 +438,54 @@ module Manifest = struct
             Ok manifest
     | _ -> Error (Invalid_schema "file manifest must contain nine values")
 
+  let verify_stream repository manifest =
+    let* splitter =
+      Yeokcham_chunking.create_splitter Yeokcham_chunking.default
+      |> Result.map_error (fun e ->
+          Unsupported_chunking_parameters (Yeokcham_chunking.error_to_string e))
+    in
+    let expected = ref manifest.chunks in
+    let hash = ref (Hash.feed_string Hash.empty content_domain) in
+    let total = ref 0 in
+    let compare_chunks chunks =
+      List.fold_left
+        (fun result bytes ->
+          let* () = result in
+          let* actual = Chunk.id bytes in
+          match !expected with
+          | (id, length) :: rest
+            when Chunk.equal_id actual id && String.length bytes = length ->
+              expected := rest;
+              Ok ()
+          | [] | _ :: _ -> Error Noncanonical_chunk_boundaries)
+        (Ok ()) chunks
+    in
+    let* () =
+      List.fold_left
+        (fun result (id, declared) ->
+          let* () = result in
+          let* bytes = Chunk.load repository id in
+          let actual = String.length bytes in
+          if actual <> declared then
+            Error (Manifest_length_mismatch { declared; actual })
+          else if !total > max_int - actual then
+            Error (Invalid_chunk_length (Int64.of_int actual))
+          else (
+            total := !total + actual;
+            hash := Hash.feed_string !hash bytes;
+            compare_chunks (Yeokcham_chunking.feed splitter bytes)))
+        (Ok ()) manifest.chunks
+    in
+    let* () = compare_chunks (Yeokcham_chunking.finish splitter) in
+    if !expected <> [] then Error Noncanonical_chunk_boundaries
+    else if !total <> manifest.total_length then
+      Error
+        (Manifest_length_mismatch
+           { declared = manifest.total_length; actual = !total })
+    else if Hash.(get !hash |> to_raw_string) <> manifest.full_content_id then
+      Error Manifest_content_identity_mismatch
+    else Ok ()
+
   let contents repository manifest =
     let rec load_chunks reversed actual_length = function
       | [] -> Ok (List.rev reversed, actual_length)
@@ -479,7 +532,7 @@ module Manifest = struct
            })
     else
       let* manifest = decode (Envelope.payload object_) in
-      let* _ = contents repository manifest in
+      let* () = verify_stream repository manifest in
       Ok manifest
 end
 
@@ -532,6 +585,30 @@ module Content = struct
       let* manifest = Manifest.load repository manifest in
       Manifest.contents repository manifest
     else Error (Unexpected_object_type { expected = Envelope.Content; actual })
+
+  let load_bounded repository ~max_bytes identity =
+    if max_bytes < 0 then Error (Invalid_schema "negative content read limit")
+    else
+      let* object_ =
+        Store.get repository (stored_object_id identity)
+        |> Result.map_error (fun e -> Store_error e)
+      in
+      let actual = Envelope.object_type object_ in
+      if actual = Envelope.Content then
+        let* bytes = decode (Envelope.payload object_) in
+        Ok (if String.length bytes <= max_bytes then Some bytes else None)
+      else if actual = Envelope.File_manifest then
+        let* manifest = Manifest.decode (Envelope.payload object_) in
+        if Manifest.total_length manifest <= max_bytes then
+          Manifest.contents repository manifest |> Result.map Option.some
+        else
+          let* () = Manifest.verify_stream repository manifest in
+          Ok None
+      else
+        Error (Unexpected_object_type { expected = Envelope.Content; actual })
+
+  let verify repository identity =
+    load_bounded repository ~max_bytes:0 identity |> Result.map (fun _ -> ())
 end
 
 module Tree = struct
