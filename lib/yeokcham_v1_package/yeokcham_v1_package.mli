@@ -10,7 +10,6 @@ type verified
 type artifact
 type prepared
 
-
 type error =
   | Io_error of { path : string; operation : string; message : string }
   | Destination_exists of string
@@ -32,7 +31,6 @@ module Core : sig
   val schema_version : int64
   val max_manifest_bytes : int
   val max_object_bytes : int
-
   val encode_manifest : manifest -> (string, error) result
 
   val decode_manifest :
@@ -74,8 +72,11 @@ module Core : sig
   val prepared_artifact : prepared -> artifact
   val prepared_authority : prepared -> Trust.authority
   val prepared_pool : prepared -> Model.Core.pool
+
   val prepared_records :
-    prepared -> (Model.Core.Record_id.t * Yeokcham_store.Stored_object_id.t) list
+    prepared ->
+    (Model.Core.Record_id.t * Yeokcham_store.Stored_object_id.t) list
+
   val prepared_titles : prepared -> (Model.Core.Record_id.t * string) list
   val prepared_branch : prepared -> Model.Core.Branch_id.t
 
@@ -85,7 +86,6 @@ module Core : sig
       current trust admission and atomic metadata receipt; no cursor/files move.
   *)
 end
-
 
 val manifest_object_ids :
   string -> (Yeokcham_store.Stored_object_id.t list, error) result

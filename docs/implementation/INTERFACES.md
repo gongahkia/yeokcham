@@ -1337,3 +1337,85 @@ includes mode, observed/chosen identities, comparisons/availability, recovery
 phase/pause, retention and prior-observation IDs. Completed historical retries
 do not claim to inspect the current tree. These local recovery journeys do not
 complete conflict resolution, Core exchange or the P3 two-person pilot.
+
+### P3 public Core package boundary (in progress)
+
+`Yeokcham_v1_package.Core` extends the existing package/artifact boundary. It
+uses public Core records and paged inventories, independently of legacy
+manifest-v1 packages. Registry envelope codes 41–46 are unchanged; package
+manifest **version 2** is a canonical ordered control tuple, bounded to 8 MiB:
+
+```text
+[2, repository_bytes, selected_branch_bytes, record_root, authority_root,
+ title_root, inventory_root]
+```
+
+Repository and object references contain 32 raw bytes; the branch contains 16.
+`decode_manifest ~repository bytes` checks shape, version, scope, identity widths
+and canonical bytes; it does not prove any closure. `encode_manifest`,
+`manifest_repository`, `manifest_branch` and `metadata_roots` expose actual control
+data. Courier manifest identity is plain SHA-256 of these bytes, as in the existing
+signed transport publication; raw store identities retain their existing domain.
+The unsigned manifest cannot grant authority or substitute for record validation.
+
+Every inventory uses registry-45 pages and a namespace of
+`core-public-ROLE-v1\0` followed by repository bytes:
+
+| Role | Byte key | Value |
+| --- | --- | --- |
+| `records` | logical Core record ID | raw stored-object ID |
+| `authority` | tag 0 plus certificate ID, or tag 1 plus epoch ID | existing canonical certificate/epoch bytes |
+| `titles` | shared-revision ID | 1–1024 UTF-8 title bytes without NUL |
+| `objects` | raw stored-object ID | canonical integer envelope byte length |
+
+The object inventory describes record envelopes, public snapshot/tree/content
+closures, exact edit-scope pages and the other three inventory closures. Its own
+page closure is discovered separately to avoid self-reference. Each page/value
+keeps existing bounds; individual raw objects are bounded to the store's 128-MiB
+limit. Ordinary large files remain manifests/chunks, rather than a whole-file
+buffer. Common directory-artifact iteration/lookups now bound each file before
+reading; streamed import validates each canonical identity again.
+
+`Core.create ~source ~destination ~authority ~records ~selected_branch ~titles`
+verifies historical signatures, repository/reference consistency, exact declared
+scopes and actual deterministic accepted results, then creates a new directory
+artifact containing precisely that public closure. It traverses typed public
+records, not `Local.encode`, private history or the whole object store. Titles
+are courier display metadata; they do not change a signed revision's author,
+identity or contents. Private observations, correspondence pages, plan controls,
+operation rows, custody and unrelated blobs are excluded.
+
+`Core.prepare ~package ~repository ~known_authority` reads the bounded control,
+discovers metadata via `Pages.page_references`, then performs full canonical page,
+authority, record, composition and exact-inventory validation in an isolated
+temporary store. Extra object files or even an otherwise canonical inventory
+containing an unselected private blob refuse. Known authority pins causal root
+continuity; without it a caller must independently compare the root before using
+the result for a new workspace. This never enrolls a device. Unsupported required
+record semantics still refuse through the actual Core/trust boundary.
+
+The opaque prepared value exposes artifact, authority, historical pure pool,
+record map, public titles and selected branch. `import_prepared ~destination`
+copies only previously verified immutable objects, with per-object revalidation.
+It creates no project head and does not change ordinary files or private cursors.
+Current new-record admission, atomic receipt, transfer acknowledgement and clone
+materialization are separate required service consumers; historical verification
+alone is not new-record admission. Legacy `read_artifact`/materialization helpers
+remain legacy-manifest APIs; shared iteration/lookups support either artifact.
+
+Actual mixed-file tests exercise selected D/later private E through native share
+and integration before export, retained executable/empty-directory/symlink/binary
+data, private sentinel/control exclusion, immutable-only import, malicious extra
+inventory, valid signatures over false accepted results, foreign authority roots
+and malformed/missing data. Independent Python vectors cover manifest encoding,
+courier identity and offset/stream hash bytes. These are public-package evidence,
+not a completed native relay/clone loop.
+
+The hash adapter now selects the existing pinned Digestif 1.3.1 C implementation
+instead of its OCaml implementation. The SHA-256 algorithm, `Hash.S` interface,
+envelope domains and identity bytes are unchanged; no format migration follows.
+The C implementation is already part of the installed dependency and the project
+already requires a native C toolchain. A debugger sample of the mixed Core
+journey identified repeated OCaml SHA-256 work. Functional fixture timings are
+diagnostics, not G01 measurements or native performance qualification. Independent
+vectors and persistent-context/offset feed tests verify the native adapter.

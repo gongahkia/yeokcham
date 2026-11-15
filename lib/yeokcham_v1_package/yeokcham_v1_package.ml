@@ -736,8 +736,9 @@ let find_artifact_object artifact ~object_id =
       else
         let* bytes =
           Store.read_file_bounded
-            ~path:(object_path artifact_package_path
-               (Store.Stored_object_id.to_hex object_id))
+            ~path:
+              (object_path artifact_package_path
+                 (Store.Stored_object_id.to_hex object_id))
             ~max_bytes:(128 * 1024 * 1024)
           |> Result.map_error (fun error -> Store_error error)
         in
@@ -1167,10 +1168,20 @@ module Core = struct
 
   [@@@warning "-42"]
 
-  let model result = Result.map_error (fun e -> Invalid_package (M.error_to_string e)) result
-  let record result = Result.map_error (fun e -> Invalid_package (R.error_to_string e)) result
-  let pages result = Result.map_error (fun e -> Invalid_package (Pages.error_to_string e)) result
-  let graph result = Result.map_error (fun e -> Invalid_package (Composition.Graph.error_to_string e)) result
+  let model result =
+    Result.map_error (fun e -> Invalid_package (M.error_to_string e)) result
+
+  let record result =
+    Result.map_error (fun e -> Invalid_package (R.error_to_string e)) result
+
+  let pages result =
+    Result.map_error (fun e -> Invalid_package (Pages.error_to_string e)) result
+
+  let graph result =
+    Result.map_error
+      (fun e -> Invalid_package (Composition.Graph.error_to_string e))
+      result
+
   let trust result = Result.map_error (fun e -> Trust_error e) result
   let stored result = Result.map_error (fun e -> Store_error e) result
   let schema_version = 2L
@@ -1196,265 +1207,568 @@ module Core = struct
   }
 
   let traverse f values =
-    List.fold_left (fun result value ->
-      let* reversed=result in let* value=f value in Ok (value::reversed)) (Ok []) values
+    List.fold_left
+      (fun result value ->
+        let* reversed = result in
+        let* value = f value in
+        Ok (value :: reversed))
+      (Ok []) values
     |> Result.map List.rev
 
-  let raw_id bytes = Id.of_raw_bytes bytes |> Option.to_result ~none:(Invalid_package "invalid Core object reference")
-  let namespace manifest role = "core-public-" ^ role ^ "-v1\000" ^ M.Repository_id.to_raw manifest.repository
+  let raw_id bytes =
+    Id.of_raw_bytes bytes
+    |> Option.to_result ~none:(Invalid_package "invalid Core object reference")
+
+  let namespace manifest role =
+    "core-public-" ^ role ^ "-v1\000"
+    ^ M.Repository_id.to_raw manifest.repository
 
   let encode_manifest manifest =
-    array [Encoding.integer schema_version;
-      Encoding.bytes (M.Repository_id.to_raw manifest.repository);
-      Encoding.bytes (M.Branch_id.to_raw manifest.selected_branch);
-      Encoding.bytes (Id.to_raw_bytes manifest.record_root);
-      Encoding.bytes (Id.to_raw_bytes manifest.authority_root);
-      Encoding.bytes (Id.to_raw_bytes manifest.title_root);
-      Encoding.bytes (Id.to_raw_bytes manifest.inventory_root)]
+    array
+      [
+        Encoding.integer schema_version;
+        Encoding.bytes (M.Repository_id.to_raw manifest.repository);
+        Encoding.bytes (M.Branch_id.to_raw manifest.selected_branch);
+        Encoding.bytes (Id.to_raw_bytes manifest.record_root);
+        Encoding.bytes (Id.to_raw_bytes manifest.authority_root);
+        Encoding.bytes (Id.to_raw_bytes manifest.title_root);
+        Encoding.bytes (Id.to_raw_bytes manifest.inventory_root);
+      ]
     |> Result.map Encoding.encode
 
   let[@warning "-4"] decode_manifest ~repository bytes =
-    if String.length bytes>max_manifest_bytes then Error (Invalid_package "Core manifest exceeds 8 MiB")
+    if String.length bytes > max_manifest_bytes then
+      Error (Invalid_package "Core manifest exceeds 8 MiB")
     else
-      let* value=Encoding.decode bytes |> Result.map_error (fun e -> Invalid_package (Encoding.decode_error_to_string e)) in
+      let* value =
+        Encoding.decode bytes
+        |> Result.map_error (fun e ->
+            Invalid_package (Encoding.decode_error_to_string e))
+      in
       match value with
-      | Encoding.Array [Encoding.Integer 2L;Encoding.Bytes scope;Encoding.Bytes branch;
-          Encoding.Bytes records;Encoding.Bytes authority;Encoding.Bytes titles;Encoding.Bytes inventory] ->
-          let* scope=M.Repository_id.of_raw scope |> model in
-          let* selected_branch=M.Branch_id.of_raw branch |> model in
-          let* record_root=raw_id records in let* authority_root=raw_id authority in
-          let* title_root=raw_id titles in let* inventory_root=raw_id inventory in
-          let manifest={repository=scope;selected_branch;record_root;authority_root;title_root;inventory_root} in
-          let* canonical=encode_manifest manifest in
-          if not (M.Repository_id.equal repository scope) || canonical<>bytes
-          then Error (Invalid_package "Core manifest scope/canonicality mismatch")
+      | Encoding.Array
+          [
+            Encoding.Integer 2L;
+            Encoding.Bytes scope;
+            Encoding.Bytes branch;
+            Encoding.Bytes records;
+            Encoding.Bytes authority;
+            Encoding.Bytes titles;
+            Encoding.Bytes inventory;
+          ] ->
+          let* scope = M.Repository_id.of_raw scope |> model in
+          let* selected_branch = M.Branch_id.of_raw branch |> model in
+          let* record_root = raw_id records in
+          let* authority_root = raw_id authority in
+          let* title_root = raw_id titles in
+          let* inventory_root = raw_id inventory in
+          let manifest =
+            {
+              repository = scope;
+              selected_branch;
+              record_root;
+              authority_root;
+              title_root;
+              inventory_root;
+            }
+          in
+          let* canonical = encode_manifest manifest in
+          if
+            (not (M.Repository_id.equal repository scope)) || canonical <> bytes
+          then
+            Error (Invalid_package "Core manifest scope/canonicality mismatch")
           else Ok manifest
       | _ -> Error (Invalid_package "unsupported Core package manifest schema")
 
-  let manifest_repository manifest=manifest.repository
-  let manifest_branch manifest=manifest.selected_branch
-  let metadata_roots manifest=
-    [namespace manifest "records",manifest.record_root;
-     namespace manifest "authority",manifest.authority_root;
-     namespace manifest "titles",manifest.title_root;
-     namespace manifest "objects",manifest.inventory_root]
+  let manifest_repository manifest = manifest.repository
+  let manifest_branch manifest = manifest.selected_branch
 
-  let read_bounded ~limit path=Store.read_file_bounded ~path ~max_bytes:limit |> stored
-  let read_object package ~limit id=read_bounded ~limit (object_path package (Id.to_hex id))
+  let metadata_roots manifest =
+    [
+      (namespace manifest "records", manifest.record_root);
+      (namespace manifest "authority", manifest.authority_root);
+      (namespace manifest "titles", manifest.title_root);
+      (namespace manifest "objects", manifest.inventory_root);
+    ]
+
+  let read_bounded ~limit path =
+    Store.read_file_bounded ~path ~max_bytes:limit |> stored
+
+  let read_object package ~limit id =
+    read_bounded ~limit (object_path package (Id.to_hex id))
 
   let fetch_metadata store package manifest =
-    let visited=Hashtbl.create 32 in
+    let visited = Hashtbl.create 32 in
     let rec fetch namespace depth id =
-      if depth>32 then Error (Invalid_package "Core metadata traversal exceeds depth bound")
-      else if Hashtbl.mem visited (namespace,id) then Ok ()
+      if depth > 32 then
+        Error (Invalid_package "Core metadata traversal exceeds depth bound")
+      else if Hashtbl.mem visited (namespace, id) then Ok ()
       else
-        let* bytes=read_object package ~limit:Pages.max_page_bytes id in
-        let* references=Pages.page_references ~namespace ~expected:id bytes |> pages in
-        let* envelope=decode_object_bytes id bytes in
-        let* _=Store.put store envelope |> stored in
-        Hashtbl.add visited (namespace,id) ();
-        let* _=traverse (fetch namespace (depth+1)) references in Ok ()
+        let* bytes = read_object package ~limit:Pages.max_page_bytes id in
+        let* references =
+          Pages.page_references ~namespace ~expected:id bytes |> pages
+        in
+        let* envelope = decode_object_bytes id bytes in
+        let* _ = Store.put store envelope |> stored in
+        Hashtbl.add visited (namespace, id) ();
+        let* _ = traverse (fetch namespace (depth + 1)) references in
+        Ok ()
     in
-    let* _=traverse (fun (namespace,id) -> fetch namespace 0 id) (metadata_roots manifest) in
+    let* _ =
+      traverse
+        (fun (namespace, id) -> fetch namespace 0 id)
+        (metadata_roots manifest)
+    in
     Ok ()
 
-  let load_rows store manifest role root=Pages.load store ~namespace:(namespace manifest role) root |> pages
+  let load_rows store manifest role root =
+    Pages.load store ~namespace:(namespace manifest role) root |> pages
 
   let inventory store manifest =
-    let* rows=load_rows store manifest "objects" manifest.inventory_root in
-    traverse (fun (raw,value) ->
-      let* id=raw_id raw in
-      let* encoded=Encoding.decode value |> Result.map_error (fun e -> Invalid_package (Encoding.decode_error_to_string e)) in
-      let* size=integer_field "Core object size" encoded in
-      if size<Int64.of_int Envelope.header_size || size>Int64.of_int max_object_bytes
-      then Error (Invalid_package "Core object size is out of bounds")
-      else Ok (id,Int64.to_int size)) rows
+    let* rows = load_rows store manifest "objects" manifest.inventory_root in
+    traverse
+      (fun (raw, value) ->
+        let* id = raw_id raw in
+        let* encoded =
+          Encoding.decode value
+          |> Result.map_error (fun e ->
+              Invalid_package (Encoding.decode_error_to_string e))
+        in
+        let* size = integer_field "Core object size" encoded in
+        if
+          size < Int64.of_int Envelope.header_size
+          || size > Int64.of_int max_object_bytes
+        then Error (Invalid_package "Core object size is out of bounds")
+        else Ok (id, Int64.to_int size))
+      rows
 
   let metadata_ids store manifest ~inventory =
-    let roots=metadata_roots manifest |> List.filter (fun (scope,_) -> inventory || scope<>namespace manifest "objects") in
-    let* lists=traverse (fun (scope,id) -> Pages.closure store ~namespace:scope id |> pages) roots in
+    let roots =
+      metadata_roots manifest
+      |> List.filter (fun (scope, _) ->
+          inventory || scope <> namespace manifest "objects")
+    in
+    let* lists =
+      traverse
+        (fun (scope, id) -> Pages.closure store ~namespace:scope id |> pages)
+        roots
+    in
     Ok (List.concat lists |> List.sort_uniq Id.compare)
 
   let record_rows store manifest =
-    let* rows=load_rows store manifest "records" manifest.record_root in
-    traverse (fun (raw,value) -> let* id=M.Record_id.of_raw raw |> model in let* obj=raw_id value in Ok (id,obj)) rows
+    let* rows = load_rows store manifest "records" manifest.record_root in
+    traverse
+      (fun (raw, value) ->
+        let* id = M.Record_id.of_raw raw |> model in
+        let* obj = raw_id value in
+        Ok (id, obj))
+      rows
 
   let[@warning "-4"] verify_records store authority repository records =
-    let* records=traverse (fun (id,obj) ->
-      let* envelope=Store.get ~max_bytes:R.max_record_bytes store obj |> stored in
-      let* signed=R.decode ~repository (Envelope.encode envelope) |> record in
-      let* actual=R.id signed |> record in
-      let* ()=Trust.Core.verify authority signed |> Result.map_error (fun e -> Invalid_package (Trust.Core.error_to_string e)) in
-      if not (M.Record_id.equal id actual) then Error (Invalid_package "Core logical record identity mismatch")
-      else Ok (id,R.body signed)) records in
-    let rec retain pool pending = match pending with
+    let* records =
+      traverse
+        (fun (id, obj) ->
+          let* envelope =
+            Store.get ~max_bytes:R.max_record_bytes store obj |> stored
+          in
+          let* signed =
+            R.decode ~repository (Envelope.encode envelope) |> record
+          in
+          let* actual = R.id signed |> record in
+          let* () =
+            Trust.Core.verify authority signed
+            |> Result.map_error (fun e ->
+                Invalid_package (Trust.Core.error_to_string e))
+          in
+          if not (M.Record_id.equal id actual) then
+            Error (Invalid_package "Core logical record identity mismatch")
+          else Ok (id, R.body signed))
+        records
+    in
+    let rec retain pool pending =
+      match pending with
       | [] -> Ok pool
       | _ ->
-          let* pool,remaining=List.fold_left (fun result (id,body) ->
-            let* pool,remaining=result in
-            match M.retain pool ~id body with
-            | Ok (pool,_) -> Ok (pool,remaining)
-            | Error (M.Missing_reference _) -> Ok (pool,(id,body)::remaining)
-            | Error e -> Error (Invalid_package (M.error_to_string e))) (Ok (pool,[])) pending in
-          if List.length remaining=List.length pending then Error (Invalid_package "Core package has missing causal references")
+          let* pool, remaining =
+            List.fold_left
+              (fun result (id, body) ->
+                let* pool, remaining = result in
+                match M.retain pool ~id body with
+                | Ok (pool, _) -> Ok (pool, remaining)
+                | Error (M.Missing_reference _) ->
+                    Ok (pool, (id, body) :: remaining)
+                | Error e -> Error (Invalid_package (M.error_to_string e)))
+              (Ok (pool, []))
+              pending
+          in
+          if List.length remaining = List.length pending then
+            Error (Invalid_package "Core package has missing causal references")
           else retain pool remaining
     in
-    let* pool=retain (M.empty_pool ~repository) records in
-    let* ()=Composition.Graph.validate store pool |> graph in
+    let* pool = retain (M.empty_pool ~repository) records in
+    let* () = Composition.Graph.validate store pool |> graph in
     Ok pool
 
   let authority_key tag id =
-    let* digest=M.Digest.of_hex id |> model in Ok (String.make 1 tag ^ M.Digest.to_raw digest)
+    let* digest = M.Digest.of_hex id |> model in
+    Ok (String.make 1 tag ^ M.Digest.to_raw digest)
 
   let authority_rows authority =
-    let* certificates=traverse (fun certificate ->
-      let* key=authority_key '\000' (Trust.certificate_id certificate) in
-      Ok (key,Trust.encode_certificate certificate)) (Trust.certificates (Trust.authority_membership authority)) in
-    let* epochs=traverse (fun epoch ->
-      let* key=authority_key '\001' (Trust.epoch_id epoch) in Ok (key,Trust.encode_epoch epoch)) (Trust.authority_epochs authority) in
+    let* certificates =
+      traverse
+        (fun certificate ->
+          let* key = authority_key '\000' (Trust.certificate_id certificate) in
+          Ok (key, Trust.encode_certificate certificate))
+        (Trust.certificates (Trust.authority_membership authority))
+    in
+    let* epochs =
+      traverse
+        (fun epoch ->
+          let* key = authority_key '\001' (Trust.epoch_id epoch) in
+          Ok (key, Trust.encode_epoch epoch))
+        (Trust.authority_epochs authority)
+    in
     Ok (certificates @ epochs)
 
   let load_authority store manifest known_authority =
-    let* rows=load_rows store manifest "authority" manifest.authority_root in
-    let* certificates,epochs=List.fold_left (fun result (key,bytes) ->
-      let* certificates,epochs=result in
-      if String.length key<>33 then Error (Invalid_package "invalid Core authority key")
-      else if key.[0]='\000' then
-        let* certificate=Trust.decode_certificate bytes |> trust in
-        let* expected=authority_key '\000' (Trust.certificate_id certificate) in
-        if key<>expected then Error (Invalid_package "Core certificate identity mismatch")
-        else Ok (certificate::certificates,epochs)
-      else if key.[0]='\001' then
-        let* epoch=Trust.decode_epoch bytes |> trust in
-        let* expected=authority_key '\001' (Trust.epoch_id epoch) in
-        if key<>expected then Error (Invalid_package "Core epoch identity mismatch")
-        else Ok (certificates,epoch::epochs)
-      else Error (Invalid_package "unsupported Core authority entry")) (Ok ([],[])) rows in
-    let* repository=Trust.Repository_id.of_string (M.Repository_id.to_hex manifest.repository) |> Result.map_error (fun s -> Invalid_package s) in
-    let* incoming_membership=Trust.verify_membership ~repository certificates |> trust in
-    let* incoming=Trust.verify_authority ~membership:incoming_membership epochs |> trust in
+    let* rows = load_rows store manifest "authority" manifest.authority_root in
+    let* certificates, epochs =
+      List.fold_left
+        (fun result (key, bytes) ->
+          let* certificates, epochs = result in
+          if String.length key <> 33 then
+            Error (Invalid_package "invalid Core authority key")
+          else if key.[0] = '\000' then
+            let* certificate = Trust.decode_certificate bytes |> trust in
+            let* expected =
+              authority_key '\000' (Trust.certificate_id certificate)
+            in
+            if key <> expected then
+              Error (Invalid_package "Core certificate identity mismatch")
+            else Ok (certificate :: certificates, epochs)
+          else if key.[0] = '\001' then
+            let* epoch = Trust.decode_epoch bytes |> trust in
+            let* expected = authority_key '\001' (Trust.epoch_id epoch) in
+            if key <> expected then
+              Error (Invalid_package "Core epoch identity mismatch")
+            else Ok (certificates, epoch :: epochs)
+          else Error (Invalid_package "unsupported Core authority entry"))
+        (Ok ([], []))
+        rows
+    in
+    let* repository =
+      Trust.Repository_id.of_string (M.Repository_id.to_hex manifest.repository)
+      |> Result.map_error (fun s -> Invalid_package s)
+    in
+    let* incoming_membership =
+      Trust.verify_membership ~repository certificates |> trust
+    in
+    let* incoming =
+      Trust.verify_authority ~membership:incoming_membership epochs |> trust
+    in
     match known_authority with
     | None -> Ok incoming
     | Some known ->
-        let* membership=Trust.extend_membership (Trust.authority_membership known) certificates |> trust in
-        let epochs=Trust.authority_epochs known @ Trust.authority_epochs incoming
-          |> List.sort_uniq (fun a b -> String.compare (Trust.epoch_id a) (Trust.epoch_id b)) in
+        let* membership =
+          Trust.extend_membership
+            (Trust.authority_membership known)
+            certificates
+          |> trust
+        in
+        let epochs =
+          Trust.authority_epochs known @ Trust.authority_epochs incoming
+          |> List.sort_uniq (fun a b ->
+              String.compare (Trust.epoch_id a) (Trust.epoch_id b))
+        in
         Trust.verify_authority ~membership epochs |> trust
 
   let[@warning "-4"] title_rows pool titles =
-    traverse (fun (id,title) ->
-      let* _=text title in
-      if title="" || String.length title>M.max_name_bytes || String.contains title '\000'
-      then Error (Invalid_package "Core public title must contain 1 through 1024 UTF-8 bytes without NUL")
-      else match M.find pool id with
-        | Some {M.payload=M.Shared_revision _;_} -> Ok (M.Record_id.to_raw id,title)
-        | _ -> Error (Invalid_package "Core public title does not name a shared revision")) titles
+    traverse
+      (fun (id, title) ->
+        let* _ = text title in
+        if
+          title = ""
+          || String.length title > M.max_name_bytes
+          || String.contains title '\000'
+        then
+          Error
+            (Invalid_package
+               "Core public title must contain 1 through 1024 UTF-8 bytes \
+                without NUL")
+        else
+          match M.find pool id with
+          | Some { M.payload = M.Shared_revision _; _ } ->
+              Ok (M.Record_id.to_raw id, title)
+          | _ ->
+              Error
+                (Invalid_package
+                   "Core public title does not name a shared revision"))
+      titles
 
   let load_titles store manifest pool =
-    let* rows=load_rows store manifest "titles" manifest.title_root in
-    let* titles=traverse (fun (raw,title) -> let* id=M.Record_id.of_raw raw |> model in Ok (id,title)) rows in
-    let* _=title_rows pool titles in Ok titles
+    let* rows = load_rows store manifest "titles" manifest.title_root in
+    let* titles =
+      traverse
+        (fun (raw, title) ->
+          let* id = M.Record_id.of_raw raw |> model in
+          Ok (id, title))
+        rows
+    in
+    let* _ = title_rows pool titles in
+    Ok titles
 
   let source_objects source pool records =
     let object_snapshot id =
-      Model.Snapshot_id.of_string (M.Object_id.to_hex id) |> Result.map_error (fun e -> Model_error e) in
-    List.fold_left (fun result (id,body) ->
-      let* objects=result in
-      let* record=List.assoc_opt id records |> Option.to_result ~none:(Invalid_package "Core public record map is incomplete") in
-      let objects=add_id objects record in
-      let snapshots,scope=match body.M.payload with
-        | M.Shared_revision revision -> [revision.M.base_snapshot;revision.M.result_snapshot],Some revision.M.edit_scope_root
-        | M.Accepted_version version -> [version.M.result_snapshot],None
-        | M.Branch_event _ -> [],None in
-      let* objects=List.fold_left (fun result id -> let* objects=result in
-        let* snapshot=object_snapshot id in collect_snapshot_closure source objects snapshot) (Ok objects) snapshots in
-      match scope with
-      | None -> Ok objects
-      | Some id ->
-          let* ids=Composition.Scope.closure source id |> Result.map_error (fun e -> Invalid_package (Composition.error_to_string e)) in
-          Ok (List.fold_left add_id objects ids)) (Ok Object_set.empty) (M.records pool)
+      Model.Snapshot_id.of_string (M.Object_id.to_hex id)
+      |> Result.map_error (fun e -> Model_error e)
+    in
+    List.fold_left
+      (fun result (id, body) ->
+        let* objects = result in
+        let* record =
+          List.assoc_opt id records
+          |> Option.to_result
+               ~none:(Invalid_package "Core public record map is incomplete")
+        in
+        let objects = add_id objects record in
+        let snapshots, scope =
+          match body.M.payload with
+          | M.Shared_revision revision ->
+              ( [ revision.M.base_snapshot; revision.M.result_snapshot ],
+                Some revision.M.edit_scope_root )
+          | M.Accepted_version version -> ([ version.M.result_snapshot ], None)
+          | M.Branch_event _ -> ([], None)
+        in
+        let* objects =
+          List.fold_left
+            (fun result id ->
+              let* objects = result in
+              let* snapshot = object_snapshot id in
+              collect_snapshot_closure source objects snapshot)
+            (Ok objects) snapshots
+        in
+        match scope with
+        | None -> Ok objects
+        | Some id ->
+            let* ids =
+              Composition.Scope.closure source id
+              |> Result.map_error (fun e ->
+                  Invalid_package (Composition.error_to_string e))
+            in
+            Ok (List.fold_left add_id objects ids))
+      (Ok Object_set.empty) (M.records pool)
 
   let has_branch pool branch =
-    List.exists (fun row -> M.Branch_id.equal row.M.branch_id branch) (M.branch_states pool)
+    List.exists
+      (fun row -> M.Branch_id.equal row.M.branch_id branch)
+      (M.branch_states pool)
 
   let create ~source ~destination ~authority ~records ~selected_branch ~titles =
-    let* repository=M.Repository_id.of_hex (Trust.repository (Trust.authority_membership authority) |> Trust.Repository_id.to_string) |> model in
-    let records=List.sort (fun (a,_) (b,_) -> M.Record_id.compare a b) records in
-    if List.length records<>List.length (List.sort_uniq (fun (a,_) (b,_) -> M.Record_id.compare a b) records)
+    let* repository =
+      M.Repository_id.of_hex
+        (Trust.repository (Trust.authority_membership authority)
+        |> Trust.Repository_id.to_string)
+      |> model
+    in
+    let records =
+      List.sort (fun (a, _) (b, _) -> M.Record_id.compare a b) records
+    in
+    if
+      List.length records
+      <> List.length
+           (List.sort_uniq
+              (fun (a, _) (b, _) -> M.Record_id.compare a b)
+              records)
     then Error (Invalid_package "duplicate Core record map entry")
     else
-      let* pool=verify_records source authority repository records in
-      let* ()=if has_branch pool selected_branch then Ok () else Error (Invalid_package "selected public branch is unknown") in
-      let placeholder=Option.get (Id.of_raw_bytes (String.make 32 '\000')) in
-      let control={repository;selected_branch;record_root=placeholder;authority_root=placeholder;title_root=placeholder;inventory_root=placeholder} in
-      let* record_root=Pages.store source ~namespace:(namespace control "records")
-        (List.map (fun (id,obj) -> M.Record_id.to_raw id,Id.to_raw_bytes obj) records) |> pages in
-      let* authority_values=authority_rows authority in
-      let* authority_root=Pages.store source ~namespace:(namespace control "authority") authority_values |> pages in
-      let* title_values=title_rows pool titles in
-      let* title_root=Pages.store source ~namespace:(namespace control "titles") title_values |> pages in
-      let control={control with record_root;authority_root;title_root} in
-      let* objects=source_objects source pool records in
-      let* metadata=metadata_ids source control ~inventory:false in
-      let objects=List.fold_left add_id objects metadata in
-      let* rows=traverse (fun hex ->
-        let* id=Id.of_hex hex |> Result.map_error (fun _ -> Invalid_package "invalid public object identity") in
-        let* bytes=read_bounded ~limit:max_object_bytes (Store.object_path source id) in
-        let* _=decode_object_bytes id bytes in
-        Ok (Id.to_raw_bytes id,Encoding.encode (Encoding.integer (Int64.of_int (String.length bytes))))) (Object_set.elements objects) in
-      let* inventory_root=Pages.store source ~namespace:(namespace control "objects") rows |> pages in
-      let control={control with inventory_root} in
-      let* manifest=encode_manifest control in
-      let* metadata=metadata_ids source control ~inventory:true in
-      let objects=List.fold_left add_id objects metadata |> Object_set.elements in
-      let* ids=traverse (fun hex -> Id.of_hex hex |> Result.map_error (fun _ -> Invalid_package "invalid public object identity")) objects in
+      let* pool = verify_records source authority repository records in
+      let* () =
+        if has_branch pool selected_branch then Ok ()
+        else Error (Invalid_package "selected public branch is unknown")
+      in
+      let placeholder = Option.get (Id.of_raw_bytes (String.make 32 '\000')) in
+      let control =
+        {
+          repository;
+          selected_branch;
+          record_root = placeholder;
+          authority_root = placeholder;
+          title_root = placeholder;
+          inventory_root = placeholder;
+        }
+      in
+      let* record_root =
+        Pages.store source
+          ~namespace:(namespace control "records")
+          (List.map
+             (fun (id, obj) -> (M.Record_id.to_raw id, Id.to_raw_bytes obj))
+             records)
+        |> pages
+      in
+      let* authority_values = authority_rows authority in
+      let* authority_root =
+        Pages.store source
+          ~namespace:(namespace control "authority")
+          authority_values
+        |> pages
+      in
+      let* title_values = title_rows pool titles in
+      let* title_root =
+        Pages.store source ~namespace:(namespace control "titles") title_values
+        |> pages
+      in
+      let control = { control with record_root; authority_root; title_root } in
+      let* objects = source_objects source pool records in
+      let* metadata = metadata_ids source control ~inventory:false in
+      let objects = List.fold_left add_id objects metadata in
+      let* rows =
+        traverse
+          (fun hex ->
+            let* id =
+              Id.of_hex hex
+              |> Result.map_error (fun _ ->
+                  Invalid_package "invalid public object identity")
+            in
+            let* bytes =
+              read_bounded ~limit:max_object_bytes (Store.object_path source id)
+            in
+            let* _ = decode_object_bytes id bytes in
+            Ok
+              ( Id.to_raw_bytes id,
+                Encoding.encode
+                  (Encoding.integer (Int64.of_int (String.length bytes))) ))
+          (Object_set.elements objects)
+      in
+      let* inventory_root =
+        Pages.store source ~namespace:(namespace control "objects") rows
+        |> pages
+      in
+      let control = { control with inventory_root } in
+      let* manifest = encode_manifest control in
+      let* metadata = metadata_ids source control ~inventory:true in
+      let objects =
+        List.fold_left add_id objects metadata |> Object_set.elements
+      in
+      let* ids =
+        traverse
+          (fun hex ->
+            Id.of_hex hex
+            |> Result.map_error (fun _ ->
+                Invalid_package "invalid public object identity"))
+          objects
+      in
       if Sys.file_exists destination then Error (Destination_exists destination)
       else
-        let* ()=mkdir destination in let* ()=mkdir (package_path destination objects_name) in
-        let* ()=write_file_exclusive (package_path destination manifest_name) manifest in
-        let* _=traverse (fun id ->
-          let* bytes=read_bounded ~limit:max_object_bytes (Store.object_path source id) in
-          let* _=decode_object_bytes id bytes in
-          write_file_exclusive (object_path destination (Id.to_hex id)) bytes) ids in
-        Ok {artifact_manifest_value=manifest;artifact_source_value=Artifact_package {artifact_package_path=destination;artifact_object_ids=ids};artifact_cleanup=None}
+        let* () = mkdir destination in
+        let* () = mkdir (package_path destination objects_name) in
+        let* () =
+          write_file_exclusive (package_path destination manifest_name) manifest
+        in
+        let* _ =
+          traverse
+            (fun id ->
+              let* bytes =
+                read_bounded ~limit:max_object_bytes
+                  (Store.object_path source id)
+              in
+              let* _ = decode_object_bytes id bytes in
+              write_file_exclusive
+                (object_path destination (Id.to_hex id))
+                bytes)
+            ids
+        in
+        Ok
+          {
+            artifact_manifest_value = manifest;
+            artifact_source_value =
+              Artifact_package
+                {
+                  artifact_package_path = destination;
+                  artifact_object_ids = ids;
+                };
+            artifact_cleanup = None;
+          }
 
   let prepare ~package ~repository ~known_authority =
-    let* bytes=read_bounded ~limit:max_manifest_bytes (package_path package manifest_name) in
-    let* control=decode_manifest ~repository bytes in
+    let* bytes =
+      read_bounded ~limit:max_manifest_bytes
+        (package_path package manifest_name)
+    in
+    let* control = decode_manifest ~repository bytes in
     with_staging (fun root ->
-      let* store=Store.init ~root |> stored in
-      let* ()=fetch_metadata store package control in
-      let* inventory_values=inventory store control in
-      let* metadata=metadata_ids store control ~inventory:true in
-      let object_ids=List.map fst inventory_values @ metadata |> List.sort_uniq Id.compare in
-      let* ()=validate_object_files package object_ids in
-      let* _=traverse (fun (id,size) ->
-        let* bytes=read_object package ~limit:size id in
-        if String.length bytes<>size then Error (Invalid_package "Core inventory length mismatch")
-        else let* envelope=decode_object_bytes id bytes in Store.put store envelope |> stored |> Result.map (fun _ -> ())) inventory_values in
-      let* authority=load_authority store control known_authority in
-      let* records=record_rows store control in
-      let* pool=verify_records store authority repository records in
-      let* ()=if has_branch pool control.selected_branch then Ok () else Error (Invalid_package "selected public branch is unknown") in
-      let* titles=load_titles store control pool in
-      let* expected=source_objects store pool records in
-      let* described_metadata=metadata_ids store control ~inventory:false in
-      let expected=List.fold_left add_id expected described_metadata in
-      let actual=List.fold_left (fun set (id,_) -> add_id set id) Object_set.empty inventory_values in
-      if not (Object_set.equal expected actual) then Error (Invalid_package "Core inventory differs from the exact public dependency closure")
-      else
-        let artifact={artifact_manifest_value=bytes;artifact_source_value=Artifact_package {artifact_package_path=package;artifact_object_ids=object_ids};artifact_cleanup=None} in
-        Ok {control;public_artifact=artifact;public_authority=authority;public_pool=pool;public_records=records;public_titles=titles})
+        let* store = Store.init ~root |> stored in
+        let* () = fetch_metadata store package control in
+        let* inventory_values = inventory store control in
+        let* metadata = metadata_ids store control ~inventory:true in
+        let object_ids =
+          List.map fst inventory_values @ metadata |> List.sort_uniq Id.compare
+        in
+        let* () = validate_object_files package object_ids in
+        let* _ =
+          traverse
+            (fun (id, size) ->
+              let* bytes = read_object package ~limit:size id in
+              if String.length bytes <> size then
+                Error (Invalid_package "Core inventory length mismatch")
+              else
+                let* envelope = decode_object_bytes id bytes in
+                Store.put store envelope |> stored |> Result.map (fun _ -> ()))
+            inventory_values
+        in
+        let* authority = load_authority store control known_authority in
+        let* records = record_rows store control in
+        let* pool = verify_records store authority repository records in
+        let* () =
+          if has_branch pool control.selected_branch then Ok ()
+          else Error (Invalid_package "selected public branch is unknown")
+        in
+        let* titles = load_titles store control pool in
+        let* expected = source_objects store pool records in
+        let* described_metadata = metadata_ids store control ~inventory:false in
+        let expected = List.fold_left add_id expected described_metadata in
+        let actual =
+          List.fold_left
+            (fun set (id, _) -> add_id set id)
+            Object_set.empty inventory_values
+        in
+        if not (Object_set.equal expected actual) then
+          Error
+            (Invalid_package
+               "Core inventory differs from the exact public dependency closure")
+        else
+          let artifact =
+            {
+              artifact_manifest_value = bytes;
+              artifact_source_value =
+                Artifact_package
+                  {
+                    artifact_package_path = package;
+                    artifact_object_ids = object_ids;
+                  };
+              artifact_cleanup = None;
+            }
+          in
+          Ok
+            {
+              control;
+              public_artifact = artifact;
+              public_authority = authority;
+              public_pool = pool;
+              public_records = records;
+              public_titles = titles;
+            })
 
-  let prepared_artifact prepared=prepared.public_artifact
-  let prepared_authority prepared=prepared.public_authority
-  let prepared_pool prepared=prepared.public_pool
-  let prepared_records prepared=prepared.public_records
-  let prepared_titles prepared=prepared.public_titles
-  let prepared_branch prepared=prepared.control.selected_branch
+  let prepared_artifact prepared = prepared.public_artifact
+  let prepared_authority prepared = prepared.public_authority
+  let prepared_pool prepared = prepared.public_pool
+  let prepared_records prepared = prepared.public_records
+  let prepared_titles prepared = prepared.public_titles
+  let prepared_branch prepared = prepared.control.selected_branch
 
   let import_prepared ~destination prepared =
     iter_artifact_objects prepared.public_artifact ~f:(fun _ bytes ->
-      let* envelope=Envelope.decode bytes |> Result.map_error (fun e -> Envelope_error e) in
-      Store.put destination envelope |> stored |> Result.map (fun _ -> ()))
+        let* envelope =
+          Envelope.decode bytes |> Result.map_error (fun e -> Envelope_error e)
+        in
+        Store.put destination envelope |> stored |> Result.map (fun _ -> ()))
 end

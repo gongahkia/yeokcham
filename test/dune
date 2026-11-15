@@ -425,10 +425,33 @@
 (test
  (name test_core_package)
  (modules test_core_package)
- (libraries alcotest unix yeokcham_encoding yeokcham_envelope yeokcham_snapshot
-  yeokcham_store yeokcham_v1_model yeokcham_v1_record yeokcham_v1_trust
-  yeokcham_v1_store yeokcham_v1_local_service yeokcham_v1_integration
-  yeokcham_v1_composition yeokcham_v1_pages yeokcham_v1_package))
+ (libraries
+  alcotest
+  unix
+  yeokcham_encoding
+  yeokcham_envelope
+  yeokcham_hash
+  yeokcham_snapshot
+  yeokcham_store
+  yeokcham_v1_model
+  yeokcham_v1_record
+  yeokcham_v1_trust
+  yeokcham_v1_store
+  yeokcham_v1_local_service
+  yeokcham_v1_integration
+  yeokcham_v1_composition
+  yeokcham_v1_pages
+  yeokcham_v1_package)
+ (deps
+  (source_tree golden)))
+
+(rule
+ (alias runtest)
+ (deps
+  ../tools/generate_core_package_vectors.py
+  (source_tree golden/core-package))
+ (action
+  (run python3 %{dep:../tools/generate_core_package_vectors.py})))
 
 (test
  (name test_v1_transport)
