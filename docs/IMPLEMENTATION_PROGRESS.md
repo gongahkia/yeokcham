@@ -1225,3 +1225,63 @@ clean main `30e01afcddc411ef2d7f4fc0aaaf1d09d4602744`. Extending the existing
 package boundary with a paged public Core manifest/verified closure, then its
 actual store/relay/clone consumers. The original full P3 scope remains binding;
 public-only packages are necessary evidence, not completion of native exchange.
+
+P3 public Core export checkpoint: external commit
+`1c5e66e9e6fc5a2fbc6e9fdfb54eca7402465094` (`newthings`) appeared during verification.
+Its six paths contain only this continuation's owned package boundary, tests and
+starting ledger entry. Inspected and preserved without reset/amend. It introduces
+`Package.Core` and canonical package-manifest version 2, with repository-scoped
+registry-45 inventories for public record references, authority, courier titles
+and exact object sizes. No new envelope code or competing mutable state exists.
+
+Creation follows only typed public Core records and their verified dependency
+closure. Preparation verifies in an isolated store: historical signatures,
+canonical references/pages, complete scope/result composition, causal root
+continuity and exact public inventory. A canonical extra private blob is rejected
+after structural verification; a valid signature over a false accepted result is
+also rejected. Immutable import moves neither ordinary files nor a project head.
+Known authority pins its root; initial clone still needs independent root checking
+and existing enrollment. Current new-record admission remains a separate service
+obligation; historical package verification does not silently adopt late records.
+
+`a65db94492923b5e6eaa2300e1d40a7e4c3a8222` records formatter/API/schema documentation,
+independent public-manifest/courier/hash fixtures and native SHA-256 selection.
+The existing pinned Digestif 1.3.1 C implementation replaces explicit OCaml
+implementation linkage; algorithm, signatures, canonical bytes and identities
+remain unchanged. Actual independent vectors and offset/persistent-context tests
+passed. Common artifact iteration/lookups bound file reads before allocation;
+large files continue through existing manifests/chunks, not whole-file buffering.
+
+The new mixed-file package journey first passed in 206.810 seconds with the
+OCaml backend. Attaching a debugger was unavailable (ptrace denied); a controlled
+child debugger sample showed OCaml SHA-256 during repeated snapshot verification.
+Diagnostic child runs were deliberately ended after sampling and are not counted
+as passing tests. The C-backed four-case run passed in 57.937 seconds; later
+six-case focused run passed in 32.498 seconds and CI's six-case run in 39.002.
+These are individual functional diagnostics under changing load, not a benchmark
+comparison or a claim that all verification costs are resolved. G01 measurements
+were neither rerun nor changed.
+
+Focused Core-package6, Core-record6, Core-trust3, metadata-pages9, legacy-package10
+and signed local-core69 passed. All three independent generators passed, including
+new exact manifest, courier ID and streamed SHA-256 vectors. `make build`,
+`make lint` and default `make ci` exited 0 on parent `1c5e66e` with the exact
+pending tree then committed as `a65db94`; CI took 40.823 seconds and may reuse
+matching unchanged Dune results. Commands, exits, file hashes and logs are in
+`core-public-package-checkpoint-checks.json` under the P3 external log directory.
+Initial strict-warning/declaration failures and expected formatter promotions
+(make exit 2) were corrected before these checks. README, P2 handoff and accepted
+G01 hashes still match the starting receipt. Legacy package/relay support remains
+distinct from the new manifest format; those older clients do not gain Core
+exchange by aliasing a command.
+
+This adds P3 public-only closure evidence and partial G02/G08 coverage, not full
+phase acceptance. Next implement actual atomic Core receipt/outbound state and
+native relay/clone consumers, including known-only remote branches without
+inventing private working observations. Metadata/availability receipt still needs
+an explicit boundary; do not weaken new accepted-result validation to make missing
+contents appear verified. Native conflict resolution, real acknowledgements,
+Alice/Bob relay/fault journeys and the complete criterion audit remain open.
+Preserve existing recovery roots and format-bearing data when changing binaries;
+source rollback cannot undo accepted history or restore files. P3 remains active,
+P4 unstarted, and no P03 completion report or acceptance receipt is claimed.
