@@ -7,8 +7,8 @@ verified local selection/recovery. Read actual signatures in
 [record Core](../../lib/yeokcham_v1_record/core_record.mli),
 [trust Core](../../lib/yeokcham_v1_trust/yeokcham_v1_trust.mli) and the local
 adapters below. P1 left V1 CLI/wrappers unchanged; P2 extends the existing local
-state root while preserving public package/transport formats. There is no new
-clone/shared composition/integration executor. See the
+state root while preserving public package/transport formats. P3 composition/accepted-result verification is now in progress below; clone,
+exchange and integration execution are not yet delivered. See the
 [P2 report](reports/P02-attempt-01.md). TC01/TC02/TC06 remain the authority in
 [Technical contracts](../TECHNICAL_CONTRACTS.md).
 
@@ -331,10 +331,11 @@ prepares metadata; a service must materialize safely before publishing it.
 The connected CLI branch/switch adapter is described below.
 
 `initialize` stores a canonical empty snapshot and signs it through
-`Trust.Core.sign`/`receive`. It never accepts existing worktree files. The local
-adapter currently admits only empty genesis and forks with at most one accepted
-parent, no chosen revisions/resolutions/review/policy and the canonical empty
-result. Other acceptance requires the actual P3 integration proof. Historical
+`Trust.Core.sign`/`receive`. It never accepts existing worktree files. The P2
+adapter originally admitted only empty genesis/forks. P3 now admits nonempty
+results only through the actual graph-composition verifier below. Required
+policy/review and resolution support are still explicitly unsupported at this
+checkpoint; no integration CLI success follows merely from staging metadata. Historical
 state reload verifies signatures and causal references. New records pass
 current admission separately; a late revoked signer cannot bypass this boundary
 by decoding historically valid bytes.
@@ -808,3 +809,48 @@ and malformed-input/property cases are in `test/test_composition.ml`.
 This foundation does not yet implement accepted-result graph verification,
 publication correspondence, selected share CLI, clone/exchange, integration
 plans/execution or conflict resolution. P3 remains incomplete.
+
+
+### P3 accepted-result graph and signed store boundary (in progress)
+
+`Composition.Graph` exposes `accepted`, `represented`, `common_base`, `compose`
+and `validate`. It validates full revision scope/content correspondence and
+recorded public bases, composes dependency layers as sets, preserves unrelated
+accepted work during exact revision updates, rejects concurrent floating versions
+of one change, and refuses missing/incomparable merge bases. Accepted snapshots
+must equal deterministic composition of their exact parents/chosen revisions.
+An advance/reconciliation cannot discard an accepted head inherited from its
+previous branch events. Rename inherits rather than replacing accepted targets.
+Graph errors distinguish underlying content failure, invalid graph and an
+explicit decision. Signature verification/admission remains `Trust.Core`.
+
+`Store.Local.decode` now runs this verifier after historical signature/reference
+validation, and `admit_update` runs it after current admission for new records.
+Complete public dependency data is required by this current read boundary;
+unknown/missing/invalid data is refused rather than called verified. A valid
+signature over a false accepted snapshot is rejected. Nonempty forks inherit the
+verified source accepted snapshot rather than substituting empty contents.
+
+`Store.Local.prepare_revision` and `prepare_acceptance` stage canonical signed
+records and return metadata plus the logical record identity. The latter checks
+exact current accepted heads and creates an advance/reconciliation event. These
+APIs do not publish a root, materialize files or create a durable outbox. Actual
+journaled service execution/atomic history/outbound publication is still needed.
+Change ID generation uses the existing typed CSPRNG constructor with three
+collision attempts. `Local.pool` and `record_objects` expose verified public
+records separately from local positions; packaging must never export `Local.encode`.
+
+`Store.local_shared_snapshots` exposes public revision bases/results and accepted
+snapshots as independent retention roots. `Gc.Shared_history` roots their entire
+snapshot/content closure even when a derived selected result does not appear in
+any private checkpoint. The signed-store test runs actual collection and reload
+before checking a nonempty fork; private file bytes remain absent from the public
+result. Scope pages/record types remain conservatively retained until their
+collection consumers are extended.
+
+Six graph cases cover updates, dependency bases, concurrent accepted heads,
+equal-content ambiguous bases, false results/nonempty genesis, inherited-head
+loss and unrecorded private bases. Native signed local-state suite has 25 cases,
+including a valid signature over an existing wrong snapshot that still fails
+composition proof, and a bounded typed change-ID collision test. This does not
+complete P3 or authorize unsupported resolution/policy behavior.

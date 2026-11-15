@@ -5,6 +5,7 @@ module Store = Yeokcham_store
 module Snapshot = Yeokcham_snapshot
 module Encoding = Yeokcham_encoding
 module Envelope = Yeokcham_envelope
+module Composition = Yeokcham_v1_composition
 
 [@@@warning "-42"]
 
@@ -34,6 +35,8 @@ type t = {
 let positions state = state.positions
 let branches state = Core.branch_states state.pool
 let empty_snapshot state = state.empty
+let pool state = state.pool
+let record_objects state = state.records
 
 let selected state =
   List.find
@@ -204,7 +207,17 @@ let add_branch ~random_bytes ~store ~authority ~certificate ~signing_capability
          name)
   else
     let* branch = fresh_branch ~random_bytes state in
-    let* payload = accepted branch parents state.empty in
+    let* result =
+      match parents with
+      | [] -> Ok state.empty
+      | [ id ] ->
+          Composition.Graph.accepted state.pool id
+          |> Result.map (fun (value : Core.accepted_version) ->
+              value.Core.result_snapshot)
+          |> Result.map_error Composition.Graph.error_to_string
+      | _ -> Error "new branch needs one explicitly selected accepted basis"
+    in
+    let* payload = accepted branch parents result in
     let* state, basis =
       persist_record ~store ~authority ~certificate ~signing_capability state
         payload
@@ -257,10 +270,6 @@ let create_branch ~store ~authority ~certificate ~signing_capability ~name
     ~cursor state =
   create_branch_using ~random_bytes:Trust.random_bytes ~store ~authority
     ~certificate ~signing_capability ~name ~cursor state
-
-module For_test = struct
-  let create_branch = create_branch_using
-end
 
 let remember state ~cursor =
   if Int64.compare cursor 0L < 0 then Error "branch cursor must be nonnegative"
@@ -406,22 +415,6 @@ let[@warning "-4"] decode ~store ~authority bytes =
           in
           let* () = Trust.Core.verify authority signed |> trust in
           let body = Record.body signed in
-          let* () =
-            match body.Core.payload with
-            | Core.Accepted_version version
-              when Core.Object_id.equal version.Core.result_snapshot empty
-                   && version.Core.chosen_revisions = []
-                   && version.Core.resolutions = []
-                   && version.Core.policy_heads = []
-                   && version.Core.review_evidence = []
-                   && List.length version.Core.accepted_parents <= 1 ->
-                Ok ()
-            | Core.Branch_event _ -> Ok ()
-            | Core.Shared_revision _ | Core.Accepted_version _ ->
-                Error
-                  "this local adapter supports empty genesis/forks only; other \
-                   acceptance requires verified integration"
-          in
           Ok ((id, body) :: values))
         (Ok []) ids
     in
@@ -445,6 +438,10 @@ let[@warning "-4"] decode ~store ~authority bytes =
           else Error "local core records have missing causal references"
     in
     let* pool = retain (Core.empty_pool ~repository) pending in
+    let* () =
+      Composition.Graph.validate store pool
+      |> Result.map_error Composition.Graph.error_to_string
+    in
     let state = { pool; records = ids; empty; selected_branch; positions } in
     let branch_ids =
       branches state |> List.map (fun row -> row.Core.branch_id)
@@ -555,4 +552,124 @@ let admit_update ~store ~authority ~previous state =
         if progress then receive pool remaining
         else Error "new branch records have missing causal references"
   in
-  receive pool pending
+  let* () = receive pool pending in
+  Composition.Graph.validate store state.pool
+  |> Result.map_error Composition.Graph.error_to_string
+
+let fresh_change_using ~random_bytes state =
+  let rec attempt count =
+    let* change = Core.Change_id.generate ~random_bytes () |> model in
+    if
+      List.exists
+        (fun (_, body) ->
+          match body.Core.payload with
+          | Core.Shared_revision value ->
+              Core.Change_id.equal change value.Core.change
+          | Core.Accepted_version _ | Core.Branch_event _ -> false)
+        (Core.records state.pool)
+    then
+      if count = 1 then Error "change identity collision after three attempts"
+      else attempt (count - 1)
+    else Ok change
+  in
+  attempt 3
+
+let prepare_revision ~store ~authority ~certificate ~signing_capability ~change
+    ~previous_revisions ~base_snapshot ~result_snapshot ~edit_scope_root
+    ~dependencies state =
+  let* change =
+    match change with
+    | Some change -> Ok change
+    | None -> fresh_change_using ~random_bytes:Trust.random_bytes state
+  in
+  let* value =
+    Core.make_shared_revision ~change ~previous_revisions ~base_snapshot
+      ~result_snapshot ~edit_scope_root ~dependencies
+    |> model
+  in
+  let* () =
+    Composition.validate_revision store value
+    |> Result.map_error Composition.error_to_string
+  in
+  let* next, id =
+    persist_record ~store ~authority ~certificate ~signing_capability state
+      (Core.Shared_revision value)
+  in
+  let* () =
+    Composition.Graph.validate store next.pool
+    |> Result.map_error Composition.Graph.error_to_string
+  in
+  Ok (next, id)
+
+let prepare_acceptance ~store ~authority ~certificate ~signing_capability
+    ~parents ~chosen_revisions ~result_snapshot ~cursor state =
+  let* row =
+    List.find_opt
+      (fun row -> Core.Branch_id.equal row.Core.branch_id state.selected_branch)
+      (branches state)
+    |> Option.to_result ~none:"selected branch is unavailable"
+  in
+  let parents = List.sort Core.Record_id.compare parents in
+  if row.Core.accepted_heads <> parents then
+    Error "accepted heads changed; prepare a new integration plan"
+  else
+    let* expected =
+      Composition.Graph.compose store state.pool ~parents
+        ~revisions:chosen_revisions
+      |> Result.map_error Composition.Graph.error_to_string
+    in
+    let* actual =
+      Composition.load store result_snapshot
+      |> Result.map_error Composition.error_to_string
+    in
+    if Composition.differences expected actual <> [] then
+      Error "accepted result does not match exact composition"
+    else
+      let* value =
+        Core.make_accepted_version ~branch:state.selected_branch
+          ~accepted_parents:parents ~chosen_revisions ~resolutions:[]
+          ~result_snapshot ~composition_profile:"line-hunks-v1" ~policy_heads:[]
+          ~review_evidence:[]
+        |> model
+      in
+      let* state, id =
+        persist_record ~store ~authority ~certificate ~signing_capability state
+          (Core.Accepted_version value)
+      in
+      let action =
+        if List.length row.Core.event_heads > 1 then Core.Reconcile
+        else Core.Advance
+      in
+      let* event =
+        Core.make_branch_event ~branch:state.selected_branch
+          ~previous_events:row.Core.event_heads ~action ~targets:[ id ]
+          ~display_name:None
+        |> model
+      in
+      let* state, _ =
+        persist_record ~store ~authority ~certificate ~signing_capability state
+          (Core.Branch_event event)
+      in
+      let* state = remember state ~cursor in
+      let state =
+        {
+          state with
+          positions =
+            List.map
+              (fun position ->
+                if Core.Branch_id.equal position.branch state.selected_branch
+                then { position with basis = id }
+                else position)
+              state.positions;
+        }
+      in
+      let* () =
+        Composition.Graph.validate store state.pool
+        |> Result.map_error Composition.Graph.error_to_string
+      in
+      Ok (state, id)
+
+module For_test = struct
+  let create_branch = create_branch_using
+  let fresh_change = fresh_change_using
+end

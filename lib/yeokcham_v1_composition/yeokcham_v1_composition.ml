@@ -530,3 +530,451 @@ let validate_revision repository revision =
   else
     Error
       (Integrity "declared edit scope differs from actual base/result contents")
+
+module Graph = struct
+  type failure =
+    | Content_error of error
+    | Invalid_graph of string
+    | Decision of string
+
+  let error_to_string = function
+    | Content_error error -> error_to_string error
+    | Invalid_graph detail -> "invalid shared graph: " ^ detail
+    | Decision detail -> "shared graph needs an explicit decision: " ^ detail
+
+  let content result =
+    Result.map_error (fun error -> Content_error error) result
+
+  module Ids = Set.Make (Core.Record_id)
+  module Objects = Map.Make (Core.Object_id)
+
+  let body pool id =
+    Core.find pool id
+    |> Option.to_result
+         ~none:(Invalid_graph ("missing record " ^ Core.Record_id.to_hex id))
+
+  let accepted pool id =
+    let* body = body pool id in
+    match body.Core.payload with
+    | Core.Accepted_version value -> Ok value
+    | Core.Shared_revision _ | Core.Branch_event _ ->
+        Error (Invalid_graph "expected an accepted version")
+
+  let revision pool id =
+    let* body = body pool id in
+    match body.Core.payload with
+    | Core.Shared_revision value -> Ok value
+    | Core.Accepted_version _ | Core.Branch_event _ ->
+        Error (Invalid_graph "expected a shared revision")
+
+  let rec ancestors pool seen = function
+    | [] -> Ok seen
+    | id :: rest when Ids.mem id seen -> ancestors pool seen rest
+    | id :: rest ->
+        let* value = accepted pool id in
+        ancestors pool (Ids.add id seen) (value.Core.accepted_parents @ rest)
+
+  let common_base pool heads =
+    match heads with
+    | [] -> Error (Decision "no accepted parent provides a base")
+    | first :: rest -> (
+        let* first = ancestors pool Ids.empty [ first ] in
+        let* common =
+          List.fold_left
+            (fun acc id ->
+              let* common = acc in
+              let* ids = ancestors pool Ids.empty [ id ] in
+              Ok (Ids.inter common ids))
+            (Ok first) rest
+        in
+        let* inherited =
+          Ids.fold
+            (fun id acc ->
+              let* inherited = acc in
+              let* value = accepted pool id in
+              let* parents =
+                ancestors pool Ids.empty value.Core.accepted_parents
+              in
+              Ok (Ids.union inherited parents))
+            common (Ok Ids.empty)
+        in
+        match Ids.elements (Ids.diff common inherited) with
+        | [ id ] -> Ok id
+        | [] ->
+            Error (Decision "accepted histories have no recorded common base")
+        | _ -> Error (Decision "multiple incomparable accepted merge bases"))
+
+  let rec revision_closure pool seen ids =
+    match ids with
+    | [] -> Ok seen
+    | id :: rest when Ids.mem id seen -> revision_closure pool seen rest
+    | id :: rest ->
+        let* value = revision pool id in
+        revision_closure pool (Ids.add id seen) (value.Core.dependencies @ rest)
+
+  let represented pool heads =
+    let* versions = ancestors pool Ids.empty heads in
+    let* roots =
+      Ids.fold
+        (fun id acc ->
+          let* roots = acc in
+          let* value = accepted pool id in
+          Ok (value.Core.chosen_revisions @ value.Core.resolutions @ roots))
+        versions (Ok [])
+    in
+    let rec walk seen = function
+      | [] -> Ok (Ids.elements seen)
+      | id :: rest when Ids.mem id seen -> walk seen rest
+      | id :: rest ->
+          let* value = revision pool id in
+          walk (Ids.add id seen)
+            (value.Core.previous_revisions @ value.Core.dependencies @ rest)
+    in
+    walk Ids.empty roots
+
+  let rec revision_ancestors pool seen = function
+    | [] -> Ok seen
+    | id :: rest when Ids.mem id seen -> revision_ancestors pool seen rest
+    | id :: rest ->
+        let* value = revision pool id in
+        revision_ancestors pool (Ids.add id seen)
+          (value.Core.previous_revisions @ rest)
+
+  type context = {
+    repository : Raw.repository;
+    pool : Core.pool;
+    mutable loaded : tree Objects.t;
+  }
+
+  let context repository pool = { repository; pool; loaded = Objects.empty }
+
+  let load context id =
+    match Objects.find_opt id context.loaded with
+    | Some tree -> Ok tree
+    | None ->
+        let* tree = load context.repository id |> content in
+        context.loaded <- Objects.add id tree context.loaded;
+        Ok tree
+
+  let validate_revision context value =
+    let* before = load context value.Core.base_snapshot in
+    let* after = load context value.Core.result_snapshot in
+    let* scope =
+      Scope.load context.repository value.Core.edit_scope_root |> content
+    in
+    if differences before after = scope then Ok ()
+    else
+      Error
+        (Invalid_graph "revision changes paths outside its exact declared scope")
+
+  let effective_base context represented value =
+    let previous =
+      List.filter
+        (fun id -> Ids.mem id represented)
+        value.Core.previous_revisions
+    in
+    let* inherited =
+      List.fold_left
+        (fun acc id ->
+          let* acc = acc in
+          let* value = revision context.pool id in
+          let* ancestors =
+            revision_ancestors context.pool Ids.empty
+              value.Core.previous_revisions
+          in
+          Ok (Ids.union acc ancestors))
+        (Ok Ids.empty) previous
+    in
+    match List.filter (fun id -> not (Ids.mem id inherited)) previous with
+    | [] -> Ok value.Core.base_snapshot
+    | [ id ] ->
+        let* previous = revision context.pool id in
+        Ok previous.Core.result_snapshot
+    | _ ->
+        Error
+          (Decision "updated revision has incomparable represented predecessors")
+
+  let public_base context accepted_ancestors applied value =
+    let* from_accepted =
+      Ids.fold
+        (fun id acc ->
+          let* found = acc in
+          let* version = accepted context.pool id in
+          Ok
+            (found
+            || Core.Object_id.equal version.Core.result_snapshot
+                 value.Core.base_snapshot))
+        accepted_ancestors (Ok false)
+    in
+    if from_accepted then Ok ()
+    else
+      let* from_dependency =
+        List.fold_left
+          (fun acc id ->
+            let* found = acc in
+            let* dependency = revision context.pool id in
+            Ok
+              (found
+              || Ids.mem id applied
+                 && Core.Object_id.equal dependency.Core.result_snapshot
+                      value.Core.base_snapshot))
+          (Ok false) value.Core.dependencies
+      in
+      if from_dependency then Ok ()
+      else
+        Error
+          (Decision
+             "revision base has no unambiguous accepted/dependency \
+              correspondence at this target")
+
+  let compose_with context ~parents ~revisions =
+    let* parents_ancestry = ancestors context.pool Ids.empty parents in
+    let* represented =
+      represented context.pool parents |> Result.map Ids.of_list
+    in
+    let* pending =
+      revision_closure context.pool Ids.empty revisions
+      |> Result.map (fun ids -> Ids.diff ids represented)
+    in
+    let* () =
+      Ids.fold
+        (fun id acc ->
+          let* () = acc in
+          let* value = revision context.pool id in
+          validate_revision context value)
+        pending (Ok ())
+    in
+    let* () =
+      Ids.fold
+        (fun id acc ->
+          let* () = acc in
+          let* value = revision context.pool id in
+          Ids.fold
+            (fun other acc ->
+              let* () = acc in
+              let* other_value = revision context.pool other in
+              if
+                (not (Core.Record_id.equal id other))
+                && Core.Change_id.equal value.Core.change
+                     other_value.Core.change
+              then
+                let* first = revision_ancestors context.pool Ids.empty [ id ] in
+                let* second =
+                  revision_ancestors context.pool Ids.empty [ other ]
+                in
+                if Ids.mem other first || Ids.mem id second then Ok ()
+                else
+                  Error
+                    (Decision
+                       "concurrent versions of one change require exact \
+                        selection or resolution")
+              else Ok ())
+            pending (Ok ()))
+        pending (Ok ())
+    in
+    let* target =
+      match parents with
+      | [] when revisions = [] -> Ok Paths.empty
+      | [] -> Error (Invalid_graph "genesis cannot accept chosen work")
+      | [ id ] ->
+          let* value = accepted context.pool id in
+          load context value.Core.result_snapshot
+      | _ ->
+          let* common = common_base context.pool parents in
+          let* version = accepted context.pool common in
+          let* base = load context version.Core.result_snapshot in
+          let* variants =
+            List.fold_left
+              (fun acc id ->
+                let* variants = acc in
+                let* version = accepted context.pool id in
+                let* tree = load context version.Core.result_snapshot in
+                Ok (tree :: variants))
+              (Ok []) parents
+          in
+          merge context.repository ~base ~variants |> content
+    in
+    let rec layers target applied pending =
+      if Ids.is_empty pending then Ok target
+      else
+        let* ready =
+          Ids.fold
+            (fun id acc ->
+              let* ready = acc in
+              let* value = revision context.pool id in
+              if
+                List.for_all
+                  (fun dependency -> Ids.mem dependency applied)
+                  value.Core.dependencies
+                && List.for_all
+                     (fun previous -> not (Ids.mem previous pending))
+                     value.Core.previous_revisions
+              then Ok (id :: ready)
+              else Ok ready)
+            pending (Ok [])
+        in
+        if ready = [] then
+          Error (Invalid_graph "revision dependencies do not form a usable DAG")
+        else
+          let* variants =
+            List.fold_left
+              (fun acc id ->
+                let* variants = acc in
+                let* value = revision context.pool id in
+                let* () = public_base context parents_ancestry applied value in
+                let* base = effective_base context applied value in
+                let* base = load context base in
+                let* changed = load context value.Core.result_snapshot in
+                let* combined =
+                  merge context.repository ~base ~variants:[ target; changed ]
+                  |> content
+                in
+                Ok (combined :: variants))
+              (Ok []) ready
+          in
+          let* combined =
+            merge context.repository ~base:target ~variants |> content
+          in
+          let ready = Ids.of_list ready in
+          layers combined (Ids.union applied ready) (Ids.diff pending ready)
+    in
+    layers target represented pending
+
+  let compose repository pool ~parents ~revisions =
+    compose_with (context repository pool) ~parents ~revisions
+
+  let event pool id =
+    let* body = body pool id in
+    match body.Core.payload with
+    | Core.Branch_event value -> Ok value
+    | Core.Shared_revision _ | Core.Accepted_version _ ->
+        Error (Invalid_graph "expected a branch event")
+
+  let rec event_targets pool seen ids =
+    match ids with
+    | [] -> Ok Ids.empty
+    | id :: rest when Ids.mem id seen -> event_targets pool seen rest
+    | id :: rest ->
+        let* value = event pool id in
+        let* other = event_targets pool (Ids.add id seen) rest in
+        let* targets =
+          match value.Core.action with
+          | Core.Rename ->
+              event_targets pool (Ids.add id seen) value.Core.previous_events
+          | Core.Create | Core.Advance | Core.Reconcile ->
+              Ok (Ids.of_list value.Core.targets)
+        in
+        Ok (Ids.union targets other)
+
+  let validate repository pool =
+    let context = context repository pool in
+    let* () =
+      List.fold_left
+        (fun acc (_, body) ->
+          let* () = acc in
+          match body.Core.payload with
+          | Core.Shared_revision value ->
+              let* () = validate_revision context value in
+              let from_accepted =
+                List.exists
+                  (fun (_, body) ->
+                    match body.Core.payload with
+                    | Core.Accepted_version accepted ->
+                        Core.Object_id.equal accepted.Core.result_snapshot
+                          value.Core.base_snapshot
+                    | Core.Shared_revision _ | Core.Branch_event _ -> false)
+                  (Core.records pool)
+              in
+              let* from_dependency =
+                List.fold_left
+                  (fun acc id ->
+                    let* found = acc in
+                    let* previous = revision pool id in
+                    Ok
+                      (found
+                      || Core.Object_id.equal previous.Core.result_snapshot
+                           value.Core.base_snapshot))
+                  (Ok false)
+                  (value.Core.dependencies @ value.Core.previous_revisions)
+              in
+              if from_accepted || from_dependency then Ok ()
+              else
+                Error
+                  (Invalid_graph
+                     "shared revision base is not a recorded \
+                      accepted/dependency snapshot")
+          | Core.Accepted_version _ | Core.Branch_event _ -> Ok ())
+        (Ok ()) (Core.records pool)
+    in
+    let verified = ref Ids.empty and visiting = ref Ids.empty in
+    let rec verify id =
+      if Ids.mem id !verified then Ok ()
+      else if Ids.mem id !visiting then
+        Error (Invalid_graph "accepted-result cycle")
+      else
+        let* value = accepted pool id in
+        visiting := Ids.add id !visiting;
+        let* () =
+          List.fold_left
+            (fun acc parent ->
+              let* () = acc in
+              verify parent)
+            (Ok ()) value.Core.accepted_parents
+        in
+        let* () =
+          if
+            value.Core.resolutions = []
+            && value.Core.policy_heads = []
+            && value.Core.review_evidence = []
+          then Ok ()
+          else
+            Error
+              (Decision
+                 "required policy/review/resolution semantics are unsupported \
+                  by this verifier")
+        in
+        let* actual = load context value.Core.result_snapshot in
+        let* expected =
+          compose_with context ~parents:value.Core.accepted_parents
+            ~revisions:value.Core.chosen_revisions
+        in
+        if differences expected actual <> [] then
+          Error
+            (Invalid_graph
+               "accepted snapshot does not equal deterministic composition of \
+                its exact parents/revisions")
+        else (
+          visiting := Ids.remove id !visiting;
+          verified := Ids.add id !verified;
+          Ok ())
+    in
+    let* () =
+      List.fold_left
+        (fun acc (id, body) ->
+          let* () = acc in
+          match body.Core.payload with
+          | Core.Accepted_version _ -> verify id
+          | Core.Shared_revision _ | Core.Branch_event _ -> Ok ())
+        (Ok ()) (Core.records pool)
+    in
+    List.fold_left
+      (fun acc (_, body) ->
+        let* () = acc in
+        match body.Core.payload with
+        | Core.Shared_revision _ | Core.Accepted_version _ -> Ok ()
+        | Core.Branch_event value -> (
+            match value.Core.action with
+            | Core.Rename -> Ok ()
+            | Core.Create | Core.Advance | Core.Reconcile ->
+                let* inherited =
+                  event_targets pool Ids.empty value.Core.previous_events
+                in
+                let* selected = ancestors pool Ids.empty value.Core.targets in
+                if Ids.subset inherited selected then Ok ()
+                else
+                  Error
+                    (Invalid_graph
+                       "branch update would discard an inherited accepted head")
+            ))
+      (Ok ()) (Core.records pool)
+end

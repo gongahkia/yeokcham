@@ -14,6 +14,10 @@ val selected : t -> position
 val positions : t -> position list
 val branches : t -> Core.branch_state list
 val empty_snapshot : t -> Core.Object_id.t
+val pool : t -> Core.pool
+
+val record_objects :
+  t -> (Core.Record_id.t * Yeokcham_store.Stored_object_id.t) list
 
 val initialize :
   store:Yeokcham_store.repository ->
@@ -50,8 +54,8 @@ val decode :
   string ->
   (t, string) result
 (** Verifies canonical typed objects, historical signatures, reference closure
-    and P2's empty/fork-only accepted semantics. Other acceptance is refused
-    until its actual integration/verification boundary exists. *)
+    and actual revision-scope/deterministic accepted-result semantics. Missing
+    required contents or unsupported review/resolution semantics refuse. *)
 
 val validate_update : previous:t -> t -> (unit, string) result
 (** Existing authenticated records and branch identities cannot be erased. *)
@@ -65,6 +69,36 @@ val admit_update :
 (** New records cross current trust admission; retained historical records do
     not become late arrivals merely because authority subsequently changed. *)
 
+val prepare_revision :
+  store:Yeokcham_store.repository ->
+  authority:Yeokcham_v1_trust.authority ->
+  certificate:string ->
+  signing_capability:Yeokcham_v1_trust.signing_capability ->
+  change:Core.Change_id.t option ->
+  previous_revisions:Core.Record_id.t list ->
+  base_snapshot:Core.Object_id.t ->
+  result_snapshot:Core.Object_id.t ->
+  edit_scope_root:Core.Object_id.t ->
+  dependencies:Core.Record_id.t list ->
+  t ->
+  (t * Core.Record_id.t, string) result
+
+val prepare_acceptance :
+  store:Yeokcham_store.repository ->
+  authority:Yeokcham_v1_trust.authority ->
+  certificate:string ->
+  signing_capability:Yeokcham_v1_trust.signing_capability ->
+  parents:Core.Record_id.t list ->
+  chosen_revisions:Core.Record_id.t list ->
+  result_snapshot:Core.Object_id.t ->
+  cursor:int64 ->
+  t ->
+  (t * Core.Record_id.t, string) result
+(** Stages signed immutable records and returns metadata only. These functions
+    do not publish a state root, create an outbox, or apply working files. The
+    service must journal materialization and atomically commit corresponding
+    history/basis/outbound state before announcing acceptance. *)
+
 module For_test : sig
   val create_branch :
     random_bytes:(int -> (string, string) result) ->
@@ -76,6 +110,11 @@ module For_test : sig
     cursor:int64 ->
     t ->
     (t, string) result
+
+  val fresh_change :
+    random_bytes:(int -> (string, string) result) ->
+    t ->
+    (Core.Change_id.t, string) result
   (** Trusted deterministic collision/entropy tests; ordinary calls use the OS
       CSPRNG. *)
 end

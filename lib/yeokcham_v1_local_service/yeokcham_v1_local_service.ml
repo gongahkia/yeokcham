@@ -5086,73 +5086,84 @@ let compare_local_states ~root ~before ~after =
   in
   if observe then with_worktree_lock ~root action else action ()
 
-let inspect_local_status ~root =
-  with_worktree_lock ~root (fun () ->
-      with_repository ~root (fun repository loaded ->
-          let store = Store.underlying_store repository in
-          let pending = Journal.pending ~root in
-          let pending_local_recovery =
+let[@warning "-4"] inspect_local_status ~root =
+  let inspect observation_failure =
+    with_repository ~root (fun repository loaded ->
+        let store = Store.underlying_store repository in
+        let pending = Journal.pending ~root in
+        let pending_local_recovery =
+          match pending with
+          | Ok (journal :: _) ->
+              Some
+                {
+                  recovery_operation = Journal.operation_id journal;
+                  recovery_target = Journal.target journal;
+                }
+          | Ok [] | Error _ -> None
+        in
+        let observation =
+          let* () =
+            match observation_failure with
+            | None -> Ok ()
+            | Some error -> Error error
+          in
+          let* () =
             match pending with
+            | Ok [] -> Ok ()
             | Ok (journal :: _) ->
-                Some
-                  {
-                    recovery_operation = Journal.operation_id journal;
-                    recovery_target = Journal.target journal;
-                  }
-            | Ok [] | Error _ -> None
+                Error
+                  (History_error
+                     ("recovery "
+                     ^ Journal.operation_id journal
+                     ^ " is pending; inspect restore --resume --operation "
+                     ^ Journal.operation_id journal))
+            | Error e -> Error (Restore_journal_error e)
           in
-          let observation =
-            let* () =
-              match pending with
-              | Ok [] -> Ok ()
-              | Ok (journal :: _) ->
-                  Error
-                    (History_error
-                       ("recovery "
-                       ^ Journal.operation_id journal
-                       ^ " is pending; inspect restore --resume --operation "
-                       ^ Journal.operation_id journal))
-              | Error e -> Error (Restore_journal_error e)
-            in
-            let saved_checkpoint =
-              (Model.active_draft loaded.Store.project).Model.latest_checkpoint
-            in
-            let* observed_snapshot = capture ~root store in
-            let* differences =
-              comparison_differences store ~before:saved_checkpoint
-                ~after:observed_snapshot
-            in
-            Ok { saved_checkpoint; observed_snapshot; differences }
+          let saved_checkpoint =
+            (Model.active_draft loaded.Store.project).Model.latest_checkpoint
           in
-          let uncaptured =
-            match observation with
-            | Ok comparison -> comparison.differences <> []
-            | Error _ -> false
+          let* observed_snapshot = capture ~root store in
+          let* differences =
+            comparison_differences store ~before:saved_checkpoint
+              ~after:observed_snapshot
           in
-          let status_branch =
-            match loaded.Store.local with
-            | Some _ -> branch_listing loaded |> Result.to_option
-            | None -> None
-          in
-          Ok
-            {
-              saved_metadata =
-                status_of_project ~uncaptured loaded.Store.project;
-              status_branch;
-              status_cursor =
-                view_of_node loaded.Store.history
-                  (History.current loaded.Store.history);
-              status_head =
-                Yeokcham_store.Stored_object_id.to_hex loaded.Store.object_id;
-              capture_observation = Result.map_error error_to_string observation;
-              pending_local_recovery;
-              pending_recovery_journals =
-                (match pending with Ok journals -> journals | Error _ -> []);
-              recovery_inspection_error =
-                (match pending with
-                | Error error -> Some (Journal.error_to_string error)
-                | Ok _ -> None);
-            }))
+          Ok { saved_checkpoint; observed_snapshot; differences }
+        in
+        let uncaptured =
+          match observation with
+          | Ok comparison -> comparison.differences <> []
+          | Error _ -> false
+        in
+        let status_branch =
+          match loaded.Store.local with
+          | Some _ -> branch_listing loaded |> Result.to_option
+          | None -> None
+        in
+        Ok
+          {
+            saved_metadata = status_of_project ~uncaptured loaded.Store.project;
+            status_branch;
+            status_cursor =
+              view_of_node loaded.Store.history
+                (History.current loaded.Store.history);
+            status_head =
+              Yeokcham_store.Stored_object_id.to_hex loaded.Store.object_id;
+            capture_observation = Result.map_error error_to_string observation;
+            pending_local_recovery;
+            pending_recovery_journals =
+              (match pending with Ok journals -> journals | Error _ -> []);
+            recovery_inspection_error =
+              (match pending with
+              | Error error -> Some (Journal.error_to_string error)
+              | Ok _ -> None);
+          })
+  in
+  match with_worktree_lock ~root (fun () -> inspect None) with
+  | Error (History_error message as error)
+    when String.starts_with ~prefix:"workspace operation unavailable:" message
+    ->
+      inspect (Some error)
+  | result -> result
 
 let inspect_local_history ~root ~before ~limit =
   if limit < 1 || limit > 200 then

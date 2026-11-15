@@ -7,6 +7,7 @@
 
 type root_reason =
   | State_head
+  | Shared_history of Yeokcham_v1_model.Snapshot_id.t
   | Checkpoint of {
       snapshot : Yeokcham_v1_model.Snapshot_id.t;
       reasons : Yeokcham_v1_model.protection_reason list;

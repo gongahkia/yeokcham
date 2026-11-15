@@ -93,6 +93,7 @@
   yeokcham_store
   yeokcham_snapshot
   yeokcham_v1_local_service
+  yeokcham_v1_composition
   yeokcham_v1_gc
   yeokcham_v1_model
   yeokcham_v1_record
@@ -765,3 +766,14 @@
   (source_tree golden/composition))
  (action
   (run python3 %{dep:../tools/generate_composition_vectors.py})))
+
+(test
+ (name test_composition_graph)
+ (modules test_composition_graph)
+ (libraries
+  alcotest
+  unix
+  yeokcham_v1_composition
+  yeokcham_v1_model
+  yeokcham_snapshot
+  yeokcham_store))

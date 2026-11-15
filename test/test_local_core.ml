@@ -7,6 +7,7 @@ module Raw = Yeokcham_store
 module Snapshot = Yeokcham_snapshot
 module H = Yeokcham_v1_undo
 module R = Yeokcham_v1_record.Core
+module Composition = Yeokcham_v1_composition
 
 [@@@warning "-42"]
 
@@ -1220,6 +1221,247 @@ let branch_plan_rejects_changed_inputs () =
       Alcotest.(check string)
         "stale plan preserves bytes" "changed after preview" (read_private root))
 
+let verified_shared_records_and_nonempty_fork () =
+  with_root (fun root ->
+      let repository, capability, certificate, authority, _ = initialize root in
+      let before = load repository in
+      let store = S.underlying_store repository in
+      let local_before = local before in
+      let base = L.empty_snapshot local_before in
+      let content =
+        Snapshot.Content.store store "D shared\n" |> ok Snapshot.error_to_string
+      in
+      let result =
+        Composition.tree
+          [
+            ( [ "note.txt" ],
+              Composition.File { mode = Snapshot.Regular; content } );
+          ]
+        |> ok Composition.error_to_string
+      in
+      let result =
+        Composition.store store result |> ok Composition.error_to_string
+      in
+      let scope =
+        Composition.Scope.store store [ [ "note.txt" ] ]
+        |> ok Composition.error_to_string
+      in
+      let staged, revision =
+        L.prepare_revision ~store ~authority ~certificate
+          ~signing_capability:capability ~change:None ~previous_revisions:[]
+          ~base_snapshot:base ~result_snapshot:result ~edit_scope_root:scope
+          ~dependencies:[] local_before
+        |> ok Fun.id
+      in
+      Alcotest.(check bool)
+        "signed staging has no root publication" true
+        (Raw.Mutable_ref.equal before.S.head (load repository).S.head);
+      let published =
+        S.save_collaborative repository ~expected:before.S.head
+          ~project:before.S.project
+          ~collaboration:(Option.get before.S.collaboration)
+          ~local:staged
+        |> ok S.error_to_string
+      in
+      let revision_body =
+        C.find (L.pool (local published)) revision |> Option.get
+      in
+      let change =
+        match revision_body.C.payload with
+        | C.Shared_revision value -> value.C.change
+        | C.Accepted_version _ | C.Branch_event _ ->
+            Alcotest.fail "missing staged shared revision"
+      in
+      let calls = ref 0 in
+      reject "change identity collision created another root"
+        (L.For_test.fresh_change
+           ~random_bytes:(fun n ->
+             incr calls;
+             Alcotest.(check int) "128-bit change ID" 16 n;
+             Ok (C.Change_id.to_raw change))
+           (local published));
+      Alcotest.(check int) "change collision attempts bounded" 3 !calls;
+      Out_channel.with_open_bin (Filename.concat root "note.txt") (fun output ->
+          Out_channel.output_string output "D shared\n");
+      Service.save ~root |> service |> ignore;
+      let captured = load repository in
+      let selected_local = captured.S.local |> Option.get in
+      let accepted, accepted_id =
+        L.prepare_acceptance ~store ~authority ~certificate
+          ~signing_capability:capability
+          ~parents:(List.hd (L.branches selected_local)).C.accepted_heads
+          ~chosen_revisions:[ revision ] ~result_snapshot:result
+          ~cursor:(H.current captured.S.history).H.id selected_local
+        |> ok Fun.id
+      in
+      Alcotest.(check bool)
+        "metadata staging did not publish acceptance" true
+        (Raw.Mutable_ref.equal captured.S.head (load repository).S.head);
+      let committed =
+        S.save_collaborative repository ~expected:captured.S.head
+          ~project:captured.S.project
+          ~collaboration:(Option.get captured.S.collaboration)
+          ~local:accepted
+        |> ok S.error_to_string
+      in
+      let loaded = load repository in
+      Alcotest.(check bool)
+        "verified nonempty acceptance survives reload" true
+        (C.Record_id.equal (L.selected (local loaded)).L.basis accepted_id);
+      Alcotest.(check string)
+        "private captured bytes remain private working files"
+        "private\000bytes\255" (read_private root);
+      let public_tree =
+        Composition.load store result |> ok Composition.error_to_string
+      in
+      Alcotest.(check bool)
+        "accepted result excludes private file" false
+        (List.mem_assoc [ "private.bin" ] (Composition.entries public_tree));
+      let plan =
+        Yeokcham_v1_gc.plan ~root |> ok Yeokcham_v1_gc.error_to_string
+      in
+      let snapshot_id =
+        Raw.Stored_object_id.of_hex (C.Object_id.to_hex result)
+        |> ok Raw.Stored_object_id.parse_error_to_string
+      in
+      let protected =
+        List.find
+          (fun entry ->
+            Raw.Stored_object_id.equal entry.Yeokcham_v1_gc.object_id
+              snapshot_id)
+          plan.Yeokcham_v1_gc.objects
+      in
+      (match protected.Yeokcham_v1_gc.disposition with
+      | Yeokcham_v1_gc.Retain reasons ->
+          Alcotest.(check bool)
+            "derived public snapshot has a shared-history root" true
+            (List.exists
+               (fun reason ->
+                 String.starts_with ~prefix:"shared-history "
+                   (Yeokcham_v1_gc.root_reason_to_string reason))
+               reasons)
+      | Yeokcham_v1_gc.Collect ->
+          Alcotest.fail "collection would lose a derived selected public result");
+      ignore (Yeokcham_v1_gc.apply ~root |> ok Yeokcham_v1_gc.error_to_string);
+      Composition.load store result |> ok Composition.error_to_string |> ignore;
+      ignore (load repository);
+      let fork =
+        L.create_branch ~store ~authority ~certificate
+          ~signing_capability:capability ~name:"nonempty-fork"
+          ~cursor:(H.current committed.S.history).H.id (local committed)
+        |> ok Fun.id
+      in
+      let position = L.lookup fork "nonempty-fork" |> ok Fun.id in
+      let version =
+        Composition.Graph.accepted (L.pool fork) position.L.basis
+        |> ok Composition.Graph.error_to_string
+      in
+      Alcotest.(check bool)
+        "fork carries verified nonempty accepted result" true
+        (C.Object_id.equal version.C.result_snapshot result);
+      ignore
+        (S.save_collaborative repository ~expected:committed.S.head
+           ~project:committed.S.project
+           ~collaboration:(Option.get committed.S.collaboration)
+           ~local:fork
+        |> ok S.error_to_string);
+      Alcotest.(check int)
+        "both shared branches persist" 2
+        (List.length (L.branches (local (load repository)))))
+
+let[@warning "-4"] signed_false_acceptance_cannot_enter_local_state () =
+  with_root (fun root ->
+      let repository, capability, certificate, authority, _ = initialize root in
+      let before = load repository in
+      let local = local before in
+      let store = S.underlying_store repository in
+      let selected = L.selected local in
+      let private_snapshot =
+        M.active_draft before.S.project |> fun draft ->
+        draft.M.latest_checkpoint |> M.Snapshot_id.to_string
+        |> C.Object_id.of_hex |> model
+      in
+      let context =
+        C.make_context
+          ~repository:(C.Repository_id.of_hex (String.make 64 'a') |> model)
+          ~author_certificate:(C.Digest.of_hex certificate |> model)
+          ~authority_heads:
+            (List.map
+               (fun id -> C.Digest.of_hex id |> model)
+               (T.authority_heads authority))
+          ~display_time:None
+        |> model
+      in
+      let payload =
+        C.make_accepted_version ~branch:selected.L.branch
+          ~accepted_parents:[ selected.L.basis ] ~chosen_revisions:[]
+          ~resolutions:[] ~result_snapshot:private_snapshot
+          ~composition_profile:"line-hunks-v1" ~policy_heads:[]
+          ~review_evidence:[]
+        |> model
+      in
+      let signed =
+        T.Core.sign authority capability
+          (C.make_body ~context ~payload:(C.Accepted_version payload))
+        |> ok T.Core.error_to_string
+      in
+      T.Core.verify authority signed |> ok T.Core.error_to_string;
+      let id = R.id signed |> ok R.error_to_string in
+      let envelope =
+        R.encode signed |> ok R.error_to_string |> Yeokcham_envelope.decode
+        |> ok Yeokcham_envelope.decode_error_to_string
+      in
+      let stored = Raw.put store envelope |> ok Raw.error_to_string in
+      let array values =
+        Yeokcham_encoding.array values
+        |> ok Yeokcham_encoding.construction_error_to_string
+      in
+      let pair =
+        array
+          [
+            Yeokcham_encoding.bytes (C.Record_id.to_raw id);
+            Yeokcham_encoding.bytes (Raw.Stored_object_id.to_raw_bytes stored);
+          ]
+      in
+      let encoded =
+        L.encode local |> ok Fun.id |> Yeokcham_encoding.decode
+        |> ok Yeokcham_encoding.decode_error_to_string
+      in
+      let encoded =
+        match encoded with
+        | Yeokcham_encoding.Array
+            [
+              version;
+              empty;
+              selected;
+              Yeokcham_encoding.Array references;
+              positions;
+            ] ->
+            let references =
+              List.sort
+                (fun a b ->
+                  String.compare
+                    (Yeokcham_encoding.encode a)
+                    (Yeokcham_encoding.encode b))
+                (pair :: references)
+            in
+            array [ version; empty; selected; array references; positions ]
+            |> Yeokcham_encoding.encode
+        | _ -> Alcotest.fail "unexpected local core schema"
+      in
+      (match L.decode ~store ~authority encoded with
+      | Error message ->
+          Alcotest.(check bool)
+            "refused actual composition mismatch after valid signature" true
+            (String.starts_with
+               ~prefix:"invalid shared graph: accepted snapshot" message)
+      | Ok _ ->
+          Alcotest.fail
+            "a valid signature replaced accepted contents with private bytes");
+      Alcotest.(check bool)
+        "refusal retains root" true
+        (Raw.Mutable_ref.equal before.S.head (load repository).S.head))
+
 let () =
   Alcotest.run "Local authenticated branch state"
     [
@@ -1281,6 +1523,12 @@ let () =
           Alcotest.test_case
             "historical verification differs from new admission" `Quick
             historical_load_and_current_admission;
+          Alcotest.test_case
+            "actual signed shared records, nonempty acceptance and fork" `Quick
+            verified_shared_records_and_nonempty_fork;
+          Alcotest.test_case
+            "valid signature cannot bypass accepted-result proof" `Quick
+            signed_false_acceptance_cannot_enter_local_state;
           Alcotest.test_case "unselected branch work survives compaction and GC"
             `Quick branch_work_is_a_retention_root;
         ] );

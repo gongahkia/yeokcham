@@ -826,3 +826,22 @@ Earlier focused core model/record/trust and GC checks also exited 0. Exact comma
 records are `composition-checks.json` and `composition-final-checks.json` in the
 P3 external log directory. Formatter promotion initially exited 2 from make;
 subsequent lint passed. No full P3 acceptance or shared CLI claim yet.
+
+
+P3 signed accepted-result checkpoint: `Composition.Graph` now verifies actual
+revision scopes, public/dependency bases, dependency-layer composition, exact
+updates, common bases and inherited branch heads. The signed local store runs
+this verifier after trust/reference checks rather than accepting arbitrary
+nonempty snapshot claims. Metadata-only preparation APIs stage real signed
+revision/accepted/event records; they do not apply files, publish a root/outbox
+or claim a complete integration. Nonempty forks inherit their source result.
+Derived public snapshots now have explicit shared-history GC roots independent
+of private captures; actual collection/reload is tested. Six graph cases and
+25 signed-local cases passed, plus existing GC/store/service45/undo16 checks,
+`make build` and `make lint` (all exits 0, `accepted-graph-checks.json`). Initial
+strict-warning compilation failures were corrected; formatter promotion is
+recorded in its external log. Full checkpoint CI follows the final reader/GC
+changes before consumers proceed. P3 remains incomplete: correspondence/outbox,
+actual selected publication, plans/private-work preservation, journaled execution,
+native clone/exchange, resolution commands and full end-to-end/fault evidence
+remain required. No README/G01 measurement changes or later pilot work.

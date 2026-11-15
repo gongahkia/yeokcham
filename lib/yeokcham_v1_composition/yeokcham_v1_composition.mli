@@ -62,3 +62,36 @@ val validate_revision :
   Yeokcham_store.repository -> Core.shared_revision -> (unit, error) result
 (** Full base/result/scope validation. A declared scope must equal the actual
     changed path set; no metadata path or undeclared private difference. *)
+
+module Graph : sig
+  type failure =
+    | Content_error of error
+    | Invalid_graph of string
+    | Decision of string
+
+  val error_to_string : failure -> string
+
+  val accepted :
+    Core.pool -> Core.Record_id.t -> (Core.accepted_version, failure) result
+
+  val represented :
+    Core.pool ->
+    Core.Record_id.t list ->
+    (Core.Record_id.t list, failure) result
+
+  val common_base :
+    Core.pool -> Core.Record_id.t list -> (Core.Record_id.t, failure) result
+
+  val compose :
+    Yeokcham_store.repository ->
+    Core.pool ->
+    parents:Core.Record_id.t list ->
+    revisions:Core.Record_id.t list ->
+    (tree, failure) result
+
+  val validate :
+    Yeokcham_store.repository -> Core.pool -> (unit, failure) result
+  (** Verifies actual revision scopes and deterministic accepted results, then
+      checks that branch advancement preserves every inherited accepted head.
+      Signatures/current authority are the caller's separate trust boundary. *)
+end

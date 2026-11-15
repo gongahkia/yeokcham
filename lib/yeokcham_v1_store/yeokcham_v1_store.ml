@@ -775,6 +775,25 @@ let local_branch_snapshots loaded =
           | Error _ -> invalid_arg "invalid loaded local branch cursor")
       |> List.sort_uniq Model.Snapshot_id.compare
 
+let[@warning "-42"] local_shared_snapshots loaded =
+  match loaded.local with
+  | None -> []
+  | Some local ->
+      Local.pool local |> Model.Core.records
+      |> List.concat_map (fun (_, body) ->
+          match body.Model.Core.payload with
+          | Model.Core.Shared_revision value ->
+              [
+                value.Model.Core.base_snapshot; value.Model.Core.result_snapshot;
+              ]
+          | Model.Core.Accepted_version value ->
+              [ value.Model.Core.result_snapshot ]
+          | Model.Core.Branch_event _ -> [])
+      |> List.map (fun id ->
+          Model.Snapshot_id.of_string (Model.Core.Object_id.to_hex id)
+          |> Result.get_ok)
+      |> List.sort_uniq Model.Snapshot_id.compare
+
 let initialize_workspace_lock ~root =
   let path =
     Filename.concat (repository_metadata_path root) "local-worktree.lock"

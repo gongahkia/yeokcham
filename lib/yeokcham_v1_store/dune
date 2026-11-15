@@ -3,6 +3,7 @@
  (libraries
   unix
   yeokcham_v1_undo
+  yeokcham_v1_composition
   yeokcham_encoding
   yeokcham_envelope
   yeokcham_snapshot

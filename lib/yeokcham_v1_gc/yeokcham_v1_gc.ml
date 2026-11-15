@@ -10,6 +10,7 @@ module V1_store = Yeokcham_v1_store
 
 type root_reason =
   | State_head
+  | Shared_history of Yeokcham_v1_model.Snapshot_id.t
   | Checkpoint of {
       snapshot : Model.Snapshot_id.t;
       reasons : Model.protection_reason list;
@@ -74,6 +75,8 @@ let ( let* ) = Result.bind
 
 let root_reason_to_string = function
   | State_head -> "state-head"
+  | Shared_history snapshot ->
+      "shared-history " ^ Model.Snapshot_id.to_string snapshot
   | Checkpoint { snapshot; reasons = [] } ->
       "checkpoint " ^ Model.Snapshot_id.to_string snapshot
   | Checkpoint { snapshot; reasons } ->
@@ -595,6 +598,15 @@ let plan_from_loaded ~root store loaded =
     checkpoint_roots loaded.V1_store.project
       ~branch_snapshots:(V1_store.local_branch_snapshots loaded)
       ~journal_snapshots ~proof_snapshots
+  in
+  let* roots =
+    List.fold_left
+      (fun acc snapshot ->
+        let* roots = acc in
+        let* id = snapshot_object_id snapshot in
+        Ok ((id, [ Shared_history snapshot ]) :: roots))
+      (Ok roots)
+      (V1_store.local_shared_snapshots loaded)
   in
   let* reachable =
     List.fold_left

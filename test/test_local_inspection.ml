@@ -308,6 +308,58 @@ let pending_recovery_blocks_partial_capture () =
         "inspection preserves interrupted tree" "partial application"
         (read root "notes"))
 
+let writer_busy_status_retains_saved_metadata () =
+  with_root (fun root ->
+      write root "notes" "saved complete state";
+      initialize root |> ignore;
+      let before = load root in
+      let ready_read, ready_write = Unix.pipe ()
+      and release_read, release_write = Unix.pipe () in
+      let child = Unix.fork () in
+      if child = 0 then (
+        Unix.close ready_read;
+        Unix.close release_write;
+        let fd =
+          Unix.openfile
+            (Filename.concat root ".yeokcham/local-worktree.lock")
+            [ Unix.O_RDWR ] 0
+        in
+        Unix.lockf fd Unix.F_LOCK 0;
+        write root "notes" "unpublished writer contents";
+        ignore (Unix.write_substring ready_write "1" 0 1);
+        ignore (Unix.read release_read (Bytes.create 1) 0 1);
+        Unix._exit 0);
+      Unix.close ready_write;
+      Unix.close release_read;
+      Fun.protect
+        ~finally:(fun () ->
+          Unix.close release_write;
+          Unix.close ready_read;
+          ignore (Unix.waitpid [] child))
+        (fun () ->
+          let ready = Bytes.create 1 in
+          Alcotest.(check int)
+            "writer lock held in another process" 1
+            (Unix.read ready_read ready 0 1);
+          let status = S.inspect_local_status ~root |> service in
+          (match status.S.capture_observation with
+          | Error message ->
+              Alcotest.(check bool)
+                "busy observation is explicit" true
+                (String.starts_with
+                   ~prefix:
+                     "local undo history: workspace operation unavailable:"
+                   message)
+          | Ok _ -> Alcotest.fail "status scanned while a writer owned the tree");
+          Alcotest.(check bool)
+            "saved snapshot remains inspectable" true
+            (M.Snapshot_id.equal status.S.status_cursor.S.state_snapshot
+               (H.current before.Store.history).H.snapshot);
+          Alcotest.(check string)
+            "writer bytes untouched" "unpublished writer contents"
+            (read root "notes");
+          same_head before root))
+
 let () =
   Alcotest.run "Local inspection"
     [
@@ -324,6 +376,8 @@ let () =
             `Quick malformed_capture_is_not_clean;
           Alcotest.test_case "unavailable and unretained states are explicit"
             `Quick unavailable_and_unretained_are_explicit;
+          Alcotest.test_case "busy writer leaves saved status inspectable"
+            `Quick writer_busy_status_retains_saved_metadata;
           Alcotest.test_case "pending recovery never captures partial files"
             `Quick pending_recovery_blocks_partial_capture;
         ] );
