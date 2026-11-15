@@ -72,7 +72,7 @@ later full-phase prompts as a shortcut around an unfinished predecessor.
 | [G05: Implement native ignore rules and reliable portable capture](implementation/goals/G05-capture-ignore.md) | G04 | pending | Partial P2 coverage; [report](implementation/reports/P02-attempt-01.md) | Native ignores/stable streaming capture/preflight delivered on Linux; full portability qualification and formal phase acceptance outstanding |
 | [G06: Persist history and indexes incrementally with atomic roots](implementation/goals/G06-incremental-history.md) | G05 | pending | Partial P2 coverage; [report](implementation/reports/P02-attempt-01.md) | Pages/index/rebuild/publication correspondence and depth measurements; whole-history encoding retained |
 | [G07: Implement lossless compression, indexed packs, and safe collection](implementation/goals/G07-compression-packs.md) | G06 | pending | — | All criteria in prompt |
-| [G08: Synchronize immutable shared history with verified offline coverage](implementation/goals/G08-shared-sync.md) | G07 | pending | P3 public graph/storage prerequisites only | Core native export, clone/exchange, coverage, acknowledgement and full phase criteria remain |
+| [G08: Synchronize immutable shared history with verified offline coverage](implementation/goals/G08-shared-sync.md) | G07 | pending | Partial P3 public Core export and atomic metadata receipt; checkpoints below | Native relay/clone/exchange consumers, availability/coverage, acknowledgement and full phase criteria remain |
 | [G09: Implement private account identity, device enrollment, and recovery custody](implementation/goals/G09-private-identity.md) | G08 | pending | — | All criteria in prompt |
 | [G10: Implement complete encrypted backup and exact private-history restoration](implementation/goals/G10-private-archive.md) | G09 | pending | — | All criteria in prompt |
 | [G11: Implement automatic private retention and inherited settings](implementation/goals/G11-retention-settings.md) | G10 | pending | — | All criteria in prompt |
@@ -101,6 +101,13 @@ partial phase. Do not relabel a partial phase complete to expose the next prompt
 | P4 harden/handoff | pending | Representative/native/human and fault evidence; unstarted |
 
 ## Current-phase checkpoints
+
+- P3 current checkpoint: public Core export and atomic metadata receipt are
+  committed. `9f79f9dd6d0043eea3b696f429998117fe9444e4` preserves exact private
+  history, allocation, positions, files and pending operations while admitting
+  incoming public records. The next consumer is durable native outbound state
+  and real relay/clone/exchange; native resolution and the full Alice/Bob audit
+  remain required. P3 is incomplete. Detailed evidence is appended below.
 
 - P3 recovery continuation `p3-recovery-resume-2026-11-15` resumes on main
   `480ff7adc5e1518f76456927639355de11d53f18` with the existing thirteen modified
@@ -1285,3 +1292,50 @@ Alice/Bob relay/fault journeys and the complete criterion audit remain open.
 Preserve existing recovery roots and format-bearing data when changing binaries;
 source rollback cannot undo accepted history or restore files. P3 remains active,
 P4 unstarted, and no P03 completion report or acceptance receipt is claimed.
+
+P3 atomic Core receipt checkpoint:
+`9f79f9dd6d0043eea3b696f429998117fe9444e4` adds
+`Local_service.Core_receive` and `Local.receive_records`. Complete public packages
+are historically verified in isolation and immutable bytes imported outside the
+writer boundary. Under the existing writer lock, current authority and records
+are reloaded, newly arriving records cross current trust admission and actual
+composition validation, then one existing state-root CAS publishes the union.
+No files are scanned/replaced, no private history/identifiers are allocated, and
+no transfer acknowledgement is fabricated. An independent receipt during a
+Prepared integration survives that operation's later commit without staling its
+exact relevant inputs or losing its pending operation.
+
+Local wrapper schema 4 represents known public branches without inventing private
+working positions. Existing positions cannot be dropped by an update; schema
+1/2/3 complete-position states retain their exact encoding. Branch listing now
+exposes selected/private-saved/known-shared state; selection of a newly known
+branch refuses before replacement until first materialization is implemented.
+Required unsupported policy and Core record/trust/composition failures remain
+typed errors. This checkpoint only admits complete packages: metadata-only
+availability, missing-content inspection and foreground coverage remain open.
+
+Core-package10, signed local-core69, legacy-package10, Core-trust3,
+Core-record6, store8, GC11 and branch CLI17/share CLI8/integration CLI8/recovery
+CLI4 passed. `make build`, `make lint` and default `make ci` exited 0 on parent
+`c437195305ed63f92de97504ce5063f19129b215` with the exact pending files then
+committed as `9f79f9d`; CI took 40.367 seconds and reused matching unchanged Dune
+results where applicable. Commands, exits, durations and file hashes are in
+`core-receipt-checkpoint-checks.json` under the P3 external log directory.
+Formatter promotion exited 2 before successful lint. Earlier focused failures
+included strict warnings, incomplete CLI error classification, a stale test
+binary and a fixture that combined JSON stdout with human stderr; these were
+corrected before the passing complete runs, without relaxing assertions. The
+four-case focused run intentionally filtered the other six cases; the subsequent
+whole ten-case run and CI executed all ten. README, P2 handoff and accepted G01
+hashes still match the starting receipt; no accepted measurement was rerun.
+
+This adds partial G02 local-wrapper and G08 receipt evidence, plus G13 unrelated
+receipt/recovery and G14 branch-inspection regression coverage. No whole original
+phase is complete. Next connect durable frozen outbound/courier acknowledgement,
+real native relay clone/exchange and supported first materialization, then native
+conflict resolution and the complete two-person/fault audit. Courier titles are
+not yet persisted on receipt. Existing legacy transport remains a separate
+consumer and does not establish the new Core loop. Preserve schema-4 roots and
+all current recovery data when changing binaries; older binaries cannot decode
+known-only branch state, and source rollback cannot restore files or undo
+accepted history. P3 remains active; P4 is unstarted.
